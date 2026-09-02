@@ -333,6 +333,18 @@ export function certifiedAmenityKeys(q: SearchQuery): string[] {
   if (chipAllow) return [...chipAllow];
   const base: string[] = [...RESIDENTIAL_AMENITY_BASE];
   if (scope.every((ty) => ty === 'Villa')) base.push(...VILLA_ONLY_AMENITIES);
+  // «مفروشة» is an amenity CHIP on the same card, not just the separate Furnished question:
+  // AMENITIES_QUESTION.resolveOptions pushes `{ key: 'furnished' }` on exactly this condition, after
+  // exactly this chipAllow early-return — so the option list and this list must mirror each other or
+  // the card offers a token nothing else certifies. It did (2026-09-01): the chip was offered on
+  // الرياض/إيجار/سنوي/شقة, committed, written to the store, and then deleted by the re-entry carry
+  // ({"p_amenities":["furnished"]} → {}) — a DROPPED filter on a cohort that never moved. The same
+  // absence made afCertify's step-4 carried-token sweep reject it on the next chat turn.
+  // `furnished` is a real p_amenities token server-side (af_eligibility_clause.sql: `not
+  // ('furnished' = any(p_amenities)) or s.furnished`), so keeping it only ever narrows.
+  // The chat cannot smuggle it in: the edge's amenity vocabulary deliberately excludes it and routes
+  // furnishing through the separate tri-state `furnished` key → furnishedPref.
+  if (cohortAllows(q, 'furnished')) base.push('furnished');
   return base;
 }
 

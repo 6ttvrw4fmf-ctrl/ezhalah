@@ -143,11 +143,19 @@ check('district counts carry the ADVANCED answers',
   /rpcAdvancedFilterParams\(q\)/.test(districtFn));
 
 // …and a change to ANY of those must invalidate the cached district numbers immediately.
-for (const field of ['detail', 'priceMin', 'priceMax', 'areaMin', 'areaMax', 'amenities', 'bathMin']) {
+for (const field of ['detail', 'priceMin', 'priceMax', 'areaMin', 'areaMax']) {
   check(`district count signature invalidates on query.${field}`,
     new RegExp(`districtNarrowingSig[\\s\\S]{0,900}query\\.${field}\\b`).test(index),
     'a filter change that does not enter the signature leaves the previous numbers on screen');
 }
+// The ADVANCED answers enter the same signature as a SPREAD of AF_PREDICATE_FIELDS (2026-09-01)
+// rather than as hand-typed names. Naming `amenities` and `bathMin` here covered two of the eleven
+// and left the other nine — and any future twelfth — free to drop out of the invalidation silently,
+// which is the stale-number lie this file exists to catch. AF_PREDICATE_FIELDS is pinned field-for-
+// field against the real rpcAdvancedFilterParams builder by verify-af-survives-filter-reentry.ts.
+check('district count signature invalidates on EVERY advanced answer (AF_PREDICATE_FIELDS, spread)',
+  /districtNarrowingSig[\s\S]{0,1400}\.\.\.AF_PREDICATE_FIELDS\.map\(\(f\) => query\[f\]\)/.test(index),
+  'a hand-typed subset leaves every unnamed advanced answer out of the invalidation');
 
 
 console.log(failures === 0

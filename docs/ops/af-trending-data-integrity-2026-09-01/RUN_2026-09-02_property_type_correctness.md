@@ -80,6 +80,16 @@ learned them:
    Apartment answers dying anyway on the way to a أرض سكنية search, with no prune involved. The
    AF-refined query is handed to `runQuery()` per search and never written back into the store query
    `index.tsx` edits. **The browser disproved my code reading.**
+
+   > **SUPERSEDED by PR #1480 (2026-09-01).** That premise no longer holds: #1480 is the first code
+   > to write AF answers into the Filter store (`agent.tsx` `writeFilterStore`), because the P0 it
+   > closes is precisely that the Filter home re-ran the PRE-AF search. What replaces the premise is
+   > read-time reconciliation — `index.tsx` derives `query = reconcileCommittedAf(storeQuery,
+   > AF_ALL_QUESTIONS)` once, and the Trending city params, district live counts, chips and «بحث»
+   > all read that one name, so a stale answer can never be searched, counted or displayed. The
+   > conclusion of item 1 (the Filter home does not leak an uncertified answer) still stands; only
+   > its reason changed, from "the store never holds one" to "every read re-certifies against
+   > `cohortAllows()`".
 2. **My own fix was inert on the search path**, and the fleet caught it, not me. All eleven AF params
    are spread onto `baseRpcParams` at the call site off `fetchListingsForQuery`'s own `q`;
    `rpcFilterParams()` contributes none of them. My barrier passed because it asserted the prune was

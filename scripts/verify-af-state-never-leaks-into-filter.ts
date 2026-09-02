@@ -21,12 +21,39 @@
 //
 // Both are asserted on SHAPE of the real source, because both fixes are a single expression that a
 // refactor can silently drop. A comment is not a code path.
+//
+// ── AMENDED 2026-09-01 (owner P0: «no dropped filters» on a Filter re-entry) ─────────────────────
+// The invariant this file protects was never "an AF predicate may not be in the store". It was
+// "AN AF PREDICATE MAY NEVER BE ACTIVE WITH NO CONTROL ON SCREEN TO SEE AND CLEAR IT" — that is
+// what made the leaked ratingMin above unfixable by the user. The owner's requirement (every
+// committed Advanced Filter predicate must survive a return to the Filter screen, counts and
+// eligible set included) collides with the literal reading and not with the real one, so the
+// assertions below now pin the real one:
+//
+//   • WITHOUT the facet receipt — a sidebar restore of a foreign conversation, an agent-parsed
+//     query — every AF field is still dropped. That is the measured P1, unchanged.
+//   • WITH it, the predicates ride, AND the Filter screen must render them as removable chips.
+//
+// And they EXECUTE the real sanitizeForFilterRestore instead of grepping its body. The grep this
+// replaced was a weak assertion by construction: the 2026-09-01 carry rewrote the function's
+// behaviour completely and seven of its eight field checks still passed, because the field names
+// had simply moved into a shared constant. Assert the behaviour, not the spelling.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from './lib/stripComments.ts';
+import { sanitizeForFilterRestore, hasActiveFilters, AF_PREDICATE_FIELDS } from '../src/lib/searchDefaults.ts';
+import { certifiedFacets, withoutFacet } from '../src/lib/afCarry.ts';
+import type { SearchQuery } from '../src/data/search.ts';
 
 const ROOT = join(import.meta.dirname, '..');
-const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
+// EVERY source read here is comment-STRIPPED, at the reader, so no individual assertion can forget.
+// index.tsx used to be read raw, which made (c)'s chip-«×» shape and (d)'s reconcile shape both
+// satisfiable by a decoy comment: turning the «×» into `{ /* <the original onPress> */ }` left a
+// carried predicate VISIBLE but NOT REMOVABLE — verbatim the condition afCarry.ts's header says is
+// what makes bypassing the sanitizer's allowlist legal — and the whole 285-check suite stayed green.
+// See scripts/lib/stripComments.ts.
+const read = (p: string) => stripComments(readFileSync(join(ROOT, p), 'utf8'));
 
 let failed = 0;
 const assert = (cond: boolean, msg: string) => {
@@ -35,12 +62,10 @@ const assert = (cond: boolean, msg: string) => {
 };
 
 // ── 1. agent.tsx must sanitize before writing the shared store ───────────────────────────────────
-const agentTsx = read('src/app/agent.tsx');
-// Strip comments FIRST. A prose mention of `setQuery(() => q)` is not a call — matching one would
-// make this barrier fail (or pass) on documentation, which is the repo's standing
-// "a comment is not a code path" trap in both directions. Line comments only: this file's block
-// comments are prose, and a naive /* */ strip would eat JSX braces.
-const agentCode = agentTsx.replace(/^\s*\/\/.*$/gm, '');
+// A prose mention of `setQuery(() => q)` is not a call — matching one would make this barrier fail
+// (or pass) on documentation, which is the repo's standing "a comment is not a code path" trap in
+// both directions. read() strips for every assertion in this file now, not just this one.
+const agentCode = read('src/app/agent.tsx');
 
 // Every setQuery in this screen writes the store the Filter home reads. There is exactly one, and it
 // must be sanitized. Counting them matters: a second, unsanitized setQuery would reopen the hole
@@ -52,22 +77,94 @@ assert(
   'every agent.tsx setQuery writes sanitizeForFilterRestore(...), never the raw agent query',
 );
 assert(
-  /import\s*\{[^}]*\bsanitizeForFilterRestore\b[^}]*\}\s*from\s*'@\/lib\/searchDefaults'/.test(agentTsx),
+  /import\s*\{[^}]*\bsanitizeForFilterRestore\b[^}]*\}\s*from\s*'@\/lib\/searchDefaults'/.test(agentCode),
   'agent.tsx imports sanitizeForFilterRestore (a call to a missing binding would not typecheck)',
 );
 // The replay path must NOT be sanitized — it needs the AF predicates to reproduce the conversation.
 // Without this, "fixing" the leak by sanitizing everything would silently break chat restore.
-assert(/openSaved\(hid,\s*q\b/.test(agentTsx), 'openSaved still replays the FULL query (AF predicates intact)');
-assert(/sendFilter\(q\b/.test(agentTsx), 'sendFilter still receives the FULL query');
+assert(/openSaved\(hid,\s*q\b/.test(agentCode), 'openSaved still replays the FULL query (AF predicates intact)');
+assert(/sendFilter\(q\b/.test(agentCode), 'sendFilter still receives the FULL query');
 
-// The sanitizer is only meaningful if it actually drops AF fields. Assert against the real allowlist
-// rather than trusting its name — this is the thing the fix leans on.
-const defaults = read('src/lib/searchDefaults.ts');
-const sanitizer = defaults.slice(defaults.indexOf('export function sanitizeForFilterRestore'));
-const sanitizerBody = sanitizer.slice(0, sanitizer.indexOf('\n}\n') + 1);
-for (const af of ['amenities', 'bathMin', 'furnishedPref', 'streetWidthMin', 'directions', 'ratingMin', 'reviewsMin', 'unitSubtypes']) {
-  assert(!sanitizerBody.includes(af), `sanitizeForFilterRestore does not carry AF field "${af}" into the Filter store`);
+// ── 1b. THE SANITIZER, EXECUTED ─────────────────────────────────────────────────────────────────
+// A query carrying every AF predicate the interview can commit. Values are deliberately "truthy but
+// harmless" so a survivor is unmistakable; furnishedPref:false is here on purpose — false is a REAL
+// answer (confirmed unfurnished), and a carry that only survives truthy values would turn it into
+// "no preference", which is UNKNOWN becoming an answer.
+const AF_LOADED: SearchQuery = {
+  ...({ deal: 'Rent', location: 'الرياض', category: 'Commercial', type: null, detail: null,
+        priceInput: '', priceBand: null, rentPeriod: 'annual' } as SearchQuery),
+  types: ['محل'], typeGroups: ['Retail & Workspace'],
+  ageMin: 3, ageMax: 5, isNewConstruction: true, amenities: ['elevator'], bathMin: 3,
+  ratingMin: 9, reviewsMin: 10, unitSubtypes: ['استديو'], furnishedPref: false,
+  streetWidthMin: 20, directions: ['شمال'],
+};
+
+// (a) NO RECEIPT ⇒ NO PREDICATE. This is the measured P1 verbatim: a sidebar restore of a foreign
+// conversation must not park an invisible filter on the Filter form.
+const noReceipt = sanitizeForFilterRestore(AF_LOADED);
+for (const af of AF_PREDICATE_FIELDS) {
+  assert(noReceipt[af] === undefined, `sanitizeForFilterRestore drops AF field "${af}" when no facet receipt rides with it`);
 }
+assert(noReceipt.afFacets === undefined, 'sanitizeForFilterRestore carries no facet receipt of its own');
+
+// (b) WITH THE RECEIPT ⇒ THE PREDICATES RIDE. This is the owner requirement: a committed Advanced
+// Filter must survive a return to the Filter screen — «no widening, no dropped filters».
+const withReceipt = sanitizeForFilterRestore({
+  ...AF_LOADED,
+  afFacets: [{ id: 'property_age', keys: ['3_5'], labels: ['٣-٥ سنوات'] }],
+});
+for (const af of AF_PREDICATE_FIELDS) {
+  assert(withReceipt[af] === AF_LOADED[af] || JSON.stringify(withReceipt[af]) === JSON.stringify(AF_LOADED[af]),
+    `sanitizeForFilterRestore carries AF field "${af}" when its facet receipt rides with it`);
+}
+assert(withReceipt.afFacets?.length === 1, 'the facet receipt itself rides, so the chips have something to render');
+// The receipt is what makes the carry legal, so the field must actually be part of SearchQuery —
+// not an untyped extra that a refactor drops with no compile error anywhere.
+assert(read('src/data/search.ts').includes('afFacets?:'), 'afFacets is a declared SearchQuery field');
+
+// (c) VISIBILITY IS THE PRICE OF THE CARRY. Every carried facet has a control on the Filter screen
+// that removes it. Without this the barrier would be licensing the exact invisible-filter state the
+// leak above was, only reached down a different path.
+const indexTsx = read('src/app/index.tsx');
+assert(/query\.afFacets/.test(indexTsx), 'the Filter screen renders the carried facets');
+// The «×» must be wired to withoutFacet on the RECONCILED list — a bare `/withoutFacet\(/` would
+// have been satisfied by the identifier appearing anywhere on the screen, including an import it no
+// longer calls. Asserted as a code SHAPE here (JSX cannot be executed from Node) and EXECUTED below.
+assert(/onPress=\{\(\) => setQuery\(\(\) => withoutFacet\(query, i, AF_ALL_QUESTIONS\)\)\}/.test(indexTsx),
+  'the chip «×» commits withoutFacet() on the reconciled query (not the raw store list)');
+assert(/testID=\{`filter-af-chip-/.test(indexTsx), 'each carried facet gets its own removable chip (testID: filter-af-chip-N)');
+// «مسح الكل» is the other half of "clearable": it is only rendered when hasActiveFilters() is true,
+// so an AF-only narrowing must count as an active filter or the user gets chips with no reset.
+assert(hasActiveFilters({ ...AF_LOADED, afFacets: [{ id: 'property_age', keys: ['3_5'], labels: ['x'] }] }),
+  'a carried Advanced Filter counts as an active filter, so «مسح الكل» is offered');
+
+// (d) THE CARRY MUST BE RE-CERTIFIED, NEVER REPLAYED BLIND. The Filter screen can move the cohort
+// under a carried answer; the AF's SQL predicates are strict-NULL-excluding, so replaying an answer
+// the new cohort never certified deletes every row that did not state the attribute — UNKNOWN
+// becoming No, which is worse than the bug being fixed.
+assert(/reconcileCommittedAf\(/.test(indexTsx), 'the Filter screen reconciles the carry against the CURRENT cohort');
+// EXECUTED, not grepped. This was `/cohortAllows\(/.test(read('src/lib/afCarry.ts'))`, and afCarry.ts
+// carries a COMMENT containing that call — deleting both the import and the only call while leaving
+// the comment kept this barrier green on a completely gutted gate. «A comment is not a code path» is
+// a permanent rule in this repo, and a barrier rewritten on the grounds that its predecessor was «a
+// weak assertion by construction» is the last place it may be broken. certifiedFacets is pure and
+// exported, so the gate is exercised directly: «rating» is Gathern/Monthly-only and is certified for
+// no Commercial-Rent-Annual cohort, so it must be refused there and kept where it IS certified.
+const ratingFacet = [{ id: 'rating', keys: ['9.0'], labels: ['٩.٠+'] }];
+const SHOP_SCOPE: SearchQuery = { ...AF_LOADED, types: ['Shop'], typeGroups: ['Retail & Workspace'] };
+const APT_MONTHLY: SearchQuery = { ...AF_LOADED, category: 'Residential', types: ['Apartment'],
+  typeGroups: ['Apartments & Co-living'], rentPeriod: 'monthly' };
+assert(certifiedFacets(SHOP_SCOPE, ratingFacet).length === 0,
+  'certifiedFacets() REFUSES an answer the current cohort never certified (executed, not grepped)');
+assert(certifiedFacets(APT_MONTHLY, ratingFacet).length === 1,
+  '…and keeps the same answer on the cohort that DID certify it — the gate narrows, it is not a blanket drop');
+// The other half of «visible AND removable»: clearing the last chip must kill its predicate too, or
+// the carry parks exactly the invisible filter this file's (a) case measures.
+const oneChip: SearchQuery = { ...SHOP_SCOPE, isNewConstruction: true,
+  afFacets: [{ id: 'property_age', keys: ['new'], labels: ['جديد'] }] };
+const cleared = withoutFacet(oneChip, 0, [{ id: 'property_age', apply: (q) => q }]);
+assert(cleared.afFacets?.length === 0 && cleared.isNewConstruction === undefined,
+  'clearing the LAST chip removes its predicate as well as its control (executed withoutFacet)');
 
 // ── 2. direction is not re-asked once committed ──────────────────────────────────────────────────
 const advanced = read('src/data/advancedFilters.ts');

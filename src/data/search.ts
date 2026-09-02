@@ -178,6 +178,24 @@ export type SearchQuery = {
   // (p_street_width_min / p_directions) — strict, unknown excluded, never invented.
   streetWidthMin?: number | null;
   directions?: string[] | null;
+  // THE RECEIPT FOR EVERY AF PREDICATE ABOVE (owner P0 2026-09-01). Each committed Advanced Filter
+  // answer, in commit order — the same {id, keys, labels} the results-turn pills already render.
+  //
+  // WHY IT IS ON THE QUERY AND NOT A SIDE CHANNEL. The Filter home, its Trending city/district
+  // counts and its «بحث» all derive from ONE object: the shared store's SearchQuery. Before this,
+  // the AF predicates lived only in agent.tsx component state, so returning to the Filter screen
+  // and pressing «بحث» — via a Trending card or not — silently re-ran the PRE-AF search: measured
+  // live on production 2026-09-01, الرياض/إيجار/سنوي/تجاري/محل + «جديد» went 243 → 566 with
+  // p_is_new_construction simply absent from the request. A second carrier could drift from this
+  // one; the same object cannot drift from itself.
+  //
+  // IT IS ALSO THE PERMISSION SLIP. sanitizeForFilterRestore carries the AF predicates into the
+  // Filter store IF AND ONLY IF these facets ride with them, because the Filter screen renders
+  // exactly these as removable chips. That keeps the rule the sanitizer was written for intact —
+  // "no active filter without a visible control to remove it" — instead of bypassing it. An AF
+  // predicate with no facet beside it is still dropped, which is what the sidebar restore of a
+  // foreign conversation must keep doing (the measured ratingMin ⇒ 0-of-11,552 leak).
+  afFacets?: { id: string; keys: string[]; labels: string[] }[] | null;
 };
 
 // Parse a raw digit string ("1,200" / "300" / "") → a positive number, or null when empty/invalid.
