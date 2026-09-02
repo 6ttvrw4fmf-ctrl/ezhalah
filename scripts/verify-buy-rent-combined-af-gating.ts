@@ -65,9 +65,18 @@ check('cohortAllowsCombined requires membership in Buy AND RentAnnual AND RentMo
 
 // ── cohortAllows: dealCombined must be checked and routed to cohortAllowsCombined BEFORE the
 // single-deal Buy/Rent branches — otherwise it falls through to whichever q.deal happens to hold.
-const dealCombinedBranch = /if\s*\(q\.dealCombined\)\s*return\s*cohortAllowsCombined\(cfg,\s*id\)/;
+// WIDENED 2026-09-02: the branch condition now also admits q.bothDeals. That is not a loosening —
+// remote.ts sends `p_deal: (q.bothDeals || q.dealCombined) ? null : …`, so the SEARCH already treats
+// the two identically as Buy ∪ Rent(any period); gating on dealCombined alone let the AI-chat
+// fallback certify against a single leg while searching both, the exact fall-through this check's
+// own comment above warns about. The regex still REQUIRES q.dealCombined in the condition and still
+// pins the ordering, so neither can regress.
+const dealCombinedBranch = /if\s*\(q\.dealCombined(?:\s*\|\|\s*q\.bothDeals)?\)\s*return\s*cohortAllowsCombined\(cfg,\s*id\)/;
 check('cohortAllows routes q.dealCombined to cohortAllowsCombined',
   dealCombinedBranch.test(af));
+check('…and q.bothDeals routes there too — the search sends p_deal null for both',
+  /if\s*\(q\.dealCombined\s*\|\|\s*q\.bothDeals\)\s*return\s*cohortAllowsCombined/.test(af),
+  'bothDeals is a Buy∪Rent scope at the request boundary; certifying it against one leg amputates the other');
 const combinedIdx = af.search(dealCombinedBranch);
 const buyBranchIdx = af.search(/if\s*\(q\.deal\s*===\s*'Buy'\)\s*return\s*\(cfg\.Buy\s*\?\?\s*\[\]\)\.includes\(id\)/);
 check('the dealCombined check runs BEFORE the single-deal Buy branch (order matters — combined must never fall through to Buy-only)',

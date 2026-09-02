@@ -5,7 +5,6 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
-import { pruneUncertifiedAdvanced } from '@/lib/afPrune';
 import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
 import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
@@ -355,13 +354,7 @@ export function cohortTypesAr(q: SearchQuery): string[] | null {
   return groups.length ? typeArForTypes(groups) : null;   // OR across groups — union of their types
 }
 
-function rpcFilterParams(qRaw: SearchQuery) {
-  // STALE ADVANCED ANSWERS DIE HERE (2026-09-01). Nothing cleared the 11 AF answer fields when the
-  // user changed category/type/deal/period, so e.g. bathMin:3 from an Apartment interview rode into
-  // an أرض تجارية search and silently amputated it (land has NULL bathrooms; the clause is
-  // strict-NULL-excluding). This is the ONE choke point every search, count, Trending click-through
-  // and Load-More page passes through, so pruning here covers every path at once. See afPrune.ts.
-  const q = pruneUncertifiedAdvanced(qRaw);
+function rpcFilterParams(q: SearchQuery) {
   const p_types = cohortTypesAr(q);
   const toks = bedroomTokens(q);
   const exact = toks.filter((d) => /^[1-4]$/.test(d)).map((d) => parseInt(d, 10));
@@ -404,10 +397,7 @@ function rpcFilterParams(qRaw: SearchQuery) {
 // Neither accepts p_sort_by — counts have no ordering — and PostgREST resolves named-param RPC calls
 // by EXACT parameter-name match, so leaking it made BOTH counts calls 404 (PGRST202) the moment the
 // user had an explicit sort active, silently killing the whole guided flow (bug-hunt 2026-07-30).
-function rpcCountFilterParams(qRaw: SearchQuery) {
-  // Same prune as the search path — a count computed over a predicate the search will not apply
-  // (or vice versa) is exactly the count-vs-results lie the contract forbids.
-  const q = pruneUncertifiedAdvanced(qRaw);
+function rpcCountFilterParams(q: SearchQuery) {
   const { p_sort_by: _drop, ...rest } = rpcFilterParams(q) as ReturnType<typeof rpcFilterParams> & { p_sort_by?: string };
   return rest;
 }
@@ -1389,23 +1379,9 @@ async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?
 // Returns null on a backend error (UI shows retry), [] when the location genuinely has no listings.
 // (user spec: route rent→rent_location_index, buy→buy_location_index, then fetch details from raw.)
 export async function fetchListingsForQuery(
-  qRaw: SearchQuery,
+  q: SearchQuery,
   opts?: { offset?: number; limit?: number; signal?: AbortSignal },
 ): Promise<FetchListingsResult> {
-  // THE PRUNE HAS TO BE HERE, NOT ONLY INSIDE rpcFilterParams() (corrected 2026-09-02).
-  //
-  // Eleven AF answer fields are spread onto baseRpcParams BELOW, at this call site, straight off
-  // this function's own `q` — NOT by rpcFilterParams(), which contributes none of them. Pruning
-  // only inside that helper therefore sanitised a set of params that never carried a stale AF
-  // answer in the first place: the fix was inert on the search path while looking wired, and its
-  // barrier passed because it asserted the prune was CALLED rather than that the AF params derive
-  // from the pruned object. (The count path was genuinely covered — rpcCountFilterParams() builds
-  // its AF spreads inside itself.)
-  //
-  // Taking the raw query as `qRaw` and shadowing it immediately means every downstream read —
-  // resolveSearchScope(), rpcFilterParams(), and the eleven spreads below — sees the pruned object,
-  // and a future AF param added at this call site is covered without anyone remembering.
-  const q = pruneUncertifiedAdvanced(qRaw);
   let pageCandidates = 0;
   let pageTotal = 0;
   const pageOffset = Math.max(0, opts?.offset ?? 0);

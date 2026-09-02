@@ -248,6 +248,16 @@ export function scopeCleanTypes(q: SearchQuery): string[] {
 // (never in Buy or RentAnnual); a type with no certified Monthly cohort (most commercial/rural types)
 // correctly offers ZERO combined-mode questions — the same conservative "no evidence, don't ask"
 // behavior 'both' already applies.
+// bothDeals IS THE SAME SCOPE FOR CERTIFICATION (found 2026-09-02, owner property-type audit).
+// src/data/remote.ts sends `p_deal: (q.bothDeals || q.dealCombined) ? null : …` and
+// af_eligibility_clause() reads p_deal IS NULL as Buy ∪ Rent(any period) — so the two fields mean
+// ONE thing to the search. cohortAllows() branched on dealCombined alone, so the AI-chat fallback
+// (bothDeals = the agent could not tell Buy from Rent from free text) certified questions against a
+// SINGLE leg while the search spanned both: the R2.2.2 amputation, and the same shape as the
+// property_age divergence that audit began with — the request boundary treats two fields as one
+// concept while the certification gate treats them as two. Intersecting is a pure NARROWING, since
+// Buy ∩ RentAnnual ∩ RentMonthly is a subset of any single leg.
+// Proof: scripts/verify-af-question-gate-is-one-predicate.ts §5.
 function cohortAllowsCombined(cfg: NonNullable<(typeof COHORT_QUESTIONS)[string]>, id: string): boolean {
   return (cfg.Buy ?? []).includes(id) && (cfg.RentAnnual ?? []).includes(id) && (cfg.RentMonthly ?? []).includes(id);
 }
@@ -267,7 +277,7 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
     if (q.category !== (CLEAN_MACRO[type] ?? 'Residential')) return false;
     const cfg = COHORT_QUESTIONS[type];
     if (!cfg) return false;                 // uncertified type = EMPTY cohort, never "no constraint"
-    if (q.dealCombined) return cohortAllowsCombined(cfg, id);
+    if (q.dealCombined || q.bothDeals) return cohortAllowsCombined(cfg, id);  // bothDeals: see above
     if (q.deal === 'Buy') return (cfg.Buy ?? []).includes(id);
     if (q.deal !== 'Rent') return false;
     if (q.rentPeriod === 'monthly') return (cfg.RentMonthly ?? []).includes(id);

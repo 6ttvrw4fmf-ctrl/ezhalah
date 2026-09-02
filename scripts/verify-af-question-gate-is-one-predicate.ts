@@ -156,6 +156,35 @@ check('a doubly-certified cohort still WORKS — Apartment/Buy keeps property_ag
   cohortAllows(aptBuy, 'property_age') === true,
   'the fix must narrow only where evidence is missing, never disable a certified question');
 
+// ── 5. bothDeals IS a combined scope (found 2026-09-02, same bug class) ──────────────────────────
+//
+// src/data/remote.ts sends `p_deal: (q.bothDeals || q.dealCombined) ? null : …`, and
+// af_eligibility_clause() reads p_deal IS NULL as Buy ∪ Rent(any period). So both fields mean one
+// thing to the SEARCH. cohortAllows() branched on dealCombined alone, so the AI-chat fallback
+// certified questions against a single leg while searching both — the R2.2.2 amputation, and the
+// same shape as the property_age divergence above: one concept, two gates.
+{
+  const base = { category: 'Residential', types: ['Apartment'], deal: 'Buy' };
+  const both: any = { ...base, bothDeals: true };
+  const comb: any = { ...base, dealCombined: true };
+  const ids = ['property_age', 'amenities', 'bathrooms', 'furnished', 'rnpl', 'direction', 'rating', 'street_width', 'unit_subtype'];
+  const disagree = ids.filter((id) => cohortAllows(both, id) !== cohortAllows(comb, id));
+  check('bothDeals certifies exactly like dealCombined — the search treats them identically',
+    disagree.length === 0,
+    `these differ: ${disagree.join(', ')} — remote.ts sends p_deal null for BOTH, so the gate must ` +
+    'use the three-leg intersection for both or the chat applies what the manual UI would refuse');
+
+  // And it must genuinely NARROW, not merely differ: a question certified for Buy alone must not
+  // survive a Buy∪Rent scope unless all three legs certify it.
+  const single: any = { ...base };
+  const widened = ids.filter((id) => cohortAllows(both, id) && !cohortAllows(single, id));
+  check('the combined gate never certifies MORE than the single leg it replaces',
+    widened.length === 0, `wrongly widened: ${widened.join(', ')}`);
+  check('and it does withhold a Buy-only question on a Buy+Rent scope (not a no-op)',
+    cohortAllows(single, 'direction') === true && cohortAllows(both, 'direction') === false,
+    'direction is certified for Apartment/Buy but not across all three legs, so a combined scope must refuse it');
+}
+
 console.log(failures
   ? `\n✗ verify-af-question-gate-is-one-predicate: ${failures} check(s) failed.\n`
   : '\n✅ verify-af-question-gate-is-one-predicate: one gate, both surfaces, R2.1.1 holds everywhere.\n');
