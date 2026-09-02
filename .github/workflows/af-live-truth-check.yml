@@ -97,6 +97,18 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-property-type-differential.ts
 
+      # The LIVE half of verify-trending-carries-full-filter-state.ts (split out 2026-09-02). Its
+      # SOURCE half is offline and stays in `npm test`; these checks call top_cities_by_deal_ar and
+      # location_search_candidates_ar against production and diff them against independent PostgREST
+      # counts, so a production hiccup must not fail an unrelated PR's required check. Nothing was
+      # retired — the same assertions, run here instead.
+      - name: Trending and district counts must HONOUR every predicate they are handed
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-filter-state-live.ts
+
       # A REAL type change in a REAL browser: answer Advanced Filter on شقة, switch the type to
       # أرض سكنية, and prove not one uncertified predicate is on the request the browser sends.
       - name: No stale AF predicate crosses a property-type change
