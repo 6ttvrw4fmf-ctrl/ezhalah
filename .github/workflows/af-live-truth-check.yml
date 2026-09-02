@@ -96,3 +96,12 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-property-type-differential.ts
+
+      # A REAL type change in a REAL browser: answer Advanced Filter on شقة, switch the type to
+      # أرض سكنية, and prove not one uncertified predicate is on the request the browser sends.
+      - name: No stale AF predicate crosses a property-type change
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-stale-predicate-live.ts

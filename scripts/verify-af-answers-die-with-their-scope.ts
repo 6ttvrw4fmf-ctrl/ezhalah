@@ -2,15 +2,24 @@
 //
 // ── THE DEFECT (found 2026-09-01, owner property-type audit) ────────────────────────────────────
 //
-// SearchQuery carries 11 AF answer fields. NOTHING cleared any of them on a scope change:
-// `setCategory()` (src/lib/searchDefaults.ts) resets 13 fields and none of the 11, even though
-// R1.1.1 says a category switch "CLEARS everything beneath it"; the type toggle
-// (src/app/index.tsx ~1580) resets types/type/detail/priceBand/contextBeds* and none of the 11.
+// SearchQuery carries 11 AF answer fields, and nothing re-validated any of them against the new
+// cohort when the user changed scope. Where that is REACHABLE matters, and reading the code alone
+// got it half wrong — so both halves are recorded here.
 //
-// Worked example, the one the owner named: answer bathrooms ≥ 3 on an Apartment search, switch to
-// Commercial, pick أرض تجارية. `bathMin: 3` rides along. Land rows have NULL bathrooms and the
-// shared clause is strict-NULL-EXCLUDING, so the result set is silently amputated — and the Filter
-// home shows no AF pill for that scope, because that scope cannot offer the question at all.
+// NOT the manual Filter home. `setCategory()` resets 13 fields and none of the 11, and the type
+// toggle resets six and none of the 11, which reads like a leak — but a real browser journey on
+// production (scripts/verify-af-stale-predicate-live.ts) showed the Apartment answers
+// p_bath_min/p_is_new_construction/p_amenities all DYING on the way to a أرض سكنية search, with no
+// prune involved. The reason is structural: the AF-refined query is handed to runQuery() per search
+// and never written back into the store query index.tsx edits, so that screen has nothing stale to
+// carry. Reported as safe, not as fixed.
+//
+// THE CHAT IS where it reaches a user. mergeConversationState() carries every established
+// STICKY_FIELD from the previous turn, and all 11 AF answer fields are on that list, right next to
+// `type` and `category` — with no cohort re-validation in the merge. So «ابغى شقة بثلاث دورات مياه»
+// followed by «خلها أرض» keeps bathMin:3 on a land search. Land rows have NULL bathrooms against a
+// strict-NULL-excluding clause, so the user's search is silently amputated. §2b executes that exact
+// merge rather than describing it.
 //
 // ── WHAT THIS PINS ───────────────────────────────────────────────────────────────────────────────
 //
@@ -31,6 +40,7 @@ import { join } from 'node:path';
 import { pruneUncertifiedAdvanced } from '../src/lib/afPrune.ts';
 import { afQuestionAllowed } from '../src/lib/afCohorts.ts';
 import { CLEAN_MACRO } from '../src/data/propertyTypes.ts';
+import { mergeConversationState, STICKY_FIELDS } from '../src/lib/conversationState.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 let failures = 0;
@@ -116,6 +126,39 @@ for (const [name, from, to] of NAMED) {
   const q: any = { ...scope('Apartment', 'Buy'), bathMin: 2, ageMax: 5 };
   const same = pruneUncertifiedAdvanced(q);
   check('a query with nothing stale is returned UNCHANGED (identity, no needless re-render)', same === q);
+}
+
+// ── 2b. THE PATH THAT ACTUALLY REACHES A USER: the AI conversation ───────────────────────────────
+//
+// The manual Filter home turned out to be structurally safe — verified in a real browser on
+// production: the AF-refined query is passed to runQuery() per search and never written back into
+// the store query index.tsx edits, so there is nothing there to go stale. The reachable path is the
+// CHAT: mergeConversationState() carries every "established" STICKY_FIELD from the previous turn,
+// and all 11 AF answer fields are on that list, right beside `type` and `category`. So a turn that
+// only says «خلها أرض» changes the type while every Apartment-era answer rides along, with no
+// cohort re-validation anywhere in the merge.
+{
+  const AF_STICKY = ['amenities', 'furnishedPref', 'ratingMin', 'reviewsMin', 'bathMin', 'ageMin',
+    'ageMax', 'isNewConstruction', 'streetWidthMin', 'directions', 'unitSubtypes'];
+  check('all 11 AF answer fields really are STICKY across conversation turns (the premise)',
+    AF_STICKY.every((f) => (STICKY_FIELDS as readonly string[]).includes(f)),
+    `missing from STICKY_FIELDS: ${AF_STICKY.filter((f) => !(STICKY_FIELDS as readonly string[]).includes(f)).join(', ')}`);
+
+  // Turn 1: Apartment/Buy with a real interview behind it. Turn 2: "make it land".
+  const t1: any = { ...scope('Apartment', 'Buy'), bathMin: 3, ageMax: 5, amenities: ['elevator'], isNewConstruction: true };
+  const t2: any = scope('Residential Land', 'Buy');
+  const merged: any = mergeConversationState(t1, t2, ['category', 'types', 'deal']);
+  check('the merge DOES carry the stale answers forward (so the prune is load-bearing, not decorative)',
+    merged.bathMin === 3 && merged.ageMax === 5,
+    `merged bathMin=${JSON.stringify(merged.bathMin)} ageMax=${JSON.stringify(merged.ageMax)} — ` +
+    'if this ever stops carrying, this barrier is testing nothing and should be revisited');
+
+  const pruned: any = pruneUncertifiedAdvanced(merged);
+  const stale = ['bathMin', 'ageMax', 'ageMin', 'isNewConstruction', 'amenities']
+    .filter((f) => pruned[f] !== undefined && pruned[f] !== null);
+  check('…and the prune removes every one of them before the request is built',
+    stale.length === 0,
+    `survived a chat type-change into أرض سكنية: ${stale.join(', ')}`);
 }
 
 // ── 3. the full generated sweep — every cohort pair, not just the named ones ─────────────────────
