@@ -29,8 +29,10 @@
 //                                a rendered string. A UI-text assertion would pass on a page that
 //                                merely re-rendered a stale number.
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { liftSymbols } from './lib/liftSymbols.ts';
+import { stripComments } from './lib/stripComments.ts';
 import { sanitizeForFilterRestore, AF_PREDICATE_FIELDS } from '../src/lib/searchDefaults.ts';
 import { reconcileCommittedAf, certifiedFacets, stripCommittedAf, withoutFacet } from '../src/lib/afCarry.ts';
 import { COHORT_QUESTIONS, certifiedAmenityKeys, cohortAllows } from '../src/lib/afCohorts.ts';
@@ -38,7 +40,12 @@ import { CLEAN_MACRO, groupsOf } from '../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
 const ROOT = join(import.meta.dirname, '..');
-const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
+// EVERY source read here is comment-STRIPPED, at the reader, so no individual assertion can forget.
+// Three of the shape assertions below rode a raw read and were therefore satisfiable by a comment —
+// including the two that pin this PR's most load-bearing wiring, which stayed green (285/285) with
+// the reconciliation disabled and the chip «×» turned into a no-op, each with the original line
+// restored as a decoy comment. See scripts/lib/stripComments.ts.
+const read = (p: string) => stripComments(readFileSync(join(ROOT, p), 'utf8'));
 
 let failed = 0;
 const assert = (cond: boolean, msg: string) => {
@@ -55,9 +62,19 @@ const QUESTION_CONSTS = [
 const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
   // addAmenities is a plain function two questions use as their whole apply(); the rest are object
-  // literals whose members are all lazily evaluated, so they lift with no prelude at all.
+  // literals whose members are all lazily evaluated, so apply() needs no prelude at all.
   [{ header: 'function addAmenities' }, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
   ['addAmenities', ...QUESTION_CONSTS],
+  // §12 also CALLS AMENITIES_QUESTION.resolveOptions, to read the token set the card can offer from
+  // the question itself rather than hand-listing it here. Its cohort logic is imported REAL; only
+  // the count path is shimmed — counts decide how many offered options are worth SHOWING, never
+  // which tokens may be offered, so the identity shim yields the superset (the fail-closed side).
+  [
+    `import { cohortAllows, scopeCleanTypes, intersectChips } from ${JSON.stringify(pathToFileURL(join(ROOT, 'src/lib/afCohorts.ts')).href)};`,
+    'type GuidedCounts = Record<string, number>;',
+    'const fetchApartmentGuidedCounts = async (_q: unknown) => ({} as GuidedCounts);',
+    'const guidedOptions = (_c: unknown, defs: Array<{ key: string }>) => ({ options: defs.map((d) => ({ key: d.key })) });',
+  ].join('\n'),
 );
 type Applier = { id: string; apply: (q: SearchQuery, keys: string[]) => SearchQuery };
 const ADVANCED = QUESTION_CONSTS.map((n) => lifted[n] as Applier);
@@ -248,6 +265,15 @@ assert(/const query = useMemo\(\s*\(\) => reconcileCommittedAf\(storeQuery, AF_A
   'index.tsx derives ONE reconciled `query` and binds it before any consumer');
 assert(/const \{ query: storeQuery,/.test(indexTsx),
   'the raw store value is renamed, so a consumer cannot reach the un-reconciled query by accident');
+// …and renaming is only half of it. The raw name may appear exactly THREE times — the destructure
+// that creates it, the reconciliation that consumes it, and that useMemo's dependency array. A
+// FOURTH is a consumer reading the store directly, which is how counts and results start disagreeing
+// again. COUNTED, not shape-matched: a shape regex is satisfied by the correct line still being
+// present ALONGSIDE the bad one, which is exactly how `rpcAllNarrowingParams(storeQuery)` with the
+// original left as a trailing decoy comment survived every barrier in the repo.
+const storeQueryUses = (indexTsx.match(/\bstoreQuery\b/g) ?? []).length;
+assert(storeQueryUses === 3,
+  `the raw store has exactly ONE consumer — the reconciliation (storeQuery appears ${storeQueryUses}x; expected 3: destructure, reconcile, memo dep)`);
 assert(/rpcAllNarrowingParams\(query\)/.test(indexTsx), 'the Trending city counts read the reconciled query');
 assert(/const districtNarrowingSig = JSON\.stringify\(\[query\./.test(indexTsx), 'the district live counts read the reconciled query');
 // …and they must read ALL of it. The AF half of that signature used to be 11 hand-typed `query.x`
@@ -267,7 +293,7 @@ console.log('\n── 8. THE WRITE THAT WAS MISSING ─────────�
 // must stay attached to the guided branch — the one place every answer, Skip and pill removal funnels
 // through — and it must carry the facets, because without them sanitizeForFilterRestore correctly
 // drops every predicate and the fix silently reverts to the bug.
-const agentTsx = read('src/app/agent.tsx').replace(/^\s*\/\/.*$/gm, '');
+const agentTsx = read('src/app/agent.tsx');
 assert(/if \(opts\?\.guided\) \{[\s\S]{0,1600}writeFilterStore\(\{ \.\.\.refined, afFacets: opts\.guided\.facets \}\)/.test(agentTsx),
   'runRefine writes the committed query AND its facet receipt into the shared store');
 assert((agentTsx.match(/setQuery\(/g) ?? []).length === 1,
@@ -314,10 +340,9 @@ const afterLast = withoutFacet(afterFirst, 0, ALL);
 assert(afterLast.afFacets?.length === 0, 'removing the last chip leaves no chip on screen');
 assert(same(rpcAdvancedFilterParams(afterLast), {}),
   `…and NO predicate either — the cleared answer really dies (sent: ${JSON.stringify(rpcAdvancedFilterParams(afterLast))})`);
-for (const f of AF_PREDICATE_FIELDS) {
-  if ((afterLast as Record<string, unknown>)[f] !== undefined) assert(false, `"${f}" is cleared with the last chip`);
-}
-assert(true, 'every AF_PREDICATE_FIELD is cleared when the last chip goes');
+const stillSet = AF_PREDICATE_FIELDS.filter((f) => (afterLast as Record<string, unknown>)[f] !== undefined);
+assert(stillSet.length === 0,
+  `every AF_PREDICATE_FIELD is cleared when the last chip goes — still set: [${stillSet.join(', ')}]`);
 // …and it stays dead across the store round-trip a Trending tap performs.
 assert(same(rpcAdvancedFilterParams(reconcileCommittedAf({ ...sanitizeForFilterRestore(afterLast), location: 'جدة' }, ALL)), {}),
   'the cleared predicate does not come back through a Trending tap');
@@ -397,6 +422,55 @@ assert(!certifiedAmenityKeys(certifiedScopeFor('rnpl')!).includes('rnpl'),
   '«rnpl» is deliberately absent from certifiedAmenityKeys — token-filtering it would drop a certified answer');
 assert(certifiedFacets(certifiedScopeFor('rnpl')!, [rnplFacet]).length === 1,
   'so an rnpl answer survives the carry on the cohort that certified it');
+
+console.log('\n── 12. EVERY TOKEN THE CARD CAN OFFER MUST SURVIVE THE CARRY ────────────────────');
+// §11 pins the carry against certifiedAmenityKeys(). That is only half the invariant: the OTHER
+// half is that certifiedAmenityKeys() covers everything AMENITIES_QUESTION can actually put on the
+// card. It did not. `resolveOptions` pushes a SIXTEENTH token — `{ key: 'furnished' }`, on
+// `cohortAllows(q,'furnished')` — that the key list never contained, so on الرياض/إيجار/سنوي/شقة,
+// a cohort that never moves, «مفروشة» was offered, committed, stored, and then DELETED by the carry:
+// {"p_amenities":["furnished"]} → {} with the chip gone. A mixed answer was silently rewritten
+// (["elevator","furnished"] → ["elevator"], chip re-labelled to «مصعد» alone). 5 of 5 offering
+// cohorts. §11's own drift guard could not see it: it pins which QUESTIONS write amenity tokens,
+// not which TOKENS the amenities question offers — a different axis.
+//
+// So the offered set is DERIVED from the question's own resolveOptions (lifted above, real cohort
+// logic, shimmed counts), never hand-listed here.
+const resolveAmenityOptions = (lifted.AMENITIES_QUESTION as {
+  resolveOptions: (q: SearchQuery) => Promise<{ options: Array<{ key: string }> }>;
+}).resolveOptions;
+const offeredKeys = async (q: SearchQuery) => (await resolveAmenityOptions(q)).options.map((o) => o.key);
+assert((await offeredKeys(APT)).length > 0, 'the lifted resolveOptions really produced the card\'s option keys');
+
+let offerCohorts = 0;
+for (const [type, cfg] of Object.entries(COHORT_QUESTIONS)) {
+  for (const leg of ['RentAnnual', 'Buy', 'RentMonthly'] as const) {
+    if (!(cfg[leg] ?? []).includes('amenities')) continue;
+    const scope: SearchQuery = {
+      ...SHOP, ...LEGS[leg],
+      category: (CLEAN_MACRO[type] ?? 'Residential') as SearchQuery['category'],
+      typeGroups: groupsOf([type]), types: [type],
+    };
+    const offered = await offeredKeys(scope);
+    const certified = new Set(certifiedAmenityKeys(scope));
+    const orphans = offered.filter((k) => !certified.has(k));
+    assert(orphans.length === 0,
+      `${type}/${leg}: every token the amenities card can OFFER is certified for that same cohort — orphans: [${orphans.join(', ')}]`);
+    if (!offered.length) continue;
+    offerCohorts++;
+    // …and executed end to end, not just set-compared: commit the whole offered list on the card,
+    // write it through the real sanitizer, re-enter the Filter screen. A dropped token here is a
+    // dropped filter on a cohort that never moved — the owner's own bullet.
+    const committed = amenQ.apply(scope, offered);
+    const facet = [{ id: 'amenities', keys: [...offered], labels: offered.map((k) => `#${k}`) }];
+    const back = reconcileCommittedAf(sanitizeForFilterRestore({ ...committed, afFacets: facet }), ALL);
+    assert(same(rpcAdvancedFilterParams(back), rpcAdvancedFilterParams(committed)),
+      `${type}/${leg}: committing every offered token and returning to the Filter screen sends the SAME params`);
+    assert(same(back.afFacets?.[0]?.keys, offered),
+      `${type}/${leg}: …and the chip still names every token, so nothing is filtered without a control`);
+  }
+}
+assert(offerCohorts > 0, `the sweep actually exercised offering cohorts (${offerCohorts})`);
 
 console.log(failed === 0
   ? '\n✅ verify-af-survives-filter-reentry: all checks passed.'

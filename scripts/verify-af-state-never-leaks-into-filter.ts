@@ -41,12 +41,19 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from './lib/stripComments.ts';
 import { sanitizeForFilterRestore, hasActiveFilters, AF_PREDICATE_FIELDS } from '../src/lib/searchDefaults.ts';
 import { certifiedFacets, withoutFacet } from '../src/lib/afCarry.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
 const ROOT = join(import.meta.dirname, '..');
-const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
+// EVERY source read here is comment-STRIPPED, at the reader, so no individual assertion can forget.
+// index.tsx used to be read raw, which made (c)'s chip-«×» shape and (d)'s reconcile shape both
+// satisfiable by a decoy comment: turning the «×» into `{ /* <the original onPress> */ }` left a
+// carried predicate VISIBLE but NOT REMOVABLE — verbatim the condition afCarry.ts's header says is
+// what makes bypassing the sanitizer's allowlist legal — and the whole 285-check suite stayed green.
+// See scripts/lib/stripComments.ts.
+const read = (p: string) => stripComments(readFileSync(join(ROOT, p), 'utf8'));
 
 let failed = 0;
 const assert = (cond: boolean, msg: string) => {
@@ -55,12 +62,10 @@ const assert = (cond: boolean, msg: string) => {
 };
 
 // ── 1. agent.tsx must sanitize before writing the shared store ───────────────────────────────────
-const agentTsx = read('src/app/agent.tsx');
-// Strip comments FIRST. A prose mention of `setQuery(() => q)` is not a call — matching one would
-// make this barrier fail (or pass) on documentation, which is the repo's standing
-// "a comment is not a code path" trap in both directions. Line comments only: this file's block
-// comments are prose, and a naive /* */ strip would eat JSX braces.
-const agentCode = agentTsx.replace(/^\s*\/\/.*$/gm, '');
+// A prose mention of `setQuery(() => q)` is not a call — matching one would make this barrier fail
+// (or pass) on documentation, which is the repo's standing "a comment is not a code path" trap in
+// both directions. read() strips for every assertion in this file now, not just this one.
+const agentCode = read('src/app/agent.tsx');
 
 // Every setQuery in this screen writes the store the Filter home reads. There is exactly one, and it
 // must be sanitized. Counting them matters: a second, unsanitized setQuery would reopen the hole
@@ -72,13 +77,13 @@ assert(
   'every agent.tsx setQuery writes sanitizeForFilterRestore(...), never the raw agent query',
 );
 assert(
-  /import\s*\{[^}]*\bsanitizeForFilterRestore\b[^}]*\}\s*from\s*'@\/lib\/searchDefaults'/.test(agentTsx),
+  /import\s*\{[^}]*\bsanitizeForFilterRestore\b[^}]*\}\s*from\s*'@\/lib\/searchDefaults'/.test(agentCode),
   'agent.tsx imports sanitizeForFilterRestore (a call to a missing binding would not typecheck)',
 );
 // The replay path must NOT be sanitized — it needs the AF predicates to reproduce the conversation.
 // Without this, "fixing" the leak by sanitizing everything would silently break chat restore.
-assert(/openSaved\(hid,\s*q\b/.test(agentTsx), 'openSaved still replays the FULL query (AF predicates intact)');
-assert(/sendFilter\(q\b/.test(agentTsx), 'sendFilter still receives the FULL query');
+assert(/openSaved\(hid,\s*q\b/.test(agentCode), 'openSaved still replays the FULL query (AF predicates intact)');
+assert(/sendFilter\(q\b/.test(agentCode), 'sendFilter still receives the FULL query');
 
 // ── 1b. THE SANITIZER, EXECUTED ─────────────────────────────────────────────────────────────────
 // A query carrying every AF predicate the interview can commit. Values are deliberately "truthy but
