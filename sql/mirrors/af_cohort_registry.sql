@@ -1,6 +1,10 @@
 -- MIRROR of the LIVE production TABLE public.af_cohort_registry. NOT a migration — this file is
 -- READ, never applied; the rows below already exist in production and the insert is written
 -- idempotently only so the mirror is a runnable statement rather than a blob.
+-- Re-verified 2026-09-02 during the AF option-truth certification: the production ROWS md5,
+--   re-derived with the exact recipe below, = e24bc3e63b85a7d2c84714b03ff5b710 — identical to the
+--   value recorded here, 59 rows all enabled, so the registry is UNCHANGED. Re-stamped only
+--   because that certification's migrations READ this table by name. Nothing was edited.
 -- Refreshed 2026-08-30 (first capture) by the AF + Trending Data Integrity routine
 --   (docs/ops/AF_TRENDING_DATA_INTEGRITY_ENGINEER.md).
 --
