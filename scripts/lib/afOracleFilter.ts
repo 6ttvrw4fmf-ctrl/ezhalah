@@ -78,6 +78,39 @@ export type OracleOpts = {
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
   const unhandled: string[] = [];
+
+  // `production_ready=is.true` IS NOT THE WHOLE ADMISSION RULE (found live 2026-09-01).
+  //
+  // af_eligibility_clause() admits:
+  //
+  //   production_ready
+  //   OR ( no city AND no district AND no region
+  //        AND not search_row_price_gated(deal_ar, price_total)
+  //        AND (region_id is null or city_id is null) )
+  //
+  // — the UNLOCATED carve-out: on a search with NO location narrowing, a listing we could not place
+  // on the map is still shown rather than hidden. Measured on Duplex/Buy nationwide: the RPC
+  // returned 125 and this oracle 124, the difference being exactly one unlocated row
+  // (ramzalqasim_residential_listings:615862, type_ar «دوبلكس», production_ready false, city_ar
+  // null). The oracle was UNDER-counting, which surfaces as a phantom EXTRA — a false alarm against
+  // a correct production search.
+  //
+  // The moment ANY location narrowing is present the carve-out is disabled by construction, so
+  // `production_ready=is.true` is then exact — which is why every existing journey (they all pick a
+  // city) has always agreed. Only the location-less case is affected.
+  //
+  // It is NOT modelled here. It depends on search_row_price_gated(), which is our own SQL —
+  // currently neutralised to constant false, but reproducing it would make this "independent"
+  // oracle depend on a guess about the server, the exact thing this module must never do (same
+  // reasoning as p_districts below). So the location-less case is REFUSED, and the caller decides:
+  // scope the check to a city, or verify that case by other means.
+  {
+    const arr = (x: unknown) => (Array.isArray(x) ? x.length : 0);
+    const hasLocation = arr(reqBody.p_cities) > 0 || arr(reqBody.p_districts) > 0 || arr(reqBody.p_region_ids) > 0;
+    if (!hasLocation) {
+      unhandled.push('no location narrowing — af_eligibility_clause() then also admits UNLOCATED non-production_ready rows (carve-out), which this oracle does not model');
+    }
+  }
   const enc = (s: unknown) => encodeURIComponent(String(s));
   const inList = (arr: unknown[]) => `(${arr.map((x) => enc(`"${x}"`)).join(',')})`;
 

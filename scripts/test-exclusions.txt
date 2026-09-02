@@ -14,6 +14,8 @@
 verify-af-agent-cta-live.ts            | .github/workflows/af-live-truth-check.yml            | drives a real browser against production
 verify-af-live-truth.ts                | .github/workflows/af-live-truth-check.yml            | drives a real browser against production
 verify-trending-live-four-way-truth.ts | .github/workflows/af-live-truth-check.yml            | drives a real browser against production
+verify-af-property-type-differential.ts| .github/workflows/af-live-truth-check.yml            | sweeps every certified cohort against production (RPC vs independent DB truth)
+verify-af-stale-predicate-live.ts      | .github/workflows/af-live-truth-check.yml            | drives a real browser against production
 verify-chat-persistence-live.mjs       | manual / live run                                    | live check against production; no scheduled workflow yet
 verify-count-rpc-parity-live.ts        | .github/workflows/count-rpc-parity-live-check.yml    | live production RPC parity
 verify-district-source-truth-live.ts   | manual / live run                                    | live check against production; no scheduled workflow yet
