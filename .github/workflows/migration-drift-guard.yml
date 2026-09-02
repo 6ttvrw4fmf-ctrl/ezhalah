@@ -62,3 +62,15 @@ jobs:
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-migration-content-parity.ts
+
+      # P0 fast-lane membership (issue #1408, 2026-08-31). P0 detection was trapped inside job 38's
+      # single transaction, invisible to the separate fast-lane session for up to 712s against a
+      # 300s SLO; 20260831192229 moved it into the lane. That fix is a LIST of ten detector names,
+      # and a list rots: add a detector that raises P0, wire it to the full-sweep roster only, and
+      # it silently inherits the old latency with every other barrier still green. This step is the
+      # only thing that would notice. It rides here rather than `npm test` for the same reason the
+      # two steps above do - it reads production, and a P0 detector added in one PR must not fail
+      # every unrelated PR. `if: always()` for the same independence reason.
+      - name: Verify every P0-capable detector runs on the fast lane
+        if: always()
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-p0-fast-lane-detection.ts

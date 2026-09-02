@@ -63,20 +63,54 @@ const read = (f: string) => (files.includes(f) ? readFileSync(`${MIGRATIONS_DIR}
 //    hand-writing one. That command holds the entire monitoring pipeline — reconcile, the 88-detector
 //    roster, and dispatch — so a pasted replacement silently drops whatever the author's copy
 //    predates, exactly like the roster class this repo has been bitten by seven times.
-const rewriters = files.filter((f) => {
+//
+//    COMMENTS ARE STRIPPED BEFORE THE JOB NAME IS MATCHED (2026-08-31), the same rule
+//    mon_detect_alert_delivery BRANCH 3 and ops_p0_lane_contract() already apply when reading
+//    source. Migrations routinely DESCRIBE the sweep in prose while editing a different cron job —
+//    20260831192229 quotes job 38's whole command in its header to explain why P0 detection had to
+//    leave it, then edits jobid 86. Matching raw text called that a sweep rewrite. This is a
+//    precision fix, not a relaxation: a migration that genuinely rewrites the sweep must name it in
+//    EXECUTABLE SQL, so every real rewrite is still caught — including the grandfathered one, which
+//    is asserted below so this cannot silently stop working.
+const stripSqlComments = (sql: string) =>
+  sql.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+
+const rewritesSweepByHand = (f: string): boolean => {
   if (GRANDFATHERED.has(f) || f === SWEEP_BUDGET_FIX) return false;
-  const sql = readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8');
+  const raw = readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8');
+  const sql = stripSqlComments(raw);
   if (!sql.includes(SWEEP_JOB)) return false;
   if (!/alter_job|cron\.schedule/i.test(sql)) return false;
   if (!/command\s*(?:=>|:=)/i.test(sql)) return false;
   const derived = /\breplace\s*\(/i.test(sql) && /from\s+cron\.job\b/i.test(sql);
   return !derived;
-});
+};
+
+const rewriters = files.filter(rewritesSweepByHand);
 check(rewriters.length === 0,
   `no migration hand-writes the ${SWEEP_JOB} command`,
   `these migrations replace the monitoring sweep's command with a hand-written literal, which ` +
   `silently drops any statement the author's copy predates — derive it from cron.job.command with ` +
   `replace() instead: ${rewriters.join(', ')}`);
+
+// 1b. THE DETECTOR MUST STILL DETECT. Comment-stripping made the match narrower, and a narrower
+//     match is exactly how a guard quietly stops guarding. The grandfathered file is a known-true
+//     positive — it hand-writes the sweep's command in executable SQL — so running the predicate
+//     against it with the grandfather bypass removed must still come back TRUE. If this ever goes
+//     green-by-blindness, the check above is decoration and this line is what says so.
+const grandfatheredFile = [...GRANDFATHERED][0];
+if (grandfatheredFile && files.includes(grandfatheredFile)) {
+  const sql = stripSqlComments(readFileSync(`${MIGRATIONS_DIR}/${grandfatheredFile}`, 'utf8'));
+  const wouldCatch =
+    sql.includes(SWEEP_JOB) &&
+    /alter_job|cron\.schedule/i.test(sql) &&
+    /command\s*(?:=>|:=)/i.test(sql) &&
+    !(/\breplace\s*\(/i.test(sql) && /from\s+cron\.job\b/i.test(sql));
+  check(wouldCatch,
+    'the predicate still catches a real hand-written sweep rewrite (proven on the grandfathered file)',
+    `THE HAND-WRITTEN-REWRITE PREDICATE NO LONGER FIRES on ${grandfatheredFile}, which is a known ` +
+    `hand-written sweep rewrite — the check above can no longer catch anything and is decoration`);
+}
 
 // 2. The grandfather list is a record, not a loophole: it may only name files that exist.
 const stale = [...GRANDFATHERED].filter((f) => !files.includes(f));
