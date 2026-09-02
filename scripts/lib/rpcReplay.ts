@@ -164,6 +164,14 @@ function looksLikeUninterpretedChange(sql: string, fn: string): boolean {
   // tracked function (statically or by building its body dynamically) still reports as unresolved.
   const definedHere = [...sql.matchAll(/create\s+or\s+replace\s+function\s+public\.([a-z0-9_]+)/gi)]
     .map((m) => m[1].toLowerCase());
+  // A NEEDLE-EDIT migration names its target in the lookup, not in a literal CREATE OR REPLACE:
+  //     select pg_get_functiondef(p.oid) ... where p.proname = 'ops_af_option_truth_sweep'
+  // then edits that body and EXECUTEs it. That is the shape AGENTS.md actually prescribes for
+  // amending a large live function (the RPC full-body-replace hazard), so it is common and growing.
+  // Without this, such a migration has no `definedHere` at all and every tracked RPC it merely
+  // MENTIONS — in a comment, or inside a format() string it assembles — is reported uninterpretable.
+  // Collect the declared targets so inspect-vs-rewrite can be judged the same way.
+  for (const m of sql.matchAll(/p\.proname\s*=\s*'([a-z0-9_]+)'/gi)) definedHere.push(m[1].toLowerCase());
   const definesTracked = definedHere.includes(fn.toLowerCase());
   if (!definesTracked && definedHere.length > 0) {
     // Guard the loophole: a dynamic rebuild names the target in the EXECUTE string rather than in a
