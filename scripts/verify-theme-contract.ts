@@ -98,7 +98,9 @@ check('profile row opens the display-name editor', /account-menu-profile[\s\S]{0
 check("Manage-account row opens in READ mode (no stale edit ride-along)", menu.includes("setEditing(false); go('account', 1)"));
 check('anchored panel pins direction rtl (escapes the sidebar LTR pin)', /panel: \{[\s\S]{0,220}direction: 'rtl'/.test(menu));
 check('both centered popups pin direction rtl', /centerCard: \{ direction: 'rtl'/.test(menu) && /centerCardWide: \{ direction: 'rtl'/.test(menu));
-check('phone dialog pins direction rtl', /phCard: \{ direction: 'rtl'/.test(menu));
+// The change-phone dialog (phCard) was REMOVED with phone sign-in (owner 2026-09-01: Google and
+// Apple only). Retired deliberately rather than routed around; scripts/verify-no-phone-auth.ts
+// now asserts the dialog stays gone, which is the opposite of what this line used to pin.
 check("no physical-left text anywhere in the menu (RTL-first hierarchy)", !/textAlign: 'left'(?!' as const, writingDirection: 'ltr')/.test(menu.replace("textAlign: 'left' as const, writingDirection: 'ltr'", '')));
 check('renames write through to auth user_metadata (refresh-proof — owner 2026-08-29)',
   /persistDisplayName[\s\S]{0,300}auth\.updateUser\(\{ data: \{ full_name: v, name: v \} \}\)/.test(read('src/lib/auth.ts')));
