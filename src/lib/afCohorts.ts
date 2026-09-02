@@ -279,7 +279,6 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
 
 
 
-
 // ── CERTIFIED AMENITY VOCABULARY (owner ruling 2026-08-29, AI-chat one-shot understanding) ────────
 //
 // The AI chat may now map amenities stated in a user's own sentence («فيها مصعد وموقف») straight into
