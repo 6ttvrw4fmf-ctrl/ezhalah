@@ -724,7 +724,7 @@ const card = StyleSheet.create({
   // «مطابق لطلبك» evidence strip — the regionChip idiom (tint background, primary bold text), one
   // checkmark for every question, wrapping under the stats row on both layouts.
   afRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8 },
-  afLabel: { fontSize: 11, color: colors.textMuted, fontWeight: '600' },
+  afLabel: { fontSize: 11, color: colors.muted, fontWeight: '600' },
   afChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3,
