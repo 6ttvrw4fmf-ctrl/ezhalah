@@ -102,7 +102,19 @@ async function say(page: import('playwright').Page, text: string) {
 }
 
 const run = async () => {
-  const browser = await chromium.launch();
+  // The SAME launch shape as every other live AF journey in af-live-truth-check.yml. In GitHub
+  // Actions these env vars are unset, so this is a no-op there and the check runs exactly as it
+  // always has. It matters everywhere else: a cloud engineering session has no `npx playwright
+  // install`, it has one pinned browser at PW_EXECUTABLE_PATH and an egress proxy that resets a
+  // TLS-1.3 ClientHello — so without these, this was the one AF live check a routine could not
+  // execute at all, and it failed with Playwright's "run npx playwright install" banner, which
+  // reads like a broken check rather than a missing flag. Its five siblings already do this.
+  const browser = await chromium.launch({
+    ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
+    ...(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {}),
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors',
+           ...(process.env.HTTPS_PROXY ? ['--disable-quic', '--ssl-version-max=tls1.2'] : [])],
+  });
   for (const j of JOURNEYS) {
     const ctx = await browser.newContext(
       j.mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {});

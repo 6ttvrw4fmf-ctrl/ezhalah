@@ -194,11 +194,11 @@ const S8: Entry[] = [
 
 // ── §9 PILLS ─────────────────────────────────────────────────────────────────────────────────────
 const S9: Entry[] = [
-  { rule: 'R9.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-emoji-summary'], evidence: 'committed answers render as removable pills' },
+  { rule: 'R9.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-emoji-summary', 'verify-af-pill-removal-live'], evidence: 'live 2026-09-02: one AF round on production left 4 removable af-pill-* controls carrying exactly the 4 committed answers (p_bath_min, p_is_new_construction, p_amenities, p_directions)' },
   { rule: 'R9.1.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-emoji-summary'], evidence: 'pills cumulative across rounds' },
-  { rule: 'R9.2.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'removing a pill removes only that predicate' },
-  { rule: 'R9.2.2', dim: 'af', weight: 2, grade: 'P', barrier: [], evidence: 'the "count may widen, nothing above is rewritten" half is not directly asserted' },
-  { rule: 'R9.2.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'removed question dropped from the asked carry — never permanently burned' },
+  { rule: 'R9.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-cross-round-carry', 'verify-af-pill-removal-live'], evidence: 'live 2026-09-02, on the request the browser actually sent: removing one pill dropped EXACTLY p_bath_min, left the other three byte-identical, invented none, and moved no normal-filter field. Desktop الرياض/شقة and mobile جدة/فيلا' },
+  { rule: 'R9.2.2', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-pill-removal-live'], evidence: 'live 2026-09-02: the count WIDENED 155→237 (mobile 122→265), the new total is re-derivable through the anon REST path, a new results turn landed BELOW, and both earlier headlines were still on screen unchanged. 7/7 mutations killed' },
+  { rule: 'R9.2.3', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-cross-round-carry', 'verify-af-pill-removal-live'], evidence: 'live 2026-09-02: «تحديد أكثر» is present on the widened turn, so the removed dimension was not burned out of the asked carry' },
   { rule: 'R9.2.4', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-cross-round-carry'], evidence: 'cross-reference' },
   { rule: 'R9.3.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-emoji-summary'], evidence: '2026-08-31 live AF interview journey (production, desktop): the skipped question produced no pill/receipt anywhere in the transcript summary region.' },
 ];
