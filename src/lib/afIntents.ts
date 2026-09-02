@@ -22,7 +22,7 @@
 // is NEVER guessed — it is rejected and the caller asks. UNKNOWN stays UNKNOWN; missing data never
 // becomes No/false/0.
 import type { SearchQuery } from '@/data/search';
-import { afQuestionAllowed } from './afCohorts.ts';
+import { cohortAllows } from './afCohorts.ts';
 
 export type AfIntentId =
   | 'property_age' | 'street_width' | 'direction' | 'bathrooms'
@@ -37,6 +37,21 @@ export type AfIntent = {
   canonicalize: (raw: string) => string | null;
   /** Writes the canonical backend field. Mirrors the AF question's apply() exactly. */
   apply: (q: SearchQuery, key: string) => SearchQuery;
+  /**
+   * Removes whatever `apply` wrote — the inverse, living beside it so the two cannot drift.
+   *
+   * Needed because certification is not only about the value the user states THIS turn. An AF answer
+   * is sticky: it survives into later turns by design (mergeConversationState must never erase what
+   * the user said). But the COHORT can change under it — «خليها شقة» after a street-width answer —
+   * and a carried value whose new cohort does not certify it is exactly the uncertified predicate the
+   * AF source-truth rule forbids. Measured live: Apartment/Buy carrying streetWidthMin 20 cuts
+   * 38,540 → 585; Apartment/RentAnnual carrying ratingMin 9.5 cuts 23,953 → 0.
+   *
+   * MUST return `q` UNCHANGED (same reference) when there is nothing set, so the caller can tell
+   * "cleared something" from "nothing to clear" without a deep compare — that distinction is what
+   * stops a rejection being announced for a filter the user never had.
+   */
+  clear: (q: SearchQuery) => SearchQuery;
 };
 
 const num = (raw: string): number | null => {
@@ -97,6 +112,8 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
     vocabulary: AGE_KEYS, // canonicalizeAge ALSO accepts a plain integer "N" ("less than N years")
     canonicalize: canonicalizeAge,
     apply: applyAge,
+    clear: (q) => (q.ageMin == null && q.ageMax == null && q.isNewConstruction == null
+      ? q : { ...q, ageMin: null, ageMax: null, isNewConstruction: null }),
   },
   street_width: {
     id: 'street_width',
@@ -106,12 +123,14 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
       const n = parseInt(key, 10);
       return Number.isFinite(n) && n > 0 ? { ...q, streetWidthMin: Math.max(n, q.streetWidthMin ?? 0) } : q;
     },
+    clear: (q) => (q.streetWidthMin == null ? q : { ...q, streetWidthMin: null }),
   },
   direction: {
     id: 'direction',
     vocabulary: DIRECTIONS,
     canonicalize: oneOf(DIRECTIONS),
     apply: (q, key) => ({ ...q, directions: [...new Set([...(q.directions ?? []), key])] }),
+    clear: (q) => (q.directions?.length ? { ...q, directions: null } : q),
   },
   bathrooms: {
     id: 'bathrooms',
@@ -121,6 +140,7 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
       const n = parseInt(key, 10);
       return Number.isFinite(n) && n > 0 ? { ...q, bathMin: Math.max(n, q.bathMin ?? 0) } : q;
     },
+    clear: (q) => (q.bathMin == null ? q : { ...q, bathMin: null }),
   },
   rating: {
     id: 'rating',
@@ -130,6 +150,8 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
       key === '9.0_rc10'
         ? { ...q, ratingMin: Math.max(9.0, q.ratingMin ?? 0), reviewsMin: Math.max(10, q.reviewsMin ?? 0) }
         : { ...q, ratingMin: Math.max(Number(key), q.ratingMin ?? 0) },
+    // reviewsMin only ever arrives WITH a rating (the 9.0_rc10 rung), so it clears with it.
+    clear: (q) => (q.ratingMin == null && q.reviewsMin == null ? q : { ...q, ratingMin: null, reviewsMin: null }),
   },
   rnpl: {
     // RNPL writes into q.amenities like an amenity token, but it is its OWN AF question with its OWN
@@ -139,18 +161,24 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
     vocabulary: ['rnpl'],
     canonicalize: oneOf(['rnpl']),
     apply: (q, key) => ({ ...q, amenities: [...new Set([...(q.amenities ?? []), key])] }),
+    // RNPL lives in q.amenities but owns its own gate, so it clears ONLY its own token — the generic
+    // amenity sweep must not take it, and it must not take theirs.
+    clear: (q) => (q.amenities?.some((t) => t === 'rnpl' || t === 'rent_now_pay_later')
+      ? { ...q, amenities: q.amenities.filter((t) => t !== 'rnpl' && t !== 'rent_now_pay_later') } : q),
   },
   unit_subtype: {
     id: 'unit_subtype',
     vocabulary: UNIT_SUBTYPES,
     canonicalize: oneOf(UNIT_SUBTYPES),
     apply: (q, key) => ({ ...q, unitSubtypes: [key] }),
+    clear: (q) => (q.unitSubtypes?.length ? { ...q, unitSubtypes: null } : q),
   },
   furnished: {
     id: 'furnished',
     vocabulary: ['yes', 'no'],
     canonicalize: oneOf(['yes', 'no']),
     apply: (q, key) => ({ ...q, furnishedPref: key === 'yes' }),
+    clear: (q) => (q.furnishedPref == null ? q : { ...q, furnishedPref: null }),
   },
   amenities: {
     // Per-token certification is finer than the question gate (villa-only tokens, commercial trios),
@@ -160,6 +188,12 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
     vocabulary: [],
     canonicalize: () => null,
     apply: (q) => q,
+    // Per-token, and deliberately NOT "drop every token": rnpl carries its own certification, so the
+    // generic sweep hands it to the rnpl entry above rather than deciding for it.
+    clear: (q) => {
+      const keep = (q.amenities ?? []).filter((t) => t === 'rnpl' || t === 'rent_now_pay_later');
+      return keep.length === (q.amenities?.length ?? 0) ? q : { ...q, amenities: keep.length ? keep : null };
+    },
   },
 };
 
@@ -196,10 +230,7 @@ export function applyAfIntents(
     const values = Array.isArray(raw) ? raw : [raw];
     // Certification FIRST: an uncertified cohort must not even canonicalize, so a rejection can never
     // be mistaken for "applied".
-    // afQuestionAllowed(), not cohortAllows(): for property_age the AF question carries a SECOND
-    // gate (AGE_FILTER_TYPES) that this surface used to ignore, so the chat applied an age filter on
-    // 15 cohorts where the manual UI can never offer one. One predicate, both surfaces.
-    if (!afQuestionAllowed(out, id)) { rejected.push(id); continue; }
+    if (!cohortAllows(out, id)) { rejected.push(id); continue; }
     for (const v of values) {
       const key = intent.canonicalize(String(v));
       if (key === null) { rejected.push(`${id}:${String(v)}`); continue; }

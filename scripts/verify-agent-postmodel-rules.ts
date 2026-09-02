@@ -176,6 +176,40 @@ eq("POOL GUARD: «حمام سباحة» (swimming pool) must not become '1 bathr
 // bathrooms" — confirmed by deliberately deleting the guard during development (it returned "2").
 eq("POOL GUARD (discriminating): a digit directly beside «حمام سباحة» must still not count as bathrooms",
   arabicBathroomCount("شقة فيها ٢ حمام سباحة"), null);
+// The singular was guarded; the PLURAL and the DUAL were not, and both were live on production
+// 2026-09-01 — «حمامين سباحة» returned "2" and «٣ حمامات سباحة» returned "3", i.e. swimming pools
+// counted as bathrooms and filtered the search on a number the user never gave. The guard is now a
+// single strip at the top of arabicBathroomCount rather than a lookahead per alternative, so these
+// three cases pin every shape of the noun.
+eq("POOL GUARD (dual): «حمامين سباحة» is two POOLS, not two bathrooms",
+  arabicBathroomCount("ابغى فيلا فيها حمامين سباحة"), null);
+eq("POOL GUARD (dual, second form): «حمامان سباحة» likewise",
+  arabicBathroomCount("ابغى فيلا فيها حمامان سباحة"), null);
+eq("POOL GUARD (plural): «٣ حمامات سباحة» is three POOLS, not three bathrooms",
+  arabicBathroomCount("ابغى شقة فيها ٣ حمامات سباحة"), null);
+// The companion that keeps the strip HONEST: it must remove the pool phrase, not eat real counts.
+// Without this, deleting the whole bathroom parser would pass every assertion above.
+eq("a real bathroom count beside a pool still reads",
+  arabicBathroomCount("فيلا فيها حمام سباحة و٣ حمامات"), "3");
+
+// …AND THE SAME RULE WHEN THE MODEL IS THE ONE SAYING IT. Guarding only the parser was proved
+// insufficient ON THE LIVE FUNCTION: after the parser fix deployed, «فيها حمامين سباحة» still came
+// back with af.bathrooms = 2 — a NUMBER, where arabicBathroomCount returns strings, so it was the
+// model's own proposal passing through a fill-absent-only helper untouched.
+eq("model-proposed bathrooms are DROPPED when the message only mentions a pool (dual)",
+  fillBathroomsIfAbsent({ bathrooms: 2 }, "ابغى فيلا للبيع في الرياض فيها حمامين سباحة").bathrooms, undefined);
+eq("…and for the plural form",
+  fillBathroomsIfAbsent({ bathrooms: 3 }, "ابغى شقة فيها ٣ حمامات سباحة").bathrooms, undefined);
+eq("…and the singular",
+  fillBathroomsIfAbsent({ bathrooms: 1 }, "شقة فيها حمام سباحة").bathrooms, undefined);
+// Scope: this must refuse ONLY a number the text cannot support. Both companions below fail if the
+// guard is widened into "ignore the model whenever a pool is mentioned".
+// Must use «حمام سباحة» — the phrase POOL_RE actually matches. An earlier draft used «مسبح», which
+// POOL_RE does not match, so the case never reached the guard and a widened guard survived mutation.
+eq("a real count stated alongside a pool is KEPT",
+  fillBathroomsIfAbsent({ bathrooms: 3 }, "فيلا فيها حمام سباحة و٣ حمامات").bathrooms, 3);
+eq("a message with no pool at all leaves the model's value alone",
+  fillBathroomsIfAbsent({ bathrooms: 2 }, "ابغى فيلا فيها حمامين").bathrooms, 2);
 eq("vague word never becomes a count (mirrors «كبير» never becomes bedrooms)",
   arabicBathroomCount("بيت جميل وكبير"), null);
 eq("unrelated amenity, no bathroom mention at all → null",

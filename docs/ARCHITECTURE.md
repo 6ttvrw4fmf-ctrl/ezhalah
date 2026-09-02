@@ -727,11 +727,12 @@ everything below is its Deal-axis mirror, not a new philosophy.
   excludes Buy-only questions (fail the Rent legs), Rent-only questions like `rnpl` (never in any
   cohort's Buy list), and Monthly-only signals like Gathern `rating`/`unit_subtype` (never in Buy or
   RentAnnual). A type with no certified Monthly cohort (most commercial/rural types) mechanically
-  offers zero combined-mode questions. `property_age` (`AGE_QUESTION`) has its own separate gate
-  (`isAgeFilterScope` in `src/lib/ageFilterTypes.ts`, never profiled against Monthly for any type)
-  that also excludes `dealCombined` unconditionally — fixing `cohortAllows` alone would have left
-  this exact leak open a second time, same as the mixed-period fix needed. Barrier:
-  `scripts/verify-buy-rent-combined-af-gating.ts` (npm test, 10 checks).
+  offers zero combined-mode questions. `property_age` (`AGE_QUESTION`) used to have its own separate
+  gate (`isAgeFilterScope` in `src/lib/ageFilterTypes.ts`) that also excluded `dealCombined`
+  unconditionally by hand; as of 2026-09-01 that second gate is deleted and `AGE_QUESTION`'s
+  eligibility is `cohortAllows(q, 'property_age')` directly, so it inherits this 3-way intersection
+  (and every other cohortAllows rule) automatically — no second gate left to drift. Barrier:
+  `scripts/verify-buy-rent-combined-af-gating.ts` (npm test, 12 checks).
 - **Trending mirrors the same combined scope.** `top_cities_by_deal_ar`/`district_options_ar` under
   `p_deal=null` return the Buy∪Rent(any period) eligible set — `top_cities_by_deal_ar` needed a
   null-safety fix first (it had a hard `s.deal_ar = p_deal` equality that NULL can never satisfy,

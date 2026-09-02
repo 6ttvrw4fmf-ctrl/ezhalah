@@ -145,7 +145,17 @@ export function describeKnownState(q: SearchQuery | null | undefined): string {
   push('district', s.districtPin);
   push('bedroomsOrSize', s.detail);
   // The budget is stored annualized for rent; say so, or the model will read 72000 as a monthly figure.
-  if (established(s.price)) bits.push(`budget=${String(s.price)}${s.priceIsAnnual ? ' (annual-equivalent)' : ''}`);
+  //
+  // `s.price` DOES NOT EXIST on SearchQuery and never did — `price` is a field of the edge's wire type
+  // BackendQuery, which agent.ts maps into q.priceInput. So this line read undefined every time and the
+  // budget was silently absent from the state we hand the model, which is how an established budget
+  // gets asked for twice. The same class as the STICKY_FIELDS bug documented at the top of this file,
+  // and it survived because the barrier's fixture invented a `price` member with an `as never` cast.
+  // A priceBand is already a complete human phrase ("SAR 75k–150k"), so the annual note is never
+  // appended to it — same reason priceCalcNote() returns early for a band.
+  const budget = established(s.priceBand) ? String(s.priceBand)
+    : established(s.priceInput) ? String(s.priceInput) : null;
+  if (budget) bits.push(`budget=${budget}${!s.priceBand && s.priceIsAnnual ? ' (annual-equivalent)' : ''}`);
   push('furnished', s.furnishedPref);
   push('amenities', s.amenities);
   push('ratingMin', s.ratingMin);

@@ -47,7 +47,8 @@ import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeName
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
-import { migrateGroups } from '@/lib/searchDefaults';
+import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
+import { toLatinDigits } from '@/lib/inputHygiene';
 import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
@@ -58,21 +59,19 @@ import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples'
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
-import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
-// below a results block — NEVER before first results — and ONLY for a strict single-type Residential
-// scope whose property_age data has been live-verified sufficient (owner rollout Building→Room→Floor,
-// 2026-07-16). Apartment is the reference (gold standard). A multi-type selection or any type not in
-// this set never triggers it. Add a new type ONLY after live-verifying its data quality + counts==
-// search parity, per docs/ADVANCED_FILTER_PATTERN.md. Do not widen without an explicit owner instruction.
-//
-// effectiveTypes() returns canonical ENGLISH keys (propertyTypes.ts), e.g. 'Apartment'/'Residential
-// Building' — NOT the Arabic label (that conversion happens later at RPC-call time via typeArForTypes()).
-// Comparing against Arabic here always evaluated false — caught live, 2026-07-15.
-// The Property Age eligibility gate lives in src/lib/ageFilterTypes.ts (zero-dep, so `npm test` can
-// assert its macros against CLEAN_MACRO — agent.tsx itself can't be imported by a plain node runner).
+// below a results block — NEVER before first results. Its gate is cohortAllows(q, 'property_age')
+// (src/lib/afCohorts.ts), the same canonical registry every other Advanced Filter question uses — a
+// type/deal/period fires only when COHORT_QUESTIONS has live-verified evidence for it (see
+// docs/ADVANCED_FILTER_PATTERN.md). This used to be a second, hand-maintained type→macro map
+// (src/lib/ageFilterTypes.ts, deleted 2026-09-01) that required a single selected type and silently
+// left out any type certified later in COHORT_QUESTIONS but never added to the second map — 5 real
+// types (Shop, Workshop, Commercial Building, Farm, Rest House) were unreachable this way. Add a new
+// type ONLY after live-verifying its data quality + counts==search parity, same as always — the entry
+// point for that is now COHORT_QUESTIONS alone, not a second list.
 // The guided flow is offered when ANY advanced question is eligible for the scope — each question owns
 // its own eligibility gate now (see docs/ADVANCED_FILTER_DESIGN_CONTRACT.md). Otherwise the tap falls
 // through to the pre-existing plain refine chips.
@@ -1183,8 +1182,10 @@ export default function Agent() {
       lastFilterRef.current = undefined;
       lastSeedRef.current = undefined;
       // The submitted Filter state already lives in the shared query context — the param-consuming
-      // effect wrote it verbatim from `?filter=` before this search began (setQuery(() => q)), and
-      // nothing between then and here ever touches query context again. router.replace('/') is the
+      // effect wrote it from `?filter=` before this search began, through the Filter-UI allowlist, and
+      // nothing between then and here ever touches query context again. (The write is sanitized, not
+      // verbatim: on the filter-form path the two are identical, and on the sidebar path the allowlist
+      // is what keeps a reopened chat's AF answers out of the next filter search.) router.replace('/') is the
       // exact navigation «تصفية» already uses to leave this screen (ModeSwitch's onSwitch below), which
       // is what lets the Filter form's own rehydration (city/district catalog matching against query
       // context) and — when the screen never unmounted — its still-live local state (price/area inputs,
@@ -1424,7 +1425,8 @@ export default function Agent() {
     } else if (dim === 'budget') {
       refined.priceInput = a;
     } else if (dim === 'beds') {
-      const n = (a.match(/\d+/) || [])[0]; if (n) refined.detail = n;
+      // Same root as parseQuery: JS \d never matches ٠-٩, so «٣» silently set no bedroom count.
+      const n = (toLatinDigits(a).match(/\d+/) || [])[0]; if (n) refined.detail = n;
     } else if (dim === 'type') {
       const p = parseQuery(a);
       if (p.type) refined.type = p.type;
@@ -1842,11 +1844,20 @@ export default function Agent() {
         ? st.keys.every((k) => scopeCandidates(st.question.id as ScopeTier, q!).includes(k))
         : eligibleQuestions(q).some((x) => x.id === st.question.id);
       if (!stillInScope) continue;                    // out of scope now
-      const n = await liveResultCount(st.question.apply(q, st.keys));
+      // UNKNOWN IS NOT NO. liveResultCount() collapses two different answers into null — "the source
+      // said zero" and "the probe never completed" — and its own comment explains that the collapse is
+      // safe for its OTHER caller, the live footer, where null means "keep showing the last good
+      // number". Here it meant the opposite: a timeout or a network blip silently DELETED an answer
+      // the user had already given, and syncGuidedFromSteps then rebuilds the query without it, so the
+      // filter disappears from the search AND from the receipt with nothing said. Ask the probe
+      // directly and keep the two apart.
+      const nextQ = st.question.apply(q, st.keys);
+      const n = await liveResultCountOrUnknown(nextQ);
       if (ageFlowTokenRef.current !== token) return;
-      if (n == null || n <= 0) continue;                // incompatible: it would select nothing
+      if (n === 'unknown') { kept.push(st); q = nextQ; continue; }   // never learned it — keep the answer
+      if (n <= 0) continue;                                          // the source ANSWERED zero: incompatible
       kept.push(st);
-      q = st.question.apply(q, st.keys);
+      q = nextQ;
     }
     ageFlowStepsRef.current = [...steps.slice(0, from + 1), ...kept];
   };
@@ -2594,7 +2605,20 @@ export default function Agent() {
         // the payload is not — the reload/bookmark/share case. The existing city/district rehydration
         // effects in index.tsx then restore the picked المدينة/الأحياء from the catalog exactly as
         // they already do on the no-reload round-trip.
-        setQuery(() => q);
+        //
+        // SANITIZED, because "identity write" above holds only when the payload came from the filter
+        // form. The sidebar breaks that assumption: Sidebar.tsx writes sanitizeForFilterRestore(query)
+        // to the store and then navigates with the UNSANITIZED query in `?filter=`, so this line used
+        // to overwrite the sanitized write with the full agent query — parking every AF predicate
+        // (ratingMin, amenities, bathMin, streetWidthMin, directions, …) in the store the Filter home
+        // binds to, with no control on screen representing any of them. Measured on production: after
+        // reopening a monthly-rent chat that had answered «التقييم ٩.٠+», an unrelated
+        // الرياض/شراء/فيلا search returns 0 of 11,552 (بيع inventory has zero rated rows); an
+        // annual-rent chat carrying amenities=[elevator]+bathMin=3 returns 574 of 11,552.
+        // The allowlist is exactly the set of fields the Filter UI can show, so this stays an identity
+        // write on the filter-form path it was written for. `openSaved`/`sendFilter` below keep the
+        // FULL q — the replay needs the AF predicates to reproduce the conversation.
+        setQuery(() => sanitizeForFilterRestore(q));
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
         startFresh();
         if (replay === '0') void openSaved(hid, q, override);

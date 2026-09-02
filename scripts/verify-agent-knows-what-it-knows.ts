@@ -12,6 +12,8 @@
 // field from prose each turn and had no structured view of its own accumulated state. Sending that
 // state is what makes "don't ask what you already know" enforceable rather than hopeful.
 import { readFileSync } from "node:fs";
+import { emptyQuery } from "../src/lib/searchDefaults.ts";
+import type { SearchQuery } from "../src/data/search.ts";
 import { describeKnownState } from "../src/lib/conversationState.ts";
 
 let failed = 0;
@@ -21,12 +23,17 @@ const check = (label: string, ok: boolean, detail = "") => {
 };
 
 console.log("── the state summary names every dimension the user can establish ──");
+// BUILT FROM THE REAL SHAPE. This fixture used to carry `price: "72000"` behind an `as never` cast —
+// a member SearchQuery does not have. describeKnownState read `s.price`, the fixture supplied it, and
+// both were wrong together, so the assertion below passed while production emitted no budget at all.
+// A fabricated fixture cannot fail; spread emptyQuery() so the compiler sees the real members.
 const rich = {
+  ...emptyQuery(),
   deal: "Rent", rentPeriod: "monthly", type: "Apartment", location: "الرياض", detail: "2",
-  price: "72000", priceIsAnnual: true, furnishedPref: true, amenities: ["elevator"],
+  priceInput: "72000", priceIsAnnual: true, furnishedPref: true, amenities: ["elevator"],
   ratingMin: 9, bathMin: 2, ageMin: 1, ageMax: 2, streetWidthMin: 20,
   directions: ["شمال"], unitSubtypes: ["شقة"], sources: ["Aqar"],
-} as never;
+} as SearchQuery;
 const desc = describeKnownState(rich);
 for (const token of ["rentPeriod=monthly", "propertyType=Apartment", "location=الرياض",
                      "bedroomsOrSize=2", "furnished=true", "amenities=elevator", "ratingMin=9",
@@ -36,6 +43,11 @@ for (const token of ["rentPeriod=monthly", "propertyType=Apartment", "location=�
 }
 // An annualized budget read as a monthly figure would make the model restate a wrong number.
 check("an annualized budget is labelled as such", desc.includes("budget=72000 (annual-equivalent)"), desc);
+// A priceBand is already a finished human phrase, so the annual note must NOT be glued onto it.
+const banded = describeKnownState({ ...emptyQuery(), deal: "Rent", rentPeriod: "annual",
+  priceBand: "SAR 75k–150k", priceIsAnnual: true } as SearchQuery);
+check("a price BAND is reported as the budget", banded.includes("budget=SAR 75k–150k"), banded);
+check("…and never gets the annual-equivalent suffix", !banded.includes("SAR 75k–150k (annual"), banded);
 
 console.log("\n── it says nothing when nothing is known (a first turn must not be polluted) ──");
 check("null state → empty", describeKnownState(null) === "");

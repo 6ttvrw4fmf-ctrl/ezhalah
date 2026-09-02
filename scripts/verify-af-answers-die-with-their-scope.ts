@@ -38,7 +38,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pruneUncertifiedAdvanced } from '../src/lib/afPrune.ts';
-import { afQuestionAllowed } from '../src/lib/afCohorts.ts';
+import { cohortAllows } from '../src/lib/afCohorts.ts';
 import { CLEAN_MACRO } from '../src/data/propertyTypes.ts';
 import { mergeConversationState, STICKY_FIELDS } from '../src/lib/conversationState.ts';
 
@@ -92,17 +92,17 @@ for (const [name, from, to] of NAMED) {
   let answered: any = { ...from };
   const carried: string[] = [];
   for (const { id, field, value } of FIELD_OF) {
-    if (!afQuestionAllowed(from, id)) continue;
+    if (!cohortAllows(from, id)) continue;
     answered[field] = value;
     carried.push(field);
   }
-  if (afQuestionAllowed(from, 'amenities')) answered.amenities = ['elevator'];
+  if (cohortAllows(from, 'amenities')) answered.amenities = ['elevator'];
   const moved = { ...answered, ...to };
   const pruned: any = pruneUncertifiedAdvanced(moved);
 
   const survivors = FIELD_OF.filter(({ field }) => pruned[field] !== undefined && pruned[field] !== null);
-  const illegal = survivors.filter(({ id }) => !afQuestionAllowed(pruned, id));
-  const amenityIllegal = (pruned.amenities ?? []).length > 0 && !afQuestionAllowed(pruned, 'amenities')
+  const illegal = survivors.filter(({ id }) => !cohortAllows(pruned, id));
+  const amenityIllegal = (pruned.amenities ?? []).length > 0 && !cohortAllows(pruned, 'amenities')
     && !(pruned.amenities ?? []).every((t: string) => t === 'rnpl' || t === 'rent_now_pay_later');
 
   check(`${name} — no uncertified answer survives`,
@@ -171,10 +171,10 @@ for (const ft of TYPES) for (const fl of LEGS) {
   let answered: any = { ...from };
   let any = false;
   for (const { id, field, value } of FIELD_OF) {
-    if (!afQuestionAllowed(from, id)) continue;
+    if (!cohortAllows(from, id)) continue;
     answered[field] = value; any = true;
   }
-  if (afQuestionAllowed(from, 'amenities')) { answered.amenities = ['elevator']; any = true; }
+  if (cohortAllows(from, 'amenities')) { answered.amenities = ['elevator']; any = true; }
   if (!any) continue;                       // nothing certified here — nothing to carry
   for (const tt of TYPES) for (const tl of LEGS) {
     if (tt === ft && tl === fl) continue;
@@ -182,11 +182,11 @@ for (const ft of TYPES) for (const fl of LEGS) {
     const pruned: any = pruneUncertifiedAdvanced({ ...answered, ...scope(tt, tl) });
     for (const { id, field } of FIELD_OF) {
       if (pruned[field] === undefined || pruned[field] === null) continue;
-      if (!afQuestionAllowed(pruned, id)) leaks.push(`${ft}/${fl} → ${tt}/${tl}: ${field} (${id})`);
+      if (!cohortAllows(pruned, id)) leaks.push(`${ft}/${fl} → ${tt}/${tl}: ${field} (${id})`);
     }
     for (const tok of (pruned.amenities ?? [])) {
       const gate = (tok === 'rnpl' || tok === 'rent_now_pay_later') ? 'rnpl' : 'amenities';
-      if (!afQuestionAllowed(pruned, gate)) leaks.push(`${ft}/${fl} → ${tt}/${tl}: amenity '${tok}'`);
+      if (!cohortAllows(pruned, gate)) leaks.push(`${ft}/${fl} → ${tt}/${tl}: amenity '${tok}'`);
     }
   }
 }

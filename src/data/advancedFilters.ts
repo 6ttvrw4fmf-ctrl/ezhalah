@@ -1,11 +1,10 @@
 import type { SearchQuery } from './search';
-import { effectiveTypes, hasClientOnlyNarrowing } from './search';
+import { hasClientOnlyNarrowing } from './search';
 import { isProbeFailure } from '@/lib/afProbe';
 import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, fetchScopeOptionCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
 import {
   SCOPE_GROUP_ID, SCOPE_TYPE_ID, scopeCandidates, applyScopeAnswer, unresolvedScopeTiers, type ScopeTier,
 } from '@/lib/afPlan';
-import { isAgeFilterScope as isAgeFilterScopeFor } from '@/lib/ageFilterTypes';
 import { CLEAN_MACRO } from './propertyTypes';
 import { t } from '@/i18n';
 // Pure ranking/gating engine (2026-08-22 extraction — see src/lib/afRanking.ts header): re-exported
@@ -55,8 +54,8 @@ export type AdvancedQuestion = {
 
 // Minimum USEFUL questions to open the interview at all (owner 2026-08-22; REVISED owner 2026-08-24
 // — supersedes the original ">=2" brief). "Useful" = passes scoreQuestion() above — real narrowing
-// power over the CURRENT eligible set, not merely structurally eligible (cohortAllows/
-// isAgeFilterScope). The rule is now: 0 useful questions closes cleanly (nothing worth asking); 1
+// power over the CURRENT eligible set, not merely structurally eligible (cohortAllows()). The rule
+// is now: 0 useful questions closes cleanly (nothing worth asking); 1
 // or more useful questions opens and asks every one of them, down to the last. A single genuinely
 // useful question is still a real, honest narrowing step for the user — it is not "a tax on their
 // attention" to ask the one question that actually moves their result set; withholding it was the
@@ -69,6 +68,22 @@ export const MIN_USEFUL_QUESTIONS_TO_SHOW = 1;
 // Engine-level LIVE result count for a query — the footer «Show {N}» on every card. Generic: the count
 // RPC applies whatever the query carries (types/scope/amenities/bath/age), so this works for every
 // question and type. null on error → the card holds the last good number rather than flashing.
+/**
+ * Like liveResultCount(), but keeps the two answers APART: 'unknown' means the probe never completed,
+ * a number means the source actually answered.
+ *
+ * liveResultCount() folds both into null, which is right for the live footer (null = "keep showing
+ * the last good number", a claim about nothing). It was WRONG for step revalidation, where null was
+ * read as "this answer selects nothing" and silently deleted a filter the user had already given,
+ * because a request timed out. UNKNOWN IS NOT NO — the same rule the tri-state data law states, in
+ * the control flow rather than the data.
+ */
+export async function liveResultCountOrUnknown(q: SearchQuery): Promise<number | 'unknown'> {
+  const c = await fetchApartmentGuidedCounts(q);
+  if (isProbeFailure(c)) return 'unknown';
+  return c ? c.cnt_selected : 0;      // a real answer, including an honest zero
+}
+
 export async function liveResultCount(q: SearchQuery): Promise<number | null> {
   const c = await fetchApartmentGuidedCounts(q);
   // A failed probe is null HERE too, but for a different and already-correct reason: this is the
@@ -80,8 +95,8 @@ export async function liveResultCount(q: SearchQuery): Promise<number | null> {
 
 // ── Questions ────────────────────────────────────────────────────────────────────────────────────
 
-// Property age — eligible for the 7 age-supported types (its gate now lives HERE, per the contract,
-// not at the agent.tsx call site). 5 strict buckets; each is exactly what Search returns if picked.
+// Property age — eligible for every type/deal/period COHORT_QUESTIONS certifies for 'property_age'
+// (see cohortAllows() below). 5 strict buckets; each is exactly what Search returns if picked.
 const AGE_BUCKETS: Array<{ key: string; labelKey: string; count: (c: AgeOptionCounts) => number }> = [
   { key: 'new', labelKey: 'New construction', count: (c) => c.cnt_new },
   { key: '1_2', labelKey: '1–2 years', count: (c) => c.cnt_1_2 },
@@ -94,10 +109,16 @@ const AGE_QUESTION: AdvancedQuestion = {
   id: 'property_age',
   titleKey: 'How old is the property?',
   selection: 'single',
-  // BOTH gates, via the one shared predicate (2026-09-01). This used to be isAgeFilterScopeFor()
-  // alone — the only AF question that skipped cohort certification — which let Room/Buy offer an
-  // age question COHORT_QUESTIONS does not certify, violating R2.1.1. See afQuestionAllowed().
-  eligibility: (q) => afQuestionAllowed(q, 'property_age'),
+  // Was its own hand-maintained type→macro map (src/lib/ageFilterTypes.ts, deleted 2026-09-01) that
+  // duplicated COHORT_QUESTIONS and drifted from it — 5 types with real, chat-certified property_age
+  // data (Shop, Workshop, Commercial Building, Farm, Rest House) were unreachable from the manual
+  // card because that second map never learned about them. cohortAllows() IS the certified registry;
+  // deriving eligibility from it directly (like every other question below) makes a second map
+  // impossible to grow stale again. This also lets property_age fire on a multi-type/group scope
+  // when every selected type certifies it — cohortAllows() already intersects safely for that, the
+  // same rule every other cohort-gated question here already relies on (see cohortAllows() in
+  // afCohorts.ts). See scripts/verify-age-filter-gate.ts.
+  eligibility: (q) => cohortAllows(q, 'property_age'),
   async resolveOptions(q) {
     const counts = await fetchPropertyAgeOptionCounts(q);
     if (isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true };
@@ -122,7 +143,7 @@ const AGE_QUESTION: AdvancedQuestion = {
 // multi-type intersection mutation-provable. The cohort DATA moved with it, unchanged. Buy+Rent
 // combined gating (q.dealCombined — owner feature 2026-08-20) lives there too, intersecting with
 // the multi-type/multi-period dimensions rather than being bolted on separately — see afCohorts.ts.
-import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips, afQuestionAllowed } from '@/lib/afCohorts';
+import { COHORT_QUESTIONS, COHORT_CHIPS, cohortAllows, scopeCleanTypes, intersectChips } from '@/lib/afCohorts';
 // Merge picked strict amenity tokens (kitchen/parking/elevator/furnished/rnpl) into q.amenities.
 function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;
@@ -359,7 +380,16 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
   titleKey: 'Which direction do you prefer?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
-  eligibility: (q) => cohortAllows(q, 'direction'),
+  // Not asked once directions are already committed — the same guard unit_subtype carries, for the
+  // same reason. cnt_dir_* is computed INSIDE a scope that already applies p_directions, while
+  // apply() UNIONS the new key: so every direction outside the committed set counts 0 while tapping
+  // it WIDENS the result set. Measured on production (Buy/الرياض/عمارة with شمال+غرب committed):
+  // current set 484, chips شمال 282 / غرب 202 / جنوب 0 / شرق 0 — and tapping the جنوب chip that
+  // advertises 0 returns 804. The count is not merely stale, it is inverted, so the honest move is
+  // not to re-ask a question whose options cannot be counted against the state they would produce.
+  // Keyed on committed STATE, not on the round's asked-set, so it also covers directions arriving
+  // from the chat intent path, which never passes through rankQuestions.
+  eligibility: (q) => cohortAllows(q, 'direction') && !(q.directions?.length),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), DIRECTION_DEFS,
       // Sound ONLY because norm_direction_ar's range is exactly these 8 buckets (verified across the

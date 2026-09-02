@@ -35,12 +35,13 @@
 //
 // ── THE RULE ────────────────────────────────────────────────────────────────────────────────────
 //
-// An answer survives iff `afQuestionAllowed(q, id)` — the same single predicate the manual AF UI
-// and the AI chat both gate on. Nothing here decides certification on its own; if it did, it would
-// become a fourth opinion about what is askable.
+// An answer survives iff `cohortAllows(q, id)` — the ONE certified registry that both the manual AF
+// UI and the AI chat gate on. Nothing here decides certification on its own; if it did, it would
+// become another opinion about what is askable, which is exactly the duplicate-map failure that
+// src/lib/ageFilterTypes.ts was deleted for on 2026-09-01.
 
 import type { SearchQuery } from '@/data/search';
-import { afQuestionAllowed, partitionRequestedAmenities } from './afCohorts.ts';
+import { cohortAllows, partitionRequestedAmenities } from './afCohorts.ts';
 
 /** Which query fields each AF question owns. Amenity TOKENS are handled separately below, because
  *  two different questions (`amenities` and `rnpl`) both write into the one `amenities` array. */
@@ -65,7 +66,7 @@ export function pruneUncertifiedAdvanced(q: SearchQuery): SearchQuery {
   let out = q;
 
   for (const [id, fields] of Object.entries(ANSWER_FIELDS)) {
-    if (afQuestionAllowed(out, id)) continue;
+    if (cohortAllows(out, id)) continue;
     for (const f of fields) {
       if (out[f] === undefined || out[f] === null) continue;
       out = { ...out, [f]: null };
@@ -84,7 +85,7 @@ export function pruneUncertifiedAdvanced(q: SearchQuery): SearchQuery {
     // rnpl is its OWN question with its own gate, so it must not be judged by the amenities gate:
     // partitionRequestedAmenities() returns [] for every token when `amenities` is uncertified,
     // which would wrongly drop a still-certified rnpl answer.
-    const keepRnpl = afQuestionAllowed(out, 'rnpl') ? rnplHeld : [];
+    const keepRnpl = cohortAllows(out, 'rnpl') ? rnplHeld : [];
     const keepPlain = plainHeld.length ? partitionRequestedAmenities(out, plainHeld).certified : [];
     const next = [...new Set([...keepPlain, ...keepRnpl])];
     if (next.length !== held.length) out = { ...out, amenities: next.length ? next : null };

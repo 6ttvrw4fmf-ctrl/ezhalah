@@ -41,8 +41,13 @@ export function buildAfSummary(facets: Array<{ id: string; keys: string[]; label
       case 'street_width':
         items.push(`شارع ${f.labels[0]} 🛣️`);
         break;
+      // «أو», not «و». p_directions is a membership filter — picking شمال and غرب returns listings
+      // facing north OR west. «شمال وغرب» describes a DIFFERENT, buildable query: one corner listing
+      // with both frontages (the index models frontage_count), so the wrong connector does not merely
+      // read oddly, it names a real query we did not run. Every OTHER multi-select in this sentence is
+      // genuinely conjunctive — amenities AND together in the RPC — which is why they stay on «و».
       case 'direction':
-        items.push(`${f.labels.join(' و')} 🧭`);
+        items.push(`${f.labels.join(' أو ')} 🧭`);
         break;
       case 'rating':
         items.push(`تقييم ${f.labels[0]} ⭐`);

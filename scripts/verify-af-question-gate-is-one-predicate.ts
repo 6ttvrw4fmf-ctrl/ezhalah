@@ -26,11 +26,21 @@
 //
 // ── WHAT THIS PINS ───────────────────────────────────────────────────────────────────────────────
 //
-// 1. Both surfaces route through the ONE shared predicate `afQuestionAllowed()`.
+// 1. Both surfaces route through the ONE certified registry, `cohortAllows()`.
 // 2. R2.1.1 executably: nothing may be offered for a (type × deal × period) that COHORT_QUESTIONS
 //    does not certify — swept over the FULL live matrix, not a sample.
 // 3. No AF question's eligibility bypasses the shared gate at source level (the bypass that made
 //    property_age special in the first place).
+//
+// RESOLUTION NOTE (2026-09-02). Two routines fixed this in the same window, in opposite directions.
+// The other one landed first (PR #1478-era, deleting src/lib/ageFilterTypes.ts) and its direction is
+// the better one: rather than intersecting the duplicate map with the registry, it DELETED the map,
+// so cohortAllows() is the single certified registry for every question including property_age.
+// That also settles the R2.2.3 tension the audit surfaced — property_age can now survive a
+// multi-type scope through cohortAllows()' own safe intersection, which the old single-type-only
+// age gate made impossible. This barrier was rewritten onto that architecture rather than kept on
+// mine, because its lasting value is not which fix won: it is that a SECOND type→macro map can
+// never quietly grow back beside the registry.
 //
 // Checks 1 and 3 are structural; check 2 is executed against the real functions. Together they mean
 // a future question cannot be added with its own private gate, and a future gate cannot be applied
@@ -38,9 +48,9 @@
 //
 //   node --experimental-strip-types scripts/verify-af-question-gate-is-one-predicate.ts
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { COHORT_QUESTIONS, afQuestionAllowed, cohortAllows } from '../src/lib/afCohorts.ts';
+import { COHORT_QUESTIONS, cohortAllows } from '../src/lib/afCohorts.ts';
 import { CLEAN_MACRO } from '../src/data/propertyTypes.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -58,10 +68,9 @@ console.log('\nverify-af-question-gate-is-one-predicate: the manual AF UI and th
 const advanced = readFileSync(join(ROOT, 'src/data/advancedFilters.ts'), 'utf8');
 const intents = readFileSync(join(ROOT, 'src/lib/afIntents.ts'), 'utf8');
 
-check('the AI chat intent applier gates on afQuestionAllowed()',
-  /if\s*\(!afQuestionAllowed\(/.test(intents),
-  'src/lib/afIntents.ts must call afQuestionAllowed(), not cohortAllows() — cohortAllows alone ' +
-  'misses the per-question extra gates (property_age) and lets the chat apply what the UI cannot offer');
+check('the AI chat intent applier gates on the certified registry',
+  /if\s*\(!cohortAllows\(/.test(intents),
+  'src/lib/afIntents.ts must gate on cohortAllows() — the same registry the manual AF question uses');
 
 // ── 2. NO question may carry a private gate that skips cohort certification ──────────────────────
 //
@@ -74,7 +83,7 @@ const SCOPE_EXEMPT = /unresolvedScopeTiers\(/;
 // trailing comment, so anchoring on end-of-line misses it).
 const TYPE_DECL = /=>\s*boolean/;
 const offenders = eligibilityLines.filter((l) =>
-  !SCOPE_EXEMPT.test(l) && !TYPE_DECL.test(l) && !/afQuestionAllowed\(|cohortAllows\(/.test(l));
+  !SCOPE_EXEMPT.test(l) && !TYPE_DECL.test(l) && !/cohortAllows\(/.test(l));
 check('no AF question eligibility bypasses the shared cohort gate',
   offenders.length === 0,
   offenders.length
@@ -83,8 +92,13 @@ check('no AF question eligibility bypasses the shared cohort gate',
       'other question and from the AI surface. Route it through afQuestionAllowed().'
     : `${eligibilityLines.length} eligibility expressions, all routed through the shared gate`);
 
-check('property_age specifically still routes through the shared gate (the 2026-09-01 regression)',
-  /eligibility:\s*\(q\)\s*=>\s*afQuestionAllowed\(q,\s*'property_age'\)/.test(advanced));
+check('property_age specifically routes through the registry (the 2026-09-01 regression)',
+  /eligibility:\s*\(q\)\s*=>\s*cohortAllows\(q,\s*'property_age'\)/.test(advanced));
+// THE DUPLICATE MAP MUST NOT GROW BACK. src/lib/ageFilterTypes.ts held a second type→macro opinion
+// beside COHORT_QUESTIONS and drifted from it; it was deleted 2026-09-01.
+check('no second type→macro certification map has reappeared beside the registry',
+  !/isAgeFilterScope|AGE_FILTER_TYPES/.test(advanced) && !existsSync(join(ROOT, 'src/lib/ageFilterTypes.ts')),
+  'a private per-question map is how property_age drifted from the registry and from the AI surface');
 
 // ── 3. R2.1.1, EXECUTED over the whole live matrix ───────────────────────────────────────────────
 const LEGS: Record<string, { deal: string; rentPeriod: string | null }> = {
@@ -106,7 +120,7 @@ for (const cleanType of Object.keys(CLEAN_MACRO)) {
     const q: any = { category: CLEAN_MACRO[cleanType], types: [cleanType], ...legQ };
     cells++;
     for (const id of ALL_IDS) {
-      const allowed = afQuestionAllowed(q, id);
+      const allowed = cohortAllows(q, id);
       if (!allowed) continue;
       // R2.1.1: whatever is offered MUST be in this exact cohort's certified list.
       const certified = (COHORT_QUESTIONS[cleanType] as any)?.[LEG_KEY[legName]] ?? [];
@@ -129,15 +143,17 @@ check('the shared gate is never WIDER than cohort certification',
 // ── 4. the specific cells the incident was measured on ───────────────────────────────────────────
 const roomBuy: any = { category: 'Residential', types: ['Room'], deal: 'Buy', rentPeriod: null };
 check("Room/Buy no longer offers property_age (COHORT_QUESTIONS.Room has no Buy list)",
-  afQuestionAllowed(roomBuy, 'property_age') === false);
+  cohortAllows(roomBuy, 'property_age') === false);
 
 const shopBuy: any = { category: 'Commercial', types: ['Shop'], deal: 'Buy', rentPeriod: null };
-check('Shop/Buy: the AI chat can no longer apply an age filter the UI cannot offer',
-  afQuestionAllowed(shopBuy, 'property_age') === false);
+// Shop/Buy CERTIFIES property_age, and under the surviving architecture the manual card can now
+// offer it too — that is the point of deleting the duplicate map, not a regression.
+check('Shop/Buy: certified age is now reachable from BOTH surfaces, not just the chat',
+  cohortAllows(shopBuy, 'property_age') === true);
 
 const aptBuy: any = { category: 'Residential', types: ['Apartment'], deal: 'Buy', rentPeriod: null };
 check('a doubly-certified cohort still WORKS — Apartment/Buy keeps property_age',
-  afQuestionAllowed(aptBuy, 'property_age') === true,
+  cohortAllows(aptBuy, 'property_age') === true,
   'the fix must narrow only where evidence is missing, never disable a certified question');
 
 console.log(failures

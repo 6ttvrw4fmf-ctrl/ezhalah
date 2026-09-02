@@ -46,10 +46,19 @@ const street = buildAfSummary([{ id: 'street_width', keys: ['20'], labels: ['٢�
 assert(street.includes('🛣️'), 'street emoji');
 assert(street.includes('شارع'), 'street context word');
 
-// 8. Direction — multi labels joined with و
+// 8. Direction — multi labels joined DISJUNCTIVELY. p_directions is a membership filter, so two
+// picked directions are OR. The receipt must say so: «شمال وشرق» names a corner listing with both
+// frontages — a different query than the one that ran. This assertion is the barrier for that.
 const dir = buildAfSummary([{ id: 'direction', keys: ['شمال', 'شرق'], labels: ['شمال', 'شرق'] }]);
 assert(dir.includes('🧭'), 'direction emoji');
-assert(dir.includes('شمال و'), 'direction labels joined');
+assert(dir.includes('شمال أو شرق'), 'direction labels joined with أو (OR — p_directions is IN, not AND)');
+// Mutation guard: reverting to the conjunctive join must FAIL here, not slip through on a substring.
+assert(!/شمال\s+و[^أ]/.test(dir), 'direction must NOT use the conjunctive «و» between two directions');
+// ...while the genuinely conjunctive multi-select keeps «و»: every amenity token must be present
+// (the RPC ANDs them), so the fix above must not leak into amenities.
+const amen2 = buildAfSummary([{ id: 'amenities', keys: ['elevator', 'parking'], labels: ['مصعد', 'موقف'] }]);
+assert(amen2.includes('، و'), 'amenities stay conjunctive — the RPC requires ALL selected tokens');
+assert(!amen2.includes(' أو '), 'amenities must not be described as alternatives');
 
 // 9. Rating
 const rating = buildAfSummary([{ id: 'rating', keys: ['9.5'], labels: ['9.5+'] }]);

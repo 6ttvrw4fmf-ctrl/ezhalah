@@ -662,10 +662,16 @@ export function querySummaryLine(q: SearchQuery): string {
   return parts.join(' · ');
 }
 
-// Numbers are always shown in Western/Latin digits (PRD rule), but the user may type the
-// amount in Arabic-Indic (٠-٩) or Persian (۰-۹) digits. Fold those onto 0-9, then keep only
-// the digits — so a price typed in either script normalizes to the same Latin value.
-export function toLatinDigits(input: string): string {
+// DIGITS ONLY — folds Arabic-Indic (٠-٩) / Persian (۰-۹) onto 0-9 and then DISCARDS everything
+// that is not a digit. For a price or area BOX, where the whole field is one number, that is exactly
+// right.
+//
+// It is named digitsOnly, not toLatinDigits, because @/lib/inputHygiene exports a toLatinDigits that
+// folds the same digits and keeps the rest of the string. Two functions, one name, opposite
+// treatment of the text around the number — and agent.ts imported the wrong one. Live effect:
+// normalizeForReadback() rendered «ابغى شقة … ٣ غرف بسعر ٧٠٠٠٠» as the read-back «370000», and
+// parseQuery() saw no digits at all, losing both the bedroom count and the budget. (2026-09-01)
+export function digitsOnly(input: string): string {
   let out = '';
   for (const ch of input) {
     const code = ch.charCodeAt(0);
