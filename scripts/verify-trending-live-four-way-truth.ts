@@ -55,9 +55,16 @@ const CLICK_LEAF = (txt: string) => {
 
 let failures = 0;
 let unverified = 0;
+// The failed labels are kept and re-printed in the closing summary, not only inline. This journey
+// emits ~55 PASS lines, and both CI and a human read the END of that log — so a single FAIL
+// hundreds of lines up is invisible to `tail`, and an INTERMITTENT one is then unnameable after the
+// fact. (2026-09-02: one run in five failed exactly one check here and the label was lost to a
+// `tail`; four re-runs were clean and the assertion could not be identified.) A summary that names
+// what failed costs nothing and is the difference between "flake" and a diagnosis.
+const failedLabels: string[] = [];
 const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
-  if (!ok) failures++;
+  if (!ok) { failures++; failedLabels.push(label); }
 };
 
 const TYPE_MACROS = await (async () => {
@@ -527,7 +534,8 @@ await runAfReentryJourney({ name: 'RE-ENTRY · Riyadh · Rent-Annual · Shop + p
 
 await browser.close();
 console.log(failures
-  ? `\n✗ ${failures} check(s) FAILED (${unverified} request(s) the oracle honestly declined)\n`
+  ? `\n✗ ${failures} check(s) FAILED (${unverified} request(s) the oracle honestly declined):\n` +
+    failedLabels.map((l) => `    • ${l}`).join('\n') + '\n'
   : `\n✓ Trending live four-way truth — all checks passed` +
     `${unverified ? ` (${unverified} request(s) the oracle honestly declined — see SKIP lines)` : ''}\n`);
 process.exit(failures ? 1 : 0);

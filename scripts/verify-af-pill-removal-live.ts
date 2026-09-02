@@ -89,9 +89,13 @@ const CLICK_LEAF = (txt: string) => {
 };
 
 let failures = 0;
+// Failed labels are re-printed in the closing summary as well as inline: CI and humans both read
+// the END of a long log, so a single FAIL far up the scroll is invisible to `tail` — which is how a
+// one-in-five intermittent in the sibling four-way journey became unnameable on 2026-09-02.
+const failedLabels: string[] = [];
 const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
-  if (!ok) failures++;
+  if (!ok) { failures++; failedLabels.push(label); }
 };
 
 /** Which AF predicates are present (non-null) on a captured request body. */
@@ -421,6 +425,6 @@ try {
 }
 
 console.log(failures
-  ? `\n✗ ${failures} check(s) FAILED\n`
+  ? `\n✗ ${failures} check(s) FAILED:\n` + failedLabels.map((l) => `    • ${l}`).join('\n') + '\n'
   : '\n✓ removing an AF pill drops exactly that predicate, widens honestly, and rewrites nothing above it\n');
 process.exit(failures ? 1 : 0);
