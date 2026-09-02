@@ -868,7 +868,138 @@ JOURNEYS['appearance-cancel-keeps-dark'] = async (mobile) => withPage({ mobile, 
   if (bag.pageErrors.length) defect(name, 'page error on the cancel path', bag.pageErrors.join(' | '));
 });
 
-/** J19 — GOOGLE ONE TAP MUST NOT SIT ON TOP OF THE APP'S OWN CONTROLS (PART 5 shapes 6 and 11).
+/** J19 — SIGN-OUT LEAVES NO TRACE OF THE PREVIOUS USER (PART 3 item 1; PART 5 shapes 1, 7 and 8).
+ *
+ *  WHY THIS EXISTS. PART 3 item 1 mandates that "sign-in, sign-out, and account deletion each leave
+ *  the UI consistent with what actually happened server-side", and until this journey the COMPLETED
+ *  sign-out path had zero real-browser coverage: `appearance-cancel-keeps-dark` deliberately taps
+ *  «إلغاء» and never confirms, so every assertion in this file stopped at the popup. The one place a
+ *  stale-state leak would be worst — a freshly logged-out guest looking at the previous account's
+ *  chat titles — was the one place nothing looked.
+ *
+ *  THE CONTRACT, BOTH DIRECTIONS. store.tsx's signOut() is explicit that the two buckets are treated
+ *  OPPOSITELY, and asserting only one half would let a future "cleanup" silently break the other:
+ *    · the per-user key (`history:<sub>`) is KEPT on purpose — "a later re-login restores it";
+ *    · the GUEST bucket and the LEGACY shared key are WIPED synchronously, so the freshly logged-out
+ *      guest cannot inherit the prior signed-in user's chats.
+ *  So this journey fails both if a chat leaks into the guest view AND if the re-login restore data
+ *  is destroyed. A barrier that only checked for leakage would score a total wipe as a pass.
+ *
+ *  WHY THE DOUBLE TAP. onLogout() guards itself with `loggingOut` and then defers the real work by
+ *  1200 ms (`setTimeout(() => { signOut(); router.replace('/'); })`). That is exactly PART 5 shape 7
+ *  with a wide-open window: a second tap during the beat must not queue a second signOut/replace.
+ *
+ *  WHY THE RELOAD. setHistory([]) clears MEMORY; the guest-bucket removal is what has to hold across
+ *  a reload. Judging the leak before a reload would pass on an in-memory-only clear (PART 5 shape 8),
+ *  which is the same class as the sidebar journeys' post-reload re-checks above.
+ *
+ *  NOT A DUPLICATE of `scripts/verify-account-deletion.ts`. That barrier asserts this same wipe by
+ *  REGEX-MATCHING store.tsx's source text for the literal `removeKeysSync([...historyKey('guest')])`
+ *  — it proves the line is written, never that the browser ends up without the chats. Renaming the
+ *  key, reordering the call after an early return, or an exception thrown before it all keep that
+ *  check green. This is the real-browser half PART 5 asks for. */
+JOURNEYS['signout-leaves-no-trace'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
+  const name = `signout-leaves-no-trace:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const TITLES = ['عقارات الرياض', 'فلل جدة', 'شقق الخبر'];
+  // Raw, per-key reads. storedHistory() only ever looks at `history:<SUB>`, and this journey's whole
+  // point is the RELATIONSHIP between three different keys — plus the difference between a key that
+  // is ABSENT and one that holds an empty array, which a JSON.parse fallback of `[]` would erase.
+  const rawKeys = () => page.evaluate((sub) => ({
+    mine: localStorage.getItem('history:' + sub),
+    guest: localStorage.getItem('history:guest'),
+    legacy: localStorage.getItem('history'),
+  }), SUB);
+  const countOf = (raw) => { try { return raw === null ? null : JSON.parse(raw).length; } catch { return 'unparseable'; } };
+  const tap = async (tid) => {
+    const l = page.locator(`[data-testid="${tid}"]`);
+    if (!(await l.count())) return false;
+    try { await l.first().click({ timeout: 15_000 }); return true; } catch { return false; }
+  };
+  // `guestOk` matters ONLY on the post-sign-out call, and it is the difference between this journey
+  // testing something and testing nothing on mobile: openMobileSidebar()'s default open-oracle is
+  // `sidebar-search-btn`, which Sidebar.tsx renders only inside its `user ? (…)` branch — so once we
+  // are logged out it can never report the drawer open, and every mobile assertion below would skip
+  // forever while looking like coverage. See the harness note on GUEST_SIDEBAR_CTA.
+  const signedInChromePresent = async ({ guestOk = false } = {}) => {
+    const opened = mobile ? await openMobileSidebar(page, { guestOk }) : true;
+    if (!opened) return null;                                // null = could not look, ≠ absent
+    return (await page.locator('[data-testid="account-menu-trigger"]').count()) > 0;
+  };
+
+  // ── precondition: we really are signed in, with the three seeded chats on screen ───────────────
+  if ((await signedInChromePresent()) !== true) { skip(name, 'seeded session did not render signed-in chrome'); return; }
+  const seeded = await rawKeys();
+  if (countOf(seeded.mine) !== 3) { skip(name, `seeded history did not land (history:${SUB} = ${countOf(seeded.mine)})`); return; }
+  const bodyBefore = await bodyText(page);
+  const shownBefore = TITLES.filter((t) => bodyBefore.includes(t));
+  if (!shownBefore.length) { skip(name, 'no seeded chat title rendered in the sidebar to begin with'); return; }
+  pass(name, `signed in with ${shownBefore.length}/3 seeded chat titles on screen`);
+
+  // ── sign out, and hammer the confirm the way an impatient person does ─────────────────────────
+  const trig = page.locator('[data-testid="account-menu-trigger"]');
+  await trig.first().click({ timeout: 15_000 }).catch(() => {});
+  await sleep(1200);
+  if (!(await page.locator('[data-testid="account-menu"]').count())) { skip(name, 'account menu would not open'); return; }
+  if (!(await tap('account-menu-signout'))) { skip(name, 'sign-out row not in the menu root'); return; }
+  await sleep(900);
+  if (!(await page.locator('[data-testid="logout-popup"]').count())) { skip(name, 'sign-out confirmation did not open'); return; }
+  if (!(await tap('account-menu-signout-confirm'))) { skip(name, 'confirm button not on the sign-out popup'); return; }
+  // Second tap INSIDE the 1200 ms beat — the `loggingOut` guard is what must absorb it. A real
+  // Locator click, not a dispatched event (PART 9.2 (4)); it is allowed to miss if the popup has
+  // already gone, which is itself fine — what must not happen is a second signOut/replace landing.
+  await tap('account-menu-signout-confirm');
+  await sleep(4000);
+
+  // ── the UI must agree that we are logged out ──────────────────────────────────────────────────
+  const chromeAfter = await signedInChromePresent({ guestOk: true });
+  if (chromeAfter === null) skip(`${name}/chrome`, 'sidebar would not open to check post-sign-out chrome');
+  else if (chromeAfter) defect(name, 'still signed in after confirming sign-out', 'account-menu-trigger is still rendered — the sidebar is showing signed-in chrome to a signed-out visitor');
+  else pass(name, 'signed-in chrome is gone after sign-out');
+
+  // ── and no chat of the previous account may be on screen ──────────────────────────────────────
+  // Only judgeable if the sidebar is actually on screen: on mobile a closed drawer would show no
+  // chat titles for a reason that has nothing to do with the leak, i.e. a free pass.
+  if (chromeAfter === null) {
+    skip(`${name}/leak`, 'sidebar would not open — cannot judge the on-screen leak');
+  } else {
+    const bodyAfter = await bodyText(page);
+    const leaked = TITLES.filter((t) => bodyAfter.includes(t));
+    if (leaked.length) defect(name, "previous account's chats are visible to the logged-out guest", `still on screen: ${leaked.join(' · ')}`);
+    else pass(name, 'no previous-account chat title is on screen');
+  }
+
+  // ── storage, both directions, AFTER a reload (memory-only clears must not pass) ────────────────
+  await page.reload({ waitUntil: 'load' });
+  await settle(page);
+  const after = await rawKeys();
+  const guestN = countOf(after.guest);
+  const legacyN = countOf(after.legacy);
+  if (guestN) defect(name, 'the guest bucket inherited the previous account\'s chats', `history:guest holds ${guestN} entr${guestN === 1 ? 'y' : 'ies'} after sign-out + reload — signOut() wipes this key precisely so a guest cannot see them`);
+  else pass(name, `guest bucket clean after reload (history:guest = ${after.guest === null ? 'absent' : `${guestN} entries`})`);
+  if (legacyN) defect(name, 'the legacy shared history key survived sign-out', `history holds ${legacyN} — signOut() purges it so it cannot leak across accounts`);
+
+  // The OTHER direction: destroying this is a different bug with the same green test if unasserted.
+  if (countOf(after.mine) !== 3) {
+    defect(name, 'sign-out destroyed the account\'s own saved history', `history:${SUB} = ${after.mine === null ? 'absent' : countOf(after.mine)} after sign-out, expected 3 — store.tsx keeps it on purpose so a later re-login restores it`);
+  } else pass(name, 'the account\'s own saved history survived for re-login restore');
+
+  // On mobile the sidebar is an UNMOUNTED drawer, so reading body text without reopening it would
+  // find no chat titles for the trivial reason that no sidebar is on screen — a guaranteed pass that
+  // proves nothing. Reopen (as a guest) before judging, and skip rather than pass if it will not.
+  const reopened = mobile ? await openMobileSidebar(page, { guestOk: true }) : true;
+  if (!reopened) {
+    skip(`${name}/reload-leak`, 'drawer would not reopen after reload — cannot judge the on-screen leak');
+  } else {
+    const bodyReloaded = await bodyText(page);
+    const leaked2 = TITLES.filter((t) => bodyReloaded.includes(t));
+    if (leaked2.length) defect(name, "previous account's chats came back after a reload", `on screen after reload: ${leaked2.join(' · ')}`);
+    else pass(name, 'still no previous-account chat title after a reload');
+  }
+
+  if (bag.pageErrors.length) defect(name, 'page error on the sign-out path', bag.pageErrors.join(' | '));
+});
+
+/** J20 — GOOGLE ONE TAP MUST NOT SIT ON TOP OF THE APP'S OWN CONTROLS (PART 5 shapes 6 and 11).
  *
  *  THE BUG THIS BARRIERS (measured live 2026-09-01, production, 3/3 fresh contexts). One Tap's
  *  LEGACY prompt — GIS's path whenever FedCM is unavailable or fails, which is every iOS Safari

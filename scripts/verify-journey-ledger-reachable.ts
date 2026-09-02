@@ -62,18 +62,22 @@ if (new Set(journeys).size !== journeys.length) {
 }
 ok(`${RUNNER} declares ${journeys.length} distinct journeys`);
 
-// ── 2. the mandate clauses that were ledger-only, and must never be again ────────────────────────
-// These two are pinned BY NAME because their absence was invisible: the ledger showed them green
-// while no committed file could run them. A rename is fine — update this list deliberately — but it
-// may not happen as a silent side effect of a refactor, which is exactly how they were lost.
-for (const required of ['adv-favorite-survives-navigation', 'adv-modeswitch-back-push-vs-replace']) {
+// ── 2. the mandate clauses that were uncovered, and must never be again ─────────────────────────
+// These are pinned BY NAME because their absence was invisible. The first two were LEDGER-ONLY: the
+// ledger showed them green while no committed file could run them. The third was worse — a PART 3
+// item 1 clause ("sign-out … leaves the UI consistent with what actually happened") with no row at
+// all, so nothing even claimed it; `appearance-cancel-keeps-dark` walks up to the logout popup and
+// deliberately taps «إلغاء», leaving the COMPLETED sign-out untested until 2026-09-02.
+// A rename is fine — update this list deliberately — but it may not happen as a silent side effect
+// of a refactor, which is exactly how the first two were lost.
+for (const required of ['adv-favorite-survives-navigation', 'adv-modeswitch-back-push-vs-replace', 'signout-leaves-no-trace']) {
   if (!journeys.includes(required)) {
-    fail(`${RUNNER} no longer declares «${required}». It covers a PART 1 mandate clause that was `
-      + `ledger-only on 2026-08-30 — asserted as covered while nothing could reproduce it. If this `
-      + `journey was deliberately renamed, update this list in the same change.`);
+    fail(`${RUNNER} no longer declares «${required}». It covers a PART 1/PART 3 mandate clause that `
+      + `was uncovered once already — asserted as covered, or not claimed at all, while nothing could `
+      + `reproduce it. If this journey was deliberately renamed, update this list in the same change.`);
   }
 }
-ok('both previously ledger-only mandate clauses have committed journeys');
+ok('every once-uncovered mandate clause has a committed journey');
 
 // ── 3. the runner registers BEFORE it records ───────────────────────────────────────────────────
 const iRegister = runner.indexOf('registerJourneys(Object.keys(JOURNEYS))');
