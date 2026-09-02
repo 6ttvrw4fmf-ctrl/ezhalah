@@ -26,6 +26,7 @@
 // The subset of Sentry's Event type we care about — kept structurally loose because the real type
 // depends on which Sentry version is installed and we do not want an unrelated Sentry upgrade to
 // break this file's typecheck.
+export type SentryStackFrame = { filename?: string; abs_path?: string; [k: string]: unknown };
 export type SentryEventShape = {
   request?: { url?: string; query_string?: string; cookies?: string; headers?: Record<string, string> };
   user?: { id?: string; email?: string; ip_address?: string; username?: string; [k: string]: unknown };
@@ -33,7 +34,10 @@ export type SentryEventShape = {
   extra?: Record<string, unknown>;
   contexts?: Record<string, unknown>;
   message?: string;
-  exception?: { values?: Array<{ value?: string; [k: string]: unknown }> };
+  culprit?: string;
+  exception?: {
+    values?: Array<{ value?: string; stacktrace?: { frames?: SentryStackFrame[] }; [k: string]: unknown }>;
+  };
 };
 
 // Patterns that must never travel to Sentry. Applied to string fields recursively in scrubEvent.
@@ -47,6 +51,47 @@ const JWT_RE = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\
 // Publishable Supabase key format `sb_publishable_...` — harmless if leaked (already client-side),
 // but stripping it stops it appearing in every event and makes real secrets visually louder.
 const PUB_KEY_RE = /sb_publishable_[A-Za-z0-9_-]{16,}/g;
+
+// ── THIRD-PARTY NOISE (routine #7, systems seam, 2026-09-02) ────────────────────────────────────
+//
+// docs/ops/SENTRY_ROUTING.md §2.1 says third-party script errors "should drop [here] before they
+// cost anyone a triage", and names routine #7 as the owner of this list. Until now that capability
+// existed only in scrubEvent's return type — the comment below it read "currently we never do".
+// So nothing was ever dropped, and REACT-NATIVE-7 (2026-09-02, `Error: pa`, culprit
+// `_.ok(gsi/client)`) reached the queue: Google Identity Services throwing inside its own XHR
+// readystatechange handler, with no first-party code involved at all.
+//
+// WHY THE EVENT LOOKED FIRST-PARTY, AND WHY "has a frame in our bundle" IS THE WRONG TEST.
+// Its two outermost frames are OUR bundle (entry-*.js) — but only because Sentry's own XHR
+// instrumentation wrapper lives there. Every originating frame is `/gsi/client`. A rule of "drop
+// when no frame is first-party" would therefore have kept it, which is exactly the trap.
+//
+// THE RULE, deliberately narrow: drop only when the error DEMONSTRABLY ORIGINATES outside our
+// code — the culprit is a known third-party origin, or the INNERMOST frame (the one that actually
+// threw; Sentry orders frames oldest-first, so that is the last one) is. If our own code throws,
+// its innermost frame is our bundle and the event is kept. Adding an origin here can silence a
+// real first-party bug only if that bug throws from inside third-party code, which is by
+// definition not ours to fix in this file.
+const THIRD_PARTY_ORIGIN_RE =
+  /\/gsi\/client|accounts\.google\.com\/gsi|apis\.google\.com|googletagmanager\.com|google-analytics\.com|chrome-extension:\/\/|moz-extension:\/\/|safari-(web-)?extension:\/\//;
+// Benign browser-layout noise with no stack and no actionable cause; named in §2.1.
+const IGNORED_MESSAGE_RE =
+  /^ResizeObserver loop (limit exceeded|completed with undelivered notifications)/;
+
+/** True when the event demonstrably originates in third-party script, not our code. */
+export function isThirdPartyNoise(event: SentryEventShape): boolean {
+  const msg = event.message ?? event.exception?.values?.[0]?.value ?? '';
+  if (typeof msg === 'string' && IGNORED_MESSAGE_RE.test(msg)) return true;
+  if (typeof event.culprit === 'string' && THIRD_PARTY_ORIGIN_RE.test(event.culprit)) return true;
+  const frames = (event.exception?.values ?? []).flatMap((v) => v.stacktrace?.frames ?? []);
+  if (frames.length) {
+    // Sentry orders frames oldest-first: the LAST one is where the error was actually thrown.
+    const origin = frames[frames.length - 1];
+    const where = origin?.filename ?? origin?.abs_path;
+    if (typeof where === 'string' && THIRD_PARTY_ORIGIN_RE.test(where)) return true;
+  }
+  return false;
+}
 
 function scrubString(s: string): string {
   return s
@@ -73,6 +118,8 @@ function scrubValue<T>(v: T): T {
  * entirely (currently we never do, but the type keeps that door open).
  */
 export function scrubEvent(event: SentryEventShape): SentryEventShape | null {
+  // Drop BEFORE scrubbing: a dropped event never leaves the device, so there is nothing to redact.
+  if (isThirdPartyNoise(event)) return null;
   if (event.request) {
     if (event.request.url) event.request.url = event.request.url.split('?')[0].split('#')[0];
     delete event.request.query_string;
