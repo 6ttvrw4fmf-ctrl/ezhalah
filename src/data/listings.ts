@@ -1,4 +1,5 @@
 import type { Deal } from './taxonomy';
+import type { AfCanon } from '@/lib/afEvidence';
 
 // A normalized listing. (PRD §8.2) In production the ingestion pipeline maps every partner feed
 // onto this shape; here we ship curated placeholders ported from the prototype.
@@ -76,6 +77,11 @@ export type Listing = {
   // Aqar rows leave this null and skip the panel. (user: rich Wasalt facts on the card.)
   additional_info?: { key: string; label: string; value: string }[] | null;
   photos?: string[];
+  // The canonical search_listings_ar row the Advanced-Filter predicate ran on, as the results RPC's
+  // `af_canon` jsonb, copied VERBATIM (`c.af_canon ?? null` — never `!!`, never `?? 0`). Feeds the
+  // «مطابق لطلبك» evidence strip (src/lib/afEvidence.ts) and nothing else; null until the RPC
+  // returns it. Every value inside stays nullable: UNKNOWN is UNKNOWN.
+  canon?: AfCanon | null;
   rent_now_pay_later?: boolean;
   rent_now_pay_later_monthly?: number | null;
   features?: {

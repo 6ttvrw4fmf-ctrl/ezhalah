@@ -388,6 +388,14 @@ const AR: Record<string, string> = {
   'South-west': 'جنوب غرب',
   'Do you prefer listings with installment options?': 'تفضّل عقارات تتيح التقسيط / الدفع لاحقًا؟',
   'Offers installments': 'يقبل التقسيط',
+  // «مطابق لطلبك» strip on every result card (owner 2026-09-02, src/lib/afEvidence.ts): the label
+  // and the row-value voices the evidence chips need beyond the AF option labelKeys they reuse.
+  'Matches your request': 'مطابق لطلبك',
+  'm': 'م',
+  'Age: one year': 'عمر سنة',
+  'Age: two years': 'عمر سنتين',
+  'Age: {n} years': 'عمر {n} سنوات',
+  'Age: {n} years (over ten)': 'عمر {n} سنة',
   'What amenities matter to you?': 'وش المميزات المهمة لك؟',
   'Do you prefer it furnished?': 'تفضلها مفروشة؟',
   'Unfurnished': 'غير مفروشة',

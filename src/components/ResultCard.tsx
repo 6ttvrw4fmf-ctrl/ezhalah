@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -10,8 +10,14 @@ import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText } from '@/lib/arabi
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
+import { afEvidence, type ActiveAf } from '@/lib/afEvidence';
 
 const IS_WEB = Platform.OS === 'web';
+
+// «مطابق لطلبك» strip: at most this many evidence chips are visible before a «+N» expander (owner
+// decision 3, 2026-09-02). The strip is derived ONLY from afEvidence() over the turn's active AF
+// predicates and this listing's canonical row — no second state, nothing hand-mapped per field.
+export const AF_CHIP_CAP = 4;
 
 // Feature key → (icon, EN label key) — the 2-column grid on the right side of the residential card.
 // The label is run through t() so it localizes to Arabic. Order matters: most useful features first.
@@ -79,13 +85,21 @@ export function ResultCard({
   listing,
   onOpen,
   rank,
+  activeAf,
 }: {
   listing: Listing;
   onOpen: () => void;
   variant?: 'compact' | 'grid'; // kept for backward compatibility — both render the new design
   rank?: number;
+  // The Advanced-Filter predicates the turn's search ran with (afActive(m.result.query)) — one
+  // stable reference per results turn; the memo comparator in agent.tsx compares it by identity.
+  activeAf?: ActiveAf;
 }) {
   const { t, isRTL, locale } = useI18n();
+  // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
+  // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
+  const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);
+  const [afOpen, setAfOpen] = useState(false);
   // EN UI: scraped Arabic district/city names get a fast client-side transliteration so users see
   // "Al Olaya, Riyadh" instead of "حي العليا, Riyadh". AR UI: pass through unchanged. (user request:
   // "when I send in English the place should be translated.")
@@ -268,6 +282,26 @@ export function ResultCard({
           <Stat icon="business-outline" big={typeLabel} small={t('Property Type')} />
           {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
         </View>
+        {/* «مطابق لطلبك» — every active Advanced-Filter predicate this listing's canonical row proves,
+            with the ROW's actual value («4 حمامات», «شمال», «عرض الشارع 20 م»). Absent entirely when
+            there is no evidence (no label alone); an UNKNOWN column renders nothing for that question.
+            The existing bath Stat / rating row / RNPL banner / feature grid stay exactly as they are. */}
+        {evidence.length > 0 ? (
+          <View style={card.afRow} testID="card-af-evidence">
+            <Text style={card.afLabel}>{t('Matches your request')}</Text>
+            {(afOpen ? evidence : evidence.slice(0, AF_CHIP_CAP)).map((c, i) => (
+              <View key={`${c.id}:${i}`} style={card.afChip} testID={`card-af-evidence-${c.id}`}>
+                <Ionicons name="checkmark-circle" size={12} color={colors.primary} />
+                <Text style={card.afChipText} numberOfLines={1}>{c.text}</Text>
+              </View>
+            ))}
+            {!afOpen && evidence.length > AF_CHIP_CAP ? (
+              <Pressable onPress={() => setAfOpen(true)} style={card.afChip} testID="card-af-evidence-more">
+                <Text style={card.afChipText}>+{evidence.length - AF_CHIP_CAP}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
       </Pressable>
 
       {/* ─── features panel (full-width below info on mobile) ─ */}
@@ -687,6 +721,15 @@ const card = StyleSheet.create({
     backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 2,
   },
   regionChipText: { fontSize: 10.5, color: colors.primary, fontWeight: '700' },
+  // «مطابق لطلبك» evidence strip — the regionChip idiom (tint background, primary bold text), one
+  // checkmark for every question, wrapping under the stats row on both layouts.
+  afRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8 },
+  afLabel: { fontSize: 11, color: colors.textMuted, fontWeight: '600' },
+  afChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3,
+  },
+  afChipText: { fontSize: 11.5, color: colors.primary, fontWeight: '700' },
   price: { fontSize: 16.5, fontWeight: '800', color: colors.primary, marginTop: 2 },
   // Guest-rating chip (Gathern) — star + score, with a muted review-count suffix. Sits just under
   // the price; only rendered when the listing actually carries a rating. (Gathern Tier-1.)
