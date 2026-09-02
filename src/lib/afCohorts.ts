@@ -336,6 +336,25 @@ export function certifiedAmenityKeys(q: SearchQuery): string[] {
   return base;
 }
 
+// THREE AF questions write their answer into the ONE `q.amenities` bag: the amenities card itself,
+// plus `furnished` and `rnpl`, which are separate questions with their own, much narrower
+// certification (the RPC's p_amenities vocabulary carries all three — 'furnished' and 'rnpl'/
+// 'rent_now_pay_later' are listed there alongside the chips). certifiedAmenityKeys() is the CHIP
+// vocabulary and knows only the first, so a furnished or RNPL answer the cohort genuinely certifies
+// came back `rejected` from the gate below: the chat path then deleted the user's own filter and
+// announced it as uncertified. Measured on 2026-09-02 by executing the real gate over every cohort:
+// 10 (cohort × question) pairs, 7 of them `furnished` — including Residential Building/RentAnnual,
+// which certifies furnished while certifying no amenity chips at all.
+//
+// Each is gated on its OWN question id. Folding them into the amenities gate would be the opposite
+// error and a worse one: rnpl certifies on 3 cohorts where amenities certifies on 24, so 'amenities'
+// as a proxy would let RNPL through wherever generic amenities happen to be allowed — the exact
+// impersonation scripts/verify-agent-af-intent-coverage.ts §3 exists to forbid.
+const AMENITY_BAG_WRITERS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['furnished', ['furnished']],
+  ['rnpl', ['rnpl', 'rent_now_pay_later']],
+];
+
 /**
  * Split requested amenity tokens into the ones this scope certifies and the ones it does not.
  *
@@ -348,6 +367,9 @@ export function partitionRequestedAmenities(
   q: SearchQuery, requested: string[],
 ): { certified: string[]; rejected: string[] } {
   const allowed = new Set(certifiedAmenityKeys(q));
+  for (const [id, tokens] of AMENITY_BAG_WRITERS) {
+    if (cohortAllows(q, id)) for (const tok of tokens) allowed.add(tok);
+  }
   const certified: string[] = [];
   const rejected: string[] = [];
   for (const raw of requested) {
