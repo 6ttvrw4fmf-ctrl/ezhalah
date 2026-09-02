@@ -331,6 +331,173 @@ async function runJourney(j: Journey) {
   }
 }
 
+/**
+ * PART 2/3 ON A RE-ENTRY — the journey the owner broke, in a real browser (P0 2026-09-01).
+ *
+ * Every journey above starts on a fresh context and searches ONCE, so none of them could ever see
+ * this: the user commits an Advanced Filter answer, goes BACK to the Filter screen, and searches
+ * again. Measured live before the fix, الرياض / إيجار / سنوي / تجاري / محل:
+ *
+ *   base search                        566   (no AF param in the body)
+ *   «كم عمر العقار؟» → «جديد»          243   (p_is_new_construction: true)
+ *   back → Trending «الرياض» → «بحث»   566   ← the committed answer simply gone from the request
+ *
+ * and every Trending row on that second visit advertised the 566-scoped number, so the card
+ * promised exactly the wrong count it then delivered. Reproduced through a Trending city card, a
+ * district card, a different city, and with Trending never touched at all.
+ *
+ * ASSERTED ON THE CAPTURED REQUEST BODY, never on rendered text: a UI assertion passes on a page
+ * that merely re-renders a stale number. Note the «تصفية» pill is collapsed once a search has run
+ * (agent.tsx modeSearched), so browser Back is the only non-destructive way back — which is exactly
+ * the route the owner took.
+ */
+async function runAfReentryJourney(j: {
+  name: string; city: string; group: string; type: string; deal: string[]; category: string;
+  /** testID of the Advanced Filter option to commit, e.g. 'af-option-new'. */
+  afOption: string;
+}) {
+  const { name, city, group, type, deal, category, afOption } = j;
+  console.log(`\n════════ AF RE-ENTRY JOURNEY: ${name} ════════`);
+  const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  const searches: { body: any; total: number }[] = [];
+  const cityCalls: { body: any }[] = [];
+  page.on('response', async (resp) => {
+    if (resp.request().method() !== 'POST') return;
+    try {
+      const rows = await resp.json();
+      if (!Array.isArray(rows)) return;
+      const body = JSON.parse(resp.request().postData() || '{}');
+      if (resp.url().includes('/rpc/location_search_candidates_ar') && body.p_limit > 1)
+        searches.push({ body, total: Number(rows?.[0]?.total_count ?? rows.length) });
+      else if (resp.url().includes('/rpc/top_cities_by_deal_ar')) cityCalls.push({ body });
+    } catch {}
+  });
+  const tap = async (txt: string, timeoutMs = 9000) => {
+    const until = Date.now() + timeoutMs;
+    let box: any = null;
+    while (Date.now() < until) {
+      box = await page.evaluate(CLICK_LEAF, txt);
+      if (box) break;
+      await page.waitForTimeout(300);
+    }
+    if (!box) throw new Error(`control never rendered: ${txt}`);
+    await page.mouse.click(box.x, box.y);
+    await page.waitForTimeout(900);
+  };
+  /** Only the Advanced Filter half of a request — the half that went missing. */
+  const afOf = (body: any) => Object.fromEntries(Object.entries(body)
+    .filter(([k]) => /^p_(amenities|bath_min|furnished|street_width_min|directions|rating_min|reviews_min|unit_subtypes|age_min|age_max|is_new_construction)$/.test(k)));
+
+  try {
+    await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(5000);
+    for (const d of deal) await tap(d);
+    await tap(category);
+    await page.click('[data-testid="city-input"]');
+    await page.waitForTimeout(3000);
+    await tap(city).catch(async () => { await page.fill('[data-testid="city-input"]', city); await tap(city); });
+    await page.waitForSelector('[data-testid="selected-city-visual"]', { timeout: 6000 }).catch(() => null);
+    await tap(group);
+    await tap(type);
+    await tap('بحث');
+    await page.waitForTimeout(14000);
+    const base = searches[searches.length - 1] ?? null;
+    check(`${name}: the base search ran`, !!base, `captured ${searches.length} search(es)`);
+
+    // ── commit an Advanced Filter answer, then FINISH the round ─────────────────────────────────
+    // By testID, never by label: the copy on this button is being reworked in a parallel PR, and a
+    // barrier that silently stops finding its own entry point reports green on an untested journey —
+    // which is precisely what the first run of this journey did.
+    await page.waitForSelector('[data-testid="results-narrow"]', { timeout: 30000 });
+    await page.click('[data-testid="results-narrow"]');
+    await page.waitForSelector('[data-testid="af-card"]', { timeout: 20000 });
+    await page.click(`[data-testid="${afOption}"]`);
+    await page.waitForTimeout(900);
+    await page.click('[data-testid="af-confirm"]');
+    // The store write happens when the ROUND ends (finishGuided → runRefine), not per answer, so the
+    // remaining questions must be skipped out or nothing is ever committed. Skip is a real answer of
+    // "I'm open": it applies no predicate and cannot move the count.
+    for (let i = 0; i < 12; i++) {
+      await page.waitForTimeout(1500);
+      if (!(await page.$('[data-testid="af-card"]'))) break;
+      await page.click('[data-testid="af-skip"]').catch(() => {});
+    }
+    await page.waitForTimeout(14000);
+    const committed = searches[searches.length - 1] ?? null;
+    const committedAf = committed ? afOf(committed.body) : {};
+    // FATAL, not a check: every assertion below compares against this answer, so if it never landed
+    // they would all compare {} to {} and pass while proving nothing at all.
+    if (!Object.keys(committedAf).length) {
+      throw new Error(`the Advanced Filter answer never reached the request (af params = ${JSON.stringify(committedAf)}; ` +
+        `base=${base?.total} committed=${committed?.total}) — the journey below would be vacuous`);
+    }
+    check(`${name}: the Advanced Filter answer reached the request`, true, `af params = ${JSON.stringify(committedAf)}`);
+    check(`${name}: and it NARROWED the set (an AF answer may only ever narrow)`,
+      !!base && !!committed && committed.total < base.total, `base=${base?.total} committed=${committed?.total}`);
+
+    // ── back to the Filter screen, re-open Trending, search again ───────────────────────────────
+    const before = cityCalls.length;
+    await page.goBack({ waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(4000);
+    await page.fill('[data-testid="city-input"]', '');           // clearing re-opens the Trending Top-6
+    await page.click('[data-testid="city-input"]');
+    await page.waitForTimeout(4000);
+    const rows = await page.evaluate(READ_TRENDING_ROWS);
+    check(`${name}: Trending re-rendered on the way back`, rows.length > 0,
+      rows.map((r) => `${r.label} ${r.count}`).join(' · ') || '(none)');
+    // R14.1.2: Trending is the location breakdown of the EXACT current eligible set — which now
+    // includes the committed Advanced Filter answer.
+    // A committed answer CHANGES the pool's narrowing signature, so a fresh top_cities_by_deal_ar
+    // must fire on the way back. No new call at all is therefore a failure in its own right, not a
+    // harness gap: it means the screen still believes it is looking at the pre-AF filter state.
+    const trendingCall = cityCalls.slice(before).pop() ?? null;
+    check(`${name}: the Trending request carries the committed Advanced Filter answer`,
+      !!trendingCall && JSON.stringify(afOf(trendingCall.body)) === JSON.stringify(committedAf),
+      trendingCall
+        ? `trending af=${JSON.stringify(afOf(trendingCall.body))} committed af=${JSON.stringify(committedAf)}`
+        : `no fresh Trending request fired at all — the pool signature never learned about the AF answer`);
+
+    const advertised = rows.find((r) => r.label === city)?.count ?? null;
+    await tap(city).catch(async () => { await page.fill('[data-testid="city-input"]', city); await tap(city); });
+    await page.waitForTimeout(1200);
+    await tap('بحث');
+    await page.waitForTimeout(14000);
+    const reentry = searches[searches.length - 1] ?? null;
+
+    check(`${name}: the re-entry search carries the SAME Advanced Filter params (no dropped filters)`,
+      !!reentry && JSON.stringify(afOf(reentry.body)) === JSON.stringify(committedAf),
+      `re-entry af=${JSON.stringify(reentry ? afOf(reentry.body) : null)} committed af=${JSON.stringify(committedAf)}`);
+    check(`${name}: the property type did not widen back out to its group`,
+      !!reentry && !!committed && JSON.stringify(reentry.body.p_types) === JSON.stringify(committed.body.p_types),
+      `re-entry p_types=${JSON.stringify(reentry?.body.p_types)} committed=${JSON.stringify(committed?.body.p_types)}`);
+    check(`${name}: the Normal Filter state round-tripped (deal, period, category)`,
+      !!reentry && !!committed && reentry.body.p_deal === committed.body.p_deal
+        && reentry.body.p_rent_period === committed.body.p_rent_period
+        && reentry.body.p_category === committed.body.p_category,
+      `re-entry=${JSON.stringify([reentry?.body.p_deal, reentry?.body.p_rent_period, reentry?.body.p_category])}`);
+    check(`${name}: the eligible set is the one the user committed, not the pre-AF one`,
+      !!reentry && !!committed && reentry.total === committed.total,
+      `committed=${committed?.total} re-entry=${reentry?.total}`);
+    // COUNT == CLICK-THROUGH (R14.2.1). The whole scope was already committed before Trending
+    // rendered, so the advertised city number is not merely an upper bound here — it is the answer.
+    //
+    // ON ITS OWN THIS CHECK CANNOT SEE THE DEFECT, and that is the point of the one above it: the
+    // advertised count and the landed count are built from the SAME store, so when the store has
+    // silently dropped the AF answer they agree with each other perfectly and are both wrong
+    // (measured on production 2026-09-01: advertised 566, landed 566, against a committed 243).
+    // Only «the eligible set is the one the user committed» distinguishes the two states.
+    if (advertised != null && reentry) {
+      check(`${name}: the Trending row advertised ${advertised} and clicking it delivered exactly that`,
+        advertised === reentry.total, `advertised=${advertised} landed=${reentry.total}`);
+    }
+  } catch (e: any) {
+    check(`${name}: journey completed without a harness error`, false, e.message);
+  } finally {
+    await ctx.close();
+  }
+}
+
 // Rotate cities AND regions, desktop and mobile — never Riyadh-only (PART 5).
 await runJourney({ name: 'Riyadh · Buy · Apartment — no extra narrowing', city: 'الرياض',
   deal: [], group: 'الشقق والسكن المشترك', type: 'شقة' });
@@ -340,6 +507,11 @@ await runJourney({ name: 'Riyadh · Buy · Apartment — price 900k + area>=120 
   deal: [], group: 'الشقق والسكن المشترك', type: 'شقة', priceMax: 900000, areaMin: 120 });
 await runJourney({ name: 'MOBILE 390x844 · Dammam · Buy · Apartment', city: 'الدمام',
   deal: [], group: 'الشقق والسكن المشترك', type: 'شقة', viewport: { width: 390, height: 844 } });
+// The owner's own repro, at the exact scope they measured it on.
+await runAfReentryJourney({ name: 'RE-ENTRY · Riyadh · Rent-Annual · Shop + property_age', city: 'الرياض',
+  // إيجار then شراء: the deal buttons are two independent toggles, so tapping إيجار alone leaves
+  // BOTH on (dealCombined), and combined mode has no period selector at all — «سنوي» never renders.
+  deal: ['إيجار', 'شراء', 'سنوي'], category: 'تجاري', group: 'التجزئة والمكاتب', type: 'محل', afOption: 'af-option-new' });
 
 await browser.close();
 console.log(failures
