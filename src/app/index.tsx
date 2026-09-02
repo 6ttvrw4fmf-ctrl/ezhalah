@@ -20,7 +20,6 @@ import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, r
 import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
 import { reconcileCommittedAf, withoutFacet, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
-import { isScopeQuestionId } from '@/lib/afPlan';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
@@ -1048,15 +1047,18 @@ export default function Home() {
                 remaining facets through each question's own apply(), exactly like the chat's pills.
                 Same «بناءً على» summary text the user already read in the chat, so the two screens
                 describe one search in one voice.
-                SCOPE facets (group/type) are deliberately absent: the group boxes and type boxes
-                below already ARE their visible control, and a «×» here would widen a specific
-                property type back out to its group — the direction the owner's rule forbids. */}
+                SCOPE facets (group/type) are absent because reconcileCommittedAf does not carry
+                them at all — the group boxes and type boxes below already ARE their control, and a
+                receipt whose predicate has a live control is not a receipt, it is a second writer
+                fighting the user (it re-applied itself over every scope edit; see @/lib/afCarry).
+                So `query.afFacets` here is exactly the advanced answers, and chip index i is facet
+                index i — which is what lets the «×» below hand `i` straight to withoutFacet(). */}
             {query.afFacets?.length ? (
               <Reveal>
                 <View style={s.afCarryWrap}>
                   <Text style={[s.afCarryLead, { textAlign: isRTL ? 'right' : 'left' }]}>{buildAfSummary(query.afFacets)}</Text>
                   <View style={[s.afCarryRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                    {query.afFacets.map((f, i) => (isScopeQuestionId(f.id) ? null : (
+                    {query.afFacets.map((f, i) => (
                       <Pressable
                         key={`${f.id}-${i}`}
                         testID={`filter-af-chip-${i}`}
@@ -1071,7 +1073,7 @@ export default function Home() {
                         <Text style={s.afCarryChipTx}>{f.labels.join('، ')}</Text>
                         <Ionicons name="close" size={13} color={colors.primary} />
                       </Pressable>
-                    )))}
+                    ))}
                   </View>
                 </View>
               </Reveal>

@@ -41,8 +41,22 @@ type Applier = { id: string; apply: (q: SearchQuery, keys: string[]) => SearchQu
  * i.e. it turns UNKNOWN into No. cohortAllows() is the same gate that decided the question could be
  * ASKED; it is the only gate that may decide the answer can still be APPLIED.
  *
- * Scope facets (group/type) are never dropped by this: they carry no strict predicate of their own,
- * and dropping one would widen the search past anything the user asked for.
+ * SCOPE facets (group/type) are NOT carried at all — they are dropped here, and this is the one
+ * place that decision lives. A facet is a RECEIPT: it exists to license a predicate the Filter UI
+ * has no control for. A scope answer has the opposite property — applyScopeAnswer writes only
+ * typeGroups/types/type, all three are Normal-tier fields the sanitizer's allowlist already carries,
+ * and the group boxes and type boxes ARE their on-screen control. So a scope receipt licenses
+ * nothing, and re-applying it is not merely redundant, it OVERWRITES the user:
+ *   الرياض/إيجار/سنوي/سكني/شقة with a committed property_type facet, measured 2026-09-01 —
+ *   deselect «شقة» → raw store types=null → re-render put ["Apartment"] straight back (a NO-OP tap);
+ *   pick «فيلا»    → raw store ["Villa"] → re-render ["Apartment"] (the user's own pick discarded);
+ *   a property_GROUP facet + a type picked outside it → the SPECIFIC type deleted and the search
+ *   widened to the whole group; a type facet + a category switch → Residential types rendered and
+ *   searched under تجاري, with no group box selected that could explain them.
+ * The type/group rows write the RAW store while they render from the reconciled query, so every
+ * scope edit was overwritten on the very next render: dead controls, and the widening direction the
+ * carry exists to forbid. Dropping the facet keeps the user's own scope edit — and the interview's
+ * own scope answer still rides, as the types/typeGroups it wrote.
  *
  * Note this is a READ-TIME derivation, not a write: changing the type away and back re-admits the
  * user's own still-visible answer rather than destroying it. Deliberate — what is searched, what is
@@ -50,7 +64,7 @@ type Applier = { id: string; apply: (q: SearchQuery, keys: string[]) => SearchQu
  */
 export function certifiedFacets(q: SearchQuery, facets: readonly CommittedFacet[]): CommittedFacet[] {
   return facets
-    .filter((f) => isScopeQuestionId(f.id) || cohortAllows(q, f.id))
+    .filter((f) => !isScopeQuestionId(f.id) && cohortAllows(q, f.id))
     .map((f) => (f.id === AMENITY_TOKEN_QUESTION_ID ? certifiedAmenityFacet(q, f) : f))
     .filter((f): f is CommittedFacet => f !== null);
 }
@@ -90,10 +104,11 @@ function certifiedAmenityFacet(q: SearchQuery, f: CommittedFacet): CommittedFace
  * The query that must actually be searched, counted and displayed on the Filter screen.
  *
  * Clears every AF predicate, then re-applies only the still-certified facets through each
- * question's OWN apply() — never a hand-written inverse, and spanning BOTH pools (ADVANCED_QUESTIONS
- * ∪ SCOPE_QUESTIONS) because a scope facet whose question could not be resolved would be silently
- * dropped and quietly widen the search. That is byte-for-byte the rebuild removeGuidedFacet already
- * performs in agent.tsx, so removing a chip on either screen means the same thing.
+ * question's OWN apply() — never a hand-written inverse. That is byte-for-byte the rebuild
+ * removeGuidedFacet already performs in agent.tsx, so removing a chip on either screen means the
+ * same thing. Scope facets never reach this reduce (certifiedFacets drops them, see above), so the
+ * scope half of the question pool is inert here — the scope answer rides as the types/typeGroups it
+ * wrote, under the Filter screen's own group and type boxes.
  *
  * A query that NEVER HAD an Advanced Filter round is returned UNTOUCHED (identity), so a plain
  * Normal-Filter search is never forced through a strip that could disturb it.

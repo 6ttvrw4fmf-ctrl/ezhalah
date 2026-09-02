@@ -33,7 +33,7 @@ import { pathToFileURL } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { stripComments } from './lib/stripComments.ts';
-import { sanitizeForFilterRestore, AF_PREDICATE_FIELDS } from '../src/lib/searchDefaults.ts';
+import { sanitizeForFilterRestore, AF_PREDICATE_FIELDS, toggleGroup, setCategory } from '../src/lib/searchDefaults.ts';
 import { reconcileCommittedAf, certifiedFacets, stripCommittedAf, withoutFacet } from '../src/lib/afCarry.ts';
 import { COHORT_QUESTIONS, certifiedAmenityKeys, cohortAllows } from '../src/lib/afCohorts.ts';
 import { CLEAN_MACRO, groupsOf } from '../src/data/propertyTypes.ts';
@@ -251,18 +251,70 @@ assert(!!typeNoGroup.typeGroups?.length, 'and its group is BACKFILLED from the t
 // must never clear it, in either direction.
 const scopeCommitted = applyScopeAnswer(SCOPE_TYPE_ID, { ...SHOP, types: null, typeGroups: null }, ['Shop']);
 const scopeFacet = [{ id: SCOPE_TYPE_ID, keys: ['Shop'], labels: ['محل'] }];
-const scopeReentry = reconcileCommittedAf({ ...sanitizeForFilterRestore({ ...scopeCommitted, afFacets: scopeFacet }), location: 'جدة' }, ALL);
+const scopeStore = sanitizeForFilterRestore({ ...scopeCommitted, afFacets: scopeFacet });
+const scopeReentry = reconcileCommittedAf({ ...scopeStore, location: 'جدة' }, ALL);
 assert(same(scopeReentry.types, ['Shop']), 'an AF-committed property type survives the Filter re-entry as a hard predicate');
-assert(certifiedFacets({ ...SHOP, category: 'Residential', types: ['Apartment'], typeGroups: ['Apartments & Units'] }, scopeFacet).length === 1,
-  'a SCOPE facet is never dropped by cohort re-certification — dropping one would widen past anything the user asked for');
+
+// …AND THE USER'S OWN SCOPE EDIT MUST WIN. This is the direction no barrier moved: every fixture
+// above changes the cohort BEFORE reconciling, never while a scope facet rides. Both AF barriers
+// printed «all checks passed» on the head where this was broken AND on the head where it was fixed —
+// «a green barrier may be asserting the bug», so the mirror of the remove-the-last-chip case is
+// asserted here: EDIT the scope with a scope facet committed, and the edit must survive the reader.
+//
+// A facet is a RECEIPT — it licenses a predicate the Filter UI has no control for. applyScopeAnswer
+// writes only typeGroups/types/type, all Normal-tier fields the sanitizer already carries under the
+// group boxes and the type boxes, so a scope receipt licenses nothing and re-applying it overwrote
+// the user: the boxes render from the reconciled query while their onPress writes the RAW store, so
+// deselecting «محل» was a NO-OP, picking another type discarded the pick, and a group facet folded a
+// specific type back into its group — the widening this file exists to forbid, with the type row
+// dead in the user's hands. certifiedFacets drops scope facets for that reason; these execute it.
+assert(scopeReentry.afFacets?.length === 0,
+  'a SCOPE facet is not carried as a receipt at all — the type row IS its control, and a second writer over a live control is what made that control dead');
+assert(certifiedFacets({ ...SHOP, types: ['Shop'], typeGroups: groupsOf(['Shop']) }, scopeFacet).length === 0,
+  'certifiedFacets drops it even on the cohort that committed it (executed, not grepped)');
+// The three edits the Filter screen's own group/type boxes perform, each written onto the RAW store
+// exactly as index.tsx writes them, then read back through the reconciliation the screen renders.
+assert(reconcileCommittedAf({ ...scopeStore, types: null }, ALL).types === null,
+  'deselecting the committed type really deselects it (was: the facet put it straight back — the tap was a no-op)');
+assert(same(reconcileCommittedAf({ ...scopeStore, types: ['Office'] }, ALL).types, ['Office']),
+  'picking a DIFFERENT type keeps the user\'s pick (was: silently replaced by the committed one)');
+const groupDropped = reconcileCommittedAf(toggleGroup(scopeStore, groupsOf(['Shop'])[0]), ALL);
+assert(!groupDropped.typeGroups?.length && !groupDropped.types?.length,
+  'deselecting the GROUP takes its type with it, as it does with no facet riding');
+const catSwitched = reconcileCommittedAf(setCategory(scopeStore, 'Residential'), ALL);
+assert(!catSwitched.typeGroups?.length && !catSwitched.types?.length,
+  'switching فئة leaves no group or type behind — a Commercial type must never be searched under سكني (or the reverse)');
+// A GROUP facet must not fold a specific type back into its group — invariant (f), the exact
+// widening the owner measured (566 → 2,265).
+const groupFacetStore = sanitizeForFilterRestore({
+  ...SHOP, afFacets: [{ id: SCOPE_GROUP_ID, keys: groupsOf(['Shop']), labels: ['تجزئة'] }],
+});
+const pickedInside = reconcileCommittedAf({ ...groupFacetStore, types: ['Office'] }, ALL);
+assert(same(pickedInside.types, ['Office']),
+  'with a GROUP facet committed, a specific type picked afterwards is never folded back into the group');
+// …while the ADVANCED half of the same round is untouched by all of this: the carry still carries.
+const mixedRound = sanitizeForFilterRestore({
+  ...ageQ.apply(scopeCommitted, ['new']),
+  afFacets: [...scopeFacet, { id: 'property_age', keys: ['new'], labels: ['جديد'] }],
+});
+const mixedBack = reconcileCommittedAf({ ...mixedRound, location: 'جدة' }, ALL);
+assert(rpcAdvancedFilterParams(mixedBack).p_is_new_construction === true,
+  'a round that answered BOTH a scope question and an advanced one still carries the advanced predicate');
+assert(same(mixedBack.types, ['Shop']), '…and still keeps the specific type it committed');
+assert(mixedBack.afFacets?.length === 1 && mixedBack.afFacets[0].id === 'property_age',
+  '…with exactly one chip: the advanced answer. Chip index i is facet index i, so the «×» can hand i straight to withoutFacet()');
 
 console.log('\n── 7. ONE CONSTRUCTION SITE: counts and results cannot disagree ─────────────────');
 // The Trending counts, the district live counts and «بحث» must all be built from the SAME reconciled
 // object. This is the rule that makes «counts» and «eligible result set» one requirement instead of
 // two — index.tsx binds `query` to the reconciled value once and every consumer reads that name.
 const indexTsx = read('src/app/index.tsx');
-assert(/const query = useMemo\(\s*\(\) => reconcileCommittedAf\(storeQuery, AF_ALL_QUESTIONS\)/.test(indexTsx),
-  'index.tsx derives ONE reconciled `query` and binds it before any consumer');
+// The dependency array is part of the derivation, not decoration: narrowing it to `[storeQuery.afFacets]`
+// (a plausible "we only need to recompute when the facets change" performance edit) FREEZES `query`
+// at the first render, and every Normal-Filter control on this screen stops moving what is counted
+// and searched while still looking as though it moved. Asserted in the same expression as the call.
+assert(/const query = useMemo\(\s*\(\) => reconcileCommittedAf\(storeQuery, AF_ALL_QUESTIONS\),\s*\[storeQuery\],\s*\)/.test(indexTsx),
+  'index.tsx derives ONE reconciled `query` from the WHOLE store value and binds it before any consumer');
 assert(/const \{ query: storeQuery,/.test(indexTsx),
   'the raw store value is renamed, so a consumer cannot reach the un-reconciled query by accident');
 // …and renaming is only half of it. The raw name may appear exactly THREE times — the destructure
@@ -283,6 +335,13 @@ assert(/const districtNarrowingSig = JSON\.stringify\(\[query\./.test(indexTsx),
 assert(/districtNarrowingSig[\s\S]{0,900}\.\.\.AF_PREDICATE_FIELDS\.map\(\(f\) => query\[f\]\)/.test(indexTsx),
   'the district signature ITERATES AF_PREDICATE_FIELDS instead of re-typing the AF fields');
 assert(/const buildFilterBaseQuery[\s\S]{0,400}\.\.\.query,/.test(indexTsx), '«بحث» is built from the reconciled query');
+// THE CHIP ROW MAPS THE FACET LIST ITSELF, so the index it renders is the index withoutFacet() takes.
+// It used to map with a `null` hole for scope facets, and the obvious tidy-up — filter first, then
+// map — silently re-indexed: tapping the «×» on «جديد» deleted a DIFFERENT facet while the chip and
+// its predicate stayed. The hole is gone because scope facets are no longer carried at all (§6), so
+// there is nothing to skip; this pins that the row still renders the list one-to-one.
+assert(/query\.afFacets\.map\(\(f, i\) =>/.test(indexTsx),
+  'the chip row maps query.afFacets one-to-one, so chip index i IS facet index i');
 // rpcAllNarrowingParams is what turns that object into the Trending request; it must keep spreading
 // the AF half, or the reconciliation above would be feeding a builder that throws the answers away.
 assert(/rpcAllNarrowingParams[\s\S]{0,1400}rpcAdvancedFilterParams\(q\)/.test(read('src/data/remote.ts')),
@@ -302,6 +361,52 @@ assert(/afCarryRef\.current = null;/.test(agentTsx),
   'a new search clears the interview carry — a stale one would outrank the receipt describing THIS search');
 assert(/if \(!afCarryRef\.current\?\.facets\.length && inboundAf\.length\)/.test(agentTsx),
   'a Filter search arriving WITH committed answers seeds the round from them (so they are not re-asked, lost from the pills, or unremovable)');
+
+// …AND NEITHER OF THOSE TWO STATEMENTS MAY BE GUARDED. Both regexes above match on PRESENCE, and a
+// guard in front of a present statement is the most plausible edit there is — «don't write an empty
+// round», «only clear the carry when we're not arriving from the Filter». Each was built and each
+// passed the whole 286-check suite:
+//   `if (opts.guided.facets.length) writeFilterStore(…)` — removing the LAST pill in the chat IS the
+//   zero-facet round, so the store keeps the previous round's facets: «تصفية» then shows a chip for
+//   an answer the user just deleted and «بحث» re-applies its predicate. That is the same transition
+//   to zero the last-chip fix closed inside reconcileCommittedAf, re-opened one call site upstream.
+//   `if (!filter) afCarryRef.current = null;` — a Filter search always HAS `filter`, so the carry is
+//   never cleared and a NEW conversation inherits the previous chat's facets, asked-set and pill
+//   origin; because the seeding below only fills an EMPTY carry, the stale carry then BEATS the
+//   receipt that describes this search. Verbatim what the comment above that line says it prevents.
+// A statement is unguarded when nothing but whitespace separates it from the end of the previous
+// statement (`;`) or the end of the previous block (`}`) — an `if (…)` or an `if (…) {` in between
+// is exactly what this refuses. Comments are already stripped by read(), so a decoy cannot pad it.
+const unguarded = (src: string, stmt: string) => {
+  const at = src.indexOf(stmt);
+  if (at < 0) return false;
+  const before = src.slice(0, at);
+  const prev = Math.max(before.lastIndexOf(';'), before.lastIndexOf('}'));
+  return /^\s*$/.test(before.slice(prev + 1));
+};
+assert(unguarded(agentTsx, 'writeFilterStore({ ...refined, afFacets: opts.guided.facets })'),
+  'the store write is UNCONDITIONAL inside the guided branch — a round that ends with zero facets must clear the store, not leave the previous round in it');
+assert(unguarded(agentTsx, 'afCarryRef.current = null;'),
+  'the carry clear is UNCONDITIONAL in startFresh — a guard would let a new conversation inherit the previous chat\'s answers');
+
+// THE SEEDING BODY, not just its condition. The `if` above was the only thing asserted, so both
+// mutations inside it survived the full suite:
+//   `originQ: q` instead of `originQ: stripCommittedAf(q)` — stripCommittedAf has exactly one call
+//   site, so a lint-driven "unused after refactor" cleanup produces it. guided.baseQ becomes a query
+//   that ALREADY contains the carried predicates, and removeGuidedFacet rebuilds from that base, so
+//   removing a carried pill re-runs a search still filtering on it with no pill left to say so —
+//   verbatim the failure the comment above that line describes.
+//   `asked: [...carry.asked]` dropping the inbound ids — rankQuestions filters on !askedIds.has(id)
+//   and AGE_QUESTION has no already-answered guard of its own, so a Filter search arriving with
+//   «جديد» committed re-asks «كم عمر العقار؟» with its options counted INSIDE the narrowed set: the
+//   advertised-0-that-widens inversion the sibling barrier pins for `direction`.
+// COUNTED as well as shaped: a count cannot be satisfied by the correct line surviving alongside a
+// bad one, which is how a trailing-decoy mutant evaded every barrier in this repo on 2026-09-01.
+assert(/originQ: stripCommittedAf\(q\)/.test(agentTsx) && (agentTsx.match(/\bstripCommittedAf\b/g) ?? []).length === 2,
+  'the seeded pill ORIGIN is stripCommittedAf(q) — the true pre-AF query, so removing a carried pill actually removes its predicate');
+assert(/asked: \[\.\.\.new Set\(\[\.\.\.\(afCarryRef\.current\?\.asked \?\? \[\]\), \.\.\.inboundAf\.map\(\(f\) => f\.id\)\]\)\]/.test(agentTsx)
+  && (agentTsx.match(/\binboundAf\b/g) ?? []).length === 4,
+  'the seeded ASKED set unions the inbound facet ids, so an already-committed question is not re-asked against its own narrowed set');
 
 console.log('\n── 9. REMOVING A CHIP REALLY REMOVES ITS PREDICATE — the LAST one included ──────');
 // withoutFacet() is the entire legal basis for the carry: the reason a carried predicate is allowed
