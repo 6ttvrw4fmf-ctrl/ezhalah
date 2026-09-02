@@ -129,3 +129,32 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-stale-predicate-live.ts
+
+      # THE ONE AF CONTROL THAT RUNS BACKWARDS (added 2026-09-02). Every other control narrows;
+      # removing a pill widens. Until now the whole of contract §9.2 rested on
+      # verify-af-cross-round-carry.ts, which reasons over removeGuidedFacet offline and cannot see
+      # the deployed bundle — R9.2.2's own half ("the count may WIDEN, a new turn lands below,
+      # nothing above is rewritten") was graded P, "not directly asserted". This walks a real round,
+      # removes one pill, and asserts on the request body the browser actually sends: exactly one
+      # predicate gone, every survivor byte-identical, the normal-filter scope untouched, the new
+      # count re-derivable from the anon REST path, and every earlier headline still on screen.
+      # Runs twice — the desktop Riyadh/Apartment cohort and a MOBILE non-Riyadh Villa one — because
+      # PART 8 of the routine spec owes a mobile and a non-Riyadh journey every run, and one
+      # parameterised file is how they stay identical instead of drifting into three.
+      - name: Removing an AF pill drops exactly that predicate and rewrites nothing above it
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-pill-removal-live.ts
+
+      - name: …and the same, on a mobile viewport in a non-Riyadh city
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          AF_PILL_CITY: جدة
+          AF_PILL_GROUP: الفلل والبيوت
+          AF_PILL_TYPE: فيلا
+          AF_PILL_MOBILE: '1'
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-pill-removal-live.ts
