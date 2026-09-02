@@ -114,9 +114,16 @@ export default function Home() {
   // فئة, drop the group, pick a different نوع, switch شراء/إيجار or شهري/سنوي. reconcileCommittedAf
   // re-checks every carried facet against the CURRENT cohort with cohortAllows() (the same gate that
   // decided the question could be asked) and re-applies only the survivors through each question's
-  // OWN apply(), spanning BOTH pools so a scope facet is never silently dropped. Applying an
-  // uncertified answer would not narrow honestly — the AF's SQL predicates are strict-NULL-excluding,
-  // so it would delete every row that never stated the attribute, turning UNKNOWN into No.
+  // OWN apply(). Applying an uncertified answer would not narrow honestly — the AF's SQL predicates
+  // are strict-NULL-excluding, so it would delete every row that never stated the attribute, turning
+  // UNKNOWN into No.
+  //
+  // SCOPE facets (group/type) are dropped outright — see certifiedFacets in src/lib/afCarry.ts. They
+  // license nothing (applyScopeAnswer writes only typeGroups/types/type, all Normal-tier fields the
+  // sanitizer already carries and the group/type boxes already control), and re-applying one made
+  // those boxes DEAD: the rows write the RAW store while rendering from this reconciled query, so
+  // every scope tap was overwritten on the next render. The interview's scope answer still rides —
+  // as the types/typeGroups it wrote.
   //
   // Derived ONCE, here, and read by the Trending city params, the district live counts, the AF chips
   // and buildFilterBaseQuery alike — so what is counted, what is shown and what is searched cannot

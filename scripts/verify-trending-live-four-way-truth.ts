@@ -390,7 +390,7 @@ async function runAfReentryJourney(j: {
     .filter(([k]) => /^p_(amenities|bath_min|furnished|street_width_min|directions|rating_min|reviews_min|unit_subtypes|age_min|age_max|is_new_construction)$/.test(k)));
 
   try {
-    await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await gotoLive(page, `${BASE}/`, { timeout: 60000 });
     await page.waitForTimeout(5000);
     for (const d of deal) await tap(d);
     await tap(category);
