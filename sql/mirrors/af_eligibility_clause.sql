@@ -1,11 +1,11 @@
--- MIRROR of the production object AS IT WILL BE once migration 20260902120100 is applied. NOT a migration — see the full-body-replace rule.
+-- MIRROR of the production object AS IT WILL BE once migration 20260902220100 is applied. NOT a migration — see the full-body-replace rule.
 -- Refreshed 2026-09-02 (AF matrix certification, BUG-1 fix): the p_has_license arm is now
 --   `(p_has_license is null or (p_has_license and s.license_number is not null))` — false admits only an
 --   explicit unlicensed fact, and canonical data carries none, so it admits nothing (silent → NULL, never
 --   unknown → NO). Text + md5 captured from a rolled-back dry run of that migration against production
 --   (a fresh Supabase branch could not be used: branch migrations fail at 20260621194329, pre-existing
 --   drift). md5(pg_get_functiondef) of the would-be object = 178deacbfa50de38e6b5a18e09bc737b.
---   SHIP MUST RE-VERIFY this md5 against the live object after applying 20260902120100 under the deploy
+--   SHIP MUST RE-VERIFY this md5 against the live object after applying 20260902220100 under the deploy
 --   lock; until then the live object still reads 681da577d8e10df55e30c345d284e139 (pre-fix).
 --
 -- Refreshed 2026-08-28 (first capture) by the AF + Trending Data Integrity routine (docs/ops/AF_TRENDING_DATA_INTEGRITY_ENGINEER.md).
@@ -37,7 +37,7 @@
 --   the E'' source literal was reconstructed by doubling every backslash and single quote, and the
 --   result verified to match production's md5(pg_get_functiondef) exactly before being written here.
 -- Verified byte-exact against the 2026-09-02 rolled-back dry run; md5 of everything below this header block: 178deacbfa50de38e6b5a18e09bc737b
---   (previous live value 681da577d8e10df55e30c345d284e139 through 2026-08-31; changes ONLY when 20260902120100 is applied).
+--   (previous live value 681da577d8e10df55e30c345d284e139 through 2026-08-31; changes ONLY when 20260902220100 is applied).
 CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
  LANGUAGE sql

@@ -272,7 +272,7 @@ const files: string[] = [];
   walk(join(ROOT, 'src')); walk(join(ROOT, 'supabase', 'functions'));
 }
 {
-  // af_eligibility_clause() (fixed 2026-09-02, migration 20260902120100; the OLD arm was
+  // af_eligibility_clause() (fixed 2026-09-02, migration 20260902220100; the OLD arm was
   // `(s.license_number is not null) = p_has_license`) — with false, every
   // row whose source simply never published a number is served as "no licence" (100% of the "no"
   // answer on شقة/إيجار/سنوي is NULL — measured 2026-09-02). That is UNKNOWN → No in the predicate
@@ -281,7 +281,7 @@ const files: string[] = [];
   const senders = files.filter((p) => /\bp_has_license\b/.test(stripComments(readFileSync(p, 'utf8'))));
   assert(senders.length === 0, `no client/edge source sends p_has_license (found in: ${senders.map((p) => p.slice(ROOT.length + 1)).join(', ')})`);
 
-  // THE ARM ITSELF, EXECUTED (owner ruling 2026-09-02, migration 20260902120100): lift the licence
+  // THE ARM ITSELF, EXECUTED (owner ruling 2026-09-02, migration 20260902220100): lift the licence
   // arm out of the clause mirror and RUN it — never grep for the fixed spelling, a comment could
   // satisfy that. The SQL boolean arm is a pure expression over one row and one parameter, so a
   // mechanical token map (is null / is not null / and / or / s.col) turns it into JS verbatim; the

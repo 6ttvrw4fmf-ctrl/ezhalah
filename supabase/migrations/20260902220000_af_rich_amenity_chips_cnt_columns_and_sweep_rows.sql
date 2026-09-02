@@ -22,8 +22,10 @@
 --
 -- The runtime sweep (ops_af_option_truth_sweep) gets the 8 rows through a needle-edit on its live
 -- body, after the water_supply row; the detector's day-slice then covers them like any option.
--- NOTE: af_option_truth_table() (PR #1513's in-DB roster, the complementary SQL leg) carries the
--- same option list and needs the same 8 rows — cited, not duplicated here; #1513 owns that function.
+-- af_option_truth_table() (20260902163957, the complementary in-DB fourth leg, LIVE since 2026-09-02)
+-- carries the same vocabulary, and af_option_vocab_drift() regex-diffs it against the sweep body on
+-- EVERY sweep — a P1 the moment they differ ("add the missing row to BOTH in one migration"). So the
+-- table gets the same 8 rows here, in the same needle-edit style, and the drift is asserted empty.
 --
 -- SELF-CHECK at apply time, per this repo's convention: parity 0 after rebuild; the certified
 -- cohort's base count unchanged; for EVERY one of the 8 tokens chip == referee == direct count on
@@ -61,6 +63,17 @@ declare
         ('amenity:optical_fibers','cnt_optical_fibers','p_amenities:=array[''optical_fibers'']','s.optical_fibers is true'),
         ('amenity:separate_electricity_meter','cnt_separate_electricity_meter','p_amenities:=array[''separate_electricity_meter'']','s.separate_electricity_meter is true'),
         ('amenity:separate_water_meter','cnt_separate_water_meter','p_amenities:=array[''separate_water_meter'']','s.separate_water_meter is true'),$x$;
+  tt_def text; tt_new text; v_drift int;
+  tt_old text := $x$    ('amenity:water_supply','cnt_water_supply','p_amenities:=array[''water_supply'']','s.water_supply is true','guided'),$x$;
+  tt_add text := $x$    ('amenity:water_supply','cnt_water_supply','p_amenities:=array[''water_supply'']','s.water_supply is true','guided'),
+    ('amenity:gym','cnt_gym','p_amenities:=array[''gym'']','s.gym is true','guided'),
+    ('amenity:pool','cnt_pool','p_amenities:=array[''pool'']','s.pool is true','guided'),
+    ('amenity:garden','cnt_garden','p_amenities:=array[''garden'']','s.garden is true','guided'),
+    ('amenity:balcony','cnt_balcony','p_amenities:=array[''balcony'']','s.balcony is true','guided'),
+    ('amenity:laundry_room','cnt_laundry_room','p_amenities:=array[''laundry_room'']','s.laundry_room is true','guided'),
+    ('amenity:optical_fibers','cnt_optical_fibers','p_amenities:=array[''optical_fibers'']','s.optical_fibers is true','guided'),
+    ('amenity:separate_electricity_meter','cnt_separate_electricity_meter','p_amenities:=array[''separate_electricity_meter'']','s.separate_electricity_meter is true','guided'),
+    ('amenity:separate_water_meter','cnt_separate_water_meter','p_amenities:=array[''separate_water_meter'']','s.separate_water_meter is true','guided'),$x$;
   toks text[] := array['gym','pool','garden','balcony','laundry_room','optical_fibers','separate_electricity_meter','separate_water_meter'];
   tok text; before_n bigint; after_n bigint; parity int; v_counts jsonb; v_chip bigint; v_ref bigint; v_direct bigint; v_garbage bigint;
 begin
@@ -131,7 +144,31 @@ begin
     execute sweep_new;
   end if;
 
-  raise notice 'SUCCESS: cnt_gym…cnt_separate_water_meter live inside the scoped CTE of apartment_guided_counts_ar (templated, rebuilt, parity 0, certified cohort % unchanged); chip==referee==direct for all 8; sweep carries the 8 rows', after_n;
+  -- ── 3b. af_option_truth_table() (the in-DB fourth leg, 20260902163957) learns the SAME 8 rows ──
+  -- Leaving it behind would make af_option_vocab_drift() raise a P1 on the next sweep for exactly
+  -- the 8 labels added above (sweep_only). Needle-edited on its live body; drift asserted empty.
+  select pg_get_functiondef(p.oid) into tt_def from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'public' and p.proname = 'af_option_truth_table';
+  if tt_def is null then raise exception 'ABORT: af_option_truth_table not found — 20260902163957 must be applied first'; end if;
+  if position('amenity:gym' in tt_def) > 0 then
+    raise notice 'af_option_truth_table already carries amenity:gym — step skipped';
+  else
+    occ := (length(tt_def) - length(replace(tt_def, tt_old, ''))) / length(tt_old);
+    if occ <> 1 then raise exception 'ABORT: af_option_truth_table water_supply anchor occurs % — refusing to guess', occ; end if;
+    tt_new := replace(tt_def, tt_old, tt_add);
+    if length(tt_new) <= length(tt_def) then raise exception 'ABORT: truth-table edit did not grow the body'; end if;
+    execute tt_new;
+  end if;
+  select count(*) into v_drift from af_option_vocab_drift();
+  if v_drift <> 0 then
+    raise exception 'ABORT: af_option_vocab_drift reports % row(s) after the edit: %', v_drift,
+      (select string_agg(d.side || ':' || d.label, ', ') from af_option_vocab_drift() d);
+  end if;
+  if (select count(*) from af_option_truth_table() where label like 'amenity:%') <> 19 then
+    raise exception 'ABORT: expected 19 amenity rows in af_option_truth_table, got %', (select count(*) from af_option_truth_table() where label like 'amenity:%');
+  end if;
+
+  raise notice 'SUCCESS: cnt_gym…cnt_separate_water_meter live inside the scoped CTE of apartment_guided_counts_ar (templated, rebuilt, parity 0, certified cohort % unchanged); chip==referee==direct for all 8; sweep AND af_option_truth_table carry the 8 rows (vocab drift 0)', after_n;
 end $do$;
 
 -- ── 4. af_field_registry: the 7 registered tokens become ui_exposed (optical_fibers has no row) ──

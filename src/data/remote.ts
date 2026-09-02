@@ -798,7 +798,7 @@ export type GuidedCounts = {
   // Commercial expansion 2026-08-16: the utility chips the commercial market actually splits on.
   cnt_electricity: number; cnt_water_supply: number;
   // Residential rich set (owner 2026-09-02): the 8 tokens certified for chat on 2026-08-31 now have
-  // chips, so they need counts. Same template row, same committed scope (migration 20260902120000).
+  // chips, so they need counts. Same template row, same committed scope (migration 20260902220000).
   cnt_gym: number; cnt_pool: number; cnt_garden: number; cnt_balcony: number; cnt_laundry_room: number;
   cnt_optical_fibers: number; cnt_separate_electricity_meter: number; cnt_separate_water_meter: number;
   cnt_selected: number;

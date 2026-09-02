@@ -411,17 +411,17 @@ rests on (executed sanitizer; the Filter home never reads bothDeals). If either 
 Owner rulings the same day, all shipped in this change (SQL drafted + branch-verified, applied by Ship):
 - **GAP 1 — the 8 rich amenities are exposed on the card** (gym, pool, garden, balcony, laundry_room,
   optical_fibers, separate_electricity_meter, separate_water_meter): `cnt_*` columns inside the same
-  `scoped` CTE through the templated path (migration `20260902120000`), chip defs + labels, sweep rows,
+  `scoped` CTE through the templated path (migration `20260902220000`), chip defs + labels, sweep rows,
   and `verify-af-matrix-truth.ts §3` now asserts offered == certified token-for-token on every
   residential amenities cell (matrix floor 742 → 886 options). Certification unchanged: residential
   cells only; villa-only tokens and Chalet/Camp untouched.
 - **BUG-1 — `p_has_license = false` admits nothing** (silent → NULL, never unknown → NO): canonical
   data has no explicit negative (fleet-wide `rega_license_status` is only ever نشط/فعال, both with a
   number), so the honest false arm is `(p_has_license is null or (p_has_license and s.license_number
-  is not null))` — migration `20260902120100` needle-edits the clause AND `top_cities_by_deal_ar`,
+  is not null))` — migration `20260902220100` needle-edits the clause AND `top_cities_by_deal_ar`,
   rebuilds, and raises if a non-active status ever appears. `§7` executes the arm from the mirror.
 - **H9 — the runtime detector reads rows**: `mon_detect_af_option_count_truth` called the sweep with
-  `p_check_rows := false`; migration `20260902120200` turns it on (p_row_limit 200) and widens to 40
+  `p_check_rows := false`; migration `20260902220200` turns it on (p_row_limit 200) and widens to 40
   slices (measured 1.65 s per row check on the heaviest cohort).
 - **Amenities AND / direction OR** stays as built and measured (contract R7.2.2).
 

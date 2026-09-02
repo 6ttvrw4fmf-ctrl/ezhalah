@@ -242,7 +242,7 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
       // certified for the chat path since 2026-08-31 (RESIDENTIAL_AMENITY_BASE) but never offered
       // here, so a token the user could commit by sentence had no chip, no count and no sweep row.
       // Each cnt_* below is computed inside the committed scope by apartment_guided_counts_ar
-      // (template row, migration 20260902120000) exactly like the chips above — a chip may only
+      // (template row, migration 20260902220000) exactly like the chips above — a chip may only
       // exist when its COUNT path exists. Order mirrors RESIDENTIAL_AMENITY_BASE.
       { key: 'gym',                        labelKey: 'Gym',                        count: (c) => c.cnt_gym },
       { key: 'pool',                       labelKey: 'Pool',                       count: (c) => c.cnt_pool },
