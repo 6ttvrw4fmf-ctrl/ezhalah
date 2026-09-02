@@ -838,6 +838,8 @@ migration-drift-guard rule in `AGENTS.md`).
 
 ## 20. Permanent rules (the non-negotiables)
 
+- **Sign-in is Google and Apple only — no phone number, no OTP (owner, 2026-09-01).** The WhatsApp-OTP path was removed at every layer (AuthModal step, account-menu change-phone flow, auth.ts helpers, country table, i18n) with zero stranded users (auth.identities that day: google 5, email 2, phone 0). `scripts/verify-no-phone-auth.ts` fails the build if any layer returns. Disabling the Phone provider in the Supabase Auth dashboard is the owner's one remaining click; the client has no path to it regardless.
+
 1. **Frontend = source of truth; backend supports it; never change UX without explicit owner approval.**
    Compare every change against this doc; if it conflicts, STOP and tell the owner. Ask if <100% certain.
 2. **Search engine, not a marketplace.** Neutral, no transactions/inventory/commission/advice; never

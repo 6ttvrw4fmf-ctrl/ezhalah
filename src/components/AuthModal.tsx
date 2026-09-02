@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { Easing, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, cardShadow } from '@/theme/tokens';
@@ -13,22 +13,12 @@ import { canDragAuthPopup, clampAuthPopupOffset, AUTH_POPUP_POS_KEY } from '@/li
 import { attachCardDrag } from '@/lib/cardDrag';
 import {
   isBackendLive,
-  sendPhoneOtp,
-  verifyPhoneOtp,
   signInWithProvider,
   authenticateWithFaceId,
 } from '@/lib/auth';
-import { COUNTRIES, type Country } from '@/data/countries';
-
-// react-native-web does NOT support the `direction` style property (it logs "Invalid style property
-// of 'direction'"). To keep the +966 phone row physically LTR even under Arabic/RTL, set the DOM
-// `dir` attribute directly via a callback ref instead of a style. (Mirrors the helper in index.tsx.)
-const setLtr = (node: any) => {
-  if (Platform.OS === 'web' && node?.setAttribute) node.setAttribute('dir', 'ltr');
-};
 
 const LOGO = require('../../assets/images/ezhalah-logo.png');
-type Step = 'main' | 'google' | 'apple' | 'appleface' | 'otp';
+type Step = 'main' | 'google' | 'apple' | 'appleface';
 
 // Open/close animation (owner spec, 2026-08-15): overlay fade ~200-250ms, popup fades in while
 // scaling ~0.96→1 with a small ~8-12px rise, smooth ease-out, no bounce/spring/spin. Close reverses
@@ -191,8 +181,9 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
-// THE ONE AUTH UI (owner 2026-08-29): every step of sign-in — Google, Apple, phone+WhatsApp OTP,
-// and the preview-only fallbacks — in a single component with two presentations. The centered
+// THE ONE AUTH UI (owner 2026-08-29): every step of sign-in — Google, Apple, and the preview-only
+// fallbacks. Phone/WhatsApp OTP was REMOVED on owner ruling 2026-09-01 ("Google and Apple, that's it");
+// scripts/verify-no-phone-auth.ts keeps it out — in a single component with two presentations. The centered
 // modal (Sheet above) renders it full-size; the small draggable SignInCard renders it `compact`.
 // Only STYLES differ between the two; state, handlers, providers and copy are this one code path,
 // so there is never a second auth system to drift.
@@ -204,30 +195,11 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
 }) {
   const { isRTL } = useI18n();
   const cp = !!compact;
-  const [cc, setCc] = useState<Country>(COUNTRIES[0]);
-  const [ccOpen, setCcOpen] = useState(false);
-  const [phone, setPhone] = useState('');
   const [step, setStep] = useState<Step>('main');
-  const [otp, setOtp] = useState('');
   const [faceDone, setFaceDone] = useState(false);
   const [hideEmail, setHideEmail] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [otpError, setOtpError] = useState('');
   const [oauthErr, setOauthErr] = useState('');
-  const otpRef = useRef<TextInput>(null);
-
-  const e164 = cc.code + phone;
-  const prefixPartial = cc.prefixes.some((p) => phone.startsWith(p) || p.startsWith(phone));
-  const prefixOk = cc.prefixes.some((p) => phone.startsWith(p));
-  const valid = prefixOk && phone.length === cc.len;
-  const phoneError =
-    phone.length === 0
-      ? ''
-      : !prefixPartial || (phone.length === cc.len && !prefixOk)
-        ? t('{country} numbers must start with {hint}', { country: t(cc.name), hint: t(cc.hint) })
-        : phone.length < cc.len
-          ? t('Enter {n} digits', { n: cc.len })
-          : '';
 
   const done = (u: AuthUser) => {
     onSignedIn(u);
@@ -266,44 +238,6 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
-  // Phone OTP: once 6 digits are entered, verify against the backend (or accept in preview).
-  // Unchanged from the old route.
-  useEffect(() => {
-    if (step !== 'otp' || otp.length !== 6) return;
-    let alive = true;
-    setBusy(true);
-    setOtpError('');
-    const timer = setTimeout(async () => {
-      const { user, error } = await verifyPhoneOtp(e164, otp);
-      if (!alive) return;
-      setBusy(false);
-      if (user) done(user);
-      else {
-        setOtp('');
-        setOtpError(t(error ?? 'The code you entered is incorrect.'));
-      }
-    }, 750);
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, otp]);
-
-  const onContinuePhone = async () => {
-    if (!valid || busy) return;
-    setBusy(true);
-    const res = await sendPhoneOtp(e164);
-    setBusy(false);
-    if (res.ok) {
-      setOtp('');
-      setOtpError('');
-      setStep('otp');
-    } else {
-      setOtpError(t(res.error ?? 'Something went wrong. Please try again.'));
-    }
-  };
-
   // Google: real OAuth when a backend is configured; the rendered chooser is the preview-only design
   // fallback (Google's own sheet takes over in production). Unchanged from the old route.
   const onGoogle = async (fallback: AuthUser) => {
@@ -332,11 +266,9 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
   };
 
   const back = () => {
-    if (ccOpen) return setCcOpen(false);
     if (step === 'main') return onRequestClose();
     if (step === 'appleface') return setStep('apple');
     setStep('main');
-    setOtp('');
   };
   // Hand the live back() to the host so its ground-press steps back exactly like the in-card
   // control. Assigned every render — cheap, and always current.
@@ -356,7 +288,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
                 dataSet={{ testid: 'auth-popup-close' }}
               >
                 <Ionicons
-                  name={step === 'main' && !ccOpen ? 'close' : isRTL ? 'chevron-forward' : 'chevron-back'}
+                  name={step === 'main' ? 'close' : isRTL ? 'chevron-forward' : 'chevron-back'}
                   size={20}
                   color={colors.ink}
                 />
@@ -390,61 +322,6 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
                     <Text style={[s.oauthText, cp && c.oauthText]}>{t('Continue with Apple')}</Text>
                   </Pressable>
                   {!!oauthErr && <Text style={s.oauthErr}>{oauthErr}</Text>}
-
-                  <View style={[s.orRow, cp && c.orRow]}>
-                    <View style={s.orLine} />
-                    <Text style={s.orText}>{t('or')}</Text>
-                    <View style={s.orLine} />
-                  </View>
-
-                  <View ref={setLtr} style={s.phoneRow}>
-                    <View style={[s.cc, cp && c.cc]}>
-                      <Text style={s.ccFlag}>{cc.flag}</Text>
-                      <Text style={s.ccText}>{cc.code}</Text>
-                    </View>
-                    <TextInput
-                      style={[s.phoneInput, cp && c.phoneInput]}
-                      placeholder={t('Phone number')}
-                      placeholderTextColor={colors.muted}
-                      textAlign="left"
-                      keyboardType="number-pad"
-                      value={phone}
-                      maxLength={cc.len}
-                      onChangeText={(v) => setPhone((v.match(/\d/g) ?? []).join('').slice(0, cc.len))}
-                    />
-                  </View>
-
-                  {ccOpen && (
-                    <>
-                      <Pressable style={s.scrim} onPress={() => setCcOpen(false)} />
-                      <View style={s.ccList}>
-                        {COUNTRIES.map((c) => {
-                          const sel = c.code === cc.code;
-                          return (
-                            <Pressable
-                              key={c.code}
-                              style={[s.ccItem, sel && s.ccItemSel]}
-                              onPress={() => {
-                                setCc(c);
-                                setCcOpen(false);
-                                setPhone('');
-                              }}
-                            >
-                              <Text style={s.ccFlag}>{c.flag}</Text>
-                              <Text style={[s.ccItemName, sel && { color: colors.dark, fontWeight: '600' }]}>{t(c.name)}</Text>
-                              <Text style={[s.ccItemCode, sel && { color: colors.primary }]}>{c.code}</Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    </>
-                  )}
-
-                  {!!(phoneError || otpError) && <Text style={s.err}>{phoneError || otpError}</Text>}
-
-                  <Pressable style={[s.continue, cp && c.continueBtn, (!valid || busy) && s.continueOff]} disabled={!valid || busy} onPress={onContinuePhone}>
-                    {busy ? <Spinner tint="#fff" /> : <Text style={[s.continueText, cp && c.continueText]}>{t('Continue')}</Text>}
-                  </Pressable>
                 </>
               )}
 
@@ -535,46 +412,6 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
               )}
 
               {/* ── WhatsApp OTP ───────────────────────────────────────── */}
-              {step === 'otp' && (
-                <View style={s.otpWrap}>
-                  <View style={[s.waBadge, cp && c.waBadge]}>
-                    <Ionicons name="logo-whatsapp" size={30} color="#fff" />
-                  </View>
-                  <Text style={[s.otpTitle, cp && c.otpTitle]}>{t('Enter the code')}</Text>
-                  <Text style={[s.otpSub, cp && c.otpSub]}>
-                    {t('We sent a 6-digit code on WhatsApp to')}{'\n'}
-                    <Text style={{ fontWeight: '700', color: colors.ink }}>{cc.code} {phone}</Text>
-                  </Text>
-
-                  <Pressable style={[s.otpBoxes, cp && c.otpBoxes]} onPress={() => otpRef.current?.focus()}>
-                    {Array.from({ length: 6 }).map((_, i) => (
-                      <View key={i} style={[s.otpBox, cp && c.otpBox, otp.length === i && s.otpBoxActive]}>
-                        <Text style={[s.otpDigit, cp && c.otpDigit]}>{otp[i] ?? ''}</Text>
-                      </View>
-                    ))}
-                    <TextInput
-                      ref={otpRef}
-                      style={s.otpHidden}
-                      keyboardType="number-pad"
-                      autoFocus
-                      value={otp}
-                      onChangeText={(v) => setOtp((v.match(/\d/g) ?? []).join('').slice(0, 6))}
-                    />
-                  </Pressable>
-
-                  {!!otpError && <Text style={[s.err, { textAlign: 'center' }]}>{otpError}</Text>}
-                  {busy && (
-                    <View style={s.verify}>
-                      <Spinner />
-                      <Text style={s.verifyText}>{t('Verifying…')}</Text>
-                    </View>
-                  )}
-                  <Pressable style={s.resend} hitSlop={8} onPress={() => sendPhoneOtp(e164)}>
-                    <Ionicons name="logo-whatsapp" size={15} color={colors.whatsApp} />
-                    <Text style={s.resendText}>{t('Resend code on WhatsApp')}</Text>
-                  </Pressable>
-                </View>
-              )}
     </>
   );
 }
@@ -591,19 +428,6 @@ const c = StyleSheet.create({
   agree: { fontSize: 10.5, lineHeight: 15, marginBottom: 12, paddingHorizontal: 0 },
   oauth: { height: 40, borderRadius: 11, marginTop: 8, gap: 7 },
   oauthText: { fontSize: 12.5 },
-  orRow: { marginVertical: 7 },
-  cc: { height: 44, paddingHorizontal: 9, borderRadius: 11, gap: 4 },
-  // fontSize restated (same web-16 rule as the base style) so the iOS-zoom barrier's parser sees
-  // it on every referenced style of this input — the compact card never shrinks it below 16.
-  phoneInput: { height: 44, paddingHorizontal: 10, borderRadius: 11, fontSize: Platform.OS === 'web' ? 16 : 15 },
-  continueBtn: { height: 44, borderRadius: 11, marginTop: 8 },
-  continueText: { fontSize: 13.5 },
-  otpBoxes: { gap: 4, marginTop: 14 },
-  otpBox: { width: 26, height: 40, borderRadius: 8 },
-  otpDigit: { fontSize: 16 },
-  otpTitle: { fontSize: 16, marginTop: 12 },
-  otpSub: { fontSize: 11.5, lineHeight: 17, marginTop: 6 },
-  waBadge: { width: 42, height: 42, borderRadius: 12 },
 });
 
 const s = StyleSheet.create({
@@ -666,33 +490,15 @@ const s = StyleSheet.create({
   oauthText: { fontSize: 15, fontWeight: '600', color: colors.ink },
   oauthErr: { fontSize: 12, color: colors.danger, textAlign: 'center', marginTop: 6 },
 
-  orRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 10 },
-  orLine: { flex: 1, height: 1, backgroundColor: colors.line },
-  orText: { fontSize: 12, color: colors.muted },
 
-  phoneRow: { flexDirection: 'row', gap: 8 },
-  cc: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 52, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine, backgroundColor: colors.surface },
-  ccFlag: { fontSize: 18 },
-  ccText: { fontSize: 14.5, fontWeight: '600', color: colors.ink },
   // fontSize >= 16 on web: under 16px mobile Safari zooms on focus and never zooms back (barrier:
   // scripts/verify-input-font-no-ios-zoom.ts). Height is fixed at 52 so the box does not reflow.
   // minWidth: 0 travels WITH the 16px bump: WebKit gives an <input> `min-width: auto` (its
   // intrinsic min-content width), so a larger font in a flex row overflows the row instead of
   // shrinking — measured 7.8px past the sheet before this was added. Same pairing as index.tsx's
   // sizeInput/rangeInput, which already carry the note.
-  phoneInput: { flex: 1, minWidth: 0, height: 52, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine, fontSize: Platform.OS === 'web' ? 16 : 15, color: colors.ink, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
 
-  scrim: { position: 'absolute', top: -1000, left: -1000, right: -1000, bottom: -1000 },
-  ccList: { marginTop: 6, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: 13, padding: 6, ...cardShadow },
-  ccItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 9 },
-  ccItemSel: { backgroundColor: colors.tint },
-  ccItemName: { flex: 1, fontSize: 13.5, color: colors.ink },
-  ccItemCode: { fontSize: 13.5, color: colors.muted, fontWeight: '600' },
 
-  err: { fontSize: 11.5, color: colors.danger, fontWeight: '500', marginTop: 8, marginHorizontal: 2, lineHeight: 16 },
-  continue: { backgroundColor: colors.dark, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
-  continueOff: { opacity: 0.45 },
-  continueText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
 
   // Google
   gauth: { marginTop: 20 },
@@ -741,19 +547,6 @@ const s = StyleSheet.create({
   faceS: { fontSize: 13.5, color: colors.muted },
 
   // OTP
-  otpWrap: { alignItems: 'center', marginTop: 24 },
-  waBadge: { width: 56, height: 56, borderRadius: 16, backgroundColor: colors.whatsApp, alignItems: 'center', justifyContent: 'center' },
-  otpTitle: { fontSize: 20, fontWeight: '700', color: colors.ink, marginTop: 16 },
-  otpSub: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8, lineHeight: 20 },
-  otpBoxes: { flexDirection: 'row', gap: 9, marginTop: 24 },
-  otpBox: { width: 44, height: 54, borderRadius: 12, borderWidth: 1.5, borderColor: colors.fieldLine, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
-  otpBoxActive: { borderColor: colors.primary },
-  otpDigit: { fontSize: 22, fontWeight: '700', color: colors.ink },
   // Invisible, but iOS still zooms to the FOCUSED element's font-size — and this one autoFocuses, so
   // without an explicit 16 it inherits react-native-web's 14px default and zooms the OTP screen.
-  otpHidden: { position: 'absolute', opacity: 0, width: 1, height: 1, fontSize: 16 },
-  verify: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 18 },
-  verifyText: { fontSize: 13, color: colors.body },
-  resend: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 22 },
-  resendText: { fontSize: 13, fontWeight: '600', color: colors.dark },
 });

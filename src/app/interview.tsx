@@ -592,7 +592,7 @@ const s = StyleSheet.create({
   sub2: { fontSize: 11.5, fontWeight: '500', color: colors.muted, marginTop: 2 },
   // >= 16 on web or mobile Safari zooms on focus and never zooms back (scripts/verify-input-font-no-ios-zoom.ts).
   // Measured: the row is sized by the 26px number badge, so the option list height is unchanged (50px).
-  // minWidth: 0 pairs with the 16px web bump — see the note on AuthModal.phoneInput.
+  // minWidth: 0 pairs with the 16px web bump — see scripts/verify-input-font-no-ios-zoom.ts.
   customInput: { flex: 1, minWidth: 0, fontSize: Platform.OS === 'web' ? 16 : 14.5, color: colors.ink, padding: 0 },
 
   note: { marginTop: 10, marginHorizontal: 2, fontSize: 12, color: colors.amberInk, backgroundColor: colors.amberBg, borderWidth: 1, borderColor: colors.amberBg, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 11, lineHeight: 17 },
