@@ -37,7 +37,7 @@ begin
   for r in
     select * from public.ops_af_option_truth_sweep(
       p_deal := null, p_period := null, p_type := null,
-      p_row_limit := 1, p_check_rows := false)      -- counts only
+      p_row_limit := 1, p_check_rows := false)      -- counts only; see note above
   loop
     v_n := v_n + 1;
     v_bad := v_bad || jsonb_build_object(
