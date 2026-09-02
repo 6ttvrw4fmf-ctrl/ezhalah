@@ -702,11 +702,11 @@ Performed 2026-08-26 against `main@11cfd2f`.
 | R6.1 Round cap 4 | ✅ `AF_ROUND_MAX_QUESTIONS` | `verify-af-round-size.ts` |
 | R6.2 Carry answered+skipped | ✅ `afCarryRef.asked` | `verify-af-cross-round-carry.ts` |
 | R6.3 Receipt on prior turn | ✅ `afReceipt[m.id]` + `buildAfSummary()` | `verify-af-round-back-boundary.ts` |
-| R7.1 Live counts = current selection | ✅ `resolveOptions` per-scope | `verify-af-count-belongs-to-selection.ts` |
-| R7.2 Marginal chips vs combined footer, both shapes | ✅ per-chip `cnt_*`; footer = `cnt_selected` recomputed | `verify-af-multiselect-combining-semantics.ts` |
+| R7.1 Live counts = current selection | ✅ `resolveOptions` per-scope | `verify-af-count-belongs-to-selection.ts`; every certified cell × option vs canonical DB truth: `verify-af-matrix-truth.ts` (offline) + `verify-af-matrix-truth-live.ts` (production) |
+| R7.2 Marginal chips vs combined footer, both shapes | ✅ per-chip `cnt_*`; footer = `cnt_selected` recomputed | `verify-af-multiselect-combining-semantics.ts`; OR/AND measured live on every multi-select cell: `verify-af-matrix-truth-live.ts` |
 | R7.3 No stale count | ✅ blank while pending | `verify-af-count-belongs-to-selection.ts` |
 | R7.4 Headline = true total | ✅ `matchTotal` | `feedback_result-cap-min-true-100-rule.md` + `verify-result-cap-honesty.ts` |
-| R7.5 Count = DB oracle | ✅ shared `af_eligibility_clause()` | `verify-af-live-truth.ts`, `verify-af-independent-oracle.ts` |
+| R7.5 Count = DB oracle | ✅ shared `af_eligibility_clause()` | `verify-af-live-truth.ts`, `verify-af-independent-oracle.ts`; measured 2026-09-02 on every certified cell: 55 cells · 742 options · 4,905 checks · 234,591 rows (`verify-af-matrix-truth-live.ts`); PR #1513 adds the in-DB SQL leg |
 | R8.1 Skip = no predicate | ✅ `skipStep()` writes nothing | `verify-af-back-navigation.ts` |
 | R8.2 Back semantics | ✅ `onAgeBack` | `verify-af-back-navigation.ts`, `verify-af-round-back-boundary.ts` |
 | R9.1 Pills = committed only | ✅ `guidedPills.facets` | `verify-af-emoji-summary.ts` |

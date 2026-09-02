@@ -224,7 +224,7 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
   //   L84     age_unknown        : (property_age is null) = p_age_unknown
   //   L85     new construction   : (property_age = 0)      = p_is_new_construction
   //   L86     tenant             : tenant_ar = p_tenant
-  //   L88     licence            : (license_number is not null) = p_has_license
+  //   L88     licence            : p_has_license is null or (p_has_license and license_number is not null)
   //   L116-118 floor             : floor_number between coalesce(min,0) and coalesce(max,maxint)
   //
   // Anything whose SQL is a genuine UNION of arms (beds exact AND min together; price under a
@@ -361,8 +361,12 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       // SQL does — (NULL = 0) is NULL, which is not `false`, so a NULL-age row fails either arm.
       case 'p_is_new_construction': parts.push(v === true ? 'property_age=eq.0' : 'property_age=neq.0'); break;
       case 'p_tenant': parts.push(`tenant_ar=eq.${enc(v)}`); break;
-      // L88: (license_number is not null) = p_has_license
-      case 'p_has_license': parts.push(v === true ? 'license_number=not.is.null' : 'license_number=is.null'); break;
+      // L88 (2026-09-02): (p_has_license is null or (p_has_license and license_number is not null)).
+      // FALSE admits ONLY an explicit unlicensed fact, and canonical data carries none (fleet-wide
+      // 2026-09-02: rega_license_status is only ever 'نشط'/'فعال', both with a number; 77,238 rows
+      // are silent) — so false is a contradiction, never «licence number is NULL» (silence → NULL,
+      // never unknown → NO).
+      case 'p_has_license': parts.push(v === true ? 'license_number=not.is.null' : 'license_number=is.null&license_number=not.is.null'); break;
       case 'p_furnished': parts.push(`furnished=is.${v}`); break;
       case 'p_age_min': parts.push(`property_age=gte.${v}`); break;
       case 'p_age_max': parts.push(`property_age=lte.${v}`); break;

@@ -148,6 +148,18 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-pill-removal-live.ts
 
+      # THE HAND-WRITTEN PREDICATE ORACLE (moved here 2026-09-02). Nine AF answers expressed as
+      # PostgREST filters written by hand — not derived from the clause — plus the exact UNKNOWN
+      # partition. It used to run inside the REQUIRED `npm test`, calling production on every PR
+      # through the committed anon key: the exact pattern #1486 removed elsewhere. Same assertions,
+      # run here where a production hiccup cannot fail an unrelated PR.
+      - name: Every AF predicate agrees with an independently hand-written predicate, and unknown never passes
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-independent-oracle.ts
+
       # THE WHOLE CERTIFIED SURFACE, EVERY OPTION (added 2026-09-02, owner requirement). The
       # property-type differential above proves ONE answer per certified question; this proves
       # EVERY option the card can render — every rung, direction, age bucket, amenity chip, both
@@ -215,3 +227,32 @@ jobs:
           AF_PILL_TYPE: فيلا
           AF_PILL_MOBILE: '1'
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-pill-removal-live.ts
+
+  # THE WHOLE CERTIFIED MATRIX (added 2026-09-02, owner invariant: «what the AF UI says + what the
+  # user selects + what the backend applies + what the returned listings actually satisfy must all be
+  # the same truth»). Every scope × deal/period mode × question × option the REAL pool offers —
+  # derived by executing src/data/advancedFilters.ts, never from a list — measured in one real city:
+  # the card's number (the real resolveOptions() on the real count RPC row) == an independent
+  # PostgREST count on canonical columns re-expressed from the option's MEANING == the results total;
+  # every returned row fetched back and checked on its canonical column; exact ID diff under the walk
+  # cap; OR/AND arithmetic; the UNKNOWN partition; Trending's advertised count. ~55 cells / ~740
+  # options / tens of thousands of rows, so it runs as its OWN job in parallel with the browser
+  # journeys rather than inside their 30-minute budget. Offline twin: scripts/verify-af-matrix-truth.ts.
+  af-matrix:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: Every certified AF option shows, sends, applies, returns and carries one truth
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: The whole certified AF matrix against production and independent DB truth
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-matrix-truth-live.ts

@@ -760,13 +760,17 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
 }
 
 // Annual-Rent apartment guided flow (2026-07-20): one scope-respecting count row that powers the RNPL,
-// amenities, and min-bathrooms questions. `cnt_total_base` = the scope total BEFORE this question's own
-// selection (drives the ≥150 gate). The per-option counts (cnt_rnpl/kitchen/parking/elevator/furnished,
-// cnt_bath1..4) are STRICT standalone availabilities within that base — they IGNORE the passed
-// p_amenities/p_bath_min so a chip's number stays stable as the user toggles. `cnt_selected` DOES honor
-// the passed p_amenities (strict) + p_bath_min (strict >= N, unknown excluded) — that is the live count
-// shown on the amenities continue button. Same scope resolution + predicate as the search RPC, so the
-// number always equals what Search returns. RPC error/timeout → null (caller skips the question).
+// amenities, and min-bathrooms questions. EVERY cnt_* is computed INSIDE the committed scope — the
+// RPC's `scoped` CTE applies the full eligibility clause INCLUDING the passed p_amenities/p_bath_min/
+// p_directions/… — so a chip's number is exactly what tapping that chip returns on top of what is
+// already committed (cnt_parking with elevator committed = elevator ∧ parking, measured 420 on
+// شقة/إيجار/سنوي 2026-09-02). `cnt_total_base` = `cnt_selected` = the committed scope's own total
+// (drives the ≥150 gate and the live footer). The ONLY dimension stripped before the call is a
+// question's OWN — property_age, via ageAgnostic() on the sibling RPC — because that answer REPLACES
+// rather than narrows. (An earlier version of this comment claimed the per-option counts IGNORE the
+// passed params: they do not, and "restoring" that would reintroduce the inverted-count defect the
+// bathroom rungs and the direction question guard against.) Same scope resolution + predicate as the
+// search RPC, so the number always equals what Search returns. RPC error/timeout → null.
 export type GuidedCounts = {
   cnt_total_base: number;
   cnt_rnpl: number;
@@ -793,6 +797,10 @@ export type GuidedCounts = {
   cnt_car_entrance: number; cnt_sanitation: number;
   // Commercial expansion 2026-08-16: the utility chips the commercial market actually splits on.
   cnt_electricity: number; cnt_water_supply: number;
+  // Residential rich set (owner 2026-09-02): the 8 tokens certified for chat on 2026-08-31 now have
+  // chips, so they need counts. Same template row, same committed scope (migration 20260902120000).
+  cnt_gym: number; cnt_pool: number; cnt_garden: number; cnt_balcony: number; cnt_laundry_room: number;
+  cnt_optical_fibers: number; cnt_separate_electricity_meter: number; cnt_separate_water_meter: number;
   cnt_selected: number;
   // Monthly (2026-08-18): Gathern rating thresholds + unit-subtype chips. Data-derived cuts on the
   // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
@@ -1423,31 +1431,16 @@ export async function fetchListingsForQuery(
     // Broad Commercial: override rpcFilterParams' p_types (null for a broad macro search) so the residential
     // scope is constrained to commercial type_ar; scope B carries the commercial-tables constraint. (2026-07-09)
     ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
-    // Property-age advanced-filter answer (2026-07-13). IMPORTANT: only included when actually answered —
-    // PostgREST resolves named-parameter RPC calls by exact parameter-name match, so unconditionally
-    // sending p_is_new_construction breaks EVERY search with "function not found" until the backend
-    // migration adding that parameter is deployed (caught live: this exact failure mode, before it ever
-    // shipped). Shared here (not just the main call) so the page-0 diversity-seed call below also respects
-    // any active age answer — a diversity-boosted row must satisfy the exact same WHERE clause as the main
-    // pool (see comment above), or a listing outside the user's chosen age bucket could be pulled forward.
-    ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
-    ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
-    ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
-    // Annual-Rent apartment guided flow (2026-07-20). p_amenities + p_bath_min already exist on the
-    // live RPC signature (unlike p_is_new_construction, which once needed its migration first), so
-    // sending them is safe. STRICT: p_amenities requires each token present; p_bath_min excludes
-    // unknown-bathroom rows (the strict-bathrooms migration removes the `s.bathrooms is null` pass).
-    ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
-    ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
-    ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
-    // Cohort-expansion answers (2026-08-15): both params exist on the live RPC signature.
-    ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
-    ...(q.directions?.length ? { p_directions: q.directions } : {}),
-    // Monthly guided answers (2026-08-18): params exist on the live signature (template rebuild).
-    // STRICT + UNKNOWN-safe by SQL: NULL rating/subtype rows can never satisfy them.
-    ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
-    ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
-    ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
+    // EVERY answered Advanced-Filter question — THE ONE shared builder, not a hand-typed copy of it
+    // (2026-09-02). This literal used to re-list the 11 AF params one by one beside
+    // rpcAdvancedFilterParams(); every count surface spreads the builder, so a 12th predicate added
+    // there would have narrowed every count and NOT the results — the widening direction, invisible
+    // because the two lists agreed by coincidence. Each key is omitted when unanswered (PostgREST
+    // resolves RPC overloads by exact parameter-name match, so an unconditional key breaks every
+    // search until its migration lands — caught live once, 2026-07-13). Shared with the page-0
+    // diversity-seed call below so a seeded row satisfies the exact same WHERE clause as the pool.
+    // Pinned by scripts/verify-af-matrix-truth.ts §5 (the spread appears once; no AF key is typed).
+    ...rpcAdvancedFilterParams(q),
   };
 
   // RC-A rebase note (2026-07-16): main's baseRpcParams block above is the P0-fixed parameter source

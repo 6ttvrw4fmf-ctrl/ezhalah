@@ -42,7 +42,11 @@ const { run, excluded, baseline } = loadRegistry(root);
 const runSet = new Set(run);
 
 // ── 1. THE BASELINE FLOOR ────────────────────────────────────────────────────────────────────────
-check('the zero-loss baseline is present and substantial', baseline.length >= 200, `${baseline.length} entries`);
+// 199, not 200, since 2026-09-02: verify-af-independent-oracle.ts left the baseline DELIBERATELY —
+// it is a live production call (committed anon key) that gated every PR through the required
+// `npm test`, the exact pattern #1486 removed for the trending live half. It now runs in
+// .github/workflows/af-live-truth-check.yml (see scripts/test-exclusions.txt). Nothing else moved.
+check('the zero-loss baseline is present and substantial', baseline.length >= 199, `${baseline.length} entries`);
 const missing = baseline.filter((b) => !runSet.has(b));
 check('EVERY baseline check is still discovered and run (no test silently disappeared)',
   missing.length === 0,

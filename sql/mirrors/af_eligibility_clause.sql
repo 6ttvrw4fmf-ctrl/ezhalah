@@ -1,4 +1,13 @@
--- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- MIRROR of the production object AS IT WILL BE once migration 20260902120100 is applied. NOT a migration — see the full-body-replace rule.
+-- Refreshed 2026-09-02 (AF matrix certification, BUG-1 fix): the p_has_license arm is now
+--   `(p_has_license is null or (p_has_license and s.license_number is not null))` — false admits only an
+--   explicit unlicensed fact, and canonical data carries none, so it admits nothing (silent → NULL, never
+--   unknown → NO). Text + md5 captured from a rolled-back dry run of that migration against production
+--   (a fresh Supabase branch could not be used: branch migrations fail at 20260621194329, pre-existing
+--   drift). md5(pg_get_functiondef) of the would-be object = 178deacbfa50de38e6b5a18e09bc737b.
+--   SHIP MUST RE-VERIFY this md5 against the live object after applying 20260902120100 under the deploy
+--   lock; until then the live object still reads 681da577d8e10df55e30c345d284e139 (pre-fix).
+--
 -- Refreshed 2026-08-28 (first capture) by the AF + Trending Data Integrity routine (docs/ops/AF_TRENDING_DATA_INTEGRITY_ENGINEER.md).
 -- Re-verified 2026-09-02 during the AF option-truth certification: md5(pg_get_functiondef) read
 --   live from production = 681da577d8e10df55e30c345d284e139, identical to the md5 recorded below,
@@ -27,8 +36,8 @@
 --   same non-hand-transcribed principle: the executed VALUE was fetched byte-exact over HTTP, then
 --   the E'' source literal was reconstructed by doubling every backslash and single quote, and the
 --   result verified to match production's md5(pg_get_functiondef) exactly before being written here.
--- Verified byte-exact; md5 of everything below this header block: 681da577d8e10df55e30c345d284e139
---   (9,376 characters), checked 2026-08-31.
+-- Verified byte-exact against the 2026-09-02 rolled-back dry run; md5 of everything below this header block: 178deacbfa50de38e6b5a18e09bc737b
+--   (previous live value 681da577d8e10df55e30c345d284e139 through 2026-08-31; changes ONLY when 20260902120100 is applied).
 CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
  LANGUAGE sql
@@ -116,7 +125,7 @@ AS $function$ select E'
       and (p_is_new_construction is null or (s.property_age = 0) = p_is_new_construction)
       and (p_tenant     is null or s.tenant_ar = p_tenant)
       and (p_directions is null or norm_direction_ar(s.direction_ar) in (select norm_direction_ar(d) from unnest(p_directions) d))
-      and (p_has_license is null or (s.license_number is not null) = p_has_license)
+      and (p_has_license is null or (p_has_license and s.license_number is not null))
       and (p_amenities is null or (
                not exists (select 1 from unnest(p_amenities) tok
                            where tok not in (''elevator'',''parking'',''kitchen'',''ac'',''maid_room'',''driver_room'',''private_entrance'',''car_entrance'',''sanitation'',''electricity'',''water_supply'',''gym'',''pool'',''garden'',''balcony'',''laundry_room'',''optical_fibers'',''separate_electricity_meter'',''separate_water_meter'',''furnished'',''rnpl'',''rent_now_pay_later''))

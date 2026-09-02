@@ -364,3 +364,72 @@ SOURCE-PUBLISHED negative, not a manufactured one — 4/4 live pages carry an ex
 (32 true / 951 false over 983 rows). Acknowledged for that one segment only (`20260823205435`).
 The aqar maid/driver segments in the same alert are fixed at the parser level (#987) and clear as the
 8-hourly sweep re-enriches; satel, wasalt and aqaratikom segments remain **unadjudicated**.
+
+## The whole certified matrix, one truth — 2026-09-02 (owner invariant, class-wide barrier)
+
+«What the AF UI says + what the user selects + what the backend applies + what the returned listings
+actually satisfy must all be the same truth.» Two barriers now walk the WHOLE matrix instead of a
+hand-picked slice — every scope (each clean type, each group) × every deal/period mode (Buy, RentAnnual,
+RentMonthly, RentBoth, dealCombined, bothDeals) × every question the REAL pool offers there × every
+option its real `resolveOptions()` defines. The matrix is derived by executing `src/data/
+advancedFilters.ts` (lifted) through the real `cohortAllows()`, never from a list, so a cohort or
+option certified tomorrow is covered tomorrow. Measured 2026-09-02: 39 scopes × 6 modes = 234 cells,
+55 certified, 149 (cell, field) pairs, 742 options.
+
+- `scripts/lib/afMatrix.ts` — the matrix builder + `optionMeaning()`: for every option KEY, its meaning
+  in three independent vocabularies (RPC params the app must send · the `cnt_*` column the card must
+  read · the predicate on canonical `search_listings_ar` columns as PostgREST filters, with the
+  known-not-matching and UNKNOWN complements). An option with no meaning fails the barrier.
+- `scripts/verify-af-matrix-truth.ts` (npm test) — gate == table; selection = predicate (single, same-
+  field OR/AND, cross-field AND); count-column wiring + caption derivation; removal via the real
+  `withoutFacet()`; Trending carry via the real `rpcAllNarrowingParams()`; results path spreads the
+  one builder; re-certification on every mode/type transition (23,415 executed); the dormant
+  `p_has_license` arm has no sender. 18 mutants RED, restored GREEN (PR body has the table).
+- `scripts/verify-af-matrix-truth-live.ts` (af-live-truth-check.yml, own job) — the same cells in
+  الرياض against production: card number (real `resolveOptions()` on the real count row) == PostgREST
+  count on canonical columns == results total; answered + known-not-matching + unknown == base for
+  EVERY option; every returned row fetched back and checked on its canonical column; exact ID diff
+  under the walk cap; two options of one field == SQL union (directions) / intersection (amenities);
+  two fields == intersection; Trending's advertised count == committed (skipped with a logged reason
+  on the agent-only bothDeals shape — see below); any certified amenity token the card does not offer
+  is still measured at count level and logged, never silently dropped.
+
+Measured 2026-09-02 on production (الرياض): 55 cells · 742 options · 4,905 checks · 234,591 returned
+rows re-verified on canonical columns · 0 empty cells · 0 cells the oracle could not express. Live
+mutants (small scopes): p_bath_min dropped RED 16 · Trending drops AF RED 1 · «غير مفروشة» sends
+nothing RED 4 · direction OR lost RED 2 · restored GREEN.
+
+Adjudicated, same day, from that run's only two FAILs (Apartment/bothDeals and Villa/bothDeals,
+`Trending advertises exactly the committed count`): executed live, `top_cities_by_deal_ar` with the
+results body's own `p_tables` returns the committed number (5,719 / 4,627); without it 9,415 / 4,647
+— the two monthly-only sources the annual results scope excludes. Not an AF carry defect, and the
+comparison does not apply: bothDeals is an agent-only shape that `sanitizeForFilterRestore()` drops,
+so the Filter home (the only Trending surface) can never hold it. The live tier now SKIPS that one
+(mode × check) with the reason printed; `verify-af-matrix-truth.ts §8` pins both facts the skip
+rests on (executed sanitizer; the Filter home never reads bothDeals). If either changes, re-adjudicate.
+
+Owner rulings the same day, all shipped in this change (SQL drafted + branch-verified, applied by Ship):
+- **GAP 1 — the 8 rich amenities are exposed on the card** (gym, pool, garden, balcony, laundry_room,
+  optical_fibers, separate_electricity_meter, separate_water_meter): `cnt_*` columns inside the same
+  `scoped` CTE through the templated path (migration `20260902120000`), chip defs + labels, sweep rows,
+  and `verify-af-matrix-truth.ts §3` now asserts offered == certified token-for-token on every
+  residential amenities cell (matrix floor 742 → 886 options). Certification unchanged: residential
+  cells only; villa-only tokens and Chalet/Camp untouched.
+- **BUG-1 — `p_has_license = false` admits nothing** (silent → NULL, never unknown → NO): canonical
+  data has no explicit negative (fleet-wide `rega_license_status` is only ever نشط/فعال, both with a
+  number), so the honest false arm is `(p_has_license is null or (p_has_license and s.license_number
+  is not null))` — migration `20260902120100` needle-edits the clause AND `top_cities_by_deal_ar`,
+  rebuilds, and raises if a non-active status ever appears. `§7` executes the arm from the mirror.
+- **H9 — the runtime detector reads rows**: `mon_detect_af_option_count_truth` called the sweep with
+  `p_check_rows := false`; migration `20260902120200` turns it on (p_row_limit 200) and widens to 40
+  slices (measured 1.65 s per row check on the heaviest cohort).
+- **Amenities AND / direction OR** stays as built and measured (contract R7.2.2).
+
+Findings while building it: the results request re-typed the 11 AF params by hand beside the shared
+builder (now spreads `rpcAdvancedFilterParams()`); the `GuidedCounts` comment asserted the opposite of
+the deployed SQL (per-option counts ARE computed inside the committed scope); the diagonal directions
+are stored ONLY in the adjectival spelling (`شمال شرقي`), so a literal oracle counted 0 against a correct
+RPC — the oracle now covers the published spellings; `p_rent_period='كلاهما'` is translated (RentBoth
+cells have truth coverage); `verify-af-independent-oracle.ts` left the required `npm test` for the live
+workflow. Deferred for the owner: the `p_has_license=false` clause arm reads a missing licence as
+«unlicensed» (no sender today, pinned); whether the card should offer the 8 rich tokens.
