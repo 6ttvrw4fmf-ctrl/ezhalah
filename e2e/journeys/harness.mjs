@@ -127,6 +127,54 @@ const sessionObj = () => ({
  * actually sent, so a journey can assert on the request rather than on a live count the world is
  * allowed to move underneath it (PART 9.2 (5)).
  */
+// The context fixture's storage seeding, as a SELF-CONTAINED function so a barrier can EXECUTE it
+// against a fake localStorage instead of string-matching it. Playwright serialises this to the
+// browser, so it must not reference anything in module scope — that constraint is what kept this
+// logic untestable, and inlining it in the addInitScript call is what let the session-resurrection
+// bug below live here unnoticed. Exported for scripts/verify-journey-fixture-session-seed.ts.
+export const seedInitScript = ([sess, hist, sub, wantAuth]) => {
+  // AN INIT SCRIPT RUNS ON EVERY DOCUMENT, INCLUDING about:blank — where touching localStorage
+  // throws `SecurityError: Access is denied for this document`. Playwright reports that as a
+  // PAGE ERROR on the page object, so it lands in `bag.pageErrors` and every journey that checks
+  // them files it as a production defect. `adv-modeswitch-back-push-vs-replace` hit exactly that
+  // on its first run (2/2, desktop and mobile): all three product assertions passed and the
+  // journey still went red, blaming the app for the harness's own throw on the about:blank the
+  // fresh context starts at and goBack() returns to. That is PART 9's first expensive error —
+  // a harness artifact filed as an Ezhalah bug — reaching the report from inside the harness
+  // itself. `back-after-search` never saw it only because it returns early when Back leaves the
+  // origin, before its pageErrors check.
+  if (!location.protocol.startsWith('http')) return;
+  try { localStorage.setItem('hasSeenIntro', '1'); } catch { return; }
+  if (!wantAuth) return;
+  // THE SESSION IS SEEDED ONCE PER CONTEXT — for the same reason the history seed below is, and
+  // this line used to miss it. Re-writing the auth token on EVERY navigation silently RESURRECTS a
+  // session the app deliberately destroyed, so any journey that signs out or deletes the account
+  // was untestable: measured 2026-09-02, `signout-leaves-no-trace` went red 4/4 (both viewports,
+  // fresh contexts) on "the previous account's chats came back after a reload" while the product
+  // was entirely correct. The probe that settled it read the key directly across the flow —
+  //   seeded: authToken PRESENT, chrome signed-in
+  //   after sign-out, before reload: authToken ABSENT, chrome guest   ← the app did its job
+  //   after reload: authToken PRESENT, chrome signed-in               ← only this script writes it
+  // — which is PART 9.1's required positive proof that a reproducible failure is harness, not code.
+  // Worse than a false positive: it would have made a REAL "sign-out doesn't stick" bug invisible,
+  // because the fixture re-signs-in exactly like the bug would.
+  //
+  // A presence check on the token itself is NOT enough and was the tempting wrong fix: after a
+  // sign-out the token is legitimately absent, so `if (!token) seed()` re-seeds it and reproduces
+  // this bug exactly. The sentinel is therefore a separate key that sign-out does not clear — it
+  // records "this context has been seeded", which is the fact we actually depend on.
+  if (!localStorage.getItem('__ez_qa_session_seeded')) {
+    localStorage.setItem('sb-aannarbkwcymrotzwdbo-auth-token', JSON.stringify(sess));
+    localStorage.setItem('__ez_qa_session_seeded', '1');
+  }
+  // Seed ONCE per context: this init script re-runs on every navigation, and re-seeding on a
+  // reload would wipe the very change a persistence journey just made — the thing it exists to
+  // verify. (Same reason as e2e/sidebar-reorder-journeys.mjs.)
+  if (hist && !localStorage.getItem('history:' + sub)) {
+    localStorage.setItem('history:' + sub, JSON.stringify(hist));
+  }
+};
+
 export async function withPage(opts, fn) {
   const { engine = 'chromium', mobile = false, signedIn = false, history = null, path = '/' } = opts;
   const browser = await ENGINES[engine].launch(launchOpts(engine));
@@ -141,28 +189,7 @@ export async function withPage(opts, fn) {
     // WebKit/Firefox reject Chromium's UA string from the device profile; let them use their own.
     ...(engine === 'chromium' ? {} : { userAgent: undefined }),
   });
-  await ctx.addInitScript(([sess, hist, sub, wantAuth]) => {
-    // AN INIT SCRIPT RUNS ON EVERY DOCUMENT, INCLUDING about:blank — where touching localStorage
-    // throws `SecurityError: Access is denied for this document`. Playwright reports that as a
-    // PAGE ERROR on the page object, so it lands in `bag.pageErrors` and every journey that checks
-    // them files it as a production defect. `adv-modeswitch-back-push-vs-replace` hit exactly that
-    // on its first run (2/2, desktop and mobile): all three product assertions passed and the
-    // journey still went red, blaming the app for the harness's own throw on the about:blank the
-    // fresh context starts at and goBack() returns to. That is PART 9's first expensive error —
-    // a harness artifact filed as an Ezhalah bug — reaching the report from inside the harness
-    // itself. `back-after-search` never saw it only because it returns early when Back leaves the
-    // origin, before its pageErrors check.
-    if (!location.protocol.startsWith('http')) return;
-    try { localStorage.setItem('hasSeenIntro', '1'); } catch { return; }
-    if (!wantAuth) return;
-    localStorage.setItem('sb-aannarbkwcymrotzwdbo-auth-token', JSON.stringify(sess));
-    // Seed ONCE per context: this init script re-runs on every navigation, and re-seeding on a
-    // reload would wipe the very change a persistence journey just made — the thing it exists to
-    // verify. (Same reason as e2e/sidebar-reorder-journeys.mjs.)
-    if (hist && !localStorage.getItem('history:' + sub)) {
-      localStorage.setItem('history:' + sub, JSON.stringify(hist));
-    }
-  }, [sessionObj(), history, SUB, signedIn]);
+  await ctx.addInitScript(seedInitScript, [sessionObj(), history, SUB, signedIn]);
 
   // A SEEDED SESSION MUST NOT SUMMON A PROMPT A REAL SIGNED-IN USER NEVER SEES.
   //
@@ -203,7 +230,7 @@ export async function withPage(opts, fn) {
     }
   });
   try {
-    await page.goto(BASE + path, { waitUntil: 'load', timeout: 90_000 });
+    await gotoOrRetryTransport(page, BASE + path);
     await settle(page);
     return await fn(page, bag, ctx);
   } finally {
@@ -404,8 +431,76 @@ export async function closeMobileSidebar(page) {
   return (await page.locator('[data-testid="sidebar-search-btn"]').count()) === 0;
 }
 
-export async function openMobileSidebar(page) {
-  if (await page.locator('[data-testid="sidebar-search-btn"]').count()) return true;
+// `guestOk` widens the OPEN oracle, and exists because the default one is auth-scoped in a way that
+// silently defeats any logged-out mobile journey. `sidebar-search-btn` renders only inside
+// Sidebar.tsx's `user ? (…)` branch, so for a GUEST this function could never return true no matter
+// how perfectly the drawer opened — a post-sign-out check keyed on it would skip 100% of the time
+// and read as "nothing to see", which is exactly the shape of blindness PART 9.4 makes ours to fix.
+// The guest branch has no testID, so its own «إنشاء حساب / تسجيل الدخول» CTA is the marker.
+// Opt-in rather than always-on: for a SIGNED-IN journey, accepting the guest marker would turn a
+// failed session seed from an honest skip into a confusing mid-journey failure.
+const GUEST_SIDEBAR_CTA = 'إنشاء حساب / تسجيل الدخول';
+// ── THE OPENING NAVIGATION: TRANSPORT FAILURE IS NOT A PRODUCT DEFECT ───────────────────────────
+// PART 9 opens by naming two opposite errors, and this function exists because the runner was
+// committing the FIRST one automatically. `run.mjs` wraps each journey in
+// `catch (e) { defect(key, 'journey threw', …) }`, so a `page.goto` that never completed at the
+// TRANSPORT layer — before a single byte of app code ran, before any assertion existed to fail —
+// was filed as an Ezhalah defect. Measured 2026-09-02: a 72-journey production sweep reported
+// exactly 2 defects, both `net::ERR_TIMED_OUT` on the opening `page.goto`, in two unrelated
+// journeys, each 1/2 — while the other 70 runs loaded that identical URL and bundle fine in the
+// same window. That is this container's egress, not the product (PART 9.1 condition 3).
+//
+// THE FIX IS A DISCRIMINATOR, NOT A SWALLOW, AND NOT A BIGGER TIMEOUT (PART 11.2 rule 3). The 90 s
+// budget is untouched. A transport-class failure gets exactly ONE genuinely fresh navigation:
+//   · it succeeds  → the blip is NAMED in the run output as a transport note, never as a pass and
+//                    never as a defect, so the rate stays visible across runs instead of vanishing;
+//   · it fails too → the original error is rethrown UNCHANGED and the journey fails exactly as
+//                    loudly as before.
+// A real outage fails both attempts on every journey, so it still reads as a total outage — which
+// is precisely the signal PART 9.4 warns must not be papered over. Only the one-off blip is
+// reclassified, and only after it has demonstrably stopped happening.
+//
+// Scoped to the OPENING navigation only. An in-journey `page.reload()` is an assertion about the
+// app (the sidebar journeys' post-reload re-checks depend on it) and is deliberately not retried.
+// `chrome-error://chromewebdata/` is in this list because the SAME failure does not always carry a
+// net:: code. When a navigation fails at the network layer Chromium may navigate to its internal
+// error page instead, and Playwright then reports «Navigation to "<url>" is interrupted by another
+// navigation to "chrome-error://chromewebdata/"» with no ERR_* anywhere in the string. Measured on
+// the verification sweep for this very fix (2026-09-02): the first sweep produced two ERR_TIMED_OUT
+// blips, the re-run produced this shape instead, in the same journey — one condition, two messages.
+// Classifying only the first would have left the discriminator half-built and still filing network
+// blips as Ezhalah defects. It is safe to treat as transport: Chromium shows that error page for
+// network, DNS, proxy and TLS failures, never for an app error or a failed assertion.
+const TRANSPORT_ERRORS = [
+  'ERR_TIMED_OUT', 'ERR_CONNECTION_RESET', 'ERR_CONNECTION_CLOSED', 'ERR_CONNECTION_REFUSED',
+  'ERR_NETWORK_CHANGED', 'ERR_NAME_NOT_RESOLVED', 'ERR_PROXY_CONNECTION_FAILED', 'ERR_EMPTY_RESPONSE',
+  'ERR_SSL_PROTOCOL_ERROR', 'ERR_ADDRESS_UNREACHABLE', 'ERR_INTERNET_DISCONNECTED',
+  'chrome-error://chromewebdata',
+];
+export const isTransportError = (err) => {
+  const s = String(err && err.message ? err.message : err);
+  return TRANSPORT_ERRORS.some((code) => s.includes(code));
+};
+export async function gotoOrRetryTransport(page, url, { timeout = 90_000 } = {}) {
+  try {
+    return await page.goto(url, { waitUntil: 'load', timeout });
+  } catch (e) {
+    if (!isTransportError(e)) throw e;              // a real app/navigation failure — unchanged
+    const first = String(e).split('\n')[0];
+    const res = await page.goto(url, { waitUntil: 'load', timeout });
+    note(`TRANSPORT BLIP (not a product defect): the opening navigation to ${url} failed with «${first}» `
+      + `and succeeded on one immediate retry. Counted as neither pass nor defect — see harness.mjs.`);
+    return res;
+  }
+}
+
+export async function openMobileSidebar(page, { guestOk = false } = {}) {
+  const isOpen = async () => {
+    if (await page.locator('[data-testid="sidebar-search-btn"]').count()) return true;
+    if (!guestOk) return false;
+    return (await page.getByText(GUEST_SIDEBAR_CTA, { exact: false }).count()) > 0;
+  };
+  if (await isOpen()) return true;
   for (let attempt = 0; attempt < 3; attempt++) {
     const rect = await page.evaluate(() => {
       // The hamburger is the LEADING small cursor:pointer box in the top bar (src/app/index.tsx
@@ -427,7 +522,7 @@ export async function openMobileSidebar(page) {
     // eyeballed off a screenshot, which is captured at devicePixelRatio (PART 9.2 (4)).
     await page.mouse.click(rect.x, rect.y).catch(() => {});
     await sleep(1600);
-    if (await page.locator('[data-testid="sidebar-search-btn"]').count()) return true;
+    if (await isOpen()) return true;
   }
   return false;
 }
