@@ -289,6 +289,29 @@ console.log('\n── T3. stale predicates leave; every def can activate; no act
   assert(afActive(q) === afActive(q) && Object.isFrozen(afActive(q)), 'afActive returns one frozen reference per result.query object');
   assert(afActive({ ...q }) !== afActive(q) && same(afActive({ ...q }), afActive(q)), 'a new query object is recomputed to equal content');
   assert(afActive(null).length === 0 && afActive(undefined).length === 0, 'no query → no active predicates');
+  // THE CARRIER IS THE PREDICATE FIELDS, NEVER A RECEIPT. afFacets / guidedPills / afReceipt are
+  // records of what was asked; only the predicate fields are what the RPC filtered on. A receipt
+  // without its field (cleared by the chat path, a legacy transcript) must NOT activate; a field
+  // without a receipt (chat one-shot) MUST.
+  const receiptOnly: SearchQuery = { ...annual, afFacets: [{ id: 'bathrooms', keys: ['3'], labels: ['3+'] }] };
+  assert(afActive(receiptOnly).length === 0, 'an afFacets receipt WITHOUT its predicate field activates nothing (receipts are not predicates)');
+  assert(same(afActive({ ...annual, bathMin: 3 }).map((a) => a.id), ['bathrooms']), 'a predicate field WITHOUT a receipt activates (chat one-shot turns carry no facets)');
+  const readKeys = new Set<string>();
+  afActive(new Proxy({ ...annual, bathMin: 2, amenities: ['kitchen'] } as Record<string, unknown>, {
+    get(tt, k) { if (typeof k === 'string') readKeys.add(k); return tt[k]; },
+  }) as unknown as SearchQuery);
+  const offSurface = [...readKeys].filter((k) => !(AF_PREDICATE_FIELDS as readonly string[]).includes(k));
+  assert(readKeys.size > 0 && offSurface.length === 0, `afActive reads ONLY AF_PREDICATE_FIELDS off the query (off-surface reads: [${offSurface.join(', ')}])`);
+  // THE GENERIC NULL-GUARD IS LOAD-BEARING ON ITS OWN. Every shipped ok() happens to fail on null
+  // too, so removing the guard changes nothing observable today — and would silently arm the first
+  // def whose ok() is lax. A probe def whose ok() and chips() would LEAK proves the guard runs
+  // before either of them, for any def, then is removed again.
+  (AF_EVIDENCE as Record<string, unknown>).__probe = { fields: [], active: () => null, reads: () => ['probe_col'], ok: () => true, chips: () => ['LEAK'] };
+  try {
+    assert(afEvidence([{ id: '__probe', keys: ['x'] }], { probe_col: null }, t).length === 0, 'a NULL read column blocks the chip BEFORE ok()/chips() run — generic, for any def');
+    assert(afEvidence([{ id: '__probe', keys: ['x'] }], {}, t).length === 0, 'an ABSENT read column (index↔shape drift) blocks the chip the same way');
+    assert(same(afEvidence([{ id: '__probe', keys: ['x'] }], { probe_col: 1 }, t).map((x) => x.text), ['LEAK']), 'the probe def does produce its chip once its column is present (the probe is live)');
+  } finally { delete (AF_EVIDENCE as Record<string, unknown>).__probe; }
 
   const LOADED: SearchQuery = {
     ...annual, ageMin: 3, ageMax: 5, isNewConstruction: null, amenities: ['rnpl', 'elevator'], bathMin: 3,
