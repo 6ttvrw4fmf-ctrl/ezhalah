@@ -57,6 +57,21 @@ check('AccountMenu still shows the locked provider row', /Google Account/.test(m
     !existsSync('src/data/countries.ts') || /RETIRED, KEPT ON DISK, IMPORTED BY NOTHING/.test(readFileSync('src/data/countries.ts', 'utf8')));
 }
 const i18n = readFileSync('src/i18n.tsx', 'utf8');
+// PATTERN SCAN, not a hand-list. The list below was curated and it MISSED 'Change phone number' —
+// the key sat in the production bundle after the removal shipped (found by the live bundle check on
+// 2026-09-02). A barrier that only catches what someone remembered to list is asserting the bug.
+// This scans EVERY i18n key for an auth-shaped phone phrase. Deliberately phrase-level, not the bare
+// word: a listing/contact string may legitimately say «جوال», but no key should describe phone
+// sign-in, OTP, WhatsApp codes, or changing a phone number.
+{
+  const keys = [...i18n.matchAll(/^\s*'([^']+)':\s*'/gm)].map((m) => m[1]);
+  // 'WhatsApp' alone is the share-sheet label (WhatsApp / X / Telegram) and stays. Only WhatsApp
+  // used as a CODE CHANNEL is auth: «on WhatsApp», «WhatsApp code», «Resend code on WhatsApp».
+  const phoneAuth = /phone number|change phone|\botp\b|on whatsapp|whatsapp (code|otp)|verification code|enter the code|resend code|sent a .*code/i;
+  const leftovers = keys.filter((k) => phoneAuth.test(k));
+  check('no i18n key describes phone sign-in / OTP / WhatsApp (pattern scan, not a hand-list)',
+    leftovers.length === 0, leftovers.length ? 'leftovers: ' + leftovers.join(' | ') : '');
+}
 for (const key of ['Enter the code', 'We sent a 6-digit code on WhatsApp to', 'Resend code on WhatsApp',
                    'Phone number', 'Phone Number', 'Please enter a valid phone number.',
                    'Phone sign-in isn’t available right now. Please try another method.']) {
