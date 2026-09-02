@@ -84,3 +84,15 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-live-four-way-truth.ts
+
+      # PROPERTY-TYPE CORRECTNESS, EVERY CERTIFIED COHORT (added 2026-09-01, owner priority). The
+      # steps above certify a handful of hand-picked journeys; this sweeps EVERY certified
+      # (clean type x deal x period) x every question that cohort certifies, and diffs the exact
+      # returned ID set against independent DB truth — so a type leak or a predicate that admits an
+      # ineligible row shows up as an EXTRA by construction. Runs even if the steps above fail.
+      - name: Every certified cohort returns only its own property type, satisfying every AF answer
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-property-type-differential.ts
