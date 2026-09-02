@@ -482,7 +482,11 @@ _AMENITY_FLAG_LABELS: dict[str, str] = {
 }
 
 
-def _amenity_flags(labels: list[str]) -> dict[str, bool]:
+def _amenity_flags(labels: Optional[list[str]]) -> dict[str, Optional[bool]]:
+    """`labels` is the PUBLISHED amenity list (possibly empty) → true/false per mapped column;
+    `None` means the source published no list at all → every column UNKNOWN (tri-state, 2026-09-02)."""
+    if labels is None:
+        return {col: None for col in _AMENITY_FLAG_LABELS}
     return {col: label in labels for col, label in _AMENITY_FLAG_LABELS.items()}
 
 
@@ -607,6 +611,12 @@ def map_listing(it: dict) -> Optional[dict]:
         title = f"{title} — {type_ar} مفروشة للإيجار الشهري".strip(" —") if type_ar else title
 
     bathrooms = _bathrooms(it.get("amenities"))
+    # Tri-state (2026-09-02): a unit whose list payload carries NO features[] at all has said nothing
+    # about its amenities — its flags are UNKNOWN, never "no". Only a PUBLISHED list that lacks the
+    # label is a real negative. (552 active rows sat at elevator=parking=driver_room=false with no
+    # amenity list captured; the source could not be re-read from the audit environment, so the
+    # mapper is fixed for every future crawl rather than the rows being guessed either way.)
+    features_published = it.get("features") is not None
     amenity_labels = _amenity_labels(it.get("features"))
     info: dict[str, Any] = {
         "furnished": True,
@@ -664,7 +674,7 @@ def map_listing(it: dict) -> Optional[dict]:
         "photo_urls": _photos(it),
         "rega_location_verified": False,
         "additional_info": info,
-        **_amenity_flags(amenity_labels),
+        **_amenity_flags(amenity_labels if features_published else None),
     }
 
 

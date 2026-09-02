@@ -280,6 +280,19 @@ def _images(body: str) -> list[str]:
     return out[:25]
 
 
+def _parking_from_garage_text(garage_txt: str) -> Optional[bool]:
+    """`pt_garages` cell → true / false / UNKNOWN (tri-state, 2026-09-02).
+
+    The source saying NOTHING about garages (absent or empty cell) is UNKNOWN, never "no parking".
+    A published dash/zero is a real negative; any other published text is a positive. The previous
+    `bool(garage_txt and …)` collapsed absence into `false` on 2 active rows.
+    """
+    garage_txt = (garage_txt or "").strip()
+    if not garage_txt:
+        return None
+    return garage_txt not in ("-", "—", "0")
+
+
 def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     """Return (row, category, gone). gone=True → sold/rented → mark inactive / skip."""
     f = _dump_fields(body)
@@ -336,8 +349,10 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
 
     # ── floor / parking ──
     floor_no = _to_int(f.get("pt_floor"))
-    garage_txt = (f.get("pt_garages") or "").strip()
-    parking = bool(garage_txt and garage_txt not in ("-", "—", "0"))
+    # Tri-state (2026-09-02): the source saying NOTHING about garages is UNKNOWN, not "no parking".
+    # Only a published dash/zero is a real negative; only published text is a positive.
+    garage_txt = (f.get("pt_garages") or "").strip() if isinstance(f.get("pt_garages"), str) else ""
+    parking = _parking_from_garage_text(garage_txt)
 
     # ── location ── city (Arabic) → English; region DERIVED from the city.
     city_ar = (f.get("city") or "").strip()
