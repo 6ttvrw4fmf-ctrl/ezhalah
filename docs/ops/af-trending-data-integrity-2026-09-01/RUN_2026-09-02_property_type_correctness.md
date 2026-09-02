@@ -111,12 +111,11 @@ antipattern this audit exists to remove, and the one that produced the `property
 - **`jurash.floor_number`** — yesterday's OPEN item, now closed and production-verified: 5 of 11
   rows carry floor values 2–3.
 
-## Barriers added (mutation-proven 10/10)
+## Barriers added (mutation-proven 6/6)
 
 | barrier | proves | mutations |
 |---|---|---|
-| `verify-af-question-gate-is-one-predicate.ts` | R2.1.1 executed over 93 cells × 9 ids; no question may carry a private gate; **and a second type→macro map can never grow back** beside the registry | 5/5 |
-| `verify-af-answers-die-with-their-scope.ts` | every named transition + **3,588 ordered cohort pairs**; SAFETY *and* LIVENESS (so a prune-everything cannot pass); executes the real `mergeConversationState` | 5/5 |
+| `verify-af-question-gate-is-one-predicate.ts` | R2.1.1 executed over 93 cells × 9 ids; no question may carry a private gate; a second type→macro map can never grow back; **and `bothDeals` certifies exactly like `dealCombined`** | 6/6 |
 | `verify-af-property-type-differential.ts` | 157/157 certified cohorts, exact ID sets, self-configuring from the live catalog | live |
 | `verify-af-stale-predicate-live.ts` | a real browser type change, asserting the request body | live |
 
