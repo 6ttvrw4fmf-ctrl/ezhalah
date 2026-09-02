@@ -47,7 +47,15 @@ check("AccountMenu never branches on method === 'phone'", !/'phone'/.test(menu))
 check('AccountMenu still shows the locked provider row', /Google Account/.test(menu) && /Apple Account/.test(menu));
 
 // ── 5. THE SUPPORTING DATA AND COPY ARE GONE TOO ───────────────────────────────
-check('the country/prefix table is deleted', !existsSync('src/data/countries.ts'));
+// The country/prefix table is kept ON DISK but must be imported by NOTHING. (Deleting it tripped
+// preflight's approved-baseline deletion guard — run 33656985287 — which cannot tell a dead data
+// table from an approved screen. The invariant that matters is that no code path reaches it.)
+{
+  const importers = execSync(`grep -rlE "data/countries" src/ || true`).toString().trim();
+  check('the country/prefix table is imported by nothing in src/', importers === '', importers);
+  check('the country/prefix table is marked retired at its head',
+    !existsSync('src/data/countries.ts') || /RETIRED, KEPT ON DISK, IMPORTED BY NOTHING/.test(readFileSync('src/data/countries.ts', 'utf8')));
+}
 const i18n = readFileSync('src/i18n.tsx', 'utf8');
 for (const key of ['Enter the code', 'We sent a 6-digit code on WhatsApp to', 'Resend code on WhatsApp',
                    'Phone number', 'Phone Number', 'Please enter a valid phone number.',
