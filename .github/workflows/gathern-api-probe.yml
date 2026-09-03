@@ -1,0 +1,38 @@
+# Gathern per-unit API discriminator (owner-requested, 2026-09-03) -- see
+# scrapers/gathern/probe_unit_api.py for the full context.
+#
+# READ-ONLY RECONNAISSANCE. No database credentials are provided to this job at all, so it cannot
+# write listing state even by accident: no SUPABASE_URL, no SUPABASE_SERVICE_ROLE_KEY. It fetches a
+# bounded set of URLs from the host our crawl already reaches every day and prints a table.
+#
+# It runs in CI rather than from an audit container because the audit container's egress policy
+# blocks msapi.gathern.co and api.gathern.co, while the GitHub Actions runner reaches them daily
+# (12/12 ok gathern crawls straight through the 09-01..09-03 web-host block).
+#
+# Do NOT add a schedule. Dispatch-only, on demand, like wasalt-proxy-diagnostic.yml.
+
+name: Gathern per-unit API probe
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: gathern-api-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Does a per-unit endpoint exist, and does it discriminate?
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Probe (read-only, no DB credentials in scope)
+        run: exec python -m scrapers.gathern.probe_unit_api

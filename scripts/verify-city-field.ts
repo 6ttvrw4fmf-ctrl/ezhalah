@@ -143,7 +143,13 @@ check("locations.ts's city pool fetch is scoped by deal via top_cities_by_deal_a
 check('locations.ts no longer reads the global, deal-blind city_listing_counts_ar view for the field pool', !locationsSrc.includes(".from('city_listing_counts_ar')"));
 // 2026-07-20: district_options_ar now also takes p_category — a live scope-divergence check proved
 // Category matters more for districts than cities, so District (unlike City) is Category+Deal aware.
-check('district_options_ar RPC calls now pass p_deal AND p_category (district Top-6 is Category+Deal-scoped, unlike the Deal-only city one)', /\.rpc\('district_options_ar', \{ p_city_id: cityId, p_deal: dealAr\(deal\), p_category: category \}\)/.test(locationsSrc));
+check('district_options_ar RPC calls now pass p_deal AND p_category (district Top-6 is Category+Deal-scoped, unlike the Deal-only city one)', /\.rpc\('district_options_ar', \{ p_city_id: cityId, p_deal: dealAr\(deal\), p_category: category, \.\.\.\(scope \?\? \{\}\) \}\)/.test(locationsSrc));
+// 2026-09-03: the LAST-RESORT fallback widens the PERIOD but must never widen the TABLE SCOPE —
+// dropping p_tables there would silently restore the over-promise (district counts describing
+// platforms Search excludes) inside an error path, where a fallback looks like a success.
+check('the last-resort district fallback keeps the table scope while it drops the period',
+  /p_category: category, \.\.\.\(scope \?\? \{\}\) \}\)/.test(locationsSrc)
+  && /Object\.assign\(args, scope \?\? \{\}\);/.test(locationsSrc));
 
 check('index.tsx no longer imports the old Place-based combined-field helpers (matchLocations/placeLabel/placeTitle/placeSub/placeIcon/placeKey/resolveLocation)', [
   'matchLocations', 'placeLabel', 'placeTitle', 'placeSub', 'placeIcon', 'placeKey', 'resolveLocation',
