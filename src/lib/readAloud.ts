@@ -27,7 +27,8 @@
 // speakReadAloud's return value) instead of ever handing Arabic text to a non-Arabic voice.
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
-import { VoiceQuality, type Voice } from 'expo-speech';
+import { type Voice } from 'expo-speech';
+import { pickBestArabicVoice, shouldForcePauseFallback } from '@/lib/readAloudVoice';
 
 const AR_LANG = 'ar-SA';
 // CHATGPT-LIKE PACING (owner 2026-08-19 — "don't assume slower is correct, compare against
@@ -70,21 +71,14 @@ let voiceCheckExhausted = false;
 // (4) any Arabic voice at all beats none. Scored (weights 4/2/1) rather than chained .find()s so a
 // voice strong on more than one axis (a local, Enhanced-quality, exact ar-SA voice, when a device has
 // one) always wins outright, while still keeping exact-locale worth more than local+quality combined.
+// The scoring itself now lives in `lib/readAloudVoice.ts`, import-free, so a barrier can EXECUTE the
+// real formula. It could not before: this module imports expo-speech and react-native, so
+// `verify-read-aloud-contract.ts` carried a hand-written `pickBestArabicReplica()` and asserted
+// against that — faithful exactly until someone edits one copy and not the other, after which the
+// barrier proves the OLD formula in green forever. Same split, and same reason, as
+// `lib/supportDraft.ts` vs `lib/support.ts`.
 function pickBestArabic(voices: Voice[]): Voice | null {
-  const norm = (lang?: string | null) => (lang ?? '').toLowerCase().replace('_', '-');
-  const arabic = voices.filter((v) => norm(v.language).startsWith('ar'));
-  if (!arabic.length) return null;
-  // `localService` only exists on expo-speech's WebVoice (web platform) — absent (undefined) on
-  // native, where every voice is already on-device by construction, so `!== false` scores it the
-  // same as an explicit local voice there too.
-  const score = (v: Voice) => {
-    let s = 0;
-    if (norm(v.language) === AR_LANG.toLowerCase()) s += 4; // exact ar-SA
-    if ((v as { localService?: boolean }).localService !== false) s += 2; // on-device — no network round trip, never slow/flaky
-    if (v.quality === VoiceQuality.Enhanced) s += 1; // higher-quality tier, when downloaded
-    return s;
-  };
-  return [...arabic].sort((a, b) => score(b) - score(a))[0];
+  return pickBestArabicVoice(voices as unknown as (Voice & { localService?: boolean })[]);
 }
 
 // Bounded poll, not a single voiceschanged await (owner 2026-08-22: "test the browser issue where
@@ -448,7 +442,12 @@ export function pauseReadAloud() {
       setTimeout(() => {
         // Still the same pause attempt and still meant to be paused, but the engine silently ignored
         // pause() (the iOS Safari bug this exists for) — force it the same way Android always does.
-        if (state === 'paused' && playToken === tokenAtPause && !window.speechSynthesis.paused) {
+        // The three conditions are `shouldForcePauseFallback`, executed by
+        // scripts/verify-read-aloud-voice-logic.ts — each one guards a different way of getting
+        // this wrong, and the file documents which.
+        if (shouldForcePauseFallback({
+          state, playToken, tokenAtPause, enginePaused: window.speechSynthesis.paused,
+        })) {
           playToken++;
           cancelSpeaking();
           pendingRestart = true;
