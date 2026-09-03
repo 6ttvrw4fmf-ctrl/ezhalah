@@ -238,6 +238,20 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
       // was missing until cnt_maid_room/cnt_driver_room were added to apartment_guided_counts_ar.
       { key: 'maid_room',   labelKey: 'Maid room',   count: (c) => c.cnt_maid_room },
       { key: 'driver_room', labelKey: 'Driver room', count: (c) => c.cnt_driver_room },
+      // The residential "rich" set (owner ruling 2026-09-02, GAP 1 of the matrix certification):
+      // certified for the chat path since 2026-08-31 (RESIDENTIAL_AMENITY_BASE) but never offered
+      // here, so a token the user could commit by sentence had no chip, no count and no sweep row.
+      // Each cnt_* below is computed inside the committed scope by apartment_guided_counts_ar
+      // (template row, migration 20260902220000) exactly like the chips above — a chip may only
+      // exist when its COUNT path exists. Order mirrors RESIDENTIAL_AMENITY_BASE.
+      { key: 'gym',                        labelKey: 'Gym',                        count: (c) => c.cnt_gym },
+      { key: 'pool',                       labelKey: 'Pool',                       count: (c) => c.cnt_pool },
+      { key: 'garden',                     labelKey: 'Garden',                     count: (c) => c.cnt_garden },
+      { key: 'balcony',                    labelKey: 'Balcony',                    count: (c) => c.cnt_balcony },
+      { key: 'laundry_room',               labelKey: 'Laundry room',               count: (c) => c.cnt_laundry_room },
+      { key: 'optical_fibers',             labelKey: 'Optical fibers',             count: (c) => c.cnt_optical_fibers },
+      { key: 'separate_electricity_meter', labelKey: 'Separate electricity meter', count: (c) => c.cnt_separate_electricity_meter },
+      { key: 'separate_water_meter',       labelKey: 'Separate water meter',       count: (c) => c.cnt_separate_water_meter },
     ];
     // Villa-form chips (2026-08-16): aqar villa ads carry مدخل سيارة and صرف صحي checkboxes the
     // apartment forms don't — both near-perfect two-sided splits (buy car entrance 5,594/5,943,

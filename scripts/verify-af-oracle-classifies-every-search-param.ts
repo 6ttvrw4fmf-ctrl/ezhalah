@@ -76,6 +76,9 @@ function balancedFrom(src: string, anchor: string, open: string, close: string):
 
 const REGIONS: [string, string][] = [
   ['rpcFilterParams()', 'function rpcFilterParams('],
+  // The AF half of the results request comes from the ONE shared builder since 2026-09-02 (the
+  // baseRpcParams literal spreads it instead of re-typing its 11 keys), so its keys are read here.
+  ['rpcAdvancedFilterParams()', 'export function rpcAdvancedFilterParams('],
   ['resolveSearchScope()', 'export async function resolveSearchScope('],
   ['baseRpcParams literal', 'const baseRpcParams = {'],
   ['location_search_candidates_ar call site', "supabase.rpc('location_search_candidates_ar'"],

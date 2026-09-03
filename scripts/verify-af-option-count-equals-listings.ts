@@ -22,13 +22,13 @@
 //   - the client never sends an empty array for p_directions, which fails CLOSED (documented at
 //     docs/AF_COHORT_LEDGER.md:138) and would hand the user an honest-looking but wrong empty page.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from './lib/stripComments.ts';
+import { loadLifted, buildMatrix, recorder } from './lib/afMatrix.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
-const stripComments = (s: string) =>
-  s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/^\s*\/\/.*$/gm, '');
 
 let failed = 0;
 const check = (ok: boolean, msg: string, extra = '') => {
@@ -36,12 +36,19 @@ const check = (ok: boolean, msg: string, extra = '') => {
   else { console.log(`  FAIL  ${msg}${extra ? ` — ${extra}` : ''}`); failed++; }
 };
 
-// The migration that carries the sweep's option table. Read the LATEST one that defines it, so a
-// later edit to the option list is what this checks against.
-const SWEEP_MIGRATION = 'supabase/migrations/20260902003701_af_option_truth_sweep_slicing.sql';
-const sweep = read(SWEEP_MIGRATION);
+// EVERY migration that touches the sweep, oldest → newest, concatenated. The first version of
+// this file hard-coded ONE migration under the comment "read the LATEST one that defines it" —
+// and two later migrations (025807, 030143) had already rewritten the function through replace()
+// needle-edits, so an option row added there would never have been seen. A needle-edit does not
+// carry the whole option table, so the union over every definer is what the deployed body holds.
+const SWEEP_MIGRATIONS = readdirSync(join(root, 'supabase/migrations'))
+  .filter((f) => f.endsWith('.sql') && read(`supabase/migrations/${f}`).includes('ops_af_option_truth_sweep'))
+  .sort();
+const SWEEP_MIGRATION = `supabase/migrations/${SWEEP_MIGRATIONS[SWEEP_MIGRATIONS.length - 1]}`;
+const sweep = SWEEP_MIGRATIONS.map((f) => read(`supabase/migrations/${f}`)).join('\n');
+check(SWEEP_MIGRATIONS.length >= 4, `the sweep's migrations were found (${SWEEP_MIGRATIONS.length}: ${SWEEP_MIGRATIONS.join(', ')})`);
 const clause = read('sql/mirrors/af_eligibility_clause.sql');
-const advanced = stripComments(read('src/data/advancedFilters.ts'));
+const advanced = stripComments(read('src/data/advancedFilters.ts'));   // question ids only (§3)
 const remote = stripComments(read('src/data/remote.ts'));
 
 // ── 1. THE SWEEP IS REAL AND STILL SHAPED THE WAY ITS PROOF DEPENDS ON ────────────────────────
@@ -70,13 +77,26 @@ const remote = stripComments(read('src/data/remote.ts'));
   );
   check(sweptTokens.size >= 10, `the sweep applies a plausible number of amenity tokens (${sweptTokens.size})`);
 
-  // Chip keys offered by the AF amenities question, read from its own defs/push list.
-  const amenBlock = advanced.slice(
-    advanced.indexOf('const AMENITIES_QUESTION'),
-    advanced.indexOf('const BATHROOMS_QUESTION'),
-  );
-  const chipKeys = [...amenBlock.matchAll(/key:\s*'([a-z_]+)'/g)].map((m) => m[1]);
-  check(chipKeys.length >= 7, `found the AF amenity chip keys (${chipKeys.length})`, chipKeys.join(','));
+  // Chip keys the amenities card can OFFER, on ANY certified cohort — by EXECUTING the real
+  // AMENITIES_QUESTION.resolveOptions() over the whole matrix (scripts/lib/afMatrix.ts), never by a
+  // regex over `key: '…'` text: a chip pushed from a COHORT_CHIPS list or a helper would have been
+  // invisible to the literal scan, and a decoy string would have satisfied it.
+  const L = await loadLifted(root);
+  const rec = recorder();
+  const cells = await buildMatrix(L, { guided: rec.row, age: rec.row });
+  const chipKeys = [...new Set(cells.flatMap((c) =>
+    c.fields.filter((f) => f.question.id === 'amenities').flatMap((f) => f.options.map((o) => o.key))))].sort();
+  // …and the COLUMN each chip reads (recorded by executing the card on a recorder row) must be the
+  // column the sweep compares for that token — a chip reading cnt_pool under key gym would pass the
+  // key check and prove the wrong number. Pairs come from the sweep's own option rows.
+  const sweptCol = new Map([...sweep.matchAll(/\('amenity:([a-z_]+)','(cnt_[a-z_0-9]+)'/g)].map((m) => [m[1], m[2]]));
+  const chipCol = new Map(cells.flatMap((c) =>
+    c.fields.filter((f) => f.question.id === 'amenities').flatMap((f) => f.options.map((o) => [o.key, String(o.count)] as const))));
+  for (const [k, col] of chipCol) {
+    if (k === 'furnished') continue;
+    check(sweptCol.get(k) === col, `AF chip "${k}" reads ${col}, and the sweep proves that same column (${sweptCol.get(k) ?? 'no row'})`);
+  }
+  check(chipKeys.length >= 12, `found the AF amenity chip keys by executing the card over every cohort (${chipKeys.length})`, chipKeys.join(','));
 
   for (const k of chipKeys) {
     if (k === 'furnished') {
@@ -143,7 +163,12 @@ const remote = stripComments(read('src/data/remote.ts'));
 // direction chip must omit the param, never pass []. Both call sites are guarded on `.length`.
 {
   const sends = [...remote.matchAll(/\.\.\.\((.{0,60}?)\?\s*\{\s*p_directions:/g)].map((m) => m[1]);
-  check(sends.length >= 2, `every p_directions call site is a guarded spread (${sends.length} found)`);
+  // ONE call site since 2026-09-02: rpcAdvancedFilterParams() is the only place that writes
+  // p_directions — the results path's hand-typed second copy was folded into the builder. A second
+  // literal appearing again would be a hand copy coming back, which is its own finding.
+  const literals = (remote.match(/\bp_directions\s*:/g) ?? []).length;
+  check(sends.length === 1 && literals === 1,
+    `p_directions is written in exactly ONE guarded spread — the shared builder (${sends.length} guarded, ${literals} literal)`);
   for (const g of sends) {
     check(/directions\?\.length/.test(g),
       'the p_directions spread is gated on .length, so [] is never sent', g.trim());

@@ -515,6 +515,17 @@ async function runAfReentryJourney(j: {
       check(`${name}: the Trending row advertised ${advertised} and clicking it delivered exactly that`,
         advertised === reentry.total, `advertised=${advertised} landed=${reentry.total}`);
     }
+    // …AND THAT NUMBER IS DB TRUTH (added 2026-09-02). advertised == landed is RPC-vs-RPC: both are
+    // built from the same clause, so a predicate wrong in the same way on both sides still agrees.
+    // The landed request is the one body here that carries a city AND the committed AF answer, so
+    // it is what the independent oracle can price: with the check above, the Trending row itself
+    // is then pinned to canonical truth, not merely to its own click-through.
+    if (reentry) {
+      const o = await oracleCount(reentry.body);
+      if (o.count == null) { unverified++; console.log(`SKIP  ${name}: oracle declined the re-entry body — ${o.unhandled[0]}`); }
+      else check(`${name}: the landed (and advertised) count equals INDEPENDENT DB truth`, o.count === reentry.total,
+        `oracle=${o.count} landed=${reentry.total}`);
+    }
   } catch (e: any) {
     check(`${name}: journey completed without a harness error`, false, e.message);
   } finally {

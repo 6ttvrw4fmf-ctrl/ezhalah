@@ -395,6 +395,14 @@ const AR: Record<string, string> = {
   'Car entrance': 'مدخل سيارة',
   'Sewage connection': 'صرف صحي',
   'Water supply': 'توفر الماء',
+  // Residential rich amenity chips (owner 2026-09-02). 'Gym' / 'Pool' already live in the interview
+  // block below with the same meaning — not redeclared here.
+  'Garden': 'حديقة',
+  'Balcony': 'بلكونة',
+  'Laundry room': 'غرفة غسيل',
+  'Optical fibers': 'ألياف بصرية',
+  'Separate electricity meter': 'عداد كهرباء مستقل',
+  'Separate water meter': 'عداد ماء مستقل',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
   // The Advanced Filter's SCOPE steps (owner 2026-08-23) — asked before any certified question when
   // the user has chosen only a category (or only a group). The option LABELS reuse the group/type

@@ -21,7 +21,6 @@ verify-af-cross-round-carry.ts
 verify-af-emoji-summary.ts
 verify-af-footer-onscreen.ts
 verify-af-group-cohort-coverage.ts
-verify-af-independent-oracle.ts
 verify-af-min-useful-questions-gate.ts
 verify-af-multiselect-combining-semantics.ts
 verify-af-narrowing-gate.ts

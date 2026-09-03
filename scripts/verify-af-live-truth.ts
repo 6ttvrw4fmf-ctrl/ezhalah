@@ -350,6 +350,15 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // number; the assertion itself is unchanged and now cannot pass on a chip that never resolves.
     const afterSelect = await readCardUntil((s) => s.chip != null && s.chip !== baselineChip);
     check(`${name}: count changed after selecting an answer`, afterSelect.chip != null && afterSelect.chip !== baselineChip, `base=${baselineChip} afterSelect=${afterSelect.chip}`);
+    // THE CARD'S NUMBER IS THE COUNT RPC's cnt_selected (added 2026-09-02). lastCountResp had been
+    // captured since 2026-08-24 and never READ — the chip was compared only with itself (changed,
+    // Skip-equal, Back-equal), so a card rendering a stale or client-derived number would have
+    // passed. Selecting an answer fires exactly one count call (fetchGuidedLiveCount → cnt_selected);
+    // the last captured response must be that call, and its cnt_selected must be the chip.
+    await page.waitForTimeout(600);
+    check(`${name}: the card's count IS the count RPC's cnt_selected`,
+      lastCountResp?.[0]?.cnt_selected != null && Number(lastCountResp[0].cnt_selected) === afterSelect.chip,
+      `card=${afterSelect.chip} rpc cnt_selected=${lastCountResp?.[0]?.cnt_selected}`);
     // ARM THE CAPTURE **BEFORE** THE COMMITTING CLICK, never after it (fix 2026-08-28). Confirming
     // the last useful question can end the round on its own and fire the final search inside the
     // 1200 ms below; the reset used to sit after this block, so that search was captured and then

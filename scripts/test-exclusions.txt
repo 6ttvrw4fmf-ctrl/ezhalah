@@ -12,6 +12,8 @@
 # PRs whenever production is momentarily unhealthy — turning a required gate into noise.
 
 verify-af-agent-cta-live.ts            | .github/workflows/af-live-truth-check.yml            | drives a real browser against production
+verify-af-independent-oracle.ts        | .github/workflows/af-live-truth-check.yml            | 9 hand-written PostgREST predicates + the UNKNOWN partition against production — was a live production call inside the REQUIRED npm test (the pattern #1486 removed elsewhere); moved 2026-09-02
+verify-af-matrix-truth-live.ts         | .github/workflows/af-live-truth-check.yml            | the WHOLE certified AF matrix (every scope × mode × field × option) against production RPCs and independent PostgREST truth on canonical columns; its offline twin verify-af-matrix-truth.ts stays in npm test
 verify-af-live-truth.ts                | .github/workflows/af-live-truth-check.yml            | drives a real browser against production
 verify-trending-live-four-way-truth.ts | .github/workflows/af-live-truth-check.yml            | drives a real browser against production
 verify-af-property-type-differential.ts| .github/workflows/af-live-truth-check.yml            | sweeps every certified cohort against production (RPC vs independent DB truth)
