@@ -3,12 +3,17 @@
 //   node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/gen-searchable-tables.ts
 //   node ... scripts/gen-searchable-tables.ts --check     # print the diff, write nothing
 //
-// THE INVENTORY IS THE UNION ARMS OF active_listing_ids_v2 — the matview sync_search_listings_ar
-// reads to build search_listings_ar. A table is production-searchable exactly when it is an arm:
-// that is what "its rows can reach the search index" means. Deliberately NOT
-// `select distinct source_table from search_listings_ar`, which answers the different and much
-// worse question "which tables have rows RIGHT NOW" — a platform whose active rows momentarily hit
-// zero would leave the inventory and then silently fail to come back.
+// THE INVENTORY IS A JOIN OF TWO PRODUCTION FACTS:
+//   · the union arms of active_listing_ids_v2 — the matview sync_search_listings_ar reads to build
+//     search_listings_ar. Being an arm is what "this table's rows CAN reach the search index" means.
+//   · platform_registry.status <> 'retired' — whether the source is MEANT to be searched at all.
+//     platform_registry's own note on `deal` reads "deprecated 2026-06-26, excluded from search".
+// `dormant` is deliberately NOT excluded: a dormant scraper is a paused CRAWL, not withdrawn
+// inventory (muktamel is dormant and has 523 live searchable rows).
+//
+// Deliberately NOT `select distinct source_table from search_listings_ar`, which answers the
+// different and much worse question "which tables have rows RIGHT NOW" — a platform whose active
+// rows momentarily hit zero would leave the inventory and then silently fail to come back.
 //
 // NEEDS A PRIVILEGED CONNECTION (pg_get_viewdef on a matview). This is a developer tool run by hand
 // when a platform is activated, not a barrier: the BARRIER is
@@ -31,10 +36,14 @@ if (!DB) {
 // The arms, straight out of the live matview definition. `psql -At` so the output is one bare name
 // per line with no formatting to parse around.
 const SQL = `
-  select distinct regexp_replace(m[1], '^public\\.', '') as t
-  from regexp_matches(
-         pg_get_viewdef('public.active_listing_ids_v2'::regclass),
-         '(?:from|FROM)\\s+((?:public\\.)?[a-z0-9_]+_(?:residential|commercial)_listings)', 'g') m
+  with arms as (
+    select distinct regexp_replace(m[1], '^public\\.', '') as t
+    from regexp_matches(
+           pg_get_viewdef('public.active_listing_ids_v2'::regclass),
+           '(?:from|FROM)\\s+((?:public\\.)?[a-z0-9_]+_(?:residential|commercial)_listings)', 'g') m)
+  select t from arms
+  where split_part(t, '_', 1) not in (
+          select platform from public.platform_registry where status = 'retired')
   order by 1`;
 
 const out = execFileSync('psql', [DB, '-At', '-c', SQL], { encoding: 'utf8' });
