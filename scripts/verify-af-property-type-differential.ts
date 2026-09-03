@@ -156,7 +156,10 @@ const DEAL_OF: Record<string, { p_deal: string; p_rent_period?: string }> = {
 // Scoping to a region disables the carve-out by construction AND is the realistic user journey.
 // The location-less case is not thereby ignored: verifyNationwideCarveOut() below covers it with a
 // direct SQL model of the clause, which CAN express search_row_price_gated().
-const REGION_IDS = [1];   // منطقة الرياض — the largest region, so cohorts stay non-empty
+// منطقة الرياض — the largest region, so cohorts stay non-empty — is the DEFAULT and what CI runs.
+// AF_PTD_REGIONS lets a certification run the same sweep against other regions (2 = مكة, 5 = الشرقية)
+// without editing the file; unset, the behaviour is exactly as before.
+const REGION_IDS = (process.env.AF_PTD_REGIONS ?? '1').split(',').map((s) => Number(s.trim())).filter(Number.isFinite);
 
 /** The request body the app would send for this scope — same shape as remote.ts builds. */
 function bodyFor(cleanType: string, leg: string, answer: Record<string, unknown>) {

@@ -180,3 +180,30 @@ def test_amenity_flags_self_checkin_never_becomes_private_entrance():
     flags = _amenity_flags(["دخول ذاتي"])
     assert "private_entrance" not in flags
     assert flags == {"elevator": False, "parking": False, "driver_room": False}
+
+
+# ── Tri-state amenity flags (2026-09-02) ──────────────────────────────────────────────────────────
+# A unit whose list payload carries NO features[] at all has said nothing about its amenities: its
+# three mapped flags must be UNKNOWN (None), never a confident "no". A PUBLISHED list — even an
+# empty one — that lacks the label is still a real negative.
+import pathlib as _pathlib
+
+
+def test_no_published_feature_list_is_unknown_not_false():
+    assert _amenity_flags(None) == {"elevator": None, "parking": None, "driver_room": None}
+
+
+def test_published_empty_list_is_a_real_negative():
+    assert _amenity_flags([]) == {"elevator": False, "parking": False, "driver_room": False}
+
+
+def test_published_list_with_label_is_true():
+    flags = _amenity_flags(_amenity_labels(_FEATURES_ITEM0))
+    assert flags["elevator"] is True and flags["parking"] is False and flags["driver_room"] is False
+
+
+def test_map_listing_wires_feature_presence_into_flags():
+    src = _pathlib.Path(__file__).resolve().parents[2].joinpath("gathern", "run.py").read_text(encoding="utf-8")
+    assert 'features_published = it.get("features") is not None' in src
+    assert "_amenity_flags(amenity_labels if features_published else None)" in src
+    assert "**_amenity_flags(amenity_labels)," not in src, "flags no longer tri-state at the mapping site"

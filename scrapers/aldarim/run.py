@@ -167,6 +167,23 @@ def _flag(v: Any) -> Optional[bool]:
     return bool(v)
 
 
+def _count_flag(v: Any) -> Optional[bool]:
+    """Aldarim's room/spot COUNTS (parking_spots, elevators, maid_rooms, …) → true / false / UNKNOWN.
+
+    Same contract as `_flag`, for count-shaped keys: a published count > 0 is True, a published
+    "0" is a real negative and stays False, and a null/absent/unparseable count is UNKNOWN (None)
+    — never a manufactured "no". Found 2026-09-02: the previous `(_int(x) or 0) > 0` stored
+    `false` on every row whose count aldarim had not published.
+    """
+    if v is None or isinstance(v, bool) or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        n = int(float(str(v).strip()))
+    except (TypeError, ValueError):
+        return None      # unparseable is UNKNOWN, not "no" (and `_int` treats 0 as falsy — avoid it)
+    return n > 0
+
+
 # Ageless types never carry a property_age even when the seller typed one (mizlaj PR#265 precedent).
 AGELESS_TYPES = {"Residential Land", "Commercial Land", "Gas Station"}
 
@@ -316,11 +333,16 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         # kitchen keeps its OWN resolver (PR#455): a non-zero `kitchens` COUNT proves a kitchen even
         # when the flag reads 0, which _flag alone cannot express.
         "kitchen":          _kitchen_state(L.get("is_kitchen_installed"), L.get("kitchens")),
-        "parking":          (_int(L.get("parking_spots")) or 0) > 0,
-        "elevator":         (_int(L.get("elevators")) or 0) > 0,
-        "maid_room":        (_int(L.get("maid_rooms")) or 0) > 0,
-        "driver_room":      (_int(L.get("driver_rooms")) or 0) > 0,
-        "balcony_terrace":  (_int(L.get("balconies")) or 0) > 0,
+        # COUNT-backed flags get the same tri-state contract as the 0/1 flags above (2026-09-02):
+        # `(_int(x) or 0) > 0` collapsed a null/absent COUNT into a confident "no" — the exact
+        # absence→False class `_flag` was written to stop, left behind on the count fields. Measured
+        # over the active aldarim inventory: parking_spots null on 8 rows, elevators 8, maid_rooms 7,
+        # driver_rooms 7 — every one stored `false`. A published "0" is still a real negative.
+        "parking":          _count_flag(L.get("parking_spots")),
+        "elevator":         _count_flag(L.get("elevators")),
+        "maid_room":        _count_flag(L.get("maid_rooms")),
+        "driver_room":      _count_flag(L.get("driver_rooms")),
+        "balcony_terrace":  _count_flag(L.get("balconies")),
         # (no detail_enriched — that's a Wasalt-only enrichment flag; Aldarim's API is already complete.)
         # ── Arabic-native (additive, shadow) + complete-source capture ──────────
         "city_ar": city_ar,
