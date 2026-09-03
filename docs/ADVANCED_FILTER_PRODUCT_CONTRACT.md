@@ -550,6 +550,49 @@ AF-specific consequences:
 
 ---
 
+## 12A. The returned card must SHOW what the user selected (owner rule, 2026-09-03)
+
+Owner, verbatim: *"Whatever the user selected in Advanced Filter must be visibly and truthfully
+shown on the returned property card. This applies to EVERY certified AF field, not only amenities."*
+
+The rule is safe to execute by construction: every AF predicate is strict and NULL-excluding
+(§2.5), so **every returned listing provably carries a real, published value for every active AF
+field**. Echoing that value on the card therefore invents nothing — it reads back the row's own
+column. That is the whole point: the user asked for a gym, so the card must say gym.
+
+- **R12A.1** — For every ACTIVE (committed, not skipped, not removed) AF answer, the card of every
+  returned listing must display that field with the listing's OWN value for it, visible without
+  expanding, scrolling a sub-panel, or opening the source. Applies to all certified fields —
+  `rnpl`, `property_age`, `amenities`, `bathrooms`, `furnished`, `street_width`, `direction`,
+  `rating`, `unit_subtype` — not only amenities.
+- **R12A.2** — The value shown is the LISTING's, never the filter's. A «10+ سنوات» answer shows the
+  listing's actual age, not the bucket label alone; a bathrooms «4+» answer shows the listing's
+  actual bathroom count.
+- **R12A.3** — Truthful or absent, never assumed. If a field is somehow absent on a returned row
+  the card shows nothing for it — and that row is itself a §2.5 violation to be investigated, never
+  papered over with a guessed value. UNKNOWN is never rendered as a claim (R13.3).
+- **R12A.4** — A fixed display cap must not hide a selected field. Where a card ranks features by a
+  static priority and shows only the first N, every ACTIVE AF selection is pinned into the visible
+  set ahead of unselected features.
+- **R12A.5** — The card's vocabulary must cover the certified vocabulary. Every certified amenity
+  token must be renderable; a token the RPC can filter on but the card cannot draw is a defect of
+  this rule, not a missing nice-to-have.
+- **R12A.6** — Barrier-protected like every other rule here: a live journey proves selection →
+  visible-on-card for each certified field, and a static barrier proves the card's vocabulary is a
+  superset of the certified token set, so adding a token to the filter without adding it to the
+  card fails CI.
+
+**Status at the time this rule was recorded (2026-09-03, evidence-backed, NOT yet satisfied):**
+`src/components/ResultCard.tsx` shows bathrooms, RNPL and (Gathern-only) rating; its `FEATURE_META`
+covers 14 amenity labels while `RESIDENTIAL_AMENITY_BASE` certifies 17 + 2 villa-only, so
+`gym`, `pool`, `garden`, `driver_room`, `car_entrance`, `separate_electricity_meter` and
+`separate_water_meter` are filterable but undrawable; features are capped at 6 by a static
+priority; and `property_age`, `furnished`, `street_width` and `direction` surface only inside the
+Wasalt-style "Additional Information" panel, so most platforms' cards show them nowhere. This is an
+OPEN P1 against R12A, not a passing rule.
+
+---
+
 ## 13. What AF must NEVER do
 
 - **R13.1** — Never ask a Normal-Filter question (bedrooms, price, area, city, deal, period). Those
@@ -565,6 +608,8 @@ AF-specific consequences:
 - **R13.10** — Never offer a round that would immediately have nothing to ask.
 - **R13.11** — Never turn our own outage into a statement about the data. A timeout, error or
   blocked request is something WE failed to learn, never something the source said.
+- **R13.12** — Never return a card that hides what the user selected. An active AF answer the card
+  does not show is a silent claim the user cannot check (§12A, owner 2026-09-03).
 
 ---
 

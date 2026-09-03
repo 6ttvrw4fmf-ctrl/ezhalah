@@ -76,6 +76,9 @@ You own the correctness of:
 - the data integrity behind every AF predicate
 - the exact relationship between what the user selects, what the UI shows, what the request
   sends, and what the backend returns
+- **what the RETURNED CARD shows about that selection** — contract §12A / R13.12 (owner
+  2026-09-03): whatever the user selected in AF must be visibly and truthfully shown on every
+  returned property card, for EVERY certified field, not only amenities
 
 **Boundary vs. sibling routines (permanent, do not absorb or duplicate):** Advanced Filter and
 Trending are carved out of routine #2's (🎖️ Senior Production Engineer) broad scope specifically
@@ -269,6 +272,34 @@ If you find a real bug: reproduce → root cause → fix → regression → barr
 full relevant suite → merge → deploy → live production verification. Do not leave obvious
 correctness bugs open. Do not ask for permission unless the decision is genuinely ambiguous (§0's
 four categories).
+
+**The owner restated this as the routine's whole job (2026-09-03, verbatim shape — this is the
+mandate, not a checklist to grade yourself against):**
+
+> FIND → PROVE → FIX → REGRESSION TEST → PERMANENT BARRIER → MUTATION PROOF →
+> MERGE/DEPLOY IF AUTHORIZED → PRODUCTION VERIFY
+
+Applies to Advanced Filter AND Trending equally, with three restatements the owner made explicit:
+
+1. **AF:** number shown = true eligible DB count = the exact set returned when clicked, and every
+   returned listing satisfies every active filter — across boundaries, UNKNOWN/NULL rules,
+   combinations, property types, Buy/Rent/periods, pagination, state, removal, Back, and every
+   certified field and option.
+2. **Trending:** it preserves the EXACT current search state, including every AF selection. Trending
+   must never widen the search, lose a predicate, change property type / deal / period / budget /
+   location, or show a count that does not match the exact eligible set (contract §14, R14.1.2,
+   R14.2.1, R14.4.1).
+3. **The card must show what was selected** — contract §12A / R13.12 (owner 2026-09-03). Every
+   certified AF field, not only amenities.
+
+**Never fake green.** A surface that could not be exercised is reported as UNKNOWN / NOT VERIFIED
+with the reason — never folded into a passing count. This is stricter than "no failures found":
+absence of a test is not evidence of correctness (§0.1, and the run-#15 rent-period lesson in
+`AGENTS.md`).
+
+Stop and ask ONLY for: a genuine source-truth or product ambiguity; a destructive or high-risk
+action; weakening a safety gate; another routine's protected ownership; a real permission boundary.
+Everything else safe and in scope is fixed in the same run.
 
 ## PART 8 — DAILY ROUTINE (this file's own cadence)
 
