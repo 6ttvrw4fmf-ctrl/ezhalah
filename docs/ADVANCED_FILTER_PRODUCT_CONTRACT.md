@@ -582,14 +582,28 @@ column. That is the whole point: the user asked for a gym, so the card must say 
   superset of the certified token set, so adding a token to the filter without adding it to the
   card fails CI.
 
-**Status at the time this rule was recorded (2026-09-03, evidence-backed, NOT yet satisfied):**
-`src/components/ResultCard.tsx` shows bathrooms, RNPL and (Gathern-only) rating; its `FEATURE_META`
-covers 14 amenity labels while `RESIDENTIAL_AMENITY_BASE` certifies 17 + 2 villa-only, so
+**Status when this rule was recorded (2026-09-03, morning — NOT yet satisfied):**
+`src/components/ResultCard.tsx` showed bathrooms, RNPL and (Gathern-only) rating; its `FEATURE_META`
+covered 14 amenity labels while `RESIDENTIAL_AMENITY_BASE` certifies 17 + 2 villa-only, so
 `gym`, `pool`, `garden`, `driver_room`, `car_entrance`, `separate_electricity_meter` and
-`separate_water_meter` are filterable but undrawable; features are capped at 6 by a static
-priority; and `property_age`, `furnished`, `street_width` and `direction` surface only inside the
-Wasalt-style "Additional Information" panel, so most platforms' cards show them nowhere. This is an
-OPEN P1 against R12A, not a passing rule.
+`separate_water_meter` were filterable but undrawable; features were capped at 6 by a static
+priority; and `property_age`, `furnished`, `street_width` and `direction` surfaced only inside the
+Wasalt-style "Additional Information" panel, so most platforms' cards showed them nowhere.
+
+**Status now (2026-09-03, afternoon — SHIPPED and production-verified):** the card carries a
+«مطابق لطلبك» evidence strip. Its source of truth is `af_canon`, a jsonb projection of the 28
+AF-relevant columns of the exact `search_listings_ar` row the predicate ran on, added to
+`location_search_candidates_ar` by migration `20260903154406_af_canon_on_results_rpc` (mirrored in
+`sql/mirrors/af_canon_select.sql`) and gated so a search carrying no AF answer pays none of its
+~598 bytes/row. `src/lib/afEvidence.ts` turns the active answers plus that row into chips — reading
+ONLY canonical columns, never `listing.features` (raw, NULL-coerced) — and renders every one of
+them, uncapped, so the `FEATURE_META` VISIBLE=6 cap can no longer hide a selection (R12A.4 is met
+by a strip that has no cap rather than by re-ranking that list). All 20 filterable amenity tokens
+are now drawable (R12A.5). Barriers: `scripts/verify-af-card-evidence.ts` (offline, in `npm test` —
+executes the registry, holds the SQL and the TypeScript to one contract, and fails CI if a token
+becomes filterable without becoming drawable) and `scripts/verify-af-card-evidence-live.ts` (a real
+browser against production, in `af-live-truth-check.yml`). See `docs/ops/AF_RATING_METHODOLOGY.md`
+and the R12A rows in `scripts/lib/afContractCoverage.ts` for the graded evidence.
 
 ---
 
