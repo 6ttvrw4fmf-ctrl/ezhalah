@@ -1171,6 +1171,46 @@ def upsert_nowaisiry_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("nowaisiry_commercial_listings", rows)
 
 
+def upsert_therc_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("therc_residential_listings", rows)
+
+
+def upsert_therc_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("therc_commercial_listings", rows)
+
+
+def upsert_aouj_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aouj_residential_listings", rows)
+
+
+def upsert_aouj_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aouj_commercial_listings", rows)
+
+
+def upsert_abralosol_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("abralosol_residential_listings", rows)
+
+
+def upsert_abralosol_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("abralosol_commercial_listings", rows)
+
+
+def upsert_arkaan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("arkaan_residential_listings", rows)
+
+
+def upsert_arkaan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("arkaan_commercial_listings", rows)
+
+
+def upsert_rawasidark_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("rawasidark_residential_listings", rows)
+
+
+def upsert_rawasidark_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("rawasidark_commercial_listings", rows)
+
+
 def upsert_october_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("october_residential_listings", rows)
 

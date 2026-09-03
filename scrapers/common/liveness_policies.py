@@ -96,10 +96,10 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abeea", "aldarim", "alhoshan", "alkhaas", "aqaratikom", "aqarcity", "aqargate",
-            "aqarmonthly", "eaqartabuk", "eastabha", "erapulse", "fursaghyr", "hajer", "jazwtn",
-            "jurash", "mizlaj", "mustqr", "nowaisiry", "october", "raghdan", "ramzalqasim",
-            "sadin", "sanadak", "satel", "souq24",
+            "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "aouj", "aqaratikom",
+            "aqarcity", "aqargate", "aqarmonthly", "arkaan", "eaqartabuk", "eastabha", "erapulse",
+            "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "mustqr", "nowaisiry", "october",
+            "raghdan", "ramzalqasim", "rawasidark", "sadin", "sanadak", "satel", "souq24", "therc",
         )
     },
 }

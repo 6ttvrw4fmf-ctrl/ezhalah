@@ -570,7 +570,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('al khaas') || s.includes('alkhaas')) return <Image source={ALKHAAS_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('abeea')) return <Image source={ABEEA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('jurash')) return <Image source={JURASH_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alnokhba')) return <Image source={ALNOKHBA_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('al nokhba') || s.includes('alnokhba')) return <Image source={ALNOKHBA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('gathern')) return <Image source={GATHERN_LOGO} style={card.hostBadge} contentFit="contain" />;
   // 2026-06 batch — text-chips until the user supplies logos.
   if (s.includes('deal')) return <Image source={DEALAPP_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -578,6 +578,11 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('pulse')) return <Image source={ERAPULSE_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('nowaisiry')) return <Image source={NOWAISIRY_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('october')) return <Image source={OCTOBER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('therc')) return <View style={[card.hostBadge, card.thercBadge]}><Text style={card.badgeText}>الخيار الصحيح</Text></View>;
+  if (s.includes('aouj')) return <View style={[card.hostBadge, card.aoujBadge]}><Text style={card.badgeText}>عوج</Text></View>;
+  if (s.includes('abralosol')) return <View style={[card.hostBadge, card.abralosolBadge]}><Text style={card.badgeText}>عبر الأصول</Text></View>;
+  if (s.includes('arkaan')) return <View style={[card.hostBadge, card.arkaanBadge]}><Text style={card.badgeText}>أركان</Text></View>;
+  if (s.includes('rawasidark')) return <View style={[card.hostBadge, card.rawasidarkBadge]}><Text style={card.badgeText}>رواسي دارك</Text></View>;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -615,13 +620,18 @@ function sourceHost(source: string): string {
   if (s.includes('al khaas') || s.includes('alkhaas')) return 'alkhaas.net';
   if (s.includes('abeea')) return 'abeea.com.sa';
   if (s.includes('jurash')) return 'jurash.sa';
-  if (s.includes('alnokhba')) return 'alnokhba-services.com';
+  if (s.includes('al nokhba') || s.includes('alnokhba')) return 'alnokhba-services.com';
   if (s.includes('gathern')) return 'gathern.co';
   if (s.includes('deal')) return 'dealapp.sa';
   if (s.includes('souq')) return '24.com.sa';
   if (s.includes('pulse')) return 'erapulse.sa';
   if (s.includes('nowaisiry')) return 'alnowaisiry.com';
   if (s.includes('october')) return '1october.com.sa';
+  if (s.includes('therc')) return 'therc.sa';
+  if (s.includes('aouj')) return 'aoujestates.com';
+  if (s.includes('abralosol')) return 'abralosol.com';
+  if (s.includes('arkaan')) return 'arkaanalaqar.com';
+  if (s.includes('rawasidark')) return 'rawasi-dark.com';
   return 'sa.aqar.fm';
 }
 
@@ -782,6 +792,11 @@ const card = StyleSheet.create({
   // 48×48 with a touch of internal padding feels right after the logo normalizer
   // (each logo file now has identical 6% built-in margin, so they all visually fill).
   hostBadge: { width: 48, height: 48 },
+  thercBadge: { borderRadius: 8, backgroundColor: '#1f5f8b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  aoujBadge: { borderRadius: 8, backgroundColor: '#8b5a1f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  abralosolBadge: { borderRadius: 8, backgroundColor: '#3f6b4a', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  arkaanBadge: { borderRadius: 8, backgroundColor: '#6b3a5f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  rawasidarkBadge: { borderRadius: 8, backgroundColor: '#2f5f6b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   aldarimBadge: { borderRadius: 8, backgroundColor: '#14506b', alignItems: 'center', justifyContent: 'center' },
   aqargateBadge: { borderRadius: 8, backgroundColor: '#0d6e63', alignItems: 'center', justifyContent: 'center' },
   hajerBadge: { borderRadius: 8, backgroundColor: '#6b4a2f', alignItems: 'center', justifyContent: 'center' },

@@ -119,6 +119,11 @@ jobs:
           # If this leg fails again DIRECT with a reset, set JAZWTN_PROXY_URL to a WORKING proxy
           # (verify the tunnel first) or re-retire — do not re-point it at the wasalt secret.
           - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
+          - { source: therc,       cmd: "python -m scrapers.therc.run --type all" }
+          - { source: aouj,        cmd: "python -m scrapers.aouj.run --type all" }
+          - { source: abralosol,   cmd: "python -m scrapers.abralosol.run --type all" }
+          - { source: arkaan,      cmd: "python -m scrapers.arkaan.run --type all" }
+          - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }
           # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
           # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
           # property-card markup); scrape_runs went from rows_seen=5 (2026-07-07) to
