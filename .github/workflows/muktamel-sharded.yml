@@ -57,7 +57,7 @@ jobs:
       fail-fast: false   # one blocked/slow shard must never cancel the other seven
       max-parallel: 8
       matrix:
-        shard: [0, 1]   # THROWAWAY PROBE: only 2 of 8 to measure concurrency ceiling, not merged
+        shard: [0]   # THROWAWAY PROBE: 1 shard, MUKTAMEL_WORKERS dropped 8->3, not merged
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -80,7 +80,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          MUKTAMEL_WORKERS: "8"
+          MUKTAMEL_WORKERS: "3"
         run: >-
           exec python -m scrapers.muktamel.run --type all
           --min-id ${{ github.event.inputs.min_id || '24000' }}
