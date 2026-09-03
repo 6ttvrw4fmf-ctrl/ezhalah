@@ -23,6 +23,19 @@ for bogus unit AND property ids, so a 200 alone proves nothing here. This qualif
 only if a real browser renders a genuine listing for ALIVE ids and something unambiguously
 not-a-listing for BOGUS ids.
 
+RESULT, measured 2026-09-03 23:30 UTC (run 33817754767, plain GitHub Actions egress, NO proxy).
+The browser DISCRIMINATES, cleanly, at the HTTP status line — the first channel that ever has:
+
+  ALIVE_FEED  5/5  status=200  html~250-358KB  notfound_ar=False  riyal=9-10  real Arabic unit titles
+  ABSENT_408  3/3  status=404  html~142KB      notfound_ar=True   riyal=0     title 'Gathern | جاذر إن'
+  BOGUS       3/3  status=404  html~142KB      notfound_ar=True   riyal=0     title 'Gathern | جاذر إن'
+
+Compare run #85, which measured this SAME host returning 200 for bogus ids to curl_cffi. The
+difference is not the site: it is the client. What curl_cffi reads as "404 = we were blocked" a real
+browser reads as "404 = no such unit", and the ALIVE cohort is the positive control that separates
+them. Adopting this as gathern's DIRECT oracle is an owner decision (reported 2026-09-03); until it
+is taken, the ABSENT_408 rows stay UNKNOWN — three rows agreeing is not 408 rows adjudicated.
+
 READ-ONLY. No database import, no credentials, no listing state. Prints a table and exits.
 
   python -m scrapers.gathern.probe_unit_browser
