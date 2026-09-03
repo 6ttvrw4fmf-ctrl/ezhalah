@@ -18,7 +18,7 @@ export default function Support() {
       <View style={[s.topBar, { paddingTop: insets.top + 8 }]}>
         <View style={{ flex: 1 }} />
         <Pressable onPress={() => router.back()} style={s.xBtn} hitSlop={8}>
-          <Ionicons name="close" size={20} color="#56635c" />
+          <Ionicons name="close" size={20} color={colors.body} />
         </Pressable>
       </View>
 
@@ -27,7 +27,7 @@ export default function Support() {
           <Text style={s.h}>{ti('Support')}</Text>
 
           <SupCard email="support@ezhalah.com" desc={ti('Questions about your account, searches, or technical issues.')} />
-          <SupCard email="info@ezhalah.com" desc={ti('Business inquiries, partnerships, media requests, and general information.')} />
+          <SupCard email="partners@ezhalah.com" desc={ti('Business inquiries, partnerships, media requests, and general information.')} />
 
           <View style={s.rt}>
             <Text style={s.rtH}>{ti('Response Time')}</Text>
