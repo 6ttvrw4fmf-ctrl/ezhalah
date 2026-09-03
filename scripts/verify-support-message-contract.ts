@@ -167,6 +167,13 @@ check('sign-out and account deletion both drop the held draft',
 // connection and try again" for both. Measured against production (route fulfilled with a real 429,
 // desktop): the connection copy rendered. That sends someone to fix a network that works and offers
 // a retry that cannot succeed until the hour rolls over — PART 5 shape 12.
+// The dialog's × needs a UNIQUE handle: AuthModal raises itself for signed-out visitors carrying
+// the same `accessibilityLabel={t('Close')}`, so a label-based locator picks ITS × sitting behind
+// this dialog — pointer-blocked, the click times out, and the ×-half of the journey quietly SKIPS
+// while reading as coverage. Losing the handle would restore that silence.
+check('the dialog\'s close control is addressable by testID, not only by an ambiguous label',
+  modal.includes('testID="info-modal-close"'));
+
 check('the form keeps WHY the send failed, not just that it did',
   /setFailure\(r\.reason === 'rate_limited' \? 'rate_limited' : 'failed'\)/.test(modal));
 check('a rate limit gets its own copy, and the connection copy stays for real failures',
