@@ -28,6 +28,39 @@ MIN_ALIVE_RATE_FOR_TRUST = 0.20
 MIN_PROBES_FOR_TRUST = 25
 
 
+# ── In-run positive control (canary) ────────────────────────────────────────────────────────────
+# The aggregate rate above is a LAGGING signal: it only condemns a run after the whole batch has
+# been probed, and on 2026-09-01 that meant a third of the damage was already decided by the time
+# the number existed. A canary asks the same question FIRST and on purpose: probe a handful of
+# listings the source itself has already proven alive, before touching the real worklist. If those
+# come back 404, the environment is lying and nothing else this run says can be believed.
+#
+# Sized as a MAJORITY rather than unanimity on purpose. A canary drawn from real inventory can
+# genuinely be delisted between runs; demanding 5/5 would let one honest death wedge the sweep shut
+# forever. 60% separates "one canary died" from "the source is refusing us".
+MIN_CANARIES = 5
+MIN_CANARY_ALIVE_RATE = 0.60
+
+
+def canary_environment_ok(
+    alive_count: int,
+    probe_count: int,
+    min_canaries: int = MIN_CANARIES,
+    min_rate: float = MIN_CANARY_ALIVE_RATE,
+) -> bool:
+    """Did the known-alive controls actually come back alive?
+
+    FAIL-CLOSED on too few canaries: a run that cannot assemble a control set has not proven its
+    environment, and an unproven environment may not kill. False here must never be read as "the
+    listings are dead" — it means this run learned nothing it may act on.
+    """
+    if probe_count < min_canaries or probe_count <= 0:
+        return False
+    if alive_count < 0:
+        return False
+    return (alive_count / probe_count) >= min_rate
+
+
 def environment_is_trustworthy(
     alive_count: int,
     probe_count: int,
