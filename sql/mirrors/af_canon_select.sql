@@ -1,0 +1,25 @@
+-- MIRROR of the `af_canon` select fragment inside public.location_search_candidates_ar, as it runs
+-- in production. Promised by supabase/migrations/20260903154406_af_canon_on_results_rpc.sql.
+--
+-- WHAT IT IS. The gated jsonb the results RPC packs onto every candidate row: the
+-- Advanced-Filter-relevant columns of the EXACT search_listings_ar row the eligibility predicate ran
+-- on, built with jsonb_build_object so a SQL NULL stays a JSON null (present, typed 'null', never
+-- absent, never 0/false). It is the ONLY source the card's «مطابق لطلبك» strip reads
+-- (src/lib/afEvidence.ts) — never the raw platform tables, whose NULLs finalize() collapses to
+-- 0/false.
+--
+-- THE GATE. The disjunction of the eleven AF predicate parameters. No AF answer ⇒ af_canon is SQL
+-- NULL rather than 28 keys on every row of a 1,500-row page-0 buffer. The client reads a missing
+-- af_canon as "no evidence" (`c.af_canon ?? null`, then afEvidence()'s null-guard), so the saving
+-- cannot cost truth.
+--
+-- WHY A MIRROR. The fragment lives inside af_rpc_templates.template, so `pg_get_functiondef` on the
+-- RPC shows the REBUILT function, not the source of truth an agent session needs to reason about.
+-- scripts/verify-af-card-evidence.ts (T6) reads THIS FILE and fails if a column any evidence def
+-- declares in `reads` is not packed here, or if an AF predicate parameter the client sends is
+-- missing from the gate — so a new AF field cannot be added on either side alone.
+--
+-- Extracted from af_rpc_templates.template for location_search_candidates_ar on production
+-- (aannarbkwcymrotzwdbo), 1213 chars.
+-- Refreshed 2026-09-03 · verified md5: 653657b202dec3e73ff90fb9c51964af
+case when (p_bath_min is not null or p_amenities is not null or p_furnished is not null or p_street_width_min is not null or p_directions is not null or p_rating_min is not null or p_reviews_min is not null or p_unit_subtypes is not null or p_age_min is not null or p_age_max is not null or p_is_new_construction is not null) then jsonb_build_object('bathrooms', s.bathrooms, 'property_age', s.property_age, 'furnished', s.furnished, 'street_width_m', s.street_width_m, 'direction_ar', s.direction_ar, 'rating', s.rating, 'reviews_count', s.reviews_count, 'unit_subtype_ar', s.unit_subtype_ar, 'rent_now_pay_later', s.rent_now_pay_later, 'elevator', s.elevator, 'parking', s.parking, 'kitchen', s.kitchen, 'air_conditioner', s.air_conditioner, 'maid_room', s.maid_room, 'driver_room', s.driver_room, 'private_entrance', s.private_entrance, 'car_entrance', s.car_entrance, 'sanitation', s.sanitation, 'electricity', s.electricity, 'water_supply', s.water_supply, 'gym', s.gym, 'pool', s.pool, 'garden', s.garden, 'balcony', s.balcony, 'laundry_room', s.laundry_room, 'optical_fibers', s.optical_fibers, 'separate_electricity_meter', s.separate_electricity_meter, 'separate_water_meter', s.separate_water_meter) end

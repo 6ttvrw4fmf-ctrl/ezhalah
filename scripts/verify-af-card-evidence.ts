@@ -25,6 +25,12 @@
 // T4 injection — comment-stripped, COUNTED shapes: agent.tsx derives activeAf from m.result.query
 //    exactly once and passes it exactly once; the memo comparator includes it; ResultCard renders
 //    the strip only from afEvidence(activeAf, listing.canon) — never from listing.features.
+// T6 packing — the promise 20260903154406_af_canon_on_results_rpc.sql makes in prose is a CODE PATH
+//    here: sql/mirrors/af_canon_select.sql (the live fragment, md5-pinned to production by
+//    verify-sql-mirrors-not-stale) must pack EVERY column any def reads, pack nothing else, and its
+//    gate must name EVERY AF predicate parameter remote.ts actually sends. Neither side can grow
+//    alone: an unpacked column, or an AF field missing from the gate, is a chip that vanishes in
+//    production while every offline check stays green.
 // T5 attach — comment-stripped, COUNTED: remote.ts carries the RPC's `af_canon` onto Listing.canon
 //    VERBATIM. There is exactly one write to l.canon and it is `c.af_canon ?? null`; no `!!`, no
 //    `?? 0`, no `||`, no Boolean() anywhere near it. This is the whole point of the feature — a
@@ -195,6 +201,10 @@ const subset = (a: Iterable<string>, b: Iterable<string>) => { const B = new Set
 
 let cells = 0;
 const seen = new Set<string>();
+// Every canonical column ANY certified def declares for ANY of its real option keys. T6 requires the
+// production af_canon fragment to pack all of them — a column the card reads but the RPC omits would
+// make the chip silently vanish in production while every offline check stayed green.
+const READ_COLUMNS = new Set<string>();
 for (const c of cohorts) {
   for (const id of c.questions) {
     const question = ADVANCED.find((x) => x.id === id);
@@ -206,6 +216,7 @@ for (const c of cohorts) {
       const cell = `${id}:${opt.key}`;
       if (seen.has(cell)) continue;   // same option under another cohort: identical evidence
       seen.add(cell); cells++;
+      for (const col of def.reads([opt.key])) READ_COLUMNS.add(col);
       const exp = expected(id, opt);
       if (id === 'amenities') {
         assert(AMENITY_LABEL[opt.key] === opt.labelKey,
@@ -387,6 +398,43 @@ console.log('\n── T5. attach: af_canon reaches Listing.canon verbatim, with 
   }
   const listings = read('src/data/listings.ts');
   assert(count(listings, 'canon?: AfCanon | null;') === 1, 'Listing.canon is `AfCanon | null` and optional (absent until the RPC ships af_canon)');
+}
+
+console.log('\n── T6. packing: the live af_canon fragment packs every column the card reads ──────────');
+{
+  // The mirror IS the live fragment — verify-sql-mirrors-not-stale pins its md5 to production and
+  // refuses a body older than the newest migration touching it — so reading it here reads production,
+  // not a copy someone typed.
+  const mirror = readFileSync(join(ROOT, 'sql/mirrors/af_canon_select.sql'), 'utf8');
+  const frag = mirror.slice(mirror.indexOf('case when ('));
+  assert(frag.includes(') then jsonb_build_object(') && frag.trimEnd().endsWith('end'),
+    'the mirror body is the gated `case when (…) then jsonb_build_object(…) end` fragment');
+
+  assert(READ_COLUMNS.size > 0, `T2 recorded ${READ_COLUMNS.size} canonical column(s) the certified defs read`);
+  for (const col of [...READ_COLUMNS].sort()) {
+    assert(count(frag, `'${col}', s.${col}`) === 1,
+      `af_canon packs «${col}» exactly once (a column the card reads must be in the RPC's object)`);
+  }
+  const packed = [...frag.matchAll(/'([a-z_0-9]+)', s\.([a-z_0-9]+)/g)].map((m) => m[1]);
+  assert(new Set(packed).size === packed.length, `no key is packed twice (${packed.length} keys)`);
+  assert(packed.length === READ_COLUMNS.size,
+    `the object packs exactly the ${READ_COLUMNS.size} columns the card reads — no more (found ${packed.length})`);
+  for (const k of packed) assert(READ_COLUMNS.has(k), `packed key «${k}» is a column some certified def reads (nothing shipped for nobody)`);
+
+  // THE GATE. Derive the p_* parameter name for each AF predicate field from remote.ts itself, then
+  // require the gate to name it. Add an AF field on the client without adding it to the gate and this
+  // goes RED — the card would show nothing on a search that WAS filtered by it.
+  const remote = read('src/data/remote.ts');
+  const gate = frag.slice(0, frag.indexOf(') then'));
+  assert(gate.length > 0 && gate.startsWith('case when ('), 'the gate is the `case when (…)` head, read separately from the object');
+  for (const f of AF_PREDICATE_FIELDS) {
+    const m = new RegExp(`\\{ (p_[a-z_]+): q\\.${f}\\b`).exec(remote);
+    assert(!!m, `remote.ts sends AF field «${f}» as a p_* parameter (${m?.[1] ?? 'NOT FOUND'})`);
+    if (m) assert(count(gate, `${m[1]} is not null`) === 1, `the af_canon gate names «${m[1]}» exactly once (field «${f}»)`);
+  }
+  const gateParams = [...gate.matchAll(/\b(p_[a-z_]+) is not null/g)].map((m) => m[1]);
+  assert(gateParams.length === AF_PREDICATE_FIELDS.length,
+    `the gate names exactly ${AF_PREDICATE_FIELDS.length} parameters, one per AF predicate field (found ${gateParams.length}: ${gateParams.join(', ')})`);
 }
 
 console.log('');
