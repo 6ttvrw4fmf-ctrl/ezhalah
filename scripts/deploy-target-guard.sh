@@ -50,3 +50,27 @@ dtg_alias_serves() {
   local expected="$1" actual="$2"
   [ -n "$expected" ] && [ -n "$actual" ] && [ "$expected" = "$actual" ]
 }
+
+# dtg_bundle_hash <bundle_path> → prints the content hash embedded in an Expo web entry filename
+# (e.g. "_expo/static/js/web/entry-a4fd39e6….js" → "a4fd39e6…"); prints "" for anything else.
+dtg_bundle_hash() {
+  printf '%s' "$1" | sed -nE 's|^.*/entry-([a-f0-9]+)\.js$|\1|p'
+}
+
+# dtg_md5 <file> → md5 of <file>'s bytes. md5sum on Linux/CI, md5 -q on macOS. "" if neither exists.
+dtg_md5() {
+  if command -v md5sum >/dev/null 2>&1; then md5sum "$1" | cut -d' ' -f1
+  elif command -v md5 >/dev/null 2>&1; then md5 -q "$1"
+  else printf ''; fi
+}
+
+# dtg_bundle_is_authentic <file> <bundle_path> → return 0 iff <file> really IS the artifact named by
+# <bundle_path>: md5(bytes) == the hash in the filename. Expo names the web entry bundle after the md5
+# of its own content (verified 2026-09-03 against production), so this turns "the alias serves a URL
+# with the right name" into "the alias serves the right BYTES" — an error page, a truncated CDN read,
+# or a same-named-but-different artifact all fail here. Empty file / unparseable name → return 1.
+dtg_bundle_is_authentic() {
+  local file="$1" want
+  want="$(dtg_bundle_hash "$2")"
+  [ -n "$want" ] && [ -s "$file" ] && [ "$(dtg_md5 "$file")" = "$want" ]
+}
