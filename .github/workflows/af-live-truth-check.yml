@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     # Measured 2026-09-03: the nine steps below took 16m44s of work plus ~1m of setup. 35 leaves
     # roughly 2x headroom. Whenever a step is ADDED here, re-measure — a budget that silently
-    # becomes too small skips the tail of this job (see the af-surface comment below).
+    # becomes too small skips the tail of this job (see the af-surface-region comment below).
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -180,7 +180,7 @@ jobs:
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-strict-filter-parity-live.ts
 
-  # THE WHOLE CERTIFIED SURFACE — ITS OWN JOB (split out 2026-09-03). These two sweeps and the
+  # THE WHOLE CERTIFIED SURFACE — ITS OWN JOB (split out 2026-09-03). The two option sweeps and the
   # four browser journeys below used to sit at the TAIL of af-truth's single 30-minute budget.
   # On 2026-09-03 that budget ran out inside the region sweep: the job was CANCELLED at 30:15,
   # and every step after it was SKIPPED — including all four journeys added the day before. A
@@ -190,11 +190,17 @@ jobs:
   # budget is sized for its own work, and the `attendance` gate at the bottom of this file turns
   # any cancelled/timed-out/skipped job into a red run. Pinned by
   # scripts/verify-live-check-workflow-attendance.ts.
-  af-surface:
+  af-surface-region:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
-    name: Every certified AF option shows DB truth and clicks to exactly that set
+    name: Every certified AF option shows DB truth and clicks to exactly that set (region)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # THE TWO SWEEPS GET A JOB EACH (2026-09-03). They are independent scopes and each is an
+    # open-ended walk over the live pool, so chaining them behind one budget recreates exactly the
+    # starvation this file was just restructured to remove — the second would be the new tail. A
+    # local run of the region sweep alone passed 800+ checks and was still going at 55 minutes
+    # through the cloud egress proxy, which is why neither a 60-minute shared budget nor a bigger
+    # guess is the answer: the sizes are not knowable in advance, so they must not share.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -221,8 +227,20 @@ jobs:
           AF_FSD_SCOPES: region:1
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
 
-      - name: …and the same option surface inside a CITY scope (جدة), single-type stages
-        if: ${{ !cancelled() }}
+  af-surface-city:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: …and the same option surface inside a CITY scope (جدة), single-type stages
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: The جدة city scope, single-type stages
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
@@ -336,17 +354,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [af-truth, af-surface, af-card-state, af-matrix]
+    needs: [af-truth, af-surface-region, af-surface-city, af-card-state, af-matrix]
     steps:
       - name: Refuse to report a clean run when a job was cancelled, skipped or failed
         env:
           RESULTS: ${{ toJSON(needs) }}
         run: |
+          set -euo pipefail
           echo "$RESULTS"
-          bad=$(echo "$RESULTS" | grep -o '"result": *"[a-z_]*"' | grep -v '"success"' || true)
+          # Parsed with jq, not grepped. A text match that stops matching — because GitHub changes
+          # the shape of toJSON(needs), or a job name gains a character the pattern did not expect —
+          # finds nothing and PASSES. That is failing OPEN, which is the exact defect this job was
+          # added to fix, reproduced one level up. Every branch below either names the offending
+          # jobs or exits non-zero.
+          n=$(jq -r 'length' <<<"$RESULTS")
+          if [ "$n" -eq 0 ]; then
+            echo "::error::attendance read ZERO needed jobs — it cannot see the run it is gating"
+            exit 1
+          fi
+          bad=$(jq -r 'to_entries | map(select(.value.result != "success")) | .[] | "\(.key): \(.value.result)"' <<<"$RESULTS")
           if [ -n "$bad" ]; then
             echo "::error::an AF/Trending live job did not succeed — a cancelled or skipped job is a DARK BARRIER, not a clean run"
             echo "$bad"
             exit 1
           fi
-          echo "all live AF/Trending jobs concluded success"
+          echo "all $n live AF/Trending jobs concluded success"
