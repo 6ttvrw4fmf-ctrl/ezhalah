@@ -402,7 +402,7 @@ function makeAbout(pal: Record<string, string>, dark: boolean) {
     // from TOP_CLEAR so the lockup can never collide with the floating × (same arithmetic contract
     // as before — verify-info-modal-header-clearance pins it).
     heroArt: { height: TOP_CLEAR + 176, overflow: 'hidden', justifyContent: 'flex-end' },
-    heroImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: dark ? 0.78 : 0.62 },
+    heroImg: { position: 'absolute', left: 0, right: 0, bottom: 0, width: '100%', height: '215%', opacity: dark ? 0.78 : 0.62 },
     heroInner: { paddingHorizontal: 24, paddingTop: TOP_CLEAR, paddingBottom: 2 },
     eyebrow: { fontSize: 12, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 6 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
