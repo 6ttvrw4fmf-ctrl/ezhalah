@@ -90,7 +90,12 @@ def test_sawm_total_and_per_meter_are_separate_columns_and_never_multiplied():
     assert row["additional_info"]["street_width_raw"] == "15 × مرفق × مرفق يليه شارع 60 م"
     assert row["additional_info"]["price_label"] == "السوم"
     assert row["price_evidence"]["json_ld_offers_price"] is None   # JSON-LD alone would lose this
-    assert row["latitude"] == 25.417207
+    # Coordinates live in additional_info, NOT as a top-level key: no *_listings table in the
+    # fleet has a latitude/longitude column, so writing one there made every real insert fail
+    # with PGRST204 (caught on the first production run of this scraper). Asserting the fold
+    # keeps the source value captured while pinning it out of the row shape.
+    assert "latitude" not in row
+    assert row["additional_info"]["latitude"] == 25.417207
 
 
 # ── 2. «السعر على السوم» — the source states there is no price (live id 1059) ────────────────────

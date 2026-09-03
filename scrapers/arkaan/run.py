@@ -408,6 +408,20 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
         "price_includes_tax_and_commission": card.get("price_includes_tax_and_commission"),
     }
     info = {k: v for k, v in info.items() if v not in (None, "", [])}
+    # NOT columns on this table shape (verified against information_schema: no *_listings table
+    # carries latitude/longitude at all, and city_ar/district_ar/city_id/region_id exist only on the
+    # 11-13 tables of the older extended shape, which these five new platforms do not use). They are
+    # kept HERE so nothing the source published is thrown away — the location arms read city/region/
+    # neighborhood, and canonical id resolution stays owned by the DB layer (district canonicalization
+    # rule: the DB is match truth, the card shows source text), never guessed by a scraper.
+    info.update({k: v for k, v in {
+        "city_ar": city_ar,
+        "district_ar": district_ar,
+        "city_id": city_id,
+        "region_id": region_id,
+        "latitude": detail.get("lat"),
+        "longitude": detail.get("lng"),
+    }.items() if v not in (None, "", [])})
 
     row: dict[str, Any] = {
         "ad_number": f"AK{pid}",
@@ -431,12 +445,6 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
         "city": city,
         "region": region,
         "neighborhood": district_ar,
-        "city_ar": city_ar,
-        "district_ar": district_ar,
-        "city_id": city_id,
-        "region_id": region_id,
-        "latitude": detail.get("lat"),
-        "longitude": detail.get("lng"),
         "title": _redact(ld.get("name")) or _redact(item.get("title_text")),
         "description": _redact(detail.get("ad_text")),
         "photo_urls": photos,
