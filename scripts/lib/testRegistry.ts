@@ -87,3 +87,33 @@ export function npmTestRuns(root: string, name: string): boolean {
   const bare = name.replace(/^scripts\//, '').replace(/\.(ts|mjs)$/, '');
   return run.includes(`${bare}.ts`) || run.includes(`${bare}.mjs`);
 }
+
+/**
+ * Does this workflow SOURCE actually invoke `name`, as opposed to merely mentioning it?
+ *
+ * Added 2026-09-03, because two different guards asked that question with a bare
+ * `src.includes(name)` and both got the wrong answer. `scripts/test-exclusions.txt` promises,
+ * per row, WHERE an excluded check really runs; `verify-test-registry-complete.ts` only checked
+ * that the named workflow FILE EXISTS. Meanwhile `verify-af-contract-coverage-map.ts` decides
+ * whether an L/B grade rests on a barrier that executes by substring-matching every workflow
+ * concatenated together. This repo documents its scripts heavily inside workflow comments, so a
+ * script named in prose satisfied both — and on 2026-09-03 verify-strict-filter-parity-live.ts
+ * and verify-residential-misfile-recovery.ts turned out to be named ONLY by a comment in
+ * full-verification-ci.yml, one that says they are deliberately NOT run there. Neither had
+ * executed anywhere for weeks.
+ *
+ * Comments are stripped first, so only a real `run:`/`uses:` reference counts. The name is
+ * normalised the same way `npmTestRuns` normalises it, so a caller holding 'verify-x',
+ * 'verify-x.ts' or 'scripts/verify-x.ts' gets the same answer — a call site that gets the shape
+ * wrong would read "this check does not run", a false alarm on a guard whose whole job is to
+ * notice a check that stopped running.
+ */
+export function workflowInvokes(src: string, name: string): boolean {
+  const bare = name.replace(/^scripts\//, '').replace(/\.(ts|mjs|cjs|js|sh|py)$/, '');
+  const code = src
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .map((l) => l.replace(/\s#.*$/, ''))
+    .join('\n');
+  return code.includes(bare);
+}

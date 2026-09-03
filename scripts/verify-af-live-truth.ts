@@ -8,6 +8,17 @@
 // captured request actually carried. Diffs exact (source_table,listing_id) sets: missing / extra /
 // duplicate, not just counts.
 import { chromium } from 'playwright';
+import { openAfOffer } from './lib/afOfferLive.ts';
+
+// ONE BUDGET FOR "WAIT FOR THE AGENT'S NEXT TURN", not three magic numbers (2026-09-03).
+// Every wait below is behind the same dependency: a PAID LLM turn whose latency is variable. This
+// file has already widened that wait twice for the same reason (its own comments record 9s -> 25s),
+// and on 2026-09-03 25s was not enough either — CI lost the Back-restore card and the final search
+// on a run where a sibling journey measured a ~40s agent reply. Three journeys reported "never
+// rendered" on the same slow afternoon against a production that was fine (each passed locally on
+// the same bundle). A budget set by a good day is not a budget; 60s is set by the worst turn
+// actually measured, and still fails in bounded time.
+const AGENT_TURN_MS = 60_000;
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
@@ -276,10 +287,16 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // RPCs carry their own 4s timeout — so on a large base scope under production load the button can
     // legitimately arrive several seconds after the cards do. 6s of polling raced that; 16s does not,
     // and a launcher that never appears in 16s is still the honest "nothing truthful left to ask".
-    let btn = null;
-    for (let i = 0; i < 40 && !btn; i++) { btn = await page.evaluate(CLICK_LEAF, 'خلّنا نحدد الطلب أكثر'); if (!btn) await page.waitForTimeout(400); }
-    if (!btn) { check(`${name}: AF launcher present`, false, 'not eligible on this scope — cannot test AF here'); await ctx.close(); return; }
-    await page.mouse.click(btn.x, btn.y);
+    // Shared opener (scripts/lib/afOfferLive.ts): re-scrolls while it polls, and separates "the
+    // agent never answered" from "the offer genuinely never rendered" — the 16s single-scroll poll
+    // this replaces reported the second when it meant the first (CI, 2026-09-03).
+    const offer = await openAfOffer(page);
+    if (!offer.opened) {
+      check(`${name}: AF launcher present`, false, offer.reason === 'no-turn'
+        ? `NOT VERIFIED — no results turn from the agent within ${offer.waitedMs}ms; the launcher could not be looked for`
+        : `the turn landed but no launcher rendered within ${offer.waitedMs}ms — not eligible on this scope, or a regression`);
+      await ctx.close(); return;
+    }
     await page.waitForTimeout(4000);
 
     const readCard = () => page.evaluate(() => {
@@ -325,7 +342,7 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       // still finite and the assertion is unchanged — a chip that never refills at all remains a
       // red with `after=null`, which is exactly what a "Skip leaves the count blank forever" defect
       // would look like. Raising a timeout is not weakening the oracle; accepting null would be.
-      const after = await readCardUntil((s) => s.hasCard && s.q !== st.q && s.chip != null, 25_000);
+      const after = await readCardUntil((s) => s.hasCard && s.q !== st.q && s.chip != null, AGENT_TURN_MS);
       check(`${name}: Skip does not change the count (no predicate applied)`, after.chip != null && after.chip === before, `before=${before} after=${after.chip}`);
       check(`${name}: Skip advances to a different question`, after.q !== st.q, `q1=${st.q} q2=${after.q}`);
       await ctx.close();
@@ -377,7 +394,7 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       // be refilled with that step's number rather than arriving with a fresh narrowing, and on a
       // 10,957-row base scope that outran the 9s default — which then returned a no-card sample
       // (q=null), and the empty option list below turned into a click on [data-testid="undefined"].
-      const restored = await readCardUntil((s) => s.hasCard && s.q === st.q && s.chip != null, 25_000);
+      const restored = await readCardUntil((s) => s.hasCard && s.q === st.q && s.chip != null, AGENT_TURN_MS);
       check(`${name}: Back restores the previous question`, restored.q === st.q, `expected=${st.q} got=${restored.q}`);
       check(`${name}: Back restores the previous count`, restored.chip != null && restored.chip === afterSelect.chip, `expected=${afterSelect.chip} got=${restored.chip}`);
       const opts2 = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
@@ -422,14 +439,14 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // Poll for the RPC first (it is the ground truth for what number the UI SHOULD settle on),
     // then poll the UI's own typed-out text for that exact number — a results turn types itself out
     // character by character, so a fixed sleep here raced the same way [E] did in the smoke test.
-    const until1 = Date.now() + 25000;
+    const until1 = Date.now() + AGENT_TURN_MS;
     while (!lastSearchBody && Date.now() < until1) await page.waitForTimeout(400);
     check(`${name}: final search request was captured`, !!lastSearchBody, JSON.stringify(lastSearchBody));
     if (!lastSearchBody) { await ctx.close(); return; }
     const rpcTotal = Number(lastSearchResp?.[0]?.total_count ?? (Array.isArray(lastSearchResp) ? lastSearchResp.length : NaN));
     const rpcTotalFmt = rpcTotal.toLocaleString('en-US');
     let uiCount = null;
-    const until2 = Date.now() + 25000;
+    const until2 = Date.now() + AGENT_TURN_MS;
     while (Date.now() < until2) {
       const t = await body();
       if (t.includes(`لقينا ${rpcTotalFmt}`) || t.includes(`لقينا ${rpcTotal}`)) { uiCount = rpcTotal; break; }
