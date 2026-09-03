@@ -11,6 +11,7 @@
 // Runs in `npm test` and in the deploy-guard CI workflow. No network, no DB, fully deterministic.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { stripShellComments } from './lib/stripComments.ts';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -115,16 +116,21 @@ check('unparseable bundle name → REFUSED (never assume authenticity)',
   authVerdict(goodFile, 'index.html') === 'REFUSE');
 
 // ── drift guards: the shipping scripts must USE the shared library, not a private copy ──────
-const safeDeploy = readFileSync(path.join(REPO, 'scripts', 'safe-deploy.sh'), 'utf8');
-const preflight = readFileSync(path.join(REPO, 'scripts', 'preflight-verify.sh'), 'utf8');
+// A COMMENT IS NOT A CODE PATH: every shape assertion below reads the script with its `#` comments
+// stripped, and asserts on the CODE. Un-stripped, the long rationale comments in safe-deploy.sh
+// mention each guard by name, so gutting a guard while leaving its name in prose passed silently
+// (measured 2026-09-03: `if ! dtg_bundle_is_authentic …` → `if false` survived a raw grep).
+const safeDeploy = stripShellComments(readFileSync(path.join(REPO, 'scripts', 'safe-deploy.sh'), 'utf8'));
+const preflight = stripShellComments(readFileSync(path.join(REPO, 'scripts', 'preflight-verify.sh'), 'utf8'));
 const lib = readFileSync(LIB, 'utf8');
+const countIn = (hay: string, needle: string) => hay.split(needle).length - 1;
 
 check('safe-deploy.sh sources the shared guard library',
   /\.\s+scripts\/deploy-target-guard\.sh/.test(safeDeploy));
 check('safe-deploy.sh gates the link via dtg_link_is_canonical',
-  /dtg_link_is_canonical/.test(safeDeploy));
+  countIn(safeDeploy, 'dtg_link_is_canonical') >= 1);
 check('safe-deploy.sh gates alias propagation via dtg_alias_serves',
-  /dtg_alias_serves/.test(safeDeploy));
+  countIn(safeDeploy, 'dtg_alias_serves') >= 1);
 // The expected hash MUST come from this run's own build log — the one source that is readable when
 // the per-deployment URL is behind deployment protection, and that is correct for an identical
 // rebuild. Reverting to a deployment-URL-only expectation reintroduces the run-33776354197 deadlock.
@@ -132,7 +138,7 @@ check('safe-deploy.sh takes the expected bundle from THIS run\'s build log (EMIT
   /EMITTED_BUNDLE="\$\(grep -oE '_expo\/static\/js\/web\/entry-\[a-f0-9\]\+\\\.js' "\$DEPLOY_LOG"/.test(safeDeploy)
   && /EXPECTED_BUNDLE="\$\{EMITTED_BUNDLE:-\$NEW_BUNDLE\}"/.test(safeDeploy));
 check('safe-deploy.sh proves the served bytes are that artifact (dtg_bundle_is_authentic)',
-  /dtg_bundle_is_authentic/.test(safeDeploy));
+  countIn(safeDeploy, 'dtg_bundle_is_authentic') >= 1);
 // Non-weakening: the gate must stay BLOCKING and must have no escape hatch.
 check('the alias/bundle gate still fails the deploy (blocking, no bypass flag)',
   /REFUSING TO ADVANCE THE BASELINE: the canonical alias never proved/.test(safeDeploy)
