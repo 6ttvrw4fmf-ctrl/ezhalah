@@ -146,3 +146,42 @@ def test_a_clean_run_records_no_reasons_at_all(monkeypatch):
     s = _Session([_page([1]), empty, empty])
     _, _, _, outcomes = g.crawl(s, [{"id": 1, "name_en": "A"}], "a", "b", verbose=False)
     assert not [k for k in outcomes if k.startswith("reason:")], outcomes
+
+
+def test_a_rejection_is_captured_verbatim_with_its_request(monkeypatch):
+    """"http_400" is a symptom. The API's own error body plus the exact params is the root cause.
+
+    Without this, the only route to the offending parameter is guessing at an unobserved request —
+    which is precisely how the sadin selector fix failed earlier the same day.
+    """
+    _fast(monkeypatch)
+    g._REJECTS.clear()
+    r = _Resp(400)
+    r.text = '{"name":"Bad Request","message":"city must be an integer."}'
+    g.fetch_page(_Session([r]), 820, 1, "2026-09-04", "2026-10-04")
+
+    assert len(g._REJECTS) == 1
+    rec = g._REJECTS[0]
+    assert rec["city"] == 820 and rec["code"] == 400
+    assert rec["params"]["check_in"] == "2026-09-04"      # the exact request is preserved
+    assert rec["params"]["has_available"] == "true"
+    assert "city must be an integer" in rec["body"]        # the source's own words
+    assert "city=820" in g.reject_report()
+
+
+def test_reject_capture_is_bounded(monkeypatch):
+    """A platform-wide rejection must not turn the log into a flood."""
+    _fast(monkeypatch)
+    g._REJECTS.clear()
+    r = _Resp(400)
+    r.text = "nope"
+    for i in range(20):
+        g.fetch_page(_Session([r]), i, 1, "a", "b")
+    assert len(g._REJECTS) == g._REJECT_LIMIT
+
+
+def test_a_healthy_run_records_no_rejections(monkeypatch):
+    _fast(monkeypatch)
+    g._REJECTS.clear()
+    g.fetch_page(_Session([_page([1])]), 1, 1, "a", "b")
+    assert g._REJECTS == [] and g.reject_report() == ""
