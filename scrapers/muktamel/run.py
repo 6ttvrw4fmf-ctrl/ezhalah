@@ -302,9 +302,24 @@ def _ensure_helper() -> Optional[str]:
         return path
 
 
+# A single parse() exchange has NO deadline of its own — until this fix, a stuck node process
+# (worker hung inside `eval()` on a pathological payload, or the pipe wedged) blocked forever on
+# `stdin.write`/`stdout.read`. All 8 fetch threads share ONE _NodeWorker behind ONE lock, so one
+# hang stalls the entire crawl permanently: no thread can ever reach the lock again, seen == 0
+# rows ever upserted, only the outer 330-minute CI timeout ends it. Root cause of "muktamel never
+# completes a single full-range crawl, zero progress-log lines" (paused 2026-07-15) — reproduced
+# 2026-09-03: a 21-id test range (24000-24020) ran 57 minutes, upserted 0 rows, and had to be
+# cancelled by hand. NODE_PARSE_TIMEOUT bounds one exchange; on expiry the stuck process is killed
+# (which unblocks the pending write/read with an OSError) and respawned on the next call — the
+# listing that triggered it is skipped (returns None, same as any other unparseable payload), but
+# every other listing and every other thread keeps moving.
+NODE_PARSE_TIMEOUT = 20.0
+
+
 class _NodeWorker:
     """A single persistent `node worker.js` process. parse() is thread-safe (one lock-guarded
-    request/response per call) and self-heals: if the worker dies it is respawned on the next call."""
+    request/response per call), bounded by NODE_PARSE_TIMEOUT, and self-heals: if the worker dies
+    or is killed for hanging, it is respawned on the next call."""
 
     def __init__(self, helper_path: str):
         self.helper = helper_path
@@ -350,9 +365,16 @@ class _NodeWorker:
     def parse(self, nuxt_src: str) -> Optional[dict]:
         data = nuxt_src.encode("utf-8")
         with self.lock:
-            for _ in range(2):  # one retry: respawn a dead worker and try again
+            for _ in range(2):  # one retry: respawn a dead (or killed-for-hanging) worker and try again
                 if self.proc is None or self.proc.poll() is not None:
                     self._spawn()
+                proc = self.proc
+                # Watchdog: if this exchange doesn't finish within NODE_PARSE_TIMEOUT, kill THIS
+                # process object specifically (not whatever self.proc is by the time the timer
+                # fires — a respawn between now and then must not kill the new, healthy worker).
+                timer = threading.Timer(NODE_PARSE_TIMEOUT, self._kill_proc, args=(proc,))
+                timer.daemon = True
+                timer.start()
                 try:
                     self._write_all(f"{len(data)}\n".encode("ascii"))
                     self._write_all(data)
@@ -366,12 +388,21 @@ class _NodeWorker:
                     out = self._read_exact(n)
                     return json.loads(out.decode("utf-8", "replace")) if out else None
                 except Exception:
-                    try:
-                        self.proc.kill()
-                    except Exception:
-                        pass
-                    self.proc = None
+                    self._kill_proc(proc)
+                    if self.proc is proc:
+                        self.proc = None
+                finally:
+                    timer.cancel()
             return None
+
+    @staticmethod
+    def _kill_proc(proc: Optional[subprocess.Popen]) -> None:
+        if proc is None:
+            return
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
     def close(self) -> None:
         try:
@@ -415,6 +446,24 @@ def _extract_nuxt(html: str) -> Optional[str]:
     return sub[:end] if end > 0 else None
 
 
+# ── Fetch outcome instrumentation ───────────────────────────────────────────────────
+# WHY: a silent `return None` cannot tell "genuinely dead id" (fast 404, expected — ~52% of the
+# range per the module docstring) apart from "every request is failing at the network layer"
+# (the toor/jazwtn IP-block shape: curl_cffi raises on every attempt, never even reaching a status
+# code). Reproduced live 2026-09-03: a fixed-and-completing 101-id run (post NODE_PARSE_TIMEOUT)
+# still upserted 0 rows and took ~30 minutes — ~143s/id, matching 3×45s-timeout-with-retries
+# almost exactly, which a dead-id range (fast 404s) could never produce. Without this counter that
+# distinction is a guess; with it, main()'s summary line answers it directly. Same fix shape as
+# erapulse (PR #1398): capture the last concrete reason instead of discarding it.
+_outcome_lock = threading.Lock()
+_outcomes: dict[str, int] = {}
+
+
+def _note(reason: str) -> None:
+    with _outcome_lock:
+        _outcomes[reason] = _outcomes.get(reason, 0) + 1
+
+
 # ── Fetch ─────────────────────────────────────────────────────────────────────────
 def fetch_one(listing_id: int) -> Optional[tuple[int, dict]]:
     """Fetch + eval one listing id. Returns (id, parsed_nuxt) for LIVE listings, else None.
@@ -422,33 +471,47 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict]]:
     url = f"{BASE}/real-estates/{listing_id}"
     s = _session()
     html = None
+    last_exc: Optional[BaseException] = None
     for attempt in range(3):
         try:
             r = s.get(url, timeout=45, allow_redirects=True)
-        except Exception:
+        except Exception as e:
+            last_exc = e
             time.sleep(1.0 * (attempt + 1))
             continue
         if r.status_code != 200:
             if r.status_code in (404, 410):
+                _note("dead_404")
                 return None
+            last_exc = None
+            _note(f"http_{r.status_code}")
             time.sleep(1.0 * (attempt + 1))
             continue
         if "/404" in str(r.url):
+            _note("redirect_404")
             return None
         html = r.text
         break
     if not html:
+        # Every attempt failed — record the LAST concrete reason, not just "no html". A network
+        # exception (timeout/reset/refused) here on every id is the IP-block signature; an
+        # accumulation of http_5xx is a different, source-side problem.
+        _note(f"network_{type(last_exc).__name__}" if last_exc is not None else "no_html_after_retries")
         return None
     nuxt_src = _extract_nuxt(html)
     if not nuxt_src:
+        _note("no_nuxt_payload")
         return None
     parsed = _nuxt_via_node(nuxt_src)
     if not parsed or not parsed.get("offer"):
+        _note("unparseable_or_no_offer")
         return None
     offer = parsed["offer"]
     # Liveness gate: only fully-hydrated, available listings carry real data.
     if not offer.get("isAvailable") or offer.get("price") in (None, 0):
+        _note("not_available_or_zero_price")
         return None
+    _note("live")
     return listing_id, parsed
 
 
@@ -744,7 +807,11 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Muktamel: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["muktamel_residential_listings", "muktamel_commercial_listings"])
+        print(f"  fetch outcomes: {dict(sorted(_outcomes.items(), key=lambda kv: -kv[1]))}", flush=True)
+        healthy = db.end_run(
+            run_id, ok=True, rows_seen=seen, rows_upserted=seen,
+            notes=f"pruned={pruned} outcomes={dict(sorted(_outcomes.items(), key=lambda kv: -kv[1]))}"[:300],
+            check_tables=["muktamel_residential_listings", "muktamel_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1
