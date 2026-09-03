@@ -22,6 +22,7 @@
 import { readFileSync } from 'node:fs';
 import { join as __join } from 'node:path';
 import { npmTestRuns } from './lib/testRegistry.ts';
+import { classifyMicCaptureError, classifyRecognitionError } from '../src/lib/voiceErrors.ts';
 
 // "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
 // resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
@@ -41,23 +42,81 @@ const i18n = readFileSync(new URL('../src/i18n.tsx', import.meta.url).pathname, 
 
 console.log('\nVoice-input error-classification barrier (owner report 2026-08-24)\n');
 
-// ── SOURCE: the onerror body ─────────────────────────────────────────────────────────────────────
+// ── EXECUTED: the REAL classifier, not the shape of its source text ─────────────────────────────
+//
+// These four assertions used to be regexes over the `rec.onerror` closure — the only option, since
+// voiceInput.ts imports react-native and touches `window`, so no Node check could reach the rule.
+// Source-text assertions have the wrong sensitivity in BOTH directions: they pass a refactor that
+// changes behaviour (rewrite the ternary as an if/else with the branches swapped and every regex
+// above still matched) and fail a rename that changes nothing. The rule now lives in the
+// import-free `src/lib/voiceErrors.ts`, so what runs here is what runs on the device.
+check(
+  "'no-speech' is IGNORED — routine silence, covered by onend's keep-alive restart, never surfaced",
+  classifyRecognitionError('no-speech').action === 'ignore',
+);
+check(
+  "'aborted' is IGNORED — an engine hiccup is not a failure the user is told about",
+  classifyRecognitionError('aborted').action === 'ignore',
+);
+check(
+  "'not-allowed' is the ONLY code that means DENIED — the one case where 'enable it in your settings' is correct advice",
+  (() => { const r = classifyRecognitionError('not-allowed'); return r.action === 'fail' && r.kind === 'denied'; })(),
+);
+// The 2026-08-24 bug in both of its halves: 'service-not-allowed' was called a permission problem,
+// and everything unlisted was swallowed with no feedback at all.
+for (const code of ['service-not-allowed', 'audio-capture', 'network', 'bad-grammar', 'language-not-supported']) {
+  const r = classifyRecognitionError(code);
+  check(
+    `'${code}' fails as BLOCKED, never denied — it is a real failure but not a permission problem`,
+    r.action === 'fail' && r.kind === 'blocked' && r.detail === code,
+  );
+}
+// The catch-all is the load-bearing part: a code nobody has seen yet must still resolve gracefully,
+// or the composer stays stuck in recording mode forever — the original silent-swallow bug.
+for (const weird of ['a-code-from-2030', '', null, undefined, 0]) {
+  const r = classifyRecognitionError(weird);
+  check(
+    `an unknown/empty code (${JSON.stringify(weird)}) still FAILS gracefully as blocked, never silently`,
+    r.action === 'fail' && r.kind === 'blocked' && !!r.detail,
+  );
+}
+check(
+  "an empty code still carries a non-empty detail ('unknown-error') — an empty parenthesis in the diagnostic tag tells a retester nothing, which is the gap that instrumentation exists to close",
+  classifyRecognitionError('').detail === 'unknown-error',
+);
+// getUserMedia's rejection is a DIFFERENT signal and was already correct; pin it so a future edit
+// cannot quietly merge the two classifications.
+check(
+  "getUserMedia's NotAllowedError/SecurityError map to 'denied' — our own mic request owns the prompt, so its rejection IS the reliable cross-browser denial",
+  classifyMicCaptureError('NotAllowedError').kind === 'denied' && classifyMicCaptureError('SecurityError').kind === 'denied',
+);
+for (const name of ['NotFoundError', 'NotReadableError', 'OverconstrainedError', 'AbortError', '']) {
+  check(
+    `getUserMedia's ${name || '(empty)'} maps to 'unavailable' — a device/state problem must not send someone into their browser settings`,
+    classifyMicCaptureError(name).kind === 'unavailable',
+  );
+}
+check('an empty getUserMedia error name still reports a detail', classifyMicCaptureError('').detail === 'unknown');
+
+// ── SOURCE: production really routes through the executed rule ──────────────────────────────────
+// An extracted classifier nothing calls is decoration; these two keep the executed checks connected
+// to the code path a user actually hits.
 const onerrorBody = voice.match(/rec\.onerror = \(ev: any\) => \{[\s\S]*?\n  \};/)?.[0] ?? '';
 check(
-  "'no-speech'/'aborted' still short-circuit BEFORE teardown — routine silence/hiccup, covered by onend's keep-alive restart, never surfaced as a failure",
-  /if \(code === 'no-speech' \|\| code === 'aborted'\) return;/.test(onerrorBody),
+  'the recognizer error path calls classifyRecognitionError and acts on its verdict — no second copy of the rule inline',
+  /classifyRecognitionError\(ev\?\.error\)/.test(onerrorBody)
+    && /verdict\.action === 'ignore'/.test(onerrorBody)
+    && /handlers\.onFailure\(verdict\.kind, verdict\.detail\)/.test(onerrorBody)
+    && !/'not-allowed' \? 'denied'/.test(onerrorBody),
 );
 check(
-  "every OTHER code reaches teardown() + handlers.onFailure(...) — no code can silently do nothing (the exact 'audio-capture' bug: previously ANY code besides not-allowed/service-not-allowed produced zero feedback and left the composer stuck in recording mode forever)",
-  /if \(code === 'no-speech' \|\| code === 'aborted'\) return;\s*\n\s*teardown\(\);\s*\n[\s\S]{0,700}handlers\.onFailure\(code === 'not-allowed' \? 'denied' : 'blocked', code \|\| 'unknown-error'\);/.test(onerrorBody),
+  "getUserMedia's catch routes through classifyMicCaptureError rather than re-inlining the name check",
+  /classifyMicCaptureError\(err\?\.name\)/.test(voice) && !/name === 'NotAllowedError' \|\| name === 'SecurityError'/.test(voice),
 );
 check(
-  "'not-allowed' is the ONLY code mapped to 'denied' — service-not-allowed/audio-capture/network/anything else fall through to 'blocked', never the permission message",
-  /handlers\.onFailure\(code === 'not-allowed' \? 'denied' : 'blocked', code \|\| 'unknown-error'\)/.test(onerrorBody),
-);
-check(
-  "getUserMedia's own catch block is untouched — NotAllowedError/SecurityError still map to 'denied', everything else to 'unavailable' (that classification was already correct; only the RECOGNIZER's error mapping was the bug)",
-  /name === 'NotAllowedError' \|\| name === 'SecurityError' \? 'denied' : 'unavailable'/.test(voice),
+  'voiceErrors.ts stays import-free, so this barrier can keep EXECUTING it',
+  !/^\s*import\s/m.test(readFileSync(new URL('../src/lib/voiceErrors.ts', import.meta.url).pathname, 'utf8')
+    .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')),
 );
 
 // ── SOURCE: 'blocked' is a real, typed kind — not a stringly-typed afterthought ─────────────────
@@ -138,8 +197,9 @@ check(
 //    site now passes the short, standardized code that caused it, and the UI appends it as a
 //    parenthetical tag — never a raw Error message/stack, never silently dropped. ─────────────────
 check(
-  "onFailure's detail param threads from getUserMedia's own catch (the error's .name, e.g. 'NotReadableError')",
-  /handlers\.onFailure\(name === 'NotAllowedError' \|\| name === 'SecurityError' \? 'denied' : 'unavailable', name\)/.test(voice),
+  "onFailure's detail param threads from getUserMedia's own catch (the error's .name, e.g. 'NotReadableError') — retargeted 2026-09-03 to the executed classifier, which now carries the name through as `detail`",
+  /handlers\.onFailure\(mic\.kind, mic\.detail\)/.test(voice)
+    && classifyMicCaptureError('NotReadableError').detail === 'NotReadableError',
 );
 check(
   "the unsupported early-return and the two rec.start() throw sites all pass a non-empty detail too — no onFailure call site is silently detail-less",
