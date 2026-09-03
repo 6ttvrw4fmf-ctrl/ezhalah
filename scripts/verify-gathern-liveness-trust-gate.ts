@@ -118,6 +118,12 @@ check('a failed canary quarantines the MAIN sweep (0 strikes, 0 inactivations)',
   /if not c_ok:[\s\S]{0,900}?end_run\([^)]*ok=False/.test(sweep));
 check('the resurrection pass is canary-gated too (a blocked run must not log dead_confirmed)',
   /CANARY-QUARANTINED recheck-dead/.test(sweep));
+// A canary that reports only "0/10" cannot tell 404 (source refusing this egress) from 407 (proxy
+// rejected us) from 0 (no verdict / CONNECT failure) — three failures needing three different
+// responses. Measured 2026-09-03: a proxied run failed 0/10 and the next question could not be
+// answered from our own logs at all. The histogram must survive.
+check('the canary records WHICH statuses it saw, not just how many were alive',
+  /statuses\[\{c_hist\}\]/.test(sweep) && /statuses\[\{hist\}\]/.test(sweep));
 
 // ── Part 8: the shared-proxy path is explicit, never inherited, and always counted ───────────────
 // scrapers/jazwtn/run.py records the standing rule: WASALT_PROXY_URL is metered, provisioned for
