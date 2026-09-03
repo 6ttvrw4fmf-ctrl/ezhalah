@@ -65,7 +65,13 @@ const read = (f: string) => (files.includes(f) ? readFileSync(`${MIGRATIONS_DIR}
 //    predates, exactly like the roster class this repo has been bitten by seven times.
 const rewriters = files.filter((f) => {
   if (GRANDFATHERED.has(f) || f === SWEEP_BUDGET_FIX) return false;
-  const sql = readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8');
+  // A comment is not a code path. 20260831192229 names the sweep only in its `-- THE DEFECT` prose
+  // while altering jobid 86, and this filter read that prose as a rewrite of the sweep. Full-line
+  // `--` comments and /* */ blocks are dropped before matching; trailing `--` is deliberately kept
+  // so a string literal is never cut short. A real rewrite must still name the sweep in CODE.
+  const sql = readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*--.*$/gm, '');
   if (!sql.includes(SWEEP_JOB)) return false;
   if (!/alter_job|cron\.schedule/i.test(sql)) return false;
   if (!/command\s*(?:=>|:=)/i.test(sql)) return false;
