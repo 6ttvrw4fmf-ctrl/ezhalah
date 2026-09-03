@@ -91,12 +91,15 @@ for (const f of pyFiles) {
 // comment explaining why (source-fidelity pass), 446 -> 484 on 2026-09-01 when _pages() grew its
 // list-fetch failure-reason capture (daily engineer run, same status-blind-fetch fix already
 // applied to sanadak/erapulse/abeea), and 484 -> 494 later the same day when the /ar/ locale-prefix
-// href fix added the shared _PROPERTY_HREF_RE constant + docstring note above LIST_ALL. The
-// exception itself is unchanged across all four shifts — still the one
+// href fix added the shared _PROPERTY_HREF_RE constant + docstring note above LIST_ALL, and
+// 494 -> 511 on 2026-09-03 when _description() gained the redesign's dt/dd selector (the sadin
+// detail-page capture outage: the same prose this exception is about had stopped being captured at
+// all, so 73/74 residential and 10/10 commercial rows were served price-less for ~3 weeks). The
+// exception itself is unchanged across all five shifts — still the one
 // `price = _extract_price(desc_raw)` call in the file, re-verified against the commit before
 // re-pinning. If this fails, confirm the line still holds the SAME call before re-pinning; do not
 // re-pin a different call site to make the check pass.
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:494']);
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:511']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);

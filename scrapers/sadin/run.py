@@ -362,19 +362,36 @@ def _photos(html: str, pid: str) -> list[str]:
     return urls[:30]
 
 
+_DESC_LABEL = "وصف العقار"
+
+
 def _description(html: str) -> Optional[str]:
-    i = html.find("وصف العقار")
+    i = html.find(_DESC_LABEL)
     if i < 0:
         return None
-    sub = html[i: i + 6000]
+    sub = html[i + len(_DESC_LABEL): i + len(_DESC_LABEL) + 6000]
     # sadin.com.sa's markup moved from class="text" to class="property-description" (found live
     # 2026-07-28: the old selector matched 0/3 sampled live pages, so a fresh crawl today would get
     # desc_raw=None and silently store no price at all — a coverage outage, not a wrong-value bug).
-    # Try the current class first, keep the old one as a fallback in case an older cached/mirrored
-    # page still uses it.
-    m = re.search(r'<div class="property-description">(.*?)</div>', sub, re.S) \
+    #
+    # It moved AGAIN with the 2026-07 detail-page redesign, and that outage ran unseen from
+    # ~2026-08-14 to 2026-09-03: 73/74 active residential rows and 10/10 commercial rows were served
+    # with NO price, because sadin's price is parsed only out of this description prose
+    # (_extract_price). The crawl never complained — ok=true, rows_seen=84, prune healthy — because
+    # only this one selector had died. What proves the fetch itself was fine is that area_m2 kept
+    # parsing on 74/74 of the very same rows from the redesigned `<dt>المساحة</dt><dd>` pair.
+    #
+    # So read the redesign's own dt/dd shape FIRST — the same structure _dd_field() already parses
+    # live for المساحة / نوع العقار / الغرض — and keep both older selectors as fallbacks so a cached
+    # or mirrored pre-redesign page still parses exactly as before. Anchored to the label's own
+    # `</dt>` (whitespace only in between) so an unrelated dt/dd pair further down the page can never
+    # be picked up as the description. A dedicated pattern rather than _dd_field() because that helper
+    # is `[^<]+?` — correct for a short scalar like "500 م²", but a description carries inner markup
+    # (<br>, <p>) that _strip() removes here.
+    m = re.search(r'^\s*</dt>\s*<dd[^>]*>(.*?)</dd>', sub, re.S) \
+        or re.search(r'<div class="property-description">(.*?)</div>', sub, re.S) \
         or re.search(r'<div class="text">(.*?)</div>', sub, re.S)
-    return _strip(m.group(1)) if m else None
+    return _strip(m.group(1)) or None if m else None
 
 
 def _is_per_meter(before: str, after: str) -> bool:
