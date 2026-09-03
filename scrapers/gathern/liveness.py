@@ -54,6 +54,11 @@ from typing import Any, Optional
 
 from scrapers.common.db import begin_run, end_run, sb
 from scrapers.common.liveness_contract import direct_alive_patch
+from scrapers.common.liveness_trust import (
+    MIN_ALIVE_RATE_FOR_TRUST,
+    MIN_PROBES_FOR_TRUST,
+    environment_is_trustworthy,
+)
 from scrapers.gathern.run import SOURCE, detail_session
 
 TABLE = "gathern_residential_listings"
@@ -406,6 +411,11 @@ def main() -> int:
     seen = dead = alive = transient = killed = struck = 0
     alive_ids: list[int] = []
     kill_pending: list[tuple[int, int]] = []  # (row id, new_missing) — flipped ONLY after the cap gate
+    # Strikes are DEFERRED for the same reason kills are, but against a different failure: the cap
+    # asks "is this batch too big?", the trust gate asks "is this run's evidence believable at all?"
+    # A strike written inside the loop cannot be taken back once the run turns out to be degraded —
+    # which is exactly what happened on 2026-09-01..03 (see scrapers/common/liveness_trust.py).
+    strike_pending: list[tuple[int, int]] = []
     started = time.time()
 
     # ── Per-row evidence (gathern_liveness_detail, migration 20260812113726) ──────────────────────
@@ -414,8 +424,9 @@ def main() -> int:
     # not be answered from our own data — it needed the source re-fetched by hand, and the per-row
     # 404s survived only in expiring GitHub Actions logs. Mirrors wasalt_liveness_pilot_detail.
     # Evidence only: this never drives inactivation and touches no safety gate.
-    detail_buf: list[dict] = []          # non-kill decisions — `applied` is known immediately
-    kill_detail: list[dict] = []         # kill decisions — `applied` waits on the cap gate below
+    detail_buf: list[dict] = []          # alive/transient — `applied` is known immediately
+    strike_detail: list[dict] = []       # strike decisions — `applied` waits on the TRUST gate below
+    kill_detail: list[dict] = []         # kill decisions — `applied` waits on trust AND the cap gate
 
     def _flush_detail(rows: list[dict]) -> None:
         """Best-effort: an audit-log write must never fail or roll back a liveness sweep."""
@@ -455,8 +466,12 @@ def main() -> int:
                 "applied": bool(args.apply) and action != "transient",
             }
             if action == "kill":
-                # `applied` is not knowable yet — the anomaly cap may quarantine the whole batch.
+                # `applied` is not knowable yet — the trust gate or the anomaly cap may quarantine
+                # the whole batch.
                 kill_detail.append(evidence)
+            elif action == "strike":
+                # Likewise: an untrusted run writes no strikes at all.
+                strike_detail.append(evidence)
             else:
                 detail_buf.append(evidence)
                 # Flush as we go so a SIGINT (CI timeout) keeps the evidence it already earned.
@@ -472,8 +487,7 @@ def main() -> int:
                     kill_pending.append((row["id"], new_missing))
                 else:
                     struck += 1
-                    if args.apply:
-                        client.table(TABLE).update({"missing_count": new_missing}).eq("id", row["id"]).execute()
+                    strike_pending.append((row["id"], new_missing))
             elif action == "alive":
                 alive += 1
                 alive_ids.append(row["id"])
@@ -492,31 +506,59 @@ def main() -> int:
         _flush_alive()
         _flush_detail(detail_buf)
 
-    # ── Anomaly cap gate (2026-07-27): the kill batch lands as one reviewed decision, not a drip ──
-    anomaly = args.apply and is_anomaly(len(kill_pending), kill_cap)
-    applied_kills = 0
-    if args.apply and kill_pending:
-        if anomaly:
-            # QUARANTINE: record the earned strike (missing_count) so history is truthful, but flip
-            # NOTHING inactive. The rows re-classify as kills next run and hit this gate again until
-            # the owner reviews and re-runs with an explicit --kill-cap.
-            for i in range(0, len(kill_pending), 200):
-                for rid, nm in kill_pending[i:i + 200]:
-                    client.table(TABLE).update({"missing_count": nm}).eq("id", rid).execute()
-        else:
-            for rid, nm in kill_pending:
-                client.table(TABLE).update({"missing_count": nm, "active": False}).eq("id", rid).execute()
-            applied_kills = len(kill_pending)
+    # ── TRUST GATE (2026-09-03): may this run act on its own DEAD verdicts AT ALL? ────────────────
+    # Asked BEFORE the cap, because the two guard different failures. The cap asks "is this BATCH
+    # too big to believe?"; the trust gate asks "is this RUN's evidence believable at all?" On
+    # 2026-09-02 a 106-row kill batch sat comfortably under the cap and landed — while the source
+    # was answering ~99% of probes with 404 because it had begun blocking our egress. A batch-size
+    # guard is structurally blind to that. Full incident: scrapers/common/liveness_trust.py.
+    #
+    # Untrusted => write NOTHING in the destructive direction: no strikes, no inactivations. The
+    # rows stay exactly as they were and stay honestly UNKNOWN. Alive (200) writes are deliberately
+    # NOT gated — a block cannot manufacture a live page, and restoring a live listing is the
+    # fail-safe direction (docs/ops/DELETION_SAFETY.md §2.4).
+    trusted = environment_is_trustworthy(alive, seen)
+    trust_quarantine = (not trusted) and bool(strike_pending or kill_pending)
 
-    # A kill's evidence is real either way, but `applied` must state whether a row actually flipped:
-    # false for a dry run AND false for a batch the anomaly cap quarantined (strikes recorded, no
-    # inactivation). Written after the gate because that is the first moment the answer is known.
+    anomaly = False
+    applied_kills = 0
+    applied_strikes = 0
+    if args.apply and trusted:
+        # Strikes: the cap does not govern them, only trust does.
+        for rid, nm in strike_pending:
+            client.table(TABLE).update({"missing_count": nm}).eq("id", rid).execute()
+        applied_strikes = len(strike_pending)
+
+        # ── Anomaly cap gate (2026-07-27) — UNCHANGED and still fully enabled. The trust gate is an
+        # ADDITIONAL guard in front of it, never a replacement for it.
+        anomaly = is_anomaly(len(kill_pending), kill_cap)
+        if kill_pending:
+            if anomaly:
+                # QUARANTINE: record the earned strike (missing_count) so history is truthful, but
+                # flip NOTHING inactive. The rows re-classify as kills next run and hit this gate
+                # again until the owner reviews and re-runs with an explicit --kill-cap.
+                for i in range(0, len(kill_pending), 200):
+                    for rid, nm in kill_pending[i:i + 200]:
+                        client.table(TABLE).update({"missing_count": nm}).eq("id", rid).execute()
+            else:
+                for rid, nm in kill_pending:
+                    client.table(TABLE).update({"missing_count": nm, "active": False}).eq("id", rid).execute()
+                applied_kills = len(kill_pending)
+
+    # `applied` must state whether a row actually changed: false for a dry run, false for a batch the
+    # anomaly cap quarantined, and false for EVERY strike and kill of an untrusted run. Written after
+    # the gates because that is the first moment the answer is known.
+    for e in strike_detail:
+        e["applied"] = bool(args.apply) and trusted
     for e in kill_detail:
-        e["applied"] = bool(args.apply) and not anomaly
+        e["applied"] = bool(args.apply) and trusted and not anomaly
+    _flush_detail(strike_detail)
     _flush_detail(kill_detail)
 
     verb = "inactivated" if args.apply else "WOULD inactivate"
-    kill_shown = applied_kills if args.apply else len(kill_pending)
+    # An untrusted run inactivates nothing, so a dry run must not advertise a number it would refuse.
+    kill_shown = applied_kills if args.apply else (len(kill_pending) if trusted else 0)
+    alive_rate = (alive / seen) if seen else 0.0
     # cap_src makes the cap's PROVENANCE auditable: an explicit --kill-cap override and a computed
     # cap are operationally different decisions and must never read the same in the run log. This is
     # what would have exposed the head=True count bug immediately instead of after ~3 days
@@ -524,14 +566,21 @@ def main() -> int:
     cap_src = (f"override active={active_now_logged}" if args.kill_cap > 0
                else f"auto=max(150,2% of {active_now_logged})")
     notes = (f"{mode} scanned={seen} dead={dead} {verb}={kill_shown} strike={struck} "
-             f"alive={alive} transient={transient} kill_cap={kill_cap} [{cap_src}]")
-    if anomaly:
+             f"applied_strikes={applied_strikes} alive={alive} transient={transient} "
+             f"kill_cap={kill_cap} [{cap_src}] alive_rate={alive_rate:.3f} trusted={trusted}")
+    if trust_quarantine:
+        notes = (f"TRUST-QUARANTINED alive_rate={alive_rate:.1%} below {MIN_ALIVE_RATE_FOR_TRUST:.0%} "
+                 f"(min_probes={MIN_PROBES_FOR_TRUST}) — 0 strikes and 0 inactivations written "
+                 f"(would_strike={len(strike_pending)} would_inactivate={len(kill_pending)}). The "
+                 f"source is not answering this run reliably, so its 404s are UNKNOWN, not death. "
+                 f"Owner review required. " + notes)
+    elif anomaly:
         notes = (f"ANOMALY-CAPPED would_inactivate={len(kill_pending)} cap={kill_cap} — 0 rows "
                  f"inactivated; owner review required. " + notes)
     print(f"\n✓ Gathern liveness done. {notes}", flush=True)
     # An empty stale worklist is legitimately healthy (everything fresh), not a dead source.
-    end_run(run_id, ok=not anomaly, rows_seen=seen, rows_upserted=applied_kills,
-            notes=notes, allow_empty=(len(work) == 0))
+    end_run(run_id, ok=not (anomaly or trust_quarantine), rows_seen=seen,
+            rows_upserted=applied_kills, notes=notes, allow_empty=(len(work) == 0))
     if holding_lock:
         _release_apply_lock(client, holder)
     return 0

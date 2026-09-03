@@ -123,15 +123,35 @@ for (const f of residencyFiles) {
 }
 if (!resHits) pass(`no string OR comment claims user data lives in the Kingdom (prod is ap-northeast-1) — ${residencyFiles.length} files`);
 
-// ── 4. The honest replacements are actually present (guards against silent deletion) ─────────────
-const about = readFileSync(join(SRC, 'app/about.tsx'), 'utf8');
-const info = readFileSync(join(SRC, 'components/InfoModal.tsx'), 'utf8');
+// ── 4. The honest replacement is present on EVERY surface that shows About copy ──────────────────
+// This used to name two files: src/app/about.tsx and components/InfoModal.tsx, because in 2026-08 the
+// About text existed in both. On 2026-09-03 /about became a redirect into InfoModal (there is now
+// exactly one About experience — see verify-info-routes-single-source.ts), so a file list would have
+// had to shrink by one. The rule is stated by SHAPE instead, which is strictly stronger than the two
+// names it replaces: any file carrying About section copy must carry the provenance statement with
+// it. A future third copy of the About text is caught by the same check, and a copy that keeps the
+// sections while dropping the provenance line — the actual regression this guards — cannot ship.
 const hasProvenance = (s: string) => /Listing licensing/.test(s) && /does not issue/i.test(s);
-if (hasProvenance(about) && hasProvenance(info)) {
-  pass('both screens carry the truthful listing-provenance statement instead of a licence claim');
-} else {
-  fail('the truthful listing-provenance statement is missing from about.tsx and/or InfoModal.tsx');
+const ABOUT_SECTIONS = ['About Us', 'Our role', 'Disclaimer', 'Data & privacy', 'Listing licensing'];
+const aboutCopyFiles = files.filter((f) => {
+  const src = readFileSync(f, 'utf8');
+  return ABOUT_SECTIONS.filter((h) => src.includes(`'${h}'`)).length >= 2;
+});
+let s4 = 0;
+for (const f of aboutCopyFiles) {
+  if (!hasProvenance(readFileSync(f, 'utf8'))) {
+    s4++;
+    fail(`${f.replace(ROOT + '/', '')} renders About copy but NOT the listing-provenance statement`);
+  }
 }
+// The canonical surface must still BE the canonical surface: emptying InfoModal would otherwise make
+// aboutCopyFiles empty, and an empty list vacuously satisfies the loop above.
+const INFO = join(SRC, 'components/InfoModal.tsx');
+if (!aboutCopyFiles.includes(INFO)) {
+  s4++;
+  fail('components/InfoModal.tsx no longer carries the About copy — the canonical About surface is gone');
+}
+if (!s4) pass(`every surface with About copy carries the truthful provenance statement (${aboutCopyFiles.length} surface(s))`);
 
 console.log(failed === 0
   ? '\n✓ no unsupported user-facing claims'

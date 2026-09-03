@@ -1,7 +1,7 @@
 -- Extend mon_detect_ai_cost_health with a reasoning-token invariant (owner audit, 2026-08-30).
 --
 -- WHY: the 2026-08-28 outage was a reasoning-alias silently eating max_tokens. ai_unexpected_model
--- (check 4) only fires if the BILLED MODEL NAME changes away from '%flash%' — it would miss a
+-- (check 4) only fires if the BILLED MODEL NAME changes away from '%flash%' -- it would miss a
 -- same-named tier that started returning thinking tokens. reasoning_tokens is the direct signal:
 -- DEEPSEEK_MODEL is pinned to a non-reasoning alias specifically so this column stays zero. Any
 -- non-zero value means we are being billed for thinking we never asked for, independent of what

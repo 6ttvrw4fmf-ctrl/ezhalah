@@ -1,0 +1,130 @@
+# The routine-#6 journey sweep, run once per BROWSER ENGINE against production.
+#
+# WHY THIS EXISTS. `e2e/journeys/run.mjs` has driven production since 2026-08-28 and had never once
+# run outside a routine's agent container — no workflow invoked it. That container ships Chromium
+# only, and PART 11.1 of docs/ops/JOURNEY_PERSISTENCE_ENGINEER.md rightly forbids `playwright
+# install` there (a mismatched build kills every journey at launch and reads as a total production
+# outage). Those two facts together were recorded in §11.5 as "WebKit and Firefox are genuinely
+# unreachable" — true of that container, and never true of CI, where six workflows already install
+# their own browser on a GitHub runner. The gap was not infrastructure; it was that nothing ran the
+# sweep anywhere else. Every "cross-browser health" figure #6 has ever reported was Chromium.
+#
+# WHAT IT PROVES, AND WHAT IT DOES NOT. Three engines, two viewports, real clicks against
+# https://ezhalah-app.vercel.app. That is ENGINE evidence — rendering, focus, layout, feature
+# detection. It is NOT device evidence: PART 10 is unchanged and headless WebKit is still not a
+# physical iPhone. Microphone capture, the iOS audio session, real touch, the on-screen keyboard and
+# iOS permission dialogs remain DEVICE REQUIRED and are not scored by anything here.
+#
+# SCHEDULED, NOT ON EVERY PR. It drives PRODUCTION and takes ~20 minutes per engine, so it is a
+# daily + manual job rather than a required check — same precedent as the live migration-drift check
+# (AGENTS.md) and the web-runtime smoke's own note about staying out of `npm test`.
+name: Journey sweep (per engine)
+
+on:
+  schedule:
+    # 04:40 UTC — off the :00/:14 data-refresh ticks (pg_cron jobids 17 and 28) that PART 9.2 (5)
+    # warns make live reads move under a journey, and clear of the 15-minute drift-guard slots.
+    - cron: '40 4 * * *'
+  workflow_dispatch:
+    inputs:
+      engine:
+        description: 'Single engine to run (blank = all three)'
+        required: false
+        default: ''
+        type: choice
+        options: ['', 'chromium', 'webkit', 'firefox']
+      journey:
+        description: 'Single journey key (JOURNEY_ONLY), blank = every journey'
+        required: false
+        default: ''
+      reps:
+        description: 'Repetitions per journey/viewport (PART 11.4 floor is 2)'
+        required: false
+        default: '2'
+
+concurrency:
+  # Never two sweeps at once: they share one production instance with real users and six other
+  # routines, and PART 11.3's concurrency knee of 3 is a property of that instance, not of CI.
+  group: journey-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: journeys on ${{ matrix.engine }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      # ONE ENGINE'S FAILURE MUST NOT CANCEL THE OTHERS. The entire question this workflow answers is
+      # "where do the engines DIFFER" — killing the siblings the moment one goes red destroys exactly
+      # the comparison, and leaves a matrix where the interesting cell is `cancelled`.
+      fail-fast: false
+      max-parallel: 1 # serial: see the concurrency note above — this load lands on production
+      matrix:
+        engine: [chromium, webkit, firefox]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Skip engines not selected for this dispatch
+        id: gate
+        run: |
+          WANT='${{ inputs.engine }}'
+          if [ -n "$WANT" ] && [ "$WANT" != '${{ matrix.engine }}' ]; then
+            echo "run=no" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ matrix.engine }} skipped — this dispatch asked for $WANT only."
+          else
+            echo "run=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.gate.outputs.run == 'yes'
+        run: npm ci --no-audit --no-fund
+
+      - name: Install ${{ matrix.engine }} for Playwright
+        if: steps.gate.outputs.run == 'yes'
+        # The `playwright install` that PART 11.1 forbids is the one in the AGENT CONTAINER, whose
+        # pinned /opt/pw-browsers build a fresh download would not match. On a GitHub runner there is
+        # no pinned build to contradict — this is the same line six existing workflows already run.
+        run: npx playwright install --with-deps ${{ matrix.engine }}
+
+      - name: Sweep production on ${{ matrix.engine }}
+        if: steps.gate.outputs.run == 'yes'
+        env:
+          JOURNEY_ENGINE: ${{ matrix.engine }}
+          JOURNEY_ONLY: ${{ inputs.journey }}
+          JOURNEY_N: ${{ inputs.reps || '2' }}
+          # NO SECRETS ARE PASSED, DELIBERATELY. The ledger write goes through the PUBLIC anon key
+          # (harness.mjs `H`) to `ops_qa_record_coverage`, exactly as it does from an agent
+          # container; nothing here needs the service-role key, and handing a job a credential it
+          # does not use is how one eventually leaks into a log.
+        # NEVER PIPE THIS (§41.12 corollary): `run.mjs | tee` reports tee's status, so a sweep that
+        # correctly exited 1 would read as a pass. Redirect, capture $?, then read the file.
+        run: |
+          set +e
+          node e2e/journeys/run.mjs > /tmp/sweep-${{ matrix.engine }}.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/sweep-${{ matrix.engine }}.log
+          echo "SWEEP_STATUS=$status" >> "$GITHUB_ENV"
+
+      - name: Report
+        if: steps.gate.outputs.run == 'yes' && always()
+        run: |
+          LOG=/tmp/sweep-${{ matrix.engine }}.log
+          {
+            echo "### ${{ matrix.engine }}"
+            echo ''
+            [ -f "$LOG" ] && sed -n '/JOURNEYS RUN:/,$p' "$LOG"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "${SWEEP_STATUS:-1}"
+
+      - name: Keep the full log
+        if: steps.gate.outputs.run == 'yes' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: journey-sweep-${{ matrix.engine }}
+          path: /tmp/sweep-${{ matrix.engine }}.log
+          if-no-files-found: warn

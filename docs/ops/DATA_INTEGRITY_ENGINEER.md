@@ -918,6 +918,74 @@ evidence-backed deletion — a genuine hard 404 on 2026-08-23, control-validated
 property id with a bogus unit id also 404s — followed by the source republishing the same unit URL.
 1 of 40. The row was **not** rebuilt from the probe.
 
+## 29. sadin put its prices behind a lead-capture wall — settled 2026-09-03 by observing the page. Do NOT write a third selector.
+
+**Verdict: NOT an Ezhalah bug. sadin no longer publishes the description or the price to an anonymous
+visitor. The NULLs are correct and must stay.** This class has now cost two failed fixes; read this
+before starting a third.
+
+**The symptom.** From ~2026-08-14, every freshly-crawled sadin row was stored with no description and
+therefore no price — 74/75 residential and 10/10 commercial active rows, all reachable, all
+price-less. sadin's price has *always* lived only in description prose (its price field publishes
+«السعر عند الطلب» — the standing declared exception in `scripts/verify-no-derived-price.ts`), so
+losing the prose loses the price.
+
+**Why every barrier stayed green, and why that was correct.** The crawl was healthy throughout:
+`ok=true`, `rows_seen=84-85`, prune normal, canonical/index parity exact, 0 rows lost. Every count,
+liveness and parity barrier was measuring something real and something fine. The loss was
+*field-level* and nothing asked. `mon_detect_summary_only_capture()` encodes exactly this bug class
+but was hardcoded to `aqaratikom_residential_listings` (§25c). `mon_detect_detail_capture_collapse()`
+(migration `20260903071530`) generalises it over every platform table and is what caught this.
+
+**The first fix was a guess, and it failed.** `_description()` was pointed at a `<dt>وصف العقار</dt>
+<dd>` pair, inferred from the true fact that `_dd_field()` works on these pages for
+المساحة / نوع العقار / الغرض. A full crawl on that code changed nothing. **The inference was never
+observed** — the audit container's egress policy hard-403s `sadin.com.sa` (`www.` is permitted for
+CONNECT but 308-redirects to the blocked apex), so the markup could not be read from a routine
+container. §19 in one sentence: *the evidence proved the fetch was healthy and one selector was dead;
+it said nothing about which selector, and it was over-read.*
+
+**What settled it: make the CRAWLER report the markup.** The crawler runs where the source is
+reachable, so `_report_description_miss()` (in `scrapers/sadin/run.py`, permanent) prints the page's
+`<dt>` labels, the tag/class skeleton, description-ish class tokens and presence signals whenever the
+description parse misses — structural only, capped at 2 rows per run, free text through `_redact()`
+because it lands in a CI log. Two crawls answered what three weeks of database reasoning could not.
+
+Observed live 2026-09-03 (runs `33773123528`, `33776005183`), identical on both sampled ads:
+
+- the label **«وصف العقار» is ABSENT from the page** — so no label-anchored selector can ever work;
+- the page carries `detail-card property-details-locked` beside `contact-card` / `dialog-content`;
+- its text reads: **«تفاصيل العقار الكاملة محمية — دعنا نتواصل معك. أدخل اسمك ورقم جوالك مرة واحدة،
+  وسيسجل فريق سدين طلبك ويتابع معك بخصوص العرض رقم …»** ("the full property details are protected;
+  enter your name and mobile number once and the Sadin team will follow up");
+- page signals `{'«السعر»': 7, '«ريال»': 0, '«سعر»': 7, 'ld+json': 0, '__NEXT_DATA__': 0,
+  'login_prompt': 1}`. **«ريال» appears ZERO times.** There is no figure anywhere in the HTML, and no
+  JSON payload holding one.
+
+The public `<dt>` block still carries الغرض / نوع العقار / المساحة (+ الغرف / دورات المياه on some
+ads), which is exactly the set that still parses correctly — 85/85 rows have area and type. That
+correspondence is itself the proof: what sadin still publishes, we still capture.
+
+**Therefore there is nothing to fix in the scraper, and two things that must NOT be done:**
+
+1. **Never submit a name and phone number to unlock the details.** It would fabricate a person,
+   disclose PII to a third party, and circumvent an access control the source deliberately put up.
+   Not a fallback, not "just for the probe".
+2. **Never recover the price from anywhere else** — a cached page, a description figure, an old
+   stored value, an arithmetic guess. Honest NULL beats a fabricated number (§21/§22). The 85 rows
+   keep their area, type, location and URL, stay active and stay searchable.
+
+**Open for the owner, not for an autonomous run** (recorded here so it is not silently decided):
+`detail_capture_collapse:sadin_residential_listings` and `:sadin_commercial_listings` are **true
+observations with no available remedy**, so they cannot go green — production can never "prove
+recovery" for a figure the source stopped publishing. Leaving a P1 red forever is the stuck-alert
+pathology §23a/§25a exist to prevent, but the fix is a *disposition*, never a silenced barrier
+(§G.7). The shape that fits this repo's existing discipline is an evidence-gated waiver table keyed
+to a recorded source probe — the `ops_price_source_verified` / `ops_deleted_but_source_live_adjudication`
+pattern — so the detector keeps discriminating and only an adjudicated, evidence-carrying platform is
+exempt. Also an owner call: whether a listing whose source no longer publishes a price should keep
+being served at all. Neither was decided autonomously.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve

@@ -34,7 +34,10 @@ import { CardIn, LoadingDots } from '@/components/CardReveal';
 // perf fix 2026-07-09). onOpen is deliberately excluded from the comparison: it's re-created each
 // render but behaves identically for the same listing.
 const MemoResultCard = memo(ResultCard, (prev, next) =>
-  prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant);
+  prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant
+  // activeAf is one frozen reference per results turn (afActive memoises on m.result.query), so
+  // identity is the right comparison; without this term the card would swallow the prop.
+  && prev.activeAf === next.activeAf);
 import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
@@ -50,6 +53,7 @@ import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveG
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
+import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
 import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -2961,6 +2965,12 @@ export default function Agent() {
               // same sentence the reply types on screen — one computation, never a second copy that
               // could drift from what's actually shown.
               const introZeroResult = m.result.listings.length === 0;
+              // «مطابق لطلبك» (§12A): the ONLY carrier of the predicates these cards were searched
+              // with is this turn's frozen result.query — never the Filter store, guidedPills or
+              // afReceipt, so a facet the user cleared cannot leak onto a card. afActive() is
+              // WeakMap-memoised on that object, so every card of the turn (and every «عرض المزيد»
+              // page, which reuses the same query) receives one stable reference.
+              const activeAf = afActive(m.result.query);
               // Same helper the mining overlay quotes (src/data/search.ts) — one definition of "the
               // total we may state", so the interview's closing beat and this headline, describing the
               // SAME search, can never name two different numbers. null ⇒ no honest count ⇒ say nothing.
@@ -3080,6 +3090,7 @@ export default function Agent() {
                               listing={l}
                               variant="compact"
                               rank={i + 1}
+                              activeAf={activeAf}
                               onOpen={() => { trackOpen(l); void openListing(l); }}
                             />
                           </CardIn>

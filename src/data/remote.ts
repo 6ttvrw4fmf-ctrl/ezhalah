@@ -1282,7 +1282,14 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
 }
 
 // A candidate row from the location index (the routing layer): just enough to find the exact raw row.
-type Cand = { source_table: string; listing_id: number; platform: string; total_count?: number };
+type Cand = {
+  source_table: string; listing_id: number; platform: string; total_count?: number;
+  // §12A / R13.12 (owner 2026-09-03). The canonical search_listings_ar row the Advanced-Filter
+  // predicate ran on, packed by the results RPC (migration af_canon_on_results_rpc) and carried to
+  // the card's «مطابق لطلبك» strip UNCHANGED. SQL NULL when the search had no AF answer — the RPC
+  // gates the build so a no-AF search does not pay ~598 bytes a row for something nothing renders.
+  af_canon?: Record<string, unknown> | null;
+};
 
 // Round-robin the candidates by platform (preserving each platform's newest-first order) so a broad
 // search shows a balanced mix instead of the top being monopolised by the platforms that scrape most
@@ -1496,6 +1503,9 @@ export async function fetchListingsForQuery(
   //    rank, and group ids by source_table to fetch the full cards.
   const cleanCands = allCands.map((c, i) => ({
     source_table: c.source_table as string, listing_id: Number(c.listing_id), platform: c.platform as string, rank: i,
+    // VERBATIM — never `!!`, never `?? 0`. Every value inside stays nullable so the card can tell
+    // "the source did not publish this" from "false" (R12A.3: UNKNOWN is never rendered as a claim).
+    af_canon: (c.af_canon ?? null) as Record<string, unknown> | null,
   }));
   // The index returns the ARABIC-CANONICAL location for every candidate (region_ar/city_ar/district_ar).
   // We display THAT — never the raw English/transliterated value underneath. (user: Arabic is canonical;
@@ -1565,6 +1575,10 @@ export async function fetchListingsForQuery(
     // city-name-guarded in finalize). null for every other source → `|| ''` keeps them byte-identical.
     l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || l.districtArFallback || '');
     l.regionAr = (ar?.region) || l.regionAr || '';
+    // §12A: the AF-canonical row travels with the listing so ResultCard can prove, per card, that
+    // this row really satisfies each active predicate — read from the SAME row the filter ran on,
+    // never from l.features/l.bathrooms (finalize() collapses their NULLs to 0/false).
+    l.canon = c.af_canon;
     const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
     ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
   }

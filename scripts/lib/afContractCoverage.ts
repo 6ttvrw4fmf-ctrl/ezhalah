@@ -139,7 +139,7 @@ const S5: Entry[] = [
   { rule: 'R5.5.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-narrowing-gate'], evidence: 'CI bathrooms journey: rungs rendered per-rung, base 11,202 → ≥1 selected → 2,469' },
   { rule: 'R5.5.2', dim: 'af', weight: 1, grade: 'L', barrier: ['verify-af-full-surface-differential', 'verify-af-surface-judge'], evidence: 'live 2026-09-02, full-surface differential (Riyadh region + جدة): every bathroom/street-width rung and every age bucket verified per rung: 337 boundaries exercised (a row ON the threshold present), ≥N includes N, buckets closed at both ends, 0 violations' },
   { rule: 'R5.6.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-salience-orders-only'], evidence: 'scoreQuestion() executed across the whole salience range (0 to 1000): ask/skip verdict and surviving option set are invariant, score stays exactly proportional, and order still moves (2026-08-30)' },
-  { rule: 'R5.6.2', dim: 'af', weight: 2, grade: 'P', barrier: ['verify-af-narrowing-gate'], evidence: 'ASK_FIRST_TIER reorders only; covered indirectly by the usefulness gate' },
+  { rule: 'R5.6.2', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-narrowing-gate', 'verify-af-salience-orders-only'], evidence: '2026-09-03 §6: the REAL scoreQuestion executed over a 4-value ask-tier sweep (0..99) on every fixture — verdict and surviving options invariant; the rule\'s own sentence asserted directly (rnpl on a scope with no installment coverage is REFUSED at every tier); §6.3 proves the tier still bites on order. Mutation: making the tier an inclusion gate in afRanking.ts turns §6.1 red' },
 ];
 
 // ── §6 ROUNDS ────────────────────────────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ const S6: Entry[] = [
   { rule: 'R6.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-round-size'], evidence: 'AF_ROUND_MAX_QUESTIONS=4' },
   { rule: 'R6.1.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-size'], evidence: 'a 1-question round is valid' },
   { rule: 'R6.1.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-size'], evidence: 'scope steps do not count' },
-  { rule: 'R6.1.4', dim: 'af', weight: 2, grade: 'P', barrier: ['verify-af-round-size'], evidence: 'structural negative ("never truncated to hit the cap") — contract §15.2 acknowledges no direct test' },
+  { rule: 'R6.1.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-size', 'verify-af-salience-orders-only'], evidence: '2026-09-03 §7: the selection is now asserted directly, not just the absence of a slice — a 6-question pool enumerated WORST-FIRST must yield the top-4 by (real askTier, score), no outscored question dropped, a 2-question pool asks 2. NOT L: advancedFilters.ts/agent.tsx are not standalone-importable by a plain Node runner, so §7 executes the real askTier but assembles the round itself; §7.1 pins the modelled comparator and the count-only cap to the production expressions. Mutation: truncating in pool order, or dropping the tier key from the real comparator, turns it red' },
   { rule: 'R6.2.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'answered AND skipped both carried' },
   { rule: 'R6.2.2', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'no re-ask across rounds' },
   { rule: 'R6.2.3', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-cross-round-carry'], evidence: 'cross-reference' },

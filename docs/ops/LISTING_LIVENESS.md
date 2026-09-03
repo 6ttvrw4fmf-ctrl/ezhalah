@@ -263,6 +263,54 @@ killed nothing — but a source that answers misleadingly under degradation (dea
 known shape) would not be caught. Choosing the threshold needs aqar's baseline verified rate and
 changes deactivation semantics, so it is an owner decision, not a drive-by.
 
+### 5.4 Gathern proved §5 the hard way — and expresses blocking as `404`
+
+§5 said "a run that cannot be trusted may not kill" from 2026-08-30, but only dealapp implemented
+it. On 2026-09-01 gathern showed what the missing half costs. Its oracle alive-rate:
+
+```
+08-23 .. 08-31   66 74 79 72 77 72 76 84 62 %     nine healthy days
+09-01  3.8%      09-02  0.7%      09-03  0.5%     the collapse
+```
+
+Inventory does not fall from 75% alive to 0.5% overnight. What changed was the *source*, not the
+listings — and the damage landed before anyone looked: **302 rows inactivated on 09-01, 106 on
+09-02**. Only on 09-03 did the batch (1,016) finally exceed the anomaly cap and quarantine.
+
+**Why the anomaly cap was not enough, and why both guards must exist.** The cap is a batch-SIZE
+guard: *is this batch too big to believe?* The 09-02 batch was 106 against a cap of 585, so it
+sailed through — while every verdict in that run was unreliable. Size and trustworthiness are
+different questions. The run-level gate (`scrapers/common/liveness_trust.py`, floor 0.20, same
+constants as dealapp) asks the second one and is evaluated **before** the cap.
+
+**The trap specific to this platform: gathern expresses blocking as `404`, not `429`.** The contract
+correctly treats 403/429/5xx as UNKNOWN, but a source that answers a throttled or unwelcome client
+with its own application-rendered 404 defeats a 404-means-dead oracle entirely. Proven the same day:
+one listing returned **200 to the GitHub-Actions oracle at 10:51 and 404 to a datacenter probe
+minutes later** — same URL, same hour, two answers. A URL that returns 200 to one client and 404 to
+another is not a not-found. A probe of 12 rows the oracle had just verified alive returned 404 on
+**12/12** from datacenter egress: a 100% false-death rate.
+
+Three consequences worth carrying forward:
+
+1. **Strikes must be deferred, not written in the loop.** They used to land per-row, so by the time
+   a run's alive-rate was known they were already durable. Nothing could take them back.
+2. **Restorative writes are never gated.** A block cannot manufacture a live 200, so an alive
+   reading stays trustworthy even in a degraded run (same posture as `DELETION_SAFETY.md` §2.4).
+3. **An aggregate rate is a lagging signal.** The sharper instrument for a source like this is an
+   in-run positive control: probe a handful of known-alive canaries; if the canaries 404, the run is
+   blocked, whatever the rest of the batch says. Not yet built — recorded here so it is not
+   rediscovered from scratch.
+
+`mon_detect_liveness_oracle_untrustworthy()` (migration `20260903162156`) makes the degraded state
+visible, as a regression against each table's own 2–14d baseline rather than an absolute — which is
+what keeps dealapp's structural ~12% (§5.1) out of the cohort while catching gathern's 75% → 0.5%.
+
+**The rows inactivated inside that window are not confirmed dead.** They are UNKNOWN and must be
+recovered through `liveness --recheck-dead`, which restores only on a live 200 — and only once the
+oracle reaches an egress gathern answers truthfully. Routing gathern through the shared Saudi
+residential proxy is an **owner decision** (§5.1), not a code change.
+
 ## 6. Ezhalah must know its own liveness state without being asked
 
 A rule nothing measures is a wish. Migration `20260830191646`:

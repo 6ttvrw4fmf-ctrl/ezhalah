@@ -1,4 +1,5 @@
 import type { Deal } from './taxonomy';
+import type { AfCanon } from '@/lib/afEvidence';
 
 // A normalized listing. (PRD §8.2) In production the ingestion pipeline maps every partner feed
 // onto this shape; here we ship curated placeholders ported from the prototype.
@@ -40,6 +41,11 @@ export type Listing = {
   // found live 2026-07-25: `listed` here is a raw scraped date string, never one of the mock catalog's
   // 5 LISTED_SEQ tokens, so the old RECENCY[listed] lookup was a permanent no-op for real data.)
   recencyRank?: number;
+  // §12A / R13.12: the canonical search_listings_ar row the Advanced-Filter predicate ran on, as the
+  // results RPC's `af_canon` jsonb, copied VERBATIM (`c.af_canon ?? null` — never `!!`, never `?? 0`).
+  // Feeds the «مطابق لطلبك» evidence strip (src/lib/afEvidence.ts) and nothing else; null when the
+  // search carried no AF answer. Every value inside stays nullable: UNKNOWN is UNKNOWN.
+  canon?: AfCanon | null;
   photo: string;
   // Real URL on the source platform — when present, the in-app browser redirects the
   // user OUT to this page. Absent for the bundled mock catalog (synthetic preview only).

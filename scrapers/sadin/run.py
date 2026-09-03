@@ -394,6 +394,92 @@ def _description(html: str) -> Optional[str]:
     return _strip(m.group(1)) or None if m else None
 
 
+_DESC_MISS_REPORTS = 0
+_DESC_MISS_LIMIT = 2
+
+
+def _report_description_miss(pid: str, html: str) -> None:
+    """Make a DEAD description selector say so, out loud, from the crawl that can see the page.
+
+    This parse failing is silent, and that silence is the whole reason the 2026-08-14 → 2026-09-03
+    outage lasted three weeks: desc_raw=None costs the row its price (sadin's price is parsed only
+    out of this prose, see _extract_price) while the run still reports ok=true, rows_seen=84 and a
+    healthy prune. Every count, liveness and parity barrier stays green because they are all
+    measuring something real and something fine.
+
+    It then cost a SECOND failed fix: the audit container's egress policy 403s sadin.com.sa, so the
+    markup could not be read, a dt/dd shape was inferred from the fact that _dd_field() works here
+    for المساحة / نوع العقار / الغرض, and that inference was wrong. The crawler runs where the
+    source IS reachable — so the crawler is what should report the shape, rather than the next
+    engineer guessing again.
+
+    STRUCTURE ONLY, and bounded: tag/class skeleton, `<dt>` labels, and description-ish class
+    tokens. Text nodes are collapsed out of the skeleton, and the one short text sample goes
+    through _redact() (PDPL — this lands in a CI log). Capped at _DESC_MISS_LIMIT rows per run so a
+    platform-wide break cannot flood the log.
+    """
+    global _DESC_MISS_REPORTS
+    if _DESC_MISS_REPORTS >= _DESC_MISS_LIMIT:
+        return
+    _DESC_MISS_REPORTS += 1
+
+    i = html.find(_DESC_LABEL)
+    where = f"at offset {i}" if i >= 0 else "ABSENT from the page"
+    print(f"  [desc-miss] {pid}: label «{_DESC_LABEL}» {where}; html={len(html)}B", flush=True)
+
+    dts = re.findall(r"<dt[^>]*>\s*([^<]{1,40}?)\s*</dt>", html)
+    print(f"  [desc-miss] {pid}: dt labels = {dts[:14]}", flush=True)
+
+    if i >= 0:
+        window = html[i + len(_DESC_LABEL): i + len(_DESC_LABEL) + 700]
+        skeleton = re.sub(r">[^<]+<", "><", window)      # keep tags + classes, drop text nodes
+        print(f"  [desc-miss] {pid}: tags after label = {skeleton[:400]}", flush=True)
+        print(f"  [desc-miss] {pid}: text after label = {(_redact(_strip(window)) or '')[:200]}",
+              flush=True)
+    else:
+        cls = sorted(set(re.findall(r'class="([^"]*(?:desc|detail|about|content)[^"]*)"', html, re.I)))
+        print(f"  [desc-miss] {pid}: candidate class tokens = {cls[:10]}", flush=True)
+
+    # Observed 2026-09-03: the label is ABSENT and the page carries a
+    # `detail-card property-details-locked` block next to `contact-card` / `dialog-content`. That
+    # reads like a login gate, which would mean the description and price are no longer PUBLISHED
+    # to an anonymous visitor — a source limitation, where honest NULL is correct and any recovered
+    # figure would be fabrication (§21/§22). But "the parser dropped it" and "the source stopped
+    # publishing it" look identical from the database, and they lead to OPPOSITE actions, so the
+    # question has to be settled on the page: is the figure anywhere in what the source hands us?
+    # Keys and counts only — never values (PDPL: this lands in a CI log).
+    signals = {
+        "«السعر»": html.count("السعر"),
+        "«ريال»": html.count("ريال"),
+        "«سعر»": html.count("سعر"),
+        "ld+json": html.count("application/ld+json"),
+        "__NEXT_DATA__": int("__NEXT_DATA__" in html),
+        "login_prompt": int(any(k in html for k in ("تسجيل الدخول", "إنشاء حساب", "سجل الدخول"))),
+    }
+    print(f"  [desc-miss] {pid}: page signals = {signals}", flush=True)
+
+    locked = re.search(r'<[a-z]+[^>]*class="[^"]*property-details-locked[^"]*"[^>]*>(.{0,600})',
+                       html, re.S)
+    if locked:
+        print(f"  [desc-miss] {pid}: inside locked block = "
+              f"{re.sub(r'>[^<]+<', '><', locked.group(1))[:300]}", flush=True)
+        print(f"  [desc-miss] {pid}: locked block text = "
+              f"{(_redact(_strip(locked.group(1))) or '')[:160]}", flush=True)
+
+    for blob in re.finditer(r'<script[^>]*type="application/ld\+json"[^>]*>(.{0,4000}?)</script>',
+                            html, re.S):
+        try:
+            import json as _json
+            data = _json.loads(blob.group(1))
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else [data]
+        for it in items:
+            if isinstance(it, dict):
+                print(f"  [desc-miss] {pid}: ld+json @type={it.get('@type')!r} keys={sorted(it)[:18]}",
+                      flush=True)
+
+
 def _is_per_meter(before: str, after: str) -> bool:
     # A per-metre rate can be labeled EITHER after the number ("4,250 ريال للمتر") OR before it
     # ("المتر: 4000 ريال") — found live 2026-07-28 on ad SDX3ZNP: only the `after` side was checked,
@@ -451,6 +537,8 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     if title_raw.strip() == "الدخول أو إنشاء حساب":
         return None, ""
     desc_raw = _description(html)
+    if desc_raw is None:
+        _report_description_miss(pid, html)
 
     # Redesign detail pages carry the REAL kind in `<dt>نوع العقار</dt>` (the pre-redesign page's
     # "نوع العقار" held the DEAL and is a dead selector now, so this is None on old markup). The
