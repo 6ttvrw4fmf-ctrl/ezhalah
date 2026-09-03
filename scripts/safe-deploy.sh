@@ -179,12 +179,28 @@ echo "Verifying the canonical alias serves the new, Supabase-configured bundle (
 NEW_BUNDLE=""
 ALIAS_BUNDLE=""
 BUNDLE_OK=0
+# ── WHY the read failed, not just that it did (routine #7, 2026-09-03, issue #1563) ───────────────
+# 14 consecutive deploys (runs 242-254) ended `failure` here reporting `alias now serving: <none>`
+# and `expected: <never readable>` — EMPTY reads, which is a different fact from "the alias did not
+# move" and the message could not tell them apart. Vercel confirms every one of those deploys reached
+# READY/production, so the deploys shipped and only this check failed; meanwhile the very same curl,
+# cache-buster included, reads the alias fine from outside CI, and the hydration gate loads the same
+# URL in a real browser seconds later. So the cause is in HOW the runner's read fails, and nothing in
+# the log recorded it. These vars capture the HTTP status and body size of the LAST read of each URL,
+# in the SAME request (`-o` + `-w`, no extra traffic — deliberately, since request volume is itself
+# one of the hypotheses), and the failure block prints them. Diagnostics only: no control flow, no
+# threshold and no gate behaviour changes here — this step stays BLOCKING and still exits 1.
+ALIAS_BODY="$(mktemp)"; NEW_BODY="$(mktemp)"
+ALIAS_HTTP=""; NEW_HTTP=""
+ALIAS_BYTES=0; NEW_BYTES=0
 POLL_DEADLINE=$(( SECONDS + 300 ))
 while [ "$SECONDS" -lt "$POLL_DEADLINE" ]; do
   if [ -z "$NEW_BUNDLE" ] && [ -n "${DEPLOYED_URL:-}" ]; then
-    NEW_BUNDLE="$(curl -s -H 'Cache-Control: no-cache' "${DEPLOYED_URL}/?_=$(date +%s%N)" | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
+    NEW_HTTP="$(curl -s -o "$NEW_BODY" -w '%{http_code}' -H 'Cache-Control: no-cache' "${DEPLOYED_URL}/?_=$(date +%s%N)" || echo 000)"
+    NEW_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$NEW_BODY" 2>/dev/null | head -1 || true)"
   fi
-  ALIAS_BUNDLE="$(curl -s -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "https://ezhalah-app.vercel.app/?_=$(date +%s%N)" | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
+  ALIAS_HTTP="$(curl -s -o "$ALIAS_BODY" -w '%{http_code}' -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "https://ezhalah-app.vercel.app/?_=$(date +%s%N)" || echo 000)"
+  ALIAS_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$ALIAS_BODY" 2>/dev/null | head -1 || true)"
   MATCHED=0
   # dtg_alias_serves: succeeds ONLY when the canonical alias serves the exact just-deployed bundle
   # (same predicate the regression test asserts) — never on an empty/stale read.
@@ -199,6 +215,10 @@ while [ "$SECONDS" -lt "$POLL_DEADLINE" ]; do
   fi
   sleep 5
 done
+ALIAS_BYTES="$(wc -c < "$ALIAS_BODY" 2>/dev/null || echo 0)"
+NEW_BYTES="$(wc -c < "$NEW_BODY" 2>/dev/null || echo 0)"
+ALIAS_HEAD="$(head -c 200 "$ALIAS_BODY" 2>/dev/null | tr -d '\n' || true)"
+rm -f "$ALIAS_BODY" "$NEW_BODY"
 if [ "$BUNDLE_OK" = 1 ]; then
   echo "OK: https://ezhalah-app.vercel.app serves $ALIAS_BUNDLE (expected: ${NEW_BUNDLE:-<unreadable from $DEPLOYED_URL — matched via PRE_BUNDLE diff instead>}) and it references supabase.co."
 else
@@ -208,6 +228,14 @@ else
   echo "   before deploy:                 ${PRE_BUNDLE:-<none>}"
   echo "   expected (from $DEPLOYED_URL):  ${NEW_BUNDLE:-<never readable>}"
   echo "   alias now serving:              ${ALIAS_BUNDLE:-<none>}"
+  # An EMPTY read and a STALE read are different failures and used to print identically (issue #1563).
+  echo "   last alias read:                HTTP ${ALIAS_HTTP:-000}, ${ALIAS_BYTES} bytes"
+  echo "   last deployment-URL read:       HTTP ${NEW_HTTP:-000}, ${NEW_BYTES} bytes"
+  echo "   alias body starts:              ${ALIAS_HEAD:-<empty>}"
+  echo "   Read those two lines FIRST. HTTP 200 with a healthy byte count but no entry- hash means the"
+  echo "   page rendered without the bundle reference; 401/403 means deployment protection or a bot"
+  echo "   challenge; 429 means this loop's own request rate; 000 means the runner could not connect"
+  echo "   at all. Only the first of those is a deploy problem."
   echo "   The Vercel deploy already happened (this check cannot un-deploy it) — but the baseline will"
   echo "   NOT advance, so the NEXT preflight-verify.sh will flag this commit as unapproved."
   echo "   If the alias never moved, promote it explicitly: npx vercel promote ${DEPLOYED_URL:-<unknown>} --yes"

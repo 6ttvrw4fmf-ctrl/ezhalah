@@ -8,11 +8,16 @@
 -- (location_search_candidates_ar). Nothing compared what those three actually DO at runtime, and
 -- that gap shipped a real defect: with شمال+غرب committed, the جنوب chip advertised 0 and tapping it
 -- returned 804 more listings, because cnt_dir_* was computed inside a scope that already applied
--- p_directions while the tap UNIONS.
+-- p_directions while the tap UNIONS. A count and a predicate can each be individually reasonable and
+-- still disagree; only running them side by side finds it.
 --
--- SEVERITY P1: a wrong number on the button is a lie told to the user before they click.
+-- This detector runs ops_af_option_truth_sweep over the certified cohort registry and raises on ANY
+-- disagreement. It is EXPENSIVE (it drives real RPCs), so it takes the daily slot like the other
+-- behavioural detectors, and it runs COUNTS-ONLY: the row-level half (`viol`) is for manual/major
+-- certification runs, where a 2,000-row pull per option is affordable.
 --
--- NOTE: superseded within the same day by 20260902004000 (slice size) — kept as applied.
+-- SEVERITY P1: a wrong number on the button is a lie told to the user before they click, and a
+-- filter that returns something other than what it advertised is the whole product being wrong.
 create or replace function mon_detect_af_option_count_truth()
 returns integer
 language plpgsql
@@ -37,7 +42,7 @@ begin
   for r in
     select * from public.ops_af_option_truth_sweep(
       p_deal := null, p_period := null, p_type := null,
-      p_row_limit := 1, p_check_rows := false)      -- counts only
+      p_row_limit := 1, p_check_rows := false)      -- counts only; see note above
   loop
     v_n := v_n + 1;
     v_bad := v_bad || jsonb_build_object(
