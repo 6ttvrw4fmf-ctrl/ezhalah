@@ -28,6 +28,7 @@ const read = (...p: string[]) => {
 const trust = read('scrapers', 'common', 'liveness_trust.py');
 const sweep = read('scrapers', 'gathern', 'liveness.py');
 const tests = read('scrapers', 'common', 'tests', 'test_liveness_trust_gate.py');
+const workflow = read('.github', 'workflows', 'gathern-liveness.yml');
 
 let failures = 0;
 const check = (name: string, cond: boolean, detail = '') => {
@@ -90,6 +91,56 @@ check('it pins healthy days as still trusted (the gate is not a blanket refusal)
   /HEALTHY_DAYS/.test(tests) && /assert environment_is_trustworthy/.test(tests));
 check('it pins the 09-02 under-the-cap batch specifically',
   /slipped_under_the_anomaly_cap/.test(tests));
+
+// ── Part 7: the in-run positive control (canary), owner rule 2026-09-03 ─────────────────────────
+// The aggregate rate is a LAGGING signal — on 2026-09-01 it only condemned the run after all 1,500
+// probes, by which time 302 rows were inactivated. The canary asks the same question on ~10 probes,
+// BEFORE the worklist is touched.
+check('a canary predicate exists and fails closed',
+  /def canary_environment_ok/.test(trust) &&
+  /probe_count\s*<\s*min_canaries\s*or\s*probe_count\s*<=\s*0/.test(trust));
+check('the canary needs a real control set (>=2) and a majority alive (>0.5)',
+  Number(trust.match(/^MIN_CANARIES\s*=\s*(\d+)/m)?.[1]) >= 2 &&
+  Number(trust.match(/^MIN_CANARY_ALIVE_RATE\s*=\s*([0-9.]+)/m)?.[1]) > 0.5);
+check('controls are drawn from source-proven liveness, not our own guess',
+  /last_verified_alive_at/.test(sweep) && /def _collect_canaries/.test(sweep));
+// Scoped to the MAIN sweep, not the whole file. `_run_canary(` also appears in _recheck_dead,
+// which is defined EARLIER — so a naive indexOf finds that one and the ordering assertion passes
+// even when main()'s canary has been moved after the probe loop. Slice from the main worklist
+// onward and ask the question there. (Both of these initially SURVIVED their mutation and forced
+// this sharpening; a check that green-lights the bug it exists to catch is worse than none.)
+const mainSweep = sweep.slice(sweep.indexOf('work = _collect_stale(client, cutoff, args.limit)'));
+const mainCanaryIdx = mainSweep.indexOf('_run_canary(s, client, args.canaries)');
+check('the canary runs BEFORE the worklist is probed (in main, not just in recheck)',
+  mainCanaryIdx !== -1 && mainCanaryIdx < mainSweep.indexOf('for row in work:'));
+check('a failed canary quarantines the MAIN sweep (0 strikes, 0 inactivations)',
+  /CANARY-QUARANTINED \{mode\}/.test(sweep) &&
+  /if not c_ok:[\s\S]{0,900}?end_run\([^)]*ok=False/.test(sweep));
+check('the resurrection pass is canary-gated too (a blocked run must not log dead_confirmed)',
+  /CANARY-QUARANTINED recheck-dead/.test(sweep));
+// A canary that reports only "0/10" cannot tell 404 (source refusing this egress) from 407 (proxy
+// rejected us) from 0 (no verdict / CONNECT failure) — three failures needing three different
+// responses. Measured 2026-09-03: a proxied run failed 0/10 and the next question could not be
+// answered from our own logs at all. The histogram must survive.
+check('the canary records WHICH statuses it saw, not just how many were alive',
+  /statuses\[\{c_hist\}\]/.test(sweep) && /statuses\[\{hist\}\]/.test(sweep));
+
+// ── Part 8: the shared-proxy path is explicit, never inherited, and always counted ───────────────
+// scrapers/jazwtn/run.py records the standing rule: WASALT_PROXY_URL is metered, provisioned for
+// wasalt, and must never be silently inherited. mon_detect_proxy_contention() is the pool's only
+// guard and its own comment requires every consumer to be added to its predicate.
+check('the proxy is read ONLY behind an explicit flag',
+  /def proxied_session\(use_proxy/.test(sweep) &&
+  /if not use_proxy:\s*\n\s*return s/.test(sweep));
+check('an empty proxy URL with --proxy fails CLOSED (never falls back to datacenter egress)',
+  /--proxy was requested but WASALT_PROXY_URL is empty/.test(sweep));
+check('a proxied run reports under its own pool-visible label',
+  /RUN_NAME_PROXY\s*=\s*["']gathern_liveness_proxy["']/.test(sweep) &&
+  /platform\s*=\s*RUN_NAME_PROXY if args\.proxy else RUN_NAME/.test(sweep));
+check('the schedule does NOT silently acquire the metered proxy',
+  /github\.event_name\s*!=\s*'schedule'\s*&&\s*inputs\.proxy/.test(workflow));
+check('the workflow passes the canary count through',
+  /--canaries \$\{\{ inputs\.canaries \|\| '10' \}\}/.test(workflow));
 
 console.log(failures === 0
   ? '\n✅ trust gate intact: untrustworthy runs cannot strike, kill, or delete.'

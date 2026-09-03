@@ -79,6 +79,15 @@ const AUDITED_UNINTERPRETABLE = new Map<string, string>([
    'predicate and reintroduce exactly the drift this guard exists to catch. The RNPL/Monthly ' +
    'predicates therefore reach the new function ONLY through that canonical clause, unchanged, and ' +
    'mon_detect_af_count_surfaces_carry_af asserts the byte-identity live every sweep.'],
+  ['20260903175817_unknown_rent_period_stays_unknown_never_defaults_to_annual.sql',
+   'audited 2026-09-03 (mine): fixes sync_search_listings_ar so a rental whose SOURCE publishes no '
+   + 'period is indexed as NULL instead of being defaulted to سنوي. It needle-edits from the LIVE '
+   + 'body (pg_get_functiondef) and RAISEs unless the default expression matches EXACTLY twice, so '
+   + 'it cannot silently rewrite anything else. Its single location_search_candidates_ar occurrence '
+   + 'is PROSE in the header comment, explaining why a NULL period still returns under an unfiltered '
+   + 'rent search — there is no CREATE OR REPLACE of that RPC, and no payment_monthly or '
+   + 'rent_now_pay_later predicate is touched: the two RNPL-adjacent reads it preserves come from the '
+   + 'live body it edits, byte-for-byte.'],
   ['20260810201309_wire_filter_audit_barriers_into_daily_detector_roster.sql',
    'audited 2026-08-10 (mine): wires five Filter-audit detectors into mon_run_all_detectors(). ' +
    'ZERO occurrences of payment_monthly and ZERO of rent_now_pay_later/rnpl/RNPL. Every function it ' +

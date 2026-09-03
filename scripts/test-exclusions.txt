@@ -12,6 +12,7 @@
 # PRs whenever production is momentarily unhealthy — turning a required gate into noise.
 
 verify-af-agent-cta-live.ts            | .github/workflows/af-live-truth-check.yml            | drives a real browser against production
+verify-af-card-evidence-live.ts        | .github/workflows/af-live-truth-check.yml            | drives a real browser against production and proves R12A.6: every committed AF answer is visible on the returned card, carries the LISTING's own value (not the filter's label), renders nothing for a column the source never published, and never claims what the row does not satisfy — plus the negative (a search with no AF answer shows no strip and carries no af_canon). Its offline twin verify-af-card-evidence.ts stays in npm test
 verify-af-independent-oracle.ts        | .github/workflows/af-live-truth-check.yml            | 9 hand-written PostgREST predicates + the UNKNOWN partition against production — was a live production call inside the REQUIRED npm test (the pattern #1486 removed elsewhere); moved 2026-09-02
 verify-af-matrix-truth-live.ts         | .github/workflows/af-live-truth-check.yml            | the WHOLE certified AF matrix (every scope × mode × field × option) against production RPCs and independent PostgREST truth on canonical columns; its offline twin verify-af-matrix-truth.ts stays in npm test
 verify-af-live-truth.ts                | .github/workflows/af-live-truth-check.yml            | drives a real browser against production
@@ -25,6 +26,7 @@ verify-af-remove-last-pill-live.ts     | .github/workflows/af-live-truth-check.y
 verify-af-scope-change-live.ts         | .github/workflows/af-live-truth-check.yml            | drives a real browser against production: changing deal / rent period after AF keeps exactly the answers the new cohort certifies (cohortAllows executed), drops the rest, resurrects nothing
 verify-combined-budget-live.ts          | .github/workflows/af-live-truth-check.yml            | drives a real browser against production (combined شراء+إيجار: each budget binds only its own deal)
 verify-trending-filter-state-live.ts   | .github/workflows/af-live-truth-check.yml            | live trending/district RPC counts vs independent PostgREST truth (the LIVE half of verify-trending-carries-full-filter-state.ts, whose SOURCE half stays in npm test)
+verify-every-live-table-is-searchable.ts | .github/workflows/af-live-truth-check.yml          | asks production (loader_active_platforms_ar) which platforms are live in search and asserts each one's tables are in RES_TABLES/COM_TABLES or explicitly acknowledged as not-yet-certified — the join between a DB activation and the client table lists that nothing checked before 2026-09-03
 verify-chat-persistence-live.mjs       | manual / live run                                    | live check against production; no scheduled workflow yet
 verify-count-rpc-parity-live.ts        | .github/workflows/count-rpc-parity-live-check.yml    | live production RPC parity
 verify-district-source-truth-live.ts   | manual / live run                                    | live check against production; no scheduled workflow yet

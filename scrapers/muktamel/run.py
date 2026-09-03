@@ -2,7 +2,13 @@
 
 مكتمل is a REGA-integrated Saudi property marketplace. There is NO usable public JSON API and the
 sitemap is stale, so we enumerate listings by sequential ID: GET /real-estates/<id> for every id in
-a range and parse the server-rendered page. Active ids span ~100..31000 at ~48% density (~15k live).
+a range and parse the server-rendered page. The site had no working crawl from 2026-07-15 (a
+_NodeWorker IPC deadlock, fixed 2026-09-03) until re-verified live 2026-09-03: the live band has
+moved on in the interim -- ids 24000-24300 are now ~0% live (aged out), while 31700-32300 measured
+86-88% live, well past the old "~100..31000" estimate. Re-measure before trusting either bound
+again; scrapers/muktamel/diag_page_structure.py is the tool for it. MIN_ID_DEFAULT is left at 1
+deliberately (never silently narrow the space you enumerate) -- callers (the sharded workflow)
+pass the evidenced range explicitly instead.
 
 Data path — the page is Nuxt 2: every field is server-rendered into a `window.__NUXT__=(function(...){
 ...}(...))` IIFE. That payload is NOT plain JSON (Nuxt 2's minified-arg format), so we evaluate the
@@ -48,7 +54,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -216,194 +221,88 @@ def _redact(text: Optional[str]) -> Optional[str]:
     return t or None
 
 
-# ── NUXT IIFE → JSON via Node subprocess (with pure-Python fallback) ──────────────
-# ONE long-lived Node worker parses EVERY payload over a pipe — we do NOT fork node per listing.
-# The old per-listing `node helper payload.js` approach spawned thousands of processes at 8-way
-# concurrency, piled up orphan node procs, and crashed the full crawl (exit 144). This worker reads
-# length-prefixed NUXT sources from stdin and writes length-prefixed JSON back; the Python side
-# serialises the (microsecond) parse step behind a lock while fetches stay fully concurrent.
-_NODE_WORKER_JS = r"""
+# ── NUXT IIFE → JSON via a one-shot Node subprocess per parse() call ──────────────
+# WHY ONE-SHOT, NOT A PERSISTENT WORKER (2026-09-03): the prior design ran ONE persistent
+# `node worker.js` process behind a custom length-prefixed stdin/stdout protocol
+# (fs.readSync()-based) shared by all 8 fetch threads via a single lock. That was already known
+# to be the deadlock root cause (a hung exchange blocked every thread forever — the reason
+# muktamel never completed a full crawl since 2026-07-15). A first fix bounded the exchange with a
+# watchdog timeout, which stopped the infinite hang — but a live re-test against real
+# muktamel.com pages (scrapers/muktamel/diag_page_structure.py, evidence captured 2026-09-03)
+# proved the SAME real payload succeeds in <35ms total (eval() 29ms + JSON.stringify() 2ms) when
+# run as a plain one-shot `node -e` process reading all of stdin at once — yet the persistent
+# worker's custom byte-level readN()/readLine() protocol reliably returned nothing for that exact
+# payload. The eval/stringify logic was never the problem; the bespoke IPC protocol was. Rather
+# than keep debugging a hand-rolled framing protocol, this replaces it with Python's own
+# subprocess.run(..., timeout=...): each parse() spawns its OWN node process, feeds the NUXT
+# source on stdin, reads JSON off stdout, and the stdlib reaps the child on exit or on
+# TimeoutExpired's kill. This is also strictly safer against the original deadlock than a
+# watchdog-timer patch: with no process and no lock SHARED across threads, one thread's slow or
+# stuck node call can never block the other 7 — there is nothing left to share.
+#
+# This is NOT the "thousands of processes crashed the crawl" failure mode the old persistent-
+# worker design was built to avoid: that incident came from spawning a fresh node process per
+# RETRY inside an unbounded loop with no reaping. Here, concurrency is capped at WORKERS (8) by
+# ThreadPoolExecutor, and subprocess.run() always waits() its child — on success, on non-zero
+# exit, or on TimeoutExpired — so there is no orphan-process path.
+NODE_PARSE_TIMEOUT = 20.0
+
+_NODE_EVAL_JS = r"""
 const fs = require('fs');
-function readN(n){
-  const buf = Buffer.alloc(n); let off = 0;
-  while (off < n){
-    let r;
-    try { r = fs.readSync(0, buf, off, n - off, null); }
-    catch (e){ if (e.code === 'EAGAIN') { continue; } if (e.code === 'EOF') return null; throw e; }
-    if (r === 0) return null;
-    off += r;
-  }
-  return buf;
-}
-function readLine(){
-  const bytes = [];
-  while (true){
-    const b = readN(1);
-    if (b === null) return null;
-    if (b[0] === 10) break;
-    bytes.push(b[0]);
-  }
-  return Buffer.from(bytes).toString('utf8');
-}
-function emit(s){
-  const ob = Buffer.from(s, 'utf8');
-  process.stdout.write(ob.length + "\n");
-  if (ob.length) process.stdout.write(ob);
-}
-while (true){
-  const header = readLine();
-  if (header === null) break;
-  const len = parseInt(header, 10);
-  if (!(len > 0)){ emit(""); continue; }
-  const body = readN(len);
-  if (body === null) break;
-  let outStr = "";
-  try {
-    let src = body.toString('utf8').replace(/^window\.__NUXT__=/, 'globalThis.__N=');
-    globalThis.__N = undefined;
-    (0, eval)(src);
-    const N = globalThis.__N || {};
-    const d0 = (N.data && N.data[0]) || {};
-    const st = N.state || {};
-    const out = {
-      offer: d0.offer || null,
-      initialPhotos: d0.offerInitialPhotos || [],
-      lazyPhotos: d0.offerLazyPhotos || [],
-      addressJson: st.addressJson || null,
-    };
-    outStr = JSON.stringify(out, (k, v) => v === undefined ? null : v);
-  } catch (e) { outStr = ""; }
-  emit(outStr);
-}
+let outStr = "";
+try {
+  const body = fs.readFileSync(0, 'utf8');
+  let src = body.replace(/^window\.__NUXT__=/, 'globalThis.__N=');
+  globalThis.__N = undefined;
+  (0, eval)(src);
+  const N = globalThis.__N || {};
+  const d0 = (N.data && N.data[0]) || {};
+  const st = N.state || {};
+  const out = {
+    offer: d0.offer || null,
+    initialPhotos: d0.offerInitialPhotos || [],
+    lazyPhotos: d0.offerLazyPhotos || [],
+    addressJson: st.addressJson || null,
+  };
+  outStr = JSON.stringify(out, (k, v) => v === undefined ? null : v);
+} catch (e) { outStr = ""; }
+process.stdout.write(outStr);
 """
-_HELPER_PATH: Optional[str] = None
+
 _NODE_OK: Optional[bool] = None
-_helper_lock = threading.Lock()
+_node_check_lock = threading.Lock()
 
 
-def _ensure_helper() -> Optional[str]:
-    global _HELPER_PATH, _NODE_OK
-    with _helper_lock:
-        if _NODE_OK is False:
-            return None
-        if _HELPER_PATH:
-            return _HELPER_PATH
-        try:
-            subprocess.run(["node", "--version"], capture_output=True, timeout=15, check=True)
-        except Exception:
-            _NODE_OK = False
-            print("⚠ node not found — muktamel needs node to parse the NUXT payload")
-            return None
-        fd, path = tempfile.mkstemp(suffix=".js", prefix="muktamel_worker_")
-        with os.fdopen(fd, "w") as f:
-            f.write(_NODE_WORKER_JS)
-        _HELPER_PATH = path
-        _NODE_OK = True
-        return path
-
-
-class _NodeWorker:
-    """A single persistent `node worker.js` process. parse() is thread-safe (one lock-guarded
-    request/response per call) and self-heals: if the worker dies it is respawned on the next call."""
-
-    def __init__(self, helper_path: str):
-        self.helper = helper_path
-        self.lock = threading.Lock()
-        self.proc: Optional[subprocess.Popen] = None
-        self._spawn()
-
-    def _spawn(self) -> None:
-        self.proc = subprocess.Popen(
-            ["node", self.helper], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, bufsize=0)
-
-    def _write_all(self, b: bytes) -> None:
-        # bufsize=0 → raw FileIO.write() can do a PARTIAL write (returns bytes written) for payloads
-        # larger than the OS pipe buffer (~64KB). NUXT sources are 50-150KB, so we MUST loop or the
-        # node worker waits forever for bytes that were never sent → deadlock on the first big listing.
-        mv = memoryview(b)
-        while mv:
-            n = self.proc.stdin.write(mv)
-            if not n:
-                continue
-            mv = mv[n:]
-
-    def _read_line(self) -> Optional[bytes]:
-        out = bytearray()
-        while True:
-            ch = self.proc.stdout.read(1)
-            if not ch:
-                return None
-            if ch == b"\n":
-                return bytes(out)
-            out += ch
-
-    def _read_exact(self, n: int) -> Optional[bytes]:
-        buf = bytearray()
-        while len(buf) < n:
-            chunk = self.proc.stdout.read(n - len(buf))
-            if not chunk:
-                return None
-            buf.extend(chunk)
-        return bytes(buf)
-
-    def parse(self, nuxt_src: str) -> Optional[dict]:
-        data = nuxt_src.encode("utf-8")
-        with self.lock:
-            for _ in range(2):  # one retry: respawn a dead worker and try again
-                if self.proc is None or self.proc.poll() is not None:
-                    self._spawn()
-                try:
-                    self._write_all(f"{len(data)}\n".encode("ascii"))
-                    self._write_all(data)
-                    self.proc.stdin.flush()
-                    header = self._read_line()
-                    if header is None:
-                        raise IOError("worker closed")
-                    n = int(header.strip() or b"0")
-                    if n <= 0:
-                        return None
-                    out = self._read_exact(n)
-                    return json.loads(out.decode("utf-8", "replace")) if out else None
-                except Exception:
-                    try:
-                        self.proc.kill()
-                    except Exception:
-                        pass
-                    self.proc = None
-            return None
-
-    def close(self) -> None:
-        try:
-            self.proc.stdin.close()
-            self.proc.terminate()
-        except Exception:
-            pass
-
-
-_node_singleton: Optional[_NodeWorker] = None
-_node_init_lock = threading.Lock()
-
-
-def _get_worker() -> Optional[_NodeWorker]:
-    global _node_singleton
-    if _node_singleton is not None:
-        return _node_singleton
-    with _node_init_lock:
-        if _node_singleton is not None:
-            return _node_singleton
-        helper = _ensure_helper()
-        if not helper:
-            return None
-        import atexit
-        _node_singleton = _NodeWorker(helper)
-        atexit.register(_node_singleton.close)
-        return _node_singleton
+def _node_available() -> bool:
+    global _NODE_OK
+    with _node_check_lock:
+        if _NODE_OK is None:
+            try:
+                subprocess.run(["node", "--version"], capture_output=True, timeout=15, check=True)
+                _NODE_OK = True
+            except Exception:
+                _NODE_OK = False
+                print("⚠ node not found — muktamel needs node to parse the NUXT payload")
+        return _NODE_OK
 
 
 def _nuxt_via_node(nuxt_src: str) -> Optional[dict]:
-    w = _get_worker()
-    return w.parse(nuxt_src) if w else None
+    if not _node_available():
+        return None
+    try:
+        r = subprocess.run(
+            ["node", "-e", _NODE_EVAL_JS],
+            input=nuxt_src.encode("utf-8"), capture_output=True, timeout=NODE_PARSE_TIMEOUT)
+    except Exception:
+        # Covers TimeoutExpired (subprocess.run already killed + reaped the child) and any other
+        # spawn/IO failure — a single bad/slow listing is skipped, never fabricated as data.
+        return None
+    if not r.stdout:
+        return None
+    try:
+        return json.loads(r.stdout.decode("utf-8", "replace"))
+    except Exception:
+        return None
 
 
 def _extract_nuxt(html: str) -> Optional[str]:
@@ -415,6 +314,24 @@ def _extract_nuxt(html: str) -> Optional[str]:
     return sub[:end] if end > 0 else None
 
 
+# ── Fetch outcome instrumentation ───────────────────────────────────────────────────
+# WHY: a silent `return None` cannot tell "genuinely dead id" (fast 404, expected — ~52% of the
+# range per the module docstring) apart from "every request is failing at the network layer"
+# (the toor/jazwtn IP-block shape: curl_cffi raises on every attempt, never even reaching a status
+# code). Reproduced live 2026-09-03: a fixed-and-completing 101-id run (post NODE_PARSE_TIMEOUT)
+# still upserted 0 rows and took ~30 minutes — ~143s/id, matching 3×45s-timeout-with-retries
+# almost exactly, which a dead-id range (fast 404s) could never produce. Without this counter that
+# distinction is a guess; with it, main()'s summary line answers it directly. Same fix shape as
+# erapulse (PR #1398): capture the last concrete reason instead of discarding it.
+_outcome_lock = threading.Lock()
+_outcomes: dict[str, int] = {}
+
+
+def _note(reason: str) -> None:
+    with _outcome_lock:
+        _outcomes[reason] = _outcomes.get(reason, 0) + 1
+
+
 # ── Fetch ─────────────────────────────────────────────────────────────────────────
 def fetch_one(listing_id: int) -> Optional[tuple[int, dict]]:
     """Fetch + eval one listing id. Returns (id, parsed_nuxt) for LIVE listings, else None.
@@ -422,33 +339,47 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict]]:
     url = f"{BASE}/real-estates/{listing_id}"
     s = _session()
     html = None
+    last_exc: Optional[BaseException] = None
     for attempt in range(3):
         try:
             r = s.get(url, timeout=45, allow_redirects=True)
-        except Exception:
+        except Exception as e:
+            last_exc = e
             time.sleep(1.0 * (attempt + 1))
             continue
         if r.status_code != 200:
             if r.status_code in (404, 410):
+                _note("dead_404")
                 return None
+            last_exc = None
+            _note(f"http_{r.status_code}")
             time.sleep(1.0 * (attempt + 1))
             continue
         if "/404" in str(r.url):
+            _note("redirect_404")
             return None
         html = r.text
         break
     if not html:
+        # Every attempt failed — record the LAST concrete reason, not just "no html". A network
+        # exception (timeout/reset/refused) here on every id is the IP-block signature; an
+        # accumulation of http_5xx is a different, source-side problem.
+        _note(f"network_{type(last_exc).__name__}" if last_exc is not None else "no_html_after_retries")
         return None
     nuxt_src = _extract_nuxt(html)
     if not nuxt_src:
+        _note("no_nuxt_payload")
         return None
     parsed = _nuxt_via_node(nuxt_src)
     if not parsed or not parsed.get("offer"):
+        _note("unparseable_or_no_offer")
         return None
     offer = parsed["offer"]
     # Liveness gate: only fully-hydrated, available listings carry real data.
     if not offer.get("isAvailable") or offer.get("price") in (None, 0):
+        _note("not_available_or_zero_price")
         return None
+    _note("live")
     return listing_id, parsed
 
 
@@ -674,6 +605,21 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
     return row, category
 
 
+def shard_ids(min_id: int, max_id: int, shards: int, shard: int) -> list[int]:
+    """The id slice one shard owns: `id % shards == shard`, inclusive of both ends.
+
+    Pulled out of main() so the partition properties (every id owned by exactly one shard, no id
+    owned by two, the union is the complete range) are directly testable without invoking the CLI.
+    Must agree with db._ad_shard(f"MK{{id}}", shards) — prune_unseen's shards= guard applies that
+    function to ad_number, and a disagreement here would mean a shard prunes ids it never fetched
+    or leaves ids it did fetch unprotected. scrapers/common/tests/test_muktamel_shard_partition.py
+    pins the agreement directly.
+    """
+    if shards <= 1:
+        return list(range(min_id, max_id + 1))
+    return [i for i in range(min_id, max_id + 1) if i % shards == shard]
+
+
 # ── Main ────────────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -682,10 +628,18 @@ def main() -> int:
                     help="validation run: upsert only the first N LIVE listings, NO prune")
     ap.add_argument("--min-id", type=int, default=MIN_ID_DEFAULT)
     ap.add_argument("--max-id", type=int, default=MAX_ID_DEFAULT)
+    ap.add_argument("--shards", type=int, default=1,
+                     help="split the id range across N parallel crawls (same convention as dealapp)")
+    ap.add_argument("--shard", type=int, default=0,
+                     help="which shard this process owns, 0..shards-1")
     args = ap.parse_args()
+    if not (0 <= args.shard < max(1, args.shards)):
+        ap.error(f"--shard must be in 0..{max(0, args.shards - 1)} for --shards {args.shards}")
 
-    ids = list(range(args.min_id, args.max_id + 1))
-    print(f"Muktamel: sweeping ids {args.min_id}..{args.max_id} ({len(ids)} candidates, {WORKERS} workers)"
+    ids = shard_ids(args.min_id, args.max_id, args.shards, args.shard)
+    print(f"Muktamel: sweeping ids {args.min_id}..{args.max_id}"
+          f"{f' shard {args.shard}/{args.shards}' if args.shards > 1 else ''} "
+          f"({len(ids)} candidates, {WORKERS} workers)"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
     run_id = None if args.limit else db.begin_run("muktamel")
@@ -734,17 +688,25 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0])
             return 0
 
-        # Full run: prune ids that were active before but weren't seen this crawl.
+        # Full run: prune ids that were active before but weren't seen this crawl. shards/shard are
+        # passed through so a shard only ever ages out ids it owns (db._ad_shard applied to
+        # ad_number="MK<id>" extracts the same <id> this crawl sharded on, by construction above) --
+        # a blocked or slow shard therefore prunes nothing outside its own slice, exactly like dealapp.
         pruned = 0
         for tbl, rows_seen in (("muktamel_residential_listings", res),
                                ("muktamel_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Muktamel")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Muktamel",
+                                 shards=args.shards, shard=args.shard)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
         print(f"✓ Muktamel: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["muktamel_residential_listings", "muktamel_commercial_listings"])
+        print(f"  fetch outcomes: {dict(sorted(_outcomes.items(), key=lambda kv: -kv[1]))}", flush=True)
+        healthy = db.end_run(
+            run_id, ok=True, rows_seen=seen, rows_upserted=seen,
+            notes=f"pruned={pruned} outcomes={dict(sorted(_outcomes.items(), key=lambda kv: -kv[1]))}"[:300],
+            check_tables=["muktamel_residential_listings", "muktamel_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

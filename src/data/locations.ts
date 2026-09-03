@@ -729,8 +729,8 @@ export function cityPoolStatus(deal: Deal | null, periodTok: string | null, cate
   const key = cityPoolKey(deal, periodTok, category, types, af);
   return CITY_FIELD_POOLS.has(key) ? 'ready' : _cityPoolStatus.get(key) ?? 'loading';
 }
-export function districtPoolStatus(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, types: string[] | null = null): PoolStatus {
-  const key = districtCacheKey(cityId, deal, category, periodTok, types);
+export function districtPoolStatus(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, types: string[] | null = null, scope: AfParams | null = null): PoolStatus {
+  const key = districtCacheKey(cityId, deal, category, periodTok, types, scope);
   return _districtCache.has(key) ? 'ready' : _districtPoolStatus.get(key) ?? 'loading';
 }
 
@@ -775,7 +775,15 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
         Object.assign(args, af ?? {});
         // "Is the user narrowed at all?" — gates every widening fallback below. Named for what it
         // now means; it covers bedrooms/price/area since 2026-08-22, not just advanced answers.
-        const hasNarrowing = Object.keys(af ?? {}).length > 0;
+        //
+        // THE TABLE-SCOPE KEYS DO NOT COUNT AS NARROWING (2026-09-03). `af` also carries the search's
+        // table scope now, and that is present on EVERY call — including a completely unfiltered one.
+        // Counting it would pin hasNarrowing permanently true and silently disable all three
+        // compat fallbacks below, so an unnarrowed user hitting an older function signature would get
+        // a BLANK city field instead of a widened-but-populated one. The scope is not a predicate the
+        // user chose; it is the frame the count is taken in.
+        const TABLE_SCOPE_KEYS = ['p_tables', 'p_tables2', 'p_types2'];
+        const hasNarrowing = Object.keys(af ?? {}).some((k) => !TABLE_SCOPE_KEYS.includes(k));
         let res = await supabase.rpc('top_cities_by_deal_ar', args).abortSignal(_ac.signal);
         // EVERY fallback below WIDENS the scope, so each is gated on the user not being narrowed:
         // a widened count under an active filter is exactly the overstatement this fix removes, and
@@ -872,12 +880,15 @@ export type DistrictOption = {
 // unaffected; only the popularity ranking / listing_count used for the Top-6 slice changes.
 const _districtCache = new Map<string, DistrictOption[]>();
 const _districtPromises = new Map<string, Promise<DistrictOption[]>>();
-const districtCacheKey = (cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, types: string[] | null = null) => `${cityId}:${deal}:${category ?? ''}:${pmKey(periodTok)}:${typesKey(types)}`;
+// The TABLE SCOPE is part of the key (2026-09-03). The pool is now scoped to the tables the results
+// call reads, so two different scopes are two different pools — keying without it would serve a
+// count taken over a wider table set than the search the user is about to run.
+const districtCacheKey = (cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, types: string[] | null = null, scope: AfParams | null = null) => `${cityId}:${deal}:${category ?? ''}:${pmKey(periodTok)}:${typesKey(types)}:${afKey(scope)}`;
 
 // Load (once, cached per city+deal+category) the full district catalog for a city_id. Never falls
 // back to another city.
-export async function ensureDistrictOptions(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null = null, types: string[] | null = null): Promise<DistrictOption[]> {
-  const key = districtCacheKey(cityId, deal, category, periodTok, types);
+export async function ensureDistrictOptions(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null = null, types: string[] | null = null, scope: AfParams | null = null): Promise<DistrictOption[]> {
+  const key = districtCacheKey(cityId, deal, category, periodTok, types, scope);
   const cached = _districtCache.get(key);
   if (cached) return cached;
   const inflight = _districtPromises.get(key);
@@ -901,14 +912,24 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal | null, c
         const args: Record<string, unknown> = { p_city_id: cityId, p_deal: dealAr(deal), p_category: category };
         if (periodTok !== null) args.p_rent_period = periodTok;
         if (types && types.length) args.p_types = types;
+        // THE TABLE SCOPE (migration district_options_ar_scoped_by_af_eligibility_clause, 2026-09-03).
+        // Until that migration this RPC had no p_tables at all and answered PGRST202, so the district
+        // panel counted every platform table in search_listings_ar while results read only the client
+        // lists. It now shares af_eligibility_clause() with the results RPC, and this is what tells it
+        // WHICH tables — same searchTableScope(query) object Trending carries.
+        Object.assign(args, scope ?? {});
         let res = await supabase.rpc('district_options_ar', args).abortSignal(_ac.signal);
         if (res.error && types && types.length) {
           const { p_types: _droppedTypes, ...noTypes } = args;
           res = await supabase.rpc('district_options_ar', noTypes).abortSignal(_ac.signal);
         }
+        // LAST-RESORT FALLBACK — it drops the PERIOD, never the table scope. A widened period still
+        // describes a set the search can deliver; a widened TABLE set does not, and quietly restoring
+        // the over-promise inside an error path is the worst place for it to happen: a fallback looks
+        // like a success. (Mirrors the city pool's rule that no count beats a wrong one.)
         if (res.error && periodTok !== null) {
           res = await supabase
-            .rpc('district_options_ar', { p_city_id: cityId, p_deal: dealAr(deal), p_category: category })
+            .rpc('district_options_ar', { p_city_id: cityId, p_deal: dealAr(deal), p_category: category, ...(scope ?? {}) })
             .abortSignal(_ac.signal);
         }
         data = res.data;
@@ -944,15 +965,15 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal | null, c
 // already returns rows ordered by listing_count desc, so this is a filter + slice).
 // `types` (and every param before it) is REQUIRED — same compile-time barrier as topCitiesByListings
 // above, guarding the district pool's read-back cache key. [[cohortTypesAr]]
-export function topDistrictsForCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, k: number, types: string[] | null): DistrictOption[] {
-  return (_districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
+export function topDistrictsForCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, k: number, types: string[] | null, scope: AfParams | null): DistrictOption[] {
+  return (_districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types, scope)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
 }
 
 // Typing: search the COMPLETE canonical catalog for THIS city (incl. zero-listing districts) by Arabic
 // substring, using the SAME norm() folding as the city field. Empty query → the Top-6 suggestions.
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
-export function matchDistrictsByCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, query: string, types: string[] | null): DistrictOption[] {
-  const all = _districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types)) ?? [];
+export function matchDistrictsByCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, query: string, types: string[] | null, scope: AfParams | null): DistrictOption[] {
+  const all = _districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types, scope)) ?? [];
   const q = norm(query);
   if (!q) return all.filter((d) => d.listingCount > 0).slice(0, 6);
   const scored: { opt: DistrictOption; rank: number }[] = [];

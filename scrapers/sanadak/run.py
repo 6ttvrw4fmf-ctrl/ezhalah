@@ -202,6 +202,24 @@ def _int(v: Any) -> Optional[int]:
         return None
 
 
+def _age_years(v: Any) -> Optional[int]:
+    """Building age in literal years, PRESERVING 0.
+
+    `_int` above treats 0 as empty, which is right for an area or a bedroom count and wrong for an
+    age: Sanadak renders buildingAge 0 as «أقل من سنة» (verified against the source 2026-09-03), a
+    published fact. Only a missing/blank key is UNKNOWN. Anything not a plain non-negative integer
+    within smallint range is refused rather than coerced — a shape we have never seen is not
+    something to guess at, and property_age is a smallint the AF predicate filters on.
+    """
+    if v is None or v == "" or isinstance(v, bool):  # bool is an int subclass: True would become "1 year"
+        return None
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if 0 <= n <= 200 else None
+
+
 def sitemap_urls(s: cc.Session) -> tuple[list[str], Optional[str]]:
     """Return (urls, failure_reason). `failure_reason` is None only when the sitemap answered a
     parseable 200; otherwise it is the CONCRETE reason, never a guess.
@@ -457,6 +475,27 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
         "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": _int(o.get("lotSize")),
+        # SOURCE-PUBLISHED building age, in literal years (2026-09-03, alert af_mapping_unplumbed
+        # #1285). Sanadak's own RSC payload has carried `buildingAge` all along — it was captured
+        # into source_capture and then dropped on the floor, so property_age was NULL on 100% of
+        # 1,707 stored rows while 1,236 of them had a published age. That is the TRAPPING failure
+        # mode of ADVANCED_FILTER_SOURCE_TRUTH.md §1: the AF property_age predicate is strict and
+        # NULL-excluding, so every Sanadak listing was silently unreachable the moment a user
+        # answered «كم عمر العقار؟» — and every count-based barrier stayed green, because a
+        # uniformly-NULL column is indistinguishable from "the source never said".
+        #
+        # ADJUDICATED AGAINST THE SOURCE, not inferred from the number's shape (two live probes of
+        # sanadak.sa on 2026-09-03): buildingAge 11 → the detail page renders «عمر البناء: 11 سنين»,
+        # and buildingAge 0 → «أقل من سنة». So it is a literal year count and 0 is a PUBLISHED
+        # value, not a blank. (One of those listings has a broker-written description saying
+        # «العمر: 15 سنة تقريباً» while the structured field says 11 — a disagreement INSIDE the
+        # source. The structured field is what the platform publishes as the age, so it is what we
+        # carry; we do not adjudicate a broker's prose against a platform's own field.)
+        #
+        # NOT _int(): that helper maps 0 → None (it treats 0 as empty), which would erase «أقل من
+        # سنة» on 285 rows — turning a published fact into UNKNOWN, exactly what P2 forbids. A
+        # missing/blank key stays None, and only that means UNKNOWN.
+        "property_age": _age_years(o.get("buildingAge")),
         "bedrooms": _int(o.get("numberBedrooms")),
         "bathrooms": _int(o.get("numberBathrooms")),
         # Rent-period truth (2026-07-27 audit): Sanadak's own RSC payload carries rentTypeText

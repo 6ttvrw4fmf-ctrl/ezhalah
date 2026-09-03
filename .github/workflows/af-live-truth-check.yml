@@ -112,6 +112,20 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-filter-state-live.ts
 
+      # THE ROOT-CAUSE JOIN (added 2026-09-03). Activating a platform is a DATABASE act; the client's
+      # RES_TABLES/COM_TABLES are a SOURCE-CODE act; until now nothing checked that the two agreed.
+      # Five platforms went live in search_listings_ar with 4,314 production_ready rows and joined
+      # neither list, so no search could return them while Trending — called without p_tables —
+      # counted them anyway (الهفوف/أرض سكنية/بيع: 2,478 advertised, 109 delivered). The AF matrix
+      # barrier caught it only on `bathrooms=1`, the one predicate wide enough to admit the new rows.
+      # This asks the question directly instead of waiting for a wide enough predicate.
+      - name: Every platform live in search must be reachable by a real search
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-every-live-table-is-searchable.ts
+
       # COMBINED شراء+إيجار in a REAL browser (added 2026-09-02). The Filter offers two independent
       # budgets and the RPC splits them by the row's own deal; until 2026-09-02 the client re-applied
       # the BUY pair to every returned row, so a Buy floor deleted every rent card the server had
@@ -255,7 +269,8 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     name: The rendered card, the removed pill and the scope change all tell one truth
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 45 → 60 on 2026-09-03: two more browser journeys (the §12A card-evidence pair) live here now.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -308,6 +323,31 @@ jobs:
           AF_PILL_TYPE: فيلا
           AF_PILL_MOBILE: '1'
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-pill-removal-live.ts
+
+      # §12A / R13.12 (owner, 2026-09-03): «the returned property card must clearly show what the
+      # user selected in the Advanced Filter». R12A.6 names a live journey as this rule's own
+      # barrier, and this is it — the only check in the repo that reads the chips a human reads off
+      # the DEPLOYED bundle. Its offline twin (scripts/verify-af-card-evidence.ts, in npm test)
+      # executes the same registry against synthetic rows and holds the SQL and the TypeScript to one
+      # contract, but cannot see production. Ground truth for every expected chip is the `af_canon`
+      # object carried by the search response itself — the exact row the predicate ran on.
+      - name: Every AF answer is visible on the returned card, with the listing's own value
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-card-evidence-live.ts
+
+      - name: …and the same, on a mobile viewport in a non-Riyadh city
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          AF_EV_CITY: جدة
+          AF_EV_GROUP: الفلل والبيوت
+          AF_EV_TYPE: فيلا
+          AF_EV_MOBILE: '1'
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-card-evidence-live.ts
 
   # THE WHOLE CERTIFIED MATRIX (added 2026-09-02, owner invariant: «what the AF UI says + what the
   # user selects + what the backend applies + what the returned listings actually satisfy must all be

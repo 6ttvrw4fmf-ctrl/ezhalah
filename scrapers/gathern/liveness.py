@@ -56,12 +56,22 @@ from scrapers.common.db import begin_run, end_run, sb
 from scrapers.common.liveness_contract import direct_alive_patch
 from scrapers.common.liveness_trust import (
     MIN_ALIVE_RATE_FOR_TRUST,
+    MIN_CANARIES,
+    MIN_CANARY_ALIVE_RATE,
     MIN_PROBES_FOR_TRUST,
+    canary_environment_ok,
     environment_is_trustworthy,
 )
 from scrapers.gathern.run import SOURCE, detail_session
 
 TABLE = "gathern_residential_listings"
+
+# Scheduled/CI runs use the plain label; a run routed through the SHARED Saudi residential proxy
+# reports under its own so mon_detect_proxy_contention() can see it. That monitor's predicate is
+# the pool's only guard, and its comment is explicit: "Adding a proxy consumer means adding it to
+# THIS predicate in the same change." Migration 20260903_gathern_liveness_proxy_consumer does that.
+RUN_NAME = "gathern_liveness"
+RUN_NAME_PROXY = "gathern_liveness_proxy"
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "1.0"))  # ~1 req/s: Gathern 429s above ~2
 
 
@@ -121,6 +131,115 @@ def probe(s, url: str, retries: int = 3) -> int:
             time.sleep(3 * (attempt + 1)); continue
         return r.status_code
     return 0
+
+
+def proxied_session(use_proxy: bool):
+    """gathern's own detail session, optionally routed through the shared Saudi residential proxy.
+
+    EXPLICIT OPT-IN ONLY. `scrapers/jazwtn/run.py` records the standing rule for this secret: "do
+    NOT silently inherit WASALT_PROXY_URL. That secret is provisioned for Wasalt, is metered." So
+    the env var is read ONLY when --proxy was passed, and an empty value with the flag set is a
+    hard failure rather than a silent fall-back to the datacenter IP that caused this incident.
+    """
+    s = detail_session()
+    if not use_proxy:
+        return s
+    purl = os.environ.get("WASALT_PROXY_URL", "").strip()
+    if not purl:
+        raise SystemExit("REFUSING TO RUN: --proxy was requested but WASALT_PROXY_URL is empty. "
+                         "Falling back to the datacenter IP would reproduce the 2026-09-01 "
+                         "false-death window, where gathern answered our egress with 404.")
+    s.proxies = {"http": purl, "https": purl}
+    return s
+
+
+def _collect_canaries(client, limit: int) -> list[dict]:
+    """Control set: rows the SOURCE ITSELF has most recently proven alive.
+
+    Drawn from `last_verified_alive_at`, which only the liveness contract writes and only on a
+    literal 200 — so a canary is a row we know existed, on the source's own word, not ours. Newest
+    first, because the freshest proof is the least likely to have died of natural causes since."""
+    r = (client.table(TABLE).select("id, ad_number, listing_url, last_verified_alive_at")
+         .eq("source", SOURCE).eq("active", True)
+         .not_.is_("last_verified_alive_at", "null")
+         .not_.is_("listing_url", "null")
+         .order("last_verified_alive_at", desc=True).limit(limit).execute())
+    return r.data or []
+
+
+def _run_canary(s, client, n: int) -> tuple[bool, int, int, str]:
+    """Probe the controls BEFORE the real worklist. Returns (ok, alive, probed, status_histogram).
+
+    This is the whole point of the pass: it costs ~n requests and answers "is the source telling us
+    the truth today?" before a single real listing's fate is decided. On 2026-09-01 the aggregate
+    rate only condemned the run after all 1,500 probes; this condemns it after 5.
+
+    THE HISTOGRAM IS NOT DECORATION. A canary that reports only "0/10" cannot distinguish the three
+    failures that matter and that need completely different responses:
+      404 -> the SOURCE is refusing this egress (a different route might work)
+      407 -> the PROXY rejected us (credentials/plan, nothing to do with the source)
+        0 -> no verdict after retries: connect timeout / CONNECT tunnel failure (the layer
+             scrapers/wasalt/diagnose_proxy.py exists to isolate)
+    Measured 2026-09-03: without this, a failed proxied run said "0/10" and the next question —
+    is gathern blocking the proxy, or is the proxy broken? — could not be answered from our own
+    logs at all."""
+    canaries = _collect_canaries(client, n)
+    alive = 0
+    statuses: dict[int, int] = {}
+    for row in canaries:
+        url = (row.get("listing_url") or "").strip()
+        if not url:
+            continue
+        st = probe(s, url)
+        statuses[st] = statuses.get(st, 0) + 1
+        if st == 200:
+            alive += 1
+    probed = sum(statuses.values())
+    hist = ",".join(f"{k}x{v}" for k, v in sorted(statuses.items())) or "none"
+    ok = canary_environment_ok(alive, probed)
+    verdict = "PASS" if ok else "FAIL"
+    print(f"CANARY {verdict}: {alive}/{probed} known-alive controls returned 200 "
+          f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) statuses[{hist}]"
+          + ("" if ok else f" — {canary_diagnosis(statuses)}"), flush=True)
+    return ok, alive, probed, hist
+
+
+def canary_diagnosis_from_hist(hist: str) -> str:
+    """Same diagnosis, from the histogram string the run already carries."""
+    counts: dict[int, int] = {}
+    for part in (hist or "").split(","):
+        if "x" in part:
+            k, _, v = part.partition("x")
+            try:
+                counts[int(k)] = int(v)
+            except ValueError:
+                continue
+    return canary_diagnosis(counts)
+
+
+def canary_diagnosis(statuses: dict[int, int]) -> str:
+    """Name the failing LAYER from the statuses, because the three cases need different people.
+
+    Saying "the source is refusing us" when the proxy rejected our credentials sends the next
+    engineer to the wrong system entirely, and a quarantine note is read precisely when nobody has
+    context. The dominant status decides:
+      404/410 -> the SOURCE answered and refused this egress
+      401/403/407 -> the PROXY or an auth layer rejected us; the source never saw the request
+      0       -> no verdict after retries: connect timeout / CONNECT tunnel failure
+    """
+    if not statuses:
+        return "no controls could be probed (empty control set)"
+    top = max(statuses.items(), key=lambda kv: kv[1])[0]
+    if top in (404, 410):
+        return ("the SOURCE answered and refused this egress — a different route may work, but "
+                "these 404s are UNKNOWN, never death")
+    if top in (401, 403, 407):
+        return ("the PROXY/auth layer rejected us — the source never saw these requests; check "
+                "credentials and plan, not the listings")
+    if top == 0:
+        return ("no verdict after retries — connect timeout or CONNECT tunnel failure; isolate "
+                "with scrapers/wasalt/diagnose_proxy.py before blaming the source")
+    return f"unexpected dominant status {top} — investigate before trusting any verdict"
 
 
 def _collect_stale(client, cutoff_iso: str, limit: int) -> list[dict]:
@@ -238,7 +357,26 @@ def _recheck_dead(client, args, run_id: int, mode: str, now_iso: str,
     print(f"Gathern liveness RECHECK-DEAD [{mode}]: {len(work)} previously-killed rows "
           f"(~{MIN_INTERVAL:.1f}s/req)", flush=True)
 
-    s = detail_session()
+    s = proxied_session(args.proxy)
+
+    # The canary matters here for a different reason than in the kill pass. This pass cannot harm a
+    # row — it only restores on a literal 200 — but a BLOCKED run restores nothing and then writes
+    # `dead_confirmed` evidence for every row it could not reach. That is a lie in the ledger, and
+    # the next reader would take it as proof the backlog really is dead. Refuse instead.
+    if args.canaries:
+        ok, c_alive, c_probed, c_hist = _run_canary(s, client, args.canaries)
+        c_diag = canary_diagnosis_from_hist(c_hist)
+        if not ok:
+            notes = (f"CANARY-QUARANTINED recheck-dead: {c_alive}/{c_probed} controls alive "
+                     f"statuses[{c_hist}] "
+                     f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) — {c_diag}. "
+                     f"A 404 here would mean 'we were blocked', not 'this listing is gone'. "
+                     f"0 restored, 0 evidence rows written.")
+            print(f"✗ {notes}", flush=True)
+            end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=notes, allow_empty=True)
+            if holding_lock:
+                _release_apply_lock(client, holder)
+            return 1
     seen = restored = still_dead = transient = 0
     detail: list[dict] = []
     started = time.time()
@@ -338,13 +476,25 @@ def main() -> int:
                          "never consults the kill cap — there is nothing for the cap to guard. "
                          "404/410 leaves the row inactive; a transient leaves it untouched. "
                          "Honours --apply (dry-run by default) and --limit like the kill pass.")
+    ap.add_argument("--proxy", action="store_true",
+                    help="Route detail probes through the SHARED Saudi residential proxy "
+                         "(WASALT_PROXY_URL). Owner-authorised for gathern 2026-09-03 after the "
+                         "source began answering our datacenter egress with its own 404 page, "
+                         "manufacturing false deaths. EXPLICIT opt-in: the secret is metered and "
+                         "shared, so it is never inherited silently, and the run reports under "
+                         f"'{RUN_NAME_PROXY}' so mon_detect_proxy_contention() counts it.")
+    ap.add_argument("--canaries", type=int, default=MIN_CANARIES * 2,
+                    help="How many known-alive control listings to probe BEFORE the worklist. If "
+                         "they do not come back alive the whole run is quarantined: 0 strikes, 0 "
+                         "inactivations. 0 disables the pass (NOT recommended; the trust gate is "
+                         "then the only guard and it only answers after the batch is spent).")
     args = ap.parse_args()
 
     client = sb()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=args.min_stale_days)).isoformat()
     now_iso = datetime.now(timezone.utc).isoformat()
     mode = "APPLY" if args.apply else "DRY-RUN"
-    platform = "gathern_liveness"
+    platform = RUN_NAME_PROXY if args.proxy else RUN_NAME
     run_id = begin_run(platform)
 
     # A DRY RUN is read-only and needs no lock (two can run concurrently, harmlessly). But --apply
@@ -407,7 +557,29 @@ def main() -> int:
             active_now = 0
         kill_cap = resolve_kill_cap(active_now)
 
-    s = detail_session()
+    s = proxied_session(args.proxy)
+
+    # ── CANARY: prove the environment BEFORE deciding any real listing's fate ────────────────────
+    # Owner rule 2026-09-03. The trust gate is a lagging signal — it can only condemn a run once the
+    # whole batch is spent, which on 2026-09-01 meant 302 rows were already inactivated by the time
+    # the number existed. This asks the same question first, for the price of ~10 requests.
+    c_alive = c_probed = 0
+    c_hist = "skipped"
+    if args.canaries:
+        c_ok, c_alive, c_probed, c_hist = _run_canary(s, client, args.canaries)
+        c_diag = canary_diagnosis_from_hist(c_hist)
+        if not c_ok:
+            notes = (f"CANARY-QUARANTINED {mode}: {c_alive}/{c_probed} known-alive controls "
+                     f"returned 200 statuses[{c_hist}] "
+                     f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) — {c_diag}. "
+                     f"0 strikes and 0 inactivations written, worklist not probed. These "
+                     f"non-200s are UNKNOWN, never death. Owner review required.")
+            print(f"✗ {notes}", flush=True)
+            end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=notes, allow_empty=True)
+            if holding_lock:
+                _release_apply_lock(client, holder)
+            return 1
+
     seen = dead = alive = transient = killed = struck = 0
     alive_ids: list[int] = []
     kill_pending: list[tuple[int, int]] = []  # (row id, new_missing) — flipped ONLY after the cap gate
@@ -567,7 +739,8 @@ def main() -> int:
                else f"auto=max(150,2% of {active_now_logged})")
     notes = (f"{mode} scanned={seen} dead={dead} {verb}={kill_shown} strike={struck} "
              f"applied_strikes={applied_strikes} alive={alive} transient={transient} "
-             f"kill_cap={kill_cap} [{cap_src}] alive_rate={alive_rate:.3f} trusted={trusted}")
+             f"kill_cap={kill_cap} [{cap_src}] alive_rate={alive_rate:.3f} trusted={trusted} "
+             f"proxy={bool(args.proxy)} canary={c_alive}/{c_probed} canary_statuses[{c_hist}]")
     if trust_quarantine:
         notes = (f"TRUST-QUARANTINED alive_rate={alive_rate:.1%} below {MIN_ALIVE_RATE_FOR_TRUST:.0%} "
                  f"(min_probes={MIN_PROBES_FOR_TRUST}) — 0 strikes and 0 inactivations written "

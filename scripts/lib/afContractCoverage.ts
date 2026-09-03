@@ -244,19 +244,28 @@ const S13: Entry[] = [
   { rule: 'R13.11', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-probe-failure-not-a-verdict'], evidence: 'never turn our own outage into a statement about the data — mayAssertNothingToNarrow() only on a decided verdict' },
   { rule: 'R13.10', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-offer-agreement'], evidence: 'CI agent-CTA 4/4: never offer a round that would have nothing to ask' },
   // ── §12A — the returned card must SHOW what the user selected (owner, 2026-09-03) ──────────────
-  // Graded N deliberately and honestly: the rule is NEW and production does not satisfy it yet.
-  // Measured gap (see contract §12A status paragraph): ResultCard's FEATURE_META draws 14 amenity
-  // labels while RESIDENTIAL_AMENITY_BASE certifies 17 + 2 villa-only, features are capped at 6 by
-  // a static priority, and property_age/furnished/street_width/direction render only inside the
-  // Wasalt-style Additional Information panel. These entries LOWER the AF score on purpose — an
-  // unmet owner rule must cost, or the map would report a health the product does not have.
-  { rule: 'R12A.1', dim: 'af', weight: 3, grade: 'N', barrier: [], evidence: 'OPEN P1 — no card surface echoes the active AF answers; nothing implements or tests it yet (owner rule 2026-09-03)' },
-  { rule: 'R12A.2', dim: 'af', weight: 2, grade: 'N', barrier: [], evidence: 'OPEN P1 — depends on R12A.1; the card would have to render the LISTING\'s value, not the filter label' },
-  { rule: 'R12A.3', dim: 'af', weight: 3, grade: 'N', barrier: [], evidence: 'OPEN P1 — the truthful-or-absent rule is unenforced while nothing renders; R13.3 keeps UNKNOWN out of every existing surface' },
-  { rule: 'R12A.4', dim: 'af', weight: 2, grade: 'N', barrier: [], evidence: 'OPEN P1 — ResultCard slices allActive to VISIBLE=6 by static priority, so a selected low-priority amenity hides behind «+N More Features»' },
-  { rule: 'R12A.5', dim: 'af', weight: 3, grade: 'N', barrier: [], evidence: 'OPEN P1 — gym, pool, garden, driver_room, car_entrance, separate_electricity_meter, separate_water_meter are filterable but undrawable' },
-  { rule: 'R12A.6', dim: 'af', weight: 2, grade: 'N', barrier: [], evidence: 'OPEN P1 — the live journey + vocabulary-superset barrier this rule mandates do not exist yet' },
-  { rule: 'R13.12', dim: 'af', weight: 3, grade: 'N', barrier: [], evidence: 'OPEN P1 — the never-form of §12A; unenforced until the card surface and its barriers exist' },
+  // These seven were graded N this morning, when the rule was recorded and production did not
+  // satisfy it. They SHIPPED the same day: the card carries a «مطابق لطلبك» strip fed by `af_canon`
+  // (migration 20260903154406 — the 28 AF-relevant columns of the exact search_listings_ar row the
+  // predicate ran on), src/lib/afEvidence.ts turns the active answers plus that row into chips, and
+  // the strip is UNCAPPED so FEATURE_META's VISIBLE=6 can no longer hide a selection.
+  //
+  // Two barriers, and the split between L and B below is exactly the split between them:
+  //   verify-af-card-evidence.ts       offline, in npm test — executes the registry against
+  //                                    synthetic rows and holds the SQL mirror and the TypeScript to
+  //                                    one contract. Reaches branches the UI cannot.
+  //   verify-af-card-evidence-live.ts  a real browser against the DEPLOYED bundle, in
+  //                                    af-live-truth-check.yml. Reads the chips a human reads.
+  // A rule is L only where the live journey actually EXERCISED it — that journey now counts how many
+  // times each branch was reached and reports NOT EXERCISED rather than PASS at zero, so these
+  // grades cannot drift into claiming a live proof the run never performed.
+  { rule: 'R12A.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-card-evidence', 'verify-af-card-evidence-live'], evidence: 'live 2026-09-03 on the deployed bundle, desktop 1440x900 (الرياض/شقة) AND mobile 390x844 (جدة/فيلا): 4 answers committed per journey, 20 «مطابق لطلبك» strips rendered, and every active answer the row satisfies was ON the card — 0 missing across 80 (question × card) comparisons. 0 strips carried a «+N», قعرض الكلة or «المزيد» affordance' },
+  { rule: 'R12A.2', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-card-evidence', 'verify-af-card-evidence-live'], evidence: 'live 2026-09-03, both viewports: every chip equalled the LISTING\'s own canonical value — 0 wrong across 80 comparisons. Each strip was joined to its row by the card\'s own card-listing-<id> wrapper, never by position (positional pairing shifts on any row that earns no strip, and did produce a false «2 vs 3 حمامات» report before the join was fixed); ground truth is the af_canon object off the wire, the exact row the predicate ran on' },
+  { rule: 'R12A.3', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-card-evidence', 'verify-af-card-evidence-live'], evidence: 'barrier-protected, NOT live-proved, and the live journey says so itself: both production runs met 0 UNKNOWN (question × card) cases, because §2.5 predicates are NULL-excluding so a returned row normally HAS the value — the null-guard is unreachable through the UI while search is correct. verify-af-card-evidence.ts reaches it with synthetic rows: a null column renders nothing, never «غير مذكور», never 0, never false. Graded B rather than L deliberately' },
+  { rule: 'R12A.4', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-card-evidence', 'verify-af-card-evidence-live'], evidence: 'live 2026-09-03, both viewports: 0 of 20 strips hid a selection behind an expander. Met by construction rather than by re-ranking FEATURE_META — the strip is a separate, UNCAPPED surface (a plain .map(), no slice, verified in the shipped bundle), so the VISIBLE=6 feature cap can no longer hide an ACTIVE AF selection. The live check looks for the SHAPE of an expander («+N» / «عرض الكل» / «المزيد») rather than a testID that would only ever be absent' },
+  { rule: 'R12A.5', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-card-evidence'], evidence: 'static, and that is the right instrument: verify-af-card-evidence.ts T5 compares the certified token set against the card\'s vocabulary and fails CI if any token is filterable but undrawable — 20 of 20 tokens have a label AND a chip def, 20 defs\' labels equal the AF chip\'s own labelKey, and AMENITY_LABEL carries no entry the filter does not accept. gym, pool, garden, driver_room, car_entrance and both separate meters, undrawable that morning, are drawable now' },
+  { rule: 'R12A.6', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-card-evidence', 'verify-af-card-evidence-live'], evidence: 'live 2026-09-03: BOTH barriers this rule mandates now exist and EXECUTE. verify-af-card-evidence.ts (offline, npm test) is the vocabulary-superset half and also holds sql/mirrors/af_canon_select.sql and src/lib/afEvidence.ts to one contract in both directions — 28 columns packed, every column the registry reads is packed, every AF predicate field\'s RPC param is in the payload gate. verify-af-card-evidence-live.ts (af-live-truth-check.yml, af-card-state) is the live journey, run green against production on both viewports this run' },
+  { rule: 'R13.12', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-card-evidence', 'verify-af-card-evidence-live'], evidence: 'live 2026-09-03, both viewports: across 80 identity-joined comparisons no chip claimed anything its listing\'s canonical row did not satisfy. The counterfactual branch (a returned row that FAILS an active predicate) was met 0 times and cannot be reached through the UI while search is correct — such a row would itself be a §2.5 violation — so that half is covered offline against synthetic rows. The negative case is live-proved too: a search with NO AF answer rendered 0 strips and carried af_canon on 0 of 1,500 rows' },
 ];
 
 // ── OWNER RULES NOT (YET) IN THE PRODUCT CONTRACT ────────────────────────────────────────────────

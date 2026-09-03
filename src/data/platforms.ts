@@ -33,7 +33,7 @@ export const PLATFORMS: Platform[] = [
   { name: 'Jazwtn', domain: 'jazwtn.sa', brand: 'Jazan Watan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Mizlaj', domain: 'mizlaj.com.sa', brand: 'Mizlaj Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Muktamel', domain: 'muktamel.com', brand: 'Muktamel', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
-  { name: 'Aqaratikom', domain: 'aqaratikom.com', brand: 'Nawait', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Aqaratikom', domain: 'nawait.sa', brand: 'Nawait', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Awal', domain: 'awaalun.com', brand: 'Awal United for Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Al Khaas', domain: 'alkhaas.net', brand: 'Al Khaas', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Abeea', domain: 'abeea.com.sa', brand: 'Abeea Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
@@ -49,6 +49,11 @@ export const PLATFORMS: Platform[] = [
   { name: '24 Souq', domain: '24.com.sa', brand: '24 Souq', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Era Pulse', domain: 'erapulse.sa', brand: 'Era Pulse', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Al Nowaisiry', domain: 'alnowaisiry.com', brand: 'Al Nowaisiry Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'THERC', domain: 'therc.sa', brand: 'The Right Choice Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Aouj', domain: 'aoujestates.com', brand: 'Aouj Estates', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Abralosol', domain: 'abralosol.com', brand: 'Abr Al Osol Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Arkaan', domain: 'arkaanalaqar.com', brand: 'Arkaan Al Aqar', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'RawasiDark', domain: 'rawasi-dark.com', brand: 'Rawasi Dark Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: '1 October', domain: '1october.com.sa', brand: '1 October Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
 ];
 
