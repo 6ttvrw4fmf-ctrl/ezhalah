@@ -110,8 +110,11 @@ function Shell() {
           <Stack.Screen name="interview" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
           {/* The /settings route is GONE (owner 2026-08-28): account controls open as a compact
               panel anchored to the sidebar's profile row — see components/AccountMenu.tsx. */}
-          <Stack.Screen name="about" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-          <Stack.Screen name="support" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+          {/* /about and /support are DOORS, not screens (owner 2026-09-03): each one raises the
+              canonical InfoModal and replaces the URL with '/'. No sheet animation — animating a
+              redirect would slide an empty modal up and straight back down. */}
+          <Stack.Screen name="about" options={{ animation: 'none' }} />
+          <Stack.Screen name="support" options={{ animation: 'none' }} />
           {/* Auth opens with a soft fade (not the abrupt slide-up-with-X) — the screen's own content
               entrance (rise + scale + fade, incl. the close X) then carries the motion. (user request.) */}
           <Stack.Screen name="auth" options={{ presentation: 'modal', animation: 'fade' }} />
