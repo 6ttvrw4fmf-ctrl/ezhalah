@@ -33,7 +33,7 @@ check('index.tsx derives the trending cohort from cohortTypesAr — never its ow
 // never a boolean) — the KEY SHAPE this test protects (types must be part of the cache key) is
 // unchanged, only the period param's name/type changed.
 check('city pool key includes the cohort types', /cityPoolKey = \([^)]*types[^)]*\) => `\$\{deal\}:\$\{pmKey\(periodTok\)\}:\$\{category \?\? ''\}:\$\{typesKey\(types\)\}:\$\{afKey\(af\)\}`/.test(loc));
-check('district cache key includes the cohort types', /districtCacheKey = \([^)]*types[^)]*\)[^`]*`\$\{cityId\}:\$\{deal\}:\$\{category \?\? ''\}:\$\{pmKey\(periodTok\)\}:\$\{typesKey\(types\)\}`/.test(loc));
+check('district cache key includes the cohort types', /districtCacheKey = \([^)]*types[^)]*\)[^`]*`\$\{cityId\}:\$\{deal\}:\$\{category \?\? ''\}:\$\{pmKey\(periodTok\)\}:\$\{typesKey\(types\)\}:\$\{afKey\(scope\)\}`/.test(loc));
 check('both RPC calls send p_types for the cohort',
   (loc.match(/args\.p_types = types;/g) || []).length === 2);
 check('both RPC calls degrade gracefully on a pre-p_types signature (drop types, never blank)',
@@ -41,7 +41,11 @@ check('both RPC calls degrade gracefully on a pre-p_types signature (drop types,
 
 // effect deps: a type change re-fetches cities AND districts
 check('city + district effects re-run when the cohort types change',
-  (idx.match(/cohortTypesSig(?:, cityAfSig)?\]\);/g) || []).length >= 3);
+  // Trailing deps are open-ended on purpose: the city effect gained cityAfSig (2026-08-22) and the
+  // district effects gained cityTableScopeSig (2026-09-03). The invariant is that cohortTypesSig is
+  // IN the dep list, not that it is the last entry — enumerating the known siblings just guarantees
+  // this check breaks again the next time a real dependency is added.
+  (idx.match(/cohortTypesSig(?:, \w+)*\]\);/g) || []).length >= 3);
 
 // exact denominators travel WITH the counts (one RPC row → numerator and denominator)
 check('CityOption carries totalInCohort; DistrictOption carries totalInCity',
@@ -87,7 +91,7 @@ for (const [name, callRe] of readFns) {
   // The city reads gained a trailing advanced-params argument (owner rule 2026-08-22), so
   // cohortTypes is threaded but no longer last. The invariant here is that it is PRESENT in
   // every call — not that it sits in the final position.
-  const scoped = (idxCode.match(new RegExp(`${name}\\([\\s\\S]{0,200}?cohortTypes(?:, cityAfParams)?\\)`, 'g')) || []).length;
+  const scoped = (idxCode.match(new RegExp(`${name}\\([\\s\\S]{0,200}?cohortTypes(?:, [\\w.]+)*\\)`, 'g')) || []).length;
   check(`${name}: every call site (${total}) threads cohortTypes (${scoped} scoped, 0 stale-cache-bucket reads)`, total > 0 && scoped === total);
 }
 

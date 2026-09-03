@@ -35,7 +35,7 @@ check('clearDistrict called on ≥4 city-mutation sites', (indexSrc.match(/clear
 // of duplicating a fetch the effect would immediately re-trigger anyway. Extended 2026-07-21
 // (PR#167/#175, LIVE) to also thread rentPeriodTok (Rent's Monthly/Yearly toggle), so the same
 // effect/warm-up also live-refreshes District's Top-6 on a Monthly<->Yearly flip.
-check('city-select (via citySelected) warms THIS city’s districts by city_id, Category+Deal+period-scoped (effCategory since count-scope parity 2026-08-14)', /useEffect\(\(\) => \{\s*if \(!citySelected\) return;\s*const cid = citySelected\.cityId;\s*void ensureDistrictOptions\(cid, effDeal, effCategory, rentPeriodTok, cohortTypes\)/.test(indexSrc));
+check('city-select (via citySelected) warms THIS city’s districts by city_id, Category+Deal+period-scoped (effCategory since count-scope parity 2026-08-14)', /useEffect\(\(\) => \{\s*if \(!citySelected\) return;\s*const cid = citySelected\.cityId;\s*void ensureDistrictOptions\(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope\)/.test(indexSrc));
 
 // ── MULTI-SELECT (owner 2026-08-10): several districts, OR semantics, one shared selection state ──
 // The state is an ARRAY and city-mutation clears wipe the WHOLE array (no cross-city carry-over,
@@ -69,12 +69,12 @@ check('District is OPTIONAL — undefined when nothing picked (city-only search 
 // `${cityId}:${deal}:${category}`, not cityId alone. Category is null until the user picks it
 // (Category is chosen AFTER District in this form — the owner declined reordering it), which the
 // RPC treats as "broader/default ranking" until then.
-check('district options come from the district_options_ar RPC, Category+Deal-scoped', /rpc\('district_options_ar', \{ p_city_id: cityId, p_deal: dealAr\(deal\), p_category: category \}\)/.test(locSrc));
+check('district options come from the district_options_ar RPC, Category+Deal-scoped', /rpc\('district_options_ar', \{ p_city_id: cityId, p_deal: dealAr\(deal\), p_category: category(?:, \.\.\.\(scope \?\? \{\}\))? \}\)/.test(locSrc));
 check('RPC result carries match_values (twin-safe recall)', /match_values/.test(locSrc));
 check('Top-6 = districts with active listings only (listingCount > 0)', /listingCount > 0\)\.slice\(0, k\)/.test(locSrc));
 check('autocomplete searches the COMPLETE cached catalog for the city', /export function matchDistrictsByCityId/.test(locSrc));
-check('empty focus shows the Category+Deal+period-scoped Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes\)/.test(indexSrc));
-check('typing filters within the chosen city+scope via matchDistrictsByCityId (cohort-typed)', /matchDistrictsByCityId\(citySelected\.cityId, effDeal, effCategory, rentPeriodTok, v, cohortTypes\)/.test(indexSrc));
+check('empty focus shows the Category+Deal+period-scoped Top-6 via topDistrictsForCityId', /topDistrictsForCityId\(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope\)/.test(indexSrc));
+check('typing filters within the chosen city+scope via matchDistrictsByCityId (cohort-typed)', /matchDistrictsByCityId\(citySelected\.cityId, effDeal, effCategory, rentPeriodTok, v, cohortTypes, cityTableScope\)/.test(indexSrc));
 // Arabic-only: typing the district in English yields NO autocomplete and the same Arabic hint the City
 // field shows (owner UI request 2026-07-18) — every district name is Arabic, so there's nothing to match.
 check('English district input shows the Arabic-only hint and clears suggestions', /const latin = isLatinOnlyInput\(v\);[\s\S]{0,220}?setDistrictSuggestions\(latin \? \[\][\s\S]{0,220}?setDistrictMsg\(latin \? ARABIC_ONLY_MSG/.test(indexSrc));
