@@ -104,7 +104,12 @@ check('the closing count still comes from resultCounts() on EVERY turn (see veri
 
 // ── 3. THE CARDS STAY ────────────────────────────────────────────────────────────────────────────
 check('a results turn renders its cards from its own reveal count, ungated by recency',
-  /m\.result\.listings\.slice\(0, revealCount\[m\.id\] \?\? \(m\.typing \? 0 : Math\.min\(FIRST_PAGE, m\.result\.listings\.length\)\)\)\.map\(/.test(agent),
+  // The not-yet-revealed fallback became initialReveal(m.result) on 2026-08-30 (a ≤INTERVIEW_STOP_AT set
+  // renders in full — src/lib/initialReveal.ts). The INVARIANT this check guards is unchanged and still
+  // pinned: the turn's OWN revealCount[m.id] leads, a typing turn starts at 0, and nothing about recency
+  // (isLatestResults) may appear in the slice bound.
+  /m\.result\.listings\.slice\(0, revealCount\[m\.id\] \?\? \(m\.typing \? 0 : initialReveal\(m\.result\)\)\)\.map\(/.test(agent)
+  && !/listings\.slice\(0, [^)]*isLatestResults/.test(agent),
   'agent.tsx: an old turn must keep showing exactly the cards it was showing — never 0, never re-collapsed');
 check('the cards render ABOVE the actions/receipt slot, so swapping that slot cannot take them with it',
   agent.indexOf('m.result.listings.slice(0, revealCount[m.id]') < agent.indexOf('showActionsRow ? ('),

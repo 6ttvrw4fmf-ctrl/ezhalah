@@ -38,7 +38,9 @@ check('finish() is idempotent (a `done` latch) — the fallback and a late-but-r
 check('the returned cleanup clears BOTH the interval and the fallback timeout — an unmounted/superseded Typer can never fire onDone after the fact', /return \(\) => \{ clearInterval\(id\); clearTimeout\(fallback\); \};/.test(agent));
 check('Typer delegates to runTypewriter (no re-inlined duplicate interval that could go unpatched)', /function Typer\(\{ text, onDone \}[\s\S]{0,200}?return runTypewriter\(text\.length, setN, onDone\);/.test(agent));
 check('BrandReveal delegates to runTypewriter too (the listings-reply path, not just plain chat replies)', /function BrandReveal\(\{ brand, text, onDone \}[\s\S]{0,300}?return runTypewriter\(full\.length, setN, onDone\);/.test(agent));
-check('the closing block (AF button / Load more / feedback row / Read Aloud) is still gated on doneTyping — this fix guarantees that gate resolves promptly, it does not remove the gate', /if \(\(m\.typing && !doneTyping\[m\.id\]\) \|\| shown < Math\.min\(FIRST_PAGE, fetched\)\) return null;/.test(agent));
+// 2026-08-30: the gate's second clause now falls back to initialReveal(m.result) (a ≤INTERVIEW_STOP_AT set renders
+// in full — src/lib/initialReveal.ts). The invariant pinned here is the FIRST clause: still gated on doneTyping[m.id].
+check('the closing block (AF button / Load more / feedback row / Read Aloud) is still gated on doneTyping — this fix guarantees that gate resolves promptly, it does not remove the gate', /if \(\(m\.typing && !doneTyping\[m\.id\]\) \|\| shown < initialReveal\(m\.result\)\) return null;/.test(agent));
 
 // ── EXECUTED: a faithful pure replica of runTypewriter, driven by an injectable fake clock (owner
 //    2026-08-23) — no real timers, so this runs instantly regardless of the ceiling being tested.
