@@ -58,7 +58,7 @@
 
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
-import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { buildOracleQS, AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
@@ -109,6 +109,11 @@ const EXPECTED_LABEL: Record<string, string[]> = {
   kitchen: ['المطبخ', 'مطبخ'], parking: ['مواقف'], elevator: ['مصعد'], ac: ['تكييف'], private_entrance: ['مدخل خاص'],
   maid_room: ['غرفة خادمة'], driver_room: ['غرفة سائق'], car_entrance: ['مدخل سيارة'], sanitation: ['صرف صحي'],
   electricity: ['كهرباء'], water_supply: ['توفر الماء'], furnished: ['مفروش'], rnpl: ['يقبل التقسيط'],
+  // The rich residential set certified 2026-08-31 (20260831205347_af_amenity_tokens_residential_
+  // rich_set.sql). Labels read from src/i18n.tsx, same as every row above.
+  gym: ['صالة رياضية'], pool: ['مسبح'], garden: ['حديقة'], balcony: ['بلكونة'],
+  laundry_room: ['غرفة غسيل'], optical_fibers: ['ألياف بصرية'],
+  separate_electricity_meter: ['عداد كهرباء مستقل'], separate_water_meter: ['عداد ماء مستقل'],
   '1': ['+1', '1+'], '2': ['+2', '2+'], '3': ['+3', '3+'], '4': ['+4', '4+'],
   '15': ['15 م فأكثر'], '20': ['20 م فأكثر'], '25': ['25 م فأكثر'], '30': ['30 م فأكثر'],
   'شمال': ['شمال'], 'جنوب': ['جنوب'], 'شرق': ['شرق'], 'غرب': ['غرب'],
@@ -121,14 +126,36 @@ const EXPECTED_LABEL: Record<string, string[]> = {
 
 // ── OPTION KEY → the cnt_* column the app reads, and the RPC that column lives on ────────────────
 type Rpc = 'guided' | 'age';
+// THE AMENITY VOCABULARY IS NOT RE-LISTED HERE (2026-09-03). It is derived from the ONE shared map
+// in scripts/lib/afOracleFilter.ts, because a hand-kept second copy is exactly how this file broke:
+// the rich residential set (gym, pool, garden, balcony, laundry_room, optical_fibers, separate_*_
+// meter) was certified on 2026-08-31 and this list did not follow, so five real options failed as
+// "unknown key" against a correct production. Every certified token's count column in
+// apartment_guided_counts_ar is `cnt_<token>` — verified 2026-09-03 against the live function
+// definition for all 20 tokens — so the mapping is a rule, not a list, and CANNOT drift again.
+// `rent_now_pay_later` is an ALIAS the clause accepts, never an option key the card renders; the
+// card's key is `rnpl`, which is in the map on its own.
+const AMENITY_KEYS = new Set(Object.keys(AMENITY_TOKEN_COL).filter((k) => k !== 'rent_now_pay_later'));
+const AMENITY_OPTION_COL = Object.fromEntries(
+  [...AMENITY_KEYS].map((k) => [k, { rpc: 'guided' as Rpc, col: `cnt_${k}` }]),
+);
+
+// A DERIVED VOCABULARY NEEDS A COMPLETE LABEL MAP, AND THE MISMATCH MUST BE LOUD (2026-09-03).
+// The count columns now follow the shared token map automatically; EXPECTED_LABEL still cannot,
+// because a label is a translation, not a rule. So the two are reconciled HERE, at load, rather
+// than per-cohort: an unlabelled token would otherwise pass unnoticed in every scope that happens
+// not to render it and fail mysteriously in the one that does — which is precisely how the five
+// rich tokens stayed invisible until a جدة villa cohort surfaced them.
+const unlabelled = [...AMENITY_KEYS].filter((k) => !EXPECTED_LABEL[k]?.length);
+if (unlabelled.length) {
+  console.error(`FATAL: certified amenity token(s) with no EXPECTED_LABEL entry: ${unlabelled.join(', ')}.\n` +
+    'Add the Arabic label from src/i18n.tsx — the token is filterable, so the card can render it, ' +
+    'and an unlabelled token cannot be checked against the label the user actually reads.');
+  process.exit(1);
+}
+
 const OPTION_COL: Record<string, { rpc: Rpc; col: string }> = {
-  kitchen: { rpc: 'guided', col: 'cnt_kitchen' }, parking: { rpc: 'guided', col: 'cnt_parking' },
-  elevator: { rpc: 'guided', col: 'cnt_elevator' }, ac: { rpc: 'guided', col: 'cnt_ac' },
-  private_entrance: { rpc: 'guided', col: 'cnt_private_entrance' }, maid_room: { rpc: 'guided', col: 'cnt_maid_room' },
-  driver_room: { rpc: 'guided', col: 'cnt_driver_room' }, car_entrance: { rpc: 'guided', col: 'cnt_car_entrance' },
-  sanitation: { rpc: 'guided', col: 'cnt_sanitation' }, electricity: { rpc: 'guided', col: 'cnt_electricity' },
-  water_supply: { rpc: 'guided', col: 'cnt_water_supply' }, furnished: { rpc: 'guided', col: 'cnt_furnished' },
-  rnpl: { rpc: 'guided', col: 'cnt_rnpl' },
+  ...AMENITY_OPTION_COL,
   '1': { rpc: 'guided', col: 'cnt_bath1' }, '2': { rpc: 'guided', col: 'cnt_bath2' },
   '3': { rpc: 'guided', col: 'cnt_bath3' }, '4': { rpc: 'guided', col: 'cnt_bath4' },
   '15': { rpc: 'guided', col: 'cnt_stw15' }, '20': { rpc: 'guided', col: 'cnt_stw20' },
@@ -145,8 +172,6 @@ const OPTION_COL: Record<string, { rpc: Rpc; col: string }> = {
   new: { rpc: 'age', col: 'cnt_new' }, '1_2': { rpc: 'age', col: 'cnt_1_2' }, '3_5': { rpc: 'age', col: 'cnt_3_5' },
   '6_9': { rpc: 'age', col: 'cnt_6_9' }, '10p': { rpc: 'age', col: 'cnt_10p' },
 };
-const AMENITY_KEYS = new Set(['kitchen', 'parking', 'elevator', 'ac', 'private_entrance', 'maid_room', 'driver_room',
-  'car_entrance', 'sanitation', 'electricity', 'water_supply', 'furnished', 'rnpl']);
 const DIRECTION_KEYS = new Set(['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرق', 'شمال غرب', 'جنوب شرق', 'جنوب غرب']);
 const BATH_KEYS = new Set(['1', '2', '3', '4']);
 const STW_KEYS = new Set(['15', '20', '25', '30']);
@@ -885,7 +910,28 @@ try {
     const card = await readCardUntil((s) => s.hasCard && s.chip != null && s.options.length > 0 && s.options.every((o) => o.count != null));
     const reads = await proveQuestion(label, card, ctxBody, ctxTotal);
     const el = reads.filter((o) => o.count != null && o.count >= MIN_REAL_OPTION_COUNT && OPTION_COL[o.key]);
-    const t = el.sort((a, b) => (a.count! - b.count!))[0];
+    // WHICH OPTION TO CLICK (corrected 2026-09-03). The narrowest option is the sharpest proof, but
+    // when this step must be FOLLOWED by another question (`!skipOut`), the narrowest is often the
+    // wrong pick: R4.3.1/R11.1 say AF legitimately STOPS at ≤ INTERVIEW_STOP_AT results, so an
+    // option landing on, say, 13 correctly ends the interview and fires the search — and the old
+    // unconditional "confirming advanced to a DIFFERENT question" then failed a production that had
+    // just obeyed the contract. Measured live 2026-09-03 (جدة/فيلا): «غرفة سائق» = 13, AF stopped,
+    // 4 checks went red against correct behaviour. So: when a Q2 is required, take the narrowest
+    // option that still leaves MORE than INTERVIEW_STOP_AT; only fall back to the global narrowest
+    // when the step is allowed to end the interview.
+    const byCount = (a: typeof el[number], b: typeof el[number]) => a.count! - b.count!;
+    const keepsGoing = el.filter((o) => o.count! > INTERVIEW_STOP_AT);
+    const t = (skipOut ? el : keepsGoing).sort(byCount)[0];
+    if (!skipOut && !t) {
+      // Not a failure of the product: this cohort has no option that both clears the ≥5 floor and
+      // leaves >25 behind, so a second in-round question cannot exist to be proved. Reporting that
+      // honestly is the rule (PART 7, "never fake green"); passing it silently would be worse.
+      skip(`${label}: a real (≥5) option exists to click`,
+        `NOT EXERCISED — every option at or above the floor lands at or below INTERVIEW_STOP_AT ` +
+        `(${INTERVIEW_STOP_AT}), so R11.1 ends the interview and there is no Q2 to prove here. ` +
+        `Options offered: ${el.map((o) => `${o.key}=${o.count}`).join(', ') || '(none)'}`);
+      return null;
+    }
     check(`${label}: a real (≥5) option exists to click`, !!t, t ? `clicking «${t.key}» (${t.label}) = ${t.count}` : 'no rendered option at or above the floor');
     if (!t) return null;
     const pred = predicateFor(t.key, ctxBody);
