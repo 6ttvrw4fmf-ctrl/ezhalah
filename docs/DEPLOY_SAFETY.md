@@ -56,6 +56,32 @@ grep -c "p_tables2" /tmp/bundle-check.js   # commercial fix marker — should be
 one. The bundle hash (`entry-<hash>.js`) is content-based — an unchanged hash after a deploy you
 expected to change something means the deploy didn't actually include what you think it did.
 
+An unchanged hash is NOT by itself a failure, though: re-deploying the same frontend code emits a
+byte-identical bundle with the same name, and that is a healthy deploy. Prove the bundle rather than
+the change:
+
+```bash
+md5sum /tmp/bundle-check.js     # macOS: md5 -q — must equal the <hash> in entry-<hash>.js
+```
+
+The Expo web entry filename IS the md5 of its own bytes, so name and content must agree. A mismatch
+means the alias served something that is not that artifact (error page, truncated CDN read).
+
+### What the post-deploy gate in `safe-deploy.sh` asserts (and why it was wrong once)
+
+The gate proves the canonical alias serves **the entry THIS RUN emitted** — read from the run's own
+build log line `› web bundles (1): _expo/static/js/web/entry-<md5>.js` — that `md5(served bytes)`
+equals the hash in that filename, and that those bytes contain `supabase.co`.
+
+It used to take the expected hash from the per-deployment URL (`https://ezhalah-<id>.vercel.app`).
+That URL is behind Vercel deployment protection and answers `HTTP 302 → vercel.com/sso-api`, 15
+bytes, so the hash was never readable from CI; the gate then fell back to demanding that the alias
+hash **differ** from the pre-deploy hash — impossible for an identical rebuild. Run 33776354197
+deployed fine (`▲ Aliased https://ezhalah-app.vercel.app`, hydration gate green) and still went red,
+so the approved baseline never advanced and every later `preflight-verify.sh` flagged `main` as
+unapproved. A `<never readable>` deployment-URL read in that failure block is now expected and
+harmless. The gate stays BLOCKING; do not add a bypass flag.
+
 ## Approved baseline record
 
 This is the last known-good state, confirmed live and verified, kept up to date after every
