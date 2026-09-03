@@ -156,26 +156,40 @@ const livePlatforms = (await rpc.json()) as string[];
 check('loader_active_platforms_ar() returned a plausible fleet', livePlatforms.length >= 20,
   `got ${livePlatforms.length} platform(s) — too few to trust as the live set`);
 
-/** production_ready rows a single source_table currently contributes to search_listings_ar. */
-const rows = async (table: string): Promise<number> => {
+/** Rows a single source_table contributes to search_listings_ar; `live` restricts to production_ready. */
+const rows = async (table: string, live: boolean): Promise<number> => {
+  const filter = live ? 'production_ready=is.true&' : '';
   const r = await fetch(
-    `${REST}/search_listings_ar?production_ready=is.true&source_table=eq.${table}&select=listing_id&limit=1`,
+    `${REST}/search_listings_ar?${filter}source_table=eq.${table}&select=listing_id&limit=1`,
     { headers: { ...H, Prefer: 'count=exact' } },
   ).catch(() => null);
   if (!r || !r.ok) return die(`could not count ${table} — ${r ? r.status : 'network error'}`);
   return Number(r.headers.get('content-range')?.split('/')[1] ?? -1);
 };
 
-// MISSING. `platform` IS the table-name prefix — asserted, not assumed: every live platform must
-// resolve to at least one table carrying rows. If that convention ever breaks, this check must fail
-// loudly rather than quietly conclude the platform is fine because it could not find its tables.
+// MISSING. `platform` IS the table-name prefix — asserted, not assumed: every platform production
+// reports as live must resolve to at least one table carrying rows. If that convention ever breaks,
+// this check must fail loudly rather than quietly conclude the platform is fine because it could not
+// find its tables.
+//
+// RESOLUTION is tested on ALL rows and SEVERITY on production_ready rows only, deliberately. A
+// platform whose rows are all currently non-production_ready is perfectly ordinary — it still
+// appears in loader_active_platforms_ar, which does not filter on that column — and testing
+// resolution with the production_ready filter would report it as a broken naming convention. The two
+// questions are "can I find this platform's tables at all" and "does it hold inventory a user should
+// be able to reach"; conflating them makes the barrier cry wolf, and a barrier nobody believes is
+// worse than none.
 const missing: Array<[string, number]> = [];
 const unresolved: string[] = [];
 for (const p of livePlatforms) {
   const tables = [`${p}_residential_listings`, `${p}_commercial_listings`];
-  const counts = await Promise.all(tables.map(rows));
-  if (counts.every((n) => n <= 0)) { unresolved.push(p); continue; }
-  tables.forEach((t, i) => { if (counts[i] > 0 && !everReachable.has(t)) missing.push([t, counts[i]]); });
+  const anyRows = await Promise.all(tables.map((t) => rows(t, false)));
+  if (anyRows.every((n) => n <= 0)) { unresolved.push(p); continue; }
+  for (const [i, t] of tables.entries()) {
+    if (anyRows[i] <= 0 || everReachable.has(t)) continue;
+    const live = await rows(t, true);
+    if (live > 0) missing.push([t, live]);
+  }
 }
 check('every live platform resolves to its <platform>_(residential|commercial)_listings tables',
   unresolved.length === 0,

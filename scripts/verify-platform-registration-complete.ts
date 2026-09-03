@@ -37,6 +37,10 @@
 //   node --experimental-strip-types scripts/verify-platform-registration-complete.ts   (in `npm test`)
 
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { liftSymbols } from './lib/liftSymbols.ts';
+
+const ROOT = join(import.meta.dirname, '..');
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -135,13 +139,19 @@ for (const p of PLATFORMS) {
 const remoteSrc = read('src/data/remote.ts');
 const dbSrc = read('scrapers/common/db.py');
 const slugOf = (t: string) => t.replace(/_(residential|commercial)_listings$/, '');
-const listAfter = (marker: string) => {
-  const i = remoteSrc.indexOf(marker);
-  return i < 0 ? [] : [...remoteSrc.slice(i, remoteSrc.indexOf('];', i)).matchAll(/'([a-z0-9]+_(?:residential|commercial)_listings)'/g)].map((m) => m[1]);
-};
-const resTables = new Set(listAfter('const RES_TABLES ='));
-const comTables = new Set(listAfter('const COM_TABLES ='));
-check('RES_TABLES / COM_TABLES parsed', resTables.size > 25 && comTables.size > 25,
+// EXECUTED, not text-parsed (2026-09-03). These were two hand-typed literals a regex could read;
+// they are now DERIVED from the generated SEARCHABLE_TABLES inventory, and the old regex silently
+// matched nothing — res=0, com=0 — which is exactly why a check must run the thing it is checking
+// rather than read it. liftSymbols runs the real declarations out of remote.ts.
+const lifted = await liftSymbols(join(ROOT, 'src/data/remote.ts'), [
+  { header: 'const SEARCHABLE_TABLES = [', endsWith: /\];$/ },
+  { header: 'const MONTHLY_ONLY_TABLE = ', endsWith: /;$/ },
+  { header: 'const RES_TABLES = ', endsWith: /;$/ },
+  { header: 'const COM_TABLES = ', endsWith: /;$/ },
+], ['RES_TABLES', 'COM_TABLES']);
+const resTables = new Set(lifted.RES_TABLES as string[]);
+const comTables = new Set(lifted.COM_TABLES as string[]);
+check('RES_TABLES / COM_TABLES executed out of remote.ts', resTables.size > 25 && comTables.size > 25,
   `res=${resTables.size} com=${comTables.size}`);
 
 // Every residential table has its commercial twin and vice versa — a half-registered platform is

@@ -1107,10 +1107,9 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
 //
 // GENERATED. Regenerate with:
 //   node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/gen-searchable-tables.ts
-// It reads production's own answer to "which physical tables can reach search_listings_ar" — the
-// union arms of active_listing_ids_v2, which sync_search_listings_ar reads — and rewrites the single
-// line below. Do not hand-edit it; scripts/verify-searchable-scope-matches-inventory.ts EXECUTES the
-// derivation underneath and fails against the live inventory in both directions.
+// It reads production's own answer to "which tables are production-searchable" and rewrites the
+// single line below. Do not hand-edit it; scripts/verify-searchable-scope-matches-inventory.ts
+// EXECUTES the derivation underneath and fails against the live inventory in both directions.
 //
 // WHY GENERATED-AND-COMMITTED rather than fetched at runtime. p_tables is on the hot path of every
 // search; a runtime fetch would add a round trip before the first result and, worse, would have to
@@ -1118,13 +1117,24 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
 // "silently fall back to a stale list", i.e. this bug again. A committed list costs nothing at
 // runtime and moves the freshness question to a barrier that can fail loudly instead.
 //
-// WHY THE v2 ARMS, and not `select distinct source_table from search_listings_ar`. The distinct
-// query answers "which tables have rows RIGHT NOW", and a platform whose active rows momentarily hit
-// zero would drop out of the inventory — then silently fail to come back when its rows return. The
-// arms answer "which tables CAN be searched", which is the question the client is actually asking.
-// Measured 2026-09-03: 77 arms == 77 physical *_listings tables, of which 62 currently carry rows.
+// IT IS A JOIN OF TWO PRODUCTION FACTS, and neither alone is the answer:
+//   · the union arms of active_listing_ids_v2 — "this table CAN reach the search index";
+//   · platform_registry.status <> 'retired'   — "this source is MEANT to be searched".
+// Measured 2026-09-03: 77 arms == 77 physical *_listings tables; 4 platforms are retired (deal,
+// toor, awal, alnokhba — 0 production_ready rows between them, and platform_registry's note on
+// `deal` says in so many words "excluded from search"), leaving 69. `dormant` is NOT excluded: a
+// dormant scraper is a paused CRAWL, not withdrawn inventory — muktamel is dormant and has 523 live
+// searchable rows.
+//
+// NOT `select distinct source_table from search_listings_ar`. That answers "which tables have rows
+// RIGHT NOW" (62 of the 77), so a platform whose active rows momentarily hit zero would drop out of
+// the inventory and then silently fail to come back. The arms answer "which tables CAN be searched",
+// which is the question the client is actually asking.
+//
+// A retired platform that starts serving rows again does NOT quietly disappear: the live barrier's
+// MISSING direction reads production's own live platform list, so it goes red and names the table.
 // GENERATED — do not edit by hand.
-const SEARCHABLE_TABLES = ['abeea_commercial_listings', 'abeea_residential_listings', 'abralosol_commercial_listings', 'abralosol_residential_listings', 'aldarim_commercial_listings', 'aldarim_residential_listings', 'alhoshan_commercial_listings', 'alhoshan_residential_listings', 'alkhaas_commercial_listings', 'alkhaas_residential_listings', 'alnokhba_commercial_listings', 'alnokhba_residential_listings', 'aouj_commercial_listings', 'aouj_residential_listings', 'aqar_commercial_listings', 'aqar_residential_listings', 'aqaratikom_commercial_listings', 'aqaratikom_residential_listings', 'aqarcity_commercial_listings', 'aqarcity_residential_listings', 'aqargate_commercial_listings', 'aqargate_residential_listings', 'aqarmonthly_residential_listings', 'arkaan_commercial_listings', 'arkaan_residential_listings', 'awal_commercial_listings', 'awal_residential_listings', 'deal_commercial_listings', 'deal_residential_listings', 'dealapp_commercial_listings', 'dealapp_residential_listings', 'eaqartabuk_commercial_listings', 'eaqartabuk_residential_listings', 'eastabha_commercial_listings', 'eastabha_residential_listings', 'erapulse_commercial_listings', 'erapulse_residential_listings', 'fursaghyr_commercial_listings', 'fursaghyr_residential_listings', 'gathern_commercial_listings', 'gathern_residential_listings', 'hajer_commercial_listings', 'hajer_residential_listings', 'jazwtn_commercial_listings', 'jazwtn_residential_listings', 'jurash_commercial_listings', 'jurash_residential_listings', 'mizlaj_commercial_listings', 'mizlaj_residential_listings', 'muktamel_commercial_listings', 'muktamel_residential_listings', 'mustqr_commercial_listings', 'mustqr_residential_listings', 'nowaisiry_commercial_listings', 'nowaisiry_residential_listings', 'october_commercial_listings', 'october_residential_listings', 'raghdan_commercial_listings', 'raghdan_residential_listings', 'ramzalqasim_commercial_listings', 'ramzalqasim_residential_listings', 'rawasidark_commercial_listings', 'rawasidark_residential_listings', 'sadin_commercial_listings', 'sadin_residential_listings', 'sanadak_commercial_listings', 'sanadak_residential_listings', 'satel_commercial_listings', 'satel_residential_listings', 'souq24_commercial_listings', 'souq24_residential_listings', 'therc_commercial_listings', 'therc_residential_listings', 'toor_commercial_listings', 'toor_residential_listings', 'wasalt_commercial_listings', 'wasalt_residential_listings'];
+const SEARCHABLE_TABLES = ['abeea_commercial_listings', 'abeea_residential_listings', 'abralosol_commercial_listings', 'abralosol_residential_listings', 'aldarim_commercial_listings', 'aldarim_residential_listings', 'alhoshan_commercial_listings', 'alhoshan_residential_listings', 'alkhaas_commercial_listings', 'alkhaas_residential_listings', 'aouj_commercial_listings', 'aouj_residential_listings', 'aqar_commercial_listings', 'aqar_residential_listings', 'aqaratikom_commercial_listings', 'aqaratikom_residential_listings', 'aqarcity_commercial_listings', 'aqarcity_residential_listings', 'aqargate_commercial_listings', 'aqargate_residential_listings', 'aqarmonthly_residential_listings', 'arkaan_commercial_listings', 'arkaan_residential_listings', 'dealapp_commercial_listings', 'dealapp_residential_listings', 'eaqartabuk_commercial_listings', 'eaqartabuk_residential_listings', 'eastabha_commercial_listings', 'eastabha_residential_listings', 'erapulse_commercial_listings', 'erapulse_residential_listings', 'fursaghyr_commercial_listings', 'fursaghyr_residential_listings', 'gathern_commercial_listings', 'gathern_residential_listings', 'hajer_commercial_listings', 'hajer_residential_listings', 'jazwtn_commercial_listings', 'jazwtn_residential_listings', 'jurash_commercial_listings', 'jurash_residential_listings', 'mizlaj_commercial_listings', 'mizlaj_residential_listings', 'muktamel_commercial_listings', 'muktamel_residential_listings', 'mustqr_commercial_listings', 'mustqr_residential_listings', 'nowaisiry_commercial_listings', 'nowaisiry_residential_listings', 'october_commercial_listings', 'october_residential_listings', 'raghdan_commercial_listings', 'raghdan_residential_listings', 'ramzalqasim_commercial_listings', 'ramzalqasim_residential_listings', 'rawasidark_commercial_listings', 'rawasidark_residential_listings', 'sadin_commercial_listings', 'sadin_residential_listings', 'sanadak_commercial_listings', 'sanadak_residential_listings', 'satel_commercial_listings', 'satel_residential_listings', 'souq24_commercial_listings', 'souq24_residential_listings', 'therc_commercial_listings', 'therc_residential_listings', 'wasalt_commercial_listings', 'wasalt_residential_listings'];
 
 // Gathern + Aqar Monthly are MONTHLY-ONLY sources: every listing is a monthly rental. On a monthly
 // search we therefore include ALL their rows — even ones whose raw rent_period is null — because the
