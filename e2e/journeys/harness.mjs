@@ -74,7 +74,14 @@ const PINNED_CHROMIUM = process.env.PW_EXECUTABLE_PATH || '/opt/pw-browsers/chro
  * instead of a journey silently passing on the one engine that happens to exist.
  */
 export function engineAvailable(engine) {
-  if (engine === 'chromium') return existsSync(PINNED_CHROMIUM);
+  // CHROMIUM LIVES IN TWO DIFFERENT PLACES, and checking only one of them made the fail-closed
+  // guard refuse a perfectly good browser. In the agent container it is the image's pinned
+  // /opt/pw-browsers build; on a GitHub runner `npx playwright install chromium` puts it in
+  // Playwright's own cache and PINNED_CHROMIUM does not exist at all. Measured 2026-09-03: the
+  // all-engines dispatch exited 2 with «JOURNEY_ENGINE=chromium is not installed here» on a runner
+  // that had just installed it — the guard doing real damage in the direction it exists to prevent,
+  // by calling a present engine absent. Accept EITHER location; the launcher picks the same one.
+  if (engine === 'chromium' && existsSync(PINNED_CHROMIUM)) return true;
   try { return existsSync(ENGINES[engine].executablePath()); } catch { return false; }
 }
 
@@ -83,7 +90,10 @@ function launchOpts(engine) {
   const proxy = process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {};
   if (engine !== 'chromium') return { ...proxy };
   return {
-    executablePath: PINNED_CHROMIUM,
+    // Only pin the path when that binary actually exists (the agent container). On a runner,
+    // letting Playwright resolve its own installed build is correct — and forcing a nonexistent
+    // executablePath would fail every launch.
+    ...(existsSync(PINNED_CHROMIUM) ? { executablePath: PINNED_CHROMIUM } : {}),
     ...proxy,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-quic',
            '--ignore-certificate-errors', '--ssl-version-max=tls1.2'],
