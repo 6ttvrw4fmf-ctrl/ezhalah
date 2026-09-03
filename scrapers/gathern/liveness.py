@@ -199,8 +199,47 @@ def _run_canary(s, client, n: int) -> tuple[bool, int, int, str]:
     ok = canary_environment_ok(alive, probed)
     verdict = "PASS" if ok else "FAIL"
     print(f"CANARY {verdict}: {alive}/{probed} known-alive controls returned 200 "
-          f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) statuses[{hist}]", flush=True)
+          f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) statuses[{hist}]"
+          + ("" if ok else f" — {canary_diagnosis(statuses)}"), flush=True)
     return ok, alive, probed, hist
+
+
+def canary_diagnosis_from_hist(hist: str) -> str:
+    """Same diagnosis, from the histogram string the run already carries."""
+    counts: dict[int, int] = {}
+    for part in (hist or "").split(","):
+        if "x" in part:
+            k, _, v = part.partition("x")
+            try:
+                counts[int(k)] = int(v)
+            except ValueError:
+                continue
+    return canary_diagnosis(counts)
+
+
+def canary_diagnosis(statuses: dict[int, int]) -> str:
+    """Name the failing LAYER from the statuses, because the three cases need different people.
+
+    Saying "the source is refusing us" when the proxy rejected our credentials sends the next
+    engineer to the wrong system entirely, and a quarantine note is read precisely when nobody has
+    context. The dominant status decides:
+      404/410 -> the SOURCE answered and refused this egress
+      401/403/407 -> the PROXY or an auth layer rejected us; the source never saw the request
+      0       -> no verdict after retries: connect timeout / CONNECT tunnel failure
+    """
+    if not statuses:
+        return "no controls could be probed (empty control set)"
+    top = max(statuses.items(), key=lambda kv: kv[1])[0]
+    if top in (404, 410):
+        return ("the SOURCE answered and refused this egress — a different route may work, but "
+                "these 404s are UNKNOWN, never death")
+    if top in (401, 403, 407):
+        return ("the PROXY/auth layer rejected us — the source never saw these requests; check "
+                "credentials and plan, not the listings")
+    if top == 0:
+        return ("no verdict after retries — connect timeout or CONNECT tunnel failure; isolate "
+                "with scrapers/wasalt/diagnose_proxy.py before blaming the source")
+    return f"unexpected dominant status {top} — investigate before trusting any verdict"
 
 
 def _collect_stale(client, cutoff_iso: str, limit: int) -> list[dict]:
@@ -326,12 +365,13 @@ def _recheck_dead(client, args, run_id: int, mode: str, now_iso: str,
     # the next reader would take it as proof the backlog really is dead. Refuse instead.
     if args.canaries:
         ok, c_alive, c_probed, c_hist = _run_canary(s, client, args.canaries)
+        c_diag = canary_diagnosis_from_hist(c_hist)
         if not ok:
             notes = (f"CANARY-QUARANTINED recheck-dead: {c_alive}/{c_probed} controls alive "
                      f"statuses[{c_hist}] "
-                     f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}). The source is not "
-                     f"answering this run reliably, so a 404 here would mean 'we were blocked', "
-                     f"not 'this listing is gone'. 0 restored, 0 evidence rows written.")
+                     f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) — {c_diag}. "
+                     f"A 404 here would mean 'we were blocked', not 'this listing is gone'. "
+                     f"0 restored, 0 evidence rows written.")
             print(f"✗ {notes}", flush=True)
             end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=notes, allow_empty=True)
             if holding_lock:
@@ -527,13 +567,13 @@ def main() -> int:
     c_hist = "skipped"
     if args.canaries:
         c_ok, c_alive, c_probed, c_hist = _run_canary(s, client, args.canaries)
+        c_diag = canary_diagnosis_from_hist(c_hist)
         if not c_ok:
             notes = (f"CANARY-QUARANTINED {mode}: {c_alive}/{c_probed} known-alive controls "
                      f"returned 200 statuses[{c_hist}] "
-                     f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) — "
-                     f"0 strikes and 0 inactivations written, worklist not probed. The source is "
-                     f"refusing this environment, so its 404s are UNKNOWN, not death. "
-                     f"Owner review required.")
+                     f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) — {c_diag}. "
+                     f"0 strikes and 0 inactivations written, worklist not probed. These "
+                     f"non-200s are UNKNOWN, never death. Owner review required.")
             print(f"✗ {notes}", flush=True)
             end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=notes, allow_empty=True)
             if holding_lock:
