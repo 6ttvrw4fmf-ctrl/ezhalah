@@ -440,6 +440,45 @@ def _report_description_miss(pid: str, html: str) -> None:
         cls = sorted(set(re.findall(r'class="([^"]*(?:desc|detail|about|content)[^"]*)"', html, re.I)))
         print(f"  [desc-miss] {pid}: candidate class tokens = {cls[:10]}", flush=True)
 
+    # Observed 2026-09-03: the label is ABSENT and the page carries a
+    # `detail-card property-details-locked` block next to `contact-card` / `dialog-content`. That
+    # reads like a login gate, which would mean the description and price are no longer PUBLISHED
+    # to an anonymous visitor — a source limitation, where honest NULL is correct and any recovered
+    # figure would be fabrication (§21/§22). But "the parser dropped it" and "the source stopped
+    # publishing it" look identical from the database, and they lead to OPPOSITE actions, so the
+    # question has to be settled on the page: is the figure anywhere in what the source hands us?
+    # Keys and counts only — never values (PDPL: this lands in a CI log).
+    signals = {
+        "«السعر»": html.count("السعر"),
+        "«ريال»": html.count("ريال"),
+        "«سعر»": html.count("سعر"),
+        "ld+json": html.count("application/ld+json"),
+        "__NEXT_DATA__": int("__NEXT_DATA__" in html),
+        "login_prompt": int(any(k in html for k in ("تسجيل الدخول", "إنشاء حساب", "سجل الدخول"))),
+    }
+    print(f"  [desc-miss] {pid}: page signals = {signals}", flush=True)
+
+    locked = re.search(r'<[a-z]+[^>]*class="[^"]*property-details-locked[^"]*"[^>]*>(.{0,600})',
+                       html, re.S)
+    if locked:
+        print(f"  [desc-miss] {pid}: inside locked block = "
+              f"{re.sub(r'>[^<]+<', '><', locked.group(1))[:300]}", flush=True)
+        print(f"  [desc-miss] {pid}: locked block text = "
+              f"{(_redact(_strip(locked.group(1))) or '')[:160]}", flush=True)
+
+    for blob in re.finditer(r'<script[^>]*type="application/ld\+json"[^>]*>(.{0,4000}?)</script>',
+                            html, re.S):
+        try:
+            import json as _json
+            data = _json.loads(blob.group(1))
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else [data]
+        for it in items:
+            if isinstance(it, dict):
+                print(f"  [desc-miss] {pid}: ld+json @type={it.get('@type')!r} keys={sorted(it)[:18]}",
+                      flush=True)
+
 
 def _is_per_meter(before: str, after: str) -> bool:
     # A per-metre rate can be labeled EITHER after the number ("4,250 ريال للمتر") OR before it
