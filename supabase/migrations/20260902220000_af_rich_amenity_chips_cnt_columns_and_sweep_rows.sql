@@ -171,7 +171,7 @@ begin
   raise notice 'SUCCESS: cnt_gym…cnt_separate_water_meter live inside the scoped CTE of apartment_guided_counts_ar (templated, rebuilt, parity 0, certified cohort % unchanged); chip==referee==direct for all 8; sweep AND af_option_truth_table carry the 8 rows (vocab drift 0)', after_n;
 end $do$;
 
--- ── 4. af_field_registry: the 7 registered tokens become ui_exposed (optical_fibers has no row) ──
+-- ── 4. af_field_registry: the 8 chips are DESCRIBED by the registry (7 flipped, optical_fibers REGISTERED) ──
 -- scripts/verify-ui-controls-have-predicates.ts reads this table LIVE and fails a chip whose row
 -- says ui_exposed=false, so the registry must move with the chips. The 2026-08-10 reasons are
 -- recorded here because they are superseded, not forgotten:
@@ -184,19 +184,37 @@ end $do$;
 --     coverage, not the property": the chip count is scoped and truthful (the NULL partition is
 --     asserted on every cell by the matrix barrier), and the owner ruled 2026-09-02 that all 8 are
 --     exposed with truthful chip/count support rather than kept as hidden backend-only predicates.
+-- optical_fibers never had a row (the 2026-08-10 registry predates its column). A chip the registry
+-- cannot describe is exactly what the barrier exists to refuse, so it is registered here with the
+-- same shape as the 2026-08-15 utility rows — measured 2026-09-02 fleet-wide: 2,886 true / 1,074
+-- false / 189,850 NULL across 13 publishing source tables (two-sided, source-published).
+insert into public.af_field_registry
+  (canonical_key, label_ar, category, datatype, unknown_policy, ui_exposed, ui_group, not_exposed_reason, concept_note, filter_tier)
+values
+  ('optical_fibers', 'ألياف بصرية', 'amenity', 'boolean', 'NULL', true, 'more_options', null,
+   'Residential rich-amenity chip since 2026-09-02 (RESIDENTIAL_AMENITY_BASE, cohort-gated). search_listings_ar.optical_fibers; positive-only IS TRUE token; unknown stays unknown. 13 publishers, two-sided.', 'advanced')
+on conflict (canonical_key) do update
+  set ui_exposed = true, ui_group = 'more_options', not_exposed_reason = null, filter_tier = 'advanced',
+      concept_note = excluded.concept_note;
+
 do $do$
-declare n int;
+declare n int; v_exposed int;
 begin
   update af_field_registry
      set ui_exposed = true, filter_tier = 'advanced', ui_group = coalesce(ui_group, 'more_options'),
          not_exposed_reason = null
-   where canonical_key in ('gym','pool','garden','balcony','laundry_room','optical_fibers','separate_electricity_meter','separate_water_meter')
+   where canonical_key in ('gym','pool','garden','balcony','laundry_room','separate_electricity_meter','separate_water_meter')
      and ui_exposed = false;
   get diagnostics n = row_count;
-  if n = 0 and (select count(*) from af_field_registry where canonical_key in ('gym','pool','garden','balcony','laundry_room','separate_electricity_meter','separate_water_meter') and ui_exposed) = 7 then
-    raise notice 'af_field_registry already exposes the rich set — skipped';
-  elsif n < 7 then
-    raise exception 'ABORT: expected to expose 7 registered rich tokens, updated %', n;
+  if n not in (0, 7) then
+    raise exception 'ABORT: expected to flip 0 (re-apply) or 7 registered rich tokens, updated %', n;
   end if;
-  raise notice 'SUCCESS: % af_field_registry rows now ui_exposed (advanced tier)', n;
+  -- the proof the barrier reads: every one of the 8 chip keys has a row, and that row says exposed.
+  select count(*) into v_exposed from af_field_registry
+   where canonical_key in ('gym','pool','garden','balcony','laundry_room','optical_fibers','separate_electricity_meter','separate_water_meter')
+     and ui_exposed and filter_tier = 'advanced' and not_exposed_reason is null;
+  if v_exposed <> 8 then
+    raise exception 'ABORT: % of 8 rich chip keys are registered+exposed (advanced tier)', v_exposed;
+  end if;
+  raise notice 'SUCCESS: % af_field_registry rows flipped; all 8 rich chip keys registered and ui_exposed (advanced tier)', n;
 end $do$;
