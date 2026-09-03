@@ -22,11 +22,13 @@
 // silent third case. An ACKNOWLEDGED table that has gone away also fails, so the list cannot rot
 // into a permanent excuse.
 //
-// WHY AN ACKNOWLEDGED LIST AT ALL. A platform is not searchable the moment its rows land: it needs
-// district canonicalization, price/period source truth, a liveness strategy that actually runs,
-// af_platform_mapping, and a SOURCE_TOKENS/PLATFORM_META entry. Until then the honest state is
-// "live in the view, deliberately not searched" — and the point of this barrier is that the state is
-// DECLARED and counted on every run, instead of being a silent hole nobody can see.
+// WHY AN ACKNOWLEDGED LIST AT ALL. A platform is not necessarily searchable the moment its rows
+// land — it needs a liveness strategy that actually runs, end-to-end registration so its cards do
+// not render as some other brand, and a client table-list entry. While any of that is outstanding the
+// honest state is "live in the view, deliberately not searched", and the point of this barrier is
+// that the state is DECLARED and counted on every run instead of being a silent hole nobody can see.
+// The list is empty today: PR #1548 closed the 2026-09-03 gap by finishing that work and adding the
+// five to the client lists.
 //
 //   node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-every-live-table-is-searchable.ts
 //
@@ -52,16 +54,11 @@ const H: Record<string, string> = { apikey: KEY, Authorization: `Bearer ${KEY}` 
  * are deleted here and its tables added to remote.ts.
  */
 const ACKNOWLEDGED: Record<string, string> = {
-  abralosol_residential_listings: 'activated 2026-09-03, uncertified: district 29%, bedrooms/bathrooms 0%, 979 Buy rows with no price_total; scraper not in the repo',
-  abralosol_commercial_listings: 'activated 2026-09-03, uncertified: district 18%; scraper not in the repo',
-  arkaan_residential_listings: 'activated 2026-09-03, uncertified: district 18%, bathrooms 0%, 71 rent rows priced annually with no rent_period_ar; scraper not in the repo',
-  arkaan_commercial_listings: 'activated 2026-09-03, uncertified: district 31%; scraper not in the repo',
-  therc_residential_listings: 'activated 2026-09-03, data is clean (district 97%, period 217/217, price 100%) but af_platform_mapping and SOURCE_TOKENS have no entry and the scraper is not in the repo',
-  therc_commercial_listings: 'activated 2026-09-03, same as therc_residential_listings',
-  rawasidark_residential_listings: 'activated 2026-09-03, uncertified: district 63%, bedrooms/bathrooms 0%; scraper not in the repo',
-  rawasidark_commercial_listings: 'activated 2026-09-03, uncertified: district 29%; scraper not in the repo',
-  aouj_residential_listings: 'activated 2026-09-03, uncertified: district 72%, 5/5 rent rows with no rent_period_ar; scraper not in the repo',
-  aouj_commercial_listings: 'activated 2026-09-03, same as aouj_residential_listings',
+  // EMPTY, and that is the point. It held all ten tables of the five platforms activated on
+  // 2026-09-03 for the few hours between their rows going live in search_listings_ar and PR #1548
+  // adding them to RES_TABLES/COM_TABLES. The hole is CLOSED: every platform live in the view is now
+  // reachable by a real search, so nothing needs excusing. A future entry here is a DECLARATION that
+  // some inventory is deliberately unreachable, never a place to park an oversight.
 };
 
 let failures = 0;
