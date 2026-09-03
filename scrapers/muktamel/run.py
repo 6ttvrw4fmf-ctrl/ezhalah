@@ -2,7 +2,13 @@
 
 مكتمل is a REGA-integrated Saudi property marketplace. There is NO usable public JSON API and the
 sitemap is stale, so we enumerate listings by sequential ID: GET /real-estates/<id> for every id in
-a range and parse the server-rendered page. Active ids span ~100..31000 at ~48% density (~15k live).
+a range and parse the server-rendered page. The site had no working crawl from 2026-07-15 (a
+_NodeWorker IPC deadlock, fixed 2026-09-03) until re-verified live 2026-09-03: the live band has
+moved on in the interim -- ids 24000-24300 are now ~0% live (aged out), while 31700-32300 measured
+86-88% live, well past the old "~100..31000" estimate. Re-measure before trusting either bound
+again; scrapers/muktamel/diag_page_structure.py is the tool for it. MIN_ID_DEFAULT is left at 1
+deliberately (never silently narrow the space you enumerate) -- callers (the sharded workflow)
+pass the evidenced range explicitly instead.
 
 Data path — the page is Nuxt 2: every field is server-rendered into a `window.__NUXT__=(function(...){
 ...}(...))` IIFE. That payload is NOT plain JSON (Nuxt 2's minified-arg format), so we evaluate the
@@ -599,6 +605,21 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
     return row, category
 
 
+def shard_ids(min_id: int, max_id: int, shards: int, shard: int) -> list[int]:
+    """The id slice one shard owns: `id % shards == shard`, inclusive of both ends.
+
+    Pulled out of main() so the partition properties (every id owned by exactly one shard, no id
+    owned by two, the union is the complete range) are directly testable without invoking the CLI.
+    Must agree with db._ad_shard(f"MK{{id}}", shards) — prune_unseen's shards= guard applies that
+    function to ad_number, and a disagreement here would mean a shard prunes ids it never fetched
+    or leaves ids it did fetch unprotected. scrapers/common/tests/test_muktamel_shard_partition.py
+    pins the agreement directly.
+    """
+    if shards <= 1:
+        return list(range(min_id, max_id + 1))
+    return [i for i in range(min_id, max_id + 1) if i % shards == shard]
+
+
 # ── Main ────────────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -607,10 +628,18 @@ def main() -> int:
                     help="validation run: upsert only the first N LIVE listings, NO prune")
     ap.add_argument("--min-id", type=int, default=MIN_ID_DEFAULT)
     ap.add_argument("--max-id", type=int, default=MAX_ID_DEFAULT)
+    ap.add_argument("--shards", type=int, default=1,
+                     help="split the id range across N parallel crawls (same convention as dealapp)")
+    ap.add_argument("--shard", type=int, default=0,
+                     help="which shard this process owns, 0..shards-1")
     args = ap.parse_args()
+    if not (0 <= args.shard < max(1, args.shards)):
+        ap.error(f"--shard must be in 0..{max(0, args.shards - 1)} for --shards {args.shards}")
 
-    ids = list(range(args.min_id, args.max_id + 1))
-    print(f"Muktamel: sweeping ids {args.min_id}..{args.max_id} ({len(ids)} candidates, {WORKERS} workers)"
+    ids = shard_ids(args.min_id, args.max_id, args.shards, args.shard)
+    print(f"Muktamel: sweeping ids {args.min_id}..{args.max_id}"
+          f"{f' shard {args.shard}/{args.shards}' if args.shards > 1 else ''} "
+          f"({len(ids)} candidates, {WORKERS} workers)"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
     run_id = None if args.limit else db.begin_run("muktamel")
@@ -659,11 +688,15 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0])
             return 0
 
-        # Full run: prune ids that were active before but weren't seen this crawl.
+        # Full run: prune ids that were active before but weren't seen this crawl. shards/shard are
+        # passed through so a shard only ever ages out ids it owns (db._ad_shard applied to
+        # ad_number="MK<id>" extracts the same <id> this crawl sharded on, by construction above) --
+        # a blocked or slow shard therefore prunes nothing outside its own slice, exactly like dealapp.
         pruned = 0
         for tbl, rows_seen in (("muktamel_residential_listings", res),
                                ("muktamel_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Muktamel")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Muktamel",
+                                 shards=args.shards, shard=args.shard)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
