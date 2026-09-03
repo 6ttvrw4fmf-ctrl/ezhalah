@@ -63,16 +63,17 @@ export const AMENITY_COL: Record<string, string> = {
   separate_electricity_meter: 'separate_electricity_meter', separate_water_meter: 'separate_water_meter',
 };
 // Amenity token → the AF chip's OWN labelKey (advancedFilters.ts AMENITIES_QUESTION defs) — one voice
-// for the chip and its evidence (owner decision 6). The barrier asserts each pair equals the def.
-// TODO(post-foundation): when feat/af-matrix-truth-barrier lands the 8 newer chips (gym, pool,
-// garden, balcony, laundry_room, optical_fibers, separate_electricity_meter, separate_water_meter),
-// add THEIR labelKeys here — data only, no code — and re-run verify-af-card-evidence.ts T1, which
-// goes RED on a chip def without a label. A token without a label renders no chip (never a guess).
+// for the chip and its evidence (owner decision 6). The barrier asserts each pair equals the def, so
+// a token whose label is re-invented here (or missing) goes RED; a token without a label renders no
+// chip (never a guess). All 20 allowlisted tokens are chips as of the class-wide truth barrier.
 export const AMENITY_LABEL: Record<string, string> = {
   kitchen: 'Kitchen', parking: 'Parking', elevator: 'Elevator', ac: 'Air conditioning',
   private_entrance: 'Private entrance', maid_room: 'Maid room', driver_room: 'Driver room',
   car_entrance: 'Car entrance', sanitation: 'Sewage connection', electricity: 'Electricity',
-  water_supply: 'Water supply', furnished: 'Furnished',
+  water_supply: 'Water supply', furnished: 'Furnished', gym: 'Gym', pool: 'Pool', garden: 'Garden',
+  balcony: 'Balcony', laundry_room: 'Laundry room', optical_fibers: 'Optical fibers',
+  separate_electricity_meter: 'Separate electricity meter',
+  separate_water_meter: 'Separate water meter',
 };
 // Canonical direction value (after normalisation) → the AF option labelKey (DIRECTION_DEFS).
 export const DIRECTION_LABEL: Record<string, string> = {

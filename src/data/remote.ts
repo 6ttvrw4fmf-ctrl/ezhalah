@@ -14,6 +14,7 @@ import { decodeEntities } from '@/lib/htmlEntities';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
+import type { AfCanon } from '@/lib/afEvidence';
 import saLocations from './sa-locations.json';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
@@ -1281,8 +1282,12 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   return req;
 }
 
-// A candidate row from the location index (the routing layer): just enough to find the exact raw row.
-type Cand = { source_table: string; listing_id: number; platform: string; total_count?: number };
+// A candidate row from the location index (the routing layer): just enough to find the exact raw row,
+// plus `af_canon` — the canonical search_listings_ar row the Advanced-Filter predicates actually ran
+// on, packed by the results RPC. It is the ONLY truthful source for the card's «مطابق لطلبك» strip:
+// the raw platform tables go through finalize(), which collapses a NULL to 0/false. Passed through
+// VERBATIM (`?? null`, never `!!`, never `?? 0`) — see src/lib/afEvidence.ts.
+type Cand = { source_table: string; listing_id: number; platform: string; total_count?: number; af_canon?: AfCanon | null };
 
 // Round-robin the candidates by platform (preserving each platform's newest-first order) so a broad
 // search shows a balanced mix instead of the top being monopolised by the platforms that scrape most
@@ -1496,6 +1501,7 @@ export async function fetchListingsForQuery(
   //    rank, and group ids by source_table to fetch the full cards.
   const cleanCands = allCands.map((c, i) => ({
     source_table: c.source_table as string, listing_id: Number(c.listing_id), platform: c.platform as string, rank: i,
+    af_canon: (c.af_canon ?? null) as AfCanon | null,
   }));
   // The index returns the ARABIC-CANONICAL location for every candidate (region_ar/city_ar/district_ar).
   // We display THAT — never the raw English/transliterated value underneath. (user: Arabic is canonical;
@@ -1565,6 +1571,10 @@ export async function fetchListingsForQuery(
     // city-name-guarded in finalize). null for every other source → `|| ''` keeps them byte-identical.
     l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || l.districtArFallback || '');
     l.regionAr = (ar?.region) || l.regionAr || '';
+    // The canonical AF row, verbatim. No coercion: a SQL NULL arrives as JSON null and STAYS null, so
+    // afEvidence() can tell «the source said No» from «nobody said». Absent (RPC not yet returning
+    // af_canon) → null → the evidence strip renders nothing.
+    l.canon = c.af_canon ?? null;
     const region = (ar?.region) || CITY_TO_REGION[canonCity] || canonCity;
     ranked.push({ l, platform: c.platform, city: canonCity, region, district: canonDistrict, rank: c.rank, source_table: c.source_table });
   }
