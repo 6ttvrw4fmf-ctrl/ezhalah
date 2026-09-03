@@ -167,26 +167,40 @@ def _collect_canaries(client, limit: int) -> list[dict]:
     return r.data or []
 
 
-def _run_canary(s, client, n: int) -> tuple[bool, int, int]:
-    """Probe the controls BEFORE the real worklist. Returns (ok, alive, probed).
+def _run_canary(s, client, n: int) -> tuple[bool, int, int, str]:
+    """Probe the controls BEFORE the real worklist. Returns (ok, alive, probed, status_histogram).
 
     This is the whole point of the pass: it costs ~n requests and answers "is the source telling us
     the truth today?" before a single real listing's fate is decided. On 2026-09-01 the aggregate
-    rate only condemned the run after all 1,500 probes; this condemns it after 5."""
+    rate only condemned the run after all 1,500 probes; this condemns it after 5.
+
+    THE HISTOGRAM IS NOT DECORATION. A canary that reports only "0/10" cannot distinguish the three
+    failures that matter and that need completely different responses:
+      404 -> the SOURCE is refusing this egress (a different route might work)
+      407 -> the PROXY rejected us (credentials/plan, nothing to do with the source)
+        0 -> no verdict after retries: connect timeout / CONNECT tunnel failure (the layer
+             scrapers/wasalt/diagnose_proxy.py exists to isolate)
+    Measured 2026-09-03: without this, a failed proxied run said "0/10" and the next question —
+    is gathern blocking the proxy, or is the proxy broken? — could not be answered from our own
+    logs at all."""
     canaries = _collect_canaries(client, n)
     alive = 0
+    statuses: dict[int, int] = {}
     for row in canaries:
         url = (row.get("listing_url") or "").strip()
         if not url:
             continue
-        if probe(s, url) == 200:
+        st = probe(s, url)
+        statuses[st] = statuses.get(st, 0) + 1
+        if st == 200:
             alive += 1
-    probed = len([c for c in canaries if (c.get("listing_url") or "").strip()])
+    probed = sum(statuses.values())
+    hist = ",".join(f"{k}x{v}" for k, v in sorted(statuses.items())) or "none"
     ok = canary_environment_ok(alive, probed)
     verdict = "PASS" if ok else "FAIL"
     print(f"CANARY {verdict}: {alive}/{probed} known-alive controls returned 200 "
-          f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES})", flush=True)
-    return ok, alive, probed
+          f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) statuses[{hist}]", flush=True)
+    return ok, alive, probed, hist
 
 
 def _collect_stale(client, cutoff_iso: str, limit: int) -> list[dict]:
@@ -311,9 +325,10 @@ def _recheck_dead(client, args, run_id: int, mode: str, now_iso: str,
     # `dead_confirmed` evidence for every row it could not reach. That is a lie in the ledger, and
     # the next reader would take it as proof the backlog really is dead. Refuse instead.
     if args.canaries:
-        ok, c_alive, c_probed = _run_canary(s, client, args.canaries)
+        ok, c_alive, c_probed, c_hist = _run_canary(s, client, args.canaries)
         if not ok:
             notes = (f"CANARY-QUARANTINED recheck-dead: {c_alive}/{c_probed} controls alive "
+                     f"statuses[{c_hist}] "
                      f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}). The source is not "
                      f"answering this run reliably, so a 404 here would mean 'we were blocked', "
                      f"not 'this listing is gone'. 0 restored, 0 evidence rows written.")
@@ -509,11 +524,13 @@ def main() -> int:
     # whole batch is spent, which on 2026-09-01 meant 302 rows were already inactivated by the time
     # the number existed. This asks the same question first, for the price of ~10 requests.
     c_alive = c_probed = 0
+    c_hist = "skipped"
     if args.canaries:
-        c_ok, c_alive, c_probed = _run_canary(s, client, args.canaries)
+        c_ok, c_alive, c_probed, c_hist = _run_canary(s, client, args.canaries)
         if not c_ok:
             notes = (f"CANARY-QUARANTINED {mode}: {c_alive}/{c_probed} known-alive controls "
-                     f"returned 200 (need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) — "
+                     f"returned 200 statuses[{c_hist}] "
+                     f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) — "
                      f"0 strikes and 0 inactivations written, worklist not probed. The source is "
                      f"refusing this environment, so its 404s are UNKNOWN, not death. "
                      f"Owner review required.")
@@ -683,7 +700,7 @@ def main() -> int:
     notes = (f"{mode} scanned={seen} dead={dead} {verb}={kill_shown} strike={struck} "
              f"applied_strikes={applied_strikes} alive={alive} transient={transient} "
              f"kill_cap={kill_cap} [{cap_src}] alive_rate={alive_rate:.3f} trusted={trusted} "
-             f"proxy={bool(args.proxy)} canary={c_alive}/{c_probed}")
+             f"proxy={bool(args.proxy)} canary={c_alive}/{c_probed} canary_statuses[{c_hist}]")
     if trust_quarantine:
         notes = (f"TRUST-QUARANTINED alive_rate={alive_rate:.1%} below {MIN_ALIVE_RATE_FOR_TRUST:.0%} "
                  f"(min_probes={MIN_PROBES_FOR_TRUST}) — 0 strikes and 0 inactivations written "
