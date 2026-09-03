@@ -176,7 +176,12 @@ export function ResultCard({
     // (user-reported: "look how it looks like in the phone, it's horrible".)
     // NOTE: the feedback row (thumbs/share) is NOT here — owner 2026-07-09 moved it to render ONCE per
     // results response, below the «تبي أعرض لك المزيد…» message (see agent.tsx + FeedbackRow.tsx).
-    <View style={[card.wrap, { flexDirection: horizontal ? 'row' : 'column' }]}>
+    // testID carries the listing's own id so a live journey can hold THIS card to THIS listing's
+    // canonical row. R12A.2 («the chip shows the LISTING's value, not the filter's label») is only
+    // checkable if a rendered card can be identified in the DOM; matching strips to rows by position
+    // is unsound, because a row that earns no chip renders no strip and silently shifts the rest.
+    // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
+    <View testID={`card-listing-${listing.id}`} style={[card.wrap, { flexDirection: horizontal ? 'row' : 'column' }]}>
       {/* ─── photo block (full-width banner on mobile) ───── */}
       <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
         <ListingPhoto photos={(listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []))} style={card.photo} t={t} />
