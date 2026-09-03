@@ -55,6 +55,7 @@
 //   AF_LAST_MOBILE=1                                390x844 touch viewport
 
 import { chromium } from 'playwright';
+import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
@@ -368,13 +369,14 @@ const readCardUntil = async (pred: (s: any) => boolean, timeoutMs = 12000) => {
   while (Date.now() < until) { if (pred(last)) return last; await page.waitForTimeout(350); last = await readCard(); }
   return last;
 };
+// The offer sits behind the agent's own LLM turn, whose latency is variable — see
+// scripts/lib/afOfferLive.ts for the 2026-09-03 CI failure that moved this out of three private
+// copies of a 16-second poll. `reason` matters: 'no-turn' means the agent never answered (not a
+// verdict about AF), 'absent' means the turn landed and the offer genuinely never rendered.
+let lastOffer: OfferResult | null = null;
 const openOffer = async (): Promise<boolean> => {
-  await scrollToBottom();
-  let box: any = null;
-  for (let i = 0; i < 40 && !box; i++) { box = await page.evaluate(CLICK_LEAF, 'خلّنا نحدد الطلب أكثر'); if (!box) await page.waitForTimeout(400); }
-  if (!box) return false;
-  await page.mouse.click(box.x, box.y);
-  return true;
+  lastOffer = await openAfOffer(page);
+  return lastOffer.opened;
 };
 const countPills = () => page.evaluate(() => document.querySelectorAll('[data-testid^="af-pill-"]').length);
 const pillLabels = () => page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-pill-"]')].map((e: any) => (e.textContent || '').trim()));
@@ -461,8 +463,19 @@ try {
   // ── 2. commit exactly ONE answer: first option of the first question, then Skip the rest ───────
   const turnsBeforeRound = (await waitForHeadlines(1)).length;
   const opened = await openOffer();
+  if (!opened && lastOffer && !lastOffer.opened && lastOffer.reason === 'no-turn') {
+    // The agent never produced a results turn inside the budget. That says nothing about whether
+    // AF would have been offered, so recording it as a failed AF rule would be a false alarm —
+    // and recording it as a pass would be worse. Neither: report it unverified and stop.
+    check('the AF offer «خلّنا نحدد الطلب أكثر» is present on the baseline turn', false,
+      `NOT VERIFIED — the agent produced no results turn within ${lastOffer.waitedMs}ms, so the ` +
+      `offer could not be looked for. This is a dependency timeout, not an AF verdict.`);
+    throw new Error('agent produced no results turn — AF offer could not be evaluated');
+  }
   check('the AF offer «خلّنا نحدد الطلب أكثر» is present on the baseline turn', opened,
-    opened ? '' : 'no offer rendered — cannot commit an answer, so the removal cannot be tested (R4.3/R4.4 may legitimately hide it; the scope then cannot prove this rule)');
+    opened ? `waited ${lastOffer && lastOffer.opened ? lastOffer.waitedMs : 0}ms`
+           : `the results turn landed but NO offer rendered on it within ${lastOffer?.waitedMs}ms ` +
+             `(N0=${N0} is above INTERVIEW_STOP_AT, so R4.3/R11.1 cannot explain the absence)`);
   if (!opened) throw new Error('offer absent on the baseline turn');
   const first = await readCardUntil((s) => s.hasCard && s.chip != null && !!s.q, 20000);
   answeredTitle = first.q;

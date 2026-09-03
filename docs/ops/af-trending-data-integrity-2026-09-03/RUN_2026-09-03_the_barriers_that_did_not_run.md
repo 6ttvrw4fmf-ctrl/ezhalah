@@ -217,6 +217,61 @@ PR #1526 carries a drafted implementation, explicitly marked do-not-merge, depen
 `af_canon` to the results RPC. That is a new product surface plus a schema change plus a frontend
 deploy — an owner decision, not an ordinary bug fix. Left open deliberately.
 
+## The fix, verified in CI — and what that run then found
+
+The restructured workflow was dispatched on the merged `main` (run 33752852600). **Five jobs, all
+in parallel, all started within 8 seconds; none cancelled, none skipped.**
+
+| job | result | note |
+|---|---|---|
+| `af-surface-region` | ✅ success | the sweep that was **cancelled mid-run** this morning — its first completion in CI |
+| `af-surface-city` (جدة) | ✅ success | had **never run at all** before today |
+| `af-matrix` | ✅ success | |
+| `af-truth` | ❌ failure | `verify-af-live-truth`, 4 checks — every other step green, including the rescued parity check |
+| `af-card-state` | ❌ failure | `verify-af-remove-last-pill-live`, 2 checks — its other three steps green |
+| **`attendance`** | ❌ **failure** | **exactly its job.** The run is RED. |
+
+That last row is the whole point. This morning the same shape — jobs not succeeding — reported
+`cancelled`, and nothing anywhere noticed. It is now a red run.
+
+`verify-strict-filter-parity-live` executed **in CI for the first time in its life** and passed,
+including the corrected annual arm (`rpc=44063 ground=44062+1=44063`) and the honest
+`SKIP … NOT EXERCISED` line. The region sweep, run locally in full alongside it, was
+**1,443 checks / 0 failures / 0 skips in 34m53s** — `MISSING 0 · EXTRA 0 · DUPLICATES 0 · COUNT
+MISMATCHES 0 · NULL→VALUE LEAKS 0 · ROW VIOLATIONS 0 · ORACLE REFUSALS 0`. That 34m53s is also the
+arithmetic proof of the original defect: step 15 alone needs ~35 minutes, on top of the 16m44s of
+steps before it, inside a 30-minute cap.
+
+### The second defect the run surfaced: a budget set by a good day
+
+Both failures were **"X never rendered in time"**, never "X was wrong":
+
+- `remove-last-pill` — the AF offer absent on a الرياض/شقة/Buy baseline of **10,665**, far above
+  `INTERVIEW_STOP_AT`, so R11.1 cannot explain it. The timestamps show the agent's own reply took
+  **~40 s** before the opener's 16 s window even began.
+- `verify-af-live-truth` — the Back-restored card and the final search request both `null`.
+
+Production was fine, and the evidence is direct: `remove-last-pill` passed **three times locally**
+on the same bundle, and three sibling journeys opened AF on that exact cohort minutes earlier in
+the same CI job. The offer sits behind a **paid LLM turn whose latency is variable**, and three
+files each carried a private fixed poll against it — `verify-af-live-truth`'s own comments record
+widening its wait twice already (9 s → 25 s) for precisely this reason. Today 25 s was not enough
+either. A number tuned on a good day is not a budget, and a barrier that cries wolf is the reason a
+real failure later goes unread (the lesson PR #1498 recorded).
+
+Fixed as a class, not as three more bumps:
+
+- `scripts/lib/afOfferLive.ts` — **one** opener for all three journeys. It re-scrolls on **every**
+  iteration (the old ones scrolled once, then polled, while the conversation was still streaming —
+  racing the very thing they waited for), budgets 60 s against the worst turn actually measured,
+  and returns a **reason**: `no-turn` (the agent never answered — *not* a verdict about AF) versus
+  `absent` (the turn landed and no offer rendered — a real absence). Conflating those is the
+  "an absent probe is not a verdict" failure this repo names most often.
+- `AGENT_TURN_MS = 60_000` in `verify-af-live-truth.ts` — one named budget replacing three magic
+  `25000`s, all waiting on the same dependency.
+
+All three journeys re-verified against production after the change.
+
 ## Harness notes (cumulative)
 
 - **A cancelled GitHub job reports neither success nor failure, and `if: ${{ !cancelled() }}` skips
