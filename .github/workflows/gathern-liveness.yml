@@ -56,6 +56,23 @@ on:
       grace:
         description: "Consecutive 404 sweeps before a unit is marked inactive"
         default: "3"
+      proxy:
+        # OWNER-AUTHORISED 2026-09-03, for gathern liveness only. gathern began answering our
+        # datacenter/CI egress with its own application 404 page, which a 404-means-dead oracle
+        # cannot tell from a real delisting: 302 rows inactivated 09-01, 106 on 09-02, and a
+        # datacenter probe returned 404 on 12/12 rows the oracle had verified alive that morning.
+        #
+        # DISPATCH-ONLY BY DESIGN, exactly as dealapp's is (docs/ops/LISTING_LIVENESS.md §5.2).
+        # The schedule does NOT set it, so the daily sweep's proxy bandwidth stays zero and the
+        # shared metered pool gains no permanent consumer. A scheduled run on blocked egress now
+        # canary-quarantines instead of striking, which is safe but does not VERIFY anything —
+        # attaching this to the schedule is a capacity decision for the owner, not a code change.
+        description: "Route probes through the shared Saudi residential proxy (WASALT_PROXY_URL). Reports as gathern_liveness_proxy so proxy contention counts it."
+        type: boolean
+        default: false
+      canaries:
+        description: "Known-alive control listings to probe BEFORE the worklist. If they fail, the whole run is quarantined (0 strikes, 0 inactivations). 0 disables (not recommended)."
+        default: "10"
       recheck_dead:
         # RESURRECTION PASS (2026-08-22, Data Integrity run #37). Re-probes rows this sweep already
         # killed and RESTORES any the source still serves. Measured that day: 3 of 60 randomly
@@ -90,6 +107,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "1.0"
+          # Present but INERT unless --proxy is passed: scrapers/gathern/liveness.py reads this
+          # ONLY behind the flag. The standing rule for this secret (scrapers/jazwtn/run.py) is
+          # that it is metered, provisioned for wasalt, and must never be inherited silently.
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          PROXY_FLAG: ${{ (github.event_name != 'schedule' && inputs.proxy) && '--proxy' || '' }}
           # ONE source of truth for apply-vs-dry-run, used by BOTH the step name above and the flag
           # below. They used to be two different expressions -- the name tested `inputs.apply`
           # (truthy) while the flag tested `inputs.apply == 'true'`. Because the input is declared
@@ -125,6 +147,7 @@ jobs:
             --limit ${{ inputs.limit || '1500' }} \
             --min-stale-days ${{ inputs.min_stale_days || '3' }} \
             --grace ${{ inputs.grace || '3' }} \
+            --canaries ${{ inputs.canaries || '10' }} \
             ${{ inputs.kill_cap && format('--kill-cap {0}', inputs.kill_cap) || '' }} \
             ${{ (github.event_name != 'schedule' && inputs.recheck_dead) && '--recheck-dead' || '' }} \
-            $APPLY_FLAG
+            $PROXY_FLAG $APPLY_FLAG
