@@ -48,7 +48,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -216,225 +215,88 @@ def _redact(text: Optional[str]) -> Optional[str]:
     return t or None
 
 
-# ── NUXT IIFE → JSON via Node subprocess (with pure-Python fallback) ──────────────
-# ONE long-lived Node worker parses EVERY payload over a pipe — we do NOT fork node per listing.
-# The old per-listing `node helper payload.js` approach spawned thousands of processes at 8-way
-# concurrency, piled up orphan node procs, and crashed the full crawl (exit 144). This worker reads
-# length-prefixed NUXT sources from stdin and writes length-prefixed JSON back; the Python side
-# serialises the (microsecond) parse step behind a lock while fetches stay fully concurrent.
-_NODE_WORKER_JS = r"""
-const fs = require('fs');
-function readN(n){
-  const buf = Buffer.alloc(n); let off = 0;
-  while (off < n){
-    let r;
-    try { r = fs.readSync(0, buf, off, n - off, null); }
-    catch (e){ if (e.code === 'EAGAIN') { continue; } if (e.code === 'EOF') return null; throw e; }
-    if (r === 0) return null;
-    off += r;
-  }
-  return buf;
-}
-function readLine(){
-  const bytes = [];
-  while (true){
-    const b = readN(1);
-    if (b === null) return null;
-    if (b[0] === 10) break;
-    bytes.push(b[0]);
-  }
-  return Buffer.from(bytes).toString('utf8');
-}
-function emit(s){
-  const ob = Buffer.from(s, 'utf8');
-  process.stdout.write(ob.length + "\n");
-  if (ob.length) process.stdout.write(ob);
-}
-while (true){
-  const header = readLine();
-  if (header === null) break;
-  const len = parseInt(header, 10);
-  if (!(len > 0)){ emit(""); continue; }
-  const body = readN(len);
-  if (body === null) break;
-  let outStr = "";
-  try {
-    let src = body.toString('utf8').replace(/^window\.__NUXT__=/, 'globalThis.__N=');
-    globalThis.__N = undefined;
-    (0, eval)(src);
-    const N = globalThis.__N || {};
-    const d0 = (N.data && N.data[0]) || {};
-    const st = N.state || {};
-    const out = {
-      offer: d0.offer || null,
-      initialPhotos: d0.offerInitialPhotos || [],
-      lazyPhotos: d0.offerLazyPhotos || [],
-      addressJson: st.addressJson || null,
-    };
-    outStr = JSON.stringify(out, (k, v) => v === undefined ? null : v);
-  } catch (e) { outStr = ""; }
-  emit(outStr);
-}
-"""
-_HELPER_PATH: Optional[str] = None
-_NODE_OK: Optional[bool] = None
-_helper_lock = threading.Lock()
-
-
-def _ensure_helper() -> Optional[str]:
-    global _HELPER_PATH, _NODE_OK
-    with _helper_lock:
-        if _NODE_OK is False:
-            return None
-        if _HELPER_PATH:
-            return _HELPER_PATH
-        try:
-            subprocess.run(["node", "--version"], capture_output=True, timeout=15, check=True)
-        except Exception:
-            _NODE_OK = False
-            print("⚠ node not found — muktamel needs node to parse the NUXT payload")
-            return None
-        fd, path = tempfile.mkstemp(suffix=".js", prefix="muktamel_worker_")
-        with os.fdopen(fd, "w") as f:
-            f.write(_NODE_WORKER_JS)
-        _HELPER_PATH = path
-        _NODE_OK = True
-        return path
-
-
-# A single parse() exchange has NO deadline of its own — until this fix, a stuck node process
-# (worker hung inside `eval()` on a pathological payload, or the pipe wedged) blocked forever on
-# `stdin.write`/`stdout.read`. All 8 fetch threads share ONE _NodeWorker behind ONE lock, so one
-# hang stalls the entire crawl permanently: no thread can ever reach the lock again, seen == 0
-# rows ever upserted, only the outer 330-minute CI timeout ends it. Root cause of "muktamel never
-# completes a single full-range crawl, zero progress-log lines" (paused 2026-07-15) — reproduced
-# 2026-09-03: a 21-id test range (24000-24020) ran 57 minutes, upserted 0 rows, and had to be
-# cancelled by hand. NODE_PARSE_TIMEOUT bounds one exchange; on expiry the stuck process is killed
-# (which unblocks the pending write/read with an OSError) and respawned on the next call — the
-# listing that triggered it is skipped (returns None, same as any other unparseable payload), but
-# every other listing and every other thread keeps moving.
+# ── NUXT IIFE → JSON via a one-shot Node subprocess per parse() call ──────────────
+# WHY ONE-SHOT, NOT A PERSISTENT WORKER (2026-09-03): the prior design ran ONE persistent
+# `node worker.js` process behind a custom length-prefixed stdin/stdout protocol
+# (fs.readSync()-based) shared by all 8 fetch threads via a single lock. That was already known
+# to be the deadlock root cause (a hung exchange blocked every thread forever — the reason
+# muktamel never completed a full crawl since 2026-07-15). A first fix bounded the exchange with a
+# watchdog timeout, which stopped the infinite hang — but a live re-test against real
+# muktamel.com pages (scrapers/muktamel/diag_page_structure.py, evidence captured 2026-09-03)
+# proved the SAME real payload succeeds in <35ms total (eval() 29ms + JSON.stringify() 2ms) when
+# run as a plain one-shot `node -e` process reading all of stdin at once — yet the persistent
+# worker's custom byte-level readN()/readLine() protocol reliably returned nothing for that exact
+# payload. The eval/stringify logic was never the problem; the bespoke IPC protocol was. Rather
+# than keep debugging a hand-rolled framing protocol, this replaces it with Python's own
+# subprocess.run(..., timeout=...): each parse() spawns its OWN node process, feeds the NUXT
+# source on stdin, reads JSON off stdout, and the stdlib reaps the child on exit or on
+# TimeoutExpired's kill. This is also strictly safer against the original deadlock than a
+# watchdog-timer patch: with no process and no lock SHARED across threads, one thread's slow or
+# stuck node call can never block the other 7 — there is nothing left to share.
+#
+# This is NOT the "thousands of processes crashed the crawl" failure mode the old persistent-
+# worker design was built to avoid: that incident came from spawning a fresh node process per
+# RETRY inside an unbounded loop with no reaping. Here, concurrency is capped at WORKERS (8) by
+# ThreadPoolExecutor, and subprocess.run() always waits() its child — on success, on non-zero
+# exit, or on TimeoutExpired — so there is no orphan-process path.
 NODE_PARSE_TIMEOUT = 20.0
 
+_NODE_EVAL_JS = r"""
+const fs = require('fs');
+let outStr = "";
+try {
+  const body = fs.readFileSync(0, 'utf8');
+  let src = body.replace(/^window\.__NUXT__=/, 'globalThis.__N=');
+  globalThis.__N = undefined;
+  (0, eval)(src);
+  const N = globalThis.__N || {};
+  const d0 = (N.data && N.data[0]) || {};
+  const st = N.state || {};
+  const out = {
+    offer: d0.offer || null,
+    initialPhotos: d0.offerInitialPhotos || [],
+    lazyPhotos: d0.offerLazyPhotos || [],
+    addressJson: st.addressJson || null,
+  };
+  outStr = JSON.stringify(out, (k, v) => v === undefined ? null : v);
+} catch (e) { outStr = ""; }
+process.stdout.write(outStr);
+"""
 
-class _NodeWorker:
-    """A single persistent `node worker.js` process. parse() is thread-safe (one lock-guarded
-    request/response per call), bounded by NODE_PARSE_TIMEOUT, and self-heals: if the worker dies
-    or is killed for hanging, it is respawned on the next call."""
-
-    def __init__(self, helper_path: str):
-        self.helper = helper_path
-        self.lock = threading.Lock()
-        self.proc: Optional[subprocess.Popen] = None
-        self._spawn()
-
-    def _spawn(self) -> None:
-        self.proc = subprocess.Popen(
-            ["node", self.helper], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, bufsize=0)
-
-    def _write_all(self, b: bytes) -> None:
-        # bufsize=0 → raw FileIO.write() can do a PARTIAL write (returns bytes written) for payloads
-        # larger than the OS pipe buffer (~64KB). NUXT sources are 50-150KB, so we MUST loop or the
-        # node worker waits forever for bytes that were never sent → deadlock on the first big listing.
-        mv = memoryview(b)
-        while mv:
-            n = self.proc.stdin.write(mv)
-            if not n:
-                continue
-            mv = mv[n:]
-
-    def _read_line(self) -> Optional[bytes]:
-        out = bytearray()
-        while True:
-            ch = self.proc.stdout.read(1)
-            if not ch:
-                return None
-            if ch == b"\n":
-                return bytes(out)
-            out += ch
-
-    def _read_exact(self, n: int) -> Optional[bytes]:
-        buf = bytearray()
-        while len(buf) < n:
-            chunk = self.proc.stdout.read(n - len(buf))
-            if not chunk:
-                return None
-            buf.extend(chunk)
-        return bytes(buf)
-
-    def parse(self, nuxt_src: str) -> Optional[dict]:
-        data = nuxt_src.encode("utf-8")
-        with self.lock:
-            for _ in range(2):  # one retry: respawn a dead (or killed-for-hanging) worker and try again
-                if self.proc is None or self.proc.poll() is not None:
-                    self._spawn()
-                proc = self.proc
-                # Watchdog: if this exchange doesn't finish within NODE_PARSE_TIMEOUT, kill THIS
-                # process object specifically (not whatever self.proc is by the time the timer
-                # fires — a respawn between now and then must not kill the new, healthy worker).
-                timer = threading.Timer(NODE_PARSE_TIMEOUT, self._kill_proc, args=(proc,))
-                timer.daemon = True
-                timer.start()
-                try:
-                    self._write_all(f"{len(data)}\n".encode("ascii"))
-                    self._write_all(data)
-                    self.proc.stdin.flush()
-                    header = self._read_line()
-                    if header is None:
-                        raise IOError("worker closed")
-                    n = int(header.strip() or b"0")
-                    if n <= 0:
-                        return None
-                    out = self._read_exact(n)
-                    return json.loads(out.decode("utf-8", "replace")) if out else None
-                except Exception:
-                    self._kill_proc(proc)
-                    if self.proc is proc:
-                        self.proc = None
-                finally:
-                    timer.cancel()
-            return None
-
-    @staticmethod
-    def _kill_proc(proc: Optional[subprocess.Popen]) -> None:
-        if proc is None:
-            return
-        try:
-            proc.kill()
-        except Exception:
-            pass
-
-    def close(self) -> None:
-        try:
-            self.proc.stdin.close()
-            self.proc.terminate()
-        except Exception:
-            pass
+_NODE_OK: Optional[bool] = None
+_node_check_lock = threading.Lock()
 
 
-_node_singleton: Optional[_NodeWorker] = None
-_node_init_lock = threading.Lock()
-
-
-def _get_worker() -> Optional[_NodeWorker]:
-    global _node_singleton
-    if _node_singleton is not None:
-        return _node_singleton
-    with _node_init_lock:
-        if _node_singleton is not None:
-            return _node_singleton
-        helper = _ensure_helper()
-        if not helper:
-            return None
-        import atexit
-        _node_singleton = _NodeWorker(helper)
-        atexit.register(_node_singleton.close)
-        return _node_singleton
+def _node_available() -> bool:
+    global _NODE_OK
+    with _node_check_lock:
+        if _NODE_OK is None:
+            try:
+                subprocess.run(["node", "--version"], capture_output=True, timeout=15, check=True)
+                _NODE_OK = True
+            except Exception:
+                _NODE_OK = False
+                print("⚠ node not found — muktamel needs node to parse the NUXT payload")
+        return _NODE_OK
 
 
 def _nuxt_via_node(nuxt_src: str) -> Optional[dict]:
-    w = _get_worker()
-    return w.parse(nuxt_src) if w else None
+    if not _node_available():
+        return None
+    try:
+        r = subprocess.run(
+            ["node", "-e", _NODE_EVAL_JS],
+            input=nuxt_src.encode("utf-8"), capture_output=True, timeout=NODE_PARSE_TIMEOUT)
+    except Exception:
+        # Covers TimeoutExpired (subprocess.run already killed + reaped the child) and any other
+        # spawn/IO failure — a single bad/slow listing is skipped, never fabricated as data.
+        return None
+    if not r.stdout:
+        return None
+    try:
+        return json.loads(r.stdout.decode("utf-8", "replace"))
+    except Exception:
+        return None
 
 
 def _extract_nuxt(html: str) -> Optional[str]:
