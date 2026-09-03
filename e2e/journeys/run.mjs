@@ -1077,7 +1077,9 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
   const winnerAt = (page, sel) => page.evaluate(({ s, sheetSel }) => {
     const el = s === 'cta'
       ? [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && (e.textContent || '').trim() === 'بحث')
-      : document.querySelector('textarea');
+      : s === 'modeswitch'
+        ? [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && (e.textContent || '').trim() === 'تصفية')
+        : document.querySelector('textarea');
     // Same engine-agnostic selector as waitForSheet — the FIRST prompt iframe with a real height.
     const f = [...document.querySelectorAll(sheetSel)].find((n) => n.getBoundingClientRect().height > 0) || null;
     const q = f && f.getBoundingClientRect();
@@ -1094,7 +1096,39 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const sheet = await waitForSheet(page);
     if (!sheet) { skip(name, 'Google never showed the One Tap prompt this run — nothing to clear'); return; }
     // Desktop renders the prompt in a corner, not docked to the bottom; there is nothing to reserve.
-    if (sheet.bottom < 660 && !mobile) { pass(name, `desktop prompt is not bottom-docked (${sheet.top}-${sheet.bottom})`); return; }
+    // Desktop's prompt sits in a corner rather than docked, so «بحث» needs no reserved space there —
+    // but the mode-switch check below still runs, because a corner prompt on a 1440px viewport can
+    // still land on a control near the top edge, and "not bottom-docked" says nothing about that.
+    const desktopCornerPrompt = sheet.bottom < 660 && !mobile;
+    if (desktopCornerPrompt) pass(name, `desktop prompt is not bottom-docked (${sheet.top}-${sheet.bottom})`);
+
+
+    // THE MODE SWITCH, because the prompt is not bottom-docked on every engine (measured 2026-09-03,
+    // first WebKit/Firefox runs). PR #1461 fixed a BOTTOM-docked sheet covering «بحث» and the
+    // composer; on WebKit the prompt renders at the TOP instead (measured 20-170 in an 812px
+    // viewport), where the control at risk is «تصفية» — the Filter/Agent mode switch, a primary
+    // control on the busiest screen (PART 1). This is not a hypothetical: in the first WebKit and
+    // Firefox sweeps `adv-modeswitch-back-push-vs-replace` could not click «تصفية» on mobile, 2/2 on
+    // each, with Playwright naming that iframe as the interceptor. That was a real user-visible
+    // obstruction discovered by accident, in a journey about something else, and reported as a skip.
+    // Measured deliberately here so it is a verdict rather than a side effect.
+    const ms = await winnerAt(page, 'modeswitch');
+    if (ms.missing) skip(`${name}/modeswitch`, '«تصفية» not rendered');
+    else if (!ms.isSelf) {
+      defect(`${name}/modeswitch`, 'the One Tap prompt is covering «تصفية» (the mode switch)',
+        `sheet now ${ms.sheetNow}; «تصفية» ${ms.top}-${ms.bottom}; a tap at its centre goes to ${ms.winner}`);
+    } else {
+      let msErr = null;
+      await page.getByText('تصفية', { exact: true }).first().click({ timeout: 10_000 })
+        .catch((e) => { msErr = String(e).split('\n')[0]; });
+      if (msErr) defect(`${name}/modeswitch`, '«تصفية» hit-tests clear but a real click still does not land', msErr);
+      else pass(`${name}/modeswitch`, `«تصفية» (${ms.top}-${ms.bottom}) is clear of the prompt (now ${ms.sheetNow}) and clickable`);
+    }
+
+    // MEASURED BEFORE «بحث» IS CLICKED, and that ordering is load-bearing: the successful branch
+    // below CLICKS «بحث», which submits a search and replaces the screen. Judging «تصفية» after that
+    // would measure a different page — and, since the mode switch may not even be rendered there,
+    // would quietly degrade into a skip that looks like coverage.
 
     // Scroll the filter form as far as a person can — the worst case, where «بحث» comes to rest.
     await page.evaluate(() => {
@@ -1105,9 +1139,10 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     });
     await sleep(1200);
 
-    const cta = await winnerAt(page, 'cta');
-    if (cta.missing) { skip(name, '«بحث» not rendered'); return; }
-    if (!cta.isSelf) {
+    const cta = desktopCornerPrompt ? { skipCta: true } : await winnerAt(page, 'cta');
+    if (cta.skipCta) { /* handled above — fall through to the mode-switch check */ }
+    else if (cta.missing) { skip(name, '«بحث» not rendered'); }
+    else if (!cta.isSelf) {
       defect(name, 'the One Tap prompt is covering «بحث»',
         `sheet now ${cta.sheetNow}; «بحث» ${cta.top}-${cta.bottom}; a tap at its centre goes to ${cta.winner}`);
     } else {
@@ -1118,6 +1153,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
       if (err) defect(name, '«بحث» hit-tests clear but a real click still does not land', err);
       else pass(name, `«بحث» (${cta.top}-${cta.bottom}) is clear of the prompt (now ${cta.sheetNow}) and clickable`);
     }
+
     if (bag.pageErrors.length) defect(name, 'page error while the prompt was up', bag.pageErrors.join(' | '));
   });
 
