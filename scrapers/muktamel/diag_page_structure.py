@@ -36,6 +36,11 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
+# Reuse the REAL production Node worker (same eval, same protocol, same timeout) rather than
+# reimplementing it — the question this script answers is "what does OUR parser actually get back
+# from a real page today", not "could some other parser work".
+from scrapers.muktamel.run import _extract_nuxt, _nuxt_via_node  # noqa: E402
+
 BASE = "https://www.muktamel.com"
 
 _SCRIPT_TAG_RE = re.compile(r"<script\b([^>]*)>(.*?)</script>", re.S | re.I)
@@ -98,6 +103,32 @@ def dump_one(s: cc.Session, listing_id: int) -> None:
         print(f"\n  --- raw HTML around first '{anchor.group(0)}' match (400 chars) ---")
         print(html[start:start + 600])
         print("  --- end ---")
+
+    # THE decisive test: actually run the real production parser (same _NodeWorker, same eval,
+    # same NODE_PARSE_TIMEOUT) against this exact page and show what it really gets back, instead
+    # of guessing from a truncated raw snippet.
+    print("\n  --- real parser result (_extract_nuxt + _nuxt_via_node, as run.py uses it) ---")
+    nuxt_src = _extract_nuxt(html)
+    if not nuxt_src:
+        print("  _extract_nuxt() found NO window.__NUXT__= payload at all (regex/</script> miss).")
+        return
+    print(f"  _extract_nuxt() ok, {len(nuxt_src)} chars")
+    parsed = _nuxt_via_node(nuxt_src)
+    if parsed is None:
+        print("  _nuxt_via_node() returned None — the node eval() failed, timed out, or threw.")
+        return
+    print(f"  _nuxt_via_node() ok — top-level keys: {sorted(parsed.keys())}")
+    addr = parsed.get("addressJson")
+    print(f"  addressJson: {'present, keys=' + str(sorted(addr.keys())) if isinstance(addr, dict) else addr!r}")
+    offer = parsed.get("offer")
+    if offer is None:
+        print("  offer: None  <-- THIS is why fetch_one() calls it unparseable_or_no_offer")
+    elif isinstance(offer, dict):
+        print(f"  offer: dict, {len(offer)} keys: {sorted(offer.keys())}")
+        for k in ("isAvailable", "price", "type", "dealType", "address"):
+            print(f"    offer[{k!r}] = {offer.get(k)!r}")
+    else:
+        print(f"  offer: unexpected type {type(offer).__name__}: {offer!r}"[:500])
 
 
 def main() -> int:
