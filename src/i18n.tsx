@@ -1037,6 +1037,21 @@ const AR: Record<string, string> = {
     'تلتزم إزهله بنظام حماية البيانات الشخصية في المملكة. نحن لا نبيع بياناتك. تُحفظ عمليات بحثك وحسابك حتى تحذف حسابك، ثم تُزال نهائياً.',
   'Support': 'المساعدة/تواصل معنا',
   'Contact support': 'تواصل مع الدعم',
+
+  // «تواصل مع الدعم» in-app form (owner 2026-09-02). Saudi-natural, calm, no exclamation marks.
+  'Subject': 'الموضوع',
+  'Message': 'الرسالة',
+  'Your email': 'بريدك الإلكتروني',
+  'What is this about?': 'وش موضوع رسالتك؟',
+  'Tell us what happened.': 'اكتب لنا التفاصيل.',
+  // 'Send' already exists above (composer) — reused here, not redefined.
+  'Sending…': 'جاري الإرسال…',
+  'Try again': 'حاول مرة أخرى',
+  'Your message reached us': 'وصلتنا رسالتك',
+  // Deliberately a promise to REPLY — never a claim that an email has already gone out.
+  "We'll reply to {email}.": 'بنرد عليك على {email}.',
+  'Send another message': 'إرسال رسالة أخرى',
+  "Couldn't send your message. Check your connection and try again.": 'ما قدرنا نرسل رسالتك. تأكد من الاتصال وحاول مرة أخرى.',
   'Terms of Service': 'شروط الخدمة',
   'Privacy Policy': 'سياسة الخصوصية',
   'Ezhalah v{version}': 'إزهله الإصدار {version}',

@@ -46,6 +46,7 @@ on:
           - devices
           - ingest-listings
           - alert-sink
+          - support-message
       action:
         # DELETE exists so a throwaway function (e.g. the agent-diag probe used to diagnose the
         # 2026-08-29 outage) can be removed through the SAME gated path that created it, instead of
