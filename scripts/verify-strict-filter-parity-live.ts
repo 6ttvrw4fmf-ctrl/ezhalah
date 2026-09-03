@@ -125,14 +125,42 @@ async function main() {
   // (src/data/remote.ts:899 `.eq('rent_period','annual')` — owner rule at :894-895, "a null
   // rent_period is NOT annual … never guess"), so they could never render: the last Load-More page
   // came back short. Ground truth here is deliberately `rent_period_ar`, the SOURCE-published period.
-  const [annualRpc, annualGt, annualNullPeriod] = await Promise.all([
+  //
+  // GROUND TRUTH CORRECTED 2026-09-03. The annual arm is now, verbatim from the live clause:
+  //     p_rent_period = 'سنوي' and (s.rent_period_ar = 'سنوي'
+  //                                 or (s.rent_period_ar = 'شهري' and coalesce(s.rent_now_pay_later, false)))
+  // The second disjunct is the owner's RNPL rule — a listing the SOURCE labels monthly and the
+  // SOURCE marks rent-now-pay-later is an annual commitment paid in instalments — and it landed
+  // after this check was written. Both disjuncts read a SOURCE-published fact, so the invariant
+  // this check exists for is untouched: nothing is INFERRED from the absence of a period.
+  //
+  // This check was dark when the arm changed (its scripts/test-exclusions.txt row named a workflow
+  // that never invoked it — see verify-live-check-workflow-attendance.ts), so nothing noticed. It
+  // then stayed silently vacuous: with zero monthly+RNPL rows in the index the old equality held
+  // by coincidence, and it only went red once a single such row appeared (2026-09-03: 44,062
+  // source-annual + 1 monthly-RNPL = the RPC's 44,063). Production was right the whole time.
+  const [annualRpc, annualSrc, annualRnpl, annualNullPeriod] = await Promise.all([
     rpcCount({ p_deal: RENT, p_rent_period: 'سنوي' }),
     tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=eq.${enc('سنوي')}`),
+    tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=eq.${enc('شهري')}&rent_now_pay_later=is.true`),
     tableCount(`deal_ar=eq.${enc(RENT)}&rent_period_ar=is.null`),
   ]);
-  check('annual rent counts only SOURCE-published annual (no inferred period)',
-    annualRpc === annualGt && annualGt > 0,
-    `rpc=${annualRpc} ground=${annualGt} (null-period rent rows excluded: ${annualNullPeriod})`);
+  check('annual rent = SOURCE-published annual + SOURCE-marked monthly-RNPL, exactly',
+    annualRpc === annualSrc + annualRnpl && annualSrc > 0,
+    `rpc=${annualRpc} ground=${annualSrc}+${annualRnpl}=${annualSrc + annualRnpl}`);
+
+  // The invariant the block above exists for, asserted on its own so the arithmetic cannot mask it:
+  // a rent row whose source published NO period is never counted as annual. When the index holds no
+  // such rows the comparison cannot discriminate, and saying so is the honest result — a check that
+  // reports PASS on a case it never exercised is the failure mode this whole file just demonstrated.
+  if (annualNullPeriod > 0) {
+    check('a null-period rent row is NEVER inferred into annual',
+      annualRpc < annualSrc + annualRnpl + annualNullPeriod,
+      `rpc=${annualRpc} vs ${annualSrc}+${annualRnpl}+${annualNullPeriod} null-period rows`);
+  } else {
+    console.log('SKIP  a null-period rent row is NEVER inferred into annual  ' +
+      '(NOT EXERCISED: the index currently holds 0 rent rows with no source-published period)');
+  }
 
   console.log(failed === 0
     ? '\n✓ strict-filter live parity holds — RPC total_count equals strict ground truth on every fixed filter'

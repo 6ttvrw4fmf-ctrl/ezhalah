@@ -37,7 +37,12 @@ export type RpcBody = Record<string, unknown>;
 //
 // `verify-af-multiselect-combining-semantics.ts` now derives the clause's vocabulary from the
 // replayed migrations and fails if this map drifts from it in either direction.
-const AMENITY_TOKEN_COL: Record<string, string> = {
+// EXPORTED 2026-09-03 so no caller keeps a private second copy. verify-af-option-card-truth-live.ts
+// had hand-listed 13 of these tokens; when the rich set landed on 2026-08-31 that list did not move,
+// and the journey went red on FIVE certified options (balcony, laundry_room, optical_fibers,
+// separate_electricity_meter, separate_water_meter) — refusing, correctly, to certify a chip it
+// could not express, while production was right. Derive from here instead of re-listing.
+export const AMENITY_TOKEN_COL: Record<string, string> = {
   elevator: 'elevator',
   parking: 'parking',
   kitchen: 'kitchen',

@@ -41,7 +41,10 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     name: AF UI count = count RPC = result RPC = independent DB truth
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Measured 2026-09-03: the nine steps below took 16m44s of work plus ~1m of setup. 35 leaves
+    # roughly 2x headroom. Whenever a step is ADDED here, re-measure — a budget that silently
+    # becomes too small skips the tail of this job (see the af-surface-region comment below).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -160,6 +163,53 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-independent-oracle.ts
 
+      # STRICT FILTER PARITY — RESCUED 2026-09-03. This check pins location_search_candidates_ar's
+      # total_count against a strict PostgREST count for every filter that was NULL-permissive
+      # before 20260727124500, plus the amenity-alias / unknown-token-fails-closed / direction-
+      # vocabulary / Farm-vs-Agriculture-Plot invariants. Its scripts/test-exclusions.txt row said
+      # it ran in full-verification-ci.yml; that workflow's only mention of it is a comment saying
+      # it is deliberately NOT run there, so it had been running nowhere at all. In that time the
+      # annual arm gained the owner's monthly-RNPL disjunct and the check's ground truth did not —
+      # it went red the first time it was executed again (production was correct; the check was
+      # stale). It is REST-only and takes ~10s, so it belongs beside the independent oracle above.
+      - name: RPC total_count still equals strict ground truth on every once-permissive filter
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-strict-filter-parity-live.ts
+
+  # THE WHOLE CERTIFIED SURFACE — ITS OWN JOB (split out 2026-09-03). The two option sweeps and the
+  # four browser journeys below used to sit at the TAIL of af-truth's single 30-minute budget.
+  # On 2026-09-03 that budget ran out inside the region sweep: the job was CANCELLED at 30:15,
+  # and every step after it was SKIPPED — including all four journeys added the day before. A
+  # cancelled run is neither success nor failure, so nothing went red and nothing alerted; six
+  # live barriers simply did not execute and the surface read as covered. Splitting them into
+  # jobs that run in PARALLEL is the fix: no sweep can starve a journey that follows it, each
+  # budget is sized for its own work, and the `attendance` gate at the bottom of this file turns
+  # any cancelled/timed-out/skipped job into a red run. Pinned by
+  # scripts/verify-live-check-workflow-attendance.ts.
+  af-surface-region:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: Every certified AF option shows DB truth and clicks to exactly that set (region)
+    runs-on: ubuntu-latest
+    # THE TWO SWEEPS GET A JOB EACH (2026-09-03). They are independent scopes and each is an
+    # open-ended walk over the live pool, so chaining them behind one budget recreates exactly the
+    # starvation this file was just restructured to remove — the second would be the new tail. A
+    # local run of the region sweep alone passed 800+ checks and was still going at 55 minutes
+    # through the cloud egress proxy, which is why neither a 60-minute shared budget nor a bigger
+    # guess is the answer: the sizes are not knowable in advance, so they must not share.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
       # THE WHOLE CERTIFIED SURFACE, EVERY OPTION (added 2026-09-02, owner requirement). The
       # property-type differential above proves ONE answer per certified question; this proves
       # EVERY option the card can render — every rung, direction, age bucket, amenity chip, both
@@ -177,14 +227,45 @@ jobs:
           AF_FSD_SCOPES: region:1
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
 
-      - name: …and the same option surface inside a CITY scope (جدة), single-type stages
-        if: ${{ !cancelled() }}
+  af-surface-city:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: …and the same option surface inside a CITY scope (جدة), single-type stages
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: The جدة city scope, single-type stages
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
           AF_FSD_SCOPES: city:جدة
           AF_FSD_SKIP_MULTI: '1'
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
+
+  # THE CARD, THE PILL AND THE SCOPE CHANGE — their own job (split out 2026-09-03, same reason as
+  # af-surface above: these four were steps 17-20 of the old serial job and were the ones actually
+  # skipped when it hit its cap). Browser journeys, so they need Chromium.
+  af-card-state:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: The rendered card, the removed pill and the scope change all tell one truth
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
 
       # THE CARD ITSELF, EVERY NUMBER ON IT (added 2026-09-02). The sweep above talks to the RPCs
       # the card talks to; this reads the numbers a human SEES on the rendered card — every option's
@@ -256,3 +337,45 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-matrix-truth-live.ts
+
+  # ATTENDANCE (added 2026-09-03). A job that is CANCELLED — by its own timeout-minutes cap, by a
+  # runner loss, by anything — reports neither `success` nor `failure`, and every step still
+  # queued behind it is reported as `skipped`. GitHub renders the whole run as "cancelled", which
+  # no branch rule, no notification and no reader treats as broken. That is exactly how six live
+  # AF barriers went dark on 2026-09-03 while this workflow looked fine.
+  #
+  # This job exists so that can never be silent again. It needs EVERY other job in the file and
+  # runs with `if: always()`, so it executes even when a sibling was cancelled, and it fails
+  # unless every one of them concluded `success`. `needs` completeness is not left to memory:
+  # scripts/verify-live-check-workflow-attendance.ts (in `npm test`) fails if a job is added to
+  # this file and not added here.
+  attendance:
+    name: Every AF/Trending live job actually ran and passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [af-truth, af-surface-region, af-surface-city, af-card-state, af-matrix]
+    steps:
+      - name: Refuse to report a clean run when a job was cancelled, skipped or failed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS"
+          # Parsed with jq, not grepped. A text match that stops matching — because GitHub changes
+          # the shape of toJSON(needs), or a job name gains a character the pattern did not expect —
+          # finds nothing and PASSES. That is failing OPEN, which is the exact defect this job was
+          # added to fix, reproduced one level up. Every branch below either names the offending
+          # jobs or exits non-zero.
+          n=$(jq -r 'length' <<<"$RESULTS")
+          if [ "$n" -eq 0 ]; then
+            echo "::error::attendance read ZERO needed jobs — it cannot see the run it is gating"
+            exit 1
+          fi
+          bad=$(jq -r 'to_entries | map(select(.value.result != "success")) | .[] | "\(.key): \(.value.result)"' <<<"$RESULTS")
+          if [ -n "$bad" ]; then
+            echo "::error::an AF/Trending live job did not succeed — a cancelled or skipped job is a DARK BARRIER, not a clean run"
+            echo "$bad"
+            exit 1
+          fi
+          echo "all $n live AF/Trending jobs concluded success"

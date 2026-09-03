@@ -437,6 +437,38 @@ Things that cost a previous run real time, and are NOT product defects:
    under a deal/period change" rule must assert that derivation, not equality — asserting equality
    reports a phantom regression on a correct production (`verify-af-scope-change-live.ts`
    `tablesFollowPeriod`).
+10. **A CANCELLED GitHub job reports neither `success` nor `failure`, and `if: ${{ !cancelled() }}`
+   skips every step behind it** (2026-09-03). That step guard exists so a FAILING step cannot hide
+   the ones after it, and it does that well — but when the JOB is cancelled (its `timeout-minutes`
+   cap, a runner loss) `cancelled()` is true and the guard skips exactly what it was written to
+   protect. On 2026-09-03 this left SIX live AF barriers unexecuted while the run looked fine.
+   A workflow whose value depends on its later steps needs an **attendance job** (`needs:` every
+   other job, `if: always()`, fail unless all concluded `success`) — a step guard cannot express
+   it. Pinned by `scripts/verify-live-check-workflow-attendance.ts`. Corollary: **when you add a
+   step to a live-check workflow, re-measure the job's budget**, and prefer a new parallel job over
+   a longer chain — a chain always has a tail, and the tail is always the newest work.
+11. **An exclusion row's promised home is not proof it runs there** (2026-09-03).
+   `scripts/test-exclusions.txt` says WHERE an excluded check runs; the registry guard only checked
+   that the named workflow FILE EXISTS. Two checks were found naming a workflow whose only mention
+   of them is a comment saying they are deliberately NOT run there — they had executed nowhere for
+   weeks. Ask `workflowInvokes()` (`scripts/lib/testRegistry.ts`), which strips comments; never a
+   bare `src.includes(name)`.
+12. **`npm ci` alone is not enough to run `npm test` in this container** (2026-09-03). Four checks
+   shell out to Python and fail in a way that reads like four broken barriers. Install
+   `curl_cffi`, `python-dotenv`, then
+   `pip install --ignore-installed PyJWT -r scrapers/requirements.txt` (the Debian-installed PyJWT
+   has no RECORD file and blocks the upgrade).
+13. **A per-file private copy of a shared vocabulary is the drift this surface keeps paying for**
+   (2026-09-03). Both shared amenity maps (`afOracleFilter.AMENITY_TOKEN_COL`,
+   `afMatrix.AMENITY_COL`) were current while a third copy inside one journey was months behind, so
+   five certified options were silently uncertifiable. Derive from the shared map; every certified
+   token's count column is `cnt_<token>`. Where a value genuinely cannot be derived (a translated
+   label), reconcile the two at LOAD time and fail loudly, not per-cohort by luck.
+14. **When a journey needs a SECOND question, do not click the narrowest option** (2026-09-03).
+   R4.3.1/R11.1 stop the interview at `INTERVIEW_STOP_AT = 25`, so the narrowest option is the
+   surest way to end it before the next question can be tested — and the resulting "it didn't
+   advance" failure is a correct production, not a defect. Pick the narrowest option leaving **>25**,
+   and report NOT EXERCISED when the cohort offers none.
 5. **Advanced Filter lives in the «الوكيل الذكي» (agent) flow, not the Normal Filter «بحث» flow.**
    Reaching it: send an Arabic request, answer the agent's disambiguation (a city that is also a
    region needs «مدينة …»; «تقصد المدينة كاملة، أو حي معيّن؟» needs «المدينة كاملة»), then click

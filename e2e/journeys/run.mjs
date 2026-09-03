@@ -30,7 +30,10 @@ const visible = async (page, text) => {
 
 /** At 375px the sidebar is an UNMOUNTED drawer, not a hidden one — every sidebar journey silently
  *  "skipped" on mobile until this existed, so half the mandate reported success by never looking. */
-const ensureSidebar = async (page, mobile) => (mobile ? openMobileSidebar(page) : true);
+// `guestOk` is passed through for the journeys that run signed-OUT: the default open-oracle is
+// `sidebar-search-btn`, which Sidebar.tsx renders only in its `user ? (…)` branch, so a guest
+// journey keyed on it would skip forever while looking like coverage.
+const ensureSidebar = async (page, mobile, opts = {}) => (mobile ? openMobileSidebar(page, opts) : true);
 
 const openSidebarSearch = async (page) => {
   const btn = page.locator('[data-testid="sidebar-search-btn"]');
@@ -1117,6 +1120,183 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     }
   });
 };
+
+// ── «تواصل مع الدعم»: shared plumbing ───────────────────────────────────────────────────────────
+// The form landed 2026-09-02 inside InfoModal's dialog and had never been driven by a journey.
+const SUP = {
+  link: 'المساعدة/تواصل معنا',
+  subject: 'وش موضوع رسالتك؟',
+  message: 'اكتب لنا التفاصيل.',
+  email: 'name@example.com',
+  send: 'إرسال',
+  retry: 'حاول مرة أخرى',
+  connErr: 'تأكد من الاتصال',
+  waitErr: 'انتظر ساعة تقريباً',
+};
+const DRAFT = {
+  subject: 'مشكلة في البحث',
+  message: 'البحث عن شقق في الرياض ما يعطيني نتائج صحيحة، جربت أكثر من مرة والنتيجة نفسها.',
+  email: 'someone@example.com',
+};
+
+/** Open «تواصل مع الدعم» the way a person does: sidebar → the Support row → the dialog's form. */
+const openSupport = async (page, mobile) => {
+  // Signed-OUT journeys: the drawer's open-oracle must accept the guest branch's own marker.
+  if (!(await ensureSidebar(page, mobile, { guestOk: true }))) return 'the mobile drawer would not open';
+  const link = page.getByText(SUP.link, { exact: true }).first();
+  if (!(await link.count())) return `«${SUP.link}» is not in the sidebar`;
+  try { await link.click({ timeout: 15_000 }); } catch (e) { return String(e).split('\n')[0]; }
+  await sleep(1500);
+  return (await page.getByPlaceholder(SUP.subject).count()) ? null : 'the support dialog opened without the form';
+};
+
+const readSupportDraft = async (page) => {
+  const val = async (ph) => {
+    const l = page.getByPlaceholder(ph).first();
+    return (await l.count()) ? await l.inputValue() : null;
+  };
+  return { subject: await val(SUP.subject), message: await val(SUP.message), email: await val(SUP.email) };
+};
+
+/** The dialog animates out, and reopening mid-exit lands the click on a leaving overlay. Wait on the
+ *  real condition — the form is gone — not on a bigger timeout (PART 11.2 rule 3). */
+const waitSupportClosed = async (page, budget = 8000) => {
+  const until = Date.now() + budget;
+  while (Date.now() < until) {
+    if (!(await page.getByPlaceholder(SUP.subject).count())) { await sleep(500); return true; }
+    await sleep(250);
+  }
+  return false;
+};
+
+const fillSupportDraft = async (page) => {
+  await page.getByPlaceholder(SUP.subject).first().fill(DRAFT.subject);
+  await page.getByPlaceholder(SUP.message).first().fill(DRAFT.message);
+  await page.getByPlaceholder(SUP.email).first().fill(DRAFT.email);
+  await sleep(400);
+};
+
+/** J20 — A TYPED PROBLEM REPORT SURVIVES AN ACCIDENTAL DISMISSAL.
+ *
+ *  The form's own design note: "losing someone's typed problem report is the one outcome this form
+ *  must never produce." That was honoured on the failed-SEND path and nowhere else — the dialog's
+ *  backdrop is a full-viewport Pressable that closes on tap, and closing UNMOUNTS the form with all
+ *  its local state. Measured 2/2 against production on 2026-09-03: 126 characters typed, one click
+ *  at x=12, reopen → every field empty. The X button did the same.
+ *
+ *  This is the real-browser half of the barrier (PART 5: never a unit test standing in for the
+ *  click). `scripts/verify-support-message-contract.ts` executes the cache; this proves the CLICK
+ *  a person actually makes no longer destroys their message. */
+JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `support-draft-survives-dismiss:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const why = await openSupport(page, mobile);
+  if (why) { skip(name, why); return; }
+  await fillSupportDraft(page);
+  const before = await readSupportDraft(page);
+  if (before.message !== DRAFT.message) { skip(name, `the draft would not type (message is ${before.message?.length ?? 'absent'} chars)`); return; }
+
+  // The backdrop: a click just outside the card, the stray tap this exists for. Not a synthetic
+  // event — a real mouse click at a coordinate that is deliberately OUTSIDE any control.
+  await page.mouse.click(12, mobile ? 400 : 500);
+  if (!(await waitSupportClosed(page))) {
+    // Not a defect on its own — but then this journey is not testing what it claims to.
+    skip(name, 'the backdrop tap did not close the dialog, so the dismissal path was never exercised');
+    return;
+  }
+  const why2 = await openSupport(page, mobile);
+  if (why2) { skip(name, `could not reopen after dismissal: ${why2}`); return; }
+  const after = await readSupportDraft(page);
+  if (after.message !== DRAFT.message || after.subject !== DRAFT.subject) {
+    defect(name, 'a backdrop tap destroyed the typed support message',
+      `typed ${DRAFT.message.length} chars + subject «${DRAFT.subject}»; after reopening: message=${after.message?.length ?? 'absent'} chars, subject=«${after.subject}»`);
+  } else {
+    pass(name, `the draft survived a backdrop dismissal (${after.message.length} chars, subject and email intact)`);
+  }
+  if (after.email !== DRAFT.email) defect(name, 'the reply address was lost on dismissal', `expected «${DRAFT.email}», got «${after.email}»`);
+
+  // And the X, which is the deliberate close — same guarantee, different control. Addressed by
+  // testID, NOT by `getByLabel('إغلاق')`: AuthModal raises itself for signed-out visitors with the
+  // same accessibility label, so on desktop `.first()` picked ITS × sitting behind this dialog —
+  // pointer-blocked, click times out, and the whole × check skipped 2/2 while reading as coverage.
+  const x = page.locator('[data-testid="info-modal-close"]').first();
+  if (await x.count()) {
+    await x.click({ timeout: 10_000 }).catch(() => {});
+    if (!(await waitSupportClosed(page))) { skip(`${name}/x`, 'the X did not close the dialog'); return; }
+    const why3 = await openSupport(page, mobile);
+    if (why3) { skip(`${name}/x`, `could not reopen after the X: ${why3}`); return; }
+    const afterX = await readSupportDraft(page);
+    if (afterX.message !== DRAFT.message) {
+      defect(`${name}/x`, 'closing with the X destroyed the typed support message',
+        `after reopening: ${afterX.message?.length ?? 'absent'} chars`);
+    } else pass(`${name}/x`, 'the draft also survived the X');
+  } else skip(`${name}/x`, 'no close control found on the dialog');
+
+  if (bag.pageErrors.length) defect(name, 'page error on the support-form path', bag.pageErrors.join(' | '));
+});
+
+/** J21 — THE ERROR STATE MUST NAME THE RIGHT FAILURE.
+ *
+ *  `sendSupportMessage` has always distinguished a 429 rate limit from a dead connection; the form
+ *  discarded the reason and rendered "check your connection and try again" for both. That sends
+ *  someone to fix a network that works, and offers a retry that cannot succeed until the hour rolls
+ *  over — PART 5 shape 12, an error state whose recovery path does not work.
+ *
+ *  THE CLICK IS REAL; ONLY THE SERVER'S ANSWER IS SIMULATED, and deliberately so. Producing a
+ *  genuine 429 means posting six real messages into a live support inbox, per run, per viewport —
+ *  writing junk into production data to observe a client-side state, which the hard safety rails
+ *  forbid. Everything under test here is the app's own code path: a real Playwright click, the real
+ *  `sendSupportMessage`, the real state machine, the real copy. */
+JOURNEYS['support-error-copy'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `support-error-copy:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const answers = { status: 429, body: JSON.stringify({ error: 'rate_limited' }) };
+  await page.route(/functions\/v1\/support-message/, (route) =>
+    route.fulfill({ status: answers.status, contentType: 'application/json', body: answers.body }));
+
+  const why = await openSupport(page, mobile);
+  if (why) { skip(name, why); return; }
+  await fillSupportDraft(page);
+
+  // The Send control RENAMES ITSELF once a send has failed — `state === 'error' ? t('Try again')`
+  // — so a second press must look for «حاول مرة أخرى», not «إرسال». Keying only on «إرسال» made the
+  // second press a silent no-op: the form still showed the FIRST failure's copy, and the journey
+  // filed «a real failure lost its connection copy» 4/4 against a perfectly correct app. PART 11.2
+  // rule 2 in a new costume — a control that is not there is not a control that was pressed.
+  const press = async () => {
+    for (const label of [SUP.send, SUP.retry]) {
+      const btn = page.getByText(label, { exact: true }).first();
+      if (!(await btn.count())) continue;
+      await btn.click({ timeout: 10_000 }).catch(() => {});
+      await sleep(3500);
+      return true;
+    }
+    return false;
+  };
+  if (!(await press())) { skip(name, `neither «${SUP.send}» nor «${SUP.retry}» is on the form`); return; }
+
+  let body = await bodyText(page);
+  if (body.includes(SUP.connErr)) {
+    defect(name, 'a rate-limited send is reported as a connection problem',
+      'the server answered 429 rate_limited and the form said «تأكد من الاتصال وحاول مرة أخرى» — the network is fine, and the retry it offers cannot succeed for another hour');
+  } else if (body.includes(SUP.waitErr)) {
+    pass(name, 'a 429 says WAIT, not "check your connection"');
+  } else {
+    defect(name, 'a failed send produced no error state at all', 'neither the rate-limit nor the connection message rendered after a 429');
+  }
+  const kept = await readSupportDraft(page);
+  if (kept.message !== DRAFT.message) defect(name, 'a failed send ate the draft', `message is ${kept.message?.length ?? 'absent'} chars after the failure`);
+  else pass(name, 'the draft is still on screen after the failure');
+
+  // The other direction — a real transport failure must still get the connection copy, or the fix
+  // has simply moved the wrong message onto a different case.
+  answers.status = 500;
+  answers.body = JSON.stringify({ error: 'boom' });
+  if (!(await press())) { skip(`${name}/500`, 'the retry control was not on the form after the first failure'); return; }
+  body = await bodyText(page);
+  if (body.includes(SUP.connErr)) pass(name, 'a genuine server failure still says "check your connection"');
+  else defect(name, 'a real failure lost its connection copy', `neither message matched after a 500; body has «${body.slice(0, 120)}»`);
+
+  if (bag.pageErrors.length) defect(name, 'page error on the support error path', bag.pageErrors.join(' | '));
+});
 
 // ═══ RUNNER ═════════════════════════════════════════════════════════════════════════════════════
 const t0 = Date.now();

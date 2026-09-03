@@ -30,7 +30,7 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { npmTestRuns } from './lib/testRegistry.ts';
+import { npmTestRuns, workflowInvokes } from './lib/testRegistry.ts';
 import {
   CONTRACT_RULES, ALL_ENTRIES, UNCONTRACTED, GRADE_SCORE, score, tally, byDim,
 } from './lib/afContractCoverage.ts';
@@ -87,9 +87,20 @@ check('every barrier named anywhere in the map is a real file',
 // `npm test` discovers its checks rather than listing them inline (scripts/lib/testRegistry.ts,
 // 2026-08-28). Ask the registry the same question the old string-match asked; matching against the
 // "test" script would now answer "no" for every barrier in the suite and fail every L/B grade.
-const workflows = readdirSync(join(root, '.github', 'workflows'))
-  .map((f) => read(join('.github', 'workflows', f))).join('\n');
-const runsSomewhere = (b: string) => npmTestRuns(root, b) || workflows.includes(b);
+// A MENTION IS NOT AN INVOCATION (hardened 2026-09-03). This used to be
+// `workflows.includes(b)` over every workflow concatenated together — so a barrier named only in a
+// COMMENT counted as executing. That is not hypothetical: on 2026-09-03,
+// verify-strict-filter-parity-live.ts and verify-residential-misfile-recovery.ts were found to be
+// named only by a comment in full-verification-ci.yml saying they are deliberately NOT run there,
+// and neither had executed anywhere for weeks. No L/B grade happened to rest on either at the time
+// — checked, and clean — but a grading gate that a comment can satisfy is a grade that can be
+// bought with prose. `workflowInvokes` strips comments; it is the same one
+// verify-live-check-workflow-attendance.ts uses, kept in scripts/lib/testRegistry.ts so this
+// question has exactly one answer in the repo.
+const workflowSources = readdirSync(join(root, '.github', 'workflows'))
+  .map((f) => read(join('.github', 'workflows', f)));
+const runsSomewhere = (b: string) =>
+  npmTestRuns(root, b) || workflowSources.some((src) => workflowInvokes(src, b));
 
 const inert = ALL_ENTRIES
   .filter((e) => e.grade === 'B' || e.grade === 'L')
