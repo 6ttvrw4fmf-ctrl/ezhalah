@@ -439,6 +439,31 @@ Layer C (§40.5) is a permanent DB object, not per-run throwaway SQL:
 A full-inventory hash comparison is only meaningful when `rpc_total <= p_limit`; above that the client
 holds a 1,500-row page of a larger set, so the count is the comparable quantity (`full_cmp=false`).
 
+**A verdict is only meaningful when BOTH SIDES SAW THE SAME INVENTORY (2026-09-03).** The ledger
+stores the count+hash the harness captured at time T; `ops_qa_adjudicate` runs the oracle at T+N.
+`search_listings_ar` is live — `sync-search-listings-ar` at :14 every hour, plus continuous liveness
+deactivations — so elapsed time alone manufactures mismatches. Measured that day: **318
+COUNT_MISMATCH + 11 SET_MISMATCH out of 3,994 rows, every one an artifact.** All 11 SET_MISMATCH rows
+had `rpc_total = sql_total` (equal cardinality, churned membership); re-measured same-instant through
+`ops_nf_cert_cell`, 7 of those cohorts returned `missing = extra = 0`. The clincher was one search
+adjudicated twice — `r200004` read RPC 12,680 / oracle 12,636, then `r300004` read RPC **12,636** /
+oracle 12,559: the later RPC equals the earlier oracle to the row, so the two implementations agree
+and were merely read at different instants. Deltas were small and directional (avg 5.14 rows, 257/318
+within 5, RPC higher in 252 of 318) — an index shrinking under the run, not a predicate disagreeing.
+
+Fixed by a watermark: `ops_qa_load_run` stamps `(index_rows_at_load, index_max_updated_at_load)` —
+a count alone cannot see a *balanced* add+delete, which is exactly the SET_MISMATCH shape — and
+`ops_qa_verdict_skew_aware` reclassifies a would-be mismatch to **`INDEX_MOVED`** (uncomparable,
+neither pass nor defect, the same refuse-don't-guess discipline as the sweep's `dbSkipped`, §41.15)
+**only** when the index provably moved. It can never mint a PASS, and with **no** watermark the
+strict verdict STANDS — never silence what you cannot explain. Pinned and mutation-proven (including
+against the committed migration itself) by `scripts/verify-qa-adjudication-skew-gate.ts` in
+`npm test`. **So: adjudicate promptly after loading a run, and read `INDEX_MOVED` as "re-run this
+cell", never as a pass.** This is the §40.7 rule ("do NOT call a harness failure a product failure")
+enforced by the ledger rather than by whoever reads it — and the reason it matters is the other
+direction: while the noise floor was ~5 rows, a real small matching defect was indistinguishable
+from it.
+
 ## 40. MAJOR CERTIFICATION STANDARD (owner rule, 2026-08-18 — permanent default)
 
 **Applies to every MAJOR certification of: Normal Filter · Advanced Filter · search · matching ·
