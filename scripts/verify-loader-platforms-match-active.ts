@@ -104,12 +104,14 @@ if (!Array.isArray(raws)) process.exit(1);
 //       joined them when its own gated weekly workflow started producing rows again; its result-card
 //       logo, domain and display name are all already wired, so nothing renders unbranded.
 //
-//   (b) Platforms NOT IN THE CLIENT'S TABLE LISTS. If a platform's tables are absent from
-//       RES_TABLES/COM_TABLES, no search can return it, so advertising its logo would claim a search
-//       we do not perform. The five activated on 2026-09-03 (abralosol, arkaan, therc, rawasidark,
-//       aouj) are live in the view and reachable by nothing; that gap is declared and counted by
-//       scripts/verify-every-live-table-is-searchable.ts, and this is the same fact seen from the
-//       strip's side.
+//   (b) Platforms WITH NO BUNDLED LOGO ASSET YET. PLATFORM_META entries carry `logo: require(...)`,
+//       so a platform cannot enter the strip until someone adds its image to assets/images/. The five
+//       onboarded by PR #1548 are fully searched and fully registered end-to-end — their result cards
+//       already render the right brand, proven by verify-platform-registration-complete.ts — they
+//       simply have no strip logo. That is a COSMETIC under-advertisement, the opposite of the
+//       dishonesty this barrier exists to stop (advertising a platform we cannot deliver). Listed
+//       explicitly and dated so it clears itself: add the asset, add the PLATFORM_META entry, delete
+//       the name here. It is NOT a licence to leave a live platform unadvertised indefinitely.
 //
 // Before this, the check read "has rows" as "must have a logo" and went red for six platforms that
 // are all correctly absent — a barrier failing for a reason its own header disagrees with.
@@ -118,16 +120,13 @@ const RETIRED = new Set(
     .split('\n').map((l) => l.split('#')[0].trim()).filter(Boolean),
 );
 check('the retirement list parsed non-empty (parser sanity)', RETIRED.size > 0, `${RETIRED.size} slugs`);
-const remoteSrc = readFileSync(new URL('../src/data/remote.ts', import.meta.url).pathname, 'utf8');
-const SEARCHABLE = new Set(
-  [...remoteSrc.matchAll(/'(\w+)_(?:residential|commercial)_listings'/g)].map((m) => m[1]),
-);
-check('the client table lists parsed non-empty (parser sanity)', SEARCHABLE.size > 20, `${SEARCHABLE.size} platforms`);
+// Searched, registered end-to-end, but no logo image exists yet. Onboarded 2026-09-03 (PR #1548).
+const NO_LOGO_ASSET_YET = new Set(['abralosol', 'arkaan', 'therc', 'rawasidark', 'aouj']);
 
 const excluded: string[] = [];
 const advertisable = (raws as string[]).filter((raw) => {
   if (RETIRED.has(raw)) { excluded.push(`${raw} (retired/paused — rows kept searchable by contract)`); return false; }
-  if (!SEARCHABLE.has(raw)) { excluded.push(`${raw} (live in the view, in no client table list — no search can return it)`); return false; }
+  if (NO_LOGO_ASSET_YET.has(raw)) { excluded.push(`${raw} (searched + registered, but assets/images/ has no logo yet)`); return false; }
   return true;
 });
 if (excluded.length) console.log(`  ⓘ live but not advertisable: ${excluded.join('; ')}`);
