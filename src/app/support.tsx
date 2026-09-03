@@ -18,7 +18,7 @@ export default function Support() {
       <View style={[s.topBar, { paddingTop: insets.top + 8 }]}>
         <View style={{ flex: 1 }} />
         <Pressable onPress={() => router.back()} style={s.xBtn} hitSlop={8}>
-          <Ionicons name="close" size={20} color="#56635c" />
+          <Ionicons name="close" size={20} color={colors.body} />
         </Pressable>
       </View>
 
@@ -27,7 +27,7 @@ export default function Support() {
           <Text style={s.h}>{ti('Support')}</Text>
 
           <SupCard email="support@ezhalah.com" desc={ti('Questions about your account, searches, or technical issues.')} />
-          <SupCard email="info@ezhalah.com" desc={ti('Business inquiries, partnerships, media requests, and general information.')} />
+          <SupCard email="partners@ezhalah.com" desc={ti('Business inquiries, partnerships, media requests, and general information.')} />
 
           <View style={s.rt}>
             <Text style={s.rtH}>{ti('Response Time')}</Text>
@@ -61,7 +61,7 @@ function RtRow({ text }: { text: string }) {
 
 const s = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 4 },
-  xBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#f1f3f1', alignItems: 'center', justifyContent: 'center' },
+  xBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingHorizontal: 22, alignItems: 'center', paddingTop: 4 },
   col: { width: '100%', maxWidth: MAX_W },
   h: { fontSize: 24, fontWeight: '700', color: colors.ink, marginBottom: 16 },

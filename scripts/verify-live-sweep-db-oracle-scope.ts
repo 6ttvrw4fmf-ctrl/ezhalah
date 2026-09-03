@@ -27,7 +27,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { dbFilterFromRequest, districtLabelVariants } from '../e2e/live-sweep/sweep.mjs';
+import { dbFilterFromRequest, districtLabelVariants, cityLookupKey } from '../e2e/live-sweep/sweep.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -52,10 +52,21 @@ const REQ = {
   p_category: 'Residential',
   p_tables: ['aqar_residential_listings'], p_tables2: ['aqar_commercial_listings'], p_types2: ['عمارة'],
 };
+// The city catalog, as data — the same shape the sweep fetches from loc_catalog_city. الأحساء and
+// الهفوف are the real clustered pair (city_ids 3677 and 12, both region 5); the duplicate «الهفوف»
+// at 501/region 1 is the real §41.16 ambiguity and is present so the region guard is exercised.
+const CITIES = [
+  { city_id: 3677, city_ar: 'الاحساء', city_norm: 'الاحساء', region_id: 5 },
+  { city_id: 12, city_ar: 'الهفوف', city_norm: 'الهفوف', region_id: 5 },
+  { city_id: 501, city_ar: 'الهفوف', city_norm: 'الهفوف', region_id: 1 },
+  { city_id: 900, city_ar: 'بيش', city_norm: 'بيش', region_id: 6 },
+  { city_id: 901, city_ar: 'عنيزة', city_norm: 'عنيزة', region_id: 4 },
+  { city_id: 1, city_ar: 'الرياض', city_norm: 'الرياض', region_id: 1 },
+];
 const dec = (s: string) => decodeURIComponent(s);
 
 // ── 1. the three formerly-unsupported scopes are now expressed ──────────────────────────────────
-const full = dbFilterFromRequest(REQ, TAX);
+const full = dbFilterFromRequest(REQ, TAX, CITIES);
 check('a district + region + two-arm + category request is COMPARABLE', full.comparable === true,
   `refused with: ${full.reason}`);
 
@@ -73,23 +84,23 @@ check('a Commercial type is NOT admitted under a Residential search', !f.include
 check('macro=both types are admitted only via the source-table suffix',
   f.includes('عمارة') && f.includes('source_table.like.*_residential_listings'), f);
 
-const com = dbFilterFromRequest({ ...REQ, p_category: 'Commercial' }, TAX);
+const com = dbFilterFromRequest({ ...REQ, p_category: 'Commercial' }, TAX, CITIES);
 check('a Commercial search switches the suffix and the admitted types',
   com.comparable && dec(com.filter).includes('*_commercial_listings') && dec(com.filter).includes('محل'),
   com.comparable ? dec(com.filter) : com.reason);
 
 // ── 3. it REFUSES rather than approximating ─────────────────────────────────────────────────────
-const multi = dbFilterFromRequest({ ...REQ, p_cities: ['بيش', 'عنيزة'] }, TAX);
+const multi = dbFilterFromRequest({ ...REQ, p_cities: ['بيش', 'عنيزة'] }, TAX, CITIES);
 check('MUTATION: districts across TWO cities are refused, not approximated',
   multi.comparable === false && /one canonical rendering is only guaranteed per city/.test(multi.reason),
   `got comparable=${multi.comparable} reason=${multi.reason}`);
 
-const noTax = dbFilterFromRequest(REQ, null);
+const noTax = dbFilterFromRequest(REQ, null, CITIES);
 check('MUTATION: no taxonomy ⇒ refuse the category scope rather than guess',
   noTax.comparable === false && /refusing to guess/.test(noTax.reason),
   `got comparable=${noTax.comparable} reason=${noTax.reason}`);
 
-const priced = dbFilterFromRequest({ ...REQ, p_price_max: 900000 }, TAX);
+const priced = dbFilterFromRequest({ ...REQ, p_price_max: 900000 }, TAX, CITIES);
 check('a price-filtered request is now COMPARABLE (was refused before 2026-08-24)',
   priced.comparable === true, priced.reason);
 
@@ -98,7 +109,7 @@ check('a price-filtered request is now COMPARABLE (was refused before 2026-08-24
 // mismatches: السعر/المساحة treat 0 as UNSET, while street width / floor / age treat 0 as a REAL
 // value. Every assertion below pins one of those, or the deal-mode price contract.
 const F = (patch: Record<string, unknown>) => {
-  const r = dbFilterFromRequest({ ...REQ, ...patch }, TAX);
+  const r = dbFilterFromRequest({ ...REQ, ...patch }, TAX, CITIES);
   return r.comparable ? dec(r.filter) : `NOT-COMPARABLE:${r.reason}`;
 };
 
@@ -112,23 +123,23 @@ check('MUTATION: price 0 is UNSET, not a real bound',
   && !F({ p_price_min: 0, p_price_max: 0 }).includes('price_total.lte.0'), F({ p_price_min: 0, p_price_max: 0 }));
 
 // price — إيجار شهري must be multiplied to the stored ANNUAL basis
-const mo = dbFilterFromRequest({ ...REQ, p_deal: 'إيجار', p_rent_period: 'شهري', p_price_min: 1000, p_price_max: 2000 }, TAX);
+const mo = dbFilterFromRequest({ ...REQ, p_deal: 'إيجار', p_rent_period: 'شهري', p_price_min: 1000, p_price_max: 2000 }, TAX, CITIES);
 check('a MONTHLY budget is converted ×12 onto the annual column',
   mo.comparable && dec(mo.filter).includes('price_annual.gte.12000') && dec(mo.filter).includes('price_annual.lte.24000'),
   mo.comparable ? dec(mo.filter) : mo.reason);
-const yr = dbFilterFromRequest({ ...REQ, p_deal: 'إيجار', p_rent_period: 'سنوي', p_price_min: 1000, p_price_max: 2000 }, TAX);
+const yr = dbFilterFromRequest({ ...REQ, p_deal: 'إيجار', p_rent_period: 'سنوي', p_price_min: 1000, p_price_max: 2000 }, TAX, CITIES);
 check('MUTATION: an ANNUAL budget is NOT multiplied',
   yr.comparable && dec(yr.filter).includes('price_annual.gte.1000') && dec(yr.filter).includes('price_annual.lte.2000'),
   yr.comparable ? dec(yr.filter) : yr.reason);
 
 // price — combined Buy+Rent keeps TWO independent budgets over the correct columns
-const both = dbFilterFromRequest({ ...REQ, p_deal: null, p_price_min: 5, p_price_max: 6, p_price_min_rent: 7, p_price_max_rent: 8 }, TAX);
+const both = dbFilterFromRequest({ ...REQ, p_deal: null, p_price_min: 5, p_price_max: 6, p_price_min_rent: 7, p_price_max_rent: 8 }, TAX, CITIES);
 const bothF = both.comparable ? dec(both.filter) : '';
 check('Buy+Rent = Buy ∪ Rent, each side judged by its OWN budget and column',
   bothF.includes('or(and(deal_ar.eq.بيع') && bothF.includes('price_total.gte.5') && bothF.includes('price_total.lte.6')
   && bothF.includes('deal_ar.eq.إيجار') && bothF.includes('price_annual.gte.7') && bothF.includes('price_annual.lte.8'), bothF);
 check('MUTATION: in combined mode a side with NO budget stays unconstrained (not excluded)',
-  (() => { const x = dbFilterFromRequest({ ...REQ, p_deal: null, p_price_min_rent: 7 }, TAX);
+  (() => { const x = dbFilterFromRequest({ ...REQ, p_deal: null, p_price_min_rent: 7 }, TAX, CITIES);
            const t = x.comparable ? dec(x.filter) : '';
            return t.includes('or(deal_ar.eq.بيع,') && t.includes('price_annual.gte.7'); })(),
   'a Buy listing must not vanish because the user only set a Rent budget');
@@ -179,10 +190,25 @@ check('MUTATION: an UNKNOWN amenity token refuses the comparison, never guesses'
 
 // The AF question set must be DISCOVERED, not hardcoded (§1) — a fixed title list made every
 // Commercial AF journey report "no question rendered" while production rendered one.
+//
+// WHAT THIS PINS IS THE INTENT, NOT ONE MECHANISM (widened 2026-08-29). It used to require the
+// literal `endsWith('؟')` body-text scan, which was the only discovery the journey had. That scan
+// reads the WHOLE page, so on a results screen it also picks up the cards behind the AF overlay —
+// measured live, a text reader on that screen returned «رقم رخصة الإعلان / 7100249846» and
+// «عمر العقار / 2025» as if they were the question's options. Reading the title from the card's own
+// `af-question-title` testID is discovery too, and strictly better scoped. Pinning the old
+// expression would have forced the harness to keep the worse of the two.
+//
+// Both halves still hold: no hardcoded title may appear, AND the title must come from the live DOM.
 const jrn = read('e2e/live-sweep/journeys.mjs');
+const HARDCODED_TITLE = /['"`][^'"`]{6,}؟['"`]/;          // any Arabic question literal in the harness
+const discoversByText = jrn.includes("endsWith('؟')");
+const discoversByTestId = /data-testid="af-question-title"/.test(jrn);
 check('AF questions are discovered from the page, not a hardcoded title list',
-  !jrn.includes("'كم عرض الشارع تفضل؟'") && jrn.includes("endsWith('؟')"),
-  'a hardcoded AF title list goes blind the moment a question is added or reworded');
+  !HARDCODED_TITLE.test(jrn.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*(\/\/|\*).*$/gm, ''))
+  && (discoversByText || discoversByTestId),
+  'a hardcoded AF title list goes blind the moment a question is added or reworded; the title must '
+  + `be read from the live DOM (body-text scan: ${discoversByText}, af-question-title: ${discoversByTestId})`);
 
 // ── 4. independence: the oracle must NOT reimplement the RPC's normalisation ─────────────────────
 const sweep = read('e2e/live-sweep/sweep.mjs');
@@ -246,7 +272,7 @@ check('an unresolvable حي makes the oracle REFUSE the layer, not report a mism
 check('a RESOLVED حي still flows into the district filter, so the layer keeps comparing',
   (() => {
     const f = dbFilterFromRequest(
-      { p_districts: ['المهدية'], p_cities: ['الرياض'], p_deal: 'بيع' }, [{ type_ar: 'شقة', macro: 'Residential' }]);
+      { p_districts: ['المهدية'], p_cities: ['الرياض'], p_deal: 'بيع' }, [{ type_ar: 'شقة', macro: 'Residential' }], CITIES);
     return f.comparable === true && decodeURIComponent(f.filter).includes('"المهدية"');
   })(),
   'refusing everything would silence the layer instead of fixing it');
@@ -257,6 +283,88 @@ check('MUTATION: exact-label-only resolution is rejected',
     return only.length === 1 && only[0] === 'حي المهدية';   // the old behaviour
   })(),
   'variants() returning the request label alone reproduces the 2026-08-26 false defect exactly');
+
+// ── 5c. THE CITY ARM: all three, never the label alone (2026-09-01) ─────────────────────────────
+// The RPC matches a city on THREE arms — label, own city_id, and `match_city_ids && city_ids` —
+// and the third is what carries loc_city_cluster. While that table was empty all three coincided,
+// so a label-only oracle was accidentally exact. The owner-approved الأحساء/الهفوف cluster
+// (migration 20260831195108) populated it, and the label-only oracle immediately reported ELEVEN
+// false COUNT MISMATCHes across six cohorts against a completely healthy product — every pair
+// summing to the RPC's own total from both directions (39+18=57 · 28+26=54 · 6+5=11 · 26+16=42 ·
+// 6+6=12 · 5+4=9). This section makes that shape impossible to reintroduce.
+const ahsa = dbFilterFromRequest(
+  { p_deal: 'بيع', p_cities: ['الاحساء'], p_region_ids: [5], p_category: 'Residential',
+    p_tables: ['aqar_residential_listings'], p_types: ['شقة'] }, TAX, CITIES);
+const ahsaF = ahsa.comparable ? dec(ahsa.filter) : '';
+check('a city search expresses the LABEL arm', ahsa.comparable && ahsaF.includes('city_ar.in.("الاحساء")'), ahsaF || ahsa.reason);
+check('a city search expresses the city_id arm', ahsaF.includes('city_id.in.(3677)'), ahsaF);
+check('a city search expresses the match_city_ids arm — the one carrying loc_city_cluster',
+  ahsaF.includes('match_city_ids.ov.{3677}'),
+  'without this arm every clustered city under-counts by its siblings and the oracle accuses production');
+
+// §41.16: the region disambiguates a repeated city NAME. الهفوف is BOTH 12/region 5 (the real
+// inventory) and 501/region 1; resolving by name alone would silently pick one.
+const hof5 = dbFilterFromRequest({ p_deal: 'بيع', p_cities: ['الهفوف'], p_region_ids: [5] }, TAX, CITIES);
+const hof1 = dbFilterFromRequest({ p_deal: 'بيع', p_cities: ['الهفوف'], p_region_ids: [1] }, TAX, CITIES);
+check('an ambiguous city NAME resolves through its REGION, not a name-keyed pick (§41.16)',
+  hof5.comparable && dec(hof5.filter).includes('.{12}') && hof1.comparable && dec(hof1.filter).includes('.{501}'),
+  `region5 → ${hof5.comparable ? dec(hof5.filter) : hof5.reason} | region1 → ${hof1.comparable ? dec(hof1.filter) : hof1.reason}`);
+
+// REFUSE, never approximate — the §41.15 rule applied to the city scope.
+const noCat = dbFilterFromRequest({ p_deal: 'بيع', p_cities: ['الاحساء'], p_region_ids: [5] }, TAX, null);
+check('MUTATION: no city catalog ⇒ REFUSE, never fall back to a label-only filter',
+  noCat.comparable === false && /city catalog unavailable/.test(noCat.reason),
+  `got comparable=${noCat.comparable} reason=${noCat.reason}`);
+const unknownCity = dbFilterFromRequest({ p_deal: 'بيع', p_cities: ['مدينة لا وجود لها'], p_region_ids: [5] }, TAX, CITIES);
+check('MUTATION: an unresolvable city is REFUSED, not silently label-matched',
+  unknownCity.comparable === false && /does not resolve/.test(unknownCity.reason),
+  `got comparable=${unknownCity.comparable} reason=${unknownCity.reason}`);
+
+// MUTATION PROOF — the pre-fix source must FAIL this file. The defect was a bare `city_ar=in.(…)`
+// predicate as the WHOLE city scope; if that shape ever returns, the false-mismatch class is back.
+const sweepSrc = read('e2e/live-sweep/sweep.mjs');
+check('MUTATION: the label-only `city_ar=in.(…)` city predicate is gone from the oracle',
+  !/f \+= `&city_ar=in\./.test(sweepSrc),
+  'that exact line is the 2026-09-01 defect — it sees one half of every clustered city');
+check('the oracle reads loc_catalog_city to resolve p_cities into the RPC\'s own city_ids',
+  sweepSrc.includes('loc_catalog_city?select=city_id,city_ar,city_norm,region_id'),
+  'the city_id / match_city_ids arms cannot be expressed without the catalog');
+
+// ── 5d. THE CITY LOOKUP FOLD — resolve the request's spelling, or refuse; never over-refuse ─────
+// §5c's first version compared the request's city label to the catalog by EXACT string equality.
+// That resolves every label the INDEX serves (measured 2026-09-01: 362/362 served (city, region)
+// pairs), but the label the REQUEST carries comes from the app's picker and can render the same city
+// with hamza. «أبو عريش» vs the catalog's «ابو عريش» failed to resolve, and the sweep SKIPPED the
+// DB-truth layer on a perfectly healthy journey. A skipped layer contributes zero mismatches, which
+// reads exactly like agreement — this file's opening paragraph is about precisely that failure — so
+// over-refusing is not the safe direction either. Both errors are now pinned.
+//
+// The fold mirrors normalize_ar() (prosrc, 2026-09-01) and is LOOKUP-ONLY: it turns a name into a
+// city_id and never decides whether a row matches. Verified live against the database's own stored
+// city_norm over the WHOLE catalog: 4,582 rows, 0 divergences.
+check('the fold maps hamza-alef forms onto bare alef (أ إ آ ٱ → ا)',
+  ['أبو عريش', 'إبو عريش', 'آبو عريش', 'ٱبو عريش'].every((s) => cityLookupKey(s) === 'ابو عريش'),
+  ['أبو عريش', 'إبو عريش', 'آبو عريش', 'ٱبو عريش'].map(cityLookupKey).join(' | '));
+check('the fold maps ة→ه and ى→ي', cityLookupKey('مكة') === 'مكه' && cityLookupKey('المرتضى') === 'المرتضي',
+  `${cityLookupKey('مكة')} | ${cityLookupKey('المرتضى')}`);
+check('the fold DELETES tatweel and bidi marks rather than mapping them',
+  cityLookupKey('بـريدة') === 'بريده' && cityLookupKey('‏جدة‎') === 'جده',
+  `${cityLookupKey('بـريدة')} | ${cityLookupKey('‏جدة‎')}`);
+check('the fold trims and collapses whitespace runs', cityLookupKey('  ابو   عريش ') === 'ابو عريش',
+  JSON.stringify(cityLookupKey('  ابو   عريش ')));
+
+// The whole point: a hamza-spelled request must now COMPARE, not skip.
+const hamza = dbFilterFromRequest({ p_deal: 'بيع', p_cities: ['أبو عريش'], p_region_ids: [10] }, TAX,
+  [{ city_id: 4242, city_ar: 'ابو عريش', city_norm: 'ابو عريش', region_id: 10 }]);
+check('MUTATION: a hamza-spelled request RESOLVES instead of skipping the DB-truth layer',
+  hamza.comparable === true && dec(hamza.filter).includes('match_city_ids.ov.{4242}'),
+  hamza.comparable ? dec(hamza.filter) : hamza.reason);
+// …and a genuinely unknown city STILL refuses. Recovering variants must not become "accept anything".
+const stillRefuses = dbFilterFromRequest({ p_deal: 'بيع', p_cities: ['مدينة لا وجود لها'], p_region_ids: [10] }, TAX,
+  [{ city_id: 4242, city_ar: 'ابو عريش', city_norm: 'ابو عريش', region_id: 10 }]);
+check('MUTATION: the fold did NOT turn refusal into accept-anything',
+  stillRefuses.comparable === false && /does not resolve/.test(stillRefuses.reason),
+  `got comparable=${stillRefuses.comparable} reason=${stillRefuses.reason}`);
 
 // ── 6. a skipped layer can never read as a pass ─────────────────────────────────────────────────
 const runner = read('e2e/live-sweep/run.mjs');

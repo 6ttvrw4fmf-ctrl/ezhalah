@@ -31,6 +31,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 
 const sweep = read('e2e/live-sweep/sweep.mjs');
+const vstate = read('e2e/live-sweep/visibleState.mjs');
 const journeys = read('e2e/live-sweep/journeys.mjs');
 const runner = read('e2e/live-sweep/run.mjs');
 const wf = read('.github/workflows/live-search-sweep.yml');
@@ -63,9 +64,12 @@ check('journey «showMoreJourney» is actually run by the runner',
 check('the «عرض المزيد» journey asserts filter persistence across batches',
   /FILTER-PERSISTENCE/.test(showMore),
   'a pager journey that does not re-check the filters proves only that a button is clickable');
-check('the «عرض المزيد» journey asserts the cap message states the true total',
-  /TRUE-TOTAL/.test(showMore) && /وعرضنا لك/.test(showMore),
-  'the browse cap is only honest while the closing line quotes trueTotal, never the cap');
+// CONTRACT CHANGE (owner 2026-08-29): the lifetime cap is gone — the journey now asserts BOTH that
+// a missing pager while matches remain is a defect (PAGER-MISSING) and that any total the closing
+// line quotes is the search's true total (TRUE-TOTAL). Same honesty, new continuation shape.
+check('the «عرض المزيد» journey asserts continuation (pager present while matches remain) + true totals',
+  /TRUE-TOTAL/.test(showMore) && /PAGER-MISSING/.test(showMore),
+  'the continuation is only honest while a missing pager with matches remaining is a defect');
 
 // ── 2. the floors, at or above the values the owner set ─────────────────────────────────────────
 const REQUIRED_FLOORS: Record<string, number> = {
@@ -103,8 +107,14 @@ check('exact-city-never-rescoped is asserted on EVERY journey (INTENT→UI)',
   /exact city .* was re-scoped to district/.test(sweep) && /INTENT→UI/.test(sweep));
 check('true-total-never-page-cap is asserted against the 1,500 page limit',
   /rendered === 1500/.test(sweep));
+// The rendered-text watches live in the pure parser module (extracted 2026-08-28 so the summary
+// scoping could be unit-tested and mutation-proven offline — see visibleState.mjs). They are still
+// asserted by the sweep; assert them WHERE THEY ARE, so the extraction cannot quietly drop one.
 check('no-html-entities-rendered is asserted from the RENDERED text',
-  /entities/.test(sweep) && /&\(\?:bull\|quot/.test(sweep));
+  /entities/.test(sweep) && /&\(\?:bull\|quot/.test(vstate));
+check('the UI-state parse is the pure module the offline barrier can prove',
+  /from '\.\/visibleState\.mjs'/.test(sweep) && /parseVisibleState\(await page\.evaluate/.test(sweep),
+  'an in-page slice cannot be unit-tested, and the one that could not be tested read ad copy as app state');
 
 // ── 4. the six-layer comparison is what decides ─────────────────────────────────────────────────
 for (const pair of ['INTENT→UI', 'UI→REQUEST', 'RPC→DB', 'RPC→RENDERED']) {
@@ -191,8 +201,17 @@ check('floor backstops target a city proven reachable this run',
 check('the MOBILE floor has a backstop of its own',
   /done\.mobile\)/.test(runner) && /mobile floor/.test(runner),
   'mobile rode on `i === 0` and vanished whenever that one city was not offered');
-check('the trending-district journey also uses a reachable city',
-  /trendingDistrict\(\{ city: reachable\(\)/.test(runner));
+// STRENGTHENED 2026-08-30: a merely-"reachable" city is not enough. `reachable()` is deal-blind —
+// it returns whichever city was reached first, for whatever deal reached it — so a rent-only city
+// («المندق», 19 listings all إيجار) satisfied this check and was still handed to trending-district,
+// which runs on the app's DEFAULT deal «بيع». The journey was skipped and the floor lost. The city
+// must now be chosen for the deal the journey actually runs; that IMPLIES reachability, so this is
+// a tightening, not a relaxation. A raw pickCities[0] still fails, as before.
+check('the trending-district journey uses a DEAL-AWARE reachable city',
+  /trendingDistrict\(\{\s*city:\s*tdCity/.test(runner)
+  && /const tdCity = reachableFor\('بيع'\)/.test(runner)
+  && !/trendingDistrict\(\{\s*city:\s*pickCities\[0\]/.test(runner),
+  'a deal-blind city hands a بيع journey a rent-only city and silently deletes the floor');
 
 // «not offered» must mean the PRODUCT refused, never "the list had not rendered yet". A flat sleep
 // turned بريدة — a top-10 city with 4,850 listings — into a skipped journey and a missed floor.
@@ -213,6 +232,30 @@ check('rotation is driven by the coverage ledger, not a hardcoded city list',
   /ops_qa_sweep_plan/.test(sweep) && /stalestFirst/.test(runner));
 check('the city pool is discovered LIVE (a hardcoded list would go stale)',
   /search_listings_ar\?select=city_ar,region_ar/.test(runner));
+
+// ── §41.2 — NO BARE VIEWPORT-COORDINATE CLICKS ─────────────────────────────────────────────────
+// «Never click bare viewport coordinates» is the repo's own rule, and the harness broke it in two
+// places. `pickCity()` clicked a getBoundingClientRect() centre via page.mouse.click(x, y); on a
+// 390 px phone that left the page in a state where the following «بحث» click NEVER became
+// actionable, so ALL THREE mobile journeys died on every «بيع» rotation (CI runs #10/#11, local
+// sweeps #3-#6) and the owner-mandated §34 mobile floor was never actually exercised while the
+// workflow sat red. Replacing it with a real element click fixed it: mobile «لقينا 1,026 إعلان»,
+// desktop byte-identical, sweep back to 10/10 with MOBILE JOURNEYS: 1.
+//
+// Only ONE coordinate click may remain: the explicitly-commented last-resort fallback inside
+// pickCity, which runs only after a real element click has already been attempted and failed.
+// Count CODE, not prose: these comments quote `page.mouse.click(x, y)` when explaining the bug,
+// and a barrier that counts its own explanation can never be satisfied.
+const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '')
+  .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+const coordClicks = ['e2e/live-sweep/sweep.mjs', 'e2e/live-sweep/journeys.mjs', 'e2e/live-sweep/showmore.mjs']
+  .flatMap((f) => [...stripComments(read(f)).matchAll(/page\.mouse\.click\(/g)]);
+check('no bare viewport-coordinate clicks beyond the single documented fallback (§41.2)',
+  coordClicks.length <= 1,
+  `${coordClicks.length} page.mouse.click( call(s) — a coordinate click silently misses off-screen controls`);
+check('pickCity clicks the ELEMENT, so Playwright scrolls and checks actionability',
+  /const option = handle\.asElement\(\)/.test(sweep) && /option\.click\(\)/.test(sweep),
+  'the mobile floor died for weeks on a coordinate click here');
 
 console.log(failures === 0
   ? '\n✓ the live sweep still covers everything it promises, and still fails on a real mismatch\n'

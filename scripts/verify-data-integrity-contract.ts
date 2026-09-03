@@ -30,6 +30,14 @@
 //
 // Run: node --experimental-strip-types scripts/verify-data-integrity-contract.ts
 import { readFileSync, existsSync } from 'node:fs';
+import { join as __join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = __join(import.meta.dirname, '..');
 
 const SPEC = 'docs/ops/DATA_INTEGRITY_ENGINEER.md';
 const ROUTINES = 'docs/ops/ENGINEER_ROUTINES.md';
@@ -147,9 +155,9 @@ check(/§0/.test(agents),
   `routine is expected to finish its own work`);
 
 // ── 7. Worthless if nothing runs it ──────────────────────────────────────────────────────────
-check(readFileSync('package.json', 'utf8').includes('verify-data-integrity-contract'),
+check(npmTestRuns(REPO_ROOT, 'verify-data-integrity-contract'),
   'npm test runs this guard',
-  'package.json no longer runs verify-data-integrity-contract.ts — the guard is inert');
+  '`npm test` no longer runs verify-data-integrity-contract.ts (see scripts/test-exclusions.txt) — the guard is inert');
 
 console.log('data-integrity-contract: §0 must keep granting completion, and keep its limits\n');
 for (const o of ok) console.log(`  ✓ ${o}`);

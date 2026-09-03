@@ -31,6 +31,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { chromium, devices } from '@playwright/test';
 import { appendFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { parseVisibleState } from './visibleState.mjs';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
@@ -53,6 +54,28 @@ writeFileSync(JOURNAL, '');
 
 // ── MINIMUM COVERAGE FLOORS (owner). A run that cannot meet these FAILS: silently shrinking
 // coverage is the failure mode a rotation system invites, so the floors are asserted, not hoped for.
+// ── DEAL-AWARE CITY CHOICE ───────────────────────────────────────────────────────────────────────
+// A journey's city must stock the DEAL that journey will actually run. Choosing a city by staleness
+// alone (`pickCities[0]`), or by "was reachable for some other deal" (a deal-blind `reachable()`),
+// hands a بيع-shaped journey a rent-only city; production then rightly declines to offer that city,
+// the journey is skipped, and its COVERAGE FLOOR is lost while production is perfectly healthy.
+//
+// Twice observed, same class, different journeys:
+//   2026-08-26  «الدليمية» (22 listings, ALL بيع) drew إيجار/سنوي → lost the non-Riyadh floor.
+//               Fixed for the normal-filter loop ONLY, via dealsOf.
+//   2026-08-30  «المندق» (19 listings, ALL إيجار) was handed to trending-district, honest-zero and
+//               card→back — all of which run on the app's DEFAULT deal «بيع» — losing three floors
+//               in one run. The 2026-08-26 fix had patched the example, not the class (§37).
+//
+// `have` is built from the LIVE index (livePool), never a hardcoded list (§1). Preference order:
+// a city already proven reachable this run → any rotated city that stocks the deal → الرياض, which
+// stocks every deal and is always offered. Returning الرياض is a last resort, not a free pass: it
+// never counts toward the non-Riyadh floor, which is computed from citiesTested minus الرياض.
+export function pickCityForDeal({ citiesTested = [], pickCities = [], dealsOf, deal, period = null, riyadh = 'الرياض' }) {
+  const stocks = (city) => dealsOf?.get?.(city)?.has?.(`${deal}/${period ?? '-'}`) ?? false;
+  return [...citiesTested].find(stocks) ?? [...pickCities].find(stocks) ?? riyadh;
+}
+
 export const FLOORS = {
   nonRiyadhCities: 3,
   mobileJourneys: 1,
@@ -94,8 +117,16 @@ async function post(path, body, tries = 4) {
         method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
         body: JSON.stringify(body), signal: AbortSignal.timeout(60000),
       });
-      const j = await r.json().catch(() => null);
-      if (j && !j.message) return j;
+      // A VOID rpc (ops_qa_record_coverage) answers 2xx with an EMPTY body. Judging success by
+      // "did we get a JSON object back" therefore read every successful coverage write as a
+      // failure and retried it: measured 2026-08-31, times_tested was climbing ~4 per run and the
+      // 4-step backoff (1.5+3+4.5+6s) sat between consecutive writes — about half the sweep's
+      // 739s runtime spent re-sending writes that had already landed. Judge the HTTP STATUS, and
+      // treat an empty 2xx body as the success it is. PostgREST reports real errors as a JSON
+      // object carrying `message`, which is still a failure even on a 2xx.
+      const text = await r.text();
+      const j = text ? JSON.parse(text) : null;
+      if (r.ok && !(j && j.message)) return j ?? {};
     } catch { /* retry */ }
     await sleep(1500 * (a + 1));
   }
@@ -187,6 +218,56 @@ async function taxonomy() {
   return _taxonomy;
 }
 
+/**
+ * The city catalog, as data — the RPC resolves `p_cities` through it (`city_norm = tok`) to build
+ * the `city_ids` its second and third city arms match on, so layer 5 cannot express those arms
+ * without it. Memoized like taxonomy(); null on failure, which makes the oracle REFUSE a
+ * city-scoped comparison rather than fall back to a label-only filter (§41.15).
+ */
+/**
+ * A LOOKUP-ONLY fold of the request's city label onto `loc_catalog_city.city_norm`.
+ *
+ * READ THIS BEFORE CALLING IT A NORMALISER. The rule this file obeys elsewhere — "the oracle does
+ * not reimplement the RPC's normaliser, because then agreement is self-confirmation" — is about the
+ * MATCHING predicate (norm_district_tok). This is not that. It never decides whether a row matches;
+ * it only turns a city NAME into the `city_id` the RPC's own `city_ids` CTE would resolve it to, and
+ * the eligible set is still expressed in PostgREST over stored columns. If the fold fails, the
+ * oracle REFUSES exactly as before — it never falls back to a label match.
+ *
+ * WHY IT IS NEEDED. The first version compared the request's label to `city_ar`/`city_norm` by exact
+ * string equality. That is right for every label the INDEX serves — measured 2026-09-01: all 362
+ * served (city_ar, region) pairs resolve exactly — but the label the REQUEST carries comes from the
+ * app's picker, which can render the same city with hamza. «أبو عريش» (request) vs «ابو عريش»
+ * (catalog) failed to resolve and skipped the DB-truth layer on a healthy journey. A skipped layer
+ * contributes zero mismatches, which reads exactly like agreement — the very failure mode this
+ * file's header warns about — so over-refusing is not a safe default either.
+ *
+ * It mirrors `normalize_ar()` exactly (read from prosrc 2026-09-01):
+ *   lower(btrim(t)) → translate 'أإآٱةىـ'+bidi marks onto 'ااااهي'+delete → collapse whitespace runs.
+ * `scripts/verify-live-sweep-db-oracle-scope.ts` §5d pins each rule and the deletions; the live
+ * equivalence against the database's own stored `city_norm` over the WHOLE catalog is what proves
+ * the mirror is faithful rather than assumed.
+ */
+const cityLookupKey = (s) => String(s ?? '').trim().toLowerCase()
+  .replace(/[أإآٱ]/g, 'ا')
+  .replace(/ة/g, 'ه')
+  .replace(/ى/g, 'ي')
+  .replace(/[ـ‎‏‌‍‪‫‬‭‮]/g, '')
+  .replace(/\s+/g, ' ');
+
+let _cityCatalog = null;
+async function cityCatalog() {
+  if (_cityCatalog) return _cityCatalog;
+  try {
+    const r = await fetch(`${SUPA}/rest/v1/loc_catalog_city?select=city_id,city_ar,city_norm,region_id&limit=20000`,
+                          { headers: H, signal: AbortSignal.timeout(30000) });
+    const rows = await r.json();
+    if (!Array.isArray(rows) || !rows.length) return null;
+    _cityCatalog = rows;
+  } catch { return null; }
+  return _cityCatalog;
+}
+
 /** LAYER 5b — the DB's own ID SET, so a count that matches by coincidence cannot pass. */
 async function dbIds(filters, cap) {
   const q = `${SUPA}/rest/v1/search_listings_ar`
@@ -215,8 +296,16 @@ const rpcIds = async (body, cap) => {
 };
 
 const ledgerPlan = (dimension, limit) => post('/rpc/ops_qa_sweep_plan', { p_dimension: dimension, p_limit: limit });
-const ledgerRecord = (dimension, key, result, notes) =>
-  post('/rpc/ops_qa_record_coverage', { p_dimension: dimension, p_key: key, p_result: result, p_notes: (notes ?? '').slice(0, 480) });
+// A coverage write that fails must never pass unnoticed: post() retries and then returns null, so a
+// rejected write used to leave the PREVIOUS run's result standing while this run reported success.
+// That is how three watches kept a stale `pass` on 2026-08-31 after the result vocabulary was
+// widened past what the RPC accepts (pass | fail | skip). Say so loudly instead.
+const ledgerRecord = async (dimension, key, result, notes) => {
+  const r = await post('/rpc/ops_qa_record_coverage',
+    { p_dimension: dimension, p_key: key, p_result: result, p_notes: (notes ?? '').slice(0, 480) });
+  if (r === null) note(`LEDGER WRITE FAILED — ${dimension}/${key} = ${result} (the previous result still stands)`);
+  return r;
+};
 
 // ── findings ─────────────────────────────────────────────────────────────────────────────────────
 const findings = [];
@@ -226,6 +315,44 @@ const defect = (journey, layerPair, detail) => {
   console.error(`  ✗ DEFECT [${journey}] ${layerPair}: ${detail}`);
 };
 const note = (msg) => console.error(`    ${msg}`);
+
+// ── WATCH OBSERVATION — a watch is green only with POSITIVE evidence it ran (2026-08-31) ─────────
+// The ledger used to derive a watch's result as `findings.some(...) ? 'fail' : 'pass'`, i.e. it read
+// the ABSENCE of a finding as proof of a pass. Three different ways a watch can produce no finding
+// while never having been evaluated at all:
+//   • its journey threw a harness error (the egress proxy timed out two watch journeys on
+//     2026-08-31 — both were stamped `pass` with a fresh last_tested_at);
+//   • its journey returned null on purpose (`city not offered — skipped`);
+//   • nothing in the tree ever asserted it (buyrent-summary-both-budgets, unknown-period-stays-
+//     unknown and clarification-answer-commits were declared watches that no code evaluated, so
+//     they had been recorded `pass` on every run since they were added).
+// That is the failure shape AGENTS.md names outright — a monitor that cannot fire reads as a clean
+// bill of health. A watch now records `pass` ONLY if observeWatch() was reached at the point the
+// assertion is actually made; anything else records `skip`, never `pass`, and trips a floor.
+const watchesObserved = new Set();
+const observeWatch = (name) => { watchesObserved.add(name); };
+
+// Three watches are NOT evaluated by the browser at all, and saying so is the point. Each names the
+// OFFLINE barrier that does evaluate it, in `npm test`. This is the same discipline
+// scripts/test-exclusions.txt already applies to skipped tests: an entry naming nowhere is a check
+// that runs nowhere, so the named file must exist AND actually run — both asserted by
+// scripts/verify-live-sweep-watch-evidence.ts, which also forbids adding an entry here for a watch
+// the sweep really does evaluate (that would retire live coverage by paperwork).
+// They are recorded `offline_barrier`, never `pass`: the sweep did not earn browser evidence for
+// them, and the ledger must not imply it did.
+const WATCH_OFFLINE_COVER = {
+  'buyrent-summary-both-budgets': 'scripts/verify-combined-budget-summary.ts',
+  'unknown-period-stays-unknown': 'scripts/verify-unknown-rent-period-not-annual.ts',
+  'clarification-answer-commits': 'scripts/verify-agent-scope-answer.ts',
+};
+
+const watchStatus = (name) =>
+  findings.some((f) => f.detail.includes(name)) ? 'fail'
+    : watchesObserved.has(name) ? 'pass'
+      : WATCH_OFFLINE_COVER[name] ? 'offline_barrier'
+        : 'skip';
+// Only a watch that is neither observed live nor covered offline is DARK — that is the floor miss.
+const unobservedWatches = () => WATCHES.filter((w) => watchStatus(w) === 'skip');
 
 // ── UI driving ───────────────────────────────────────────────────────────────────────────────────
 // The deal and period rows are INDEPENDENT TOGGLES, not radios: clicking the other one turns BOTH
@@ -274,9 +401,23 @@ async function pickCity(page, city) {
       return !!el;
     }, city, { timeout: CITY_OPTION_TIMEOUT_MS }).then(() => true).catch(() => false);
   if (!appeared) return false;
-  const hit = await page.evaluate(optionAt, city);
-  if (!hit) return false;
-  await page.mouse.click(hit.x, hit.y); await sleep(1300);
+  // §41.2: never click bare viewport coordinates. `page.mouse.click(x, y)` from a
+  // getBoundingClientRect() was the LAST such click in this harness, and on a 390 px phone it is
+  // exactly the trap that section describes — the coordinate lands, the city commits, and the page
+  // is left in a state where the subsequent «بحث» click never becomes actionable. Take the ELEMENT
+  // and click it, so Playwright does its own scrolling and actionability checks.
+  const handle = await page.evaluateHandle((c) => [...document.querySelectorAll('div')].filter((e) => {
+    const t = (e.innerText || '').trim();
+    return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
+  }).pop(), city);
+  const option = handle.asElement();
+  if (!option) return false;
+  await option.scrollIntoViewIfNeeded().catch(() => {});
+  await option.click().catch(async () => {
+    const hit = await page.evaluate(optionAt, city);        // last-resort fallback, still recorded
+    if (hit) await page.mouse.click(hit.x, hit.y);
+  });
+  await sleep(1300);
   // The commit is the assertion, not the click (§41.13): a click that missed leaves the field empty
   // and the search would later be REFUSED, which reads as a broken product instead of a harness miss.
   const committed = await input.inputValue().catch(() => '');
@@ -301,8 +442,92 @@ async function pickCity(page, city) {
 // scripts/verify-live-sweep-coverage-contract.ts, so a new zero-state phrasing cannot silently
 // reintroduce the hang. «ما لقينا» needs no branch of its own — it contains «لقينا».
 export const SETTLED_RE = /لقينا|ما لقيت|ما فيه/;
+/**
+ * Tap a control by its exact Arabic label, scrolling the inner ScrollView to it first.
+ *
+ * Same class as the «بحث» defect below (§37: fix the class, not the example). The filter form's
+ * group and نوع chips sit below the fold on a phone exactly as «بحث» does, and their call sites
+ * swallow the failure with `.catch(() => {})` — so on mobile they silently did not select, and the
+ * journey went on believing it had chosen a نوع it never chose. That is worse than a crash: it is
+ * the §40.4 failure the sweep exists to prevent, inside the sweep itself.
+ *
+ * Returns whether the element was actually found, so a caller can tell "tapped" from "absent"
+ * instead of treating both as success.
+ */
+export async function tapByText(page, label, timeout = 15000) {
+  const el = page.getByText(label, { exact: true }).first();
+  const there = await el.waitFor({ state: 'attached', timeout }).then(() => true).catch(() => false);
+  if (!there) return false;
+  await page.evaluate((t) => {                     // FIRST match only — `.first()` is what we click
+    for (const e of document.querySelectorAll('*'))
+      if (e.children.length === 0 && (e.textContent || '').trim() === t) { e.scrollIntoView({ block: 'center' }); return; }
+  }, label).catch(() => {});
+  await sleep(500);
+  return el.click({ timeout }).then(() => true).catch(() => false);
+}
+
 const runSearch = async (page) => {
-  await page.getByText('بحث', { exact: true }).first().click();
+  // «بحث» IS BELOW THE FOLD ON A PHONE — scroll it in before clicking (§41.2, applied to the one
+  // control that still clicked blind). The pager already learned this lesson; the search button had
+  // not, and it is the same shape of bug: on the 390 px viewport the expanded filter form pushes
+  // «بحث» past the visible area, Playwright's actionability wait never settles, and the journey dies
+  // with `locator.click: Timeout 30000ms exceeded — waiting for getByText('بحث')`.
+  //
+  // Measured 2026-09-01, and this is why it is worth fixing rather than dismissing as CI noise:
+  // the scheduled sweep failed on runs #10 and #11 with `mobile journeys: 0 < 1` — ALL THREE mobile
+  // journeys (صفوى, بقعاء and الرياض, the last-resort fallback) timed out on exactly this locator,
+  // while EVERY desktop journey in both runs passed. The non-Riyadh floor miss was a downstream
+  // consequence: صفوى's only journey was the mobile one that died. So the owner-mandated §34 mobile
+  // floor has not actually been exercised in CI, and the workflow is red daily — a standing red
+  // trains people to stop reading it.
+  //
+  // ROOT CAUSE, measured on production at 390 px (iPhone 13) with the DEFAULT deal «بيع»:
+  //   • «بحث» renders at y≈1030 while the viewport is 664 px tall — below the fold;
+  //   • document.body does NOT scroll (scrollHeight === innerHeight === 664). The form lives in an
+  //     inner react-native-web ScrollView — one DIV with scrollHeight 1547 / clientHeight 664 — and
+  //     that container is the only thing that can move.
+  //   • **Playwright's scrollIntoViewIfNeeded() does not move it.** That is why the first attempt at
+  //     this fix changed nothing and the failure survived it.
+  //   • A DOM-level `el.scrollIntoView({block:'center'})` DOES move it, where Playwright's helper
+  //     does not: in a probe that went straight from load → pick city → search, «بحث» moved
+  //     y 1030 → 583 and the search really ran («لقينا 1,025 إعلان», تبوك/بيع/سكني).
+  //
+  // NOT A PRODUCTION DEFECT — measured, not assumed. Driving the inner container to its maximum
+  // scroll (866 of 866) puts «بحث» at y=583, fully inside the 664 px viewport, `reachable: true`.
+  // A human scrolling the form on a phone reaches the button normally. §40.7: harness, not product.
+  //
+  // ⚠️ STILL OPEN, and this comment must not be read as a fix. In the FULL journey — which calls
+  // setDeal() and setPeriod() before picking the city — the click still times out even with the
+  // scroll above. Verified against sweeps #4, #5 and #6: mobile journeys 0, floor missed. What is
+  // narrowed: it is not the below-the-fold position alone (the scroll demonstrably resolves that in
+  // isolation), not "two «بحث» nodes" (there is exactly 1), and not the environment (it reproduces
+  // locally every time on the default «بيع»). What is NOT isolated: what setDeal/setPeriod leave on
+  // the page that keeps the click from landing. Owned by this routine; next run continues here.
+  //
+  // Cost of the bug: ALL THREE mobile journeys die on every «بيع» rotation (CI runs #10 and #11,
+  // local sweeps #3–#6), so the owner-mandated §34 mobile floor is not actually being exercised and
+  // the workflow is red on those runs — the same wound as a dark detector.
+  const search = page.getByText('بحث', { exact: true }).first();
+  // Wait for it to EXIST first — scrolling to an element that has not mounted is a silent no-op, and
+  // then the click just waits out its timeout below the fold exactly as before.
+  await search.waitFor({ state: 'attached', timeout: 30000 }).catch(() => {});
+  // Scroll the INNER container, from the DOM. Playwright's own scrollIntoViewIfNeeded() does NOT
+  // move a react-native-web ScrollView — that is measured, and is why the first attempt at this fix
+  // changed nothing. Settle afterwards: the scroll is not instantaneous and clicking mid-scroll
+  // fails actionability for the same reason being below the fold does.
+  // Scroll the FIRST match, because `.first()` is what gets clicked. An earlier version looped over
+  // every match and therefore scrolled to the LAST one — so on a page carrying two «بحث» nodes the
+  // harness centred one element and clicked a different, still-offscreen one, and the timeout
+  // survived the "fix" untouched.
+  await page.evaluate(() => {
+    for (const e of document.querySelectorAll('*'))
+      if (e.children.length === 0 && (e.textContent || '').trim() === 'بحث') {
+        e.scrollIntoView({ block: 'center' });
+        return;
+      }
+  }).catch(() => {});
+  await sleep(800);
+  await search.click();
   await page.waitForFunction((src) => new RegExp(src).test(document.body.innerText),
     SETTLED_RE.source, { timeout: 70000 });
   await sleep(2600);
@@ -314,29 +539,11 @@ const runSearch = async (page) => {
  * of its own — reading them off the whole page made the sweep accuse the app of re-scoping a city
  * when it had only read a card's prose (first run, 2026-08-23). An oracle that cannot tell the
  * app's own summary from a source's ad text is not allowed to accuse it. */
-const visibleState = (page) => page.evaluate(() => {
-  const all = document.body.innerText;
-  // The summary sits between «ملخص البحث» and the first listing card; fall back to the head of the
-  // document (before any card) so a layout change degrades to "read less", never "read a card".
-  const cardAt = all.indexOf('الضغط على هذا الإعلان');
-  const sumAt = all.indexOf('ملخص البحث');
-  const head = all.slice(0, cardAt > 0 ? cardAt : all.length);
-  const summary = sumAt >= 0 ? head.slice(sumAt) : head;
-  // Summary rows are short bulleted «• label: value» lines — cap the value so a run-on paragraph can
-  // never masquerade as a field.
-  const line = (label) => {
-    const m = summary.match(new RegExp(`[•·]\\s*${label}:\\s*([^\\n]{1,60})`));
-    return m ? m[1].trim() : null;
-  };
-  return {
-    city: line('المدينة'), district: line('الحي'), region: line('الإقليم'),
-    deal: line('نوع العملية'), type: line('نوع العقار'), budget: line('الميزانية'),
-    headline: ([...all.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].pop() || [])[1] ?? null,
-    zero: /ما لقينا|ما فيه نتائج/.test(all),
-    entities: (all.match(/&(?:bull|quot|amp|ndash|mdash|nbsp|lt|gt|#\d+);/g) || []).slice(0, 5),
-    latinInCards: (all.match(/\b(?:undefined|NaN|\[object)\b/g) || []).slice(0, 5),
-  };
-});
+// The parse is a PURE function in its own module so it can be unit-tested and mutation-proven
+// offline (`scripts/verify-live-sweep-visible-state-scope.ts`, in `npm test`) — the browser's only
+// job here is to hand over the rendered text. See visibleState.mjs for why the old in-page slice
+// read advertiser ad copy as if it were the app's own «ملخص البحث».
+const visibleState = async (page) => parseVisibleState(await page.evaluate(() => document.body.innerText));
 
 /**
  * LAYER 5's filter, derived from the app's OWN captured request so the two sides compare the SAME
@@ -348,7 +555,7 @@ const visibleState = (page) => page.evaluate(() => {
  * "found" three defects that were purely the oracle's own imprecision. A sweep that accuses the
  * product for its own missing predicate is worse than one that stays quiet: skip, and say why.
  */
-function dbFilterFromRequest(req, tax) {
+function dbFilterFromRequest(req, tax, cities) {
   const enc = encodeURIComponent;
   const unsupported = [];
   // What STAYS unexpressible, and why — each is a deliberate refusal, not an oversight:
@@ -395,7 +602,52 @@ function dbFilterFromRequest(req, tax) {
   if (req.p_deal) f += `&deal_ar=eq.${enc(req.p_deal)}`;
   if (req.p_rent_period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`;
   if (req.p_rent_period === 'شهري') f += '&payment_monthly=is.true&rent_now_pay_later=not.is.true';
-  if (req.p_cities?.length) f += `&city_ar=in.(${enc(req.p_cities.map((c) => `"${c}"`).join(','))})`;
+  // ── المدينة: mirror the RPC's THREE arms, never the label alone ───────────────────────────────
+  // The RPC's city predicate is (read from prosrc 2026-09-01, and what §42.2 describes):
+  //     normalize_ar(s.city_ar) = any(city_tokens)      ← the LABEL arm
+  //  OR s.city_id               = any(city_ids)         ← the row's own city
+  //  OR s.match_city_ids       && city_ids              ← the row's match SET (aliases + clusters)
+  //
+  // This oracle expressed only the first arm, as a literal label match. That was exact for as long
+  // as `loc_city_cluster` was EMPTY: a row's match_city_ids then held just its own city, so all
+  // three arms coincided and the label alone was a faithful stand-in. The owner-approved
+  // الأحساء/الهفوف cluster (migration 20260831195108, 2026-08-31) populated that table, and the arms
+  // separated — a search for «الاحساء» now correctly also returns its الهفوف siblings, exactly as
+  // intended, while a label-only oracle sees only one half of the union.
+  //
+  // On 2026-09-01 that produced ELEVEN false COUNT MISMATCHes across six independent cohorts, each
+  // one an accusation against a perfectly healthy product. The proof that production was right and
+  // the oracle wrong: every الاحساء/الهفوف pair summed EXACTLY to the RPC's own total, from both
+  // directions — 39+18=57 · 28+26=54 · 6+5=11 · 26+16=42 · 6+6=12 · 5+4=9. This is §41.15's rule
+  // again: when the oracle and the product disagree over a whole slice of the result set, suspect
+  // the oracle's ability to NAME the scope before the product's ability to find the rows.
+  //
+  // So resolve the requested names the way the RPC does — through the catalog, region-constrained
+  // (§41.16: a city NAME is not an identity; 290 of them repeat across regions) — and REFUSE when a
+  // name does not resolve, rather than silently falling back to the label that caused this.
+  if (req.p_cities?.length) {
+    if (!Array.isArray(cities) || !cities.length) {
+      return { comparable: false,
+               reason: 'city catalog unavailable: the RPC\'s city_id / match_city_ids arms cannot be expressed' };
+    }
+    const wantRegions = req.p_region_ids?.length ? new Set(req.p_region_ids.map(Number)) : null;
+    const ids = new Set();
+    for (const name of req.p_cities) {
+      const hits = cities.filter((c) => (c.city_ar === name || c.city_norm === cityLookupKey(name))
+                                     && (!wantRegions || wantRegions.has(Number(c.region_id))));
+      if (!hits.length) {
+        return { comparable: false,
+                 reason: `city «${name}» does not resolve in loc_catalog_city${wantRegions ? ' for the requested region' : ''}` };
+      }
+      for (const h of hits) ids.add(Number(h.city_id));
+    }
+    const idList = [...ids].sort((a, b) => a - b).join(',');
+    // Repeated `or=` params are ANDed by PostgREST (verified live 2026-09-01: `or=deal` + `or=region`
+    // returned 17,524, byte-identical to the same two as plain ANDed predicates), so this composes
+    // safely alongside the «سنوي» disjunction above.
+    f += `&or=(city_ar.in.(${enc(req.p_cities.map((c) => `"${c}"`).join(','))})`
+       + `,city_id.in.(${idList}),match_city_ids.ov.{${idList}})`;
+  }
 
   // ── the SCOPE arm: (tables ∧ types) OR (tables2 ∧ types2) ─────────────────────────────────────
   // p_tables IS the category scope (residential vs commercial source tables) — omitting it was the
@@ -537,7 +789,9 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   if (intent.city && ui.city && !ui.city.includes(intent.city) && !intent.city.includes(ui.city)) {
     defect(name, 'INTENT→UI', `asked for city «${intent.city}», summary shows «${ui.city}»`); j.ok = false;
   }
-  // THE أبها WATCH: an exact city must never come back scoped to a neighbourhood.
+  // THE أبها WATCH: an exact city must never come back scoped to a neighbourhood. Observed only
+  // when an exact city was actually asked for — a journey with no city cannot evaluate it.
+  if (intent.city && !intent.district) observeWatch('exact-city-never-rescoped');
   if (intent.city && !intent.district && ui.district) {
     defect(name, 'INTENT→UI', `exact city «${intent.city}» was re-scoped to district «${ui.district}» (exact-city-never-rescoped)`); j.ok = false;
   }
@@ -569,7 +823,7 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
       dbReq = { ...req, p_districts: r.labels };
     }
   }
-  const dbf = dbReq ? dbFilterFromRequest(dbReq, await taxonomy()) : { comparable: false, reason: j.dbSkipped };
+  const dbf = dbReq ? dbFilterFromRequest(dbReq, await taxonomy(), await cityCatalog()) : { comparable: false, reason: j.dbSkipped };
   if (dbf.comparable) {
     j.db = await dbCount(dbf.filter);
     if (j.db != null && j.db !== j.rpc) { defect(name, 'RPC→DB', `RPC ${j.rpc} vs independent DB ${j.db}`); j.ok = false; }
@@ -597,10 +851,13 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
     defect(name, 'RPC→RENDERED', `page shows ${rendered}, RPC returned ${j.rpc}`); j.ok = false;
   }
   // THE PAGE-CAP WATCH: 1,500 is the RPC page limit and must never be quoted as a match total.
+  // Only a journey that actually rendered a total can judge it.
+  if (rendered != null && j.rpc != null) observeWatch('true-total-never-page-cap');
   if (rendered === 1500 && j.rpc !== 1500) {
     defect(name, 'RPC→RENDERED', 'page quoted 1,500 — the RPC page cap — as the match total (true-total-never-page-cap)'); j.ok = false;
   }
-  // Arabic rendering watches
+  // Arabic rendering watches — observed whenever a rendered screen was actually scraped.
+  if (ui.entities) observeWatch('no-html-entities-rendered');
   if (ui.entities.length) { defect(name, 'RENDERED', `raw HTML entities on screen: ${ui.entities.join(' ')} (no-html-entities-rendered)`); j.ok = false; }
   if (ui.latinInCards.length) { defect(name, 'RENDERED', `placeholder junk on screen: ${ui.latinInCards.join(' ')}`); j.ok = false; }
 
@@ -645,5 +902,6 @@ async function withPage(mobile, fn) {
   } finally { await browser.close(); }
 }
 
-export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, withPage, setDeal, setPeriod, pickCity, runSearch,
-         visibleState, ledgerPlan, ledgerRecord, findings, journeys, defect, note, num, lastCount, sleep };
+export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, cityCatalog, cityLookupKey, withPage, setDeal, setPeriod, pickCity, runSearch,
+         visibleState, ledgerPlan, ledgerRecord, findings, journeys, defect, note, num, lastCount, sleep,
+         observeWatch, watchStatus, unobservedWatches, WATCH_OFFLINE_COVER };

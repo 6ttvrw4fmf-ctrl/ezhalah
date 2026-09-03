@@ -15,6 +15,17 @@ ADVANCED_FILTER_SOURCE_TRUTH.md`, or `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md
 question, cite it — do not re-read a giant old report to re-derive the same fact, and do not restate a
 settled rule at length in a chat reply; a one-line citation is enough.
 
+**Listing liveness is an architectural rule, not a per-platform habit — `docs/ops/LISTING_LIVENESS.md`
+is canonical (owner, 2026-08-30).** Read it before touching any liveness, cleanup, strike or
+deactivation path, and before adding a platform. In one line: liveness is THREE-valued
+(ALIVE / DEAD / **UNKNOWN**), UNKNOWN never deactivates anything, only a DIRECT fetch of the
+listing's own URL can kill and only at full grace, absence from our crawl is a candidate signal and
+never a verdict, and "seen by the crawler" (`last_seen_at`) is a different fact from "proven alive"
+(`last_verified_alive_at` — writable only through `scrapers/common/liveness_contract.py`). Every
+production-searchable platform must declare a strategy in `scrapers/common/liveness_policies.py` or
+CI fails. `select * from ops_platform_liveness_coverage;` is the standing answer to "do we have dead
+listings?" — do not re-derive it by hand.
+
 **The daily integrity routine's spec is `docs/ops/DATA_INTEGRITY_ENGINEER.md` — that FILE is the
 source of truth, not the cloud routine's prompt text.** If the two ever differ, update the routine to
 match the file. Read it before any data-fidelity, price, area, location, searchability or Normal
@@ -65,6 +76,15 @@ outside the roster is decoration. Adjudicate every finding against source before
    cases, and prove both directions. (Run #15 assumed absence meant silence on 13 aqaratikom rows;
    the source published «سنوي» on all 13.)
 
+**GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds ALL SEVEN routines. Canonical text:
+`docs/ops/ENGINEER_ROUTINES.md` §G; the file wins over any routine prompt.** In one line each:
+fix first, report last (a found bug is not a finished job); exactly SIX legitimate reasons to stop
+without fixing (§G.2) and nothing else; if the blocker is ownership or permissions, ROUTE the
+defect to the write-authorized routine with reproduction and root cause rather than saying someone
+should look at it; effort scales with what you find; never manufacture a 10/10; read Sentry FIRST
+every run and resolve an issue only after the production fix is verified; and none of it weakens an
+existing guard. Every routine's live prompt carries a condensed copy — §G is the source of truth.
+
 **Owner-granted engineering/product decisions belong in this repo, not just in an agent's own memory.**
 When the owner gives you a permanent rule, architecture decision, or business/compliance decision:
 land it in `docs/ARCHITECTURE.md` (or the relevant `docs/ops/*.md`) in the same session, not only in
@@ -89,6 +109,29 @@ nearby, fix it in the same edit.
 concurrent sessions with no per-session isolation — a background `gh pr create` with no `--head` can
 silently pick up whatever branch another session has checked out and open/merge the wrong PR (this
 happened once). Always pass `--head <exact-branch> --base main` explicitly.
+
+**`safe-pr-merge.ts` IS A MERGE ACTION. IT IS NEVER A READINESS OR DRY-RUN COMMAND (owner rule,
+2026-08-31, permanent).** Running it with a PR number verifies **and then merges**. There is no
+inspect-only mode, no `--check`, and no flag that stops it after the verification step. If you want
+to know whether a PR is ready — required checks, `mergeable`, `mergeStateStatus`, whether the branch
+is BEHIND — **read that state, do not run this tool**: the GitHub API, `pull_request_read` /
+`get_status`, or the Actions run list all answer it without side effects.
+
+**Therefore: any PR class that repo policy requires to stay OPEN for human review must never invoke
+this command unless the authorized owner has explicitly approved that specific merge.** The standing
+example is the one immediately below — a `migration_drift` repair PR touching `supabase/migrations/`,
+which this file already says is "never self-merged by an autonomous run". Before typing the command,
+answer one question: *is this a PR I am allowed to merge right now, without a human?* If the answer
+is anything but a clear yes, do not run it.
+
+How this rule was earned: on 2026-08-31 an autonomous seam run invoked
+`scripts/safe-pr-merge.ts 1407` intending only to *read* the PR's readiness after clearing a `behind`
+state, and merged a drift-repair PR that the rule below says must stay open for review (PR #1407,
+merge `f08f9b4`). The tool behaved exactly as documented; the mistake was treating a merge verb as a
+query. Nothing reached production — no workflow applies migrations on merge and no deploy workflow
+runs on push to `main` — and the owner directed that it not be reverted, since the merged state was
+green, production-aligned and drift-free. The lesson is recorded here rather than in any one agent's
+memory so the next session cannot repeat it.
 
 **Merge gate — use `scripts/safe-pr-merge.ts`, never a bare `gh pr merge` (permanent, 2026-08-24):**
 `gh pr checks --watch` returning means "nothing is still running" — NOT "safe to merge." PR #1046
@@ -356,3 +399,87 @@ handed only a flattened id set, so it can't see file pairs or filename collision
 `supabase_migrations.schema_migrations.statements` (matched by `version`) into
 `supabase/migrations/`, commit, and open a PR — this itself touches `supabase/migrations/`, so per
 the daily/senior routine rules it stays OPEN for review, never self-merged by an autonomous run.
+
+# How `npm test` finds its checks (owner-approved, 2026-08-28)
+
+**To add a barrier, create `scripts/verify-my-thing.ts`. That is the whole procedure — do not edit
+`package.json`.** A check runs BECAUSE IT EXISTS on disk; `scripts/lib/testRegistry.ts` discovers
+every `scripts/verify-*.{ts,mjs}` and `scripts/run-tests.mjs` runs them in sorted order, stopping at
+the first failure.
+
+This replaced a single 201-command `&&` chain on one line of `package.json`. Every routine adding a
+barrier edited that exact line, so two sessions adding a barrier in the same window conflicted
+essentially always — PR #1196 took five conflict/rebase rounds, #1177 three. Discovery removes the
+shared line rather than shortening it, so there is nothing left to conflict over.
+
+Discovery fails in the safe direction: **a new file nobody thought about RUNS.** The failure mode is
+a loud red, never a barrier that silently never executes — the direction this repo has been burned
+by before (nine dark detectors reading as a clean bill of health, §"Read this first").
+
+Three rules keep that safe, all enforced by `scripts/verify-test-registry-complete.ts` (in the suite):
+
+1. **`scripts/test-baseline.txt` is a FLOOR, not a list.** Every check the old chain ran must still
+   be discovered and run. Removing a test therefore takes a deliberate, reviewed edit to the
+   baseline — it cannot happen as a side effect of a rename, a bad glob, or a merge resolution.
+   Adding a test needs no baseline edit at all.
+2. **Every exclusion names a reason AND a home that exists.** `scripts/test-exclusions.txt` is
+   `name | where it DOES run | why`, and the "where" must be a workflow file that exists, an npm
+   script that exists, or an explicit `manual`. Live/browser checks that need production belong
+   here; so does `verify-migration-drift-vs-production.ts`, which §"Migration drift guard" pins OUT
+   of `npm test` deliberately. The file cannot become a graveyard, and cannot retire a check by
+   naming nowhere.
+3. **Never prove your own wiring by string-matching `package.json`.** Ask
+   `npmTestRuns(root, 'verify-my-thing')` from `scripts/lib/testRegistry.ts`. Sixteen barriers used
+   `pkg.includes('verify-me')` against the mega line; that predicate is false for every check now,
+   and the naive repair (match `run-tests` instead) is worse — it would pass for every file
+   including one nothing runs, i.e. a wiring check that cannot fail. The registry guard rejects the
+   pattern outright. Reading `package.json` for a real reason (a dependency, a script name) is fine.
+
+The runner fails closed three ways: a non-zero child fails the run; a **signal-killed child**
+(`status === null` — timeout, OOM) is a failure, not a skip; and an **empty run set** is itself a
+failure. `npm run test:list` prints the resolved run order; `npm run test:all` runs every check
+instead of stopping at the first failure.
+
+## SINGLE-WRITER RULE — `supabase/functions/agent/index.ts`
+
+**Only one active session may MODIFY the AI agent edge function at a time.** Other sessions may
+inspect it, run tests, investigate bugs, propose patches, and work on unrelated files — they must not
+write or merge overlapping changes to it while another session owns the surface.
+
+**Why.** That file is ~113KB of production code and several automation sessions edit it. On
+2026-08-29 two *individually correct* changes collided — the health heartbeat and the usage telemetry
+each added `const t0 = Date.now();` to the same scope in `runModel()` — and the function stopped
+booting. Every barrier was green, because they all read that file as TEXT.
+
+**Parse protection catches SYNTAX collisions. It does NOT catch two logically valid changes that
+overwrite or contradict each other.** That is why ownership and a final semantic diff both exist.
+
+### Before writing the agent function
+```bash
+scripts/agent-surface.sh claim "<session-id>" "<what you are changing>"   # fail-closed
+node scripts/agent-surface-preflight.mjs before                           # who else is in here?
+```
+`claim` refuses if another session owns it (TTL-bounded, so a crashed session cannot hold it
+forever). `before` lists open PRs touching the same file and the recent commits your work will land
+on top of.
+
+### Immediately before merge/deploy
+```bash
+git fetch origin main && git merge origin/main      # rebase FIRST
+node scripts/agent-surface-preflight.mjs final      # semantic diff + parse gate, fail-closed
+```
+`final` refuses if the branch is behind main, prints the merged file's diff against `origin/main`,
+and calls out **removed** lines — that is where a silent overwrite hides. Read them. Confirm every
+one is intentional before merging.
+
+### After deploy
+```bash
+scripts/agent-surface.sh smoke      # REAL boot + request against the live endpoint
+scripts/agent-surface.sh release "<session-id>"
+```
+**A successful deploy command is not production proof.** The 2026-08-29 outage reported a successful
+deploy and then returned `BOOT_ERROR` on every request. `smoke` asks the live function a real Arabic
+question and fails on `BOOT_ERROR` or on any response without a classification.
+
+The lock reuses `acquire_deploy_lock()` under the name `agent-edge-surface`. Only `^prod` names
+canonicalize to `production`, so claiming this surface never blocks a normal deploy.

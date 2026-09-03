@@ -21,6 +21,23 @@ The daily question:
 على العقار، هل يوصل لنفس العقار الصحيح؟» — If not, because of a fixable Ezhalah-side bug: fix it.
 Do not ask first.
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
+
+On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
+whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
+cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
+a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
+contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
+RUN: N` in your FINAL REPORT.
+
+If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
+owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
+Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
+doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
+
 ## 1. Test the ACTUAL Arabic filter — live, not a stale list
 Use the real production UI at https://ezhalah-app.vercel.app. Refer to user-facing controls by
 their actual Arabic names: «شراء» · «إيجار» · «سنوي» · «شهري» · المنطقة · المدينة · الحي ·
@@ -46,6 +63,41 @@ must satisfy every selection according to the trusted structured backend. Verify
 No filter silently ignored. No wrong listing added to pad results. No correctly-matching listing
 lost to Ezhalah-side search logic.
 
+### 3.1 THE NARROWING INVARIANT — adding a filter may only REMOVE rows (2026-08-29)
+**Narrowing a search can never make a listing appear that the broader search did not return, and can
+never lose a listing that still satisfies every selection.** Formally: for any search S and any
+additional selection f, `results(S + f) ⊆ results(S)`, and every row of `results(S)` satisfying f is
+in `results(S + f)`. This is the cheapest matching test there is — one search, one narrowing, one
+subset check — and it catches a whole family of scope bugs that per-search validation cannot see,
+because each side is internally consistent and only the RELATIONSHIP between them is wrong.
+
+Found by exactly this, 2026-08-29: «فئة تجاري» returned a محل misfiled into a residential table;
+«فئة تجاري» + «نوع محل» dropped it. `resolveSearchScope` had carried misfile recovery in one
+direction only since 2026-07-10 — Residential rows pulled back out of `*_commercial_listings` — and
+its Commercial mirror was never built, so a *broad* Commercial search recovered those rows through
+its own `isBroadCommercial` branch while a specific-نوع search collapsed to the commercial tables
+alone. Fixed, with the class derived from the taxonomy (the six Commercial clean types whose
+`CleanQuery.kinds` is `['com']`), and pinned by `scripts/verify-commercial-misfile-recovery.ts`.
+
+The invariant applies to every narrowing, not just نوع: adding a حي, a price bound, an area bound, a
+bedroom count, or a period must behave the same way. When a broad and a narrow search disagree in
+this direction, suspect the SCOPE the narrow search sends — not the rows.
+
+**Fired live every run since 2026-09-02: `e2e/qa-coverage/narrowing.mjs`** (`node
+e2e/qa-coverage/narrowing.mjs`, `QA_NARROW_COHORTS=<n>` to resize). It needs **no oracle at all** —
+the narrowed answer is checked against the BROAD answer's own rows, using the predicate fields the
+RPC itself returns (`effective_price`, `area_m2`, `bedrooms`). Two independent production answers
+checked against each other, so nothing it finds can be blamed on a harness reimplementation of the
+matching predicate: there isn't one. Per cohort it asserts all three conditions at once —
+`extra = 0` (narrowing invented a row), `missing = 0` (narrowing lost a qualifying row),
+`dupes = 0` — over price-min/price-max/area-min/area-max/bedrooms cuts derived from the broad set.
+Cells come from the live index grid stalest-first (§43.2), the broad set must fit inside one page to
+be a valid superset reference (§39.1), and every cut lands strictly between two observed values so a
+boundary convention can never read as a defect (§32 tests boundaries deliberately; this layer must
+not conflate the two). Contract pinned and mutation-proven by
+`scripts/verify-narrowing-invariant-probe.ts` in `npm test`. **Read trap §41.18 before changing how
+it derives a price bound.**
+
 ## 4. DIVERSITY COMES SECOND — match first, then diversity
 First build the exact eligible set; only then apply diversity/ranking. Where several platforms have
 valid matches: measure eligible listings per platform · inspect the first batch · inspect later
@@ -53,6 +105,52 @@ batches after «عرض المزيد» · verify no eligible platform is accident
 platform dominates due to an Ezhalah-side ranking bug. Diversity must NEVER introduce a property
 that fails the user's filters. One platform with genuine matches → one-platform results are
 CORRECT. **Never manufacture diversity.**
+
+### 4.1 PHOTO PREFERENCE COMES THIRD (owner PERMANENT rule, 2026-08-29)
+After match and diversity, prefer genuinely-matched listings with a real, usable photo — but this is
+a ranking nudge, NEVER an eligibility filter. A no-photo listing stays a genuine result: it must
+remain discoverable, counted in `total_count`, and reachable through «عرض المزيد» exactly as if this
+tier didn't exist. Verify daily: a search whose matches are mostly photo-bearing does not bury the
+few no-photo listings past the visible page, but does NOT drop them from the true count either;
+`total_count` and the full matched id-set are IDENTICAL whether or not photo preference is active.
+
+**UNKNOWN must remain UNKNOWN.** `search_listings_ar.has_photo` is `NULL` for any platform
+`ops_photo_capture_trust` hasn't cleared (≥50 reachable rows, ≥70% real-photo rate — both
+re-measured on every sync run, never a hand-picked list). A `NULL` row is neither rewarded as
+"has a photo" nor punished as "confirmed no photo" — it ranks strictly between the two. Test:
+query `ops_photo_capture_trust` for the currently-untrusted platforms and confirm none of their
+rows are ever demoted below a confirmed-false row of another platform in the same tier.
+
+Live behavioral barrier: `scripts/verify-photo-preference-and-rotation-live.ts` (§ "Photo preference
++ rotation" below), scheduled via `.github/workflows/photo-rotation-live-check.yml`.
+
+### 4.2 CONTROLLED ROTATION COMES FOURTH, and LAST (owner PERMANENT rule, 2026-08-29)
+Do not confuse this with the "Rotation — never Riyadh-heavy" section further down this document —
+that section is about QA COVERAGE sampling (spreading test journeys across cities during
+certification runs); THIS section is about RESULT ORDERING (which listings a real user sees first).
+Two unrelated concepts that happen to share a name — keep them separate in conversation and in code.
+
+The rule: no cohort's top results may permanently belong to the same handful of listings for every
+user, forever — but rotation must never be `ORDER BY random()`, never reshuffle a user's own
+in-progress browse/pagination walk, and never outrank a materially better match. Test daily:
+- **Same search, same session, repeat page loads → IDENTICAL order.** Deterministic, not random.
+- **Two different devices, same cohort, same moment → the top results may legitimately differ.**
+  This is the fix for the old defect: a brand-new visitor's device gets its own rotation seed from
+  its very first search (`src/lib/rotationSeed.ts`), not a revisit counter that started at 0 for
+  everyone — the old mechanism never actually solved this, only "same device, later visit" did.
+- **A rotated multi-page `عرض المزيد` walk has ZERO duplicates and ZERO skipped rows** — concatenate
+  every batch and diff against a single unpaged fetch of the same search; they must match exactly.
+- **An explicit objective sort (price/area/beds/oldest) is BYTE-IDENTICAL with or without rotation
+  active.** Rotation must visibly step aside the instant the user picks a real sort — verify by
+  comparing the exact returned order both ways.
+- **Rotation can only reorder WITHIN a tier that match + diversity + photo preference already
+  produced** — it is structurally incapable of promoting a worse match over a better one, because it
+  is the very last ORDER BY term before the total-order id tiebreaker. If a rotated result ever looks
+  "wrong" (an obviously worse listing above a better one), that is a match/diversity/photo bug, not a
+  rotation bug — rotation cannot cause it by construction.
+
+Live behavioral barrier: `scripts/verify-photo-preference-and-rotation-live.ts`; offline contract:
+`scripts/verify-rotation-seed-contract.ts` (in `npm test`).
 
 ## 5. السعر — heavy daily testing
 No price · min only · max only · min+max · very narrow · wide · low · high · strange boundaries ·
@@ -216,6 +314,11 @@ it cannot be fixed safely, and what evidence/decision is missing. Otherwise: fix
 ## 28. Final report — only after fix + deploy + retest
 > For a **major** certification the report block in **§40.9** is REQUIRED in addition to this
 > section's content. §28 governs the daily heartbeat; §40.9 governs major runs.
+>
+> **Every run also reports the six §43.4 numbers SEPARATELY** — browser journeys · production API
+> searches · exact-set SQL differentials · unique cohorts covered · stale cohorts revisited ·
+> never-tested cohorts remaining. They are never merged into one "searches" figure (owner,
+> 2026-08-28): a request count is not a coverage claim.
 
 Order: full testing → fixes → barriers → regression suite → safe deployment → live production
 retest → final report. Header: `🧪 مهندس اختبار البحث والتطابق اليومي — Before: X/10 → After: X/10`.
@@ -635,6 +738,27 @@ appears broken.
     `'monthly'`/`'both'` half was guarded, so deleting either `dealCombined` clause collapsed every
     combined search to an annual-only pool with the suite fully green.
 
+18. **`effective_price` comes back ANNUALISED, but a «شهري» budget is sent in MONTHLY units and the
+    RPC ×12s it** (hit 2026-09-02, on the very first run of the §3.1 narrowing probe). The RPC's own
+    price arm is explicit:
+    `s.price_annual >= coalesce(p_price_min,0) * (case when p_rent_period='شهري' then 12 else 1 end)`
+    — and `src/data/remote.ts:363` says the same from the client side ("bounds already in the
+    displayed unit; the RPC ×12s a monthly [bound]"). So a harness that reads a returned
+    `effective_price` and feeds it straight back as a «شهري» bound is asking for a budget **12×
+    too large**, gets 0 rows, and reads as production losing every qualifying listing.
+    It did exactly that: شقة/إيجار/شهري/الشقيق came back `broad=29 narrow=0 expected=10`, a
+    confident total matching failure. Production was right on both of its layers — bisecting the
+    bound reproduced the ×12 exactly (73,920 annual ÷ 12 = 6,160/mo: `priceMin=6000` → 29 rows,
+    `priceMin=6200` → 22; 417,600 ÷ 12 = 34,800: `priceMin=34800` → 1, inclusive).
+    Rule: **a price bound is expressed in the unit the USER sees, never in the unit the row
+    returns.** When deriving a bound from returned rows on a «شهري» search, choose the cut as a
+    multiple of 12 in annual space and divide by 12 for the request, so the RPC's ×12 is exact and
+    no rounding drift appears at the boundary. Pinned, mutation-proven in both directions, by
+    `scripts/verify-narrowing-invariant-probe.ts` (in `npm test`).
+    This is §40.7 in its purest form again — the same shape as traps 15, 16 and 17: **when the probe
+    and the product disagree by the whole result set, suspect the probe's ability to express the
+    question before you suspect the product's ability to answer it.**
+
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 
 > **What the user sees must match the actual listing/search truth exactly, in clean Arabic, with no
@@ -680,6 +804,83 @@ admin-region label as city · guessed unknown location · district non-canonical
 two ways) and `mon_detect_ranking_diversity_contract()` (daily-gated; drives the real RPC). Both are
 in the `mon_run_all_detectors()` roster. All six label conditions and the ranking comparison are
 mutation-proven — each shown to read 0 on clean data and 1 on a deliberately broken row.
+
+## 43. THE TWO-TIER MODEL — coverage, not request volume (owner rule, 2026-08-28, permanent)
+
+> «Do not increase production traffic merely to make the search count larger. The objective is
+> coverage and defect detection, not request volume.» — owner, 2026-08-28
+
+Testing this product has exactly **two tiers**, and they are never conflated.
+
+| | **Daily heartbeat** | **Major certification** |
+|---|---|---|
+| purpose | catch regressions cheaply and continuously | prove a change did not alter what users can find |
+| when | every run (§20) | ONLY for a meaningful change to Filter, matching, location, pagination, cards, or anything else able to alter search eligibility or results (§40) |
+| browser journeys | ~10–25 | ~200 |
+| production API searches | a **bounded budget** (`DAILY_BUDGET`, `e2e/qa-coverage/plan.mjs`) | ~5,000 |
+| SQL differential | a stratified exact-set sample | the FULL searchable inventory |
+
+**A daily heartbeat is never reported as a major certification.** Naming it one inflates the
+evidence behind every claim in the report.
+
+### 43.1 The daily budget is a CEILING, not a target
+Spending less of it is a perfectly good run. Spending it on cells that were tested yesterday is not.
+Production is 2 vCPU and the search RPC is already 64.4% of all database time (§40.1) — the budget
+exists because real users share that machine, not because a number looks good in a report.
+
+**Never pad a run to reach a count.** Once the meaningful combinations are covered, thousands of
+extra near-identical calls add production load without adding confidence: they re-test one predicate
+shape with different numeric literals. Confidence about *data* belongs to the SQL differential
+(§40.5), which validates every matching row at once and costs 5.5× less than a single RPC search.
+
+### 43.2 Stale-first and risk-first, never population-first
+Coverage is drawn **stalest-first** from `ops_qa_coverage_ledger`, weighted by **risk**, across
+نوع العقار × المدينة/الحي × العملية/الفترة × filter shape. A cohort nothing has ever tested outranks
+every previously-tested one; among tested cohorts, the stalest wins. Population NEVER buys a slot.
+
+This rule is written from a real failure: **the 2026-08-28 daily run fired 446 RPC searches ordered
+by population** — biggest populated cell first — so it re-tested الرياض apartments while «سكن عمال»,
+«مخيم» and dozens of small cities stayed untouched for weeks. The browser sweep, which has rotated
+stalest-first since 2026-08-23, was the only layer whose coverage actually moved. The search count
+looked impressive; the coverage did not improve, and nothing in the suite could tell the difference.
+
+Machinery (do not rebuild it): `e2e/qa-coverage/plan.mjs` (`planCells` · `score` · `RISK` ·
+`DAILY_BUDGET`), `e2e/qa-coverage/request.mjs` (the app's serialization, §41-hardened),
+`e2e/qa-coverage/run.mjs` (fires, validates, writes coverage back), and
+`ops_qa_cohort_catalog()` (the harvested cohort/table truth, anon-readable). The whole contract —
+stale-first ordering, the budget ceiling, the per-نوع spread, every §41 serialization rule, and a
+**mutation proof that a population-first planner fails it** — is pinned by
+`scripts/verify-qa-coverage-planner.ts` in `npm test`.
+
+### 43.3 What each layer is EVIDENCE for
+Neither layer substitutes for the other; they answer different questions.
+
+- **Browser journeys** prove the actual user path, end to end:
+  `UI intent → request → RPC → DB oracle → rendered result`. Nothing else can see what a browser
+  renders (§40, THE LIVE BROWSER SWEEP).
+- **The independent SQL differential** is the stronger evidence for exact data correctness: it
+  compares the whole result SET (`missing = extra = duplicates = count mismatch = 0`) rather than
+  asking whether a count looks plausible. Prefer it over more HTTP searches, always.
+- **Production API searches** sit between them: broad predicate coverage at a cost the instance can
+  absorb.
+
+### 43.4 Report the numbers SEPARATELY
+Every run reports these as distinct figures, never summed into one "searches" number:
+
+```
+BROWSER JOURNEYS:            PRODUCTION API SEARCHES:      EXACT-SET SQL DIFFERENTIALS:
+UNIQUE COHORTS COVERED:      STALE COHORTS REVISITED:      NEVER-TESTED COHORTS REMAINING:
+```
+
+`NEVER-TESTED COHORTS REMAINING` is the honest one: it is the size of the blind spot, and it may
+only shrink over time. A run that leaves it unchanged covered nothing new, whatever its search count.
+
+### 43.5 Load is a stop condition, not a budget to spend
+**If production load approaches the measured safe limit, reduce testing rather than impact users.**
+The envelope (§40.6) is concurrency ≤ 2 sustained (bursts ≤ 3, never > 6) and ≤ 1.5 searches/second,
+avoiding `sync-search-listings-ar` at :14 and the 01:00–06:00 UTC scraper window. Watch latency
+throughout; degrading Supabase to finish a run is a FAILED run, and an abandoned run that protected
+users is a successful one. `QA_BUDGET=<n>` exists precisely so a run can be made smaller on the day.
 
 ## Final principle
 **MATCH → SOURCE TRUTH → DIVERSITY → USER JOURNEY → PERFORMANCE**, in that order. The engineer owns
@@ -745,12 +946,15 @@ cards actually grow · the headline total never moves · المدينة/الحي
 all survive · no HTML entities or `undefined` appear in later batches · the request's predicate does
 not drift (same `p_deal`/`p_rent_period`/`p_cities`/`p_districts`/`p_category`/`p_types`, later
 offset only) · no duplicate `source_table:listing_id` in the served set (§30 identity, never card
-text). **A healthy run is 10 → 100 cards and exactly ONE pager click** — production caps one search's
-browse at `BROWSE_CAP` 100 and then offers «خلّنا نحدد الطلب أكثر» instead of paging on, so the
-pager's absence at 100 is the contract, not a defect. What the journey asserts there is that the
-closing line still states the TRUE total — «لقينا 21,868 إعلان يطابق طلبك، وعرضنا لك 100 منها» —
-never the cap. Verified live 2026-08-27 on الرياض/إيجار/سنوي, جدة/بيع and الدمام/إيجار/شهري:
-3 journeys, 0 defects.
+text). **A healthy first page is 10 → 100 cards on exactly ONE pager click, and paging then
+CONTINUES in clean 100-batches (100 → 200 → 300 …) for as long as matches remain** — owner
+2026-08-29, superseding the 2026-08-20 lifetime cap this paragraph used to describe; «خلّنا نحدد
+الطلب أكثر» is offered alongside, never instead of, continued browsing. What the journey asserts is
+that every batch keeps the per-batch invariants above AND the closing line always states the TRUE
+total with the honest shown count — «عرضت لك أول 100 من أصل 21,868 إعلان مطابق» — never a batch
+size standing in for the total, and never a «عرض المزيد» offered when no matches remain
+(`scripts/verify-result-cap-honesty.ts` pins the continuation contract under its original
+filename).
 
 ### Permanent watches (one per defect fixed 2026-08-23)
 `exact-city-never-rescoped` · `monthly-af-counts-update` · `true-total-never-page-cap` ·

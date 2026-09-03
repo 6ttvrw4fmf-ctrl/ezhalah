@@ -8,7 +8,7 @@
 //
 //   node --experimental-strip-types scripts/verify-af-oracle-filter-translator.ts   (wired into `npm test`)
 
-import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { buildOracleQS, directionVariantsFrom } from './lib/afOracleFilter.ts';
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -57,9 +57,8 @@ const BASE = { p_deal: 'بيع', p_tables: ['aqar_residential_listings'], p_type
   const monthly = buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'شهري' }).qs;
   check('monthly period = payment_monthly AND NOT rnpl (excludes the annual RNPL branch)',
     monthly.includes('payment_monthly=is.true') && monthly.includes('rent_now_pay_later=not.is.true'));
-  const both = buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'كلاهما' });
-  check('"both" (كلاهما) is honestly UNHANDLED, never guessed at',
-    both.unhandled.some((u) => u.includes('كلاهما')));
+  // 'كلاهما' (both periods) was UNHANDLED here until 2026-09-02; it is now translated verbatim from
+  // the clause and proven in the inconclusive-by-default block below.
 }
 
 // ── AF-answer column mapping (each one a real defect class if the operator/column is wrong) ─────
@@ -74,8 +73,25 @@ const BASE = { p_deal: 'بيع', p_tables: ['aqar_residential_listings'], p_type
     && buildOracleQS({ ...BASE, p_age_max: 5 }).qs.includes('property_age=lte.5'));
   check('street width → street_width_m gte/lte',
     buildOracleQS({ ...BASE, p_street_width_min: 15 }).qs.includes('street_width_m=gte.15'));
-  check('directions → direction_ar in',
-    buildOracleQS({ ...BASE, p_directions: ['شمال'] }).qs.includes(`direction_ar=in.(${encodeURIComponent('"شمال"')})`));
+  // DIRECTIONS (2026-09-02): the index stores «…ي» spellings the RPC normalises, so the oracle must
+  // expand each key through a map built from the OBSERVED spellings, and refuse without one.
+  {
+    const dv = directionVariantsFrom(['شمال', 'شمال شرق', 'شمال شرقي', 'جنوب غربي']);
+    check('directionVariantsFrom maps a «…ي» compound onto its canonical key and keeps the key itself',
+      !!dv && dv['شمال شرق'].includes('شمال شرق') && dv['شمال شرق'].includes('شمال شرقي') && dv['جنوب غرب'].includes('جنوب غربي'));
+    check('directionVariantsFrom REFUSES an unmappable spelling (a ninth bucket must not be silently dropped)',
+      directionVariantsFrom(['شمال', 'شمالي شرقي']) === null && directionVariantsFrom(['شرق', 'north']) === null);
+    check('directions WITHOUT a variants map are UNHANDLED (a literal match is known to undercount)',
+      buildOracleQS({ ...BASE, p_directions: ['شمال شرق'] }).unhandled.some((u) => u.includes('p_directions')));
+    const withMap = buildOracleQS({ ...BASE, p_directions: ['شمال شرق'] }, { directionVariants: dv! });
+    check('directions WITH a map → direction_ar in (key AND its observed «…ي» spelling)',
+      withMap.unhandled.length === 0 &&
+      withMap.qs.includes(`direction_ar=in.(${encodeURIComponent('"شمال شرق"')},${encodeURIComponent('"شمال شرقي"')})`));
+    check('a key the map does not know is UNHANDLED, not silently matched literally',
+      buildOracleQS({ ...BASE, p_directions: ['فوق'] }, { directionVariants: dv! }).unhandled.some((u) => u.includes('p_directions')));
+    check('a plain key with no observed variant still translates to itself alone',
+      buildOracleQS({ ...BASE, p_directions: ['شمال'] }, { directionVariants: dv! }).qs.includes(`direction_ar=in.(${encodeURIComponent('"شمال"')})`));
+  }
   check('rating/reviews → rating gte / reviews_count gte',
     buildOracleQS({ ...BASE, p_rating_min: 9.5 }).qs.includes('rating=gte.9.5')
     && buildOracleQS({ ...BASE, p_reviews_min: 10 }).qs.includes('reviews_count=gte.10'));
@@ -95,18 +111,120 @@ const BASE = { p_deal: 'بيع', p_tables: ['aqar_residential_listings'], p_type
 {
   check('an unmapped amenity token is UNHANDLED, never silently dropped',
     buildOracleQS({ ...BASE, p_amenities: ['not_a_real_amenity'] }).unhandled.some((u) => u.includes('not_a_real_amenity')));
-  check('an unverified param (e.g. price) with a REAL value is UNHANDLED',
-    buildOracleQS({ ...BASE, p_price_min: 500000 }).unhandled.some((u) => u.includes('p_price_min')));
+  // NOTE (2026-09-01 → 2026-09-02): this pair has named p_price_min, then p_rent_period='كلاهما', as
+  // its example of an unverified param — each time the translator learned the previous example. The
+  // property being pinned is unchanged (a REAL value for an unverified param must be UNHANDLED,
+  // while its ABSENCE must not trip anything); the example is now a period that does not exist.
+  check('an unverified param with a REAL value is UNHANDLED',
+    buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'ربع سنوي' }).unhandled.some((u) => u.includes('p_rent_period')));
   check('the SAME unverified param, absent (null), does not falsely trip unhandled',
-    buildOracleQS({ ...BASE, p_price_min: null }).unhandled.length === 0);
+    buildOracleQS({ ...BASE, p_rent_period: null }).unhandled.length === 0);
+  // BOTH periods (2026-09-02, full-surface sweep): 'كلاهما' is the union of the two known-period
+  // arms, translated verbatim from the clause — never "no period filter".
+  {
+    const both = buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'كلاهما' });
+    check('p_rent_period=كلاهما under Rent translates (no longer unhandled)', both.unhandled.length === 0, JSON.stringify(both.unhandled));
+    check('…as payment_monthly OR literal-annual OR (monthly-labelled AND RNPL) — all three arms, one or=()',
+      both.qs.includes(`or=(payment_monthly.is.true,rent_period_ar.eq.${encodeURIComponent('سنوي')},and(rent_period_ar.eq.${encodeURIComponent('شهري')},rent_now_pay_later.is.true))`));
+    check('…and does NOT degrade to "no period filter" (an unpublished period must stay out)',
+      !both.qs.includes('rent_period_ar=not.is.null') && both.qs.includes('or=(payment_monthly'));
+    check('a period under a NON-Rent deal is REFUSED (the clause skips the period predicate for Buy rows; translating it would filter Buy rows by a rent column)',
+      buildOracleQS({ ...BASE, p_deal: 'بيع', p_rent_period: 'سنوي' }).unhandled.some((u) => u.includes('p_rent_period')));
+  }
+  check('a param that is now VERIFIED no longer reports unhandled (price was, until 2026-09-01)',
+    buildOracleQS({ ...BASE, p_price_min: 500000 }).unhandled.length === 0);
   check('an entirely unknown future param name is UNHANDLED (default case), not ignored',
     buildOracleQS({ ...BASE, p_some_future_param: 42 }).unhandled.some((u) => u.includes('p_some_future_param')));
 }
 
 // ── genuinely irrelevant params never produce noise ───────────────────────────────────────────
+// p_category was REMOVED from this list on 2026-08-28. It was never informational: the clause's
+// category-purity predicate makes a `both`-macro type eligible only from the table matching the
+// requested category. Treating it as paging metadata produced a live false differential (المدينة
+// المنورة / Residential Building / Buy: oracle 708 vs RPC 707, the row being a `both`-macro «عمارة»
+// in a commercial table) AND left the oracle unable to catch a category-purity leak at all.
 {
-  check('paging/sorting/informational params never appear in the WHERE clause and never trip unhandled',
-    buildOracleQS({ ...BASE, p_limit: 100, p_offset: 0, p_sort_by: 'recent', p_category: 'Residential' }).unhandled.length === 0);
+  check('paging/sorting params never appear in the WHERE clause and never trip unhandled',
+    buildOracleQS({ ...BASE, p_limit: 100, p_offset: 0, p_sort_by: 'recent' }).unhandled.length === 0);
+}
+
+// ── category purity is a PREDICATE, and a missing macro map fails LOUD ─────────────────────────
+{
+  const noMap = buildOracleQS({ ...BASE, p_category: 'Residential' });
+  check('p_category without a macro map is UNHANDLED, never silently dropped',
+    noMap.unhandled.some((u) => u.includes('p_category')), JSON.stringify(noMap.unhandled));
+
+  const macros = { 'شقة': 'Residential', 'عمارة': 'both', 'محل': 'Commercial' };
+  const withMap = buildOracleQS({ ...BASE, p_category: 'Residential' }, { typeMacros: macros });
+  check('p_category WITH a macro map is fully handled', withMap.unhandled.length === 0, JSON.stringify(withMap.unhandled));
+
+  // scope A keeps `both`; scope B (the other category's tables) must drop it
+  const body = {
+    ...BASE, p_category: 'Residential',
+    p_tables: ['aqar_residential_listings'], p_types: ['شقة', 'عمارة'],
+    p_tables2: ['aqar_commercial_listings'], p_types2: ['شقة', 'عمارة'],
+  };
+  const q = decodeURIComponent(buildOracleQS(body, { typeMacros: macros }).qs);
+  const arms = q.match(/and\(source_table\.in\.\([^)]*\),type_ar\.in\.\([^)]*\)\)/g) ?? [];
+  check('scope A keeps a `both`-macro type (its tables match the category)',
+    arms.some((x) => x.includes('residential_listings') && x.includes('عمارة')), arms.join(' | '));
+  check('scope B DROPS a `both`-macro type (its tables do not match the category)',
+    arms.some((x) => x.includes('commercial_listings') && !x.includes('عمارة')), arms.join(' | '));
+  check('a Commercial-only type is dropped from a Residential scope entirely', !q.includes('محل'));
+}
+
+// ── NUMERIC NARROWING (added 2026-09-01, alongside the translations themselves) ──────────────────
+//
+// price / area / beds / exact-bathrooms / floor / age-unknown / new-construction / tenant / licence
+// were ALL unclassified until 2026-09-01, so the oracle refused every narrowed search and AF's
+// stacked-state journeys could never be independently certified. These pin the translations against
+// af_eligibility_clause()'s actual semantics; the live differential that proved them (27/27 exact
+// against production, incl. all three cities) lives in verify-af-live-truth.ts.
+{
+  const BUY = { ...BASE, p_deal: 'بيع' };
+  const qs = (b: Record<string, unknown>) => buildOracleQS(b).qs;
+
+  check('a Buy budget reads price_total and excludes the priceless rows the clause excludes',
+    qs({ ...BUY, p_price_min: 500000, p_price_max: 1500000 })
+      .includes('price_total=gt.0') &&
+    qs({ ...BUY, p_price_min: 500000 }).includes('price_total=gte.500000'));
+
+  // The clause compares a MONTHLY budget against the ANNUAL column scaled by 12 (L78/79). Reading
+  // a monthly figure straight off price_annual would silently return ~1/12th of the right band.
+  check('a MONTHLY rent budget is scaled x12 onto price_annual, not compared raw',
+    qs({ ...BASE, p_deal: 'إيجار', p_rent_period: 'شهري', p_price_min: 2000, p_price_max: 8000 })
+      .includes('price_annual=gte.24000'));
+  check('an ANNUAL rent budget is NOT scaled',
+    qs({ ...BASE, p_deal: 'إيجار', p_rent_period: 'سنوي', p_price_min: 24000 })
+      .includes('price_annual=gte.24000'));
+
+  check('beds_exact becomes a set membership, beds_min a threshold',
+    qs({ ...BUY, p_beds_exact: [2, 3] }).includes('bedrooms=in.(2,3)') &&
+    qs({ ...BUY, p_beds_min: 3 }).includes('bedrooms=gte.3'));
+
+  check('area min/max map to area_m2 in the right direction',
+    qs({ ...BUY, p_area_min: 100, p_area_max: 300 }).includes('area_m2=gte.100') &&
+    qs({ ...BUY, p_area_min: 100, p_area_max: 300 }).includes('area_m2=lte.300'));
+
+  // A budget of 0 is the UI's "unset", and the clause wraps every budget in nullif(x,0). Treating a
+  // 0 as a real bound would exclude every priceless row from an unfiltered search.
+  check('a 0 budget is treated as unset (nullif semantics), not as a real bound',
+    !qs({ ...BUY, p_price_min: 0, p_price_max: 0 }).includes('price_total'));
+
+  // Genuine unions stay refusals — an approximation here would make the oracle agree with a wrong
+  // RPC, the one failure mode this whole module exists to prevent.
+  // p_deal null IS the combined Buy+Rent search (both buttons lit) — BASE carries a deal, so it
+  // must be stripped, not merely omitted from the spread.
+  check('a budget under a COMBINED Buy+Rent search is refused, not approximated',
+    buildOracleQS({ ...BASE, p_deal: undefined, p_price_min: 100000 }).unhandled.length > 0);
+  check('beds_exact and beds_min together (a real OR of two arms) is refused, not silently narrowed',
+    buildOracleQS({ ...BUY, p_beds_exact: [3], p_beds_min: 2 }).unhandled.length > 0);
+
+  // Ordering-only params must not narrow anything — p_rotation_seed is sent on EVERY search, so a
+  // predicate here would corrupt every single oracle count.
+  check('p_rotation_seed changes nothing about the predicate (ordering-only)',
+    qs({ ...BUY, p_rotation_seed: 'seed|2026-W36' }) === qs(BUY) &&
+    buildOracleQS({ ...BUY, p_rotation_seed: 'seed|2026-W36' }).unhandled.length === 0);
 }
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
@@ -133,10 +251,31 @@ mustCatch('scope B silently ignored would make a Residential+commercial-mirrored
   })());
 mustCatch('an unmapped amenity being treated as a boolean column of the same name (fabricated column)',
   !buildOracleQS({ ...BASE, p_amenities: ['totally_made_up'] }).qs.includes('totally_made_up=is.true'));
-mustCatch('"both" period silently resolving to "no filter" (would over-match anything)',
-  buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'كلاهما' }).unhandled.length > 0);
+mustCatch('"both" period silently resolving to "no filter" (would over-match anything: an unpublished period must stay out)',
+  (() => {
+    const both = buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'كلاهما' });
+    const none = buildOracleQS({ ...BASE, p_deal: 'إيجار' });
+    return both.unhandled.length === 0 && both.qs !== none.qs && both.qs.includes('or=(payment_monthly.is.true');
+  })());
+mustCatch('a direction key matched LITERALLY (would drop every «…ي» spelling and report a phantom EXTRA)',
+  (() => {
+    const dv = directionVariantsFrom(['شمال شرقي']);
+    return !!dv && buildOracleQS({ ...BASE, p_directions: ['شمال شرق'] }, { directionVariants: dv }).qs.includes(encodeURIComponent('"شمال شرقي"'));
+  })());
 mustCatch('rnpl amenity resolving to a nonexistent "rnpl" column instead of rent_now_pay_later',
   !buildOracleQS({ ...BASE, p_amenities: ['rnpl'] }).qs.includes('rnpl=is.true'));
+mustCatch('a monthly rent budget compared raw against the annual column (would return ~1/12th the band)',
+  buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'شهري', p_price_min: 2000 }).qs
+    .includes('price_annual=gte.24000'));
+mustCatch('an ordering-only param leaking into the predicate (p_rotation_seed rides every search)',
+  buildOracleQS({ ...BASE, p_deal: 'بيع', p_rotation_seed: 'z' }).qs
+    === buildOracleQS({ ...BASE, p_deal: 'بيع' }).qs);
+mustCatch('new-construction true/false collapsing to one filter (would ignore the answer entirely)',
+  buildOracleQS({ ...BASE, p_is_new_construction: true }).qs
+    !== buildOracleQS({ ...BASE, p_is_new_construction: false }).qs);
+mustCatch('age_unknown inverted — UNKNOWN and KNOWN must never resolve to the same predicate',
+  buildOracleQS({ ...BASE, p_age_unknown: true }).qs.includes('property_age=is.null')
+    && buildOracleQS({ ...BASE, p_age_unknown: false }).qs.includes('property_age=not.is.null'));
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }

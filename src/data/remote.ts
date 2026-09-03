@@ -13,6 +13,7 @@ import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { decodeEntities } from '@/lib/htmlEntities';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
+import { rotationSeed } from '@/lib/rotationSeed';
 import saLocations from './sa-locations.json';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
@@ -596,19 +597,44 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
   const resSel = effectiveTypes(q);
   const resGroups = effectiveGroups(q);
-  const resSelectedTypeAr = resSel.length ? typeArForTypes(resSel) : (resGroups.length ? typeArForTypes(resGroups) : null);
+  // The selected clean type(s)/group(s) as type_ar labels. Used by BOTH misfile-recovery branches
+  // below, so it is not residential-specific despite where it was first needed.
+  const selectedTypeAr = resSel.length ? typeArForTypes(resSel) : (resGroups.length ? typeArForTypes(resGroups) : null);
   const resMisfileTypes = isBroadResidential
     ? RESIDENTIAL_TYPE_AR_COM
-    : (resSelectedTypeAr ? resSelectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
+    : (selectedTypeAr ? selectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
   const resScopeBTables = platformScope(COM_TABLES.filter((t) => !mainTables.includes(t)));
   const attachResScopeB = q.category === 'Residential' && !isBroadCommercial
     && resMisfileTypes.length > 0 && resScopeBTables.length > 0;
+
+  // THE COMMERCIAL MIRROR (2026-08-29). FIX A above recovers Residential-macro rows misfiled into
+  // *_commercial_listings; the same misfile happens in the other direction and, until now, only the
+  // BROAD «فئة تجاري» search recovered it. Narrowing to a نوع made a matching listing DISAPPEAR:
+  // measured live on october_residential_listings:9618987 (محل / إيجار / سنوي / مكة المكرمة /
+  // حي بطحاء قريش) — «فئة تجاري» returned 7 including it, «فئة تجاري + نوع محل» returned 2 without
+  // it, and the same narrowed request with this scope returned 3, i.e. exactly the one misfiled row
+  // and nothing else. A narrower filter must never lose a listing the broader one returns.
+  //
+  // Scoped exactly like its mirror: the residential tables the main scope does not already read
+  // (مكتب's CleanQuery.extraTables already pulls in dealapp_residential, so that stays out), the
+  // SELECTED types only, and عمارة EXCLUDED via COMMERCIAL_TYPE_AR_RES — in a residential table
+  // عمارة is a Residential Building, so including it would leak apartment blocks into a Commercial
+  // search. resTables(q) rather than the bare constant, so the set is identical to the one the broad
+  // Commercial search scans: the narrow result is then a subset of the broad one by construction.
+  const comMisfileTypes = selectedTypeAr
+    ? selectedTypeAr.filter((t) => COMMERCIAL_TYPE_AR_RES.includes(t))
+    : [];
+  const comScopeBTables = platformScope(resTables(q).filter((t) => !mainTables.includes(t)));
+  const attachComScopeB = q.category === 'Commercial' && !isBroadCommercial
+    && comMisfileTypes.length > 0 && comScopeBTables.length > 0;
 
   const scopeB = isBroadCommercial
     ? { p_tables2: tables, p_types2: COMMERCIAL_TYPE_AR_COM }
     : attachResScopeB
       ? { p_tables2: resScopeBTables, p_types2: resMisfileTypes }
-      : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
+      : attachComScopeB
+        ? { p_tables2: comScopeBTables, p_types2: comMisfileTypes }
+        : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
 
   return {
     // dealCombined (owner feature 2026-08-20, Filter شراء+إيجار both selected) → null, same as
@@ -734,13 +760,17 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
 }
 
 // Annual-Rent apartment guided flow (2026-07-20): one scope-respecting count row that powers the RNPL,
-// amenities, and min-bathrooms questions. `cnt_total_base` = the scope total BEFORE this question's own
-// selection (drives the ≥150 gate). The per-option counts (cnt_rnpl/kitchen/parking/elevator/furnished,
-// cnt_bath1..4) are STRICT standalone availabilities within that base — they IGNORE the passed
-// p_amenities/p_bath_min so a chip's number stays stable as the user toggles. `cnt_selected` DOES honor
-// the passed p_amenities (strict) + p_bath_min (strict >= N, unknown excluded) — that is the live count
-// shown on the amenities continue button. Same scope resolution + predicate as the search RPC, so the
-// number always equals what Search returns. RPC error/timeout → null (caller skips the question).
+// amenities, and min-bathrooms questions. EVERY cnt_* is computed INSIDE the committed scope — the
+// RPC's `scoped` CTE applies the full eligibility clause INCLUDING the passed p_amenities/p_bath_min/
+// p_directions/… — so a chip's number is exactly what tapping that chip returns on top of what is
+// already committed (cnt_parking with elevator committed = elevator ∧ parking, measured 420 on
+// شقة/إيجار/سنوي 2026-09-02). `cnt_total_base` = `cnt_selected` = the committed scope's own total
+// (drives the ≥150 gate and the live footer). The ONLY dimension stripped before the call is a
+// question's OWN — property_age, via ageAgnostic() on the sibling RPC — because that answer REPLACES
+// rather than narrows. (An earlier version of this comment claimed the per-option counts IGNORE the
+// passed params: they do not, and "restoring" that would reintroduce the inverted-count defect the
+// bathroom rungs and the direction question guard against.) Same scope resolution + predicate as the
+// search RPC, so the number always equals what Search returns. RPC error/timeout → null.
 export type GuidedCounts = {
   cnt_total_base: number;
   cnt_rnpl: number;
@@ -767,6 +797,10 @@ export type GuidedCounts = {
   cnt_car_entrance: number; cnt_sanitation: number;
   // Commercial expansion 2026-08-16: the utility chips the commercial market actually splits on.
   cnt_electricity: number; cnt_water_supply: number;
+  // Residential rich set (owner 2026-09-02): the 8 tokens certified for chat on 2026-08-31 now have
+  // chips, so they need counts. Same template row, same committed scope (migration 20260902220000).
+  cnt_gym: number; cnt_pool: number; cnt_garden: number; cnt_balcony: number; cnt_laundry_room: number;
+  cnt_optical_fibers: number; cnt_separate_electricity_meter: number; cnt_separate_water_meter: number;
   cnt_selected: number;
   // Monthly (2026-08-18): Gathern rating thresholds + unit-subtype chips. Data-derived cuts on the
   // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
@@ -1397,31 +1431,16 @@ export async function fetchListingsForQuery(
     // Broad Commercial: override rpcFilterParams' p_types (null for a broad macro search) so the residential
     // scope is constrained to commercial type_ar; scope B carries the commercial-tables constraint. (2026-07-09)
     ...(isBroadCommercial ? { p_types: COMMERCIAL_TYPE_AR_RES } : {}),
-    // Property-age advanced-filter answer (2026-07-13). IMPORTANT: only included when actually answered —
-    // PostgREST resolves named-parameter RPC calls by exact parameter-name match, so unconditionally
-    // sending p_is_new_construction breaks EVERY search with "function not found" until the backend
-    // migration adding that parameter is deployed (caught live: this exact failure mode, before it ever
-    // shipped). Shared here (not just the main call) so the page-0 diversity-seed call below also respects
-    // any active age answer — a diversity-boosted row must satisfy the exact same WHERE clause as the main
-    // pool (see comment above), or a listing outside the user's chosen age bucket could be pulled forward.
-    ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
-    ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
-    ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
-    // Annual-Rent apartment guided flow (2026-07-20). p_amenities + p_bath_min already exist on the
-    // live RPC signature (unlike p_is_new_construction, which once needed its migration first), so
-    // sending them is safe. STRICT: p_amenities requires each token present; p_bath_min excludes
-    // unknown-bathroom rows (the strict-bathrooms migration removes the `s.bathrooms is null` pass).
-    ...(q.amenities?.length ? { p_amenities: q.amenities } : {}),
-    ...(q.bathMin != null ? { p_bath_min: q.bathMin } : {}),
-    ...(q.furnishedPref != null ? { p_furnished: q.furnishedPref } : {}),
-    // Cohort-expansion answers (2026-08-15): both params exist on the live RPC signature.
-    ...(q.streetWidthMin != null ? { p_street_width_min: q.streetWidthMin } : {}),
-    ...(q.directions?.length ? { p_directions: q.directions } : {}),
-    // Monthly guided answers (2026-08-18): params exist on the live signature (template rebuild).
-    // STRICT + UNKNOWN-safe by SQL: NULL rating/subtype rows can never satisfy them.
-    ...(q.ratingMin != null ? { p_rating_min: q.ratingMin } : {}),
-    ...(q.reviewsMin != null ? { p_reviews_min: q.reviewsMin } : {}),
-    ...(q.unitSubtypes?.length ? { p_unit_subtypes: q.unitSubtypes } : {}),
+    // EVERY answered Advanced-Filter question — THE ONE shared builder, not a hand-typed copy of it
+    // (2026-09-02). This literal used to re-list the 11 AF params one by one beside
+    // rpcAdvancedFilterParams(); every count surface spreads the builder, so a 12th predicate added
+    // there would have narrowed every count and NOT the results — the widening direction, invisible
+    // because the two lists agreed by coincidence. Each key is omitted when unanswered (PostgREST
+    // resolves RPC overloads by exact parameter-name match, so an unconditional key breaks every
+    // search until its migration lands — caught live once, 2026-07-13). Shared with the page-0
+    // diversity-seed call below so a seeded row satisfies the exact same WHERE clause as the pool.
+    // Pinned by scripts/verify-af-matrix-truth.ts §5 (the spread appears once; no AF key is typed).
+    ...rpcAdvancedFilterParams(q),
   };
 
   // RC-A rebase note (2026-07-16): main's baseRpcParams block above is the P0-fixed parameter source
@@ -1433,6 +1452,11 @@ export async function fetchListingsForQuery(
     p_per_platform: null,
     p_limit: pageLimit,
     p_offset: pageOffset,
+    // CONTROLLED ROTATION, tier 4 (owner PERMANENT rule 2026-08-29). Same seed on every page of one
+    // search/pagination walk (rotationSeed() is a pure function of device+week, recomputed identically
+    // on every call — nothing to thread through Load-More by hand), so the RPC's rot_key ORDER BY term
+    // stays stable for the whole walk while still varying across devices/weeks. See rotationSeed.ts.
+    p_rotation_seed: rotationSeed(),
   }), RPC_TIMEOUT_MS, signal);
   if (error) return { listings: null, pageCandidates, pageTotal };   // index error OR timeout (RC-A) → retry UI, not "no matches"
   pageCandidates = (cands as Cand[] | null)?.length ?? 0;   // this page's matching-candidate count → drives Load-More offset/hasMore

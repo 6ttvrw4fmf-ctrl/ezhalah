@@ -952,6 +952,90 @@ def prune_unseen(
     return killed
 
 
+def retire_superseded_siblings(
+    *,
+    res_table: str,
+    com_table: str,
+    res_ads,
+    com_ads,
+    source: Optional[str] = None,
+) -> int:
+    """Retire rows for an ad that THIS RUN classified into the sibling table.
+
+    A dual-table platform routes each ad to exactly one of `<platform>_residential_listings` /
+    `<platform>_commercial_listings`, decided from the source page (type map + usage chip). When
+    that decision CHANGES between runs — the source edits its type, a mapping learns a word it
+    used to miss, or a capture is degraded — the ad is written to the new table and the row in the
+    old one is simply abandoned. Nothing removes it, so the SAME source ad stays live in both
+    tables and the Normal Filter renders it as TWO cards that click through to one URL.
+
+    `prune_unseen` cannot clean this up, and that is by design, not by omission:
+      • it works one table at a time on ABSENCE ("this ad_number wasn't seen in this table"), and
+        every one of its circuit breakers exists to stop absence from cascading. An orphan on a
+        thin catalog trips the coverage/collapse guard forever and is never even given a strike;
+      • worse, `verify_gone` SELF-HEALS it. The oracle asks "is this URL still live on the
+        source?" — and it is, because the ad is alive in the sibling table. Verdict 'live' resets
+        `missing_count` to 0 and refreshes `last_seen_at`, so the orphan is immortal. Measured
+        2026-08-30: five sadin commercial rows last parsed 2026-07-26 still carried
+        `missing_count = 0` and `last_seen_at` of that morning, five weeks on.
+
+    This function answers a different question, and that is the whole point. It never reasons from
+    absence, so it needs none of the guards above: an ad in `com_ads` was POSITIVELY parsed and
+    classified commercial from the source page during THIS run, which is direct evidence that its
+    residential row is superseded. A thin or blocked crawl on either side simply yields a smaller
+    seen-set and therefore supersedes fewer rows — it can never cascade.
+
+    Safety properties, in the order they matter:
+      • DEACTIVATES ONLY — sets `active = false` + `deactivated_at`. Nothing is ever deleted, so
+        every repair is reversible and the source row is preserved for audit.
+      • Identity is the ad_number the platform itself assigns, never similarity between rows.
+      • An ad present in BOTH seen-sets in one run is genuinely ambiguous (the crawl classified
+        the same ad two ways) and is left completely untouched, on both sides, for a human.
+      • A row already inactive is not rewritten, so `deactivated_at` keeps its original date.
+
+    Returns the number of rows retired (0 when there is nothing to do).
+    """
+    res_seen = {a for a in (res_ads or ()) if a}
+    com_seen = {a for a in (com_ads or ()) if a}
+    # Classified both ways in a single run → contradictory evidence, so this is not ours to settle.
+    ambiguous = res_seen & com_seen
+    if ambiguous:
+        print(f"⚠ {res_table}/{com_table}: {len(ambiguous)} ad(s) classified BOTH ways this run — "
+              f"left untouched: {sorted(ambiguous)[:5]}", flush=True)
+    res_seen -= ambiguous
+    com_seen -= ambiguous
+    # Nothing positively classified this run → nothing to supersede. Return before building a
+    # client so a no-op call needs no credentials and costs no round trip.
+    if not res_seen and not com_seen:
+        return 0
+
+    c = sb()
+    now = datetime.now(timezone.utc).isoformat()
+    retired = 0
+    # com_seen supersedes rows in the residential table, and vice versa.
+    for table, superseding, other in ((res_table, com_seen, com_table),
+                                      (com_table, res_seen, res_table)):
+        if not superseding:
+            continue
+        ads = sorted(superseding)
+        for i in range(0, len(ads), 200):
+            chunk = ads[i:i + 200]
+            q = c.table(table).select("ad_number").in_("ad_number", chunk).eq("active", True)
+            if source:
+                q = q.eq("source", source)
+            live = _execute(q, what=table + ".supersede_select")
+            stale = [r["ad_number"] for r in (getattr(live, "data", None) or [])]
+            if not stale:
+                continue
+            _execute(c.table(table).update({"active": False, "deactivated_at": now})
+                     .in_("ad_number", stale),
+                     what=table + ".supersede_update")
+            retired += len(stale)
+            print(f"↪ {table}: retired {len(stale)} row(s) superseded by {other} this run "
+                  f"({', '.join(stale[:5])}{'…' if len(stale) > 5 else ''})", flush=True)
+    return retired
+
+
 def end_run(
     run_id: int,
     *,

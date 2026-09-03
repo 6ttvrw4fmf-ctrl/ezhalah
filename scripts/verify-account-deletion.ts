@@ -28,7 +28,9 @@ import { dirname, join } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const store = readFileSync(join(root, 'src/store.tsx'), 'utf8');
 const auth = readFileSync(join(root, 'src/lib/auth.ts'), 'utf8');
-const settings = readFileSync(join(root, 'src/app/settings.tsx'), 'utf8');
+// The delete UI moved (owner 2026-08-28): the centered /settings modal was replaced by the
+// sidebar-anchored account menu. The truth-telling contract rides along unchanged.
+const settings = readFileSync(join(root, 'src/components/AccountMenu.tsx'), 'utf8');
 const fnPath = join(root, 'supabase/functions/delete-account/index.ts');
 
 let failed = 0;
@@ -74,7 +76,7 @@ check('deleteAccount still clears the signed-in account’s own bucket',
 // ── 4) THE UI TELLS THE TRUTH ──
 check('settings awaits the result instead of assuming success', /const ok = await deleteAccount\(\);/.test(settings));
 check('a failed delete does NOT navigate away', /if \(!ok\) \{[\s\S]{0,220}?return;\s*\}/.test(settings));
-check('a failed delete shows the user an error', /setDeleteError\(/.test(settings) && /s\.delError/.test(settings));
+check('a failed delete shows the user an error', /setDeleteError\(/.test(settings) && /s\.deleteError/.test(settings));
 
 console.log(failed === 0 ? '\n✅ account-deletion contract holds.' : `\n❌ ${failed} check(s) failed.`);
 process.exit(failed === 0 ? 0 : 1);

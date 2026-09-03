@@ -142,8 +142,10 @@ check('agent: a text turn keeps the same identity (recordChatTurn return adopted
   /const rid = recordChatTurn\(v\); if \(rid\) chatIdRef\.current = rid;/.test(agent));
 check('agent: a fresh chat clears the conversation id (New Chat + startFresh inherit nothing)',
   (agent.match(/chatIdRef\.current = null;/g) ?? []).length >= 2);
+// 2026-08-30: the capture also carries `completed` (AF narrowed the search to its final set — see
+// verify-completed-chat-state.ts). The invariant pinned here is unchanged: debounced, content-keyed.
 check('agent: capture serializes the settled state, debounced and content-keyed',
-  /const t = serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills \}\);/.test(agent)
+  /const t = serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed \}\);/.test(agent)
   && /if \(j === lastCapturedRef\.current\) return;/.test(agent)
   && /if \(busy\) return;/.test(agent));
 check('agent: restore reinstates ALL FIVE state slices (msgs, doneTyping, revealCount, afReceipt, guidedPills)',
@@ -151,7 +153,11 @@ check('agent: restore reinstates ALL FIVE state slices (msgs, doneTyping, reveal
   && /setDoneTyping\(restored\.doneTyping\);/.test(agent)
   && /setRevealCount\(restored\.revealCount\);/.test(agent)
   && /setAfReceipt\(restored\.afReceipt\);/.test(agent)
-  && /setGuidedPills\(restored\.guidedPills as any\);/.test(agent));
+  // guidedPills is also deduped-by-label on restore (owner audit, 2026-08-27) — a chat saved before
+  // that fix shipped could carry a stray duplicate pill baked into its serialized facets, and restore
+  // must not resurrect it verbatim. Still reinstates the same `restored.guidedPills`, just through
+  // dedupeFacetsByLabel first.
+  && /setGuidedPills\(\(rgp && rgp\.facets \? \{ \.\.\.rgp, facets: dedupeFacetsByLabel\(rgp\.facets\) \} : rgp\) as any\);/.test(agent));
 check('agent: restore adopts the chat id so continuing the conversation updates the SAME entry',
   /chatIdRef\.current = entryId \?\? null;/.test(agent));
 check('agent: restore falls back to the server copy when the local cache was pruned',

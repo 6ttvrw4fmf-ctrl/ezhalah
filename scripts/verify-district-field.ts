@@ -123,8 +123,13 @@ check('marking prefers the live full-filter-state count over the scope count', /
       new RegExp(`query\\.${f}\\b`).test(sigBlock));
   }
 }
+// The advanced half is SPREAD from AF_PREDICATE_FIELDS (2026-09-01), not re-typed field by field:
+// naming three of the eleven here left a twelfth predicate free to stop invalidating these counts
+// silently, which is the overstatement this check exists to catch. The list itself is pinned against
+// the real rpcAdvancedFilterParams builder by verify-af-survives-filter-reentry.ts, and
+// verify-af-count-params-carry-advanced.ts owns the completeness half of the contract.
 check('narrowing signature ALSO covers the advanced answers (AF-only narrowing must refetch + invalidate)',
-  /districtNarrowingSig = JSON\.stringify\(\[[\s\S]{0,600}?query\.amenities[\s\S]{0,400}?query\.bathMin[\s\S]{0,400}?query\.ratingMin/.test(indexSrc));
+  /districtNarrowingSig = JSON\.stringify\(\[[\s\S]{0,1400}?\.\.\.AF_PREDICATE_FIELDS\.map\(\(f\) => query\[f\]\)/.test(indexSrc));
 check('changing any relevant filter INVALIDATES the previous counts before refetch (no stale numbers)', /setDistrictLiveCounts\(null\);\s*\n\s*if \(!citySelected \|\| !hasDistrictNarrowing/.test(indexSrc));
 check('a live-count response is dropped if a newer request superseded it (race guard)', /if \(id === districtLiveReq\.current && counts\) setDistrictLiveCounts\(counts\)/.test(indexSrc));
 check('onSearch and the count effect share ONE query builder (no state drift between count and search)', /const base = buildFilterBaseQuery\(\)!/.test(indexSrc) && /const q = buildFilterBaseQuery\(\);/.test(indexSrc));

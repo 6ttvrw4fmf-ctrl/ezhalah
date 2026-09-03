@@ -8,7 +8,23 @@
 
 import type { SearchQuery } from '@/data/search';
 import type { Deal } from '@/data/taxonomy';
-import { groupsMembers, pruneTypesToGroups } from '../data/propertyTypes.ts';
+import { groupsMembers, groupsOf, pruneTypesToGroups } from '../data/propertyTypes.ts';
+
+// EVERY SearchQuery field an Advanced Filter answer can write. ONE list, used by both halves of the
+// carry: this module copies exactly these into the Filter store (and nothing else), and
+// @/lib/afCarry clears exactly these before re-applying the still-certified facets. A per-question
+// inverse would be the hand-written drift the repo forbids; kept honest by
+// verify-af-survives-filter-reentry.ts, which fails if this set diverges from the AF params
+// rpcAdvancedFilterParams() actually sends.
+//
+// Scope-tier fields (typeGroups/types/type) are deliberately ABSENT: they are Normal-tier fields the
+// Filter home renders as its own group/type rows and already ride the allowlist below. Clearing them
+// with the AF would widen a specific property type back out to its group — the one direction the
+// owner's rule forbids outright.
+export const AF_PREDICATE_FIELDS = [
+  'ageMin', 'ageMax', 'isNewConstruction', 'amenities', 'bathMin',
+  'ratingMin', 'reviewsMin', 'unitSubtypes', 'furnishedPref', 'streetWidthMin', 'directions',
+] as const;
 
 // Defaults are Rent + Residential so a bare Search (nothing else chosen) returns residential
 // rentals nationwide — the filter only narrows from there, it's never required. (PRD §6.1)
@@ -33,7 +49,8 @@ export const emptyQuery = (): SearchQuery => ({
 // `typeGroups` REPLACED the old single `typeGroup` string outright — there is no second live field
 // and no mirror to drift. Data written before the change (saved searches in storage, a `?filter=`
 // URL in flight) still carries the scalar, so it is migrated ON READ by migrateGroups() below, at
-// the two boundaries where old data can enter. Everything inside the app sees only `typeGroups`.
+// the boundaries where old data can enter (history hydration in store.tsx, the `?filter=` parse in
+// agent.tsx, sanitizeForFilterRestore). Everything inside the app sees only `typeGroups`.
 
 // The selected groups as a list. The twin of effectiveTypes(): one code path covers none/one/many,
 // so no call site has to branch on arity.
@@ -59,6 +76,15 @@ export function migrateGroups<T extends Partial<SearchQuery>>(raw: T): T {
   const legacy = (raw as { typeGroup?: unknown }).typeGroup;
   const out = { ...raw } as T & { typeGroup?: unknown; typeGroups?: string[] | null };
   delete out.typeGroup;                                   // never carried forward — one field only
+  // The two REQUIRED string fields every reader dereferences (`q.location.trim()`,
+  // `q.priceInput.match(...)` — 9 sites in src/data/search.ts alone). A payload persisted before a
+  // field existed simply lacks the key, and reopening such a saved chat crashed openStatic →
+  // filterToChat (2026-08-23). '' is exactly what "absent" means for both (countrywide / no typed
+  // price), so filling it cannot change what a replayed search does. Do NOT default any OTHER field
+  // here: filling e.g. rentPeriod or category would silently CHANGE a replayed legacy search
+  // (verify-legacy-query-defaults.ts pins both directions).
+  out.location ??= '';
+  out.priceInput ??= '';
   if (out.typeGroups && out.typeGroups.length) return out as T;
   out.typeGroups = typeof legacy === 'string' && legacy ? [legacy] : null;
   return out as T;
@@ -93,9 +119,27 @@ export function toggleGroup(q: SearchQuery, group: string): SearchQuery {
 // `typeGroup: null`, which silently became a no-op the moment that field was replaced by typeGroups,
 // and the compiler could not catch it through an object spread. (owner 2026-08-20)
 export function setCategory(q: SearchQuery, category: string | null): SearchQuery {
+  // A SEARCH ALWAYS LANDS ON EXACTLY ONE CATEGORY (owner ruling 2026-08-30). Re-tapping the active
+  // category used to DESELECT it (`q.category === category ? null : category`), so the UI could sit
+  // in a no-category state. Two reasons that is wrong, one product and one data:
+  //
+  //   Product: the user asked for a category switch, not a category toggle. Residential and
+  //   Commercial are the two worlds the catalogue is divided into; "neither" is not a search anyone
+  //   means to run.
+  //
+  //   Data: that exact null state caused a measured production leak on 2026-07-17 — deselecting sent
+  //   p_category:null, which turned the RPC's purity predicate `(p_category IS NULL OR …)` into a
+  //   no-op AND short-circuited matchesType() client-side, so BOTH isolation layers were off at once
+  //   and 1,202 Commercial-macro rows leaked into a realistic Residential search
+  //   (scripts/verify-null-category-purity.ts). impliedCategory() was added to defend against it;
+  //   this removes the way to reach it. Defence in depth stays — that barrier is untouched.
+  //
+  // Re-tap is now a NO-OP rather than a re-select, so an accidental second tap cannot silently wipe
+  // the group/type/price scope the user has already built underneath it.
+  if (category !== null && q.category === category) return q;
   return {
     ...q,
-    category: (q.category === category ? null : category) as SearchQuery['category'],
+    category: category as SearchQuery['category'],
     typeGroups: null,
     type: null,
     types: null,
@@ -141,6 +185,38 @@ export function sanitizeForFilterRestore(raw: SearchQuery): SearchQuery {
   // Entries saved before typeGroups existed carry the legacy scalar — migrate before reading it, or
   // the group (and therefore the visible type row) would silently vanish on reopen.
   const q = migrateGroups(raw);
+  // BACKFILL THE GROUP BEFORE PRUNING THE TYPE (owner P0 2026-09-01). pruneTypesToGroups returns
+  // null when no group survives (propertyTypes.ts), so a payload carrying `types: ['محل']` and no
+  // typeGroups had its type SILENTLY DELETED here — and the next «بحث» widened from the محل family
+  // (566 live) to the whole التجزئة والمكاتب group (2,265) or the whole تجاري category (3,191),
+  // exactly the numbers the owner reported. The rule this line enforces is "no type without its
+  // visible group box"; deriving the group the types already imply SATISFIES that rule, where
+  // deleting the type satisfied its letter by widening the search instead. groupsOf() is the same
+  // backfill applyScopeAnswer() already performs, for the same reason.
+  // …and read the type through effectiveTypes(), not `q.types` alone. The AI-chat path never writes
+  // `q.types`: src/data/agent.ts queryFromBackend is its ONLY property-type writer and it sets the
+  // SINGULAR `q.type` (verified — zero `types:` assignments in agent.ts or agent.tsx). Reading only
+  // the plural meant every guided round started from a free-text chat stored type=null types=null
+  // typeGroups=null — cohortAllows() then refused the carried answer on that type-less query, the
+  // predicate AND its chip were both dropped (so the loss was invisible), and «شقة» widened to the
+  // whole سكني category. That widening is reachable ONLY through the store write this change added,
+  // so it had to be closed here. effectiveTypes() is the existing one-line union of the two fields.
+  const typesIn = effectiveTypes(q);
+  const groups = q.typeGroups?.length ? q.typeGroups : groupsOf(typesIn);
+  // THE ADVANCED FILTER RIDES IF AND ONLY IF ITS FACETS RIDE (owner P0 2026-09-01). The facets are
+  // what the Filter home renders as removable chips, so a carried predicate always has a control on
+  // screen to see and clear it — the rule this whole allowlist exists for, satisfied rather than
+  // bypassed. Without them (a sidebar restore of a foreign conversation, an agent-parsed query) every
+  // AF field still resets to default, which is the measured ratingMin ⇒ 0-of-11,552 leak this
+  // allowlist was written to stop. @/lib/afCarry then re-checks each carried facet against the
+  // CURRENT cohort before it is allowed to narrow anything.
+  const af: Partial<SearchQuery> = {};
+  if (q.afFacets?.length) {
+    af.afFacets = q.afFacets;
+    for (const f of AF_PREDICATE_FIELDS) {
+      if (q[f] !== undefined) (af as Record<string, unknown>)[f] = q[f];
+    }
+  }
   return {
     ...base,
     deal: q.deal ?? base.deal,                    // visible: شراء/إيجار toggle (bothDeals is NOT restored)
@@ -149,9 +225,9 @@ export function sanitizeForFilterRestore(raw: SearchQuery): SearchQuery {
     districts: q.districts,                       // visible: district field
     districtLabel: q.districtLabel,
     category: q.category ?? base.category,        // visible: سكني/تجاري
-    typeGroups: q.typeGroups ?? null,             // visible: group boxes (multi-select)
+    typeGroups: groups.length ? groups : null,    // visible: group boxes (multi-select)
     // Never restore a type whose group is not also restored — it would be an invisible active filter.
-    types: pruneTypesToGroups(q.types, q.typeGroups ?? []),
+    types: pruneTypesToGroups(typesIn, groups),
     contextBeds: q.contextBeds,                   // visible: bedroom chips
     contextBedsList: q.contextBedsList,
     contextSize: q.contextSize,                   // visible: area context
@@ -168,6 +244,7 @@ export function sanitizeForFilterRestore(raw: SearchQuery): SearchQuery {
     dealCombined: !!q.dealCombined,
     priceMinRent: q.priceMinRent,
     priceMaxRent: q.priceMaxRent,
+    ...af,                                        // visible: the removable Advanced Filter chips
   };
 }
 
@@ -268,6 +345,11 @@ export function hasActiveFilters(q: SearchQuery): boolean {
     q.priceBand !== d.priceBand ||
     !!q.priceMin ||
     !!q.priceMax ||
-    (q.rentPeriod ?? 'annual') !== d.rentPeriod
+    (q.rentPeriod ?? 'annual') !== d.rentPeriod ||
+    // A carried Advanced Filter answer is an active filter like any other (owner P0 2026-09-01):
+    // without this, a search narrowed ONLY by the interview came back to the Filter screen with its
+    // chips on screen and «مسح الكل» hidden — an active predicate with no way to clear all of it,
+    // which is the very state this whole allowlist exists to make impossible.
+    !!(q.afFacets && q.afFacets.length)
   );
 }

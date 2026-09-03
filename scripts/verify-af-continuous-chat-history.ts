@@ -104,7 +104,12 @@ check('the closing count still comes from resultCounts() on EVERY turn (see veri
 
 // ── 3. THE CARDS STAY ────────────────────────────────────────────────────────────────────────────
 check('a results turn renders its cards from its own reveal count, ungated by recency',
-  /m\.result\.listings\.slice\(0, revealCount\[m\.id\] \?\? \(m\.typing \? 0 : Math\.min\(FIRST_PAGE, m\.result\.listings\.length\)\)\)\.map\(/.test(agent),
+  // The not-yet-revealed fallback became initialReveal(m.result) on 2026-08-30 (a ≤INTERVIEW_STOP_AT set
+  // renders in full — src/lib/initialReveal.ts). The INVARIANT this check guards is unchanged and still
+  // pinned: the turn's OWN revealCount[m.id] leads, a typing turn starts at 0, and nothing about recency
+  // (isLatestResults) may appear in the slice bound.
+  /m\.result\.listings\.slice\(0, revealCount\[m\.id\] \?\? \(m\.typing \? 0 : initialReveal\(m\.result\)\)\)\.map\(/.test(agent)
+  && !/listings\.slice\(0, [^)]*isLatestResults/.test(agent),
   'agent.tsx: an old turn must keep showing exactly the cards it was showing — never 0, never re-collapsed');
 check('the cards render ABOVE the actions/receipt slot, so swapping that slot cannot take them with it',
   agent.indexOf('m.result.listings.slice(0, revealCount[m.id]') < agent.indexOf('showActionsRow ? ('),
@@ -205,10 +210,12 @@ check('the receipt strings are translated with the owner\'s exact wording',
   const mid = resultCounts({ trueTotal: 635, shown: 10, fetched: 635, serverMore: false });
   check('635 matched / 10 shown → "load more" is still genuinely offered',
     mid.hasMore === true && mid.endKind === 'more');
-  const capped = resultCounts({ trueTotal: 635, shown: 100, fetched: 635, serverMore: false });
-  check('635 matched / 100 shown → paging stops at the browse cap, and 635 stays the stated total',
-    capped.hasMore === false && capped.endKind === 'capped' && capped.endTotal === 635 && capped.endShown === 100,
-    'the 100 is a browse cap; presenting it as the eligible total is the banned substitution');
+  // CONTRACT CHANGE (owner 2026-08-29): the lifetime browse cap is gone — paging continues to the
+  // last real match. The honesty half is what this check still owns: 635 stays the stated total.
+  const paging = resultCounts({ trueTotal: 635, shown: 100, fetched: 635, serverMore: false });
+  check('635 matched / 100 shown → paging CONTINUES (no lifetime cap), and 635 stays the stated total',
+    paging.hasMore === true && paging.endKind === 'more' && paging.endTotal === 635 && paging.endShown === 100,
+    'the batch size may never stand in for the eligible total, and the browse must reach all 635');
 }
 
 // ── 7. THE LAST CARD OF A ROUND STILL ADVANCES (the round cap must not create a terminal primary) ─

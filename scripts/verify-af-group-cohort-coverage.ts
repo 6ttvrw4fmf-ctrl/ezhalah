@@ -72,11 +72,16 @@ if (!MIN_USEFUL_MATCH) {
 }
 const MIN_USEFUL = Number(MIN_USEFUL_MATCH[1]);
 
-// Every question id the AF pool can offer whose scope gate is cohortAllows(). `property_age` is
-// deliberately absent: its eligibility is isAgeFilterScopeFor(), not a cohort, so counting it here
-// would misreport what this gate decides.
+// Every question id the AF pool can offer whose scope gate is cohortAllows(). `property_age` joined
+// this list 2026-09-01: it used to have its own separate, single-type-only gate
+// (isAgeFilterScopeFor(), src/lib/ageFilterTypes.ts, deleted) that could never fire for a group
+// search regardless of what COHORT_QUESTIONS certified — the exact bug-class this file's baselines
+// exist to catch. Now its eligibility IS cohortAllows(q, 'property_age'), so it behaves for a group
+// scope exactly like every id already in this list: fires only when EVERY member type of the group
+// certifies it for that deal/period.
 const COHORT_GATED_IDS = [
   'rnpl', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction', 'rating', 'unit_subtype',
+  'property_age',
 ] as const;
 
 // The deal/period shapes a user can actually be in.
@@ -106,12 +111,17 @@ const UNCERTIFIED_IN_SHIPPED_GROUPS = [
 // 2026-08-24: MIN_USEFUL_QUESTIONS_TO_SHOW is now 1, not 2) — the lone certified question opens
 // and is asked. Pinned so a change to the underlying cohort data is visible on the PR that causes it.
 const EXPECTED: Record<string, Record<string, number>> = {
-  'Apartments & Co-living': { Buy: 0, 'Rent/Annual': 1, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
+  // Rent/Annual 1 -> 2 on 2026-09-01: property_age joined COHORT_GATED_IDS (age-gate unification —
+  // it used to be single-type-only and could never fire for a group). Every member of this group
+  // (Apartment, Room, Floor, Studio) certifies property_age for RentAnnual.
+  'Apartments & Co-living': { Buy: 0, 'Rent/Annual': 2, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   // Buy 0 -> 1 on 2026-08-23: Duplex certified with its one source-verified field (bathrooms).
   'Villas & Houses': { Buy: 1, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   'Vacation & Rural': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
-  'Retail & Workspace': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
+  // Buy 1 -> 2, Rent/Annual 1 -> 2 on 2026-09-01: same property_age unification — every member of
+  // this group (Office, Shop, Showroom) certifies property_age for both deals.
+  'Retail & Workspace': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   // 0 -> 1 on both deals: Factory certified with street_width. Capped at 1 by Warehouse ∩ Workshop.
   'Industrial & Logistics': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
   'Commercial Buildings & Facilities': { Buy: 0, 'Rent/Annual': 0, 'Rent/Monthly': 0, 'Rent/both': 0, 'Buy+Rent': 0 },
@@ -184,17 +194,22 @@ for (const { macro, group, types } of shippedGroups) {
 // PRODUCT question about the intersection rule, not a data question, and this pin makes the two
 // cases distinguishable on sight instead of being rediscovered by another browser journey.
 //
-// `property_age` is excluded here for a load-bearing reason: its eligibility is isAgeFilterScopeFor(),
-// which requires a SINGLE selected type, so it can never fire for a group search whatever a cohort
-// lists. Counting it would overstate every ceiling below.
+// `property_age` is now INCLUDED here (2026-09-01, see COHORT_GATED_IDS above) — its eligibility is
+// cohortAllows(q, 'property_age') like every other id, so it counts toward a group's ceiling exactly
+// like the rest whenever every member type of that group certifies it for the same deal.
+// 2026-09-01: property_age joined COHORT_GATED_IDS (age-gate unification, see above), so every
+// ceiling below was recomputed against real COHORT_QUESTIONS data with the SAME best-case-intersection
+// method this section already used — property_age only raises a ceiling where every type WITH an
+// entry for that deal also certifies property_age (never lowers one; a narrower id can only shrink
+// an intersection, never grow it beyond what was already there).
 const CEILING: Record<string, Record<string, number>> = {
-  'Apartments & Co-living': { Buy: 0, 'Rent/Annual': 1, 'Rent/Monthly': 2 },
-  'Villas & Houses': { Buy: 1, 'Rent/Annual': 6, 'Rent/Monthly': 3 },
-  'Vacation & Rural': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
+  'Apartments & Co-living': { Buy: 1, 'Rent/Annual': 2, 'Rent/Monthly': 2 },
+  'Villas & Houses': { Buy: 1, 'Rent/Annual': 7, 'Rent/Monthly': 3 },
+  'Vacation & Rural': { Buy: 2, 'Rent/Annual': 3, 'Rent/Monthly': 0 },
   'Residential Plots': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
-  'Retail & Workspace': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0 },
+  'Retail & Workspace': { Buy: 2, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
   'Industrial & Logistics': { Buy: 1, 'Rent/Annual': 1, 'Rent/Monthly': 0 },
-  'Commercial Buildings & Facilities': { Buy: 2, 'Rent/Annual': 1, 'Rent/Monthly': 0 },
+  'Commercial Buildings & Facilities': { Buy: 3, 'Rent/Annual': 2, 'Rent/Monthly': 0 },
   'Commercial & Industrial Plots': { Buy: 2, 'Rent/Annual': 0, 'Rent/Monthly': 0 },
 };
 const DEAL_KEYS: Array<[string, 'Buy' | 'RentAnnual' | 'RentMonthly']> = [

@@ -112,7 +112,7 @@ const st = StyleSheet.create({
   stage: { width: 220, height: 150, alignItems: 'center', justifyContent: 'center' },
   frag: { position: 'absolute', backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.primary, borderRadius: 6 },
   core: {
-    width: 52, height: 52, borderRadius: radius.pill, backgroundColor: colors.primary,
+    width: 52, height: 52, borderRadius: radius.pill, backgroundColor: colors.selFill,
     alignItems: 'center', justifyContent: 'center',
   },
   copyBlock: { marginTop: 14, minHeight: 58, alignSelf: 'stretch', justifyContent: 'center' },

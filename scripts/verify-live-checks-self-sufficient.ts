@@ -17,7 +17,9 @@
 // Hermetic: no network, no DB. Wired into `npm test`.
 //   node --experimental-strip-types scripts/verify-live-checks-self-sufficient.ts
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { dirname, join, resolve as resolvePath, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { resolvePublicSupabase, PUBLIC_SUPABASE_ANON_KEY } from './lib/public-supabase.ts';
 
 let failed = 0;
@@ -81,6 +83,106 @@ console.log('\n3) the committed key is anon, not service_role');
 }
 
 // ---------------------------------------------------------------------------
+// Transitive import-graph helpers (2026-09-01, reviewer-proven gap). `touchesSupabase` used to be
+// `/supabase/i.test(src)` against the CHECKED FILE'S OWN TEXT ONLY. A script that imports a wrapper
+// which itself re-exports resolvePublicSupabase (e.g. `import { getEndpoint } from
+// './lib/db-endpoint-wrapper.ts'`) never has the literal word "supabase" in its own source, so the
+// old check reported "needs no Supabase secret at all" and skipped it entirely — the exact
+// "barrier reads text, not the real code path" failure class this project has been burned by
+// before. Fix: recursively resolve every LOCAL (`./`/`../`) import a script makes and look at the
+// real graph, not a substring of one file. Bounded and shallow on purpose — this repo never needs
+// to chase into node_modules to answer "does this touch Supabase".
+// ---------------------------------------------------------------------------
+const RESOLVER_MODULE_PATH = fileURLToPath(new URL('./lib/public-supabase.ts', import.meta.url));
+const LOCAL_IMPORT_RE = /\b(?:from|import)\s*\(?\s*['"](\.\.?\/[^'"]+)['"]/g;
+const MAX_CLOSURE_FILES = 200; // ponytail: bounded fan-out guard; raise if a real live check legitimately needs a deeper local import tree
+
+function resolveImportPath(fromFile: string, specifier: string): string | null {
+  const base = resolvePath(dirname(fromFile), specifier);
+  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+// BFS over local imports starting at entryFile. Returns absolutePath -> source for every file
+// reached, including entryFile itself (missing entirely if entryFile can't be read).
+function collectImportClosure(entryFile: string): Map<string, string> {
+  const files = new Map<string, string>();
+  const stack = [entryFile];
+  while (stack.length && files.size < MAX_CLOSURE_FILES) {
+    const file = stack.pop()!;
+    if (files.has(file)) continue;
+    let src: string;
+    try { src = readFileSync(file, 'utf8'); } catch { continue; }
+    files.set(file, src);
+    for (const m of src.matchAll(LOCAL_IMPORT_RE)) {
+      const resolved = resolveImportPath(file, m[1]);
+      if (resolved && !files.has(resolved)) stack.push(resolved);
+    }
+  }
+  return files;
+}
+
+// A literal, precise signal that a file talks to Supabase directly — a real host or the known raw
+// env var names, NOT the bare word "supabase" (which also shows up in innocent prose comments like
+// "see supabase/migrations/..." — src/lib/afCohorts.ts has exactly that, and it must NOT flip a
+// script that never touches Supabase into looking gated).
+const RAW_SUPABASE_SIGNAL =
+  /supabase\.(?:co|io)\b|@supabase\/supabase-js|\bEXPO_PUBLIC_SUPABASE_(?:URL|ANON_KEY|KEY)\b|\bSUPABASE_(?:URL|ANON_KEY|SERVICE_ROLE_KEY)\b/i;
+
+function classifyLiveCheck(entryFile: string): {
+  missing: boolean;
+  touchesSupabase: boolean;
+  importsResolver: boolean;
+  skipFailMatch: string | null;
+  fileCount: number;
+} {
+  const closure = collectImportClosure(entryFile);
+  if (!closure.has(entryFile)) {
+    return { missing: true, touchesSupabase: false, importsResolver: false, skipFailMatch: null, fileCount: 0 };
+  }
+
+  // Structural: does ANY file in the closure hold an import specifier that resolves to the
+  // sanctioned resolver module? This survives renaming/aliasing (`export { resolvePublicSupabase
+  // as getEndpoint }`) because it compares resolved FILE PATHS, not identifier text.
+  let importsResolver = false;
+  for (const [file, text] of closure) {
+    if (file === RESOLVER_MODULE_PATH) continue;
+    for (const m of text.matchAll(LOCAL_IMPORT_RE)) {
+      if (resolveImportPath(file, m[1]) === RESOLVER_MODULE_PATH) { importsResolver = true; break; }
+    }
+    if (importsResolver) break;
+  }
+
+  // Raw signal: excludes the resolver module's OWN file, which legitimately names the host and the
+  // env vars it reads as fallbacks — that is not evidence of a SCRIPT bypassing it.
+  let rawSupabaseSignal = false;
+  for (const [file, text] of closure) {
+    if (file === RESOLVER_MODULE_PATH) continue;
+    if (RAW_SUPABASE_SIGNAL.test(text)) { rawSupabaseSignal = true; break; }
+  }
+
+  // Excludes the resolver module's own file, whose header comment quotes the historical
+  // "SKIP-FAIL: ..." bail-out text as documentation of the bug this file fixed — not a live
+  // bail-out in the SCRIPT being checked.
+  let skipFailMatch: string | null = null;
+  for (const [file, text] of closure) {
+    if (file === RESOLVER_MODULE_PATH) continue;
+    const m = text.match(/^.*SKIP-FAIL.*$/m);
+    if (m) { skipFailMatch = m[0]; break; }
+  }
+
+  return {
+    missing: false,
+    touchesSupabase: importsResolver || rawSupabaseSignal,
+    importsResolver,
+    skipFailMatch,
+    fileCount: closure.size,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 4. Every live-check script a WORKFLOW schedules must be self-sufficient. Discovered from the
 //    workflows, so a newly added barrier is covered the day it is added, not the day it is noticed.
 // ---------------------------------------------------------------------------
@@ -136,18 +238,64 @@ console.log('\n4) every workflow-scheduled live check can obtain an endpoint wit
   }
 
   for (const script of [...referenced].sort()) {
-    let src: string;
-    try { src = readFileSync(new URL(`../scripts/${script}`, import.meta.url), 'utf8'); }
-    catch { bad(script, 'referenced by a workflow but missing from scripts/'); continue; }
+    const entryFile = fileURLToPath(new URL(`../scripts/${script}`, import.meta.url));
+    const result = classifyLiveCheck(entryFile);
+    if (result.missing) { bad(script, 'referenced by a workflow but missing from scripts/'); continue; }
 
-    if (!/resolvePublicSupabase\s*\(/.test(src)) {
-      bad(script, 'does not use resolvePublicSupabase() — it can only run if a repo secret happens to be set, which is exactly how both barriers silently never ran');
+    // A script needs resolvePublicSupabase() (anywhere in its LOCAL import graph, not just its own
+    // text) only if it talks to Supabase at all — that is the ONLY way an unset repo secret can
+    // silently gate it (2026-09-01: verify-frontend-bundle-matches-source-live.ts hits nothing but
+    // the public production website over plain HTTPS; it cannot be affected by a missing SUPABASE
+    // secret because it never reads one, so requiring the resolver from it would be a dead import
+    // satisfying a check it has nothing to do with — the same shape §4a's "de-LIVE-ry" fix already
+    // rejected for the discovery regex).
+    if (result.touchesSupabase && !result.importsResolver) {
+      bad(script, `talks to Supabase but does not use resolvePublicSupabase() anywhere in its import graph (${result.fileCount} local file(s) checked) — it can only run if a repo secret happens to be set, which is exactly how both barriers silently never ran`);
       continue;
     }
-    // The old shape: bail out when the env is missing. Any surviving copy re-opens the hole.
-    const skipFail = src.match(/^.*SKIP-FAIL.*$/m);
-    if (skipFail) bad(script, `still has a SKIP-FAIL bail-out: ${skipFail[0].trim().slice(0, 120)}`);
-    else ok(`${script} resolves its endpoint without depending on a repo secret`);
+    // The old shape: bail out when the env is missing. Any surviving copy re-opens the hole —
+    // checked across the whole graph so a wrapper can't hide one either.
+    if (result.skipFailMatch) bad(script, `still has a SKIP-FAIL bail-out: ${result.skipFailMatch.trim().slice(0, 120)}`);
+    else if (result.touchesSupabase) ok(`${script} resolves its endpoint without depending on a repo secret (${result.fileCount} local file(s) in its import graph)`);
+    else ok(`${script} needs no Supabase secret at all — cannot be gated by one being unset`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 5. Regression-pin the exact reviewer-proven gap (2026-09-01): a script hiding its Supabase access
+//    behind ONE layer of local indirection must still be classified correctly — for the resolver
+//    it must be recognised as touching Supabase via the sanctioned resolver, and for a raw env-var
+//    read it must still fail closed. Built from real files on disk (not inline strings matched
+//    against a copy of the logic) so this exercises the SAME collectImportClosure/classifyLiveCheck
+//    the real check above runs.
+// ---------------------------------------------------------------------------
+console.log('\n5) transitive detection survives one layer of local import indirection');
+{
+  const scriptsDir = fileURLToPath(new URL('.', import.meta.url));
+  const fixtureDir = mkdtempSync(join(scriptsDir, '.self-check-fixture-'));
+  try {
+    const resolverSpecifier = (() => {
+      const rel = relative(fixtureDir, RESOLVER_MODULE_PATH).split(sep).join('/');
+      return rel.startsWith('.') ? rel : `./${rel}`;
+    })();
+
+    const goodEntry = join(fixtureDir, 'verify-fixture-good-live.ts');
+    writeFileSync(join(fixtureDir, 'wrapper.ts'), `export { resolvePublicSupabase as getEndpoint } from '${resolverSpecifier}';\n`);
+    writeFileSync(goodEntry, `import { getEndpoint } from './wrapper.ts';\nconst { url, key } = getEndpoint(process.env);\nvoid url; void key;\n`);
+
+    const badEntry = join(fixtureDir, 'verify-fixture-bad-live.ts');
+    writeFileSync(join(fixtureDir, 'bad-wrapper.ts'), `export function getEndpoint(env: NodeJS.ProcessEnv) {\n  return { url: env.EXPO_PUBLIC_SUPABASE_URL, key: env.EXPO_PUBLIC_SUPABASE_ANON_KEY };\n}\n`);
+    writeFileSync(badEntry, `import { getEndpoint } from './bad-wrapper.ts';\nconst { url, key } = getEndpoint(process.env);\nvoid url; void key;\n`);
+
+    const good = classifyLiveCheck(goodEntry);
+    if (good.touchesSupabase && good.importsResolver) ok('one-hop resolver re-export (reviewer repro) is now recognised, not silently skipped');
+    else bad('one-hop resolver re-export (reviewer repro) is now recognised', JSON.stringify(good));
+
+    const badResult = classifyLiveCheck(badEntry);
+    if (badResult.touchesSupabase && !badResult.importsResolver) ok('one-hop raw env-var read still fails closed (does not use resolvePublicSupabase)');
+    else bad('one-hop raw env-var read still fails closed', JSON.stringify(badResult));
+  } finally {
+    rmSync(fixtureDir, { recursive: true, force: true });
   }
 }
 

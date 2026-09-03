@@ -88,11 +88,23 @@ check('a listings turn is rewritten ONLY when the model\'s location is that twin
   /const twin = regionOrCityTwin\(turn\.query\.location\);[\s\S]*?const named = scopeNamedForTwin\(v, twin\) \?\? \(askedTwin \? scopeChoice : null\);[\s\S]*?if \(twin && named\) turn = \{ \.\.\.turn, query: \{ \.\.\.turn\.query, location: scopedLocation\(twin, named\) \} \};/.test(sendFn));
 check('when the model drifts off-thread (greeting / another question) the answer to OUR question still searches', /askedTwin && turn\.kind === 'message'[\s\S]*?kind: 'listings'[\s\S]*?location: scopedLocation\(askedTwin, scopeChoice\)/.test(sendFn));
 check('the pending question is read-and-CLEARED once per turn (it can never go stale)', /const askedTwin = pendingScopeRef\.current;\s*\n\s*pendingScopeRef\.current = null;/.test(sendFn));
-check('asking the question records WHICH twin it is about', /pendingScopeRef\.current = regionOrCityTwin\(turn\.query\.location\);/.test(src));
+// RETIRED (owner-approved unified-agent-search-authority consolidation, 2026-08-30): the client used
+// to arm pendingScopeRef itself whenever ITS OWN locationClarification() decided to re-ask a twin
+// question — deleted along with that whole client-side gate (src/lib/agentQuestionBudget.ts and its
+// call site). Twin/region/district ambiguity is now decided ONCE, server-side, by
+// supabase/functions/agent/decide.ts's decideAgentTurn() (ladder step 1, fed by loc_classify) — see
+// scripts/verify-agent-decide-turn.ts test (f). The client trusts kind="listings" unconditionally
+// and never re-arms this ref from that path any more; asserting its ABSENCE is now the correct
+// invariant, not asserting its presence.
+check('the client no longer arms pendingScopeRef from its own retired clarify-or-search gate',
+  !/pendingScopeRef\.current = regionOrCityTwin\(turn\.query\.location\);/.test(src));
 check('New Chat inherits no half-answered question', /setMsgs\(\[\]\);\s*\n\s*pendingScopeRef\.current = null;/.test(src));
-// The user-visible symptom of the 2-ask cap eating the answered location. The line itself is correct
-// behaviour for a genuinely unknown location — it just must no longer be reachable by answering.
-check('the Kingdom-wide «ما قدرت أحدد الموقع بدقة» note is still gated on the 2-ask cap only', /const forcedBroad = !!clarifyQ && askCountRef\.current >= 2;/.test(src));
+// RETIRED alongside the same gate: forcedBroad no longer depends on the client's own clarifyQ
+// judgment (locationClarification() has no remaining call site) — it is simply "the server searched
+// with no location", which is exactly what decideAgentTurn's budget-exhausted / hasEnoughToSearch
+// steps mean by "broad is fine". See src/app/agent.tsx's `if (turn.kind === 'listings')` block.
+check('the Kingdom-wide «ما قدرت أحدد الموقع بدقة» note fires exactly when the server searched with no location',
+  /const forcedBroad = !turn\.query\.location;/.test(src));
 
 console.log(
   failed === 0

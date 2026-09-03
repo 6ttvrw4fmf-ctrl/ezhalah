@@ -8,7 +8,8 @@
 // covers less than the floor is itself a failure — that is the way a rotation system rots.
 //
 //   node e2e/live-sweep/run.mjs
-import { FLOORS, WATCHES, findings, journeys, ledgerPlan, ledgerRecord, note, dbCount, sleep } from './sweep.mjs';
+import { FLOORS, WATCHES, findings, journeys, ledgerPlan, ledgerRecord, note, dbCount, pickCityForDeal, sleep,
+         watchStatus, unobservedWatches, WATCH_OFFLINE_COVER } from './sweep.mjs';
 import { normalFilter, trendingCity, trendingDistrict, advancedFilter, zeroResult,
          cardClickBack, tabHistory, typedDistrict, clearAll } from './journeys.mjs';
 import { showMoreJourney } from './showmore.mjs';
@@ -136,6 +137,21 @@ async function main() {
   // production; it only stops one unlucky rotation draw from silently deleting one. الرياض never
   // counts toward the non-Riyadh floor, which is computed from citiesTested minus الرياض.
   const reachable = () => [...citiesTested][0] ?? pickCities[0] ?? RIYADH;
+
+  // ...but "reachable" is not enough on its own: a city is only usable by a journey that runs the
+  // DEAL that city actually stocks. `reachable()` is deal-blind (it returns a city proven offerable
+  // for whatever deal happened to reach it first) and `pickCities[0]` is blind to both. So a
+  // rent-only city drawn into the rotation silently lost every بيع-shaped journey and took its
+  // COVERAGE FLOOR with it — 2026-08-30: «المندق» (19 listings, ALL إيجار, zero بيع) cost
+  // trending-district, honest-zero AND card→back in one run, with production perfectly healthy.
+  //
+  // This is the SAME class as the 2026-08-26 «الدليمية» miss above, which was fixed for the
+  // normal-filter loop only (via dealsOf) and left unfixed everywhere else. The four journeys below
+  // never call setDeal, so they run on the app's DEFAULT deal — «بيع» — which is precisely the deal
+  // a rent-only city cannot offer. Availability is read from the live index (livePool), never a
+  // hardcoded list (§1); الرياض is the last resort because it stocks every deal.
+  const reachableFor = (deal, period = null) =>
+    pickCityForDeal({ citiesTested, pickCities, dealsOf, deal, period, riyadh: RIYADH });
   if (!done.buyRent) {
     const city = reachable();
     await run(`normal ${city} Buy+Rent [floor]`, () => normalFilter({ city, deal: 'both', period: null }),
@@ -161,11 +177,15 @@ async function main() {
 
   // ── 2. TRENDING city + district ────────────────────────────────────────────────────────────────
   await run('trending city', () => trendingCity({ deal: 'بيع', period: null }), () => { done.tCity++; });
+  const tdCity = reachableFor('بيع');
   await run('trending district (narrowed)',
-    () => trendingDistrict({ city: reachable(), deal: 'بيع', period: null, priceMax: 900000 }),
-    () => { done.tDistrict++; citiesTested.add(pickCities[0]); });
+    () => trendingDistrict({ city: tdCity, deal: 'بيع', period: null, priceMax: 900000 }),
+    () => { done.tDistrict++; citiesTested.add(tdCity); });
   await ledgerRecord('trending_city', 'live-sweep', 'pass', 'live browser sweep');
-  await ledgerRecord('trending_district', pickCities[0], 'pass', 'live browser sweep');
+  // Record the city the journey ACTUALLY ran against, not pickCities[0] — crediting coverage to a
+  // city that was never reached marks it fresh and pushes it to the back of the stalest-first
+  // rotation, which is the same quiet-rot failure the skip-vs-pass rule above exists to prevent.
+  await ledgerRecord('trending_district', tdCity, 'pass', 'live browser sweep');
 
   // ── 3. ADVANCED FILTER (needs a scope big enough to open) ──────────────────────────────────────
   await run('advanced filter', () => advancedFilter({ city: RIYADH, deal: 'بيع', group: 'الفلل والبيوت', typeLabel: 'فيلا' }),
@@ -175,8 +195,12 @@ async function main() {
   await ledgerRecord('advanced_filter', 'live-sweep', 'pass', 'live browser sweep');
 
   // ── 4. honest zero · card→external→Back · Clear All ───────────────────────────────────────────
-  await run('honest zero', () => zeroResult({ city: pickCities[0] }), () => { done.zero++; });
-  await run('card → source → back', () => cardClickBack({ city: pickCities[0] }), () => { done.cardBack++; });
+  // These three run on the app's DEFAULT deal («بيع») — they never call setDeal — so their city must
+  // be one that actually stocks بيع, not merely the stalest draw. See reachableFor() above.
+  const zeroCity = reachableFor('بيع');
+  await run('honest zero', () => zeroResult({ city: zeroCity }), () => { done.zero++; citiesTested.add(zeroCity); });
+  const cbCity = reachableFor('بيع');
+  await run('card → source → back', () => cardClickBack({ city: cbCity }), () => { done.cardBack++; citiesTested.add(cbCity); });
 
   // §10 requires «عرض المزيد» to be actually clicked in production EVERY run. Riyadh, not a rotated
   // city: the journey needs a cohort big enough to reach the browse cap, and a small city that
@@ -185,7 +209,7 @@ async function main() {
     () => showMoreJourney({ city: RIYADH, deal: 'إيجار', period: 'سنوي', batches: 3 }),
     () => { done.showMore++; citiesTested.add(RIYADH); });
 
-  await run('clear all', () => clearAll({ city: pickCities[0] }));
+  await run('clear all', () => clearAll({ city: reachableFor('بيع') }));
 
   // ── 5. THE PERMANENT WATCHES for the 2026-08-23 fixes ─────────────────────────────────────────
   await run('watch: tab switching pushes no junk history', () => tabHistory());
@@ -193,7 +217,19 @@ async function main() {
     () => typedDistrict({ city: RIYADH, districtText: 'النرجس' }));
   // exact-city-never-rescoped is asserted inside EVERY assertChain (INTENT→UI), so it is covered by
   // every journey above rather than by one probe.
-  for (const w of WATCHES) await ledgerRecord('live_watch', w, findings.some((f) => f.detail.includes(w)) ? 'fail' : 'pass', 'live browser sweep');
+  // A watch records `pass` ONLY with positive evidence it was evaluated (watchStatus, sweep.mjs).
+  // Absence of a finding is not evidence: a harness error, a skipped journey, or a watch nothing
+  // asserts all produce no finding, and all three used to be written to the ledger as `pass`.
+  // ops_qa_record_coverage accepts ONLY pass | fail | skip and raises on anything else, so the
+  // internal `offline_barrier` status is written as `skip` — which is exactly what it is from the
+  // browser's point of view — with the notes naming the barrier that does evaluate it. Writing an
+  // out-of-vocabulary value made the RPC throw, and post() swallowed it: the three rows silently
+  // kept the previous run's stale `pass`. Same bug class as the one this PR fixes, one layer down.
+  for (const w of WATCHES) {
+    const st = watchStatus(w);
+    await ledgerRecord('live_watch', w, st === 'offline_barrier' ? 'skip' : st,
+      st === 'offline_barrier' ? `not browser-evaluated; covered by ${WATCH_OFFLINE_COVER[w]}` : 'live browser sweep');
+  }
 
   // ── floors ─────────────────────────────────────────────────────────────────────────────────────
   const nonRiyadhCount = [...citiesTested].filter((c) => c !== RIYADH).length;
@@ -209,6 +245,11 @@ async function main() {
   floor('honest-zero journeys', done.zero, FLOORS.zeroResultJourneys);
   floor('card→back journeys', done.cardBack, FLOORS.cardClickBackJourneys);
   floor('«عرض المزيد» journeys', done.showMore, FLOORS.showMoreJourneys);
+  // A permanent watch that did not actually run is a floor miss, not a pass. §40 says deleting a
+  // watch fails the barrier; a watch that silently never executes is deletion at runtime, and it
+  // used to leave the run green.
+  const dark = unobservedWatches();
+  if (dark.length) floorMisses.push(`permanent watches never evaluated: ${dark.join(', ')}`);
 
   // ── the recurring report ───────────────────────────────────────────────────────────────────────
   const byPair = (p) => findings.filter((f) => f.layerPair === p).length;
@@ -243,8 +284,16 @@ async function main() {
   line('BUGS FOUND', findings.length);
   line('BUGS FIXED', 0);
   line('BARRIERS ADDED/STRENGTHENED', 0);
+  // Watch evidence, stated as counts rather than inferred from silence (2026-08-31).
+  line('WATCHES BROWSER-EVALUATED', `${WATCHES.filter((w) => watchStatus(w) === 'pass' || watchStatus(w) === 'fail').length}/${WATCHES.length}`);
+  line('WATCHES COVERED OFFLINE', WATCHES.filter((w) => watchStatus(w) === 'offline_barrier').length);
+  line('WATCHES NOT EVALUATED AT ALL', unobservedWatches().length);
   line('PRODUCTION VERIFIED', findings.length === 0 ? 'YES' : 'NO');
   line('SEARCH & MATCHING HEALTH', `${health}/10`);
+  if (dark.length) {
+    console.error('\nPERMANENT WATCHES NOT EVALUATED (recorded `skip`, never `pass`):');
+    dark.forEach((w) => console.error(`  ⚠ ${w}`));
+  }
   if (floorMisses.length) { console.error('\nCOVERAGE FLOORS MISSED:'); floorMisses.forEach((m) => console.error(`  ✗ ${m}`)); }
   if (findings.length) {
     console.error('\nDEFECTS (each must be fixed → barriered → deployed → re-tested, never reported and left):');

@@ -1,11 +1,10 @@
 import type { SearchQuery } from './search';
-import { effectiveTypes, hasClientOnlyNarrowing } from './search';
+import { hasClientOnlyNarrowing } from './search';
 import { isProbeFailure } from '@/lib/afProbe';
 import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, fetchScopeOptionCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
 import {
   SCOPE_GROUP_ID, SCOPE_TYPE_ID, scopeCandidates, applyScopeAnswer, unresolvedScopeTiers, type ScopeTier,
 } from '@/lib/afPlan';
-import { isAgeFilterScope as isAgeFilterScopeFor } from '@/lib/ageFilterTypes';
 import { CLEAN_MACRO } from './propertyTypes';
 import { t } from '@/i18n';
 // Pure ranking/gating engine (2026-08-22 extraction — see src/lib/afRanking.ts header): re-exported
@@ -55,8 +54,8 @@ export type AdvancedQuestion = {
 
 // Minimum USEFUL questions to open the interview at all (owner 2026-08-22; REVISED owner 2026-08-24
 // — supersedes the original ">=2" brief). "Useful" = passes scoreQuestion() above — real narrowing
-// power over the CURRENT eligible set, not merely structurally eligible (cohortAllows/
-// isAgeFilterScope). The rule is now: 0 useful questions closes cleanly (nothing worth asking); 1
+// power over the CURRENT eligible set, not merely structurally eligible (cohortAllows()). The rule
+// is now: 0 useful questions closes cleanly (nothing worth asking); 1
 // or more useful questions opens and asks every one of them, down to the last. A single genuinely
 // useful question is still a real, honest narrowing step for the user — it is not "a tax on their
 // attention" to ask the one question that actually moves their result set; withholding it was the
@@ -69,6 +68,22 @@ export const MIN_USEFUL_QUESTIONS_TO_SHOW = 1;
 // Engine-level LIVE result count for a query — the footer «Show {N}» on every card. Generic: the count
 // RPC applies whatever the query carries (types/scope/amenities/bath/age), so this works for every
 // question and type. null on error → the card holds the last good number rather than flashing.
+/**
+ * Like liveResultCount(), but keeps the two answers APART: 'unknown' means the probe never completed,
+ * a number means the source actually answered.
+ *
+ * liveResultCount() folds both into null, which is right for the live footer (null = "keep showing
+ * the last good number", a claim about nothing). It was WRONG for step revalidation, where null was
+ * read as "this answer selects nothing" and silently deleted a filter the user had already given,
+ * because a request timed out. UNKNOWN IS NOT NO — the same rule the tri-state data law states, in
+ * the control flow rather than the data.
+ */
+export async function liveResultCountOrUnknown(q: SearchQuery): Promise<number | 'unknown'> {
+  const c = await fetchApartmentGuidedCounts(q);
+  if (isProbeFailure(c)) return 'unknown';
+  return c ? c.cnt_selected : 0;      // a real answer, including an honest zero
+}
+
 export async function liveResultCount(q: SearchQuery): Promise<number | null> {
   const c = await fetchApartmentGuidedCounts(q);
   // A failed probe is null HERE too, but for a different and already-correct reason: this is the
@@ -80,8 +95,8 @@ export async function liveResultCount(q: SearchQuery): Promise<number | null> {
 
 // ── Questions ────────────────────────────────────────────────────────────────────────────────────
 
-// Property age — eligible for the 7 age-supported types (its gate now lives HERE, per the contract,
-// not at the agent.tsx call site). 5 strict buckets; each is exactly what Search returns if picked.
+// Property age — eligible for every type/deal/period COHORT_QUESTIONS certifies for 'property_age'
+// (see cohortAllows() below). 5 strict buckets; each is exactly what Search returns if picked.
 const AGE_BUCKETS: Array<{ key: string; labelKey: string; count: (c: AgeOptionCounts) => number }> = [
   { key: 'new', labelKey: 'New construction', count: (c) => c.cnt_new },
   { key: '1_2', labelKey: '1–2 years', count: (c) => c.cnt_1_2 },
@@ -94,11 +109,20 @@ const AGE_QUESTION: AdvancedQuestion = {
   id: 'property_age',
   titleKey: 'How old is the property?',
   selection: 'single',
-  eligibility: (q) => isAgeFilterScopeFor(q, effectiveTypes(q)),
+  // Was its own hand-maintained type→macro map (src/lib/ageFilterTypes.ts, deleted 2026-09-01) that
+  // duplicated COHORT_QUESTIONS and drifted from it — 5 types with real, chat-certified property_age
+  // data (Shop, Workshop, Commercial Building, Farm, Rest House) were unreachable from the manual
+  // card because that second map never learned about them. cohortAllows() IS the certified registry;
+  // deriving eligibility from it directly (like every other question below) makes a second map
+  // impossible to grow stale again. This also lets property_age fire on a multi-type/group scope
+  // when every selected type certifies it — cohortAllows() already intersects safely for that, the
+  // same rule every other cohort-gated question here already relies on (see cohortAllows() in
+  // afCohorts.ts). See scripts/verify-age-filter-gate.ts.
+  eligibility: (q) => cohortAllows(q, 'property_age'),
   async resolveOptions(q) {
     const counts = await fetchPropertyAgeOptionCounts(q);
-    if (isProbeFailure(counts)) return { options: [], unknownCount: 0, total: 0, probeFailed: true };
-    if (!counts || counts.cnt_total < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0, total: counts?.cnt_total ?? 0 };
+    if (isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true };
+    if (!counts || counts.cnt_total < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: null, total: counts?.cnt_total ?? 0 };
     const options = meaningful(AGE_BUCKETS.map((b) => ({ key: b.key, label: t(b.labelKey), count: b.count(counts) })));
     return { options, unknownCount: counts.cnt_unknown, total: counts.cnt_total };
   },
@@ -125,17 +149,52 @@ function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
   return keys.length ? { ...q, amenities: [...new Set([...(q.amenities ?? []), ...keys])] } : q;
 }
 
-// Build a chip/tier question's options from the guided counts, applying the scope-size + per-option floors.
+// THE UNKNOWN COUNT IS NEVER GUESSED (owner rule 2026-08-28, R7.1.3).
+//
+// `unknownCount` is `number | null`, and `null` means "this question has no truthful single unknown
+// count" — the card then shows NO caption. It used to be a hardcoded `0` here, which is a FABRICATED
+// FACT: it asserts "every listing stated this" for questions where nothing of the sort is known. The
+// owner's rule when approving the caption was exact: *never display a fake unknown count; if a
+// question does not have a truthful, source-grounded unknown count, do not show 0 and do not guess.*
+//
+// A question may only claim an unknown count when one is DERIVABLE from real count columns:
+//
+//   • FURNISHED   total − cnt_furnished − cnt_unfurnished. Sound by construction: `furnished` is a
+//     tri-state boolean, so true + false + null partitions the scope. Verified live 2026-08-28 on
+//     الرياض/إيجار/سنوي/شقة — 11,153 − 1,048 − 2,671 = 7,434, exactly the DB's `furnished IS NULL`.
+//   • DIRECTION   total − Σ(the 8 direction counts). Sound only because norm_direction_ar's range IS
+//     exactly those 8 buckets — verified across the whole production index (0 rows normalise to a
+//     9th value). verify-af-unknown-count-truthful.ts pins that domain: a 9th bucket would silently
+//     inflate "did not mention", so it must turn the barrier red.
+//   • PROPERTY AGE has a real `cnt_unknown` column and needs no derivation.
+//
+// Everything else stays null, and each for a stated reason:
+//   • AMENITIES — there is NO single unknown. Each chip is its own boolean column, so "didn't say"
+//     differs per amenity; one number could only be a lie about the rest.
+//   • BATHROOMS / STREET_WIDTH / RATING — threshold ladders. total − (≥1) conflates NULL with the
+//     rows that genuinely have zero/below-threshold, so no honest subtraction exists.
+//   • UNIT_SUBTYPE — total − Σ(3) is only right while the value domain has exactly 3 members. That
+//     is true today but is a data fact, not an invariant, so it is not safe to publish as truth.
+//   • RNPL — a lone boolean chip: false and null are inseparable from cnt_rnpl alone.
 function guidedOptions(
   counts: GuidedCounts | null | { __probeFailed: true },
   defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }>,
+  // Supply ONLY when the count is provably the number of listings whose source did not state the
+  // field. Omit it and the question honestly reports "I don't know how many didn't say".
+  unknownOf?: (c: GuidedCounts) => number,
 ): AdvancedQuestionResult {
   // A probe that never completed is UNKNOWN and says nothing about the scope. It must not return the
   // same shape as "the source answered: nothing" — that equivalence is what silently demoted users to
   // the legacy chips under load (owner 2026-08-26; src/lib/afProbe.ts).
-  if (isProbeFailure(counts)) return { options: [], unknownCount: 0, total: 0, probeFailed: true };
-  if (!counts || counts.cnt_total_base < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: 0, total: counts?.cnt_total_base ?? 0 };
-  return { options: meaningful(defs.map((d) => ({ key: d.key, label: t(d.labelKey), count: d.count(counts) }))), unknownCount: 0, total: counts.cnt_total_base };
+  if (isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true };
+  if (!counts || counts.cnt_total_base < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: null, total: counts?.cnt_total_base ?? 0 };
+  return {
+    options: meaningful(defs.map((d) => ({ key: d.key, label: t(d.labelKey), count: d.count(counts) }))),
+    // Clamp at 0: a negative would mean the arithmetic no longer partitions the scope, and printing
+    // a negative "did not mention" is worse than printing nothing.
+    unknownCount: unknownOf ? Math.max(0, unknownOf(counts)) : null,
+    total: counts.cnt_total_base,
+  };
 }
 
 // Installments (RNPL) — one strict chip. NEUTRAL metadata filter only (no payment calc/estimate/
@@ -179,6 +238,20 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
       // was missing until cnt_maid_room/cnt_driver_room were added to apartment_guided_counts_ar.
       { key: 'maid_room',   labelKey: 'Maid room',   count: (c) => c.cnt_maid_room },
       { key: 'driver_room', labelKey: 'Driver room', count: (c) => c.cnt_driver_room },
+      // The residential "rich" set (owner ruling 2026-09-02, GAP 1 of the matrix certification):
+      // certified for the chat path since 2026-08-31 (RESIDENTIAL_AMENITY_BASE) but never offered
+      // here, so a token the user could commit by sentence had no chip, no count and no sweep row.
+      // Each cnt_* below is computed inside the committed scope by apartment_guided_counts_ar
+      // (template row, migration 20260902220000) exactly like the chips above — a chip may only
+      // exist when its COUNT path exists. Order mirrors RESIDENTIAL_AMENITY_BASE.
+      { key: 'gym',                        labelKey: 'Gym',                        count: (c) => c.cnt_gym },
+      { key: 'pool',                       labelKey: 'Pool',                       count: (c) => c.cnt_pool },
+      { key: 'garden',                     labelKey: 'Garden',                     count: (c) => c.cnt_garden },
+      { key: 'balcony',                    labelKey: 'Balcony',                    count: (c) => c.cnt_balcony },
+      { key: 'laundry_room',               labelKey: 'Laundry room',               count: (c) => c.cnt_laundry_room },
+      { key: 'optical_fibers',             labelKey: 'Optical fibers',             count: (c) => c.cnt_optical_fibers },
+      { key: 'separate_electricity_meter', labelKey: 'Separate electricity meter', count: (c) => c.cnt_separate_electricity_meter },
+      { key: 'separate_water_meter',       labelKey: 'Separate water meter',       count: (c) => c.cnt_separate_water_meter },
     ];
     // Villa-form chips (2026-08-16): aqar villa ads carry مدخل سيارة and صرف صحي checkboxes the
     // apartment forms don't — both near-perfect two-sided splits (buy car entrance 5,594/5,943,
@@ -200,7 +273,14 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
     // [] = the types disagree, so offer none rather than one side's chip.
     const chipAllow = intersectChips(scope);
     if (chipAllow) {
-      defs.push({ key: 'sanitation',   labelKey: 'Sewage connection', count: (c) => c.cnt_sanitation });
+      // Guarded (2026-08-27): the Villa branch above can ALSO push 'sanitation' — today those two
+      // branches never both fire for the same scope (chipAllow is null for a pure-Villa scope, since
+      // COHORT_CHIPS has no Villa entry), but that's a data fact, not a structural guarantee. A
+      // future COHORT_CHIPS entry for Villa would silently double-push the identical chip with
+      // nothing to catch it — guard at the source rather than relying on chips staying disjoint.
+      if (!defs.some((d) => d.key === 'sanitation')) {
+        defs.push({ key: 'sanitation', labelKey: 'Sewage connection', count: (c) => c.cnt_sanitation });
+      }
       defs.push({ key: 'electricity',  labelKey: 'Electricity',       count: (c) => c.cnt_electricity });
       defs.push({ key: 'water_supply', labelKey: 'Water supply',      count: (c) => c.cnt_water_supply });
       const chosen = defs.filter((d) => chipAllow.includes(d.key));
@@ -260,7 +340,7 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
       { key: 'yes', labelKey: 'Furnished',   count: (c) => c.cnt_furnished },
       { key: 'no',  labelKey: 'Unfurnished', count: (c) => c.cnt_unfurnished },
-    ]);
+    ], (c) => c.cnt_total_base - c.cnt_furnished - c.cnt_unfurnished);
   },
   apply: (q, keys) =>
     keys[0] === 'yes' ? { ...q, furnishedPref: true }
@@ -314,9 +394,22 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
   titleKey: 'Which direction do you prefer?',
   descriptionKey: 'Results update as you choose',
   selection: 'multi',
-  eligibility: (q) => cohortAllows(q, 'direction'),
+  // Not asked once directions are already committed — the same guard unit_subtype carries, for the
+  // same reason. cnt_dir_* is computed INSIDE a scope that already applies p_directions, while
+  // apply() UNIONS the new key: so every direction outside the committed set counts 0 while tapping
+  // it WIDENS the result set. Measured on production (Buy/الرياض/عمارة with شمال+غرب committed):
+  // current set 484, chips شمال 282 / غرب 202 / جنوب 0 / شرق 0 — and tapping the جنوب chip that
+  // advertises 0 returns 804. The count is not merely stale, it is inverted, so the honest move is
+  // not to re-ask a question whose options cannot be counted against the state they would produce.
+  // Keyed on committed STATE, not on the round's asked-set, so it also covers directions arriving
+  // from the chat intent path, which never passes through rankQuestions.
+  eligibility: (q) => cohortAllows(q, 'direction') && !(q.directions?.length),
   async resolveOptions(q) {
-    return guidedOptions(await fetchApartmentGuidedCounts(q), DIRECTION_DEFS);
+    return guidedOptions(await fetchApartmentGuidedCounts(q), DIRECTION_DEFS,
+      // Sound ONLY because norm_direction_ar's range is exactly these 8 buckets (verified across the
+      // whole production index). Summing DIRECTION_DEFS rather than re-listing the columns means the
+      // derivation cannot drift from the offered chips.
+      (c) => c.cnt_total_base - DIRECTION_DEFS.reduce((a, d) => a + d.count(c), 0));
   },
   apply: (q, keys) => (keys.length ? { ...q, directions: [...new Set([...(q.directions ?? []), ...keys])] } : q),
 };
@@ -440,6 +533,14 @@ const TYPE_QUESTION: AdvancedQuestion = {
 };
 
 export const SCOPE_QUESTIONS: AdvancedQuestion[] = [GROUP_QUESTION, TYPE_QUESTION];
+
+// BOTH POOLS, as one list. Anything that rebuilds a query from committed facets must span the scope
+// questions as well as the advanced ones — a surviving group/type facet whose question could not be
+// resolved would be silently dropped from the rebuild and quietly widen the search (owner
+// 2026-08-23). removeGuidedFacet in agent.tsx already learned that the hard way with a hand-written
+// `?? SCOPE_QUESTIONS.find(...)`; this is the same union, named once so the Filter screen's carry
+// (@/lib/afCarry) cannot be given half of it.
+export const AF_ALL_QUESTIONS: AdvancedQuestion[] = [...ADVANCED_QUESTIONS, ...SCOPE_QUESTIONS];
 export const scopeQuestionFor = (tier: ScopeTier): AdvancedQuestion =>
   tier === SCOPE_GROUP_ID ? GROUP_QUESTION : TYPE_QUESTION;
 
@@ -455,7 +556,7 @@ export function scoreQuestion(
 }
 
 export type RankedQuestion = {
-  question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; total: number; score: number;
+  question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; total: number; score: number;
 };
 
 // Probe every still-unasked eligible question against the CURRENT query, score, and rank. The

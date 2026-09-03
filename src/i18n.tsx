@@ -395,6 +395,14 @@ const AR: Record<string, string> = {
   'Car entrance': 'مدخل سيارة',
   'Sewage connection': 'صرف صحي',
   'Water supply': 'توفر الماء',
+  // Residential rich amenity chips (owner 2026-09-02). 'Gym' / 'Pool' already live in the interview
+  // block below with the same meaning — not redeclared here.
+  'Garden': 'حديقة',
+  'Balcony': 'بلكونة',
+  'Laundry room': 'غرفة غسيل',
+  'Optical fibers': 'ألياف بصرية',
+  'Separate electricity meter': 'عداد كهرباء مستقل',
+  'Separate water meter': 'عداد ماء مستقل',
   // 'Furnished' key lives in the shared amenities block below (identical value 'مفروش') — not redeclared here.
   // The Advanced Filter's SCOPE steps (owner 2026-08-23) — asked before any certified question when
   // the user has chosen only a category (or only a group). The option LABELS reuse the group/type
@@ -411,7 +419,6 @@ const AR: Record<string, string> = {
   'No preference': 'لا يهمني',
   // Advanced Filter Design Contract (2026-07-20): generic footer + subtitle shared by every question.
   'Show {count} results': 'عرض {count} نتيجة',
-  'Show results': 'عرض النتائج',
   'Results update as you choose': 'تُحدَّث النتائج مع كل اختيار',
   // Card redesign (owner 2026-07-21): numeric question progress + remaining-count skip link, and the
   // RNPL question's pay-monthly-not-yearly subtitle (neutral, descriptive — never advice).
@@ -421,13 +428,17 @@ const AR: Record<string, string> = {
   // Conversational interview refresh (owner 2026-08-16): opening state, live count chip, multi
   // continue CTA, availability line, mining transition, and the results summary + removable pills.
   '{count} results': '{count} نتيجة',
+  '{n} listings did not mention this': '{n} إعلان لم يذكر هذه المعلومة',
   'We found {count} properties': 'لقينا {count} عقار',
   'Let’s pin down what you’re looking for': 'خلّنا نحدد طلبك أكثر',
   'We’ll use what we know about these listings to get you closer to the right one': 'بنستخدم المعلومات المتوفرة عندنا عن هالعقارات عشان نقرّب لك الأنسب',
   'Let’s begin': 'يلا نبدأ',
   // 'Continue' reuses the existing auth-flow key ('متابعة') — not redeclared here.
   'Continue · {count} results': 'متابعة · {count} نتيجة',
-  'Options reflect the information available for the current listings': 'الخيارات تعتمد على المعلومات المتوفرة للإعلانات الحالية',
+  // AF data-availability notes (owner 2026-08-29): unknown is never «no», and the numbers belong to
+  // the CURRENT result set. Professional, calm, never legal/technical language.
+  'Some listings do not mention this detail, so the options reflect what the listings actually state': 'بعض الإعلانات لا تذكر هذه المعلومة، لذلك تعتمد الخيارات على البيانات المتوفرة في الإعلانات.',
+  'Options and counts are based on your current search results and update as you narrow down': 'الخيارات والأعداد مبنية على نتائج بحثك الحالية وتُحدَّث مع تضييق البحث.',
   'Finding the closest match for you': 'ندور لك على الأقرب لطلبك',
   'Going through {count} properties to pull out the best fit': 'نراجع {count} عقار ونطلع لك الأنسب',
   'We found {count} properties closest to your request': 'لقينا {count} عقار أقرب لطلبك',
@@ -640,6 +651,9 @@ const AR: Record<string, string> = {
   'I showed you all {n} matching listings. Want help finding more precise ones?': 'عرضت لك كل النتائج المطابقة ({n} إعلان). تبي أساعدك نلقى نتائج أدق؟',
   // ≤25-result variants (owner 2026-08-19, item 4): no "help me find more precise ones?" invitation
   // when the result set is already small enough that Advanced Filter has nothing useful left to offer.
+  // Browse continuation (owner 2026-08-29): trusted totals state BOTH numbers while more remain.
+  'I showed you the first {shown} of {total} matching listings. Want me to show more?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد؟',
+  'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد، أو أساعدك توصل لنتائج أدق؟',
   'I showed you the first {n} listings. Want me to show more?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟',
   'I showed you all {n} matching listings.': 'عرضت لك كل النتائج المطابقة ({n} إعلان).',
   // CAPPED variants (owner 2026-08-20): when MORE than the browse cap actually match, the truth has two
@@ -977,13 +991,6 @@ const AR: Record<string, string> = {
   'Enter 9 digits': 'أدخل 9 أرقام',
   'Continue': 'متابعة',
   "By continuing you agree to Ezhalah's Terms & Privacy Policy.": 'بالمتابعة فإنك توافق على شروط إزهله وسياسة الخصوصية.',
-  'Enter the code': 'أدخل الرمز',
-  'We sent a 6-digit code on WhatsApp to': 'أرسلنا رمزاً مكوّناً من 6 أرقام عبر واتساب إلى',
-  'Verifying…': 'جارٍ التحقق…',
-  'Resend code on WhatsApp': 'إعادة إرسال الرمز عبر واتساب',
-  'Phone number': 'رقم الجوال',
-  '{country} numbers must start with {hint}': 'أرقام {country} يجب أن تبدأ بـ {hint}',
-  'Enter {n} digits': 'أدخل {n} أرقام',
   // Country names + dial-prefix hints (phone picker)
   'United Arab Emirates': 'الإمارات العربية المتحدة',
   'Qatar': 'قطر',
@@ -1014,11 +1021,6 @@ const AR: Record<string, string> = {
   'Verified': 'تم التحقق',
 
   // Phone OTP errors (friendly, localized)
-  'The code you entered is incorrect.': 'الرمز الذي أدخلته غير صحيح.',
-  'This code has expired. Request a new one.': 'انتهت صلاحية هذا الرمز. اطلب رمزاً جديداً.',
-  'Too many attempts. Please wait a moment and try again.': 'محاولات كثيرة. الرجاء الانتظار قليلاً ثم المحاولة مرة أخرى.',
-  'Please enter a valid phone number.': 'الرجاء إدخال رقم هاتف صحيح.',
-  'Phone sign-in isn’t available right now. Please try another method.': 'تسجيل الدخول عبر الهاتف غير متاح حالياً. جرّب طريقة أخرى.',
   'Network error. Check your connection and try again.': 'خطأ في الشبكة. تحقق من اتصالك ثم حاول مرة أخرى.',
   'Something went wrong. Please try again.': 'حدث خطأ ما. الرجاء المحاولة مرة أخرى.',
 
@@ -1043,12 +1045,29 @@ const AR: Record<string, string> = {
     'تلتزم إزهله بنظام حماية البيانات الشخصية في المملكة. نحن لا نبيع بياناتك. تُحفظ عمليات بحثك وحسابك حتى تحذف حسابك، ثم تُزال نهائياً.',
   'Support': 'المساعدة/تواصل معنا',
   'Contact support': 'تواصل مع الدعم',
+
+  // «تواصل مع الدعم» in-app form (owner 2026-09-02). Saudi-natural, calm, no exclamation marks.
+  'Subject': 'الموضوع',
+  'Message': 'الرسالة',
+  'Your email': 'بريدك الإلكتروني',
+  'What is this about?': 'وش موضوع رسالتك؟',
+  'Tell us what happened.': 'اكتب لنا التفاصيل.',
+  // 'Send' already exists above (composer) — reused here, not redefined.
+  'Sending…': 'جاري الإرسال…',
+  'Try again': 'حاول مرة أخرى',
+  'Your message reached us': 'وصلتنا رسالتك',
+  // Deliberately a promise to REPLY — never a claim that an email has already gone out.
+  "We'll reply to {email}.": 'بنرد عليك على {email}.',
+  'Send another message': 'إرسال رسالة أخرى',
+  "Couldn't send your message. Check your connection and try again.": 'ما قدرنا نرسل رسالتك. تأكد من الاتصال وحاول مرة أخرى.',
   'Terms of Service': 'شروط الخدمة',
   'Privacy Policy': 'سياسة الخصوصية',
   'Ezhalah v{version}': 'إزهله الإصدار {version}',
 
   // Drawer / sidebar
   'New Chat': 'محادثة جديدة',
+  'Search complete': 'اكتمل البحث',
+  'Start a new chat to search again': 'ابدأ محادثة جديدة للبحث من جديد',
   // Sidebar chat search (owner 2026-08-24): ChatGPT-style in-sidebar search, Arabic-first. The
   // empty state + hint are deliberately calm Saudi copy — never an English "No results".
   'Search chats': 'البحث في المحادثات',
@@ -1057,7 +1076,16 @@ const AR: Record<string, string> = {
   'Type in Arabic to search your chats': 'اكتب بالعربي للبحث في محادثاتك',
   'No chat with that name': 'ما لقينا محادثة بهذا الاسم',
   'About Us': 'من نحن',
+  'Trust & transparency': 'الثقة والشفافية',
+  // Said when a filter the user asked for cannot be applied to THIS search. Owner's own wording
+  // (2026-08-30): plain, short, no technical framing — never "Advanced Filter", never an error tone.
+  // We still show the best valid results; only the part we could not honour is mentioned.
+  'That option is not available in this search, so I showed the results without it.':
+    'هالخيار مو متوفر حالياً في هالبحث، فطلعت لك النتائج بدون هالشرط.',
+  'Real-estate platforms, searched as one.': 'منصة عقارية تبحث فيها كأنها منصة واحدة.',
   'Sign up / Log in': 'إنشاء حساب / تسجيل الدخول',
+  // Desktop sign-in dock subtitle (owner 2026-08-26) — why an account is worth it, in one line.
+  'Save your searches and come back to them anytime.': 'احفظ بحثك وارجع له في أي وقت.',
   'Get more. Sign up free.': 'احصل على المزيد. سجل مجاناً.',
   'Sign up to keep searching': 'سجّل للاستمرار في البحث',
   'Get more with a free account': 'احصل على المزيد بحساب مجاني',
@@ -1073,6 +1101,11 @@ const AR: Record<string, string> = {
   'Star': 'أضف إلى المفضلة',
   'Unstar': 'أزل من المفضلة',
   'Delete': 'حذف',
+  // Sidebar delete-confirmation (owner 2026-08-28) — the owner's exact Arabic copy, split into
+  // title + body for the dialog layout; together they read as his one message verbatim.
+  'Delete this conversation?': 'هل أنت متأكد من حذف هذه المحادثة؟',
+  'It will be permanently deleted and cannot be recovered.': 'سيتم حذفها نهائيًا ولا يمكن استرجاعها.',
+  'Delete permanently': 'حذف نهائي',
   'Rename': 'إعادة تسمية',
   // Press-hold-drag reorder (owner 2026-08-24) — accessibility strings, Arabic-first.
   'Hold to reorder the conversation': 'اضغط مطولًا لإعادة ترتيب المحادثة',
@@ -1085,8 +1118,6 @@ const AR: Record<string, string> = {
   'Display Name': 'الاسم المعروض',
   'Edit': 'تعديل',
   'Save': 'حفظ',
-  'Phone Number': 'رقم الجوال',
-  'Change': 'تغيير',
   'Apple Account': 'حساب Apple',
   'Google Account': 'حساب Google',
   "Can't be changed": 'لا يمكن تغييره',
@@ -1096,23 +1127,44 @@ const AR: Record<string, string> = {
     'ما قدرنا نحذف حسابك. تأكد من اتصالك وحاول مرة ثانية.',
   "To change it, you'll have to delete this account and make a new one.":
     'لتغييره، عليك حذف هذا الحساب وإنشاء حساب جديد.',
-  'Logged in device': 'الجهاز المسجَّل دخوله',
+  // Truthful device/browser row (owner 2026-08-29): values come from src/lib/deviceInfo.ts —
+  // detected, never derived from the login provider, never an exact model. Browser row is
+  // omitted entirely when detection isn't trustworthy.
+  'Logged in device': 'الجهاز المستخدم',
   'This device': 'هذا الجهاز',
-  'Android / Chrome': 'أندرويد / كروم',
+  'Browser': 'المتصفح',
   'iPhone': 'آيفون',
+  'iPad': 'آيباد',
+  'Android': 'أندرويد',
+  'Mac': 'ماك',
+  'Windows': 'ويندوز',
+  'Chrome': 'كروم',
+  'Safari': 'سفاري',
+  'Firefox': 'فايرفوكس',
+  'Edge': 'إيدج',
+  'Opera': 'أوبرا',
+  // Devices list (owner Phase 2, 2026-08-29): the REAL session registry. Relative-time labels
+  // live in src/lib/devices.ts (pure Arabic buckets, barrier-executed) — not here.
+  'Devices signed in': 'الأجهزة المسجّل عليها الدخول',
+  'Active now': 'نشط الآن',
+  'Unknown device': 'جهاز غير معروف',
+  'Log out from all other devices': 'تسجيل الخروج من جميع الأجهزة الأخرى',
+  'Signs out within an hour at most': 'سيتم تسجيل الخروج خلال ساعة على الأكثر',
+  'Confirm sign out': 'تأكيد الخروج',
+  "Couldn't sign out this device. Try again.": 'تعذّر تسجيل الخروج من هذا الجهاز. حاول مرة أخرى.',
+  "Couldn't load the other devices.": 'تعذّر تحميل باقي الأجهزة.',
+  'Retry': 'إعادة المحاولة',
   'Saved': 'تم الحفظ',
   'Name saved': 'تم حفظ الاسم',
   'Log out?': 'تسجيل الخروج؟',
-  'Are you sure you want to log out?': 'هل أنت متأكد أنك تريد تسجيل الخروج؟',
+  // Owner's exact logout-confirmation wording (2026-08-28) — the centered popup copy, verbatim.
+  'Are you sure you want to log out?': 'هل أنت متأكد من رغبتك في تسجيل الخروج؟',
   'Danger zone': 'منطقة الخطر',
   'Delete my account': 'حذف حسابي',
   'Log out': 'تسجيل الخروج',
   'Signing out…': 'جارٍ تسجيل الخروج…',
   'Deleting account…': 'جارٍ حذف الحساب…',
   'Apple sign-in isn’t available right now. Please try another method.': 'تسجيل الدخول عبر Apple غير متاح حالياً. جرّب طريقة أخرى.',
-  'Change phone number': 'تغيير رقم الجوال',
-  "Enter your new number, we'll send a verification code on WhatsApp.":
-    'أدخل رقمك الجديد، وسنرسل لك رمز تحقق عبر واتساب.',
   'Send code': 'إرسال الرمز',
   'Cancel': 'إلغاء',
   'Back': 'رجوع',
@@ -1121,6 +1173,19 @@ const AR: Record<string, string> = {
     'يؤدي هذا إلى إزالة حسابك وعمليات بحثك المحفوظة وسجل المحادثات نهائياً. لا يمكن التراجع عن ذلك.',
   "Note: to change your {provider} account, you'll need to delete this account and sign up again with the new one.":
     'ملاحظة: لتغيير حساب {provider}، عليك حذف هذا الحساب وإنشاء حساب جديد بالحساب الآخر.',
+
+  // Sidebar-anchored account menu (owner 2026-08-28). Appearance/Language/Help/Account labels —
+  // the compact panel that replaced the centered Settings modal.
+  'Appearance': 'المظهر',
+  'System': 'النظام',
+  'Light': 'فاتح',
+  'Dark': 'داكن',
+  // ('Language' already lives in the general chrome section above.)
+  'Help': 'المساعدة',
+  'Manage account': 'إدارة الحساب',
+  'Account menu': 'قائمة الحساب',
+  // The Arabic-only contract (i18n setLocale guard): English is listed but not selectable.
+  'Not available yet': 'غير متاح بعد',
 
   // About Us — the long-form «من نحن» copy below is the OWNER'S EXACT wording (2026-07-09); never
   // rewrite or shorten it (still referenced by src/app/about.tsx). The modal now uses the compact

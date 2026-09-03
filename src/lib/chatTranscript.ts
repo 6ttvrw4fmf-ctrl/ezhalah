@@ -30,6 +30,12 @@ export type PersistedChat = {
   // The cumulative AF pills record (committed facets + asked/skipped ids, anchored to the origin
   // query) — restoring it keeps answers removable and stops the next round re-asking them.
   guidedPills: { msgId: string; baseQ: unknown; facets: unknown[]; asked: string[]; total: number | null } | null;
+  // COMPLETED SEARCH (owner 2026-08-30): Advanced Filter narrowed this chat to its final set (≤
+  // INTERVIEW_STOP_AT, R11.1) or no useful question remained (R11.2). The conversation is done: the
+  // composer is replaced by «محادثة جديدة» and a reopened/Back-navigated chat must NOT resurrect an
+  // active composer. Optional and only ever `true`, so older transcripts and the persistence barrier's
+  // literal round-trip are byte-identical when unset.
+  completed?: true;
 };
 
 // Bounds. Listings dominate transcript size (a card is ~1-2KB of JSON); everything else is text.
@@ -47,6 +53,7 @@ type LiveChatState = {
   revealCount: Record<string, number>;
   afReceipt: Record<string, string>;
   guidedPills: { msgId: string; baseQ: unknown; facets: unknown[]; asked: string[]; total: number | null } | null;
+  completed?: boolean;
 };
 
 // Serialize the live screen state into a persistable transcript. Returns null when there is no
@@ -79,6 +86,7 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
   const gp = live.guidedPills;
   return {
     v: 1,
+    ...(live.completed ? { completed: true as const } : {}),
     msgs,
     revealCount,
     afReceipt,
@@ -110,6 +118,7 @@ export function restoreChat(raw: unknown): (PersistedChat & { doneTyping: Record
     guidedPills: p.guidedPills && typeof p.guidedPills.msgId === 'string' && Array.isArray(p.guidedPills.asked)
       ? p.guidedPills
       : null,
+    ...(p.completed === true ? { completed: true as const } : {}),
     doneTyping,
   };
 }

@@ -1,26 +1,21 @@
-// PERMANENT BARRIER: the browse cap is a CAP, never a fake result count (owner 2026-08-20).
+// BROWSE-CONTINUATION HONESTY (owner 2026-08-29 — supersedes the 2026-08-20 lifetime cap this file
+// used to pin; the owner explicitly reversed that decision, so this file now locks the NEW contract
+// with the same rigor it used to lock the old one).
 //
-// THE RULE. Ezhalah shows at most BROWSE_CAP (100) listing cards for one search. But the number of
-// cards the user can reach is ALWAYS min(trueTotal, BROWSE_CAP) — never 100 unconditionally:
-//     trueTotal   8 → browse   8         trueTotal  99 → browse  99
-//     trueTotal  46 → browse  46         trueTotal 100 → browse 100
-//     trueTotal 437 → browse 100, and the closing message still tells the truth: "matched 437, showed 100".
-// trueTotal (how many listings actually satisfy the whole search) and the cap are TWO numbers and must
-// never be confused. The closing message states trueTotal — the authoritative matching count — NOT the
-// cap, NOT a page size, NOT the loaded-array length.
+// THE RULE. «عرض المزيد» keeps working while matching listings genuinely exist: batches land on
+// clean 100 boundaries (…→100→200→300) and reach the LAST real match — no lifetime ceiling. The
+// honesty half is unchanged and non-negotiable: the closing message states the TRUE matched total,
+// never a batch size, never a buffer length, and "more" is never offered when nothing more exists.
 //
-// THE BUG THIS LOCKS OUT (reproduced live 2026-08-20 on ezhalah-app.vercel.app): a 2,223-match search
-// paged PAST 100 (110 cards on screen, "load more" still offered) and a hardcoded «100 at a time» line
-// read as a result count. There was no browse cap and no honest ">cap" closing message.
-//
-// This test proves the pure logic (src/data/resultCount.ts) across every boundary AND scans agent.tsx so
-// the substitutions the owner banned — a hardcoded 100, a page/candidate cap, or the loaded length used
-// as the total — cannot creep back. Mutation-proven: see the MUTATION note at the end.
-//
-//   node --experimental-strip-types scripts/verify-result-cap-honesty.ts   (wired into `npm test`)
+//   node --experimental-strip-types scripts/verify-result-cap-honesty.ts   (runs by existence)
 
 import { readFileSync } from 'node:fs';
-import { BROWSE_CAP, resultCounts } from '../src/data/resultCount.ts';
+import { join } from 'node:path';
+import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '../src/data/resultCount.ts';
+
+const root = join(import.meta.dirname, '..');
+const code = readFileSync(join(root, 'src', 'app', 'agent.tsx'), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/^\s*\/\/.*$/gm, '');
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -29,83 +24,102 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.error(`FAIL  ${label}${detail ? `\n      ${detail}` : ''}`);
 };
 
-console.log('\nThe browse cap is a cap, never a fake result count\n');
+console.log('\nBrowse continuation — every match reachable, every number honest\n');
 
-check('BROWSE_CAP is 100', BROWSE_CAP === 100, `got ${BROWSE_CAP}`);
+check('the batch size is 100', BROWSE_BATCH === 100, `got ${BROWSE_BATCH}`);
 
-// ── A. reachable = min(trueTotal, cap) at EVERY boundary ─────────────────────────────────────────
-const BOUNDARIES = [0, 1, 8, 24, 25, 26, 46, 99, 100, 101, 437, 2223, 11438];
-for (const trueTotal of BOUNDARIES) {
-  const expected = Math.min(trueTotal, BROWSE_CAP);
-  // "fully loaded" terminal state: everything reachable is fetched and on screen, server has no more.
-  const rc = resultCounts({ trueTotal, shown: expected, fetched: Math.min(trueTotal, 1500), serverMore: false });
-  check(`trueTotal ${trueTotal} → reachable ${expected}`, rc.reachable === expected, `got ${rc.reachable}`);
-  check(`trueTotal ${trueTotal} → never browses past the cap`, rc.endShown <= BROWSE_CAP, `endShown ${rc.endShown}`);
-  check(`trueTotal ${trueTotal} → fully loaded means no "load more"`, rc.hasMore === false);
-  if (trueTotal <= BROWSE_CAP) {
-    check(`trueTotal ${trueTotal} (≤cap) → end says ALL, stating the TRUE total`,
-      rc.endKind === 'all' && rc.endTotal === trueTotal && rc.endShown === trueTotal,
-      `endKind=${rc.endKind} endTotal=${rc.endTotal} endShown=${rc.endShown}`);
-  } else {
-    check(`trueTotal ${trueTotal} (>cap) → end says CAPPED: true total ${trueTotal}, shown ${BROWSE_CAP}`,
-      rc.endKind === 'capped' && rc.endTotal === trueTotal && rc.endShown === BROWSE_CAP,
-      `endKind=${rc.endKind} endTotal=${rc.endTotal} endShown=${rc.endShown}`);
-  }
+// ── 1. batches land on clean boundaries and never overshoot what exists ─────────────────────────
+check('first press from the initial drip (10 shown) completes the first hundred',
+  nextBatchTarget(10, 5000) === 100);
+check('subsequent presses land on 200, 300…',
+  nextBatchTarget(100, 5000) === 200 && nextBatchTarget(200, 5000) === 300);
+check('the final batch clamps to the true last match (…→437), never past it',
+  nextBatchTarget(400, 437) === 437 && nextBatchTarget(437, 437) === 437);
+check('a small set clamps immediately (23 available → 23)', nextBatchTarget(10, 23) === 23);
+
+// ── 2. NO LIFETIME CEILING — the exact behavior the owner ordered ───────────────────────────────
+{
+  // Walk a 2,223-match search the way the UI does: press → boundary → press …
+  let shown = 10;
+  let presses = 0;
+  while (shown < 2223 && presses < 50) { shown = nextBatchTarget(shown, 2223); presses++; }
+  check('a 2,223-match search is walkable to ALL 2,223 (was capped at 100 before)',
+    shown === 2223, `reached ${shown} in ${presses} presses`);
+  check('it takes the honest number of presses (23 boundaries)', presses === 23, `presses=${presses}`);
 }
-
-// ── B. the closing count is NEVER the cap when fewer matched ─────────────────────────────────────
-// This is the exact "46 shown as 100" complaint: with 46 matches the stated total must be 46, not 100.
-for (const trueTotal of [8, 24, 46, 99]) {
+for (const trueTotal of [0, 7, 99, 100, 101, 200, 201, 437, 9892]) {
   const rc = resultCounts({ trueTotal, shown: trueTotal, fetched: trueTotal, serverMore: false });
-  check(`${trueTotal} matches → closing total is ${trueTotal}, NEVER ${BROWSE_CAP}`,
-    rc.endTotal === trueTotal && rc.endTotal !== BROWSE_CAP && rc.endShown === trueTotal);
+  check(`trueTotal ${trueTotal}, all shown → endKind 'all', total stated is ${trueTotal}`,
+    rc.endKind === 'all' && rc.endTotal === trueTotal && !rc.hasMore && rc.reachable === trueTotal);
 }
 
-// ── C. mid-load shows "more" and the cap gates it ────────────────────────────────────────────────
+// ── 3. hasMore is exactly "matches remain" — alive at 100/200/300, dead at the end ──────────────
+check('hasMore stays TRUE at 100 shown of 9,892 (the cap used to kill it here)',
+  resultCounts({ trueTotal: 9892, shown: 100, fetched: 1500, serverMore: true }).hasMore === true);
+check('hasMore stays TRUE at 1,500 shown when the server has more pages',
+  resultCounts({ trueTotal: 9892, shown: 1500, fetched: 1500, serverMore: true }).hasMore === true);
+check('hasMore goes FALSE only when the last match is on screen',
+  resultCounts({ trueTotal: 9892, shown: 9892, fetched: 9892, serverMore: false }).hasMore === false);
+check('hasMore is never fabricated: nothing buffered and no server pages → false even if total says more',
+  resultCounts({ trueTotal: 500, shown: 200, fetched: 200, serverMore: false }).hasMore === false);
+
+// ── 4. the closing number is ALWAYS the true total ──────────────────────────────────────────────
+for (const [trueTotal, shown] of [[9892, 100], [9892, 300], [437, 437], [46, 46]] as const) {
+  const rc = resultCounts({ trueTotal, shown, fetched: Math.max(shown, 100), serverMore: shown < trueTotal });
+  check(`${trueTotal} matches, ${shown} shown → message states ${trueTotal}, shown ${shown}`,
+    rc.endTotal === trueTotal && rc.endShown === shown);
+}
+
+// ── 5. the shipped wiring uses the module (never a re-derived local rule) ───────────────────────
+check('loadMore advances via nextBatchTarget (both the buffer path and the fetch path)',
+  (code.match(/nextBatchTarget\(/g) ?? []).length >= 2);
+check('the lifetime-cap gate is GONE from loadMore',
+  !/cur >= BROWSE_CAP/.test(code) && !/BROWSE_CAP/.test(code));
+check('the closing message and the gate share resultCounts()',
+  /const rc = resultCounts\(\{ trueTotal, shown, fetched, serverMore \}\)/.test(code));
+check('a client-narrowed search never quotes the untrusted RPC total',
+  /clientNarrowed \? \(serverMore \? fetched \+ 1 : fetched\) : rawTotal/.test(code)
+  && /const quoteTotal = !clientNarrowed;/.test(code));
+// The ban list, unchanged in spirit: nothing may stand in for trueTotal.
+check('no hardcoded 100 stands in for a result count in the closing message block',
+  !/endTotal: *100|trueTotal = 100|matchTotal \?\? 100/.test(code));
+
+// ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
+console.log('\n  mutation proof — each guard must FAIL on its own defect\n');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+// (a) the old cap sneaking back as a resultCounts ceiling
 {
-  const midSmall = resultCounts({ trueTotal: 46, shown: 10, fetched: 46, serverMore: false });
-  check('46 matches, 10 shown → "more" (34 still reachable)', midSmall.endKind === 'more' && midSmall.hasMore);
-  const midBig = resultCounts({ trueTotal: 2223, shown: 40, fetched: 1500, serverMore: true });
-  check('2223 matches, 40 shown → "more"', midBig.endKind === 'more' && midBig.hasMore && midBig.reachable === 100);
-  const atCap = resultCounts({ trueTotal: 2223, shown: 100, fetched: 1500, serverMore: true });
-  check('2223 matches, 100 shown → cap reached, NO more (stops paging at the cap)', atCap.hasMore === false && atCap.endKind === 'capped');
-  const past = resultCounts({ trueTotal: 2223, shown: 130, fetched: 1500, serverMore: true });
-  check('shown can never be reported above the cap even if a caller over-reveals', past.endShown === 100);
+  const capped = (a: { trueTotal: number; shown: number; fetched: number; serverMore: boolean }) => {
+    const r = resultCounts(a);
+    const reachable = Math.min(a.trueTotal, 100);
+    return { ...r, reachable, hasMore: r.hasMore && a.shown < reachable };
+  };
+  mustCatch('a min(trueTotal, 100) ceiling re-imposed on reachability',
+    capped({ trueTotal: 9892, shown: 100, fetched: 1500, serverMore: true }).hasMore === false);
 }
-
-// ── D. SOURCE SCAN — the banned substitutions must not reach the closing count in agent.tsx ──────
-const agent = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
-const strip = (s: string) => s.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l.trim())).join('\n');
-const code = strip(agent);
-
-check('the closing block derives counts from resultCounts() (single source of truth)',
-  /const rc = resultCounts\(/.test(code));
-check('the load-more gate enforces the cap (cur >= BROWSE_CAP → stop)',
-  /cur >= BROWSE_CAP/.test(code),
-  'without this gate a >100 search pages past the cap — the exact 2026-08-20 bug');
-check('the reveal step is clamped to BROWSE_CAP',
-  /Math\.min\([^)]*BROWSE_CAP\)/.test(code));
-check('the hardcoded «100 at a time» caption is gone (it read as a result count)',
-  !/100 listings at a time/.test(code) && !/100 إعلان في كل مرة/.test(code));
-// The end message must NOT quote listings.length / fetched as the total. resultCounts.endTotal is the
-// ONLY total the message may state. A regex catch: the closing Text must not interpolate `fetched` or
-// `listings.length` as a count.
-const closing = code.slice(code.indexOf('const rc = resultCounts('), code.indexOf('FeedbackRow') > 0 ? code.indexOf('FeedbackRow') : undefined);
-check('the closing message never states fetched/listings.length as the total',
-  !/\{\s*n:\s*fetched/.test(closing) && !/listings\.length\).toLocaleString/.test(closing),
-  'the buffer length is a paging artifact, never the match total');
-
-// ── E. MUTATION PROOF (documented + self-checking) ──────────────────────────────────────────────
-// Restore the bug in the logic and confirm THIS test would catch it: a resultCounts that ignores the
-// cap (reachable = trueTotal) must fail check A. We assert the guard the way a mutant would break it.
+// (b) boundary math drifting to cur+100 (110/210 instead of 100/200)
+mustCatch('drifted boundaries (10+100=110 instead of completing the hundred)',
+  nextBatchTarget(10, 5000) !== 110);
+// (c) fabricated "more" past the last match
+mustCatch('paging past the last real match',
+  nextBatchTarget(437, 437) === 437
+  && resultCounts({ trueTotal: 437, shown: 437, fetched: 437, serverMore: false }).hasMore === false);
+// (d) the closing message quoting the buffer length as the total
 {
-  const buggy = (trueTotal: number) => ({ reachable: trueTotal, endShown: trueTotal }); // the removed bug
-  const mutantWouldPass = buggy(2223).reachable === Math.min(2223, BROWSE_CAP);
-  check('MUTATION: an uncapped reachable (=trueTotal) is caught by this test', mutantWouldPass === false,
-    'if this ever passes, check A is not actually asserting the cap');
+  const buggy = resultCounts({ trueTotal: 9892, shown: 100, fetched: 1500, serverMore: true });
+  mustCatch('the buffer length (1,500) standing in for the true total (9,892)',
+    buggy.endTotal === 9892 && buggy.endTotal !== 1500);
 }
+// (e) the source-level gate check going blind
+mustCatch('the cap gate creeping back into loadMore source',
+  /BROWSE_CAP/.test(code.replace('const cur = revealCount[mid]', 'if (cur >= BROWSE_CAP) return; const cur = revealCount[mid]')));
 
-console.log(failures === 0
-  ? '\n✓ the browse cap is min(trueTotal, 100); the closing message always states the true total\n'
-  : `\n✗ ${failures} check(s) FAILED — a search could show/say the wrong count\n`);
-process.exit(failures === 0 ? 0 : 1);
+if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
+if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
+console.log('\n✓ continuation honest end to end: clean boundaries, true totals, no ceiling, no fabricated more\n');

@@ -32,10 +32,17 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useResolvedTheme } from '@/lib/appearance';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
-import { bumpRotation, currentRotation, pickLoaderPlatforms, type LoaderPlatform } from '@/data/loaderPlatforms';
+import {
+  bumpRotation,
+  currentRotation,
+  pickLoaderPlatforms,
+  type LoaderPlatform,
+} from '@/data/loaderPlatforms';
+import { fetchActivePlatformNames } from '@/data/loaderActivePlatforms';
 import type { SearchQuery } from '@/data/search';
 
 const IS_WEB = Platform.OS === 'web';
@@ -114,6 +121,10 @@ function PlatformPill({
   item: LoaderPlatform; index: number; total: number; rtl: boolean; reduced: boolean; name: string;
 }) {
   const h = useSharedValue(0);
+  // Theme-paired glow literals — interpolateColor parses colors, so no var() tokens here.
+  const darkTheme = useResolvedTheme() === 'dark';
+  const glowBg: [string, string] = darkTheme ? ['#1a241e', '#213529'] : ['#f4f9f6', '#e2f1e7'];
+  const glowLine: [string, string] = darkTheme ? ['#26312a', '#35543f'] : ['#e3ece6', '#b7dbc4'];
   useEffect(() => {
     if (reduced) { h.value = 0; return; }
     // Full sweep ≈3.5–4.5s regardless of roster size; rest keeps each pill's phase stable per loop.
@@ -131,8 +142,8 @@ function PlatformPill({
   const a = useAnimatedStyle(() => {
     const g = h.value;
     return {
-      backgroundColor: interpolateColor(g, [0, 1], ['#f4f9f6', '#e2f1e7']),
-      borderColor: interpolateColor(g, [0, 1], ['#e3ece6', '#b7dbc4']),
+      backgroundColor: interpolateColor(g, [0, 1], glowBg),
+      borderColor: interpolateColor(g, [0, 1], glowLine),
       transform: reduced ? [] : [{ scale: 1 + g * 0.02 }],
       // Soft green glow under the active pill — premium emphasis, not a flash. Same pattern as the
       // app's selection glow (ui.tsx): boxShadow string on web; shadow* + elevation on native
@@ -214,17 +225,34 @@ export default function SearchLoader({
   if (offsetRef.current == null) offsetRef.current = currentRotation();
   useEffect(() => { bumpRotation(); }, []);
 
-  // The COMPLETE 32-platform roster (LOCKED — always the full network, regardless of query), computed
-  // once and FROZEN — `resultSources` arriving later (as the query resolves) only reorders which
-  // pills lead; it must never reshuffle or hide pills already on screen. `query` just gates WHEN the
-  // strip mounts (a search is actually underway); its contents no longer affect WHICH platforms show.
+  // ACTIVE-ONLY roster (owner rule 2026-08-29): only platforms with reachable rows in
+  // `search_listings_ar` are advertised, so a scraper that goes cold stops showing without a
+  // deploy. `fetchActivePlatformNames()` resolves once and is cached at the module level via the
+  // usual React state; if it fails, `activeNames` stays null and pickLoaderPlatforms falls back to
+  // the full catalog (safe degradation — see loaderPlatforms.ts). The catalog itself is barrier-
+  // pinned equal to production's active set at CI time (verify-loader-platforms-match-active.ts).
+  const [activeNames, setActiveNames] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchActivePlatformNames().then((names) => {
+      if (!cancelled) setActiveNames(names);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Roster is computed once per (query, resultSources, activeNames) and FROZEN — `resultSources`
+  // arriving later (as the query resolves) only reorders which pills lead; it must never reshuffle
+  // or hide pills already on screen. `query` just gates WHEN the strip mounts (a search is actually
+  // underway); its contents do not affect WHICH platforms show. If the active-names fetch resolves
+  // AFTER the strip already mounted for THIS search, the frozen roster stays — the next search
+  // picks up the filtered set. That prevents mid-search jitter.
   const frozenRef = useRef<LoaderPlatform[] | null>(null);
   const platforms = useMemo<LoaderPlatform[]>(() => {
     if (frozenRef.current && frozenRef.current.length) return frozenRef.current;
-    const picked = query ? pickLoaderPlatforms(resultSources, offsetRef.current ?? 0) : [];
+    const picked = query ? pickLoaderPlatforms(resultSources, offsetRef.current ?? 0, activeNames) : [];
     if (picked.length) frozenRef.current = picked;
     return picked;
-  }, [query, resultSources]);
+  }, [query, resultSources, activeNames]);
 
   // Soft completion (owner v4): fade the whole block out gently before the results morph in —
   // the loader must never vanish in a single frame.
@@ -271,7 +299,7 @@ const s = StyleSheet.create({
   strip: { flexWrap: 'wrap', alignSelf: 'stretch', gap: 9, rowGap: 9 },
   pill: {
     alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 11, borderRadius: 14,
-    backgroundColor: '#f4f9f6', borderWidth: 1, borderColor: '#e3ece6',
+    backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
   },
   pillLogo: { width: 18, height: 18, borderRadius: 4, backgroundColor: colors.surface },
   pillName: { fontSize: 12.5, fontWeight: '600', color: colors.body, maxWidth: 150 },

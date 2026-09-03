@@ -7,6 +7,8 @@
 > original scope, daily 04:30 Arizona / 11:30 UTC): **Advanced Filter is out of scope for this routine** — it
 > belongs to the senior. See `docs/ops/ENGINEER_ROUTINES.md` for the three-engineer contract.
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+
 ## §0. Standing operating contract (owner-granted, 2026-08-12 — permanent)
 
 **This section is attached to THIS existing job and no other:** routine #3,
@@ -107,6 +109,21 @@ with `price_total = 0` — **kept and searchable**, the source publishes 0 · 18
 total sits inside the «سعر المتر» slot — **kept**. Of 31 rows that all shared the "impossible"
 shape `area = price`, exactly **1** was ours. A repair that cannot name the mechanism Ezhalah used
 to create the wrong value is not a repair; it is data loss with good intentions.
+
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
+
+On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
+whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
+cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
+a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
+contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
+RUN: N` in your FINAL REPORT.
+
+If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
+owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
+Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
+doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
 
 ## 1. Everything we scrape must be accounted for
 Every day, across all active platforms, verify:
@@ -735,6 +752,171 @@ Three rules this pins:
 - **A restore is not finished at `active = true`.** The row must clear the matview refresh (:00) and
   `sync_search_listings_ar` (:14) before a user can reach it, and `last_seen_at` must be refreshed
   or the next crawl re-kills it in three days. Verify through the anon RPC, not the table.
+
+## 25. The wasalt "×1000 land prices" — settled 2026-08-28 by an archive we already had. Do not re-open.
+
+**Verdict: NOT an Ezhalah bug. wasalt publishes these figures itself. Never reprice them.** This
+class has now been half-investigated at least three times (the 2026-08-22 code comment, the standing
+P1 `field_integrity_phone_price:wasalt_residential_listings`, and this run) and each time the trigger
+was the same seductive arithmetic. Read this before starting a fourth.
+
+**The false signal.** 115 active wasalt Buy rows have `price_total / area_m2 > 200,000 SAR/m²`
+(110 visible to users, 5 gated). Dividing them by 1000 lands on *exact, round, entirely plausible*
+Riyadh land rates — 3,147,200,000 → 5,000 · 4,387,500,000 → 6,500 · 3,300,000,000 → 6,000 ·
+7,312,500,000 → 16,250 SAR/m². Five for five, clean integers. It is very hard to look at that and not
+conclude a unit bug. **It is a coincidence of the ÷1000 arithmetic, not evidence.**
+
+**The oracle that settles it, and it is already in our database.**
+`wasalt_residential_listings.ar_data` archives wasalt's own detail payload (`propertyInfo`) per row.
+Nobody had queried it — the 2026-08-22 comment blocked on "wasalt is unreachable from CI/agent
+containers", which is true of a *live* fetch and irrelevant to an *archived* one. Measured:
+
+- **115/115** stored `price_total` == wasalt's own `propertyInfo.salePrice`. Zero differ.
+- **115/115** `conversionPrice` == `salePrice`, and `currencyType` == `conversionUnit` (both «ر.س»).
+  Across **all 53,942 active rows**: `conversionPrice` differs from `salePrice` on **0** rows, and the
+  two currency units differ on **0** rows. So the `salePrice or conversionPrice` fallback in
+  `run.py` cannot introduce a magnitude error, and conversionPrice is not halalas and not FX.
+- **114/114** rows carrying `averageSalePricePerSqm` — *wasalt's own computed per-m² figure* — are
+  internally consistent with wasalt's own `salePrice ÷ wasalt's own area`, at the SAME magnitude
+  (e.g. 16,250,000 SAR/m² on the 450 m² العليا plot). **0** rows show a source per-m² ~1000× smaller,
+  which is exactly what would exist if our total were inflated ×1000.
+- **102/115** have wasalt's own description prose quoting our exact digits, e.g. «سعرها 7312500000 ر.س».
+
+The 38 rows whose source per-m² does not match *our* ratio are explained entirely by our integer
+truncation of wasalt's fractional areas (153.9→153, 372.18→372, 66.61→66); the price is identical in
+every one. **Repairing area precision is a separate, non-urgent question — it never touches price.**
+
+**Precedent that should have short-circuited all of this:** 26 wasalt rows were already adjudicated
+into `ops_price_source_verified` on 2026-08-11 with the evidence line *"salePrice=conversionPrice=
+3150000000, prose «سعرها 3150000000 ر.س» verbatim. Source-published."* — the identical standard.
+
+**The gate is evidence-gated by design, and that is the correct lever.**
+`enforce_price_size_sanity()` hides a `price_size_impossible()` row **only if it is absent from
+`ops_price_source_verified`**. That is why 34 rows trip the predicate while only 16 are withheld: the
+other 18 are registered as proven-source and stay searchable. **The gate is not malfunctioning and
+must not be widened, narrowed, or bypassed to make this cohort go away.** Registering a proven row is
+the sanctioned way to un-hide it — and each entry needs a real `evidence` string, so it cannot be done
+in bulk on a hunch.
+
+**Two things that remain genuinely UNKNOWN — do not "resolve" them by arithmetic:**
+1. **9 rows where stored = source × exactly 1000, in the OPPOSITE direction** (ids incl. 520292,
+   525615; all area 734, stored 579,000, `ar_data.salePrice` = 579, no source per-m², description only
+   «سنة اتحاد الملاك»). wasalt's English search payload and its Arabic detail payload disagree, and
+   *our* value is the plausible one. Neither is provable from what we hold. Left untouched.
+2. **2 aqarmonthly gated rows** (1143359, 1661535) whose capture is
+   `price_evidence.reason = adapter_emitted_no_evidence`. No archived figure exists to check against.
+   (The other 2 reconcile exactly: source monthly × 12 = stored `price_annual`.)
+
+**The rule this pins:** before concluding any wasalt price is ours, query `ar_data`. More generally —
+*an archived source payload we already store IS source truth, and "unreachable live" is not the same
+claim as "unverifiable".* A divide-by-N that lands on pretty numbers is never evidence; the source's
+own per-unit field and its own prose are.
+
+## 27. Three adjudications from run 2026-08-29 — do not re-derive any of them
+
+**27a. A row with a city that is not `production_ready` is served to NOBODY, and now something asks.**
+The Normal Filter admits a row through exactly two branches: `production_ready` with a location, or the
+unlocated fallback, which *requires* `city_id IS NULL`. A located row that is not `production_ready`
+satisfies neither — it sits in `search_listings_ar`, counts as present in every count-parity check, and
+no user can ever reach it. Run #68 found 15 of these on 2026-08-28 and registered 13; this run found the
+remaining 2 the same way, **by hand, eight hours later**, because nothing in the roster asked the
+question: `mon_detect_unlocated_search_contract` limb (b) checks the opposite direction
+(`production_ready` ⇒ city AND region), and `price_gate_withheld` counts withheld rows without
+distinguishing "still reachable through the fallback" from "reachable by nothing".
+`mon_detect_located_row_unreachable()` (P1, roster-wired, ~190 ms, resolves on the evaluated path per
+§23a) now closes it. Both directions proven live: raised 2 at 07:16:24, resolved both at 07:16:51,
+`insta_resolves = 0`. **A standing 0 is the healthy reading** (§24c).
+
+**27b. The two "genuinely UNKNOWN" aqarmonthly prices are answered — aqar publishes them.** §25 closed
+the wasalt ×1000 story but left `1143359` / `1661535` open as unverifiable ("no archived figure exists
+to check against"). That was true of `ar_data`; it was **not** true of the source, which is reachable
+and needs no auth. `sa.aqar.fm/graphql`
+`DailyRenting.getCalculatedBookingPriceWithDiscount(...).discounted_price` — the exact field
+`scrapers/aqarmonthly/run.py` reads — answered live on 2026-08-29: **6156982 → 32,999,967, matching the
+stored `price_annual` 395,999,604 = 32,999,967 × 12 EXACTLY**; 6188874 → 90,412,109.48, the same ~1e8
+magnitude as the stored figure (this vertical prices per 30-day window, so the exact number is
+window-dependent *by design* and a window difference is not a discrepancy). The unit is SAR, not
+halalas: the platform's own median stored monthly is **10,866 SAR over 1,739 active rows**. A third,
+independently captured listing (`1588733`, حي اشبيلية) carries the identical 395,999,604. Both rows are
+registered in `ops_price_source_verified` and are now retrievable through the anon RPC.
+*The generalisation, and it is the same one §25 pinned from the other side:* **"we hold no archived
+copy" is not "unverifiable" — check whether the source itself still answers before filing a row as
+unknowable.**
+
+**27c. aqarmonthly's 94% capture drop was the SOURCE, and mustqr's crawl absence IS a source verdict.**
+Two liveness scares, both cleared by asking the source rather than reading our own state:
+- `silent_partial_success:aqarmonthly` fired on 243 rows seen against a ~3,738/day norm (the same shape
+  as 2026-08-22, 241). All 16 shards independently discovered the *same* ~241 ids — a truncation would
+  have produced ragged slices — and a live probe returned `Search.find(availability:{eq:1}).total =
+  **244**`. The source's availability board really is that small today. Zero listings lost: shards never
+  prune (`--shard` skips it), `pruned=0` on all 16, and `prune_unseen`'s collapse guard would refuse
+  241-vs-1,724 anyway.
+- mustqr's 3-strike kills carry no per-row `GONE` verdict, which is the §26 shape — but it is **not** the
+  §26 *defect*. aqarcity's sitemap is an incomplete index; mustqr's discovery is a complete query of the
+  source's own database (`…supabase.co/rest/v1/properties?status=eq.متاح`), so absence from the crawl is
+  the source saying "no longer available". Crawls are stable and complete (1,172→1,189 rows_seen over 8
+  days, ok=true, prunes 0–9/day). Re-probed 2026-08-29: mustqr's HTML is still **md5-identical** for
+  killed, live and bogus ids (18,951-byte SPA shell), so a per-page oracle remains impossible and
+  registering mustqr in `ops_oracle_required_platform` would buy nothing. Its backend REST host is
+  blocked by the agent egress proxy, so a per-id status probe cannot run from a routine container —
+  it would have to live in the scraper. **Leave it as it is; §26's "not restored" verdict stands.**
+
+**27d. aqar has a control-validated liveness oracle and it needs no auth — use it instead of reasoning
+about the largest kill cohort.** aqar is the biggest inactivation cohort in the system (358 in 24 h,
+2,543 in 7 days) and every one of those kills rests on 3-strike crawl absence (`missing_count = 3`),
+which is the shape §26 exists to distrust. It holds up here, and the cheap way to confirm it is
+`sa.aqar.fm/graphql` → `Listing{ get(id:…){ id uri } }`, no key, no session:
+**6/6 rows deactivated on 2026-08-29 came back ABSENT with aqar's own «الإعلان غير موجود», and 3/3
+currently-active rows came back PRESENT** — so the oracle discriminates, which a bare 404 on a bogus id
+never proves on its own (§26: *an oracle needs a CONTROL before it is an oracle*). Note the bogus-id
+control returns the same «الإعلان غير موجود», so the discriminating half is the POSITIVE control, not
+the negative one. Re-run those two halves rather than re-deriving whether aqar's crawl is complete.
+
+## 28. Two adjudications from run 2026-08-30 — a 30× kill spike that was the source, and the oracle trap I nearly fell into
+
+**28a. §27d's aqar GraphQL oracle takes the AD NUMBER, not our row `id` — and only the POSITIVE
+control can tell you when you have got that wrong.** §27d recommends
+`sa.aqar.fm/graphql` → `Listing{ get(id:…){ id uri } }`. Passing `<platform>_listings.id` (our
+internal row id) instead of `ad_number` makes **every** probe return aqar's «الإعلان غير موجود» —
+killed rows, currently-active rows and bogus ids alike, because the ids simply do not exist on aqar.
+Read with only a negative control that is an immaculate *"6/6 confirmed gone"*, and on 2026-08-30 the
+conclusion it would have manufactured happened to be **true**, which is the worst possible outcome: a
+right answer with no evidence behind it, ready to be wrong the next time. §27d already says the
+discriminating half is the positive control. This is why. **A liveness probe whose active-row control
+does not come back PRESENT has told you about your query, not about the source.**
+
+**28b. A 30× inactivation spike is not evidence of a bug, and the way to settle it is to re-run the
+PRODUCTION predicate on live pages.** 12,363 `aqar_residential_listings` rows went inactive in one
+hour (2026-08-30 01:00–02:00, `gh-aqar-liveness` jobid 6) against a ~350/day norm — `missing_count`
+3–4, avg 3.0 days since last seen, most shards killing ~1,000–1,250 where the whole platform had
+killed 358 the night before. Every surface signal said "§26: a perfect crawl of an incomplete index".
+It was not. Importing `looks_dead()`/`looks_closed()` from `scrapers/aqar/liveness.py` and running
+them against live pages gave **6/6 killed = aqar's soft-closed «مغلق» badge with the `offers`/`price`
+JSON-LD node stripped, and 6/6 still-active controls = `offers` + `price` present** — same fetch path,
+same container, so the difference is per-listing, not a page-shape collapse. Per-row evidence is in
+`ops_stale_inactivation_probe`.
+
+The hypothesis that had to be excluded, because it is the one that would have been catastrophic:
+`looks_closed()`'s factor 2 is `'"offers"' in body or '"price"' in body`, a **page-shape** signal. If
+aqar ever moves those nodes client-side, factor 2 goes False for every page at once and the
+two-factor guard degenerates to "the word «مغلق» appears near markup" — which that function's own
+docstring measured at 7 of 77 *live* pages (~9%), suspiciously close to the 12.7% kill rate observed
+here. **The active-row control is what distinguishes the two, and it must be part of any future
+adjudication of this cohort.** Do not re-derive the 2026-08-30 spike; do re-run those two halves.
+
+**28c. The roster's second P0 could not go GREEN, and it took the P0's first-ever firing to reveal
+it.** `mon_detect_deleted_but_source_live()` called `mon_raise()` in both limbs and no resolver
+anywhere; `mon_detect_unresolvable_alert_kinds()` flagged it 30 minutes after the first raise. SQL
+cannot re-probe a URL (§26), so there is no honest self-heal — the close-out is
+`ops_deleted_but_source_live_adjudication`, a disposition plus ≥40 chars of real evidence, the
+`ops_price_source_verified` discipline. The gate is not weakened: an un-adjudicated finding still
+raises P0 and stays open. Live keys are derived from the **raising cohort**, never from the
+`not exists (alert)` guard — that is the §25a insta-resolve trap, which would resolve the alert in the
+transaction that created it. Migration `20260830071705`; both directions proven live, `insta_resolves = 0`.
+**Adjudicating is not restoring:** the finding (gathern unit 182286) turned out to be a correct,
+evidence-backed deletion — a genuine hard 404 on 2026-08-23, control-validated today because a valid
+property id with a bogus unit id also 404s — followed by the source republishing the same unit URL.
+1 of 40. The row was **not** rebuilt from the probe.
 
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the

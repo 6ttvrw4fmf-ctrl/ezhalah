@@ -51,3 +51,14 @@ jobs:
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-migration-drift-vs-production.ts
+
+      # Drift condition #5 (2026-08-30): conditions #1-#4 above compare only IDENTIFIERS - a
+      # version, a name, a function signature - so a committed file can contain SQL production never
+      # executed and every one of them stays green. This step compares the CONTENT. `if: always()`
+      # is deliberate: the two conditions are independent, and an identifier-level drift must not
+      # hide a content-level one behind an early exit.
+      - name: Verify migration content parity vs production (drift condition #5)
+        if: always()
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-migration-content-parity.ts

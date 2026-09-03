@@ -8,7 +8,8 @@ initial server-rendered HTML.
 Data path (HTML parse, NO API — "v4" redesign live since ~2026-07-26, scraper updated 2026-07-30):
   • GET /properties (+?page=N pagination; the pager carries NO rel="next" as of 2026-08-04 — the
     crawl stops when a page yields no NEW /property/{ID} links) → `<article class="property-card">` cards:
-    title (h3), href="/property/{ID}" (5-char alnum id), deal badge (للبيع/للإيجار),
+    title (h3), href="/property/{ID}" or href="/ar/property/{ID}" (site added the /ar/ locale
+    prefix to list-page hrefs 2026-09-01; the 5-char alnum id itself is unchanged), deal badge (للبيع/للإيجار),
     `property-facts` chips as `<b>VALUE</b><span>LABEL</span>` pairs (م² area, غرف, حمامات), and
     the `property-location` line "CITY · DISTRICT" — now the ONLY structured city/district on the
     site (the old detail-page المدينة/الحي rows are gone).
@@ -37,6 +38,7 @@ import os
 import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
@@ -58,6 +60,15 @@ LIST_ALL = f"{BASE}/properties"
 LIST_SALE = f"{BASE}/properties?purpose=sale"
 LIST_RENT = f"{BASE}/properties?purpose=rent"
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
+
+# Site added an `/ar/` locale prefix to every list-page property href (found live 2026-09-01 via a
+# GitHub-Actions debug probe, after two consecutive 0-row days: page 1 of /properties now links
+# `/ar/property/{ID}` exclusively — zero bare `/property/{ID}` hrefs present — while the 5-char
+# alnum ID scheme is unchanged. A direct GET of the bare, unprefixed detail URL still resolves
+# (200, identical og:title) — confirmed for both the bare and `/ar/`-prefixed forms, and for both
+# the `www.` and apex host (which 301s to apex either way) — so ONLY the href-extraction regex
+# needs the prefix made optional; BASE/detail-url construction is untouched and still correct.
+_PROPERTY_HREF_RE = re.compile(r'href="(?:/ar)?/property/([A-Za-z0-9]{4,8})"')
 
 # Arabic property-kind word (from the card/og title or description) → canonical English type.
 # Order matters: more specific multi-word forms are checked first in _map_type().
@@ -195,6 +206,26 @@ def _page_url(url: str, page: int) -> str:
     return f"{url}{'&' if '?' in url else '?'}page={page}"
 
 
+# List-page failure tally (daily engineer, 2026-09-01). Same defect class already fixed for
+# sanadak/erapulse/abeea: _pages() used to read `.text` and drop `.status_code` on the floor, and
+# swallowed every exception with a bare `except Exception: return`. A block page, a 5xx, or a
+# transport failure on page 1 then looks EXACTLY like "the catalogue is genuinely this small" —
+# the same "0-row run (blocked/empty source?)" question mark, one layer down. Confirmed pattern:
+# sadin recorded 2 consecutive 0-row days (08-31, 09-01) with no concrete reason in scrape_runs.
+_list_fetch_fail_reasons: list[str] = []
+
+
+def _record_list_fetch_failure(reason: str) -> None:
+    _list_fetch_fail_reasons.append(reason)
+
+
+def list_fetch_failure_summary() -> str:
+    """Compact 'reason=count' breakdown, most common first. '' when nothing failed."""
+    if not _list_fetch_fail_reasons:
+        return ""
+    return ", ".join(f"{r}={n}" for r, n in Counter(_list_fetch_fail_reasons).most_common(6))
+
+
 def _pages(s: cc.Session, url: str, max_pages: int = 40):
     """Yield each list page's HTML, following the redesign's server-side ?page=N pagination.
 
@@ -207,15 +238,32 @@ def _pages(s: cc.Session, url: str, max_pages: int = 40):
     run still recorded as ok=true. The remaining condition is site-agnostic and terminates correctly
     on today's markup: pages 1/2 share 0 ids (9 unique each), and page 11 yields 0 links, which ends
     the loop. Do not re-add a stop that depends on a specific pager marker — the catalogue itself is
-    the only reliable signal that there is nothing left to read."""
+    the only reliable signal that there is nothing left to read.
+
+    Every early return now records a CONCRETE reason first (transport exception, non-200 status,
+    or a real 200 whose first page carries zero property links — a markup/parser-drift signal, not
+    proof the catalogue is empty) so a run that captures nothing can name the cause."""
     seen: set[str] = set()
     for p in range(1, max_pages + 1):
         _throttle()
         try:
-            html = s.get(_page_url(url, p), timeout=40).text
-        except Exception:
+            r = s.get(_page_url(url, p), timeout=40)
+        except Exception as e:
+            _record_list_fetch_failure(f"transport_{type(e).__name__}")
             return
-        ids = set(re.findall(r'href="/property/([A-Za-z0-9]{4,8})"', html))
+        if r.status_code != 200:
+            # A non-200 is the source refusing/blocking us — never let it look like "no more
+            # pages left to read".
+            _record_list_fetch_failure(f"http_{r.status_code}")
+            return
+        html = r.text
+        ids = set(_PROPERTY_HREF_RE.findall(html))
+        if p == 1 and not ids:
+            # A real 200 we extracted nothing from is a DIFFERENT fact from the source blocking
+            # us — most likely the markup changed under us again (the 2026-07 redesign already
+            # did this once). Keep the two buckets apart, same as sanadak's http_200_no_listing.
+            _record_list_fetch_failure("http_200_zero_ids_page1")
+            return
         if p > 1 and not (ids - seen):
             return
         seen |= ids
@@ -225,7 +273,7 @@ def _pages(s: cc.Session, url: str, max_pages: int = 40):
 def _ids(s: cc.Session, url: str) -> list[str]:
     out: list[str] = []
     for html in _pages(s, url):
-        for pid in re.findall(r'href="/property/([A-Za-z0-9]{4,8})"', html):
+        for pid in _PROPERTY_HREF_RE.findall(html):
             if pid not in out:
                 out.append(pid)
     return out
@@ -239,7 +287,7 @@ def parse_catalog_cards(html: str, cards: dict[str, dict]) -> None:
     `property-location` line ("المدينة المنورة · حي العريض") is now the ONLY structured
     city/district on the site (the old detail-page المدينة/الحي rows are gone)."""
     for b in re.split(r'(?=<article class="property-card)', html):
-        m = re.search(r'href="/property/([A-Za-z0-9]{4,8})"', b)
+        m = _PROPERTY_HREF_RE.search(b)
         if not m or not b.startswith('<article'):
             continue
         pid = m.group(1)
@@ -314,19 +362,36 @@ def _photos(html: str, pid: str) -> list[str]:
     return urls[:30]
 
 
+_DESC_LABEL = "وصف العقار"
+
+
 def _description(html: str) -> Optional[str]:
-    i = html.find("وصف العقار")
+    i = html.find(_DESC_LABEL)
     if i < 0:
         return None
-    sub = html[i: i + 6000]
+    sub = html[i + len(_DESC_LABEL): i + len(_DESC_LABEL) + 6000]
     # sadin.com.sa's markup moved from class="text" to class="property-description" (found live
     # 2026-07-28: the old selector matched 0/3 sampled live pages, so a fresh crawl today would get
     # desc_raw=None and silently store no price at all — a coverage outage, not a wrong-value bug).
-    # Try the current class first, keep the old one as a fallback in case an older cached/mirrored
-    # page still uses it.
-    m = re.search(r'<div class="property-description">(.*?)</div>', sub, re.S) \
+    #
+    # It moved AGAIN with the 2026-07 detail-page redesign, and that outage ran unseen from
+    # ~2026-08-14 to 2026-09-03: 73/74 active residential rows and 10/10 commercial rows were served
+    # with NO price, because sadin's price is parsed only out of this description prose
+    # (_extract_price). The crawl never complained — ok=true, rows_seen=84, prune healthy — because
+    # only this one selector had died. What proves the fetch itself was fine is that area_m2 kept
+    # parsing on 74/74 of the very same rows from the redesigned `<dt>المساحة</dt><dd>` pair.
+    #
+    # So read the redesign's own dt/dd shape FIRST — the same structure _dd_field() already parses
+    # live for المساحة / نوع العقار / الغرض — and keep both older selectors as fallbacks so a cached
+    # or mirrored pre-redesign page still parses exactly as before. Anchored to the label's own
+    # `</dt>` (whitespace only in between) so an unrelated dt/dd pair further down the page can never
+    # be picked up as the description. A dedicated pattern rather than _dd_field() because that helper
+    # is `[^<]+?` — correct for a short scalar like "500 م²", but a description carries inner markup
+    # (<br>, <p>) that _strip() removes here.
+    m = re.search(r'^\s*</dt>\s*<dd[^>]*>(.*?)</dd>', sub, re.S) \
+        or re.search(r'<div class="property-description">(.*?)</div>', sub, re.S) \
         or re.search(r'<div class="text">(.*?)</div>', sub, re.S)
-    return _strip(m.group(1)) if m else None
+    return _strip(m.group(1)) or None if m else None
 
 
 def _is_per_meter(before: str, after: str) -> bool:
@@ -596,6 +661,15 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:74])
             return 0
 
+        # An ad whose category flipped this run is superseded in the table it LEFT. This runs
+        # before prune_unseen because it reasons from positive evidence (we parsed and classified
+        # the ad this run), not from absence — prune's guards protect an orphan rather than age it
+        # out, and verify_gone's 'live' verdict then makes it immortal. See db.retire_superseded_siblings.
+        superseded = db.retire_superseded_siblings(
+            res_table="sadin_residential_listings", com_table="sadin_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Sadin")
+
         # Full run: prune listings active before but not seen this crawl.
         pruned = 0
         for tbl, rows_seen in (("sadin_residential_listings", res),
@@ -605,8 +679,18 @@ def main() -> int:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
-        print(f"✓ Sadin: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["sadin_residential_listings", "sadin_commercial_listings"])
+        print(f"✓ Sadin: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned, "
+              f"{superseded} cross-table superseded")
+        # Carry the list-page failure breakdown into the run row. Without it a run where every
+        # list page 500'd/blocked is recorded identically to one whose catalogue was genuinely
+        # this small — see _pages()'s docstring.
+        fail_summary = list_fetch_failure_summary()
+        if fail_summary:
+            print(f"  list-fetch failures: {fail_summary}", flush=True)
+        notes = f"pruned={pruned}"
+        if fail_summary:
+            notes += f" | list-fetch failures: {fail_summary}"
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=notes[:300], check_tables=["sadin_residential_listings", "sadin_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

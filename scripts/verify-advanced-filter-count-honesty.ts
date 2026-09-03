@@ -128,19 +128,33 @@ check('hasClientOnlyNarrowing still covers all three narrowers',
 check('buildQuery writes q.amenities from the answer',
   /if \(real\(a\.s_amenities\) && AMENITY_TOKEN\[a\.s_amenities\]\) q\.amenities = \[AMENITY_TOKEN\[a\.s_amenities\]\];/.test(interview));
 
-// The live p_amenities vocabulary of location_search_candidates_ar, read off pg_get_functiondef
-// 2026-08-04. An unknown token matches nothing BY DESIGN, so every mapped value must be in this set —
-// a typo here would silently zero out every interview search that answers this question.
-const LIVE_AMENITY_TOKENS = new Set([
-  'elevator', 'parking', 'kitchen', 'ac', 'maid_room', 'driver_room', 'private_entrance',
-  'furnished', 'rnpl', 'rent_now_pay_later',
-]);
+// The live p_amenities vocabulary, DERIVED from the clause rather than transcribed from it.
+// An unknown token matches nothing BY DESIGN, so every mapped value must be in this set — a typo
+// here would silently zero out every interview search that answers this question.
+//
+// This was a hand-copied set "read off pg_get_functiondef 2026-08-04". It was 12 tokens behind by
+// 2026-09-01, which makes the check below narrower than production: a legitimately certified token
+// would have been reported as a typo. sql/mirrors/af_eligibility_clause.sql is byte-exact with the
+// deployed clause and kept fresh by verify-sql-mirrors-not-stale.ts, so this stays offline.
+const clauseSql = readFileSync(new URL('../sql/mirrors/af_eligibility_clause.sql', import.meta.url), 'utf8');
+const vocabMatch = clauseSql.match(/where tok not in \(([^)]*)\)/);
+if (!vocabMatch) { console.log('FAIL  amenity vocabulary unreadable from the clause mirror'); process.exit(1); }
+const LIVE_AMENITY_TOKENS = new Set([...vocabMatch[1].matchAll(/''([a-z_]+)''/g)].map((m) => m[1]));
+if (LIVE_AMENITY_TOKENS.size < 12) {
+  console.log(`FAIL  vocabulary parsed as only ${LIVE_AMENITY_TOKENS.size} tokens — parse miss, not a real shrink`);
+  process.exit(1);
+}
 const mapBlock = interview.match(/const AMENITY_TOKEN: Record<string, string> = \{([\s\S]*?)\};/);
 check('AMENITY_TOKEN map exists', !!mapBlock);
 const mapped = [...(mapBlock?.[1] ?? '').matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 check(`every mapped token is in the live RPC vocabulary (mapped: ${mapped.join(', ')})`,
   mapped.length > 0 && mapped.every((tok) => LIVE_AMENITY_TOKENS.has(tok)));
-check('Pool and Gym are NOT mapped — no such column exists, and a guessed slug would zero out results',
+// Restated 2026-09-02: the columns exist, both tokens are certified, and 20260902220000 gives them
+// cnt_* columns and card chips. The INTERVIEW mapping still must not carry them: its four-option
+// amenity list is owner-scoped and certified separately; a token appearing there is an interview
+// decision, never a side effect of the card. (2026-09-01's "no cnt_pool/cnt_gym exists" is no longer
+// the reason — that count path now exists.)
+check('Pool and Gym are NOT mapped in the interview — its option list is owner-scoped; a card chip does not enrol a token there',
   !/'pool'/i.test(mapBlock?.[1] ?? '') && !/'gym'/i.test(mapBlock?.[1] ?? ''));
 
 // The amenities question's own skip option must not be treated as a stated preference (it was

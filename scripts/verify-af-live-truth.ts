@@ -8,7 +8,9 @@
 // captured request actually carried. Diffs exact (source_table,listing_id) sets: missing / extra /
 // duplicate, not just counts.
 import { chromium } from 'playwright';
+import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
@@ -44,10 +46,69 @@ const check = (label, ok, detail = '') => {
   if (!ok) failures++;
 };
 
-const browser = await chromium.launch({ args: ['--no-sandbox', '--ignore-certificate-errors'] });
+// Launch options are ENV-DRIVEN and default to exactly what they were, so CI (which runs
+// `playwright install` and has open egress) is byte-for-byte unaffected. They exist for the agent
+// containers the AF routine actually runs in, where this check could not launch at all:
+//   PW_EXECUTABLE_PATH — the image ships ONE pinned Chromium (/opt/pw-browsers/chromium) whose
+//                        build number is not the one this Playwright driver would download, so a
+//                        bare launch dies with "Executable doesn't exist at …chromium-<other>".
+//   HTTPS_PROXY        — behind the MITM egress proxy Chromium resets every connection under
+//                        TLS 1.3, so the proxy is passed through with --ssl-version-max=tls1.2.
+// Both are SEARCH_MATCH_QA_ENGINEER.md §41.1/§41.12, already solved this way in e2e/live-sweep.
+// Without them the routine's own §0 step 8 ("run verify-af-live-truth.ts") was impossible in the
+// container, which is how the live AF suite went unrun on the day the sweep needed it most.
+const browser = await chromium.launch({
+  ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
+  ...(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {}),
+  args: ['--no-sandbox', '--ignore-certificate-errors',
+         ...(process.env.HTTPS_PROXY ? ['--disable-quic', '--ssl-version-max=tls1.2'] : [])],
+});
+
+// CATEGORY PURITY NEEDS THE SAME REFERENCE TABLE PRODUCTION USES (2026-08-28). p_category is a real
+// predicate — a `both`-macro type is eligible only from the table matching the requested category —
+// so the oracle now REFUSES a request carrying p_category without this map rather than silently
+// ignoring it. Read from known_type_ar itself, which is what af_eligibility_clause() joins against,
+// so the oracle stays genuinely independent of our own SQL rather than of our own constants.
+const TYPE_MACROS = await (async () => {
+  const r = await fetch(`${REST_URL}/rest/v1/known_type_ar?select=type_ar,macro`, { headers: H });
+  if (!r.ok) throw new Error(`known_type_ar unreadable (${r.status}) — the oracle cannot apply category purity`);
+  return Object.fromEntries((await r.json()).map((x) => [x.type_ar, x.macro]));
+})();
+// RESOLVE ONLY THE NAMES THE REQUEST ACTUALLY USES (2026-09-01, second pass).
+//
+// The first version of this read the WHOLE district reference set: 192,125 rows paged 1,000 at a
+// time, each page carrying an `order=` over the full index, to learn 2,069 distinct values. It was
+// correct and unusably slow — 193 ordered round-trips turned a ~2-minute live suite into a
+// 30-minute one, which in CI is a timeout waiting to happen, i.e. another way for this check to go
+// quiet. A barrier that is too slow to finish protects nothing.
+//
+// A request carries one to three district names, so ask about exactly those: one count-only probe
+// per name (Range 0-0, no rows returned). Cost is O(names in the request), not O(rows in the index),
+// and the fact being established is identical — "is this name stored verbatim in search_listings_ar".
+const districtCache = new Map();
+async function knownDistrictsFor(names) {
+  const out = new Set();
+  for (const n of new Set(names)) {
+    if (!districtCache.has(n)) {
+      const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id&district_ar=eq.${encodeURIComponent(n)}`,
+        { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } });
+      if (!r.ok) throw new Error(`district probe failed for ${n} (${r.status}) — refusing to guess`);
+      districtCache.set(n, Number((r.headers.get('content-range') || '').split('/')[1] ?? 0) > 0);
+    }
+    if (districtCache.get(n)) out.add(n);
+  }
+  return out;
+}
+
+// Directions (2026-09-02): the index stores «…ي» spellings the RPC normalises; the oracle needs the
+// OBSERVED spellings or it refuses to translate p_directions (see afOracleLive.ts).
+const DIRECTION_VARIANTS = (await loadDirectionVariants(REST_URL, H)).map;
+const ORACLE_OPTS = { typeMacros: TYPE_MACROS, ...(DIRECTION_VARIANTS ? { directionVariants: DIRECTION_VARIANTS } : {}) };
+
 
 async function oracleCount(reqBody) {
-  const { qs, unhandled } = buildOracleQS(reqBody);
+  const opts = { ...ORACLE_OPTS, knownDistricts: await knownDistrictsFor(reqBody.p_districts ?? []) };
+  const { qs, unhandled } = buildOracleQS(reqBody, opts);
   if (unhandled.length) return { count: null, unhandled };
   const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id&${qs}`,
     { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } });
@@ -56,12 +117,22 @@ async function oracleCount(reqBody) {
 }
 
 async function oracleIds(reqBody, cap = 30000) {
-  const { qs, unhandled } = buildOracleQS(reqBody);
+  // Both oracle entry points must resolve districts the same way — an ids-diff that silently used a
+  // different district predicate than the count would compare two different questions.
+  const opts = { ...ORACLE_OPTS, knownDistricts: await knownDistrictsFor(reqBody.p_districts ?? []) };
+  const { qs, unhandled } = buildOracleQS(reqBody, opts);
   if (unhandled.length) return { ids: null, unhandled };
   const ids = new Set();
   const PAGE = 1000;
   for (let off = 0; off < cap; off += PAGE) {
-    const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id,source_table&${qs}`,
+    // A Range-paged PostgREST query MUST carry an explicit total order (fix 2026-08-28). Without
+    // `order=`, Postgres is free to return rows in a different sequence per page request, so paging
+    // silently drops or repeats rows across page boundaries. Measured on جدة / Villa+Duplex / Buy:
+    // unordered paging returned 3,866 of 3,867 on three consecutive passes — a phantom "1 MISSING
+    // eligible ID" against a set the RPC had exactly right. That is a false alarm on the very check
+    // that certifies AF returns the correct listings, and the same instability could just as easily
+    // have hidden a real missing row. (source_table, listing_id) is unique, so it is a total order.
+    const r = await fetch(`${REST_URL}/rest/v1/search_listings_ar?select=listing_id,source_table&${qs}&order=source_table.asc,listing_id.asc`,
       { headers: { ...H, Range: `${off}-${off + PAGE - 1}` } });
     const rows = await r.json();
     if (!Array.isArray(rows) || !rows.length) break;
@@ -160,7 +231,7 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
   };
 
   try {
-    await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await gotoLive(page, `${BASE}/`, { timeout: 60000 });
     await page.waitForTimeout(5000);
     for (const d of deal) await tap(d);
     if (category) await tap(category);
@@ -279,6 +350,24 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // number; the assertion itself is unchanged and now cannot pass on a chip that never resolves.
     const afterSelect = await readCardUntil((s) => s.chip != null && s.chip !== baselineChip);
     check(`${name}: count changed after selecting an answer`, afterSelect.chip != null && afterSelect.chip !== baselineChip, `base=${baselineChip} afterSelect=${afterSelect.chip}`);
+    // THE CARD'S NUMBER IS THE COUNT RPC's cnt_selected (added 2026-09-02). lastCountResp had been
+    // captured since 2026-08-24 and never READ — the chip was compared only with itself (changed,
+    // Skip-equal, Back-equal), so a card rendering a stale or client-derived number would have
+    // passed. Selecting an answer fires exactly one count call (fetchGuidedLiveCount → cnt_selected);
+    // the last captured response must be that call, and its cnt_selected must be the chip.
+    await page.waitForTimeout(600);
+    check(`${name}: the card's count IS the count RPC's cnt_selected`,
+      lastCountResp?.[0]?.cnt_selected != null && Number(lastCountResp[0].cnt_selected) === afterSelect.chip,
+      `card=${afterSelect.chip} rpc cnt_selected=${lastCountResp?.[0]?.cnt_selected}`);
+    // ARM THE CAPTURE **BEFORE** THE COMMITTING CLICK, never after it (fix 2026-08-28). Confirming
+    // the last useful question can end the round on its own and fire the final search inside the
+    // 1200 ms below; the reset used to sit after this block, so that search was captured and then
+    // thrown away, and the 25s poll that followed had nothing left to find. That is a false FAIL
+    // with no product defect behind it — `MOBILE …/furnished: final search request was captured =
+    // null` in run 33168150595, while the byte-identical desktop journey passed in the same run
+    // purely because its round still had a question left. Arming here cannot weaken the assertion:
+    // a final search that never fires still leaves lastSearchBody null and still fails.
+    lastSearchBody = null; lastSearchResp = null;
     await page.click('[data-testid="af-confirm"]');
     await page.waitForTimeout(1200);
 
@@ -296,25 +385,39 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       // empty and `opts2[otherIdx]` is undefined — which used to click `[data-testid="undefined"]`
       // and spend 30s timing out on a selector that cannot exist, burying the real failure (the card
       // never came back) under a harness stack trace. Fail here, naming the actual cause.
+      // The detail string is printed on PASS as well as FAIL, so it must READ TRUE IN BOTH STATES.
+      // It used to be the failure sentence unconditionally, which produced the genuinely misleading
+      // «PASS … no af-option-* found after Back — the restored card never rendered» in run
+      // 33168150595 — a green check whose own evidence line says the card never rendered. A reader
+      // triaging that log is being told the opposite of what happened.
       check(`${name}: Back re-offers the earlier question's options`, opts2.length > 0,
-        `no af-option-* found after Back — the restored card never rendered (restored.q=${restored.q})`);
+        opts2.length
+          ? `${opts2.length} option(s) restored (restored.q=${restored.q})`
+          : `no af-option-* found after Back — the restored card never rendered (restored.q=${restored.q})`);
       if (!opts2.length) { await ctx.close(); return; }
       const otherIdx = opts2.length > 1 ? 1 : 0;
       await page.click(`[data-testid="${opts2[otherIdx]}"]`);
       const changed = await readCardUntil((s) => s.chip != null && s.chip !== afterSelect.chip);
       check(`${name}: changing the answer recomputes the count`, changed.chip !== afterSelect.chip || opts2.length === 1, `after1st=${afterSelect.chip} afterChange=${changed.chip}`);
+      lastSearchBody = null; lastSearchResp = null;   // re-arm: this confirm is now the committing one
       await page.click('[data-testid="af-confirm"]');
       await page.waitForTimeout(1200);
     }
 
-    // Finish now — «عرض النتائج» (af-skip-all) commits accumulated answers + searches. Confirming
-    // the LAST useful question can already have ended the flow (mining → results) on its own, so
-    // only click af-skip-all if the card is still actually there to click.
-    lastSearchBody = null; lastSearchResp = null;
-    const stillOpen = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
-    if (stillOpen) {
-      const btn2 = await page.evaluate(() => !!document.querySelector('[data-testid="af-skip-all"]'));
-      if (btn2) await page.click('[data-testid="af-skip-all"]');
+    // Finish the round. The «عرض النتائج» early-exit was REMOVED by the owner (2026-08-28) — the
+    // footer is متابعة/تخطي/رجوع only, and a round ends when its questions are exhausted. So when
+    // the card is still open after the committing confirm above, walk it out by SKIPPING the
+    // remaining questions (skip = commitGuidedStep([]) — the same ONE commit path, recorded as
+    // no-preference, changing no filters). Bounded: AF_ROUND_MAX_QUESTIONS is 5, so 8 attempts can
+    // never loop forever even if a click is swallowed once or twice. The capture was armed before
+    // that confirm, so a search it already fired is still held here rather than discarded.
+    for (let hop = 0; hop < 8; hop++) {
+      const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
+      if (!open) break;
+      const skip = await page.evaluate(() => !!document.querySelector('[data-testid="af-skip"]'));
+      if (!skip) break; // intro/mining state — no question on screen to skip
+      await page.click('[data-testid="af-skip"]');
+      await page.waitForTimeout(900);
     }
     // Poll for the RPC first (it is the ground truth for what number the UI SHOULD settle on),
     // then poll the UI's own typed-out text for that exact number — a results turn types itself out

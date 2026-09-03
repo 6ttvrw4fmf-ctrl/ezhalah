@@ -8,6 +8,14 @@
 //   node --experimental-strip-types scripts/verify-intro-rotator-contract.ts   (wired into `npm test`)
 
 import { readFileSync } from 'node:fs';
+import { join as __join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = __join(import.meta.dirname, '..');
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -20,7 +28,6 @@ const examplesSrc = readFileSync(new URL('../src/data/introExamples.ts', import.
 const proof = readFileSync(new URL('../docs/ops/INTRO_EXAMPLES_PROOF.md', import.meta.url), 'utf8');
 const i18n = readFileSync(new URL('../src/i18n.tsx', import.meta.url), 'utf8');
 const filterScreen = readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
-const pkg = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
 const ex = await import(new URL('../src/data/introExamples.ts', import.meta.url).href);
 
 console.log('\nIntro greeting + rotating examples contract (owner brief 2026-08-23)\n');
@@ -178,7 +185,7 @@ const mutations: Array<[string, boolean]> = [
 for (const [label, ok] of mutations) check(`MUT ${label}`, ok);
 
 // ── Wiring: this barrier itself must be in npm test, or it is decoration ────────────────────────
-check('W. verify-intro-rotator-contract.ts is wired into `npm test`', /verify-intro-rotator-contract\.ts/.test(pkg));
+check('W. verify-intro-rotator-contract.ts is wired into `npm test`', npmTestRuns(REPO_ROOT, 'verify-intro-rotator-contract'));
 
 console.log('');
 if (failed) {
