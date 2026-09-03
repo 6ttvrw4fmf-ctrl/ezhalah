@@ -126,22 +126,18 @@ if (amenityOptsMatch) {
 }
 
 // ── 4. controls we deliberately retired must not creep back ──────────────────────────────────────
-// THE REASON CHANGED, THE RULE DID NOT (restated 2026-09-01 — the old wording had become false).
-// It used to read "no such column exists / only an explicit NO is published, so the chip can only
-// ever return zero". Production now contradicts both halves: the columns are populated (pool 40 true
-// of 932 known, gym 12 of 923) and BOTH tokens are certified in the live p_amenities vocabulary.
-//
-// The chip still must not appear, for a different and still-binding reason: apartment_guided_counts_ar
-// exposes no cnt_pool / cnt_gym, so an offered chip could not carry a count — and this repo's
-// count-honesty contract says an option's number must equal what tapping it returns. That is exactly
-// the state ac / private_entrance / maid_room / driver_room were in before their count columns landed.
-// Re-expose each one when its count path does, not before.
+// THE REASON CHANGED AGAIN, THE RULE DID NOT (restated 2026-09-02). 2026-09-01's wording — "no
+// cnt_pool / cnt_gym exists, so the chip could not carry a count" — stops being true the moment
+// 20260902220000 lands: both tokens get a cnt_* column inside the scoped CTE and a CARD chip
+// (AMENITIES_QUESTION, cohort-gated). What this check guards is a different surface: the INTERVIEW's
+// four-option amenity list (src/app/agent.tsx). That list is owner-scoped; growing it is an interview
+// decision with its own certification (verify-af-interview-*), never a side effect of a card chip
+// landing. So Pool/Gym stay out of the interview's option list until the owner scopes them in there.
 for (const dead of ['Pool', 'Gym']) {
   const offeredAgain = amenityOptsMatch ? new RegExp(`'${dead}'`).test(amenityOptsMatch[1]) : false;
   check(`'${dead}' is not offered as an amenity option`, !offeredAgain,
-    `the token is certified and search_listings_ar.${dead.toLowerCase()} is populated, but ` +
-    `apartment_guided_counts_ar has no cnt_${dead.toLowerCase()} — so the chip could not show a truthful count. ` +
-    `Add the count column first, then the chip.`);
+    `the interview's amenity option list is owner-scoped (4 options); '${dead}' reaching it is an ` +
+    `interview decision with its own certification, not a side effect of the card chip — scope it in deliberately.`);
 }
 
 // ── 5. THE INVERSE RULE: backend-only fields must STAY backend-only ─────────────────────────────
@@ -177,6 +173,16 @@ try {
     check('deed_location_text never reaches the filter UI (it is prose, not a predicate)', !deedInUi,
       'a free-text title-deed description cannot be a filter, and must never be parsed into '
       + 'district/street/coordinates — those are separate facts with their own sources');
+
+    // ── 5b. A CHIP THE REGISTRY CANNOT DESCRIBE IS REFUSED (2026-09-02). The leak check above
+    // only sees rows that exist: a chip whose key has NO registry row at all (optical_fibers before
+    // 20260902220000 registered it) slipped past it silently. Every amenity chip key must map to a
+    // registry row — by its own key, or by the two long-standing spellings that predate the registry.
+    const REGISTRY_KEY: Record<string, string> = { ac: 'air_conditioner', rnpl: 'installment_available' };
+    const registered = new Set(registry.map((f) => f.canonical_key));
+    const undescribed = chipKeys.filter((k) => !registered.has(REGISTRY_KEY[k] ?? k));
+    check('every amenity chip is described by an af_field_registry row (a chip the registry cannot describe is refused)',
+      undescribed.length === 0, `no af_field_registry row for: ${undescribed.join(', ')}`);
 
     const noReason = registry.filter((f) => !f.ui_exposed && !f.not_exposed_reason).map((f) => f.canonical_key);
     check('every backend-only field records WHY it is hidden', noReason.length === 0, noReason.join(', '));

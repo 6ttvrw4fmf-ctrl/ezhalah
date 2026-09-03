@@ -149,11 +149,12 @@ check('AMENITY_TOKEN map exists', !!mapBlock);
 const mapped = [...(mapBlock?.[1] ?? '').matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 check(`every mapped token is in the live RPC vocabulary (mapped: ${mapped.join(', ')})`,
   mapped.length > 0 && mapped.every((tok) => LIVE_AMENITY_TOKENS.has(tok)));
-// Restated 2026-09-01: the columns DO exist and both tokens ARE certified now, so "no such column"
-// was false. The mapping still must not carry them, because apartment_guided_counts_ar publishes no
-// cnt_pool / cnt_gym — an interview option whose count cannot be computed breaks count honesty,
-// which is the whole subject of this file.
-check('Pool and Gym are NOT mapped — no cnt_pool/cnt_gym exists, so their chips could not show a truthful count',
+// Restated 2026-09-02: the columns exist, both tokens are certified, and 20260902220000 gives them
+// cnt_* columns and card chips. The INTERVIEW mapping still must not carry them: its four-option
+// amenity list is owner-scoped and certified separately; a token appearing there is an interview
+// decision, never a side effect of the card. (2026-09-01's "no cnt_pool/cnt_gym exists" is no longer
+// the reason — that count path now exists.)
+check('Pool and Gym are NOT mapped in the interview — its option list is owner-scoped; a card chip does not enrol a token there',
   !/'pool'/i.test(mapBlock?.[1] ?? '') && !/'gym'/i.test(mapBlock?.[1] ?? ''));
 
 // The amenities question's own skip option must not be treated as a stated preference (it was
