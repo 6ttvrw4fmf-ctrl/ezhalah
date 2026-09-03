@@ -8,8 +8,9 @@
 // THE HONEST BOUNDARY. This project has NO email provider. There is no Resend/SendGrid/Postmark
 // key, no SMTP host, no send-mail function anywhere in the repo or in this function's environment —
 // that was checked before a line of this was written. So the contract here is deliberate and
-// narrow: the message is STORED in the project's own Saudi-hosted Postgres, which is a real,
-// durable receipt, and email is attempted ONLY if a RESEND_API_KEY secret exists. The row records
+// narrow: the message is STORED in the project's own Postgres — region ap-northeast-1 (Tokyo), NOT
+// the Kingdom; do not describe it otherwise — which is a real, durable receipt, and email is
+// attempted ONLY if a RESEND_API_KEY secret exists. The row records
 // which of the two happened (delivery_status: stored | emailed | email_failed). The response never
 // tells the client an email was sent, and the UI copy says «وصلتنا رسالتك» — we received it — which
 // is true whether or not the mail leg is configured. The day the owner adds the secret, delivery
