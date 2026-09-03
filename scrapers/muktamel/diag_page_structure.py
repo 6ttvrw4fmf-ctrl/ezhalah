@@ -116,6 +116,8 @@ def dump_one(s: cc.Session, listing_id: int) -> None:
     parsed = _nuxt_via_node(nuxt_src)
     if parsed is None:
         print("  _nuxt_via_node() returned None — the node eval() failed, timed out, or threw.")
+        print("  --- raw one-shot node eval probe (bypasses the production worker's silent catch) ---")
+        raw_node_eval_probe(nuxt_src)
         return
     print(f"  _nuxt_via_node() ok — top-level keys: {sorted(parsed.keys())}")
     addr = parsed.get("addressJson")
@@ -129,6 +131,47 @@ def dump_one(s: cc.Session, listing_id: int) -> None:
             print(f"    offer[{k!r}] = {offer.get(k)!r}")
     else:
         print(f"  offer: unexpected type {type(offer).__name__}: {offer!r}"[:500])
+
+
+# Same eval strategy as production's _NODE_WORKER_JS (window.__NUXT__= -> globalThis.__N=, then
+# (0, eval)(src)), but this is a ONE-SHOT `node -e` invocation with the real error surfaced instead
+# of swallowed — production's `catch (e) { outStr = ""; }` cannot tell "threw a RangeError" apart
+# from "threw nothing in particular", which is exactly the ambiguity blocking root-causing this.
+_RAW_EVAL_PROBE_JS = r"""
+const fs = require('fs');
+const body = fs.readFileSync(0, 'utf8');
+const t0 = Date.now();
+try {
+  let src = body.replace(/^window\.__NUXT__=/, 'globalThis.__N=');
+  globalThis.__N = undefined;
+  (0, eval)(src);
+  const N = globalThis.__N || {};
+  const d0 = (N.data && N.data[0]) || {};
+  console.log('EVAL_OK ms=' + (Date.now() - t0));
+  console.log('top-level N keys: ' + JSON.stringify(Object.keys(N)));
+  console.log('data length: ' + (Array.isArray(N.data) ? N.data.length : typeof N.data));
+  console.log('data[0] keys: ' + JSON.stringify(Object.keys(d0)));
+  console.log('data[0].offer present: ' + ('offer' in d0));
+} catch (e) {
+  console.log('EVAL_THREW ms=' + (Date.now() - t0));
+  console.log('name: ' + e.name);
+  console.log('message: ' + String(e.message).slice(0, 500));
+  console.log('stack (first 3 lines): ' + String(e.stack).split('\n').slice(0, 3).join(' | '));
+}
+"""
+
+
+def raw_node_eval_probe(nuxt_src: str) -> None:
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["node", "-e", _RAW_EVAL_PROBE_JS],
+            input=nuxt_src, capture_output=True, text=True, timeout=60)
+        print(r.stdout.strip() or "(no stdout)")
+        if r.stderr.strip():
+            print("  stderr: " + r.stderr.strip()[:1000])
+    except subprocess.TimeoutExpired:
+        print("  raw eval probe itself TIMED OUT after 60s — eval() is genuinely hanging on this payload.")
 
 
 def main() -> int:
