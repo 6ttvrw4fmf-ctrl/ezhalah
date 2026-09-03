@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { pickBestArabicVoice } from '../src/lib/readAloudVoice.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const readAloud = readFileSync(join(root, 'src/lib/readAloud.ts'), 'utf8');
@@ -55,7 +56,11 @@ check('msgRTL (bubble RTL layout) has ONE definition (src/lib/textDirection.ts) 
 //    2026-08-22): prefer an exact ar-SA, on-device, Enhanced-quality Arabic voice when available,
 //    resolved ahead of time via a bounded poll (never awaited inside speakReadAloud — that would
 //    break iOS Safari's synchronous-user-gesture requirement), plus a calmer rate. ──────────────────
-check('voice scoring prefers exact ar-SA, on-device (localService), AND Enhanced quality — all three axes', /AR_LANG\.toLowerCase\(\)\) s \+= 4/.test(readAloud) && /localService[\s\S]{0,20}!== false\) s \+= 2/.test(readAloud) && /VoiceQuality\.Enhanced\) s \+= 1/.test(readAloud));
+const voiceLogic = readFileSync(join(root, 'src/lib/readAloudVoice.ts'), 'utf8');
+// Retargeted 2026-09-03: the scoring moved to the import-free lib/readAloudVoice.ts so it could be
+// EXECUTED rather than replicated (see the block below). The three axes are still pinned — and the
+// behaviour itself is now run, per engine, by scripts/verify-read-aloud-voice-logic.ts.
+check('voice scoring prefers exact ar-SA, on-device (localService), AND Enhanced quality — all three axes', /AR_LANG\.toLowerCase\(\)\) s \+= 4/.test(voiceLogic) && /localService[\s\S]{0,20}!== false\) s \+= 2/.test(voiceLogic) && /QUALITY_ENHANCED\) s \+= 1/.test(voiceLogic));
 check('voice resolution is a bounded POLL (not a single voiceschanged await) — resilient to voiceschanged never firing on some engines', /const POLL_TIMEOUTS_MS = \[/.test(readAloud) && /Promise\.race\(\[/.test(readAloud) && /void resolveVoice\(\);/.test(readAloud));
 // ROOT-CAUSE FIX (owner report, 2026-08-23 — Windows Chrome: the button always said "not available",
 // even though the device may genuinely have a usable Arabic voice that just took longer than the
@@ -153,8 +158,8 @@ check('Android (no native pause/resume in expo-speech) never silently no-ops a p
 // all, so that fallback was already proven). AND: if pause() no-ops and the utterance finishes
 // naturally instead, the onDone callback must NOT auto-advance to the next unit while `state` is
 // still 'paused' — that would speak straight through the pause, the exact "doesn't work" shape.
-check('a real pause attempt is VERIFIED, not trusted blindly — falls back to cancel+restart if speechSynthesis.paused never actually became true', /const WEB_PAUSE_VERIFY_MS = 120;/.test(readAloud) && /!window\.speechSynthesis\.paused\)/.test(readAloud));
-check('the pause-verify fallback is gated on the SAME pause attempt still being current (token + state check) — a resume or a new pause in the verify window is never overridden by a stale check', /playToken === tokenAtPause && !window\.speechSynthesis\.paused/.test(readAloud));
+check('a real pause attempt is VERIFIED, not trusted blindly — falls back to cancel+restart if speechSynthesis.paused never actually became true', /const WEB_PAUSE_VERIFY_MS = 120;/.test(readAloud) && /enginePaused: window\.speechSynthesis\.paused/.test(readAloud) && /!o\.enginePaused/.test(voiceLogic));
+check('the pause-verify fallback is gated on the SAME pause attempt still being current (token + state check) — a resume or a new pause in the verify window is never overridden by a stale check', /o\.state === 'paused' && o\.playToken === o\.tokenAtPause && !o\.enginePaused/.test(voiceLogic) && /shouldForcePauseFallback\(\{/.test(readAloud));
 check('a unit that finishes naturally while state is "paused" (the iOS no-op case) does NOT auto-advance to the next unit — it waits for an explicit resume instead of talking through the pause', /if \(state !== 'playing'\) \{ pendingRestart = true; return; \}/.test(readAloud));
 check('stopReadAloud(), a seek jump, and a speed change all invalidate the in-flight callback via playToken++ before cancelling — a cancelled utterance can never fire a stale onDone/onError', (readAloud.match(/playToken\+\+/g) ?? []).length >= 4);
 
@@ -230,23 +235,19 @@ for (const key of ['Read aloud', 'Stop reading', 'Pause reading', 'Resume readin
   check("AR dict has «Listening isn't available on this device» with an Arabic, Latin-free value", !!m && /[؀-ۿ]/.test(m![1]) && !/[A-Za-z]/.test(m![1]));
 }
 
-// ── EXECUTED: a faithful replica of readAloud.ts's pickBestArabic() scoring (root-cause fix,
-//    2026-08-22), run against concrete voice lists — not just a source-text match. Proves the
-//    priority order empirically: exact ar-SA > on-device > Enhanced quality > any Arabic > none. ────
+// ── EXECUTED: readAloud.ts's REAL pickBestArabic() scoring, run against concrete voice lists.
+//
+//    This block used to define its own hand-written copy of that scoring — "a faithful replica" —
+//    that, because readAloud.ts imports expo-speech and react-native and a Node check cannot import
+//    it. A replica is faithful exactly until someone edits production and not the copy, and then
+//    this file proves the OLD formula, in green, forever. The scoring now lives in the import-free
+//    `src/lib/readAloudVoice.ts` (same split as lib/supportDraft.ts vs lib/support.ts), so these
+//    cases run the code production runs. Per-engine voice-list shapes and the WebKit pause watchdog
+//    are covered in scripts/verify-read-aloud-voice-logic.ts; the priority-order cases stay here,
+//    where they have always lived. ────
 type TestVoice = { identifier: string; name: string; quality: 'Default' | 'Enhanced'; language: string; localService?: boolean };
-function pickBestArabicReplica(voices: TestVoice[]): TestVoice | null {
-  const norm = (lang?: string | null) => (lang ?? '').toLowerCase().replace('_', '-');
-  const arabic = voices.filter((v) => norm(v.language).startsWith('ar'));
-  if (!arabic.length) return null;
-  const score = (v: TestVoice) => {
-    let s = 0;
-    if (norm(v.language) === 'ar-sa') s += 4;
-    if (v.localService !== false) s += 2;
-    if (v.quality === 'Enhanced') s += 1;
-    return s;
-  };
-  return [...arabic].sort((a, b) => score(b) - score(a))[0];
-}
+const pickBestArabicReal = (voices: TestVoice[]): TestVoice | null =>
+  pickBestArabicVoice(voices as unknown as (TestVoice & { language: string })[]) as TestVoice | null;
 {
   const majed: TestVoice = { identifier: 'majed', name: 'Majed', quality: 'Default', language: 'ar-001', localService: true };
   const arSA: TestVoice = { identifier: 'ar-sa-1', name: 'Generic Saudi', quality: 'Default', language: 'ar-SA', localService: true };
@@ -255,18 +256,18 @@ function pickBestArabicReplica(voices: TestVoice[]): TestVoice | null {
   const arEnhanced: TestVoice = { identifier: 'ar-enh', name: 'Enhanced Arabic', quality: 'Enhanced', language: 'ar-001', localService: true };
   const en: TestVoice = { identifier: 'samantha', name: 'Samantha', quality: 'Default', language: 'en-US', localService: true };
 
-  check('macOS-shape device (only Majed, ar-001, generic) picks Majed — the real production case verified live', pickBestArabicReplica([en, majed])?.identifier === 'majed');
-  check('when both an exact ar-SA and a generic ar-EG voice exist, ar-SA wins (exact-locale priority)', pickBestArabicReplica([arEG, arSA])?.identifier === 'ar-sa-1');
+  check('macOS-shape device (only Majed, ar-001, generic) picks Majed — the real production case verified live', pickBestArabicReal([en, majed])?.identifier === 'majed');
+  check('when both an exact ar-SA and a generic ar-EG voice exist, ar-SA wins (exact-locale priority)', pickBestArabicReal([arEG, arSA])?.identifier === 'ar-sa-1');
   // Owner's own stated priority is explicit and unconditional: "1. exact Saudi Arabic voice (ar-SA)
   // ... 2. other high-quality Arabic voice" — exact-locale wins even over a local generic voice.
   // On-device/local is a tiebreaker AMONG non-exact candidates (see the ar-SA-vs-ar-EG check above
   // and the "best-of-all-worlds" check below), never a reason to skip a genuinely exact match.
-  check('an exact ar-SA voice wins even when it happens to be remote and a local generic voice is also available (owner priority: exact-locale first, unconditionally)', pickBestArabicReplica([arSARemote, majed])?.identifier === 'ar-sa-remote');
-  check('among candidates that are EQUALLY exact (or equally non-exact), local still wins over remote (the tiebreaker, not an override of exact-locale)', pickBestArabicReplica([arSARemote, arSA])?.identifier === 'ar-sa-1');
-  check('an Enhanced-quality voice beats a Default-quality voice when locale+locality are equal', pickBestArabicReplica([majed, { ...arEnhanced }])?.identifier === 'ar-enh');
-  check('best-of-all-worlds: exact ar-SA + local + Enhanced wins over every partial match', pickBestArabicReplica([majed, arSARemote, arEG, { ...arSA, quality: 'Enhanced' }])?.identifier === 'ar-sa-1');
-  check('zero Arabic voices on the device (Windows/Android with no AR language pack) correctly returns null — never an English voice', pickBestArabicReplica([en]) === null);
-  check('English-only voice list never gets picked even when it is the ONLY voice present', pickBestArabicReplica([en])?.identifier !== 'samantha');
+  check('an exact ar-SA voice wins even when it happens to be remote and a local generic voice is also available (owner priority: exact-locale first, unconditionally)', pickBestArabicReal([arSARemote, majed])?.identifier === 'ar-sa-remote');
+  check('among candidates that are EQUALLY exact (or equally non-exact), local still wins over remote (the tiebreaker, not an override of exact-locale)', pickBestArabicReal([arSARemote, arSA])?.identifier === 'ar-sa-1');
+  check('an Enhanced-quality voice beats a Default-quality voice when locale+locality are equal', pickBestArabicReal([majed, { ...arEnhanced }])?.identifier === 'ar-enh');
+  check('best-of-all-worlds: exact ar-SA + local + Enhanced wins over every partial match', pickBestArabicReal([majed, arSARemote, arEG, { ...arSA, quality: 'Enhanced' }])?.identifier === 'ar-sa-1');
+  check('zero Arabic voices on the device (Windows/Android with no AR language pack) correctly returns null — never an English voice', pickBestArabicReal([en]) === null);
+  check('English-only voice list never gets picked even when it is the ONLY voice present', pickBestArabicReal([en])?.identifier !== 'samantha');
 }
 
 // ── EXECUTED: a faithful replica of readAloud.ts's ESTIMATE-BASED SEEK math (owner 2026-08-22;
