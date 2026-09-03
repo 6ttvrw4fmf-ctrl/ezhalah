@@ -238,10 +238,22 @@ async function main() {
         return null;
       })(),
       chips: [...strip.querySelectorAll('[data-testid^="card-af-evidence-"]')]
-        // The chip is «icon + text»; the icon contributes a line break to innerText, so a raw
-        // trim() leaves «\nجديد». Collapse ALL whitespace runs — the assertion is about the VALUE
-        // the user reads, not about how the renderer laid the glyphs out.
-        .map((c: any) => ({ id: (c.getAttribute('data-testid') || '').replace('card-af-evidence-', ''), text: (c.innerText || '').replace(/\s+/g, ' ').trim() })),
+        // The chip is «icon + text», and BOTH halves of that reach innerText as things a reader
+        // never sees: the Ionicons checkmark is a font glyph in the Unicode private-use area
+        // (U+E000-U+F8FF, plus the supplementary planes), and an RTL layout can insert bidi
+        // controls (LRM/RLM/ALM and the isolate marks). Neither is whitespace, so `\s` misses them
+        // and trim() cannot remove them — the first live run reported four «mismatches» that were
+        // one invisible glyph, rendered by the terminal as a blank so it read as a leading space.
+        // Strip both, then collapse whitespace: the assertion is about the VALUE the user reads,
+        // never about how the renderer laid the glyphs out.
+        .map((c: any) => ({
+          id: (c.getAttribute('data-testid') || '').replace('card-af-evidence-', ''),
+          text: (c.innerText || '')
+            .replace(/[\u{E000}-\u{F8FF}\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu, '')  // icon glyphs (private use)
+            .replace(/[\u200E\u200F\u061C\u2066-\u2069]/g, '')                              // bidi controls
+            .replace(/\s+/g, ' ')
+            .trim(),
+        })),
       // R12A.1 forbids a cap. Today ResultCard renders a plain .map() with no expander, so a
       // dedicated testID would only ever be absent — a check that cannot fail. This looks for the
       // SHAPE an expander takes instead (a «+4» / «عرض الكل» affordance sitting inside the strip),
@@ -268,7 +280,14 @@ async function main() {
   check('every rendered strip could be traced back to its own listing',
     unidentified === 0, `${unidentified} of ${cards.length} strip(s) had no card-listing-<id> ancestor`);
 
+  // `unknownSeen` / `unsatisfiedSeen` count how many times each branch was actually REACHED, not
+  // how many times it misbehaved. Without them, "R12A.3 passed" and "R13.12 passed" are silent on
+  // whether the run ever met an UNKNOWN column or a non-satisfying row at all — and a check that
+  // asserts nothing about an unvisited branch is a check that cannot fail. They are reported as
+  // NOT EXERCISED rather than PASS when the count is 0, so the grade this journey earns matches
+  // what it really proved.
   let compared = 0, wrongValue = 0, missingChip = 0, falseChip = 0, unknownShown = 0, unmatched = 0;
+  let unknownSeen = 0, unsatisfiedSeen = 0;
   const notes: string[] = [];
 
   for (let i = 0; i < cards.length; i++) {
@@ -287,11 +306,13 @@ async function main() {
 
       if (anyUnknown) {
         // R12A.3 — a column the source never published must render NOTHING for this question.
+        unknownSeen++;
         if (rendered.length) { unknownShown++; notes.push(`listing ${lid} «${id}»: UNKNOWN column but rendered ${JSON.stringify(rendered)}`); }
         continue;
       }
       if (!satisfied) {
         // R13.12 — the strip must never claim something the row does not satisfy.
+        unsatisfiedSeen++;
         if (rendered.length) { falseChip++; notes.push(`listing ${lid} «${id}»: row does NOT satisfy it but rendered ${JSON.stringify(rendered)}`); }
         continue;
       }
@@ -309,16 +330,31 @@ async function main() {
     notes.filter((n) => n.includes('shows nothing')).slice(0, 4).join('\n      '));
   check('R12A.2 — every chip carries the LISTING\'s own value, not the filter\'s label', wrongValue === 0,
     notes.filter((n) => n.includes('the ROW\'s value')).slice(0, 4).join('\n      '));
-  check('R12A.3 — an UNKNOWN column renders nothing for that question', unknownShown === 0,
-    notes.filter((n) => n.includes('UNKNOWN')).slice(0, 4).join('\n      '));
-  check('R13.12 — no chip claims something the row does not satisfy', falseChip === 0,
-    notes.filter((n) => n.includes('does NOT satisfy')).slice(0, 4).join('\n      '));
+  if (unknownSeen > 0) {
+    check(`R12A.3 — an UNKNOWN column renders nothing for that question (${unknownSeen} case(s) met)`,
+      unknownShown === 0, notes.filter((n) => n.includes('UNKNOWN')).slice(0, 4).join('\n      '));
+  } else {
+    skip('R12A.3 — an UNKNOWN column renders nothing for that question',
+      'NOT EXERCISED: every (question × card) pair this run met had a published value on every column it '
+      + 'reads, so the null-guard was never reached. Expected — §2.5 predicates are NULL-excluding, so a '
+      + 'returned row normally HAS the value. The offline twin covers this branch with synthetic rows.');
+  }
+  if (unsatisfiedSeen > 0) {
+    check(`R13.12 — no chip claims something the row does not satisfy (${unsatisfiedSeen} case(s) met)`,
+      falseChip === 0, notes.filter((n) => n.includes('does NOT satisfy')).slice(0, 4).join('\n      '));
+  } else {
+    skip('R13.12 — no chip claims something the row does not satisfy',
+      'NOT EXERCISED: every row the search returned satisfied every active answer, which is what a correct '
+      + 'predicate DOES — so this branch is unreachable through the UI while search is right. A row that '
+      + 'reached it would itself be a §2.5 violation. Covered offline against synthetic rows.');
+  }
   check('every identified strip belongs to a listing THIS search returned', unmatched === 0,
     `${unmatched} strip(s) carried a listing id absent from the committed response — a stale card left on screen`);
   check('the comparison actually bit (chips were checked against real rows)', compared > 0,
     `${compared} (question × card) pair(s) compared across ${cards.length} card(s)`);
 
-  console.log(`\n      [diag] active=${active.map((a) => a.id).join(',')} · cards=${cards.length} · comparisons=${compared}`);
+  console.log(`\n      [diag] active=${active.map((a) => a.id).join(',')} · cards=${cards.length}`
+    + ` · comparisons=${compared} · UNKNOWN cases met=${unknownSeen} · non-satisfying rows met=${unsatisfiedSeen}`);
   await browser.close();
 
   console.log('');
