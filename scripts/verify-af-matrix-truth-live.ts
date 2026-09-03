@@ -256,6 +256,14 @@ async function verifyCell(cell: Cell) {
         args.p_category = cell.scope.category;
         args.p_types = body0.p_types;
         Object.assign(args, L.rpcAllNarrowingParams(q1));
+        // THE TABLE SCOPE, exactly as locations.ts now sends it (fix 2026-09-03). Trending used to go
+        // out with no p_tables while the results body carried one, so it counted platform tables the
+        // results RPC excludes — and this very check was what caught it, on `bathrooms=1`, the one
+        // predicate wide enough to admit the five uncertified platforms live in search_listings_ar.
+        // Taken from body0, the RESULTS body, so the two sides are compared on one scope by
+        // construction: if the client ever stops sending it, the identity below breaks again.
+        args.p_tables = body0.p_tables;
+        if (body0.p_tables2) { args.p_tables2 = body0.p_tables2; args.p_types2 = body0.p_types2; }
         const rows = await rpc<any[]>('top_cities_by_deal_ar', args);
         const row = rows.find((r) => r.city_ar === CITY);
         check(`${tag}/${fid}=${o.key}: Trending advertises for ${CITY} exactly the committed count`,

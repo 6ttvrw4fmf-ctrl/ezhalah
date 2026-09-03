@@ -775,7 +775,15 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
         Object.assign(args, af ?? {});
         // "Is the user narrowed at all?" — gates every widening fallback below. Named for what it
         // now means; it covers bedrooms/price/area since 2026-08-22, not just advanced answers.
-        const hasNarrowing = Object.keys(af ?? {}).length > 0;
+        //
+        // THE TABLE-SCOPE KEYS DO NOT COUNT AS NARROWING (2026-09-03). `af` also carries the search's
+        // table scope now, and that is present on EVERY call — including a completely unfiltered one.
+        // Counting it would pin hasNarrowing permanently true and silently disable all three
+        // compat fallbacks below, so an unnarrowed user hitting an older function signature would get
+        // a BLANK city field instead of a widened-but-populated one. The scope is not a predicate the
+        // user chose; it is the frame the count is taken in.
+        const TABLE_SCOPE_KEYS = ['p_tables', 'p_tables2', 'p_types2'];
+        const hasNarrowing = Object.keys(af ?? {}).some((k) => !TABLE_SCOPE_KEYS.includes(k));
         let res = await supabase.rpc('top_cities_by_deal_ar', args).abortSignal(_ac.signal);
         // EVERY fallback below WIDENS the scope, so each is gated on the user not being narrowed:
         // a widened count under an active filter is exactly the overstatement this fix removes, and
