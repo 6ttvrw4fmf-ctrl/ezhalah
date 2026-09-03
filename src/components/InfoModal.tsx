@@ -53,6 +53,10 @@ const TOP_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP;
 
 const EAGLE = require('../../assets/images/eagle-mark.png');
 const HERO = require('../../assets/images/hero-bg.png');
+// «من نحن» artwork (owner 2026-08-30): the EXISTING Ezhalah eagle looking over the Kingdom's properties
+// — assets/images/eagle-night.jpg, 900×1317, previously unreferenced. Dark-native, so it needs no
+// theme swap and reads correctly under both palettes; the melt gradient below it does the integration.
+const ABOUT_ART = require('../../assets/images/eagle-night.jpg');
 
 // The only number «من نحن» shows. Derived from the shipped partner roster at compile time — never a
 // hardcoded count that goes stale, and never a dynamic listings/cities figure we'd have to fake.
@@ -115,7 +119,7 @@ function Sheet({ kind, onClose }: { kind: 'support' | 'about'; onClose: () => vo
           accessibilityLabel={t('Close')}
           style={({ hovered, pressed }: any) => [s.xBtn, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
         >
-          <Ionicons name="close" size={18} color="#4c5a52" />
+          <Ionicons name="close" size={18} color={colors.body} />
         </Pressable>
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
           {kind === 'support' ? <SupportBody t={t} /> : <AboutBody t={t} reduced={reduced} />}
@@ -159,7 +163,7 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
         />
         <SupCard
           icon="business-outline"
-          email="info@ezhalah.com"
+          email="partners@ezhalah.com"
           desc={t('Business inquiries, partnerships, media requests, and general information.')}
         />
         <View style={s.rt}>
@@ -253,7 +257,7 @@ function AboutBody({ t, reduced }: { t: Tr; reduced: boolean }) {
           composition, never an image in a box. The lockup rises out of its lower band; TOP_CLEAR
           keeps everything under the floating ×. ── */}
       <Reveal {...rev} delay={40} fadeOnly style={a.heroArt}>
-        <RNImage source={HERO} style={a.heroImg} resizeMode="cover" />
+        <RNImage source={ABOUT_ART} style={a.heroImg} resizeMode="cover" />
         <LinearGradient colors={[alpha0(pal.paper), pal.paper]} locations={[0.15, 0.96]} style={StyleSheet.absoluteFill} />
         <View style={a.heroInner}>
           <Text style={a.eyebrow}>{t('About Us')}</Text>
@@ -397,8 +401,8 @@ function makeAbout(pal: Record<string, string>, dark: boolean) {
     // The artwork hero: full-bleed at the card's top, melting into the surface. paddingTop derives
     // from TOP_CLEAR so the lockup can never collide with the floating × (same arithmetic contract
     // as before — verify-info-modal-header-clearance pins it).
-    heroArt: { height: TOP_CLEAR + 128, overflow: 'hidden', justifyContent: 'flex-end' },
-    heroImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: dark ? 0.22 : 0.55 },
+    heroArt: { height: TOP_CLEAR + 176, overflow: 'hidden', justifyContent: 'flex-end' },
+    heroImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: dark ? 0.78 : 0.62 },
     heroInner: { paddingHorizontal: 24, paddingTop: TOP_CLEAR, paddingBottom: 2 },
     eyebrow: { fontSize: 12, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 6 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
