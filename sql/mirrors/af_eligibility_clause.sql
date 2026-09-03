@@ -1,4 +1,14 @@
--- MIRROR of the production object AS IT WILL BE once migration 20260902220100 is applied. NOT a migration — see the full-body-replace rule.
+-- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+--
+-- Re-verified 2026-09-03 (district_options_ar table-scope fix, migration 20260903224522). The
+--   pending re-verification the 2026-09-02 note below DEMANDED is now DONE: md5(pg_get_functiondef)
+--   read live from production under the deploy lock = 178deacbfa50de38e6b5a18e09bc737b, byte-identical
+--   to the md5 recorded in this file. So 20260902220100 did apply, the p_has_license arm live in
+--   production is the fixed one, and this mirror is confirmed against the real object rather than
+--   against a rolled-back dry run. Nothing in the body was edited.
+--   Re-stamped because 20260903224522 NAMES this object: it rebuilds district_options_ar around
+--   af_eligibility_clause() so the district panel stops carrying its own second opinion about
+--   eligibility. The clause itself is unchanged — the new caller is what changed.
 -- Refreshed 2026-09-02 (AF matrix certification, BUG-1 fix): the p_has_license arm is now
 --   `(p_has_license is null or (p_has_license and s.license_number is not null))` — false admits only an
 --   explicit unlicensed fact, and canonical data carries none, so it admits nothing (silent → NULL, never
