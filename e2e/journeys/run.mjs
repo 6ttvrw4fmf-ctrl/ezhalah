@@ -1129,6 +1129,7 @@ const SUP = {
   message: 'اكتب لنا التفاصيل.',
   email: 'name@example.com',
   send: 'إرسال',
+  retry: 'حاول مرة أخرى',
   connErr: 'تأكد من الاتصال',
   waitErr: 'انتظر ساعة تقريباً',
 };
@@ -1213,8 +1214,11 @@ JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile
   }
   if (after.email !== DRAFT.email) defect(name, 'the reply address was lost on dismissal', `expected «${DRAFT.email}», got «${after.email}»`);
 
-  // And the X, which is the deliberate close — same guarantee, different control.
-  const x = page.getByLabel('إغلاق').first();
+  // And the X, which is the deliberate close — same guarantee, different control. Addressed by
+  // testID, NOT by `getByLabel('إغلاق')`: AuthModal raises itself for signed-out visitors with the
+  // same accessibility label, so on desktop `.first()` picked ITS × sitting behind this dialog —
+  // pointer-blocked, click times out, and the whole × check skipped 2/2 while reading as coverage.
+  const x = page.locator('[data-testid="info-modal-close"]').first();
   if (await x.count()) {
     await x.click({ timeout: 10_000 }).catch(() => {});
     if (!(await waitSupportClosed(page))) { skip(`${name}/x`, 'the X did not close the dialog'); return; }
@@ -1252,14 +1256,22 @@ JOURNEYS['support-error-copy'] = async (mobile) => withPage({ mobile }, async (p
   if (why) { skip(name, why); return; }
   await fillSupportDraft(page);
 
+  // The Send control RENAMES ITSELF once a send has failed — `state === 'error' ? t('Try again')`
+  // — so a second press must look for «حاول مرة أخرى», not «إرسال». Keying only on «إرسال» made the
+  // second press a silent no-op: the form still showed the FIRST failure's copy, and the journey
+  // filed «a real failure lost its connection copy» 4/4 against a perfectly correct app. PART 11.2
+  // rule 2 in a new costume — a control that is not there is not a control that was pressed.
   const press = async () => {
-    const btn = page.getByText(SUP.send, { exact: true }).first();
-    if (!(await btn.count())) return false;
-    await btn.click({ timeout: 10_000 }).catch(() => {});
-    await sleep(3500);
-    return true;
+    for (const label of [SUP.send, SUP.retry]) {
+      const btn = page.getByText(label, { exact: true }).first();
+      if (!(await btn.count())) continue;
+      await btn.click({ timeout: 10_000 }).catch(() => {});
+      await sleep(3500);
+      return true;
+    }
+    return false;
   };
-  if (!(await press())) { skip(name, '«إرسال» not found on the form'); return; }
+  if (!(await press())) { skip(name, `neither «${SUP.send}» nor «${SUP.retry}» is on the form`); return; }
 
   let body = await bodyText(page);
   if (body.includes(SUP.connErr)) {
@@ -1278,7 +1290,7 @@ JOURNEYS['support-error-copy'] = async (mobile) => withPage({ mobile }, async (p
   // has simply moved the wrong message onto a different case.
   answers.status = 500;
   answers.body = JSON.stringify({ error: 'boom' });
-  await press();
+  if (!(await press())) { skip(`${name}/500`, 'the retry control was not on the form after the first failure'); return; }
   body = await bodyText(page);
   if (body.includes(SUP.connErr)) pass(name, 'a genuine server failure still says "check your connection"');
   else defect(name, 'a real failure lost its connection copy', `neither message matched after a 500; body has «${body.slice(0, 120)}»`);

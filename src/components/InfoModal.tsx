@@ -116,9 +116,17 @@ function Sheet({ kind, onClose }: { kind: 'support' | 'about'; onClose: () => vo
       <Animated.View style={[s.card, { maxWidth: Math.min(width - 32, kind === 'about' ? 640 : 560), maxHeight: maxH }, cardStyle]}>
         {/* Close — a circular button pinned to the PHYSICAL top-right (owner: right side, premium,
             subtle shadow, gentle hover — like modern Apple/Notion dialogs). */}
+        {/* testID because the ACCESSIBILITY LABEL IS NOT UNIQUE on this screen: AuthModal raises
+            itself for signed-out visitors and carries its own `accessibilityLabel={t('Close')}`, so
+            on desktop a `getByLabel('إغلاق').first()` picks AuthModal's × sitting behind this
+            dialog — pointer-blocked, so the click times out and the check quietly SKIPS. Measured
+            2026-09-03 at 1440px: two «إغلاق» buttons, nth(0) at x=1389 (AuthModal, unclickable),
+            nth(1) at x=952 (this one, closes the dialog). A skip that looks like coverage is the
+            exact failure this run exists to remove. */}
         <Pressable
           onPress={close}
           hitSlop={8}
+          testID="info-modal-close"
           accessibilityRole="button"
           accessibilityLabel={t('Close')}
           style={({ hovered, pressed }: any) => [s.xBtn, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
