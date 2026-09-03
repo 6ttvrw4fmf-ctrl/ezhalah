@@ -185,3 +185,46 @@ def test_a_healthy_run_records_no_rejections(monkeypatch):
     g._REJECTS.clear()
     g.fetch_page(_Session([_page([1])]), 1, 1, "a", "b")
     assert g._REJECTS == [] and g.reject_report() == ""
+
+
+def test_a_400_that_says_too_many_requests_is_a_THROTTLE_and_is_retried(monkeypatch):
+    """gathern rate-limits with HTTP 400, not 429 — observed live 2026-09-03, run 33816958296.
+
+    The rejected request was byte-identical in shape to ones that succeeded seconds earlier in the
+    same shard; the body read {"success":false,"message":"Too many requests. Please try again
+    later."}. Classifying that as a permanent client error and giving up is what cost the crawl
+    whole cities. FAILS on the pre-fix code, which returned http_400 after a single attempt.
+    """
+    _fast(monkeypatch)
+    g._REJECTS.clear()
+    throttled = _Resp(400)
+    throttled.text = '{"success":false,"message":"Too many requests. Please try again later.","errors":null}'
+    s = _Session([throttled, throttled, _page([1, 2])])
+
+    items, _, status = g.fetch_page(s, 1626, 2, "2026-09-04", "2026-10-04")
+    assert status == "ok" and len(items) == 2, status   # it retried through the throttle
+    assert s.calls == 3
+    assert g._REJECTS == []                             # a throttle is not a rejection to report
+
+
+def test_a_sustained_throttle_ends_as_exhausted_not_as_a_hard_400(monkeypatch):
+    """Routing matters: 'exhausted' says the source throttled us, http_400 says our request is bad."""
+    _fast(monkeypatch)
+    g._REJECTS.clear()
+    throttled = _Resp(400)
+    throttled.text = '{"message":"Too many requests. Please try again later."}'
+    items, _, status = g.fetch_page(_Session([throttled]), 1, 1, "a", "b")
+    assert (items, status) == ([], "exhausted"), status
+
+
+def test_a_genuinely_malformed_400_still_fails_FAST_and_is_reported(monkeypatch):
+    """The fix must not turn every 400 into a retry loop against a request that can never work."""
+    _fast(monkeypatch)
+    g._REJECTS.clear()
+    bad = _Resp(400)
+    bad.text = '{"success":false,"message":"city must be an integer.","errors":{"city":["invalid"]}}'
+    s = _Session([bad])
+    items, _, status = g.fetch_page(s, 99, 1, "a", "b")
+    assert (items, status) == ([], "http_400"), status
+    assert s.calls == 1, s.calls                        # one attempt, no ladder
+    assert len(g._REJECTS) == 1                         # and it IS captured for diagnosis
