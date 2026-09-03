@@ -1,0 +1,120 @@
+"""A source that REFUSES to answer must never be recorded as a source with nothing to say.
+
+gathern's crawl paged each city until an empty page. `fetch_page()` returned a bare `[], {}` for
+BOTH "HTTP 200, zero items" (a genuine end of catalogue) and "the source declined" (a hard 4xx, or
+retries exhausted under throttling). So:
+
+  * a refused page 1 made crawl() print «no monthly units» and skip the whole city, and
+  * two refused pages mid-city satisfied the `empties >= 2` end-of-catalogue rule,
+
+while the run still reported ok=true. A platform that starts rate-limiting therefore shrinks the
+crawl silently, and every count-based barrier stays green because the counts it compares are
+themselves the truncated ones. §10: never let a scraper failure cascade.
+
+These tests pin the distinction and the two places it matters.
+"""
+import time
+
+import scrapers.gathern.run as g
+
+
+class _Resp:
+    def __init__(self, status, payload=None):
+        self.status_code = status
+        self._payload = payload
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("not json")
+        return self._payload
+
+
+class _Session:
+    """Serves a scripted list of responses, then repeats the last one forever."""
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        i = min(self.calls - 1, len(self._responses) - 1)
+        r = self._responses[i]
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+
+def _fast(monkeypatch):
+    """Neutralise pacing/backoff sleeps, and map units trivially — these tests are about the
+    PAGING outcome logic, not about map_listing()'s field extraction."""
+    monkeypatch.setattr(g, "_throttle", lambda: None)
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(g, "map_listing", lambda it: {"ad_number": f"GA{it['id']}"})
+
+
+def _unit(uid):
+    return {"id": uid, "chalet_id": 1, "name": f"unit {uid}", "city_en": "Riyadh",
+            "final_price": 3000, "price": 3000}
+
+
+def _page(units):
+    return _Resp(200, {"items": [_unit(u) for u in units],
+                       "_meta": {"totalCount": 999, "pageCount": 9, "perPage": 12}})
+
+
+def test_status_distinguishes_empty_from_refusal(monkeypatch):
+    _fast(monkeypatch)
+
+    items, _, status = g.fetch_page(_Session([_Resp(200, {"items": [], "_meta": {}})]), 1, 1, "a", "b")
+    assert (items, status) == ([], "empty")          # a real answer
+
+    items, _, status = g.fetch_page(_Session([_Resp(403)]), 1, 1, "a", "b")
+    assert (items, status) == ([], "http_403")       # NOT an empty catalogue
+
+    items, _, status = g.fetch_page(_Session([_Resp(429)]), 1, 1, "a", "b")
+    assert (items, status) == ([], "exhausted")      # throttled past its retries
+
+    items, _, status = g.fetch_page(_Session([_page([1, 2])]), 1, 1, "a", "b")
+    assert status == "ok" and len(items) == 2
+
+
+def test_a_refused_city_is_counted_as_failed_not_as_having_no_units(monkeypatch):
+    """FAILS on the pre-fix code, which counted this city as an ordinary empty one and moved on."""
+    _fast(monkeypatch)
+    s = _Session([_Resp(403)])
+    _, _, _, outcomes = g.crawl(s, [{"id": 1, "name_en": "Riyadh"}], "a", "b", verbose=False)
+    assert outcomes.get("failed") == 1, outcomes
+    assert outcomes.get("empty", 0) == 0, outcomes
+
+
+def test_a_genuinely_empty_city_is_still_counted_as_empty(monkeypatch):
+    """The fix must not turn honest empties into false alarms."""
+    _fast(monkeypatch)
+    s = _Session([_Resp(200, {"items": [], "_meta": {"totalCount": 0}})])
+    _, _, _, outcomes = g.crawl(s, [{"id": 1, "name_en": "Tabuk"}], "a", "b", verbose=False)
+    assert outcomes.get("empty") == 1, outcomes
+    assert outcomes.get("failed", 0) == 0, outcomes
+
+
+def test_a_refusal_midway_marks_the_city_incomplete_not_finished(monkeypatch):
+    """A city truncated by a refusal must not be presented as a fully-crawled city.
+
+    Pre-fix, page 2 returning `[]` from a 429 counted toward `empties >= 2` and the city was
+    recorded as completely crawled — the silent-truncation half of the same bug.
+    """
+    _fast(monkeypatch)
+    s = _Session([_page([1, 2]), _Resp(429)])
+    rows, _, _, outcomes = g.crawl(s, [{"id": 1, "name_en": "Jeddah"}], "a", "b", verbose=False)
+    assert outcomes.get("incomplete") == 1, outcomes
+    assert outcomes.get("ok", 0) == 0, outcomes
+    assert len(rows) == 2                      # what it DID capture is still kept, never discarded
+
+
+def test_a_city_that_ends_on_real_empty_pages_is_complete(monkeypatch):
+    _fast(monkeypatch)
+    empty = _Resp(200, {"items": [], "_meta": {}})
+    s = _Session([_page([1, 2]), empty, empty])
+    rows, _, _, outcomes = g.crawl(s, [{"id": 1, "name_en": "Riyadh"}], "a", "b", verbose=False)
+    assert outcomes.get("ok") == 1, outcomes
+    assert outcomes.get("incomplete", 0) == 0, outcomes
+    assert len(rows) == 2

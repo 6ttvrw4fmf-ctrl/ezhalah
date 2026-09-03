@@ -248,8 +248,18 @@ def fetch_cities(s: cc.Session) -> list[dict]:
     return []
 
 
-def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tuple[list[dict], dict]:
-    """One MONTHLY-mode search page. Retries flaky empty/non-JSON bodies (Gathern rate-limits)."""
+def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tuple[list[dict], dict, str]:
+    """One MONTHLY-mode search page. Retries flaky empty/non-JSON bodies (Gathern rate-limits).
+
+    Returns (items, meta, status) where status distinguishes the four outcomes that used to be one:
+    "ok" (items), "empty" (HTTP 200, valid JSON, zero items — a genuine end of catalogue),
+    "http_<code>" (a hard 4xx), and "exhausted" (retries used up: throttle, transport, non-JSON).
+
+    The status is the whole point. This function used to return a bare `[], {}` for BOTH "the source
+    has no more units" and "the source refused to answer", and crawl() then recorded a refused city
+    as «no monthly units» and moved on, while the run still reported ok=true. A platform that starts
+    rate-limiting therefore shrinks the crawl silently — the shape §10 exists to prevent ("never let
+    a scraper failure cascade") and the one every count-based barrier is blind to."""
     _throttle()
     params = {
         "lang": "ar", "city": city_id, "page": page,
@@ -263,13 +273,14 @@ def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tupl
         if r.status_code == 429 or r.status_code >= 500:
             time.sleep(3 * (attempt + 1)); continue
         if r.status_code != 200:
-            return [], {}  # a hard 4xx (not throttle) → no point retrying this page
+            return [], {}, f"http_{r.status_code}"  # a hard 4xx (not throttle) → no point retrying
         try:
             j = r.json()
         except Exception:
             time.sleep(2 * (attempt + 1)); continue   # empty/non-JSON body → retry
-        return j.get("items") or [], (j.get("_meta") or {})
-    return [], {}
+        items = j.get("items") or []
+        return items, (j.get("_meta") or {}), ("ok" if items else "empty")
+    return [], {}, "exhausted"
 
 
 # ── DETAIL-PAGE ENRICHMENT (Tier 2) ──────────────────────────────────────────────────────────────
@@ -690,14 +701,24 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
     its inflated _meta.totalCount). De-dup is by ad_number across cities — a unit can surface twice."""
     rows_by_ad: dict[str, dict] = {}
     per_city: dict[str, int] = {}
+    outcomes: dict[str, int] = {}
+    failed_cities: list[str] = []
+    incomplete_cities: list[str] = []
     scanned = 0
     for c in cities:
         cid = c.get("id")
         name = c.get("name_en") or c.get("name") or str(cid)
-        items, meta = fetch_page(s, cid, 1, ci, co)
+        items, meta, status = fetch_page(s, cid, 1, ci, co)
         if not items:
+            # "empty" is a real answer; anything else is the source declining to answer, and calling
+            # that «no monthly units» is how a throttled crawl reports a clean, much smaller run.
+            outcome = "empty" if status == "empty" else "failed"
+            outcomes[outcome] = outcomes.get(outcome, 0) + 1
+            if outcome == "failed":
+                failed_cities.append(f"{name}:{status}")
             if verbose:
-                print(f"  city={cid:<6} {name:<28} monthlyTotalMeta={meta.get('totalCount', 0):<5} kept=0 (no monthly units)")
+                detail = "no monthly units" if outcome == "empty" else f"FETCH FAILED ({status})"
+                print(f"  city={cid:<6} {name:<28} monthlyTotalMeta={meta.get('totalCount', 0):<5} kept=0 ({detail})")
             continue
         total_meta = meta.get("totalCount") or 0
         # _meta.pageCount under-reports the real tail (Jeddah: pageCount=121 but units run to ~p129),
@@ -707,6 +728,7 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
         city_kept = 0
         page = 1
         empties = 0
+        truncated = False
         while True:
             for it in items:
                 scanned += 1
@@ -723,21 +745,36 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
             if page >= hard_cap:
                 break
             page += 1
-            items, _ = fetch_page(s, cid, page, ci, co)
+            items, _, status = fetch_page(s, cid, page, ci, co)
             if not items:
+                if status != "empty":
+                    # A refusal is NOT an end of catalogue. Stop paging this city (continuing would
+                    # only hammer a source that is already declining), but record it as INCOMPLETE
+                    # so the run cannot present a truncated city as a finished one.
+                    incomplete_cities.append(f"{name}:p{page}:{status}")
+                    truncated = True
+                    break
                 empties += 1
                 if empties >= 2:
                     break  # two empty pages in a row → real end of this city's monthly catalog
                 continue
             empties = 0
+        outcomes["incomplete" if truncated else "ok"] = \
+            outcomes.get("incomplete" if truncated else "ok", 0) + 1
         per_city[name] = per_city.get(name, 0) + city_kept
         if verbose:
-            print(f"  city={cid:<6} {name:<28} monthlyTotalMeta={total_meta:<5} pagesRead={page:<4} kept={city_kept}")
+            flag = " INCOMPLETE" if truncated else ""
+            print(f"  city={cid:<6} {name:<28} monthlyTotalMeta={total_meta:<5} pagesRead={page:<4} kept={city_kept}{flag}")
         if limit and len(rows_by_ad) >= limit:
             if verbose:
                 print(f"  [--limit {limit}] reached after {name}")
             break
-    return rows_by_ad, scanned, per_city
+    if verbose and (failed_cities or incomplete_cities):
+        # Loud, because this is the difference between "the source is smaller today" and
+        # "the source stopped answering us" — and only one of those is our problem.
+        print(f"  ⚠ city coverage gap: failed={failed_cities[:8]} incomplete={incomplete_cities[:8]}",
+              flush=True)
+    return rows_by_ad, scanned, per_city, outcomes
 
 
 def main() -> int:
@@ -857,7 +894,7 @@ def main() -> int:
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}"
           f"{' [max ' + str(args.max_pages) + ' pages/city]' if args.max_pages else ''}")
 
-    rows_by_ad, scanned, per_city = crawl(
+    rows_by_ad, scanned, per_city, outcomes = crawl(
         s, cities, ci, co,
         limit=args.limit, max_pages=args.max_pages, verbose=True,
     )
@@ -922,7 +959,11 @@ def main() -> int:
         top = sorted(per_city.items(), key=lambda kv: -kv[1])[:10]
         print("  top cities:", ", ".join(f"{n}={c}" for n, c in top))
         healthy = db.end_run(run_id, ok=True, rows_seen=scanned, rows_upserted=len(rows),
-                   notes=f"cities={len(cities)} pruned={pruned}", check_tables=["gathern_residential_listings"])
+                   notes=(f"cities={len(cities)} pruned={pruned} "
+                          f"city_ok={outcomes.get('ok', 0)} city_empty={outcomes.get('empty', 0)} "
+                          f"city_failed={outcomes.get('failed', 0)} "
+                          f"city_incomplete={outcomes.get('incomplete', 0)}"),
+                   check_tables=["gathern_residential_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1
