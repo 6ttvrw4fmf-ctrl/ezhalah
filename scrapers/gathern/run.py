@@ -251,6 +251,14 @@ def fetch_cities(s: cc.Session) -> list[dict]:
 _REJECTS: list[dict] = []
 _REJECT_LIMIT = 6
 
+# gathern answers a rate limit with HTTP 400 and this message, not with 429 (observed live
+# 2026-09-03). Matched on the BODY so a genuinely malformed request is still treated as fatal.
+_THROTTLE_BODY_RE = re.compile(r"too\s+many\s+requests|rate\s*limit", re.I)
+
+
+def _is_throttle_body(body: str) -> bool:
+    return bool(_THROTTLE_BODY_RE.search(body or ""))
+
 
 def _record_reject(city_id: int, page: int, code: int, params: dict, body: str) -> None:
     """Keep the first few rejections VERBATIM (bounded), so the API's own words are the evidence.
@@ -300,12 +308,26 @@ def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tupl
         if r.status_code == 429 or r.status_code >= 500:
             time.sleep(3 * (attempt + 1)); continue
         if r.status_code != 200:
-            # Capture the REJECTION ITSELF. A 4xx body from this API names the field it objects to,
-            # and "http_400" alone is a symptom, not a root cause — without the body and the exact
-            # params, the only way forward is guessing which parameter is wrong, and guessing at an
-            # unobserved request is how the sadin selector fix failed earlier today.
+            # gathern signals THROTTLING WITH HTTP 400, not 429. Observed live 2026-09-03 (run
+            # 33816958296, shard 2): the rejected request is byte-for-byte the same shape as the
+            # ones that succeeded seconds earlier in the same shard —
+            #   params={'lang':'ar','city':1626,'page':2,'calendar_type':'monthly',
+            #           'check_in':'2026-09-04','check_out':'2026-10-04','has_available':'true'}
+            #   body={"success":false,"message":"Too many requests. Please try again later."}
+            # so there is no malformed parameter. Treating that as a permanent client error and
+            # giving up ("no point retrying") is what silently cost the crawl whole cities: the big
+            # cities early in a shard spend the budget (At Taif alone reads 33 pages) and every
+            # later city in that shard is refused.
+            #
+            # Discriminate on the BODY, never on the status alone: a genuinely malformed request
+            # must still fail fast rather than spin through the retry ladder.
+            if _is_throttle_body(getattr(r, "text", "")):
+                time.sleep(3 * (attempt + 1)); continue
+            # Capture the REJECTION ITSELF. Without the body and the exact params, the only way
+            # forward is guessing which parameter is wrong, and guessing at an unobserved request is
+            # how the sadin selector fix failed earlier today.
             _record_reject(city_id, page, r.status_code, params, getattr(r, "text", ""))
-            return [], {}, f"http_{r.status_code}"  # a hard 4xx (not throttle) → no point retrying
+            return [], {}, f"http_{r.status_code}"  # a genuine hard 4xx → no point retrying
         try:
             j = r.json()
         except Exception:
