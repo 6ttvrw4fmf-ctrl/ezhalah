@@ -118,3 +118,31 @@ def test_a_city_that_ends_on_real_empty_pages_is_complete(monkeypatch):
     assert outcomes.get("ok") == 1, outcomes
     assert outcomes.get("incomplete", 0) == 0, outcomes
     assert len(rows) == 2
+
+
+def test_failure_reasons_are_tallied_so_throttle_vs_block_is_queryable(monkeypatch):
+    """The COUNT says coverage dropped; only the REASON says whether that is our problem.
+
+    429/exhausted means the source throttled us (pace/parallelism is ours to fix); 403 means we are
+    blocked; 404 means the endpoint moved. These end up in the run's notes precisely so the question
+    is answerable from SQL later instead of by digging through an expired CI log.
+    """
+    _fast(monkeypatch)
+    cities = [{"id": 1, "name_en": "A"}, {"id": 2, "name_en": "B"}]
+    s = _Session([_Resp(403)])
+    _, _, _, outcomes = g.crawl(s, cities, "a", "b", verbose=False)
+    assert outcomes.get("failed") == 2, outcomes
+    assert outcomes.get("reason:http_403") == 2, outcomes
+
+    s = _Session([_Resp(429)])
+    _, _, _, outcomes = g.crawl(s, [{"id": 1, "name_en": "A"}], "a", "b", verbose=False)
+    assert outcomes.get("reason:exhausted") == 1, outcomes
+
+
+def test_a_clean_run_records_no_reasons_at_all(monkeypatch):
+    """No failures ⇒ no reason keys ⇒ the notes stay short and a clean run reads as clean."""
+    _fast(monkeypatch)
+    empty = _Resp(200, {"items": [], "_meta": {}})
+    s = _Session([_page([1]), empty, empty])
+    _, _, _, outcomes = g.crawl(s, [{"id": 1, "name_en": "A"}], "a", "b", verbose=False)
+    assert not [k for k in outcomes if k.startswith("reason:")], outcomes
