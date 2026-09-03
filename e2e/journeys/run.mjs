@@ -10,7 +10,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
          findings, skips, skip, ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
-         closeMobileSidebar, THREE_CHATS, SUB, BASE } from './harness.mjs';
+         closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -1302,9 +1302,23 @@ JOURNEYS['support-error-copy'] = async (mobile) => withPage({ mobile }, async (p
 const t0 = Date.now();
 console.log(`JOURNEY SWEEP — ${new Date().toISOString()}`);
 const engines = ['chromium', 'webkit', 'firefox'].filter(engineAvailable);
-console.log(`ENGINES AVAILABLE: ${engines.join(', ')}`);
+console.log(`ENGINES AVAILABLE HERE: ${engines.join(', ') || 'none'}`);
+console.log(`ENGINE THIS RUN: ${ENGINE}`);
+// FAIL CLOSED ON AN ENGINE THAT ISN'T THERE. Asking for webkit and silently getting a Chromium run
+// would be the worst possible outcome of this whole exercise: a green matrix cell reporting engine
+// coverage that never happened. The launch would throw anyway, but it would throw 76 times as
+// «journey threw», which reads as 76 product defects rather than one missing browser.
+if (!engineAvailable(ENGINE)) {
+  console.error(`\nREFUSING TO RUN: JOURNEY_ENGINE=${ENGINE} is not installed here.\n`
+    + `  In CI, install it first: npx playwright install --with-deps ${ENGINE}\n`
+    + `  In the agent container, only chromium exists and PART 11.1 forbids \`playwright install\` —\n`
+    + `  a mismatched build kills every journey at launch and reads as a total production outage.`);
+  process.exit(2);
+}
 for (const e of ['webkit', 'firefox']) {
-  if (!engineAvailable(e)) note(`COVERAGE LIMIT: ${e} is not installed in this container and PART 11.1 forbids \`playwright install\` — NOT tested this run.`);
+  if (!engineAvailable(e)) note(`COVERAGE LIMIT: ${e} is not installed here — NOT tested by THIS process. `
+    + `It is covered by the per-engine matrix in .github/workflows/journey-sweep.yml; a run that never `
+    + `saw that workflow's result has no evidence about ${e}.`);
 }
 
 let ran = 0;
@@ -1318,7 +1332,7 @@ for (const [key, fn] of Object.entries(JOURNEYS)) {
       console.log(`\n▶ ${key} [${mobile ? 'mobile' : 'desktop'}] run ${i}/${N}`);
       try { await fn(mobile); } catch (e) { defect(key, 'journey threw', String(e).slice(0, 220)); }
       ran++;
-      const k = `${key}:${mobile ? 'mobile' : 'desktop'}`;
+      const k = `${key}${ENGINE === 'chromium' ? '' : `:${ENGINE}`}:${mobile ? 'mobile' : 'desktop'}`;
       perJourney[k] = perJourney[k] || { runs: 0, failed: 0, skipped: 0 };
       perJourney[k].runs++;
       if (findings.length > before) perJourney[k].failed++;
@@ -1328,7 +1342,7 @@ for (const [key, fn] of Object.entries(JOURNEYS)) {
 }
 
 console.log(`\n${'═'.repeat(90)}`);
-console.log(`JOURNEYS RUN: ${ran} in ${Math.round((Date.now() - t0) / 1000)}s`);
+console.log(`JOURNEYS RUN: ${ran} on ${ENGINE} in ${Math.round((Date.now() - t0) / 1000)}s`);
 console.log(`REPRODUCTION RATIOS (failed/runs):`);
 for (const [k, v] of Object.entries(perJourney)) console.log(`  ${v.failed}/${v.runs}  ${k}`);
 console.log(`SKIPPED (never executed — not a pass): ${skips.length}`);

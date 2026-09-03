@@ -175,16 +175,41 @@ export const seedInitScript = ([sess, hist, sub, wantAuth]) => {
   }
 };
 
+/**
+ * The engine this process drives, when a journey does not name one.
+ *
+ * PART 3 item 6 asks for a rotation across Safari/Chrome/Firefox; §11.5 recorded WebKit and Firefox
+ * as unreachable, which is true OF THIS CONTAINER (Chromium only, and PART 11.1 rightly forbids
+ * `playwright install` here — a mismatched build kills every journey at launch and reads as an
+ * outage). It was never true of CI: six workflows already run `npx playwright install --with-deps
+ * chromium` on a GitHub runner. What was missing is that NO workflow ran this sweep at all, so it
+ * only ever executed where only Chromium exists. `.github/workflows/journey-sweep.yml` runs it once
+ * per engine; this variable is how that matrix reaches every journey without touching one of them.
+ */
+export const ENGINE = process.env.JOURNEY_ENGINE || 'chromium';
+
 export async function withPage(opts, fn) {
-  const { engine = 'chromium', mobile = false, signedIn = false, history = null, path = '/' } = opts;
+  const { engine = ENGINE, mobile = false, signedIn = false, history = null, path = '/' } = opts;
   const browser = await ENGINES[engine].launch(launchOpts(engine));
   const device = mobile ? devices['iPhone 13'] : devices['Desktop Chrome'];
-  // iPhone 13 is 390px; PART 3 item 6 fixes the mobile viewport at 375px, so the width is pinned
-  // explicitly rather than inherited from the device profile.
+  // FIREFOX REJECTS `isMobile` OUTRIGHT — `browser.newContext: options.isMobile is not supported in
+  // Firefox`, thrown at context creation, i.e. before a single journey body runs. The iPhone 13
+  // profile carries `isMobile: true` inside the spread as well as the explicit pair below, so BOTH
+  // have to be stripped; dropping only the explicit one leaves the device profile's copy to throw.
+  // Gecko has no mobile-emulation mode at all, so this is a genuine engine limit, not a workaround:
+  // Firefox mobile runs are a 375px viewport with touch, and the report says exactly that rather
+  // than implying a device profile it never had.
+  const mobileCtx = mobile
+    ? (engine === 'firefox'
+        ? { viewport: { width: 375, height: 812 }, hasTouch: true }
+        : { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true })
+    : { viewport: { width: 1440, height: 1000 } };
+  const { isMobile: _deviceIsMobile, ...deviceRest } = device;
   const ctx = await browser.newContext({
-    ...device,
-    ...(mobile ? { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true }
-               : { viewport: { width: 1440, height: 1000 } }),
+    // iPhone 13 is 390px; PART 3 item 6 fixes the mobile viewport at 375px, so the width is pinned
+    // explicitly rather than inherited from the device profile.
+    ...(engine === 'firefox' ? deviceRest : device),
+    ...mobileCtx,
     locale: 'ar-SA',
     // WebKit/Firefox reject Chromium's UA string from the device profile; let them use their own.
     ...(engine === 'chromium' ? {} : { userAgent: undefined }),
@@ -342,7 +367,20 @@ export const LEDGER_RESULTS = ['pass', 'fail', 'skip'];
 let ownedLedgerKeys = null;
 
 /** Both viewport rows the runner emits for a journey. The single source of the key shape. */
-export const ledgerKeysFor = (names) => names.flatMap((n) => [`${n}:desktop`, `${n}:mobile`]);
+/**
+ * Ledger keys for a set of journeys, on the engine this process is driving.
+ *
+ * CHROMIUM KEEPS THE UNQUALIFIED KEY ON PURPOSE. The ledger's job is "what has gone longest
+ * untested" (PART 3 item 7), and that answer lives in `times_tested`/`last_tested_at` accumulated
+ * across ~20 runs per key. Qualifying every key with an engine would have reset all 38 of them to
+ * zero and blinded the rotation for weeks — paying for multi-engine coverage by destroying the
+ * history that makes coverage legible. Non-Chromium engines are genuinely new coverage, so they get
+ * their own rows and their own honest count starting at 1.
+ */
+export const ledgerKeysFor = (names, engine = ENGINE) => {
+  const suffix = engine === 'chromium' ? '' : `:${engine}`;
+  return names.flatMap((n) => [`${n}${suffix}:desktop`, `${n}${suffix}:mobile`]);
+};
 
 /** Called by the runner with its own `Object.keys(JOURNEYS)` before any row is written. */
 export function registerJourneys(names) {

@@ -1,7 +1,3 @@
--- MIRROR of the migration applied to production 2026-08-31 (migration-mirror rule: the session that
--- applies owns mirroring it, immediately — five production deploys were blocked today by sessions
--- that did not).
---
 -- ═══ THE MONTHLY BUDGET, MADE EXPLICIT ═══════════════════════════════════════════════════════
 -- Owner 2026-08-31: "my monthly budget is 62 dollars in deepseek", and ~$2/day is the average that
 -- implies. Those two numbers are the same statement: the daily ceiling already in ai_spend_config

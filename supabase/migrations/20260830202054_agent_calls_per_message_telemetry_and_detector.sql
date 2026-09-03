@@ -1,38 +1,9 @@
 -- TELEMETRY FOR THE UNIFIED AGENT DECISION AUTHORITY (owner-approved consolidation, 2026-08-30).
 --
 -- Adds the columns the consolidated supabase/functions/agent/index.ts / decide.ts need to tell a
--- genuine second user message apart from a duplicate/runaway call on the SAME message:
---
---   user_message_id  — a client-generated id, stamped ONCE per user SEND (src/app/agent.tsx),
---                       shared by the primary model call and any retry it triggers. NOT a uuid
---                       type on purpose: the client's existing id generator (uid() in agent.tsx,
---                       the same one every chat message id already uses) is a short string, not an
---                       RFC4122 uuid, and this is a label for grouping rows, never a join key into
---                       user data — reusing the app's own id shape needs no new dependency.
---   call_reason       — WHY this row exists: 'primary' (the turn's own call), 'language_retry' (the
---                       wrong-language regenerate — still a full second paid call, see index.ts),
---                       or 'http_retry' (a 429/5xx retry attempt within either of those calls).
---   history_turns_raw — the TRUE pre-cap conversation length (client's msgs.length BEFORE its own
---                       slice(-10)/slice(-2)), alongside the existing history_turns (post-cap).
---                       Without this a 7-genuine-message conversation and a duplicate-call runaway
---                       show the identical capped history_turns and are visually indistinguishable
---                       — exactly what made 7 real messages look suspicious in the 2026-08-29 cost
---                       audit before this column existed.
---
--- Then a new detector, mon_detect_agent_calls_per_message(), a sibling to mon_detect_ai_cost_health
--- (same file: supabase/migrations/20260829230722_mon_detect_ai_cost_health.sql — read before
--- touching either), fires when the new columns show the shape of >1 model call per user message:
---   - more than one 'primary' row for the same user_message_id (two independent primary calls —
---     the platform is supposed to make exactly one)
---   - more than 2 total rows for the same user_message_id (primary + language_retry is 2; a THIRD
---     row means something retried beyond the one allowed retry path)
---   - any row with call_reason NULL or outside the three known values (an unlabelled call is a
---     silent gap in the very telemetry this migration exists to add)
---
--- Registered in mon_run_all_detectors() in THIS SAME migration (standing rule: a detector not on
--- the roster never runs) via the same needle-edit pattern as
--- 20260830022202_register_ai_cost_detector_in_sweep.sql — read the LIVE function body, insert one
--- entry beside its sibling detector, re-execute; refuses to guess if the anchor is gone.
+-- genuine second user message apart from a duplicate/runaway call on the SAME message.
+-- See supabase/migrations/20260830210000_agent_calls_per_message_telemetry_and_detector.sql in git
+-- for the full rationale (mirrored here verbatim).
 
 create type public.ai_call_reason as enum ('primary', 'language_retry', 'http_retry');
 
@@ -68,8 +39,6 @@ declare
   bad_reason_n int;
   sev text;
 begin
-  -- How many distinct user turns do we even have telemetry for in this window? Below the floor,
-  -- stay silent rather than alerting off a handful of samples (same discipline as the cost sibling).
   select count(distinct user_message_id) into msgs_seen
     from public.ai_usage
    where at >= now() - win and user_message_id is not null;
@@ -79,10 +48,6 @@ begin
     return 0;
   end if;
 
-  -- ── 1. MORE THAN ONE 'primary' ROW FOR THE SAME MESSAGE ───────────────────────
-  -- The platform makes exactly one primary call per user SEND. Two means two independent calls
-  -- happened for what the client considers a single message — the exact duplicate-call shape this
-  -- telemetry exists to catch.
   select count(*) into dup_primary_n
     from (
       select user_message_id
@@ -108,10 +73,6 @@ begin
     live_keys := live_keys || array['agent_duplicate_primary_call'];
   end if;
 
-  -- ── 2. MORE THAN TWO TOTAL ROWS FOR THE SAME MESSAGE ──────────────────────────
-  -- primary + language_retry is the known ceiling (2). A THIRD row (excluding the failed-attempt
-  -- http_retry rows a single call can legitimately log while retrying transport errors) means a
-  -- call path retried beyond the one allowed retry.
   select count(*) into over_two_n
     from (
       select user_message_id
@@ -137,11 +98,6 @@ begin
     live_keys := live_keys || array['agent_calls_per_message_over_ceiling'];
   end if;
 
-  -- ── 3. NULL OR UNRECOGNISED call_reason ────────────────────────────────────────
-  -- This telemetry is only as good as its own labelling. A row logged with no call_reason (or a
-  -- value outside the enum, which the enum type itself should make impossible — this catches an
-  -- OLDER unlabelled row still inside the window, e.g. right after this migration deploys) is a
-  -- silent gap in the exact signal the two checks above depend on.
   select count(*) into bad_reason_n
     from public.ai_usage
    where at >= now() - win and user_message_id is not null and call_reason is null;
@@ -168,9 +124,6 @@ $function$;
 comment on function public.mon_detect_agent_calls_per_message() is
   'Sibling to mon_detect_ai_cost_health(): watches public.ai_usage.user_message_id/call_reason for more than one primary call, more than 2 total calls, or an unlabelled call reason per user message.';
 
--- Register in the roster. NEEDLE EDIT (migration-mirror + RPC full-body-replace-hazard rules):
--- read the LIVE function body, insert one entry beside mon_detect_ai_cost_health (the sibling this
--- detector was modelled on), re-execute. Refuses to guess if the anchor is gone.
 do $do$
 declare def text;
 begin
