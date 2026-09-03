@@ -94,12 +94,14 @@ for (const f of pyFiles) {
 // href fix added the shared _PROPERTY_HREF_RE constant + docstring note above LIST_ALL, and
 // 494 -> 511 on 2026-09-03 when _description() gained the redesign's dt/dd selector (the sadin
 // detail-page capture outage: the same prose this exception is about had stopped being captured at
-// all, so 73/74 residential and 10/10 commercial rows were served price-less for ~3 weeks). The
-// exception itself is unchanged across all five shifts — still the one
+// all, so 73/74 residential and 10/10 commercial rows were served price-less for ~3 weeks), and
+// 511 -> 560 later the same day when _report_description_miss() was added so that a dead
+// description selector reports the live markup from the crawler instead of being guessed at. The
+// exception itself is unchanged across all six shifts — still the one
 // `price = _extract_price(desc_raw)` call in the file, re-verified against the commit before
 // re-pinning. If this fails, confirm the line still holds the SAME call before re-pinning; do not
 // re-pin a different call site to make the check pass.
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:511']);
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:560']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);
