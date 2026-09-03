@@ -716,6 +716,11 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
             outcomes[outcome] = outcomes.get(outcome, 0) + 1
             if outcome == "failed":
                 failed_cities.append(f"{name}:{status}")
+                # The REASON is what separates "throttled" (429 → exhausted) from "blocked" (403)
+                # from "the endpoint moved" (404). Keep it QUERYABLE, not merely loggable: a log
+                # line dies with the runner, and answering "why did coverage drop?" from CI logs
+                # is archaeology every single time.
+                outcomes[f"reason:{status}"] = outcomes.get(f"reason:{status}", 0) + 1
             if verbose:
                 detail = "no monthly units" if outcome == "empty" else f"FETCH FAILED ({status})"
                 print(f"  city={cid:<6} {name:<28} monthlyTotalMeta={meta.get('totalCount', 0):<5} kept=0 ({detail})")
@@ -752,6 +757,7 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
                     # only hammer a source that is already declining), but record it as INCOMPLETE
                     # so the run cannot present a truncated city as a finished one.
                     incomplete_cities.append(f"{name}:p{page}:{status}")
+                    outcomes[f"reason:{status}"] = outcomes.get(f"reason:{status}", 0) + 1
                     truncated = True
                     break
                 empties += 1
@@ -962,7 +968,11 @@ def main() -> int:
                    notes=(f"cities={len(cities)} pruned={pruned} "
                           f"city_ok={outcomes.get('ok', 0)} city_empty={outcomes.get('empty', 0)} "
                           f"city_failed={outcomes.get('failed', 0)} "
-                          f"city_incomplete={outcomes.get('incomplete', 0)}"),
+                          f"city_incomplete={outcomes.get('incomplete', 0)}"
+                          + (" city_fail_reasons=" + ",".join(
+                              f"{k.split(':', 1)[1]}:{v}"
+                              for k, v in sorted(outcomes.items()) if k.startswith("reason:"))
+                             if any(k.startswith("reason:") for k in outcomes) else "")),
                    check_tables=["gathern_residential_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
