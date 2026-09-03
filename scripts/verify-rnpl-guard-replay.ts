@@ -64,6 +64,32 @@ console.log('\nRNPL/Monthly guard — asserted against the REPLAYED final state 
 // confirmed not to touch the RNPL/Monthly predicates. Remove an entry the moment its migration is
 // superseded by an explicit definition.
 const AUDITED_UNINTERPRETABLE = new Map<string, string>([
+  ['20260903230551_buy_price_predicate_uses_price_total_effective_everywhere.sql',
+   'audited 2026-09-03 (mine, read line by line): points the BUY budget comparison at the new ' +
+   'generated column search_listings_ar.price_total_effective in four RPCs, so the Filter, the ' +
+   'counts and the Advanced Filter cannot disagree about what a budget means. Uninterpretable for ' +
+   'the same reason several entries above are: the body is BUILT AT APPLY TIME from ' +
+   'pg_get_functiondef() and two string replaces, which is the point — it is what keeps four ' +
+   'copies of one predicate identical instead of hand-copied. VERIFIED BY GREP on the file: ZERO ' +
+   'occurrences of payment_monthly and ZERO of rent_now_pay_later/rnpl/RNPL, and ZERO literal ' +
+   'CREATE FUNCTION / CREATE OR REPLACE FUNCTION statements. It rewrites ONLY the two predicate ' +
+   'shapes "s.price_total >= coalesce(p_price_min" and "s.price_total <= coalesce(nullif(' +
+   'p_price_max", and RAISES (2 raise exception guards) unless it finds EXACTLY 2 of each per ' +
+   'function — so it cannot edit blind, and it leaves the RPC payload\'s own price_total SELECT ' +
+   'untouched on purpose, so the card still receives the source-published total.'],
+  ['20260903230701_buy_price_gate_and_sort_price_also_use_price_total_effective.sql',
+   'audited 2026-09-03 (mine, read line by line): finishes the previous migration. Rewiring the ' +
+   'comparisons alone was not enough — the Buy branch is gated upstream by "price_total is not ' +
+   'null and price_total > 0", which drops a per-metre-only row before any comparison runs ' +
+   '(measured: 535 returned against a truth of 897). This moves that precondition, its OR-branch ' +
+   'twin, and effective_price (which orders and displays the row) onto price_total_effective. ' +
+   'VERIFIED BY GREP: ZERO payment_monthly and ZERO rent_now_pay_later/rnpl/RNPL occurrences, ZERO ' +
+   'literal CREATE FUNCTION statements. HONEST CAVEAT: unlike its predecessor this one carries no ' +
+   'raise-exception guard — on an unexpected shape it takes the no-op branch and only RAISE ' +
+   'NOTICEs, so it fails silent-but-safe (nothing rewritten) rather than loud. It deliberately does ' +
+   'NOT touch coalesce(s.price_total, 0) >= 0 (a no-op sanity term) or search_row_price_gated(' +
+   's.deal_ar, s.price_total), which judges a SOURCE-published price and must keep judging exactly ' +
+   'that.'],
   ['20260822141945_top_cities_by_deal_ar_understands_advanced_filter.sql',
    'audited 2026-08-22 (mine, read line by line): makes the trending CITY chip RPC advanced-filter ' +
    'aware. ZERO literal occurrences of payment_monthly and ZERO of rent_now_pay_later/rnpl/RNPL in ' +
