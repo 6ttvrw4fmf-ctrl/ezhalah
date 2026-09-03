@@ -57,6 +57,7 @@
 // LIVE CHECK — excluded from `npm test` (it drives a real browser against production).
 
 import { chromium } from 'playwright';
+import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS, AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
@@ -588,12 +589,12 @@ const runBaselineSearch = async (): Promise<Search | null> => {
 
 /** Open the round. A missing offer is reported by the caller — it is either R11 behaving (a SKIP
  *  with the number that explains it) or a defect (a FAIL); this helper only says whether it opened. */
+// Shared with the other live journeys — see scripts/lib/afOfferLive.ts for why a fixed 16s poll
+// that scrolls only once is not a budget for something behind a paid LLM turn.
+let lastOffer: OfferResult | null = null;
 const openAF = async (): Promise<boolean> => {
-  await scrollToBottom();
-  let btn: any = null;
-  for (let i = 0; i < 40 && !btn; i++) { btn = await page.evaluate(CLICK_LEAF, 'خلّنا نحدد الطلب أكثر'); if (!btn) await page.waitForTimeout(400); }
-  if (!btn) return false;
-  await page.mouse.click(btn.x, btn.y);
+  lastOffer = await openAfOffer(page);
+  if (!lastOffer.opened) return false;
   await page.waitForTimeout(2500);
   return true;
 };
