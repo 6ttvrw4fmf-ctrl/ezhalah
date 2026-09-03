@@ -243,6 +243,20 @@ const S13: Entry[] = [
   { rule: 'R13.9', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'never permanently burn an un-answered question' },
   { rule: 'R13.11', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-probe-failure-not-a-verdict'], evidence: 'never turn our own outage into a statement about the data — mayAssertNothingToNarrow() only on a decided verdict' },
   { rule: 'R13.10', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-offer-agreement'], evidence: 'CI agent-CTA 4/4: never offer a round that would have nothing to ask' },
+  // ── §12A — the returned card must SHOW what the user selected (owner, 2026-09-03) ──────────────
+  // Graded N deliberately and honestly: the rule is NEW and production does not satisfy it yet.
+  // Measured gap (see contract §12A status paragraph): ResultCard's FEATURE_META draws 14 amenity
+  // labels while RESIDENTIAL_AMENITY_BASE certifies 17 + 2 villa-only, features are capped at 6 by
+  // a static priority, and property_age/furnished/street_width/direction render only inside the
+  // Wasalt-style Additional Information panel. These entries LOWER the AF score on purpose — an
+  // unmet owner rule must cost, or the map would report a health the product does not have.
+  { rule: 'R12A.1', dim: 'af', weight: 3, grade: 'N', barrier: [], evidence: 'OPEN P1 — no card surface echoes the active AF answers; nothing implements or tests it yet (owner rule 2026-09-03)' },
+  { rule: 'R12A.2', dim: 'af', weight: 2, grade: 'N', barrier: [], evidence: 'OPEN P1 — depends on R12A.1; the card would have to render the LISTING\'s value, not the filter label' },
+  { rule: 'R12A.3', dim: 'af', weight: 3, grade: 'N', barrier: [], evidence: 'OPEN P1 — the truthful-or-absent rule is unenforced while nothing renders; R13.3 keeps UNKNOWN out of every existing surface' },
+  { rule: 'R12A.4', dim: 'af', weight: 2, grade: 'N', barrier: [], evidence: 'OPEN P1 — ResultCard slices allActive to VISIBLE=6 by static priority, so a selected low-priority amenity hides behind «+N More Features»' },
+  { rule: 'R12A.5', dim: 'af', weight: 3, grade: 'N', barrier: [], evidence: 'OPEN P1 — gym, pool, garden, driver_room, car_entrance, separate_electricity_meter, separate_water_meter are filterable but undrawable' },
+  { rule: 'R12A.6', dim: 'af', weight: 2, grade: 'N', barrier: [], evidence: 'OPEN P1 — the live journey + vocabulary-superset barrier this rule mandates do not exist yet' },
+  { rule: 'R13.12', dim: 'af', weight: 3, grade: 'N', barrier: [], evidence: 'OPEN P1 — the never-form of §12A; unenforced until the card surface and its barriers exist' },
 ];
 
 // ── OWNER RULES NOT (YET) IN THE PRODUCT CONTRACT ────────────────────────────────────────────────
