@@ -41,7 +41,7 @@
 // Run: node --experimental-strip-types scripts/verify-live-check-workflow-attendance.ts
 import { readFileSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { npmTestRuns } from './lib/testRegistry.ts';
+import { npmTestRuns, parseExclusions, workflowInvokes, type Exclusion } from './lib/testRegistry.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const EXCLUSIONS = 'scripts/test-exclusions.txt';
@@ -51,41 +51,9 @@ const WF_DIR = '.github/workflows';
 // Pure predicates. Kept free of I/O so the self-proof at the bottom can feed them corrupted input.
 // ---------------------------------------------------------------------------------------------
 
-export type ExclusionRow = { script: string; home: string; why: string };
-
-/** `name | where it DOES run | why`, ignoring blanks and comments. */
-export function parseExclusions(text: string): ExclusionRow[] {
-  const rows: ExclusionRow[] = [];
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const parts = line.split('|').map((p) => p.trim());
-    if (parts.length < 2) continue;
-    rows.push({ script: parts[0], home: parts[1], why: parts[2] ?? '' });
-  }
-  return rows;
-}
-
 /** A home that points at a workflow file (as opposed to an npm script or the literal `manual`). */
 export function homeIsWorkflow(home: string): boolean {
   return home.endsWith('.yml') || home.endsWith('.yaml');
-}
-
-/**
- * Does this workflow actually invoke that script? Matched on the script's stem so
- * `verify-af-live-truth.ts` and a `.mjs` sibling both resolve, and so a `run:` line that wraps the
- * call in `node --experimental-strip-types …` still counts. Comment lines are stripped first: this
- * repo documents its scripts heavily inside workflow comments, and a mention in prose is not a run
- * (the same trap #1528 fixed in the migration sweep guard).
- */
-export function workflowInvokes(src: string, script: string): boolean {
-  const stem = script.replace(/\.(ts|mjs|cjs|js|sh|py)$/, '');
-  const code = src
-    .split('\n')
-    .filter((l) => !/^\s*#/.test(l))
-    .map((l) => l.replace(/\s#.*$/, ''))
-    .join('\n');
-  return code.includes(stem);
 }
 
 export type WorkflowJob = {
@@ -209,18 +177,18 @@ check(rows.length > 0, `${EXCLUSIONS} parsed — ${rows.length} exclusion row(s)
 
 const wfHomes = new Map<string, string>();   // workflow path -> source
 for (const row of rows) {
-  if (!homeIsWorkflow(row.home)) continue;
-  const path = join(WF_DIR, basename(row.home));
+  if (!homeIsWorkflow(row.where)) continue;
+  const path = join(WF_DIR, basename(row.where));
   const abs = join(ROOT, path);
   if (!existsSync(abs)) {
-    problems.push(`${row.script}: its declared home ${row.home} does not exist`);
+    problems.push(`${row.name}: its declared home ${row.where} does not exist`);
     continue;
   }
   const src = readFileSync(abs, 'utf8');
   wfHomes.set(path, src);
-  check(workflowInvokes(src, row.script),
-    `${row.script} is really invoked by ${basename(row.home)}`,
-    `${row.script} is excluded from \`npm test\` because it "runs in" ${row.home}, but that ` +
+  check(workflowInvokes(src, row.name),
+    `${row.name} is really invoked by ${basename(row.where)}`,
+    `${row.name} is excluded from \`npm test\` because it "runs in" ${row.where}, but that ` +
     `workflow never invokes it — the check runs NOWHERE. Point the row at the workflow that ` +
     `actually runs it, or run it.`);
 }
