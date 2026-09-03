@@ -302,9 +302,24 @@ def _ensure_helper() -> Optional[str]:
         return path
 
 
+# A single parse() exchange has NO deadline of its own — until this fix, a stuck node process
+# (worker hung inside `eval()` on a pathological payload, or the pipe wedged) blocked forever on
+# `stdin.write`/`stdout.read`. All 8 fetch threads share ONE _NodeWorker behind ONE lock, so one
+# hang stalls the entire crawl permanently: no thread can ever reach the lock again, seen == 0
+# rows ever upserted, only the outer 330-minute CI timeout ends it. Root cause of "muktamel never
+# completes a single full-range crawl, zero progress-log lines" (paused 2026-07-15) — reproduced
+# 2026-09-03: a 21-id test range (24000-24020) ran 57 minutes, upserted 0 rows, and had to be
+# cancelled by hand. NODE_PARSE_TIMEOUT bounds one exchange; on expiry the stuck process is killed
+# (which unblocks the pending write/read with an OSError) and respawned on the next call — the
+# listing that triggered it is skipped (returns None, same as any other unparseable payload), but
+# every other listing and every other thread keeps moving.
+NODE_PARSE_TIMEOUT = 20.0
+
+
 class _NodeWorker:
     """A single persistent `node worker.js` process. parse() is thread-safe (one lock-guarded
-    request/response per call) and self-heals: if the worker dies it is respawned on the next call."""
+    request/response per call), bounded by NODE_PARSE_TIMEOUT, and self-heals: if the worker dies
+    or is killed for hanging, it is respawned on the next call."""
 
     def __init__(self, helper_path: str):
         self.helper = helper_path
@@ -350,9 +365,16 @@ class _NodeWorker:
     def parse(self, nuxt_src: str) -> Optional[dict]:
         data = nuxt_src.encode("utf-8")
         with self.lock:
-            for _ in range(2):  # one retry: respawn a dead worker and try again
+            for _ in range(2):  # one retry: respawn a dead (or killed-for-hanging) worker and try again
                 if self.proc is None or self.proc.poll() is not None:
                     self._spawn()
+                proc = self.proc
+                # Watchdog: if this exchange doesn't finish within NODE_PARSE_TIMEOUT, kill THIS
+                # process object specifically (not whatever self.proc is by the time the timer
+                # fires — a respawn between now and then must not kill the new, healthy worker).
+                timer = threading.Timer(NODE_PARSE_TIMEOUT, self._kill_proc, args=(proc,))
+                timer.daemon = True
+                timer.start()
                 try:
                     self._write_all(f"{len(data)}\n".encode("ascii"))
                     self._write_all(data)
@@ -366,12 +388,21 @@ class _NodeWorker:
                     out = self._read_exact(n)
                     return json.loads(out.decode("utf-8", "replace")) if out else None
                 except Exception:
-                    try:
-                        self.proc.kill()
-                    except Exception:
-                        pass
-                    self.proc = None
+                    self._kill_proc(proc)
+                    if self.proc is proc:
+                        self.proc = None
+                finally:
+                    timer.cancel()
             return None
+
+    @staticmethod
+    def _kill_proc(proc: Optional[subprocess.Popen]) -> None:
+        if proc is None:
+            return
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
     def close(self) -> None:
         try:
