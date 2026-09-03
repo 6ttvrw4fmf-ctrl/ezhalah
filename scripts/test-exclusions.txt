@@ -39,10 +39,10 @@ verify-photo-preference-and-rotation-live.ts | .github/workflows/photo-rotation-
 verify-platform-diversity-live.ts      | .github/workflows/diversity-live-check.yml           | live production diversity check
 verify-recency-fallback-live.ts        | .github/workflows/recency-fallback-live-check.yml    | live production check
 verify-region-scoped-city-live.ts      | .github/workflows/region-scoped-city-live-check.yml  | live production region+city check; also re-earns ops_qa_search_differential's city-resolution exemption
-verify-residential-misfile-recovery.ts | .github/workflows/full-verification-ci.yml          | invoked directly by CI as its own step
-verify-strict-filter-parity-live.ts    | .github/workflows/full-verification-ci.yml          | invoked directly by CI as its own step
+verify-residential-misfile-recovery.ts | manual / live run                                    | one-off SHADOW PROOF of the 2026-07-10 residential-misfile fix, pinned to that day's expected delta; needs live creds and no workflow has ever invoked it (the row claimed full-verification-ci.yml, which only MENTIONS it in a comment saying it is deliberately not run there)
+verify-strict-filter-parity-live.ts    | .github/workflows/af-live-truth-check.yml            | live RPC total_count vs strict PostgREST ground truth for every previously NULL-permissive filter + the amenity/direction vocabulary invariants; given a real home 2026-09-03 after its old row named a workflow that never invoked it
 verify-taxonomy.ts                     | npm run verify:taxonomy                              | needs network/taxonomy source; run by the taxonomy suite
 verify-trending-usable-under-narrowing.ts | .github/workflows/count-rpc-parity-live-check.yml | live anon-role check against production
 verify-unlocated-fallback-scope-live.ts| manual / live run                                    | live check against production; no scheduled workflow yet
-verify-web-runtime-smoke.mjs           | .github/workflows/full-verification-ci.yml          | drives a real browser; invoked directly by CI
+verify-web-runtime-smoke.mjs           | .github/workflows/web-runtime-smoke.yml             | drives a real browser; the row named full-verification-ci.yml, which never invoked it — corrected 2026-09-03
 verify-loader-platforms-match-active.ts | .github/workflows/loader-active-platforms-check.yml | queries production for the distinct active platform set to prove the loader roster is not dishonest

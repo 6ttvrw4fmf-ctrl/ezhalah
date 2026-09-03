@@ -4,7 +4,7 @@
 -- option comparisons, and the commercial land cohorts are slower still. At 6 slices (~10 cohorts per
 -- run) the detector hit the timeout and raised nothing — a detector that cannot complete is a
 -- detector that cannot fire, which reads as a clean bill of health. 20 slices puts ~3 cohorts in each
--- run; the heaviest slice was measured at 39.7s, with real headroom.
+-- run, ~20-30s, with real headroom.
 --
 -- Slower full coverage is the right trade here: this detector watches for DRIFT BETWEEN THE COUNT
 -- EXPRESSION AND THE PREDICATE, which only changes when someone ships a migration — not with the
@@ -45,8 +45,6 @@ begin
      set last_result = v_n where detector = 'af_option_count_truth';
 
   if v_n = 0 then
-    -- Resolve only THIS slice's key, so a real disagreement in another slice is not cleared by a
-    -- clean run over cohorts that were never looked at.
     perform public.mon_resolve_key('af_option_count_truth','af_option_count_truth_slice_' || v_slice);
     return 0;
   end if;

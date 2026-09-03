@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -10,6 +10,7 @@ import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText } from '@/lib/arabi
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
+import { afEvidence, type ActiveAf } from '@/lib/afEvidence';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -79,13 +80,20 @@ export function ResultCard({
   listing,
   onOpen,
   rank,
+  activeAf,
 }: {
   listing: Listing;
   onOpen: () => void;
   variant?: 'compact' | 'grid'; // kept for backward compatibility — both render the new design
   rank?: number;
+  // The Advanced-Filter predicates the turn's search ran with (afActive(m.result.query)) — one
+  // stable reference per results turn; the memo comparator in agent.tsx compares it by identity.
+  activeAf?: ActiveAf;
 }) {
   const { t, isRTL, locale } = useI18n();
+  // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
+  // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
+  const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);
   // EN UI: scraped Arabic district/city names get a fast client-side transliteration so users see
   // "Al Olaya, Riyadh" instead of "حي العليا, Riyadh". AR UI: pass through unchanged. (user request:
   // "when I send in English the place should be translated.")
@@ -268,6 +276,30 @@ export function ResultCard({
           <Stat icon="business-outline" big={typeLabel} small={t('Property Type')} />
           {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
         </View>
+        {/* «مطابق لطلبك» — every active Advanced-Filter predicate this listing's canonical row proves,
+            carrying the ROW's actual value («4 حمامات», «شمال», «عرض الشارع 20 م»), never the filter's
+            label. Absent entirely when there is no evidence; an UNKNOWN column renders nothing for
+            that question. The existing bath Stat / rating row / RNPL banner / feature grid are
+            untouched.
+
+            NO CAP, NO EXPANDER (2026-09-03). The 2026-09-02 draft showed the first 4 behind a «+N».
+            R12A.1 requires an active selection to be "visible without expanding, scrolling a sub-panel,
+            or opening the source", and rounds accumulate — 5+ committed answers is ordinary, so a cap
+            of 4 would hide one the user explicitly asked for. The chips are small and wrap; showing
+            them all is what the rule says. R12A.4 (a static priority cap must not hide a selected
+            field) is satisfied the same way: whatever the feature grid below chooses to cap, every
+            AF-selected field is already proven here, above it, unexpanded. */}
+        {evidence.length > 0 ? (
+          <View style={card.afRow} testID="card-af-evidence">
+            <Text style={card.afLabel}>{t('Matches your request')}</Text>
+            {evidence.map((c, i) => (
+              <View key={`${c.id}:${i}`} style={card.afChip} testID={`card-af-evidence-${c.id}`}>
+                <Ionicons name="checkmark-circle" size={12} color={colors.primary} />
+                <Text style={card.afChipText}>{c.text}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </Pressable>
 
       {/* ─── features panel (full-width below info on mobile) ─ */}
@@ -687,6 +719,15 @@ const card = StyleSheet.create({
     backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 2,
   },
   regionChipText: { fontSize: 10.5, color: colors.primary, fontWeight: '700' },
+  // «مطابق لطلبك» evidence strip — the regionChip idiom (tint background, primary bold text), one
+  // checkmark per proven predicate, wrapping under the stats row on both layouts.
+  afRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8 },
+  afLabel: { fontSize: 11, color: colors.muted, fontWeight: '600' },
+  afChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3,
+  },
+  afChipText: { fontSize: 10.5, color: colors.primary, fontWeight: '700' },
   price: { fontSize: 16.5, fontWeight: '800', color: colors.primary, marginTop: 2 },
   // Guest-rating chip (Gathern) — star + score, with a muted review-count suffix. Sits just under
   // the price; only rendered when the listing actually carries a rating. (Gathern Tier-1.)

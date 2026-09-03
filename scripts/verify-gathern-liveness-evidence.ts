@@ -128,11 +128,30 @@ check(
 // ── 5. A kill's `applied` is resolved after the anomaly cap gate ─────────────────────────────────
 // A quarantined batch produces REAL evidence with applied=false. If kill evidence were flushed in
 // the loop, `applied` would be a guess made before the cap was known.
-const anomalyIdx = src.indexOf('anomaly = args.apply and is_anomaly(');
+// Anchored on the CALL, not on the surrounding boolean. Until 2026-09-03 this searched for the
+// literal `anomaly = args.apply and is_anomaly(`; the trust gate (scrapers/common/liveness_trust.py)
+// then moved the cap inside `if args.apply and trusted:`, so `args.apply` is tested one level up and
+// the literal no longer appears. Broadening to the call keeps every guarantee that matters — the cap
+// must still be computed from THIS run's real batch and THIS run's real cap — while not pinning the
+// gate to one enclosing shape. The `applied`/flush assertions below are unchanged and still specific.
+const anomalyMatch = /anomaly\s*=\s*(?:args\.apply\s+and\s+)?is_anomaly\(\s*len\(kill_pending\)\s*,\s*kill_cap\s*\)/.exec(src);
+const anomalyIdx = anomalyMatch ? anomalyMatch.index : -1;
 check(
   anomalyIdx !== -1,
   'anomaly cap gate still present',
   `${SRC} no longer contains the anomaly cap gate — this guard's assumptions need revisiting.`,
+);
+
+// The trust gate must sit IN FRONT of the cap. The cap is a batch-SIZE guard and was structurally
+// blind to the 2026-09-02 window, where a 106-row batch sat under the cap and landed while the
+// source was answering ~99% of probes 404 because it had begun blocking our egress. Order matters:
+// if the cap were evaluated first, an untrusted run could still write strikes.
+const trustedIdx = src.indexOf('trusted = environment_is_trustworthy(');
+check(
+  trustedIdx !== -1 && anomalyIdx !== -1 && trustedIdx < anomalyIdx,
+  'run-level trust gate precedes the batch-size cap',
+  `${SRC} must evaluate environment_is_trustworthy() BEFORE the anomaly cap, so a degraded run ` +
+    `writes no strikes and no kills at all.`,
 );
 if (anomalyIdx !== -1) {
   const afterGate = src.slice(anomalyIdx);

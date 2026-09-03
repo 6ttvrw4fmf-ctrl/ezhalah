@@ -175,16 +175,41 @@ export const seedInitScript = ([sess, hist, sub, wantAuth]) => {
   }
 };
 
+/**
+ * The engine this process drives, when a journey does not name one.
+ *
+ * PART 3 item 6 asks for a rotation across Safari/Chrome/Firefox; §11.5 recorded WebKit and Firefox
+ * as unreachable, which is true OF THIS CONTAINER (Chromium only, and PART 11.1 rightly forbids
+ * `playwright install` here — a mismatched build kills every journey at launch and reads as an
+ * outage). It was never true of CI: six workflows already run `npx playwright install --with-deps
+ * chromium` on a GitHub runner. What was missing is that NO workflow ran this sweep at all, so it
+ * only ever executed where only Chromium exists. `.github/workflows/journey-sweep.yml` runs it once
+ * per engine; this variable is how that matrix reaches every journey without touching one of them.
+ */
+export const ENGINE = process.env.JOURNEY_ENGINE || 'chromium';
+
 export async function withPage(opts, fn) {
-  const { engine = 'chromium', mobile = false, signedIn = false, history = null, path = '/' } = opts;
+  const { engine = ENGINE, mobile = false, signedIn = false, history = null, path = '/' } = opts;
   const browser = await ENGINES[engine].launch(launchOpts(engine));
   const device = mobile ? devices['iPhone 13'] : devices['Desktop Chrome'];
-  // iPhone 13 is 390px; PART 3 item 6 fixes the mobile viewport at 375px, so the width is pinned
-  // explicitly rather than inherited from the device profile.
+  // FIREFOX REJECTS `isMobile` OUTRIGHT — `browser.newContext: options.isMobile is not supported in
+  // Firefox`, thrown at context creation, i.e. before a single journey body runs. The iPhone 13
+  // profile carries `isMobile: true` inside the spread as well as the explicit pair below, so BOTH
+  // have to be stripped; dropping only the explicit one leaves the device profile's copy to throw.
+  // Gecko has no mobile-emulation mode at all, so this is a genuine engine limit, not a workaround:
+  // Firefox mobile runs are a 375px viewport with touch, and the report says exactly that rather
+  // than implying a device profile it never had.
+  const mobileCtx = mobile
+    ? (engine === 'firefox'
+        ? { viewport: { width: 375, height: 812 }, hasTouch: true }
+        : { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true })
+    : { viewport: { width: 1440, height: 1000 } };
+  const { isMobile: _deviceIsMobile, ...deviceRest } = device;
   const ctx = await browser.newContext({
-    ...device,
-    ...(mobile ? { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true }
-               : { viewport: { width: 1440, height: 1000 } }),
+    // iPhone 13 is 390px; PART 3 item 6 fixes the mobile viewport at 375px, so the width is pinned
+    // explicitly rather than inherited from the device profile.
+    ...(engine === 'firefox' ? deviceRest : device),
+    ...mobileCtx,
     locale: 'ar-SA',
     // WebKit/Firefox reject Chromium's UA string from the device profile; let them use their own.
     ...(engine === 'chromium' ? {} : { userAgent: undefined }),
@@ -342,7 +367,20 @@ export const LEDGER_RESULTS = ['pass', 'fail', 'skip'];
 let ownedLedgerKeys = null;
 
 /** Both viewport rows the runner emits for a journey. The single source of the key shape. */
-export const ledgerKeysFor = (names) => names.flatMap((n) => [`${n}:desktop`, `${n}:mobile`]);
+/**
+ * Ledger keys for a set of journeys, on the engine this process is driving.
+ *
+ * CHROMIUM KEEPS THE UNQUALIFIED KEY ON PURPOSE. The ledger's job is "what has gone longest
+ * untested" (PART 3 item 7), and that answer lives in `times_tested`/`last_tested_at` accumulated
+ * across ~20 runs per key. Qualifying every key with an engine would have reset all 38 of them to
+ * zero and blinded the rotation for weeks — paying for multi-engine coverage by destroying the
+ * history that makes coverage legible. Non-Chromium engines are genuinely new coverage, so they get
+ * their own rows and their own honest count starting at 1.
+ */
+export const ledgerKeysFor = (names, engine = ENGINE) => {
+  const suffix = engine === 'chromium' ? '' : `:${engine}`;
+  return names.flatMap((n) => [`${n}${suffix}:desktop`, `${n}${suffix}:mobile`]);
+};
 
 /** Called by the runner with its own `Object.keys(JOURNEYS)` before any row is written. */
 export function registerJourneys(names) {
@@ -436,10 +474,47 @@ export async function closeMobileSidebar(page) {
 // Sidebar.tsx's `user ? (…)` branch, so for a GUEST this function could never return true no matter
 // how perfectly the drawer opened — a post-sign-out check keyed on it would skip 100% of the time
 // and read as "nothing to see", which is exactly the shape of blindness PART 9.4 makes ours to fix.
-// The guest branch has no testID, so its own «إنشاء حساب / تسجيل الدخول» CTA is the marker.
 // Opt-in rather than always-on: for a SIGNED-IN journey, accepting the guest marker would turn a
 // failed session seed from an honest skip into a confusing mid-journey failure.
-const GUEST_SIDEBAR_CTA = 'إنشاء حساب / تسجيل الدخول';
+//
+// THE GUEST MARKER MUST BE DRAWER-ONLY, AND THE FIRST ONE WAS NOT (measured 2026-09-03, routine #6).
+// This oracle used to match the CTA's visible TEXT, «إنشاء حساب / تسجيل الدخول», on the stated
+// premise that "the guest branch has no testID". That premise was simply false — Sidebar.tsx's guest
+// CTA carries `dataSet={{ testid: 'sidebar-signin-cta' }}` — and the string it used instead is NOT
+// unique to the drawer: `src/app/index.tsx` renders the identical label in the mobile TOP BAR
+// (`s.topSignIn`), added by the owner on 2026-08-19 for exactly the reason that makes it fatal here
+// ("on mobile the sidebar is a drawer, so without this the sign-in CTA is invisible until the
+// hamburger is tapped"). So on any signed-out mobile screen the oracle answered "the drawer is open"
+// before a single tap, and `openMobileSidebar` returned true having opened nothing.
+//
+// That is not a cosmetic wart — it silently voided the mobile half of `signout-leaves-no-trace`.
+// With the drawer never opened, `account-menu-trigger` cannot be on screen and no seeded chat title
+// can be in `bodyText`, so THREE assertions passed for the trivial reason that nothing was rendered:
+// "signed-in chrome is gone after sign-out", the on-screen leak check, and the post-reload leak
+// check. Assertions that cannot fail; the ledger recorded 4/4 passes. The journey's own comment
+// ("Only judgeable if the sidebar is actually on screen … a guaranteed pass that proves nothing")
+// names the trap precisely, and the guard it built was defeated by this oracle answering true.
+//
+// Measured proof, 2/2 in fresh mobile contexts against production:
+//   drawer CLOSED → CTA text matches 1 node (the top bar); [data-testid="sidebar-signin-cta"] → 0
+//   drawer OPEN   → [data-testid="sidebar-signin-cta"] → 1, and «المساعدة/تواصل معنا» is in the drawer
+// So the testID is the marker, and the guest drawer's own contents were never the problem.
+export const SIDEBAR_OPEN_MARKER = '[data-testid="sidebar-search-btn"]';
+export const SIDEBAR_OPEN_MARKER_GUEST = '[data-testid="sidebar-signin-cta"]';
+
+/**
+ * Is the sidebar ACTUALLY on screen? Exported and page-shaped-by-contract (it touches nothing but
+ * `page.locator(sel).count()`) so `scripts/verify-journey-mobile-sidebar-oracle.ts` can EXECUTE the
+ * real predicate against a fake page — the same "execute it, don't string-match it" rule the
+ * fixture-seed barrier follows. A selector-only oracle is what makes that possible: the moment this
+ * reaches for visible text again, the barrier can no longer tell the drawer from the top bar, and
+ * neither can the journeys.
+ */
+export async function sidebarIsOpen(page, { guestOk = false } = {}) {
+  if (await page.locator(SIDEBAR_OPEN_MARKER).count()) return true;
+  if (!guestOk) return false;
+  return (await page.locator(SIDEBAR_OPEN_MARKER_GUEST).count()) > 0;
+}
 // ── THE OPENING NAVIGATION: TRANSPORT FAILURE IS NOT A PRODUCT DEFECT ───────────────────────────
 // PART 9 opens by naming two opposite errors, and this function exists because the runner was
 // committing the FIRST one automatically. `run.mjs` wraps each journey in
@@ -495,11 +570,7 @@ export async function gotoOrRetryTransport(page, url, { timeout = 90_000 } = {})
 }
 
 export async function openMobileSidebar(page, { guestOk = false } = {}) {
-  const isOpen = async () => {
-    if (await page.locator('[data-testid="sidebar-search-btn"]').count()) return true;
-    if (!guestOk) return false;
-    return (await page.getByText(GUEST_SIDEBAR_CTA, { exact: false }).count()) > 0;
-  };
+  const isOpen = () => sidebarIsOpen(page, { guestOk });
   if (await isOpen()) return true;
   for (let attempt = 0; attempt < 3; attempt++) {
     const rect = await page.evaluate(() => {

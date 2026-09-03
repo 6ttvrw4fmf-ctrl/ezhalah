@@ -359,6 +359,16 @@ const AR: Record<string, string> = {
   '3–5 years': '٣-٥ سنوات',
   '6–9 years': '٦-٩ سنوات',
   '10+ years': '١٠ سنوات فأكثر',
+  // «مطابق لطلبك» card evidence (§12A / R13.12, owner 2026-09-03). The age voices print the
+  // LISTING's own age, not the bucket the user picked (R12A.2), so they need the singular/dual forms
+  // Arabic actually uses; «١٠ سنوات فأكثر» above is reused verbatim for 10, which is exact on aqar
+  // and the «10+» bucket on wasalt — the one wording truthful under both codings.
+  'Matches your request': 'مطابق لطلبك',
+  'Age: one year': 'عمر سنة',
+  'Age: two years': 'عمر سنتين',
+  'Age: {n} years': 'عمر {n} سنوات',
+  'Age: {n} years (over ten)': 'عمر {n} سنة',
+  'm': 'م',
   'Skip': 'تخطي',
   'Skip remaining questions and search now': 'تخطي الباقي وابحث الآن',
   'Age unknown for {count} matching listings': 'العمر غير معروف لـ {count} من العقارات المطابقة',
@@ -1060,6 +1070,11 @@ const AR: Record<string, string> = {
   "We'll reply to {email}.": 'بنرد عليك على {email}.',
   'Send another message': 'إرسال رسالة أخرى',
   "Couldn't send your message. Check your connection and try again.": 'ما قدرنا نرسل رسالتك. تأكد من الاتصال وحاول مرة أخرى.',
+  // The rate limit (5 per hour per source, supabase/functions/support-message) is NOT a connection
+  // problem: telling someone to check a working network, then offering a retry that cannot succeed
+  // for another hour, is an error state whose recovery path does not work.
+  'You have sent several messages already. Please wait about an hour before sending another.':
+    'أرسلت عدة رسائل خلال وقت قصير. انتظر ساعة تقريباً قبل إرسال رسالة جديدة.',
   'Terms of Service': 'شروط الخدمة',
   'Privacy Policy': 'سياسة الخصوصية',
   'Ezhalah v{version}': 'إزهله الإصدار {version}',
