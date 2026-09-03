@@ -1,29 +1,3 @@
--- FIX: public.ai_usage_costed was created (20260829223530_ai_usage_cost_telemetry.sql, ~22:35:30 UTC)
--- BEFORE the `source` column existed on public.ai_usage. `source` (caller class: user | ci |
--- selftest) was added ~65 minutes later by 20260829234024_ai_spend_guard_config_and_attribution.sql
--- (23:40:24 UTC). A view built on `select u.*, ... from ai_usage u` expands `u.*` into an EXPLICIT
--- column list AT CREATE TIME — it does not track later `ALTER TABLE ADD COLUMN`s. Confirmed live via
--- information_schema.columns: the view's real column list ends at "...latency_ms, is_peak, tier,
--- usd" — no `source` (and, since two more columns were added even later, also missing `attempt` and
--- `http_status`).
---
--- CONSEQUENCE: nothing reading ai_usage_costed — including public.ai_cost_dashboard()'s `spend`
--- figures — can break USD cost down by user vs ci vs selftest (only raw ai_usage.source COUNTS could,
--- via a direct query bypassing the view). This is exactly the kind of blind spot that produced two
--- different real-usage audits reaching wildly different "98% CI" vs "70% user" conclusions from the
--- same underlying system (see project_deepseek-cost-audit-2026-08-29).
---
--- FIX, ATTEMPT 1 (verified live on a throwaway view name before touching the real one): a plain
--- `select u.*, ...` DOES re-expand against the current table shape when CREATE OR REPLACE runs today
--- — confirmed source/attempt/http_status all come back. BUT applying that verbatim to the REAL view
--- failed: `42P16 cannot change name of view column "is_peak" to "source"`. Postgres's CREATE OR
--- REPLACE VIEW allows ADDING columns only at the very END of the output list, never inserting them in
--- the middle — and u.* naturally places the newer base-table columns (source/attempt/http_status,
--- appended to ai_usage after latency_ms) BEFORE the already-existing is_peak/tier/usd columns,
--- shifting every position after them. FIX, ATTEMPT 2 (this one): list the ORIGINAL 19 columns
--- explicitly in their ORIGINAL order (byte-for-byte the same output shape as today), then append
--- source/attempt/http_status at the end — legal under CREATE OR REPLACE, and the actual goal (the new
--- columns are queryable/joinable from the view) is unaffected by which end they're appended to.
 create or replace view public.ai_usage_costed as
 with p as (
   select
@@ -60,10 +34,6 @@ from p;
 comment on view public.ai_usage_costed is
   'ai_usage + estimated USD per call. Pricing/peak windows live here so a rate change never needs an edge-function redeploy. source/attempt/http_status appended 2026-08-30 (fixing a column-drift blind spot: they existed on ai_usage since before this view was even created, but a view built on u.* only picks up new columns on a fresh CREATE OR REPLACE, which never happened until now).';
 
--- ai_cost_dashboard() already broke down CALL COUNTS by source (by_source_24h, straight off the base
--- table, unaffected by the view drift above) but had no way to break down USD by source, because that
--- requires `usd` (view-only) joined with `source` (missing from the view until the fix above). Add it
--- now that the view actually carries both.
 create or replace function public.ai_cost_dashboard()
 returns jsonb
 language sql stable security definer set search_path = 'public'
