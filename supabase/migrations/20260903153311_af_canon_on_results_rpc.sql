@@ -1,11 +1,16 @@
 -- ╔══════════════════════════════════════════════════════════════════════════════════════════════╗
--- ║  STATUS: DRAFT — NOT APPLIED TO PRODUCTION (2026-09-02).                                    ║
--- ║  Verified end-to-end on a throw-away Supabase branch (created → applied → smoked → deleted). ║
--- ║  Apply only in the post-foundation step, re-derived against the THEN-LIVE template text:    ║
--- ║  feat/af-matrix-truth-barrier edits a different af_rpc_templates row and also rebuilds, so   ║
--- ║  whichever lands second must re-run the anchor checks below against what is live then.     ║
--- ║  When applied: add sql/mirrors/af_canon_select.sql (the jsonb fragment) and re-record the   ║
--- ║  af_rpc replay checkpoint, same change — migration-mirror rule.                             ║
+-- ║  STATUS: DRAFT — NOT APPLIED TO PRODUCTION (re-derived 2026-09-03T15:33Z).                  ║
+-- ║  Verified end-to-end twice: on a throw-away Supabase branch (created → applied → smoked →   ║
+-- ║  deleted), and again against the NOW-LIVE production template inside a DO block that ends   ║
+-- ║  in `raise exception`, so the whole verification ROLLS BACK and production keeps its         ║
+-- ║  definitions. Re-derivation basis: the class-wide truth barrier (#1527) edited the           ║
+-- ║  apartment_guided_counts_ar row and rebuilt all four RPCs, but left the results template     ║
+-- ║  byte-identical — md5 0b4747305c5748f980b12eeb7013f236, unchanged — and all 7 anchors below  ║
+-- ║  still occur EXACTLY once (counted with (length − length(replace))/length on the live text).  ║
+-- ║  Whoever applies it must re-run those counts against what is live THEN; the guards below do  ║
+-- ║  exactly that and abort otherwise.                                                           ║
+-- ║  When applied: add sql/mirrors/af_canon_select.sql (the jsonb fragment) and re-record the    ║
+-- ║  af_rpc replay checkpoint, same change — migration-mirror rule.                              ║
 -- ╚══════════════════════════════════════════════════════════════════════════════════════════════╝
 --
 -- WHAT. The results RPC public.location_search_candidates_ar returns ONE additional column,
@@ -24,6 +29,20 @@
 --
 -- WHY THE OTHER THREE RPCs ARE UNTOUCHED. Only the results RPC feeds cards. The counts RPCs and the
 -- referee keep their templates byte-for-byte; the rebuild re-creates them identically.
+--
+-- RE-VERIFICATION 2026-09-03T15:34Z, against LIVE production, rolled back. The whole body below was
+-- replayed on production inside a single DO block whose last statement is `raise exception`, so the
+-- template UPDATE and the rebuild rolled back and production kept its definitions. Actual result line:
+--   VERIFY_OK_ROLLED_BACK overloads=1 rowtype_has_af_canon=yes parity=0 rows=200 keys_checked=5600
+--   json_nulls=4920 bath_rows=50 dir_rows=50 furnished_rows=50 total_index_rows=193150
+-- i.e. all 7 anchors hit exactly once on the live text; one overload; the row type carries
+-- `af_canon jsonb`; mon_af_predicate_parity() = 0; 200 real rows each had all 28 keys present and each
+-- af_canon equalled the same jsonb_build_object over its own source row; 4,920 of the 5,600 key reads
+-- were JSON null (a SQL NULL arrives as JSON null — present, typed 'null', never absent, never 0/false,
+-- proven non-vacuously); and an explicit probe on a row with `gym is null` returned jsonb_typeof 'null'.
+-- Afterwards production re-checked: results template md5 still 0b4747305c5748f980b12eeb7013f236, no
+-- 'af_canon' in it, 1 overload, row type WITHOUT af_canon, parity 0, af_rpc_build_state def_md5 == live
+-- for all four RPCs, and schema_migrations has no af_canon row.
 --
 -- SMOKE, inside the transaction: (1) exactly one overload; (2) the row type carries af_canon jsonb;
 -- (3) mon_af_predicate_parity() = 0; (4) every returned af_canon has all 28 keys, each a jsonb

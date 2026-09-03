@@ -25,6 +25,10 @@
 // T4 injection — comment-stripped, COUNTED shapes: agent.tsx derives activeAf from m.result.query
 //    exactly once and passes it exactly once; the memo comparator includes it; ResultCard renders
 //    the strip only from afEvidence(activeAf, listing.canon) — never from listing.features.
+// T5 attach — comment-stripped, COUNTED: remote.ts carries the RPC's `af_canon` onto Listing.canon
+//    VERBATIM. There is exactly one write to l.canon and it is `c.af_canon ?? null`; no `!!`, no
+//    `?? 0`, no `||`, no Boolean() anywhere near it. This is the whole point of the feature — a
+//    coercion here would rebuild finalize()'s NULL→0/false lie one layer up.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -365,6 +369,24 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
     assert(!strip.includes(forbidden), `the strip does not read ${forbidden}`);
   }
   assert(AR['Matches your request'] === 'مطابق لطلبك' && AR['m'] === 'م', 'i18n: «مطابق لطلبك» and «م» exist');
+}
+
+console.log('\n── T5. attach: af_canon reaches Listing.canon verbatim, with no coercion ─────────────');
+{
+  const remote = read('src/data/remote.ts');
+  assert(/type Cand = \{[^}]*af_canon\?: AfCanon \| null[^}]*\};/.test(remote),
+    'remote.ts Cand declares `af_canon?: AfCanon | null` (the RPC column, nullable)');
+  assert(count(remote, 'l.canon') === 1, 'remote.ts writes l.canon in exactly ONE place (no second, coercing path)');
+  assert(count(remote, 'l.canon = c.af_canon ?? null;') === 1,
+    'that one place is `l.canon = c.af_canon ?? null;` — verbatim pass-through at the cand→Listing merge');
+  assert(count(remote, 'af_canon: (c.af_canon ?? null) as AfCanon | null,') === 1,
+    'cleanCands carries af_canon through as `(c.af_canon ?? null) as AfCanon | null`');
+  for (const forbidden of ['!!c.af_canon', 'c.af_canon ?? 0', 'c.af_canon ?? {}', 'c.af_canon ?? false',
+    'c.af_canon ||', 'Boolean(c.af_canon)', 'c.af_canon ?? []']) {
+    assert(!remote.includes(forbidden), `remote.ts never coerces the canonical row (${forbidden})`);
+  }
+  const listings = read('src/data/listings.ts');
+  assert(count(listings, 'canon?: AfCanon | null;') === 1, 'Listing.canon is `AfCanon | null` and optional (absent until the RPC ships af_canon)');
 }
 
 console.log('');
