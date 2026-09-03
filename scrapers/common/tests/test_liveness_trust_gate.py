@@ -18,7 +18,10 @@ import pytest
 
 from scrapers.common.liveness_trust import (
     MIN_ALIVE_RATE_FOR_TRUST,
+    MIN_CANARIES,
+    MIN_CANARY_ALIVE_RATE,
     MIN_PROBES_FOR_TRUST,
+    canary_environment_ok,
     environment_is_trustworthy,
 )
 
@@ -93,6 +96,49 @@ def test_constants_match_the_dealapp_reference_shape():
     )
     assert MIN_ALIVE_RATE_FOR_TRUST == DEALAPP_RATE
     assert MIN_PROBES_FOR_TRUST == DEALAPP_PROBES
+
+
+# ── The in-run positive control (canary) ────────────────────────────────────────────────────────
+
+def test_canary_all_controls_alive_passes():
+    """The ordinary healthy case must proceed — a control that never passes is not a control."""
+    assert canary_environment_ok(10, 10)
+    assert canary_environment_ok(8, 10)
+
+
+def test_canary_blocked_environment_is_refused():
+    """The 2026-09-01 shape: controls the source itself proved alive now answer 404."""
+    assert not canary_environment_ok(0, 10)
+    assert not canary_environment_ok(1, 10)
+
+
+def test_canary_tolerates_a_genuinely_dead_control_but_not_a_blockade():
+    """A canary drawn from real inventory can legitimately die between runs. Demanding unanimity
+    would let one honest death wedge the sweep shut forever; demanding a majority would not."""
+    assert canary_environment_ok(9, 10)                     # one died naturally -> still run
+    assert canary_environment_ok(6, 10)                     # exactly at the floor
+    assert not canary_environment_ok(5, 10)                 # half is not a working environment
+
+
+def test_canary_fails_closed_on_too_few_controls():
+    """No control set = no proof. Refuse, even when every control that DID answer was alive."""
+    assert not canary_environment_ok(MIN_CANARIES - 1, MIN_CANARIES - 1)
+    assert not canary_environment_ok(0, 0)
+    assert not canary_environment_ok(1, 1)
+
+
+def test_canary_fails_closed_on_degenerate_counts():
+    assert not canary_environment_ok(-1, 10)
+    assert not canary_environment_ok(0, -3)
+
+
+def test_canary_is_strictly_earlier_evidence_than_the_aggregate_gate():
+    """Both guards must condemn the incident, but the canary does it on ~10 probes rather than
+    1,500 — that difference is 302 rows on 2026-09-01."""
+    blocked_canary, blocked_batch = (0, 10), (57, 1500)
+    assert not canary_environment_ok(*blocked_canary)
+    assert not environment_is_trustworthy(*blocked_batch)
+    assert blocked_canary[1] < blocked_batch[1]
 
 
 def test_gate_separates_the_incident_cleanly_with_margin():
