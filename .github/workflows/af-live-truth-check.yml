@@ -113,18 +113,19 @@ jobs:
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-filter-state-live.ts
 
       # THE ROOT-CAUSE JOIN (added 2026-09-03). Activating a platform is a DATABASE act; the client's
-      # RES_TABLES/COM_TABLES are a SOURCE-CODE act; until now nothing checked that the two agreed.
+      # searchable-table scope is a SOURCE-CODE act; until now nothing checked that the two agreed.
       # Five platforms went live in search_listings_ar with 4,314 production_ready rows and joined
-      # neither list, so no search could return them while Trending — called without p_tables —
-      # counted them anyway (الهفوف/أرض سكنية/بيع: 2,478 advertised, 109 delivered). The AF matrix
-      # barrier caught it only on `bathrooms=1`, the one predicate wide enough to admit the new rows.
-      # This asks the question directly instead of waiting for a wide enough predicate.
-      - name: Every platform live in search must be reachable by a real search
+      # neither of the two hand-maintained client lists, so no search could return them while
+      # Trending — called without p_tables — counted them anyway (الرياض/شقة/إيجار/سنوي, bath>=1:
+      # 3,422 advertised, 3,340 delivered). The AF matrix barrier caught it only on `bathrooms=1`,
+      # the one predicate wide enough to admit the new rows. This asks the question directly, in
+      # both directions, by EXECUTING the real scope functions against the live inventory.
+      - name: The client scope and the live searchable inventory are the same set
         if: ${{ !cancelled() }}
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
-        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-every-live-table-is-searchable.ts
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-searchable-scope-matches-inventory.ts
 
       # COMBINED شراء+إيجار in a REAL browser (added 2026-09-02). The Filter offers two independent
       # budgets and the RPC splits them by the row's own deal; until 2026-09-02 the client re-applied
