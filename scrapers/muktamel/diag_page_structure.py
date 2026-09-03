@@ -152,6 +152,33 @@ try {
   console.log('data length: ' + (Array.isArray(N.data) ? N.data.length : typeof N.data));
   console.log('data[0] keys: ' + JSON.stringify(Object.keys(d0)));
   console.log('data[0].offer present: ' + ('offer' in d0));
+
+  // Now reproduce the PRODUCTION worker's exact remaining steps (build `out`, JSON.stringify it)
+  // to find out whether eval() succeeding is NOT the whole story -- the real failure could be in
+  // the stringify step (circular structure, a function/getter value, excessive depth) which the
+  // eval-only test above cannot see.
+  const st = N.state || {};
+  const out = {
+    offer: d0.offer || null,
+    initialPhotos: d0.offerInitialPhotos || [],
+    lazyPhotos: d0.offerLazyPhotos || [],
+    addressJson: st.addressJson || null,
+  };
+  console.log('offer typeof: ' + typeof out.offer);
+  if (out.offer && typeof out.offer === 'object') {
+    console.log('offer keys: ' + JSON.stringify(Object.keys(out.offer)));
+    for (const k of Object.keys(out.offer)) {
+      const v = out.offer[k];
+      console.log('  offer.' + k + ' : ' + typeof v + (typeof v === 'function' ? ' <-- A FUNCTION VALUE' : ''));
+    }
+  }
+  try {
+    const t1 = Date.now();
+    const s = JSON.stringify(out, (k, v) => v === undefined ? null : v);
+    console.log('STRINGIFY_OK ms=' + (Date.now() - t1) + ' len=' + s.length);
+  } catch (e2) {
+    console.log('STRINGIFY_THREW name=' + e2.name + ' message=' + String(e2.message).slice(0, 300));
+  }
 } catch (e) {
   console.log('EVAL_THREW ms=' + (Date.now() - t0));
   console.log('name: ' + e.name);
