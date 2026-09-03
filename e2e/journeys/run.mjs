@@ -10,7 +10,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
          findings, skips, skip, ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
-         closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE } from './harness.mjs';
+         closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -57,7 +57,7 @@ JOURNEYS['cold-open'] = async (mobile) => withPage({ mobile }, async (page, bag)
   if (text.length < 200) defect(name, 'blank page', `body innerText is ${text.length} chars`);
   else pass(name, `rendered (${text.length} chars)`);
   if (!text.includes('بحث')) defect(name, 'missing primary control', '«بحث» not rendered on Filter home');
-  if (bag.pageErrors.length) defect(name, 'page error on cold open', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on cold open', errs.join(' | ')); }
   if (mobile) {
     const ov = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
     if (ov.sw > ov.cw + 1) defect(name, 'horizontal overflow', `scrollWidth ${ov.sw} > clientWidth ${ov.cw}`);
@@ -147,7 +147,7 @@ JOURNEYS['open-saved-chat'] = async (mobile) => withPage({ mobile, signedIn: tru
   } else {
     pass(name, `opened without duplicating (${(after || []).length} rows)`);
   }
-  if (bag.pageErrors.length) defect(name, 'page error while opening a saved chat', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while opening a saved chat', errs.join(' | ')); }
 });
 
 /** J5 — NEW CHAT must start genuinely blank (PART 5 shape 1). Type into the agent composer, then
@@ -178,7 +178,7 @@ JOURNEYS['new-chat-blank'] = async (mobile) => withPage({ mobile, signedIn: true
   } else {
     pass(name, 'New Chat starts blank');
   }
-  if (bag.pageErrors.length) defect(name, 'page error on New Chat', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on New Chat', errs.join(' | ')); }
 });
 
 /** J6 — a rapid double-click on «بحث» must run the search ONCE (PART 5 shape 7).
@@ -207,24 +207,42 @@ const primeSearch = async (page) => {
 
 JOURNEYS['double-click-search'] = async (mobile) => {
   const name = `double-click-search:${mobile ? 'mobile375' : 'desktop1440'}`;
+  // BOTH SIDES ARE COUNTED ONLY ONCE THEY STOP GROWING. This used to read the count after a fixed
+  // `sleep(10_000)`, which PART 11.2 forbids as an oracle, and WebKit proved why: one press of
+  // «بحث» fires SIX `location_search_candidates_ar` calls (measured, §11.3), and on 2026-09-03 a
+  // WebKit mobile run captured only ONE of them inside the window. The comparison then read
+  // `double (6) > single (1)` and filed «double-click fired the search twice» against an app that
+  // had done nothing wrong — 1/4.
+  //
+  // The dangerous direction is the OTHER one. If the DOUBLE side is the short capture, a genuine
+  // double-fire compares as `double <= single` and passes. So this oracle could hide exactly the
+  // regression it exists to catch, on any engine slow enough — the fix is a real settling condition
+  // rather than a bigger sleep (PART 11.2 rule 3), and an UNSETTLED count is refused as a
+  // measurement instead of being compared.
+  const settledSearchRpcs = (bag, from) => settledCount(
+    () => bag.rpc.slice(from).filter((r) => r.name === 'location_search_candidates_ar').length);
+
   const press = (clicks) => withPage({ mobile }, async (page, bag) => {
     if (!(await primeSearch(page))) return null;
     const from = bag.rpc.length;
     await page.getByText('بحث', { exact: true }).last()
       .click({ clickCount: clicks, delay: 40 }).catch(() => {});
-    await sleep(10_000);
-    return bag.rpc.slice(from).filter((r) => r.name === 'location_search_candidates_ar').length;
+    return settledSearchRpcs(bag, from);
   });
 
   const single = await press(1);
   const double = await press(2);
   if (single === null || double === null) { skip(name, 'search could not be primed'); return; }
-  if (single === 0) { defect(name, 'dead control', '«بحث» single click fired no search at all'); return; }
-  if (double > single) {
+  // A count that never stopped growing is not a measurement. Refuse to compare rather than compare
+  // two numbers of unknown completeness — that is what produced the false verdict above.
+  if (single.n > 0 && !single.settled) { skip(name, `single-click RPC count never settled (still ${single.n} at the budget)`); return; }
+  if (double.n > 0 && !double.settled) { skip(name, `double-click RPC count never settled (still ${double.n} at the budget)`); return; }
+  if (single.n === 0) { defect(name, 'dead control', '«بحث» single click fired no search at all'); return; }
+  if (double.n > single.n) {
     defect(name, 'double-click fired the search twice',
-      `single click -> ${single} search RPCs, double click -> ${double}`);
+      `single click -> ${single.n} search RPCs (settled), double click -> ${double.n} (settled)`);
   } else {
-    pass(name, `double-click ran one search (single ${single} / double ${double} RPCs)`);
+    pass(name, `double-click ran one search (single ${single.n} / double ${double.n} RPCs, both settled)`);
   }
 };
 
@@ -261,7 +279,7 @@ JOURNEYS['back-after-search'] = async (mobile) => withPage({ mobile }, async (pa
   if (text.length < 200) defect(name, 'Back stranded the user', `body is ${text.length} chars at ${url}`);
   else if (!text.includes('بحث')) defect(name, 'Back landed off-route', `no Filter home controls at ${url}`);
   else pass(name, `Back returned to a usable screen (${url})`);
-  if (bag.pageErrors.length) defect(name, 'page error on Back', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on Back', errs.join(' | ')); }
 });
 
 /** J8 — voice: FEATURE DETECTION and the control's presence. PART 10: this is engine evidence on
@@ -277,7 +295,8 @@ JOURNEYS['voice-control'] = async (mobile) => withPage({ mobile }, async (page, 
   if (micCount) {
     await mic.first().click().catch(() => {});
     await sleep(2500);
-    if (bag.pageErrors.length) defect(name, 'mic tap threw', bag.pageErrors.join(' | '));
+    const micErrs = appPageErrors(bag, name);
+    if (micErrs.length) defect(name, 'mic tap threw', micErrs.join(' | '));
     else pass(name, 'mic tap did not throw');
   }
 });
@@ -472,7 +491,7 @@ JOURNEYS['sidebar-row-actions'] = async (mobile) => withPage({ mobile, signedIn:
   } else {
     pass(name, 'delete survived a refresh');
   }
-  if (bag.pageErrors.length) defect(name, 'page error during row actions', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during row actions', errs.join(' | ')); }
 });
 
 /** Locate the rename TextInput. It carries no testID, and RN-web renders it as a plain <input>
@@ -569,7 +588,7 @@ JOURNEYS['sidebar-rename'] = async (mobile) => withPage({ mobile, signedIn: true
   } else {
     pass(name, 'the rename survived a refresh with the order intact');
   }
-  if (bag.pageErrors.length) defect(name, 'page error during rename', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during rename', errs.join(' | ')); }
 });
 
 /** J9–J11 — THE ADVERSARIAL SET (PART 4). A fixed checklist only ever catches bugs someone already
@@ -595,7 +614,7 @@ JOURNEYS['adv-double-open'] = async (mobile) => withPage({ mobile, signedIn: tru
   } else {
     pass(name, `repeat open created no duplicate (${(after || []).length} rows)`);
   }
-  if (bag.pageErrors.length) defect(name, 'page error on repeat open', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on repeat open', errs.join(' | ')); }
 });
 
 /** J10 — New Chat pressed WHILE a restore is still landing must produce a genuinely blank chat,
@@ -615,7 +634,7 @@ JOURNEYS['adv-newchat-mid-restore'] = async (mobile) => withPage({ mobile, signe
   if (leaked) defect(name, 'interrupted restore leaked into the new chat', 'a restored search bubble is on the blank chat');
   else if (composer.trim()) defect(name, 'New Chat inherited composer text', `holds «${composer}»`);
   else pass(name, 'New Chat is blank even when it interrupts a restore');
-  if (bag.pageErrors.length) defect(name, 'page error on interrupted restore', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on interrupted restore', errs.join(' | ')); }
 });
 
 /** J11 — a backgrounded tab suspends rAF. React Native Web drives Animated off rAF, so anything
@@ -634,7 +653,7 @@ JOURNEYS['adv-background-tab'] = async (mobile) => withPage({ mobile, signedIn: 
   if (t.length < 200) defect(name, 'backgrounded tab came back blank', `body is ${t.length} chars`);
   else if (!t.includes('بحث')) defect(name, 'controls missing after backgrounding', 'no «بحث» on return');
   else pass(name, `survived 45s backgrounded (${t.length} chars, controls present)`);
-  if (bag.pageErrors.length) defect(name, 'page error after backgrounding', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error after backgrounding', errs.join(' | ')); }
   await other.close().catch(() => {});
 });
 
@@ -692,7 +711,7 @@ JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobi
   if (!row) defect(name, 'the favourited chat vanished from the sidebar after navigation', '«فلل جدة» is not rendered at all');
   else if (!starHeader) defect(name, 'the favourited chat is no longer in المفضلة after navigation', 'the row is present but the Starred bucket is gone');
   else pass(name, 'the row is still rendered under المفضلة after navigation');
-  if (bag.pageErrors.length) defect(name, 'page error during the favourite navigation trip', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the favourite navigation trip', errs.join(' | ')); }
 });
 
 /** J17 — THE MODE TOGGLE COSTS NO HISTORY, from the user's side (PART 5 shape 9).
@@ -765,7 +784,7 @@ JOURNEYS['adv-modeswitch-back-push-vs-replace'] = async (mobile) => withPage({ m
       pass(name, `one Back landed on a usable in-app screen (${url})`);
     }
   }
-  if (bag.pageErrors.length) defect(name, 'page error during the mode-switch round trips', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the mode-switch round trips', errs.join(' | ')); }
 });
 
 // ── appearance: the auth gate, in a REAL browser ────────────────────────────────────────────────
@@ -805,7 +824,7 @@ JOURNEYS['appearance-guest-light'] = async (mobile) => withPage({ mobile }, asyn
   } else {
     pass(name, `guest stayed light at both layers with stored «${after.stored}»`);
   }
-  if (bag.pageErrors.length) defect(name, 'page error on the guest appearance path', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the guest appearance path', errs.join(' | ')); }
 });
 
 /** J15 — إلغاء MUST NOT TOUCH THE THEME. The owner rule (theme.tsx, 2026-08-28) is that only a
@@ -868,7 +887,7 @@ JOURNEYS['appearance-cancel-keeps-dark'] = async (mobile) => withPage({ mobile, 
   } else {
     pass(name, 'إلغاء left both the theme and the stored preference untouched');
   }
-  if (bag.pageErrors.length) defect(name, 'page error on the cancel path', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the cancel path', errs.join(' | ')); }
 });
 
 /** J19 — SIGN-OUT LEAVES NO TRACE OF THE PREVIOUS USER (PART 3 item 1; PART 5 shapes 1, 7 and 8).
@@ -999,7 +1018,7 @@ JOURNEYS['signout-leaves-no-trace'] = async (mobile) => withPage({ mobile, signe
     else pass(name, 'still no previous-account chat title after a reload');
   }
 
-  if (bag.pageErrors.length) defect(name, 'page error on the sign-out path', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the sign-out path', errs.join(' | ')); }
 });
 
 /** J20 — GOOGLE ONE TAP MUST NOT SIT ON TOP OF THE APP'S OWN CONTROLS (PART 5 shapes 6 and 11).
@@ -1154,7 +1173,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
       else pass(name, `«بحث» (${cta.top}-${cta.bottom}) is clear of the prompt (now ${cta.sheetNow}) and clickable`);
     }
 
-    if (bag.pageErrors.length) defect(name, 'page error while the prompt was up', bag.pageErrors.join(' | '));
+    { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while the prompt was up', errs.join(' | ')); }
   });
 
   // The same class on the OTHER busy screen: the Agent composer is bottom-anchored, so padding the
@@ -1288,7 +1307,7 @@ JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile
     } else pass(`${name}/x`, 'the draft also survived the X');
   } else skip(`${name}/x`, 'no close control found on the dialog');
 
-  if (bag.pageErrors.length) defect(name, 'page error on the support-form path', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the support-form path', errs.join(' | ')); }
 });
 
 /** J21 — THE ERROR STATE MUST NAME THE RIGHT FAILURE.
@@ -1352,7 +1371,7 @@ JOURNEYS['support-error-copy'] = async (mobile) => withPage({ mobile }, async (p
   if (body.includes(SUP.connErr)) pass(name, 'a genuine server failure still says "check your connection"');
   else defect(name, 'a real failure lost its connection copy', `neither message matched after a 500; body has «${body.slice(0, 120)}»`);
 
-  if (bag.pageErrors.length) defect(name, 'page error on the support error path', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the support error path', errs.join(' | ')); }
 });
 
 // ═══ RUNNER ═════════════════════════════════════════════════════════════════════════════════════
