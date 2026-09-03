@@ -11,11 +11,11 @@
 drop function if exists public.ops_af_option_truth_sweep(text, text, text, int, boolean);
 
 create or replace function ops_af_option_truth_sweep(
-  p_deal        text    default null,   -- null = every certified deal
+  p_deal        text    default null,
   p_period      text    default null,
   p_type        text    default null,
-  p_row_limit   int     default 2000,   -- cap on the result set pulled per option
-  p_check_rows  boolean default true,   -- false = counts only (cheap enough for a monitor tick)
+  p_row_limit   int     default 2000,
+  p_check_rows  boolean default true,
   p_slice       int     default null,   -- 0-based slice index; null = every cohort
   p_slices      int     default 1
 ) returns table(cohort text, opt text, chip bigint, applied bigint, returned bigint, viol bigint)
@@ -37,8 +37,6 @@ begin
     where p_slice is null or mod(z.rn, greatest(p_slices, 1)) = p_slice
     order by z.rn
   loop
-    -- The cohort's base scope, identical for all three measurements. Passing the same base to each is
-    -- what makes the comparison meaningful: any difference is the OPTION, never the scope.
     v_base := format('p_deal:=%L, p_types:=array[%L]::text[]', c.deal_ar, c.type_ar)
               || coalesce(format(', p_rent_period:=%L', c.rent_period_ar), '');
 
@@ -46,7 +44,6 @@ begin
     continue when v_counts is null;
 
     for o in
-      -- label | cnt_* column | the AF param that applies it | how to read it off the row itself
       select * from (values
         ('amenity:kitchen','cnt_kitchen','p_amenities:=array[''kitchen'']','s.kitchen is true'),
         ('amenity:parking','cnt_parking','p_amenities:=array[''parking'']','s.parking is true'),
@@ -87,14 +84,12 @@ begin
       ) as t(label, col, af_param, row_pred)
     loop
       v_chip := (v_counts ->> o.col)::bigint;
-      continue when v_chip is null;             -- this build exposes no such count column
+      continue when v_chip is null;
 
       execute format('select af_eligible_count(%s, %s)', v_base, o.af_param) into v_applied;
 
       v_ret := null; v_viol := null;
       if p_check_rows then
-        -- THE LISTINGS THEMSELVES, not another count. Joined back to the index so the predicate is
-        -- read off each returned row's own column — «every one of those N must actually have it».
         execute format(
           'select count(distinct r.listing_id), count(*) filter (where not (%s)) '
           'from location_search_candidates_ar(%s, %s, p_limit:=%s, p_per_platform:=%s) r '
@@ -103,8 +98,6 @@ begin
           into v_ret, v_viol;
       end if;
 
-      -- Report ONLY disagreements. `returned` is compared against the chip only when the set was not
-      -- truncated by p_row_limit, otherwise a large cohort would look like a defect for being big.
       if v_chip is distinct from v_applied
          or coalesce(v_viol, 0) <> 0
          or (p_check_rows and v_ret < least(v_chip, p_row_limit)) then
@@ -116,8 +109,68 @@ begin
   end loop;
 end
 $fn$;
+
 comment on function ops_af_option_truth_sweep(text,text,text,int,boolean,int,int) is
   'AF button truth: per cohort per option, chip count = applied filter = returned listings, and every returned row satisfies the predicate on its own column. Any returned row is a defect. p_slice/p_slices bound one run so it always completes.';
 
 -- The detector now sweeps ONE rotating slice per day, so it completes inside the statement timeout
--- and still covers every cohort across the rotation. (Slice COUNT retuned in 20260902004000.)
+-- and still covers every cohort across the rotation.
+create or replace function mon_detect_af_option_count_truth()
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $fn$
+declare
+  SLICES constant int := 6;             -- full coverage every 6 days
+  v_slice int := mod(extract(doy from now())::int, SLICES);
+  v_bad jsonb := '[]'::jsonb;
+  v_n int := 0; v_cohorts int; r record;
+begin
+  if not public.mon_claim_daily_slot('af_option_count_truth') then return 0; end if;
+
+  select count(*) into v_cohorts from public.af_cohort_registry where enabled;
+  if coalesce(v_cohorts, 0) < 10 then
+    raise exception 'refusing to run: af_cohort_registry has only % enabled cohorts', v_cohorts;
+  end if;
+
+  for r in
+    select * from public.ops_af_option_truth_sweep(
+      p_deal := null, p_period := null, p_type := null,
+      p_row_limit := 1, p_check_rows := false,
+      p_slice := v_slice, p_slices := SLICES)
+  loop
+    v_n := v_n + 1;
+    v_bad := v_bad || jsonb_build_object(
+      'cohort', r.cohort, 'option', r.opt,
+      'count_shown_on_chip', r.chip, 'count_the_filter_returns', r.applied);
+  end loop;
+
+  update public.ops_detector_last_full_run
+     set last_result = v_n where detector = 'af_option_count_truth';
+
+  if v_n = 0 then
+    -- Resolve only THIS slice's key, so a real disagreement in another slice is not cleared by a
+    -- clean run over cohorts that were never looked at.
+    perform public.mon_resolve_key('af_option_count_truth','af_option_count_truth_slice_' || v_slice);
+    return 0;
+  end if;
+
+  return public.mon_raise('P1','af_option_count_truth','all',
+    'af_option_count_truth_slice_' || v_slice,
+    jsonb_build_object(
+      'disagreements', v_n,
+      'slice', v_slice, 'of_slices', SLICES, 'cohorts_enabled', v_cohorts,
+      'offenders', v_bad,
+      'why', 'An Advanced Filter option shows the user one number and its filter returns another. '
+          || 'The chip count comes from apartment_guided_counts_ar and the filter from '
+          || 'af_eligible_count, both generated from af_eligibility_clause() — so a disagreement means '
+          || 'the cnt_* expression and the predicate have drifted apart. The user is told N before '
+          || 'they click and given something else after.',
+      'adjudicate', 'Compare the cnt_* expression for that option against the matching predicate in '
+          || 'af_eligibility_clause(). Check the SCOPE first: the direction defect (2026-09-01) was a '
+          || 'cnt_* computed inside a scope that already applied the same parameter, while the UI '
+          || 'action UNIONS onto it. Then re-run ops_af_option_truth_sweep with p_check_rows := true '
+          || 'for that cohort to see whether the returned rows are wrong too, or only the number.'));
+end
+$fn$;
