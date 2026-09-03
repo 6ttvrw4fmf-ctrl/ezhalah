@@ -49,7 +49,14 @@ load_dotenv()
 _TRANSIENT_MARKERS = ("522", "520", "524", "503", "502", "504", "429", "408",
                       "timed out", "timeout", "connection", "json could not be generated",
                       "temporarily unavailable", "eof", "reset by peer", "server disconnected",
-                      "pgrst002")
+                      "pgrst002",
+                      # "broken pipe" / httpx.WriteError: the socket died while the REQUEST was
+                      # still being written. Textbook transient, and it matched NOTHING above
+                      # ("[Errno 32] Broken pipe" contains no other marker), so it was re-raised as
+                      # permanent and threw away the whole crawl. Observed 2026-09-03 on arkaan:
+                      # 1,072 listings fetched, 689 written, run lost on one write. Every caller of
+                      # _execute is idempotent (upsert on ad_number), so retrying is safe.
+                      "broken pipe", "writeerror", "write error")
 
 
 def _execute(query, *, what: str = "db", tries: int = 5):
