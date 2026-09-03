@@ -83,6 +83,21 @@ The invariant applies to every narrowing, not just نوع: adding a حي, a pric
 bedroom count, or a period must behave the same way. When a broad and a narrow search disagree in
 this direction, suspect the SCOPE the narrow search sends — not the rows.
 
+**Fired live every run since 2026-09-02: `e2e/qa-coverage/narrowing.mjs`** (`node
+e2e/qa-coverage/narrowing.mjs`, `QA_NARROW_COHORTS=<n>` to resize). It needs **no oracle at all** —
+the narrowed answer is checked against the BROAD answer's own rows, using the predicate fields the
+RPC itself returns (`effective_price`, `area_m2`, `bedrooms`). Two independent production answers
+checked against each other, so nothing it finds can be blamed on a harness reimplementation of the
+matching predicate: there isn't one. Per cohort it asserts all three conditions at once —
+`extra = 0` (narrowing invented a row), `missing = 0` (narrowing lost a qualifying row),
+`dupes = 0` — over price-min/price-max/area-min/area-max/bedrooms cuts derived from the broad set.
+Cells come from the live index grid stalest-first (§43.2), the broad set must fit inside one page to
+be a valid superset reference (§39.1), and every cut lands strictly between two observed values so a
+boundary convention can never read as a defect (§32 tests boundaries deliberately; this layer must
+not conflate the two). Contract pinned and mutation-proven by
+`scripts/verify-narrowing-invariant-probe.ts` in `npm test`. **Read trap §41.18 before changing how
+it derives a price bound.**
+
 ## 4. DIVERSITY COMES SECOND — match first, then diversity
 First build the exact eligible set; only then apply diversity/ranking. Where several platforms have
 valid matches: measure eligible listings per platform · inspect the first batch · inspect later
@@ -722,6 +737,27 @@ appears broken.
     `scripts/verify-rent-period-both.ts` §2 (in `npm test`) — until this run only the
     `'monthly'`/`'both'` half was guarded, so deleting either `dealCombined` clause collapsed every
     combined search to an annual-only pool with the suite fully green.
+
+18. **`effective_price` comes back ANNUALISED, but a «شهري» budget is sent in MONTHLY units and the
+    RPC ×12s it** (hit 2026-09-02, on the very first run of the §3.1 narrowing probe). The RPC's own
+    price arm is explicit:
+    `s.price_annual >= coalesce(p_price_min,0) * (case when p_rent_period='شهري' then 12 else 1 end)`
+    — and `src/data/remote.ts:363` says the same from the client side ("bounds already in the
+    displayed unit; the RPC ×12s a monthly [bound]"). So a harness that reads a returned
+    `effective_price` and feeds it straight back as a «شهري» bound is asking for a budget **12×
+    too large**, gets 0 rows, and reads as production losing every qualifying listing.
+    It did exactly that: شقة/إيجار/شهري/الشقيق came back `broad=29 narrow=0 expected=10`, a
+    confident total matching failure. Production was right on both of its layers — bisecting the
+    bound reproduced the ×12 exactly (73,920 annual ÷ 12 = 6,160/mo: `priceMin=6000` → 29 rows,
+    `priceMin=6200` → 22; 417,600 ÷ 12 = 34,800: `priceMin=34800` → 1, inclusive).
+    Rule: **a price bound is expressed in the unit the USER sees, never in the unit the row
+    returns.** When deriving a bound from returned rows on a «شهري» search, choose the cut as a
+    multiple of 12 in annual space and divide by 12 for the request, so the RPC's ×12 is exact and
+    no rounding drift appears at the boundary. Pinned, mutation-proven in both directions, by
+    `scripts/verify-narrowing-invariant-probe.ts` (in `npm test`).
+    This is §40.7 in its purest form again — the same shape as traps 15, 16 and 17: **when the probe
+    and the product disagree by the whole result set, suspect the probe's ability to express the
+    question before you suspect the product's ability to answer it.**
 
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 

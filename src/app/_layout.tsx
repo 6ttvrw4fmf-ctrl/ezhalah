@@ -120,9 +120,9 @@ function Shell() {
       </View>
       {/* The small draggable sign-in card (owner 2026-08-29) — the UNPROMPTED invitation for
           signed-out desktop-web visitors on Filter/Agent, in the retired dock's side slot.
-          Mounted AFTER the Stack deliberately: the card contains a phone <input>, and index-based
-          input targeting (tests, autofill heuristics) must keep finding the screens' own inputs
-          first. Visual layering is zIndex, not DOM order. */}
+          Mounted AFTER the Stack deliberately so index-based input targeting (tests, autofill
+          heuristics) keeps finding the screens' own inputs first. Visual layering is zIndex, not
+          DOM order. */}
       <SignInCard />
       {/* Support / About Us popups — rendered at the root so they overlay every screen. */}
       <InfoModal />

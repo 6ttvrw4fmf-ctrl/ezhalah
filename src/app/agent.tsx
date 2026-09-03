@@ -23,6 +23,7 @@ import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupporte
 import VoiceWaveform from '@/components/VoiceWaveform';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
+import { initialReveal as initialRevealPure } from '@/lib/initialReveal';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
@@ -545,7 +546,7 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
+  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript, newChat } = useApp();
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
   // which counts the `setQuery(` calls in this file precisely so a second, unsanitized writer cannot
@@ -842,6 +843,17 @@ export default function Agent() {
   // first move already reads the settled height of the thing being landed on.
   const LAND_PASSES_MS = [1400, 3200];
   const FIRST_PAGE = 10; // show the first 10; «عرض المزيد» pages the rest of the matched set. (owner 2026-07-08.)
+  // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
+  // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
+  // INTERVIEW_STOP_AT (25): the same line at which Advanced Filter stops narrowing (R11.1) and the set
+  // is by contract the FINAL one, so there is nothing left for a first page to be a preview OF. Gated
+  // on quotableTotal() — the honest total, null whenever the RPC count would overstate (client-only
+  // narrowing, agent-annualized budgets) — and in those cases we fall back to FIRST_PAGE rather than
+  // reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 25, so a ≤25 set is always
+  // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
+  // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
+  const initialReveal = (r: SearchResult | undefined | null): number =>
+    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT });
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
@@ -921,6 +933,12 @@ export default function Agent() {
   // summary. The turn trades its action buttons for a read-only receipt — it is history now, and only
   // the newest result turn carries live actions.
   const [afReceipt, setAfReceipt] = useState<Record<string, string>>({});
+  // COMPLETED SEARCH (owner 2026-08-30). Set ONLY by the canonical AF stop conditions — R11.1 (the
+  // post-round honest total ≤ INTERVIEW_STOP_AT) and R11.2 (the offer probe finds no useful question
+  // left after a committed round). Never by a plain first search, never by a count alone: a fresh
+  // 20-result search with no AF round is not "finished", it is a search the user may still refine.
+  // Persisted with the transcript so Back / saved chats reopen READ-ONLY, never with a live composer.
+  const [completed, setCompleted] = useState(false);
   // Whether a results turn still has a question worth asking — resolved by a REAL probe (below),
   // never guessed. Absent = not yet known ⇒ the button stays hidden rather than promising a round
   // that would have nothing truthful to ask.
@@ -1047,7 +1065,7 @@ export default function Agent() {
   };
   const markTyped = (id: string) => {
     const msg = msgs.find((m) => m.id === id);
-    startReveal(id, msg?.role === 'results' ? Math.min(FIRST_PAGE, msg.result?.listings?.length ?? 0) : 0);
+    startReveal(id, msg?.role === 'results' ? initialReveal(msg.result) : 0);
   };
   // Cancel any pending one-by-one reveals (on unmount, or when a new turn starts).
   const clearReveals = () => { revealTimers.current.forEach(clearTimeout); revealTimers.current = []; };
@@ -1295,7 +1313,7 @@ export default function Agent() {
     // Cards start appearing NOW — one by one, while the intro text is still typing above (owner
     // 2026-07-09: show the first card as soon as valid listings are ready; don't hold them hostage
     // to the typewriter). The more-message + feedback row still wait for the text (doneTyping).
-    beginCardDrip(statusId, Math.min(FIRST_PAGE, result.listings.length));
+    beginCardDrip(statusId, initialReveal(result));
   };
 
   // «عرض المزيد» (Load more) — CONTINUATION IS THE RULE (owner 2026-08-29, supersedes the 2026-08-20
@@ -1323,7 +1341,7 @@ export default function Agent() {
     const q = m.result.query;
     if (runRef.current) return; // a real turn is mid-flight — never start a cascade under it (review fix)
     const fetched = m.result.listings.length;
-    const cur = revealCount[mid] ?? Math.min(FIRST_PAGE, fetched);
+    const cur = revealCount[mid] ?? initialReveal(m.result);
     // (A) fetched-but-unrevealed cards remain → cascade to the next batch boundary from the buffer.
     if (cur < fetched) {
       cascadeIn(mid, cur, nextBatchTarget(cur, fetched));
@@ -1503,7 +1521,7 @@ export default function Agent() {
     if (busy) return;
     const id = chatIdRef.current;
     if (!id) return;
-    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills });
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed });
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
@@ -1567,7 +1585,11 @@ export default function Agent() {
     // the common case (a tier with a real choice) exits after the first one. Still ONE probe per turn,
     // still passive — it renders a button and never opens the overlay (owner 2026-08-19).
     void (async () => {
-      const offer = (ok: boolean) => setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
+      const offer = (ok: boolean) => {
+        setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
+        // R11.2: an AF round was committed (afCarryRef) and NO remaining question can narrow — done.
+        if (!ok && afCarryRef.current) setCompleted(true);
+      };
       let scoped = q;
       const seen = new Set<string>(asked);
       for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
@@ -1936,6 +1958,8 @@ export default function Agent() {
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
+        // R11.1: the round narrowed the set to its FINAL size — the search is complete.
+        if (total != null && total <= INTERVIEW_STOP_AT) setCompleted(true);
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
         timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
         timers.push(setTimeout(() => {
@@ -2497,6 +2521,7 @@ export default function Agent() {
       setDoneTyping(restored.doneTyping);
       setRevealCount(restored.revealCount);
       setAfReceipt(restored.afReceipt);
+      setCompleted(restored.completed === true);
       // Dedup on restore too (owner audit, 2026-08-27): a chat saved before this fix shipped could
       // have a stray duplicate pill baked into its serialized transcript — restoring it verbatim
       // would resurrect exactly the bug this fix closes everywhere else. Deduping HERE (not just at
@@ -2528,7 +2553,7 @@ export default function Agent() {
         { id: resultsId, role: 'results', text: sub, result: snapshot },
       ]);
       setDoneTyping((d) => ({ ...d, [resultsId]: true }));
-      setRevealCount((c) => ({ ...c, [resultsId]: Math.min(FIRST_PAGE, snapshot.listings.length) }));
+      setRevealCount((c) => ({ ...c, [resultsId]: initialReveal(snapshot) }));
       landAtLatest();
       return;
     }
@@ -2555,7 +2580,7 @@ export default function Agent() {
       { id: resultsId, role: 'results', text: sub, result },
     ]);
     setDoneTyping((d) => ({ ...d, [resultsId]: true }));
-    setRevealCount((c) => ({ ...c, [resultsId]: Math.min(FIRST_PAGE, result.listings.length) }));
+    setRevealCount((c) => ({ ...c, [resultsId]: initialReveal(result) }));
     pinModeRef.current = 'top';
     toTop();
   };
@@ -2729,6 +2754,7 @@ export default function Agent() {
         setBusy(false);
         setMsgs([]);
         pendingScopeRef.current = null; // New Chat inherits nothing — not even a half-answered question
+        setCompleted(false);
         lastQueryRef.current = null;    // …and not the previous conversation's accumulated filters
         pendingCityRef.current = null;  // …including the plain-city question's subject
         chatIdRef.current = null;       // …and not the previous conversation's sidebar identity
@@ -3024,8 +3050,11 @@ export default function Agent() {
                       2026-07-09: show the first card the moment valid listings exist). The
                       more-message + feedback row still wait for the text via their doneTyping gates. */}
                   {m.result.listings.length === 0 ? (
-                    // Zero-result: text already animated in slot above — render nothing here to avoid duplicate.
-                    null
+                    // Zero-result: the text already animated in the slot above, so no duplicate copy here —
+                    // but the RESPONSE-level feedback row still belongs to this turn (owner 2026-08-30: thumbs
+                    // must not vanish merely because listing count = 0; the user is rating the answer, and
+                    // "nothing matched" IS an answer). Read-aloud reads the zero-result intro alone.
+                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined)} />
                   ) : (
                     <>
                       {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).
@@ -3042,7 +3071,7 @@ export default function Agent() {
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
-                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, m.result.listings.length))).map((l, i) => (
+                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result))).map((l, i) => (
                           // CardIn = soft mount-in (fade + slight rise). Keyed by source:id (ids are
                           // only unique per source table — matches the de-dup identity), so cards
                           // already on screen NEVER re-animate — only newly-revealed ones enter softly.
@@ -3064,7 +3093,7 @@ export default function Agent() {
                           ألقى نتائج أدق» asks ONE clarifying question then re-searches. */}
                       {(() => {
                         const fetched = m.result.listings.length;
-                        const shown = revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, fetched));
+                        const shown = revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result));
                         const serverMore = !!m.result.hasMore; // the DB still has more matching pages to fetch
                         // Show once this page's cards are on screen. Gate on (typing && !doneTyping) — the SAME
                         // condition the cards use — NOT on `m.typing` alone: a live results message keeps typing=true
@@ -3072,7 +3101,7 @@ export default function Agent() {
                         // min(FIRST_PAGE, fetched): a search with <10 matches still gets its closing message.
                         // ALSO gates FeedbackRow/Read Aloud below (merged into one block, owner 2026-08-23 — the
                         // spoken closing note must reuse this SAME computed text, never re-derive it separately).
-                        if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
+                        if ((m.typing && !doneTyping[m.id]) || shown < initialReveal(m.result)) return null;
                         // BROWSE-CONTINUATION RULE (owner 2026-08-29, supersedes the 2026-08-20 cap) — the
                         // "load more" gate and the closing count come from ONE pure function
                         // (src/data/resultCount.ts), so they can never disagree and one test locks them. The
@@ -3266,6 +3295,30 @@ export default function Agent() {
             bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
         {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
             insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
+        {/* COMPLETED SEARCH (owner 2026-08-30): Advanced Filter reached the final set (R11.1) or no useful
+            question remained (R11.2). The conversation is DONE — the composer (and the mic that lives inside it)
+            is replaced by one clear action. The saved transcript stays readable; Back / reopen restore this
+            same state from `completed` rather than resurrecting a live composer. */}
+        {completed ? (
+          <View style={[s.completedWrap, { paddingBottom: insets.bottom + 12 }]}>
+            <View style={[s.col, s.completedBar]}>
+              <View style={s.completedTxWrap}>
+                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+                <Text style={s.completedTx}>{t('Search complete')}</Text>
+              </View>
+              <Text style={s.completedSub}>{t('Start a new chat to search again')}</Text>
+              <Pressable
+                onPress={() => { newChat(); router.replace({ pathname: '/', params: { fresh: String(Date.now()) } }); }}
+                accessibilityRole="button"
+                accessibilityLabel={t('New Chat')}
+                style={({ pressed, hovered }: any) => [s.newChatBtn, (pressed || hovered) && s.newChatBtnOn]}
+              >
+                <Ionicons name="add" size={18} color={colors.onFill} />
+                <Text style={s.newChatTx}>{t('New Chat')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
@@ -3429,6 +3482,7 @@ export default function Agent() {
             </Text>
           </View>
         </View>
+        )}
       </KeyboardAvoidingView>
 
       {/* ChatGPT-style feedback toast — floats top-center ABOVE the conversation (below the header),
@@ -3671,6 +3725,15 @@ const s = StyleSheet.create({
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
+  // Completed-search bar (owner 2026-08-30) — replaces the composer once AF reaches the final set.
+  completedWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
+  completedBar: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 22, paddingVertical: 16, paddingHorizontal: 18, alignItems: 'center', gap: 6, ...cardShadow },
+  completedTxWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  completedTx: { fontSize: 15, fontWeight: '800', color: colors.ink },
+  completedSub: { fontSize: 12.5, color: colors.muted, textAlign: 'center' },
+  newChatBtn: { marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.selFill, paddingVertical: 11, paddingHorizontal: 22, borderRadius: 999 },
+  newChatBtnOn: { backgroundColor: colors.dark },
+  newChatTx: { fontSize: 14, fontWeight: '800', color: colors.onFill },
   // The send/stop button is pinned to the PHYSICAL right (right:4) and never mirrors — it stays on the
   // right in Arabic too, so paddingRight leaves room for it regardless of text direction. (user request.)
   // Inline row (no absolute button): input flexes, the send/stop button sits at the end, vertically

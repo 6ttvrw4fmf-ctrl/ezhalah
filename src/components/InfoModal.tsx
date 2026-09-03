@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { I18nManager, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, I18nManager, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import Animated, {
   Easing,
   interpolate,
@@ -16,6 +16,7 @@ import { alpha0 } from '@/theme/palette';
 import { colors, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { useApp } from '@/store';
+import { MESSAGE_MAX, SUBJECT_MAX, sendSupportMessage, validateSupportMessage, type SupportField } from '@/lib/support';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { PLATFORM_META } from '@/data/loaderPlatforms';
 
@@ -53,6 +54,10 @@ const TOP_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP;
 
 const EAGLE = require('../../assets/images/eagle-mark.png');
 const HERO = require('../../assets/images/hero-bg.png');
+// «من نحن» artwork (owner 2026-08-30): the EXISTING Ezhalah eagle looking over the Kingdom's properties
+// — assets/images/eagle-night.jpg, 900×1317, previously unreferenced. Dark-native, so it needs no
+// theme swap and reads correctly under both palettes; the melt gradient below it does the integration.
+const ABOUT_ART = require('../../assets/images/eagle-night.jpg');
 
 // The only number «من نحن» shows. Derived from the shipped partner roster at compile time — never a
 // hardcoded count that goes stale, and never a dynamic listings/cities figure we'd have to fake.
@@ -115,7 +120,7 @@ function Sheet({ kind, onClose }: { kind: 'support' | 'about'; onClose: () => vo
           accessibilityLabel={t('Close')}
           style={({ hovered, pressed }: any) => [s.xBtn, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
         >
-          <Ionicons name="close" size={18} color="#4c5a52" />
+          <Ionicons name="close" size={18} color={colors.body} />
         </Pressable>
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
           {kind === 'support' ? <SupportBody t={t} /> : <AboutBody t={t} reduced={reduced} />}
@@ -152,14 +157,12 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
       </View>
 
       <View style={s.bodyPad}>
-        <SupCard
-          icon="headset-outline"
-          email="support@ezhalah.com"
-          desc={t('Questions about your account, searches, or technical issues.')}
-        />
+        <SupportForm t={t} />
+        {/* Partnerships stay an ADDRESS, not a form: those threads are commercial, they come from
+            outside the app as often as inside it, and they are not what «تواصل مع الدعم» is for. */}
         <SupCard
           icon="business-outline"
-          email="info@ezhalah.com"
+          email="partners@ezhalah.com"
           desc={t('Business inquiries, partnerships, media requests, and general information.')}
         />
         <View style={s.rt}>
@@ -171,6 +174,141 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
           <RtRow text={t('Some inquiries may take up to {d}.', { d: t('1 week') })} />
         </View>
       </View>
+    </View>
+  );
+}
+
+// The in-app support message (owner 2026-09-02): "build an in-app support message form... that
+// reaches support@". Four states and no fifth: idle → sending → sent, or error with the draft still
+// on screen so «حاول مرة أخرى» resends exactly what the user wrote. Nothing is cleared on failure —
+// losing someone's typed problem report is the one outcome this form must never produce.
+function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => string }) {
+  const { locale } = useI18n();
+  const { user } = useApp();
+  // Signed-in users authenticate with Google/Apple, so `sub` IS their email — prefill it rather
+  // than making them type an address we already know. Signed-out users type their own.
+  const [email, setEmail] = useState(user?.sub && user.sub.includes('@') ? user.sub : '');
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [touched, setTouched] = useState(false);
+
+  const draft = { subject, message, email };
+  const missing: SupportField | null = validateSupportMessage(draft);
+  const sending = state === 'sending';
+
+  async function send() {
+    setTouched(true);
+    if (missing || sending) return;
+    setState('sending');
+    const r = await sendSupportMessage(draft, locale === 'en' ? 'en' : 'ar');
+    if (r.ok) {
+      setState('sent');
+      return;
+    }
+    setState('error');
+  }
+
+  if (state === 'sent') {
+    return (
+      <View style={s.sentCard}>
+        <View style={s.sentIc}><Ionicons name="checkmark" size={22} color={colors.onFill} /></View>
+        <Text style={s.sentH}>{t('Your message reached us')}</Text>
+        {/* Truthful by construction: the message is stored the moment this renders. It promises a
+            REPLY to their address — never that an email has already been sent anywhere. */}
+        <Text style={s.sentTx}>{t("We'll reply to {email}.", { email })}</Text>
+        <Pressable
+          onPress={() => { setSubject(''); setMessage(''); setTouched(false); setState('idle'); }}
+          style={s.againBtn}
+          accessibilityRole="button"
+        >
+          <Text style={s.againTx}>{t('Send another message')}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <View style={s.form}>
+      <View style={s.formHead}>
+        <View style={s.cardIc}><Ionicons name="headset-outline" size={19} color={colors.primary} /></View>
+        <View style={s.supBody}>
+          <Text style={s.mail}>{t('Contact support')}</Text>
+          <Text style={s.desc}>{t('Questions about your account, searches, or technical issues.')}</Text>
+        </View>
+      </View>
+
+      <Field label={t('Subject')} invalid={touched && missing === 'subject'}>
+        <TextInput
+          value={subject}
+          onChangeText={setSubject}
+          editable={!sending}
+          maxLength={SUBJECT_MAX}
+          placeholder={t('What is this about?')}
+          placeholderTextColor={colors.muted}
+          style={s.input}
+        />
+      </Field>
+
+      <Field label={t('Message')} invalid={touched && missing === 'message'}>
+        <TextInput
+          value={message}
+          onChangeText={setMessage}
+          editable={!sending}
+          maxLength={MESSAGE_MAX}
+          multiline
+          numberOfLines={5}
+          textAlignVertical="top"
+          placeholder={t('Tell us what happened.')}
+          placeholderTextColor={colors.muted}
+          style={[s.input, s.area]}
+        />
+      </Field>
+
+      <Field label={t('Your email')} invalid={touched && missing === 'email'}>
+        <TextInput
+          value={email}
+          onChangeText={setEmail}
+          editable={!sending}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoComplete="email"
+          placeholder="name@example.com"
+          placeholderTextColor={colors.muted}
+          style={[s.input, s.inputLtr]}
+        />
+      </Field>
+
+      {state === 'error' ? (
+        <View style={s.errRow}>
+          <Ionicons name="alert-circle-outline" size={15} color={colors.danger} />
+          <Text style={s.errTx}>{t("Couldn't send your message. Check your connection and try again.")}</Text>
+        </View>
+      ) : null}
+
+      <Pressable
+        onPress={send}
+        disabled={sending}
+        style={[s.sendBtn, sending && s.sendBtnBusy]}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: sending }}
+      >
+        {sending ? (
+          <ActivityIndicator size="small" color={colors.onFill} />
+        ) : (
+          <Ionicons name="paper-plane-outline" size={16} color={colors.onFill} />
+        )}
+        <Text style={s.sendTx}>{sending ? t('Sending…') : state === 'error' ? t('Try again') : t('Send')}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function Field({ label, invalid, children }: { label: string; invalid: boolean; children: React.ReactNode }) {
+  return (
+    <View style={s.field}>
+      <Text style={s.fieldLabel}>{label}</Text>
+      <View style={[s.fieldBox, invalid && s.fieldBoxBad]}>{children}</View>
     </View>
   );
 }
@@ -253,7 +391,7 @@ function AboutBody({ t, reduced }: { t: Tr; reduced: boolean }) {
           composition, never an image in a box. The lockup rises out of its lower band; TOP_CLEAR
           keeps everything under the floating ×. ── */}
       <Reveal {...rev} delay={40} fadeOnly style={a.heroArt}>
-        <RNImage source={HERO} style={a.heroImg} resizeMode="cover" />
+        <RNImage source={ABOUT_ART} style={a.heroImg} resizeMode="cover" />
         <LinearGradient colors={[alpha0(pal.paper), pal.paper]} locations={[0.15, 0.96]} style={StyleSheet.absoluteFill} />
         <View style={a.heroInner}>
           <Text style={a.eyebrow}>{t('About Us')}</Text>
@@ -385,6 +523,43 @@ const s = StyleSheet.create({
   rtRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
   rtText: { flex: 1, fontSize: 13, color: colors.body, lineHeight: 20, textAlign: 'right' },
+
+  // ——— «تواصل مع الدعم» form (owner 2026-09-02) ———
+  form: {
+    backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.fieldLine,
+    padding: 16, marginBottom: 10,
+  },
+  formHead: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
+  field: { marginBottom: 12 },
+  fieldLabel: { fontSize: 12.5, fontWeight: '700', color: colors.muted, textAlign: 'right', marginBottom: 6 },
+  fieldBox: { backgroundColor: colors.paper, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine, paddingHorizontal: 12 },
+  fieldBoxBad: { borderColor: colors.danger },
+  input: {
+    // 16px on web is not a design choice: under 16 iOS Safari zooms the page on focus and never
+    // zooms back. (verify-input-font-no-ios-zoom caught this form at 14.)
+    fontSize: IS_WEB ? 16 : 14, color: colors.ink, textAlign: 'right', paddingVertical: 11, minHeight: 44,
+    ...(IS_WEB ? ({ outlineStyle: 'none' } as any) : {}),
+  },
+  inputLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
+  area: { minHeight: 108, paddingTop: 11, lineHeight: 21 },
+  errRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
+  errTx: { flex: 1, fontSize: 12.5, color: colors.danger, textAlign: 'right', lineHeight: 18 },
+  sendBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 13,
+    ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  sendBtnBusy: { opacity: 0.75 },
+  sendTx: { fontSize: 14.5, fontWeight: '800', color: colors.onFill },
+  sentCard: {
+    alignItems: 'center', backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1,
+    borderColor: colors.fieldLine, paddingVertical: 24, paddingHorizontal: 18, marginBottom: 10,
+  },
+  sentIc: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  sentH: { fontSize: 16, fontWeight: '800', color: colors.ink, textAlign: 'center' },
+  sentTx: { fontSize: 13, color: colors.body, textAlign: 'center', marginTop: 6, lineHeight: 20 },
+  againBtn: { marginTop: 14, paddingVertical: 8, paddingHorizontal: 14, ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}) },
+  againTx: { fontSize: 13.5, fontWeight: '700', color: colors.primary },
 });
 
 // «من نحن» styles. Arabic typography rules: NO letterSpacing anywhere (Latin tracking mangles
@@ -397,8 +572,8 @@ function makeAbout(pal: Record<string, string>, dark: boolean) {
     // The artwork hero: full-bleed at the card's top, melting into the surface. paddingTop derives
     // from TOP_CLEAR so the lockup can never collide with the floating × (same arithmetic contract
     // as before — verify-info-modal-header-clearance pins it).
-    heroArt: { height: TOP_CLEAR + 128, overflow: 'hidden', justifyContent: 'flex-end' },
-    heroImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%', opacity: dark ? 0.22 : 0.55 },
+    heroArt: { height: TOP_CLEAR + 176, overflow: 'hidden', justifyContent: 'flex-end' },
+    heroImg: { position: 'absolute', left: 0, right: 0, bottom: 0, width: '100%', height: '215%', opacity: dark ? 0.78 : 0.62 },
     heroInner: { paddingHorizontal: 24, paddingTop: TOP_CLEAR, paddingBottom: 2 },
     eyebrow: { fontSize: 12, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 6 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },

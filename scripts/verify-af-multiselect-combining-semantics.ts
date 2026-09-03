@@ -46,7 +46,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { buildOracleQS, directionVariantsFrom } from './lib/afOracleFilter.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -158,7 +158,8 @@ check('three amenity chips produce three separate conjunctive filters (AND), not
   && multiAmenity.qs.includes('air_conditioner=is.true')
   && !multiAmenity.qs.includes('or='),
   multiAmenity.qs);
-const multiDir = buildOracleQS({ ...PROBE_LOC, p_directions: ['شمال', 'جنوب'] });
+// Offline: the canonical keys alone stand in for the observed spellings (see afOracleLive.ts).
+const multiDir = buildOracleQS({ ...PROBE_LOC, p_directions: ['شمال', 'جنوب'] }, { directionVariants: directionVariantsFrom([])! });
 check('two direction chips produce ONE membership filter (OR/union), not two conjunctive ones',
   (multiDir.qs.match(/direction_ar=in\./g) ?? []).length === 1,
   multiDir.qs);

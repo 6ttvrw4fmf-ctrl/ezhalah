@@ -76,6 +76,9 @@ You own the correctness of:
 - the data integrity behind every AF predicate
 - the exact relationship between what the user selects, what the UI shows, what the request
   sends, and what the backend returns
+- **what the RETURNED CARD shows about that selection** — contract §12A / R13.12 (owner
+  2026-09-03): whatever the user selected in AF must be visibly and truthfully shown on every
+  returned property card, for EVERY certified field, not only amenities
 
 **Boundary vs. sibling routines (permanent, do not absorb or duplicate):** Advanced Filter and
 Trending are carved out of routine #2's (🎖️ Senior Production Engineer) broad scope specifically
@@ -270,6 +273,34 @@ full relevant suite → merge → deploy → live production verification. Do no
 correctness bugs open. Do not ask for permission unless the decision is genuinely ambiguous (§0's
 four categories).
 
+**The owner restated this as the routine's whole job (2026-09-03, verbatim shape — this is the
+mandate, not a checklist to grade yourself against):**
+
+> FIND → PROVE → FIX → REGRESSION TEST → PERMANENT BARRIER → MUTATION PROOF →
+> MERGE/DEPLOY IF AUTHORIZED → PRODUCTION VERIFY
+
+Applies to Advanced Filter AND Trending equally, with three restatements the owner made explicit:
+
+1. **AF:** number shown = true eligible DB count = the exact set returned when clicked, and every
+   returned listing satisfies every active filter — across boundaries, UNKNOWN/NULL rules,
+   combinations, property types, Buy/Rent/periods, pagination, state, removal, Back, and every
+   certified field and option.
+2. **Trending:** it preserves the EXACT current search state, including every AF selection. Trending
+   must never widen the search, lose a predicate, change property type / deal / period / budget /
+   location, or show a count that does not match the exact eligible set (contract §14, R14.1.2,
+   R14.2.1, R14.4.1).
+3. **The card must show what was selected** — contract §12A / R13.12 (owner 2026-09-03). Every
+   certified AF field, not only amenities.
+
+**Never fake green.** A surface that could not be exercised is reported as UNKNOWN / NOT VERIFIED
+with the reason — never folded into a passing count. This is stricter than "no failures found":
+absence of a test is not evidence of correctness (§0.1, and the run-#15 rent-period lesson in
+`AGENTS.md`).
+
+Stop and ask ONLY for: a genuine source-truth or product ambiguity; a destructive or high-risk
+action; weakening a safety gate; another routine's protected ownership; a real permission boundary.
+Everything else safe and in scope is fixed in the same run.
+
 ## PART 8 — DAILY ROUTINE (this file's own cadence)
 
 Every run must include: real-user AF journeys; city Trending journeys; district Trending journeys;
@@ -388,6 +419,24 @@ Things that cost a previous run real time, and are NOT product defects:
    only the row's displayed label will disagree with the UI wherever `match_values` merges name
    variants (live 2026-08-25: جدة «الصفاء» = `['الصفاء','حي الصفا']` = 304 + 105 = the advertised 409).
    Count over the whole `match_values` set.
+6. **Directions are stored with the nisba «ي» and the oracle must know it** (2026-09-02). The index
+   holds «شمال شرقي», never «شمال شرق» — the key the chip sends — and the RPC normalises both sides.
+   A literal `direction_ar=in.(key)` therefore undercounts every compound direction and reports a
+   phantom EXTRA against a correct search. `buildOracleQS` now REFUSES `p_directions` unless given a
+   `directionVariants` map; build it with `loadDirectionVariants()` (`scripts/lib/afOracleLive.ts`),
+   which reads the observed spellings from the index and refuses on any unclassified spelling.
+7. **Discover distinct values with a "next value strictly greater" walk, never by paging the whole
+   index.** `order=<col>&limit=1&<col>=gt.<last>` finds all 50 source tables in 50 requests (~30 s);
+   paging 200k rows by 1,000 took ~200 ordered requests. PostgREST has no DISTINCT.
+8. **`npm test` auto-discovers every `scripts/verify-*.ts`.** A new live browser journey dropped into
+   `scripts/` runs INSIDE `npm test` — and fails it — until its `scripts/test-exclusions.txt` row
+   names its workflow home. Add the row in the same change as the file.
+9. **`p_tables` is period-DERIVED, not scope-stable** (2026-09-02). `resTables()` in
+   `src/data/remote.ts` appends the two monthly-only sources (`gathern_*`, `aqarmonthly_*`) exactly
+   when the period scope includes Monthly (شهري or كلاهما, or combined deal). A "no non-AF key moved
+   under a deal/period change" rule must assert that derivation, not equality — asserting equality
+   reports a phantom regression on a correct production (`verify-af-scope-change-live.ts`
+   `tablesFollowPeriod`).
 5. **Advanced Filter lives in the «الوكيل الذكي» (agent) flow, not the Normal Filter «بحث» flow.**
    Reaching it: send an Arabic request, answer the agent's disambiguation (a city that is also a
    region needs «مدينة …»; «تقصد المدينة كاملة، أو حي معيّن؟» needs «المدينة كاملة»), then click

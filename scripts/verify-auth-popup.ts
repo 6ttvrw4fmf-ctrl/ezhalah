@@ -162,7 +162,7 @@ check('AuthModal exports AuthForm and its Sheet renders it', authModal.includes(
 check('SignInCard renders the SAME AuthForm compact — full login inside the card',
   signInCard.includes("import { AuthForm } from '@/components/AuthModal'")
   && signInCard.includes('<AuthForm compact onRequestClose={dismissSignInCard} onSignedIn={signIn} />'));
-check('SignInCard hosts NO auth logic of its own (providers/OTP live only in the shared form)',
+check('SignInCard hosts NO auth logic of its own (providers live only in the shared form)',
   !signInCard.includes('signInWithProvider') && !signInCard.includes('verifyPhoneOtp') && !signInCard.includes('sendPhoneOtp'));
 
 // ── 6. CARD WIRING ───────────────────────────────────────────────────────────────────────────────

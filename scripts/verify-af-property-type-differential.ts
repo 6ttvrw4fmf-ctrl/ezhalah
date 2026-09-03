@@ -65,6 +65,7 @@
 import { COHORT_QUESTIONS, COHORT_CHIPS } from '../src/lib/afCohorts.ts';
 import { typeArForTypes, CLEAN_MACRO } from '../src/data/propertyTypes.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
@@ -84,6 +85,9 @@ async function rest(path: string, extraHeaders: Record<string, string> = {}): Pr
 const TYPE_MACROS: Record<string, string> = Object.fromEntries(
   (await rest('known_type_ar?select=type_ar,macro')).map((x: any) => [x.type_ar, x.macro]),
 );
+
+// Directions (2026-09-02): the oracle refuses p_directions without the observed «…ي» spellings.
+const DIRECTION_VARIANTS = (await loadDirectionVariants(REST, H)).map;
 
 /** Every served source table, split the way resolveSearchScope splits them. */
 const { RES_TABLES, COM_TABLES } = await (async () => {
@@ -205,7 +209,7 @@ async function rpcIds(body: any): Promise<{ ids: string[]; total: number; dupes:
 }
 
 async function oracleIds(body: any): Promise<{ ids: string[]; unhandled: string[] }> {
-  const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS });
+  const { qs, unhandled } = buildOracleQS(body, { typeMacros: TYPE_MACROS, ...(DIRECTION_VARIANTS ? { directionVariants: DIRECTION_VARIANTS } : {}) });
   if (unhandled.length) return { ids: [], unhandled };
   const out: string[] = [];
   for (let off = 0; ; off += 1000) {

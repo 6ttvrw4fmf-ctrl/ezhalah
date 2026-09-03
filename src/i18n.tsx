@@ -983,13 +983,6 @@ const AR: Record<string, string> = {
   'Enter 9 digits': 'أدخل 9 أرقام',
   'Continue': 'متابعة',
   "By continuing you agree to Ezhalah's Terms & Privacy Policy.": 'بالمتابعة فإنك توافق على شروط إزهله وسياسة الخصوصية.',
-  'Enter the code': 'أدخل الرمز',
-  'We sent a 6-digit code on WhatsApp to': 'أرسلنا رمزاً مكوّناً من 6 أرقام عبر واتساب إلى',
-  'Verifying…': 'جارٍ التحقق…',
-  'Resend code on WhatsApp': 'إعادة إرسال الرمز عبر واتساب',
-  'Phone number': 'رقم الجوال',
-  '{country} numbers must start with {hint}': 'أرقام {country} يجب أن تبدأ بـ {hint}',
-  'Enter {n} digits': 'أدخل {n} أرقام',
   // Country names + dial-prefix hints (phone picker)
   'United Arab Emirates': 'الإمارات العربية المتحدة',
   'Qatar': 'قطر',
@@ -1020,11 +1013,6 @@ const AR: Record<string, string> = {
   'Verified': 'تم التحقق',
 
   // Phone OTP errors (friendly, localized)
-  'The code you entered is incorrect.': 'الرمز الذي أدخلته غير صحيح.',
-  'This code has expired. Request a new one.': 'انتهت صلاحية هذا الرمز. اطلب رمزاً جديداً.',
-  'Too many attempts. Please wait a moment and try again.': 'محاولات كثيرة. الرجاء الانتظار قليلاً ثم المحاولة مرة أخرى.',
-  'Please enter a valid phone number.': 'الرجاء إدخال رقم هاتف صحيح.',
-  'Phone sign-in isn’t available right now. Please try another method.': 'تسجيل الدخول عبر الهاتف غير متاح حالياً. جرّب طريقة أخرى.',
   'Network error. Check your connection and try again.': 'خطأ في الشبكة. تحقق من اتصالك ثم حاول مرة أخرى.',
   'Something went wrong. Please try again.': 'حدث خطأ ما. الرجاء المحاولة مرة أخرى.',
 
@@ -1049,12 +1037,29 @@ const AR: Record<string, string> = {
     'تلتزم إزهله بنظام حماية البيانات الشخصية في المملكة. نحن لا نبيع بياناتك. تُحفظ عمليات بحثك وحسابك حتى تحذف حسابك، ثم تُزال نهائياً.',
   'Support': 'المساعدة/تواصل معنا',
   'Contact support': 'تواصل مع الدعم',
+
+  // «تواصل مع الدعم» in-app form (owner 2026-09-02). Saudi-natural, calm, no exclamation marks.
+  'Subject': 'الموضوع',
+  'Message': 'الرسالة',
+  'Your email': 'بريدك الإلكتروني',
+  'What is this about?': 'وش موضوع رسالتك؟',
+  'Tell us what happened.': 'اكتب لنا التفاصيل.',
+  // 'Send' already exists above (composer) — reused here, not redefined.
+  'Sending…': 'جاري الإرسال…',
+  'Try again': 'حاول مرة أخرى',
+  'Your message reached us': 'وصلتنا رسالتك',
+  // Deliberately a promise to REPLY — never a claim that an email has already gone out.
+  "We'll reply to {email}.": 'بنرد عليك على {email}.',
+  'Send another message': 'إرسال رسالة أخرى',
+  "Couldn't send your message. Check your connection and try again.": 'ما قدرنا نرسل رسالتك. تأكد من الاتصال وحاول مرة أخرى.',
   'Terms of Service': 'شروط الخدمة',
   'Privacy Policy': 'سياسة الخصوصية',
   'Ezhalah v{version}': 'إزهله الإصدار {version}',
 
   // Drawer / sidebar
   'New Chat': 'محادثة جديدة',
+  'Search complete': 'اكتمل البحث',
+  'Start a new chat to search again': 'ابدأ محادثة جديدة للبحث من جديد',
   // Sidebar chat search (owner 2026-08-24): ChatGPT-style in-sidebar search, Arabic-first. The
   // empty state + hint are deliberately calm Saudi copy — never an English "No results".
   'Search chats': 'البحث في المحادثات',
@@ -1105,8 +1110,6 @@ const AR: Record<string, string> = {
   'Display Name': 'الاسم المعروض',
   'Edit': 'تعديل',
   'Save': 'حفظ',
-  'Phone Number': 'رقم الجوال',
-  'Change': 'تغيير',
   'Apple Account': 'حساب Apple',
   'Google Account': 'حساب Google',
   "Can't be changed": 'لا يمكن تغييره',
@@ -1154,9 +1157,6 @@ const AR: Record<string, string> = {
   'Signing out…': 'جارٍ تسجيل الخروج…',
   'Deleting account…': 'جارٍ حذف الحساب…',
   'Apple sign-in isn’t available right now. Please try another method.': 'تسجيل الدخول عبر Apple غير متاح حالياً. جرّب طريقة أخرى.',
-  'Change phone number': 'تغيير رقم الجوال',
-  "Enter your new number, we'll send a verification code on WhatsApp.":
-    'أدخل رقمك الجديد، وسنرسل لك رمز تحقق عبر واتساب.',
   'Send code': 'إرسال الرمز',
   'Cancel': 'إلغاء',
   'Back': 'رجوع',

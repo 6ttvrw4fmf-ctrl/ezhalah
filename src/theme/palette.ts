@@ -55,45 +55,52 @@ export type PaletteKey = keyof typeof lightColors;
 // Dark appearance — PR#1206's palette (deep green-black paper, warm green-tinted neutrals),
 // extended with the same semantic keys the full-app sweep added to light.
 export const darkColors: Record<PaletteKey, string> = {
-  primary: '#3f8f5c', // brand green, lifted for legibility on dark ground
-  dark: '#245c44', // interaction fill (hover/press) on dark
-  tint: '#1b2a21',
-  tintFill: '#18271f',
-  userBubble: '#1f3a2c',
-  userBubbleText: '#cfe6d6',
-  tintLine: '#2a4234',
-  ink: '#e9efe9', // warm off-white
-  body: '#c2cdc5',
-  muted: '#8fa096',
-  mutedBlue: '#93a3ad',
-  line: '#243029',
-  fieldLine: '#273329',
-  pickLine: '#2c3a31',
-  chipFill: '#1b2a21',
-  chipLine: '#2a4234',
-  chipIcon: '#9fd0b2',
-  exFill: '#12281d',
+  // NEUTRAL CHARCOAL, not green-black (owner 2026-08-30). The previous dark palette tinted every
+  // surface green (#0f1712 paper, #161f19 cards) and read as "too dark/green, not polished". This is
+  // the ChatGPT-class treatment: neutral gray grounds, clear white primary text, softer gray secondary
+  // text, subtle dividers — and Ezhalah green survives ONLY as the accent (primary, selected fills,
+  // chip icons, the AI leaf), never as the ground. Every key below flows to `var(--ez-*)` on web, so
+  // this file IS the dark redesign; no component carries its own dark hex.
+  primary: '#3f9a63', // brand green, lifted for legibility on neutral dark
+  dark: '#2b6f4c', // interaction fill (hover/press)
+  tint: '#1e2320', // agent box fill — near-neutral with the faintest warm-green cast
+  tintFill: '#1c211e',
+  userBubble: '#2f2f2f', // user bubble — neutral gray (green must not dominate)
+  userBubbleText: '#ececec',
+  tintLine: '#2c332e',
+  ink: '#ececec', // primary text — clear white
+  body: '#c9cbc9', // body text
+  muted: '#8f938f', // secondary text — softer gray
+  mutedBlue: '#9aa3ab',
+  line: '#2e2e2e', // hairline dividers — subtle, not invisible
+  fieldLine: '#343434', // input / card borders
+  pickLine: '#3b3b3b', // unselected pick-box border
+  chipFill: '#262626',
+  chipLine: '#3a3a3a',
+  chipIcon: '#8fd0a8',
+  exFill: '#1f3a2c', // example chips keep the green accent fill
   exIcon: '#79c79c',
-  paper: '#0f1712', // deep green-black paper
-  surface: '#161f19', // raised cards / menu panel
-  surface2: '#1d2620',
-  segTrack: '#1d2620',
+  paper: '#171717', // screen background — charcoal
+  surface: '#212121', // raised cards / menu panels
+  surface2: '#2a2a2a', // secondary chips, tracks, quiet hover fills
+  segTrack: '#2a2a2a',
   accentLeaf: '#2fb672',
-  amberBg: '#2b2214',
-  amberInk: '#e0b070',
+  amberBg: '#2b2416',
+  amberInk: '#e3b56f',
   whatsApp: '#25d366',
   onFill: '#ffffff',
-  selFill: '#2b6f4c', // deep selected fill so onFill text keeps contrast (dark primary is lighter)
-  danger: '#e0685c', // lifted red for legibility on dark
-  dangerBg: '#3a1b16',
-  dangerLine: '#54261f',
-  rnplBg: '#1b2438',
-  rnplLine: '#2d3c5c',
+  selFill: '#2f7247', // selected control fill — brand green as ACCENT
+  danger: '#e46a5e',
+  dangerBg: '#3a1e19',
+  dangerLine: '#562a23',
+  rnplBg: '#1c2434',
+  rnplLine: '#2d3a55',
   rnplInk: '#93b2f0',
-  aqsatBg: '#20223c',
-  aqsatLine: '#343862',
-  scrim: 'rgba(0,0,0,0.55)',
+  aqsatBg: '#20223a',
+  aqsatLine: '#34385e',
+  scrim: 'rgba(0,0,0,0.62)',
 };
+
 
 // CSS custom-property name for a palette key. tokens.ts and +html.tsx MUST agree on this.
 export const cssVar = (k: PaletteKey) => `--ez-${k}`;

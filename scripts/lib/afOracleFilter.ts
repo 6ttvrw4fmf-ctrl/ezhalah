@@ -73,7 +73,37 @@ export type OracleOpts = {
   /** The literal `district_ar` values present in the index. Required whenever p_districts is set —
    *  see the p_districts case for why a literal match alone is not sound. */
   knownDistricts?: Iterable<string>;
+  /** canonical direction key → every literal `direction_ar` spelling the index stores for it.
+   *  Required whenever p_directions is set — see the p_directions case. Build it with
+   *  `directionVariantsFrom()` below from the DISTINCT values actually in search_listings_ar. */
+  directionVariants?: Record<string, string[]>;
 };
+
+/** The eight canonical direction keys the product offers (src/data/advancedFilters.ts DIRECTION_DEFS). */
+export const CANONICAL_DIRECTIONS = ['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرق', 'شمال غرب', 'جنوب شرق', 'جنوب غرب'] as const;
+
+/**
+ * Map every literal direction spelling the index stores onto its canonical key, INDEPENDENTLY of
+ * the server's norm_direction_ar(): the only rule applied is Arabic morphology — a compound
+ * direction may carry the nisba suffix «ي» on its last word («شمال شرقي» = «شمال شرق»). Measured on
+ * the live index (2026-09-02): exactly 12 distinct spellings, the 8 canonical keys plus the 4
+ * «ي»-suffixed compounds, 92,130 rows, 0 outliers.
+ *
+ * Returns `null` if ANY observed spelling maps to no canonical key or to more than one: the caller
+ * must then refuse to translate p_directions rather than silently undercount — a ninth bucket in the
+ * data is exactly the drift verify-af-unknown-count-truthful.ts exists to catch.
+ */
+export function directionVariantsFrom(observed: Iterable<string>): Record<string, string[]> | null {
+  const map: Record<string, string[]> = Object.fromEntries(CANONICAL_DIRECTIONS.map((k) => [k, [k]]));
+  for (const raw of observed) {
+    const v = String(raw ?? '').trim();
+    if (!v) continue;
+    const hits = CANONICAL_DIRECTIONS.filter((k) => v === k || v === `${k}ي`);
+    if (hits.length !== 1) return null;
+    if (!map[hits[0]].includes(v)) map[hits[0]].push(v);
+  }
+  return map;
+}
 
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
@@ -301,9 +331,21 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         break;
       }
       case 'p_rent_period':
+        // The clause's period predicate is `p_rent_period is null OR s.deal_ar <> 'إيجار' OR (…)`:
+        // under any deal other than Rent it is a no-op, and the translations below would then
+        // wrongly filter Buy rows by a rent column. The app never sends a period without
+        // p_deal='إيجار' (rentPeriodParam returns null otherwise), so this is refused, not modelled.
+        if (reqBody.p_deal !== 'إيجار') { unhandled.push(`p_rent_period=${v} with p_deal=${JSON.stringify(reqBody.p_deal ?? null)} (the clause only applies a period to Rent rows)`); break; }
         if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`);
         else if (v === 'شهري') parts.push(`payment_monthly=is.true&rent_now_pay_later=not.is.true`);
-        else unhandled.push(`p_rent_period=${v}`); // includes 'كلاهما' (both) — not yet verified
+        // BOTH periods (rentPeriod 'both' → 'كلاهما'), translated VERBATIM from the clause (2026-09-02):
+        //   p_rent_period = 'كلاهما' and (s.payment_monthly = true
+        //                                 or s.rent_period_ar = 'سنوي'
+        //                                 or (s.rent_period_ar = 'شهري' and coalesce(s.rent_now_pay_later,false)))
+        // It is the union of the two single-period arms — NOT "no period filter": a rent row whose
+        // source published no period at all stays OUT (R1.5.1; migration rent_period_both_monthly_and_annual).
+        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`);
+        else unhandled.push(`p_rent_period=${v}`);
         break;
       // beds/bath/price/floor are handled ABOVE, where the clause's exact-vs-min and
       // single-vs-combined-deal interactions are visible; here they must not be re-applied.
@@ -326,7 +368,22 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_age_max': parts.push(`property_age=lte.${v}`); break;
       case 'p_street_width_min': parts.push(`street_width_m=gte.${v}`); break;
       case 'p_street_width_max': parts.push(`street_width_m=lte.${v}`); break;
-      case 'p_directions': parts.push(`direction_ar=in.${inList(v as string[])}`); break;
+      // DIRECTIONS ARE NOT STORED CANONICALLY (found 2026-09-02, full-surface sweep). The clause
+      // compares norm_direction_ar() on BOTH sides, and the index holds «شمال شرقي» (3,978 rows) next
+      // to «شمال شرق» (the key the chip sends). A literal `direction_ar=in.(key)` therefore UNDERCOUNTS
+      // every compound direction and reports a phantom EXTRA against a correct production search.
+      // Same route as p_category / p_districts: read the observed spellings from the index, map them
+      // with a rule that owes nothing to our SQL (directionVariantsFrom), and REFUSE when no map was
+      // supplied or a requested key is not in it — never emit a filter known to undercount.
+      case 'p_directions': {
+        const dv = opts?.directionVariants;
+        if (!dv) { unhandled.push('p_directions (no directionVariants supplied — the index stores «…ي» spellings the RPC normalises, so a literal match undercounts)'); break; }
+        const keys = v as string[];
+        const missing = keys.filter((k) => !dv[k]);
+        if (missing.length) { unhandled.push(`p_directions:${missing.join('|')} (not a canonical direction key)`); break; }
+        parts.push(`direction_ar=in.${inList(keys.flatMap((k) => dv[k]))}`);
+        break;
+      }
       case 'p_rating_min': parts.push(`rating=gte.${v}`); break;
       case 'p_reviews_min': parts.push(`reviews_count=gte.${v}`); break;
       case 'p_unit_subtypes': parts.push(`unit_subtype_ar=in.${inList(v as string[])}`); break;

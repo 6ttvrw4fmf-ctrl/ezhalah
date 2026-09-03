@@ -70,8 +70,14 @@ check(
 check('3a. About styles are palette-driven (makeAbout factory), never the static light tokens',
   /function makeAbout\(pal: Record<string, string>, dark: boolean\)/.test(modal)
   && /useMemo\(\(\) => makeAbout\(pal, dark\), \[pal, dark\]\)/.test(modal));
-check('3b. the hero artwork dims for dark mode instead of glowing through it',
-  /opacity: dark \? 0\.22 : 0\.55/.test(modal));
+// 3b RETARGETED 2026-08-30 (owner: use the EXISTING eagle-over-properties artwork in «من نحن»).
+// The old pin (dark 0.22 / light 0.55) belonged to the LIGHT skyline, which would glow through a dark
+// surface and so had to be dimmed. The hero is now assets/images/eagle-night.jpg — a dark-native
+// night scene — so in dark mode it must be SHOWN, not ghosted; dimming it to 0.22 would erase the very
+// artwork the owner asked for. The rule is still a pin on the exact literals so a drive-by edit cannot
+// silently change the composition; only the truth behind the numbers changed with the asset.
+check('3b. the hero artwork is tuned per theme for the dark-native eagle art (shown in dark, softened in light)',
+  /opacity: dark \? 0\.78 : 0\.62/.test(modal) && /const ABOUT_ART = require\('\.\.\/\.\.\/assets\/images\/eagle-night\.jpg'\)/.test(modal));
 check('3c. the hero art clips and derives its text clearance from TOP_CLEAR (× can never collide)',
   /heroArt: \{ height: TOP_CLEAR \+ \d+, overflow: 'hidden'/.test(modal)
   && /heroInner: \{[^}]*paddingTop: TOP_CLEAR/.test(modal));

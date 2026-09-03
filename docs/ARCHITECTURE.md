@@ -838,6 +838,8 @@ migration-drift-guard rule in `AGENTS.md`).
 
 ## 20. Permanent rules (the non-negotiables)
 
+- **Sign-in is Google and Apple only — no phone number, no OTP (owner, 2026-09-01).** The WhatsApp-OTP path was removed at every layer (AuthModal step, account-menu change-phone flow, auth.ts helpers, country table, i18n) with zero stranded users (auth.identities that day: google 5, email 2, phone 0). `scripts/verify-no-phone-auth.ts` fails the build if any layer returns. Disabling the Phone provider in the Supabase Auth dashboard is the owner's one remaining click; the client has no path to it regardless.
+
 1. **Frontend = source of truth; backend supports it; never change UX without explicit owner approval.**
    Compare every change against this doc; if it conflicts, STOP and tell the owner. Ask if <100% certain.
 2. **Search engine, not a marketplace.** Neutral, no transactions/inventory/commission/advice; never
@@ -961,6 +963,19 @@ migration-drift-guard rule in `AGENTS.md`).
     current device self-corrects locally. **Barrier:** `scripts/verify-devices-contract.ts`
     (executes the mapper/JWT-reader/time-buckets; pins ownership SQL, endpoint shape, the client
     confirmation gate — all anti-vacuous, mutation-proven ×5).
+
+18. **Whatever the user selected in Advanced Filter must be visibly and truthfully shown on the
+    returned property card — every certified AF field, not only amenities.** (Owner, 2026-09-03.)
+    Safe by construction: AF predicates are strict and NULL-excluding, so every returned row carries
+    a real published value for every active field; the card reads that row's own value back, and
+    never a guess (UNKNOWN stays invisible, never a claim). A static feature cap must not hide a
+    selected field, and the card's vocabulary must cover the certified token vocabulary — a token
+    the RPC can filter on but the card cannot draw is a defect of this rule. Canonical text and the
+    per-rule numbering: `docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md` §12A (R12A.1–R12A.6) + R13.12;
+    owned by the AF + Trending routine (`docs/ops/AF_TRENDING_DATA_INTEGRITY_ENGINEER.md`).
+    **Status when recorded: OPEN P1, not yet satisfied** — see §12A's status paragraph for the
+    measured gap (7 certified amenity tokens undrawable, a 6-item cap, and four fields visible only
+    on Wasalt-style cards).
 
 ---
 

@@ -11,8 +11,7 @@ import { useI18n } from '@/i18n';
 import { detectDevice, readDeviceEnv } from '@/lib/deviceInfo';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { pickName, buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
-import { COUNTRIES, type Country } from '@/data/countries';
-import { isBackendLive, persistDisplayName, sendPhoneOtp, verifyPhoneOtp } from '@/lib/auth';
+import { isBackendLive, persistDisplayName } from '@/lib/auth';
 import {
   currentSessionId, lastActiveLabel, listDeviceSessions, revokeDeviceSession,
   signOutOtherDevices, type DeviceSession,
@@ -28,7 +27,7 @@ import {
 //   language   العربية (active). English listed but disabled — the product is Arabic-only
 //              (i18n setLocale guards `l !== 'ar'`); the row still calls setLocale so the day
 //              that guard lifts, this menu works unchanged.
-//   account    display-name inline edit · phone change (WhatsApp OTP) / locked Google-Apple row ·
+//   account    display-name inline edit · locked Google/Apple row (phone sign-in removed, owner 2026-09-01) ·
 //              logged-in device · delete account (destructive, kept at the bottom of the account
 //              area — never visually dominant at the menu root)
 //   signout /  in-panel confirmations with the same loading beats and the same store calls the
@@ -137,12 +136,11 @@ export default function AccountMenu({
   }));
 
   // ── Account state (moved from settings.tsx — same semantics) ───────────────────────────────────
-  const m = user?.method ?? 'phone';
+  const m = user?.method ?? 'google';
   const shownName = pickName(user, locale);
   const [name, setName] = useState(shownName);
   const [editing, setEditing] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
-  const [phOpen, setPhOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -463,17 +461,6 @@ export default function AccountMenu({
               </Pressable>
 
               <View style={s.groupDivider} />
-              {m === 'phone' ? (
-                <View style={s.field}>
-                  <View style={s.fieldHead}>
-                    <Text style={s.fieldLabel}>{t('Phone Number')}</Text>
-                    <Pressable testID="account-menu-phone-change" onPress={() => setPhOpen(true)} hitSlop={6}>
-                      <Text style={s.actText}>{t('Change')}</Text>
-                    </Pressable>
-                  </View>
-                  <Text style={s.fieldValue}>{user.sub || '+966 5XX XXX XXX'}</Text>
-                </View>
-              ) : (
                 <View style={s.field}>
                   <View style={s.fieldHead}>
                     <Text style={s.fieldLabel}>{m === 'apple' ? t('Apple Account') : t('Google Account')}</Text>
@@ -482,7 +469,6 @@ export default function AccountMenu({
                   <Text style={s.fieldValue} numberOfLines={1}>{user.sub}</Text>
                   <Text style={s.fieldNote}>{t("To change it, you'll have to delete this account and make a new one.")}</Text>
                 </View>
-              )}
               </View>
 
               {/* «الأجهزة المسجّل عليها الدخول» — the real session registry, current device first.
@@ -683,14 +669,6 @@ export default function AccountMenu({
         </Modal>
       )}
 
-      {phOpen && (
-        <ChangePhone
-          onDone={(newSub) => { updateUser({ sub: newSub }); setPhOpen(false); }}
-          onClose={() => setPhOpen(false)}
-          s={s}
-          C={C}
-        />
-      )}
     </>
   );
 }
@@ -730,113 +708,6 @@ function ShimmerDeviceCard({ s, reduced }: { s: ReturnType<typeof makeStyles>; r
   );
 }
 
-// ── Change phone number (enter → WhatsApp OTP) — moved unchanged from settings.tsx ───────────────
-function ChangePhone({
-  onDone,
-  onClose,
-  s,
-  C,
-}: {
-  onDone: (sub: string) => void;
-  onClose: () => void;
-  s: ReturnType<typeof makeStyles>;
-  C: Record<string, string>;
-}) {
-  const { t, isRTL } = useI18n();
-  const [step, setStep] = useState<'enter' | 'otp'>('enter');
-  const [cc] = useState<Country>(COUNTRIES[0]);
-  const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
-  const otpRef = useRef<TextInput>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
-  const e164 = cc.code + phone;
-  const prefixOk = cc.prefixes.some((p) => phone.startsWith(p));
-  const valid = prefixOk && phone.length === cc.len;
-  const liveErr = phone.length === 0 || valid ? '' : t('{country} numbers must start with {hint}', { country: t(cc.name), hint: t(cc.hint) });
-
-  const sendCode = async () => {
-    if (!valid || busy) return;
-    setBusy(true);
-    const r = await sendPhoneOtp(e164);
-    setBusy(false);
-    if (r.ok) { setOtp(''); setErr(''); setStep('otp'); }
-    else setErr(t(r.error ?? 'Something went wrong. Please try again.'));
-  };
-
-  const onOtp = async (val: string) => {
-    setOtp(val);
-    if (val.length === 6) {
-      setBusy(true);
-      const { user, error } = await verifyPhoneOtp(e164, val);
-      setBusy(false);
-      if (user) onDone(cc.code + ' ' + phone);
-      else { setOtp(''); setErr(t(error ?? 'The code you entered is incorrect.')); }
-    }
-  };
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={s.phRoot}>
-        <Pressable style={s.phBack} onPress={onClose} />
-        <View style={s.phCard}>
-          {step === 'enter' ? (
-            <>
-              <Text style={s.confirmTitle}>{t('Change phone number')}</Text>
-              <Text style={s.confirmSub}>{t("Enter your new number, we'll send a verification code on WhatsApp.")}</Text>
-              <View style={s.phField}>
-                <View style={s.phCc}>
-                  <Text style={{ fontSize: 18 }}>{cc.flag}</Text>
-                  <Text style={s.phCcText}>{cc.code}</Text>
-                </View>
-                <TextInput
-                  style={s.phInput}
-                  autoFocus
-                  keyboardType="number-pad"
-                  textAlign={isRTL ? 'right' : 'left'}
-                  placeholder={t('Phone number')}
-                  placeholderTextColor={C.muted}
-                  value={phone}
-                  maxLength={cc.len}
-                  onChangeText={(v) => setPhone((v.match(/\d/g) ?? []).join('').slice(0, cc.len))}
-                />
-              </View>
-              {!!(liveErr || err) && <Text style={s.phErr}>{liveErr || err}</Text>}
-              <Pressable style={[s.confirmBtn, { backgroundColor: lightColors.dark }, (!valid || busy) && { opacity: 0.4 }]} disabled={!valid || busy} onPress={sendCode}>
-                <Text style={s.confirmBtnText}>{t('Send code')}</Text>
-              </Pressable>
-              <Pressable style={s.cancelBtn} onPress={onClose}>
-                <Text style={s.cancelText}>{t('Cancel')}</Text>
-              </Pressable>
-            </>
-          ) : (
-            <>
-              <View style={s.waIcon}><Ionicons name="logo-whatsapp" size={24} color="#fff" /></View>
-              <Text style={s.confirmTitle}>{t('Enter the code')}</Text>
-              <Text style={s.confirmSub}>
-                {t('We sent a 6-digit code on WhatsApp to')}{'\n'}
-                <Text style={{ fontWeight: '700', color: C.ink }}>{cc.code} {phone}</Text>
-              </Text>
-              <Pressable style={s.otpBoxes} onPress={() => otpRef.current?.focus()}>
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <View key={i} style={[s.otpBox, otp.length === i && s.otpBoxActive]}>
-                    <Text style={s.otpDigit}>{otp[i] ?? ''}</Text>
-                  </View>
-                ))}
-                <TextInput ref={otpRef} style={s.otpHidden} keyboardType="number-pad" autoFocus value={otp} onChangeText={(v) => onOtp((v.match(/\d/g) ?? []).join('').slice(0, 6))} />
-              </Pressable>
-              {!!err && <Text style={[s.phErr, { textAlign: 'center' }]}>{err}</Text>}
-              <Pressable style={s.cancelBtn} onPress={() => { setStep('enter'); setOtp(''); setErr(''); }}>
-                <Text style={s.cancelText}>{t('Back')}</Text>
-              </Pressable>
-            </>
-          )}
-        </View>
-      </View>
-    </Modal>
-  );
-}
 
 // Theme-aware styles: rebuilt only when the resolved theme flips (useMemo above).
 function makeStyles(C: Record<string, string>, dark: boolean) {
@@ -980,22 +851,8 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     busyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 
     // Change-phone dialog (small focused OTP dialog — not the retired Settings modal).
-    phRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, ...(Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 } as any) : null) },
-    phBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.5)' },
-    phCard: { direction: 'rtl' as any, width: '100%', maxWidth: 320, backgroundColor: C.surface, borderRadius: 20, padding: 22, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 12 },
-    phField: { flexDirection: 'row', gap: 8, marginTop: 16, width: '100%' },
-    phCc: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 48, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: C.pickLine, backgroundColor: C.surface },
-    phCcText: { fontSize: 14, fontWeight: '600', color: C.ink },
     // Same iOS focus-zoom guard; fixed 48 height so the box does not reflow. minWidth: 0 pairs with
     // the 16px web bump — see the note on AuthModal.phoneInput.
-    phInput: { flex: 1, minWidth: 0, height: 48, paddingHorizontal: 14, textAlign: 'left' as const, writingDirection: 'ltr' as any, borderRadius: 12, borderWidth: 1, borderColor: C.pickLine, fontSize: Platform.OS === 'web' ? 16 : 15, color: C.ink, backgroundColor: C.surface, ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
-    phErr: { fontSize: 11.5, color: '#d05b4c', marginTop: 8, alignSelf: 'flex-start' },
-    waIcon: { width: 48, height: 48, borderRadius: 15, backgroundColor: lightColors.whatsApp, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-    otpBoxes: { flexDirection: 'row', gap: 8, marginTop: 16 },
-    otpBox: { width: 38, height: 48, borderRadius: 11, borderWidth: 1.5, borderColor: C.pickLine, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surface },
-    otpBoxActive: { borderColor: C.primary },
-    otpDigit: { fontSize: 20, fontWeight: '700', color: C.ink },
     // autoFocus'd + invisible, but iOS zooms to the focused element's font-size all the same.
-    otpHidden: { position: 'absolute', opacity: 0, width: 1, height: 1, fontSize: 16 },
   });
 }
