@@ -1032,14 +1032,34 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
 
   // Wait for the sheet to ARRIVE and finish GROWING: it is inserted ~1.3s after load at height 0 and
   // animates up to 144px. Measuring once at load reads 0 and would judge a covered control clear.
+  //
+  //  THE PROMPT IS NOT THE SAME ELEMENT ON EVERY ENGINE (measured 2026-09-03, the first WebKit and
+  //  Firefox runs this suite has ever had). This detector matched `#credential_picker_iframe` — the
+  //  id GIS uses for its FedCM prompt, which is what CHROMIUM gets. WebKit and Firefox get Google's
+  //  classic bottom-sheet instead, an iframe with NO id and a generated class:
+  //      <iframe class="L5Fo6c-PQbLGe" title="مربع حوار تسجيل الدخول باستخدام حساب Google"
+  //              src="https://accounts.google.com/gsi/...">
+  //  So on both engines this returned null and the journey skipped «Google never showed the One Tap
+  //  prompt this run» — 4/4 on each — while the prompt was demonstrably ON SCREEN in the same run:
+  //  `adv-modeswitch-back-push-vs-replace` failed to click «تصفية» 2/2 on mobile because THAT iframe
+  //  intercepted the tap. One run, two journeys, flatly contradicting each other.
+  //
+  //  The cost is the whole point of this barrier: PR #1461 fixed One Tap sitting on top of «بحث» and
+  //  the Agent composer, and the guard against that regression could only ever fire on Chromium —
+  //  on the two engines where a bottom-docked sheet is MORE likely, it reported a tidy skip.
+  //
+  //  Matching on the GIS src covers every variant, present and future, and still resolves to the
+  //  same element on Chromium.
+  const SHEET_SEL = 'iframe#credential_picker_iframe, iframe[src*="accounts.google.com/gsi"]';
   const waitForSheet = async (page) => {
     for (let i = 0; i < 40; i++) {
-      const r = await page.evaluate(() => {
-        const f = document.querySelector('#credential_picker_iframe');
-        if (!f) return null;
-        const q = f.getBoundingClientRect();
-        return q.height > 0 ? { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height) } : null;
-      });
+      const r = await page.evaluate((sel) => {
+        for (const f of document.querySelectorAll(sel)) {
+          const q = f.getBoundingClientRect();
+          if (q.height > 0) return { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height) };
+        }
+        return null;
+      }, SHEET_SEL);
       if (r) return r;
       await sleep(500);
     }
@@ -1054,11 +1074,12 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
   // self-contradictory pass line «(587-606) is clear of the prompt (558-812)». The verdict was always
   // sound (elementFromPoint + a real click decide it), but a message whose numbers disagree with its
   // own conclusion is how a future reader talks themselves out of a real finding.
-  const winnerAt = (page, sel) => page.evaluate((s) => {
+  const winnerAt = (page, sel) => page.evaluate(({ s, sheetSel }) => {
     const el = s === 'cta'
       ? [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && (e.textContent || '').trim() === 'بحث')
       : document.querySelector('textarea');
-    const f = document.querySelector('#credential_picker_iframe');
+    // Same engine-agnostic selector as waitForSheet — the FIRST prompt iframe with a real height.
+    const f = [...document.querySelectorAll(sheetSel)].find((n) => n.getBoundingClientRect().height > 0) || null;
     const q = f && f.getBoundingClientRect();
     const sheetNow = q && q.height > 0 ? `${Math.round(q.top)}-${Math.round(q.bottom)}` : 'gone';
     if (!el) return { missing: true, sheetNow };
@@ -1067,7 +1088,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), sheetNow,
              winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}` : null,
              isSelf: !!t && (t === el || t.contains(el) || el.contains(t)) };
-  }, sel);
+  }, { s: sel, sheetSel: SHEET_SEL });
 
   await withPage({ mobile }, async (page, bag) => {
     const sheet = await waitForSheet(page);
