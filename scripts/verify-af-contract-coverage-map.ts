@@ -50,7 +50,11 @@ console.log('  cites a real executing barrier, and the scoring function stays ho
 // ── 1. THE CONTRACT IS THE DENOMINATOR ───────────────────────────────────────────────────────────
 const contract = read('docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md');
 const contractRules = [...new Set(
-  [...contract.matchAll(/\*\*(R\d+\.\d+(?:\.\d+)?)\*\*/g)].map((m) => m[1]),
+  // A section may carry a letter suffix (§12A → R12A.1). Without the [A-Z]? the grader silently
+  // skipped every rule in such a section — seven of them landed ungraded on 2026-09-03 and only
+  // R13.12, numbered the ordinary way, was caught. A rule must not be able to hide behind its
+  // own numbering.
+  [...contract.matchAll(/\*\*(R\d+[A-Z]?\.\d+(?:\.\d+)?)\*\*/g)].map((m) => m[1]),
 )];
 check('the Product Contract still defines rules to measure against', contractRules.length > 100,
   `${contractRules.length} R-numbers found`);
