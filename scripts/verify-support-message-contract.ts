@@ -111,7 +111,71 @@ check('partnerships still show partners@ezhalah.com', modal.includes('email="par
 check('the form is theme-token only (no hardcoded hex in the new styles)',
   !/(sendBtn|sentCard|fieldBox|errTx)[^\n]*#[0-9a-fA-F]{3,8}/.test(modal));
 
+// ── 10. THE DRAFT SURVIVES THE DIALOG (routine #6, 2026-09-03) ──
+//
+// §7 pinned "a failed send keeps the draft on screen" and stopped there, so the likelier accident
+// stayed open: this form lives inside InfoModal's dialog, whose backdrop is a full-viewport
+// Pressable that closes on tap, and closing UNMOUNTS SupportForm along with all its useState.
+// Measured against production 2/2 in fresh desktop contexts: 126 characters typed, one click at
+// x=12, reopen → every field empty. The design note this feature shipped with says losing a typed
+// problem report is "the one outcome this form must never produce"; a network blip was guarded and
+// a stray click was not.
+//
+// The cache is EXECUTED here, not read, for the same reason the validator is.
+const cache = await import('../src/lib/supportDraft.ts');
+const DRAFT = { subject: 'مشكلة', message: 'ما تظهر لي النتائج في حي الملقا أبد', email: 'a@b.co' };
+cache.forgetSupportDraft();
+check('nothing is recalled before anything is remembered', cache.recallSupportDraft() === null);
+cache.rememberSupportDraft(DRAFT);
+check('a draft interrupted mid-typing comes back intact',
+  JSON.stringify(cache.recallSupportDraft()) === JSON.stringify(DRAFT));
+check('the recalled draft is a COPY — mutating it cannot corrupt the cache',
+  (() => { const d = cache.recallSupportDraft()!; d.message = 'tampered'; return cache.recallSupportDraft()!.message === DRAFT.message; })());
+cache.rememberSupportDraft({ subject: '', message: '', email: 'a@b.co' });
+check('an email-only draft is not worth keeping (empty subject AND message ⇒ nothing held)',
+  cache.recallSupportDraft() === null);
+cache.rememberSupportDraft({ subject: '', message: 'نص طويل نصف مكتوب', email: '' });
+check('a HALF-written draft is kept — that is the state a stray tap catches',
+  cache.recallSupportDraft()?.message === 'نص طويل نصف مكتوب');
+cache.forgetSupportDraft();
+check('forgetting clears it', cache.recallSupportDraft() === null);
+
+check('the form restores the held draft on mount, lazily (not on every render)',
+  /useState\(\s*\(\)\s*=>\s*recallSupportDraft\(\)\?\.subject/.test(modal)
+  && /useState\(\s*\(\)\s*=>\s*recallSupportDraft\(\)\?\.message/.test(modal));
+check('the form holds the draft on every keystroke, not only on failure',
+  /useEffect\(\(\) => \{ rememberSupportDraft\(\{ subject, message, email \}\); \}, \[subject, message, email\]\)/.test(modal));
+check('a DELIVERED message is forgotten, so it cannot return as a draft',
+  /forgetSupportDraft\(\);\s*\n\s*setState\('sent'\)/.test(modal));
+// The draft is one person's problem report and their email address. It is memory-only by design —
+// writing it to disk would be new at-rest retention on a PDPL surface (store.tsx: "guests:
+// session-only, nothing on disk") — and it must not outlive the session that typed it.
+// Anchored to real CODE lines — this barrier already learned once that a commented-out
+// `alter table … enable row level security` passed a naive substring check.
+const draftCode = readFileSync('src/lib/supportDraft.ts', 'utf8')
+  .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+check('the draft cache never touches disk (no localStorage / AsyncStorage in code)',
+  !/localStorage|AsyncStorage|sessionStorage/.test(draftCode));
+const store = readFileSync('src/store.tsx', 'utf8');
+check('sign-out and account deletion both drop the held draft',
+  (store.match(/forgetSupportDraft\(\)/g) || []).length >= 2);
+
+// ── 11. A RATE LIMIT IS NOT A CONNECTION PROBLEM (routine #6, 2026-09-03) ──
+//
+// The edge function answers 429 `rate_limited` after MAX_PER_HOUR, and `sendSupportMessage` has
+// always returned that reason distinctly — the form threw it away and rendered "check your
+// connection and try again" for both. Measured against production (route fulfilled with a real 429,
+// desktop): the connection copy rendered. That sends someone to fix a network that works and offers
+// a retry that cannot succeed until the hour rolls over — PART 5 shape 12.
+check('the form keeps WHY the send failed, not just that it did',
+  /setFailure\(r\.reason === 'rate_limited' \? 'rate_limited' : 'failed'\)/.test(modal));
+check('a rate limit gets its own copy, and the connection copy stays for real failures',
+  /failure === 'rate_limited'\s*\n?\s*\?\s*t\('You have sent several messages already/.test(modal)
+  && modal.includes("t(\"Couldn't send your message. Check your connection and try again.\")"));
+
 const i18n = readFileSync('src/i18n.tsx', 'utf8');
+check('the rate-limit copy is translated and says WAIT, never "check your connection"',
+  /'You have sent several messages already\. Please wait about an hour before sending another\.':\s*\n?\s*'[^']*انتظر[^']*'/.test(i18n));
 check('the success copy promises a REPLY, never a sent email',
   i18n.includes('"We\'ll reply to {email}.": \'بنرد عليك على {email}.\'')
   && !/(أرسلنا|تم الإرسال إلى support)/.test(i18n));

@@ -436,10 +436,47 @@ export async function closeMobileSidebar(page) {
 // Sidebar.tsx's `user ? (…)` branch, so for a GUEST this function could never return true no matter
 // how perfectly the drawer opened — a post-sign-out check keyed on it would skip 100% of the time
 // and read as "nothing to see", which is exactly the shape of blindness PART 9.4 makes ours to fix.
-// The guest branch has no testID, so its own «إنشاء حساب / تسجيل الدخول» CTA is the marker.
 // Opt-in rather than always-on: for a SIGNED-IN journey, accepting the guest marker would turn a
 // failed session seed from an honest skip into a confusing mid-journey failure.
-const GUEST_SIDEBAR_CTA = 'إنشاء حساب / تسجيل الدخول';
+//
+// THE GUEST MARKER MUST BE DRAWER-ONLY, AND THE FIRST ONE WAS NOT (measured 2026-09-03, routine #6).
+// This oracle used to match the CTA's visible TEXT, «إنشاء حساب / تسجيل الدخول», on the stated
+// premise that "the guest branch has no testID". That premise was simply false — Sidebar.tsx's guest
+// CTA carries `dataSet={{ testid: 'sidebar-signin-cta' }}` — and the string it used instead is NOT
+// unique to the drawer: `src/app/index.tsx` renders the identical label in the mobile TOP BAR
+// (`s.topSignIn`), added by the owner on 2026-08-19 for exactly the reason that makes it fatal here
+// ("on mobile the sidebar is a drawer, so without this the sign-in CTA is invisible until the
+// hamburger is tapped"). So on any signed-out mobile screen the oracle answered "the drawer is open"
+// before a single tap, and `openMobileSidebar` returned true having opened nothing.
+//
+// That is not a cosmetic wart — it silently voided the mobile half of `signout-leaves-no-trace`.
+// With the drawer never opened, `account-menu-trigger` cannot be on screen and no seeded chat title
+// can be in `bodyText`, so THREE assertions passed for the trivial reason that nothing was rendered:
+// "signed-in chrome is gone after sign-out", the on-screen leak check, and the post-reload leak
+// check. Assertions that cannot fail; the ledger recorded 4/4 passes. The journey's own comment
+// ("Only judgeable if the sidebar is actually on screen … a guaranteed pass that proves nothing")
+// names the trap precisely, and the guard it built was defeated by this oracle answering true.
+//
+// Measured proof, 2/2 in fresh mobile contexts against production:
+//   drawer CLOSED → CTA text matches 1 node (the top bar); [data-testid="sidebar-signin-cta"] → 0
+//   drawer OPEN   → [data-testid="sidebar-signin-cta"] → 1, and «المساعدة/تواصل معنا» is in the drawer
+// So the testID is the marker, and the guest drawer's own contents were never the problem.
+export const SIDEBAR_OPEN_MARKER = '[data-testid="sidebar-search-btn"]';
+export const SIDEBAR_OPEN_MARKER_GUEST = '[data-testid="sidebar-signin-cta"]';
+
+/**
+ * Is the sidebar ACTUALLY on screen? Exported and page-shaped-by-contract (it touches nothing but
+ * `page.locator(sel).count()`) so `scripts/verify-journey-mobile-sidebar-oracle.ts` can EXECUTE the
+ * real predicate against a fake page — the same "execute it, don't string-match it" rule the
+ * fixture-seed barrier follows. A selector-only oracle is what makes that possible: the moment this
+ * reaches for visible text again, the barrier can no longer tell the drawer from the top bar, and
+ * neither can the journeys.
+ */
+export async function sidebarIsOpen(page, { guestOk = false } = {}) {
+  if (await page.locator(SIDEBAR_OPEN_MARKER).count()) return true;
+  if (!guestOk) return false;
+  return (await page.locator(SIDEBAR_OPEN_MARKER_GUEST).count()) > 0;
+}
 // ── THE OPENING NAVIGATION: TRANSPORT FAILURE IS NOT A PRODUCT DEFECT ───────────────────────────
 // PART 9 opens by naming two opposite errors, and this function exists because the runner was
 // committing the FIRST one automatically. `run.mjs` wraps each journey in
@@ -495,11 +532,7 @@ export async function gotoOrRetryTransport(page, url, { timeout = 90_000 } = {})
 }
 
 export async function openMobileSidebar(page, { guestOk = false } = {}) {
-  const isOpen = async () => {
-    if (await page.locator('[data-testid="sidebar-search-btn"]').count()) return true;
-    if (!guestOk) return false;
-    return (await page.getByText(GUEST_SIDEBAR_CTA, { exact: false }).count()) > 0;
-  };
+  const isOpen = () => sidebarIsOpen(page, { guestOk });
   if (await isOpen()) return true;
   for (let attempt = 0; attempt < 3; attempt++) {
     const rect = await page.evaluate(() => {
