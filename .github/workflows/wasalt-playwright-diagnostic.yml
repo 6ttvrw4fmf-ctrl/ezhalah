@@ -1,0 +1,33 @@
+# Wasalt ordinary-browser-access discriminator (owner-requested, 2026-08-24) -- see GitHub issue
+# #1019 and scrapers/wasalt/diagnose_playwright.py's module docstring for the full context.
+#
+# Launches ONE stock, unmodified Playwright/Chromium session against ONE real listing, through
+# the same WASALT_PROXY_URL every other wasalt workflow uses -- no stealth, no fingerprint
+# spoofing, no challenge-solving, no CAPTCHA bypass. Diagnosis only -- no database writes, no
+# burst. Do NOT add a schedule to this workflow; it is dispatched manually/on demand only.
+
+name: Wasalt playwright diagnostic
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  diagnose:
+    name: Diagnose ordinary browser access to wasalt.sa
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Install Playwright's Chromium build
+        run: python -m playwright install --with-deps chromium
+      - name: Run the browser-access discriminator
+        env:
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+        run: exec python -m scrapers.wasalt.diagnose_playwright
