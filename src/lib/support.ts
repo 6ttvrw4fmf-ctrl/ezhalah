@@ -9,7 +9,10 @@
 import { supabase } from '@/lib/supabase';
 import { validateSupportMessage, type SupportDraft } from '@/lib/supportDraft';
 
-export { MESSAGE_MAX, MESSAGE_MIN, SUBJECT_MAX, SUBJECT_MIN, validateSupportMessage } from '@/lib/supportDraft';
+export {
+  MESSAGE_MAX, MESSAGE_MIN, SUBJECT_MAX, SUBJECT_MIN, validateSupportMessage,
+  forgetSupportDraft, recallSupportDraft, rememberSupportDraft,
+} from '@/lib/supportDraft';
 export type { SupportDraft, SupportField } from '@/lib/supportDraft';
 
 export type SupportSendResult = { ok: true } | { ok: false; reason: 'invalid' | 'rate_limited' | 'failed' };

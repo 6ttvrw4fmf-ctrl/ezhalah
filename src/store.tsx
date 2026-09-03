@@ -19,6 +19,7 @@ import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllC
 import { mergeOne, pickTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { buildSyncedName } from '@/lib/nameSync';
 import { identifyUser } from '@/lib/observability';
+import { forgetSupportDraft } from '@/lib/supportDraft';
 
 type DataSource = 'local' | 'supabase';
 
@@ -649,6 +650,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSearchCount(0);
         setActiveChatId(null);
         setPendingMessageState(null);
+        // The support form's in-progress draft is this person's typed problem report and their email
+        // address, held in memory so an accidental dialog dismissal doesn't destroy it
+        // (lib/supportDraft.ts). It belongs to the session that is ending: the next guest on this
+        // device must not reopen «تواصل مع الدعم» and find it waiting.
+        forgetSupportDraft();
         // Also wipe the GUEST bucket, so the freshly-logged-out guest doesn't inherit the prior
         // signed-in user's in-memory chats getting re-written under 'history:guest'. (user request.)
         // Sync-first for the same reason as deleteAccount: settings.tsx navigates 1.2s after this,
@@ -691,6 +697,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSearchCount(0);
         setActiveChatId(null);
         setPendingMessageState(null);
+        // "Delete everything of mine on this device" includes an unsent support draft (see signOut).
+        forgetSupportDraft();
         historyLoadedRef.current = null;
         // No signOutBackend() here — deleteAccountBackend() above already signed out, and only after
         // the auth user was actually deleted.

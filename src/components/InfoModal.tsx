@@ -16,7 +16,10 @@ import { alpha0 } from '@/theme/palette';
 import { colors, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { useApp } from '@/store';
-import { MESSAGE_MAX, SUBJECT_MAX, sendSupportMessage, validateSupportMessage, type SupportField } from '@/lib/support';
+import {
+  MESSAGE_MAX, SUBJECT_MAX, forgetSupportDraft, recallSupportDraft, rememberSupportDraft,
+  sendSupportMessage, validateSupportMessage, type SupportField,
+} from '@/lib/support';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { PLATFORM_META } from '@/data/loaderPlatforms';
 
@@ -185,17 +188,34 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
 function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => string }) {
   const { locale } = useI18n();
   const { user } = useApp();
-  // Signed-in users authenticate with Google/Apple, so `sub` IS their email — prefill it rather
-  // than making them type an address we already know. Signed-out users type their own.
-  const [email, setEmail] = useState(user?.sub && user.sub.includes('@') ? user.sub : '');
-  const [subject, setSubject] = useState('');
-  const [message, setMessage] = useState('');
+  // Closing this dialog UNMOUNTS the form, and its backdrop closes on a tap — so an in-progress
+  // draft is restored from the session-scoped cache rather than starting empty. See the long note
+  // in lib/supportDraft.ts for the measured loss and why the cache is memory, never disk.
+  // Lazy initialisers: `recallSupportDraft()` must run on MOUNT, not on every render.
+  const [email, setEmail] = useState(
+    // Signed-in users authenticate with Google/Apple, so `sub` IS their email — prefill it rather
+    // than making them type an address we already know. Signed-out users type their own. A recalled
+    // address wins: the user may have deliberately typed a different one before being interrupted.
+    () => recallSupportDraft()?.email || (user?.sub && user.sub.includes('@') ? user.sub : ''),
+  );
+  const [subject, setSubject] = useState(() => recallSupportDraft()?.subject ?? '');
+  const [message, setMessage] = useState(() => recallSupportDraft()?.message ?? '');
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [touched, setTouched] = useState(false);
+  // WHY the send failed, not just THAT it did. A rate limit and a dead connection are different
+  // events with different advice, and telling someone to "check your connection" when the server
+  // said 429 sends them to fix a network that is working, then offers a retry that cannot succeed
+  // until the hour rolls over — PART 5 shape 12, an error state whose recovery path does not work.
+  // `sendSupportMessage` has always distinguished the two; this form used to throw the answer away.
+  const [failure, setFailure] = useState<'rate_limited' | 'failed'>('failed');
 
   const draft = { subject, message, email };
   const missing: SupportField | null = validateSupportMessage(draft);
   const sending = state === 'sending';
+
+  // Every keystroke, so whatever is on screen is what comes back — including a draft too short to
+  // send, which is exactly the half-written state a stray backdrop tap catches.
+  useEffect(() => { rememberSupportDraft({ subject, message, email }); }, [subject, message, email]);
 
   async function send() {
     setTouched(true);
@@ -203,9 +223,13 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
     setState('sending');
     const r = await sendSupportMessage(draft, locale === 'en' ? 'en' : 'ar');
     if (r.ok) {
+      // Unconditional, and before the setState: if the dialog was dismissed mid-flight this
+      // component is already unmounted, and a delivered message must not come back as a draft.
+      forgetSupportDraft();
       setState('sent');
       return;
     }
+    setFailure(r.reason === 'rate_limited' ? 'rate_limited' : 'failed');
     setState('error');
   }
 
@@ -281,8 +305,12 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
 
       {state === 'error' ? (
         <View style={s.errRow}>
-          <Ionicons name="alert-circle-outline" size={15} color={colors.danger} />
-          <Text style={s.errTx}>{t("Couldn't send your message. Check your connection and try again.")}</Text>
+          <Ionicons name={failure === 'rate_limited' ? 'time-outline' : 'alert-circle-outline'} size={15} color={colors.danger} />
+          <Text style={s.errTx}>
+            {failure === 'rate_limited'
+              ? t('You have sent several messages already. Please wait about an hour before sending another.')
+              : t("Couldn't send your message. Check your connection and try again.")}
+          </Text>
         </View>
       ) : null}
 
