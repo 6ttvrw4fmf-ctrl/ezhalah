@@ -142,8 +142,10 @@ check('agent: a text turn keeps the same identity (recordChatTurn return adopted
   /const rid = recordChatTurn\(v\); if \(rid\) chatIdRef\.current = rid;/.test(agent));
 check('agent: a fresh chat clears the conversation id (New Chat + startFresh inherit nothing)',
   (agent.match(/chatIdRef\.current = null;/g) ?? []).length >= 2);
+// 2026-08-30: the capture also carries `completed` (AF narrowed the search to its final set — see
+// verify-completed-chat-state.ts). The invariant pinned here is unchanged: debounced, content-keyed.
 check('agent: capture serializes the settled state, debounced and content-keyed',
-  /const t = serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills \}\);/.test(agent)
+  /const t = serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed \}\);/.test(agent)
   && /if \(j === lastCapturedRef\.current\) return;/.test(agent)
   && /if \(busy\) return;/.test(agent));
 check('agent: restore reinstates ALL FIVE state slices (msgs, doneTyping, revealCount, afReceipt, guidedPills)',

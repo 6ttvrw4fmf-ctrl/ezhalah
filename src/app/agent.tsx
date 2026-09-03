@@ -545,7 +545,7 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
+  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript, newChat } = useApp();
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
   // which counts the `setQuery(` calls in this file precisely so a second, unsanitized writer cannot
@@ -921,6 +921,12 @@ export default function Agent() {
   // summary. The turn trades its action buttons for a read-only receipt — it is history now, and only
   // the newest result turn carries live actions.
   const [afReceipt, setAfReceipt] = useState<Record<string, string>>({});
+  // COMPLETED SEARCH (owner 2026-08-30). Set ONLY by the canonical AF stop conditions — R11.1 (the
+  // post-round honest total ≤ INTERVIEW_STOP_AT) and R11.2 (the offer probe finds no useful question
+  // left after a committed round). Never by a plain first search, never by a count alone: a fresh
+  // 20-result search with no AF round is not "finished", it is a search the user may still refine.
+  // Persisted with the transcript so Back / saved chats reopen READ-ONLY, never with a live composer.
+  const [completed, setCompleted] = useState(false);
   // Whether a results turn still has a question worth asking — resolved by a REAL probe (below),
   // never guessed. Absent = not yet known ⇒ the button stays hidden rather than promising a round
   // that would have nothing truthful to ask.
@@ -1503,7 +1509,7 @@ export default function Agent() {
     if (busy) return;
     const id = chatIdRef.current;
     if (!id) return;
-    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills });
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed });
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
@@ -1567,7 +1573,11 @@ export default function Agent() {
     // the common case (a tier with a real choice) exits after the first one. Still ONE probe per turn,
     // still passive — it renders a button and never opens the overlay (owner 2026-08-19).
     void (async () => {
-      const offer = (ok: boolean) => setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
+      const offer = (ok: boolean) => {
+        setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
+        // R11.2: an AF round was committed (afCarryRef) and NO remaining question can narrow — done.
+        if (!ok && afCarryRef.current) setCompleted(true);
+      };
       let scoped = q;
       const seen = new Set<string>(asked);
       for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
@@ -1936,6 +1946,8 @@ export default function Agent() {
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
+        // R11.1: the round narrowed the set to its FINAL size — the search is complete.
+        if (total != null && total <= INTERVIEW_STOP_AT) setCompleted(true);
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
         timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
         timers.push(setTimeout(() => {
@@ -2497,6 +2509,7 @@ export default function Agent() {
       setDoneTyping(restored.doneTyping);
       setRevealCount(restored.revealCount);
       setAfReceipt(restored.afReceipt);
+      setCompleted(restored.completed === true);
       // Dedup on restore too (owner audit, 2026-08-27): a chat saved before this fix shipped could
       // have a stray duplicate pill baked into its serialized transcript — restoring it verbatim
       // would resurrect exactly the bug this fix closes everywhere else. Deduping HERE (not just at
@@ -2729,6 +2742,7 @@ export default function Agent() {
         setBusy(false);
         setMsgs([]);
         pendingScopeRef.current = null; // New Chat inherits nothing — not even a half-answered question
+        setCompleted(false);
         lastQueryRef.current = null;    // …and not the previous conversation's accumulated filters
         pendingCityRef.current = null;  // …including the plain-city question's subject
         chatIdRef.current = null;       // …and not the previous conversation's sidebar identity
@@ -3266,6 +3280,30 @@ export default function Agent() {
             bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
         {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
             insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
+        {/* COMPLETED SEARCH (owner 2026-08-30): Advanced Filter reached the final set (R11.1) or no useful
+            question remained (R11.2). The conversation is DONE — the composer (and the mic that lives inside it)
+            is replaced by one clear action. The saved transcript stays readable; Back / reopen restore this
+            same state from `completed` rather than resurrecting a live composer. */}
+        {completed ? (
+          <View style={[s.completedWrap, { paddingBottom: insets.bottom + 12 }]}>
+            <View style={[s.col, s.completedBar]}>
+              <View style={s.completedTxWrap}>
+                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+                <Text style={s.completedTx}>{t('Search complete')}</Text>
+              </View>
+              <Text style={s.completedSub}>{t('Start a new chat to search again')}</Text>
+              <Pressable
+                onPress={() => { newChat(); router.replace({ pathname: '/', params: { fresh: String(Date.now()) } }); }}
+                accessibilityRole="button"
+                accessibilityLabel={t('New Chat')}
+                style={({ pressed, hovered }: any) => [s.newChatBtn, (pressed || hovered) && s.newChatBtnOn]}
+              >
+                <Ionicons name="add" size={18} color={colors.onFill} />
+                <Text style={s.newChatTx}>{t('New Chat')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
@@ -3429,6 +3467,7 @@ export default function Agent() {
             </Text>
           </View>
         </View>
+        )}
       </KeyboardAvoidingView>
 
       {/* ChatGPT-style feedback toast — floats top-center ABOVE the conversation (below the header),
@@ -3671,6 +3710,15 @@ const s = StyleSheet.create({
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
+  // Completed-search bar (owner 2026-08-30) — replaces the composer once AF reaches the final set.
+  completedWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
+  completedBar: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 22, paddingVertical: 16, paddingHorizontal: 18, alignItems: 'center', gap: 6, ...cardShadow },
+  completedTxWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  completedTx: { fontSize: 15, fontWeight: '800', color: colors.ink },
+  completedSub: { fontSize: 12.5, color: colors.muted, textAlign: 'center' },
+  newChatBtn: { marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.selFill, paddingVertical: 11, paddingHorizontal: 22, borderRadius: 999 },
+  newChatBtnOn: { backgroundColor: colors.dark },
+  newChatTx: { fontSize: 14, fontWeight: '800', color: colors.onFill },
   // The send/stop button is pinned to the PHYSICAL right (right:4) and never mirrors — it stays on the
   // right in Arabic too, so paddingRight leaves room for it regardless of text direction. (user request.)
   // Inline row (no absolute button): input flexes, the send/stop button sits at the end, vertically
