@@ -517,10 +517,86 @@ function dedupeInFlight<T>(cache: Map<string, Promise<T>>, key: string, run: () 
 }
 const inFlightDistrictCities = new Map<string, Promise<{ data: { city_ar: string; match_count: number }[] | null; error: unknown }>>();
 
-export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null> {
+export type SearchTableScope = Pick<SearchScope, 'p_tables' | 'p_tables2' | 'p_types2' | 'isBroadCommercial'>;
+
+// The TABLE half of a search's scope: which physical platform tables the results RPC reads, plus the
+// misfile-recovery second scope. Lifted out of resolveSearchScope — still its only other caller, so
+// there remains exactly ONE definition — because this half is PURE and SYNCHRONOUS. It needs none of
+// that function's async city resolution, so a COUNT surface can ask "which tables would the results
+// call read?" without paying for, or hand-copying, location resolution.
+//
+// WHY IT IS EXPORTED (production defect, 2026-09-03). top_cities_by_deal_ar was called with NO
+// p_tables while the results RPC was called WITH it. Five platforms went live in search_listings_ar
+// (abralosol/arkaan/therc/rawasidark/aouj, 4,314 production_ready rows) without being added to
+// RES_TABLES/COM_TABLES, and Trending immediately began counting inventory the results screen
+// excludes: measured live, الهفوف/أرض سكنية/بيع advertised 2,478 while search delivered 109.
+// Any count surface claiming to describe the search MUST scope itself through this — the
+// alternative, a second copy of the table lists, is the exact drift that caused the defect.
+// Returns null in precisely the case resolveSearchScope does: no readable table for this query.
+export function searchTableScope(q: SearchQuery): SearchTableScope | null {
   const tables = tablesFor(q);
   if (!tables.length) return null;
   const isBroadCommercial = q.category === 'Commercial' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
+
+  // HARDENING (owner PERMANENT rule 2026-07-16, merged from PR#86): always return the filtered set,
+  // even empty, rather than silently falling back to `tbls` unfiltered when the platform has no
+  // table in this particular scope (e.g. Gathern + Buy) — that fallback bug let a platform filter
+  // silently widen back to every platform.
+  const platformScope = (tbls: string[]): string[] => {
+    if (!(q.sources && q.sources.length)) return tbls;
+    const wanted = new Set(q.sources);
+    return tbls.filter((t) => wanted.has(t.replace(/_(residential|commercial)_listings$/, '')));
+  };
+  const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
+
+  const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
+  const resSel = effectiveTypes(q);
+  const resGroups = effectiveGroups(q);
+  // The selected clean type(s)/group(s) as type_ar labels. Used by BOTH misfile-recovery branches
+  // below, so it is not residential-specific despite where it was first needed.
+  const selectedTypeAr = resSel.length ? typeArForTypes(resSel) : (resGroups.length ? typeArForTypes(resGroups) : null);
+  const resMisfileTypes = isBroadResidential
+    ? RESIDENTIAL_TYPE_AR_COM
+    : (selectedTypeAr ? selectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
+  const resScopeBTables = platformScope(COM_TABLES.filter((t) => !mainTables.includes(t)));
+  const attachResScopeB = q.category === 'Residential' && !isBroadCommercial
+    && resMisfileTypes.length > 0 && resScopeBTables.length > 0;
+
+  // THE COMMERCIAL MIRROR (2026-08-29). FIX A above recovers Residential-macro rows misfiled into
+  // *_commercial_listings; the same misfile happens in the other direction and, until now, only the
+  // BROAD «فئة تجاري» search recovered it. Narrowing to a نوع made a matching listing DISAPPEAR:
+  // measured live on october_residential_listings:9618987 (محل / إيجار / سنوي / مكة المكرمة /
+  // حي بطحاء قريش) — «فئة تجاري» returned 7 including it, «فئة تجاري + نوع محل» returned 2 without
+  // it, and the same narrowed request with this scope returned 3, i.e. exactly the one misfiled row
+  // and nothing else. A narrower filter must never lose a listing the broader one returns.
+  //
+  // Scoped exactly like its mirror: the residential tables the main scope does not already read
+  // (مكتب's CleanQuery.extraTables already pulls in dealapp_residential, so that stays out), the
+  // SELECTED types only, and عمارة EXCLUDED via COMMERCIAL_TYPE_AR_RES — in a residential table
+  // عمارة is a Residential Building, so including it would leak apartment blocks into a Commercial
+  // search. resTables(q) rather than the bare constant, so the set is identical to the one the broad
+  // Commercial search scans: the narrow result is then a subset of the broad one by construction.
+  const comMisfileTypes = selectedTypeAr
+    ? selectedTypeAr.filter((t) => COMMERCIAL_TYPE_AR_RES.includes(t))
+    : [];
+  const comScopeBTables = platformScope(resTables(q).filter((t) => !mainTables.includes(t)));
+  const attachComScopeB = q.category === 'Commercial' && !isBroadCommercial
+    && comMisfileTypes.length > 0 && comScopeBTables.length > 0;
+
+  const scopeB = isBroadCommercial
+    ? { p_tables2: tables, p_types2: COMMERCIAL_TYPE_AR_COM }
+    : attachResScopeB
+      ? { p_tables2: resScopeBTables, p_types2: resMisfileTypes }
+      : attachComScopeB
+        ? { p_tables2: comScopeBTables, p_types2: comMisfileTypes }
+        : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
+
+  return { p_tables: mainTables, ...scopeB, isBroadCommercial };
+}
+
+export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null> {
+  const tableScope = searchTableScope(q);
+  if (!tableScope) return null;
 
   const lm = q.locationMatch;
   let cities: string[] | null = null;
@@ -583,59 +659,6 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   }
   if (lm?.kind === 'district' && !(q.districts && q.districts.length)) return null;
 
-  // HARDENING (owner PERMANENT rule 2026-07-16, merged from PR#86): always return the filtered set,
-  // even empty, rather than silently falling back to `tbls` unfiltered when the platform has no
-  // table in this particular scope (e.g. Gathern + Buy) — that fallback bug let a platform filter
-  // silently widen back to every platform.
-  const platformScope = (tbls: string[]): string[] => {
-    if (!(q.sources && q.sources.length)) return tbls;
-    const wanted = new Set(q.sources);
-    return tbls.filter((t) => wanted.has(t.replace(/_(residential|commercial)_listings$/, '')));
-  };
-  const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
-
-  const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
-  const resSel = effectiveTypes(q);
-  const resGroups = effectiveGroups(q);
-  // The selected clean type(s)/group(s) as type_ar labels. Used by BOTH misfile-recovery branches
-  // below, so it is not residential-specific despite where it was first needed.
-  const selectedTypeAr = resSel.length ? typeArForTypes(resSel) : (resGroups.length ? typeArForTypes(resGroups) : null);
-  const resMisfileTypes = isBroadResidential
-    ? RESIDENTIAL_TYPE_AR_COM
-    : (selectedTypeAr ? selectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
-  const resScopeBTables = platformScope(COM_TABLES.filter((t) => !mainTables.includes(t)));
-  const attachResScopeB = q.category === 'Residential' && !isBroadCommercial
-    && resMisfileTypes.length > 0 && resScopeBTables.length > 0;
-
-  // THE COMMERCIAL MIRROR (2026-08-29). FIX A above recovers Residential-macro rows misfiled into
-  // *_commercial_listings; the same misfile happens in the other direction and, until now, only the
-  // BROAD «فئة تجاري» search recovered it. Narrowing to a نوع made a matching listing DISAPPEAR:
-  // measured live on october_residential_listings:9618987 (محل / إيجار / سنوي / مكة المكرمة /
-  // حي بطحاء قريش) — «فئة تجاري» returned 7 including it, «فئة تجاري + نوع محل» returned 2 without
-  // it, and the same narrowed request with this scope returned 3, i.e. exactly the one misfiled row
-  // and nothing else. A narrower filter must never lose a listing the broader one returns.
-  //
-  // Scoped exactly like its mirror: the residential tables the main scope does not already read
-  // (مكتب's CleanQuery.extraTables already pulls in dealapp_residential, so that stays out), the
-  // SELECTED types only, and عمارة EXCLUDED via COMMERCIAL_TYPE_AR_RES — in a residential table
-  // عمارة is a Residential Building, so including it would leak apartment blocks into a Commercial
-  // search. resTables(q) rather than the bare constant, so the set is identical to the one the broad
-  // Commercial search scans: the narrow result is then a subset of the broad one by construction.
-  const comMisfileTypes = selectedTypeAr
-    ? selectedTypeAr.filter((t) => COMMERCIAL_TYPE_AR_RES.includes(t))
-    : [];
-  const comScopeBTables = platformScope(resTables(q).filter((t) => !mainTables.includes(t)));
-  const attachComScopeB = q.category === 'Commercial' && !isBroadCommercial
-    && comMisfileTypes.length > 0 && comScopeBTables.length > 0;
-
-  const scopeB = isBroadCommercial
-    ? { p_tables2: tables, p_types2: COMMERCIAL_TYPE_AR_COM }
-    : attachResScopeB
-      ? { p_tables2: resScopeBTables, p_types2: resMisfileTypes }
-      : attachComScopeB
-        ? { p_tables2: comScopeBTables, p_types2: comMisfileTypes }
-        : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
-
   return {
     // dealCombined (owner feature 2026-08-20, Filter شراء+إيجار both selected) → null, same as
     // bothDeals: af_eligibility_clause() treats p_deal IS NULL as Buy ∪ Rent(any period) — verified
@@ -644,7 +667,6 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     p_rent_period: rentPeriodParam(q),
     p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
-    p_tables: mainTables,
     p_platforms: q.sources && q.sources.length ? q.sources : null,
     p_region_ids: q.regionPin
       ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
@@ -655,8 +677,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     // age-bucket option-count RPC stays in exact parity with what Search actually returns. Uses
     // impliedCategory() (not raw q.category) — see its comment: closes the null-category leak.
     p_category: impliedCategory(q),
-    ...scopeB,
-    isBroadCommercial,
+    ...tableScope,
   };
 }
 

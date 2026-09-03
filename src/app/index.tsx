@@ -16,7 +16,7 @@ import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { buildAfSummary, grouped, type SearchQuery } from '@/data/search';
-import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams } from '@/data/remote';
+import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
 import { reconcileCommittedAf, withoutFacet, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
@@ -254,7 +254,20 @@ export default function Home() {
   // Recomputing each render is cheap; memoising on the SIGNATURE gives a stable object identity that
   // changes if and only if a real predicate changed, so the pool cache key and the refresh effect
   // below can never serve a count for a filter state the user has already left.
-  const cityAfRaw = rpcAllNarrowingParams(query);
+  //
+  // THE TABLE SCOPE RIDES ALONG (defect 2026-09-03). The narrowing params alone are not enough for
+  // Trending to describe the search: the results RPC is also scoped to a TABLE list, and Trending was
+  // sending none — so it counted every platform table in search_listings_ar while results read only
+  // RES_TABLES/COM_TABLES. The moment five platforms went live in the view without being added to
+  // those client lists, Trending began advertising inventory results cannot return (measured live:
+  // الهفوف/أرض سكنية/بيع advertised 2,478, search delivered 109). searchTableScope(query) is the SAME
+  // pure function resolveSearchScope uses for the results call, never a second copy of the lists —
+  // a copy is exactly how this drifted. null (no readable table for this query) leaves the scope off
+  // and is unreachable here in practice: tablesFor() is non-empty for every real Filter state.
+  // isBroadCommercial is dropped: it is a local branch flag for fetchListingsForQuery, NOT an RPC
+  // argument — passing it would make PostgREST reject the whole call with PGRST202.
+  const { isBroadCommercial: _cityScopeFlag, ...cityTableScope } = searchTableScope(query) ?? {};
+  const cityAfRaw = { ...rpcAllNarrowingParams(query), ...cityTableScope };
   const cityAfSig = JSON.stringify(cityAfRaw);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cityAfParams = useMemo(() => cityAfRaw, [cityAfSig]);
