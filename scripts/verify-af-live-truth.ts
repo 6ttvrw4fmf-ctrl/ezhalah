@@ -56,6 +56,14 @@ const check = (label, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
   if (!ok) failures++;
 };
+// A rule this run could not reach is NOT a rule this run proved. It is printed and counted on its
+// own, never folded into the passes — absence of a test is not evidence of correctness
+// (AF_TRENDING_DATA_INTEGRITY_ENGINEER.md PART 7, "never fake green").
+const notExercised = [];
+const unexercised = (label, why) => {
+  notExercised.push(`${label}: ${why}`);
+  console.log(`NOT EXERCISED  ${label}\n      ${why}`);
+};
 
 // Launch options are ENV-DRIVEN and default to exactly what they were, so CI (which runs
 // `playwright install` and has open egress) is byte-for-byte unaffected. They exist for the agent
@@ -389,6 +397,30 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     await page.waitForTimeout(1200);
 
     if (backAndChange) {
+      // WHICH RULE A BACK CLICK MEANS IS DECIDED BY THE STEP THE CARD IS ON, so this journey must
+      // PROVE the round advanced before it clicks (2026-09-04). R8.2.1 — Back steps to the previous
+      // question and restores its answer — and R8.2.2 — Back on question ONE cancels the round
+      // outright, leaving no card at all — are different, correct behaviours of the same button. The
+      // 1,200 ms fixed wait after the confirm above does not establish which one is armed: the
+      // advance renders when the confirm's count round-trip lands, and on the 10,625-row Riyadh
+      // apartment scope that is sometimes over that budget. A Back that arrives first is handled by
+      // production as R8.2.2 — correctly — and this journey then reports the resulting empty card as
+      // a broken R8.2.1.
+      //
+      // That is exactly what happened on 2026-09-04 (run 33855677911 and again locally): «Back
+      // restores the previous question — expected=وش المميزات المهمة لك؟ got=null», three checks
+      // red, against a production that a hand-driven browser on the SAME deployed bundle showed
+      // restoring the question, its 2,415 count and all 12 options within 2.5 s. Every other
+      // interaction in this file already polls for the state it acts on; this was the last fixed
+      // sleep standing in front of a state-dependent click.
+      const advanced = await readCardUntil((s) => s.hasCard && s.q != null && s.q !== st.q, AGENT_TURN_MS);
+      if (!(advanced.hasCard && advanced.q && advanced.q !== st.q)) {
+        // The round ended at the confirm (one useful question) — R8.2.1 has no earlier step to
+        // restore, so it cannot be exercised here. Say so; never assert it, and never call it green.
+        unexercised(`${name}: Back restores the previous question (R8.2.1)`,
+          `the round did not advance to a second question within ${AGENT_TURN_MS}ms (card=${advanced.hasCard} q=${advanced.q}) — a Back here is R8.2.2 (cancel the round), a different rule`);
+        await ctx.close(); return;
+      }
       await page.click('[data-testid="af-back"]');
       // 25s for the same reason Skip needs it: Back re-shows an EARLIER question, so its chip has to
       // be refilled with that step's number rather than arriving with a fresh narrowing, and on a
@@ -514,5 +546,14 @@ await runJourney('Residential/Buy/Apartment/Riyadh — BACK/change-answer case',
 });
 
 await browser.close();
-console.log(`\n${failures === 0 ? '✓ AF backend truth audit — all checks passed' : `✗ ${failures} check(s) FAILED`}`);
+if (notExercised.length) console.log(`\n${notExercised.length} rule(s) NOT EXERCISED this run (not proved, not counted as passes):\n  ${notExercised.join('\n  ')}`);
+// NAME the failures in the closing summary, do not merely count them. Every FAIL is already printed
+// inline, but this file is step 6 of a 16-step CI job whose later steps keep running, so the inline
+// lines end up thousands of lines from the end of the log — and the tooling an agent has for reading
+// a job log reads the TAIL. On 2026-09-04 that turned a red step into an unreadable one: the check
+// passed locally, twice, against the same production bundle, and the CI cause could not be seen at
+// all. A summary that names its failures is legible from the tail whatever ran afterwards.
+console.log(`\n${failures === 0
+  ? '✓ AF backend truth audit — all checks passed'
+  : `✗ ${failures} check(s) FAILED:\n` + REPORT.filter((r) => !r.ok).map((r) => `    • ${r.label}${r.detail ? `\n      ${r.detail}` : ''}`).join('\n')}`);
 process.exit(failures === 0 ? 0 : 1);
