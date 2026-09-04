@@ -46,19 +46,33 @@ from scrapers.common.cleanup import PLATFORMS, _probe, verdict
 from scrapers.common.db import begin_run, end_run, sb
 
 
+def window_and_sample(client, platform: str, days: int, sample: int) -> tuple[int, int, list[dict]]:
+    """Returns (rows in the window BEFORE the listing_url filter, rows that HAVE a listing_url,
+    sampled rows). The middle value is counted before sampling, so "how many deletions can never
+    be verified" stays exact no matter how few of them the sample happens to draw.
+
+    The pre-filter count is what lets run() tell the two very different meanings of "sampled 0"
+    apart. Without it, "this platform deleted nothing, so there is nothing to verify" (the safest
+    state there is) and "we deleted rows we can never verify because none carries a listing_url"
+    (a real defect) are the same number, and RC-B reports both as a blocked source."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    rows = (client.table("cleanup_deletion_log")
+            .select("id, platform, source_table, listing_id, listing_url, deleted_at")
+            .eq("platform", platform).gte("deleted_at", since).execute().data or [])
+    window_total = len(rows)
+    rows = [r for r in rows if (r.get("listing_url") or "").strip()]
+    with_url = len(rows)
+    if with_url > sample:
+        rows = random.sample(rows, sample)
+    return window_total, with_url, rows
+
+
 def sample_recent_deletions(client, platform: str, days: int, sample: int) -> list[dict]:
     """Pulls the full deletion-log window for this platform, then samples in Python — kept
     separate from the network loop so the sampling logic is unit-testable without a real DB or
     network, and so a future stratified-sampling change (e.g. weight toward older deletions,
     where a systematic bug would have had the most time to matter) only touches this function."""
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    rows = (client.table("cleanup_deletion_log")
-            .select("id, platform, source_table, listing_id, listing_url, deleted_at")
-            .eq("platform", platform).gte("deleted_at", since).execute().data or [])
-    rows = [r for r in rows if (r.get("listing_url") or "").strip()]
-    if len(rows) <= sample:
-        return rows
-    return random.sample(rows, sample)
+    return window_and_sample(client, platform, days, sample)[2]
 
 
 def classify(rows: list[dict], dead_marker, probe=None) -> list[dict]:
@@ -94,8 +108,35 @@ def run(platform: str, *, days: int = 30, sample: int = 40) -> dict:
                      notes="no dead-check registered for this platform — nothing to verify")
             return stats
 
-        rows = sample_recent_deletions(client, platform, days, sample)
+        window_total, with_url, rows = window_and_sample(client, platform, days, sample)
         stats["sampled"] = len(rows)
+        stats["window_total"] = window_total
+        stats["unverifiable"] = window_total - with_url
+
+        # A platform that deleted nothing in the window has nothing to verify, and that is the
+        # SAFEST state this job can report — but rows_seen=0 makes RC-B demote the run to
+        # ok=False with "blocked/empty source?", which is how verify_deletions:aqar and
+        # verify_deletions:wasalt read as failing every week while cleanup:aqar/cleanup:wasalt
+        # were (correctly) aborting on their anomaly gate and had never hard-deleted a single
+        # row. Opt out of RC-B for that one case ONLY, and prove it from the pre-filter count so
+        # a genuinely broken run can still never borrow the exemption.
+        if window_total == 0:
+            end_run(run_id, ok=True, rows_seen=0, rows_upserted=0, allow_empty=True,
+                    notes=(f"sampled=0 still_dead=0 live=0 unknown=0 | no deletions logged for "
+                           f"this platform in the last {days}d — nothing to verify"))
+            print(f"✓ verify_deletions {platform}: no deletions in the last {days}d window — "
+                  f"nothing to verify", flush=True)
+            return stats
+
+        # Deletions DID happen but not one of them carries a listing_url, so no probe can ever
+        # be built: these rows can never be shown to have been correctly deleted. That is a real
+        # defect in whatever wrote them, not an empty window, and it must stay red.
+        if not rows:
+            end_run(run_id, ok=False, rows_seen=0, rows_upserted=0,
+                    notes=(f"{window_total} deletion(s) in the last {days}d window but NONE has a "
+                           f"listing_url — these deletions are unverifiable"))
+            return stats
+
         results = classify(rows, dead_marker)
 
         log_rows = []
@@ -116,9 +157,11 @@ def run(platform: str, *, days: int = 30, sample: int = 40) -> dict:
             for i in range(0, len(log_rows), 200):
                 client.table("cleanup_deletion_verification").insert(log_rows[i:i + 200]).execute()
 
+        unverifiable_note = (f" unverifiable={stats['unverifiable']}"
+                             if stats["unverifiable"] else "")
         end_run(run_id, ok=True, rows_seen=stats["sampled"], rows_upserted=stats["live"],
                  notes=(f"sampled={stats['sampled']} still_dead={stats['still_dead']} "
-                        f"live={stats['live']} unknown={stats['unknown']}"))
+                        f"live={stats['live']} unknown={stats['unknown']}{unverifiable_note}"))
         print(f"✓ verify_deletions {platform}: sampled={stats['sampled']} "
               f"still_dead={stats['still_dead']} live={stats['live']} unknown={stats['unknown']}",
               flush=True)

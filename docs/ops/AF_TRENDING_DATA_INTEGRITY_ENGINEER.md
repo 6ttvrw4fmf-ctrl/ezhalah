@@ -4,6 +4,8 @@
 on any divergence** (same rule as `docs/ops/DATA_INTEGRITY_ENGINEER.md` and `docs/ops/
 SEARCH_MATCH_QA_ENGINEER.md`). If the two ever differ, update the routine to match this file.
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+
 ## §0.1 — READ FIRST, EVERY RUN (mandatory)
 
 **Before touching anything else, read these two files in this order:**
@@ -50,6 +52,20 @@ Contract — a future edit that quietly loosens either fails the build.
 
 ---
 
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
+
+On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
+whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
+cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
+a link to the fix commit/PR**. An issue that you resolve without a barrier is a a violation of this contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
+RUN: N` in your FINAL REPORT.
+
+If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
+owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
+Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
+doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
+
 ## §0 — Mandate and standing operating contract
 
 You own the correctness of:
@@ -60,6 +76,9 @@ You own the correctness of:
 - the data integrity behind every AF predicate
 - the exact relationship between what the user selects, what the UI shows, what the request
   sends, and what the backend returns
+- **what the RETURNED CARD shows about that selection** — contract §12A / R13.12 (owner
+  2026-09-03): whatever the user selected in AF must be visibly and truthfully shown on every
+  returned property card, for EVERY certified field, not only amenities
 
 **Boundary vs. sibling routines (permanent, do not absorb or duplicate):** Advanced Filter and
 Trending are carved out of routine #2's (🎖️ Senior Production Engineer) broad scope specifically
@@ -254,6 +273,34 @@ full relevant suite → merge → deploy → live production verification. Do no
 correctness bugs open. Do not ask for permission unless the decision is genuinely ambiguous (§0's
 four categories).
 
+**The owner restated this as the routine's whole job (2026-09-03, verbatim shape — this is the
+mandate, not a checklist to grade yourself against):**
+
+> FIND → PROVE → FIX → REGRESSION TEST → PERMANENT BARRIER → MUTATION PROOF →
+> MERGE/DEPLOY IF AUTHORIZED → PRODUCTION VERIFY
+
+Applies to Advanced Filter AND Trending equally, with three restatements the owner made explicit:
+
+1. **AF:** number shown = true eligible DB count = the exact set returned when clicked, and every
+   returned listing satisfies every active filter — across boundaries, UNKNOWN/NULL rules,
+   combinations, property types, Buy/Rent/periods, pagination, state, removal, Back, and every
+   certified field and option.
+2. **Trending:** it preserves the EXACT current search state, including every AF selection. Trending
+   must never widen the search, lose a predicate, change property type / deal / period / budget /
+   location, or show a count that does not match the exact eligible set (contract §14, R14.1.2,
+   R14.2.1, R14.4.1).
+3. **The card must show what was selected** — contract §12A / R13.12 (owner 2026-09-03). Every
+   certified AF field, not only amenities.
+
+**Never fake green.** A surface that could not be exercised is reported as UNKNOWN / NOT VERIFIED
+with the reason — never folded into a passing count. This is stricter than "no failures found":
+absence of a test is not evidence of correctness (§0.1, and the run-#15 rent-period lesson in
+`AGENTS.md`).
+
+Stop and ask ONLY for: a genuine source-truth or product ambiguity; a destructive or high-risk
+action; weakening a safety gate; another routine's protected ownership; a real permission boundary.
+Everything else safe and in scope is fixed in the same run.
+
 ## PART 8 — DAILY ROUTINE (this file's own cadence)
 
 Every run must include: real-user AF journeys; city Trending journeys; district Trending journeys;
@@ -312,6 +359,29 @@ Per the standing reporting rule shared by all engineers (`docs/ops/ENGINEER_ROUT
 as the run FOUND it, then the state as the run LEAVES it, counting only changes actually verified
 in production.
 
+**Every health number is DERIVED, never estimated (owner rule 2026-08-28).** Read
+`docs/ops/AF_RATING_METHODOLOGY.md`, grade this run's work in
+`scripts/lib/afContractCoverage.ts`, and take the numbers from what
+`scripts/verify-af-contract-coverage-map.ts` prints. **Do not type a health number the tool did not
+print, do not carry one forward from a previous run, and do not "calibrate" against last run's
+figure** — that is exactly what produced the inflated 9.5/10 the owner rejected on 2026-08-28 (the
+same production state measured 8.4 once every contract rule was actually in the denominator). The
+barrier is in `npm test` and fails if any of the contract's rules is missing from the map, if a
+grade cites a barrier that does not exist or never executes, or if the grade ordering is loosened.
+
+Two rating lines are NOT coverage scores and must be stated as judgements, not measurements:
+`AF SYSTEM RATING` (how close the product AS SPECIFIED is to §0's philosophy) and
+`ENGINEER PERFORMANCE RATING` (how well the run executed the 12 steps).
+
+The report must also carry, straight from the tool:
+
+```
+NEW PRODUCT CONTRACT USED FOR RATING: YES/NO
+RULES LIVE-TESTED THIS RUN: X/Y          (grade L)
+RULES BARRIER-PROTECTED: X/Y             (grade B)
+RULES WITH INSUFFICIENT COVERAGE: X/Y    (grades P + N)
+```
+
 For every bug found, include: what the user experienced; root cause; exact fix; barrier added;
 mutation proof; production verification.
 
@@ -349,6 +419,83 @@ Things that cost a previous run real time, and are NOT product defects:
    only the row's displayed label will disagree with the UI wherever `match_values` merges name
    variants (live 2026-08-25: جدة «الصفاء» = `['الصفاء','حي الصفا']` = 304 + 105 = the advertised 409).
    Count over the whole `match_values` set.
+6. **Directions are stored with the nisba «ي» and the oracle must know it** (2026-09-02). The index
+   holds «شمال شرقي», never «شمال شرق» — the key the chip sends — and the RPC normalises both sides.
+   A literal `direction_ar=in.(key)` therefore undercounts every compound direction and reports a
+   phantom EXTRA against a correct search. `buildOracleQS` now REFUSES `p_directions` unless given a
+   `directionVariants` map; build it with `loadDirectionVariants()` (`scripts/lib/afOracleLive.ts`),
+   which reads the observed spellings from the index and refuses on any unclassified spelling.
+7. **Discover distinct values with a "next value strictly greater" walk, never by paging the whole
+   index.** `order=<col>&limit=1&<col>=gt.<last>` finds all 50 source tables in 50 requests (~30 s);
+   paging 200k rows by 1,000 took ~200 ordered requests. PostgREST has no DISTINCT.
+8. **`npm test` auto-discovers every `scripts/verify-*.ts`.** A new live browser journey dropped into
+   `scripts/` runs INSIDE `npm test` — and fails it — until its `scripts/test-exclusions.txt` row
+   names its workflow home. Add the row in the same change as the file.
+9. **`p_tables` is period-DERIVED, not scope-stable** (2026-09-02). `resTables()` in
+   `src/data/remote.ts` appends the two monthly-only sources (`gathern_*`, `aqarmonthly_*`) exactly
+   when the period scope includes Monthly (شهري or كلاهما, or combined deal). A "no non-AF key moved
+   under a deal/period change" rule must assert that derivation, not equality — asserting equality
+   reports a phantom regression on a correct production (`verify-af-scope-change-live.ts`
+   `tablesFollowPeriod`).
+10. **A CANCELLED GitHub job reports neither `success` nor `failure`, and `if: ${{ !cancelled() }}`
+   skips every step behind it** (2026-09-03). That step guard exists so a FAILING step cannot hide
+   the ones after it, and it does that well — but when the JOB is cancelled (its `timeout-minutes`
+   cap, a runner loss) `cancelled()` is true and the guard skips exactly what it was written to
+   protect. On 2026-09-03 this left SIX live AF barriers unexecuted while the run looked fine.
+   A workflow whose value depends on its later steps needs an **attendance job** (`needs:` every
+   other job, `if: always()`, fail unless all concluded `success`) — a step guard cannot express
+   it. Pinned by `scripts/verify-live-check-workflow-attendance.ts`. Corollary: **when you add a
+   step to a live-check workflow, re-measure the job's budget**, and prefer a new parallel job over
+   a longer chain — a chain always has a tail, and the tail is always the newest work.
+11. **An exclusion row's promised home is not proof it runs there** (2026-09-03).
+   `scripts/test-exclusions.txt` says WHERE an excluded check runs; the registry guard only checked
+   that the named workflow FILE EXISTS. Two checks were found naming a workflow whose only mention
+   of them is a comment saying they are deliberately NOT run there — they had executed nowhere for
+   weeks. Ask `workflowInvokes()` (`scripts/lib/testRegistry.ts`), which strips comments; never a
+   bare `src.includes(name)`.
+12. **`npm ci` alone is not enough to run `npm test` in this container** (2026-09-03). Four checks
+   shell out to Python and fail in a way that reads like four broken barriers. Install
+   `curl_cffi`, `python-dotenv`, then
+   `pip install --ignore-installed PyJWT -r scrapers/requirements.txt` (the Debian-installed PyJWT
+   has no RECORD file and blocks the upgrade).
+13. **A per-file private copy of a shared vocabulary is the drift this surface keeps paying for**
+   (2026-09-03). Both shared amenity maps (`afOracleFilter.AMENITY_TOKEN_COL`,
+   `afMatrix.AMENITY_COL`) were current while a third copy inside one journey was months behind, so
+   five certified options were silently uncertifiable. Derive from the shared map; every certified
+   token's count column is `cnt_<token>`. Where a value genuinely cannot be derived (a translated
+   label), reconcile the two at LOAD time and fail loudly, not per-cohort by luck.
+14. **When a journey needs a SECOND question, do not click the narrowest option** (2026-09-03).
+   R4.3.1/R11.1 stop the interview at `INTERVIEW_STOP_AT = 25`, so the narrowest option is the
+   surest way to end it before the next question can be tested — and the resulting "it didn't
+   advance" failure is a correct production, not a defect. Pick the narrowest option leaving **>25**,
+   and report NOT EXERCISED when the cohort offers none.
+15. **A CI job log can only be read from the TAIL, so a red step in the middle of a job is invisible**
+   (2026-09-04). The live-check jobs are long chains (`af-truth` is 16 steps) and every step runs
+   behind `if: !cancelled()`, so a failing step's own summary ends up thousands of lines from the
+   end — and `get_job_logs` returns a tail. Three red steps cost most of a run to diagnose this way.
+   What actually works, in order: (a) if the failing check's summary NAMES its failures, a tail of
+   ~120 lines is enough — `verify-af-option-card-truth-live.ts` and `verify-af-live-truth.ts` both do
+   this now, and any new live check must; (b) otherwise **re-run that one check locally against
+   production** (`PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node
+   --experimental-strip-types scripts/verify-<x>.ts`), which is faster than fetching log pages and
+   gives the real assertion; (c) a check that passes locally but fails on the runner is
+   runner-latency, i.e. the §14-below class — not a product defect, and not to be reported as one.
+16. **The searchable index is REBUILT under any sweep longer than about an hour** (2026-09-04).
+   `sync_search_listings_ar` (pg_cron jobid 28) runs at `:14` past every hour and the location MV
+   refresh (jobid 17) at `:20`. A witness captured once and reused across a cohort — the chip in
+   `verify-af-full-surface-differential.ts` was captured per cohort and judged minutes later — is
+   stale by construction, and the resulting failure is a comparison between two databases, not a
+   product defect. `settleOnOneIndex()` in `scripts/lib/afSurfaceJudge.ts` is the answer: bracket a
+   re-read with an index fingerprint and report UNDECIDED when it moved. Never widen a tolerance.
+17. **Never assert on a UI state the journey has not OBSERVED itself reach** (2026-09-04). The AF
+   card renders behind a paid LLM turn measured near 40 s, and its meaning is step-dependent: R8.2.1
+   (Back steps to the previous question) and R8.2.2 (Back on question ONE cancels the round, leaving
+   no card) are different, correct behaviours of the same button. A journey that sleeps a fixed
+   1,200 ms and then clicks «رجوع» is sampling a race, and when it loses, production's CORRECT
+   R8.2.2 is reported as a broken R8.2.1. This class has produced four false accusations
+   (2026-08-24, 2026-09-03, 2026-09-04 ×2), each previously "fixed" by widening a number. It is now
+   pinned in source by `scripts/verify-af-live-journey-polling.ts` (offline, in `npm test`): poll
+   for the state, and report NOT EXERCISED when the precondition is genuinely unreachable.
 5. **Advanced Filter lives in the «الوكيل الذكي» (agent) flow, not the Normal Filter «بحث» flow.**
    Reaching it: send an Arabic request, answer the agent's disambiguation (a city that is also a
    region needs «مدينة …»; «تقصد المدينة كاملة، أو حي معيّن؟» needs «المدينة كاملة»), then click

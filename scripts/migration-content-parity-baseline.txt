@@ -1,0 +1,93 @@
+# Migration content-parity baseline — the FLOOR, not a list (routine #7, systems seam, 2026-08-30).
+#
+# Each line is a strict-era migration whose committed file already differed from the statements
+# production actually executed at the moment this barrier was created. Drift conditions #1-#4
+# compare only identifiers (version, name, function signature), so this entire class was invisible:
+# 75 of 269 strict-era files, 26%, with the file and production disagreeing about what shipped.
+#
+# THESE ARE EXEMPT SO THE BARRIER CAN EXIST AT ALL, NOT BECAUSE THEY ARE FINE. They are known debt
+# owned by whichever routine landed each one. Reconciling one means making the file match what
+# production ran (recover verbatim from supabase_migrations.schema_migrations.statements) or
+# applying the part production never got - then DELETING its line here.
+#
+# THE RATCHET: entries may only be REMOVED. verify-migration-content-parity-wired.ts fails if this
+# file ever grows, so a new divergence cannot be silenced by appending to it - it has to be fixed.
+# Same shape as scripts/test-baseline.txt and STRICT_ERA_BASELINE: history grandfathered, the
+# present held to the rule.
+#
+# Format: <14-digit version>  <migration name>
+20260815230856  trending_locations_cohort_aware_types_and_denominator
+20260815231434  mon_detect_trending_cohort_drift
+20260815233822  trending_drift_detector_monthly_multidistrict_region_probes
+20260815233850  roster_wire_wasalt_annualisation_fabricated_detector
+20260817071028  detect_aqaratikom_summary_only_capture
+20260817085146  filter_autoapply_suppression_barrier
+20260817104135  room_bedrooms_lock_no_longer_a_predicate
+20260817231433  trending_cohort_drift_full_taxonomy_sweep
+20260818221919  rent_period_product_fallback_annual_when_no_monthly_evidence
+20260818222127  rent_period_and_unlocated_contract_barriers
+20260818222637  rent_period_and_unlocated_contract_barrier_corrections
+20260818223011  unlocated_contract_barrier_guards_the_trigger_that_enforces_it
+20260818223204  retire_all_rent_period_waivers_product_decision_made_them_vacuous
+20260818223548  count_surfaces_pinned_to_canonical_period_and_located_scope
+20260818224006  period_detectors_measure_source_layer_not_classification_layer
+20260818224411  probe_contradiction_oracle_reads_matview_not_union_view
+20260818231309  trending_rpcs_rent_period_token_owner_2026_08_19
+20260819062809  cron_ordering_contract_overlay_after_sync
+20260819062842  roster_cron_ordering_contract_detector
+20260819064104  zero_new_stall_gated_on_reconfirm_coverage
+20260819230600  duplex_reachability_and_fold_detector
+20260820084921  ops_qa_diff_monthly_scope_is_residential_macro_only
+20260820090454  ops_qa_cohort_scopes_derived_from_harvest_not_guessed
+20260820092245  ops_qa_scope_both_kind_and_office_overlay_scopes
+20260820094417  mon_detect_search_scope_unreachable_inventory
+20260820194905  buy_rent_combined_trending_null_safe_and_dual_price
+20260821031350  fix_run_field_range_composite_baseline
+20260821031441  field_range_test_fixture
+20260821035944  buy_rent_combined_barriers_exactness_and_trending_null_safety
+20260821063048  price_eq_area_waivers_carry_their_proven_price_and_are_rechecked
+20260821225556  drift_gate_also_detects_committed_but_not_applied
+20260821231752  barrier_alert_kind_that_can_never_be_cleared
+20260822061643  detector_sweep_runtime_budget_barrier_and_headroom
+20260822130327  aqar_deep_fill_health_barriers
+20260822130456  fix_aqar_runtime_budget_barrier_null_blind_filter
+20260822140529  migrate_aqar_wasalt_onto_safe_cleanup_engine
+20260822142235  barrier_af_count_surfaces_carry_af
+20260822142418  canonical_location_display_labels
+20260822143719  visible_card_and_ranking_diversity_barriers
+20260822144913  deletion_barriers_11_and_12
+20260823145919  aqarmonthly_district_suffix_canonical_guard
+20260823151024  cleanup_evidence_gap_joins_the_real_run_id_and_catches_bypass
+20260823151214  cleanup_evidence_gap_limb_a_excludes_dry_runs
+20260823151946  legacy_freshness_resolves_on_current_health_not_row_age
+20260823152112  retract_the_300s_phantom_ceiling_claim_in_sweep_budget
+20260823154603  cleanup_evidence_gap_one_resolve_call_per_kind_stops_flapping
+20260824082414  sync_change_detection_compares_display_labels
+20260824114058  amenity_source_probe_carries_a_cohort
+20260824114120  fabricated_amenity_detector_honours_cohort
+20260824114140  aqar_residential_maid_driver_source_probe_evidence
+20260824114314  defabricate_probed_aqar_non_villa_maid_driver
+20260824115704  defabrication_reruns_its_watching_detector
+20260824130918  defabricate_aqar_non_villa_maid_driver_owner_authorized
+20260825072415  loc_rel_adaptive_batch_and_never_completes_barrier
+20260825180025  mon_detect_stale_no_remediation_path
+20260828211856  alert_dispatch_heartbeat_and_silence_detector
+20260828220456  p0_delivery_five_minute_slo_fast_lane
+20260828230915  p0_canonical_destination_is_github_issues
+20260829104744  sweep_duration_gates_p0_slo_and_fast_lane_survives_abort
+20260829171732  photo_capture_trust_and_has_photo_sync
+20260829172402  ranking_photo_preference_and_rotation_order_by
+20260829172433  drop_old_location_search_candidates_ar_overload
+20260829172838  ranking_photo_preference_fold_into_diversity_partition_order
+20260829200000  agent_health_telemetry_and_detector
+20260829201500  register_agent_health_detector_in_sweep
+20260829230722  mon_detect_ai_cost_health
+20260829230839  mon_selftest_ai_cost_health
+20260829231321  register_agent_edge_surface_lock_identity
+20260829234024  ai_spend_guard_config_and_attribution
+20260829234102  ai_spend_gate_and_reset
+20260829234156  ai_telemetry_silent_detector_and_dashboard
+20260829234502  mon_selftest_ai_spend_guard
+20260829235052  ai_usage_attempt_and_http_status
+20260830001500  register_agent_edge_surface_lock_identity
+20260830013418  loader_active_platforms_ar_rpc

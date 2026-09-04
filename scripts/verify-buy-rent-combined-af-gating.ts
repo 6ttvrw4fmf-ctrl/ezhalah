@@ -10,8 +10,8 @@
 // pressed) happens to still hold — silently offering a Buy-only question (dropping every Rent row
 // the moment it's answered) or a Rent-only question like rnpl/rating (dropping every Buy row), or
 // a Monthly-only signal (dropping every Annual row) — while the search still claims to cover
-// Buy ∪ Annual Rent ∪ Monthly Rent. property_age has its OWN separate eligibility gate
-// (isAgeFilterScope, never profiled against Monthly for any type) that must be fixed independently.
+// Buy ∪ Annual Rent ∪ Monthly Rent. property_age (2026-09-01: unified onto cohortAllows, see below)
+// inherits this same 3-way intersection automatically now that it has no separate gate of its own.
 //
 // EXECUTED ASSERTIONS (mirrors verify-mixed-period-af-gating.ts's 2026-08-20 upgrade): cohortAllows
 // lives in src/lib/afCohorts.ts, a PURE module with no runtime imports beyond other pure modules,
@@ -41,7 +41,6 @@ const check = (label: string, ok: boolean, detail = '') => {
 console.log('\nBuy+Rent combined (شراء+إيجار) Advanced Filter gating — 3-way intersection, never union\n');
 
 const af = codeOnly(read('src/lib/afCohorts.ts'));
-const ageGate = codeOnly(read('src/lib/ageFilterTypes.ts'));
 
 // The REAL gate + the REAL certified config.
 const Q = (over: Record<string, unknown>) =>
@@ -66,9 +65,18 @@ check('cohortAllowsCombined requires membership in Buy AND RentAnnual AND RentMo
 
 // ── cohortAllows: dealCombined must be checked and routed to cohortAllowsCombined BEFORE the
 // single-deal Buy/Rent branches — otherwise it falls through to whichever q.deal happens to hold.
-const dealCombinedBranch = /if\s*\(q\.dealCombined\)\s*return\s*cohortAllowsCombined\(cfg,\s*id\)/;
+// WIDENED 2026-09-02: the branch condition now also admits q.bothDeals. That is not a loosening —
+// remote.ts sends `p_deal: (q.bothDeals || q.dealCombined) ? null : …`, so the SEARCH already treats
+// the two identically as Buy ∪ Rent(any period); gating on dealCombined alone let the AI-chat
+// fallback certify against a single leg while searching both, the exact fall-through this check's
+// own comment above warns about. The regex still REQUIRES q.dealCombined in the condition and still
+// pins the ordering, so neither can regress.
+const dealCombinedBranch = /if\s*\(q\.dealCombined(?:\s*\|\|\s*q\.bothDeals)?\)\s*return\s*cohortAllowsCombined\(cfg,\s*id\)/;
 check('cohortAllows routes q.dealCombined to cohortAllowsCombined',
   dealCombinedBranch.test(af));
+check('…and q.bothDeals routes there too — the search sends p_deal null for both',
+  /if\s*\(q\.dealCombined\s*\|\|\s*q\.bothDeals\)\s*return\s*cohortAllowsCombined/.test(af),
+  'bothDeals is a Buy∪Rent scope at the request boundary; certifying it against one leg amputates the other');
 const combinedIdx = af.search(dealCombinedBranch);
 const buyBranchIdx = af.search(/if\s*\(q\.deal\s*===\s*'Buy'\)\s*return\s*\(cfg\.Buy\s*\?\?\s*\[\]\)\.includes\(id\)/);
 check('the dealCombined check runs BEFORE the single-deal Buy branch (order matters — combined must never fall through to Buy-only)',
@@ -111,12 +119,17 @@ check('Room has no Buy entry in COHORT_QUESTIONS (so combined mode mechanically 
 check('EXECUTED — combined mode on Room offers nothing, even for a question in its RentAnnual list',
   cohortAllows(Q({ dealCombined: true, types: ['Room'] }), 'amenities') === false);
 
-// ── property_age (AGE_QUESTION) bypasses cohortAllows entirely via its own gate — must be fixed too ─
-check("AGE_QUESTION's eligibility gate (isAgeFilterScope) also excludes dealCombined, unconditionally",
-  /if\s*\(q\.dealCombined\)\s*return\s*false;/.test(ageGate),
-  'this gate is SEPARATE from cohortAllows (property_age has its own eligibility fn) — fixing cohortAllows alone would have left this leak open, exactly like the mixed-period fix needed the same second fix');
-check('isAgeFilterScope\'s dealCombined check runs BEFORE the single-type/category checks (fails closed, not open)',
-  /if\s*\(effectiveTypes\.length\s*!==\s*1\)\s*return\s*false;\s*if\s*\(q\.dealCombined\)\s*return\s*false;/.test(ageGate));
+// ── property_age (AGE_QUESTION) UNIFIED 2026-09-01: it used to bypass cohortAllows entirely via its
+// own gate (src/lib/ageFilterTypes.ts, deleted). Now AGE_QUESTION's eligibility IS
+// cohortAllows(q, 'property_age') directly (src/data/advancedFilters.ts), so it inherits
+// cohortAllowsCombined()'s 3-way intersection automatically — proved here EXECUTED, not by reading
+// a second file's source, because there is no longer a second file to read.
+check('EXECUTED — property_age also excludes dealCombined (never certified for RentMonthly, so the 3-way intersection is empty)',
+  cohortAllows(Q({ dealCombined: true, types: ['Apartment'] }), 'property_age') === false
+  && cohortAllows(Q({ dealCombined: true, types: ['Shop'], category: 'Commercial' }), 'property_age') === false);
+check('EXECUTED — property_age still fires on plain Buy and plain Annual Rent once dealCombined is false',
+  cohortAllows(Q({ deal: 'Buy', dealCombined: false, types: ['Apartment'] }), 'property_age') === true
+  && cohortAllows(Q({ deal: 'Rent', rentPeriod: 'annual', dealCombined: false, types: ['Apartment'] }), 'property_age') === true);
 
 console.log(failures === 0
   ? '\n✓ Buy+Rent combined AF gating intact: 3-way intersection, no Buy-only/Rent-only/Monthly-only leak\n'

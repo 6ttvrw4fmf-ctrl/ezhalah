@@ -12,7 +12,6 @@ import { normalizeArabic } from '../lib/chatSearch';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { combinedBudgetParts } from '@/lib/combinedBudget';
-import { rediversifyByPlatform } from '@/lib/platformDiversity';
 import { bedroomTokensPure } from '@/lib/roomBedrooms';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -179,6 +178,24 @@ export type SearchQuery = {
   // (p_street_width_min / p_directions) — strict, unknown excluded, never invented.
   streetWidthMin?: number | null;
   directions?: string[] | null;
+  // THE RECEIPT FOR EVERY AF PREDICATE ABOVE (owner P0 2026-09-01). Each committed Advanced Filter
+  // answer, in commit order — the same {id, keys, labels} the results-turn pills already render.
+  //
+  // WHY IT IS ON THE QUERY AND NOT A SIDE CHANNEL. The Filter home, its Trending city/district
+  // counts and its «بحث» all derive from ONE object: the shared store's SearchQuery. Before this,
+  // the AF predicates lived only in agent.tsx component state, so returning to the Filter screen
+  // and pressing «بحث» — via a Trending card or not — silently re-ran the PRE-AF search: measured
+  // live on production 2026-09-01, الرياض/إيجار/سنوي/تجاري/محل + «جديد» went 243 → 566 with
+  // p_is_new_construction simply absent from the request. A second carrier could drift from this
+  // one; the same object cannot drift from itself.
+  //
+  // IT IS ALSO THE PERMISSION SLIP. sanitizeForFilterRestore carries the AF predicates into the
+  // Filter store IF AND ONLY IF these facets ride with them, because the Filter screen renders
+  // exactly these as removable chips. That keeps the rule the sanitizer was written for intact —
+  // "no active filter without a visible control to remove it" — instead of bypassing it. An AF
+  // predicate with no facet beside it is still dropped, which is what the sidebar restore of a
+  // foreign conversation must keep doing (the measured ratingMin ⇒ 0-of-11,552 leak).
+  afFacets?: { id: string; keys: string[]; labels: string[] }[] | null;
 };
 
 // Parse a raw digit string ("1,200" / "300" / "") → a positive number, or null when empty/invalid.
@@ -663,10 +680,16 @@ export function querySummaryLine(q: SearchQuery): string {
   return parts.join(' · ');
 }
 
-// Numbers are always shown in Western/Latin digits (PRD rule), but the user may type the
-// amount in Arabic-Indic (٠-٩) or Persian (۰-۹) digits. Fold those onto 0-9, then keep only
-// the digits — so a price typed in either script normalizes to the same Latin value.
-export function toLatinDigits(input: string): string {
+// DIGITS ONLY — folds Arabic-Indic (٠-٩) / Persian (۰-۹) onto 0-9 and then DISCARDS everything
+// that is not a digit. For a price or area BOX, where the whole field is one number, that is exactly
+// right.
+//
+// It is named digitsOnly, not toLatinDigits, because @/lib/inputHygiene exports a toLatinDigits that
+// folds the same digits and keeps the rest of the string. Two functions, one name, opposite
+// treatment of the text around the number — and agent.ts imported the wrong one. Live effect:
+// normalizeForReadback() rendered «ابغى شقة … ٣ غرف بسعر ٧٠٠٠٠» as the read-back «370000», and
+// parseQuery() saw no digits at all, losing both the bedroom count and the budget. (2026-09-01)
+export function digitsOnly(input: string): string {
   let out = '';
   for (const ch of input) {
     const code = ch.charCodeAt(0);
@@ -752,17 +775,52 @@ function listingPriceValue(price: string): number {
   return num;
 }
 
+// A rent row's ANNUAL value — the unit the «Rent budget (yearly basis)» box and the RPC's
+// price_annual bound both speak. listingPriceString() renders a rent row AT price_annual, except a
+// source-published MONTHLY one, which it divides by 12 for the /mo card line; ×12 puts that back. No
+// period is ever guessed: a row whose source published none never took the ÷12 branch, so its
+// displayed figure already IS price_annual. (owner rule: period = source.)
+function rentAnnualValue(l: Listing): number {
+  const v = listingPriceValue(l.price);
+  return l.rentPeriod === 'monthly' ? v * 12 : v;
+}
+
 // A predicate deciding whether a listing fits the query's budget — or null when there's no usable
 // price filter (broaden). Mirrors interpretPrice's magnitude logic and handles three Buy modes:
 //   • a fixed total ceiling (large Buy figure, or per-m² × a known exact size);
 //   • a per-m² price with NO fixed size → compare each listing by its OWN area (total ÷ area ≤ rate),
 //     which is what lets "villa at SAR 1,000/m²" filter correctly without an entered area;
 //   • Rent → annual ceiling (monthly ×12, or a large figure as-is). (PRD §6.2)
+// …and, under COMBINED شراء+إيجار, a fourth mode: two independent budgets split by the row's own
+// deal, exactly as the RPC splits them. See the block inside.
 function priceFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
   // Explicit price RANGE (filter UI): min only → ≥, max only → ≤, both → between. The bounds are in the
   // SAME unit as the displayed price (Buy total; Rent annual or monthly per the chosen period), so they
   // compare directly. Wins over the legacy band / single ceiling. HARD (enforced in runSearch).
   const lo = numOrNull(q.priceMin), hi = numOrNull(q.priceMax);
+  // COMBINED شراء+إيجار (owner 2026-08-20) carries TWO independent budgets — «Buy budget»
+  // (priceMin/priceMax) and «Rent budget (yearly basis)» (priceMinRent/priceMaxRent) — and the RPC
+  // splits them by the ROW's deal exactly that way (location_search_candidates_ar, p_deal IS NULL
+  // branch: 'بيع' bounded by p_price_min/max on price_total, 'إيجار' by p_price_min_rent/max_rent on
+  // price_annual). This net used to apply the BUY pair to every row, rent included, so a Buy floor of
+  // 500,000 deleted every rent card the server had correctly returned — while the headline count,
+  // which comes from the RPC, still counted them. Split it the same way the server does.
+  // (found 2026-09-02; scripts/verify-combined-deal-budget-split.ts)
+  const rentLo = q.dealCombined ? numOrNull(q.priceMinRent) : null;
+  const rentHi = q.dealCombined ? numOrNull(q.priceMaxRent) : null;
+  if (q.dealCombined && (lo != null || hi != null || rentLo != null || rentHi != null)) {
+    return (l) => {
+      if (l.deal === 'Buy') {
+        return lo == null && hi == null ? true : withinValue(l.price, lo ?? 0, hi ?? Infinity);
+      }
+      if (rentLo == null && rentHi == null) return true;   // empty box = no opinion, never a 0 bound
+      // An unreadable price («Price on request») is NaN, and every NaN comparison is false — so a row
+      // we cannot price is excluded by a STATED budget without needing a guard, and kept by the
+      // early return above when none was stated. Both directions are pinned by the barrier.
+      const annual = rentAnnualValue(l);
+      return annual >= (rentLo ?? 0) && annual <= (rentHi ?? Infinity);
+    };
+  }
   if (lo != null || hi != null) {
     const min = lo ?? 0, max = hi ?? Infinity;
     return (l) => withinValue(l.price, min, max);
@@ -1267,7 +1325,7 @@ function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): L
   return out;
 }
 
-export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean; visitOffset?: number }): SearchResult {
+export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean }): SearchResult {
   let eligible = pickPool(q, pools)
     // bothDeals (agent searched without knowing rent/buy) or dealCombined (Filter شراء+إيجار both
     // selected) → show BOTH; otherwise filter to the single selected deal. supports() checks the
@@ -1400,32 +1458,14 @@ export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFa
   // Show-More-to-200 paging is a UI increment on top; the engine returns the ranked set.) (user.)
   // TOTAL matches (before any display cap) — drives the «more than 25» message + the show-all button.
   const total = listings.length;
-  // QUALITY-PRESERVING repeat-visit rotation (user 2026-06-27): on a repeat search of the SAME filter
-  // (visitOffset advances per visit, persisted by the caller), rotate a 25-window over the TOP-quality
-  // pool so a return visitor sees DIFFERENT high-quality listings — deterministic, never random, always
-  // inside the same filters. First visit (offset 0) shows the top 25 as usual.
-  // NEVER rotate an explicitly-sorted result set (bug-hunt 2026-07-30): sortListings just ordered the
-  // full set by the user's objective key (cheapest/newest/…), so a rotated window would show rank #26
-  // first under a «مرتبة حسب الأقل سعراً» note — a visible lie. Rotation is for the default relevance
-  // order only.
-  // ROTATION MUST NOT COST PLATFORM DIVERSITY (Search QA 2026-08-16). The incoming order is the
-  // platform round-robin from remote.ts's orderByScope, which necessarily ends in a single-platform TAIL
-  // once the smaller platforms run out (live: مستودع/بيع/الرياض — aqar 55, wasalt 10, aldarim 2, dealapp 2
-  // → positions ~20+ are all aqar). Rotating a 25-window by 25/50/… landed a RETURNING visitor squarely
-  // inside that tail and rendered a 100%-single-platform first page while 4 platforms had real matches —
-  // owner PERMANENT rule 2026-07-13 Rule 2 broken by a rule-2026-06-27 feature. Live-reproduced 2026-08-16:
-  // same filters, same session — visit 1 (off=0) 4 platforms, visits 2-3 (off=25/50) 1 platform, visit 4
-  // (off=6) 4 platforms. Fix: rotate as before (the returning visitor still gets DIFFERENT listings), then
-  // re-interleave ONLY the rotated window by platform so the mix survives. No listing is added, removed or
-  // re-filtered — every row here already passed every filter (MATCH FIRST, DIVERSIFY SECOND).
-  if (!q.sort && opts?.visitOffset && total > 25) {
-    const POOL = Math.min(total, 100);
-    const off = (opts.visitOffset * 25) % POOL;
-    if (off > 0) {
-      const rotated = [...listings.slice(off, POOL), ...listings.slice(0, off)];
-      listings = [...rediversifyByPlatform(rotated, (l) => l.source), ...listings.slice(POOL)];
-    }
-  }
+  // CONTROLLED ROTATION now lives entirely server-side (owner PERMANENT rule, 2026-08-29 — see
+  // src/lib/rotationSeed.ts + location_search_candidates_ar's p_rotation_seed). `listings` here is
+  // already in the RPC's final order (match → diversity → photo preference → rotation), so there is
+  // nothing left for runSearch to rotate — REMOVED the old client-side 25-window rotate-then-
+  // rediversify (2026-06-27, hardened 2026-08-16) that used to sit here, which windowed an
+  // ALREADY-FETCHED in-memory array under the old lifetime BROWSE_CAP=100 and could not stay correct
+  // once pagination went unbounded (PR #1267): a real "next 100" server page is a genuinely new
+  // fetch, not a slice of one fixed array.
   // Return up to the system max (200) so "show all" reveals beyond the first 25 with NO refetch; the UI
   // shows the first 25 and only reveals the rest when the user taps «عرض جميع النتائج». (user: first 25 + show-all.)
   // Reveal cap raised 200→1500 (owner 2026-07-08): with filter-first the fetched candidates are already
@@ -1472,6 +1512,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   // asked — i.e. no other relaxable filter is active. Otherwise fall through to the honest generic
   // fallback below rather than assert a specific cause this check cannot actually verify.
   const hasOtherFilters = !!(q.priceInput || q.priceBand || q.priceMin != null || q.priceMax != null
+    || q.priceMinRent != null || q.priceMaxRent != null   // the combined-mode rent budget narrows too
     || (q.districts && q.districts.length) || q.detail || q.contextBeds || (q.contextBedsList && q.contextBedsList.length)
     || q.contextSize || q.areaMin != null || q.areaMax != null || q.type || (q.types && q.types.length) || effectiveGroups(q).length);
   if (explicitPlace && !hasOtherFilters && countWith({ priceInput: '', priceBand: null, priceMin: null, priceMax: null, detail: null, contextBeds: null, contextBedsList: null, contextSize: null, areaMin: null, areaMax: null, type: null, types: null, typeGroups: null }) === 0) {
@@ -1517,7 +1558,11 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
       return t("No matches for that property type here — other types are available. Want me to broaden the type?");
     }
   }
-  if ((q.priceInput || q.priceMin || q.priceMax) && countWith({ priceInput: '', priceMin: null, priceMax: null }) > 0) {
+  // "Remove the price filter" must remove ALL of it. Under dealCombined the budget is TWO pairs, and
+  // clearing only the Buy one leaves the rent half still biting — which would make this probe count
+  // zero and silently decline a relaxation the user could genuinely use. (2026-09-02, same fix.)
+  if ((q.priceInput || q.priceMin || q.priceMax || q.priceMinRent || q.priceMaxRent)
+      && countWith({ priceInput: '', priceMin: null, priceMax: null, priceMinRent: null, priceMaxRent: null }) > 0) {
     return t("No listings in that price range — there are matches outside it. Want me to remove the price filter?");
   }
   if (q.districts?.length && countWith({ districts: undefined }) > 0) {

@@ -145,6 +145,11 @@ if [ -n "$MISSING" ]; then
 fi
 
 echo "Clean, on main, matches origin/main, required Vercel env present ($LOCAL). Deploying..."
+# Capture what the canonical alias serves BEFORE deploying. If the fresh deployment's own unique URL
+# can never be read below (deployment protection / a cold-start URL nobody has hit yet), this is the
+# fallback proof that the alias actually MOVED to something new.
+PRE_BUNDLE="$(curl -s -H 'Cache-Control: no-cache' "https://ezhalah-app.vercel.app/?_=$(date +%s%N)" | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
+
 # Capture the unique deployment URL vercel prints, so we can PROVE the canonical alias actually
 # received THIS build (not just that ezhalah-app.vercel.app serves some valid old bundle).
 DEPLOY_LOG="$(mktemp)"
@@ -152,80 +157,91 @@ npx vercel --prod --yes | tee "$DEPLOY_LOG"
 DEPLOYED_URL="$(grep -oE 'https://[a-z0-9.-]+\.vercel\.app' "$DEPLOY_LOG" | tail -1 || true)"
 rm -f "$DEPLOY_LOG"
 
-# POST-DEPLOY ASSERTION: the served bundle MUST reference the Supabase host, proving the
-# EXPO_PUBLIC_* vars were actually inlined at build time. A green Vercel build with a null client
-# is the exact failure this catches.
-#
-# This POLLS with a bounded retry loop rather than a single check. Right after `vercel --prod`, the
-# production alias can take tens of seconds to propagate the fresh bundle across Vercel's CDN, so the
-# old `sleep 3` + single curl frequently WARNED on perfectly healthy deploys (false alarm — a manual
-# re-check seconds later always found the marker; e.g. PR #48/FIX A, PR #58/dpl_2gVFqg). We now retry
-# every 5s for up to ~90s and succeed the instant `supabase.co` appears. It is WARNING-ONLY and NEVER
-# fails the script or triggers a rollback — a false negative must not block a good deploy.
-# (Env inlining is a BUILD-TIME property of the Vercel PROJECT env: if ANY served bundle references
-# supabase.co, the vars are present and every build — including this one — inlines them, so polling
-# the alias is sufficient; we don't need to resolve the exact just-deployed bundle hash.)
+# ── POST-DEPLOY BUNDLE VERIFICATION (rewritten 2026-09-03 after run 33706257876) ───────────────────
+# This used to be TWO sequential checks. One polled ANY currently-served bundle for `supabase.co`
+# (warning-only, ~90s) — it could pass on a STALE bundle that never changed, proving nothing about
+# THIS deploy. The other read the fresh deployment's unique URL ONCE, with no retry, to learn the
+# expected bundle hash for dtg_alias_serves (blocking, ~90s) — on 2026-09-03 that single curl
+# returned nothing in 69ms on a perfectly healthy deploy, so it warned-and-skipped and the propagation
+# match never actually ran. Merged into ONE bounded, cache-busted, BLOCKING loop that proves BOTH
+# properties before the baseline is allowed to advance:
+#   (a) the canonical alias serves a bundle dtg_alias_serves() recognizes as the just-deployed one —
+#       retried every attempt instead of read once outside the loop; and, only if the deployment's
+#       own URL never yields a hash at all, a fallback proof that the alias moved away from PRE_BUNDLE;
+#   (b) that bundle's content includes supabase.co, proving the EXPO_PUBLIC_* vars inlined.
+# Window is 5 minutes, not 90s: CDN propagation is the documented false-negative mode here (PR
+# #48/FIX A, PR #58/dpl_2gVFqg) — a bounded wait is cheaper than a false "investigate now" alarm, and
+# cheaper than blocking baseline advance on a deploy that is actually fine. BLOCKING: do not weaken
+# this into a warning again — a bundle that never proves the Supabase config is the 2026-07-10 P0
+# signature, and never proving the alias moved is the 2026-07-21 off-target signature.
 echo ""
-echo "Verifying the served bundle has the Supabase config baked in (polling up to ~90s for CDN propagation)..."
-SUPA_OK=0
-LIVE_BUNDLE=""
-POLL_DEADLINE=$(( SECONDS + 90 ))
+echo "Verifying the canonical alias serves the new, Supabase-configured bundle (polling up to 5m)..."
+NEW_BUNDLE=""
+ALIAS_BUNDLE=""
+BUNDLE_OK=0
+# ── WHY the read failed, not just that it did (routine #7, 2026-09-03, issue #1563) ───────────────
+# 14 consecutive deploys (runs 242-254) ended `failure` here reporting `alias now serving: <none>`
+# and `expected: <never readable>` — EMPTY reads, which is a different fact from "the alias did not
+# move" and the message could not tell them apart. Vercel confirms every one of those deploys reached
+# READY/production, so the deploys shipped and only this check failed; meanwhile the very same curl,
+# cache-buster included, reads the alias fine from outside CI, and the hydration gate loads the same
+# URL in a real browser seconds later. So the cause is in HOW the runner's read fails, and nothing in
+# the log recorded it. These vars capture the HTTP status and body size of the LAST read of each URL,
+# in the SAME request (`-o` + `-w`, no extra traffic — deliberately, since request volume is itself
+# one of the hypotheses), and the failure block prints them. Diagnostics only: no control flow, no
+# threshold and no gate behaviour changes here — this step stays BLOCKING and still exits 1.
+ALIAS_BODY="$(mktemp)"; NEW_BODY="$(mktemp)"
+ALIAS_HTTP=""; NEW_HTTP=""
+ALIAS_BYTES=0; NEW_BYTES=0
+POLL_DEADLINE=$(( SECONDS + 300 ))
 while [ "$SECONDS" -lt "$POLL_DEADLINE" ]; do
-  LIVE_BUNDLE="$(curl -s https://ezhalah-app.vercel.app/ | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
-  if [ -n "$LIVE_BUNDLE" ] && curl -s "https://ezhalah-app.vercel.app/$LIVE_BUNDLE" | grep -q "supabase.co"; then
-    SUPA_OK=1
+  if [ -z "$NEW_BUNDLE" ] && [ -n "${DEPLOYED_URL:-}" ]; then
+    NEW_HTTP="$(curl -s -o "$NEW_BODY" -w '%{http_code}' -H 'Cache-Control: no-cache' "${DEPLOYED_URL}/?_=$(date +%s%N)" || echo 000)"
+    NEW_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$NEW_BODY" 2>/dev/null | head -1 || true)"
+  fi
+  ALIAS_HTTP="$(curl -s -o "$ALIAS_BODY" -w '%{http_code}' -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "https://ezhalah-app.vercel.app/?_=$(date +%s%N)" || echo 000)"
+  ALIAS_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$ALIAS_BODY" 2>/dev/null | head -1 || true)"
+  MATCHED=0
+  # dtg_alias_serves: succeeds ONLY when the canonical alias serves the exact just-deployed bundle
+  # (same predicate the regression test asserts) — never on an empty/stale read.
+  if dtg_alias_serves "$NEW_BUNDLE" "$ALIAS_BUNDLE"; then
+    MATCHED=1
+  elif [ -z "$NEW_BUNDLE" ] && [ -n "$ALIAS_BUNDLE" ] && [ "$ALIAS_BUNDLE" != "$PRE_BUNDLE" ]; then
+    MATCHED=1 # DEPLOYED_URL never resolved a bundle; the alias moving away from PRE_BUNDLE is the fallback proof it advanced.
+  fi
+  if [ "$MATCHED" = 1 ] && curl -s -H 'Cache-Control: no-cache' "https://ezhalah-app.vercel.app/$ALIAS_BUNDLE?_=$(date +%s%N)" | grep -q "supabase.co"; then
+    BUNDLE_OK=1
     break
   fi
   sleep 5
 done
-if [ "$SUPA_OK" = 1 ]; then
-  echo "OK: live bundle ($LIVE_BUNDLE) references supabase.co — client will initialize."
+ALIAS_BYTES="$(wc -c < "$ALIAS_BODY" 2>/dev/null || echo 0)"
+NEW_BYTES="$(wc -c < "$NEW_BODY" 2>/dev/null || echo 0)"
+ALIAS_HEAD="$(head -c 200 "$ALIAS_BODY" 2>/dev/null | tr -d '\n' || true)"
+rm -f "$ALIAS_BODY" "$NEW_BODY"
+if [ "$BUNDLE_OK" = 1 ]; then
+  echo "OK: https://ezhalah-app.vercel.app serves $ALIAS_BUNDLE (expected: ${NEW_BUNDLE:-<unreadable from $DEPLOYED_URL — matched via PRE_BUNDLE diff instead>}) and it references supabase.co."
 else
-  echo "WARNING: could not confirm supabase.co in the served bundle after ~90s (last seen: ${LIVE_BUNDLE:-none})."
-  echo "This is warning-only and does NOT fail the deploy. If search shows «حاول مرة ثانية» app-wide, the"
-  echo "env vars did NOT inline — investigate before declaring the deploy healthy (2026-07-10 P0 signature)."
-  echo "If search works fine, this was just slow CDN propagation — re-grep the served bundle to confirm."
-fi
-
-# ── CANONICAL-URL PROPAGATION ASSERTION (owner P0 2026-07-21): prove https://ezhalah-app.vercel.app
-# is actually serving THE BUILD WE JUST DEPLOYED, not merely a valid-looking older one. Compares the
-# fresh deployment's entry-bundle hash to what the canonical alias serves. A mismatch after the full
-# poll window is the unambiguous "the alias didn't move / deployed off-target" signature (the exact
-# 2026-07 class of incident: vercel --prod reports READY but the production alias never advanced —
-# fix is `vercel promote <deployment>`). Only runs when we could parse the deployment URL.
-echo ""
-if [ -n "${DEPLOYED_URL:-}" ]; then
-  echo "Verifying https://ezhalah-app.vercel.app is serving THIS deployment ($DEPLOYED_URL)..."
-  NEW_BUNDLE="$(curl -s "$DEPLOYED_URL" | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
-  if [ -z "$NEW_BUNDLE" ]; then
-    echo "WARNING: could not read the fresh deployment's entry bundle from $DEPLOYED_URL — skipping"
-    echo "the propagation match. Manually confirm https://ezhalah-app.vercel.app reflects your change."
-  else
-    ALIAS_MATCH=0
-    DEADLINE=$(( SECONDS + 90 ))
-    while [ "$SECONDS" -lt "$DEADLINE" ]; do
-      ALIAS_BUNDLE="$(curl -s https://ezhalah-app.vercel.app/ | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
-      # dtg_alias_serves: succeeds ONLY when the canonical alias serves the exact just-deployed
-      # bundle (same predicate the regression test asserts) — never on an empty/stale read.
-      if dtg_alias_serves "$NEW_BUNDLE" "$ALIAS_BUNDLE"; then ALIAS_MATCH=1; break; fi
-      sleep 5
-    done
-    if [ "$ALIAS_MATCH" = 1 ]; then
-      echo "OK: https://ezhalah-app.vercel.app is serving the just-deployed bundle ($NEW_BUNDLE). Target confirmed."
-    else
-      echo "❌ TARGET FAILURE: https://ezhalah-app.vercel.app is NOT serving the deployment you just made."
-      echo "   deployed bundle:      $NEW_BUNDLE  (at $DEPLOYED_URL)"
-      echo "   canonical URL serving: ${ALIAS_BUNDLE:-<none>}"
-      echo "   The production alias did not advance to this deployment. Promote it explicitly:"
-      echo "     npx vercel promote $DEPLOYED_URL --yes"
-      echo "   then re-verify. Do NOT report this deploy as live until the canonical URL matches."
-      exit 1
-    fi
-  fi
-else
-  echo "WARNING: could not parse the deployment URL from 'vercel --prod' output — cannot auto-verify"
-  echo "canonical-URL propagation. Manually confirm https://ezhalah-app.vercel.app reflects your change"
-  echo "(compare its served entry-*.js hash to the new deployment)."
+  echo ""
+  echo "❌ REFUSING TO ADVANCE THE BASELINE: the canonical alias never proved it serves a new,"
+  echo "   Supabase-configured build after 5 minutes."
+  echo "   before deploy:                 ${PRE_BUNDLE:-<none>}"
+  echo "   expected (from $DEPLOYED_URL):  ${NEW_BUNDLE:-<never readable>}"
+  echo "   alias now serving:              ${ALIAS_BUNDLE:-<none>}"
+  # An EMPTY read and a STALE read are different failures and used to print identically (issue #1563).
+  echo "   last alias read:                HTTP ${ALIAS_HTTP:-000}, ${ALIAS_BYTES} bytes"
+  echo "   last deployment-URL read:       HTTP ${NEW_HTTP:-000}, ${NEW_BYTES} bytes"
+  echo "   alias body starts:              ${ALIAS_HEAD:-<empty>}"
+  echo "   Read those two lines FIRST. HTTP 200 with a healthy byte count but no entry- hash means the"
+  echo "   page rendered without the bundle reference; 401/403 means deployment protection or a bot"
+  echo "   challenge; 429 means this loop's own request rate; 000 means the runner could not connect"
+  echo "   at all. Only the first of those is a deploy problem."
+  echo "   The Vercel deploy already happened (this check cannot un-deploy it) — but the baseline will"
+  echo "   NOT advance, so the NEXT preflight-verify.sh will flag this commit as unapproved."
+  echo "   If the alias never moved, promote it explicitly: npx vercel promote ${DEPLOYED_URL:-<unknown>} --yes"
+  echo "   If it DID move but supabase.co is missing, the env vars did not inline (2026-07-10 P0"
+  echo "   signature) — investigate before declaring this deploy healthy."
+  exit 1
 fi
 
 # ── LIVE SEARCH SMOKE TEST (added 2026-07-15, after the PR #78 outage — a deploy that made the

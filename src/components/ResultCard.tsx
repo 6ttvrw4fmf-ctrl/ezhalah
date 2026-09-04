@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -10,6 +10,7 @@ import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText } from '@/lib/arabi
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
+import { afEvidence, type ActiveAf } from '@/lib/afEvidence';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -79,13 +80,20 @@ export function ResultCard({
   listing,
   onOpen,
   rank,
+  activeAf,
 }: {
   listing: Listing;
   onOpen: () => void;
   variant?: 'compact' | 'grid'; // kept for backward compatibility — both render the new design
   rank?: number;
+  // The Advanced-Filter predicates the turn's search ran with (afActive(m.result.query)) — one
+  // stable reference per results turn; the memo comparator in agent.tsx compares it by identity.
+  activeAf?: ActiveAf;
 }) {
   const { t, isRTL, locale } = useI18n();
+  // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
+  // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
+  const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);
   // EN UI: scraped Arabic district/city names get a fast client-side transliteration so users see
   // "Al Olaya, Riyadh" instead of "حي العليا, Riyadh". AR UI: pass through unchanged. (user request:
   // "when I send in English the place should be translated.")
@@ -168,7 +176,12 @@ export function ResultCard({
     // (user-reported: "look how it looks like in the phone, it's horrible".)
     // NOTE: the feedback row (thumbs/share) is NOT here — owner 2026-07-09 moved it to render ONCE per
     // results response, below the «تبي أعرض لك المزيد…» message (see agent.tsx + FeedbackRow.tsx).
-    <View style={[card.wrap, { flexDirection: horizontal ? 'row' : 'column' }]}>
+    // testID carries the listing's own id so a live journey can hold THIS card to THIS listing's
+    // canonical row. R12A.2 («the chip shows the LISTING's value, not the filter's label») is only
+    // checkable if a rendered card can be identified in the DOM; matching strips to rows by position
+    // is unsound, because a row that earns no chip renders no strip and silently shifts the rest.
+    // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
+    <View testID={`card-listing-${listing.id}`} style={[card.wrap, { flexDirection: horizontal ? 'row' : 'column' }]}>
       {/* ─── photo block (full-width banner on mobile) ───── */}
       <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
         <ListingPhoto photos={(listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []))} style={card.photo} t={t} />
@@ -231,7 +244,13 @@ export function ResultCard({
             USED to derive the rate as round(total/area) a later gate could null the total and leave
             a 0 behind — which rendered «سعر المتر ر.س 0» on 5 live dealapp cards (found 2026-07-26,
             scrapers fixed in PR#218). `> 1` withholds 0 and negatives as well as the placeholder. */}
-        {listing.price === 'Price on request'
+        {/* DERIVED-TOTAL ROWS KEEP THEIR SOURCE RATE (owner rule 2026-09-03). When the total shown
+            above is OUR per-metre x area arithmetic, the advertiser's own per-metre figure must stay
+            on the card — it is the only source-published price the listing has, and it is what the
+            derived total is accountable to. Without `|| listing.priceIsDerived` this line vanished
+            the moment the row stopped saying «السعر عند الطلب», hiding the source value behind a
+            number we computed. */}
+        {(listing.price === 'Price on request' || listing.priceIsDerived)
           && listing.pricePerMeter != null
           && listing.pricePerMeter > 1 ? (
           <Text style={card.pricePerMeter} numberOfLines={1}>
@@ -241,6 +260,14 @@ export function ResultCard({
                 the one thing this element must never be mistaken for. The unit now travels with the
                 number, so a rate can never be misread as the price of the property. */}
             {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{Number(listing.pricePerMeter).toLocaleString('en-US')} {t('SAR/m²')}</Text>
+          </Text>
+        ) : null}
+        {/* TRUTHFULNESS: a derived total is arithmetic, not an advertised price, and must say so.
+            The figure above already carries '≈'; this states plainly where it came from, so nobody
+            reads it as a number the seller published. (owner rule 2026-09-03) */}
+        {listing.priceIsDerived ? (
+          <Text style={card.derivedTotalNote} numberOfLines={1}>
+            {t('Calculated from price per m² × area — not published by the source')}
           </Text>
         ) : null}
         {/* Guest rating — renders ONLY when the listing carries one (Gathern). e.g. ★ 9.9 (59 تقييم) */}
@@ -268,6 +295,30 @@ export function ResultCard({
           <Stat icon="business-outline" big={typeLabel} small={t('Property Type')} />
           {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
         </View>
+        {/* «مطابق لطلبك» — every active Advanced-Filter predicate this listing's canonical row proves,
+            carrying the ROW's actual value («4 حمامات», «شمال», «عرض الشارع 20 م»), never the filter's
+            label. Absent entirely when there is no evidence; an UNKNOWN column renders nothing for
+            that question. The existing bath Stat / rating row / RNPL banner / feature grid are
+            untouched.
+
+            NO CAP, NO EXPANDER (2026-09-03). The 2026-09-02 draft showed the first 4 behind a «+N».
+            R12A.1 requires an active selection to be "visible without expanding, scrolling a sub-panel,
+            or opening the source", and rounds accumulate — 5+ committed answers is ordinary, so a cap
+            of 4 would hide one the user explicitly asked for. The chips are small and wrap; showing
+            them all is what the rule says. R12A.4 (a static priority cap must not hide a selected
+            field) is satisfied the same way: whatever the feature grid below chooses to cap, every
+            AF-selected field is already proven here, above it, unexpanded. */}
+        {evidence.length > 0 ? (
+          <View style={card.afRow} testID="card-af-evidence">
+            <Text style={card.afLabel}>{t('Matches your request')}</Text>
+            {evidence.map((c, i) => (
+              <View key={`${c.id}:${i}`} style={card.afChip} testID={`card-af-evidence-${c.id}`}>
+                <Ionicons name="checkmark-circle" size={12} color={colors.primary} />
+                <Text style={card.afChipText}>{c.text}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </Pressable>
 
       {/* ─── features panel (full-width below info on mobile) ─ */}
@@ -533,7 +584,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('al khaas') || s.includes('alkhaas')) return <Image source={ALKHAAS_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('abeea')) return <Image source={ABEEA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('jurash')) return <Image source={JURASH_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alnokhba')) return <Image source={ALNOKHBA_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('al nokhba') || s.includes('alnokhba')) return <Image source={ALNOKHBA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('gathern')) return <Image source={GATHERN_LOGO} style={card.hostBadge} contentFit="contain" />;
   // 2026-06 batch — text-chips until the user supplies logos.
   if (s.includes('deal')) return <Image source={DEALAPP_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -541,6 +592,11 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('pulse')) return <Image source={ERAPULSE_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('nowaisiry')) return <Image source={NOWAISIRY_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('october')) return <Image source={OCTOBER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('therc')) return <View style={[card.hostBadge, card.thercBadge]}><Text style={card.badgeText}>الخيار الصحيح</Text></View>;
+  if (s.includes('aouj')) return <View style={[card.hostBadge, card.aoujBadge]}><Text style={card.badgeText}>عوج</Text></View>;
+  if (s.includes('abralosol')) return <View style={[card.hostBadge, card.abralosolBadge]}><Text style={card.badgeText}>عبر الأصول</Text></View>;
+  if (s.includes('arkaan')) return <View style={[card.hostBadge, card.arkaanBadge]}><Text style={card.badgeText}>أركان</Text></View>;
+  if (s.includes('rawasidark')) return <View style={[card.hostBadge, card.rawasidarkBadge]}><Text style={card.badgeText}>رواسي دارك</Text></View>;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -578,13 +634,18 @@ function sourceHost(source: string): string {
   if (s.includes('al khaas') || s.includes('alkhaas')) return 'alkhaas.net';
   if (s.includes('abeea')) return 'abeea.com.sa';
   if (s.includes('jurash')) return 'jurash.sa';
-  if (s.includes('alnokhba')) return 'alnokhba-services.com';
+  if (s.includes('al nokhba') || s.includes('alnokhba')) return 'alnokhba-services.com';
   if (s.includes('gathern')) return 'gathern.co';
   if (s.includes('deal')) return 'dealapp.sa';
   if (s.includes('souq')) return '24.com.sa';
   if (s.includes('pulse')) return 'erapulse.sa';
   if (s.includes('nowaisiry')) return 'alnowaisiry.com';
   if (s.includes('october')) return '1october.com.sa';
+  if (s.includes('therc')) return 'therc.sa';
+  if (s.includes('aouj')) return 'aoujestates.com';
+  if (s.includes('abralosol')) return 'abralosol.com';
+  if (s.includes('arkaan')) return 'arkaanalaqar.com';
+  if (s.includes('rawasidark')) return 'rawasi-dark.com';
   return 'sa.aqar.fm';
 }
 
@@ -615,8 +676,8 @@ function RnplBanner({ monthly, source, t }: { monthly?: number; source?: string;
       <View style={card.rnplRow}>
         <Image source={EJARI_LOGO} style={card.ejariLogo} contentFit="contain" />
         <View style={card.rnplChevs}>
-          <Ionicons name="chevron-forward" size={13} color="#3868c8" style={{ marginRight: -6 }} />
-          <Ionicons name="chevron-forward" size={13} color="#3868c8" />
+          <Ionicons name="chevron-forward" size={13} color={colors.rnplInk} style={{ marginRight: -6 }} />
+          <Ionicons name="chevron-forward" size={13} color={colors.rnplInk} />
         </View>
         <Text style={card.rnplCta}>{t('Rent now, pay later')}</Text>
       </View>
@@ -654,15 +715,15 @@ const card = StyleSheet.create({
   photoColWide: { width: 240, height: 200 },
   photoColMobile: { width: '100%', height: 200 },
   photo: { width: '100%', height: '100%' },
-  photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#eef2ec' },
+  photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface2 },
   photoFallbackText: { fontSize: 11, color: colors.muted, fontWeight: '600' },
   rankBadge: {
-    position: 'absolute', top: 8, left: 8, backgroundColor: colors.primary,
+    position: 'absolute', top: 8, left: 8, backgroundColor: colors.selFill,
     borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3,
   },
   rankText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   platformBadge: {
-    position: 'absolute', top: 8, right: 8, backgroundColor: '#fff',
+    position: 'absolute', top: 8, right: 8, backgroundColor: colors.surface,
     borderRadius: 14, paddingHorizontal: 8, paddingVertical: 3, flexDirection: 'row', alignItems: 'center', gap: 4,
   },
   platformText: { color: colors.primary, fontSize: 10.5, fontWeight: '700' },
@@ -687,6 +748,15 @@ const card = StyleSheet.create({
     backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 2,
   },
   regionChipText: { fontSize: 10.5, color: colors.primary, fontWeight: '700' },
+  // «مطابق لطلبك» evidence strip — the regionChip idiom (tint background, primary bold text), one
+  // checkmark per proven predicate, wrapping under the stats row on both layouts.
+  afRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8 },
+  afLabel: { fontSize: 11, color: colors.muted, fontWeight: '600' },
+  afChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3,
+  },
+  afChipText: { fontSize: 10.5, color: colors.primary, fontWeight: '700' },
   price: { fontSize: 16.5, fontWeight: '800', color: colors.primary, marginTop: 2 },
   // Guest-rating chip (Gathern) — star + score, with a muted review-count suffix. Sits just under
   // the price; only rendered when the listing actually carries a rating. (Gathern Tier-1.)
@@ -697,6 +767,7 @@ const card = StyleSheet.create({
   // Source-published «سعر المتر» subline, rendered directly under the price line on listings that
   // have no total price. Deliberately quieter than `price` (muted, smaller) so it reads as
   // supporting information the source happened to publish, never as the listing's headline price.
+  derivedTotalNote: { fontSize: 10.5, color: colors.muted, marginTop: 2, textAlign: 'right' },
   pricePerMeter: { fontSize: 11.5, color: colors.muted, fontWeight: '500', marginTop: 2 },
   pricePerMeterStrong: { fontWeight: '700', color: colors.ink },
 
@@ -705,7 +776,7 @@ const card = StyleSheet.create({
   // subtle border, generous padding. Self-aligned so it hugs content instead of stretching full
   // width. (user-visible RNPL CTA — must read as an official partnership badge.)
   rnplBanner: {
-    backgroundColor: '#e8efff', borderRadius: 10, borderWidth: 1, borderColor: '#cdd9f5',
+    backgroundColor: colors.rnplBg, borderRadius: 10, borderWidth: 1, borderColor: colors.rnplLine,
     paddingHorizontal: 10, paddingVertical: 8, alignSelf: 'flex-start', marginTop: 4, gap: 4,
   },
   rnplRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -713,10 +784,10 @@ const card = StyleSheet.create({
   // ratio and lets the parent banner's padding control the surround.
   ejariLogo: { width: 90, height: 28 },
   rnplChevs: { flexDirection: 'row', alignItems: 'center' },
-  rnplCta: { fontSize: 11.5, fontWeight: '700', color: '#3868c8' },
+  rnplCta: { fontSize: 11.5, fontWeight: '700', color: colors.rnplInk },
   // أقساط (Aqsat) variant — Al Hoshan's own RNPL brand; deeper indigo than EJARI's blue.
   // The official PNG is the wordmark + tagline stacked, so it's a bit taller than the EJARI strip.
-  aqsatBanner: { backgroundColor: '#ecedfb', borderColor: '#c9ccf2' },
+  aqsatBanner: { backgroundColor: colors.aqsatBg, borderColor: colors.aqsatLine },
   aqsatLogo: { width: 104, height: 40 },
   rnplFromLine: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
   rnplFromStrong: { color: colors.dark, fontWeight: '700' },
@@ -736,6 +807,11 @@ const card = StyleSheet.create({
   // 48×48 with a touch of internal padding feels right after the logo normalizer
   // (each logo file now has identical 6% built-in margin, so they all visually fill).
   hostBadge: { width: 48, height: 48 },
+  thercBadge: { borderRadius: 8, backgroundColor: '#1f5f8b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  aoujBadge: { borderRadius: 8, backgroundColor: '#8b5a1f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  abralosolBadge: { borderRadius: 8, backgroundColor: '#3f6b4a', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  arkaanBadge: { borderRadius: 8, backgroundColor: '#6b3a5f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  rawasidarkBadge: { borderRadius: 8, backgroundColor: '#2f5f6b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   aldarimBadge: { borderRadius: 8, backgroundColor: '#14506b', alignItems: 'center', justifyContent: 'center' },
   aqargateBadge: { borderRadius: 8, backgroundColor: '#0d6e63', alignItems: 'center', justifyContent: 'center' },
   hajerBadge: { borderRadius: 8, backgroundColor: '#6b4a2f', alignItems: 'center', justifyContent: 'center' },

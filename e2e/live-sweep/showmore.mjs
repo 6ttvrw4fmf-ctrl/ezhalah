@@ -10,11 +10,13 @@
 // text-shaped keys collided across 150 genuinely distinct مكتب cards on a previous run). Nothing
 // here is clicked through to a source platform, so the journey generates ZERO source traffic (§40.6).
 //
-// WHAT "DONE" LOOKS LIKE. Production caps one search's browse at BROWSE_CAP (100) and then offers
-// «خلّنا نحدد الطلب أكثر» instead of paging on, so a healthy الرياض run is 10 → 100 cards and ONE
-// pager click — not an endless ladder. The absence of a pager at 100 is the contract, not a defect;
-// what must hold is that the closing line still states the TRUE total («لقينا 21,868 … وعرضنا لك 100
-// منها»), which this journey asserts (owner 2026-08-20, scripts/verify-result-cap-honesty.ts).
+// WHAT "DONE" LOOKS LIKE (owner 2026-08-29, supersedes the 2026-08-20 lifetime cap). Paging
+// CONTINUES in clean 100-batches for as long as matches remain: a healthy الرياض run is 10 → 100 →
+// 200 → 300 across this journey's budgeted clicks, with the pager still offered whenever more
+// matches genuinely exist. A pager may legitimately be ABSENT only when everything matching is on
+// screen — and then the closing line must state the true matched total with the honest shown count
+// («عرضت لك أول 100 من أصل 21,868 إعلان مطابق» mid-browse, «عرضت لك جميع الإعلانات …» at the end),
+// never a batch size standing in for the total (scripts/verify-result-cap-honesty.ts).
 //
 // Traps this journey is built around: §41.2 (scroll_into_view, never bare coordinates), §41.3 (card
 // descriptions carry their own «عرض المزيد» — and its 25px rule no longer separates them, see
@@ -111,24 +113,20 @@ export async function showMoreJourney(plan) {
     for (let b = 1; b <= (plan.batches ?? 3); b++) {
       const btn = await pager(page);
       if (!btn) {
-        // Not a failure: production caps one search's browse at BROWSE_CAP (100) and then invites the
-        // user to NARROW instead of paging on (scripts/verify-result-cap-honesty.ts, owner 2026-08-20).
-        // The cap is only honest if the closing line still states the TRUE total — «لقينا 21,868 …
-        // وعرضنا لك 100 منها», never "found 100". That is the §40 true-total-never-page-cap rule at
-        // the one screen where the two numbers are most easily confused, so assert it here.
-        const closing = await page.evaluate(() => (document.body.innerText
-          .match(/لقينا\s+([\d,٬]+)\s+إعلان[^\n]*?وعرضنا لك\s+([\d,٬]+)\s+منها/) || []).slice(1, 3));
-        if (closing.length === 2) {
-          const [claimedTotal, shown] = closing;
-          if (claimedTotal !== total0) {
-            defect(name, 'TRUE-TOTAL', `cap message quotes ${claimedTotal} but the search found ${total0}`);
-          }
-          if (claimedTotal === shown && num(total0) > num(shown)) {
-            defect(name, 'TRUE-TOTAL', `cap message quotes the CAP (${shown}) as the match total`);
-          }
-          note(`${name}: browse cap reached after ${b - 1} «عرض المزيد» — «لقينا ${claimedTotal} … وعرضنا لك ${shown} منها» (honest)`);
+        // CONTINUATION CONTRACT (owner 2026-08-29): the pager may be absent ONLY when everything
+        // matching is already on screen. With more matches remaining, a missing pager is now a
+        // DEFECT — the exact ceiling the owner removed. The closing line must state the honest
+        // count of what is on screen; when it can state a total, that total must be the search's
+        // true total, never a batch size.
+        if (num(total0) > n) {
+          defect(name, 'PAGER-MISSING', `no «عرض المزيد» at ${n} cards while the search found ${total0} — the removed lifetime cap is back`);
         } else {
-          note(`${name}: no «عرض المزيد» after batch ${b - 1} (${n} cards)`);
+          note(`${name}: all ${n} matching cards on screen — pager legitimately absent`);
+        }
+        const closing = await page.evaluate(() => (document.body.innerText
+          .match(/(?:من أصل|لقينا)\s+([\d,٬]+)\s+إعلان/) || []).slice(1, 2));
+        if (closing.length === 1 && closing[0] !== total0 && num(closing[0]) > 0 && num(total0) > 0 && num(closing[0]) !== n) {
+          defect(name, 'TRUE-TOTAL', `closing message quotes ${closing[0]} but the search found ${total0}`);
         }
         break;
       }

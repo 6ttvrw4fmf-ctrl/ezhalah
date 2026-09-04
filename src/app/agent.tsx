@@ -23,6 +23,8 @@ import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupporte
 import VoiceWaveform from '@/components/VoiceWaveform';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
+import { initialReveal as initialRevealPure } from '@/lib/initialReveal';
+import { distinctPlatformCount } from '@/lib/platformDiversity';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
@@ -33,7 +35,10 @@ import { CardIn, LoadingDots } from '@/components/CardReveal';
 // perf fix 2026-07-09). onOpen is deliberately excluded from the comparison: it's re-created each
 // render but behaves identically for the same listing.
 const MemoResultCard = memo(ResultCard, (prev, next) =>
-  prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant);
+  prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant
+  // activeAf is one frozen reference per results turn (afActive memoises on m.result.query), so
+  // identity is the right comparison; without this term the card would swallow the prop.
+  && prev.activeAf === next.activeAf);
 import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
@@ -43,12 +48,15 @@ import { parseQuery, respond } from '@/data/agent';
 import { parseProximity } from '@/data/proximity';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
-import { regionOrCityChoice, scopedLocation, scopeNamedForTwin } from '@/lib/regionOrCityAnswer';
+import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
 import { openListing } from '@/lib/openListing';
 import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
-import { deriveGuided, sameKeys, type GuidedStep } from '@/lib/afSteps';
-import { migrateGroups } from '@/lib/searchDefaults';
-import { BROWSE_CAP, resultCounts } from '@/data/resultCount';
+import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
+import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
+import { stripCommittedAf } from '@/lib/afCarry';
+import { afActive } from '@/lib/afEvidence';
+import { toLatinDigits } from '@/lib/inputHygiene';
+import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
@@ -58,21 +66,19 @@ import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples'
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
-import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
-// below a results block — NEVER before first results — and ONLY for a strict single-type Residential
-// scope whose property_age data has been live-verified sufficient (owner rollout Building→Room→Floor,
-// 2026-07-16). Apartment is the reference (gold standard). A multi-type selection or any type not in
-// this set never triggers it. Add a new type ONLY after live-verifying its data quality + counts==
-// search parity, per docs/ADVANCED_FILTER_PATTERN.md. Do not widen without an explicit owner instruction.
-//
-// effectiveTypes() returns canonical ENGLISH keys (propertyTypes.ts), e.g. 'Apartment'/'Residential
-// Building' — NOT the Arabic label (that conversion happens later at RPC-call time via typeArForTypes()).
-// Comparing against Arabic here always evaluated false — caught live, 2026-07-15.
-// The Property Age eligibility gate lives in src/lib/ageFilterTypes.ts (zero-dep, so `npm test` can
-// assert its macros against CLEAN_MACRO — agent.tsx itself can't be imported by a plain node runner).
+// below a results block — NEVER before first results. Its gate is cohortAllows(q, 'property_age')
+// (src/lib/afCohorts.ts), the same canonical registry every other Advanced Filter question uses — a
+// type/deal/period fires only when COHORT_QUESTIONS has live-verified evidence for it (see
+// docs/ADVANCED_FILTER_PATTERN.md). This used to be a second, hand-maintained type→macro map
+// (src/lib/ageFilterTypes.ts, deleted 2026-09-01) that required a single selected type and silently
+// left out any type certified later in COHORT_QUESTIONS but never added to the second map — 5 real
+// types (Shop, Workshop, Commercial Building, Farm, Rest House) were unreachable this way. Add a new
+// type ONLY after live-verifying its data quality + counts==search parity, same as always — the entry
+// point for that is now COHORT_QUESTIONS alone, not a second list.
 // The guided flow is offered when ANY advanced question is eligible for the scope — each question owns
 // its own eligibility gate now (see docs/ADVANCED_FILTER_DESIGN_CONTRACT.md). Otherwise the tap falls
 // through to the pre-existing plain refine chips.
@@ -209,15 +215,31 @@ const WHOLE_AREA = /كامل|كاملة|بالكامل|كلها|كل المدي�
 // audit). Guarding every use defensively, same pattern as search.ts's locationLines().
 const arLabel = (s: string) => arabicOrPlaceholder(s, 'ar', LOCATION_UNRESOLVED_AR);
 
+// The PLAIN-CITY narrowing question, and the city it is about — one template, one parser, adjacent
+// on purpose. The caller needs the subject back so it can remember which city it asked about (see
+// pendingCityRef): the bare answer «المدينة كاملة» contains no city, and before 2026-08-29 the app
+// re-parsed that generic noun as المدينة المنورة and searched the wrong region entirely.
+// scripts/verify-agent-whole-city-answer.ts round-trips these two so the template cannot drift out
+// from under the parser.
+export const wholeCityQuestion = (cityAr: string) => `تقصد مدينة ${cityAr} كاملة، أو حي معيّن؟`;
+export function wholeCityQuestionSubject(text: string | null | undefined): string | null {
+  const m = /^تقصد مدينة (.+) كاملة، أو حي معيّن؟$/u.exec((text ?? '').trim());
+  const city = m?.[1]?.trim();
+  return city ? city : null;
+}
+
 // The region-AND-city TWIN NAME behind the «مدينة X ولا منطقة X كاملة؟» question (and behind the
 // whole-region question for the same names), so send() knows which name the user is answering about on
 // the next turn. Accepts either form the query can carry («الرياض» or «منطقة الرياض»). null when the
 // location is not one of those twins — a plain city/region/district ask is untouched.
+// The rule itself lives in src/lib/regionOrCityAnswer.ts (pure, executable by a barrier); this is
+// the thin wrapper that hands it the real resolver and the app's Arabic-label guard. Before
+// 2026-08-29 the logic lived here and only stripped «منطقة » from the INPUT, so an English catalog
+// name like «Riyadh» — which is exactly what parseQuery() emits — resolved to the REGION, reported
+// "not a twin", and silently disabled the entire region-vs-city disambiguation. See twinNameFor().
 function regionOrCityTwin(loc: string | undefined): string | null {
-  const bare = (loc ?? '').trim().replace(/^منطقة\s+/, '').trim();
-  if (!bare) return null;
-  const lm = resolveLocation(bare, 'ar');
-  return lm.regionOrCity ? arLabel(lm.label) : null;
+  const label = twinNameFor(loc, (name) => resolveLocation(name, 'ar'));
+  return label == null ? null : arLabel(label);
 }
 
 function locationClarification(q: SearchQuery, userText: string): string | null {
@@ -286,7 +308,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
   }
   // 3) A whole CITY with no neighbourhood → ask the WHOLE city or a specific district.
   if (lm.kind === 'city') {
-    return `تقصد مدينة ${cityDisplay(lm.city, 'ar')} كاملة، أو حي معيّن؟`;
+    return wholeCityQuestion(cityDisplay(lm.city, 'ar'));
   }
   return null;
 }
@@ -529,7 +551,18 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, saveTranscript, hydrateTranscript } = useApp();
+  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript, newChat } = useApp();
+  // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
+  // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
+  // which counts the `setQuery(` calls in this file precisely so a second, unsanitized writer cannot
+  // reopen the leak while an assertion on the first still passes.
+  //
+  // Two callers, both writing the search that is ON SCREEN: the `?filter=` arrival effect (the
+  // Normal Filter query this chat started from) and runRefine's guided branch (that same query once
+  // the Advanced Filter round has committed its answers). The second used to not exist, which is the
+  // whole owner-reported P0: the AF answers lived only in this component, so returning to the Filter
+  // screen and pressing «بحث» — through Trending or not — silently re-ran the PRE-AF search.
+  const writeFilterStore = (q: SearchQuery) => setQuery(() => sanitizeForFilterRestore(q));
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -814,7 +847,18 @@ export default function Agent() {
   // delay also clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s), so the
   // first move already reads the settled height of the thing being landed on.
   const LAND_PASSES_MS = [1400, 3200];
-  const FIRST_PAGE = 10; // show the first 10; «عرض المزيد» pages the rest of the matched set. (owner 2026-07-08.)
+  const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
+  // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
+  // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
+  // INTERVIEW_STOP_AT (25): the same line at which Advanced Filter stops narrowing (R11.1) and the set
+  // is by contract the FINAL one, so there is nothing left for a first page to be a preview OF. Gated
+  // on quotableTotal() — the honest total, null whenever the RPC count would overstate (client-only
+  // narrowing, agent-annualized budgets) — and in those cases we fall back to FIRST_PAGE rather than
+  // reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 25, so a ≤25 set is always
+  // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
+  // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
+  const initialReveal = (r: SearchResult | undefined | null): number =>
+    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings) });
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
@@ -830,9 +874,10 @@ export default function Agent() {
     | { phase: 'loading' }
     // Opening state (owner 2026-08-16): after an eligible Filter search lands with > 25 results the
     // overlay opens on this calm invitation — the count, «خلّنا نحدد طلبك أكثر», one soft line —
-    // never a question. Begin is opt-in; «عرض النتائج» closes it (the results are already behind).
+    // never a question. Begin is opt-in; declining is the ✕ (the results are already behind) —
+    // the intro's «عرض النتائج» link was removed by the owner 2026-08-28, same day as the footer's.
     | { phase: 'intro'; total: number | null }
-    | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; initialKeys: string[]; progressCur: number; progressTotal: number }
+    | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; initialKeys: string[]; progressCur: number; progressTotal: number }
     // The «digging through the market» beat (owner 2026-08-16): shown once after the interview
     // finishes while the final search runs behind it. Dismissal is driven by plain setTimeout
     // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
@@ -847,7 +892,7 @@ export default function Agent() {
   const ageFlowTokenRef = useRef(0);
   const ageFlowChangedRef = useRef(false);
   const ageFlowLabelsRef = useRef<string[]>([]);
-  const ageFlowPlanRef = useRef<Array<{ question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number; total: number }>>([]);
+  const ageFlowPlanRef = useRef<Array<{ question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; total: number }>>([]);
   // Questions already answered OR skipped this session — never re-asked (owner 2026-08-11). The
   // plan is RE-RANKED against the narrowed set after every answer, so ask-order is contextual.
   const ageFlowAskedRef = useRef<Set<string>>(new Set());
@@ -893,6 +938,12 @@ export default function Agent() {
   // summary. The turn trades its action buttons for a read-only receipt — it is history now, and only
   // the newest result turn carries live actions.
   const [afReceipt, setAfReceipt] = useState<Record<string, string>>({});
+  // COMPLETED SEARCH (owner 2026-08-30). Set ONLY by the canonical AF stop conditions — R11.1 (the
+  // post-round honest total ≤ INTERVIEW_STOP_AT) and R11.2 (the offer probe finds no useful question
+  // left after a committed round). Never by a plain first search, never by a count alone: a fresh
+  // 20-result search with no AF round is not "finished", it is a search the user may still refine.
+  // Persisted with the transcript so Back / saved chats reopen READ-ONLY, never with a live composer.
+  const [completed, setCompleted] = useState(false);
   // Whether a results turn still has a question worth asking — resolved by a REAL probe (below),
   // never guessed. Absent = not yet known ⇒ the button stays hidden rather than promising a round
   // that would have nothing truthful to ask.
@@ -1019,7 +1070,7 @@ export default function Agent() {
   };
   const markTyped = (id: string) => {
     const msg = msgs.find((m) => m.id === id);
-    startReveal(id, msg?.role === 'results' ? Math.min(FIRST_PAGE, msg.result?.listings?.length ?? 0) : 0);
+    startReveal(id, msg?.role === 'results' ? initialReveal(msg.result) : 0);
   };
   // Cancel any pending one-by-one reveals (on unmount, or when a new turn starts).
   const clearReveals = () => { revealTimers.current.forEach(clearTimeout); revealTimers.current = []; };
@@ -1065,13 +1116,63 @@ export default function Agent() {
   // model replied to it with a greeting or yet another question often enough that leaving the answer to
   // the model WAS the loop. Read-and-cleared once per turn; also cleared by New Chat.
   const pendingScopeRef = useRef<string | null>(null);
+  // The last canonical query this conversation produced — the carrier that lets accumulated state
+  // survive a clarification turn. Cleared by newChat() like every other per-conversation ref.
+  const lastQueryRef = useRef<SearchQuery | null>(null);
+  // The PLAIN CITY we last asked «تقصد مدينة X كاملة، أو حي معيّن؟» about. pendingScopeRef above only
+  // ever holds region/city TWIN names, so before this ref existed the app remembered nothing at all
+  // about a plain-city question — and answering it «المدينة كاملة» searched المدينة المنورة, because
+  // the generic noun «المدينة» re-parses as that city's name (defect found live 2026-08-29; the
+  // measured before/after is in src/lib/regionOrCityAnswer.ts). Same lifecycle as pendingScopeRef:
+  // read-and-cleared once per turn, cleared by New Chat.
+  const pendingCityRef = useRef<string | null>(null);
 
-  const toBottom = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+  // `animated: false` while a saved-chat landing is in flight (owner 2026-08-29: opening a chat must
+  // BE at the latest message, never visibly drag the page down to it). Live turns keep the glide.
+  const landInstantRef = useRef(false);
+  const toBottom = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current }));
   const toTop = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   const onGrow = () => {
     if (pinModeRef.current === 'top') toTop();
     else if (pinModeRef.current === 'bottom') toBottom();
   };
+
+  // OPEN A SAVED CHAT AT ITS LATEST CONTENT (owner 2026-08-29, supersedes the open-at-top rule):
+  // tapping a sidebar conversation must land the viewport on the newest message, like every chat
+  // product. One scroll is not enough — restored result cards and images report their height late,
+  // growing the content AFTER the first scrollToEnd. So the landing holds a short SETTLE WINDOW:
+  // pinMode='bottom' (onGrow re-bottoms on every late layout) plus a few timed re-bottoms, then
+  // releases to 'none'. The window is CANCELLED THE INSTANT the user scrolls/touches/wheels — their
+  // intent always wins, and once released nothing ever yanks the view again (no jump loops).
+  const landTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const cancelLanding = () => {
+    if (!landTimersRef.current.length && pinModeRef.current !== 'bottom') return;
+    landTimersRef.current.forEach(clearTimeout);
+    landTimersRef.current = [];
+    landInstantRef.current = false;
+    pinModeRef.current = 'none';
+  };
+  const landAtLatest = () => {
+    cancelLanding();
+    landInstantRef.current = true; // every re-bottom in this window jumps, none glides
+    pinModeRef.current = 'bottom';
+    toBottom();
+    for (const ms of [150, 450, 900, 1600]) {
+      landTimersRef.current.push(setTimeout(toBottom, ms));
+    }
+    landTimersRef.current.push(setTimeout(() => { landTimersRef.current = []; landInstantRef.current = false; pinModeRef.current = 'none'; }, 1900));
+  };
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const stop = () => cancelLanding();
+    document.addEventListener('wheel', stop, { passive: true, capture: true });
+    document.addEventListener('touchstart', stop, { passive: true, capture: true });
+    return () => {
+      document.removeEventListener('wheel', stop, true);
+      document.removeEventListener('touchstart', stop, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Stop box: cancel the current turn. Drop the in-flight "thinking/searching" bubbles (anything
   // already written — the reply, earlier results — stays), unblock any waiting beat, and re-enable
@@ -1116,8 +1217,10 @@ export default function Agent() {
       lastFilterRef.current = undefined;
       lastSeedRef.current = undefined;
       // The submitted Filter state already lives in the shared query context — the param-consuming
-      // effect wrote it verbatim from `?filter=` before this search began (setQuery(() => q)), and
-      // nothing between then and here ever touches query context again. router.replace('/') is the
+      // effect wrote it from `?filter=` before this search began, through the Filter-UI allowlist, and
+      // nothing between then and here ever touches query context again. (The write is sanitized, not
+      // verbatim: on the filter-form path the two are identical, and on the sidebar path the allowlist
+      // is what keeps a reopened chat's AF answers out of the next filter search.) router.replace('/') is the
       // exact navigation «تصفية» already uses to leave this screen (ModeSwitch's onSwitch below), which
       // is what lets the Filter form's own rehydration (city/district catalog matching against query
       // context) and — when the screen never unmounted — its still-live local state (price/area inputs,
@@ -1215,17 +1318,16 @@ export default function Agent() {
     // Cards start appearing NOW — one by one, while the intro text is still typing above (owner
     // 2026-07-09: show the first card as soon as valid listings are ready; don't hold them hostage
     // to the typewriter). The more-message + feedback row still wait for the text (doneTyping).
-    beginCardDrip(statusId, Math.min(FIRST_PAGE, result.listings.length));
+    beginCardDrip(statusId, initialReveal(result));
   };
 
-  // «عرض المزيد» (Load more) — reveal the NEXT 100 matching listings (owner 2026-07-08: "100 at a time";
-  // if fewer than 100 remain, show all remaining). Correctness rule: the RPC filters the FULL matching set
-  // BEFORE any cap, so paging always reaches every match — nothing valid is hidden behind the display limit.
-  // Each tap reveals REVEAL_STEP more from what's already fetched; when that buffer is spent and the DB still
-  // has more pages (m.result.hasMore), we fetch the next REAL page (store.loadMoreListings, gap-free via
-  // p_offset), append it de-duped, then reveal into it. So a broad search (e.g. Riyadh villas & houses =
-  // 11,438) can be walked all the way to the end. loadingMore guards a double-tap from double-fetching.
-  const REVEAL_STEP = 100;
+  // «عرض المزيد» (Load more) — CONTINUATION IS THE RULE (owner 2026-08-29, supersedes the 2026-08-20
+  // lifetime cap): each tap advances to the next clean batch boundary — first 100, then 101–200,
+  // then 201–300 — for as long as matching listings genuinely exist, all the way to the last one.
+  // Correctness rule unchanged: the RPC filters the FULL matching set BEFORE any paging, so paging
+  // reaches every match, gap-free via p_offset, appended DE-DUPED (never a duplicate card, never a
+  // skipped id). When the fetched buffer is spent and the DB still has more (m.result.hasMore), the
+  // next REAL page is fetched first. loadingMore guards a double-tap from double-fetching.
   // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each mounting card also
   // fades+rises via CardIn, so the batch flows in instead of landing at once. (owner 2026-07-09.)
   const LOAD_MORE_STEP_MS = 55;
@@ -1244,15 +1346,10 @@ export default function Agent() {
     const q = m.result.query;
     if (runRef.current) return; // a real turn is mid-flight — never start a cascade under it (review fix)
     const fetched = m.result.listings.length;
-    const cur = revealCount[mid] ?? Math.min(FIRST_PAGE, fetched);
-    // BROWSE CAP (owner 2026-08-20): a search shows at most BROWSE_CAP cards. Once the cap is on screen
-    // there is nothing more to reveal and no more pages to fetch — min(trueTotal, BROWSE_CAP) is the hard
-    // ceiling on what the user can browse, even when thousands actually match (they see the true total in
-    // the closing message, not more cards). This is the single gate that makes the cap a cap.
-    if (cur >= BROWSE_CAP) return;
-    // (A) fetched-but-unrevealed cards remain → cascade the next slice in from the buffer, up to the cap.
+    const cur = revealCount[mid] ?? initialReveal(m.result);
+    // (A) fetched-but-unrevealed cards remain → cascade to the next batch boundary from the buffer.
     if (cur < fetched) {
-      cascadeIn(mid, cur, Math.min(cur + REVEAL_STEP, fetched, BROWSE_CAP));
+      cascadeIn(mid, cur, nextBatchTarget(cur, fetched));
       return;
     }
     // (B) buffer exhausted but the DB has more → fetch the next real page, append de-duped, cascade.
@@ -1270,7 +1367,7 @@ export default function Agent() {
           return { ...mm, result: { ...mm.result, listings: [...mm.result.listings, ...add], pageOffset: nextOffset, hasMore } };
         }),
       );
-      const target = Math.min(cur + REVEAL_STEP, mergedLen, BROWSE_CAP);
+      const target = nextBatchTarget(cur, mergedLen);
       // If a new turn started while the page was fetching, reveal instantly (no cascade) — the drip
       // machinery belongs to the new turn now; cards still fade in via CardIn. (review fix.)
       if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: target }));
@@ -1363,7 +1460,8 @@ export default function Agent() {
     } else if (dim === 'budget') {
       refined.priceInput = a;
     } else if (dim === 'beds') {
-      const n = (a.match(/\d+/) || [])[0]; if (n) refined.detail = n;
+      // Same root as parseQuery: JS \d never matches ٠-٩, so «٣» silently set no bedroom count.
+      const n = (toLatinDigits(a).match(/\d+/) || [])[0]; if (n) refined.detail = n;
     } else if (dim === 'type') {
       const p = parseQuery(a);
       if (p.type) refined.type = p.type;
@@ -1428,7 +1526,7 @@ export default function Agent() {
     if (busy) return;
     const id = chatIdRef.current;
     if (!id) return;
-    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills });
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed });
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
@@ -1492,7 +1590,11 @@ export default function Agent() {
     // the common case (a tier with a real choice) exits after the first one. Still ONE probe per turn,
     // still passive — it renders a button and never opens the overlay (owner 2026-08-19).
     void (async () => {
-      const offer = (ok: boolean) => setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
+      const offer = (ok: boolean) => {
+        setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
+        // R11.2: an AF round was committed (afCarryRef) and NO remaining question can narrow — done.
+        if (!ok && afCarryRef.current) setCompleted(true);
+      };
       let scoped = q;
       const seen = new Set<string>(asked);
       for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
@@ -1557,7 +1659,24 @@ export default function Agent() {
     // while the results headline behind it stated the real match total. ONE total for both.
     const honestTotal = quotableTotal(result);
     opts?.onFetched?.(honestTotal);
-    if (opts?.guided) setGuidedPills({ msgId: statusId, baseQ: opts.guided.baseQ, facets: opts.guided.facets, asked: opts.guided.asked, total: honestTotal });
+    if (opts?.guided) {
+      setGuidedPills({ msgId: statusId, baseQ: opts.guided.baseQ, facets: opts.guided.facets, asked: opts.guided.asked, total: honestTotal });
+      // THE MISSING WRITE (owner P0 2026-09-01). An Advanced Filter round mutated only this
+      // component's state, so the shared store the Filter home reads still held the PRE-AF query.
+      // Returning to the Filter screen and pressing «بحث» — through a Trending city card, a Trending
+      // district card, or with Trending never touched at all — therefore re-ran the search WITHOUT
+      // the user's committed answers, and Trending's own row counts were computed from the same
+      // stripped query, so they advertised exactly the wrong number they then delivered. Measured
+      // live: الرياض / إيجار / سنوي / تجاري / محل + «جديد» committed 243, re-entry returned 566 with
+      // `p_is_new_construction` simply absent from the request body.
+      //
+      // `refined` IS the query these results came from, and the facets ride WITH it — which is what
+      // licenses sanitizeForFilterRestore to carry the AF predicates at all (they render as
+      // removable chips on the Filter screen; see @/lib/afCarry). Written here rather than at each
+      // commit site because every guided answer, every Skip and every pill removal already funnels
+      // through this one call — one writer, so the store can never hold a round this screen never ran.
+      writeFilterStore({ ...refined, afFacets: opts.guided.facets });
+    }
     await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label);
     if (run.cancelled) return;
     void promptSignupSoon(run);
@@ -1657,7 +1776,7 @@ export default function Agent() {
         // Plots». Zero options records an open skip. Either way the walk moves DOWN a tier instead of
         // stalling, and neither case invents a predicate the user did not ask for.
         const auto = opts.length === 1 ? [opts[0].key] : [];
-        ageFlowStepsRef.current = [...steps, { question, options: opts, unknownCount: 0, total: res?.total ?? 0, keys: auto }];
+        ageFlowStepsRef.current = [...steps, { question, options: opts, unknownCount: null, total: res?.total ?? 0, keys: auto }];
         // ADVANCE PAST the step we just recorded. Re-entering on the SAME cursor would find the step
         // now present in the record and take the REPLAY branch above — rendering the very question
         // that had nothing to choose between. Moving to stepIndex + 1 both skips it and makes
@@ -1781,11 +1900,20 @@ export default function Agent() {
         ? st.keys.every((k) => scopeCandidates(st.question.id as ScopeTier, q!).includes(k))
         : eligibleQuestions(q).some((x) => x.id === st.question.id);
       if (!stillInScope) continue;                    // out of scope now
-      const n = await liveResultCount(st.question.apply(q, st.keys));
+      // UNKNOWN IS NOT NO. liveResultCount() collapses two different answers into null — "the source
+      // said zero" and "the probe never completed" — and its own comment explains that the collapse is
+      // safe for its OTHER caller, the live footer, where null means "keep showing the last good
+      // number". Here it meant the opposite: a timeout or a network blip silently DELETED an answer
+      // the user had already given, and syncGuidedFromSteps then rebuilds the query without it, so the
+      // filter disappears from the search AND from the receipt with nothing said. Ask the probe
+      // directly and keep the two apart.
+      const nextQ = st.question.apply(q, st.keys);
+      const n = await liveResultCountOrUnknown(nextQ);
       if (ageFlowTokenRef.current !== token) return;
-      if (n == null || n <= 0) continue;                // incompatible: it would select nothing
+      if (n === 'unknown') { kept.push(st); q = nextQ; continue; }   // never learned it — keep the answer
+      if (n <= 0) continue;                                          // the source ANSWERED zero: incompatible
       kept.push(st);
-      q = st.question.apply(q, st.keys);
+      q = nextQ;
     }
     ageFlowStepsRef.current = [...steps.slice(0, from + 1), ...kept];
   };
@@ -1819,7 +1947,10 @@ export default function Agent() {
     const guided = ageFlowBaseQRef.current
       ? {
           baseQ: carry?.originQ ?? ageFlowBaseQRef.current,
-          facets: [...(carry?.facets ?? []), ...ageFlowFacetsRef.current],
+          // Deduped across rounds (owner audit, 2026-08-27), not a raw concatenation — a carried
+          // round's facet and this round's facet can never both be kept if they resolve to the same
+          // displayed label, whatever question id produced either one.
+          facets: dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]),
           asked: [...ageFlowAskedRef.current],   // already unioned with the carry by syncGuidedFromSteps
         }
       : undefined;
@@ -1832,6 +1963,8 @@ export default function Agent() {
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
+        // R11.1: the round narrowed the set to its FINAL size — the search is complete.
+        if (total != null && total <= INTERVIEW_STOP_AT) setCompleted(true);
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
         timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
         timers.push(setTimeout(() => {
@@ -1879,6 +2012,26 @@ export default function Agent() {
     // with «جديد» sitting at 100% of the set, an option that could not move anything because the
     // answer was already applied. Skips ride in this set too: they leave no facet, so it is the only
     // record that the user was already asked.
+    // SEEDED FROM THE QUERY'S OWN RECEIPT when the conversation had none to hand over (owner P0
+    // 2026-09-01). A Filter search can now arrive with Advanced Filter answers already committed —
+    // the user answered them, went back to «تصفية», and pressed «بحث» again. Round 1 of THIS chat
+    // then had an empty carry, which broke three things at once: the interview re-asked a question
+    // whose predicate was already applied (its options are counted INSIDE that scope, so they read 0
+    // and tapping one WIDENS — the exact inversion verify-af-state-never-leaks-into-filter pins for
+    // direction); the carried answers vanished from the pills, leaving predicates on screen with no
+    // chip to remove them; and the pills' origin was a query that already contained them, so removing
+    // one did nothing. stripCommittedAf() reconstructs the true pre-AF origin by removing exactly the
+    // fields the AF writes — no second copy of the query to drift. A carry handed over by «تحديد
+    // أكثر» in this same chat always wins; this only fills a genuinely empty one.
+    const inboundAf = q.afFacets ?? [];
+    if (!afCarryRef.current?.facets.length && inboundAf.length) {
+      afCarryRef.current = {
+        msgId: afCarryRef.current?.msgId ?? '',
+        originQ: stripCommittedAf(q),
+        facets: inboundAf,
+        asked: [...new Set([...(afCarryRef.current?.asked ?? []), ...inboundAf.map((f) => f.id)])],
+      };
+    }
     ageFlowAskedRef.current = new Set(afCarryRef.current?.asked ?? []);
     // SCOPE PREFIX SHORT-CIRCUIT (owner 2026-08-23): when CATEGORY→GROUP→TYPE is not yet resolved,
     // the interview opens on the hierarchy and there is nothing to rank yet — ranking the advanced
@@ -1932,8 +2085,9 @@ export default function Agent() {
     void presentGuided(0, token);
   };
 
-  // Intro handlers: «يلا نبدأ» opts in (or arms the flag if the plan is still resolving);
-  // «عرض النتائج» simply closes — the results are already rendered behind the overlay.
+  // Intro handlers: «يلا نبدأ» opts in (or arms the flag if the plan is still resolving); the ✕
+  // simply closes — the results are already rendered behind the overlay. (The intro's «عرض النتائج»
+  // link ran this same close handler until the owner removed it, 2026-08-28.)
   const onIntroBegin = () => {
     if (ageFlow?.phase !== 'intro') return;
     introBeginRef.current = true;
@@ -2020,10 +2174,9 @@ export default function Agent() {
     const back = ++ageFlowTokenRef.current;
     void presentGuided(stepIndex - 1, back);
   };
-  // «عرض النتائج» leaves the interview NOW — but through the same commit path, so the answer the
-  // user can currently see selected is recorded first. Otherwise the card's own «عرض N نتيجة» chip
-  // and the results it lands on would disagree.
-  const onAgeSkipAll = (keys: string[]) => { void commitGuidedStep(keys, true); };
+  // The in-question «عرض النتائج» early-exit was REMOVED by the owner (2026-08-28) — the question
+  // footer is متابعة / تخطي / رجوع only, so a round ends by walking its questions, by Back from
+  // question 1, or by ✕. commitGuidedStep(keys, true) still runs when the question pool exhausts.
   const onAgeClose = () => { ageFlowTokenRef.current++; setAgeFlow(null); };
 
   // Tap on a refine answer chip → lock that question's chips so it can't be answered twice, then run.
@@ -2036,6 +2189,10 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
+    // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
+    // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
+    // busy-refused submit is not a send.
+    dismissSignInCard();
     // The CHAT agent accepts English as an input convenience: it normalizes any English place to the
     // canonical ARABIC location, searches in Arabic, and shows every location/result in Arabic (never an
     // English place name). The agent_notes location rules enforce the Arabic-canonical output. The FILTER
@@ -2076,9 +2233,14 @@ export default function Agent() {
     saidRef.current = [...saidRef.current, v];
 
     const startedAt = Date.now();
+    // Stamped once per SEND (owner-approved consolidation, 2026-08-30) — shared by this call and any
+    // server-side language-mismatch retry it triggers, so ai_usage rows from this one turn can be
+    // told apart from a genuine second message (mon_detect_agent_calls_per_message()). Same id shape
+    // every chat message already uses (uid() below), so no new dependency.
+    const userMessageId = uid();
     // Build the conversation MEMORY from prior turns (before this new message) so the agent can
     // reason across the chat and never re-ask what was already said. The greeting (text:'') drops out.
-    const history = msgs
+    const historyAll = msgs
       .filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'results')
       .map((m) => {
         const role = m.role === 'user' ? ('user' as const) : ('model' as const);
@@ -2102,12 +2264,30 @@ export default function Agent() {
         }
         return { role, text: (m as { text?: string }).text ?? '' };
       })
-      .filter((h) => !!h.text.trim())
-      .slice(-10);
+      .filter((h) => !!h.text.trim());
+    // HISTORY TRIMMING (owner-approved consolidation, 2026-08-30). describeKnownState()'s ~150-token
+    // knownState snapshot (built from lastQueryRef.current below) already carries every FACT from
+    // older turns, so sending the full window a second time as raw prose was pure token cost with no
+    // new information. Trimmed to the last 2 raw entries — in this alternating user/model list that
+    // is always the immediately-preceding user message and the model's immediately-preceding reply,
+    // KEPT VERBATIM (never paraphrased): pronoun resolution ("that one") and exact-phrase-triggered
+    // behavior (e.g. «خلها شهري» flipping the rent period) both depend on the model seeing the
+    // literal prior exchange, not a summary of it.
+    const history = historyAll.slice(-2);
     // Pass auth state: a guest searches on any property query; a logged-in user only gets listings
     // when their message is a direct order, otherwise Ezhalah replies conversationally. (user request.)
-    let turn = await respond(v, { loggedIn: !!user, history, attemptTexts: saidRef.current });
+    // The conversation's accumulated canonical state. Without it a clarification turn resets
+    // everything the user already said — «شهرية» came back as RentAnnual and a 9.5 rating vanished
+    // after one more question (owner-reported 2026-08-29). Explicit changes in the new turn still win.
+    let turn = await respond(v, {
+      loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current,
+      askCount: askCountRef.current, userMessageId, historyTurnsRaw: historyAll.length,
+    });
     if (run.cancelled) return;
+    // The server is the single decision authority for askCount too (decide.ts) — store whatever it
+    // last echoed back. Never reset mid-chat by the client (owner-confirmed default); a brand new
+    // chat starts askCountRef at 0 by construction (a fresh screen mount / New Chat, not a reset here).
+    if (typeof turn.askCount === 'number') askCountRef.current = turn.askCount;
 
     // ── The user NAMED a scope: «مدينة الرياض» / «منطقة الرياض» ────────────────────────────────────
     // Either answering our own «تقصد مدينة X ولا منطقة X كاملة؟» question or saying it up front. Either
@@ -2115,8 +2295,18 @@ export default function Agent() {
     // region, «مدينة X» the city — instead of re-asking it or falling through to the 2-ask cap's
     // Kingdom-wide «ما قدرت أحدد الموقع بدقة» (defect `agent-clarify-loop`, found live 2026-08-23:
     // answering «مدينة الرياض» never produced a search in 7/7 fresh runs).
+    // Remember the accumulated state from a CLARIFICATION too, not only from a search. A question
+    // pauses execution; it must never roll the conversation back to nothing (owner ruling
+    // 2026-08-30). Without this the answer to «مدينة ولا منطقة؟» rebuilt the query from scratch and
+    // silently dropped the property type, the rental period and every AF value already given.
+    if (turn.kind !== 'interview' && turn.query) lastQueryRef.current = turn.query;
     const askedTwin = pendingScopeRef.current;
     pendingScopeRef.current = null;
+    // The plain-city question we asked last turn, and whether this message is the bare «المدينة كاملة»
+    // answer to it. Read-and-cleared here for the same reason as askedTwin: one question, one answer.
+    const askedCity = pendingCityRef.current;
+    pendingCityRef.current = null;
+    const genericWholeArea = !!askedCity && isGenericWholeAreaAnswer(v);
     const scopeChoice = regionOrCityChoice(v);
     if (turn.kind === 'listings') {
       // Rewrite ONLY when the model's own location is that same twin — never override a different city
@@ -2128,6 +2318,25 @@ export default function Agent() {
       // just asked the twin question (askedTwin), a bare «مدينة» IS an answer, because we asked.
       const named = scopeNamedForTwin(v, twin) ?? (askedTwin ? scopeChoice : null);
       if (twin && named) turn = { ...turn, query: { ...turn.query, location: scopedLocation(twin, named) } };
+      // The bare answer to OUR plain-city question carries no place of its own (isGenericWholeAreaAnswer
+      // is false the moment one survives), so the only correct location is the city we asked about.
+      // Whatever the model parsed out of «المدينة كاملة» is, by construction, not a place the user named.
+      else if (genericWholeArea) turn = { ...turn, query: { ...turn.query, location: askedCity! } };
+      // «الرياض كاملة» is the CITY (owner, 2026-08-29). Without this the WHOLE_AREA rule below
+      // short-circuits the twin question and searches whatever the parser produced — for a twin
+      // that is the whole REGION, so «الرياض كاملة» returned all 20 cities of منطقة الرياض. Only
+      // ever narrows region→city, and explicit «منطقة X» wins (see twinWholeAreaIsCity).
+      else if (twin && twinWholeAreaIsCity(v, twin)) {
+        turn = { ...turn, query: { ...turn.query, location: scopedLocation(twin, 'city') } };
+      }
+    } else if (askedTwin && twinWholeAreaIsCity(v, askedTwin) && turn.kind === 'message') {
+      // Same rule when «كاملة» arrives as the ANSWER to our twin question and the model drifted off
+      // the thread — the user still chose, and their choice is the city.
+      turn = { kind: 'listings', reply: '', query: { ...parseQuery(saidRef.current.join(' ')), location: scopedLocation(askedTwin, 'city') } };
+    } else if (genericWholeArea && turn.kind === 'message') {
+      // Same recovery as the twin branch below: the model drifted off the thread, but the user did
+      // answer a question WE asked, so run their search from this attempt scoped to that city.
+      turn = { kind: 'listings', reply: '', query: { ...parseQuery(saidRef.current.join(' ')), location: askedCity! } };
     } else if (scopeChoice && askedTwin && turn.kind === 'message') {
       // The model drifted off the thread (a greeting, or another question). The user still answered a
       // question WE asked, so run their search from everything said this attempt, scoped to their pick.
@@ -2148,36 +2357,24 @@ export default function Agent() {
     }
 
     if (turn.kind === 'listings') {
-      // DETERMINISTIC backstop: even though the model chose to search, if the location is not usable
-      // (no city / a bare multi-city district) ASK in Arabic instead — accuracy over speed. After 2 asks
-      // we stop pestering and search with whatever we have. (user: it MUST ask, not guess the location.)
-      const clarifyQ = locationClarification(turn.query, v);
-      if (clarifyQ && askCountRef.current < 2) {
-        askCountRef.current += 1;
-        // Remember WHICH twin name this question is about, so the user's next message can commit their
-        // pick even if the model answers with something else entirely.
-        pendingScopeRef.current = regionOrCityTwin(turn.query.location);
-        setMsgs((m) =>
-          m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: clarifyQ, typing: true } : x)),
-        );
-      } else {
-        // Bug-fix #10 (audit `agent-2ask-cap-silent-search`): when we hit the 2-question cap with an
-        // unusable location, the silent fallback search needs to TELL the user what scope was used so
-        // they're not surprised by broad results. (user directive: "explain the search scope used".)
-        const forcedBroad = !!clarifyQ && askCountRef.current >= 2;
-        askCountRef.current = 0;
-        saidRef.current = [];
-        beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
-        const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
-        const reply = forcedBroad
-          ? `${getLocale() !== 'en'
-              ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
-              : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
-          : buildScrapeIntro(result.query ?? turn.query);
-        await playListings(run, statusId, reply, result, v);
-        if (run.cancelled) return;
-        void promptSignupSoon(run);
-      }
+      // THE SERVER IS THE SINGLE DECISION AUTHORITY (owner-approved consolidation, 2026-08-30).
+      // decideAgentTurn() in supabase/functions/agent/decide.ts already decided this turn should
+      // search — including deciding that broadly, with no city, is fine when nothing better is
+      // known. The client no longer re-litigates that with its own clarifyQ/askCountRef gate
+      // (deleted: src/lib/agentQuestionBudget.ts's shouldAskLocationInsteadOfSearching and its call
+      // site here) — trust it unconditionally and render, never ask instead.
+      const forcedBroad = !turn.query.location;
+      saidRef.current = [];
+      beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
+      const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
+      const reply = forcedBroad
+        ? `${getLocale() !== 'en'
+            ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
+            : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
+        : buildScrapeIntro(result.query ?? turn.query);
+      await playListings(run, statusId, reply, result, v);
+      if (run.cancelled) return;
+      void promptSignupSoon(run);
     } else {
       const attemptText = saidRef.current.join(' ');
       const combined = parseQuery(attemptText);
@@ -2246,6 +2443,11 @@ export default function Agent() {
     askCountRef.current = 0;
     saidRef.current = [];
     runRef.current = makeRun('filter'); // owner 2026-08-18: tags this turn so Stop returns to Filter
+    // A Filter-originated search IS the new canonical state — the form says exactly what the user
+    // wants — so the chat's accumulated query must not survive into it. Placed AFTER makeRun on
+    // purpose: verify-filter-stop-cancels-and-restores.ts asserts a 600-char sendFilter→makeRun
+    // proximity, and inserting above it pushed makeRun out of that window.
+    lastQueryRef.current = null;
     // Filter search: open at the top and let the request bubble type itself out FIRST, on its own —
     // the SEARCHING loader (full platform roster + highlight wave) does not mount until the bubble
     // has fully finished typing (onBubbleDone). (owner 2026-07-15: reversed from the prior "loader
@@ -2324,10 +2526,15 @@ export default function Agent() {
       setDoneTyping(restored.doneTyping);
       setRevealCount(restored.revealCount);
       setAfReceipt(restored.afReceipt);
-      setGuidedPills(restored.guidedPills as any);
+      setCompleted(restored.completed === true);
+      // Dedup on restore too (owner audit, 2026-08-27): a chat saved before this fix shipped could
+      // have a stray duplicate pill baked into its serialized transcript — restoring it verbatim
+      // would resurrect exactly the bug this fix closes everywhere else. Deduping HERE (not just at
+      // render) keeps the array index-consistent for removeGuidedFacet's index-based removal.
+      const rgp = restored.guidedPills as { facets?: GuidedFacet[] } | null | undefined;
+      setGuidedPills((rgp && rgp.facets ? { ...rgp, facets: dedupeFacetsByLabel(rgp.facets) } : rgp) as any);
       lastCapturedRef.current = JSON.stringify(t); // what's on screen IS what's stored — no echo write
-      pinModeRef.current = 'top';
-      toTop();
+      landAtLatest();
       return;
     }
     // No transcript anywhere. A search chat falls back to the legacy snapshot/replay view; a
@@ -2351,9 +2558,8 @@ export default function Agent() {
         { id: resultsId, role: 'results', text: sub, result: snapshot },
       ]);
       setDoneTyping((d) => ({ ...d, [resultsId]: true }));
-      setRevealCount((c) => ({ ...c, [resultsId]: Math.min(FIRST_PAGE, snapshot.listings.length) }));
-      pinModeRef.current = 'top';
-      toTop();
+      setRevealCount((c) => ({ ...c, [resultsId]: initialReveal(snapshot) }));
+      landAtLatest();
       return;
     }
     // Render the user bubble + a brief "searching…" status immediately so the screen is never blank
@@ -2379,7 +2585,7 @@ export default function Agent() {
       { id: resultsId, role: 'results', text: sub, result },
     ]);
     setDoneTyping((d) => ({ ...d, [resultsId]: true }));
-    setRevealCount((c) => ({ ...c, [resultsId]: Math.min(FIRST_PAGE, result.listings.length) }));
+    setRevealCount((c) => ({ ...c, [resultsId]: initialReveal(result) }));
     pinModeRef.current = 'top';
     toTop();
   };
@@ -2440,6 +2646,12 @@ export default function Agent() {
       setBusy(false);
       setMsgs([]);                                         // new search = a clean chat view
       chatIdRef.current = null;                            // new conversation → new sidebar chat (a restore re-sets it)
+      // The Advanced Filter carry belongs to the conversation being left. It is only ever WRITTEN on
+      // a «تحديد أكثر» tap, so without this a brand-new search inherited the previous chat's answered
+      // set and opened its first round already believing those questions were resolved — and, since
+      // startAgeFlow now also seeds from the incoming query's own receipt, a stale carry would beat
+      // the receipt that actually describes this search.
+      afCarryRef.current = null;
     };
     // THE GATE (owner 2026-08-16). Params that were in the URL when the DOCUMENT loaded — a refresh,
     // a restored tab, a pasted link — are not a user action, so they must not execute anything. Drop
@@ -2478,7 +2690,20 @@ export default function Agent() {
         // the payload is not — the reload/bookmark/share case. The existing city/district rehydration
         // effects in index.tsx then restore the picked المدينة/الأحياء from the catalog exactly as
         // they already do on the no-reload round-trip.
-        setQuery(() => q);
+        //
+        // SANITIZED, because "identity write" above holds only when the payload came from the filter
+        // form. The sidebar breaks that assumption: Sidebar.tsx writes sanitizeForFilterRestore(query)
+        // to the store and then navigates with the UNSANITIZED query in `?filter=`, so this line used
+        // to overwrite the sanitized write with the full agent query — parking every AF predicate
+        // (ratingMin, amenities, bathMin, streetWidthMin, directions, …) in the store the Filter home
+        // binds to, with no control on screen representing any of them. Measured on production: after
+        // reopening a monthly-rent chat that had answered «التقييم ٩.٠+», an unrelated
+        // الرياض/شراء/فيلا search returns 0 of 11,552 (بيع inventory has zero rated rows); an
+        // annual-rent chat carrying amenities=[elevator]+bathMin=3 returns 574 of 11,552.
+        // The allowlist is exactly the set of fields the Filter UI can show, so this stays an identity
+        // write on the filter-form path it was written for. `openSaved`/`sendFilter` below keep the
+        // FULL q — the replay needs the AF predicates to reproduce the conversation.
+        writeFilterStore(q);
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
         startFresh();
         if (replay === '0') void openSaved(hid, q, override);
@@ -2534,6 +2759,9 @@ export default function Agent() {
         setBusy(false);
         setMsgs([]);
         pendingScopeRef.current = null; // New Chat inherits nothing — not even a half-answered question
+        setCompleted(false);
+        lastQueryRef.current = null;    // …and not the previous conversation's accumulated filters
+        pendingCityRef.current = null;  // …including the plain-city question's subject
         chatIdRef.current = null;       // …and not the previous conversation's sidebar identity
         // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
         // identical to a previous one (otherwise the change-detection would skip it and leave just
@@ -2586,6 +2814,14 @@ export default function Agent() {
     introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
 
   return (
+    // DARK MODE IS GLOBAL AND STICKY (owner 2026-08-30, reverses the 2026-08-29 "white by design"
+    // decision below): "Dark means everything dark and forever — until the user changes it
+    // manually, even if he leaves the page and re-enters." The Agent/chat screen was pinned to
+    // light via ForceLightTheme, so navigating here (including a plain search, which routes
+    // through this screen) silently dropped a signed-in user's dark preference. Removed — every
+    // color on this screen already flows through the `colors.*` CSS-var tokens (theme/tokens.ts),
+    // which are dark-reactive by construction, so this screen was always dark-CAPABLE; only the
+    // ForceLightTheme wrapper was overriding it back to light. See verify-theme-contract.ts.
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
           Home) so the landmarks fill the whole frame — including the center, which used to wash out
@@ -2700,7 +2936,7 @@ export default function Agent() {
                 const rtl = msgRTL(txt);
                 return (
                   <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
-                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]}>
+                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
                       <View style={s.replyIcon}>
                         <Ionicons name="sparkles" size={14} color={colors.primary} />
                       </View>
@@ -2730,6 +2966,12 @@ export default function Agent() {
               // same sentence the reply types on screen — one computation, never a second copy that
               // could drift from what's actually shown.
               const introZeroResult = m.result.listings.length === 0;
+              // «مطابق لطلبك» (§12A): the ONLY carrier of the predicates these cards were searched
+              // with is this turn's frozen result.query — never the Filter store, guidedPills or
+              // afReceipt, so a facet the user cleared cannot leak onto a card. afActive() is
+              // WeakMap-memoised on that object, so every card of the turn (and every «عرض المزيد»
+              // page, which reuses the same query) receives one stable reference.
+              const activeAf = afActive(m.result.query);
               // Same helper the mining overlay quotes (src/data/search.ts) — one definition of "the
               // total we may state", so the interview's closing beat and this headline, describing the
               // SAME search, can never name two different numbers. null ⇒ no honest count ⇒ say nothing.
@@ -2819,8 +3061,11 @@ export default function Agent() {
                       2026-07-09: show the first card the moment valid listings exist). The
                       more-message + feedback row still wait for the text via their doneTyping gates. */}
                   {m.result.listings.length === 0 ? (
-                    // Zero-result: text already animated in slot above — render nothing here to avoid duplicate.
-                    null
+                    // Zero-result: the text already animated in the slot above, so no duplicate copy here —
+                    // but the RESPONSE-level feedback row still belongs to this turn (owner 2026-08-30: thumbs
+                    // must not vanish merely because listing count = 0; the user is rating the answer, and
+                    // "nothing matched" IS an answer). Read-aloud reads the zero-result intro alone.
+                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined)} />
                   ) : (
                     <>
                       {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).
@@ -2837,7 +3082,7 @@ export default function Agent() {
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
-                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, m.result.listings.length))).map((l, i) => (
+                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result))).map((l, i) => (
                           // CardIn = soft mount-in (fade + slight rise). Keyed by source:id (ids are
                           // only unique per source table — matches the de-dup identity), so cards
                           // already on screen NEVER re-animate — only newly-revealed ones enter softly.
@@ -2846,6 +3091,7 @@ export default function Agent() {
                               listing={l}
                               variant="compact"
                               rank={i + 1}
+                              activeAf={activeAf}
                               onOpen={() => { trackOpen(l); void openListing(l); }}
                             />
                           </CardIn>
@@ -2859,7 +3105,7 @@ export default function Agent() {
                           ألقى نتائج أدق» asks ONE clarifying question then re-searches. */}
                       {(() => {
                         const fetched = m.result.listings.length;
-                        const shown = revealCount[m.id] ?? (m.typing ? 0 : Math.min(FIRST_PAGE, fetched));
+                        const shown = revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result));
                         const serverMore = !!m.result.hasMore; // the DB still has more matching pages to fetch
                         // Show once this page's cards are on screen. Gate on (typing && !doneTyping) — the SAME
                         // condition the cards use — NOT on `m.typing` alone: a live results message keeps typing=true
@@ -2867,28 +3113,30 @@ export default function Agent() {
                         // min(FIRST_PAGE, fetched): a search with <10 matches still gets its closing message.
                         // ALSO gates FeedbackRow/Read Aloud below (merged into one block, owner 2026-08-23 — the
                         // spoken closing note must reuse this SAME computed text, never re-derive it separately).
-                        if ((m.typing && !doneTyping[m.id]) || shown < Math.min(FIRST_PAGE, fetched)) return null;
-                        // RESULT-CAP RULE (owner 2026-08-20) — the browse cap, the "load more" gate and the
-                        // closing count all come from ONE pure function (src/data/resultCount.ts), so they can
-                        // never disagree and one test locks them. The user browses min(trueTotal, BROWSE_CAP)
-                        // cards; the closing message states the TRUE total, never the cap or the buffer length.
+                        if ((m.typing && !doneTyping[m.id]) || shown < initialReveal(m.result)) return null;
+                        // BROWSE-CONTINUATION RULE (owner 2026-08-29, supersedes the 2026-08-20 cap) — the
+                        // "load more" gate and the closing count come from ONE pure function
+                        // (src/data/resultCount.ts), so they can never disagree and one test locks them. The
+                        // user can browse EVERY match in batches of BROWSE_BATCH; the closing message states
+                        // the TRUE total, never a batch size or the buffer length.
                         const clientNarrowed = !!(m.result.query && hasClientOnlyNarrowing(m.result.query));
                         // TRUE eligible total — matchTotal FIRST (PR #608 "never the page-capped total"), NEVER
                         // `fetched`/`listings.length` (a page-buffer size). Under client-only narrowing the RPC
-                        // total OVERSTATES (it never applied the client filter), so it may neither be quoted nor
-                        // capped-against: we cap against the cap itself so paging still reaches it, and word the
-                        // message from `shown` — the same reason the intro suppresses the count. (bug-hunt 2026-07-30.)
+                        // total OVERSTATES (it never applied the client filter), so it may not be quoted; the
+                        // honest substitute is the FLOOR we can prove — what's fetched, plus-one while the
+                        // server still has pages (keeps «عرض المزيد» alive without ever quoting the fake
+                        // total; the copy branches below word these searches from `shown` only, exactly as
+                        // before — bug-hunt 2026-07-30).
                         const rawTotal = m.result.matchTotal ?? fetched;
-                        const trueTotal = clientNarrowed ? BROWSE_CAP : rawTotal;
+                        const trueTotal = clientNarrowed ? (serverMore ? fetched + 1 : fetched) : rawTotal;
                         const rc = resultCounts({ trueTotal, shown, fetched, serverMore });
                         // ONLY THE NEWEST results turn carries live actions (owner 2026-08-24). The
                         // cap logic itself is untouched — rc still states the honest totals for every
                         // turn; this only decides whether the buttons are still THIS turn's to offer.
                         const isLatestResults = m.id === lastResultsMsg?.id;
                         const hasMore = rc.hasMore && isLatestResults;
-                        // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side)
-                        // AND more than the cap actually matched — that is the only case with two honest numbers.
-                        const quoteTotal = !clientNarrowed && rc.endKind === 'capped';
+                        // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side).
+                        const quoteTotal = !clientNarrowed;
                         // ≤25 RULE (owner brief 2026-08-19, item 4): the auto-opening AF intro already
                         // correctly gated on this same threshold (agent.tsx ~1375) — this SEPARATE manual
                         // button did not, and its click path (startAgeFlow → rankQuestions, which itself
@@ -2907,19 +3155,19 @@ export default function Agent() {
                         const fetching = !!loadingMore[m.id];
                         const cascading = revealing && revealActiveRef.current?.id === m.id;
                         const moreNoteText = rc.endKind === 'more'
-                          ? (canNarrowFurther
-                              ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: rc.endShown.toLocaleString('en-US') })
-                              : t('I showed you the first {n} listings. Want me to show more?', { n: rc.endShown.toLocaleString('en-US') }))
-                          : quoteTotal
-                            // More than the cap matched: two honest numbers — the true total AND the {cap} shown.
-                            ? (canNarrowFurther
-                                ? t('We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?', { total: rc.endTotal.toLocaleString('en-US'), shown: rc.endShown.toLocaleString('en-US') })
-                                : t('We found {total} listings matching your search, and showed you {shown}.', { total: rc.endTotal.toLocaleString('en-US'), shown: rc.endShown.toLocaleString('en-US') }))
-                            // Everything matching is on screen (≤ cap, or a hidden-total narrowed search):
-                            // state the real matched count — which equals what's shown.
-                            : (canNarrowFurther
-                                ? t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') })
-                                : t('I showed you all {n} matching listings.', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') }));
+                          ? (quoteTotal
+                              // Trusted total + more remain: BOTH honest numbers, and the door stays open.
+                              ? (canNarrowFurther
+                                  ? t('I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?', { shown: rc.endShown.toLocaleString('en-US'), total: rc.endTotal.toLocaleString('en-US') })
+                                  : t('I showed you the first {shown} of {total} matching listings. Want me to show more?', { shown: rc.endShown.toLocaleString('en-US'), total: rc.endTotal.toLocaleString('en-US') }))
+                              // Narrowed search (total not quotable): word it from what's on screen only.
+                              : (canNarrowFurther
+                                  ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: rc.endShown.toLocaleString('en-US') })
+                                  : t('I showed you the first {n} listings. Want me to show more?', { n: rc.endShown.toLocaleString('en-US') })))
+                          // Everything matching is on screen — state the real matched count.
+                          : (canNarrowFurther
+                              ? t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') })
+                              : t('I showed you all {n} matching listings.', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') }));
                         // HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21) — see the comment on the
                         // buttons row below; the SAME gate decides whether Read Aloud may mention them too.
                         const showActionsRow = (hasMore || canNarrowFurther) && !ageFlow;
@@ -3059,6 +3307,30 @@ export default function Agent() {
             bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
         {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
             insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
+        {/* COMPLETED SEARCH (owner 2026-08-30): Advanced Filter reached the final set (R11.1) or no useful
+            question remained (R11.2). The conversation is DONE — the composer (and the mic that lives inside it)
+            is replaced by one clear action. The saved transcript stays readable; Back / reopen restore this
+            same state from `completed` rather than resurrecting a live composer. */}
+        {completed ? (
+          <View style={[s.completedWrap, { paddingBottom: insets.bottom + 12 }]}>
+            <View style={[s.col, s.completedBar]}>
+              <View style={s.completedTxWrap}>
+                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+                <Text style={s.completedTx}>{t('Search complete')}</Text>
+              </View>
+              <Text style={s.completedSub}>{t('Start a new chat to search again')}</Text>
+              <Pressable
+                onPress={() => { newChat(); router.replace({ pathname: '/', params: { fresh: String(Date.now()) } }); }}
+                accessibilityRole="button"
+                accessibilityLabel={t('New Chat')}
+                style={({ pressed, hovered }: any) => [s.newChatBtn, (pressed || hovered) && s.newChatBtnOn]}
+              >
+                <Ionicons name="add" size={18} color={colors.onFill} />
+                <Text style={s.newChatTx}>{t('New Chat')}</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
@@ -3222,6 +3494,7 @@ export default function Agent() {
             </Text>
           </View>
         </View>
+        )}
       </KeyboardAvoidingView>
 
       {/* ChatGPT-style feedback toast — floats top-center ABOVE the conversation (below the header),
@@ -3258,7 +3531,6 @@ export default function Agent() {
             <AdvancedIntroCard
               total={ageFlow.total}
               onBegin={onIntroBegin}
-              onShowResults={onIntroShowResults}
               onClose={onIntroShowResults}
             />
           ) : ageFlow.phase === 'mining' ? (
@@ -3280,7 +3552,6 @@ export default function Agent() {
               onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
               onBack={onAgeBack}
-              onSkipAll={onAgeSkipAll}
               onClose={onAgeClose}
             />
           )}
@@ -3337,7 +3608,7 @@ const s = StyleSheet.create({
     elevation: 2,
   },
   shareIconPressed: { opacity: 0.85 },
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
 
@@ -3392,7 +3663,7 @@ const s = StyleSheet.create({
   // The two actions under the «more than 25» message: primary (show all) + outline (refine). (user 2026-06-27.)
   mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
   // minWidth + centered content: the text↔dots swap never changes the button's size (no layout shift).
-  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.primary, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
+  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.selFill, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
   mBtnPrimaryHover: { backgroundColor: colors.dark },
   mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: '#fff', lineHeight: 18 },
   mBtnAlt: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
@@ -3420,7 +3691,7 @@ const s = StyleSheet.create({
   promptLogo: { width: 56, height: 56, borderRadius: 28 },
   promptTitle: { fontSize: 17, fontWeight: '800', color: colors.ink, textAlign: 'center' },
   promptBody: { fontSize: 13.5, lineHeight: 19, color: colors.muted, textAlign: 'center' },
-  promptPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primary, borderRadius: 13, paddingVertical: 13, width: '100%', marginTop: 6 },
+  promptPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.selFill, borderRadius: 13, paddingVertical: 13, width: '100%', marginTop: 6 },
   promptPrimaryTx: { color: '#fff', fontSize: 14.5, fontWeight: '700' },
   promptSecondary: { paddingVertical: 8 },
   promptSecondaryTx: { color: colors.muted, fontSize: 13.5, fontWeight: '600' },
@@ -3430,8 +3701,8 @@ const s = StyleSheet.create({
   // User message bubble — deliberately STRONGER light-green so it pops against the cream paper bg,
   // like the selected recent-chat row in the sidebar. Dark green text for contrast. (user request.)
   // User message bubble — soft light green pill, normal text weight (not heavy/black). (user request.)
-  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: '#d7eede', borderColor: '#bedfc9', borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
-  userText: { color: '#1d4a37', fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: colors.userBubble, borderColor: colors.tintLine, borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
+  userText: { color: colors.userBubbleText, fontSize: 14, lineHeight: 19, fontWeight: '500' },
 
   status: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 2 },
   statusText: { fontSize: 12.5, color: colors.muted },
@@ -3462,10 +3733,19 @@ const s = StyleSheet.create({
   refineIc: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   refineT: { fontSize: 13, fontWeight: '700', color: colors.ink },
   refineS: { fontSize: 11, color: colors.body, marginTop: 1, lineHeight: 15 },
-  refineBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 11 },
+  refineBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 11 },
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
+  // Completed-search bar (owner 2026-08-30) — replaces the composer once AF reaches the final set.
+  completedWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
+  completedBar: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 22, paddingVertical: 16, paddingHorizontal: 18, alignItems: 'center', gap: 6, ...cardShadow },
+  completedTxWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  completedTx: { fontSize: 15, fontWeight: '800', color: colors.ink },
+  completedSub: { fontSize: 12.5, color: colors.muted, textAlign: 'center' },
+  newChatBtn: { marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.selFill, paddingVertical: 11, paddingHorizontal: 22, borderRadius: 999 },
+  newChatBtnOn: { backgroundColor: colors.dark },
+  newChatTx: { fontSize: 14, fontWeight: '800', color: colors.onFill },
   // The send/stop button is pinned to the PHYSICAL right (right:4) and never mirrors — it stays on the
   // right in Arabic too, so paddingRight leaves room for it regardless of text direction. (user request.)
   // Inline row (no absolute button): input flexes, the send/stop button sits at the end, vertically
@@ -3498,7 +3778,7 @@ const s = StyleSheet.create({
   // 16px and never zoom back out — the single worst mobile-web chat bug. overflowY:'auto' gives the
   // internal scroll once the textarea reaches COMPOSER_MAX_H. (owner 2026-08-19)
   input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
-  sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   sendBtnHover: { backgroundColor: colors.dark },
   sendDisabled: { opacity: 0.35 },
   // ── Voice recording composer (owner brief 2026-08-23) ──

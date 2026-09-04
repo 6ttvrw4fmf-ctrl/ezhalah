@@ -51,7 +51,7 @@ across many partner platforms and shows them in one place. **It is a search engi
 | **Backend** | **Supabase** project `aannarbkwcymrotzwdbo` — Postgres + PostgREST (RPC) + Edge Functions (Deno) + `pg_cron` + Vault. Region **Tokyo** (PDPL residency is an open question). |
 | **Scraper repo** | GitHub **`6ttvrw4fmf-ctrl/ezhalah`**. All scrapers + GitHub Actions workflows live here. |
 | **Scraper dispatch** | `pg_cron` → `trigger_gh_workflow(wf)` → GitHub `workflow_dispatch`. **Every workflow is dispatch-only; all cadence is owned by Postgres** (so it is monitorable/pausable from the DB). PAT in Vault (exp 2027-06-22). |
-| **AI agent** | Supabase Edge Function named **`agent`** (Gemini 2.5 Flash-Lite primary + Flash fallback, via `GEMINI_MODEL` secret). Runtime behavior tunable via the `agent_notes` DB table (no redeploy). |
+| **AI agent** | Supabase Edge Function named **`agent`** (DeepSeek `deepseek-v4-flash`, via `DEEPSEEK_MODEL` secret; sole provider since 2026-08-28 — Gemini removed as a clean cutover). Runtime behavior tunable via the `agent_notes` DB table (no redeploy). |
 
 **Why Expo/React Native, not native SwiftUI (owner decision 2026-06-09):** the owner first said "decide
 for me" (→ SwiftUI), then pivoted: wanted web + iPhone + Android from one codebase, live-preview while
@@ -727,11 +727,12 @@ everything below is its Deal-axis mirror, not a new philosophy.
   excludes Buy-only questions (fail the Rent legs), Rent-only questions like `rnpl` (never in any
   cohort's Buy list), and Monthly-only signals like Gathern `rating`/`unit_subtype` (never in Buy or
   RentAnnual). A type with no certified Monthly cohort (most commercial/rural types) mechanically
-  offers zero combined-mode questions. `property_age` (`AGE_QUESTION`) has its own separate gate
-  (`isAgeFilterScope` in `src/lib/ageFilterTypes.ts`, never profiled against Monthly for any type)
-  that also excludes `dealCombined` unconditionally — fixing `cohortAllows` alone would have left
-  this exact leak open a second time, same as the mixed-period fix needed. Barrier:
-  `scripts/verify-buy-rent-combined-af-gating.ts` (npm test, 10 checks).
+  offers zero combined-mode questions. `property_age` (`AGE_QUESTION`) used to have its own separate
+  gate (`isAgeFilterScope` in `src/lib/ageFilterTypes.ts`) that also excluded `dealCombined`
+  unconditionally by hand; as of 2026-09-01 that second gate is deleted and `AGE_QUESTION`'s
+  eligibility is `cohortAllows(q, 'property_age')` directly, so it inherits this 3-way intersection
+  (and every other cohortAllows rule) automatically — no second gate left to drift. Barrier:
+  `scripts/verify-buy-rent-combined-af-gating.ts` (npm test, 12 checks).
 - **Trending mirrors the same combined scope.** `top_cities_by_deal_ar`/`district_options_ar` under
   `p_deal=null` return the Buy∪Rent(any period) eligible set — `top_cities_by_deal_ar` needed a
   null-safety fix first (it had a hard `s.deal_ar = p_deal` equality that NULL can never satisfy,
@@ -837,6 +838,8 @@ migration-drift-guard rule in `AGENTS.md`).
 
 ## 20. Permanent rules (the non-negotiables)
 
+- **Sign-in is Google and Apple only — no phone number, no OTP (owner, 2026-09-01).** The WhatsApp-OTP path was removed at every layer (AuthModal step, account-menu change-phone flow, auth.ts helpers, country table, i18n) with zero stranded users (auth.identities that day: google 5, email 2, phone 0). `scripts/verify-no-phone-auth.ts` fails the build if any layer returns. Disabling the Phone provider in the Supabase Auth dashboard is the owner's one remaining click; the client has no path to it regardless.
+
 1. **Frontend = source of truth; backend supports it; never change UX without explicit owner approval.**
    Compare every change against this doc; if it conflicts, STOP and tell the owner. Ask if <100% certain.
 2. **Search engine, not a marketplace.** Neutral, no transactions/inventory/commission/advice; never
@@ -852,7 +855,14 @@ migration-drift-guard rule in `AGENTS.md`).
    filter UI.
 8. **Gathern = rent-only monthly.** Never in Buy results; price already annualized.
 9. **Lifecycle:** accuracy over cleanup — never wrongly remove a real listing; confirmed-dead + multi-
-   strike + collapse guards only.
+   strike + collapse guards only. **Liveness is THREE-valued — ALIVE / DEAD / UNKNOWN — never two,
+   and UNKNOWN never deactivates anything** (owner, 2026-08-30). Timeout, 403, 429, 5xx, an
+   uninterpretable 200, and absence from our own crawl are all UNKNOWN. Only DIRECT evidence (a
+   fetch of the listing's own URL) can kill, and only at full grace. "Seen by the crawler"
+   (`last_seen_at`) and "proven alive" (`last_verified_alive_at`) are different facts in different
+   columns, and only `scrapers/common/liveness_contract.py` may write the second.
+   **`docs/ops/LISTING_LIVENESS.md` is canonical** — read it before touching any liveness,
+   cleanup, strike or deactivation path.
 10. **Regression prevention (#1 ops rule):** preserve work before risky git ops; never `git reset --hard`
     a dirty tree; before+after verify every deploy; deploy only to project `ezhalah-app`.
 11. **Compliance:** REGA FAL + PDPL (Saudi residency, no selling user data).
@@ -895,6 +905,77 @@ migration-drift-guard rule in `AGENTS.md`).
     kept**: a `live` verdict needs HTTP 200 plus no dead-marker, and restoring a wrongly-inactive
     listing is the fail-safe direction. Never widen the freeze to reactivations, and never key its
     rate on `stats["skipped"]` (that counter also holds rows with no URL, which never reach a probe).
+16. **Ranking hierarchy: MATCH → PLATFORM DIVERSITY → PHOTO PREFERENCE → CONTROLLED ROTATION.**
+    (owner PERMANENT rule, 2026-08-29.) "Never sacrifice correctness or eligibility for diversity,
+    photos, or rotation." All four tiers live in ONE place — `location_search_candidates_ar`'s
+    ORDER BY — and never change `matched` (eligibility) or `total_count`; a no-photo or unknown-photo
+    listing is exactly as reachable/counted as any other genuine match.
+    - **Tier 1, MATCH, is absolute.** Price/location/type/deal/period/bedrooms/AF predicates stay
+      exact; nothing below this tier can pull in an ineligible row.
+    - **Tier 2, PLATFORM DIVERSITY**, is unchanged from the 2026-08-05 `div_rank` mechanism (rule
+      #2's PR #331) — each platform's own eligible rows numbered 1..n, ordered by that number first.
+    - **Tier 3, PHOTO PREFERENCE**, is folded INTO `div_rank`'s own per-platform ordering (photo
+      status first, recency second) rather than sitting after it — computing `div_rank` on recency
+      alone let a platform's most-recent-but-no-photo listing outrank that SAME platform's
+      older-but-real-photo listing, exactly the "photo-less occupying the first 10" failure the
+      owner named; caught and fixed live, same session, before this rule was written down.
+      `search_listings_ar.has_photo` is the source of truth: `NULL` (unknown/unaudited platform, per
+      `ops_photo_capture_trust`) is NEVER treated as "has a photo" and NEVER demoted as "confirmed
+      no photo" — it ranks strictly between the two. **UNKNOWN must remain UNKNOWN** (mirrors the AF
+      probe rule, `afProbe.ts`, 2026-08-25). A platform only gets `has_photo` written once its
+      capture rate clears `ops_photo_capture_trust`'s bar (≥50 reachable rows, ≥70% real-photo rate,
+      both re-derived on every sync run — never a hand-picked, rot-prone allowlist).
+    - **Tier 4, CONTROLLED ROTATION**, is the LAST tie-break, strictly before the pre-existing
+      unconditional `(source_table, listing_id)` total-order tiebreaker — so total-order pagination
+      (no duplicate/skip across `عرض المزيد` batches, PR #1267) holds regardless of rotation.
+      `hashtext(source_table, listing_id, p_rotation_seed)` — a deterministic Postgres builtin,
+      **never `ORDER BY random()`**. `p_rotation_seed` is minted client-side, once per device (not
+      per visit — `src/lib/rotationSeed.ts`), combined with a coarse ISO-week bucket so a long-lived
+      device's exposure still drifts over time. REPLACED the old `ezh_rot` per-filter localStorage
+      revisit counter (2026-06-27): that counter started at 0 for every brand-new device, so two
+      different first-time visitors of the same cohort saw an identical top 10 — it never solved the
+      cross-user problem, only the same-device-returns-later one.
+    - **Tiers 3 and 4 are both NULL (inert) under every objective sort** (price/area/beds/oldest) —
+      an explicit user sort is a promise about literal order and always wins; verified byte-identical
+      live, with and without a rotation seed.
+    - **Barriers:** `scripts/verify-photo-preference-and-rotation-live.ts` (live production RPC
+      behavior — determinism, seed variation, count-honesty, zero-dup pagination, photo ordering,
+      sort immunity), `scripts/verify-rotation-seed-contract.ts` (pure module + wiring, `npm test`).
+      §40 of `docs/ops/SEARCH_MATCH_QA_ENGINEER.md` carries the full worked model as "Result
+      Rotation" — do not confuse it with that file's pre-existing, unrelated "Coverage Rotation"
+      section (QA-journey sampling, not result ordering).
+17. **«الأجهزة المسجّل عليها الدخول» shows ONLY the real session registry, under a locked privacy
+    contract.** (Owner Phase 2, 2026-08-29.) GoTrue's `auth.sessions` is the one truth (one row =
+    one device-login); there are NO fake/derived devices, NO fingerprinting, and NO parallel
+    device-tracking table (a per-session hints table — "Phase 3" — is explicitly forbidden). The
+    only bridge is the `devices` edge function (JWT → `auth.getUser` → act on that `user_id`,
+    delete-account's identity pattern): GET returns per session ONLY `{session_id, device_class,
+    browser|null, created_at, refreshed_at}` — the raw user-agent and IP NEVER leave the server;
+    the UA collapses server-side through the ONE truthful detector (`src/lib/deviceInfo.ts`,
+    byte-pinned copy in the function). DELETE revokes only caller-owned rows (`id AND user_id` in
+    the SQL). The client badges «هذا الجهاز» from its OWN JWT `session_id` claim (identity, never
+    list position) and removes a card ONLY after the backend confirms revocation. Honesty rules:
+    last-active = `COALESCE(refreshed_at, created_at)` (refreshed_at is written on ~hourly token
+    rotation — proven live), buckets never claim finer precision («نشط خلال الساعة الأخيرة» is the
+    freshest claim for another device), and revocation copy says sign-out completes within an hour
+    at most (issued access tokens live ≤1h). Known accepted limit: a stored UA cannot carry
+    maxTouchPoints, so ANOTHER device that is an iPad in desktop mode truthfully reads ماك; the
+    current device self-corrects locally. **Barrier:** `scripts/verify-devices-contract.ts`
+    (executes the mapper/JWT-reader/time-buckets; pins ownership SQL, endpoint shape, the client
+    confirmation gate — all anti-vacuous, mutation-proven ×5).
+
+18. **Whatever the user selected in Advanced Filter must be visibly and truthfully shown on the
+    returned property card — every certified AF field, not only amenities.** (Owner, 2026-09-03.)
+    Safe by construction: AF predicates are strict and NULL-excluding, so every returned row carries
+    a real published value for every active field; the card reads that row's own value back, and
+    never a guess (UNKNOWN stays invisible, never a claim). A static feature cap must not hide a
+    selected field, and the card's vocabulary must cover the certified token vocabulary — a token
+    the RPC can filter on but the card cannot draw is a defect of this rule. Canonical text and the
+    per-rule numbering: `docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md` §12A (R12A.1–R12A.6) + R13.12;
+    owned by the AF + Trending routine (`docs/ops/AF_TRENDING_DATA_INTEGRITY_ENGINEER.md`).
+    **Status when recorded: OPEN P1, not yet satisfied** — see §12A's status paragraph for the
+    measured gap (7 certified amenity tokens undrawable, a 6-item cap, and four fields visible only
+    on Wasalt-style cards).
 
 ---
 

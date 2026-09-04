@@ -133,21 +133,59 @@ def rem_fields(html_text: str) -> dict[str, str]:
     return out
 
 
-def fetch_list(s: cc.Session) -> list[dict]:
+def fetch_list(s: cc.Session) -> tuple[list[dict], Optional[str]]:
+    """Return (listings, last_err). last_err is set only when page 1 ultimately failed after
+    retries — the previous version broke silently on a non-200 or swallowed an empty page-1 body,
+    so a 2026-09-01/02 back-to-back "Hajer Houses: 0 listings from REST" pair (mon_detect_
+    silent_scraper_death P0) left nothing to root-cause from: the live source answered fine when
+    re-checked by hand both times, so this was a transient page-1 response the scraper never
+    retried or explained. Mirrors the 2026-08-31 erapulse fetch_page() fix (scrapers/erapulse/
+    run.py) — retry page 1 up to 5 times, capture the concrete reason (exception / HTTP status +
+    body / valid-but-empty body) instead of discarding it. A later page ending short of a full
+    batch is the normal pagination end, not a failure, so it isn't retried."""
     out: list[dict] = []
     page = 1
+    last_err: Optional[str] = None
     while True:
         _throttle()
-        r = s.get(f"{LIST_API}?per_page=100&page={page}&_embed=wp:featuredmedia",
-                  timeout=30, headers={"Accept": "application/json"})
-        if r.status_code != 200:
+        attempts = 5 if page == 1 else 1
+        arr: list = []
+        page_err: Optional[str] = "no attempts made"
+        for attempt in range(attempts):
+            try:
+                r = s.get(f"{LIST_API}?per_page=100&page={page}&_embed=wp:featuredmedia",
+                          timeout=30, headers={"Accept": "application/json"})
+            except Exception as e:
+                page_err = f"{type(e).__name__}: {e}"[:200]
+                if attempt < attempts - 1:
+                    time.sleep(2 * (attempt + 1))
+                continue
+            if r.status_code != 200:
+                page_err = f"HTTP {r.status_code}: {r.text[:150]!r}"
+                if attempt < attempts - 1:
+                    time.sleep(2 * (attempt + 1))
+                continue
+            try:
+                arr = r.json() or []
+            except Exception as e:
+                page_err = f"HTTP 200 non-JSON body ({type(e).__name__}): {r.text[:150]!r}"
+                if attempt < attempts - 1:
+                    time.sleep(2 * (attempt + 1))
+                continue
+            if arr or page > 1:
+                page_err = None
+                break
+            page_err = "HTTP 200, valid JSON, but page 1 data=[] (flaky-empty case)"
+            if attempt < attempts - 1:
+                time.sleep(2 * (attempt + 1))
+        if page_err:
+            last_err = page_err
             break
-        arr = r.json() or []
         out += arr
         if len(arr) < 100:
             break
         page += 1
-    return out
+    return out, last_err
 
 
 def _image(p: dict, html_text: str) -> list[str]:
@@ -279,8 +317,9 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
-    listings = fetch_list(s)
-    print(f"Hajer Houses: {len(listings)} listings from REST")
+    listings, fetch_err = fetch_list(s)
+    print(f"Hajer Houses: {len(listings)} listings from REST"
+          + (f" — last attempt: {fetch_err}" if fetch_err else ""))
     run_id = None if args.limit_test else db.begin_run("hajer")
     res: list[dict] = []
     com: list[dict] = []
@@ -341,7 +380,10 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Hajer: {len(res)} residential + {len(com)} commercial upserted, {gone_ct} sold/rented pinned inactive, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"gone={gone_ct} pruned={pruned}",
+        notes = f"gone={gone_ct} pruned={pruned}"
+        if fetch_err:
+            notes += f" fetch_err={fetch_err}"
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=notes[:300],
                    check_tables=["hajer_residential_listings", "hajer_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)

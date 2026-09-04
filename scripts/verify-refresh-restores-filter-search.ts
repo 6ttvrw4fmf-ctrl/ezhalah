@@ -123,8 +123,14 @@ check('the sidebar still reopens a saved chat via replay=0 + hid',
   /replay:\s*'0',\s*hid:\s*c\.id/.test(readFileSync(new URL('../src/components/Sidebar.tsx', import.meta.url), 'utf8')));
 check('re-running the SAME query later still works (the handled-refs are released when params clear)',
   /if\s*\(\s*!filter\s*&&\s*!seed\s*\)[\s\S]{0,400}?lastFilterRef\.current = undefined;[\s\S]{0,120}?lastSeedRef\.current = undefined;/.test(effect));
+// The seed must still HAPPEN — that is what keeps «تصفية» usable after a refresh. It no longer
+// writes `q` raw: since 2026-09-01 it writes it through sanitizeForFilterRestore, because the sidebar
+// reaches this same line with a full agent query and used to park AF predicates in the Filter store
+// (verify-af-state-never-leaks-into-filter.ts owns that half). Assert the seed exists and derives
+// from the payload, not the exact expression — pinning the expression is what made this assertion
+// fail on a fix that preserved its actual intent.
 check('agent.tsx still seeds the app query from a filter payload (تصفية stays usable)',
-  /setQuery\(\s*\(\s*\)\s*=>\s*q\s*\)/.test(agent));
+  /setQuery\(\s*\(\s*\)\s*=>\s*(?:sanitizeForFilterRestore\(\s*)?q\s*\)?\s*\)/.test(agent));
 check('agent.tsx never calls setQuery with a bare value (the 2026-08-15 outage signature)',
   !/setQuery\(\s*(?!\(|function\b)[A-Za-z_$][\w$]*\s*\)/.test(agent));
 

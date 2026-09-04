@@ -3,6 +3,7 @@ import { Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable,
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useThemePalette } from '@/lib/appearance';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
@@ -14,9 +15,11 @@ import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } 
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
-import { grouped, type SearchQuery } from '@/data/search';
-import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams } from '@/data/remote';
+import { buildAfSummary, grouped, type SearchQuery } from '@/data/search';
+import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
+import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
+import { reconcileCommittedAf, withoutFacet, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
@@ -98,7 +101,37 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale, isRTL } = useI18n();
-  const { query, setQuery, user, openAuth } = useApp();
+  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard } = useApp();
+  // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
+  //
+  // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
+  // before it, returning here and pressing «بحث» (through a Trending card or not) silently re-ran
+  // the PRE-AF search, and the Trending row counts, built from the same stripped query, advertised
+  // exactly the wrong number they then delivered. Measured live: الرياض/إيجار/سنوي/تجاري/محل +
+  // «جديد» committed 243, re-entry returned 566 with p_is_new_construction absent from the request.
+  //
+  // Reconciled, not raw, because THIS screen can move the cohort under a carried answer — change
+  // فئة, drop the group, pick a different نوع, switch شراء/إيجار or شهري/سنوي. reconcileCommittedAf
+  // re-checks every carried facet against the CURRENT cohort with cohortAllows() (the same gate that
+  // decided the question could be asked) and re-applies only the survivors through each question's
+  // OWN apply(). Applying an uncertified answer would not narrow honestly — the AF's SQL predicates
+  // are strict-NULL-excluding, so it would delete every row that never stated the attribute, turning
+  // UNKNOWN into No.
+  //
+  // SCOPE facets (group/type) are dropped outright — see certifiedFacets in src/lib/afCarry.ts. They
+  // license nothing (applyScopeAnswer writes only typeGroups/types/type, all Normal-tier fields the
+  // sanitizer already carries and the group/type boxes already control), and re-applying one made
+  // those boxes DEAD: the rows write the RAW store while rendering from this reconciled query, so
+  // every scope tap was overwritten on the next render. The interview's scope answer still rides —
+  // as the types/typeGroups it wrote.
+  //
+  // Derived ONCE, here, and read by the Trending city params, the district live counts, the AF chips
+  // and buildFilterBaseQuery alike — so what is counted, what is shown and what is searched cannot
+  // disagree, by construction rather than by four call sites remembering to agree.
+  const query = useMemo(
+    () => reconcileCommittedAf(storeQuery, AF_ALL_QUESTIONS),
+    [storeQuery],
+  );
   const docked = useDocked(); // website: sidebar is a permanent column, so hide the menu button
   // CITY-ONLY FIELD (owner spec 2026-07-17): citySuggestions holds either the Top-6-by-listings
   // (focus, empty text) or the Arabic-matched typed results — never a mix, and never a
@@ -221,7 +254,27 @@ export default function Home() {
   // Recomputing each render is cheap; memoising on the SIGNATURE gives a stable object identity that
   // changes if and only if a real predicate changed, so the pool cache key and the refresh effect
   // below can never serve a count for a filter state the user has already left.
-  const cityAfRaw = rpcAllNarrowingParams(query);
+  //
+  // THE TABLE SCOPE RIDES ALONG (defect 2026-09-03). The narrowing params alone are not enough for
+  // Trending to describe the search: the results RPC is also scoped to a TABLE list, and Trending was
+  // sending none — so it counted every platform table in search_listings_ar while results read only
+  // RES_TABLES/COM_TABLES. The moment five platforms went live in the view without being added to
+  // those client lists, Trending began advertising inventory results cannot return (measured live:
+  // الهفوف/أرض سكنية/بيع advertised 2,478, search delivered 109). searchTableScope(query) is the SAME
+  // pure function resolveSearchScope uses for the results call, never a second copy of the lists —
+  // a copy is exactly how this drifted. null (no readable table for this query) leaves the scope off
+  // and is unreachable here in practice: tablesFor() is non-empty for every real Filter state.
+  // isBroadCommercial is dropped: it is a local branch flag for fetchListingsForQuery, NOT an RPC
+  // argument — passing it would make PostgREST reject the whole call with PGRST202.
+  const { isBroadCommercial: _cityScopeFlag, ...cityTableScopeRaw } = searchTableScope(query) ?? {};
+  // Memoised on its own CONTENT signature, exactly like cityAfParams below. The district pool takes
+  // this object directly (its cache key folds it in), and the scope can change WITHOUT deal/category/
+  // types changing — a platform filter alone rewrites it — so a stable identity keyed on the content
+  // is what makes the district effects re-run on precisely the changes that matter and no others.
+  const cityTableScopeSig = JSON.stringify(cityTableScopeRaw);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cityTableScope = useMemo(() => cityTableScopeRaw, [cityTableScopeSig]);
+  const cityAfRaw = { ...rpcAllNarrowingParams(query), ...cityTableScope };
   const cityAfSig = JSON.stringify(cityAfRaw);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cityAfParams = useMemo(() => cityAfRaw, [cityAfSig]);
@@ -461,16 +514,16 @@ export default function Home() {
   useEffect(() => {
     if (!citySelected) return;
     const cid = citySelected.cityId;
-    void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes).then(() => {
+    void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).then(() => {
       if (districtTextRef.current) {
         const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes));
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes, cityTableScope));
       } else if (districtFocus) {
-        setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes));
+        setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effDeal, effCategory, citySelected, rentPeriodTok, cohortTypesSig]);
+  }, [effDeal, effCategory, citySelected, rentPeriodTok, cohortTypesSig, cityTableScopeSig]);
 
   // DISTRICT REHYDRATION — the districtsSelected twin of the citySelected fix above (2026-08-04).
   //
@@ -504,7 +557,7 @@ export default function Home() {
     districtsRehydrated.current = true;
     if (districtsSelected.length) return;   // a live pick already stands — nothing to restore
     let cancelled = false;
-    void ensureDistrictOptions(citySelected.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes).then((pool) => {
+    void ensureDistrictOptions(citySelected.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).then((pool) => {
       if (cancelled) return;
       const wanted = new Set(want);
       const restored = pool.filter((d) => d.matchValues.some((v) => wanted.has(v)));
@@ -515,7 +568,7 @@ export default function Home() {
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [citySelected, effDeal, effCategory, rentPeriodTok, cohortTypesSig]);
+  }, [citySelected, effDeal, effCategory, rentPeriodTok, cohortTypesSig, cityTableScopeSig]);
 
   // ONE query builder shared by onSearch and the district live-count effect below — the count call
   // and the search call must be built from the SAME state or their numbers can drift apart, which
@@ -562,9 +615,12 @@ export default function Home() {
   const districtNarrowingSig = JSON.stringify([query.type, query.typeGroups, query.types, query.detail,
     query.contextBeds, query.contextBedsList, query.contextSize, query.priceInput, query.priceBand,
     query.priceMin, query.priceMax, query.priceMinRent, query.priceMaxRent, query.areaMin, query.areaMax,
-    query.amenities, query.bathMin, query.furnishedPref, query.streetWidthMin, query.directions,
-    query.ratingMin, query.reviewsMin, query.unitSubtypes, query.ageMin, query.ageMax,
-    query.isNewConstruction]);
+    // The Advanced-Filter half is ITERATED from the one list, never re-typed here. Hand-listing the
+    // 11 fields meant a 12th AF predicate would silently stop invalidating these live counts — the
+    // exact "advertised count disagrees with the delivered result set" class this signature exists
+    // to close, re-opened by omission. AF_PREDICATE_FIELDS is pinned against the real RPC builder by
+    // verify-af-survives-filter-reentry.ts, so one list stays honest for both.
+    ...AF_PREDICATE_FIELDS.map((f) => query[f])]);
   const hasDistrictNarrowing = useMemo(
     () => (JSON.parse(districtNarrowingSig) as unknown[]).some((v) =>
       Array.isArray(v) ? v.length > 0 : v != null && v !== ''),
@@ -608,7 +664,7 @@ export default function Home() {
       : cityStatus !== 'ready' ? cityStatus
       : query.location ? 'empty' : null;
   const districtLatin = !!districtText && isLatinOnlyInput(districtText);
-  const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes) : 'loading';
+  const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope) : 'loading';
   const districtZeroRow: 'loading' | 'error' | 'empty' | null =
     !citySelected || districtSuggestions.length > 0 || districtLatin ? null
       : districtStatus !== 'ready' ? districtStatus
@@ -635,12 +691,12 @@ export default function Home() {
     clearBlurTimer(districtBlurTimer);
     districtRef.current?.focus();
     setDistrictSuggestions([]);
-    void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes).then(() => {
+    void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).then(() => {
       if (districtTextRef.current) {
         const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes));
+        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes, cityTableScope));
       } else {
-        setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes));
+        setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
       }
     });
   };
@@ -749,6 +805,10 @@ export default function Home() {
       () => {
         // Search is FREE, always (owner rule 2026-08-15): no auth gate may ever sit between the
         // Search button and results. verify-search-is-free.ts fails the build if one comes back.
+        // The user SENT something — the small sign-in card retires for the rest of this load
+        // (owner 2026-08-29). Placed on the successful path only: a blocked submit (no city
+        // picked) is not a send. Note the card never gated this search either way.
+        dismissSignInCard();
         router.push({ pathname: '/agent', params: { filter: JSON.stringify(q) } });
       },
       320,
@@ -830,9 +890,12 @@ export default function Home() {
   }, [districtsSelected, districtSel, districtPop, confirmPop]);
   // Field style while/after a pick is confirmed: a scale overshoot (one-shot) + the border easing to
   // green (persistent while selected). `sel` is the 0/1 persistent value, `pop` the one-shot pulse.
+  // Literal palette: RN Animated color interpolation PARSES its output range and cannot digest the
+  // var() theme tokens — same rule as ui.tsx's interpolateColor sites.
+  const pal = useThemePalette();
   const confirmFieldStyle = (pop: RNAnimated.Value, sel: RNAnimated.Value) => ({
     transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [1, 1.02] }) }],
-    borderColor: sel.interpolate({ inputRange: [0, 1], outputRange: [colors.fieldLine, colors.primary] }),
+    borderColor: sel.interpolate({ inputRange: [0, 1], outputRange: [pal.fieldLine, pal.primary] }),
   });
   const checkStyle = (sel: RNAnimated.Value) => ({
     opacity: sel,
@@ -1000,6 +1063,48 @@ export default function Home() {
                 </Pressable>
               </Reveal>
             )}
+            {/* THE ADVANCED FILTER ANSWERS CARRIED IN FROM THE CHAT (owner P0 2026-09-01).
+                THIS IS NOT DECORATION — it is what licenses the carry to exist at all.
+                sanitizeForFilterRestore is a strict allowlist of "what the Filter UI can actually
+                show", written for a measured P1: an AF predicate active with no on-screen control
+                silently amputated an unrelated search (a leaked ratingMin returned 0 of 11,552 on
+                الرياض/شراء/فيلا). The owner's requirement — every committed AF predicate must survive
+                a return to this screen — is only reconcilable with that rule by SHOWING them here and
+                letting the user remove any of them. Removing one rebuilds the query from the
+                remaining facets through each question's own apply(), exactly like the chat's pills.
+                Same «بناءً على» summary text the user already read in the chat, so the two screens
+                describe one search in one voice.
+                SCOPE facets (group/type) are absent because reconcileCommittedAf does not carry
+                them at all — the group boxes and type boxes below already ARE their control, and a
+                receipt whose predicate has a live control is not a receipt, it is a second writer
+                fighting the user (it re-applied itself over every scope edit; see @/lib/afCarry).
+                So `query.afFacets` here is exactly the advanced answers, and chip index i is facet
+                index i — which is what lets the «×» below hand `i` straight to withoutFacet(). */}
+            {query.afFacets?.length ? (
+              <Reveal>
+                <View style={s.afCarryWrap}>
+                  <Text style={[s.afCarryLead, { textAlign: isRTL ? 'right' : 'left' }]}>{buildAfSummary(query.afFacets)}</Text>
+                  <View style={[s.afCarryRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+                    {query.afFacets.map((f, i) => (
+                      <Pressable
+                        key={`${f.id}-${i}`}
+                        testID={`filter-af-chip-${i}`}
+                        style={s.afCarryChip}
+                        hitSlop={6}
+                        // Removed from the RECONCILED list this row is rendered from, never from the
+                        // raw store list — a facet the cohort already retired would otherwise shift
+                        // the indexes and a «×» would delete somebody else's answer. Writing the
+                        // reconciled query back is the same commit the user just made on screen.
+                        onPress={() => setQuery(() => withoutFacet(query, i, AF_ALL_QUESTIONS))}
+                      >
+                        <Text style={s.afCarryChipTx}>{f.labels.join('، ')}</Text>
+                        <Ionicons name="close" size={13} color={colors.primary} />
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              </Reveal>
+            ) : null}
             {/* شراء / إيجار — TWO independent toggle buttons, not a radio (owner feature 2026-08-20,
                 mirrors the already-shipped سنوي+شهري pattern exactly): both can be on at once, which
                 means "match either Buy or Rent — Rent side accepts both Annual and Monthly." No third
@@ -1187,7 +1292,7 @@ export default function Home() {
             </AnimatedPressable>
 
             {locMsg ? (
-              <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
+              <Text style={{ color: colors.danger, fontSize: 13, marginTop: 6, textAlign: 'right' }}>{locMsg}</Text>
             ) : null}
 
             {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
@@ -1319,12 +1424,12 @@ export default function Home() {
                     // re-check the live text via districtTextRef before showing the Top-6.
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
-                      void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes).then(() => {
-                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes));
+                      void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).then(() => {
+                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
                       });
                     } else if (!isLatinOnlyInput(districtTextRef.current)) {
                       // P2 — refocusing mid-typing shows the current matches, not an empty box.
-                      setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes));
+                      setDistrictSuggestions(matchDistrictsByCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes, cityTableScope));
                     }
                   }}
                   onBlur={() => { districtBlurTimer.current = setTimeout(() => setDistrictFocus(false), 150); }}
@@ -1337,11 +1442,11 @@ export default function Home() {
                     // typed-but-unconfirmed string being searched; that stays true by construction,
                     // since districtText itself is never sent anywhere.)
                     if (!citySelected) return;
-                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes)); setDistrictMsg(''); return; }
+                    if (!v) { setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope)); setDistrictMsg(''); return; }
                     // Arabic-only product: English typing gets NO autocomplete and the same Arabic hint the
                     // City field shows — every district name here is Arabic, so there is nothing to match. (owner UI request.)
                     const latin = isLatinOnlyInput(v);
-                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, v, cohortTypes));
+                    setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, v, cohortTypes, cityTableScope));
                     setDistrictMsg(latin ? ARABIC_ONLY_MSG : '');
                   }}
                 />
@@ -1359,7 +1464,7 @@ export default function Home() {
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
                   districtRef.current?.focus();
                 }} hitSlop={8}>
                   <Ionicons name="close-circle" size={18} color={colors.muted} />
@@ -1388,7 +1493,7 @@ export default function Home() {
             ) : null}
 
             {districtMsg ? (
-              <Text style={{ color: '#c0392b', fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
+              <Text style={{ color: colors.danger, fontSize: 13, marginTop: 6, textAlign: 'right' }}>{districtMsg}</Text>
             ) : null}
 
             {/* Merge note (2026-07-20): outer open/close wrapper is PR #156's DropdownReveal; inner
@@ -1414,7 +1519,7 @@ export default function Home() {
                   districtTextRef.current = '';
                   setDistrictText('');
                   setDistrictMsg('');
-                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes));
+                  if (citySelected) setDistrictSuggestions(topDistrictsForCityId(citySelected.cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
                 };
                 const selectedLabels = new Set(districtsSelected.map((d) => d.districtAr));
                 return (
@@ -1830,7 +1935,7 @@ const s = StyleSheet.create({
   shareBtnPressed: { opacity: 0.85 },
   // Top-bar sign-in (mobile, logged-out only — owner 2026-08-19). Compact pill matching the sidebar's
   // CTA green so the action is unmistakable. On desktop the docked sidebar already shows it.
-  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   hero: { alignItems: 'center', marginTop: 12, marginHorizontal: 4 },
@@ -1848,6 +1953,16 @@ const s = StyleSheet.create({
   // clear icon, which is likewise conditional on query.location.length > 0).
   clearAllBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginBottom: 10 },
   clearAllText: { fontSize: 13, color: colors.muted, fontWeight: '600' },
+  // Carried Advanced Filter answers — same tinted pill the chat's removable pills use, so one
+  // committed answer looks like itself on whichever screen the user is standing on.
+  afCarryWrap: { alignSelf: 'stretch', gap: 7, marginBottom: 12 },
+  afCarryLead: { fontSize: 12.5, fontWeight: '500', color: colors.muted },
+  afCarryRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
+  afCarryChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
+    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
+  },
+  afCarryChipTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 52, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, paddingHorizontal: 14, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   sizeField: { marginTop: 8, height: 46 },
   sizeFieldOn: { borderColor: colors.primary },
@@ -1928,7 +2043,7 @@ const s = StyleSheet.create({
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   wrapCell: { flexGrow: 1, flexBasis: '30%', minWidth: 90, flex: 0 },
 
-  searchBtn: { marginTop: 11, height: 51, borderRadius: radius.field, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  searchBtn: { marginTop: 11, height: 51, borderRadius: radius.field, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   searchBtnText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
 
   startHead: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 9, marginHorizontal: 2 },

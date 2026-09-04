@@ -1,62 +1,40 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEffect } from 'react';
+import { View } from 'react-native';
 import { useRouter } from 'expo-router';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
-import { useI18n } from '@/i18n';
+import { useApp } from '@/store';
 
-const MAX_W = 560;
-
-// About Us — neutrality, listing-licensing provenance, disclaimer, and privacy.
-// TRUTHFULNESS RULE (2026-08-06, owner-approved): this screen must never assert a licence Ezhalah does not
-// hold, nor a data-residency location that is not factually where production data lives (currently Supabase
-// ap-northeast-1 / Tokyo — NOT the Kingdom). Both claims previously shipped here and were false. Any future
-// claim must be provable before it ships; scripts/verify-no-unsupported-claims.ts fails the build otherwise.
-export default function About() {
-  const insets = useSafeAreaInsets();
+// /about — a DOOR, not a screen. (owner 2026-09-03)
+//
+// This file used to render its own «من نحن» page, written for the prototype. Nothing in the app has
+// linked here for a long time — the sidebar opens components/InfoModal — so it became a SECOND About
+// surface that nobody maintained, and it drifted: the canonical screen was redesigned around the
+// eagle artwork with compact approved copy, while anyone who typed /about still got the old plain
+// text page. Worse, a stale copy of the LEGAL text is the dangerous kind of duplicate: the licensing,
+// disclaimer and privacy statements have to be corrected in ONE place when they change, and this
+// file was a second place that no correction ever reached.
+//
+// The rule this file now enforces, and the reason it has no content of its own: THERE IS EXACTLY ONE
+// About experience, and it lives in components/InfoModal.tsx — including the truthful
+// listing-provenance statement, which verify-no-unsupported-claims.ts checks THERE. This route opens
+// that one and steps out of the way. The URL keeps working; the duplicate cannot drift again,
+// because there is nothing here left to drift. Same call the owner already made for /settings
+// (removed 2026-08-28 in favour of the anchored account panel).
+//
+// Pinned by scripts/verify-info-routes-single-source.ts.
+export default function AboutRoute() {
   const router = useRouter();
-  const { t } = useI18n();
+  const { openModal } = useApp();
 
-  return (
-    <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      <View style={[s.topBar, { paddingTop: insets.top + 8 }]}>
-        <View style={{ flex: 1 }} />
-        <Pressable onPress={() => router.back()} style={s.xBtn} hitSlop={8}>
-          <Ionicons name="close" size={20} color="#56635c" />
-        </Pressable>
-      </View>
+  useEffect(() => {
+    // Order matters: raise the modal FIRST, then swap the URL. `modal` lives in the app-wide store,
+    // so it survives the navigation — the user lands on the home screen with «من نحن» already open,
+    // and never sees a frame of empty page. replace(), not push(), so Back does not bounce them
+    // straight back into this redirect.
+    openModal('about');
+    router.replace('/');
+  }, [openModal, router]);
 
-      <ScrollView contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 32 }]}>
-        <View style={s.col}>
-          <Text style={s.h}>{t('About Us')}</Text>
-          <Text style={s.intro}>
-            {t('Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Wasalt, Aldarim and more in one place, and help those platforms reach more users by driving traffic directly to their listings.')}
-          </Text>
-
-          <Text style={s.sec}>{t('Our role')}</Text>
-          <Text style={s.tx}>{t('We are a property search platform only. We do not own, list, sell or rent any property. We do not facilitate transactions or collect commission.')}</Text>
-
-          <Text style={s.sec}>{t('Listing licensing')}</Text>
-          <Text style={s.tx}>{t('Every listing shown on Ezhalah is published by the source platform it came from, and each advertisement remains subject to that platform\'s own licensing and regulatory obligations. Ezhalah does not issue, own or publish advertisements.')}</Text>
-
-          <Text style={s.sec}>{t('Disclaimer')}</Text>
-          <Text style={s.tx}>{t('All listings are sourced directly from third-party platforms. Ezhalah does not own or verify any listing. Always confirm details directly with the original platform before making any decision.')}</Text>
-
-          <Text style={s.sec}>{t('Data & privacy')}</Text>
-          <Text style={s.tx}>{t('We collect only what the service needs, and we do not sell user data.')}</Text>
-        </View>
-      </ScrollView>
-    </View>
-  );
+  // A paper-coloured filler for the one frame before the swap: `null` would flash white in dark mode.
+  return <View style={{ flex: 1, backgroundColor: colors.paper }} />;
 }
-
-const s = StyleSheet.create({
-  topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 4 },
-  xBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#f1f3f1', alignItems: 'center', justifyContent: 'center' },
-  scroll: { paddingHorizontal: 22, alignItems: 'center', paddingTop: 4 },
-  col: { width: '100%', maxWidth: MAX_W },
-  h: { fontSize: 24, fontWeight: '700', color: colors.ink, marginBottom: 14 },
-  intro: { fontSize: 14, color: colors.body, lineHeight: 22 },
-  sec: { fontSize: 15, fontWeight: '700', color: colors.ink, marginTop: 22, marginBottom: 7 },
-  tx: { fontSize: 13.5, color: colors.body, lineHeight: 21 },
-});

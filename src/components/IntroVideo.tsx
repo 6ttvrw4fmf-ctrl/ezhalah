@@ -25,6 +25,11 @@ import { runAfterAnimation } from '@/lib/afterAnimation';
 // breaks waiting on the asset.
 const INTRO_SOURCE: number | string | null = null;
 
+// Whether the intro can render AT ALL. The sign-in popup's auto-show gate (authPopupBehavior)
+// must wait for a film that will actually play — and must NOT wait forever on one that never
+// will. This is the single source of that truth; _layout.tsx reads it to compute introBlocking.
+export const INTRO_ENABLED = INTRO_SOURCE != null;
+
 // Hard ceiling: if the video hasn't finished (stalled/slow network) by this long, give up and let
 // the user into the app. Keep it a little above the clip length (~5s clip → 9s ceiling).
 const SAFETY_MS = 9000;

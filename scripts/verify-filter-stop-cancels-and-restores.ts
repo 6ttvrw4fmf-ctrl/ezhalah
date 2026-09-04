@@ -101,7 +101,11 @@ check('fetchRawByIds checks the signal between chunked requests, not only at the
   /for \(let i = 0; i < ids\.length; i \+= ID_CHUNK\) \{\s*\n\s*if \(signal\?\.aborted\)/.test(remote));
 check('fetchListingsForQuery threads the SAME signal into both the main RPC call and the raw-card fetch',
   /opts\?\.signal/.test(remote) && /fetchRawByIds\(q, tbl, ids, signal\)/.test(remote)
-  && /supabase\.rpc\('location_search_candidates_ar'[\s\S]{0,400}\), RPC_TIMEOUT_MS, signal\)/.test(remote));
+  // Budget widened 400->900 (2026-08-29, controlled-rotation change): the RPC call block grew a new
+  // p_rotation_seed param + its explanatory comment. Widen again if it grows further — the point of
+  // this check is that `signal` is still the trailing arg to the SAME bounded() call, not a specific
+  // byte count; a comment block between the call's start and its close is not a regression.
+  && /supabase\.rpc\('location_search_candidates_ar'[\s\S]{0,900}\), RPC_TIMEOUT_MS, signal\)/.test(remote));
 check('runQuery accepts a signal and passes it all the way down',
   // signature gained a trailing chatId (conversation identity, owner 2026-08-25) — signal position unchanged.
   /runQuery: \(q: SearchQuery, record\?: boolean, signal\?: AbortSignal, chatId\?: string \| null\)/.test(store)

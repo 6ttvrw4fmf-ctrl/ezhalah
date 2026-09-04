@@ -65,13 +65,18 @@ export function sourceName(source: string): string {
   if (s.includes('al khaas') || s.includes('alkhaas')) return 'Al Khaas';
   if (s.includes('abeea')) return 'Abeea Real Estate';
   if (s.includes('jurash')) return 'Jurash Real Estate';
-  if (s.includes('alnokhba')) return 'Al Nokhba';
+  if (s.includes('al nokhba') || s.includes('alnokhba')) return 'Al Nokhba';
   if (s.includes('gathern')) return 'Gathern';
   if (s.includes('deal')) return 'Deal App';
   if (s.includes('souq')) return '24 Souq';
   if (s.includes('pulse')) return 'Era Pulse';
   if (s.includes('nowaisiry')) return 'Al Nowaisiry Real Estate';
   if (s.includes('october')) return '1 October Real Estate';
+  if (s.includes('therc')) return 'The Right Choice Real Estate';
+  if (s.includes('aouj')) return 'Aouj Estates';
+  if (s.includes('abralosol')) return 'Abr Al Osol Real Estate';
+  if (s.includes('arkaan')) return 'Arkaan Al Aqar';
+  if (s.includes('rawasidark')) return 'Rawasi Dark Real Estate';
   return 'AQAR';
 }
 

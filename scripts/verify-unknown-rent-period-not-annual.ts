@@ -26,6 +26,14 @@
 //   node --experimental-strip-types scripts/verify-unknown-rent-period-not-annual.ts
 import { readFileSync } from 'node:fs';
 import { listingPriceString } from '../src/data/listings.ts';
+import { join as __join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = __join(import.meta.dirname, '..');
 
 let failed = 0;
 const check = (label: string, ok: boolean, extra = '') => {
@@ -79,8 +87,15 @@ check('a price-less row still falls back to the «السعر عند الطلب»
 
 const REMOTE = readFileSync('src/data/remote.ts', 'utf8');
 const finalizeSrc = REMOTE.slice(REMOTE.indexOf('function finalize('));
+// The call gained two arguments on 2026-09-03 (price_per_meter, area_m2) when the owner ruled that
+// a per-metre-only SALE listing must show a computed total — see data/listings.ts::
+// derivedTotalFromPerMeter and scripts/verify-derived-total-rule-parity.ts. The INVARIANT this
+// check exists for is unchanged and still enforced: finalize() must DELEGATE the price line rather
+// than format it itself, so the period rule keeps exactly one owner. Only the argument list moved,
+// so the pattern now allows the extra source fields (and a line break) without allowing a
+// re-inlined formatter — the two checks below still forbid that.
 check('finalize() delegates the price line to listingPriceString()',
-  /const priceStr = listingPriceString\(deal, r\.rent_period, r\.price_annual, r\.price_total\)/
+  /const priceStr = listingPriceString\(deal, r\.rent_period, r\.price_annual, r\.price_total\s*(?:,[\s\S]{0,80}?)?\)/
     .test(finalizeSrc),
   'finalize() no longer calls listingPriceString — the formatting rule has a second owner again, '
   + 'and the behavioural checks above no longer cover what the card actually renders');
@@ -101,10 +116,9 @@ check('keptFiltersReq still filters ANNUAL searches to an explicit rent_period=\
   'the annual branch no longer requires an explicit annual rent_period — NULL-period rows would be '
   + 'swept into an annual-only result set');
 
-const pkg = readFileSync('package.json', 'utf8');
 check('npm test runs this guard',
-  pkg.includes('verify-unknown-rent-period-not-annual'),
-  'package.json no longer runs verify-unknown-rent-period-not-annual.ts — the guard is inert');
+  npmTestRuns(REPO_ROOT, 'verify-unknown-rent-period-not-annual'),
+  '`npm test` no longer runs verify-unknown-rent-period-not-annual.ts (see scripts/test-exclusions.txt) — the guard is inert');
 
 console.log(
   failed

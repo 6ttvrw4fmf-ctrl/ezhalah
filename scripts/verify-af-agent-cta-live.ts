@@ -15,6 +15,7 @@
 //    precedent as every other live check here: `npm test` is hermetic and runs in seconds.)
 
 import { chromium } from 'playwright';
+import { gotoLive } from './lib/liveNav.ts';
 import { judgeAfCta, type AfCtaObservation } from './lib/afOfferAgreement.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
@@ -29,7 +30,29 @@ const RPC_ORIGIN = new URL(REST_URL).origin;
 // Journeys are ARABIC free text plus the answers the agent's disambiguation needs — exactly what a
 // real user types. A city that is also a region needs «مدينة …»; «تقصد المدينة كاملة…» needs
 // «المدينة كاملة» (harness notes, docs/ops/AF_TRENDING_DATA_INTEGRITY_ENGINEER.md).
-const JOURNEYS: Array<{ name: string; say: string[]; mobile?: boolean }> = [
+// PAID-CALL BUDGET (owner rule 2026-08-29). Every message below is a real, billed DeepSeek call,
+// and this file runs 4x/day on cron AND after every production deploy. Four near-identical journeys
+// were 4x the evidence needed to prove one rule: that the AGENT entry path reaches AF correctly.
+//
+// Default is the single Riyadh/Rent-Annual journey - the one the rule was written for. The full set
+// still runs when it is genuinely wanted (a deliberate `AF_LIVE_FULL=1`), so coverage is a choice
+// rather than a standing cost. Pinned by scripts/verify-ai-spend-safety.ts.
+const AF_LIVE_FULL = process.env.AF_LIVE_FULL === '1';
+// Hard ceiling on billed calls for this run, independent of how many journeys/messages exist.
+// say() retries internally, so without this a bad night multiplies silently.
+const MAX_PAID_CALLS_PER_RUN = AF_LIVE_FULL ? 40 : 12;
+let paidCalls = 0;
+function budgetedPaidCall(): void {
+  paidCalls += 1;
+  if (paidCalls > MAX_PAID_CALLS_PER_RUN) {
+    throw new Error(
+      `paid-call budget exhausted (${MAX_PAID_CALLS_PER_RUN}) - refusing further live model calls. ` +
+      `Raise MAX_PAID_CALLS_PER_RUN deliberately if more live verification is genuinely needed.`,
+    );
+  }
+}
+
+const ALL_JOURNEYS: Array<{ name: string; say: string[]; mobile?: boolean }> = [
   { name: 'agent · Riyadh · Rent-Annual · apartments',
     say: ['ابغى شقة للإيجار السنوي في الرياض', 'مدينة الرياض', 'المدينة كاملة'] },
   { name: 'agent · Riyadh · Buy · villas',
@@ -39,6 +62,7 @@ const JOURNEYS: Array<{ name: string; say: string[]; mobile?: boolean }> = [
   { name: 'agent · Riyadh · Rent-Annual · apartments (MOBILE)',
     say: ['ابغى شقة للإيجار السنوي في الرياض', 'مدينة الرياض', 'المدينة كاملة'], mobile: true },
 ];
+const JOURNEYS = AF_LIVE_FULL ? ALL_JOURNEYS : ALL_JOURNEYS.slice(0, 1);
 
 const failures: string[] = [];
 const report: string[] = [];
@@ -61,6 +85,9 @@ async function say(page: import('playwright').Page, text: string) {
     const ta = page.locator('textarea, input[type=text]').first();
     await ta.click();
     await ta.fill(text);
+    // Every Enter here is a BILLED DeepSeek call, and this loop retries up to 3x - which is how a
+    // flaky night quietly triples the bill. Counted against the run budget before it is spent.
+    budgetedPaidCall();
     await page.keyboard.press('Enter');
     for (let i = 0; i < 24; i++) {
       await page.waitForTimeout(500);
@@ -75,11 +102,30 @@ async function say(page: import('playwright').Page, text: string) {
 }
 
 const run = async () => {
-  const browser = await chromium.launch();
+  // The SAME launch shape as every other live AF journey in af-live-truth-check.yml. In GitHub
+  // Actions these env vars are unset, so this is a no-op there and the check runs exactly as it
+  // always has. It matters everywhere else: a cloud engineering session has no `npx playwright
+  // install`, it has one pinned browser at PW_EXECUTABLE_PATH and an egress proxy that resets a
+  // TLS-1.3 ClientHello — so without these, this was the one AF live check a routine could not
+  // execute at all, and it failed with Playwright's "run npx playwright install" banner, which
+  // reads like a broken check rather than a missing flag. Its five siblings already do this.
+  const browser = await chromium.launch({
+    ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
+    ...(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {}),
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors',
+           ...(process.env.HTTPS_PROXY ? ['--disable-quic', '--ssl-version-max=tls1.2'] : [])],
+  });
   for (const j of JOURNEYS) {
     const ctx = await browser.newContext(
       j.mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {});
     const page = await ctx.newPage();
+    // Label this browser's real billed DeepSeek calls as CI traffic (owner audit, 2026-08-30): the
+    // agent edge fn defaults ai_usage.source to "user" for any request missing this header, and this
+    // script fires a real billed call on every journey/attempt, on a cron AND after every deploy —
+    // without this, those calls pollute the user/ci split every cost audit reads off ai_usage.
+    // Pinned by scripts/verify-ai-spend-safety.ts.
+    await page.route('**/functions/v1/agent', (route) =>
+      route.continue({ headers: { ...route.request().headers(), 'x-ezhalah-client': 'ci' } }));
     // A question that renders without the app ever asking the backend for its option counts would be
     // a FAKE question — the one failure mode "a card appeared" cannot distinguish on its own. Record
     // every AF count RPC that actually left the page, against the resolved project origin.
@@ -89,7 +135,7 @@ const run = async () => {
       if (u.startsWith(RPC_ORIGIN) && u.includes('/rest/v1/rpc/')) afRpcs.push(u.split('/rpc/')[1].split('?')[0]);
     });
     try {
-      await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+      await gotoLive(page, BASE, { timeout: 90_000 });
       await page.waitForTimeout(2500);
       await page.click('text=الوكيل الذكي', { timeout: 30_000 });
       await page.waitForTimeout(1500);

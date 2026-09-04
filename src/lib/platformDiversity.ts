@@ -84,41 +84,6 @@ export function interleaveRanked<L extends { cleanType?: string | null; rentPeri
   return out;
 }
 
-// Stable platform round-robin over an ALREADY-ORDERED list: take each platform's #1, then each
-// platform's #2, … preserving every platform's own relative order. Densest platform leads, matching
-// interleaveRanked's tie-break so both paths front the same platform.
-//
-// WHY THIS EXISTS (Search QA run 2026-08-16). orderByScope's round-robin necessarily DEGENERATES into a
-// single-platform tail: once the smaller platforms are exhausted, everything after that point belongs to
-// the one platform that still has rows (live: مستودع/بيع/الرياض = aqar 55, wasalt 10, aldarim 2, dealapp 2
-// → positions ~20-69 are 100% aqar). Any consumer that then takes a WINDOW at an arbitrary offset — the
-// repeat-visit rotation in runSearch — lands inside that tail and shows a returning user a
-// single-platform first page, silently breaking owner PERMANENT rule 2026-07-13 Rule 2 ("a platform with
-// more matches must never be invisible just because another platform's rows dominate"). Re-interleaving
-// the window restores the mix WITHOUT re-sorting it: the rotation still decides WHICH listings the
-// returning visitor sees (owner rule 2026-06-27), this only decides the ORDER they are shown in.
-// MATCH FIRST, DIVERSIFY SECOND still holds — this only reorders rows the filters already matched.
-export function rediversifyByPlatform<T>(rows: T[], platformOf: (row: T) => string): T[] {
-  if (rows.length < 2) return [...rows];
-  const groups = new Map<string, T[]>();
-  for (const r of rows) {
-    const k = platformOf(r) || '∅';
-    let a = groups.get(k);
-    if (!a) { a = []; groups.set(k, a); }
-    a.push(r);
-  }
-  if (groups.size < 2) return [...rows];           // one platform → nothing to interleave
-  const lists = [...groups.values()];
-  lists.sort((a, b) => b.length - a.length);       // densest leads (mirrors interleaveRanked)
-  const out: T[] = [];
-  for (let i = 0; out.length < rows.length; i++) {
-    let progressed = false;
-    for (const g of lists) { if (i < g.length) { out.push(g[i]); progressed = true; } }
-    if (!progressed) break;
-  }
-  return out;
-}
-
 export function orderByScope<L extends { cleanType?: string | null; rentPeriod?: string | null }>(rows: RankedRow<L>[], scope: Scope, multiType = false, mixPeriods = false): RankedRow<L>[] {
   // Diversity hierarchy per scope — SUPERSEDES the 2026-06-27 geography-first order (Region → cities →
   // districts → platforms) per owner PERMANENT rule 2026-07-13: "Rule 1 filters always win; Rule 2,
@@ -148,4 +113,34 @@ export function orderByScope<L extends { cleanType?: string | null; rentPeriod?:
   // type (the rows were already constrained to the selected types by the raw fetch + matchesType).
   const keys = multiType ? [...withPeriod, 'cleanType'] : withPeriod;
   return interleaveRanked(rows, keys);
+}
+
+// ── HOW MANY PLATFORMS GENUINELY MATCH THIS SEARCH ────────────────────────────────────────────
+// Owner PERMANENT rule 2026-09-02: the initial batch is
+//   min(genuine matches, max(10, distinct matching platforms))
+// so the first screen carries one listing from EVERY platform that has a real match, instead of a
+// fixed ten. This function supplies the "distinct matching platforms" term.
+//
+// DERIVED, NEVER LISTED. The count is read from the eligible rows themselves — no allowlist, no
+// array of platform names, no number to bump. A new scraper participates the moment it contributes
+// one genuine matching listing; a platform that is disabled, retired, or simply has no match for
+// THIS search contributes nothing. («therc» entered the Riyadh villa set during this work with no
+// ranking code edited — that is the intended behaviour.)
+//
+// COUNTING THE FETCHED PAGE IS EXACT, NOT APPROXIMATE. Both ordering layers emit one row per
+// platform before any platform repeats — the RPC's div_rank is a per-platform row_number(), and
+// interleaveRanked() above round-robins with `platform` as the OUTERMOST key — so a page of 1,500
+// already contains every platform that has a match.
+//
+// IT CANNOT HARM MATCHING. This only sizes a PREFIX of an array the RPC has already filtered to the
+// true eligible set. It cannot add a row, widen a predicate, or reach outside the set; the only
+// thing it can change is how much of what already matched is revealed. MATCH stays absolute by
+// construction rather than by promise.
+export function distinctPlatformCount(rows: ReadonlyArray<{ source?: string | null }> | null | undefined): number {
+  const seen = new Set<string>();
+  for (const r of rows ?? []) {
+    const p = (r?.source ?? '').trim();
+    if (p) seen.add(p);          // a blank/unknown source must not invent a platform slot
+  }
+  return seen.size;
 }

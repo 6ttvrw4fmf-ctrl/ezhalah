@@ -415,28 +415,39 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
 
 
 # ── Fetch ────────────────────────────────────────────────────────────────────────
-def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], dict]:
+def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], dict, Optional[str]]:
     # api.erapulse.sa is intermittent — it sometimes answers 200 with an empty/non-JSON body
     # (rate-limit/flap). Retry on that AND on an empty page-1 instead of giving up after one shot,
     # so a flaky API doesn't fail the whole run (the prune-guard then keeps existing listings anyway).
+    #
+    # last_err (owner, 2026-08-31): every branch used to `continue` on failure with the actual
+    # exception/status/body DISCARDED, so 5 straight days of "unreachable, blocking, or schema
+    # change?" scrape_runs rows carried zero information to distinguish those three cases — we could
+    # not tell a DNS failure from a 403 from a JSON shape change without re-running by hand. Now the
+    # last attempt's concrete reason rides back to main() and lands in scrape_runs.notes.
     _throttle()
+    last_err: Optional[str] = "no attempts made"
     for attempt in range(5):
         try:
             r = s.get(LIST_URL, params={"page": page, "limit": PAGE_SIZE}, timeout=30)
-        except Exception:
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"[:200]
             time.sleep(2 * (attempt + 1)); continue
         if r.status_code != 200:
+            last_err = f"HTTP {r.status_code}: {r.text[:150]!r}"
             time.sleep(2 * (attempt + 1)); continue
         try:
             j = r.json()
-        except Exception:
+        except Exception as e:
+            last_err = f"HTTP 200 non-JSON body ({type(e).__name__}): {r.text[:150]!r}"
             time.sleep(2 * (attempt + 1)); continue   # empty/non-JSON body → retry
         data = j.get("data") or []
         pag = j.get("pagination") or {}
         if data or page > 1:          # page-1 emptiness is the flaky case → retry; later pages empty = real end
-            return data, pag
+            return data, pag, None
+        last_err = "HTTP 200, valid JSON, but page 1 data=[] (flaky-empty case)"
         time.sleep(2 * (attempt + 1))
-    return [], {}
+    return [], {}, last_err
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────
@@ -461,10 +472,11 @@ def main() -> int:
     # BEFORE the fetch so a re-block fails LOUD, not silently.
     run_id = None if args.limit else db.begin_run("erapulse")
 
-    first, pag = fetch_page(s, 1)
+    first, pag, err = fetch_page(s, 1)
     if not first:
         msg = ("list endpoint returned no properties after 5 attempts "
-               "(api.erapulse.sa unreachable, blocking, or schema change)")
+               "(api.erapulse.sa unreachable, blocking, or schema change) "
+               f"— last attempt: {err}")
         print(f"✗ Era Pulse: {msg}")
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
@@ -480,7 +492,7 @@ def main() -> int:
     page = 1
     while pag.get("hasNext") and page < pages:
         page += 1
-        more, pag = fetch_page(s, page)
+        more, pag, _err = fetch_page(s, page)
         if not more:
             break
         catalog += more

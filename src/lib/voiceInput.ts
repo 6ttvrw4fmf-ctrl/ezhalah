@@ -22,6 +22,7 @@
 // so "X while the permission request is resolving" tears the just-granted stream down immediately,
 // and a hidden mic can never keep capturing after the UI left recording mode.
 import { Platform } from 'react-native';
+import { classifyMicCaptureError, classifyRecognitionError } from '@/lib/voiceErrors';
 
 export type VoiceHandlers = {
   // Fired when capture could not start or died: 'denied' = the browser/OS genuinely refused
@@ -130,8 +131,8 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err: any) {
     if (gen !== generation) return false; // cancelled while the prompt was up — nothing to clean
-    const name = String(err?.name ?? '') || 'unknown';
-    handlers.onFailure(name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : 'unavailable', name);
+    const mic = classifyMicCaptureError(err?.name);
+    handlers.onFailure(mic.kind, mic.detail);
     return false;
   }
   if (gen !== generation) {
@@ -208,19 +209,14 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
   };
   rec.onerror = (ev: any) => {
     if (gen !== generation) return;
-    const code = String(ev?.error ?? '');
-    // 'no-speech'/'aborted' are routine (silence, engine hiccup) — onend's keep-alive restart
-    // covers them. Silence NEVER auto-submits and never ends the session (owner brief §6).
-    if (code === 'no-speech' || code === 'aborted') return;
+    // The rule itself lives in `lib/voiceErrors.ts`, import-free, so a barrier can EXECUTE it. It
+    // used to live inline in this closure, where no Node check could reach it — so the barrier
+    // asserted on the shape of the SOURCE TEXT, which passes a refactor that changes behaviour and
+    // fails a rename that changes nothing. That file documents every branch and why it exists.
+    const verdict = classifyRecognitionError(ev?.error);
+    if (verdict.action === 'ignore') return;
     teardown();
-    // 'not-allowed' is the ONE code that means the user/OS genuinely refused microphone permission.
-    // Everything else — 'service-not-allowed' (the recognition SERVICE refused/throttled the
-    // request), 'audio-capture' (the mic hardware/session couldn't be captured), 'network', or any
-    // other/future code — is a real failure but NOT a permission problem, so it must never produce
-    // the "enable it in your settings" message (that was the actual bug: every non-'not-allowed'
-    // code used to be silently swallowed with NO feedback at all, leaving the composer stuck in
-    // recording mode forever — 'blocked' now guarantees every one of them resolves gracefully).
-    handlers.onFailure(code === 'not-allowed' ? 'denied' : 'blocked', code || 'unknown-error');
+    handlers.onFailure(verdict.kind, verdict.detail);
   };
   rec.onend = () => {
     if (gen !== generation) return;

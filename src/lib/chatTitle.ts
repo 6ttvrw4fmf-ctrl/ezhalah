@@ -77,6 +77,7 @@ const AMENITY_AR: Record<string, string> = {
   rnpl: 'تقسيط', car_entrance: 'مدخل سيارة', optical_fibers: 'ألياف بصرية',
   electricity: 'كهرباء', water_supply: 'ماء', sanitation: 'صرف صحي',
   pool: 'مسبح', gym: 'نادي', garden: 'حديقة', balcony: 'شرفة', laundry_room: 'غرفة غسيل',
+  separate_electricity_meter: 'عداد كهرباء مستقل', separate_water_meter: 'عداد مياه مستقل',
 };
 const AMENITY_EN: Record<string, string> = {
   elevator: 'Elevator', parking: 'Parking', kitchen: 'Kitchen', air_conditioner: 'A/C',
@@ -84,6 +85,7 @@ const AMENITY_EN: Record<string, string> = {
   rnpl: 'Instalments', car_entrance: 'Car entrance', optical_fibers: 'Fiber',
   electricity: 'Electricity', water_supply: 'Water', sanitation: 'Sanitation',
   pool: 'Pool', gym: 'Gym', garden: 'Garden', balcony: 'Balcony', laundry_room: 'Laundry',
+  separate_electricity_meter: 'Own electricity meter', separate_water_meter: 'Own water meter',
 };
 
 const ar = (loc: string) => loc !== 'en';

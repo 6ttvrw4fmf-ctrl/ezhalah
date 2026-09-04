@@ -232,17 +232,39 @@ def _map_type(raw: str, usage: str) -> str:
     return "Commercial Land" if usage == "commercial" else "Residential Land"
 
 
+# The meta dict is the ONLY thing that separates "the catalogue is empty" from "we never reached
+# the catalogue", and main() depends on that (see catalogue_is_unreachable). eaqartabuk always
+# answers a successful list call with `total`, so:
+#     ([], {"total": 0, ...})  -> the source published its own emptiness   (healthy)
+#     ([], {})                 -> the ladder was exhausted, we saw nothing (dark)
+# Never return an empty meta on a request that actually succeeded, and never return a populated
+# one on a request that did not.
 def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], dict]:
     for attempt in range(3):
         try:
             r = s.get(LIST, params={"per_page": PAGE_SIZE, "page": page}, timeout=40)
+            if r.status_code != 200:
+                time.sleep(2 * (attempt + 1)); continue
+            # .json() inside the guard (senior run 2026-08-29): a WAF/consent HTML body answers
+            # 200 and raises here. Outside the try that was an UNCAUGHT crash in main() before
+            # begin_run(), i.e. a dark source leaving no scrape_runs row at all — the erapulse
+            # class of 2026-08-27. A non-JSON body is a failed attempt, not a fatal one.
+            j = r.json()
         except Exception:
             time.sleep(2 * (attempt + 1)); continue
-        if r.status_code != 200:
-            time.sleep(2 * (attempt + 1)); continue
-        j = r.json()
         return (j.get("items") or []), j
     return [], {}
+
+
+def catalogue_is_unreachable(meta: dict) -> bool:
+    """True when the list endpoint never actually answered us.
+
+    A successful call always carries `total`. Absence of the whole meta dict (ladder exhausted) or
+    of that key (an error object such as {"code": "rest_no_route"}) means we have NO evidence about
+    the catalogue — which is not the same as evidence of an empty catalogue, and must never be
+    allowed to stand in for it.
+    """
+    return not meta or "total" not in meta
 
 
 def _enrich(pid: int) -> tuple[dict, Optional[str]]:
@@ -463,7 +485,28 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
+
+    # begin_run() BEFORE the first source call, and the dark-source bail AFTER it (senior run
+    # 2026-08-29). On 2026-08-28 and 2026-08-29 this leg's page-1 fetch timed out from the GitHub
+    # runners while the same endpoint answered 200 / total=554 from other egress, and the scraper
+    # reported it as `Eaqar Tabuk: None listings across 1 pages` — a PHANTOM EMPTY CATALOGUE. It
+    # then walked the whole upsert/prune path on zero rows; only prune_unseen's guard and
+    # end_run()'s RC-B demotion stood between a blocked crawl and 532 live listings being pruned,
+    # and the run's own note could only say "blocked/empty source?" because the scraper did not
+    # know which. This is the erapulse ordering defect of 2026-08-27 in its MUTE form: erapulse
+    # exited early and wrote no row, eaqartabuk wrote a row that misdescribed what happened.
+    run_id = None if args.limit else db.begin_run("eaqartabuk")
+
     first_items, meta0 = fetch_page(s, 1)
+    if catalogue_is_unreachable(meta0):
+        msg = ("list endpoint answered no catalogue after 3 attempts "
+               "(eaqartabuk.com/wp-json unreachable, blocking, or schema change) — "
+               "NOT an empty catalogue: nothing was scraped and nothing was pruned")
+        print(f"✗ Eaqar Tabuk: {msg}")
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
+        return 1
+
     total = meta0.get("total")
     pages = meta0.get("total_pages") or 1
     print(f"Eaqar Tabuk: {total} listings across {pages} pages ({WORKERS} workers)"
@@ -480,8 +523,6 @@ def main() -> int:
             items.extend(more)
             page += 1
     print(f"  collected {len(items)} list items")
-
-    run_id = None if args.limit else db.begin_run("eaqartabuk")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0

@@ -23,16 +23,18 @@ import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
 const SRC = join(ROOT, 'src');
+// Residency is checked WIDER than the user-facing surface — see section 3.
+const BACKEND = join(ROOT, 'supabase');
 
 let failed = 0;
 const fail = (msg: string) => { failed++; console.log(`FAIL  ${msg}`); };
 const pass = (msg: string) => console.log(`PASS  ${msg}`);
 
-function walk(dir: string, out: string[] = []): string[] {
+function walk(dir: string, out: string[] = [], re = /\.(ts|tsx)$/): string[] {
   for (const e of readdirSync(dir)) {
     const p = join(dir, e);
-    if (statSync(p).isDirectory()) walk(p, out);
-    else if (/\.(ts|tsx)$/.test(p)) out.push(p);
+    if (statSync(p).isDirectory()) walk(p, out, re);
+    else if (re.test(p)) out.push(p);
   }
   return out;
 }
@@ -92,11 +94,26 @@ const RESIDENCY = [
   /خوادم\s+(?:داخل\s+)?(?:المملكة|السعودية)/,
   /خوادم\s+سعودية/,
   /data\s+(?:is\s+)?(?:stored|hosted)\s+in\s+saudi/i,
+  // Added 2026-09-02: the support-messages migration and edge function shipped the phrase
+  // "the project's own (Saudi-hosted) Postgres" in their header comments. Nothing above matched it.
+  // Storage is named directly here so a paraphrase cannot slide past. A "Saudi-hosted LLM endpoint"
+  // (src/data/agent.ts, a note about a FUTURE endpoint) is not a residency claim and must not trip.
+  // [^\w\n]{0,3} not \s+: the claim that actually shipped was "(Saudi-hosted) Postgres" — the closing
+  // paren sat between the two halves and the first version of this pattern passed on the real bug.
+  /(?:saudi|ksa)[-\s]hosted[^\w\n]{0,3}(?:postgres|database|db|servers?|storage|data)/i,
+  /(?:data|database|postgres|rows?|messages?)[^.\n]{0,30}hosted\s+in\s+(?:the\s+)?(?:kingdom|saudi)/i,
 ];
+// RESIDENCY IS CHECKED IN COMMENTS TOO, and across the BACKEND as well as the app.
+// The licence checks above skip comments on the principle that "comments explain, they don't claim".
+// Residency is the exception, learned the hard way: the false claim that started this section is now
+// the kind of sentence an engineer or an agent reads in a migration header and repeats verbatim into
+// a PDPL answer or a user-facing screen. A wrong fact about where personal data lives does damage
+// wherever it is written down. scripts/ is excluded on purpose — this very file quotes the false
+// claims in order to ban them.
+const residencyFiles = [...files, ...walk(BACKEND, [], /\.(ts|tsx|sql)$/)];
 let resHits = 0;
-for (const f of files) {
+for (const f of residencyFiles) {
   readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
-    if (line.trimStart().startsWith('//')) return;
     if (ALLOWED_RESIDENCY_CLAIMS.some((a) => line.includes(a))) return;
     if (RESIDENCY.some((re) => re.test(line))) {
       resHits++;
@@ -104,17 +121,37 @@ for (const f of files) {
     }
   });
 }
-if (!resHits) pass('no string claims user data is stored inside the Kingdom (prod is ap-northeast-1)');
+if (!resHits) pass(`no string OR comment claims user data lives in the Kingdom (prod is ap-northeast-1) — ${residencyFiles.length} files`);
 
-// ── 4. The honest replacements are actually present (guards against silent deletion) ─────────────
-const about = readFileSync(join(SRC, 'app/about.tsx'), 'utf8');
-const info = readFileSync(join(SRC, 'components/InfoModal.tsx'), 'utf8');
+// ── 4. The honest replacement is present on EVERY surface that shows About copy ──────────────────
+// This used to name two files: src/app/about.tsx and components/InfoModal.tsx, because in 2026-08 the
+// About text existed in both. On 2026-09-03 /about became a redirect into InfoModal (there is now
+// exactly one About experience — see verify-info-routes-single-source.ts), so a file list would have
+// had to shrink by one. The rule is stated by SHAPE instead, which is strictly stronger than the two
+// names it replaces: any file carrying About section copy must carry the provenance statement with
+// it. A future third copy of the About text is caught by the same check, and a copy that keeps the
+// sections while dropping the provenance line — the actual regression this guards — cannot ship.
 const hasProvenance = (s: string) => /Listing licensing/.test(s) && /does not issue/i.test(s);
-if (hasProvenance(about) && hasProvenance(info)) {
-  pass('both screens carry the truthful listing-provenance statement instead of a licence claim');
-} else {
-  fail('the truthful listing-provenance statement is missing from about.tsx and/or InfoModal.tsx');
+const ABOUT_SECTIONS = ['About Us', 'Our role', 'Disclaimer', 'Data & privacy', 'Listing licensing'];
+const aboutCopyFiles = files.filter((f) => {
+  const src = readFileSync(f, 'utf8');
+  return ABOUT_SECTIONS.filter((h) => src.includes(`'${h}'`)).length >= 2;
+});
+let s4 = 0;
+for (const f of aboutCopyFiles) {
+  if (!hasProvenance(readFileSync(f, 'utf8'))) {
+    s4++;
+    fail(`${f.replace(ROOT + '/', '')} renders About copy but NOT the listing-provenance statement`);
+  }
 }
+// The canonical surface must still BE the canonical surface: emptying InfoModal would otherwise make
+// aboutCopyFiles empty, and an empty list vacuously satisfies the loop above.
+const INFO = join(SRC, 'components/InfoModal.tsx');
+if (!aboutCopyFiles.includes(INFO)) {
+  s4++;
+  fail('components/InfoModal.tsx no longer carries the About copy — the canonical About surface is gone');
+}
+if (!s4) pass(`every surface with About copy carries the truthful provenance statement (${aboutCopyFiles.length} surface(s))`);
 
 console.log(failed === 0
   ? '\n✓ no unsupported user-facing claims'

@@ -1,4 +1,5 @@
 import type { Deal } from './taxonomy';
+import type { AfCanon } from '@/lib/afEvidence';
 
 // A normalized listing. (PRD §8.2) In production the ingestion pipeline maps every partner feed
 // onto this shape; here we ship curated placeholders ported from the prototype.
@@ -21,6 +22,9 @@ export type Listing = {
   // whenever there was no total.) MUST NOT be folded into `price` — that string is parsed back to a
   // number by listingPriceValue() and drives the hard price filter and the cheapest/priciest sort.
   pricePerMeter?: number | null;
+  // True when `price` is OUR per-metre x area arithmetic, not a figure the advertiser published.
+  // The card MUST label it; nothing may present it as source-published. (owner rule 2026-09-03)
+  priceIsDerived?: boolean;
   area: number; // m²
   beds: number; // 0 = not a dwelling
   source: string; // platform name
@@ -40,6 +44,11 @@ export type Listing = {
   // found live 2026-07-25: `listed` here is a raw scraped date string, never one of the mock catalog's
   // 5 LISTED_SEQ tokens, so the old RECENCY[listed] lookup was a permanent no-op for real data.)
   recencyRank?: number;
+  // §12A / R13.12: the canonical search_listings_ar row the Advanced-Filter predicate ran on, as the
+  // results RPC's `af_canon` jsonb, copied VERBATIM (`c.af_canon ?? null` — never `!!`, never `?? 0`).
+  // Feeds the «مطابق لطلبك» evidence strip (src/lib/afEvidence.ts) and nothing else; null when the
+  // search carried no AF answer. Every value inside stays nullable: UNKNOWN is UNKNOWN.
+  canon?: AfCanon | null;
   photo: string;
   // Real URL on the source platform — when present, the in-app browser redirects the
   // user OUT to this page. Absent for the bundled mock catalog (synthetic preview only).
@@ -113,19 +122,72 @@ export type Listing = {
 // no period filter at all, so they land on the card. keptFiltersReq() already refuses this same
 // guess on the annual branch ("a null rent_period ... is NOT annual ... never guess"); the display
 // used to make it anyway. Bug found live 2026-08-23.
+// PER-METRE → TOTAL (owner rule 2026-09-03). Some sources publish ONLY a price per square metre.
+// The Filter asks for a TOTAL budget, so such a listing could never match a budget search and its
+// card showed a per-metre figure sitting beside totals in the millions.
+//
+// THIS IS THE CLIENT HALF OF ONE RULE. The SQL half is the generated column
+// search_listings_ar.price_total_effective; the two MUST agree, or a listing matches a budget the
+// card cannot justify. scripts/verify-derived-total-rule-parity.ts parses the shipped SQL and
+// executes this function against the same cases so they cannot drift.
+//
+// Derive ONLY when the row:
+//   (a) is a SALE — a per-metre x area product is a sale price, never a rent;
+//   (b) publishes NO price at all (neither a total nor an annual);
+//   (c) carries a real per-metre price AND a real area > 0 — both from the source;
+//   (d) yields a CREDIBLE product (<= 500,000,000 SAR).
+// Multiplying two source fields amplifies either's error — raw products in production reach
+// 7,000,000,000,000 SAR — so above the bound we derive NOTHING and the row stays UNKNOWN and out of
+// budget matching. That bound gates a number WE computed; it never hides a source-published price.
+export const DERIVED_TOTAL_MAX = 500_000_000;
+
+export function derivedTotalFromPerMeter(
+  deal: Deal,
+  priceTotal: unknown,
+  priceAnnual: unknown,
+  pricePerMeter: unknown,
+  areaM2: unknown,
+): number | null {
+  if (deal !== 'Buy') return null;                       // (a) sale only
+  if (typeof priceTotal === 'number' || typeof priceAnnual === 'number') return null; // (b) source spoke
+  if (typeof pricePerMeter !== 'number' || !(pricePerMeter > 0)) return null;         // (c)
+  if (typeof areaM2 !== 'number' || !(areaM2 > 0)) return null;                       // (c)
+  const total = pricePerMeter * areaM2;
+  if (!Number.isFinite(total) || total > DERIVED_TOTAL_MAX) return null;              // (d)
+  return total;
+}
+
+// True when the price shown for this row is OUR arithmetic rather than the advertiser's number.
+// The card uses it to label the figure; nothing may present a derived total as source-published.
+export function isDerivedTotal(
+  deal: Deal,
+  priceTotal: unknown,
+  priceAnnual: unknown,
+  pricePerMeter: unknown,
+  areaM2: unknown,
+): boolean {
+  return derivedTotalFromPerMeter(deal, priceTotal, priceAnnual, pricePerMeter, areaM2) !== null;
+}
+
 export function listingPriceString(
   deal: Deal,
   rentPeriod: string | null | undefined,
   priceAnnual: unknown,
   priceTotal: unknown,
+  pricePerMeter?: unknown,
+  areaM2?: unknown,
 ): string {
   const isMonthlyRent = deal === 'Rent' && rentPeriod === 'monthly' && typeof priceAnnual === 'number';
+  const derived = derivedTotalFromPerMeter(deal, priceTotal, priceAnnual, pricePerMeter, areaM2);
   const amount = deal === 'Rent'
     ? (isMonthlyRent ? Math.round((priceAnnual as number) / 12) : priceAnnual)
-    : priceTotal;
+    : (typeof priceTotal === 'number' ? priceTotal : derived);
   if (typeof amount !== 'number') return 'Price on request';
   const suffix = isMonthlyRent ? '/mo' : (deal === 'Rent' && rentPeriod === 'annual') ? '/yr' : '';
-  return `SAR ${amount.toLocaleString('en-US')}${suffix}`;
+  // '≈' marks arithmetic, not an advertised figure. The card additionally renders an explicit
+  // «محتسب من سعر المتر» note; this prefix is the last line of defence if that note is ever dropped.
+  const prefix = derived !== null && typeof priceTotal !== 'number' ? '≈ ' : '';
+  return `${prefix}SAR ${amount.toLocaleString('en-US')}${suffix}`;
 }
 
 export const LISTED_SEQ = ['today', '2 days ago', '2 months ago', '8 months ago', '1 year ago'];

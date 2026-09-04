@@ -68,10 +68,18 @@ check(
 const sigMatch = index.match(/const districtNarrowingSig = JSON\.stringify\(\[([\s\S]*?)\]\);/);
 check('districtNarrowingSig found in src/app/index.tsx', !!sigMatch);
 const sig = sigMatch?.[1] ?? '';
-for (const f of ['query.amenities', 'query.bathMin', 'query.furnishedPref', 'query.ratingMin',
-                 'query.unitSubtypes', 'query.ageMin', 'query.isNewConstruction']) {
-  check(`    districtNarrowingSig includes ${f}`, sig.includes(f));
-}
+// The AF half of that signature is no longer seven hand-typed `query.x` entries to grep for: it
+// SPREADS AF_PREDICATE_FIELDS, the same list src/lib/afCarry.ts clears and re-applies and that
+// verify-af-survives-filter-reentry.ts pins field-for-field against the real rpcAdvancedFilterParams
+// builder (2026-09-01). Checking for the iteration is strictly stronger than checking for seven of
+// the eleven names — under the old form a TWELFTH predicate silently stopped invalidating these
+// counts and this check stayed green, which is the overstatement class this file exists to close.
+check('    districtNarrowingSig iterates AF_PREDICATE_FIELDS',
+  /\.\.\.AF_PREDICATE_FIELDS\.map\(\(f\) => query\[f\]\)/.test(sig),
+  'a hand-typed AF tail stops invalidating the cached district counts the moment a predicate is added');
+check('    AF_PREDICATE_FIELDS is imported into src/app/index.tsx',
+  /import \{[^}]*AF_PREDICATE_FIELDS[^}]*\} from '@\/lib\/afCarry'/.test(index),
+  'the spread must resolve to the one shared list, not a local re-declaration');
 
 // ── (E) completeness: every advanced field on SearchQuery is represented in the helper ───────────
 // Catches the real-world failure mode — a new advanced question adds a SearchQuery field and a

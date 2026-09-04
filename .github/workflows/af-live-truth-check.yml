@@ -21,7 +21,12 @@ name: AF backend-truth live check
 
 on:
   schedule:
-    - cron: '23 */6 * * *' # every 6 hours, offset from the sibling live-check jobs
+    # COST (owner ruling 2026-08-29): this job drives 11 REAL messages through the paid production
+    # AI agent per run. At every-6-hours that was 44 paid agent messages a day against ~6 from actual
+    # users — CI was ~98% of the DeepSeek bill. Daily still catches a live regression within 24h, and
+    # the workflow_run trigger below keeps IMMEDIATE post-deploy verification, which is the run that
+    # actually matters. 44 -> 11 messages/day with no loss of deploy-time coverage.
+    - cron: '23 4 * * *' # daily, offset from the sibling live-check jobs
   workflow_dispatch:
   workflow_run:
     workflows: ['Deploy frontend (production)']
@@ -36,7 +41,10 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     name: AF UI count = count RPC = result RPC = independent DB truth
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Measured 2026-09-03: the nine steps below took 16m44s of work plus ~1m of setup. 35 leaves
+    # roughly 2x headroom. Whenever a step is ADDED here, re-measure — a budget that silently
+    # becomes too small skips the tail of this job (see the af-surface-region comment below).
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,3 +76,346 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-agent-cta-live.ts
+
+      # TRENDING, THE WHOLE WAY DOWN (added 2026-09-01). The steps above certify Advanced Filter;
+      # nothing certified that the number a user SEES in a Trending row survives the click into a
+      # search and still agrees with the database. Runs even if the AF steps fail, so one red
+      # surface never hides the other.
+      - name: Trending rows must equal the RPC, the click-through, and independent DB truth
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-live-four-way-truth.ts
+
+      # PROPERTY-TYPE CORRECTNESS, EVERY CERTIFIED COHORT (added 2026-09-01, owner priority). The
+      # steps above certify a handful of hand-picked journeys; this sweeps EVERY certified
+      # (clean type x deal x period) x every question that cohort certifies, and diffs the exact
+      # returned ID set against independent DB truth — so a type leak or a predicate that admits an
+      # ineligible row shows up as an EXTRA by construction. Runs even if the steps above fail.
+      - name: Every certified cohort returns only its own property type, satisfying every AF answer
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-property-type-differential.ts
+
+      # The LIVE half of verify-trending-carries-full-filter-state.ts (split out 2026-09-02). Its
+      # SOURCE half is offline and stays in `npm test`; these checks call top_cities_by_deal_ar and
+      # location_search_candidates_ar against production and diff them against independent PostgREST
+      # counts, so a production hiccup must not fail an unrelated PR's required check. Nothing was
+      # retired — the same assertions, run here instead.
+      - name: Trending and district counts must HONOUR every predicate they are handed
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-filter-state-live.ts
+
+      # THE ROOT-CAUSE JOIN (added 2026-09-03). Activating a platform is a DATABASE act; the client's
+      # RES_TABLES/COM_TABLES are a SOURCE-CODE act; until now nothing checked that the two agreed.
+      # Five platforms went live in search_listings_ar with 4,314 production_ready rows and joined
+      # neither list, so no search could return them while Trending — called without p_tables —
+      # counted them anyway (الهفوف/أرض سكنية/بيع: 2,478 advertised, 109 delivered). The AF matrix
+      # barrier caught it only on `bathrooms=1`, the one predicate wide enough to admit the new rows.
+      # This asks the question directly instead of waiting for a wide enough predicate.
+      - name: Every platform live in search must be reachable by a real search
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-every-live-table-is-searchable.ts
+
+      # COMBINED شراء+إيجار in a REAL browser (added 2026-09-02). The Filter offers two independent
+      # budgets and the RPC splits them by the row's own deal; until 2026-09-02 the client re-applied
+      # the BUY pair to every returned row, so a Buy floor deleted every rent card the server had
+      # correctly returned — measured on the live bundle at 1,166 rent rows handed to the app and 0
+      # rent cards on screen. Its offline twin is verify-combined-deal-budget-split.ts.
+      - name: A combined Buy+Rent search must show BOTH sides
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-combined-budget-live.ts
+
+      # A REAL type change in a REAL browser: answer Advanced Filter on شقة, switch the type to
+      # أرض سكنية, and prove not one uncertified predicate is on the request the browser sends.
+      - name: No stale AF predicate crosses a property-type change
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-stale-predicate-live.ts
+
+      # THE ONE AF CONTROL THAT RUNS BACKWARDS (added 2026-09-02). Every other control narrows;
+      # removing a pill widens. Until now the whole of contract §9.2 rested on
+      # verify-af-cross-round-carry.ts, which reasons over removeGuidedFacet offline and cannot see
+      # the deployed bundle — R9.2.2's own half ("the count may WIDEN, a new turn lands below,
+      # nothing above is rewritten") was graded P, "not directly asserted". This walks a real round,
+      # removes one pill, and asserts on the request body the browser actually sends: exactly one
+      # predicate gone, every survivor byte-identical, the normal-filter scope untouched, the new
+      # count re-derivable from the anon REST path, and every earlier headline still on screen.
+      # Runs twice — the desktop Riyadh/Apartment cohort and a MOBILE non-Riyadh Villa one — because
+      # PART 8 of the routine spec owes a mobile and a non-Riyadh journey every run, and one
+      # parameterised file is how they stay identical instead of drifting into three.
+      - name: Removing an AF pill drops exactly that predicate and rewrites nothing above it
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-pill-removal-live.ts
+
+      # THE HAND-WRITTEN PREDICATE ORACLE (moved here 2026-09-02). Nine AF answers expressed as
+      # PostgREST filters written by hand — not derived from the clause — plus the exact UNKNOWN
+      # partition. It used to run inside the REQUIRED `npm test`, calling production on every PR
+      # through the committed anon key: the exact pattern #1486 removed elsewhere. Same assertions,
+      # run here where a production hiccup cannot fail an unrelated PR.
+      - name: Every AF predicate agrees with an independently hand-written predicate, and unknown never passes
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-independent-oracle.ts
+
+      # STRICT FILTER PARITY — RESCUED 2026-09-03. This check pins location_search_candidates_ar's
+      # total_count against a strict PostgREST count for every filter that was NULL-permissive
+      # before 20260727124500, plus the amenity-alias / unknown-token-fails-closed / direction-
+      # vocabulary / Farm-vs-Agriculture-Plot invariants. Its scripts/test-exclusions.txt row said
+      # it ran in full-verification-ci.yml; that workflow's only mention of it is a comment saying
+      # it is deliberately NOT run there, so it had been running nowhere at all. In that time the
+      # annual arm gained the owner's monthly-RNPL disjunct and the check's ground truth did not —
+      # it went red the first time it was executed again (production was correct; the check was
+      # stale). It is REST-only and takes ~10s, so it belongs beside the independent oracle above.
+      - name: RPC total_count still equals strict ground truth on every once-permissive filter
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-strict-filter-parity-live.ts
+
+  # THE WHOLE CERTIFIED SURFACE — ITS OWN JOB (split out 2026-09-03). The two option sweeps and the
+  # four browser journeys below used to sit at the TAIL of af-truth's single 30-minute budget.
+  # On 2026-09-03 that budget ran out inside the region sweep: the job was CANCELLED at 30:15,
+  # and every step after it was SKIPPED — including all four journeys added the day before. A
+  # cancelled run is neither success nor failure, so nothing went red and nothing alerted; six
+  # live barriers simply did not execute and the surface read as covered. Splitting them into
+  # jobs that run in PARALLEL is the fix: no sweep can starve a journey that follows it, each
+  # budget is sized for its own work, and the `attendance` gate at the bottom of this file turns
+  # any cancelled/timed-out/skipped job into a red run. Pinned by
+  # scripts/verify-live-check-workflow-attendance.ts.
+  af-surface-region:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: Every certified AF option shows DB truth and clicks to exactly that set (region)
+    runs-on: ubuntu-latest
+    # THE TWO SWEEPS GET A JOB EACH (2026-09-03). They are independent scopes and each is an
+    # open-ended walk over the live pool, so chaining them behind one budget recreates exactly the
+    # starvation this file was just restructured to remove — the second would be the new tail. A
+    # local run of the region sweep alone passed 800+ checks and was still going at 55 minutes
+    # through the cloud egress proxy, which is why neither a 60-minute shared budget nor a bigger
+    # guess is the answer: the sizes are not knowable in advance, so they must not share.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # THE WHOLE CERTIFIED SURFACE, EVERY OPTION (added 2026-09-02, owner requirement). The
+      # property-type differential above proves ONE answer per certified question; this proves
+      # EVERY option the card can render — every rung, direction, age bucket, amenity chip, both
+      # furnished answers, every rating cut, every unit subtype — with five witnesses per option
+      # (card chip = af_eligible_count = search total_count = paged ID set = independent PostgREST
+      # truth, rows re-evaluated in JS), plus same-field OR, cross-field AND with the round-2 chip,
+      # boundaries, UNKNOWN never becoming a value, zero-count options, multi-type pairs, combined
+      # Buy∪Rent and both-period scopes. Its verdict logic is mutation-proven offline by
+      # scripts/verify-af-surface-judge.ts (in npm test). Riyadh region daily; cities rotate below.
+      - name: Every option of every certified cohort shows DB truth and clicks to exactly that set
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          AF_FSD_SCOPES: region:1
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
+
+  af-surface-city:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: …and the same option surface inside a CITY scope (جدة), single-type stages
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: The جدة city scope, single-type stages
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          AF_FSD_SCOPES: city:جدة
+          AF_FSD_SKIP_MULTI: '1'
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
+
+  # THE CARD, THE PILL AND THE SCOPE CHANGE — their own job (split out 2026-09-03, same reason as
+  # af-surface above: these four were steps 17-20 of the old serial job and were the ones actually
+  # skipped when it hit its cap). Browser journeys, so they need Chromium.
+  af-card-state:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: The rendered card, the removed pill and the scope change all tell one truth
+    runs-on: ubuntu-latest
+    # 45 → 60 on 2026-09-03: two more browser journeys (the §12A card-evidence pair) live here now.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      # THE CARD ITSELF, EVERY NUMBER ON IT (added 2026-09-02). The sweep above talks to the RPCs
+      # the card talks to; this reads the numbers a human SEES on the rendered card — every option's
+      # count — and carries each to the captured count RPC and to independent DB truth, clicks one,
+      # walks «عرض المزيد» to the end asserting every page carries the same predicate with no
+      # duplicates, then commits a second round and proves the AND.
+      - name: Every number on the rendered AF card is DB truth, clicks to that set, and pages cleanly
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-option-card-truth-live.ts
+
+      # Removing the LAST pill must return byte-exactly to the pre-AF search — zero AF predicates,
+      # the same count, and the removed question askable again (added 2026-09-02).
+      - name: Removing the last AF pill returns exactly to the pre-AF search
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-remove-last-pill-live.ts
+
+      # Changing DEAL or RENT PERIOD after committing answers keeps exactly what the new cohort
+      # certifies — cohortAllows() executed live against the request body — and resurrects nothing
+      # (added 2026-09-02; the type-change half is verify-af-stale-predicate-live.ts above).
+      - name: Changing deal or period after AF keeps exactly the certified answers
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-scope-change-live.ts
+
+      - name: …and the same, on a mobile viewport in a non-Riyadh city
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          AF_PILL_CITY: جدة
+          AF_PILL_GROUP: الفلل والبيوت
+          AF_PILL_TYPE: فيلا
+          AF_PILL_MOBILE: '1'
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-pill-removal-live.ts
+
+      # §12A / R13.12 (owner, 2026-09-03): «the returned property card must clearly show what the
+      # user selected in the Advanced Filter». R12A.6 names a live journey as this rule's own
+      # barrier, and this is it — the only check in the repo that reads the chips a human reads off
+      # the DEPLOYED bundle. Its offline twin (scripts/verify-af-card-evidence.ts, in npm test)
+      # executes the same registry against synthetic rows and holds the SQL and the TypeScript to one
+      # contract, but cannot see production. Ground truth for every expected chip is the `af_canon`
+      # object carried by the search response itself — the exact row the predicate ran on.
+      - name: Every AF answer is visible on the returned card, with the listing's own value
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-card-evidence-live.ts
+
+      - name: …and the same, on a mobile viewport in a non-Riyadh city
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          AF_EV_CITY: جدة
+          AF_EV_GROUP: الفلل والبيوت
+          AF_EV_TYPE: فيلا
+          AF_EV_MOBILE: '1'
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-card-evidence-live.ts
+
+  # THE WHOLE CERTIFIED MATRIX (added 2026-09-02, owner invariant: «what the AF UI says + what the
+  # user selects + what the backend applies + what the returned listings actually satisfy must all be
+  # the same truth»). Every scope × deal/period mode × question × option the REAL pool offers —
+  # derived by executing src/data/advancedFilters.ts, never from a list — measured in one real city:
+  # the card's number (the real resolveOptions() on the real count RPC row) == an independent
+  # PostgREST count on canonical columns re-expressed from the option's MEANING == the results total;
+  # every returned row fetched back and checked on its canonical column; exact ID diff under the walk
+  # cap; OR/AND arithmetic; the UNKNOWN partition; Trending's advertised count. ~55 cells / ~740
+  # options / tens of thousands of rows, so it runs as its OWN job in parallel with the browser
+  # journeys rather than inside their 30-minute budget. Offline twin: scripts/verify-af-matrix-truth.ts.
+  af-matrix:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: Every certified AF option shows, sends, applies, returns and carries one truth
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: The whole certified AF matrix against production and independent DB truth
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-matrix-truth-live.ts
+
+  # ATTENDANCE (added 2026-09-03). A job that is CANCELLED — by its own timeout-minutes cap, by a
+  # runner loss, by anything — reports neither `success` nor `failure`, and every step still
+  # queued behind it is reported as `skipped`. GitHub renders the whole run as "cancelled", which
+  # no branch rule, no notification and no reader treats as broken. That is exactly how six live
+  # AF barriers went dark on 2026-09-03 while this workflow looked fine.
+  #
+  # This job exists so that can never be silent again. It needs EVERY other job in the file and
+  # runs with `if: always()`, so it executes even when a sibling was cancelled, and it fails
+  # unless every one of them concluded `success`. `needs` completeness is not left to memory:
+  # scripts/verify-live-check-workflow-attendance.ts (in `npm test`) fails if a job is added to
+  # this file and not added here.
+  attendance:
+    name: Every AF/Trending live job actually ran and passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [af-truth, af-surface-region, af-surface-city, af-card-state, af-matrix]
+    steps:
+      - name: Refuse to report a clean run when a job was cancelled, skipped or failed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS"
+          # Parsed with jq, not grepped. A text match that stops matching — because GitHub changes
+          # the shape of toJSON(needs), or a job name gains a character the pattern did not expect —
+          # finds nothing and PASSES. That is failing OPEN, which is the exact defect this job was
+          # added to fix, reproduced one level up. Every branch below either names the offending
+          # jobs or exits non-zero.
+          n=$(jq -r 'length' <<<"$RESULTS")
+          if [ "$n" -eq 0 ]; then
+            echo "::error::attendance read ZERO needed jobs — it cannot see the run it is gating"
+            exit 1
+          fi
+          bad=$(jq -r 'to_entries | map(select(.value.result != "success")) | .[] | "\(.key): \(.value.result)"' <<<"$RESULTS")
+          if [ -n "$bad" ]; then
+            echo "::error::an AF/Trending live job did not succeed — a cancelled or skipped job is a DARK BARRIER, not a clean run"
+            echo "$bad"
+            exit 1
+          fi
+          echo "all $n live AF/Trending jobs concluded success"

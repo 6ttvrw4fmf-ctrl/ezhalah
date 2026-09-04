@@ -104,9 +104,11 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   //                   monoculture (94%), flagged like Shop/IndLand before it. street_width verified
   //                   10/10 EXACT against aqar's own structured `street_width` payload key, with one
   //                   correct UNKNOWN where the source is silent. property_age is ALSO source-verified
-  //                   (10/10) but is deliberately NOT listed: AGE_FILTER_TYPES has no Factory entry and
-  //                   that gate's floor is 150 rows, so the question could never be offered — listing
-  //                   it would be availability for a question this type can never be asked.
+  //                   (10/10) but is deliberately NOT listed below: Factory's n is under the 150-row
+  //                   MIN_TOTAL_TO_SHOW floor for age specifically, so the question could never be
+  //                   offered — listing it here would be availability for a question this type can
+  //                   never be asked. (Property age eligibility is cohortAllows(q, 'property_age')
+  //                   against this table directly — 2026-09-01, no longer a second hand-kept map.)
   //   Chalet          NOT certified. It passes every DB-side gate (rent-annual n=61: age 53, bath 54,
   //                   street width 56) — but of 24 rows adjudicated against source, HALF (12) now have
   //                   both structured keys null on the live page. Counts built on values the source no
@@ -246,6 +248,16 @@ export function scopeCleanTypes(q: SearchQuery): string[] {
 // (never in Buy or RentAnnual); a type with no certified Monthly cohort (most commercial/rural types)
 // correctly offers ZERO combined-mode questions — the same conservative "no evidence, don't ask"
 // behavior 'both' already applies.
+// bothDeals IS THE SAME SCOPE FOR CERTIFICATION (found 2026-09-02, owner property-type audit).
+// src/data/remote.ts sends `p_deal: (q.bothDeals || q.dealCombined) ? null : …` and
+// af_eligibility_clause() reads p_deal IS NULL as Buy ∪ Rent(any period) — so the two fields mean
+// ONE thing to the search. cohortAllows() branched on dealCombined alone, so the AI-chat fallback
+// (bothDeals = the agent could not tell Buy from Rent from free text) certified questions against a
+// SINGLE leg while the search spanned both: the R2.2.2 amputation, and the same shape as the
+// property_age divergence that audit began with — the request boundary treats two fields as one
+// concept while the certification gate treats them as two. Intersecting is a pure NARROWING, since
+// Buy ∩ RentAnnual ∩ RentMonthly is a subset of any single leg.
+// Proof: scripts/verify-af-question-gate-is-one-predicate.ts §5.
 function cohortAllowsCombined(cfg: NonNullable<(typeof COHORT_QUESTIONS)[string]>, id: string): boolean {
   return (cfg.Buy ?? []).includes(id) && (cfg.RentAnnual ?? []).includes(id) && (cfg.RentMonthly ?? []).includes(id);
 }
@@ -265,7 +277,7 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
     if (q.category !== (CLEAN_MACRO[type] ?? 'Residential')) return false;
     const cfg = COHORT_QUESTIONS[type];
     if (!cfg) return false;                 // uncertified type = EMPTY cohort, never "no constraint"
-    if (q.dealCombined) return cohortAllowsCombined(cfg, id);
+    if (q.dealCombined || q.bothDeals) return cohortAllowsCombined(cfg, id);  // bothDeals: see above
     if (q.deal === 'Buy') return (cfg.Buy ?? []).includes(id);
     if (q.deal !== 'Rent') return false;
     if (q.rentPeriod === 'monthly') return (cfg.RentMonthly ?? []).includes(id);
@@ -276,3 +288,107 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
 
 
 
+
+// ── CERTIFIED AMENITY VOCABULARY (owner ruling 2026-08-29, AI-chat one-shot understanding) ────────
+//
+// The AI chat may now map amenities stated in a user's own sentence («فيها مصعد وموقف») straight into
+// q.amenities, without the user walking the Advanced Filter flow first. That is only safe if the chat
+// is held to EXACTLY the same certification the AF chips are held to — so this is the single place
+// that answers "which amenity tokens are certified for this scope", and both paths ask it.
+//
+// It is deliberately a SUBSET-SAFE gate, not a suggestion engine:
+//   - the amenities QUESTION must itself be certified for the cohort (cohortAllows) — an uncertified
+//     type is an EMPTY cohort, never "no constraint"
+//   - a mapped commercial/rural type gets EXACTLY its COHORT_CHIPS list and none of the residential
+//     tokens; a multi-type scope gets the INTERSECTION (owner 2026-08-20), so a disagreeing scope
+//     yields nothing rather than one side's token
+//   - villa-only tokens stay villa-only
+// Anything not returned here is NOT certified for this scope and must never reach q.amenities. The
+// caller asks the user instead — guessing an uncertified attribute is how UNKNOWN silently becomes No.
+const RESIDENTIAL_AMENITY_BASE = [
+  'kitchen', 'parking', 'elevator', 'ac', 'private_entrance', 'maid_room', 'driver_room',
+  // Added 2026-08-31 (owner, gym-bug class sweep): these columns already existed on
+  // search_listings_ar (2026-08-10/11 rich-canonical-columns + car_entrance/optical_fibers
+  // migrations) with real, populated data, but were never wired past the ALTER TABLE — the exact
+  // same situation "gym" was in. Live counts checked 2026-08-31 (fleet-wide true/941 total 197,768):
+  // gym 13, pool 44, garden 49, balcony 1,476, laundry_room 1,959, optical_fibers 2,911,
+  // separate_electricity_meter 52,652, separate_water_meter 46,474. See
+  // supabase/migrations/20260831205347_af_amenity_tokens_residential_rich_set.sql for the RPC side.
+  'gym', 'pool', 'garden', 'balcony', 'laundry_room', 'optical_fibers',
+  'separate_electricity_meter', 'separate_water_meter',
+] as const;
+// aqar villa ads carry مدخل سيارة / صرف صحي checkboxes the apartment forms do not (2026-08-16).
+const VILLA_ONLY_AMENITIES = ['car_entrance', 'sanitation'] as const;
+
+export function certifiedAmenityKeys(q: SearchQuery): string[] {
+  // Not certified for this cohort at all ⇒ no amenity token is applicable. Never fall through to a
+  // base list here: that would let an uncertified cohort acquire constraints the AF path refuses.
+  if (!cohortAllows(q, 'amenities')) return [];
+  // No empty-scope guard here on purpose: cohortAllows() already returns false when scopeCleanTypes
+  // is empty, so a second check is dead code — it cannot change behaviour and cannot be tested. (A
+  // mutation removing it was provably EQUIVALENT, which is what exposed it as redundant.)
+  const scope = scopeCleanTypes(q);
+  // Mapped commercial/rural types render EXACTLY their list; [] means the selected types disagree.
+  const chipAllow = intersectChips(scope);
+  if (chipAllow) return [...chipAllow];
+  const base: string[] = [...RESIDENTIAL_AMENITY_BASE];
+  if (scope.every((ty) => ty === 'Villa')) base.push(...VILLA_ONLY_AMENITIES);
+  // «مفروشة» is an amenity CHIP on the same card, not just the separate Furnished question:
+  // AMENITIES_QUESTION.resolveOptions pushes `{ key: 'furnished' }` on exactly this condition, after
+  // exactly this chipAllow early-return — so the option list and this list must mirror each other or
+  // the card offers a token nothing else certifies. It did (2026-09-01): the chip was offered on
+  // الرياض/إيجار/سنوي/شقة, committed, written to the store, and then deleted by the re-entry carry
+  // ({"p_amenities":["furnished"]} → {}) — a DROPPED filter on a cohort that never moved. The same
+  // absence made afCertify's step-4 carried-token sweep reject it on the next chat turn.
+  // `furnished` is a real p_amenities token server-side (af_eligibility_clause.sql: `not
+  // ('furnished' = any(p_amenities)) or s.furnished`), so keeping it only ever narrows.
+  // The chat cannot smuggle it in: the edge's amenity vocabulary deliberately excludes it and routes
+  // furnishing through the separate tri-state `furnished` key → furnishedPref.
+  if (cohortAllows(q, 'furnished')) base.push('furnished');
+  return base;
+}
+
+// THREE AF questions write their answer into the ONE `q.amenities` bag: the amenities card itself,
+// plus `furnished` and `rnpl`, which are separate questions with their own, much narrower
+// certification (the RPC's p_amenities vocabulary carries all three — 'furnished' and 'rnpl'/
+// 'rent_now_pay_later' are listed there alongside the chips). certifiedAmenityKeys() is the CHIP
+// vocabulary and knows only the first, so a furnished or RNPL answer the cohort genuinely certifies
+// came back `rejected` from the gate below: the chat path then deleted the user's own filter and
+// announced it as uncertified. Measured on 2026-09-02 by executing the real gate over every cohort:
+// 10 (cohort × question) pairs, 7 of them `furnished` — including Residential Building/RentAnnual,
+// which certifies furnished while certifying no amenity chips at all.
+//
+// Each is gated on its OWN question id. Folding them into the amenities gate would be the opposite
+// error and a worse one: rnpl certifies on 3 cohorts where amenities certifies on 24, so 'amenities'
+// as a proxy would let RNPL through wherever generic amenities happen to be allowed — the exact
+// impersonation scripts/verify-agent-af-intent-coverage.ts §3 exists to forbid.
+const AMENITY_BAG_WRITERS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['furnished', ['furnished']],
+  ['rnpl', ['rnpl', 'rent_now_pay_later']],
+];
+
+/**
+ * Split requested amenity tokens into the ones this scope certifies and the ones it does not.
+ *
+ * `rejected` is NOT a soft failure to swallow — it is the clarification trigger. The owner's rule:
+ * if an amenity is not certified for that cohort, ASK the user rather than guessing. Applying it
+ * anyway would filter on a field whose semantics this cohort has never certified; silently dropping
+ * it would answer a narrower question than the user asked while the reply still claims otherwise.
+ */
+export function partitionRequestedAmenities(
+  q: SearchQuery, requested: string[],
+): { certified: string[]; rejected: string[] } {
+  const allowed = new Set(certifiedAmenityKeys(q));
+  for (const [id, tokens] of AMENITY_BAG_WRITERS) {
+    if (cohortAllows(q, id)) for (const tok of tokens) allowed.add(tok);
+  }
+  const certified: string[] = [];
+  const rejected: string[] = [];
+  for (const raw of requested) {
+    const key = String(raw ?? '').trim().toLowerCase();
+    if (!key) continue;
+    if (certified.includes(key) || rejected.includes(key)) continue; // stable, de-duplicated
+    (allowed.has(key) ? certified : rejected).push(key);
+  }
+  return { certified, rejected };
+}

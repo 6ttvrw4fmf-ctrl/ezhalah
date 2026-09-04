@@ -24,6 +24,14 @@
 //
 // Run: node --experimental-strip-types scripts/verify-monitoring-sweep-is-guarded.ts
 import { readFileSync, readdirSync } from 'node:fs';
+import { join as __join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
+
+// "Is this guard actually wired in?" — asked of the test registry, which is what `npm test`
+// resolves its run set from (scripts/lib/testRegistry.ts). String-matching package.json used to
+// answer it; since the 201-command chain became one runner invocation, that match would read
+// "not wired" for every barrier in the suite.
+const REPO_ROOT = __join(import.meta.dirname, '..');
 
 const MIGRATIONS_DIR = 'supabase/migrations';
 const CRON_HEALTH_FIX = '20260822061419_cron_health_cannot_see_the_job_it_runs_inside.sql';
@@ -57,7 +65,13 @@ const read = (f: string) => (files.includes(f) ? readFileSync(`${MIGRATIONS_DIR}
 //    predates, exactly like the roster class this repo has been bitten by seven times.
 const rewriters = files.filter((f) => {
   if (GRANDFATHERED.has(f) || f === SWEEP_BUDGET_FIX) return false;
-  const sql = readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8');
+  // A comment is not a code path. 20260831192229 names the sweep only in its `-- THE DEFECT` prose
+  // while altering jobid 86, and this filter read that prose as a rewrite of the sweep. Full-line
+  // `--` comments and /* */ blocks are dropped before matching; trailing `--` is deliberately kept
+  // so a string literal is never cut short. A real rewrite must still name the sweep in CODE.
+  const sql = readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*--.*$/gm, '');
   if (!sql.includes(SWEEP_JOB)) return false;
   if (!/alter_job|cron\.schedule/i.test(sql)) return false;
   if (!/command\s*(?:=>|:=)/i.test(sql)) return false;
@@ -116,10 +130,9 @@ check(/0\.6 \* 300/.test(budget),
   `barrier that has never been shown to fire is decoration`);
 
 // 5. This guard is worthless if nothing runs it.
-const pkg = readFileSync('package.json', 'utf8');
-check(pkg.includes('verify-monitoring-sweep-is-guarded'),
+check(npmTestRuns(REPO_ROOT, 'verify-monitoring-sweep-is-guarded'),
   'npm test runs this guard',
-  'package.json no longer runs verify-monitoring-sweep-is-guarded.ts — the guard is inert');
+  '`npm test` no longer runs verify-monitoring-sweep-is-guarded.ts (see scripts/test-exclusions.txt) — the guard is inert');
 
 console.log('monitoring-sweep-is-guarded: the sweep must fail loudly, and its command must not be pasted\n');
 for (const o of ok) console.log(`  ✓ ${o}`);

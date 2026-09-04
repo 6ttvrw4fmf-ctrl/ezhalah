@@ -41,18 +41,29 @@ const advanced  = read('src/data/advancedFilters.ts');
 const remote    = read('src/data/remote.ts');
 const interview = read('src/app/interview.tsx');
 
-// ── the authoritative slug vocabulary, copied from location_search_candidates_ar ────────────────
+// ── the authoritative slug vocabulary, DERIVED from the clause ────────────────────────────────
 // An UNKNOWN token matches nothing by design, so a guessed slug silently zeroes every result.
-const RESULTS_SLUGS = new Set([
-  'elevator', 'parking', 'kitchen', 'ac', 'maid_room', 'driver_room',
-  'private_entrance', 'furnished', 'rnpl', 'rent_now_pay_later',
-  // Villa cohort 2026-08-16: villa-form chips (migration 20260815223500 added both tokens to all
-  // 4 shared surfaces; chips == direct SQL == referee asserted in-transaction).
-  'car_entrance', 'sanitation',
-  // Commercial expansion 2026-08-16: utility chips (migration 20260815234444, same in-transaction
-  // chips == direct SQL == referee proof).
-  'electricity', 'water_supply',
-]);
+//
+// This used to be a hand-maintained literal "copied from location_search_candidates_ar". Copies go
+// stale: by 2026-09-01 production certified 22 tokens and this list still held 14, so the eight
+// added on 08-31 (gym, pool, garden, balcony, laundry_room, optical_fibers,
+// separate_electricity_meter, separate_water_meter) were outside the vocabulary this check enforces
+// — a chip using one would have been reported as an invented slug. Read the real thing instead.
+//
+// sql/mirrors/af_eligibility_clause.sql is byte-exact with the deployed clause and is kept fresh by
+// verify-sql-mirrors-not-stale.ts, so this stays offline. Same parsing idiom as
+// verify-af-multiselect-combining-semantics.ts, which already proved it.
+const clauseSql = read('sql/mirrors/af_eligibility_clause.sql');
+const vocabMatch = clauseSql.match(/where tok not in \(([^)]*)\)/);
+if (!vocabMatch) {
+  console.log('  FAIL  could not read the amenity vocabulary from sql/mirrors/af_eligibility_clause.sql');
+  process.exit(1);                       // FAIL CLOSED: deleting the mirror must not disarm the check
+}
+const RESULTS_SLUGS = new Set([...vocabMatch[1].matchAll(/''([a-z_]+)''/g)].map((m) => m[1]));
+if (RESULTS_SLUGS.size < 12) {
+  console.log(`  FAIL  amenity vocabulary parsed as only ${RESULTS_SLUGS.size} tokens — parse miss, not a real shrink`);
+  process.exit(1);                       // a silently-empty Set would make every slug check vacuous
+}
 
 // Only the AMENITY-bearing questions carry p_amenities slugs. The age question's keys
 // ('new', '1_2', …) are age buckets applied via p_age_min/p_age_max, and the bathroom rungs are
@@ -115,11 +126,18 @@ if (amenityOptsMatch) {
 }
 
 // ── 4. controls we deliberately retired must not creep back ──────────────────────────────────────
+// THE REASON CHANGED AGAIN, THE RULE DID NOT (restated 2026-09-02). 2026-09-01's wording — "no
+// cnt_pool / cnt_gym exists, so the chip could not carry a count" — stops being true the moment
+// 20260902220000 lands: both tokens get a cnt_* column inside the scoped CTE and a CARD chip
+// (AMENITIES_QUESTION, cohort-gated). What this check guards is a different surface: the INTERVIEW's
+// four-option amenity list (src/app/agent.tsx). That list is owner-scoped; growing it is an interview
+// decision with its own certification (verify-af-interview-*), never a side effect of a card chip
+// landing. So Pool/Gym stay out of the interview's option list until the owner scopes them in there.
 for (const dead of ['Pool', 'Gym']) {
   const offeredAgain = amenityOptsMatch ? new RegExp(`'${dead}'`).test(amenityOptsMatch[1]) : false;
   check(`'${dead}' is not offered as an amenity option`, !offeredAgain,
-    `only sanadak publishes it and publishes an explicit NO on 184/184 listings, so the chip can only ever return zero results. ` +
-    `The data is still stored (search_listings_ar.${dead.toLowerCase()}); re-expose it only when a platform publishes a yes.`);
+    `the interview's amenity option list is owner-scoped (4 options); '${dead}' reaching it is an ` +
+    `interview decision with its own certification, not a side effect of the card chip — scope it in deliberately.`);
 }
 
 // ── 5. THE INVERSE RULE: backend-only fields must STAY backend-only ─────────────────────────────
@@ -155,6 +173,16 @@ try {
     check('deed_location_text never reaches the filter UI (it is prose, not a predicate)', !deedInUi,
       'a free-text title-deed description cannot be a filter, and must never be parsed into '
       + 'district/street/coordinates — those are separate facts with their own sources');
+
+    // ── 5b. A CHIP THE REGISTRY CANNOT DESCRIBE IS REFUSED (2026-09-02). The leak check above
+    // only sees rows that exist: a chip whose key has NO registry row at all (optical_fibers before
+    // 20260902220000 registered it) slipped past it silently. Every amenity chip key must map to a
+    // registry row — by its own key, or by the two long-standing spellings that predate the registry.
+    const REGISTRY_KEY: Record<string, string> = { ac: 'air_conditioner', rnpl: 'installment_available' };
+    const registered = new Set(registry.map((f) => f.canonical_key));
+    const undescribed = chipKeys.filter((k) => !registered.has(REGISTRY_KEY[k] ?? k));
+    check('every amenity chip is described by an af_field_registry row (a chip the registry cannot describe is refused)',
+      undescribed.length === 0, `no af_field_registry row for: ${undescribed.join(', ')}`);
 
     const noReason = registry.filter((f) => !f.ui_exposed && !f.not_exposed_reason).map((f) => f.canonical_key);
     check('every backend-only field records WHY it is hidden', noReason.length === 0, noReason.join(', '));

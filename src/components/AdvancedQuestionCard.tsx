@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing } from 'react-native-reanimated';
 import { Image } from 'expo-image';
@@ -96,10 +96,12 @@ export function AdvancedQuestionLoading({ onClose }: { onClose: () => void }) {
 // ── Opening state (owner 2026-08-16) ─────────────────────────────────────────────────────────────
 // Shown automatically after an eligible Filter search lands with > 25 results: never a question, a
 // calm invitation — «لقينا N عقار» → «خلّنا نحدد طلبك أكثر» → one soft line explaining we use the
-// information available about these listings. Begin is opt-in; «عرض النتائج» leaves immediately
-// (the results are already rendered behind the overlay). No technical language, ever.
-export function AdvancedIntroCard({ total, onBegin, onShowResults, onClose }: {
-  total: number | null; onBegin: () => void; onShowResults: () => void; onClose: () => void;
+// information available about these listings. Begin is opt-in. No technical language, ever.
+// The «عرض النتائج» decline link was REMOVED (owner follow-up, 2026-08-28: no عرض النتائج action
+// anywhere inside the AF flow). ✕ is the decline — it always ran the exact same handler, and the
+// results are already rendered behind the overlay, so nothing was lost with the link.
+export function AdvancedIntroCard({ total, onBegin, onClose }: {
+  total: number | null; onBegin: () => void; onClose: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -114,9 +116,6 @@ export function AdvancedIntroCard({ total, onBegin, onShowResults, onClose }: {
           <Tap onPress={onBegin} style={s.primaryBtn}>
             <Text style={s.primaryTxt}>{t('Let’s begin')}</Text>
           </Tap>
-          <Pressable style={s.introLink} onPress={onShowResults} hitSlop={8}>
-            <Text style={s.skipTxt}>{t('Show results')}</Text>
-          </Pressable>
         </View>
       </View>
     </Shell>
@@ -136,7 +135,9 @@ export type AdvancedQuestionCardProps = {
   brandImage?: string;            // asset token resolved via the card's own BRAND_IMAGES registry
   selection: 'single' | 'multi';
   options: AdvancedOption[];      // already pre-filtered to the meaningful-option floor by the config
-  unknownCount: number;
+  /** Listings in scope whose SOURCE did not state this field, or `null` when the question has no
+   *  truthful single unknown count. `null` renders NOTHING — never "0 did not mention". */
+  unknownCount: number | null;
   progressCur: number;           // 1-based ordinal among the questions that will actually show
   progressTotal: number;         // count of ELIGIBLE questions for this scope (not the static array)
   liveCount: (keys: string[]) => Promise<number | null>; // live count for a tentative selection
@@ -144,7 +145,8 @@ export type AdvancedQuestionCardProps = {
   onConfirm: (keys: string[]) => void; // commit the selection (empty = no preference) and advance/search
   onSkip: () => void;                   // skip THIS question
   onBack: () => void;                   // one question back — from the first question, out of AF entirely
-  onSkipAll: (keys: string[]) => void;  // commit accumulated + the VISIBLE selection, search now
+  // The skip-all prop was REMOVED (owner, 2026-08-28): the in-question «عرض النتائج» early-exit is
+  // gone — the footer is متابعة / تخطي / رجوع only. The intro card's decline link is separate.
   onClose: () => void;                  // abandon
 };
 
@@ -212,13 +214,24 @@ function OptionRow({ option, selected, selection, first, onPress }: {
 }
 
 export default function AdvancedQuestionCard({
-  titleKey, descriptionKey, brandImage, selection, options, unknownCount: _unknownCount, progressCur, progressTotal,
-  liveCount, initialKeys, onConfirm, onSkip, onBack, onSkipAll, onClose,
+  titleKey, descriptionKey, brandImage, selection, options, unknownCount, progressCur, progressTotal,
+  liveCount, initialKeys, onConfirm, onSkip, onBack, onClose,
 }: AdvancedQuestionCardProps) {
-  const { t } = useI18n();
+  const { t, isRTL } = useI18n();
   const [sel, setSel] = useState<string[]>(initialKeys ?? []);
   const [count, setCount] = useState<number | null>(null);
   const reduced = useReducedMotion();
+  // Belt-and-suspenders (owner audit, 2026-08-27): the SAME concept must never render as two chips in
+  // one question, even if two upstream option builders (a future data path, or a translation
+  // collision) resolve to the same displayed label under different keys. This is the ONE render
+  // gateway every question funnels through (see the file header) — the whole class is closed HERE,
+  // not in afRanking.ts's meaningful(), which the scope questions bypass entirely. First occurrence
+  // wins; an eligibility/scoring bug upstream should never silently double-render instead of failing
+  // loudly elsewhere.
+  const dedupedOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return options.filter((o) => (seen.has(o.label) ? false : (seen.add(o.label), true)));
+  }, [options]);
 
   // Question-transition: the body fades/rises in whenever the QUESTION changes (keyed on titleKey) —
   // no hard cuts between steps. Decoration only; reduced motion renders instantly.
@@ -335,20 +348,36 @@ export default function AdvancedQuestionCard({
         <Reanimated.View style={enterA}>
           <Text style={s.qt} testID="af-question-title">{t(titleKey)}</Text>
           {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
+          {/* R7.1.3 — the unknown-count caption. UNKNOWN STAYS VISIBLE: these listings are still
+              fully eligible (no option's count includes them, and Skip keeps them all), so the user
+              is told they exist rather than being left to infer that every listing stated the fact.
+              Rendered ONLY for a truthful count: `null` means the question has no honest single
+              unknown number and prints nothing, and 0 prints nothing because there is no one to
+              mention. Never a fabricated "0 did not mention" (owner rule 2026-08-28). */}
+          {unknownCount != null && unknownCount > 0 ? (
+            <Text style={s.unknownNote} testID="af-unknown-count">
+              {t('{n} listings did not mention this', { n: unknownCount.toLocaleString('en-US') })}
+            </Text>
+          ) : null}
           {brandImage && BRAND_IMAGES[brandImage] ? (
             <View style={s.brandStrip}>
               <Image source={BRAND_IMAGES[brandImage]} style={s.brandImg} contentFit="contain" />
             </View>
           ) : null}
           <View style={s.list}>
-            {options.map((o, i) => (
+            {dedupedOptions.map((o, i) => (
               <OptionRow key={o.key} option={o} selected={sel.includes(o.key)} selection={selection}
                 first={i === 0} onPress={() => pick(o.key)} />
             ))}
           </View>
           {/* One tiny availability line instead of database language (owner 2026-08-16): the numbers
               come from what we actually know about the current listings — say that plainly, once. */}
-          <Text style={s.note}>{t('Options reflect the information available for the current listings')}</Text>
+          {/* Owner 2026-08-29, two quiet truths: (1) an ad that doesn't mention a feature is not
+              saying "no" — the user must never read missing data as a negative answer; (2) the
+              options and counts belong to THIS search's current results and follow the narrowing.
+              Neither line excuses a wrong number — counts still come from backend truth. */}
+          <Text style={s.note}>{t('Some listings do not mention this detail, so the options reflect what the listings actually state')}</Text>
+          <Text style={s.noteSub}>{t('Options and counts are based on your current search results and update as you narrow down')}</Text>
         </Reanimated.View>
       </ScrollView>
       {/* PINNED action row — outside the ScrollView on purpose (see s.foot). */}
@@ -360,29 +389,51 @@ export default function AdvancedQuestionCard({
               «عرض N نتيجة»: the user tapped a button promising results, the card simply moved to the
               next question, and no results turn was ever produced. The card cannot know whether a
               question is the last one either — the pool is re-ranked after every answer — so an
-              arity- or ordinal-based «عرض» promise can never be honest here. The ONE terminal
-              control is «عرض النتائج» in the row below. */}
+              arity- or ordinal-based «عرض» promise can never be honest here. Since 2026-08-28 the
+              footer has NO terminal control at all — a round ends only by walking its questions,
+              Back from question 1, or ✕ — so nothing in this footer may ever promise results. */}
           <Text style={s.primaryTxt}>
             {count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue')}
           </Text>
         </Tap>
+        {/* Secondary row — TWO real buttons, not footnote links (owner redesign, 2026-08-28: the
+            old text-only رجوع/تخطي/عرض النتائج row read as fine print and was easy to miss). The
+            same owner decision REMOVED the in-question «عرض النتائج» early-exit entirely — the
+            question footer offers exactly متابعة / تخطي / رجوع; a round now ends by walking its
+            questions (confirm/skip), by Back from question 1, or by ✕. The owner's follow-up the
+            same day removed the intro card's «عرض النتائج» decline link too — ✕ is the decline.
+            Both buttons share the option rows' surface+fieldLine border idiom at the primary's
+            chip radius, so the three footer controls read as one family, distinct from content.
+            States are instant Pressable style-state (press feedback on pointer-down, never a
+            timer): hover lifts to segTrack, press adds the pickLine border + a 0.98 settle,
+            keyboard focus shows a primary-color ring. Under the app's RTL direction the JSX order
+            Back→Skip lands «رجوع» on the RIGHT — the canonical Arabic back position — with the
+            chevron pointing toward where the user came from (the AuthModal's isRTL idiom). */}
         <View style={s.footRow}>
           {/* «رجوع» is on EVERY question, including the first — from the first one it leaves the
               interview entirely and hands the pre-AF controls back (owner 2026-08-22 §2). */}
-          <Pressable style={s.skipLink} testID="af-back" onPress={onBack} hitSlop={8}>
-            <Text style={s.backTxt}>{t('Back')}</Text>
+          <Pressable
+            style={({ pressed, hovered, focused }: any) => [
+              s.secondaryBtn,
+              hovered && s.secondaryBtnHover,
+              focused && s.secondaryBtnFocus,
+              pressed && s.secondaryBtnPress,
+            ]}
+            testID="af-back" onPress={onBack} hitSlop={8} accessibilityRole="button"
+          >
+            <Ionicons name={isRTL ? 'chevron-forward' : 'chevron-back'} size={16} color={colors.dark} />
+            <Text style={s.secondaryTxt}>{t('Back')}</Text>
           </Pressable>
-          <Pressable style={s.skipLink} testID="af-skip" onPress={onSkip} hitSlop={8}>
-            <Text style={s.skipTxt}>{t('Skip')}</Text>
-          </Pressable>
-          {/* «عرض النتائج» must honour what is on screen: the chip and «عرض N نتيجة» already
-              promise the count for the CURRENT selection, so leaving by this link commits that
-              selection too. Before 2026-08-22 a single tap auto-committed within 260ms and this
-              window barely existed; now that a tap only selects, exiting here would silently
-              discard a visible answer and land the user on a different number than the one they
-              were just shown. */}
-          <Pressable style={s.skipLink} testID="af-skip-all" onPress={() => onSkipAll(sel)} hitSlop={8}>
-            <Text style={s.skipAllTxt}>{t('Show results')}</Text>
+          <Pressable
+            style={({ pressed, hovered, focused }: any) => [
+              s.secondaryBtn,
+              hovered && s.secondaryBtnHover,
+              focused && s.secondaryBtnFocus,
+              pressed && s.secondaryBtnPress,
+            ]}
+            testID="af-skip" onPress={onSkip} hitSlop={8} accessibilityRole="button"
+          >
+            <Text style={s.secondaryTxt}>{t('Skip')}</Text>
           </Pressable>
         </View>
       </Reanimated.View>
@@ -420,7 +471,6 @@ const s = StyleSheet.create({
   introTitle: { fontFamily: font.family.bold, fontSize: 17, color: colors.ink, marginTop: 10, textAlign: 'center' },
   introSupport: { fontFamily: font.family.regular, fontSize: 13, color: colors.muted, lineHeight: 20, marginTop: 8, textAlign: 'center', maxWidth: 300 },
   introFoot: { marginTop: 20, alignSelf: 'stretch', gap: 12, alignItems: 'center' },
-  introLink: { paddingVertical: 4 },
 
   // The scroller must be the ONLY thing that gives up height when the card is taller than the
   // screen. RN and react-native-web disagree on the default (RNW's ScrollView already ships
@@ -429,6 +479,7 @@ const s = StyleSheet.create({
   body: { paddingHorizontal: space.card, paddingTop: space.base, paddingBottom: 16 },
   qt: { fontFamily: font.family.bold, fontSize: 19, color: colors.ink, lineHeight: 27, paddingHorizontal: 2, paddingTop: 8 },
   desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 5 },
+  unknownNote: { fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, opacity: 0.85, paddingHorizontal: 2, paddingTop: 3 },
 
   // Shared brand-image slot — one fixed position (under the subtitle, above the options) and one
   // style for ANY question that names a brandImage token. The PNG carries its own branding; the
@@ -459,6 +510,7 @@ const s = StyleSheet.create({
   countText: { fontFamily: font.family.bold, fontSize: 12.5, color: colors.primary, fontVariant: ['tabular-nums'] },
 
   note: { marginTop: 12, marginHorizontal: 2, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 16 },
+  noteSub: { marginTop: 4, marginHorizontal: 2, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 16 },
 
   // PINNED footer (defect 2026-08-23). It used to be the last child INSIDE the body ScrollView, so a
   // question with many options pushed «متابعة / رجوع / تخطي / عرض النتائج» past the bottom of the
@@ -472,11 +524,18 @@ const s = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.paper,
   },
   tapInner: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 13 },
-  primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.chip, alignSelf: 'stretch' },
+  primaryBtn: { backgroundColor: colors.selFill, borderRadius: radius.chip, alignSelf: 'stretch' },
   primaryTxt: { fontFamily: font.family.bold, fontSize: 14.5, color: colors.surface },
-  footRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 2 },
-  skipLink: { paddingVertical: 4, flexShrink: 1 },
-  skipTxt: { fontFamily: font.family.semibold, fontSize: 13.5, color: colors.dark },
-  backTxt: { fontFamily: font.family.semibold, fontSize: 13.5, color: colors.muted },
-  skipAllTxt: { fontFamily: font.family.medium, fontSize: 12.5, color: colors.muted },
+  footRow: { flexDirection: 'row', alignItems: 'stretch', gap: 10 },
+  // Real secondary buttons (owner redesign 2026-08-28) — the option rows' surface+fieldLine idiom
+  // at the primary's chip radius: one control family, clearly tappable, ≥44pt targets on mobile.
+  secondaryBtn: {
+    flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 5, backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.fieldLine,
+    borderRadius: radius.chip, paddingVertical: 11, paddingHorizontal: 12,
+  },
+  secondaryBtnHover: { backgroundColor: colors.segTrack },
+  secondaryBtnPress: { backgroundColor: colors.segTrack, borderColor: colors.pickLine, transform: [{ scale: 0.98 }] },
+  secondaryBtnFocus: { borderColor: colors.primary },
+  secondaryTxt: { fontFamily: font.family.semibold, fontSize: 14, color: colors.dark },
 });

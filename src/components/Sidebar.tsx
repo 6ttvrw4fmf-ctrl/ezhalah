@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { I18nManager, Image as RNImage, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { OPEN_DELAY_MS, armOpen, cancelOpen, openShouldFire, type ArmedOpen } from '@/lib/rowClick';
 import Animated, {
   Easing,
@@ -12,12 +12,14 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, radius, space, cardShadow } from '@/theme/tokens';
+import { colors, darkColors, radius, space, cardShadow } from '@/theme/tokens';
+import { useTheme } from '@/theme/theme';
 import HeroBackground from '@/components/HeroBackground';
+import AccountMenu from '@/components/AccountMenu';
 import { useApp, type HistoryItem } from '@/store';
-import { sanitizeArabicSearch, isSearchableQuery, filterChats } from '@/lib/chatSearch';
+import { sanitizeArabicSearch, isSearchableQuery, filterChats, arabicHintAfterInput } from '@/lib/chatSearch';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { queryLabel } from '@/data/search';
 import { HOLD_MS, canReorder, dragTargetIndex, dragCrossIntent, neighboursAt, preActivate, sortByOrder, type CrossIntent } from '@/lib/sidebarReorder';
@@ -94,8 +96,22 @@ function groupHistory(items: HistoryItem[]): { key: string; items: HistoryItem[]
 export default function Sidebar({ onClose, docked = false }: { onClose: () => void; docked?: boolean }) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  // ACTIVE-CHAT TRUTH (owner 2026-08-29): the green active row means «this is the conversation you
+  // are looking at RIGHT NOW». On the Filter home there is no conversation on screen, so nothing may
+  // be highlighted — activeChatId can legitimately still be set (it survives for a return to /agent),
+  // but the HIGHLIGHT is a claim about the current screen, and on '/' that claim is false. The four
+  // states are separate by design: current chat (green, /agent only), hovered row, context-menu row
+  // (dark green while its ⋯ menu is open), previously-visited chat (no visual state at all).
+  const pathname = usePathname();
+  const onAgentScreen = pathname?.startsWith('/agent') ?? false;
   const { t, isRTL, locale } = useI18n();
   const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
+  // APPEARANCE (owner 2026-08-28): the sidebar is a THEMED surface — it re-skins in dark mode via
+  // the dark override sheet (dks) below. TC carries the resolved palette for inline icon colors.
+  const { resolved, colors: TC } = useTheme();
+  const dark = resolved === 'dark';
+  // Sidebar-anchored account menu — replaces the centered /settings modal (owner 2026-08-28).
+  const [acctOpen, setAcctOpen] = useState(false);
   // Row action menu (Star / Delete). Rendered as a panel-level overlay OUTSIDE the scrolling list so
   // it can never be clipped, and opened UP or DOWN from the click position so the full menu is always
   // on-screen near the top, middle, or bottom of the sidebar. (user request.)
@@ -110,6 +126,14 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   });
   const [menu, setMenu] = useState<{ id: string; top: number; openUp: boolean; panelH: number } | null>(null);
   const menuItem = menu ? history.find((c) => c.id === menu.id) ?? null : null;
+  // DELETE CONFIRMATION (owner 2026-08-28): حذف never deletes on the first tap — it opens this
+  // dialog, and only «حذف نهائي» inside it actually deletes. Escape / backdrop / إلغاء all cancel.
+  // `deleteFiredRef` is the double-fire guard: Pressable onPress can land twice before React state
+  // flushes (a fast double-tap), and while deleteHistory(id) is idempotent for one id, the rule is
+  // that ONE confirmation fires ONE delete — the ref is set synchronously, so the second tap of a
+  // double-tap reads it and returns before touching history.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const deleteFiredRef = useRef(false);
 
   // INLINE RENAME (owner 2026-08-21): double-click the title → it becomes an input; Enter saves,
   // blur saves, Escape cancels and restores. `editingId` is which row is in edit mode; `draft` is
@@ -150,10 +174,14 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   };
   const closeSearch = () => { setSearching(false); setSearchText(''); setHadLatin(false); };
   const onSearchChange = (raw: string) => {
-    const { text, hadLatin: stripped } = sanitizeArabicSearch(raw);
-    setSearchText(text);
-    if (stripped) setHadLatin(true);
-    else if (!text) setHadLatin(false);
+    const sanitized = sanitizeArabicSearch(raw);
+    setSearchText(sanitized.text);
+    // The hint's lifecycle is one rule, executed in chatSearch.ts (arabicHintAfterInput) rather
+    // than spelled out here, so the barrier runs the real decision instead of grepping for its
+    // shape. It clears as soon as a real Arabic query is filtering — the old "clear only when the
+    // field is empty" latch left the nudge on screen for the whole session, because stripping
+    // Latin already empties the field and the user's Arabic never passes through empty.
+    setHadLatin((shown) => arabicHintAfterInput(shown, sanitized));
   };
 
   // OWNER BUG FIX: a single click OPENS, but the native dblclick below ALSO ran openHistory() on each
@@ -505,12 +533,12 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     setTimeout(() => animateOut(() => { onClose(); setTimeout(() => router.replace({ pathname: '/', params }), 10); }), 240);
   };
 
-  const go = (path: '/settings' | '/agent' | '/') => {
-    animateOut(() => {
-      onClose();
-      // Home is the current screen — for New Chat just close; otherwise push the target.
-      if (path !== '/') setTimeout(() => router.push(path), 10);
-    });
+  // Settings no longer navigates anywhere: the account controls open as a compact panel anchored
+  // to the profile row (AccountMenu), inside the sidebar itself. (owner 2026-08-28 — the centered
+  // /settings modal is retired; `go('/settings')` went with it.)
+  const openAccountMenu = () => {
+    setMenu(null);
+    setAcctOpen(true);
   };
 
   // Support / About Us / Sign-in open as in-app popups (centered dialog) rather than full-screen
@@ -571,17 +599,17 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     : baseGroups;
   const NavLinks = (
     <View style={s.nav}>
-      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && s.navLinkHover]} onPress={() => (user ? go('/settings') : openSignIn())}>
-        <Ionicons name="settings-outline" size={19} color={colors.ink} />
-        <Text style={s.navText}>{t('Settings')}</Text>
+      <Pressable testID="sidebar-settings-link" style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && (dark ? dks.navLinkHover : s.navLinkHover)]} onPress={() => (user ? openAccountMenu() : openSignIn())}>
+        <Ionicons name="settings-outline" size={19} color={TC.ink} />
+        <Text style={[s.navText, dark && dks.navText]}>{t('Settings')}</Text>
       </Pressable>
-      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && s.navLinkHover]} onPress={() => openInfo('support')}>
-        <Ionicons name="chatbubble-ellipses-outline" size={19} color={colors.ink} />
-        <Text style={s.navText}>{t('Support')}</Text>
+      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && (dark ? dks.navLinkHover : s.navLinkHover)]} onPress={() => openInfo('support')}>
+        <Ionicons name="chatbubble-ellipses-outline" size={19} color={TC.ink} />
+        <Text style={[s.navText, dark && dks.navText]}>{t('Support')}</Text>
       </Pressable>
-      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && s.navLinkHover]} onPress={() => openInfo('about')}>
-        <Ionicons name="information-circle-outline" size={19} color={colors.ink} />
-        <Text style={s.navText}>{t('About Us')}</Text>
+      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && (dark ? dks.navLinkHover : s.navLinkHover)]} onPress={() => openInfo('about')}>
+        <Ionicons name="information-circle-outline" size={19} color={TC.ink} />
+        <Text style={[s.navText, dark && dks.navText]}>{t('About Us')}</Text>
       </Pressable>
     </View>
   );
@@ -597,16 +625,16 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                 there is exactly ONE search affordance on screen at a time. */}
             <View style={s.brandRow}>
               <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
-              <Text ref={noTranslateRef} style={s.word}>{t('EZHALAH')}</Text>
+              <Text ref={noTranslateRef} style={[s.word, dark && dks.word]}>{t('EZHALAH')}</Text>
               {!searching && (
                 <Pressable
-                  style={({ hovered, pressed }: any) => [s.searchTopBtn, WEB_SMOOTH, (hovered || pressed) && s.searchTopBtnHover]}
+                  style={({ hovered, pressed }: any) => [s.searchTopBtn, WEB_SMOOTH, (hovered || pressed) && (dark ? dks.searchTopBtnHover : s.searchTopBtnHover)]}
                   onPress={openSearch}
                   hitSlop={4}
                   accessibilityLabel={t('Search chats')}
                   testID="sidebar-search-btn"
                 >
-                  <Ionicons name="search" size={18} color={colors.dark} />
+                  <Ionicons name="search" size={18} color={dark ? '#a9c9b4' : colors.dark} />
                 </Pressable>
               )}
             </View>
@@ -623,6 +651,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               <Pressable
                 style={(state) => [
                   s.newChat,
+                  dark && dks.newChat,
                   WEB_SMOOTH,
                   // `hovered` is react-native-web only; RN's PressableStateCallbackType omits it.
                   ((((state as { hovered?: boolean }).hovered ?? false) || state.pressed || (state as { focused?: boolean }).focused) ?? false) && s.newChatHover,
@@ -633,8 +662,11 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                   const on = (((state as { hovered?: boolean }).hovered ?? false) || state.pressed || ((state as { focused?: boolean }).focused ?? false));
                   return (
                     <>
-                      <Ionicons name="add" size={18} color={on ? colors.surface : colors.dark} />
-                      <Text style={[s.newChatText, on && s.newChatTextOn]}>{t('New Chat')}</Text>
+                      {/* Dark appearance lightens only the RESTING glyph; the light-mode contract
+                          (rest = dark green, interaction = white) is untouched and still pinned by
+                          verify-sidebar-light-green-interaction.ts. */}
+                      <Ionicons name="add" size={18} color={dark && !on ? '#cfe0d5' : on ? colors.surface : colors.dark} />
+                      <Text style={[s.newChatText, dark && dks.newChatText, on && s.newChatTextOn]}>{t('New Chat')}</Text>
                     </>
                   );
                 }}
@@ -645,13 +677,13 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                 is tapped — the normal sidebar never shows an input. Same Arabic-only engine,
                 same results area (the list below filters live). */}
             {searching ? (
-              <Animated.View style={[s.searchRow, searchEnterA]}>
-                <Pressable style={s.searchClose} hitSlop={8} onPress={closeSearch}
+              <Animated.View style={[s.searchRow, dark && dks.searchRow, searchEnterA]}>
+                <Pressable style={[s.searchClose, dark && dks.searchClose]} hitSlop={8} onPress={closeSearch}
                   accessibilityLabel={t('Close search')} testID="sidebar-search-close">
                   <Ionicons name="close" size={16} color="#9aa6a0" />
                 </Pressable>
                 <TextInput
-                  style={s.searchInput}
+                  style={[s.searchInput, dark && dks.searchInput]}
                   value={searchText}
                   onChangeText={onSearchChange}
                   placeholder={t('Search your chats…')}
@@ -667,7 +699,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               </Animated.View>
             ) : null}
             {searching && hadLatin ? (
-              <Text style={s.searchHint}>{t('Type in Arabic to search your chats')}</Text>
+              <Text style={[s.searchHint, dark && dks.searchHint]}>{t('Type in Arabic to search your chats')}</Text>
             ) : null}
 
             {/* History */}
@@ -682,7 +714,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               scrollEventThrottle={16}
             >
               {groups.length === 0 ? (
-                <Text style={s.empty}>{searchActive ? t('No chat with that name') : t('Your searches will appear here.')}</Text>
+                <Text style={[s.empty, dark && dks.empty]}>{searchActive ? t('No chat with that name') : t('Your searches will appear here.')}</Text>
               ) : (
                 groups.map((g) => (
                   <View key={g.key} style={s.group}>
@@ -693,13 +725,13 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                         // the drop commits.
                         ((drag?.cross === 'star' && g.key === 'Starred') || (drag?.cross === 'unstar' && g.key === 'Recent')) && s.groupHeadTarget]}>
                         {g.key === 'Starred' && <Ionicons name="star" size={11} color={GOLD} />}
-                        <Text style={s.groupTitle}>{t(g.key)}</Text>
+                        <Text style={[s.groupTitle, dark && dks.groupTitle]}>{t(g.key)}</Text>
                       </View>
                     )}
                     {/* Note #8 — chat row layout is IDENTICAL in both languages: icon → title → star → ⋯
                         on the right. `direction: ltr` locks the row so Arabic doesn't auto-flip it.
                         Title still flows with its own text direction inside the bubble. (user request.) */}
-                    {g.items.map((c, idx) => { const hot = hotRowId === c.id && activeChatId !== c.id && editingId !== c.id; return (
+                    {g.items.map((c, idx) => { const ctx = menu?.id === c.id; const hot = ctx || (hotRowId === c.id && !(onAgentScreen && activeChatId === c.id) && editingId !== c.id); return (
                       <View
                         key={c.id}
                         // The OUTER row hosts both gestures (dblclick rename + hold-to-drag) and is
@@ -708,7 +740,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                         // hot-row hover from main — hover paint and drag wiring share this host.)
                         ref={bindRowHost(c, g.key, idx, g.items.length, g.items.filter((x) => x.id !== c.id).map((x) => x.id)) as any}
                         onLayout={idx === 0 ? (e) => { const h = e.nativeEvent.layout.height; if (h > 20) rowHRef.current = h; } : undefined}
-                        style={[s.histRow, WEB_SMOOTH, hot && s.histRowHot, activeChatId === c.id && s.histRowActive, menu?.id === c.id && s.histRowOpen, drag?.id === c.id && s.histRowDragging, { direction: 'ltr' } as any,
+                        style={[s.histRow, WEB_SMOOTH, hot && s.histRowHot, !hot && onAgentScreen && activeChatId === c.id && (dark ? dks.histRowActive : s.histRowActive), drag?.id === c.id && s.histRowDragging, { direction: 'ltr' } as any,
                           // Siblings glide aside (translateY only — X never moves, RTL layout untouched)
                           // while a drag from this bucket hovers over their slot. The dragged row's own
                           // transform is applied directly to its DOM node so it tracks the pointer with
@@ -724,7 +756,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                           <View style={s.histItem}>
                             <Ionicons name="chatbubble-outline" size={15} color="#8a978f" />
                             <TextInput
-                              style={[s.histLabel, s.histInput]}
+                              style={[s.histLabel, dark && dks.histLabel, s.histInput, dark && dks.histInput]}
                               value={draft}
                               onChangeText={setDraft}
                               autoFocus
@@ -753,7 +785,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                             accessibilityHint={t('Hold to reorder the conversation')}
                           >
                             <Ionicons name="chatbubble-outline" size={15} color={hot ? colors.surface : '#8a978f'} />
-                            <Text style={[s.histLabel, (hot || drag?.id === c.id) && s.histLabelHot]} numberOfLines={1}>{displayTitle(c, locale) || queryLabel(c.query)}</Text>
+                            <Text style={[s.histLabel, dark && dks.histLabel, (hot || drag?.id === c.id) && s.histLabelHot]} numberOfLines={1}>{displayTitle(c, locale) || queryLabel(c.query)}</Text>
                             {c.starred && <Ionicons name="star" size={13} color={GOLD} />}
                           </Pressable>
                         )}
@@ -767,17 +799,23 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               )}
             </ScrollView>
 
-            <View style={s.divider} />
+            <View style={[s.divider, dark && dks.divider]} />
             {NavLinks}
             {/* Note #7 — profile row layout is IDENTICAL in both languages: avatar → name + email on
                 the right. `direction: ltr` locks it so Arabic doesn't auto-flip the avatar to the
                 opposite side. The name text itself still flows in its own language. (user request.) */}
-            <Pressable style={({ hovered, pressed }: any) => [s.userRow, WEB_SMOOTH, (hovered || pressed) && s.userRowHover, { direction: 'ltr' } as any]} onPress={() => go('/settings')}>
+            <Pressable
+              testID="account-menu-trigger"
+              accessibilityLabel={t('Account menu')}
+              style={({ hovered, pressed }: any) => [s.userRow, dark && dks.userRow, WEB_SMOOTH, (hovered || pressed || acctOpen) && (dark ? dks.userRowHover : s.userRowHover), { direction: 'ltr' } as any]}
+              onPress={() => (acctOpen ? setAcctOpen(false) : openAccountMenu())}
+            >
               <View style={s.userAv}><Text style={s.userAvText}>{initialsOf(pickName(user, locale))}</Text></View>
               <View style={{ flex: 1 }}>
-                <Text style={s.userName} numberOfLines={1}>{pickName(user, locale)}</Text>
-                {!!user.sub && <Text style={s.userSub} numberOfLines={1}>{user.sub}</Text>}
+                <Text style={[s.userName, dark && dks.userName]} numberOfLines={1}>{pickName(user, locale)}</Text>
+                {!!user.sub && <Text style={[s.userSub, dark && dks.userSub]} numberOfLines={1}>{user.sub}</Text>}
               </View>
+              <Ionicons name="ellipsis-horizontal" size={15} color={dark ? darkColors.muted : '#9aa6a0'} />
             </Pressable>
           </>
         ) : (
@@ -787,21 +825,23 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
             <View style={s.brandRow}>
               <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
-              <Text ref={noTranslateRef} style={s.word}>{t('EZHALAH')}</Text>
+              <Text ref={noTranslateRef} style={[s.word, dark && dks.word]}>{t('EZHALAH')}</Text>
             </View>
 
-            <Pressable style={[s.cta, { marginTop: 22 }]} onPress={openSignIn}>
-              <Ionicons name="person-outline" size={18} color="#fff" />
-              <View>
-                <Text style={s.ctaTitle}>{t('Sign up / Log in')}</Text>
-                <Text style={s.ctaSub}>{t('Get more. Sign up free.')}</Text>
-              </View>
-            </Pressable>
-
+            {/* The upper guest CTA card that used to sit here was the OLD auth prompt (removed
+                with the SignInDock, owner 2026-08-28): the large AuthModal now raises itself for
+                signed-out visitors. ONE minimal affordance remains below — in the same bottom slot
+                as the signed-in profile row — so login/signup is always one click away and reopens
+                that same popup. */}
             <View style={{ flex: 1, minHeight: 30 }} />
-            <View style={s.divider} />
+            <View style={[s.divider, dark && dks.divider]} />
             {NavLinks}
-            <Pressable style={s.cta} onPress={openSignIn}>
+            <Pressable
+              style={s.cta}
+              onPress={openSignIn}
+              // @ts-expect-error web-only DOM props on the RNW host node
+              dataSet={{ testid: 'sidebar-signin-cta' }}
+            >
               <Ionicons name="person-outline" size={18} color="#fff" />
               <View>
                 <Text style={s.ctaTitle}>{t('Sign up / Log in')}</Text>
@@ -821,25 +861,61 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       <View
         style={[
           s.rowMenu,
+          dark && dks.rowMenu,
           isRTL ? { left: 14 } : { right: 14 },
           menu.openUp ? { bottom: Math.max(8, menu.panelH - menu.top + 4) } : { top: menu.top + 4 },
         ]}
       >
-        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && s.rowMenuItemHover]} onPress={() => { const item = history.find((c) => c.id === menu.id); setMenu(null); if (item) beginRename(item); }}>
-          <Ionicons name="pencil-outline" size={15} color={colors.ink} />
-          <Text style={s.rowMenuText} numberOfLines={1}>{t('Rename')}</Text>
+        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && (dark ? dks.rowMenuItemHover : s.rowMenuItemHover)]} onPress={() => { const item = history.find((c) => c.id === menu.id); setMenu(null); if (item) beginRename(item); }}>
+          <Ionicons name="pencil-outline" size={15} color={TC.ink} />
+          <Text style={[s.rowMenuText, dark && dks.rowMenuText]} numberOfLines={1}>{t('Rename')}</Text>
         </Pressable>
-        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && s.rowMenuItemHover]} onPress={() => { toggleStar(menu.id); setMenu(null); }}>
-          <Ionicons name={menuItem.starred ? 'star' : 'star-outline'} size={15} color={menuItem.starred ? GOLD : colors.ink} />
-          <Text style={s.rowMenuText} numberOfLines={1}>{menuItem.starred ? t('Unstar') : t('Star')}</Text>
+        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && (dark ? dks.rowMenuItemHover : s.rowMenuItemHover)]} onPress={() => { toggleStar(menu.id); setMenu(null); }}>
+          <Ionicons name={menuItem.starred ? 'star' : 'star-outline'} size={15} color={menuItem.starred ? GOLD : TC.ink} />
+          <Text style={[s.rowMenuText, dark && dks.rowMenuText]} numberOfLines={1}>{menuItem.starred ? t('Unstar') : t('Star')}</Text>
         </Pressable>
-        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && s.rowMenuItemHover]} onPress={() => { deleteHistory(menu.id); setMenu(null); }}>
+        <Pressable testID="chat-delete-open-confirm" style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && (dark ? dks.rowMenuItemHover : s.rowMenuItemHover)]} onPress={() => { deleteFiredRef.current = false; setConfirmDeleteId(menu.id); setMenu(null); }}>
           <Ionicons name="trash-outline" size={15} color="#c0392b" />
           <Text style={[s.rowMenuText, { color: '#c0392b' }]} numberOfLines={1}>{t('Delete')}</Text>
         </Pressable>
       </View>
     </>
   ) : null;
+
+  // Delete-confirmation dialog (owner 2026-08-28). Same visual convention as the account-delete
+  // confirm in settings.tsx (scrim + centered card + red destructive button + quiet cancel), via
+  // the SAME RN <Modal> primitive — never a browser confirm(). The safest action is إلغاء: Escape
+  // (react-native-web routes it to onRequestClose), a tap on the backdrop, and the إلغاء button all
+  // cancel; only an explicit tap on «حذف نهائي» deletes, exactly once (deleteFiredRef).
+  const confirmDeleteItem = confirmDeleteId ? history.find((c) => c.id === confirmDeleteId) ?? null : null;
+  const onConfirmDelete = () => {
+    if (deleteFiredRef.current) return;
+    deleteFiredRef.current = true;
+    const id = confirmDeleteId;
+    setConfirmDeleteId(null);
+    if (id) deleteHistory(id);
+  };
+  const deleteConfirmOverlay = (
+    <Modal visible={!!confirmDeleteItem} transparent animationType="fade" onRequestClose={() => setConfirmDeleteId(null)}>
+      <View style={s.dcRoot}>
+        <Pressable testID="chat-delete-cancel-backdrop" style={s.dcBack} onPress={() => setConfirmDeleteId(null)} />
+        <View style={s.dcCard} testID="chat-delete-confirm-dialog">
+          <Pressable testID="chat-delete-close" onPress={() => setConfirmDeleteId(null)} hitSlop={8} style={s.dcClose}>
+            <Ionicons name="close" size={18} color="#9aa6a0" />
+          </Pressable>
+          <View style={s.dcIc}><Ionicons name="trash-outline" size={22} color="#c0392b" /></View>
+          <Text style={s.dcT}>{t('Delete this conversation?')}</Text>
+          <Text style={s.dcS}>{t('It will be permanently deleted and cannot be recovered.')}</Text>
+          <Pressable testID="chat-delete-confirm" style={s.dcConfirm} onPress={onConfirmDelete}>
+            <Text style={s.dcConfirmText}>{t('Delete permanently')}</Text>
+          </Pressable>
+          <Pressable testID="chat-delete-cancel" style={s.dcCancel} onPress={() => setConfirmDeleteId(null)}>
+            <Text style={s.dcCancelText}>{t('Cancel')}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
 
   // Website: render as a fixed, always-visible column (no backdrop, no slide) at the leading edge.
   // Pin the WHOLE sidebar structure to LTR — icons, stars, ⋯ menus, sections, profile row all stay
@@ -850,13 +926,21 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
 
   if (docked) {
     return (
-      <View ref={panelRef} style={[s.dockPanel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
-        <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />
+      // While the account menu is open the column lifts above the content stack, so the menu's
+      // full-viewport click-catcher actually sits over the page (every RNW View is z-index:0 —
+      // a sibling stacking context later in the DOM otherwise paints over it). Closed → back to
+      // z-auto ordering so the root overlays (Support/About/Auth) keep painting above the sidebar.
+      <View ref={panelRef} style={[s.dockPanel, dark && dks.dockPanel, acctOpen && ({ zIndex: 30 } as any), { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
+        {/* Dark appearance drops the light pencil-sketch backdrop: the deep green paper IS the
+            dark surface (the sketch and its fade-to-light-paper gradient assume light ground). */}
+        {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
         {body}
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
         ) : null}
         {menuOverlay}
+        {deleteConfirmOverlay}
+        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} />
       </View>
     );
   }
@@ -865,13 +949,15 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   return (
     <View style={s.overlay}>
       <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close} />
-      <Animated.View ref={panelRef as any} style={[s.panel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, panelStyle, LTR_PIN]}>
-        <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />
+      <Animated.View ref={panelRef as any} style={[s.panel, dark && dks.panel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, panelStyle, LTR_PIN]}>
+        {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
         {body}
         {menuOverlay}
+        {deleteConfirmOverlay}
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
         ) : null}
+        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} />
       </Animated.View>
     </View>
   );
@@ -985,8 +1071,53 @@ const s = StyleSheet.create({
   userSub: { fontSize: 11.5, color: colors.muted, textAlign: 'left', marginTop: 2 },
 
   // Visually hidden, still announced: the post-drop «تم تغيير ترتيب المحادثة» confirmation.
+  // Delete-confirmation dialog — same geometry as settings.tsx's account-delete confirm.
+  dcRoot: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, ...(Platform.OS === 'web' ? ({ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 } as any) : null) },
+  dcBack: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.5)' },
+  dcCard: { width: '100%', maxWidth: 320, backgroundColor: '#fff', borderRadius: 22, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 30, shadowOffset: { width: 0, height: 20 }, elevation: 12 },
+  dcClose: { position: 'absolute', top: 12, ...(I18nManager.isRTL ? { left: 12 } : { right: 12 }), zIndex: 2, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  dcIc: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#fbeaea', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  dcT: { fontSize: 18, fontWeight: '700', color: colors.ink, textAlign: 'center' },
+  dcS: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8, lineHeight: 19 },
+  dcConfirm: { width: '100%', backgroundColor: '#c0392b', borderRadius: 13, paddingVertical: 13, alignItems: 'center', marginTop: 18 },
+  dcConfirmText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  dcCancel: { width: '100%', paddingVertical: 12, alignItems: 'center', marginTop: 4 },
+  dcCancelText: { fontSize: 14, fontWeight: '500', color: colors.muted },
   srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
   cta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13 },
   ctaTitle: { fontSize: 13, fontWeight: '700', color: '#fff' },
   ctaSub: { fontSize: 10.5, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
+});
+
+// DARK APPEARANCE overrides (owner 2026-08-28) — appended after the base style when the resolved
+// theme is dark. Style-only: no layout value ever changes here, so light/dark can never disagree
+// about geometry. The interaction colors (hover/drag fills in brand dark-green, gold star, red
+// delete) are shared with light mode and deliberately absent.
+const dks = StyleSheet.create({
+  panel: { backgroundColor: darkColors.paper },
+  dockPanel: { backgroundColor: darkColors.paper, borderRightColor: darkColors.line },
+  word: { color: darkColors.ink },
+  searchTopBtnHover: { backgroundColor: darkColors.tint },
+  newChat: { backgroundColor: darkColors.tint, borderColor: darkColors.tintLine },
+  newChatText: { color: '#cfe0d5' },
+  searchRow: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
+  searchClose: { backgroundColor: '#1d2620' },
+  searchInput: { color: darkColors.ink },
+  searchHint: { color: darkColors.muted },
+  empty: { color: darkColors.muted },
+  groupTitle: { color: darkColors.muted },
+  histRowActive: { backgroundColor: '#1f3a2c' },
+  histRowOpen: { backgroundColor: '#1d2620' },
+  histLabel: { color: darkColors.ink },
+  histInput: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
+  rowMenu: { backgroundColor: darkColors.surface, borderColor: darkColors.fieldLine },
+  rowMenuItemHover: { backgroundColor: '#1d2a22' },
+  rowMenuText: { color: darkColors.ink },
+  divider: { backgroundColor: darkColors.fieldLine },
+  navLinkHover: { backgroundColor: '#1d2620' },
+  navText: { color: darkColors.ink },
+  userRow: { borderTopColor: '#1d2620' },
+  userRowHover: { backgroundColor: '#1d2620' },
+  userName: { color: darkColors.ink },
+  userSub: { color: darkColors.muted },
 });

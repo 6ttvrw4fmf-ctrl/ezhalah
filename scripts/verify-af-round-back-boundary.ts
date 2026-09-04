@@ -59,7 +59,7 @@ const fnBody = (src: string, head: string, end: string) => {
 // The `if (stepIndex <= 0) { … }` branch of onAgeBack, brace-matched so a mutation that adds a nested
 // block is still read in full (a fixed «to the next }» slice would stop short and go blind).
 const cancelBranch = (src: string) => {
-  const body = fnBody(src, 'const onAgeBack = () => {', 'const onAgeSkipAll');
+  const body = fnBody(src, 'const onAgeBack = () => {', 'const onAgeClose');
   const i = body.indexOf('if (stepIndex <= 0) {');
   if (i < 0) return '';
   let depth = 0;
@@ -164,7 +164,7 @@ check('cancelling never advances the interview (the walk-back is unreachable fro
 // The origin turn trades its actions for a read-only receipt when a round COMPLETES. A cancelled
 // round completed nothing, so Back must leave `afReceipt` and the offer probe alone; otherwise the
 // turn keeps its cards but loses «تحديد أكثر» and «عرض المزيد» with no way to get them back.
-const backBody = fnBody(agentSrc, 'const onAgeBack = () => {', 'const onAgeSkipAll');
+const backBody = fnBody(agentSrc, 'const onAgeBack = () => {', 'const onAgeClose');
 check('Back — at ANY step — writes no receipt, no pills and no probe verdict',
   backBody.length > 0 && !/setAfReceipt|setGuidedPills|setAfCanNarrow|afProbedRef/.test(backBody));
 // One writer, one meaning: a receipt exists iff a round actually finished.
@@ -263,11 +263,11 @@ mustCatch('a search hidden inside a nested block in the cancel branch',
 mustCatch('Back stamping a receipt on the turn it is cancelling (buttons never return)',
   /setAfReceipt|setGuidedPills|setAfCanNarrow|afProbedRef/.test(fnBody(
     mut(agentSrc, 'syncGuidedFromSteps(0);', 'syncGuidedFromSteps(0);\n      setAfReceipt((r) => ({ ...r, x: "" }));'),
-    'const onAgeBack = () => {', 'const onAgeSkipAll')));
+    'const onAgeBack = () => {', 'const onAgeClose')));
 mustCatch('Back clearing the offer probe (the button would stay hidden after a cancel)',
   /setAfCanNarrow|afProbedRef/.test(fnBody(
     mut(agentSrc, 'syncGuidedFromSteps(0);', 'afProbedRef.current = {};'),
-    'const onAgeBack = () => {', 'const onAgeSkipAll')));
+    'const onAgeBack = () => {', 'const onAgeClose')));
 mustCatch('a SECOND receipt writer appearing outside finishGuided',
   (mut(agentSrc, 'const onAgeClose = () =>', 'const x = () => setAfReceipt({});\n  const onAgeClose = () =>')
     .match(/setAfReceipt\(/g) ?? []).length !== 1);

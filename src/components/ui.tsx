@@ -7,12 +7,15 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  type SharedValue,
   withDelay,
   withRepeat,
   withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { useThemePalette } from '@/lib/appearance';
+import { alpha0 } from '@/theme/palette';
 import { colors, radius } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
@@ -133,6 +136,32 @@ export function DropdownReveal({ visible, children, style }: { visible: boolean;
 // Gentle "heartbeat" pulse — a soft double-thump (lub-dub) then a rest, looping forever, so the
 // example/suggestion cards feel alive without being distracting. Subtle scale only (≤1.035). An
 // optional index staggers each card's beat so they don't all thump in lockstep. (user request.)
+// SELECTOR ICON RULE (owner bug, 2026-08-29): an option icon must NEVER derive its visibility from
+// an ANIMATED tintColor. Reanimated writes tintColor as a per-frame inline style, and on WebKit
+// react-native-web resolves tintColor through an SVG-filter reference — a combination Safari
+// applies unreliably, which is exactly how the شراء icon vanished into its selected card on a real
+// iPhone while every Chromium run looked fine. The stable shape is a crossfade of two layers whose
+// tintColor is STATIC (resolved once through RN-web's normal path); only their OPACITY animates,
+// and opacity is bulletproof on every engine. Both selector families (SegButton + OptionBox) render
+// icons through this one component, so the class cannot regress in a single family silently.
+function CrossfadeTintIcon({ source, p, off, on, size }: {
+  source: any; p: SharedValue<number>; off: string; on: string; size: { width: number; height: number; marginBottom?: number };
+}) {
+  const offA = useAnimatedStyle(() => ({ opacity: 1 - p.value }));
+  const onA = useAnimatedStyle(() => ({ opacity: p.value }));
+  // PLAIN absolute-fill literals, not StyleSheet.absoluteFill: a registered style ID inside a
+  // Reanimated style array was dropped on web, leaving both layers at the PNG's natural size
+  // (measured 429×470 inside a 24×24 wrapper). Explicit numbers survive every engine, and the
+  // wrapper clips as a second line of defence.
+  const fill = { position: 'absolute' as const, top: 0, left: 0, width: size.width, height: size.height };
+  return (
+    <View style={[size, { overflow: 'hidden' }]}>
+      <AnimatedImage source={source} resizeMode="contain" style={[fill, { tintColor: off }, offA]} />
+      <AnimatedImage source={source} resizeMode="contain" style={[fill, { tintColor: on }, onA]} />
+    </View>
+  );
+}
+
 export function Heartbeat({
   children, style, index = 0,
 }: {
@@ -156,6 +185,8 @@ export function Heartbeat({
 
 // Rent / Buy segmented control. Option values stay in English; only the label is localized.
 function SegButton({ label, on, onPress, icon }: { label: string; on: boolean; onPress: () => void; icon?: any }) {
+  // Literal palette: interpolateColor PARSES colors and cannot digest the var() tokens (theming).
+  const pal = useThemePalette();
   const p = useSharedValue(on ? 1 : 0);
   const press = useSharedValue(0);
   const focus = useSharedValue(0);
@@ -173,7 +204,7 @@ function SegButton({ label, on, onPress, icon }: { label: string; on: boolean; o
     wasOn.current = on;
   }, [on, p]);
   const box = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(p.value, [0, 1], ['rgba(47,114,71,0)', colors.primary]),
+    backgroundColor: interpolateColor(p.value, [0, 1], [alpha0(pal.selFill), pal.selFill]),
     transform: [{ scale: 1 - press.value * 0.05 + pop.value }],
     // web keyboard-focus ring (a11y) + selection glow bloom; native uses shadow* props for the same glow
     ...(Platform.OS === 'web'
@@ -181,8 +212,7 @@ function SegButton({ label, on, onPress, icon }: { label: string; on: boolean; o
           boxShadow: `0px ${glow.value * 5}px ${glow.value * 14}px rgba(20,80,45,${glow.value * 0.28})` }
       : { shadowColor: '#14502d', shadowOpacity: glow.value * 0.28, shadowRadius: glow.value * 14, shadowOffset: { width: 0, height: glow.value * 5 }, elevation: glow.value * 5 }),
   }));
-  const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [colors.muted, '#ffffff']) }));
-  const tint = useAnimatedStyle(() => ({ tintColor: interpolateColor(p.value, [0, 1], [colors.muted, '#ffffff']) }));
+  const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [pal.muted, pal.onFill]) }));
   return (
     <AnimatedPressable
       style={[s.segBtn, box]}
@@ -192,7 +222,7 @@ function SegButton({ label, on, onPress, icon }: { label: string; on: boolean; o
       onFocus={() => { focus.value = withTiming(1, FOCUS_T); }}
       onBlur={() => { focus.value = withTiming(0, FOCUS_T); }}
     >
-      {icon ? <AnimatedImage source={icon} resizeMode="contain" style={[s.segIcon, tint]} /> : null}
+      {icon ? <CrossfadeTintIcon source={icon} p={p} off={pal.muted} on={pal.onFill} size={s.segIcon} /> : null}
       <Animated.Text ref={noTranslateRef} style={[s.segText, txt]}>{label}</Animated.Text>
     </AnimatedPressable>
   );
@@ -211,6 +241,8 @@ export function Segmented({ options, value, onChange, icons }: { options: string
 
 // Tappable option box (category / type / detail) — selection fades in, press dips slightly.
 export function OptionBox({ label, selected, onPress, style, img }: { label: string; selected: boolean; onPress: () => void; style?: ViewStyle; img?: any }) {
+  // Literal palette — same var()-cannot-be-interpolated reason as SegButton above.
+  const pal = useThemePalette();
   const p = useSharedValue(selected ? 1 : 0);
   const press = useSharedValue(0);
   const hover = useSharedValue(0);
@@ -229,9 +261,9 @@ export function OptionBox({ label, selected, onPress, style, img }: { label: str
     wasSel.current = selected;
   }, [selected, p]);
   const box = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(p.value, [0, 1], [colors.surface, colors.primary]),
+    backgroundColor: interpolateColor(p.value, [0, 1], [pal.surface, pal.selFill]),
     // hover (web pointer) tints the border toward primary while unselected — subtle "tappable" cue
-    borderColor: interpolateColor(Math.max(p.value, hover.value * (1 - p.value)), [0, 1], [colors.pickLine, colors.primary]),
+    borderColor: interpolateColor(Math.max(p.value, hover.value * (1 - p.value)), [0, 1], [pal.pickLine, pal.primary]),
     transform: [{ scale: 1 - press.value * 0.045 + pop.value }],
     // web keyboard-focus ring (a11y) + selection glow bloom; native uses shadow* props for the same glow
     ...(Platform.OS === 'web'
@@ -239,8 +271,7 @@ export function OptionBox({ label, selected, onPress, style, img }: { label: str
           boxShadow: `0px ${glow.value * 7}px ${glow.value * 16}px rgba(20,80,45,${glow.value * 0.30})` }
       : { shadowColor: '#14502d', shadowOpacity: glow.value * 0.30, shadowRadius: glow.value * 16, shadowOffset: { width: 0, height: glow.value * 7 }, elevation: glow.value * 6 }),
   }));
-  const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [colors.ink, '#ffffff']) }));
-  const tint = useAnimatedStyle(() => ({ tintColor: interpolateColor(p.value, [0, 1], [colors.ink, '#ffffff']) }));
+  const txt = useAnimatedStyle(() => ({ color: interpolateColor(p.value, [0, 1], [pal.ink, pal.onFill]) }));
   return (
     <AnimatedPressable
       onPress={onPress}
@@ -252,7 +283,7 @@ export function OptionBox({ label, selected, onPress, style, img }: { label: str
       onBlur={() => { focus.value = withTiming(0, FOCUS_T); }}
       style={[s.box, box, style]}
     >
-      {img ? <AnimatedImage source={img} resizeMode="contain" style={[s.optIcon, tint]} /> : null}
+      {img ? <CrossfadeTintIcon source={img} p={p} off={pal.ink} on={pal.onFill} size={s.optIcon} /> : null}
       <Animated.Text ref={noTranslateRef} style={[s.boxText, selected && s.boxTextOn, txt, NO_MIDWORD_BREAK]} numberOfLines={2}>{label}</Animated.Text>
     </AnimatedPressable>
   );
