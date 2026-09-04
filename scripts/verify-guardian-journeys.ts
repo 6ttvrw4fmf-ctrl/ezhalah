@@ -41,7 +41,14 @@ const WORKFLOW = join(ROOT, '.github/workflows/guardian-journeys.yml');
 const REQUIRED_SURFACES = [
   'theme', 'chat_persistence', 'auth', 'navigation', 'result_card', 'loading_states', 'modal', 'search',
   // Second tranche (2026-09-04) — the surfaces the owner named that had no journey until then.
-  'pagination', 'trending', 'advanced_filter', 'normal_filter', 'voice',
+  // pagination, trending, advanced_filter, normal_filter and voice journeys were WRITTEN on
+  // 2026-09-04 but are NOT in this floor yet: their author hit a session limit before the two
+  // end-to-end verification runs, and the single verification run that did happen produced three
+  // false alarms out of 26 (a mobile auth click that missed a live control, a doors assertion on a ×
+  // that About deliberately does not have, and a 150s timeout). A journey that cries wolf is worse
+  // than no journey — it files a false P1 against routine #6 every night — so the expansion is
+  // deferred to its own change rather than shipped unverified. The written version is preserved in
+  // this branch's history; incident hunt-2026-09-04:monitoring:21 tracks finishing it.
 ];
 /** The two viewports, as the owner's bug reports arrive: a desktop and a phone. */
 const REQUIRED_VIEWPORTS = [
