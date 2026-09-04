@@ -996,7 +996,9 @@ const AR: Record<string, string> = {
   // Auth hero — new title + subtitle (user-supplied Arabic; English mirrors it without naming
   // platforms, per the platform-confidentiality rule). The title carries the brand "Ezhalah".
   'Looking for a property? Ezhalah.': 'تدور على عقار؟ إزهله.',
-  'Sign in or create your account': 'سجّل الدخول أو أنشئ حسابك',
+  // Sign-in popup heading + support line (owner 2026-09-03: simple, natural Arabic).
+  'Sign in or create your free account': 'سجّل دخولك أو أنشئ حسابك مجاناً',
+  'Sign in to unlock more of Ezhalah.': 'سجّل دخولك للوصول إلى المزيد من مزايا إزهله',
   'More than 25 Saudi property platforms — in one place.': 'أكثر من ٢٥ منصة عقارية سعودية — في مكان واحد.',
   'Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.':
     'إزهله تجمع العقارات المعروضة من مختلف منصات العقار السعودية في مكان واحد.',
@@ -1006,7 +1008,8 @@ const AR: Record<string, string> = {
   'Saudi mobile numbers start with 5': 'أرقام الجوال السعودية تبدأ بالرقم 5',
   'Enter 9 digits': 'أدخل 9 أرقام',
   'Continue': 'متابعة',
-  "By continuing you agree to Ezhalah's Terms & Privacy Policy.": 'بالمتابعة فإنك توافق على شروط إزهله وسياسة الخصوصية.',
+  // The privacy sentence is composed: this lead + the «سياسة الخصوصية» link ('Privacy Policy' below).
+  'By continuing, you agree to our': 'بالمتابعة، أنت توافق على',
   // Country names + dial-prefix hints (phone picker)
   'United Arab Emirates': 'الإمارات العربية المتحدة',
   'Qatar': 'قطر',
@@ -1083,6 +1086,9 @@ const AR: Record<string, string> = {
     'أرسلت عدة رسائل خلال وقت قصير. انتظر ساعة تقريباً قبل إرسال رسالة جديدة.',
   'Terms of Service': 'شروط الخدمة',
   'Privacy Policy': 'سياسة الخصوصية',
+  // «الشروط والخصوصية» reader (owner 2026-09-03): the account-menu row + its two tabs.
+  'Terms & Privacy': 'الشروط والخصوصية',
+  'Terms of Use': 'شروط الاستخدام',
   'Ezhalah v{version}': 'إزهله الإصدار {version}',
 
   // Drawer / sidebar

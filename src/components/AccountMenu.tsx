@@ -3,6 +3,7 @@ import { ActivityIndicator, I18nManager, Modal, Platform, Pressable, ScrollView,
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { hasLegalDocs } from '@/data/legal';
 import { colors as lightColors, radius } from '@/theme/tokens';
 import { useTheme, type ThemeMode } from '@/theme/theme';
 import { useApp } from '@/store';
@@ -57,11 +58,14 @@ export default function AccountMenu({
   visible,
   onClose,
   onHelp,
+  onLegal,
 }: {
   visible: boolean;
   onClose: () => void;
   /** Opens the existing Support popup (the sidebar owns the drawer-close choreography). */
   onHelp: () => void;
+  /** Opens the «الشروط والخصوصية» reader (same InfoModal host as Support / About). */
+  onLegal: () => void;
 }) {
   const router = useRouter();
   const { height: winH } = useWindowDimensions();
@@ -342,6 +346,12 @@ export default function AccountMenu({
               <Row icon="globe-outline" label={t('Language')} value="العربية" chevron onPress={() => go('language', 1)} testID="account-menu-language" />
               <Row icon="help-circle-outline" label={t('Help')} onPress={() => { onClose(); onHelp(); }} testID="account-menu-help" />
               <Row icon="person-outline" label={t('Manage account')} chevron onPress={() => { setEditing(false); go('account', 1); }} testID="account-menu-account" />
+              {/* «الشروط والخصوصية» (owner 2026-09-03) — directly above «تسجيل الخروج». Rendered
+                  ONLY once the owner's legal text exists (src/data/legal.ts): a row that opens an
+                  empty reader would be worse than no row. */}
+              {hasLegalDocs() && (
+                <Row icon="document-text-outline" label={t('Terms & Privacy')} onPress={() => { onClose(); onLegal(); }} testID="account-menu-legal" />
+              )}
               <View style={s.hairline} />
               <Row icon="log-out-outline" label={t('Log out')} onPress={() => go('signout', 1)} testID="account-menu-signout" />
             </View>

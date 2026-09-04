@@ -544,7 +544,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // Support / About Us / Sign-in open as in-app popups (centered dialog) rather than full-screen
   // routes: close the drawer, then raise the overlay so it sits on top of the current page (owner
   // 2026-08-15: sign-in must never navigate away from the Filter — see AuthModal.tsx).
-  const openInfo = (m: 'support' | 'about') => {
+  const openInfo = (m: 'support' | 'about' | 'legal') => {
     animateOut(() => {
       if (!docked) onClose();
       setTimeout(() => openModal(m), 10);
@@ -940,7 +940,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         ) : null}
         {menuOverlay}
         {deleteConfirmOverlay}
-        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} />
+        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} onLegal={() => openInfo('legal')} />
       </View>
     );
   }
@@ -957,7 +957,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
         ) : null}
-        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} />
+        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} onLegal={() => openInfo('legal')} />
       </Animated.View>
     </View>
   );
