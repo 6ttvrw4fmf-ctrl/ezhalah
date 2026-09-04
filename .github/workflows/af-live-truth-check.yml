@@ -204,8 +204,27 @@ jobs:
   # budget is sized for its own work, and the `attendance` gate at the bottom of this file turns
   # any cancelled/timed-out/skipped job into a red run. Pinned by
   # scripts/verify-live-check-workflow-attendance.ts.
+  # SWEEPS RUN AFTER THE BROWSER JOBS, NEVER BESIDE THEM (2026-09-04). All five jobs used to start at
+  # once: two browser jobs and three heavy RPC sweeps, each sweep self-limited to 2 in flight. That is
+  # ~6-10 concurrent probes against a production whose MEASURED envelope is a concurrency knee of 3 and
+  # ~1.5 searches/s sustained (SEARCH_MATCH_QA_ENGINEER.md §40.1). The sweeps are throughput work and
+  # survive it; the browser journeys are latency work behind a paid agent turn, and they do not.
+  #
+  # PROVEN BY EXPERIMENT, not inferred from the timings: verify-af-option-card-truth-live.ts passes
+  # 426/426 run alone against production, and FAILS (exit 1) when run concurrently with
+  # verify-af-full-surface-differential.ts — «the AF offer is present again on a fresh load» and «the
+  # journey completed without a harness error», which is exactly the shape CI kept reporting. Across
+  # runs 131/132/134 the red set GREW (option-card, then remove-last-pill, then trending four-way) as
+  # the afternoon got busier, which is load, not a spreading product defect: every one of those checks
+  # passes alone against the same deployed bundle.
+  #
+  # `if: always()` is load-bearing. A plain `needs:` SKIPS a dependent when its dependency fails, and a
+  # skipped sweep is lost coverage that the attendance job would then have to report — the 2026-09-03
+  # lesson about a guard that skips exactly what it exists to protect. These must run whatever the
+  # browser jobs concluded; attendance still requires all five to have concluded success.
   af-surface-region:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: [af-truth, af-card-state]
+    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     name: Every certified AF option shows DB truth and clicks to exactly that set (region)
     runs-on: ubuntu-latest
     # THE TWO SWEEPS GET A JOB EACH (2026-09-03). They are independent scopes and each is an
@@ -242,7 +261,8 @@ jobs:
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
 
   af-surface-city:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: [af-truth, af-card-state]
+    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     name: …and the same option surface inside a CITY scope (جدة), single-type stages
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -360,7 +380,8 @@ jobs:
   # options / tens of thousands of rows, so it runs as its OWN job in parallel with the browser
   # journeys rather than inside their 30-minute budget. Offline twin: scripts/verify-af-matrix-truth.ts.
   af-matrix:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: [af-truth, af-card-state]
+    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     name: Every certified AF option shows, sends, applies, returns and carries one truth
     runs-on: ubuntu-latest
     timeout-minutes: 50
