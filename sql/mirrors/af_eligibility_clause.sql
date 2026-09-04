@@ -28,6 +28,21 @@
 -- trailing newline): 47feed9ce3a08e743c44a7fb978f4278 — read live from pg_get_functiondef.
 --
 -- ── prior history, kept ──────────────────────────────────────────────────────────────────────
+-- Re-verified 2026-09-04 (rebuild guard, migration 20260904120741). Read live from production:
+--   md5(pg_get_functiondef) = 178deacbfa50de38e6b5a18e09bc737b, byte-identical to the md5 this file
+--   already records. Nothing in the body was edited, and that migration does not modify this object
+--   — it only CALLS it, which is why the staleness checker named it. Re-stamped for that reason.
+--
+--   Worth reading, because "unchanged" is the whole point of that migration rather than a
+--   reassurance: this clause has fallen BEHIND the four RPCs it is supposed to generate. All four
+--   live functions carry `price_total_effective` (the per-m² × area derived total, owner rule
+--   2026-09-03); this clause does not, and neither does any af_rpc_templates row, and the clause no
+--   longer appears verbatim inside any of the four. So rebuild_af_filter_rpcs() would have rendered
+--   them from THIS text and silently reverted that feature. 20260904120741 makes the rebuild refuse
+--   until they agree. Bringing the per-m² semantics into this file is the outstanding repair, and it
+--   is an owner-approval item — it is followed by dropping and recreating the four load-bearing
+--   search RPCs.
+--
 -- Re-verified 2026-09-03 (district_options_ar table-scope fix, migration 20260903224522). The
 --   pending re-verification the 2026-09-02 note below DEMANDED is now DONE: md5(pg_get_functiondef)
 --   read live from production under the deploy lock = 178deacbfa50de38e6b5a18e09bc737b, byte-identical
