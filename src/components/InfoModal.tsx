@@ -561,8 +561,12 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
             </Pressable>
           ))}
         </View>
+        {/* The legal text names the contact address as the {{CONTACT_EMAIL}} token, substituted here
+            — never as a literal in src/data/legal.ts — so verify-info-routes-single-source.ts's
+            "no second @ezhalah.com copy anywhere in src/" rule stays true of the DATA layer too,
+            not just the other UI surfaces it was written for. This IS the canonical address. */}
         {docs.map((p, i) => (
-          <Text key={i} style={s.legalP}>{p}</Text>
+          <Text key={i} style={s.legalP}>{p.replace('{{CONTACT_EMAIL}}', 'partners@ezhalah.com')}</Text>
         ))}
       </View>
     </View>

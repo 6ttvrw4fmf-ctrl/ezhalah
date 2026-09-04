@@ -5,8 +5,9 @@
 // drove the wording and must not be "corrected" without re-checking them first:
 //   1. PRODUCTION IS HOSTED IN TOKYO (ap-northeast-1), NOT Saudi Arabia. §5 of the Privacy Policy
 //      discloses this honestly (as a PDPL cross-border-transfer disclosure, regionally as "Asia
-//      Pacific" — not naming the city) instead of falsely claiming Saudi residency. NEVER change
-//      this section to claim Saudi-hosted data. See feedback_residency-claims-are-banned-in-comments-too.
+//      Pacific" — not naming the city) instead of a false residency claim. NEVER edit §5 to assert
+//      or imply Kingdom-only storage — the true location is Tokyo, full stop. See
+//      feedback_residency-claims-are-banned-in-comments-too.
 //   2. Ezhalah does not hold (or its status is unconfirmed) a REGA FAL brokerage license. §15 of the
 //      Terms therefore describes Ezhalah accurately as a neutral, non-brokerage SEARCH tool that
 //      conducts no transactions and holds no listings — which is the legally accurate description
@@ -14,6 +15,10 @@
 //      not have). If Ezhalah obtains/holds a FAL license, add its number to that section.
 // Retention (§7 of the Privacy Policy) is a reasonable operational default (30 days post-deletion),
 // not a figure the owner specified — PRD §13 lists the exact PDPL retention window as still open.
+// The contact address below is the LITERAL TOKEN `{{CONTACT_EMAIL}}`, never the real address —
+// verify-info-routes-single-source.ts refuses a second @ezhalah.com literal anywhere in src/ outside
+// InfoModal.tsx, and that rule is right (a stale second copy is exactly how this repo's /support and
+// /about doors drifted before). InfoModal.tsx's LegalBody substitutes the real address at render.
 // This is a strong draft, not a substitute for a Saudi lawyer's review before relying on it fully.
 export const LEGAL_DOCS: { terms: string[]; privacy: string[] } = {
   terms: [
@@ -33,7 +38,7 @@ export const LEGAL_DOCS: { terms: string[]; privacy: string[] } = {
     '13) التعديلات على هذه الشروط\n\nقد تُحدَّث هذه الشروط من وقت لآخر لمواكبة تطوّر الخدمة أو الأنظمة المعمول بها. سيُشار إلى تاريخ آخر تحديث أعلى هذه الصفحة، واستمرارك في استخدام المنصة بعد أي تحديث يُعدّ موافقة منك على الشروط المحدَّثة.',
     '14) القانون الحاكم وتسوية المنازعات\n\nتخضع هذه الشروط وتُفسَّر وفقًا لأنظمة المملكة العربية السعودية. أي نزاع ينشأ عن استخدام المنصة تسعى إزهله لحلّه بالتراضي أولًا، وفي حال تعذّر ذلك تختص به الجهات القضائية أو التنظيمية المختصة في المملكة.',
     '15) دور إزهله تجاه الأنظمة العقارية\n\nبما أن إزهله أداة بحث ومقارنة محايدة، لا تُدرج عقارات باسمها ولا تُجري وساطة أو تفاوضًا عقاريًا، فهي لا تمارس نشاط الوساطة العقارية الخاضع لترخيص الهيئة العامة للعقار ("ريجا"). يبقى الترخيص النظامي مسؤولية كل منصّة أو مُعلن يظهر على المنصة تجاه إعلاناته الخاصة. تحقّق دائمًا من صفة وترخيص المُعلن مباشرة قبل أي تعامل.',
-    '16) التواصل معنا\n\nلأي استفسار بخصوص هذه الشروط، راسلنا عبر partners@ezhalah.com.',
+    '16) التواصل معنا\n\nلأي استفسار بخصوص هذه الشروط، راسلنا عبر {{CONTACT_EMAIL}}.',
   ],
   privacy: [
     'آخر تحديث: 4 سبتمبر 2026',
@@ -44,13 +49,13 @@ export const LEGAL_DOCS: { terms: string[]; privacy: string[] } = {
     '5) مكان معالجة البيانات ونقلها خارج المملكة\n\nتتم معالجة بياناتك وتخزينها باستخدام مزوّدي بنية تحتية سحابية موثوقين، وقد تقع بعض هذه المرافق خارج المملكة العربية السعودية (حاليًا في مناطق تشمل آسيا والمحيط الهادئ). عند حدوث ذلك، نطبّق ضمانات تعاقدية وتقنية تحافظ على مستوى حماية لبياناتك يتوافق مع متطلبات نظام حماية البيانات الشخصية السعودي. نُقيّم باستمرار خياراتنا التقنية، بما في ذلك إمكانية استضافة البيانات محليًا داخل المملكة مستقبلًا مع نمو الخدمة.',
     '6) أمن البيانات\n\nنطبّق إجراءات حماية معقولة لبياناتك، منها التشفير أثناء نقل البيانات، وضبط صلاحيات الوصول إليها، وعدم تخزين أي كلمة مرور أصلًا بما أن تسجيل الدخول يتم فقط عبر Google وApple. مع ذلك، لا يوجد نظام آمن بنسبة 100%، ونوصيك دائمًا بحماية الوصول إلى حساب Google أو Apple الخاص بك وجهازك الشخصي.',
     '7) الاحتفاظ بالبيانات\n\nنحتفظ ببيانات حسابك طوال بقاء حسابك نشطًا. عند حذف حسابك، تُحذف بياناتك الشخصية أو تُخفى هويتها خلال 30 يومًا كحد أقصى، ما لم يستلزم نظام معمول به فترة احتفاظ أطول لأغراض قانونية أو تنظيمية.',
-    '8) حقوقك بموجب نظام حماية البيانات الشخصية\n\nيحقّ لك معرفة البيانات التي نحتفظ بها عنك والوصول إليها، وطلب تصحيحها إن كانت غير دقيقة، وطلب حذفها، وسحب موافقتك على معالجتها في أي وقت، والاعتراض على بعض أوجه استخدامها. لممارسة أي من هذه الحقوق، تواصل معنا عبر partners@ezhalah.com، وسنستجيب لطلبك خلال مدة معقولة. كما يحقّ لك التقدّم بشكوى إلى الهيئة السعودية للبيانات والذكاء الاصطناعي (سدايا) إذا رأيت أن حقوقك لم تُحترم.',
+    '8) حقوقك بموجب نظام حماية البيانات الشخصية\n\nيحقّ لك معرفة البيانات التي نحتفظ بها عنك والوصول إليها، وطلب تصحيحها إن كانت غير دقيقة، وطلب حذفها، وسحب موافقتك على معالجتها في أي وقت، والاعتراض على بعض أوجه استخدامها. لممارسة أي من هذه الحقوق، تواصل معنا عبر {{CONTACT_EMAIL}}، وسنستجيب لطلبك خلال مدة معقولة. كما يحقّ لك التقدّم بشكوى إلى الهيئة السعودية للبيانات والذكاء الاصطناعي (سدايا) إذا رأيت أن حقوقك لم تُحترم.',
     '9) ملفات تعريف الارتباط والتخزين المحلي\n\nنستخدم تخزينًا محليًا أساسيًا على جهازك لتشغيل التطبيق بسلاسة وتذكّر تفضيلاتك، مثل المظهر الليلي أو النهاري وحالة تسجيل دخولك. لا نستخدم هذه البيانات لأغراض إعلانات موجَّهة من أطراف ثالثة.',
     '10) خصوصية القُصّر\n\nخدمة إزهله موجَّهة للأشخاص ذوي الأهلية النظامية الكاملة، ولا تستهدف الأطفال أو القُصّر عمدًا. إذا تبيَّن لنا أننا جمعنا بيانات شخصية لقاصر دون إذن نظامي، فسنعمل على حذفها في أقرب وقت ممكن.',
     '11) المساعد الذكي ومعالجة المحادثات\n\nقد تُسجَّل رسائلك مع المساعد الذكي لتشغيل البحث وتحسين جودة الخدمة وحيادية إجاباتها. لا يستخدم المساعد محادثاتك لتقديم توصيات شرائية أو استثمارية، ولا تُباع محتويات هذه المحادثات لأي طرف، وتُعامَل وفق هذه السياسة كأي بيانات شخصية أخرى.',
     '12) الروابط لمواقع أخرى\n\nبمجرد انتقالك من إزهله إلى أي منصة عقارية شريكة، تخضع لسياسة الخصوصية الخاصة بتلك المنصة، وإزهله غير مسؤولة عمّا يحدث لبياناتك هناك.',
     '13) التعديلات على هذه السياسة\n\nقد نُحدّث هذه السياسة من وقت لآخر لمواكبة تطوّر الخدمة أو الأنظمة المعمول بها في المملكة، وسنشير إلى تاريخ آخر تحديث أعلى هذه الصفحة. استمرارك في استخدام المنصة بعد أي تحديث يُعدّ موافقة منك على السياسة المحدَّثة.',
-    '14) كيفية التواصل معنا\n\nلأي سؤال أو طلب متعلق ببياناتك الشخصية أو هذه السياسة، راسلنا عبر partners@ezhalah.com.',
+    '14) كيفية التواصل معنا\n\nلأي سؤال أو طلب متعلق ببياناتك الشخصية أو هذه السياسة، راسلنا عبر {{CONTACT_EMAIL}}.',
   ],
 };
 
