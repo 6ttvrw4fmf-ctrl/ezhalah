@@ -44,7 +44,7 @@ check('the pool contains all five questions and rankQuestions re-ranks it contex
   // INTERVIEW_STOP_AT/MIN_TOTAL_TO_SHOW moved to afRanking.ts (2026-08-22, pure-module extraction);
   // advancedFilters.ts still re-exports them (checked separately below) so every existing importer
   // is unaffected.
-  && /INTERVIEW_STOP_AT = 25/.test(rankingSrc)
+  && /INTERVIEW_STOP_AT = 50/.test(rankingSrc)   // owner product rule 2026-09-04 (was 25)
   && /MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT \+ 1/.test(rankingSrc)
   && /INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW/.test(advSrc));
 // MECHANISM CHANGE (owner 2026-08-22, «رجوع»): asked-tracking is no longer an incremental
@@ -78,7 +78,7 @@ check('installments is ask-first via a TIER applied in the sort, never by bypass
 // pure implementation OR in advancedFilters.ts's thin wrapper.
 check('scoreQuestion gates on scope size and the shared narrowing predicate, not selectivity',
   /if \(N < MIN_TOTAL_TO_SHOW\) return null;/.test(rankingSrc)
-  && /const narrowing = result\.options\.filter\(\(o\) => optionNarrowsMeaningfully\(o\.count, N\)\);/.test(rankingSrc)
+  && /const narrowing = result\.options\.filter\(\(o\) => o\.count != null && optionNarrowsMeaningfully\(o\.count, N\)\);/.test(rankingSrc)   // an UNKNOWN count is skipped, never scored (2026-09-04)
   && /if \(narrowing\.length < minOptionsFor\(selection\)\) return null;/.test(rankingSrc)
   && !/Math\.max\(15, Math\.ceil\(0\.08 \* N\)\)/.test(rankingSrc)
   && !/o\.count <= 0\.9 \* N/.test(rankingSrc)

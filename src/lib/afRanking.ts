@@ -8,7 +8,13 @@
 // advancedFilters.ts re-exports everything below verbatim; nothing else in the app imports this file
 // directly except that re-export and this module's own barrier.
 
-export type AdvancedOption = { key: string; label: string; count: number };
+// `count: null` = UNKNOWN (owner rule 2026-09-04): the per-option count RPC timed out or errored
+// even after one retry. UNKNOWN is not zero and is not No — the option stays on the card with no
+// number, so a slow count can never make a real branch of the taxonomy disappear (the 2026-09-04
+// defect: شقة ~10.6k and دور ~9.7k vanished from the apartments group while غرفة=1 stayed, because
+// the two biggest counts were the two slowest). Only SCOPE (group/type) options carry null; the
+// advanced pool's options are computed from a single counts row and are always numbers.
+export type AdvancedOption = { key: string; label: string; count: number | null };
 export type AdvancedQuestionResult = { options: AdvancedOption[];
   /** How many listings in scope whose SOURCE did not state this field — or `null` when no truthful
    *  single unknown count exists for the question (owner rule 2026-08-28, R7.1.3). `null` is not a
@@ -50,7 +56,10 @@ export function minOptionsFor(selection: 'single' | 'multi'): number {
 // Scope-size floor: don't ask a question unless the current scope has MORE results than the
 // interview's stop line (owner 2026-08-11 contextual-interview rework — unchanged by the 2026-08-22
 // and 2026-08-25 narrowing-gate reworks below).
-export const INTERVIEW_STOP_AT = 25;
+// 25 → 50 (owner product rule 2026-09-04): above 50 the interview keeps offering NEW rounds of
+// certified, unasked questions until the set is ≤ 50 or no truthful question remains; at ≤ 50 it
+// stops, reveals every remaining listing, and finishes the chat (agent.tsx finishGuided).
+export const INTERVIEW_STOP_AT = 50;
 export const MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT + 1;
 
 // Per-OPTION floor — one absolute value for EVERY question (contract §9). An option backed by fewer
@@ -59,7 +68,8 @@ export const MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT + 1;
 // option is then worth ASKING about.
 export const MIN_REAL_OPTION_COUNT = 5;
 export function meaningful(options: AdvancedOption[]): AdvancedOption[] {
-  return options.filter((o) => o.count >= MIN_REAL_OPTION_COUNT);
+  // An UNKNOWN count (null) is not evidence of clearing the floor; only a measured count is.
+  return options.filter((o) => o.count != null && o.count >= MIN_REAL_OPTION_COUNT);
 }
 
 // ── Contextual ranking (owner 2026-08-11; narrowing-gate reworks 2026-08-22, 2026-08-25) ───────
@@ -149,9 +159,9 @@ export function scoreQuestion(
 ): { score: number; options: AdvancedOption[] } | null {
   const N = result.total;
   if (N < MIN_TOTAL_TO_SHOW) return null;
-  const narrowing = result.options.filter((o) => optionNarrowsMeaningfully(o.count, N));
+  const narrowing = result.options.filter((o) => o.count != null && optionNarrowsMeaningfully(o.count, N));
   if (narrowing.length < minOptionsFor(selection)) return null;
-  const bestSplit = Math.max(...narrowing.map((o) => 1 - Math.abs((2 * o.count) / N - 1)));
+  const bestSplit = Math.max(...narrowing.map((o) => 1 - Math.abs((2 * (o.count as number)) / N - 1)));
   return { score: bestSplit * (SALIENCE[questionId] ?? 0.5), options: narrowing };
 }
 
@@ -188,5 +198,5 @@ export const AF_ROUND_MAX_QUESTIONS = 4;
 // ≤INTERVIEW_STOP_AT hide, and it is the seam a future non-ranked caller would have to go through.
 export function offersMeaningfulNarrowing(total: number, options: readonly AdvancedOption[]): boolean {
   if (total <= INTERVIEW_STOP_AT) return false;
-  return options.some((o) => optionNarrowsMeaningfully(o.count, total));
+  return options.some((o) => o.count != null && optionNarrowsMeaningfully(o.count, total));
 }

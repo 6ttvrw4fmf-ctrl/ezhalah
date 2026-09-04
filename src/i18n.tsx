@@ -1094,6 +1094,7 @@ const AR: Record<string, string> = {
   // Drawer / sidebar
   'New Chat': 'محادثة جديدة',
   'Search complete': 'اكتمل البحث',
+  'No further truthful narrowing question exists for this scope — these are all the genuine matches.': 'ما فيه سؤال إضافي موثوق يضيّق هذا النطاق أكثر — هذي كل النتائج المطابقة فعلاً.',
   'Start a new chat to search again': 'ابدأ محادثة جديدة للبحث من جديد',
   // Sidebar chat search (owner 2026-08-24): ChatGPT-style in-sidebar search, Arabic-first. The
   // empty state + hint are deliberately calm Saudi copy — never an English "No results".
