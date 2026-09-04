@@ -32,6 +32,13 @@ jobs:
       - name: PLATFORM_META must equal production active-searchable set
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-loader-platforms-match-active.ts
 
+      # Same subject — a platform must not be represented as more than it is — and the same anon
+      # read, so it shares this job rather than earning a workflow of its own. `if: always()` so a
+      # red roster check does not hide an unearned liveness claim.
+      - name: No platform is represented as liveness-proven without the evidence
+        if: always()
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-liveness-claims-are-earned.ts
+
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
       # This job runs unattended: a red run notifies nobody, so it has to reach alert_event to reach
       # a human. One open P1 per workflow file (dedup workflow_failed:loader-active-platforms-check.yml), and the next
