@@ -578,9 +578,16 @@ try {
   const afSnapshot = () => page.evaluate(() => {
     const visible = (sel) => Array.from(document.querySelectorAll(sel)).find((e) => e.offsetParent !== null);
     const title = visible('[data-testid="af-question-title"]')?.innerText?.trim() ?? null;
-    const options = Array.from(document.querySelectorAll('[data-testid^="af-option-"]')).filter((e) => e.offsetParent !== null).map((e) => e.getAttribute('data-testid'));
+    const optionEls = Array.from(document.querySelectorAll('[data-testid^="af-option-"]')).filter((e) => e.offsetParent !== null);
+    const options = optionEls.map((e) => e.getAttribute('data-testid'));
+    // Each option row ends in its own count pill (AdvancedQuestionCard's countPill). Read it, so a
+    // journey can choose an option by what it CLAIMS rather than by its position.
+    const optionCounts = optionEls.map((e) => {
+      const nums = (e.innerText || '').replace(/[^\d\s]/g, ' ').trim().split(/\s+/).filter(Boolean);
+      return nums.length ? parseInt(nums[nums.length - 1], 10) : null;
+    });
     const countChip = visible('[data-testid="af-count-chip"]')?.innerText?.trim() ?? null;
-    return { title, options, count: countChip ? parseInt(countChip.replace(/[^\d]/g, ''), 10) : null };
+    return { title, options, optionCounts, count: countChip ? parseInt(countChip.replace(/[^\d]/g, ''), 10) : null };
   });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
@@ -590,7 +597,9 @@ try {
     await page.click('input >> nth=1');
     await page.type('input >> nth=1', name, { delay: 40 });
     await page.waitForTimeout(1600);
-    await tap(`حي ${name}`);
+    // District rows are ASYNC (district_options_ar per request) — the strict tap's fixed wait is the
+    // documented flake class tapWhenRendered exists for, and this loop was still using it.
+    await tapWhenRendered(`حي ${name}`);
     await page.waitForTimeout(300);
   }
   await tap('الفلل والبيوت'); await tap('فيلا');
@@ -799,6 +808,9 @@ try {
   check('[J] Advanced Filter OPENS for a cohort with exactly ONE useful question (the 1-question fix)', jOpened);
 
   let jTitles = [];
+  let jPick = 0;
+  let jPickId = null;
+  let jAdvertised = null;
   if (jOpened) {
     // Same render race Journey I already guards against: af-card can mount a beat before its
     // question TITLE/options actually paint (real network round trip via rankQuestions), and CI's
@@ -809,7 +821,18 @@ try {
     if (snap.title) jTitles.push(snap.title);
     check('[J] exactly one question is shown (street_width)', jTitles.length === 1, JSON.stringify(jTitles));
     if (snap.options.length) {
-      await page.locator(`[data-testid="${snap.options[0]}"]:visible`).first().click({ timeout: 8000 });
+      // ANSWER THE NARROWEST OPTION, NOT THE FIRST ONE. options[0] has no guarantee of excluding a
+      // single row: an AF option whose count equals the cohort total is a perfectly honest answer,
+      // and this cohort produced one the moment the searchable scope stopped reading three RETIRED
+      // platforms (2026-09-04) — the journey then failed on `final < start` while the app was right.
+      // Picking by the option's OWN advertised count makes the narrowing assertion below a statement
+      // about the product instead of a bet on option order.
+      for (let i = 1; i < snap.options.length; i++) {
+        if ((snap.optionCounts[i] ?? Infinity) < (snap.optionCounts[jPick] ?? Infinity)) jPick = i;
+      }
+      jAdvertised = snap.optionCounts[jPick] ?? null;
+      jPickId = snap.options[jPick];
+      await page.locator(`[data-testid="${snap.options[jPick]}"]:visible`).first().click({ timeout: 8000 });
       await page.waitForTimeout(300);
       await page.locator('[data-testid="af-confirm"]:visible').first().click({ timeout: 8000 });
     }
@@ -840,8 +863,19 @@ try {
       await page.waitForTimeout(500);
     }
   }
-  check('[J] the closed interview lands on a genuinely narrowed, non-null result',
-    !jFinalOpen && Number.isFinite(jFinal) && jFinal < jStart, `start=${jStart} final=${jFinal}`);
+  // The landed count must be the one the answered option ADVERTISED — strictly stronger than the old
+  // `final < start`, which any smaller number satisfied. Narrowing is asserted separately and only
+  // where the cohort can actually demonstrate it: when even the narrowest option covers every row,
+  // `<` is unsatisfiable by a correct app, so the honest assertion there is that nothing GREW.
+  const jCanNarrow = Number.isFinite(jAdvertised) && jAdvertised < jStart;
+  check('[J] the closed interview lands on the count its answer advertised',
+    !jFinalOpen && Number.isFinite(jFinal) && jFinal === jAdvertised,
+    `start=${jStart} answered=${jPickId} advertised=${jAdvertised} final=${jFinal}`);
+  check(jCanNarrow
+    ? '[J] answering the single question genuinely narrowed the result'
+    : '[J] no option in this cohort excludes a row — the result must not GROW either',
+    Number.isFinite(jFinal) && (jCanNarrow ? jFinal < jStart : jFinal <= jStart),
+    `start=${jStart} final=${jFinal}`);
 
   // Boundary case: the SAME type+city with Buy ALSO selected (dealCombined) has ZERO certified
   // questions (street_width is Buy+RentAnnual certified but not RentMonthly, so the 3-way
