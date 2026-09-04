@@ -65,6 +65,11 @@ import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { cohortAllows, certifiedAmenityKeys } from '../src/lib/afCohorts.ts';
 import { CLEAN_TO_TYPE_AR } from '../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../src/data/search.ts';
+import { liftSearchScope } from './lib/liftSearchScope.ts';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -153,11 +158,27 @@ const KNOWN_WIRE_KEYS = new Set(['p_deal', 'p_cities', 'p_districts', 'p_tables'
   'p_tenant', 'p_directions', 'p_has_license', 'p_amenities', 'p_offset', 'p_tables2', 'p_types2', 'p_age_min', 'p_bath_exact', 'p_street_width_min',
   'p_street_width_max', 'p_floor_min', 'p_floor_max', 'p_is_new_construction', 'p_category', 'p_sort_by', 'p_age_unknown', 'p_rating_min',
   'p_reviews_min', 'p_unit_subtypes', 'p_price_min_rent', 'p_price_max_rent', 'p_rotation_seed']);
-const MONTHLY_ONLY_TABLES = ['gathern_residential_listings', 'aqarmonthly_residential_listings'];
+// LIFTED AND EXECUTED, never re-typed (2026-09-04). This was a hand-written pair of residential
+// table names, and it went stale the day #1653 shipped: that PR made comTables() generic over
+// MONTHLY_ONLY_TABLE, so gathern_commercial_listings now joins the COMMERCIAL arm on a monthly
+// period too, "instead of being permanently invisible — the very hole this whole change closes".
+// A third hand-maintained copy of "which platforms are monthly-only" is exactly the sin #1653
+// removed, so this reads the shipped functions and runs them.
+const SCOPE = await liftSearchScope(ROOT);
+const MONTHLY_ONLY_TABLES = SCOPE.resTables({ deal: 'Rent', rentPeriod: 'monthly' } as any)
+  .filter((t) => !SCOPE.resTables({ deal: 'Rent', rentPeriod: 'annual' } as any).includes(t));
+const MONTHLY_ONLY_TABLES2 = SCOPE.comTables({ deal: 'Rent', rentPeriod: 'monthly' } as any)
+  .filter((t) => !SCOPE.comTables({ deal: 'Rent', rentPeriod: 'annual' } as any).includes(t));
+
 // Non-AF keys that a deal/period change must leave untouched (deal, period and the ordering seed excepted).
-// `p_tables` is NOT in this list on purpose: it is deal/period-DERIVED (src/data/remote.ts resTables():
-// the two monthly-only sources join exactly when the period scope includes Monthly) — see tablesFollowPeriod.
-const NON_AF_STABLE = ['p_cities', 'p_districts', 'p_region_ids', 'p_types', 'p_tables2', 'p_types2', 'p_category', 'p_platforms',
+// NEITHER `p_tables` NOR `p_tables2` is in this list, and for the same reason: both are deal/period-
+// DERIVED (src/data/remote.ts resTables()/comTables() — the monthly-only sources join exactly when the
+// period scope includes Monthly). `p_tables2` was listed here as STABLE until 2026-09-04, which was
+// true only while the commercial arm had no monthly-only source; after #1653 it reported a correct
+// period change as "moved a non-AF narrowing". Both are checked by tablesFollowPeriod instead — a
+// STRICTER statement than silence: the set must be the base set plus exactly the monthly-only
+// sources, and nothing else, in both directions.
+const NON_AF_STABLE = ['p_cities', 'p_districts', 'p_region_ids', 'p_types', 'p_types2', 'p_category', 'p_platforms',
   'p_beds_exact', 'p_beds_min', 'p_area_min', 'p_area_max', 'p_price_min', 'p_price_max', 'p_price_min_rent', 'p_price_max_rent',
   'p_tenant', 'p_has_license', 'p_floor_min', 'p_floor_max', 'p_age_unknown', 'p_bath_exact', 'p_limit', 'p_offset', 'p_per_platform'];
 
@@ -195,11 +216,11 @@ const R = {
   nonAfUnchanged: (b1: any, bn: any) => NON_AF_STABLE.every((k) => JSON.stringify(b1?.[k] ?? null) === JSON.stringify(bn?.[k] ?? null)),
   /** p_tables follows the documented derivation (remote.ts resTables, owner 2026-08-14): the base table set is
    *  B1's exactly, plus the two monthly-only sources IFF the period scope includes Monthly (شهري or كلاهما). */
-  tablesFollowPeriod: (b1Tables: unknown, bnTables: unknown, wantsMonthly: boolean) => {
+  tablesFollowPeriod: (b1Tables: unknown, bnTables: unknown, wantsMonthly: boolean, monthlyOnly: string[] = MONTHLY_ONLY_TABLES) => {
     if (!Array.isArray(b1Tables) || !Array.isArray(bnTables) || b1Tables.length === 0) return false;
-    const base = b1Tables.filter((t) => !MONTHLY_ONLY_TABLES.includes(String(t)));
+    const base = b1Tables.filter((t) => !monthlyOnly.includes(String(t)));
     if (base.length !== b1Tables.length) return false;                       // B1 (Buy) must not carry them
-    const want = wantsMonthly ? [...base, ...MONTHLY_ONLY_TABLES] : base;
+    const want = wantsMonthly ? [...base, ...monthlyOnly] : base;
     return bnTables.length === want.length && want.every((t) => bnTables.includes(t)) && new Set(bnTables).size === bnTables.length;
   },
   /** the normal-filter scope reads exactly as expected (deal/period moved as asked; nothing else did). */
@@ -590,6 +611,12 @@ try {
       check(`STRUCTURE — ${lbl} p_tables = B1's base set ${wantsMonthly ? 'PLUS' : 'WITHOUT'} the two monthly-only sources (period-derived, nothing else moved)`,
         R.tablesFollowPeriod(B1.body.p_tables, bn.body.p_tables, wantsMonthly),
         `B1=${(B1.body.p_tables ?? []).length} tables · ${lbl}=${(bn.body.p_tables ?? []).length} tables · monthly-only present: ${MONTHLY_ONLY_TABLES.filter((t) => (bn.body.p_tables ?? []).includes(t)).length}/2`);
+      // The COMMERCIAL arm obeys the SAME derivation (comTables() is the mirror of resTables()), so
+      // it gets the same assertion rather than the silence it had while it happened to be stable.
+      check(`STRUCTURE — ${lbl} p_tables2 = B1's base set ${wantsMonthly ? 'PLUS' : 'WITHOUT'} the monthly-only COMMERCIAL source(s) (period-derived, nothing else moved)`,
+        R.tablesFollowPeriod(B1.body.p_tables2, bn.body.p_tables2, wantsMonthly, MONTHLY_ONLY_TABLES2),
+        `B1=${(B1.body.p_tables2 ?? []).length} tables · ${lbl}=${(bn.body.p_tables2 ?? []).length} tables · `
+        + `monthly-only present: ${MONTHLY_ONLY_TABLES2.filter((t) => (bn.body.p_tables2 ?? []).includes(t)).length}/${MONTHLY_ONLY_TABLES2.length}`);
       check(`STRUCTURE — ${lbl} only DROPPED committed predicates (none added, none altered)`, R.onlyDrops(committed, atomsOf(bn.body)),
         Object.entries(atomsOf(bn.body)).filter(([a, v]) => !(a in committed) || committed[a] !== v).map(([a, v]) => `${a}=${v}`).join(', ') || 'clean');
       check(`STRUCTURE — ${lbl} carries no wire key outside the RPC vocabulary (no invisible predicate on an unmapped key)`, R.onlyKnownKeys(bn.body),
@@ -673,6 +700,17 @@ try {
         !R.tablesFollowPeriod(B1.body.p_tables, [...B1.body.p_tables, ...MONTHLY_ONLY_TABLES], false));
       mut('a foreign table smuggled into p_tables is caught by tablesFollowPeriod',
         !R.tablesFollowPeriod(B1.body.p_tables, [...B4.body.p_tables, '__smuggled_listings'], true));
+      // …and the COMMERCIAL arm, which was asserted to be STABLE until 2026-09-04 and therefore had
+      // no mutation cover at all. The monthly-only set is LIFTED from the shipped comTables(), so an
+      // empty lift would make every one of these vacuous — that is the first thing asserted.
+      mut('the lifted monthly-only COMMERCIAL set is non-empty (an empty lift makes the arm vacuous)',
+        MONTHLY_ONLY_TABLES2.length > 0);
+      mut('a Monthly scope MISSING the monthly-only COMMERCIAL source is caught',
+        !R.tablesFollowPeriod(B1.body.p_tables2, B1.body.p_tables2, true, MONTHLY_ONLY_TABLES2));
+      mut('an Annual scope that ADDED the monthly-only COMMERCIAL source is caught',
+        !R.tablesFollowPeriod(B1.body.p_tables2, [...(B1.body.p_tables2 ?? []), ...MONTHLY_ONLY_TABLES2], false, MONTHLY_ONLY_TABLES2));
+      mut('a foreign table smuggled into p_tables2 is caught',
+        !R.tablesFollowPeriod(B1.body.p_tables2, [...(B4.body.p_tables2 ?? []), '__smuggled_commercial_listings'], true, MONTHLY_ONLY_TABLES2));
       mut('a base table DROPPED under a period change is caught by tablesFollowPeriod',
         !R.tablesFollowPeriod(B1.body.p_tables, B4.body.p_tables.slice(1), true));
       mut('a duplicated table is caught by tablesFollowPeriod',
