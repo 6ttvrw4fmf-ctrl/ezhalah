@@ -481,7 +481,29 @@ Four rules that come from real failures on this exact surface:
 | One full browser journey | ~26 s | §40.2 |
 | **One #6 journey, this routine's own mix** | **~14.4 s** | measured 2026-08-28: `e2e/journeys/run.mjs`, 32 journeys in 460 s against production, Chromium, strictly serial, a fresh browser + context per journey (so launch/teardown is INSIDE the figure, not additional) |
 | Engines installed in the agent image | **Chromium only** | measured 2026-08-28: `/opt/pw-browsers` holds `chromium-1194`, its headless shell and `ffmpeg-1011` — no `webkit-*`, no `firefox-*` |
-| One «بحث» press → search RPCs | **6** `location_search_candidates_ar` calls | measured 2026-08-28: single click → 6, double click → 6 (identical). A double-click oracle must compare against a measured single-click baseline, never against 1 |
+| Engines reachable in CI | **all three** | measured 2026-09-03: `journey-sweep.yml` installs and drives chromium, webkit and firefox on `ubuntu-latest` |
+| One full 84-journey sweep, **WebKit** | **~1,400–1,550 s** | measured 2026-09-03, two full sweeps against production (1547 s, 1396 s) |
+| One full 84-journey sweep, **Firefox** | **~1,740 s** | measured 2026-09-03, one full sweep against production |
+| Firefox mobile emulation | **none** | Gecko rejects `isMobile` at context creation, and the iPhone 13 profile carries it inside its spread too. Firefox mobile is a 375 px viewport with touch — say that, never "iPhone 13" |
+| One press of «بحث», **WebKit** | the same **6** `location_search_candidates_ar` calls | measured 2026-09-03; they can span >10 s, which is why the count must be read on a settling condition and never after a fixed sleep |
+| One «بحث» press → **calls** named `location_search_candidates_ar` | **6** | measured 2026-08-28 and re-measured 2026-09-04 (mobile, 2/2): single click → 6, double click → 6 |
+| …of which **RESULTS searches** | **exactly 1** (`p_limit: 1500`) | the other **5** are `p_limit: 1` per-option COUNT calls — `fetchScopeOptionCounts` and `fetchDistrictEligibleCounts` reuse the same RPC name, one call per VISIBLE option (`src/data/remote.ts:920`, `:965`, results at `:1476`) |
+
+**That split is the whole point, and getting it wrong cost a false verdict.** The number of calls is
+a property of how many options the results screen decided to decorate — it varies with the data and
+with what is on screen. Only the `p_limit != 1` class counts submitted searches. On 2026-09-04
+WebKit mobile captured `single -> 1, double -> 6` and `double-click-search` filed «double-click
+fired the search twice» when **both sides had submitted exactly one search** (1 results call each).
+Classify with `classifySearchRpc()` in `e2e/journeys/harness.mjs`; never count by RPC name alone.
+
+**A form the app will refuse to submit is not a primed form.** `onSearch` returns at
+`if (!citySelected)` with a validation message and **zero requests** (`src/app/index.tsx:712`) —
+the owner's 2026-07-17 spec, "never guess a location". Only a TAPPED suggestion row sets
+`citySelected`, and every keystroke clears it, so the tap is a race. When it loses, «بحث» correctly
+fires nothing; on 2026-09-04 WebKit desktop that was filed as «dead control». `primeSearch` must
+prove the commit via `SELECTED_CITY_MARKER` (`[data-testid="selected-city-visual"]`, rendered iff
+`citySelected` is non-null) and return false — a skip — rather than hand a caller a form that
+cannot search.
 
 **The consequence you must actually apply:** `rankQuestions` fires one `af_eligible_count` **per
 eligible question, concurrently** — so a five-question cohort is already past the concurrency knee
@@ -493,8 +515,9 @@ load.
 
 **NOT ESTABLISHED — do not cite a number for these until one is measured:**
 
-- WebKit and Firefox timings. Every figure above was measured on Chromium, and neither engine is
-  installed in the agent image (see the table), so this cannot be measured here at all today.
+- WebKit and Firefox timings, as a per-journey average. Full sweeps are now measured (see the table
+  above), but a per-journey figure has not been separated out. Both engines are reachable in CI via
+  `.github/workflows/journey-sweep.yml`; neither is installable in the agent container.
 - How many parallel contexts this container tolerates. The ~14.4 s figure above is strictly
   SERIAL; nothing about concurrent journeys has been measured, and PART 11.3's concurrency knee of
   3 is a constraint on the shared production instance regardless.
@@ -507,10 +530,18 @@ load.
 Stated here so no run scores a surface it never touched, and so the gaps are visible as
 infrastructure asks rather than rediscovered each time:
 
-- **WebKit and Firefox are not installed** and PART 11.1 forbids `playwright install`. Every run in
-  this image is Chromium-only, which bounds PART 3 item 6's rotation and PART 5 item 10 outright.
-  This is a COVERAGE LIMIT to report, never a surface to score. `engineAvailable()` in
-  `e2e/journeys/harness.mjs` detects it and the runner prints the limit.
+- **WebKit and Firefox are not installed IN THIS CONTAINER**, and PART 11.1 rightly forbids
+  `playwright install` here. That bounds what one agent session can drive; it does **not** bound the
+  routine. **Resolved 2026-09-03:** the ban is about this image's pinned build, not about CI, where
+  six workflows already run `npx playwright install --with-deps chromium` on a GitHub runner. What
+  was actually missing is that NO workflow ran this sweep at all, so it only ever executed where
+  only Chromium exists — which is why every cross-browser figure this routine had ever reported was
+  Chromium. `.github/workflows/journey-sweep.yml` now runs it once per engine (chromium × webkit ×
+  firefox, both viewports, daily + manual dispatch), and `JOURNEY_ENGINE` selects the engine for
+  every journey at once. A run in this container is still Chromium-only and must say so; the
+  engine evidence comes from that workflow's result, and a report that never read it has no
+  evidence about WebKit or Firefox. `engineAvailable()` fails CLOSED on a missing engine (exit 2)
+  rather than silently substituting Chromium.
 - **Google One Tap cannot be exercised**: the egress proxy denies CONNECT to `www.google.com` and
   `android.clients.google.com` (observed as ~600 rejected connections during the 2026-08-28 sweep),
   so GIS never loads. One Tap's *code* contract stays covered by the static barriers
