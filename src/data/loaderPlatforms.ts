@@ -65,6 +65,12 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'Era Pulse',    i18nKey: 'Era Pulse',                               logo: require('../../assets/images/erapulse.jpg') },
   { name: 'Al Nowaisiry', i18nKey: 'Al Nowaisiry Real Estate',               logo: require('../../assets/images/nowaisiry.jpg') },
   { name: '1 October',    i18nKey: '1 October Real Estate',                   logo: require('../../assets/images/october.jpg') },
+  { name: 'Muktamel',     i18nKey: 'Muktamel',                                logo: require('../../assets/images/muktamel.jpg') },
+  { name: 'Arkaan',       i18nKey: 'Arkaan Al Aqar',                          logo: require('../../assets/images/arkaan.png') },
+  { name: 'Abralosol',    i18nKey: 'Abr Al Osol Real Estate',                 logo: require('../../assets/images/abralosol.png') },
+  { name: 'THERC',        i18nKey: 'The Right Choice Real Estate',            logo: require('../../assets/images/therc.png') },
+  { name: 'Rawasi Dark',  i18nKey: 'Rawasi Dark Real Estate',                 logo: require('../../assets/images/rawasidark.png') },
+  { name: 'Aouj',         i18nKey: 'Aouj Estates',                            logo: require('../../assets/images/aouj.png') },
 ];
 
 // Ordered SPECIFIC-first token → platform name map, mirroring ResultCard's SourceBadge matching so a
@@ -84,6 +90,8 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['mizlaj', 'Mizlaj'], ['abeea', 'Abeea'], ['jurash', 'Jurash'],
   ['gathern', 'Gathern'], ['dealapp', 'Deal App'], ['deal', 'Deal App'], ['souq', '24 Souq'],
   ['erapulse', 'Era Pulse'], ['pulse', 'Era Pulse'], ['nowaisiry', 'Al Nowaisiry'], ['october', '1 October'],
+  ['muktamel', 'Muktamel'], ['arkaan', 'Arkaan'],
+  ['abralosol', 'Abralosol'], ['therc', 'THERC'], ['rawasidark', 'Rawasi Dark'], ['aouj', 'Aouj'],
   ['aqar', 'Aqar'],
 ];
 
