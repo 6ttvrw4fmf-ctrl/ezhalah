@@ -131,6 +131,24 @@ Respect single-writer locks (`ops_deploy_lock`) and never create cross-session c
 ownership tables already exist: §S and `docs/ops/SENTRY_ROUTING.md` for Sentry issues,
 `docs/ops/ALERT_ROUTING.md` for `[alert]` issues, and the Boundary rules below for surfaces.
 
+**The queue this rule needs now exists (2026-09-04).** Until then, "file it in that routine's
+queue/coverage trail" named a destination that only existed for the two cases above: a finding that
+was neither a Sentry issue nor an `alert_event` kind — a journey seeing a card render wrong, a visual
+regression, a dead control — had no row to create, so the honest reading of this rule was to drop it.
+The rule is unchanged; its mechanism is now concrete. Route with:
+
+```sql
+select incident_open('<stable fingerprint>', '<what is wrong>', '<surface>', 'P1', 'agent',
+                     '<where you saw it>',
+                     '{"repro":"...","expected":"...","found":"..."}'::jsonb);
+-- already own it and it turns out to be someone else's?
+select incident_handoff(<id>, '<their routine slug>', '<why it is not yours>');
+```
+
+`incident_route_owner(surface)` is total, so the finding lands on a real owner without you choosing
+one. `mon_detect_stalled_incident()` then makes an unworked queue loud and attributable. Full
+contract: **`docs/ops/AUTONOMOUS_INCIDENT_LOOP.md`** — read it before routing anything.
+
 ### §G.4 — ADAPTIVE EFFORT
 
 - **Clean surface** ⇒ normal verification, **SHORT report**, invent no work.
@@ -171,6 +189,35 @@ SENTRY ISSUE → CLAIM → REPRODUCE → ROOT CAUSE → FIX → BARRIER/MUTATION
 - **Prove the connection with a real read each run; a configured connector is not a working one.**
   If the Sentry read fails, say so plainly in the report (`SENTRY CONNECTION WORKING: NO`) rather
   than silently skipping it.
+
+### §G.6b — YOUR INCIDENT QUEUE IS READ AT THE START, LIKE SENTRY (2026-09-04)
+
+Sentry is read first because an error nobody looked at is not being handled. The same is true of a
+finding another routine routed to you — and unlike Sentry, that queue is never empty by accident.
+Immediately after §G.6, read it:
+
+```sql
+select id, severity, title, surface, state, last_progress_at, detail
+  from ops_incident
+ where owner_routine = '<your routine slug>' and state not in ('resolved','wont_fix')
+ order by severity, last_progress_at;
+```
+
+Every row is work, exactly as an open alert is (`AGENT_AUTHORITY.md`: *"an open alert is work, not
+wallpaper… age confers no immunity"*). Drive each to a terminal state this run using §G.1's chain:
+
+- `incident_advance(id, 'investigating'|'reproduced'|'fixed'|'verifying', root_cause, fix_pr)` as you go;
+- `incident_resolve(id, 'scripts/verify-<barrier>.ts', now())` — refused without a barrier AND a
+  production verification, so §G.1's "PERMANENT BARRIER" step is no longer something you can forget;
+- `incident_handoff(id, '<their slug>', '<why>')` for §G.2 (d)/(e) — the ownership and permission
+  boundaries §G.3 says to ROUTE;
+- `incident_block(id, '<a|b|c|f>', '<what you need>')` only for a genuine owner decision;
+- `incident_wont_fix(id, '<why this is not a bug>')` when it is not one.
+
+Report `INCIDENTS WORKED / RESOLVED / HANDED OFF / BLOCKED` in your §G.8 block.
+`mon_detect_stalled_incident()` raises a P1 naming any routine whose queue stops moving inside its
+severity SLA (P0 4h, P1 24h, P2 72h, P3 14d), so an unworked queue is attributable rather than
+anonymous. Full contract: `docs/ops/AUTONOMOUS_INCIDENT_LOOP.md`.
 
 ### §G.7 — NOTHING ABOVE WEAKENS ANY EXISTING GUARD
 

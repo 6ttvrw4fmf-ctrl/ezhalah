@@ -1,0 +1,162 @@
+# ONE artifact the owner reads, instead of testing screens himself.
+#
+# The owner's brief (2026-09-04): "I should mostly receive: 'We found this bug ourselves, fixed it,
+# permanently protected it, deployed it, and production is verified.'" Seven routines already send
+# seven daily reports; what was missing is a single answer to the question those reports cannot
+# answer individually — IS THE LOOP ITSELF WORKING, and is anything actually waiting on me.
+#
+# Deliberately ONE issue, not a stream. A daily digest issue per day is a feed nobody reads, and the
+# measured failure this whole system exists to fix is a queue nobody reads (1,014 alerts raised,
+# 2 ever acknowledged). So this maintains exactly one issue, always current, and CLOSES it when the
+# loop is green — an open [loop] issue means something needs attention, a closed one means it does
+# not. That is a signal with two states rather than an inbox with infinite ones.
+#
+# It never files product bugs. Everything here is a projection of ops_loop_health(); the incidents
+# themselves are created by the guardian journeys, the detectors, and the routines.
+
+name: Loop health digest
+
+on:
+  schedule:
+    - cron: "0 13 * * *"     # 06:00 Arizona — after the 03:00-05:30 AZ routine block has finished
+  workflow_dispatch: {}
+
+concurrency:
+  group: loop-health-digest
+  cancel-in-progress: true
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      TITLE: "[loop] autonomous engineering loop — health"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read ops_loop_health() and project it into one issue
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${KEY:-}" ]; then
+            echo "::error::SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing — refusing to report loop health it cannot read"
+            exit 1
+          fi
+
+          health=$(curl -sf -X POST "$SUPABASE_URL/rest/v1/rpc/ops_loop_health" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" -d '{}')
+          [ -n "$health" ] || { echo "::error::ops_loop_health() returned nothing"; exit 1; }
+
+          inc_open=$(jq -r '.incidents.open'                  <<<"$health")
+          inc_res7=$(jq -r '.incidents.resolved_last_7d'      <<<"$health")
+          inc_oldd=$(jq -r '.incidents.oldest_open_days'      <<<"$health")
+          al_open=$( jq -r '.alerts.open'                     <<<"$health")
+          al_unack=$(jq -r '.alerts.open_unacknowledged'      <<<"$health")
+          al_ackall=$(jq -r '.alerts.acknowledged_all_time'   <<<"$health")
+          al_oldd=$( jq -r '.alerts.oldest_open_days'         <<<"$health")
+          needs=$(   jq -r '.needs_owner_decision | length'   <<<"$health")
+
+          # GREEN means: nothing is waiting on the owner, no incident has gone stale, and the alert
+          # queue is being acknowledged. An unacknowledged backlog is NOT green — that is precisely
+          # the condition that made this necessary.
+          green=true
+          [ "$needs"    -gt 0 ]  && green=false
+          [ "$al_unack" -gt 0 ]  && green=false
+          [ "$inc_oldd" -gt 7 ]  && green=false
+
+          {
+            echo "_Generated $(date -u +%Y-%m-%dT%H:%MZ) by \`ops_loop_health()\`. Contract: [docs/ops/AUTONOMOUS_INCIDENT_LOOP.md](docs/ops/AUTONOMOUS_INCIDENT_LOOP.md)._"
+            echo
+            if [ "$needs" -gt 0 ]; then
+              echo "## ⚠️ Waiting on you — $needs"
+              echo
+              echo "These are the only things the loop cannot finish by itself. Each cites which of §G.2's six legitimate stop reasons applies."
+              echo
+              jq -r '.needs_owner_decision[] | "- **\(.title)** — `\(.surface)` · owner `\(.owner)` · blocked since \(.blocked_since[0:10])\n  - \(.reason)"' <<<"$health"
+            else
+              echo "## ✅ Nothing is waiting on you"
+              echo
+              echo "No incident is blocked on an owner decision."
+            fi
+            echo
+            echo "## Incidents"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Open | $inc_open |"
+            echo "| Resolved (7d) | $inc_res7 |"
+            echo "| Oldest open | ${inc_oldd}d |"
+            echo
+            echo "By state: \`$(jq -c '.incidents.by_state' <<<"$health")\`"
+            echo
+            echo "By owner: \`$(jq -c '.incidents.by_owner' <<<"$health")\`"
+            echo
+            echo "## Alert queue"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Open | $al_open |"
+            echo "| Open and **unacknowledged** | $al_unack |"
+            echo "| Acknowledged, all time | $al_ackall |"
+            echo "| Oldest open | ${al_oldd}d |"
+            echo
+            if [ "$al_unack" -gt 0 ]; then
+              echo "> An unacknowledged alert is an unstarted task, not a status. Each owning routine"
+              echo "> claims its own with \`gh issue list --label ezhalah-alert --label <routine-label> --state open\`"
+              echo "> and self-assigns — that assignment is what stamps \`acknowledged_at\`."
+            fi
+          } > body.md
+
+          # Find the issue by LABEL, then match the title client-side. Not by `--search`: GitHub's
+          # issue search is an index, it lags writes, and a title containing brackets does not match
+          # the way you expect — `--search "[alert] foo in:title"` returned NOTHING for an issue that
+          # demonstrably existed while this was being written. alert-dispatch.yml already uses the
+          # label+jq shape for the same reason. A lookup that silently finds nothing here would make
+          # this workflow open a SECOND issue every day, which is precisely the stream it exists to
+          # avoid. `gh label create --force` above guarantees the label exists before the first read.
+          gh label create loop-health --repo "$REPO" --force --color 0E8A16 \
+            --description "Autonomous engineering loop health" >/dev/null
+          num=$(gh issue list --repo "$REPO" --label loop-health --state all --limit 100 \
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"$TITLE\")] | sort_by(.number) | last | .number // empty")
+
+          if [ "$green" = true ]; then
+            if [ -n "$num" ]; then
+              gh issue edit  "$num" --repo "$REPO" --body-file body.md
+              gh issue close "$num" --repo "$REPO" --comment "Loop is green: nothing blocked on the owner, no stale incident, alert queue acknowledged." || true
+              echo "loop green — issue #$num updated and closed"
+            else
+              echo "loop green — no issue to maintain"
+            fi
+            exit 0
+          fi
+
+          if [ -n "$num" ]; then
+            gh issue edit "$num" --repo "$REPO" --body-file body.md
+            gh issue reopen "$num" --repo "$REPO" 2>/dev/null || true
+            echo "loop needs attention — issue #$num updated"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" --label loop-health --body-file body.md
+            echo "loop needs attention — issue created"
+          fi
+
+      # A digest that fails silently would be the same bug it exists to report.
+      - name: Alert if this check itself failed
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node scripts/ops/raise-workflow-alert.mjs \
+            --kind seam_check_failed \
+            --workflow loop-health-digest.yml \
+            --status "${{ job.status }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
