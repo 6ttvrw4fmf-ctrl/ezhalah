@@ -1,5 +1,20 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
 --
+-- Re-verified 2026-09-04 (af_rebuild_must_not_silently_revert_live_semantics, migration
+--   20260904120741) — CHANGED since the last capture, a real redefinition, not a mention.
+--   md5(pg_get_functiondef) read live from production = 47feed9ce3a08e743c44a7fb978f4278,
+--   captured in 7 independently-checksummed ~1500-char chunks (each chunk's md5 verified against
+--   its own live substring before concatenation) to rule out transcription error on a body this
+--   size — every chunk matched, and the concatenated body's md5 matches the live value exactly.
+--   The change: both buy-deal ("بيع") price-range branches now filter on
+--   s.price_total_effective (the per-m² × area derived total) instead of the raw s.price_total —
+--   this is the owner-ruled 2026-09-03 change that made per-m²-only sale listings
+--   budget-searchable (PR #1661, "Per-m² × area: a shown, searchable total (Stage 2)", commit
+--   0e2350a). Nothing else in the clause changed. Nothing was hand-edited here — the whole body
+--   below is the verbatim live capture.
+--   Re-stamped because 20260904120741 NAMES this object (af_rebuild_would_revert() reads it to
+--   detect exactly this kind of drift between af_eligibility_clause() and the four live AF RPCs —
+--   see that migration's own header for the incident this mirror staleness would otherwise hide).
 -- Re-verified 2026-09-03 (district_options_ar table-scope fix, migration 20260903224522). The
 --   pending re-verification the 2026-09-02 note below DEMANDED is now DONE: md5(pg_get_functiondef)
 --   read live from production under the deploy lock = 178deacbfa50de38e6b5a18e09bc737b, byte-identical
@@ -46,8 +61,9 @@
 --   same non-hand-transcribed principle: the executed VALUE was fetched byte-exact over HTTP, then
 --   the E'' source literal was reconstructed by doubling every backslash and single quote, and the
 --   result verified to match production's md5(pg_get_functiondef) exactly before being written here.
--- Verified byte-exact against the 2026-09-02 rolled-back dry run; md5 of everything below this header block: 178deacbfa50de38e6b5a18e09bc737b
---   (previous live value 681da577d8e10df55e30c345d284e139 through 2026-08-31; changes ONLY when 20260902220100 is applied).
+-- Verified byte-exact against 2026-09-04 live production; md5 of everything below this header block: 47feed9ce3a08e743c44a7fb978f4278
+--   (previous live value 178deacbfa50de38e6b5a18e09bc737b through 2026-09-03; changed when the
+--   price_total_effective buy-price migration was applied).
 CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
  LANGUAGE sql
@@ -112,8 +128,8 @@ AS $function$ select E'
       and (
             (p_deal is null and s.deal_ar = ''بيع''
              and (nullif(p_price_min,0) is null and nullif(p_price_max,0) is null
-                  or (s.price_total is not null and s.price_total > 0
-                      and s.price_total >= coalesce(p_price_min,0) and s.price_total <= coalesce(nullif(p_price_max,0),1e15))))
+                  or (s.price_total_effective is not null and s.price_total_effective > 0
+                      and s.price_total_effective >= coalesce(p_price_min,0) and s.price_total_effective <= coalesce(nullif(p_price_max,0),1e15))))
          or (p_deal is null and s.deal_ar = ''إيجار''
              and (nullif(p_price_min_rent,0) is null and nullif(p_price_max_rent,0) is null
                   or (s.price_annual is not null and s.price_annual > 0
@@ -121,8 +137,8 @@ AS $function$ select E'
                       and s.price_annual <= coalesce(nullif(p_price_max_rent,0),1e15))))
          or (p_deal is not null and nullif(p_price_min,0) is null and nullif(p_price_max,0) is null)
          or (p_deal is not null and s.deal_ar = ''بيع''
-               and s.price_total is not null and s.price_total > 0
-               and s.price_total >= coalesce(p_price_min,0) and s.price_total <= coalesce(nullif(p_price_max,0),1e15))
+               and s.price_total_effective is not null and s.price_total_effective > 0
+               and s.price_total_effective >= coalesce(p_price_min,0) and s.price_total_effective <= coalesce(nullif(p_price_max,0),1e15))
          or (p_deal is not null and s.deal_ar = ''إيجار''
                and s.price_annual is not null and s.price_annual > 0
                and s.price_annual >= coalesce(p_price_min,0)*(case when p_rent_period=''شهري'' then 12 else 1 end)
@@ -169,4 +185,4 @@ AS $function$ select E'
       and (p_rating_min is null or s.rating >= p_rating_min)
       and (p_reviews_min is null or s.reviews_count >= p_reviews_min)
       and (p_unit_subtypes is null or cardinality(p_unit_subtypes) = 0 or s.unit_subtype_ar = any(p_unit_subtypes))
-'::text $function$
+' $function$
