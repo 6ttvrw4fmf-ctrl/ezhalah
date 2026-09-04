@@ -226,8 +226,20 @@ check('a city pick is confirmed by the field having COMMITTED, not by the click'
 check('the sweep runs on a schedule', /^\s*schedule:/m.test(wf) && /cron:/.test(wf));
 check('the scheduled target is production', /ezhalah-app\.vercel\.app/.test(wf));
 check('it runs the runner, not a subset', /node e2e\/live-sweep\/run\.mjs/.test(wf));
-check('it uses the anon key only (never the service role)',
-  /EXPO_PUBLIC_SUPABASE_ANON_KEY/.test(wf) && !/SERVICE_ROLE/.test(wf));
+// THE CREDENTIAL RULE IS ABOUT THE BROWSER JOB — it drives production and logs everything it sees,
+// so it gets the anon key and nothing else. This was written as a whole-FILE regex when the
+// workflow had exactly one job. Since 2026-09-04 it also carries a tiny `alert:` job that writes
+// this run's pass/fail into alert_event, and mon_raise requires the service role (issue #1349: a
+// scheduled check that fails silently protects nothing). Scoping the assertion to the sweep job is
+// not a loosening — the second check below is new, and pins that NO other job may hold that key, so
+// the credential still cannot spread anywhere it was previously excluded from. Both fail CLOSED: a
+// renamed or deleted job yields an empty block and the assertion goes red.
+const jobBlock = (name: string) =>
+  wf.split(new RegExp(`^  ${name}:$`, 'm'))[1]?.split(/^  [\w-]+:$/m)[0] ?? '';
+check('the sweep job uses the anon key only (never the service role)',
+  /EXPO_PUBLIC_SUPABASE_ANON_KEY/.test(jobBlock('sweep')) && !/SERVICE_ROLE/.test(jobBlock('sweep')));
+check('only the alert-bridge job may hold the service role',
+  !/SERVICE_ROLE/.test(wf.replace(jobBlock('alert'), '\n')));
 check('rotation is driven by the coverage ledger, not a hardcoded city list',
   /ops_qa_sweep_plan/.test(sweep) && /stalestFirst/.test(runner));
 check('the city pool is discovered LIVE (a hardcoded list would go stale)',

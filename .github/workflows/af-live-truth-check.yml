@@ -408,6 +408,10 @@ jobs:
     if: always()
     needs: [af-truth, af-surface-region, af-surface-city, af-card-state, af-matrix]
     steps:
+      # The bridge step below runs a script from the repo, so this job needs a checkout of its own —
+      # it previously had none, because asserting over `needs` requires nothing on disk.
+      - uses: actions/checkout@v4
+
       - name: Refuse to report a clean run when a job was cancelled, skipped or failed
         env:
           RESULTS: ${{ toJSON(needs) }}
@@ -431,3 +435,22 @@ jobs:
             exit 1
           fi
           echo "all $n live AF/Trending jobs concluded success"
+
+      # This workflow is the only live check that was still able to fail silently (2026-09-04): 9 AF
+      # journeys going red notified nobody. It is also the one that matters most on a deploy day —
+      # it chains off a successful production deploy, and for 11 consecutive deploys reported as
+      # `failure` (a shell defect in the post-deploy bundle gate, fixed in this same change) it never
+      # ran at all. Hooked to the ATTENDANCE job on purpose: attendance already computes the
+      # aggregate verdict across all five jobs, so a green shard cannot resolve an alert that a red
+      # sibling just raised.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind af_live_check_failed
+          --workflow af-live-truth-check.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
