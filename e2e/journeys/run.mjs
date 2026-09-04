@@ -1461,7 +1461,7 @@ JOURNEYS['adv-crosstab-no-clobber'] = async (mobile) => withPage(
       pass(name, `the deletion held and the first tab kept its own change (disk [${ids(final)}], starred [${flagged}])`);
     }
   }
-  if (bag.pageErrors.length) defect(name, 'page error during the cross-tab race', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the cross-tab race', errs.join(' | ')); }
   await tabB.close().catch(() => {});
 });
 
