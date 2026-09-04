@@ -1,5 +1,12 @@
-254baca613ef5e09cb715c7ff2011e4dcd5d0fd7
+57dd41e0fa0688883c9e21622a2895a26f51dd55
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
+# 2026-09-04  57dd41e  deployed via .github/workflows/deploy-frontend.yml run 33898889593.
+#   Recorded BY PR, not by the deploy: the runner has no git identity, so safe-deploy.sh's
+#   `git commit` failed on «Author identity unknown» and its old else-branch reported that as
+#   «baseline unchanged (no diff)» — which is why this file sat on 254baca since PR #1470.
+#   The deploy itself is verified: ezhalah-app.vercel.app serves
+#   _expo/static/js/web/entry-2cb5e91d2daebdff29c78bb857e259da.js, md5(bytes) == that filename,
+#   and the alias/bundle gate (#1648) passed on it. The message is fixed in the same PR.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
 # safe-deploy.sh advances this to the newly-deployed SHA after every successful production deploy.
