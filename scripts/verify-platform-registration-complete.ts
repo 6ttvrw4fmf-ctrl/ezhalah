@@ -148,7 +148,8 @@ const lifted = await liftSymbols(join(ROOT, 'src/data/remote.ts'), [
   { header: 'const MONTHLY_ONLY_TABLE = ', endsWith: /;$/ },
   { header: 'const RES_TABLES = ', endsWith: /;$/ },
   { header: 'const COM_TABLES = ', endsWith: /;$/ },
-], ['RES_TABLES', 'COM_TABLES']);
+  { header: 'const DEEPLINK_TABLES = [', endsWith: /^\];$/ },
+], ['SEARCHABLE_TABLES', 'RES_TABLES', 'COM_TABLES', 'DEEPLINK_TABLES']);
 const resTables = new Set(lifted.RES_TABLES as string[]);
 const comTables = new Set(lifted.COM_TABLES as string[]);
 check('RES_TABLES / COM_TABLES executed out of remote.ts', resTables.size > 25 && comTables.size > 25,
@@ -181,14 +182,19 @@ for (const t of resTables) {
   check(`${slug}: db.py has both upsert helpers`, hasUpsert('residential') && hasUpsert('commercial'));
 }
 
-// The single-listing by-id lookup walks its own table list; a platform missing there cannot be
-// reopened from a shared/saved link even though it is fully searchable.
-const byIdStart = remoteSrc.indexOf('for (const table of [');
-const byIdBlock = remoteSrc.slice(byIdStart, remoteSrc.indexOf(']', byIdStart));
-for (const t of resTables) {
-  const slug = slugOf(t);
-  if (MONTHLY_ONLY.has(slug)) continue;
-  check(`${slug}: present in the by-id lookup list`, byIdBlock.includes(`'${slug}_residential_listings'`));
+// The single-listing by-id lookup: a platform missing there cannot be reopened from a shared or
+// saved link even though it is fully searchable.
+//
+// EXECUTED, and NO LONGER SKIPPING THE MONTHLY-ONLY SOURCES (2026-09-04). This used to slice the
+// literal out of `for (const table of [` and text-match slugs in it, with `MONTHLY_ONLY` skipped —
+// so the one platform actually missing from that list, aqarmonthly, was the one platform this check
+// deliberately did not ask about. (gathern_commercial_listings was missing too.) The list is now
+// DEEPLINK_TABLES, derived from the same SEARCHABLE_TABLES inventory, so ask the real question of
+// the real value: every searchable table must be resolvable by id, monthly-only sources included.
+const deeplink = new Set(lifted.DEEPLINK_TABLES as string[]);
+check('DEEPLINK_TABLES executed out of remote.ts', deeplink.size > 50, `got ${deeplink.size}`);
+for (const t of (lifted.SEARCHABLE_TABLES as string[])) {
+  check(`${t}: resolvable by id (in DEEPLINK_TABLES)`, deeplink.has(t));
 }
 
 console.log(failed === 0
