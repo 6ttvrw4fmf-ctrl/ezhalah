@@ -909,12 +909,21 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
 // type total.
 export async function fetchScopeOptionCounts(
   candidates: { key: string; query: SearchQuery }[],
-): Promise<Record<string, number> | null> {
+): Promise<Record<string, number | null> | null> {
   if (!supabase || !candidates.length) return null;
-  const out: Record<string, number> = {};
-  await Promise.all(candidates.map(async ({ key, query }) => {
+  // UNKNOWN IS NOT NO — for SCOPE options too (owner rule 2026-09-04). This used to `return` on a
+  // timeout/error, leaving the key ABSENT, and scopeQuestionOptions() then dropped the option from the
+  // card as if the taxonomy branch did not exist. Reproduced live 2026-09-04 (Riyadh / Buy / apartments
+  // group, 21,892): the two largest types — شقة ~10.6k and دور ~9.7k — are the two SLOWEST counts, so
+  // under load they were the ones that vanished while غرفة=1 and عمارة سكنية=1,554 stayed; the user's
+  // real answer was not on the card, they continued, the type stayed unresolved, the cohort
+  // intersection was empty, and the interview dumped the whole group. Now: every candidate that fails
+  // is retried ONCE (bounded, never a poll), and anything still undetermined is returned as `null` —
+  // a real option with no number — never omitted and never 0.
+  const out: Record<string, number | null> = {};
+  const probe = async ({ key, query }: { key: string; query: SearchQuery }): Promise<number | null> => {
     const scope = await resolveSearchScope(query);
-    if (!scope) return;                            // unresolvable scope → absent key, never a fake 0
+    if (!scope) return null;                       // unresolvable scope → UNKNOWN, never a fake 0
     const { isBroadCommercial, ...scopeParams } = scope;
     const result = await withTimeout(
       supabase!.rpc('location_search_candidates_ar', {
@@ -929,13 +938,16 @@ export async function fetchScopeOptionCounts(
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
-    if ('timedOut' in result) return;              // absent key → the option is dropped, never shown as 0
+    if ('timedOut' in result) return null;         // UNKNOWN — the caller retries once, then keeps null
     const { data, error } = result;
-    if (error) return;
-    out[key] = data && (data as { total_count: number }[]).length
+    if (error) return null;                        // UNKNOWN — transport/DB error is not an answer
+    return data && (data as { total_count: number }[]).length
       ? Number((data as { total_count: number }[])[0].total_count) || 0
       : 0;                                         // empty result set = an honest zero
-  }));
+  };
+  await Promise.all(candidates.map(async (c) => { out[c.key] = await probe(c); }));
+  const failed = candidates.filter((c) => out[c.key] == null);
+  if (failed.length) await Promise.all(failed.map(async (c) => { out[c.key] = await probe(c); }));
   return out;
 }
 

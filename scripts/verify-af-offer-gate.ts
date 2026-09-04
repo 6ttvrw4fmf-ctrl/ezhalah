@@ -76,33 +76,36 @@ check(`MEANINGFUL_NARROWING_FRACTION is the owner's 10% (got ${MEANINGFUL_NARROW
   'src/lib/afRanking.ts — the owner set this threshold on 2026-08-24 and extended it to the ask gate '
   + 'on 2026-08-25; changing it needs their decision');
 
-check(`INTERVIEW_STOP_AT is still 25 (got ${INTERVIEW_STOP_AT}) — the owner chose 25 over 30`,
-  INTERVIEW_STOP_AT === 25,
-  'src/lib/afRanking.ts — the round target and this gate\'s "finishes the job" clause both hang off it');
+check(`INTERVIEW_STOP_AT is 50 (got ${INTERVIEW_STOP_AT}) — owner product rule 2026-09-04 (was 25)`,
+  INTERVIEW_STOP_AT === 50,
+  'src/lib/afRanking.ts — the round target and this gate\'s "finishes the job" clause both hang off it; '
+  + 'above 50 rounds continue while truthful questions remain, at ≤50 the interview finishes and reveals all');
 
 // "Example at N=50: an option yielding <=45 qualifies; one yielding 47 does not." Exactly 10% must
 // qualify — the boundary is `>=`, so 50→45 is the last qualifying answer, not the first rejected one.
-check('N=50, best option yields 45 (exactly 10% removed) ⇒ OFFERED',
-  offersMeaningfulNarrowing(50, opts(45, 49)) === true,
+// (Owner's original worked example was at N=50 with a 25 target; re-expressed at N=100 for the 50
+// target — same inclusive 10% boundary: 100→90 is the last qualifying answer, 100→94 is not.)
+check('N=100, best option yields 90 (exactly 10% removed) ⇒ OFFERED',
+  offersMeaningfulNarrowing(100, opts(90, 99)) === true,
   'the 10% boundary is inclusive; a `>` here would silently drop the owner\'s own worked example');
-check('N=50, best option yields 47 (6% removed) ⇒ HIDDEN — a round that moves 50→47 is not worth a tap',
-  offersMeaningfulNarrowing(50, opts(47, 49)) === false);
+check('N=100, best option yields 94 (6% removed) ⇒ HIDDEN — a round that moves 100→94 is not worth a tap',
+  offersMeaningfulNarrowing(100, opts(94, 99)) === false);
 
 // "Example at N=27: an option yielding 24 qualifies" — it both clears 10% and finishes the job.
-check('N=27, best option yields 24 ⇒ OFFERED',
-  offersMeaningfulNarrowing(27, opts(24)) === true);
+check('N=52, best option yields 49 ⇒ OFFERED',
+  offersMeaningfulNarrowing(52, opts(49)) === true);
 
 // THE SECOND CLAUSE ALONE. 26→25 removes 3.8% — well under the fraction — but it lands AT the target,
 // which is the entire point of the round. Only 26/27-sized sets can isolate this clause, which is
 // exactly why it is easy to delete by accident.
-check('N=26, best option yields 25 (only 3.8% removed, but it lands AT the ≤25 target) ⇒ OFFERED',
-  offersMeaningfulNarrowing(26, opts(25)) === true,
+check('N=51, best option yields 50 (only 2% removed, but it lands AT the ≤50 target) ⇒ OFFERED',
+  offersMeaningfulNarrowing(51, opts(50)) === true,
   'the `|| o.count <= INTERVIEW_STOP_AT` clause: finishing the job always qualifies, however small the step');
 
 // ── 2. The gate's own floor and its no-op guard ──────────────────────────────────────────────────
 check('at exactly INTERVIEW_STOP_AT results nothing is ever offered, however good the option',
-  offersMeaningfulNarrowing(25, opts(1)) === false,
-  'the ≤25 hide is `total <= INTERVIEW_STOP_AT`; a `<` would offer a round on an already-finished set');
+  offersMeaningfulNarrowing(50, opts(1)) === false,
+  'the ≤50 hide is `total <= INTERVIEW_STOP_AT`; a `<` would offer a round on an already-finished set');
 check('below the target either — the button is gone, only «عرض المزيد» remains',
   offersMeaningfulNarrowing(10, opts(1)) === false);
 check('a no-op option (count === total, 100% of the set already has it) never earns an offer',
@@ -172,8 +175,8 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   const ask = bodyOf('scoreQuestion');
   const offer = bodyOf('offersMeaningfulNarrowing');
 
-  check('scoreQuestion() gates inclusion on the SHARED predicate and nothing else',
-    ask.includes('result.options.filter((o) => optionNarrowsMeaningfully(o.count, N))'),
+  check('scoreQuestion() gates inclusion on the SHARED predicate and nothing else (an UNKNOWN count is skipped, never scored)',
+    ask.includes('result.options.filter((o) => o.count != null && optionNarrowsMeaningfully(o.count, N))'),
     'src/lib/afRanking.ts — this call IS the owner\'s 2026-08-25 rule');
   check('offersMeaningfulNarrowing() calls that same predicate rather than its own copy',
     /optionNarrowsMeaningfully\(o\.count, total\)/.test(offer),
@@ -218,6 +221,14 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   // overlay it would be the auto-popup under a new name. The next round is ALWAYS a manual tap.
   const probeFrom = agent.indexOf('const afProbedRef');
   const probe = probeFrom < 0 ? '' : agent.slice(probeFrom, agent.indexOf('}, [lastResultsMsg', probeFrom));
+  // The tier WALK + the ranked assessment moved into ONE shared function, `assessNarrowing` (owner
+  // 2026-09-04), so the offer button and the automatic round continuation can never disagree. The
+  // structural pins below read THAT body; the effect itself must route through it.
+  const assessFrom = agent.indexOf('const assessNarrowing = async');
+  const assess = assessFrom < 0 ? '' : agent.slice(assessFrom, agent.indexOf('const afProbedRef', assessFrom));
+  check('the offer effect routes through the ONE shared assessment (assessNarrowing), not a private walk',
+    assessFrom >= 0 && /void assessNarrowing\(q, asked\)/.test(probe),
+    'src/app/agent.tsx — two walks drift; the button must promise exactly the round that finishGuided would continue');
   check('the offer probe exists and only records a verdict (setAfCanNarrow)',
     probeFrom >= 0 && probe.includes('setAfCanNarrow'),
     'src/app/agent.tsx — the probe must be findable for the ban below to mean anything');
@@ -243,29 +254,31 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   //    behavioural fixture is impossible here (agent.tsx cannot be rendered by a barrier), so each
   //    one is a precise read of the shipped shape and each was mutation-proven against this file.
   check('the probe no longer SHORT-CIRCUITS on a tier merely existing — that shape is banned',
-    !/if \(nextScopeTier\(.*\)\) \{ setAfCanNarrow/.test(probe),
+    !/if \(nextScopeTier\(.*\)\) \{ setAfCanNarrow/.test(probe) && !/if \(nextScopeTier\(.*\)\) return 'yes'/.test(assess),
     'src/app/agent.tsx offer probe — a tier that resolves to ≤1 option is AUTO-COMMITTED and walked '
     + 'past, so its existence never proves a round follows (الطائف/شهري/الاستراحات والريف, 43 matches)');
   check('…it RESOLVES each tier instead, against a scope it carries forward itself',
-    /nextScopeTier\(scoped, seen\)/.test(probe)
-    && /scopeQuestionFor\(tier\)\.resolveOptions\(scoped\)/.test(probe),
+    /nextScopeTier\(scoped, seen\)/.test(assess)
+    && /scopeQuestionFor\(tier\)\.resolveOptions\(scoped\)/.test(assess),
     'src/app/agent.tsx offer probe — resolving is the only way to know whether a tier is a real '
     + 'question or a scope the user already has');
   check('a tier with a REAL choice (more than one option) is what earns the offer',
-    /res\.options\.length > 1\) \{ offer\(true\); return; \}/.test(probe),
+    /if \(res\.options\.length > 1\) return 'yes';/.test(assess),
     'src/app/agent.tsx offer probe — `>= 1` would re-admit the auto-commit case this fix removed');
   check('a ≤1-option tier is AUTO-COMMITTED onto the local scope and the walk continues, exactly as presentGuided does',
-    /seen\.add\(tier\)/.test(probe)
-    && /scopeQuestionFor\(tier\)\.apply\(scoped, \[res\.options\[0\]\.key\]\)/.test(probe),
+    /seen\.add\(tier\)/.test(assess)
+    && /scopeQuestionFor\(tier\)\.apply\(scoped, \[res\.options\[0\]\.key\]\)/.test(assess),
     'src/app/agent.tsx offer probe — without the commit the probe ranks the advanced pool against an '
     + 'unresolved scope, which is empty BY CONSTRUCTION, and hides a button that would have worked');
-  check('UNKNOWN still never hardens into NO: an UNMEASURABLE tier keeps offering, only a MEASURED one may hide',
-    /if \(!res \|\| res\.total === 0\) \{ offer\(true\); return; \}/.test(probe),
+  check('UNKNOWN still never hardens into NO: an UNMEASURABLE tier is `unknown`, only a MEASURED one may say no',
+    /if \(!res \|\| res\.probeFailed\) return 'unknown';/.test(assess)
+    && /if \(ranked && !ranked\.probeFailed\) return 'no';/.test(assess)
+    && /verdict === 'yes'/.test(probe),
     'src/app/agent.tsx offer probe — a turn showing >INTERVIEW_STOP_AT matches cannot truthfully have '
     + 'an empty scope, so total===0 is a failed count RPC, not a fact (permanent fleet rule)');
   check('the advanced-pool rank runs against the RESOLVED scope and the walked asked-set',
-    /rankQuestions\(scoped, seen\)/.test(probe)
-    && /eligibleQuestions\(scoped\)\.filter\(\(qq\) => !seen\.has\(qq\.id\)\)/.test(probe),
+    /rankQuestions\(scoped, seen\)/.test(assess)
+    && /eligibleQuestions\(scoped\)\.some\(\(qq\) => !seen\.has\(qq\.id\)\)/.test(assess),
     'src/app/agent.tsx offer probe — ranking the RAW query would score every question against a scope '
     + 'the user has not picked yet and come back empty by construction');
   // COST: the walk costs real count RPCs, so it must stay ONE probe per turn and must never poll.
@@ -286,6 +299,6 @@ check('…and it earns an OFFER too — offer and ask agree on it',
 
 console.log(failures === 0
   ? '\n✓ one predicate, two gates: 10% (or landing at ≤25) both offers a round and admits a question;'
-    + ' small slices always ask; ≤25 stays 25; the next round is a tap\n'
+    + ' small slices always ask; ≤50 finishes; a further round continues only through the SAME assessment\n'
   : `\n✗ ${failures} check(s) FAILED — the AF offer/ask gates have drifted apart\n`);
 process.exit(failures === 0 ? 0 : 1);
