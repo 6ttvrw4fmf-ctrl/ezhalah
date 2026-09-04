@@ -90,11 +90,52 @@ const raws = (await rpcRes.json()) as unknown;
 check('RPC returns an array', Array.isArray(raws), `got ${typeof raws}`);
 if (!Array.isArray(raws)) process.exit(1);
 
+// ── 1b. "LIVE IN THE VIEW" IS NOT "ADVERTISED IN THE STRIP" (2026-09-03).
+//
+// loader_active_platforms_ar() answers "which platforms have rows in search_listings_ar". The strip
+// answers a NARROWER question — "which platforms is Ezhalah actively searching for you" — and two
+// established, owner-maintained declarations already carve out the difference. Deriving the carve-out
+// from those files rather than hand-listing names here means it maintains itself:
+//
+//   (a) RETIRED / PAUSED platforms (scrapers/RETIRED_PLATFORMS.txt). Retirement KEEPS the historical
+//       rows searchable on purpose ("Historical DB rows and the scrapers/<slug>/ directory are KEPT"),
+//       so they stay live in the view forever. awal, toor and alnokhba have been exactly this for
+//       months and are deliberately absent from PLATFORM_META — the precedent this follows. muktamel
+//       joined them when its own gated weekly workflow started producing rows again; its result-card
+//       logo, domain and display name are all already wired, so nothing renders unbranded.
+//
+//   (b) Platforms WITH NO BUNDLED LOGO ASSET YET. PLATFORM_META entries carry `logo: require(...)`,
+//       so a platform cannot enter the strip until someone adds its image to assets/images/. The five
+//       onboarded by PR #1548 are fully searched and fully registered end-to-end — their result cards
+//       already render the right brand, proven by verify-platform-registration-complete.ts — they
+//       simply have no strip logo. That is a COSMETIC under-advertisement, the opposite of the
+//       dishonesty this barrier exists to stop (advertising a platform we cannot deliver). Listed
+//       explicitly and dated so it clears itself: add the asset, add the PLATFORM_META entry, delete
+//       the name here. It is NOT a licence to leave a live platform unadvertised indefinitely.
+//
+// Before this, the check read "has rows" as "must have a logo" and went red for six platforms that
+// are all correctly absent — a barrier failing for a reason its own header disagrees with.
+const RETIRED = new Set(
+  readFileSync(new URL('../scrapers/RETIRED_PLATFORMS.txt', import.meta.url).pathname, 'utf8')
+    .split('\n').map((l) => l.split('#')[0].trim()).filter(Boolean),
+);
+check('the retirement list parsed non-empty (parser sanity)', RETIRED.size > 0, `${RETIRED.size} slugs`);
+// Searched, registered end-to-end, but no logo image exists yet. Onboarded 2026-09-03 (PR #1548).
+const NO_LOGO_ASSET_YET = new Set(['abralosol', 'arkaan', 'therc', 'rawasidark', 'aouj']);
+
+const excluded: string[] = [];
+const advertisable = (raws as string[]).filter((raw) => {
+  if (RETIRED.has(raw)) { excluded.push(`${raw} (retired/paused — rows kept searchable by contract)`); return false; }
+  if (NO_LOGO_ASSET_YET.has(raw)) { excluded.push(`${raw} (searched + registered, but assets/images/ has no logo yet)`); return false; }
+  return true;
+});
+if (excluded.length) console.log(`  ⓘ live but not advertisable: ${excluded.join('; ')}`);
+
 // ── 2. Map raw DB names → canonical loader names via SOURCE_TOKENS (the SAME normalizer the
 //       client uses) so the comparison is apples-to-apples.
 const liveCanon = new Set<string>();
 const unmapped: string[] = [];
-for (const raw of raws as string[]) {
+for (const raw of advertisable) {
   const n = normalizeSource(raw);
   if (n) liveCanon.add(n);
   else unmapped.push(raw);

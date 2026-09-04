@@ -31,6 +31,14 @@ DIRECT_REVISIT = "DIRECT_REVISIT"
 CANDIDATE_PLUS_DIRECT = "CANDIDATE_PLUS_DIRECT"
 CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 
+# REGISTERED IS NOT THE SAME AS SEARCHABLE (2026-09-03). abralosol, aouj, arkaan, rawasidark and
+# therc have 4,314 production_ready rows live in search_listings_ar and rows in
+# ops_liveness_registry (migration 20260903042707), so MONITORING must know their strategy — a live
+# row nothing grades is exactly the blind spot this registry exists to remove. They are deliberately
+# NOT in the client's RES_TABLES/COM_TABLES and no search can return them yet: district
+# canonicalization, af_platform_mapping and a SOURCE_TOKENS entry are still missing per platform.
+# Their unreachability is declared and counted by scripts/verify-every-live-table-is-searchable.ts.
+#
 # Platforms that exist in scrapers/ but are NOT production-searchable, so they need no policy.
 # Kept in sync with scrapers/RETIRED_PLATFORMS.txt + the paused/gated ones.
 NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "muktamel", "awal", "deal", "common"})
@@ -96,10 +104,10 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abeea", "aldarim", "alhoshan", "alkhaas", "aqaratikom", "aqarcity", "aqargate",
-            "aqarmonthly", "eaqartabuk", "eastabha", "erapulse", "fursaghyr", "hajer", "jazwtn",
-            "jurash", "mizlaj", "mustqr", "nowaisiry", "october", "raghdan", "ramzalqasim",
-            "sadin", "sanadak", "satel", "souq24",
+            "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "aouj", "aqaratikom",
+            "aqarcity", "aqargate", "aqarmonthly", "arkaan", "eaqartabuk", "eastabha", "erapulse",
+            "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "mustqr", "nowaisiry", "october",
+            "raghdan", "ramzalqasim", "rawasidark", "sadin", "sanadak", "satel", "souq24", "therc",
         )
     },
 }
