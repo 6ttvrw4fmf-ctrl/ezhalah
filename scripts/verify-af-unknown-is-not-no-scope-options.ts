@@ -92,15 +92,17 @@ const feeder = fnFrom >= 0 && fnTo > fnFrom ? remote.slice(fnFrom, fnTo) : '';
 check('fetchScopeOptionCounts exists and is typed Record<string, number | null> (UNKNOWN is representable)',
   feeder.includes('Promise<Record<string, number | null> | null>'),
   'src/data/remote.ts — a number-only map cannot say "unknown", so it must drop or lie');
-check('a timeout returns null (UNKNOWN) — the bare `if (\'timedOut\' in result) return;` drop is gone from this function',
-  /if \('timedOut' in result\) return null;/.test(feeder) && !/if \('timedOut' in result\) return;/.test(feeder));
-check('an RPC error returns null (UNKNOWN), never a silent omission',
-  /if \(error\) return null;/.test(feeder) && !/if \(error\) return;/.test(feeder));
-check('every candidate is written to the map (out[c.key] = await probe(c)) — no key can be absent',
-  /out\[c\.key\] = await probe\(c\)/.test(feeder));
+check('a timeout is the repo\'s PROBE_FAILED sentinel inside the feeder — the bare `return;` drop is gone, and it is never `null` (null = "the source answered" everywhere else)',
+  /if \('timedOut' in result\) return PROBE_FAILED;/.test(feeder) && !/if \('timedOut' in result\) return;/.test(feeder) && !/if \('timedOut' in result\) return null;/.test(feeder));
+check('an RPC error is PROBE_FAILED too, never a silent omission',
+  /if \(error\) return PROBE_FAILED;/.test(feeder) && !/if \(error\) return;/.test(feeder));
+check('every candidate is written to the raw map (raw[c.key] = await probe(c)) — no key can be absent',
+  /raw\[c\.key\] = await probe\(c\)/.test(feeder));
 check('failed candidates are retried exactly ONCE (bounded — never a poll)',
-  /const failed = candidates\.filter\(\(c\) => out\[c\.key\] == null\);/.test(feeder)
+  /const failed = candidates\.filter\(\(c\) => isProbeFailure\(raw\[c\.key\]\)\);/.test(feeder)
   && (feeder.match(/await Promise\.all\(/g) ?? []).length === 2);
+check('at the boundary a still-failed probe becomes null for the pure builder (UNKNOWN), a measured count passes through',
+  /out\[c\.key\] = isProbeFailure\(raw\[c\.key\]\) \? null : \(raw\[c\.key\] as number\);/.test(feeder));
 
 // ── 5. The consumer: scopeQuestionOptions uses the REAL pure builder, not a private copy ─────────
 const adv = stripComments(read('src/data/advancedFilters.ts'));
