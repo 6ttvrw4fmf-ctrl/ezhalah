@@ -244,7 +244,13 @@ export function ResultCard({
             USED to derive the rate as round(total/area) a later gate could null the total and leave
             a 0 behind — which rendered «سعر المتر ر.س 0» on 5 live dealapp cards (found 2026-07-26,
             scrapers fixed in PR#218). `> 1` withholds 0 and negatives as well as the placeholder. */}
-        {listing.price === 'Price on request'
+        {/* DERIVED-TOTAL ROWS KEEP THEIR SOURCE RATE (owner rule 2026-09-03). When the total shown
+            above is OUR per-metre x area arithmetic, the advertiser's own per-metre figure must stay
+            on the card — it is the only source-published price the listing has, and it is what the
+            derived total is accountable to. Without `|| listing.priceIsDerived` this line vanished
+            the moment the row stopped saying «السعر عند الطلب», hiding the source value behind a
+            number we computed. */}
+        {(listing.price === 'Price on request' || listing.priceIsDerived)
           && listing.pricePerMeter != null
           && listing.pricePerMeter > 1 ? (
           <Text style={card.pricePerMeter} numberOfLines={1}>
@@ -254,6 +260,14 @@ export function ResultCard({
                 the one thing this element must never be mistaken for. The unit now travels with the
                 number, so a rate can never be misread as the price of the property. */}
             {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{Number(listing.pricePerMeter).toLocaleString('en-US')} {t('SAR/m²')}</Text>
+          </Text>
+        ) : null}
+        {/* TRUTHFULNESS: a derived total is arithmetic, not an advertised price, and must say so.
+            The figure above already carries '≈'; this states plainly where it came from, so nobody
+            reads it as a number the seller published. (owner rule 2026-09-03) */}
+        {listing.priceIsDerived ? (
+          <Text style={card.derivedTotalNote} numberOfLines={1}>
+            {t('Calculated from price per m² × area — not published by the source')}
           </Text>
         ) : null}
         {/* Guest rating — renders ONLY when the listing carries one (Gathern). e.g. ★ 9.9 (59 تقييم) */}
@@ -541,7 +555,18 @@ function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (
 }
 
 function SourceBadge({ source }: { source: string }) {
-  const s = source.toLowerCase();
+  // SPACING IS NOT IDENTITY (production defect, 2026-09-04). Every branch below tests a closed-up
+  // slug, but the DB `source` value is a human brand string that often carries SPACES: production
+  // stores 'Abr Alosol', 'THE RC' and 'Rawasi Dark', so `includes('abralosol' | 'therc' |
+  // 'rawasidark')` all missed and 3,165 live listings fell through to the Aqar fallback below —
+  // Aqar's name, Aqar's logo, and a click-through to sa.aqar.fm on another company's listing. Same
+  // trap that hit 'Al Khaas' and 'Al Nokhba', which were each patched one-off with an extra alias.
+  // Searching BOTH the raw string and a space-stripped copy retires the whole class instead of the
+  // next instance of it: a spaced brand and its slug now match the same branch, and the existing
+  // spaced tokens ('al khaas') keep working because the raw form is still in the haystack. The '|'
+  // separator cannot appear in any token, so nothing can match across the join.
+  const raw = source.toLowerCase();
+  const s = raw + '|' + raw.replace(/\s+/g, '');
   if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('aldarim')) return <Image source={ALDARIM_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('aqargate')) return <Image source={AQARGATE_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -570,7 +595,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('al khaas') || s.includes('alkhaas')) return <Image source={ALKHAAS_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('abeea')) return <Image source={ABEEA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('jurash')) return <Image source={JURASH_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alnokhba')) return <Image source={ALNOKHBA_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('al nokhba') || s.includes('alnokhba')) return <Image source={ALNOKHBA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('gathern')) return <Image source={GATHERN_LOGO} style={card.hostBadge} contentFit="contain" />;
   // 2026-06 batch — text-chips until the user supplies logos.
   if (s.includes('deal')) return <Image source={DEALAPP_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -578,6 +603,11 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('pulse')) return <Image source={ERAPULSE_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('nowaisiry')) return <Image source={NOWAISIRY_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('october')) return <Image source={OCTOBER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('therc')) return <View style={[card.hostBadge, card.thercBadge]}><Text style={card.badgeText}>الخيار الصحيح</Text></View>;
+  if (s.includes('aouj')) return <View style={[card.hostBadge, card.aoujBadge]}><Text style={card.badgeText}>عوج</Text></View>;
+  if (s.includes('abralosol')) return <View style={[card.hostBadge, card.abralosolBadge]}><Text style={card.badgeText}>عبر الأصول</Text></View>;
+  if (s.includes('arkaan')) return <View style={[card.hostBadge, card.arkaanBadge]}><Text style={card.badgeText}>أركان</Text></View>;
+  if (s.includes('rawasidark')) return <View style={[card.hostBadge, card.rawasidarkBadge]}><Text style={card.badgeText}>رواسي دارك</Text></View>;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -585,7 +615,18 @@ function SourceBadge({ source }: { source: string }) {
 // to src/lib/listingDisplay.ts, owner 2026-08-22, so Read Aloud shares the exact same platform-name
 // mapping instead of a second copy that could drift.)
 function sourceHost(source: string): string {
-  const s = source.toLowerCase();
+  // SPACING IS NOT IDENTITY (production defect, 2026-09-04). Every branch below tests a closed-up
+  // slug, but the DB `source` value is a human brand string that often carries SPACES: production
+  // stores 'Abr Alosol', 'THE RC' and 'Rawasi Dark', so `includes('abralosol' | 'therc' |
+  // 'rawasidark')` all missed and 3,165 live listings fell through to the Aqar fallback below —
+  // Aqar's name, Aqar's logo, and a click-through to sa.aqar.fm on another company's listing. Same
+  // trap that hit 'Al Khaas' and 'Al Nokhba', which were each patched one-off with an extra alias.
+  // Searching BOTH the raw string and a space-stripped copy retires the whole class instead of the
+  // next instance of it: a spaced brand and its slug now match the same branch, and the existing
+  // spaced tokens ('al khaas') keep working because the raw form is still in the haystack. The '|'
+  // separator cannot appear in any token, so nothing can match across the join.
+  const raw = source.toLowerCase();
+  const s = raw + '|' + raw.replace(/\s+/g, '');
   if (s.includes('wasalt')) return 'wasalt.sa';
   if (s.includes('aldarim')) return 'aldarim.sa';
   if (s.includes('aqargate')) return 'aqargate.com';
@@ -615,13 +656,18 @@ function sourceHost(source: string): string {
   if (s.includes('al khaas') || s.includes('alkhaas')) return 'alkhaas.net';
   if (s.includes('abeea')) return 'abeea.com.sa';
   if (s.includes('jurash')) return 'jurash.sa';
-  if (s.includes('alnokhba')) return 'alnokhba-services.com';
+  if (s.includes('al nokhba') || s.includes('alnokhba')) return 'alnokhba-services.com';
   if (s.includes('gathern')) return 'gathern.co';
   if (s.includes('deal')) return 'dealapp.sa';
   if (s.includes('souq')) return '24.com.sa';
   if (s.includes('pulse')) return 'erapulse.sa';
   if (s.includes('nowaisiry')) return 'alnowaisiry.com';
   if (s.includes('october')) return '1october.com.sa';
+  if (s.includes('therc')) return 'therc.sa';
+  if (s.includes('aouj')) return 'aoujestates.com';
+  if (s.includes('abralosol')) return 'abralosol.com';
+  if (s.includes('arkaan')) return 'arkaanalaqar.com';
+  if (s.includes('rawasidark')) return 'rawasi-dark.com';
   return 'sa.aqar.fm';
 }
 
@@ -743,6 +789,7 @@ const card = StyleSheet.create({
   // Source-published «سعر المتر» subline, rendered directly under the price line on listings that
   // have no total price. Deliberately quieter than `price` (muted, smaller) so it reads as
   // supporting information the source happened to publish, never as the listing's headline price.
+  derivedTotalNote: { fontSize: 10.5, color: colors.muted, marginTop: 2, textAlign: 'right' },
   pricePerMeter: { fontSize: 11.5, color: colors.muted, fontWeight: '500', marginTop: 2 },
   pricePerMeterStrong: { fontWeight: '700', color: colors.ink },
 
@@ -782,6 +829,11 @@ const card = StyleSheet.create({
   // 48×48 with a touch of internal padding feels right after the logo normalizer
   // (each logo file now has identical 6% built-in margin, so they all visually fill).
   hostBadge: { width: 48, height: 48 },
+  thercBadge: { borderRadius: 8, backgroundColor: '#1f5f8b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  aoujBadge: { borderRadius: 8, backgroundColor: '#8b5a1f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  abralosolBadge: { borderRadius: 8, backgroundColor: '#3f6b4a', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  arkaanBadge: { borderRadius: 8, backgroundColor: '#6b3a5f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  rawasidarkBadge: { borderRadius: 8, backgroundColor: '#2f5f6b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   aldarimBadge: { borderRadius: 8, backgroundColor: '#14506b', alignItems: 'center', justifyContent: 'center' },
   aqargateBadge: { borderRadius: 8, backgroundColor: '#0d6e63', alignItems: 'center', justifyContent: 'center' },
   hajerBadge: { borderRadius: 8, backgroundColor: '#6b4a2f', alignItems: 'center', justifyContent: 'center' },

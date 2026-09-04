@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
-import { listingPriceString, type Listing } from './listings';
+import { listingPriceString, isDerivedTotal, type Listing } from './listings';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -517,10 +517,86 @@ function dedupeInFlight<T>(cache: Map<string, Promise<T>>, key: string, run: () 
 }
 const inFlightDistrictCities = new Map<string, Promise<{ data: { city_ar: string; match_count: number }[] | null; error: unknown }>>();
 
-export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null> {
+export type SearchTableScope = Pick<SearchScope, 'p_tables' | 'p_tables2' | 'p_types2' | 'isBroadCommercial'>;
+
+// The TABLE half of a search's scope: which physical platform tables the results RPC reads, plus the
+// misfile-recovery second scope. Lifted out of resolveSearchScope — still its only other caller, so
+// there remains exactly ONE definition — because this half is PURE and SYNCHRONOUS. It needs none of
+// that function's async city resolution, so a COUNT surface can ask "which tables would the results
+// call read?" without paying for, or hand-copying, location resolution.
+//
+// WHY IT IS EXPORTED (production defect, 2026-09-03). top_cities_by_deal_ar was called with NO
+// p_tables while the results RPC was called WITH it. Five platforms went live in search_listings_ar
+// (abralosol/arkaan/therc/rawasidark/aouj, 4,314 production_ready rows) without being added to
+// RES_TABLES/COM_TABLES, and Trending immediately began counting inventory the results screen
+// excludes: measured live, الهفوف/أرض سكنية/بيع advertised 2,478 while search delivered 109.
+// Any count surface claiming to describe the search MUST scope itself through this — the
+// alternative, a second copy of the table lists, is the exact drift that caused the defect.
+// Returns null in precisely the case resolveSearchScope does: no readable table for this query.
+export function searchTableScope(q: SearchQuery): SearchTableScope | null {
   const tables = tablesFor(q);
   if (!tables.length) return null;
   const isBroadCommercial = q.category === 'Commercial' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
+
+  // HARDENING (owner PERMANENT rule 2026-07-16, merged from PR#86): always return the filtered set,
+  // even empty, rather than silently falling back to `tbls` unfiltered when the platform has no
+  // table in this particular scope (e.g. Gathern + Buy) — that fallback bug let a platform filter
+  // silently widen back to every platform.
+  const platformScope = (tbls: string[]): string[] => {
+    if (!(q.sources && q.sources.length)) return tbls;
+    const wanted = new Set(q.sources);
+    return tbls.filter((t) => wanted.has(t.replace(/_(residential|commercial)_listings$/, '')));
+  };
+  const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
+
+  const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
+  const resSel = effectiveTypes(q);
+  const resGroups = effectiveGroups(q);
+  // The selected clean type(s)/group(s) as type_ar labels. Used by BOTH misfile-recovery branches
+  // below, so it is not residential-specific despite where it was first needed.
+  const selectedTypeAr = resSel.length ? typeArForTypes(resSel) : (resGroups.length ? typeArForTypes(resGroups) : null);
+  const resMisfileTypes = isBroadResidential
+    ? RESIDENTIAL_TYPE_AR_COM
+    : (selectedTypeAr ? selectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
+  const resScopeBTables = platformScope(COM_TABLES.filter((t) => !mainTables.includes(t)));
+  const attachResScopeB = q.category === 'Residential' && !isBroadCommercial
+    && resMisfileTypes.length > 0 && resScopeBTables.length > 0;
+
+  // THE COMMERCIAL MIRROR (2026-08-29). FIX A above recovers Residential-macro rows misfiled into
+  // *_commercial_listings; the same misfile happens in the other direction and, until now, only the
+  // BROAD «فئة تجاري» search recovered it. Narrowing to a نوع made a matching listing DISAPPEAR:
+  // measured live on october_residential_listings:9618987 (محل / إيجار / سنوي / مكة المكرمة /
+  // حي بطحاء قريش) — «فئة تجاري» returned 7 including it, «فئة تجاري + نوع محل» returned 2 without
+  // it, and the same narrowed request with this scope returned 3, i.e. exactly the one misfiled row
+  // and nothing else. A narrower filter must never lose a listing the broader one returns.
+  //
+  // Scoped exactly like its mirror: the residential tables the main scope does not already read
+  // (مكتب's CleanQuery.extraTables already pulls in dealapp_residential, so that stays out), the
+  // SELECTED types only, and عمارة EXCLUDED via COMMERCIAL_TYPE_AR_RES — in a residential table
+  // عمارة is a Residential Building, so including it would leak apartment blocks into a Commercial
+  // search. resTables(q) rather than the bare constant, so the set is identical to the one the broad
+  // Commercial search scans: the narrow result is then a subset of the broad one by construction.
+  const comMisfileTypes = selectedTypeAr
+    ? selectedTypeAr.filter((t) => COMMERCIAL_TYPE_AR_RES.includes(t))
+    : [];
+  const comScopeBTables = platformScope(resTables(q).filter((t) => !mainTables.includes(t)));
+  const attachComScopeB = q.category === 'Commercial' && !isBroadCommercial
+    && comMisfileTypes.length > 0 && comScopeBTables.length > 0;
+
+  const scopeB = isBroadCommercial
+    ? { p_tables2: tables, p_types2: COMMERCIAL_TYPE_AR_COM }
+    : attachResScopeB
+      ? { p_tables2: resScopeBTables, p_types2: resMisfileTypes }
+      : attachComScopeB
+        ? { p_tables2: comScopeBTables, p_types2: comMisfileTypes }
+        : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
+
+  return { p_tables: mainTables, ...scopeB, isBroadCommercial };
+}
+
+export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null> {
+  const tableScope = searchTableScope(q);
+  if (!tableScope) return null;
 
   const lm = q.locationMatch;
   let cities: string[] | null = null;
@@ -583,59 +659,6 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   }
   if (lm?.kind === 'district' && !(q.districts && q.districts.length)) return null;
 
-  // HARDENING (owner PERMANENT rule 2026-07-16, merged from PR#86): always return the filtered set,
-  // even empty, rather than silently falling back to `tbls` unfiltered when the platform has no
-  // table in this particular scope (e.g. Gathern + Buy) — that fallback bug let a platform filter
-  // silently widen back to every platform.
-  const platformScope = (tbls: string[]): string[] => {
-    if (!(q.sources && q.sources.length)) return tbls;
-    const wanted = new Set(q.sources);
-    return tbls.filter((t) => wanted.has(t.replace(/_(residential|commercial)_listings$/, '')));
-  };
-  const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
-
-  const isBroadResidential = q.category === 'Residential' && !q.type && !(q.types && q.types.length) && !effectiveGroups(q).length;
-  const resSel = effectiveTypes(q);
-  const resGroups = effectiveGroups(q);
-  // The selected clean type(s)/group(s) as type_ar labels. Used by BOTH misfile-recovery branches
-  // below, so it is not residential-specific despite where it was first needed.
-  const selectedTypeAr = resSel.length ? typeArForTypes(resSel) : (resGroups.length ? typeArForTypes(resGroups) : null);
-  const resMisfileTypes = isBroadResidential
-    ? RESIDENTIAL_TYPE_AR_COM
-    : (selectedTypeAr ? selectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
-  const resScopeBTables = platformScope(COM_TABLES.filter((t) => !mainTables.includes(t)));
-  const attachResScopeB = q.category === 'Residential' && !isBroadCommercial
-    && resMisfileTypes.length > 0 && resScopeBTables.length > 0;
-
-  // THE COMMERCIAL MIRROR (2026-08-29). FIX A above recovers Residential-macro rows misfiled into
-  // *_commercial_listings; the same misfile happens in the other direction and, until now, only the
-  // BROAD «فئة تجاري» search recovered it. Narrowing to a نوع made a matching listing DISAPPEAR:
-  // measured live on october_residential_listings:9618987 (محل / إيجار / سنوي / مكة المكرمة /
-  // حي بطحاء قريش) — «فئة تجاري» returned 7 including it, «فئة تجاري + نوع محل» returned 2 without
-  // it, and the same narrowed request with this scope returned 3, i.e. exactly the one misfiled row
-  // and nothing else. A narrower filter must never lose a listing the broader one returns.
-  //
-  // Scoped exactly like its mirror: the residential tables the main scope does not already read
-  // (مكتب's CleanQuery.extraTables already pulls in dealapp_residential, so that stays out), the
-  // SELECTED types only, and عمارة EXCLUDED via COMMERCIAL_TYPE_AR_RES — in a residential table
-  // عمارة is a Residential Building, so including it would leak apartment blocks into a Commercial
-  // search. resTables(q) rather than the bare constant, so the set is identical to the one the broad
-  // Commercial search scans: the narrow result is then a subset of the broad one by construction.
-  const comMisfileTypes = selectedTypeAr
-    ? selectedTypeAr.filter((t) => COMMERCIAL_TYPE_AR_RES.includes(t))
-    : [];
-  const comScopeBTables = platformScope(resTables(q).filter((t) => !mainTables.includes(t)));
-  const attachComScopeB = q.category === 'Commercial' && !isBroadCommercial
-    && comMisfileTypes.length > 0 && comScopeBTables.length > 0;
-
-  const scopeB = isBroadCommercial
-    ? { p_tables2: tables, p_types2: COMMERCIAL_TYPE_AR_COM }
-    : attachResScopeB
-      ? { p_tables2: resScopeBTables, p_types2: resMisfileTypes }
-      : attachComScopeB
-        ? { p_tables2: comScopeBTables, p_types2: comMisfileTypes }
-        : { p_tables2: null as string[] | null, p_types2: null as string[] | null };
-
   return {
     // dealCombined (owner feature 2026-08-20, Filter شراء+إيجار both selected) → null, same as
     // bothDeals: af_eligibility_clause() treats p_deal IS NULL as Buy ∪ Rent(any period) — verified
@@ -644,7 +667,6 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     p_rent_period: rentPeriodParam(q),
     p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
-    p_tables: mainTables,
     p_platforms: q.sources && q.sources.length ? q.sources : null,
     p_region_ids: q.regionPin
       ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
@@ -655,8 +677,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     // age-bucket option-count RPC stays in exact parity with what Search actually returns. Uses
     // impliedCategory() (not raw q.category) — see its comment: closes the null-category leak.
     p_category: impliedCategory(q),
-    ...scopeB,
-    isBroadCommercial,
+    ...tableScope,
   };
 }
 
@@ -1086,8 +1107,8 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
 // to read — and because macro_category is decoupled from the physical table (Commercial Land lives in
 // RESIDENTIAL tables, etc.), cross-table types ('both' kinds) read both and the client filters by the
 // normalized macro. Gathern + Aqar Monthly are monthly-only RESIDENTIAL sources (no commercial table).
-const RES_TABLES = ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings', 'sanadak_residential_listings', 'eastabha_residential_listings', 'aqarcity_residential_listings', 'raghdan_residential_listings', 'eaqartabuk_residential_listings', 'satel_residential_listings', 'sadin_residential_listings', 'toor_residential_listings', 'mustqr_residential_listings', 'ramzalqasim_residential_listings', 'fursaghyr_residential_listings', 'jazwtn_residential_listings', 'mizlaj_residential_listings', 'muktamel_residential_listings', 'aqaratikom_residential_listings', 'awal_residential_listings', 'alkhaas_residential_listings', 'abeea_residential_listings', 'jurash_residential_listings', 'alnokhba_residential_listings', 'dealapp_residential_listings', 'erapulse_residential_listings', 'nowaisiry_residential_listings', 'october_residential_listings', 'souq24_residential_listings'];
-const COM_TABLES = ['aqar_commercial_listings', 'wasalt_commercial_listings', 'aldarim_commercial_listings', 'aqargate_commercial_listings', 'alhoshan_commercial_listings', 'hajer_commercial_listings', 'sanadak_commercial_listings', 'eastabha_commercial_listings', 'aqarcity_commercial_listings', 'raghdan_commercial_listings', 'eaqartabuk_commercial_listings', 'satel_commercial_listings', 'sadin_commercial_listings', 'toor_commercial_listings', 'mustqr_commercial_listings', 'ramzalqasim_commercial_listings', 'fursaghyr_commercial_listings', 'jazwtn_commercial_listings', 'mizlaj_commercial_listings', 'muktamel_commercial_listings', 'aqaratikom_commercial_listings', 'awal_commercial_listings', 'alkhaas_commercial_listings', 'abeea_commercial_listings', 'jurash_commercial_listings', 'alnokhba_commercial_listings', 'dealapp_commercial_listings', 'erapulse_commercial_listings', 'nowaisiry_commercial_listings', 'october_commercial_listings', 'souq24_commercial_listings'];
+const RES_TABLES = ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings', 'sanadak_residential_listings', 'eastabha_residential_listings', 'aqarcity_residential_listings', 'raghdan_residential_listings', 'eaqartabuk_residential_listings', 'satel_residential_listings', 'sadin_residential_listings', 'toor_residential_listings', 'mustqr_residential_listings', 'ramzalqasim_residential_listings', 'fursaghyr_residential_listings', 'jazwtn_residential_listings', 'mizlaj_residential_listings', 'muktamel_residential_listings', 'aqaratikom_residential_listings', 'awal_residential_listings', 'alkhaas_residential_listings', 'abeea_residential_listings', 'jurash_residential_listings', 'alnokhba_residential_listings', 'dealapp_residential_listings', 'erapulse_residential_listings', 'nowaisiry_residential_listings', 'october_residential_listings', 'souq24_residential_listings', 'therc_residential_listings', 'aouj_residential_listings', 'abralosol_residential_listings', 'arkaan_residential_listings', 'rawasidark_residential_listings'];
+const COM_TABLES = ['aqar_commercial_listings', 'wasalt_commercial_listings', 'aldarim_commercial_listings', 'aqargate_commercial_listings', 'alhoshan_commercial_listings', 'hajer_commercial_listings', 'sanadak_commercial_listings', 'eastabha_commercial_listings', 'aqarcity_commercial_listings', 'raghdan_commercial_listings', 'eaqartabuk_commercial_listings', 'satel_commercial_listings', 'sadin_commercial_listings', 'toor_commercial_listings', 'mustqr_commercial_listings', 'ramzalqasim_commercial_listings', 'fursaghyr_commercial_listings', 'jazwtn_commercial_listings', 'mizlaj_commercial_listings', 'muktamel_commercial_listings', 'aqaratikom_commercial_listings', 'awal_commercial_listings', 'alkhaas_commercial_listings', 'abeea_commercial_listings', 'jurash_commercial_listings', 'alnokhba_commercial_listings', 'dealapp_commercial_listings', 'erapulse_commercial_listings', 'nowaisiry_commercial_listings', 'october_commercial_listings', 'souq24_commercial_listings', 'therc_commercial_listings', 'aouj_commercial_listings', 'abralosol_commercial_listings', 'arkaan_commercial_listings', 'rawasidark_commercial_listings'];
 
 // Gathern + Aqar Monthly are MONTHLY-ONLY sources: every listing is a monthly rental. On a monthly
 // search we therefore include ALL their rows — even ones whose raw rent_period is null — because the
@@ -1686,6 +1707,11 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
     'nowaisiry_residential_listings', 'nowaisiry_commercial_listings',
     'october_residential_listings', 'october_commercial_listings',
     'souq24_residential_listings', 'souq24_commercial_listings',
+    'therc_residential_listings', 'therc_commercial_listings',
+    'aouj_residential_listings', 'aouj_commercial_listings',
+    'abralosol_residential_listings', 'abralosol_commercial_listings',
+    'arkaan_residential_listings', 'arkaan_commercial_listings',
+    'rawasidark_residential_listings', 'rawasidark_commercial_listings',
   ]) {
     const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).limit(1);
     if (error || !data || !data.length) continue;
@@ -1736,7 +1762,14 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // A genuinely MONTHLY rental → show its monthly figure (price_annual was stored as monthly×12, so
     // dividing back gives the exact monthly rent). Annual rentals keep the yearly figure. A rent row
     // whose source published NO period gets the bare figure with no suffix — see listingPriceString().
-    const priceStr = listingPriceString(deal, r.rent_period, r.price_annual, r.price_total);
+    // Per-metre-only SALE rows get a DERIVED total here, by the same rule the SQL generated
+    // column search_listings_ar.price_total_effective uses to decide budget matching — so a
+    // listing can never match a budget the card then fails to show. It renders with a '≈' and
+    // the card adds an explicit «محتسب من سعر المتر» note; the source per-metre figure is kept
+    // untouched in pricePerMeter below. (owner rule 2026-09-03)
+    const priceStr = listingPriceString(deal, r.rent_period, r.price_annual, r.price_total,
+                                        r.price_per_meter, r.area_m2);
+    const priceIsDerived = isDerivedTotal(deal, r.price_total, r.price_annual, r.price_per_meter, r.area_m2);
     // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
     // (villa-default.png, at one of a couple CDN sizes, sometimes with a corrupted trailing
     // backslash) as a literal photo_urls entry - filter it out so a listing with only this
@@ -1778,6 +1811,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // whether to SHOW it (and the «سعر المتر 1» placeholder rule) lives in ResultCard, so this
       // field always means "what the source published", nothing else.
       pricePerMeter: typeof r.price_per_meter === 'number' ? r.price_per_meter : null,
+      priceIsDerived,
       area: r.area_m2 ?? 0,
       beds: r.bedrooms ?? 0,
       // CRITICAL: source comes from the DB row, never hardcoded — the card's logo, "Hosted on X",

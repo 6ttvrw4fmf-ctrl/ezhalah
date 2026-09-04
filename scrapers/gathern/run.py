@@ -248,8 +248,53 @@ def fetch_cities(s: cc.Session) -> list[dict]:
     return []
 
 
-def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tuple[list[dict], dict]:
-    """One MONTHLY-mode search page. Retries flaky empty/non-JSON bodies (Gathern rate-limits)."""
+_REJECTS: list[dict] = []
+_REJECT_LIMIT = 6
+
+# gathern answers a rate limit with HTTP 400 and this message, not with 429 (observed live
+# 2026-09-03). Matched on the BODY so a genuinely malformed request is still treated as fatal.
+_THROTTLE_BODY_RE = re.compile(r"too\s+many\s+requests|rate\s*limit", re.I)
+
+
+def _is_throttle_body(body: str) -> bool:
+    return bool(_THROTTLE_BODY_RE.search(body or ""))
+
+
+def _record_reject(city_id: int, page: int, code: int, params: dict, body: str) -> None:
+    """Keep the first few rejections VERBATIM (bounded), so the API's own words are the evidence.
+
+    An error body is the source telling us exactly what it dislikes about our request. It is not
+    listing data and carries no PII, but it is bounded and passed through _redact() anyway — this
+    ends up in a CI log."""
+    if len(_REJECTS) >= _REJECT_LIMIT:
+        return
+    _REJECTS.append({
+        "city": city_id, "page": page, "code": code,
+        "params": dict(params),
+        "body": (_redact(re.sub(r"\s+", " ", body or "")) or "")[:400],
+    })
+
+
+def reject_report() -> str:
+    """One-line-per-rejection dump for the run log. Empty when nothing was rejected."""
+    return "\n".join(
+        f"  [reject] city={r['city']} page={r['page']} HTTP {r['code']} "
+        f"params={r['params']} body={r['body']}"
+        for r in _REJECTS)
+
+
+def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tuple[list[dict], dict, str]:
+    """One MONTHLY-mode search page. Retries flaky empty/non-JSON bodies (Gathern rate-limits).
+
+    Returns (items, meta, status) where status distinguishes the four outcomes that used to be one:
+    "ok" (items), "empty" (HTTP 200, valid JSON, zero items — a genuine end of catalogue),
+    "http_<code>" (a hard 4xx), and "exhausted" (retries used up: throttle, transport, non-JSON).
+
+    The status is the whole point. This function used to return a bare `[], {}` for BOTH "the source
+    has no more units" and "the source refused to answer", and crawl() then recorded a refused city
+    as «no monthly units» and moved on, while the run still reported ok=true. A platform that starts
+    rate-limiting therefore shrinks the crawl silently — the shape §10 exists to prevent ("never let
+    a scraper failure cascade") and the one every count-based barrier is blind to."""
     _throttle()
     params = {
         "lang": "ar", "city": city_id, "page": page,
@@ -263,13 +308,33 @@ def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tupl
         if r.status_code == 429 or r.status_code >= 500:
             time.sleep(3 * (attempt + 1)); continue
         if r.status_code != 200:
-            return [], {}  # a hard 4xx (not throttle) → no point retrying this page
+            # gathern signals THROTTLING WITH HTTP 400, not 429. Observed live 2026-09-03 (run
+            # 33816958296, shard 2): the rejected request is byte-for-byte the same shape as the
+            # ones that succeeded seconds earlier in the same shard —
+            #   params={'lang':'ar','city':1626,'page':2,'calendar_type':'monthly',
+            #           'check_in':'2026-09-04','check_out':'2026-10-04','has_available':'true'}
+            #   body={"success":false,"message":"Too many requests. Please try again later."}
+            # so there is no malformed parameter. Treating that as a permanent client error and
+            # giving up ("no point retrying") is what silently cost the crawl whole cities: the big
+            # cities early in a shard spend the budget (At Taif alone reads 33 pages) and every
+            # later city in that shard is refused.
+            #
+            # Discriminate on the BODY, never on the status alone: a genuinely malformed request
+            # must still fail fast rather than spin through the retry ladder.
+            if _is_throttle_body(getattr(r, "text", "")):
+                time.sleep(3 * (attempt + 1)); continue
+            # Capture the REJECTION ITSELF. Without the body and the exact params, the only way
+            # forward is guessing which parameter is wrong, and guessing at an unobserved request is
+            # how the sadin selector fix failed earlier today.
+            _record_reject(city_id, page, r.status_code, params, getattr(r, "text", ""))
+            return [], {}, f"http_{r.status_code}"  # a genuine hard 4xx → no point retrying
         try:
             j = r.json()
         except Exception:
             time.sleep(2 * (attempt + 1)); continue   # empty/non-JSON body → retry
-        return j.get("items") or [], (j.get("_meta") or {})
-    return [], {}
+        items = j.get("items") or []
+        return items, (j.get("_meta") or {}), ("ok" if items else "empty")
+    return [], {}, "exhausted"
 
 
 # ── DETAIL-PAGE ENRICHMENT (Tier 2) ──────────────────────────────────────────────────────────────
@@ -690,14 +755,32 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
     its inflated _meta.totalCount). De-dup is by ad_number across cities — a unit can surface twice."""
     rows_by_ad: dict[str, dict] = {}
     per_city: dict[str, int] = {}
+    outcomes: dict[str, int] = {}
+    failed_cities: list[str] = []
+    incomplete_cities: list[str] = []
     scanned = 0
     for c in cities:
         cid = c.get("id")
         name = c.get("name_en") or c.get("name") or str(cid)
-        items, meta = fetch_page(s, cid, 1, ci, co)
+        items, meta, status = fetch_page(s, cid, 1, ci, co)
         if not items:
+            # "empty" is a real answer; anything else is the source declining to answer, and calling
+            # that «no monthly units» is how a throttled crawl reports a clean, much smaller run.
+            outcome = "empty" if status == "empty" else "failed"
+            outcomes[outcome] = outcomes.get(outcome, 0) + 1
+            if outcome == "failed":
+                failed_cities.append(f"{name}:{status}")
+                outcomes.setdefault("failed_city_ids", [])
+                if len(outcomes["failed_city_ids"]) < 12:
+                    outcomes["failed_city_ids"].append(cid)
+                # The REASON is what separates "throttled" (429 → exhausted) from "blocked" (403)
+                # from "the endpoint moved" (404). Keep it QUERYABLE, not merely loggable: a log
+                # line dies with the runner, and answering "why did coverage drop?" from CI logs
+                # is archaeology every single time.
+                outcomes[f"reason:{status}"] = outcomes.get(f"reason:{status}", 0) + 1
             if verbose:
-                print(f"  city={cid:<6} {name:<28} monthlyTotalMeta={meta.get('totalCount', 0):<5} kept=0 (no monthly units)")
+                detail = "no monthly units" if outcome == "empty" else f"FETCH FAILED ({status})"
+                print(f"  city={cid:<6} {name:<28} monthlyTotalMeta={meta.get('totalCount', 0):<5} kept=0 ({detail})")
             continue
         total_meta = meta.get("totalCount") or 0
         # _meta.pageCount under-reports the real tail (Jeddah: pageCount=121 but units run to ~p129),
@@ -707,6 +790,7 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
         city_kept = 0
         page = 1
         empties = 0
+        truncated = False
         while True:
             for it in items:
                 scanned += 1
@@ -723,21 +807,42 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
             if page >= hard_cap:
                 break
             page += 1
-            items, _ = fetch_page(s, cid, page, ci, co)
+            items, _, status = fetch_page(s, cid, page, ci, co)
             if not items:
+                if status != "empty":
+                    # A refusal is NOT an end of catalogue. Stop paging this city (continuing would
+                    # only hammer a source that is already declining), but record it as INCOMPLETE
+                    # so the run cannot present a truncated city as a finished one.
+                    incomplete_cities.append(f"{name}:p{page}:{status}")
+                    outcomes[f"reason:{status}"] = outcomes.get(f"reason:{status}", 0) + 1
+                    truncated = True
+                    break
                 empties += 1
                 if empties >= 2:
                     break  # two empty pages in a row → real end of this city's monthly catalog
                 continue
             empties = 0
+        outcomes["incomplete" if truncated else "ok"] = \
+            outcomes.get("incomplete" if truncated else "ok", 0) + 1
         per_city[name] = per_city.get(name, 0) + city_kept
         if verbose:
-            print(f"  city={cid:<6} {name:<28} monthlyTotalMeta={total_meta:<5} pagesRead={page:<4} kept={city_kept}")
+            flag = " INCOMPLETE" if truncated else ""
+            print(f"  city={cid:<6} {name:<28} monthlyTotalMeta={total_meta:<5} pagesRead={page:<4} kept={city_kept}{flag}")
         if limit and len(rows_by_ad) >= limit:
             if verbose:
                 print(f"  [--limit {limit}] reached after {name}")
             break
-    return rows_by_ad, scanned, per_city
+    if verbose and (failed_cities or incomplete_cities):
+        # Loud, because this is the difference between "the source is smaller today" and
+        # "the source stopped answering us" — and only one of those is our problem.
+        print(f"  ⚠ city coverage gap: failed={failed_cities[:12]} incomplete={incomplete_cities[:8]}",
+              flush=True)
+        # And the source's OWN words about what it rejected, with the exact request that drew it.
+        # This is what turns "http_400" from a symptom into a root cause.
+        rep = reject_report()
+        if rep:
+            print(rep, flush=True)
+    return rows_by_ad, scanned, per_city, outcomes
 
 
 def main() -> int:
@@ -857,7 +962,7 @@ def main() -> int:
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}"
           f"{' [max ' + str(args.max_pages) + ' pages/city]' if args.max_pages else ''}")
 
-    rows_by_ad, scanned, per_city = crawl(
+    rows_by_ad, scanned, per_city, outcomes = crawl(
         s, cities, ci, co,
         limit=args.limit, max_pages=args.max_pages, verbose=True,
     )
@@ -922,7 +1027,17 @@ def main() -> int:
         top = sorted(per_city.items(), key=lambda kv: -kv[1])[:10]
         print("  top cities:", ", ".join(f"{n}={c}" for n, c in top))
         healthy = db.end_run(run_id, ok=True, rows_seen=scanned, rows_upserted=len(rows),
-                   notes=f"cities={len(cities)} pruned={pruned}", check_tables=["gathern_residential_listings"])
+                   notes=(f"cities={len(cities)} pruned={pruned} "
+                          f"city_ok={outcomes.get('ok', 0)} city_empty={outcomes.get('empty', 0)} "
+                          f"city_failed={outcomes.get('failed', 0)} "
+                          f"city_incomplete={outcomes.get('incomplete', 0)}"
+                          + (" city_fail_reasons=" + ",".join(
+                              f"{k.split(':', 1)[1]}:{v}"
+                              for k, v in sorted(outcomes.items()) if k.startswith("reason:"))
+                             if any(k.startswith("reason:") for k in outcomes) else "")
+                          + (" failed_city_ids=" + ",".join(str(i) for i in outcomes["failed_city_ids"])
+                             if outcomes.get("failed_city_ids") else "")),
+                   check_tables=["gathern_residential_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

@@ -105,6 +105,36 @@ const locations = strip(read('src/data/locations.ts'));
 check('the narrowing params are spread into the top_cities_by_deal_ar arguments',
   /Object\.assign\(args,\s*af\s*\?\?\s*\{\}\)/.test(locations));
 
+// THE TABLE SCOPE IS PART OF "the set the user selected" (defect 2026-09-03). The results RPC is
+// scoped to a table list; Trending sent none, so it counted every platform table in
+// search_listings_ar while results read only RES_TABLES/COM_TABLES. Five platforms went live in the
+// view without joining those lists and Trending began advertising inventory results cannot return —
+// الهفوف/أرض سكنية/بيع advertised 2,478 against 109 delivered. The scope must come from the SAME
+// function the results call uses; a second copy of the lists is exactly how this drifted.
+// Pinned to the COMPOSITION, not to the name appearing somewhere in the file: `...cityTableScope`
+// also occurs in the destructuring that produces it, so a looser regex stays green while the spread
+// into cityAfRaw is deleted — the exact defect. (Mutation-proven: deleting the spread fails this.)
+check('the Trending params carry the search TABLE scope, from searchTableScope(query)',
+  /const cityAfRaw = \{ \.\.\.rpcAllNarrowingParams\(query\), \.\.\.cityTableScope \}/.test(index)
+  && /= searchTableScope\(query\) \?\? \{\}/.test(index),
+  'without p_tables, Trending counts platform tables the results RPC excludes');
+check('searchTableScope is the SHARED resolver, not a second copy of the table lists',
+  /export function searchTableScope/.test(strip(read('src/data/remote.ts')))
+  && /const tableScope = searchTableScope\(q\);/.test(strip(read('src/data/remote.ts'))),
+  'resolveSearchScope and Trending must read ONE definition — a copy is the drift class itself');
+check('isBroadCommercial is stripped before the scope reaches the RPC',
+  /isBroadCommercial: _cityScopeFlag/.test(index),
+  'it is a local branch flag, not an RPC argument — PostgREST rejects the whole call (PGRST202)');
+
+// The scope rides in the same `af` object the narrowing does, and it is present on EVERY call —
+// including a completely unfiltered one. If it counted as narrowing, hasNarrowing would be pinned
+// true and silently disable all three compat fallbacks above, blanking the city field for an
+// unnarrowed user instead of widening. The scope is the FRAME of the count, not a predicate.
+check('the table-scope keys do NOT count as user narrowing',
+  /TABLE_SCOPE_KEYS = \['p_tables', 'p_tables2', 'p_types2'\]/.test(locations)
+  && /hasNarrowing = Object\.keys\(af \?\? \{\}\)\.some\(\(k\) => !TABLE_SCOPE_KEYS\.includes\(k\)\)/.test(locations),
+  'a scope key read as narrowing pins hasNarrowing true and kills every widening fallback');
+
 // Scoped to the CITY pool builder: every fallback there WIDENS the scope (drops types/category/
 // period), and a widened count under an active filter is the overstatement itself — delivered
 // silently, because a fallback looks like a success. So each is gated on the user not being narrowed.

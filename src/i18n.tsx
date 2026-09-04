@@ -628,6 +628,7 @@ const AR: Record<string, string> = {
   'Your budget': 'ميزانيتك',
   'Monthly Rent': 'الإيجار الشهري',
   'Annual Equivalent': 'المعادل السنوي',
+  'Calculated from price per m² × area — not published by the source': 'محتسب من سعر المتر × المساحة — غير معلن من المصدر',
   'Price Per m²': 'سعر المتر',
   // Unit suffix for the source-published «سعر المتر» rate. It is printed NEXT TO the number so the
   // card reads «سعر المتر 750 ريال/م²» — a per-square-metre RATE, never mistakable for a total.
@@ -883,6 +884,11 @@ const AR: Record<string, string> = {
   '24 Souq':                           'سوق العقار ٢٤',
   'Era Pulse':                         'نبض العصر',
   'Al Nowaisiry Real Estate':          'النويصري العقارية',
+  'The Right Choice Real Estate': 'الخيار الصحيح للخدمات العقارية',
+  'Aouj Estates': 'عوج العقارية',
+  'Abr Al Osol Real Estate': 'عبر الأصول للخدمات العقارية',
+  'Arkaan Al Aqar': 'أركان العقار',
+  'Rawasi Dark Real Estate': 'رواسي دارك العقارية',
   '1 October Real Estate':             '1 أكتوبر العقارية',
   'Additional Information':            'معلومات إضافية',
   'See more':                          'عرض المزيد',
