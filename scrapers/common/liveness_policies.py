@@ -45,7 +45,12 @@ CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 #
 # Platforms that exist in scrapers/ but are NOT production-searchable, so they need no policy.
 # Kept in sync with scrapers/RETIRED_PLATFORMS.txt + the paused/gated ones.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "muktamel", "awal", "deal", "common"})
+# muktamel LEFT this set on 2026-09-04 (migration
+# 20260904151723_muktamel_liveness_policy_paused_is_not_unsearchable): "paused" was a CADENCE fact —
+# its two tables never left the client scope, and a gated run put 523 production_ready rows into
+# search_listings_ar with 0 ever verified alive and no grace contract. Production re-seeded the
+# registry with it at CRAWL_PRESENCE_ONLY/3/168; this mirror follows production, it does not vote.
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "awal", "deal", "common"})
 
 
 class _P(dict):
@@ -110,7 +115,8 @@ POLICIES: dict[str, _P] = {
         for p in (
             "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "aouj", "aqaratikom",
             "aqarcity", "aqargate", "aqarmonthly", "arkaan", "eaqartabuk", "eastabha", "erapulse",
-            "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "mustqr", "nowaisiry", "october",
+            "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry",
+            "october",
             "raghdan", "ramzalqasim", "rawasidark", "sadin", "sanadak", "satel", "souq24", "therc",
         )
     },
