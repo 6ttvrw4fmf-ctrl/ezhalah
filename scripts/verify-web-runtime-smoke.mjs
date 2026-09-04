@@ -586,11 +586,13 @@ try {
   await page.waitForTimeout(4000);
   await tap('إيجار'); await tap('شراء'); await tap('سنوي');
   await pickCity('الرياض');
+  // District suggestion rows render async (same case documented at line 194 for «حي النرجس»),
+  // so the fixed 1600ms wait races the runner. Use the same tapWhenRendered pattern the earlier
+  // journey already uses for identical control — polls up to 8s, taps as soon as the row exists.
   for (const name of ['النرجس', 'الملقا', 'الياسمين', 'الربيع', 'القيروان', 'العارض']) {
     await page.click('input >> nth=1');
     await page.type('input >> nth=1', name, { delay: 40 });
-    await page.waitForTimeout(1600);
-    await tap(`حي ${name}`);
+    await tapWhenRendered(`حي ${name}`);
     await page.waitForTimeout(300);
   }
   await tap('الفلل والبيوت'); await tap('فيلا');
