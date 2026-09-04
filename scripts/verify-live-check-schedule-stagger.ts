@@ -113,21 +113,13 @@ for (const it of items) {
   console.log(`  · new scheduled production workflow (not in baseline, spacing still enforced): ${it.file}`);
 }
 
-// ── 5. THE INTERACTIVE HALF PACES ITSELF ─────────────────────────────────────────────────────────
-// Staggering only governs load that has a cron line. The load that actually degraded Search on
-// 2026-09-04 had none: seven routines running harnesses interactively, each individually inside the
-// 1.5/s envelope and collectively at 2.5-3.2/s. A per-run constant cannot see the sum, so the run
-// asks for it — and must PACE, never SKIP.
-const runner = readFileSync(join(root, 'e2e/qa-coverage/run.mjs'), 'utf8');
-check('the coverage run consults the live load signal', /ops_search_load_now/.test(runner));
-check('it slows down rather than dropping searches (no budget cut on load)',
-  /BUSY_GAP_MS/.test(runner) && !/searches\.length\s*=|budget\s*=\s*.*degraded|\.slice\(0, *BUSY/.test(runner));
-check('an unreadable load signal keeps the NORMAL pace, never a permanent back-off',
-  /catch \{ pacingGap = MIN_GAP_MS; \}/.test(runner));
-check('the load probe is rate-limited so it cannot become load itself',
-  /LOAD_RECHECK_MS/.test(runner));
-check('back-off is reported, so pacing is visible rather than silent',
-  /PACED BACK FOR OTHER LOAD/.test(runner));
+// ── 5. THE INTERACTIVE HALF ─────────────────────────────────────────────────────────────────────
+// Staggering only governs load that has a cron line. The load that actually degraded Search had
+// none: seven routines running harnesses interactively. That half is paced by the SHARED pacer
+// (scripts/lib/searchPacer.mjs) and is owned by scripts/verify-search-pacing-shared.ts, which
+// proves every paced-RPC caller has joined it. Kept in a separate barrier deliberately: this file
+// is about WHEN checks start, that one is about HOW FAST they run once started, and collapsing the
+// two would make either failure read as the other.
 
 check('this barrier is discovered by npm test', npmTestRuns(root, 'verify-live-check-schedule-stagger'));
 
@@ -156,21 +148,6 @@ check('    caught: several checks crowded into one 30-minute window',
 const halved = firingMinutes('5 1-13/12 * * *').length;             // 2/day instead of 4/day
 check('    caught: cadence halved while the spacing still looks fine',
   halved < (baseline.get('frontend-bundle-source-parity-live-check.yml') ?? 4));
-
-// The pacing limbs, mutated the two ways they realistically rot: the signal stops being consulted,
-// or back-off becomes the default so an outage silently triples every run.
-const pacingMutations: [string, string, string, (s: string) => boolean][] = [
-  ['load signal no longer consulted', 'ops_search_load_now', 'ops_noop', (s) => /ops_search_load_now/.test(s)],
-  ['an unreadable signal now backs off permanently instead of resuming normal pace',
-    'catch { pacingGap = MIN_GAP_MS; }', 'catch { pacingGap = BUSY_GAP_MS; }',
-    (s) => /catch \{ pacingGap = MIN_GAP_MS; \}/.test(s)],
-  ['the load probe stops being rate-limited and becomes load itself',
-    'LOAD_RECHECK_MS', 'ZERO_MS', (s) => /LOAD_RECHECK_MS/.test(s)],
-];
-for (const [label, from, to, stillHolds] of pacingMutations) {
-  if (!runner.includes(from)) { failures++; console.error(`  ✗ mutation anchor missing: ${label}`); continue; }
-  check(`    caught: ${label}`, !stillHolds(runner.replaceAll(from, to)));
-}
 
 if (failures) {
   console.error(`\n✗ scheduled live-check stagger: ${failures} failure(s)`);

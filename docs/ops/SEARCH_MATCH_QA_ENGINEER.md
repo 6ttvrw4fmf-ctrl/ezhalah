@@ -968,3 +968,50 @@ asserted on **every** journey, not by one probe.
 It found a real, user-visible defect. Handle it the way §25 and §26 already require:
 **reproduce → root cause → fix → regression → barrier → mutation-proof → merge → deploy → re-test.**
 Never close it by loosening the sweep.
+
+## §44 — SHARED SEARCH PACING (owner directive, 2026-09-04)
+
+**Automated QA traffic is the largest single load on production Search, and no single run can see
+it.** On 2026-09-04 user-facing Search averaged ~2 s in real traffic while cron sat at **zero**
+seconds. Seven daily routines were each individually inside the §40.1 envelope of 1.5 searches/second
+and collectively at **2.5–3.2/s** on a 2-vCPU instance. Every run's rate constant was correct in
+isolation and blind to the sum.
+
+The load has two halves and they need different fixes:
+
+1. **Scheduled** (has a cron line) → **spread it.** Sixteen production-driving workflows were stacked:
+   79 collision pairs within 10 minutes, three exactly simultaneous, a peak of 8 starts in one
+   30-minute window, and 7 firings inside the 10:00–12:45 UTC routine window. Now split across the
+   only three 6-hour phases that miss that window — `{1,7,13,19}`, `{2,8,14,20}`, `{3,9,15,21}` — at
+   `:05`/`:25`/`:45`. Result: 0 collisions, peak 2, 0 firings in the window, **no cadence changed**.
+   Enforced by `scripts/verify-live-check-schedule-stagger.ts` plus the cadence FLOOR in
+   `scripts/live-check-cadence-baseline.txt`.
+
+2. **Interactive** (no cron line — the actual cause) → **pace it.** `scripts/lib/searchPacer.mjs` is
+   the ONE pacer, imported by every harness that fetches a paced search RPC. It wraps `fetch`, so a
+   harness joins with a single line and the barrier can prove all of them have.
+
+**What pacing may never do.** It only ever makes a search WAIT. It never drops, skips, reorders or
+refuses a request, never rewrites a body, never narrows a predicate, never caps a limit, never cuts a
+budget or a cohort. Coverage, cadence, assertions, mutations, barriers and production verification
+are byte-for-byte identical paced or not — only wall-clock moves, and only while the instance is
+already busy. §33 governs in both directions: correctness outranks latency, and latency is never
+bought with coverage.
+
+**Why the back-off ESCALATES.** A fixed "busy" gap is still a per-process constant: N runners at a
+fixed 2.1 s gap still offer N × 0.48 searches/second, so seven land at 3.3/s having "backed off".
+Multiplicative increase while degraded (×1.6, capped at `MAX_GAP_MS` 5 s) with gentle decay while
+healthy (÷1.3) converges on whatever rate the instance can take, for ANY number of concurrent
+runners, none of which knows how many others exist. At the 5 s cap, seven runners sum to 1.4/s.
+
+**Two traps already paid for, both live-measured:**
+- **A readable-but-EMPTY load window is not "healthy."** The 5-minute sampler is itself a pg_cron job
+  and gets starved by the very load this relieves — two firings were skipped outright during the
+  four-way concurrency run. An empty window therefore HOLDS the current gap; resetting to normal
+  would disengage pacing hardest exactly when load is worst.
+- **An unreadable signal (exception) keeps the NORMAL pace.** A monitoring outage must never become a
+  coverage cost by silently tripling every run.
+
+`ops_search_load_now()` is the signal (anon-callable, reads `ops_search_latency_sample`, issues no
+searches of its own). Pinned by `scripts/verify-search-pacing-shared.ts`: the caller list is
+COMPUTED, never hardcoded, so a new harness is in scope the moment it is written.

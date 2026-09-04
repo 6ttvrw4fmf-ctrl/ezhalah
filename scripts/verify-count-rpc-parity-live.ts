@@ -18,6 +18,9 @@
 //   EXPO_PUBLIC_SUPABASE_URL=... EXPO_PUBLIC_SUPABASE_ANON_KEY=... \
 //     node --experimental-strip-types scripts/verify-count-rpc-parity-live.ts
 
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };

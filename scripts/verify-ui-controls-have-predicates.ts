@@ -22,6 +22,9 @@
 // (a copy of the contract inside the test would drift from the contract). Wired into `npm test`.
 //   node --experimental-strip-types scripts/verify-ui-controls-have-predicates.ts
 
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 

@@ -27,6 +27,9 @@
 // .github/workflows/count-rpc-parity-live-check.yml every 6h:
 //   EXPO_PUBLIC_SUPABASE_URL=... EXPO_PUBLIC_SUPABASE_ANON_KEY=... \
 //     node --experimental-strip-types scripts/verify-trending-usable-under-narrowing.ts
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase(process.env);

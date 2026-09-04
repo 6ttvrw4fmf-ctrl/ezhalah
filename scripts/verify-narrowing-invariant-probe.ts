@@ -91,7 +91,17 @@ check('the populated cell grid is discovered live from the index (§1)',
   /search_listings_ar\?select=type_ar,deal_ar,rent_period_ar,city_id/.test(src));
 
 // ── 6. LOAD ENVELOPE AND STALE-FIRST ROTATION ────────────────────────────────────────────────────
-check('rate is held at the measured safe envelope (§40.6)', /const MIN_GAP_MS = 700;/.test(src));
+// Rate is still held at the §40.6 envelope, but by the SHARED pacer rather than a private constant
+// (owner directive, 2026-09-04). This is a STRENGTHENING, not a relaxation: the old
+// `const MIN_GAP_MS = 700` bounded this probe against ITSELF and was blind to the other six
+// routines — which is precisely how seven individually-compliant harnesses summed to 3.2
+// searches/second and put real Search at a ~2 s mean. The shared pacer spaces this probe's searches
+// against every other routine's as well. Both limbs are asserted so "shared" cannot quietly become
+// "none": it must import the pacer AND must not have grown a private gap of its own again.
+check('rate is held at the measured safe envelope, via the shared pacer (§40.6)',
+  /searchPacer\.mjs/.test(src));
+check('the probe did NOT reintroduce a private rate limiter blind to other routines',
+  !/const MIN_GAP_MS\s*=/.test(src));
 check('coverage is drawn stalest-first, never population-first (§43.2)',
   /ops_qa_sweep_plan/.test(src) && /never-tested first, then stalest/.test(src));
 check('what was covered is written back to the ledger (§39)',

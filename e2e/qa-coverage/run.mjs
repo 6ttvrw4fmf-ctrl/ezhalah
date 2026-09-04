@@ -9,6 +9,8 @@
 //
 // The run prints the SIX SEPARATE NUMBERS the owner requires (2026-08-28) — it never collapses them
 // into one "searches" figure, because a request count is not a coverage claim.
+import '../../scripts/lib/searchPacer.mjs';   // shared pacing: wraps fetch, spaces searches against ALL routines
+import { pacingStats } from '../../scripts/lib/searchPacer.mjs';
 import { createHash } from 'node:crypto';
 import { buildRequest, cohortKey, PAGE_LIMIT } from './request.mjs';
 import { dbCount, dbFilterFromRequest, cityCatalog } from '../live-sweep/sweep.mjs';
@@ -22,33 +24,10 @@ const BUDGET = Number(process.env.QA_BUDGET) || DAILY_BUDGET;
 const CONCURRENCY = 2;
 const MIN_GAP_MS = 700;                       // ≤1.5 searches/sec sustained
 
-// ── ADAPTIVE PACING (owner directive, 2026-09-04) ────────────────────────────────────────────────
-// 700 ms keeps THIS run inside the §40.1 envelope of 1.5 searches/second. It says nothing about the
-// SUM. On 2026-09-04 the seven daily routines were each individually compliant and collectively at
-// 2.5-3.2/s, and real search traffic averaged ~2 s while cron sat at zero — self-inflicted
-// contention that no per-run constant can see, because every run's constant is correct in
-// isolation. Staggering fixes the scheduled half; nothing can stagger interactive sessions.
-//
-// So the run asks how loaded Search actually is and spaces itself out when the instance is already
-// busy. This NEVER drops a search, narrows a predicate, or skips an assertion — the plan, the
-// oracle and the ledger writes are byte-for-byte identical either way. Only wall-clock moves, and
-// only while someone else is hurting. §33: correctness outranks latency, in both directions.
-const BUSY_GAP_MS = Number(process.env.QA_BUSY_GAP_MS) || 2100;   // ~0.5/s while the box is loaded
-const LOAD_RECHECK_MS = 60000;                                    // one cheap probe a minute, at most
-let pacingGap = MIN_GAP_MS, lastLoadCheck = 0, backedOff = 0;
-async function currentGap() {
-  if (Date.now() - lastLoadCheck < LOAD_RECHECK_MS) return pacingGap;
-  lastLoadCheck = Date.now();
-  try {
-    const [load] = (await rpc('ops_search_load_now', {})) ?? [];
-    // Unreadable or not yet sampled ⇒ keep the normal pace. A missing signal must never be read as
-    // "the box is on fire" and silently triple every run's duration.
-    const busy = !!load?.degraded;
-    if (busy && pacingGap === MIN_GAP_MS) backedOff++;
-    pacingGap = busy ? BUSY_GAP_MS : MIN_GAP_MS;
-  } catch { pacingGap = MIN_GAP_MS; }
-  return pacingGap;
-}
+// Pacing lives in the SHARED pacer (imported at the top of this file), not here. It wraps fetch, so
+// every search this run fires is spaced against every OTHER routine's searches too — which is the
+// whole point: a per-run constant is correct in isolation and blind to the sum. See
+// scripts/lib/searchPacer.mjs for why this is one module rather than seven rate limiters.
 const LEDGER_DIMENSION = 'rpc_cohort';
 
 const rest = (p) => fetch(`${SUPA}/rest/v1/${p}`, { headers: H }).then((r) => r.json());
@@ -143,9 +122,7 @@ async function worker() {
     const i = cursor++;
     if (i >= searches.length) return;
     const s = searches[i];
-    const gap = (await currentGap()) - (Date.now() - lastFire);
-    if (gap > 0) await sleep(gap);
-    lastFire = Date.now();
+    // No local gap: the shared pacer spaces every search at the fetch layer.
     const body = buildRequest(COHORT.get(s.uiType), s);
     const t0 = Date.now();
     let rows;
@@ -195,7 +172,7 @@ DUPLICATE IDS SERVED:         ${out.reduce((a, r) => a + r.dupes, 0)}
 HONEST-ZERO SEARCHES:         ${zero}
 HARNESS ERRORS:               ${errors.length}
 LATENCY ms:                   p50 ${lat[Math.floor(lat.length * 0.5)]}  p95 ${lat[Math.floor(lat.length * 0.95)]}  max ${lat[lat.length - 1]}
-PACED BACK FOR OTHER LOAD:    ${backedOff} time(s) — searches unchanged, only spacing
+PACED BACK FOR OTHER LOAD:    ${pacingStats().backedOff} time(s), ${pacingStats().paced} searches paced — count unchanged
 (browser journeys and exact-set SQL differentials are reported by their own layers — never merged in)`);
 if (errors.length) console.log('ERRORS:\n' + errors.slice(0, 15).join('\n'));
 

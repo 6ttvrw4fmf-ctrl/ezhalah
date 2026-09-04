@@ -25,6 +25,9 @@
 // Manual:
 //   node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
 //     scripts/verify-recency-fallback-live.ts
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();

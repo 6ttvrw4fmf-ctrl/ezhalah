@@ -18,6 +18,9 @@
 
 // Env wins when set; otherwise the committed PUBLIC endpoint. Before 2026-08-10 this required env
 // and the workflow's repo secret did not exist, so this barrier exited 1 without ever running.
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };

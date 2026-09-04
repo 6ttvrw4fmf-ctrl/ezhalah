@@ -57,6 +57,9 @@
 //        AF_SCOPE_CLEAN (Apartment — the clean type the cohort gate is asked about; must map to
 //        AF_SCOPE_TYPE, and the run checks that against the captured body) · AF_SCOPE_MOBILE=1
 
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';

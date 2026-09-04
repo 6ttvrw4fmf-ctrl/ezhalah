@@ -29,6 +29,9 @@
 //   BASE_URL=http://localhost:8081 node …        # against a local build
 //   SWEEP_ONLY=trending-city node …              # one journey kind while developing
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import '../../scripts/lib/searchPacer.mjs';
 import { chromium, devices } from '@playwright/test';
 import { appendFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { parseVisibleState } from './visibleState.mjs';

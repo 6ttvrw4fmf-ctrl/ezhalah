@@ -30,6 +30,9 @@
 //
 //   node --experimental-strip-types scripts/verify-trending-filter-state-live.ts
 
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase(process.env);

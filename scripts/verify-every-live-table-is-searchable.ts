@@ -34,6 +34,9 @@
 //
 // LIVE CHECK — excluded from `npm test` (scripts/test-exclusions.txt); runs in
 // .github/workflows/af-live-truth-check.yml with the other production-truth barriers.
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
