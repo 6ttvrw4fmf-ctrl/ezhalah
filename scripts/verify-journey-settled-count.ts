@@ -121,6 +121,20 @@ check('an unsettled count is REFUSED rather than compared',
   /!single\.settled/.test(journey) && /!double\.settled/.test(journey) && /skip\(name,/.test(journey));
 check('the pass line reports both counts AND that they settled, so a reader can see the measurement was complete',
   /both settled/.test(journey));
+// A CLICK THAT NEVER LANDED IS NOT A DEAD CONTROL. The «بحث» click used to swallow its error in a
+// bare `.catch(() => {})`, so an intercepted click produced zero RPCs and the journey reported
+// «dead control» — its most alarming verdict, from the least evidence (measured 2/2 on WebKit
+// desktop, 2026-09-04, while Chromium and Firefox ran the same journey clean on that bundle).
+// Matched on the ANTIPATTERN itself, not on one line's formatting: the first version of this check
+// pinned the exact single-line `.click({...}).catch(() => {})` and a mutation that merely split it
+// across two lines walked straight through. A bare swallowing catch anywhere in this journey is the
+// thing that must not come back, however it is laid out.
+check('the «بحث» click no longer swallows its own failure (no bare catch anywhere in this journey)',
+  !/catch\(\(\)\s*=>\s*\{\s*\}\)/.test(journeyCode));
+check('a click that never landed SKIPS with the reason instead of being called a dead control',
+  /clickErr/.test(journeyCode) && /never landed/.test(journey));
+check('the non-landing check is judged BEFORE the dead-control verdict',
+  journey.indexOf('never landed') < journey.indexOf("'dead control'"));
 
 if (failed) { console.error(`\nverify-journey-settled-count: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-journey-settled-count: counts are compared only once they have stopped moving.');

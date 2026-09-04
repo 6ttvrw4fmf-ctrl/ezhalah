@@ -222,17 +222,37 @@ JOURNEYS['double-click-search'] = async (mobile) => {
   const settledSearchRpcs = (bag, from) => settledCount(
     () => bag.rpc.slice(from).filter((r) => r.name === 'location_search_candidates_ar').length);
 
+  // A CLICK THAT NEVER LANDED IS NOT EVIDENCE ABOUT THE CONTROL. This swallowed its click error in
+  // a bare `.catch(() => {})`, so an intercepted or non-actionable «بحث» produced zero RPCs and the
+  // journey called it a DEAD CONTROL — the most alarming verdict it can reach, from the least
+  // evidence. Measured 2026-09-04: «dead control: «بحث» single click fired no search at all» 2/2 on
+  // WebKit desktop, on a bundle where Chromium and Firefox both ran the same journey clean.
+  //
+  // Same swallowed-catch shape as PR #1146's 2.4s no-op retries and as the «إغلاق» locator earlier
+  // in this suite: the failure is absorbed into silence and the next reader is pointed at the wrong
+  // screen. The click error is now carried out and the journey SKIPS with the real reason —
+  // Playwright's own log names the interceptor, which is exactly the discriminator PART 9.1 wants.
   const press = (clicks) => withPage({ mobile }, async (page, bag) => {
     if (!(await primeSearch(page))) return null;
     const from = bag.rpc.length;
+    let clickErr = null;
     await page.getByText('بحث', { exact: true }).last()
-      .click({ clickCount: clicks, delay: 40 }).catch(() => {});
+      .click({ clickCount: clicks, delay: 40 })
+      .catch((e) => {
+        const lines = String(e).split('\n');
+        clickErr = lines.find((l) => /intercepts pointer events/.test(l))?.trim() || lines[0];
+      });
+    if (clickErr) return { clickErr };
     return settledSearchRpcs(bag, from);
   });
 
   const single = await press(1);
   const double = await press(2);
   if (single === null || double === null) { skip(name, 'search could not be primed'); return; }
+  // Judged BEFORE the dead-control check, deliberately: a control that was never actually clicked
+  // must never be reported as one that did nothing when clicked.
+  if (single.clickErr) { skip(name, `the single click on «بحث» never landed: ${single.clickErr}`); return; }
+  if (double.clickErr) { skip(name, `the double click on «بحث» never landed: ${double.clickErr}`); return; }
   // A count that never stopped growing is not a measurement. Refuse to compare rather than compare
   // two numbers of unknown completeness — that is what produced the false verdict above.
   if (single.n > 0 && !single.settled) { skip(name, `single-click RPC count never settled (still ${single.n} at the budget)`); return; }
