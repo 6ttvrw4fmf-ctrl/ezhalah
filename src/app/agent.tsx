@@ -24,6 +24,7 @@ import VoiceWaveform from '@/components/VoiceWaveform';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure } from '@/lib/initialReveal';
+import { distinctPlatformCount } from '@/lib/platformDiversity';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
@@ -846,7 +847,7 @@ export default function Agent() {
   // delay also clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s), so the
   // first move already reads the settled height of the thing being landed on.
   const LAND_PASSES_MS = [1400, 3200];
-  const FIRST_PAGE = 10; // show the first 10; «عرض المزيد» pages the rest of the matched set. (owner 2026-07-08.)
+  const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
   // INTERVIEW_STOP_AT (25): the same line at which Advanced Filter stops narrowing (R11.1) and the set
@@ -857,7 +858,7 @@ export default function Agent() {
   // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
   // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
   const initialReveal = (r: SearchResult | undefined | null): number =>
-    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT });
+    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings) });
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
