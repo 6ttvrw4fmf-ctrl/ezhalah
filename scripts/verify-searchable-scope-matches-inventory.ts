@@ -42,7 +42,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { stripComments } from './lib/stripComments.ts';
-import { liftSymbols } from './lib/liftSymbols.ts';
+import { liftSearchScope } from './lib/liftSearchScope.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -66,22 +66,7 @@ const die = (why: string): never => {
 // deal/rentPeriod/dealCombined must break this lift loudly rather than silently evaluate undefined
 // and make every monthly assertion trivially true.
 type Q = { deal?: string; rentPeriod?: string; dealCombined?: boolean };
-const lifted = await liftSymbols(
-  join(ROOT, 'src/data/remote.ts'),
-  [
-    { header: 'const SEARCHABLE_TABLES = [', endsWith: /\];$/ },
-    { header: 'const MONTHLY_ONLY_TABLE = ', endsWith: /;$/ },
-    { header: 'const RES_TABLES = ', endsWith: /;$/ },
-    { header: 'const COM_TABLES = ', endsWith: /;$/ },
-    { header: 'const DEEPLINK_TABLES = [', endsWith: /^\];$/ },
-    { header: 'function monthlyInScope(' },
-    { header: 'function monthlyOnly(' },
-    { header: 'function resTables(' },
-    { header: 'function comTables(' },
-  ],
-  ['SEARCHABLE_TABLES', 'RES_TABLES', 'COM_TABLES', 'DEEPLINK_TABLES', 'monthlyInScope', 'resTables', 'comTables'],
-  'type SearchQuery = { deal?: string; rentPeriod?: string; dealCombined?: boolean };\n',
-).catch((e) => die(`could not lift the scope out of src/data/remote.ts — ${(e as Error).message}`));
+const lifted = await liftSearchScope(ROOT).catch((e) => die(`could not lift the scope out of src/data/remote.ts — ${(e as Error).message}`));
 
 const SEARCHABLE_TABLES = lifted.SEARCHABLE_TABLES as string[];
 const RES_TABLES = lifted.RES_TABLES as string[];
