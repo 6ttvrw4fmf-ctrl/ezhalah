@@ -933,9 +933,14 @@ migration-drift-guard rule in `AGENTS.md`).
       `min(genuine matches, max(10, distinct platforms in the matching set))` — 10 is a FLOOR, never
       a cap. Tiers 1–3 above already ordered one row per platform before any platform repeats, but
       the CLIENT truncated that at a hardcoded 10, so every platform past the tenth was erased from
-      the first screen: measured on production, «فلل للبيع في الرياض» lost 3 of 13 matching
-      platforms, «الرياض / كل السكني» 8 of 18, and «كل السكني للبيع» 23 of 33. A correct
-      33-platform ordering was being shown as a ten-platform site.
+      the first screen. Measured on production over SUPPORTED scopes only (a city is required — see
+      `CITY_REQUIRED_MSG`; there is no nationwide scope): «الرياض / كل السكني» lost 8 of 18 matching
+      platforms, «جدة / كل السكني» 7 of 17, «جدة / شقق / إيجار» 5 of 15, «الدمام / كل السكني» 4 of
+      14, «فلل للبيع في الرياض» 3 of 13. A district search («الرياض / حي الملقا», 8 platforms) lost
+      none — below the floor of 10, nothing is truncated.
+      (An earlier revision of this note cited a 33-platform kingdom-wide figure. That came from a
+      direct RPC call with `p_cities := null`, which is NOT a scope any user can reach; it was
+      corrected on 2026-09-04 and the leftover agent path that could still reach it was closed.)
       - The platform count is **DERIVED from the eligible rows** (`distinctPlatformCount`), never a
         list, an allowlist, or a number to bump: a new scraper participates the moment it
         contributes one genuine matching listing, and a disabled or non-matching platform
