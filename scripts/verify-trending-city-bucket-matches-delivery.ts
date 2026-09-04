@@ -1,33 +1,23 @@
-// A TRENDING CITY ROW MUST ADVERTISE WHAT CLICKING IT DELIVERS.
+// A TRENDING CITY ROW MUST ADVERTISE WHAT CLICKING IT DELIVERS. No exceptions.
 //
-// THE DEFECT (measured 2026-09-04, reproduces identically on origin/main — this is NOT caused by the
-// searchable-table scope work). الهفوف / أرض سكنية / بيع: Trending says 2,627, the committed search
-// delivers 2,737. A 110-row (4.0%) under-report with byte-identical parameters.
+// THE CONTRACT this asserts, both recorded verbatim in src/data/locations.ts:
+//   · "Owner rule 2026-08-22: Trending IS the location breakdown of the user's eligible set."
+//   · "owner rule 2026-08-22: the city count shown must equal what clicking that city returns,
+//      under the full current AF state."
 //
-// THE MECHANISM. Two different city predicates are in play, and they do not agree:
+// THE DEFECT IT WAS BORN FROM (measured 2026-09-04). الهفوف / أرض سكنية / بيع: Trending said 2,627,
+// the committed search delivered 2,737; الاحساء said 110 and delivered the same 2,737. Two different
+// city predicates were in play:
 //   · the RESULTS path widens — a row is delivered under city C when C ∈ its `match_city_ids`, the
 //     array `trg_set_match_city_ids` fills from `composite_match_city_ids()` (a composite city string
 //     like «الأحساء - الهفوف» resolves to BOTH ids, and a `loc_city_cluster` member pulls in its
-//     siblings);
-//   · TRENDING buckets — `top_cities_by_deal_ar` ends in `group by co.city_id`, the single scalar.
-// So a row whose city_id is الاحساء and whose match array also holds الهفوف is DELIVERED under
-// الهفوف and COUNTED under الاحساء.
-//
-// WHY THIS BARRIER AND NOT A FIX. Making Trending bucket on `unnest(match_city_ids)` would make each
-// city advertise exactly what it delivers — and would count every multi-city row in TWO buckets, so
-// the city rows would no longer sum to the `total_in_cohort` the same RPC returns. Measured
-// fleet-wide on 2026-09-04: 5,955 of 197,095 production_ready rows (3.0%) carry a multi-city array,
-// every one of them is the al_ahsa cluster, and EXACTLY TWO cities of 362 are affected — الهفوف
-// (delivers 5,955, counts 5,113) and الاحساء (delivers 5,955, counts 842). Whether a clustered pair
-// should each advertise the union is a PRODUCT decision about how a cluster is presented, not a bug
-// to silently patch: it needs the owner. (The al_ahsa cluster itself has been added, removed and
-// re-added before — see 20260720171946_remove_al_ahsa_city_cluster_enforce_strict_city_match.sql.)
-//
-// So this file does the one thing that must not wait for that decision: it PINS the exception. A
-// Trending/delivery gap on a city that is NOT a cluster member is a plain bug and fails. A gap on a
-// cluster member is reported with its exact magnitude and passes — but the pinned magnitudes below
-// mean a gap that GROWS, or one that quietly disappears because someone changed the bucketing
-// without saying so, also fails. Nobody rediscovers this by accident.
+//     siblings — owner-approved 2026-08-31, 20260831195108);
+//   · TRENDING bucketed on the single scalar `group by co.city_id`.
+// 20260904181500_trending_city_bucket_matches_delivery.sql moved the bucket onto the same array the
+// results path filters on, so the two surfaces describe one set. THIS FILE IS THE PROOF THAT THEY
+// STILL DO — it asserts the invariant, never the old gap. (An earlier revision of this file PINNED
+// the gap as a sanctioned exception. That exemption is gone: a barrier that asserts a bug goes green
+// on the bug and red on the fix.)
 //
 // It reads production through the ANON/publishable key — the same path a real visitor takes — and
 // compares the REAL top_cities_by_deal_ar output against an INDEPENDENT PostgREST count on
@@ -67,12 +57,11 @@ const COHORTS: Array<{ label: string; body: Record<string, unknown>; rest: strin
     rest: 'deal_ar=eq.%D8%A5%D9%8A%D8%AC%D8%A7%D8%B1&type_ar=eq.%D8%B4%D9%82%D8%A9' },
 ];
 
-// The ONLY sanctioned reason a Trending bucket may differ from what clicking delivers, pinned to the
-// measured magnitudes of 2026-09-04. Grow, shrink or move and this barrier goes red on purpose.
-const KNOWN: Record<number, { city: string; note: string }> = {
-  12:   { city: 'الهفوف',  note: 'al_ahsa cluster sibling of الاحساء (3677)' },
-  3677: { city: 'الاحساء', note: 'al_ahsa cluster sibling of الهفوف (12)' },
-};
+// loc_city_cluster's membership on the day the fix shipped. A cluster member's row now advertises
+// the UNION its siblings deliver, so ADDING a member adds another city row carrying another city's
+// inventory under a second name — visible in the Top-6, and a product decision, not a data tweak.
+// The invariant below stays true either way, which is exactly why this has to be pinned separately.
+const CLUSTERED_ON_2026_09_04 = [12, 3677];
 
 const restCount = async (query: string): Promise<number> => {
   const r = await fetch(`${REST}/search_listings_ar?${query}&select=listing_id&limit=1`,
@@ -81,20 +70,21 @@ const restCount = async (query: string): Promise<number> => {
   return Number(r.headers.get('content-range')?.split('/')[1] ?? -1);
 };
 
-// ── 1. the cluster is the exception list, read from production, not assumed ──────────────────────
+// ── 1. the cluster membership, read from production, not assumed ─────────────────────────────────
 const cr = await fetch(`${REST}/loc_city_cluster?select=city_id,cluster_key`, { headers: H })
   .catch((e) => die(`loc_city_cluster unreachable — ${(e as Error).message}`));
 if (!cr.ok) die(`loc_city_cluster returned ${cr.status}`);
 const clusterRows = (await cr.json()) as Array<{ city_id: number; cluster_key: string }>;
-const clustered = new Set(clusterRows.map((c) => c.city_id));
+const clustered = [...new Set(clusterRows.map((c) => c.city_id))].sort((a, b) => a - b);
 
-console.log('\n── the sanctioned exception, read from production ──────────────────────────────');
-check('loc_city_cluster still holds exactly the cities this barrier exempts',
-  clustered.size === Object.keys(KNOWN).length && Object.keys(KNOWN).every((id) => clustered.has(Number(id))),
-  `production clusters ${[...clustered].sort().join(', ')}; this barrier exempts ${Object.keys(KNOWN).join(', ')} — a new cluster member is a PRODUCT decision that must be reviewed here, not absorbed silently`);
+console.log('\n── loc_city_cluster, read from production ──────────────────────────────────────');
+check('cluster membership is unchanged since the bucket fix shipped',
+  clustered.length === CLUSTERED_ON_2026_09_04.length
+    && clustered.every((id, i) => id === CLUSTERED_ON_2026_09_04[i]),
+  `production clusters ${clustered.join(', ')}; pinned ${CLUSTERED_ON_2026_09_04.join(', ')} — every member's Trending row advertises the whole cluster's inventory, so a change here changes what the Top-6 shows and needs a human`);
 
-// ── 2. Trending bucket vs delivery, per city, per cohort ─────────────────────────────────────────
-let knownGapsSeen = 0;
+// ── 2. Trending bucket vs delivery, per city, per cohort — ONE invariant, no exemptions ──────────
+let citiesSwept = 0;
 for (const { label, body, rest } of COHORTS) {
   console.log(`\n── ${label} ──────────────────────────────────────────────────`);
   const r = await fetch(`${REST}/rpc/top_cities_by_deal_ar`, {
@@ -109,30 +99,20 @@ for (const { label, body, rest } of COHORTS) {
   for (const c of cities) {
     // INDEPENDENT delivery truth: the results path's own predicate, `match_city_ids @> {city}`.
     const delivered = await restCount(`production_ready=is.true&${rest}&match_city_ids=cs.{${c.city_id}}`);
+    citiesSwept++;
     if (delivered !== c.listing_count) gaps.push({ id: c.city_id, city: c.city_ar, counted: c.listing_count, delivered });
   }
 
-  const unexplained = gaps.filter((g) => !clustered.has(g.id));
-  check('every non-clustered city advertises exactly what clicking it delivers',
-    unexplained.length === 0,
-    unexplained.map((g) => `${g.city} (city_id ${g.id}): Trending ${g.counted.toLocaleString()} vs ${g.delivered.toLocaleString()} delivered — ${g.delivered - g.counted > 0 ? 'UNDER' : 'OVER'}-reports by ${Math.abs(g.delivered - g.counted).toLocaleString()}`).join('\n        '));
-
-  // The known exception must still BE the known exception: present, and under-reporting (a cluster
-  // sibling can only ever deliver MORE than its own scalar bucket). Silence here would mean the
-  // bucketing changed without this file being updated — the surprise this barrier exists to prevent.
-  for (const g of gaps.filter((x) => clustered.has(x.id))) {
-    knownGapsSeen++;
-    console.log(`  ⓘ KNOWN (${KNOWN[g.id]?.note ?? 'clustered'}): ${g.city} — Trending ${g.counted.toLocaleString()}, clicking delivers ${g.delivered.toLocaleString()} (+${(g.delivered - g.counted).toLocaleString()})`);
-    check(`${g.city}: the cluster gap is an UNDER-report, as the mechanism predicts`, g.delivered > g.counted,
-      `delivered ${g.delivered} <= counted ${g.counted} — that is not the match_city_ids widening, so this exemption no longer describes reality`);
-  }
+  check('every city advertises exactly what clicking it delivers',
+    gaps.length === 0,
+    gaps.map((g) => `${g.city} (city_id ${g.id})${clustered.includes(g.id) ? ' [cluster member]' : ''}: Trending ${g.counted.toLocaleString()} vs ${g.delivered.toLocaleString()} delivered — ${g.delivered - g.counted > 0 ? 'UNDER' : 'OVER'}-reports by ${Math.abs(g.delivered - g.counted).toLocaleString()}`).join('\n        '));
 }
 
-check('the al_ahsa cluster gap is still present and still measured',
-  knownGapsSeen > 0,
-  'no clustered city showed a gap in ANY cohort — either the bucketing was changed (say so, and delete this barrier\'s exemption) or the cluster was emptied. Both need a human.');
+// A sweep that measured nothing must not pass as a sweep that found nothing.
+check(`the sweep actually measured cities (${citiesSwept})`, citiesSwept >= 100,
+  'far fewer city×cohort comparisons than production has cities — the sweep is not covering what its name claims');
 
 console.log(failures === 0
-  ? `\n✅ verify-trending-city-bucket-matches-delivery: every city row advertises what it delivers, except the ${clustered.size} pinned al_ahsa cluster members.\n`
+  ? `\n✅ verify-trending-city-bucket-matches-delivery: all ${citiesSwept} city×cohort rows advertise exactly what they deliver.\n`
   : `\n✗ verify-trending-city-bucket-matches-delivery: ${failures} check(s) failed.\n`);
 process.exit(failures === 0 ? 0 : 1);
