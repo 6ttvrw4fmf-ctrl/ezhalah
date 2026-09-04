@@ -244,7 +244,13 @@ export function ResultCard({
             USED to derive the rate as round(total/area) a later gate could null the total and leave
             a 0 behind — which rendered «سعر المتر ر.س 0» on 5 live dealapp cards (found 2026-07-26,
             scrapers fixed in PR#218). `> 1` withholds 0 and negatives as well as the placeholder. */}
-        {listing.price === 'Price on request'
+        {/* DERIVED-TOTAL ROWS KEEP THEIR SOURCE RATE (owner rule 2026-09-03). When the total shown
+            above is OUR per-metre x area arithmetic, the advertiser's own per-metre figure must stay
+            on the card — it is the only source-published price the listing has, and it is what the
+            derived total is accountable to. Without `|| listing.priceIsDerived` this line vanished
+            the moment the row stopped saying «السعر عند الطلب», hiding the source value behind a
+            number we computed. */}
+        {(listing.price === 'Price on request' || listing.priceIsDerived)
           && listing.pricePerMeter != null
           && listing.pricePerMeter > 1 ? (
           <Text style={card.pricePerMeter} numberOfLines={1}>
@@ -254,6 +260,14 @@ export function ResultCard({
                 the one thing this element must never be mistaken for. The unit now travels with the
                 number, so a rate can never be misread as the price of the property. */}
             {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{Number(listing.pricePerMeter).toLocaleString('en-US')} {t('SAR/m²')}</Text>
+          </Text>
+        ) : null}
+        {/* TRUTHFULNESS: a derived total is arithmetic, not an advertised price, and must say so.
+            The figure above already carries '≈'; this states plainly where it came from, so nobody
+            reads it as a number the seller published. (owner rule 2026-09-03) */}
+        {listing.priceIsDerived ? (
+          <Text style={card.derivedTotalNote} numberOfLines={1}>
+            {t('Calculated from price per m² × area — not published by the source')}
           </Text>
         ) : null}
         {/* Guest rating — renders ONLY when the listing carries one (Gathern). e.g. ★ 9.9 (59 تقييم) */}
@@ -753,6 +767,7 @@ const card = StyleSheet.create({
   // Source-published «سعر المتر» subline, rendered directly under the price line on listings that
   // have no total price. Deliberately quieter than `price` (muted, smaller) so it reads as
   // supporting information the source happened to publish, never as the listing's headline price.
+  derivedTotalNote: { fontSize: 10.5, color: colors.muted, marginTop: 2, textAlign: 'right' },
   pricePerMeter: { fontSize: 11.5, color: colors.muted, fontWeight: '500', marginTop: 2 },
   pricePerMeterStrong: { fontWeight: '700', color: colors.ink },
 
