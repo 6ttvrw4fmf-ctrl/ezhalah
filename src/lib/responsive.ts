@@ -55,3 +55,8 @@ export function atLeast({ mounted, isWeb, width, min }: ViewportGate): boolean {
   if (!isWeb) return false;
   return width >= min;
 }
+
+// «من نحن» composition (owner 2026-09-03): at/above this width the portrait artwork box sits BESIDE
+// the intro column; below it the story stacks with the art box centered. Lives here — never inline
+// in a component — so SSR (width 0) and the client agree through useAtLeast().
+export const ABOUT_ART_BREAKPOINT = 640;

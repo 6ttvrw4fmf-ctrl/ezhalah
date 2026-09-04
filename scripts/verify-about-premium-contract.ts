@@ -6,8 +6,10 @@
 // brief so no future edit quietly regresses any of them:
 //
 //   1. the long five-card scroll must not return          6. no Arabic dash separators («—»)
-//   2. desktop fits a capped single screen                7. the map panel stays desktop-only
-//   3. panel art never overflows its 340px canvas         8. required legal/brand content survives
+//      (2026-09-03: and the artwork sits in its OWN box,   7. the map panel stays desktop-only
+//      never as a background under text)                  8. required legal/brand content survives
+//   2. desktop fits a capped single screen
+//   3. themed fully; no × on «من نحن», header-drag
 //   4. no letterSpacing on Arabic text                    9. reduced motion is respected
 //   5. every displayed string has an Arabic entry        10. the sidebar entry still opens the modal
 //
@@ -42,24 +44,28 @@ check(
   '1a. the old five-card About stack is gone (no secCard/secIc icon-circle rhythm)',
   !/secCard|secIc|secHead|secTitle/.test(modal),
 );
-// REDESIGN (owner 2026-08-29): one artwork-led column replaces the 2026-08-24 hero/panel row.
+// DESIGN CORRECTION (owner 2026-09-03, supersedes the 2026-08-29 artwork-led hero): «من نحن» is
+// NOT text written over a background image. The artwork lives in its OWN box — the real image at
+// its real aspect ratio, contained, nothing painted over it — and the information has its own
+// structure (intro, statistic, 2×2 feature cards, trust card).
 check(
-  '1b. the artwork-led composition exists (full-bleed hero art melting into the surface + trust card)',
-  /heroArt:\s*\{/.test(modal) && /heroImg:\s*\{/.test(modal) && /trustCard:\s*\{/.test(modal)
-  && /LinearGradient colors=\{\[alpha0\(pal\.paper\), pal\.paper\]\}/.test(modal),
+  '1b. the artwork lives in its OWN box, contained at its real aspect ratio, and no gradient melt remains',
+  /artBox:\s*\{/.test(modal) && /artImg:\s*\{/.test(modal) && /trustCard:\s*\{/.test(modal)
+  && /<RNImage source=\{ABOUT_ART\} style=\{a\.artImg\} resizeMode="contain" \/>/.test(modal)
+  && /aspectRatio: ABOUT_ART_RATIO/.test(modal) && /const ABOUT_ART_RATIO = 900 \/ 1317/.test(modal)
+  && !/LinearGradient/.test(modal),
 );
 check(
-  '1c. the artwork is INTEGRATED, not pasted: the hero image sits under a melt gradient and the '
-  + 'lockup rises out of its lower band',
-  modal.indexOf('a.heroImg') < modal.indexOf('LinearGradient colors={[alpha0(pal.paper), pal.paper]}')
-  && modal.indexOf('LinearGradient colors={[alpha0(pal.paper), pal.paper]}') < modal.indexOf('a.heroInner'),
+  '1c. the artwork is never a background under text: the image is not absolutely positioned and its box holds ONLY the image',
+  !/artImg:\s*\{[^}]*position: 'absolute'/.test(modal)
+  && /style=\{\[a\.artBox, wide \? a\.artBoxWide : a\.artBoxNarrow\]\}>\s*\n\s*<RNImage source=\{ABOUT_ART\}[^\n]*\n\s*<\/Reveal>/.test(modal),
 );
 
 // ── 2. Desktop about is a capped single screen ──────────────────────────────────────────────────
-const aboutCap = Number(modal.match(/kind === 'about' \? (\d+) : \d+\)/)?.[1] ?? NaN);
+const aboutCap = Number(modal.match(/^const ABOUT_MAX_H = (\d+);/m)?.[1] ?? NaN);
 check(
-  `2a. the About height cap exists and stays a dialog, not a screen takeover (${aboutCap} ≤ 680)`,
-  Number.isFinite(aboutCap) && aboutCap <= 680,
+  `2a. the About height cap exists and stays a dialog, not a screen takeover (${aboutCap} ≤ 720)`,
+  Number.isFinite(aboutCap) && aboutCap <= 720,
 );
 check(
   '2b. ONE column serves every breakpoint — the retired two-panel machinery is gone',
@@ -70,17 +76,18 @@ check(
 check('3a. About styles are palette-driven (makeAbout factory), never the static light tokens',
   /function makeAbout\(pal: Record<string, string>, dark: boolean\)/.test(modal)
   && /useMemo\(\(\) => makeAbout\(pal, dark\), \[pal, dark\]\)/.test(modal));
-// 3b RETARGETED 2026-08-30 (owner: use the EXISTING eagle-over-properties artwork in «من نحن»).
-// The old pin (dark 0.22 / light 0.55) belonged to the LIGHT skyline, which would glow through a dark
-// surface and so had to be dimmed. The hero is now assets/images/eagle-night.jpg — a dark-native
-// night scene — so in dark mode it must be SHOWN, not ghosted; dimming it to 0.22 would erase the very
-// artwork the owner asked for. The rule is still a pin on the exact literals so a drive-by edit cannot
-// silently change the composition; only the truth behind the numbers changed with the asset.
-check('3b. the hero artwork is tuned per theme for the dark-native eagle art (shown in dark, softened in light)',
-  /opacity: dark \? 0\.78 : 0\.62/.test(modal) && /const ABOUT_ART = require\('\.\.\/\.\.\/assets\/images\/eagle-night\.jpg'\)/.test(modal));
-check('3c. the hero art clips and derives its text clearance from TOP_CLEAR (× can never collide)',
-  /heroArt: \{ height: TOP_CLEAR \+ \d+, overflow: 'hidden'/.test(modal)
-  && /heroInner: \{[^}]*paddingTop: TOP_CLEAR/.test(modal));
+// 3b RETARGETED 2026-09-03: the EXISTING eagle-night asset stays, and it is shown as-is — never
+// dimmed, ghosted or zoomed (the 2026-08-30 per-theme opacity belonged to the wallpaper treatment).
+check('3b. the artwork is the existing eagle-night asset, shown at full opacity in both themes (never ghosted)',
+  /const ABOUT_ART = require\('\.\.\/\.\.\/assets\/images\/eagle-night\.jpg'\)/.test(modal)
+  && !/artImg:[^\n]*opacity/.test(modal) && !/artBox(Wide|Narrow)?:[^\n]*opacity/.test(modal));
+// 3c RETARGETED 2026-09-03: «من نحن» has NO close button (the backdrop closes it) and is DRAGGABLE
+// by its header on desktop, starting centered on every open (no position memory).
+check('3c. «من نحن» renders without a × (gated), drags by its header via the shared machinery, and never remembers a position',
+  /const hasClose = kind !== 'about';/.test(modal) && /\{hasClose && \(/.test(modal)
+  && /<AboutBody[^>]*gripRef=\{gripRef\}/.test(modal) && /ref=\{gripRef\}/.test(modal)
+  && /attachCardDrag\(node, grip, \{/.test(modal) && !/posKey:/.test(modal)
+  && /const drag = about && canDragAuthPopup\(\{ isWeb: IS_WEB, docked \}\)/.test(modal));
 
 // ── 4. Arabic typography: no letterSpacing anywhere in the About styles ─────────────────────────
 const aBlock = modal.slice(modal.indexOf('const a = StyleSheet.create'));

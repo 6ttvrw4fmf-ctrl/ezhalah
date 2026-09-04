@@ -30,7 +30,10 @@
 import { chromium, webkit, firefox, devices } from '@playwright/test';
 import { existsSync } from 'node:fs';
 
-export const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
+// The production target lock (AGENTS.md): the ONE URL these journeys score. Named rather than
+// inlined so `ledgerRecord` can refuse to mint coverage for anything else.
+export const PROD_BASE = 'https://ezhalah-app.vercel.app';
+export const BASE = process.env.BASE_URL || PROD_BASE;
 export const SUB = 'qa@ezhalah.test';
 const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
 const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
@@ -85,9 +88,45 @@ export function engineAvailable(engine) {
   try { return existsSync(ENGINES[engine].executablePath()); } catch { return false; }
 }
 
-/** Chromium takes the container flags; WebKit/Firefox take the proxy only (they have no such CLI). */
+/** Chromium takes the container flags; WebKit/Firefox take the proxy only (they have no such CLI).
+ *
+ *  THE LOCALHOST BYPASS IS NOT A CONVENIENCE. Production is the only thing these journeys score
+ *  (PART 3), but a `src/` fix has to be provable in a real browser BEFORE it ships, and the only
+ *  build that carries an unmerged fix is a local one — `scripts/verify-web-runtime-smoke.mjs`
+ *  serves `dist/` on 127.0.0.1 for exactly that reason, and sets this same bypass.
+ *
+ *  With the proxy set and no bypass, 127.0.0.1 is routed through the egress proxy and never
+ *  resolves; unsetting the proxy (the obvious workaround) loads the page but cuts the browser off
+ *  from Supabase entirely. The bypass is the only combination that can be both, so it belongs here.
+ *
+ *  THE BYPASS ALONE IS NOT ENOUGH, AND THE SECOND HALF IS THE ONE THAT COSTS A RUN. Build the
+ *  bundle the obvious way and EVERY signed-in journey skips with «row ⋯ menu would not open», on
+ *  the existing known-good `sidebar-row-actions` as much as on a new journey, while both pass
+ *  against production. `verify-web-runtime-smoke.mjs` fails the same build at
+ *  «pickCity(الرياض): the app never confirmed the selection» — on plain `main`, which CI is green
+ *  on. Nothing is wrong with the app: the bundle simply has no backend.
+ *
+ *  TWO THINGS ARE REQUIRED, and the second is invisible:
+ *    1. EXPORT THE CLIENT ENV BEFORE BUILDING. `src/lib/supabase.ts` reads
+ *       `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_KEY` at BUILD time; unset, the client
+ *       builds as null and every search, location lookup and auth check dies. This container does
+ *       not set them (CI does, in web-runtime-smoke.yml, with public fallbacks — they are
+ *       client-public by definition and inlined into every served page; the service-role key
+ *       NEVER goes here).
+ *    2. CLEAR METRO'S CACHE IF AN EARLIER BUILD RAN WITHOUT THEM. `process.env.EXPO_PUBLIC_*` is
+ *       inlined at TRANSFORM time and the transform is cached, so exporting the variables and
+ *       rebuilding silently reuses the `undefined` from the first attempt. That is the whole trap:
+ *       the second build looks correct, changes nothing, and sends you hunting a product bug.
+ *       `grep -rl "<the supabase ref>" dist/` is the one-second check that the env actually landed.
+ *
+ *  With both done, the same local `dist/` goes from 1 smoke check passing to 52, the sidebar
+ *  journeys stop skipping, and a `src/` fix becomes provable before it ships (measured 2026-09-04).
+ *  Production remains the only thing scored (PART 3/PART 7) — a local green is evidence the fix
+ *  works, never a substitute for verifying production after deploy. */
 function launchOpts(engine) {
-  const proxy = process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {};
+  const proxy = process.env.HTTPS_PROXY
+    ? { proxy: { server: process.env.HTTPS_PROXY, bypass: '127.0.0.1,localhost' } }
+    : {};
   if (engine !== 'chromium') return { ...proxy };
   return {
     // Only pin the path when that binary actually exists (the agent container). On a runner,
@@ -402,6 +441,23 @@ export function registerJourneys(names) {
 export const isOwnedLedgerKey = (key) => !!ownedLedgerKeys && ownedLedgerKeys.has(key);
 
 export async function ledgerRecord(key, result, notesText) {
+  // A ROW MUST MEAN "PRODUCTION WAS TESTED", OR IT MEANS NOTHING.
+  //
+  // The ledger is not a log — it is what decides which surface gets attacked next (PART 3 item 7),
+  // so a row minted from anywhere else rotates coverage AWAY from a surface production has never
+  // exercised. `BASE_URL` is overridable for local-build verification (see launchOpts), and nothing
+  // stopped such a run from writing here: this run drove `http://127.0.0.1:8899` and wrote
+  // `adv-crosstab-no-clobber` rows claiming production coverage for a journey production had never
+  // executed, and could not have — the fix it guards was not deployed yet. Those rows were removed.
+  //
+  // This is the same failure the `registerJourneys` guard below exists for — a row asserting
+  // coverage nothing can reproduce — reached through the other door: that one checks WHICH journey,
+  // this one checks WHAT WAS DRIVEN. Both have to hold for a row to be worth reading.
+  if (BASE !== PROD_BASE) {
+    console.log(`  ledger  REFUSED «${key}» — this run drove ${BASE}, not production (${PROD_BASE}). `
+      + `A ledger row means production was tested; a local build has proved a fix, not covered a surface.`);
+    return false;
+  }
   if (!LEDGER_RESULTS.includes(result)) {
     console.log(`  ledger  REFUSED «${result}» for ${key} — must be one of ${LEDGER_RESULTS.join('|')}`);
     return false;

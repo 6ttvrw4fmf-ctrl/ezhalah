@@ -89,7 +89,7 @@ async function main() {
   console.error(`ROTATION → deals:  ${deals.map((d) => d.deal + (d.period ? '/' + d.period : '')).join(', ')}`);
   console.error(`ROTATION → types:  ${types.map((t) => t.label ?? t.group).join(', ')}\n`);
 
-  const done = { normal: 0, af: 0, tCity: 0, tDistrict: 0, mobile: 0, buyRent: 0, monthly: 0, zero: 0, cardBack: 0, showMore: 0 };
+  const done = { normal: 0, af: 0, tCity: 0, tDistrict: 0, mobile: 0, buyRent: 0, monthly: 0, zero: 0, cardBack: 0, showMore: 0, showMoreAf: 0 };
   const citiesTested = new Set(); const regionsTested = new Set(); const typesTested = new Set();
   const run = async (label, fn, tally) => {
     console.error(`▶ ${label}`);
@@ -209,6 +209,15 @@ async function main() {
     () => showMoreJourney({ city: RIYADH, deal: 'إيجار', period: 'سنوي', batches: 3 }),
     () => { done.showMore++; citiesTested.add(RIYADH); });
 
+  // AF-SCOPED PAGINATION (owner PERMANENT, 2026-09-04): "the app's actual Load More UI, under an
+  // active AF state, preserves the exact eligible set — no duplicates, no skips, and the committed
+  // predicate never silently changes mid-browse." Same cohort `advancedFilter` already proves opens a
+  // real AF question (villa/Buy Riyadh) — reused here specifically so this journey commits a REAL
+  // predicate through the real UI, then pages through it.
+  await run('«عرض المزيد» under an active AF predicate → set + predicate both survive',
+    () => showMoreJourney({ city: RIYADH, deal: 'بيع', group: 'الفلل والبيوت', typeLabel: 'فيلا', batches: 2, af: true }),
+    () => { done.showMoreAf++; citiesTested.add(RIYADH); });
+
   await run('clear all', () => clearAll({ city: reachableFor('بيع') }));
 
   // ── 5. THE PERMANENT WATCHES for the 2026-08-23 fixes ─────────────────────────────────────────
@@ -245,6 +254,7 @@ async function main() {
   floor('honest-zero journeys', done.zero, FLOORS.zeroResultJourneys);
   floor('card→back journeys', done.cardBack, FLOORS.cardClickBackJourneys);
   floor('«عرض المزيد» journeys', done.showMore, FLOORS.showMoreJourneys);
+  floor('«عرض المزيد» under active AF journeys', done.showMoreAf, FLOORS.showMoreAfJourneys);
   // A permanent watch that did not actually run is a floor miss, not a pass. §40 says deleting a
   // watch fails the barrier; a watch that silently never executes is deletion at runtime, and it
   // used to leave the run green.

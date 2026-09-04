@@ -1394,6 +1394,77 @@ JOURNEYS['support-error-copy'] = async (mobile) => withPage({ mobile }, async (p
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the support error path', errs.join(' | ')); }
 });
 
+/** J22 — TWO TABS ARE ONE ACCOUNT. PART 5 shape 3 ("a sidebar action creating a duplicate or
+ *  losing a chat") attacked across tabs rather than within one, which is where it was actually
+ *  broken. Found 2026-09-04 by PART 4 exploration, not by any checklist.
+ *
+ *  store.tsx persists chat history by writing the ENTIRE in-memory array on every mutation, and
+ *  nothing listened for `storage`. Two tabs held two forks of one list and the LAST writer won
+ *  wholesale: tab B deleted h3 through the «حذف نهائي» gate (disk [h1,h2]), tab A — which never
+ *  learned about it — favourited an unrelated chat, and its whole-array write put [h1,h2,h3] back.
+ *  A confirmed deletion silently returning is the worst version of this class, because the user
+ *  watched the confirmation dialog agree with them.
+ *
+ *  WHY THE ORACLE IS THE DELETE AND NOT THE FAVOURITE. The favourite is only the trigger — any
+ *  mutation in tab A serves. What must hold is that a deletion CONFIRMED in one tab stays deleted
+ *  no matter what the other tab does next, so h3's absence is asserted on DISK (the shared truth
+ *  both tabs read on their next load), not in either tab's rendering. */
+JOURNEYS['adv-crosstab-no-clobber'] = async (mobile) => withPage(
+  { mobile, signedIn: true, history: THREE_CHATS() }, async (tabA, bag, ctx) => {
+  const name = `adv-crosstab-no-clobber:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const ids = (h) => (h || []).map((x) => x.id).join(',');
+
+  const tabB = await ctx.newPage();
+  await tabB.goto(BASE, { waitUntil: 'load' });
+  await settle(tabB);
+  const start = await storedHistory(tabA);
+  if ((start || []).length !== 3) { skip(name, `fixture seeded [${ids(start)}], expected 3 chats`); return; }
+
+  // ── tab B deletes h3, all the way through the confirmation gate ───────────────────────────────
+  if (!(await ensureSidebar(tabB, mobile))) { skip(name, 'sidebar would not open in the second tab'); return; }
+  if (!(await openRowMenu(tabB, 'شقق الخبر'))) { skip(name, 'row ⋯ menu would not open in the second tab'); return; }
+  if (!(await clickText(tabB, 'حذف'))) { skip(name, `delete action in the second tab: ${clickReason()}`); return; }
+  await sleep(1800);
+  // «حذف» only OPENS the gate (PR #1200); «حذف نهائي» deletes. Matching the row menu's own label
+  // here is the stale oracle that made sidebar-row-actions report a false failure 4/4 on
+  // 2026-08-29 — and the first version of this journey repeated it verbatim before being fixed.
+  const confirm = tabB.locator('[data-testid="chat-delete-confirm"]');
+  if (!(await confirm.count())) { skip(name, '«حذف نهائي» never appeared — the delete gate did not open'); return; }
+  await confirm.first().click({ timeout: 15_000 }).catch(() => {});
+  await sleep(2000);
+  const afterDelete = await storedHistory(tabB);
+  if ((afterDelete || []).some((x) => x.id === 'h3')) {
+    skip(name, `the delete itself did not land in the second tab (disk [${ids(afterDelete)}]) — no race to judge`);
+    return;
+  }
+  pass(name, `the second tab deleted h3 (disk [${ids(afterDelete)}])`);
+
+  // ── tab A, holding a now-stale list, does something ordinary ──────────────────────────────────
+  await tabA.bringToFront();
+  await sleep(600);
+  if (!(await ensureSidebar(tabA, mobile))) { skip(name, 'sidebar would not open in the first tab'); return; }
+  if (!(await openRowMenu(tabA, 'فلل جدة'))) { skip(name, 'row ⋯ menu would not open in the first tab'); return; }
+  if (!(await clickText(tabA, 'أضف إلى المفضلة'))) { skip(name, `favourite action in the first tab: ${clickReason()}`); return; }
+  await sleep(2200);
+
+  const final = await storedHistory(tabA);
+  if ((final || []).some((x) => x.id === 'h3')) {
+    defect(name, 'a chat deleted in another tab came back', `disk [${ids(final)}] after the first tab wrote — `
+      + 'the stale tab overwrote a CONFIRMED deletion with its whole-array write');
+  } else if (!(final || []).some((x) => x.id === 'h1') || !(final || []).some((x) => x.id === 'h2')) {
+    defect(name, 'the cross-tab merge lost a surviving chat', `disk [${ids(final)}], expected h1 and h2 to remain`);
+  } else {
+    const flagged = (final || []).filter((x) => x.starred || x.favorite || x.pinned).map((x) => x.id);
+    if (flagged.join(',') !== 'h2') {
+      defect(name, 'the first tab lost its own action to the cross-tab sync', `flagged [${flagged.join(',')}], expected [h2]`);
+    } else {
+      pass(name, `the deletion held and the first tab kept its own change (disk [${ids(final)}], starred [${flagged}])`);
+    }
+  }
+  if (bag.pageErrors.length) defect(name, 'page error during the cross-tab race', bag.pageErrors.join(' | '));
+  await tabB.close().catch(() => {});
+});
+
 // ═══ RUNNER ═════════════════════════════════════════════════════════════════════════════════════
 const t0 = Date.now();
 console.log(`JOURNEY SWEEP — ${new Date().toISOString()}`);
