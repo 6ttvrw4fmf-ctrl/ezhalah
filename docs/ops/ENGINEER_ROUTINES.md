@@ -72,85 +72,6 @@ The 11:00–12:30 UTC block also sits clear of the heavy daily pipeline window (
 scrapers 04:22/04:40, aqarmonthly 06:00, `sync-rich-attrs-wasalt` 06:47, the AF barriers 06:52), so
 each engineer audits settled data with that morning's detectors already run.
 
-## §R — WHY THERE ARE SEVEN, AND WHAT WOULD CHANGE THAT (reviewed 2026-09-04)
-
-The owner asked directly whether specialised engineers should be ADDED, and was explicit: *"Do not
-add engineers just to increase the number. Add them only when they give us meaningfully better bug
-discovery, faster ownership, or safer autonomous fixing."*
-
-**Verdict: no new routines.** A 74-agent audit (run `wf_01c03538-2c0`) hunted ten surfaces in
-parallel, confirmed 15 defects through 2-of-3 independent adversarial refutation, and put the
-question to three judges reasoning separately from coverage, from ownership clarity, and from
-operational cost. All three returned the same answer, and the decisive evidence is the same in each:
-
-| Owner | Confirmed defects that run |
-|---|---|
-| #6 Journey & Persistence | 8 |
-| #4 Search & Matching QA | 5 |
-| #3 Data Integrity | 2 |
-| #1, #2, #5, #7 | 0 |
-| **a surface no routine owns** | **0** |
-
-Not one defect needed an owner that did not already exist. They went undiscovered because **nobody
-was looking at those screens with a browser**, which is a throughput fact, not an ownership one — and
-throughput is bought with journeys and hunt agents, which cost no boundary. The marginal cost of a
-routine is not its run; it is its **boundary**. An eighth owner means editing, in lockstep,
-`incident_route_owner()`, `scripts/lib/alertRouting.ts`, `SENTRY_ROUTING.md` §2, `ALERT_ROUTING.md`,
-this file, `e2e/guardian/journeys.mjs`, and `scripts/verify-incident-spine.ts`. Boundary maintenance
-is empirically the thing this system is worst at: the same audit found ten documented ownership
-contradictions across four routing mechanisms, two of which had misrouted Advanced Filter for twelve
-days.
-
-**What was actually missing, and is now fixed:** the routing *vocabulary*. Ten real user-reachable
-surfaces (`share`, `feedback`, `account_menu`, `devices`, `support`, `interview`, `browser`, `intro`,
-`mode_switch`, `agent`) had no name, so findings on them fell through to the #2 fallback and arrived
-indistinguishable from noise. They are named now, and an unknown surface RAISES at `incident_open()`
-instead of silently joining #2's pile.
-
-### §R.1 — The one split that is pre-authorised, on a falsifiable trigger
-
-#6 owns nine of the routed surfaces and took 53% of that run's defects, two of them inside PART 1
-bullets it simply had not reached. That is a real capacity argument, and it is the only one. It is
-NOT acted on yet, because the mechanism that found those eight was not a routine — it was ten hunt
-agents in one session, which scales on demand and costs no boundary.
-
-**Trigger (measure it, do not re-argue it):** if over any 14-day window #6-owned surfaces produce
-more than half of all confirmed defects **and** fewer than a third of those were found by #6's own
-runs, split it. #6a keeps auth / session / One Tap / sidebar / chat persistence / favorites /
-navigation; #6b takes voice, read-aloud, share, feedback, theme, the modals, mobile hit targets and
-the cross-browser matrix. Nothing moves out of #3/#4/#5/#7, so the split adds one boundary rather
-than redrawing four. Until the trigger fires, #6 should exploit the rotation ledger it already has
-(`ops_qa_coverage_ledger`, `journey_` prefix) rather than be subdivided.
-
-### §R.2 — Proposals considered and rejected, so they are not re-litigated
-
-- **Frontend/Visual QA** — wholly inside #6's charter (`JOURNEY_PERSISTENCE_ENGINEER.md:78-79`). The
-  share-sheet dark-mode defect proves that surface is under-exercised, not unowned.
-- **Mobile / RTL** — mobile is an *axis*, not a surface: a mobile AF bug would belong to #5 and to
-  the mobile engineer simultaneously, on every surface. The measured gap is CONFIG (a second
-  Playwright project, two unset env vars, two hardcoded viewports), not capacity.
-- **Failure-Path / Degradation** — the largest defect class (5 of 15) and the most tempting proposal.
-  Rejected because a cross-cutting CLASS is what a BARRIER is for, not an owner: ownership here is
-  keyed on surface, so a class-owner would collide with every surface owner at once — the "two
-  routines working the same crash" failure `SENTRY_ROUTING.md` §4 exists to prevent. A daily agent
-  re-derives the same judgement every day; a barrier makes it permanent for free. The replacement is
-  `scripts/verify-failure-is-not-emptiness.ts`.
-- **AI Agent / Conversation** — the one proposal with a genuine ownership hole, and it is BLOCKED
-  rather than refused: it would have to be carved out of #2, and **#2 is the only routine with no
-  canonical spec in this repo** (its sections live at claude.ai). You cannot carve a surface out of a
-  contract you cannot read. Writing #2's spec into this repo is the prerequisite, and it is an owner
-  action.
-
-### §R.3 — The gap no engineer can close
-
-**Automation cannot sign in.** Production auth is Google + Apple OAuth only (owner ruling
-2026-09-01), so every synthetic journey is permanently a guest. The entire signed-in half of the
-product — sidebar history lifecycle, favorites, rename, reorder, account menu, devices, deletion,
-appearance/dark mode — has no live coverage and cannot get any until a non-OAuth QA session exists.
-This is an owner decision (§G.2(a)/(b)), not an engineering one: it needs either anonymous sign-in
-enabled for a dedicated test identity, or a QA account whose credentials live in GitHub Actions
-secrets. Adding a routine does not help; that routine would be a guest too.
-
 ## §S — SENTRY (mandatory every run, owner rule 2026-08-28) — applies to ALL SEVEN routines
 On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
 whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
@@ -329,6 +250,85 @@ not to fix**.
 Routines whose canonical spec already defines a richer domain report block **keep it, and append
 this block at the end**. The `Rating Before → Rating After` pair required by "Reporting rules"
 below is unaffected and still mandatory; `TRUE SCORE` does not replace it.
+
+## §R — WHY THERE ARE SEVEN, AND WHAT WOULD CHANGE THAT (reviewed 2026-09-04)
+
+The owner asked directly whether specialised engineers should be ADDED, and was explicit: *"Do not
+add engineers just to increase the number. Add them only when they give us meaningfully better bug
+discovery, faster ownership, or safer autonomous fixing."*
+
+**Verdict: no new routines.** A 74-agent audit (run `wf_01c03538-2c0`) hunted ten surfaces in
+parallel, confirmed 15 defects through 2-of-3 independent adversarial refutation, and put the
+question to three judges reasoning separately from coverage, from ownership clarity, and from
+operational cost. All three returned the same answer, and the decisive evidence is the same in each:
+
+| Owner | Confirmed defects that run |
+|---|---|
+| #6 Journey & Persistence | 8 |
+| #4 Search & Matching QA | 5 |
+| #3 Data Integrity | 2 |
+| #1, #2, #5, #7 | 0 |
+| **a surface no routine owns** | **0** |
+
+Not one defect needed an owner that did not already exist. They went undiscovered because **nobody
+was looking at those screens with a browser**, which is a throughput fact, not an ownership one — and
+throughput is bought with journeys and hunt agents, which cost no boundary. The marginal cost of a
+routine is not its run; it is its **boundary**. An eighth owner means editing, in lockstep,
+`incident_route_owner()`, `scripts/lib/alertRouting.ts`, `SENTRY_ROUTING.md` §2, `ALERT_ROUTING.md`,
+this file, `e2e/guardian/journeys.mjs`, and `scripts/verify-incident-spine.ts`. Boundary maintenance
+is empirically the thing this system is worst at: the same audit found ten documented ownership
+contradictions across four routing mechanisms, two of which had misrouted Advanced Filter for twelve
+days.
+
+**What was actually missing, and is now fixed:** the routing *vocabulary*. Ten real user-reachable
+surfaces (`share`, `feedback`, `account_menu`, `devices`, `support`, `interview`, `browser`, `intro`,
+`mode_switch`, `agent`) had no name, so findings on them fell through to the #2 fallback and arrived
+indistinguishable from noise. They are named now, and an unknown surface RAISES at `incident_open()`
+instead of silently joining #2's pile.
+
+### §R.1 — The one split that is pre-authorised, on a falsifiable trigger
+
+#6 owns nine of the routed surfaces and took 53% of that run's defects, two of them inside PART 1
+bullets it simply had not reached. That is a real capacity argument, and it is the only one. It is
+NOT acted on yet, because the mechanism that found those eight was not a routine — it was ten hunt
+agents in one session, which scales on demand and costs no boundary.
+
+**Trigger (measure it, do not re-argue it):** if over any 14-day window #6-owned surfaces produce
+more than half of all confirmed defects **and** fewer than a third of those were found by #6's own
+runs, split it. #6a keeps auth / session / One Tap / sidebar / chat persistence / favorites /
+navigation; #6b takes voice, read-aloud, share, feedback, theme, the modals, mobile hit targets and
+the cross-browser matrix. Nothing moves out of #3/#4/#5/#7, so the split adds one boundary rather
+than redrawing four. Until the trigger fires, #6 should exploit the rotation ledger it already has
+(`ops_qa_coverage_ledger`, `journey_` prefix) rather than be subdivided.
+
+### §R.2 — Proposals considered and rejected, so they are not re-litigated
+
+- **Frontend/Visual QA** — wholly inside #6's charter (`JOURNEY_PERSISTENCE_ENGINEER.md:78-79`). The
+  share-sheet dark-mode defect proves that surface is under-exercised, not unowned.
+- **Mobile / RTL** — mobile is an *axis*, not a surface: a mobile AF bug would belong to #5 and to
+  the mobile engineer simultaneously, on every surface. The measured gap is CONFIG (a second
+  Playwright project, two unset env vars, two hardcoded viewports), not capacity.
+- **Failure-Path / Degradation** — the largest defect class (5 of 15) and the most tempting proposal.
+  Rejected because a cross-cutting CLASS is what a BARRIER is for, not an owner: ownership here is
+  keyed on surface, so a class-owner would collide with every surface owner at once — the "two
+  routines working the same crash" failure `SENTRY_ROUTING.md` §4 exists to prevent. A daily agent
+  re-derives the same judgement every day; a barrier makes it permanent for free. The replacement is
+  `scripts/verify-failure-is-not-emptiness.ts`.
+- **AI Agent / Conversation** — the one proposal with a genuine ownership hole, and it is BLOCKED
+  rather than refused: it would have to be carved out of #2, and **#2 is the only routine with no
+  canonical spec in this repo** (its sections live at claude.ai). You cannot carve a surface out of a
+  contract you cannot read. Writing #2's spec into this repo is the prerequisite, and it is an owner
+  action.
+
+### §R.3 — The gap no engineer can close
+
+**Automation cannot sign in.** Production auth is Google + Apple OAuth only (owner ruling
+2026-09-01), so every synthetic journey is permanently a guest. The entire signed-in half of the
+product — sidebar history lifecycle, favorites, rename, reorder, account menu, devices, deletion,
+appearance/dark mode — has no live coverage and cannot get any until a non-OAuth QA session exists.
+This is an owner decision (§G.2(a)/(b)), not an engineering one: it needs either anonymous sign-in
+enabled for a dedicated test identity, or a QA account whose credentials live in GitHub Actions
+secrets. Adding a routine does not help; that routine would be a guest too.
 
 ## 1. ⚡ Daily JUNIOR SCRAPING Engineer (original, unmodified)
 
