@@ -21,6 +21,13 @@ const check = (label: string, ok: boolean, detail = '') => {
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail && !ok ? `\n        ${detail}` : ''}`);
 };
+// A barrier nobody watched fail is a comment that runs: `mustCatch` applies a check's OWN predicate
+// to a deliberately broken input and asserts it rejects it (repo ratchet,
+// scripts/verify-new-barriers-are-mutation-proven.ts).
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) failed++;
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) ${caught ? 'catches' : 'BLIND to'} ${label}`);
+};
 
 const agent = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
 const voice = readFileSync(new URL('../src/lib/voiceInput.ts', import.meta.url), 'utf8');
@@ -95,9 +102,53 @@ check(
   '5a. sendVoice submits via the one existing send() path, exactly once, after synchronous teardown',
   (sendBody.match(/void send\(/g) ?? []).length === 1 && /stopVoiceInput\(\)/.test(sendBody),
 );
+// 5b. LIFECYCLE INVARIANT, not a literal shape. This check used to assert that the source contained
+// `if (!active) return '';` as stopVoiceInput's first statement — i.e. it PINNED THE DEFECT AS
+// CORRECT. `active` only turns true AFTER getUserMedia resolves, so that early return made Stop and
+// Send the two exit paths that left recording mode WITHOUT calling teardown() while the permission
+// prompt was still up. teardown()'s `generation++` is the only thing an in-flight start checks, so
+// the grant arrived for a session the UI had already left and the mic came up hidden, capturing
+// forever (ops_incident hunt-2026-09-04:voice:05; X was never affected — cancelVoiceInput tears down
+// unconditionally). The invariant the module states for itself at voiceInput.ts:19-23 is what is
+// asserted now: on EVERY exit path of a leave-recording-mode API, teardown() has already run.
+const fnBody = (src: string, name: string) =>
+  src.match(new RegExp(`export function ${name}\\([^)]*\\)[^{]*\\{[\\s\\S]*?\\n\\}`))?.[0] ?? '';
+const tearsDownBeforeEveryReturn = (body: string) => {
+  const firstTeardown = body.indexOf('teardown()');
+  if (firstTeardown === -1) return false; // no teardown at all — the mic outlives the UI
+  return [...body.matchAll(/\breturn\b/g)].every((m) => (m.index ?? 0) > firstTeardown);
+};
+const stopFn = fnBody(voice, 'stopVoiceInput');
+const cancelFn = fnBody(voice, 'cancelVoiceInput');
 check(
-  '5b. stopVoiceInput() hands the transcript out at most once (inactive → empty no-op)',
-  /export function stopVoiceInput\(\): string \{\s*\n\s*if \(!active\) return '';/.test(voice),
+  '5b. every exit path tears down BEFORE it can return (Stop/Send cancel an in-flight start, like X), ' +
+    'and the transcript is still handed out at most once',
+  tearsDownBeforeEveryReturn(stopFn) && tearsDownBeforeEveryReturn(cancelFn) && /\bactive\b/.test(stopFn),
+  'stopVoiceInput()/cancelVoiceInput() must reach teardown() on every path — a return that jumps over it ' +
+    'leaves a start still awaiting the permission prompt uncancelled, and the granted mic captures with no UI. ' +
+    'stopVoiceInput must also keep gating the transcript on `active` so it is consumed exactly once.',
+);
+// MUTATION PROOF for 5b — the predicate is fed the defect it replaced, plus the shapes a fake fix
+// would take, and must reject every one while still accepting the real code.
+mustCatch(
+  "the shipped defect: `if (!active) return '';` returning before teardown()",
+  !tearsDownBeforeEveryReturn("export function stopVoiceInput(): string {\n  if (!active) return '';\n  const text = t();\n  teardown();\n  return text;\n}"),
+);
+mustCatch(
+  'a guard that returns early anywhere in the body, before teardown()',
+  !tearsDownBeforeEveryReturn("export function stopVoiceInput(): string {\n  if (!recognizer) return '';\n  teardown();\n  return '';\n}"),
+);
+mustCatch(
+  'teardown() dropped from the function entirely',
+  !tearsDownBeforeEveryReturn("export function cancelVoiceInput(): void {\n  active = false;\n}"),
+);
+mustCatch(
+  'the real fixed shape still PASSING (the predicate is not vacuously red)',
+  tearsDownBeforeEveryReturn("export function stopVoiceInput(): string {\n  const text = active ? f() : '';\n  teardown();\n  return text;\n}"),
+);
+mustCatch(
+  'a valid refactor that tears down first and then returns early (not flagged)',
+  tearsDownBeforeEveryReturn("export function stopVoiceInput(): string {\n  if (!active) { teardown(); return ''; }\n  teardown();\n  return f();\n}"),
 );
 check(
   '5c. Enter-while-recording routes to the SAME guarded voice send, never a raw send()',

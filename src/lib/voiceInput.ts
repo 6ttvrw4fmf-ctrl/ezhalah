@@ -239,11 +239,17 @@ export async function startVoiceInput(handlers: VoiceHandlers): Promise<boolean>
 }
 
 // Finish listening and return everything recognized (finals + trailing interim), fully torn down.
-// Idempotent: a second call (Stop tapped twice, Stop then Send racing) returns '' and no-ops — the
-// transcript is handed out exactly once, so no path can double-consume it.
+// Idempotent: a second call (Stop tapped twice, Stop then Send racing) returns '' — the transcript is
+// handed out exactly once, so no path can double-consume it.
+// TEARS DOWN UNCONDITIONALLY, exactly like cancelVoiceInput. `active` only turns true AFTER
+// getUserMedia resolves, so an `if (!active) return ''` early exit made Stop/Send the ONE pair of
+// exit paths that skipped teardown() while the permission prompt was still up — and teardown()'s
+// generation bump is the only thing that cancels an in-flight start. The grant then arrived for a
+// session the UI had already left, bringing the MediaStream + audio graph + recognizer up with no UI
+// and the tab's mic indicator lit (ops_incident hunt-2026-09-04:voice:05). Every exit path tears
+// down; only the transcript is conditional.
 export function stopVoiceInput(): string {
-  if (!active) return '';
-  const text = `${finalText} ${interimText}`.trim();
+  const text = active ? `${finalText} ${interimText}`.trim() : '';
   teardown();
   return text;
 }
