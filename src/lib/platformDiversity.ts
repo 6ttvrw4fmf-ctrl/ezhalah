@@ -61,13 +61,19 @@ function normLocKey(s: string): string {
 // Keyed on the registry's DOMAIN rather than a hardcoded pair, so any future vertical of an existing
 // site folds automatically and a genuinely new site never does. Display is untouched: each card
 // still renders its own source exactly, just as normLocKey leaves the city spelling alone.
+// Compared on letters+digits only: the RPC hands us the DB SLUG ('aqarmonthly', 'therc'), the
+// hydrated listing carries the registry NAME ('Aqar Monthly', 'THE RC'), and both must resolve to the
+// same identity — an exact-string map missed the slug side and «عقار» still showed twice (live,
+// 2026-09-04, after the first fix). A slug the registry cannot resolve stays itself, so it remains a
+// distinct identity rather than colliding with anything.
+const platformToken = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const DOMAIN_BY_PLATFORM: ReadonlyMap<string, string> = new Map(
-  PLATFORMS.map((p) => [p.name.toLowerCase(), p.domain]),
+  PLATFORMS.map((p) => [platformToken(p.name), p.domain]),
 );
 export function platformIdentity(platform: string | null | undefined): string {
-  const p = (platform ?? '').trim();
+  const p = platformToken(platform ?? '');
   if (!p) return '';
-  return DOMAIN_BY_PLATFORM.get(p.toLowerCase()) ?? p.toLowerCase();
+  return DOMAIN_BY_PLATFORM.get(p) ?? p;
 }
 
 function rankedKey<L extends { cleanType?: string | null; rentPeriod?: string | null }>(r: RankedRow<L>, k: string): string {
