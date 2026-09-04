@@ -486,7 +486,24 @@ Four rules that come from real failures on this exact surface:
 | One full 84-journey sweep, **Firefox** | **~1,740 s** | measured 2026-09-03, one full sweep against production |
 | Firefox mobile emulation | **none** | Gecko rejects `isMobile` at context creation, and the iPhone 13 profile carries it inside its spread too. Firefox mobile is a 375 px viewport with touch — say that, never "iPhone 13" |
 | One press of «بحث», **WebKit** | the same **6** `location_search_candidates_ar` calls | measured 2026-09-03; they can span >10 s, which is why the count must be read on a settling condition and never after a fixed sleep |
-| One «بحث» press → search RPCs | **6** `location_search_candidates_ar` calls | measured 2026-08-28: single click → 6, double click → 6 (identical). A double-click oracle must compare against a measured single-click baseline, never against 1 |
+| One «بحث» press → **calls** named `location_search_candidates_ar` | **6** | measured 2026-08-28 and re-measured 2026-09-04 (mobile, 2/2): single click → 6, double click → 6 |
+| …of which **RESULTS searches** | **exactly 1** (`p_limit: 1500`) | the other **5** are `p_limit: 1` per-option COUNT calls — `fetchScopeOptionCounts` and `fetchDistrictEligibleCounts` reuse the same RPC name, one call per VISIBLE option (`src/data/remote.ts:920`, `:965`, results at `:1476`) |
+
+**That split is the whole point, and getting it wrong cost a false verdict.** The number of calls is
+a property of how many options the results screen decided to decorate — it varies with the data and
+with what is on screen. Only the `p_limit != 1` class counts submitted searches. On 2026-09-04
+WebKit mobile captured `single -> 1, double -> 6` and `double-click-search` filed «double-click
+fired the search twice» when **both sides had submitted exactly one search** (1 results call each).
+Classify with `classifySearchRpc()` in `e2e/journeys/harness.mjs`; never count by RPC name alone.
+
+**A form the app will refuse to submit is not a primed form.** `onSearch` returns at
+`if (!citySelected)` with a validation message and **zero requests** (`src/app/index.tsx:712`) —
+the owner's 2026-07-17 spec, "never guess a location". Only a TAPPED suggestion row sets
+`citySelected`, and every keystroke clears it, so the tap is a race. When it loses, «بحث» correctly
+fires nothing; on 2026-09-04 WebKit desktop that was filed as «dead control». `primeSearch` must
+prove the commit via `SELECTED_CITY_MARKER` (`[data-testid="selected-city-visual"]`, rendered iff
+`citySelected` is non-null) and return false — a skip — rather than hand a caller a form that
+cannot search.
 
 **The consequence you must actually apply:** `rankQuestions` fires one `af_eligible_count` **per
 eligible question, concurrently** — so a five-question cohort is already past the concurrency knee

@@ -10,7 +10,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
          findings, skips, skip, ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
-         closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount } from './harness.mjs';
+         closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
+         classifySearchRpc, SELECTED_CITY_MARKER } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -191,6 +192,21 @@ JOURNEYS['new-chat-blank'] = async (mobile) => withPage({ mobile, signedIn: true
  *  would have", so a single click in its own fresh context IS the oracle — measured every run
  *  rather than hard-coded, because that call count is routine #4's to change freely and a constant
  *  here would rot into a false alarm the day they do. */
+/** Bring the Filter home to the one state in which pressing «بحث» is allowed to search at all.
+ *
+ *  IT MUST PROVE ITS OWN PRECONDITION, NOT ASSUME IT. This used to end at "«بحث» exists", which is
+ *  true of a form the app will REFUSE to submit: `onSearch` returns at `if (!citySelected)` with a
+ *  validation message and zero requests (src/app/index.tsx:712), because only a TAPPED suggestion
+ *  row commits a city and every keystroke clears it (owner spec 2026-07-17, "never guess a
+ *  location"). The suggestion tap is a race — the list has to have rendered — and when it loses,
+ *  the caller is handed a primed-looking form that cannot search.
+ *
+ *  `double-click-search` then read "zero search RPCs" as «dead control: «بحث» single click fired no
+ *  search at all» — its most alarming verdict, filed against the app doing exactly what it was
+ *  specified to do (measured on WebKit desktop, 2026-09-04, on a bundle Chromium and Firefox ran
+ *  clean). SELECTED_CITY_MARKER renders iff `citySelected` is non-null, so an unprimed form now
+ *  returns false and the journey SKIPS with "search could not be primed" instead of accusing.
+ */
 const primeSearch = async (page) => {
   await clickText(page, 'شراء');
   await sleep(600);
@@ -202,25 +218,31 @@ const primeSearch = async (page) => {
   await sleep(2500);
   await clickText(page, 'الرياض', { exact: true, nth: 0 });
   await sleep(1500);
+  if (!(await page.locator(SELECTED_CITY_MARKER).count())) return false;
   return (await page.getByText('بحث', { exact: true }).last().count()) > 0;
 };
 
 JOURNEYS['double-click-search'] = async (mobile) => {
   const name = `double-click-search:${mobile ? 'mobile375' : 'desktop1440'}`;
-  // BOTH SIDES ARE COUNTED ONLY ONCE THEY STOP GROWING. This used to read the count after a fixed
-  // `sleep(10_000)`, which PART 11.2 forbids as an oracle, and WebKit proved why: one press of
-  // «بحث» fires SIX `location_search_candidates_ar` calls (measured, §11.3), and on 2026-09-03 a
-  // WebKit mobile run captured only ONE of them inside the window. The comparison then read
-  // `double (6) > single (1)` and filed «double-click fired the search twice» against an app that
-  // had done nothing wrong — 1/4.
+  // COUNT SEARCHES, NOT CALLS. `location_search_candidates_ar` is the results query AND the RPC
+  // behind both per-option count helpers, which fire one `p_limit: 1` call PER VISIBLE OPTION on
+  // the screen the search just produced (see classifySearchRpc in harness.mjs). So the raw call
+  // count measures how much the results screen decided to decorate itself, not how many searches
+  // were submitted — and it filed «double-click fired the search twice: single -> 1, double -> 6»
+  // on WebKit mobile, 2026-09-04, when both sides had submitted exactly one search.
   //
-  // The dangerous direction is the OTHER one. If the DOUBLE side is the short capture, a genuine
-  // double-fire compares as `double <= single` and passes. So this oracle could hide exactly the
-  // regression it exists to catch, on any engine slow enough — the fix is a real settling condition
-  // rather than a bigger sleep (PART 11.2 rule 3), and an UNSETTLED count is refused as a
-  // measurement instead of being compared.
-  const settledSearchRpcs = (bag, from) => settledCount(
-    () => bag.rpc.slice(from).filter((r) => r.name === 'location_search_candidates_ar').length);
+  // Measured on production, mobile, 2/2 each: a single press → 1 results call + 5 option counts; a
+  // DOUBLE press → 1 results call + 5 option counts. The results class gives 1 = 1, which is the
+  // question this journey asks; the option-count class is noise to it and varies with the data.
+  //
+  // BOTH SIDES ARE STILL COUNTED ONLY ONCE THEY STOP GROWING. This also used to read after a fixed
+  // `sleep(10_000)`, which PART 11.2 forbids as an oracle. The dangerous direction there is the
+  // quiet one: if the DOUBLE side is the short capture, a genuine double-fire compares as
+  // `double <= single` and PASSES — the guard silently failing to guard on any engine slow enough.
+  // An UNSETTLED count is therefore refused as a measurement rather than compared.
+  const searchRpcs = (bag, from, cls) =>
+    bag.rpc.slice(from).filter((r) => classifySearchRpc(r) === cls).length;
+  const settledSearchRpcs = (bag, from) => settledCount(() => searchRpcs(bag, from, 'results'));
 
   // A CLICK THAT NEVER LANDED IS NOT EVIDENCE ABOUT THE CONTROL. This swallowed its click error in
   // a bare `.catch(() => {})`, so an intercepted or non-actionable «بحث» produced zero RPCs and the
@@ -243,7 +265,9 @@ JOURNEYS['double-click-search'] = async (mobile) => {
         clickErr = lines.find((l) => /intercepts pointer events/.test(l))?.trim() || lines[0];
       });
     if (clickErr) return { clickErr };
-    return settledSearchRpcs(bag, from);
+    const out = await settledSearchRpcs(bag, from);
+    // Carried out for the verdict line, and so an unparsable body can never be guessed into a class.
+    return { ...out, optionCounts: searchRpcs(bag, from, 'option-count'), unknown: searchRpcs(bag, from, 'unknown') };
   });
 
   const single = await press(1);
@@ -257,12 +281,17 @@ JOURNEYS['double-click-search'] = async (mobile) => {
   // two numbers of unknown completeness — that is what produced the false verdict above.
   if (single.n > 0 && !single.settled) { skip(name, `single-click RPC count never settled (still ${single.n} at the budget)`); return; }
   if (double.n > 0 && !double.settled) { skip(name, `double-click RPC count never settled (still ${double.n} at the budget)`); return; }
+  // A call whose body would not parse belongs to no class. Refuse the run rather than let a guess
+  // land in the results class and manufacture the double-fire this journey exists to detect.
+  const unknown = single.unknown + double.unknown;
+  if (unknown) { skip(name, `${unknown} search RPC(s) had an unreadable body — class unknown, so the counts are not comparable`); return; }
   if (single.n === 0) { defect(name, 'dead control', '«بحث» single click fired no search at all'); return; }
+  const mix = `single ${single.n} results +${single.optionCounts} option-counts / double ${double.n} results +${double.optionCounts}`;
   if (double.n > single.n) {
     defect(name, 'double-click fired the search twice',
-      `single click -> ${single.n} search RPCs (settled), double click -> ${double.n} (settled)`);
+      `single click -> ${single.n} RESULTS searches (settled), double click -> ${double.n} (settled); ${mix}`);
   } else {
-    pass(name, `double-click ran one search (single ${single.n} / double ${double.n} RPCs, both settled)`);
+    pass(name, `double-click ran one search (${mix}, both settled)`);
   }
 };
 

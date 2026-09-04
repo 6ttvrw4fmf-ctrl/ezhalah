@@ -24,7 +24,7 @@
 // Run: node --experimental-strip-types scripts/verify-journey-settled-count.ts
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { settledCount } from '../e2e/journeys/harness.mjs';
+import { settledCount, classifySearchRpc, SELECTED_CITY_MARKER } from '../e2e/journeys/harness.mjs';
 
 const ROOT = join(import.meta.dirname, '..');
 let failed = 0;
@@ -135,6 +135,66 @@ check('a click that never landed SKIPS with the reason instead of being called a
   /clickErr/.test(journeyCode) && /never landed/.test(journey));
 check('the non-landing check is judged BEFORE the dead-control verdict',
   journey.indexOf('never landed') < journey.indexOf("'dead control'"));
+
+// ── 7. COUNTING CALLS IS NOT COUNTING SEARCHES ──────────────────────────────────────────────────
+// `location_search_candidates_ar` is the results query AND the RPC behind fetchScopeOptionCounts
+// and fetchDistrictEligibleCounts, which fire one `p_limit: 1` call PER VISIBLE OPTION on the
+// screen the search just produced (src/data/remote.ts:920, :965, :1476). So the raw call count is a
+// property of what the results screen decorates, not of how many searches were submitted.
+//
+// Measured on production 2026-09-04, mobile, 2/2 each: a SINGLE press → 6 calls = 1 results
+// (p_limit 1500) + 5 option counts; a DOUBLE press → also 6 = 1 results + 5 option counts. So the
+// app submits one search either way, and the results class shows it as 1 = 1 — while the raw count
+// produced «double-click fired the search twice: single -> 1, double -> 6» on WebKit mobile.
+const rpc = (name: string, body: unknown) => ({ name, body });
+check('the RESULTS query (p_limit 1500) is a search',
+  classifySearchRpc(rpc('location_search_candidates_ar', { p_limit: 1500, p_offset: 0 })) === 'results');
+check('a p_limit:1 option-count call is NOT a search',
+  classifySearchRpc(rpc('location_search_candidates_ar', { p_limit: 1, p_districts: ['حي'] })) === 'option-count');
+check('a page-2 results call (p_limit 1500, offset 1500) is still a search',
+  classifySearchRpc(rpc('location_search_candidates_ar', { p_limit: 1500, p_offset: 1500 })) === 'results');
+check('a different RPC entirely is neither',
+  classifySearchRpc(rpc('loader_active_platforms_ar', { p_limit: 1500 })) === 'other');
+// An unreadable body must NOT be guessed into the results class — that is the direction that
+// manufactures a double-fire out of a parse failure.
+check('an unparsable body is UNKNOWN, never silently counted as a search',
+  classifySearchRpc(rpc('location_search_candidates_ar', null)) === 'unknown');
+check('a body with no p_limit at all is UNKNOWN, not a search',
+  classifySearchRpc(rpc('location_search_candidates_ar', { p_offset: 0 })) === 'unknown');
+check('null/undefined entries do not throw and are not searches',
+  classifySearchRpc(null) === 'other' && classifySearchRpc(undefined) === 'other');
+// The measured mixes, end to end: both sides are ONE search.
+{
+  const press = [rpc('location_search_candidates_ar', { p_limit: 1500 }),
+    ...Array.from({ length: 5 }, () => rpc('location_search_candidates_ar', { p_limit: 1 })),
+    rpc('loader_active_platforms_ar', {})];
+  check('the measured 6-call press counts as exactly ONE results search',
+    press.filter((r) => classifySearchRpc(r) === 'results').length === 1);
+  check('a GENUINE double-fire (two results calls) is still counted as two — the guard still guards',
+    [...press, rpc('location_search_candidates_ar', { p_limit: 1500 })]
+      .filter((r) => classifySearchRpc(r) === 'results').length === 2);
+}
+check('the journey counts the RESULTS class, not every call with that RPC name',
+  /classifySearchRpc\(r\) === cls/.test(journeyCode) && /'results'/.test(journeyCode));
+check('an unknown-class call is REFUSED rather than compared',
+  /unknown/.test(journeyCode) && /unreadable body/.test(journey));
+
+// ── 8. A FORM THE APP WILL REFUSE TO SUBMIT IS NOT A PRIMED FORM ────────────────────────────────
+// `onSearch` returns at `if (!citySelected)` with a validation message and ZERO requests
+// (src/app/index.tsx:712) — the owner's 2026-07-17 spec, "never guess a location". Only a tapped
+// suggestion row sets `citySelected`, and every keystroke clears it, so the tap is a race. When it
+// loses, «بحث» correctly fires nothing and the journey called that a DEAD CONTROL (WebKit desktop,
+// 2026-09-04). primeSearch must prove the city was committed before any caller reaches a verdict.
+check('SELECTED_CITY_MARKER is a testID, not visible text — text answers true from the wrong screen',
+  /^\[data-testid="[a-z-]+"\]$/.test(SELECTED_CITY_MARKER));
+const prime = run.slice(run.indexOf('const primeSearch'), run.indexOf("JOURNEYS['double-click-search']"));
+check('primeSearch requires the committed-city marker before reporting the form ready',
+  /SELECTED_CITY_MARKER/.test(prime));
+check('an uncommitted city returns FALSE (→ the caller skips), rather than being reported as primed',
+  /if \(!\(await page\.locator\(SELECTED_CITY_MARKER\)\.count\(\)\)\) return false;/.test(prime));
+// The check is worthless if it runs after the verdict, so pin the order: marker first, «بحث» last.
+check('the marker is checked BEFORE the «بحث»-exists check that used to be the whole precondition',
+  prime.indexOf('SELECTED_CITY_MARKER') < prime.indexOf("getByText('بحث'"));
 
 if (failed) { console.error(`\nverify-journey-settled-count: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-journey-settled-count: counts are compared only once they have stopped moving.');

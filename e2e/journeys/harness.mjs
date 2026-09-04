@@ -581,6 +581,46 @@ export async function sidebarIsOpen(page, { guestOk = false } = {}) {
   if (!guestOk) return false;
   return (await page.locator(SIDEBAR_OPEN_MARKER_GUEST).count()) > 0;
 }
+
+// ── A COMMITTED CITY IS THE ONLY THING THAT MAKES A SEARCH VALID ────────────────────────────────
+// src/app/index.tsx:1219 renders this image ONLY when `citySelected` is non-null, and `onSearch`
+// (index.tsx:712) returns at `if (!citySelected)` with a validation message and ZERO requests. That
+// refusal is the owner's spec, 2026-07-17: "The user must select a valid city result. Do not accept
+// arbitrary free text and never guess a location." `citySelected` is cleared on every keystroke, so
+// only a TAPPED suggestion row sets it.
+//
+// A journey that types a city, fails to land the suggestion tap, presses «بحث» and observes no
+// request has therefore observed the app OBEYING ITS SPEC — not a broken control. Measured
+// 2026-09-04: `double-click-search` filed «dead control: «بحث» single click fired no search at all»
+// on WebKit desktop from exactly that state. This marker is what lets a journey tell the two apart
+// BEFORE it reaches a verdict, and it is a testID rather than visible text for the same reason the
+// sidebar oracle is (see above): text answers true from the wrong screen.
+export const SELECTED_CITY_MARKER = '[data-testid="selected-city-visual"]';
+
+// ── ONE RPC NAME, THREE DIFFERENT QUESTIONS ─────────────────────────────────────────────────────
+// `location_search_candidates_ar` is not "a search". src/data/remote.ts calls it from three places:
+//   · line 1476 — the RESULTS query, `p_limit: pageLimit` (1500 in production)
+//   · line  920 — fetchScopeOptionCounts,      `p_limit: 1`, ONE CALL PER VISIBLE SCOPE OPTION
+//   · line  965 — fetchDistrictEligibleCounts, `p_limit: 1`, ONE CALL PER VISIBLE DISTRICT OPTION,
+//                 and only "when a narrowing filter beyond district_options_ar's scope is active"
+// The count helpers fan out in parallel, one call per option ON SCREEN, so the raw number of calls
+// is a property of what the results screen decided to decorate — not of how many searches were
+// submitted. Measured on production 2026-09-04, mobile, 2/2 each: one press → 6 calls = 1 results
+// (p_limit 1500) + 5 option counts; a DOUBLE press → also 6 = 1 results + 5 option counts.
+//
+// So `double (6) > single (1)` says nothing about double-submission, which is precisely the verdict
+// `double-click-search` filed on WebKit mobile. Counting the RESULTS class alone answers the
+// question the journey is actually asking, and gives the same number on both sides.
+//
+// An unparsable body is 'unknown' rather than being folded into either class: guessing would push
+// it into 'results' and manufacture the very double-fire this is meant to measure.
+export function classifySearchRpc(r) {
+  if (!r || r.name !== 'location_search_candidates_ar') return 'other';
+  const lim = r.body ? r.body.p_limit : undefined;
+  if (lim === 1) return 'option-count';
+  if (typeof lim === 'number' && lim > 1) return 'results';
+  return 'unknown';
+}
 // ── THE OPENING NAVIGATION: TRANSPORT FAILURE IS NOT A PRODUCT DEFECT ───────────────────────────
 // PART 9 opens by naming two opposite errors, and this function exists because the runner was
 // committing the FIRST one automatically. `run.mjs` wraps each journey in
