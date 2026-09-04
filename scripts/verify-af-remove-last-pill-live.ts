@@ -58,6 +58,10 @@ import { chromium } from 'playwright';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { AGENT_TURN_MS, describeLoad, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
+
+/** Marks an abort raised because a card was never OBSERVED, so the catch does not double-report it. */
+const UNOBSERVED_ABORT = '[unobserved]';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 
@@ -129,6 +133,23 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 // A SKIP is printed as SKIP, never as PASS: an assertion whose precondition failed proved nothing.
 const skip = (label: string, why: string) => console.log(`SKIP  ${label}\n      ${why}`);
+
+// ── A UI STATE THAT NEVER ARRIVED IS NOT A MEASUREMENT ─────────────────────────────────────────
+// See scripts/lib/afJourneyPacing.ts. UNDECIDED is counted SEPARATELY from `skip` and FAILS the run
+// (it is added to the exit code below): a journey that could not observe the card did not certify
+// anything, so this can never be a route to green — it only replaces a wrong reason with the
+// measured one.
+let undecided = 0;
+const undecidedLabels: string[] = [];
+const unobserved = async (label: string, detail: string) => {
+  const l = await readSearchLoad(SUPABASE_URL, H);
+  if (verdictForNonArrival(l) === 'red') {
+    check(label, false, `${detail} · ${describeLoad(l)} — production was NOT degraded, so this is a real failure`);
+    return;
+  }
+  console.log(`SKIP  ${label}\n      NOT EXERCISED — the awaited card never arrived within ${AGENT_TURN_MS}ms and ${describeLoad(l)}. ${detail}`);
+  undecided++; undecidedLabels.push(label);
+};
 
 /** Which AF predicates are present (non-null, non-empty) on a captured request body. */
 const afKeysOn = (body: any): string[] =>
@@ -363,12 +384,14 @@ const readCard = () => page.evaluate(() => {
   const d = chipTxt ? chipTxt.replace(/[٠-٩]/g, (x) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(x))).replace(/[^\d]/g, '') : '';
   return { hasCard: !!card, q, chip: d ? parseInt(d, 10) : null, hasSkip: !!card?.querySelector('[data-testid="af-skip"]'), hasConfirm: !!card?.querySelector('[data-testid="af-confirm"]') };
 });
-const readCardUntil = async (pred: (s: any) => boolean, timeoutMs = 12000) => {
-  const until = Date.now() + timeoutMs;
-  let last = await readCard();
-  while (Date.now() < until) { if (pred(last)) return last; await page.waitForTimeout(350); last = await readCard(); }
-  return last;
-};
+/** SETTLED reads — `settled:false` means the state was NEVER observed and must not be asserted
+ *  against. Same defect, same fix as verify-af-option-card-truth-live.ts (2026-09-04); the rule and
+ *  the reproduction live in scripts/lib/afJourneyPacing.ts. The old 12s default was sized for a
+ *  render; what these reads await is a paid agent turn. */
+const readCardSettled = (pred: (s: any) => boolean, timeoutMs = AGENT_TURN_MS) =>
+  settleUntil<any>(readCard, pred, timeoutMs, (ms) => page.waitForTimeout(ms));
+const readCardUntil = async (pred: (s: any) => boolean, timeoutMs = AGENT_TURN_MS) =>
+  (await readCardSettled(pred, timeoutMs)).value;
 // The offer sits behind the agent's own LLM turn, whose latency is variable — see
 // scripts/lib/afOfferLive.ts for the 2026-09-03 CI failure that moved this out of three private
 // copies of a 16-second poll. `reason` matters: 'no-turn' means the agent never answered (not a
@@ -477,8 +500,16 @@ try {
            : `the results turn landed but NO offer rendered on it within ${lastOffer?.waitedMs}ms ` +
              `(N0=${N0} is above INTERVIEW_STOP_AT, so R4.3/R11.1 cannot explain the absence)`);
   if (!opened) throw new Error('offer absent on the baseline turn');
-  const first = await readCardUntil((s) => s.hasCard && s.chip != null && !!s.q, 20000);
+  const fr = await readCardSettled((s) => s.hasCard && s.chip != null && !!s.q);
+  const first = fr.value;
   answeredTitle = first.q;
+  if (!fr.settled) {
+    // Both assertions below read the card's own chip. Judging them against a card that never
+    // finished rendering reports the harness's impatience as a product defect (chip=null vs N0).
+    await unobserved('the first question rendered with a title and a resolved header chip', JSON.stringify(first));
+    await unobserved('the first question header chip equals N0 before any selection (R7.1.1)', `chip=${first.chip} N0=${N0}`);
+    throw new Error(`${UNOBSERVED_ABORT} the first AF card never rendered — nothing below can be asserted`);
+  }
   check('the first question rendered with a title and a resolved header chip', first.hasCard && !!first.q && first.chip != null, JSON.stringify(first));
   check('the first question header chip equals N0 before any selection (R7.1.1)', first.chip === N0, `chip=${first.chip} N0=${N0}`);
   const opts = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
@@ -631,10 +662,18 @@ try {
   const reopened = await openOffer();
   check('R9.2.3 — the offer «خلّنا نحدد الطلب أكثر» is present again after the removal', reopened, reopened ? '' : 'no offer on the restored turn — the removed question may have stayed in the asked carry');
   if (reopened) {
-    const again = await readCardUntil((s) => s.hasCard && !!s.q && s.chip != null, 20000);
+    const ag = await readCardSettled((s) => s.hasCard && !!s.q && s.chip != null);
+    const again = ag.value;
     reofferedTitle = again.q;
+    if (!ag.settled) {
+      await unobserved('R9.2.3 — re-opening AF asks the SAME first question that was answered (not burned)',
+        `the re-opened card never rendered (card=${again.hasCard} q=${JSON.stringify(again.q)} chip=${again.chip})`);
+      await unobserved('R7.1.1 — the re-offered question\'s header chip equals N0 (the restored eligible set)',
+        `chip=${again.chip} N0=${N0}`);
+    } else {
     check('R9.2.3 — re-opening AF asks the SAME first question that was answered (not burned)', R.sameQuestionReoffered(answeredTitle, reofferedTitle), `answered=${JSON.stringify(answeredTitle)} reoffered=${JSON.stringify(reofferedTitle)}`);
     check('R7.1.1 — the re-offered question\'s header chip equals N0 (the restored eligible set)', again.chip === N0, `chip=${again.chip} N0=${N0}`);
+    }
   }
 
   check('the journey exercised the expected production backend', origins.size === 1 && origins.has(new URL(SUPABASE_URL).origin), `saw ${[...origins].join(', ') || '(none)'}, expected ${new URL(SUPABASE_URL).origin}`);
@@ -687,13 +726,22 @@ try {
       Number.isFinite(reAdded) && reAdded === N1 && reAdded !== N0, `B2+${afValues(leftover)} → ${reAdded} · N1=${N1} N0=${N0}`);
   } else check('MUTATION — real-RPC re-add of the removed predicate', false, 'B1 carried no AF key to re-add — nothing to prove against');
 } catch (e: any) {
-  check('the journey completed without a harness error', false, e.message);
+  // An abort raised BECAUSE a card was never observed has already been classified against
+  // production's load signal; re-reporting it as a harness error would state a second, wronger
+  // reason for one cause. Every other throw is a genuine harness failure and stays red.
+  if (String(e?.message ?? '').startsWith(UNOBSERVED_ABORT)) {
+    console.log(`      [diag] journey abandoned: ${String(e.message).slice(UNOBSERVED_ABORT.length).trim()}`);
+  } else {
+    check('the journey completed without a harness error', false, e.message);
+  }
 } finally {
   await ctx.close();
   await browser.close();
 }
 
-console.log(failures
-  ? `\n✗ ${failures} check(s) FAILED:\n` + failedLabels.map((l) => `    • ${l}`).join('\n') + '\n'
+// UNDECIDED counts against the exit code: a journey that never observed the card certified nothing.
+console.log(failures + undecided
+  ? `\n✗ ${failures} check(s) FAILED, ${undecided} NOT EXERCISED:\n` +
+    failedLabels.map((l) => `    • FAIL ${l}`).concat(undecidedLabels.map((l) => `    • NOT EXERCISED ${l}`)).join('\n') + '\n'
   : '\n✓ removing the LAST AF pill returns the user to exactly the pre-AF search: same request, same count, same listings, same question re-offered\n');
-process.exit(failures ? 1 : 0);
+process.exit(failures + undecided ? 1 : 0);

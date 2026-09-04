@@ -1,6 +1,14 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-09-04 (migration-mirror recovery): UNCHANGED. The migration that trips this
+--   checker, 20260904161552_dlr_detector_stops_evaluating_the_whole_v2_union.sql, MENTIONS the view
+--   exactly once and only inside a detector's human-readable `why` string ("the precedence in
+--   listing_native_location_v1.best") — it creates no view and replaces no function body. Re-ran
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live
+--   production: still 31036a9c8b92fddc5293b700985b869d at 14127 chars, so the body below is current
+--   and only the re-verification date advances.
+--
 -- Re-verified 2026-09-03 (5-platform search activation): UNCHANGED, and this one is a real test of
 --   that claim. This view was DROPPED and recreated during the activation: adding the new platforms
 --   required rebuilding listing_location_index, whose CASCADE takes listing_native_location_v1 with
