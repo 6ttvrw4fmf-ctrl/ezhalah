@@ -184,7 +184,9 @@ for (const [k, ar] of [
 check('the drag styling never force-paints the card a raw color (no node.style.background)',
   !/style\.background = '/.test(sidebar));
 check('the dragged row gets the dark card via React state (histRowDragging on the row)',
-  /drag\?\.id === c\.id && s\.histRowDragging/.test(sidebar) && /histRowDragging: \{ backgroundColor: colors\.dark \}/.test(sidebar));
+  // 2026-09-03: the dragged row wears the sidebar's ONE interaction fill (colors.hoverRow — the dark
+  // green in light, the muted deep green in dark), exactly like hover; never the bright dark-theme green.
+  /drag\?\.id === c\.id && s\.histRowDragging/.test(sidebar) && /histRowDragging: \{ backgroundColor: colors\.hoverRow \}/.test(sidebar));
 check('…and the label goes white for the SAME condition (hover OR dragging — never one without the other)',
   /\(hot \|\| drag\?\.id === c\.id\) && s\.histLabelHot/.test(sidebar));
 
