@@ -30,7 +30,10 @@
 import { chromium, webkit, firefox, devices } from '@playwright/test';
 import { existsSync } from 'node:fs';
 
-export const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
+// The production target lock (AGENTS.md): the ONE URL these journeys score. Named rather than
+// inlined so `ledgerRecord` can refuse to mint coverage for anything else.
+export const PROD_BASE = 'https://ezhalah-app.vercel.app';
+export const BASE = process.env.BASE_URL || PROD_BASE;
 export const SUB = 'qa@ezhalah.test';
 const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
 const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
@@ -428,6 +431,23 @@ export function registerJourneys(names) {
 export const isOwnedLedgerKey = (key) => !!ownedLedgerKeys && ownedLedgerKeys.has(key);
 
 export async function ledgerRecord(key, result, notesText) {
+  // A ROW MUST MEAN "PRODUCTION WAS TESTED", OR IT MEANS NOTHING.
+  //
+  // The ledger is not a log — it is what decides which surface gets attacked next (PART 3 item 7),
+  // so a row minted from anywhere else rotates coverage AWAY from a surface production has never
+  // exercised. `BASE_URL` is overridable for local-build verification (see launchOpts), and nothing
+  // stopped such a run from writing here: this run drove `http://127.0.0.1:8899` and wrote
+  // `adv-crosstab-no-clobber` rows claiming production coverage for a journey production had never
+  // executed, and could not have — the fix it guards was not deployed yet. Those rows were removed.
+  //
+  // This is the same failure the `registerJourneys` guard below exists for — a row asserting
+  // coverage nothing can reproduce — reached through the other door: that one checks WHICH journey,
+  // this one checks WHAT WAS DRIVEN. Both have to hold for a row to be worth reading.
+  if (BASE !== PROD_BASE) {
+    console.log(`  ledger  REFUSED «${key}» — this run drove ${BASE}, not production (${PROD_BASE}). `
+      + `A ledger row means production was tested; a local build has proved a fix, not covered a surface.`);
+    return false;
+  }
   if (!LEDGER_RESULTS.includes(result)) {
     console.log(`  ledger  REFUSED «${result}» for ${key} — must be one of ${LEDGER_RESULTS.join('|')}`);
     return false;
