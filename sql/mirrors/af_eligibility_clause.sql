@@ -1,5 +1,33 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
 --
+-- Refreshed 2026-09-04 — a real redefinition, and the one this file has been warning about.
+--   Migration 20260904143250 moved the per-m² × area derived total INTO this canonical clause. Until
+--   then the four AF RPCs ran `price_total_effective` as HAND-EDITED copies while this clause — the
+--   single definition they are generated from — still said `price_total`, so the sanctioned
+--   rebuild_af_filter_rpcs() would have reverted the feature and then recorded the reverted md5 as
+--   correct. 20260904120741 had made that rebuild refuse; this is the repair that let it proceed.
+--
+--   The new text was DERIVED, not written: replace(clause, 's.price_total ', 's.price_total_effective ')
+--   — proven equal to the clause production already had inlined in apartment_guided_counts_ar and in
+--   property_age_option_counts_ar (both md5 c951752de383bb59f2beff510723962a, identical to each
+--   other). It rewrites 8 of the 10 `s.price_total` occurrences and deliberately leaves 2 alone:
+--   search_row_price_gated(s.deal_ar, s.price_total) — hiding a price the SOURCE published stays
+--   forbidden — and the coalesce(s.price_total,0) >= 0 sanity check.
+--
+--   After the rebuild all four RPCs were byte-identical to what production was already serving, so
+--   nothing user-visible changed here; what changed is that the definition is now honest about it.
+--   top_cities_by_deal_ar, a FIFTH surface embedding this clause and NOT in af_rpc_templates, was
+--   still on the old text and its Trending chip undercounted against its own click-through under a
+--   Buy budget (جدة 10,835 vs 10,925). Migration 20260904143656 swapped the clause there too.
+--
+--   One cosmetic delta, recorded so a future reader is not puzzled by it: the recreation went through
+--   format('%L'), which emits the literal without the previous `::text` cast. Same value, same
+--   declared return type, 6 characters shorter.
+--
+-- Body below is byte-identical to production: md5 of everything below this header block (with its
+-- trailing newline): 47feed9ce3a08e743c44a7fb978f4278 — read live from pg_get_functiondef.
+--
+-- ── prior history, kept ──────────────────────────────────────────────────────────────────────
 -- Re-verified 2026-09-03 (district_options_ar table-scope fix, migration 20260903224522). The
 --   pending re-verification the 2026-09-02 note below DEMANDED is now DONE: md5(pg_get_functiondef)
 --   read live from production under the deploy lock = 178deacbfa50de38e6b5a18e09bc737b, byte-identical
@@ -112,8 +140,8 @@ AS $function$ select E'
       and (
             (p_deal is null and s.deal_ar = ''بيع''
              and (nullif(p_price_min,0) is null and nullif(p_price_max,0) is null
-                  or (s.price_total is not null and s.price_total > 0
-                      and s.price_total >= coalesce(p_price_min,0) and s.price_total <= coalesce(nullif(p_price_max,0),1e15))))
+                  or (s.price_total_effective is not null and s.price_total_effective > 0
+                      and s.price_total_effective >= coalesce(p_price_min,0) and s.price_total_effective <= coalesce(nullif(p_price_max,0),1e15))))
          or (p_deal is null and s.deal_ar = ''إيجار''
              and (nullif(p_price_min_rent,0) is null and nullif(p_price_max_rent,0) is null
                   or (s.price_annual is not null and s.price_annual > 0
@@ -121,8 +149,8 @@ AS $function$ select E'
                       and s.price_annual <= coalesce(nullif(p_price_max_rent,0),1e15))))
          or (p_deal is not null and nullif(p_price_min,0) is null and nullif(p_price_max,0) is null)
          or (p_deal is not null and s.deal_ar = ''بيع''
-               and s.price_total is not null and s.price_total > 0
-               and s.price_total >= coalesce(p_price_min,0) and s.price_total <= coalesce(nullif(p_price_max,0),1e15))
+               and s.price_total_effective is not null and s.price_total_effective > 0
+               and s.price_total_effective >= coalesce(p_price_min,0) and s.price_total_effective <= coalesce(nullif(p_price_max,0),1e15))
          or (p_deal is not null and s.deal_ar = ''إيجار''
                and s.price_annual is not null and s.price_annual > 0
                and s.price_annual >= coalesce(p_price_min,0)*(case when p_rent_period=''شهري'' then 12 else 1 end)
@@ -169,4 +197,4 @@ AS $function$ select E'
       and (p_rating_min is null or s.rating >= p_rating_min)
       and (p_reviews_min is null or s.reviews_count >= p_reviews_min)
       and (p_unit_subtypes is null or cardinality(p_unit_subtypes) = 0 or s.unit_subtype_ar = any(p_unit_subtypes))
-'::text $function$
+' $function$
