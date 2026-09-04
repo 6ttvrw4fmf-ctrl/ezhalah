@@ -517,6 +517,11 @@ const MIZLAJ_LOGO = require('../../assets/images/mizlaj.jpg');
 const DEALAPP_LOGO = require('../../assets/images/dealapp.jpg');
 const GATHERN_LOGO = require('../../assets/images/gathern.jpg');
 const OCTOBER_LOGO = require('../../assets/images/october.jpg');
+const ARKAAN_LOGO = require('../../assets/images/arkaan.png');
+const ABRALOSOL_LOGO = require('../../assets/images/abralosol.png');
+const THERC_LOGO = require('../../assets/images/therc.png');
+const RAWASIDARK_LOGO = require('../../assets/images/rawasidark.png');
+const AOUJ_LOGO = require('../../assets/images/aouj.png');
 const AQARATIKOM_LOGO = require('../../assets/images/aqaratikom.jpg');
 const AWAL_LOGO = require('../../assets/images/awal.jpg');
 const ALKHAAS_LOGO = require('../../assets/images/alkhaas.jpg');
@@ -603,11 +608,11 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('pulse')) return <Image source={ERAPULSE_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('nowaisiry')) return <Image source={NOWAISIRY_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('october')) return <Image source={OCTOBER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('therc')) return <View style={[card.hostBadge, card.thercBadge]}><Text style={card.badgeText}>الخيار الصحيح</Text></View>;
-  if (s.includes('aouj')) return <View style={[card.hostBadge, card.aoujBadge]}><Text style={card.badgeText}>عوج</Text></View>;
-  if (s.includes('abralosol')) return <View style={[card.hostBadge, card.abralosolBadge]}><Text style={card.badgeText}>عبر الأصول</Text></View>;
-  if (s.includes('arkaan')) return <View style={[card.hostBadge, card.arkaanBadge]}><Text style={card.badgeText}>أركان</Text></View>;
-  if (s.includes('rawasidark')) return <View style={[card.hostBadge, card.rawasidarkBadge]}><Text style={card.badgeText}>رواسي دارك</Text></View>;
+  if (s.includes('therc')) return <Image source={THERC_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('aouj')) return <Image source={AOUJ_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('abralosol')) return <Image source={ABRALOSOL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('arkaan')) return <Image source={ARKAAN_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('rawasidark')) return <Image source={RAWASIDARK_LOGO} style={card.hostBadge} contentFit="contain" />;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
