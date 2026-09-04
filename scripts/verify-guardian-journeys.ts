@@ -40,6 +40,8 @@ const WORKFLOW = join(ROOT, '.github/workflows/guardian-journeys.yml');
 /** The surfaces this suite is required to cover. Each maps to an owning routine in the migration. */
 const REQUIRED_SURFACES = [
   'theme', 'chat_persistence', 'auth', 'navigation', 'result_card', 'loading_states', 'modal', 'search',
+  // Second tranche (2026-09-04) — the surfaces the owner named that had no journey until then.
+  'pagination', 'trending', 'advanced_filter', 'normal_filter', 'voice',
 ];
 /** The two viewports, as the owner's bug reports arrive: a desktop and a phone. */
 const REQUIRED_VIEWPORTS = [
