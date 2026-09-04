@@ -41,10 +41,19 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     name: AF UI count = count RPC = result RPC = independent DB truth
     runs-on: ubuntu-latest
-    # Measured 2026-09-03: the nine steps below took 16m44s of work plus ~1m of setup. 35 leaves
-    # roughly 2x headroom. Whenever a step is ADDED here, re-measure — a budget that silently
-    # becomes too small skips the tail of this job (see the af-surface-region comment below).
-    timeout-minutes: 35
+    # RE-MEASURED 2026-09-04, because the old note was already wrong. It read "16m44s of work plus
+    # ~1m of setup, roughly 2x headroom" from a quiet 2026-09-03. Run #137 took 27m50s of this
+    # 35-minute budget against a production whose search mean had risen 773ms → 5,109ms — 7 minutes
+    # of headroom, not 2x. On top of that the pacing gate added below may wait up to PACE_BUDGET_MS
+    # (10 min) for production to come back inside its envelope before the first journey starts, and
+    # 27m50s + 10m does not fit in 35.
+    #
+    # So this is measured headroom for work that is already happening, not room made for a slower
+    # test: 50 covers the observed 27m50s plus a full pacing wait plus margin. The workflow's own
+    # rule below still applies — whenever a step is ADDED, re-measure, because a budget that
+    # silently becomes too small skips the TAIL of this job, and the tail is where the AF pill and
+    # strict-parity checks live.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

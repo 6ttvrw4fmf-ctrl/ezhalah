@@ -151,10 +151,46 @@ function optionCardProblems(src: string): string[] {
   return p;
 }
 
+/**
+ * The remove-last-pill journey carried the IDENTICAL fail-open read (a 12s budget and `return last`)
+ * and failed in CI on 2026-09-04 in the same run, from the same cause: its first-card read and its
+ * re-open read both assert the card's own chip against N0, so a card that never finished rendering
+ * printed `chip=null` as a product failure.
+ *
+ * Its ledger differs in one way that matters: `skip()` there does NOT count against the exit code,
+ * so a NOT EXERCISED routed through `skip` would have been a route to GREEN. It therefore counts
+ * `undecided` separately, and that counter MUST reach the exit code.
+ */
+function removeLastPillProblems(src: string): string[] {
+  const p: string[] = [];
+  if (!/const readCardSettled = /.test(src)) p.push('no readCardSettled read — the journey cannot know whether the card it asserted on ever arrived');
+  if (!/settleUntil/.test(src)) p.push('the settled read does not go through the shared settleUntil primitive');
+  for (const fn of ['readCardSettled', 'readCardUntil']) {
+    const decl = src.match(new RegExp(`const ${fn} = [^\\n]*`))?.[0] ?? '';
+    if (!decl) p.push(`${fn} is gone`);
+    else if (!/timeoutMs = AGENT_TURN_MS/.test(decl)) p.push(`${fn} does not default to a full agent turn — its budget is sized for a render`);
+  }
+  if (!/if \(!fr\.settled\)/.test(src)) p.push('the first-card read no longer abandons on a card that never rendered — chip=null would be reported against N0 again');
+  if (!/if \(!ag\.settled\)/.test(src)) p.push('the re-open read no longer abandons on a card that never rendered');
+  // THE ONE THAT WOULD SILENTLY GO GREEN: undecided must reach the exit code.
+  if (!/process\.exit\(failures \+ undecided \? 1 : 0\)/.test(src)) {
+    p.push('NOT EXERCISED does not reach the exit code — a journey that observed nothing would report success');
+  }
+  const unobs = src.match(/const unobserved = async[\s\S]*?\n\};/)?.[0] ?? '';
+  if (!unobs) p.push('no unobserved() classifier');
+  else {
+    if (!/verdictForNonArrival/.test(unobs)) p.push('unobserved() does not consult production load — it decides red-vs-inconclusive on its own opinion');
+    if (!/check\(label, false/.test(unobs)) p.push('unobserved() never reports a real FAILURE');
+    if (!/undecided\+\+/.test(unobs)) p.push('unobserved() does not COUNT the non-arrival, so it cannot reach the exit code');
+  }
+  return p;
+}
+
 // ── the real files must be clean ─────────────────────────────────────────────────────────────────
 const CE = read('verify-af-card-evidence-live.ts');
 const LT = read('verify-af-live-truth.ts');
 const OC = read('verify-af-option-card-truth-live.ts');
+const RL = read('verify-af-remove-last-pill-live.ts');
 
 {
   const p = cardEvidenceProblems(CE);
@@ -167,6 +203,10 @@ const OC = read('verify-af-option-card-truth-live.ts');
 {
   const p = optionCardProblems(OC);
   check('verify-af-option-card-truth-live.ts fails CLOSED on a state that never arrived', p.length === 0, p.join(' | '));
+}
+{
+  const p = removeLastPillProblems(RL);
+  check('verify-af-remove-last-pill-live.ts fails CLOSED, and NOT EXERCISED reaches its exit code', p.length === 0, p.join(' | '));
 }
 
 // ── mutation proofs — each reversion to the bug class must turn this barrier RED ──────────────────
@@ -221,6 +261,23 @@ mustReject('the non-arrival classifier stops consulting production and decides o
 
 mustReject('the classifier can no longer report a REAL failure (everything becomes inconclusive)',
   optionCardProblems(OC.replace(/check\(label, false[\s\S]*?\n {4}return;/, '    return;')), 'read as inconclusive forever');
+
+// ── remove-last-pill: the same class, plus the exit-code trap its ledger made possible ────────────
+mustReject('the remove-last-pill settled read is reverted to the 12s fail-open one',
+  removeLastPillProblems(RL.replace(/const readCardSettled = [\s\S]*?;\n/, '')), 'ever arrived');
+
+mustReject('NOT EXERCISED stops reaching the exit code (a journey that observed nothing reads GREEN)',
+  removeLastPillProblems(RL.replace('process.exit(failures + undecided ? 1 : 0)', 'process.exit(failures ? 1 : 0)')),
+  'would report success');
+
+mustReject('the first-card read stops abandoning on a card that never rendered',
+  removeLastPillProblems(RL.replace('if (!fr.settled) {', 'if (false) {')), 'chip=null');
+
+mustReject('the re-open read stops abandoning on a card that never rendered',
+  removeLastPillProblems(RL.replace('if (!ag.settled) {', 'if (false) {')), 're-open read no longer abandons');
+
+mustReject('the remove-last-pill classifier stops counting the non-arrival',
+  removeLastPillProblems(RL.replace('undecided++;', '')), 'cannot reach the exit code');
 
 console.log(failures
   ? `\n✗ verify-af-live-journey-polling: ${failures} failure(s)\n`
