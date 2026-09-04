@@ -58,6 +58,14 @@ export const FALLBACK_ROUTINE: RoutineNumber = 2;
 export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp }> = [
   // 7 🧵 Systems Seam — cron→detector→alert, migration→mirror→prod, RLS, monitoring's own plumbing.
   { routine: 7, test: /^(alert_delivery|alert_acknowledgment|alert_dispatch)/ },
+  // alert_queue_unworked / incident_stalled (2026-09-04) — the incident loop watching ITSELF.
+  // The first says nobody is acknowledging the alert queue at all (measured: 1,014 alerts raised
+  // all-time, 2 ever acknowledged, 106 open with the oldest at 24 days). The second says a specific
+  // routine's incident queue has stopped moving, and names it in the alert detail. Both belong to
+  // this routine because both are failures of the alert→delivery→acknowledgement seam it already
+  // owns — and routing them to the #2 fallback would have been the joke version: an alert about
+  // nobody reading alerts, filed to the busiest triage queue.
+  { routine: 7, test: /^(alert_queue_unworked|incident_stalled)$/ },
   { routine: 7, test: /^(cron_|migration_drift|sql_mirror_drift|deploy_lock_misuse)/ },
   { routine: 7, test: /^(detector_|orphaned_detector|unresolvable_|monitoring_watchdog)/ },
   { routine: 7, test: /^(registry_orphans|repair_guarantee|loc_rel_|rls_)/ },

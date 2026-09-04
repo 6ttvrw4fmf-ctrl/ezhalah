@@ -25,7 +25,7 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROUTINES } from './lib/alertRouting.ts';
+import { ROUTINES, routineForKind, FALLBACK_ROUTINE } from './lib/alertRouting.ts';
 
 const root = join(import.meta.dirname, '..');
 const migDir = join(root, 'supabase', 'migrations');
@@ -132,6 +132,16 @@ check('the roster edit verifies its own result instead of trusting the replace',
 check('stalled incidents are reported per OWNER, not per incident (no alert storm)',
   /group by owner_routine/.test(spine));
 
+// The loop's own alerts must not land on the #2 fallback. An alert saying "nobody is reading the
+// alert queue", filed to the busiest triage queue, is the joke version of this whole project — and
+// alertRouting.ts's own header warns that #2 inheriting a backlog by default is how a triage router
+// stops being read. Executed, not string-matched.
+for (const kind of ['alert_queue_unworked', 'incident_stalled']) {
+  check(`'${kind}' is explicitly routed, not left to the #2 fallback`,
+    routineForKind(kind) !== FALLBACK_ROUTINE,
+    `routineForKind('${kind}') === ${routineForKind(kind)}, which is the fallback`);
+}
+
 // ── mutation self-proof: every claim above must FAIL against its own defect ────────────────────
 let mutFail = 0;
 const mustCatch = (label: string, brokenIsCaught: boolean) => {
@@ -168,6 +178,10 @@ mustCatch('a regressed incident no longer reopening',
 const parkable = spine.replace(/lower\(p_g2_category\) in \('d','e'\)/, "lower(p_g2_category) in ('zz')");
 mustCatch('an ownership boundary becoming parkable as blocked instead of routed',
   !/lower\(p_g2_category\) in \('d','e'\)/.test(parkable));
+
+// Prove the routing check can fail: a kind nothing claims MUST read as the fallback.
+mustCatch('a loop kind that lost its explicit route (falls back to #2)',
+  routineForKind('a_kind_no_rule_will_ever_claim_xyzzy') === FALLBACK_ROUTINE);
 
 mustCatch('the migration-finder going blind when the table is gone',
   (() => { const s = spine.replace('create table if not exists public.ops_incident', 'create table x');
