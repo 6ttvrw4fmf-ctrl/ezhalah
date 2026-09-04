@@ -31,3 +31,12 @@ jobs:
           node-version: '22'
       - name: PLATFORM_META must equal production active-searchable set
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-loader-platforms-match-active.ts
+
+      # Layer 2 heartbeat wiring (owner rule 2026-08-30). Piggybacks on this workflow's schedule
+      # rather than getting its own — both barriers hit the same production Supabase surface via
+      # anon and their failure modes are complementary (loader-static-drift and routine-silence
+      # are both integrity claims about live production), so failing on either turns the same job
+      # red without doubling the cron footprint. `if: !cancelled()` so neither can hide the other.
+      - name: Sentry-check heartbeat + silent-detector wired
+        if: ${{ !cancelled() }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-sentry-heartbeat-detector-wired.ts
