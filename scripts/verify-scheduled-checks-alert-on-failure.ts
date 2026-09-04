@@ -60,11 +60,6 @@ const EXEMPT: Record<string, string> = {
     'It is watched from the DB side instead, by mon_detect_alert_dispatch_silent() (migration ' +
     '20260828211856), which is a heartbeat detector that fires precisely when this workflow stops ' +
     'running — the one shape a self-raised alert cannot cover.',
-  'af-live-truth-check.yml':
-    'TEMPORARY (2026-09-04): owned by a concurrent change that adds its own af_live_check_failed ' +
-    'wiring. af_live_check_failed is already routed (routine 5, asserted below), so the only ' +
-    'missing half is the workflow step. DELETE THIS ENTRY once that change lands — it is the only ' +
-    'live-check workflow still able to fail silently.',
 };
 
 // ── YAML reading. Strip comments AT THE READER, including trailing ones ────────────────────────────
