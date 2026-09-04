@@ -89,17 +89,30 @@ export function engineAvailable(engine) {
  *  resolves; unsetting the proxy (the obvious workaround) loads the page but cuts the browser off
  *  from Supabase entirely. The bypass is the only combination that can be both, so it belongs here.
  *
- *  IT IS NOT SUFFICIENT, AND SAYING SO IS THE POINT. Against a local `dist/` every SIDEBAR journey
- *  still skips — «row ⋯ menu would not open» — and that is measured on the EXISTING, known-good
- *  `sidebar-row-actions` as well as on a new one (2/2 each, 2026-09-04), while both pass against
- *  production. Same journeys, same harness, different target: the local static export is the
- *  differing variable, not the journey and not the app (PART 9.1's inverse rule — a failure is
- *  closed as harness/target only on positive proof, and this is that proof).
+ *  THE BYPASS ALONE IS NOT ENOUGH, AND THE SECOND HALF IS THE ONE THAT COSTS A RUN. Build the
+ *  bundle the obvious way and EVERY signed-in journey skips with «row ⋯ menu would not open», on
+ *  the existing known-good `sidebar-row-actions` as much as on a new journey, while both pass
+ *  against production. `verify-web-runtime-smoke.mjs` fails the same build at
+ *  «pickCity(الرياض): the app never confirmed the selection» — on plain `main`, which CI is green
+ *  on. Nothing is wrong with the app: the bundle simply has no backend.
  *
- *  CONSEQUENCE FOR A `src/` FIX: local-build verification of anything behind the signed-in sidebar
- *  is NOT available in this container today. Such a fix is proved by the production journey AFTER
- *  deploy (PART 7), and a run must not report a local green as if it were that. Making the local
- *  export usable for signed-in journeys is unfinished work, recorded here rather than rediscovered. */
+ *  TWO THINGS ARE REQUIRED, and the second is invisible:
+ *    1. EXPORT THE CLIENT ENV BEFORE BUILDING. `src/lib/supabase.ts` reads
+ *       `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_KEY` at BUILD time; unset, the client
+ *       builds as null and every search, location lookup and auth check dies. This container does
+ *       not set them (CI does, in web-runtime-smoke.yml, with public fallbacks — they are
+ *       client-public by definition and inlined into every served page; the service-role key
+ *       NEVER goes here).
+ *    2. CLEAR METRO'S CACHE IF AN EARLIER BUILD RAN WITHOUT THEM. `process.env.EXPO_PUBLIC_*` is
+ *       inlined at TRANSFORM time and the transform is cached, so exporting the variables and
+ *       rebuilding silently reuses the `undefined` from the first attempt. That is the whole trap:
+ *       the second build looks correct, changes nothing, and sends you hunting a product bug.
+ *       `grep -rl "<the supabase ref>" dist/` is the one-second check that the env actually landed.
+ *
+ *  With both done, the same local `dist/` goes from 1 smoke check passing to 52, the sidebar
+ *  journeys stop skipping, and a `src/` fix becomes provable before it ships (measured 2026-09-04).
+ *  Production remains the only thing scored (PART 3/PART 7) — a local green is evidence the fix
+ *  works, never a substitute for verifying production after deploy. */
 function launchOpts(engine) {
   const proxy = process.env.HTTPS_PROXY
     ? { proxy: { server: process.env.HTTPS_PROXY, bypass: '127.0.0.1,localhost' } }
