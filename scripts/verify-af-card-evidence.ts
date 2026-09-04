@@ -461,6 +461,15 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
     'remote.ts copies af_canon verbatim (`c.af_canon ?? null`), never `!!` and never `?? 0`');
   assert(/l\.canon = c\.af_canon;/.test(remote), 'remote.ts attaches the canonical row to the listing');
   assert(!/af_canon[^\n]*\?\?\s*(0|false|\{\})/.test(remote), 'remote.ts never defaults af_canon to a value');
+  // The attach is a SINGLE WRITER. Asserting only that the verbatim line is PRESENT leaves a second,
+  // coercing write to l.canon completely unguarded — `l.canon = l.canon ?? { furnished: false }` names
+  // no `af_canon` at all, so every regex above stays green while a listing whose source never published
+  // `furnished` starts printing «غير مفروشة» on the card. Proven-RED mutant, 2026-09-03.
+  assert(count(remote, 'l.canon') === 1, 'remote.ts writes l.canon in exactly ONE place (no second, coercing path)');
+  for (const forbidden of ['!!c.af_canon', 'c.af_canon ?? 0', 'c.af_canon ?? {}', 'c.af_canon ?? false',
+    'c.af_canon ||', 'Boolean(c.af_canon)', 'c.af_canon ?? []']) {
+    assert(!remote.includes(forbidden), `remote.ts never coerces the canonical row (${forbidden})`);
+  }
 }
 
 console.log('');
