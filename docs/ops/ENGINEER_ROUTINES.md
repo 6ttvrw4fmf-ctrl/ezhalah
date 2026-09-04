@@ -131,6 +131,24 @@ Respect single-writer locks (`ops_deploy_lock`) and never create cross-session c
 ownership tables already exist: §S and `docs/ops/SENTRY_ROUTING.md` for Sentry issues,
 `docs/ops/ALERT_ROUTING.md` for `[alert]` issues, and the Boundary rules below for surfaces.
 
+**The queue this rule needs now exists (2026-09-04).** Until then, "file it in that routine's
+queue/coverage trail" named a destination that only existed for the two cases above: a finding that
+was neither a Sentry issue nor an `alert_event` kind — a journey seeing a card render wrong, a visual
+regression, a dead control — had no row to create, so the honest reading of this rule was to drop it.
+The rule is unchanged; its mechanism is now concrete. Route with:
+
+```sql
+select incident_open('<stable fingerprint>', '<what is wrong>', '<surface>', 'P1', 'agent',
+                     '<where you saw it>',
+                     '{"repro":"...","expected":"...","found":"..."}'::jsonb);
+-- already own it and it turns out to be someone else's?
+select incident_handoff(<id>, '<their routine slug>', '<why it is not yours>');
+```
+
+`incident_route_owner(surface)` is total, so the finding lands on a real owner without you choosing
+one. `mon_detect_stalled_incident()` then makes an unworked queue loud and attributable. Full
+contract: **`docs/ops/AUTONOMOUS_INCIDENT_LOOP.md`** — read it before routing anything.
+
 ### §G.4 — ADAPTIVE EFFORT
 
 - **Clean surface** ⇒ normal verification, **SHORT report**, invent no work.

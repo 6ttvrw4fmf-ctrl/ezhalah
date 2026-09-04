@@ -85,6 +85,19 @@ should look at it; effort scales with what you find; never manufacture a 10/10; 
 every run and resolve an issue only after the production fix is verified; and none of it weakens an
 existing guard. Every routine's live prompt carries a condensed copy — §G is the source of truth.
 
+**A finding now has a durable home with one owner, and closing it is EARNED —
+`docs/ops/AUTONOMOUS_INCIDENT_LOOP.md` is canonical (owner brief, 2026-09-04).** Read it before
+routing, parking, or closing anything. In one line: `alert_event` says whether a CONDITION is true
+right now; `ops_incident` says who owns a FINDING and what has been done about it. Start every run by
+reading `ops_incident where owner_routine = '<your slug>' and state not in ('resolved','wont_fix')`;
+route anything outside your lane with `incident_open()` / `incident_handoff()` instead of dropping it
+(§G.3's mechanism, which did not exist before); and note that `resolved` is unreachable without
+naming a permanent barrier AND a production verification — a CHECK constraint enforces it, so the
+"every bug gets a barrier" rule no longer depends on anyone remembering. `blocked` is the only state
+that routinely reaches the owner and must cite one of §G.2's six reasons; categories (d) and (e) are
+refused, because those are things to ROUTE. Why it exists, measured: 1,014 alerts raised all-time and
+**2 ever acknowledged**.
+
 **Owner-granted engineering/product decisions belong in this repo, not just in an agent's own memory.**
 When the owner gives you a permanent rule, architecture decision, or business/compliance decision:
 land it in `docs/ARCHITECTURE.md` (or the relevant `docs/ops/*.md`) in the same session, not only in
