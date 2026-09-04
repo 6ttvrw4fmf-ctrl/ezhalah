@@ -40,8 +40,23 @@ CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 # Their unreachability is declared and counted by scripts/verify-every-live-table-is-searchable.ts.
 #
 # Platforms that exist in scrapers/ but are NOT production-searchable, so they need no policy.
-# Kept in sync with scrapers/RETIRED_PLATFORMS.txt + the paused/gated ones.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "muktamel", "awal", "deal", "common"})
+#
+# "PAUSED" IS NOT "NOT SEARCHABLE" (2026-09-04). muktamel sat in this set from 2026-07-15 because it
+# was "paused": moved off the shared cron matrix onto its own gated weekly workflow. That is a
+# CADENCE fact, not a searchability fact — its rows stayed in the client's RES_TABLES/COM_TABLES the
+# whole time, and on 2026-09-03 a gated run put 523 production_ready rows into search_listings_ar.
+# The exemption then silenced the one rule that mattered: 523 user-visible listings with no liveness
+# strategy, 0 ever verified alive, and 4 already accruing strikes under no grace contract. CI stayed
+# green because this check compares against the scrapers/ DIRECTORY LISTING, never against
+# production. An entry here is a CLAIM ABOUT PRODUCTION, and this file cannot verify it.
+#
+# So the claim is now checked where production truth lives: mon_detect_platform_monitoring_scope_gap()
+# derives the searchable platform set from search_listings_ar every sweep and raises P1 on any
+# platform missing from ops_liveness_registry — no list to maintain, future platforms covered by
+# construction. Adding a slug here no longer hides anything.
+#
+# Kept in sync with scrapers/RETIRED_PLATFORMS.txt. Membership requires ZERO production_ready rows.
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "awal", "deal", "common"})
 
 
 class _P(dict):
@@ -106,8 +121,9 @@ POLICIES: dict[str, _P] = {
         for p in (
             "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "aouj", "aqaratikom",
             "aqarcity", "aqargate", "aqarmonthly", "arkaan", "eaqartabuk", "eastabha", "erapulse",
-            "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "mustqr", "nowaisiry", "october",
-            "raghdan", "ramzalqasim", "rawasidark", "sadin", "sanadak", "satel", "souq24", "therc",
+            "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry",
+            "october", "raghdan", "ramzalqasim", "rawasidark", "sadin", "sanadak", "satel",
+            "souq24", "therc",
         )
     },
 }
