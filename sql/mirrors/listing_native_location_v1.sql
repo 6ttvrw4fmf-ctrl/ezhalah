@@ -1,6 +1,18 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-09-04 (discarded-location detector cost fix): UNCHANGED. The migration that
+--   trips this checker, 20260904161552_dlr_detector_stops_evaluating_the_whole_v2_union, MENTIONS
+--   this view but does not touch it: the only occurrence of the name is inside the limb-A alert
+--   text, which tells the reader to check "the precedence in listing_native_location_v1.best". That
+--   string is part of what production now runs, so it cannot be reworded to dodge this check
+--   without breaking migration content parity. What the migration actually changes is
+--   mon_detect_discarded_location_resolution, and the only object it reads differently is
+--   listing_native_location_v2 -- which it now filters by a literal source_table instead of joining
+--   whole. Re-ran md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against
+--   production: 31036a9c8b92fddc5293b700985b869d at 14127 chars, byte-identical to the recorded
+--   md5 and to the body below. Body untouched.
+--
 -- Re-verified 2026-09-03 (5-platform search activation): UNCHANGED, and this one is a real test of
 --   that claim. This view was DROPPED and recreated during the activation: adding the new platforms
 --   required rebuilding listing_location_index, whose CASCADE takes listing_native_location_v1 with
