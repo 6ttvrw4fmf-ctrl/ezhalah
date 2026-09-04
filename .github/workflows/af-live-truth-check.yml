@@ -41,10 +41,19 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     name: AF UI count = count RPC = result RPC = independent DB truth
     runs-on: ubuntu-latest
-    # Measured 2026-09-03: the nine steps below took 16m44s of work plus ~1m of setup. 35 leaves
-    # roughly 2x headroom. Whenever a step is ADDED here, re-measure — a budget that silently
-    # becomes too small skips the tail of this job (see the af-surface-region comment below).
-    timeout-minutes: 35
+    # RE-MEASURED 2026-09-04, because the old note was already wrong. It read "16m44s of work plus
+    # ~1m of setup, roughly 2x headroom" from a quiet 2026-09-03. Run #137 took 27m50s of this
+    # 35-minute budget against a production whose search mean had risen 773ms → 5,109ms — 7 minutes
+    # of headroom, not 2x. On top of that the pacing gate added below may wait up to PACE_BUDGET_MS
+    # (10 min) for production to come back inside its envelope before the first journey starts, and
+    # 27m50s + 10m does not fit in 35.
+    #
+    # So this is measured headroom for work that is already happening, not room made for a slower
+    # test: 50 covers the observed 27m50s plus a full pacing wait plus margin. The workflow's own
+    # rule below still applies — whenever a step is ADDED, re-measure, because a budget that
+    # silently becomes too small skips the TAIL of this job, and the tail is where the AF pill and
+    # strict-parity checks live.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -113,18 +122,19 @@ jobs:
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-filter-state-live.ts
 
       # THE ROOT-CAUSE JOIN (added 2026-09-03). Activating a platform is a DATABASE act; the client's
-      # RES_TABLES/COM_TABLES are a SOURCE-CODE act; until now nothing checked that the two agreed.
+      # searchable-table scope is a SOURCE-CODE act; until now nothing checked that the two agreed.
       # Five platforms went live in search_listings_ar with 4,314 production_ready rows and joined
-      # neither list, so no search could return them while Trending — called without p_tables —
-      # counted them anyway (الهفوف/أرض سكنية/بيع: 2,478 advertised, 109 delivered). The AF matrix
-      # barrier caught it only on `bathrooms=1`, the one predicate wide enough to admit the new rows.
-      # This asks the question directly instead of waiting for a wide enough predicate.
-      - name: Every platform live in search must be reachable by a real search
+      # neither of the two hand-maintained client lists, so no search could return them while
+      # Trending — called without p_tables — counted them anyway (الرياض/شقة/إيجار/سنوي, bath>=1:
+      # 3,422 advertised, 3,340 delivered). The AF matrix barrier caught it only on `bathrooms=1`,
+      # the one predicate wide enough to admit the new rows. This asks the question directly, in
+      # both directions, by EXECUTING the real scope functions against the live inventory.
+      - name: The client scope and the live searchable inventory are the same set
         if: ${{ !cancelled() }}
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
-        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-every-live-table-is-searchable.ts
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-searchable-scope-matches-inventory.ts
 
       # CARD IDENTITY against the string production really stores (added 2026-09-04). Found by
       # looking at live cards: 3,165 abralosol/therc/rawasidark listings rendered as «عقار» with a
@@ -298,7 +308,26 @@ jobs:
   # af-surface above: these four were steps 17-20 of the old serial job and were the ones actually
   # skipped when it hit its cap). Browser journeys, so they need Chromium.
   af-card-state:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    # THE LAST RACE IN THIS WORKFLOW (2026-09-04). Making the three sweeps wait for the browser jobs
+    # fixed sweep-vs-journey contention and the reds SURVIVED it: run #137 failed BOTH browser jobs
+    # while no sweep had started. The two browser jobs were still racing EACH OTHER, and an AF card
+    # is a paid agent turn plus a count RPC — two journeys driving that at once is enough.
+    #
+    # PROVEN BY EXPERIMENT, not inferred. verify-af-option-card-truth-live.ts, same deployed bundle:
+    #     alone                                          426 checks, 0 failures, exit 0
+    #     beside verify-af-live-truth.ts (the CI shape)   5 failures — "the round walked at least one
+    #                                                     question", "chip == the current eligible
+    #                                                     total", "confirming the answer produced a
+    #                                                     search", the same shapes CI reported
+    # Measured the same afternoon: apartment_guided_counts_ar on an unfiltered Buy scope took 14-19s
+    # and 57014'd in CI at ~21s, while fleet search mean rose 773ms → 5,109ms at ~3.8 q/s against a
+    # safe envelope of 1.5 q/s. Latency work cannot share a database with more latency work.
+    #
+    # `if: always()` for the same reason as the sweeps below: a plain `needs:` SKIPS a dependent when
+    # its dependency fails, and a skipped browser job is lost coverage on the surface it exists to
+    # protect. Attendance still requires all five jobs to have concluded success.
+    needs: [af-truth]
+    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     name: The rendered card, the removed pill and the scope change all tell one truth
     runs-on: ubuntu-latest
     # 45 → 60 on 2026-09-03: two more browser journeys (the §12A card-evidence pair) live here now.
