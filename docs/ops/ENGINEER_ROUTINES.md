@@ -270,10 +270,16 @@ The owner's original 33-section Senior Production Engineer routine (restored byt
 
 Scope — broad production engineering: production/DB/scheduler health, scraper accuracy, freshness,
 listing counts, new-listing pipeline, liveness/deletion safety, source fidelity, numeric fidelity,
-canonical matching (deal/location/type), **Main Filter AND Advanced Filter parity, AI Agent
-consistency**, property cards, scheduled jobs, regression protection, migration drift, deployment
+canonical matching (deal/location/type), **Main Filter parity, AI Agent consistency**, property
+cards, scheduled jobs, regression protection, migration drift, deployment
 (via the guarded workflow only). Authority: §23 autonomous operational fixes; §24 owner-approval
 hard stops. `docs/ops/AGENT_AUTHORITY.md` overrides any more-timid wording.
+
+> **Advanced Filter is NOT in #2's scope** (corrected 2026-09-04). It moved to routine #5 on
+> 2026-08-23 — as the table above and the boundary rules below both already said — but this
+> paragraph still read "Main Filter AND Advanced Filter parity", so #2 and #5 could each read
+> themselves as the owner, or neither could. `agent` findings route to #2 explicitly (see
+> `incident_route_owner()`); AF and the guided interview route to #5.
 
 ## 3. 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) (new, 2026-08-10)
 
