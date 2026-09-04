@@ -422,6 +422,17 @@ Three rules keep that safe, all enforced by `scripts/verify-test-registry-comple
    be discovered and run. Removing a test therefore takes a deliberate, reviewed edit to the
    baseline — it cannot happen as a side effect of a rename, a bad glob, or a merge resolution.
    Adding a test needs no baseline edit at all.
+
+   **Lowering the floor is a two-part act, and the second part is a PR-body line.** The floor is
+   computed as `200 − BASELINE_DEPARTURES` in `verify-test-registry-complete.ts`; you cannot lower it
+   by editing a number. Add a departure entry naming the script, the PR, its new home, and — the part
+   reviewers actually need — whether **per-PR coverage was LOST**. A relocation with a real execution
+   home is not a loss; a script that afterwards runs on no PR **is** a partial loss and must be said
+   in those words. The barrier prints every departure on every run. Then **say it in the PR body**,
+   naming the moved script and its new home: PR #1527 moved `verify-af-independent-oracle.ts` out of
+   the required `npm test` into `af-live-truth-check.yml` and took the floor 200 → 199 for good
+   reasons, but its body never mentioned it, so the one fact a reviewer most needed was reachable
+   only by diffing three files.
 2. **Every exclusion names a reason AND a home that exists.** `scripts/test-exclusions.txt` is
    `name | where it DOES run | why`, and the "where" must be a workflow file that exists, an npm
    script that exists, or an explicit `manual`. Live/browser checks that need production belong
