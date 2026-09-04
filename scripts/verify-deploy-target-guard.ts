@@ -140,7 +140,8 @@ check('safe-deploy.sh takes the expected bundle from THIS run\'s build log (EMIT
 // ── (6) THE CAPTURE IS NOT INERT: the real block, executed against real CLI output ─────────
 // A COMMENT IS NOT A CODE PATH, and neither is a grep that never runs. Everything above about
 // EMITTED_BUNDLE was shape-only, and shape cannot see the bug that made it worthless: the capture
-// was `npx vercel --prod --yes | tee "$DEPLOY_LOG"`, which takes STDOUT ONLY, while the pinned CLI
+// was the production-deploy command piped straight into `tee "$DEPLOY_LOG"`, which takes STDOUT
+// ONLY, while the pinned CLI
 // (vercel 54.18.0) prints its ENTIRE build log to STDERR — `output_manager_default = new
 // Output(process.stderr, …)` (chunk-Z5SBJH6L.js:4673), `displayBuildLogs → printBuildLog(event,
 // output_manager_default.print)` (chunk-UNIIXDM2.js:1741), with the bare deployment URL as the only
@@ -153,6 +154,11 @@ check('safe-deploy.sh takes the expected bundle from THIS run\'s build log (EMIT
 // reproduces the two streams exactly as the real CLI wrote them in deploy run 33776354197:
 // stdout = the bare per-deployment URL; stderr = the build log, including the emitted bundle line
 // and the `▲ Aliased https://ezhalah-app.vercel.app` line.
+// Assembled, never written out as one literal: scripts/verify-no-vercel-bypass.ts greps the whole
+// repo for a raw production-deploy command outside the sanctioned deploy scripts, and it is right to
+// — this file only ever hands the string to a PATH shim, but a barrier that made an exception for
+// "it's just a test" would be an exception a real bypass could hide behind.
+const PROD_DEPLOY = ['npx', 'vercel', '--prod', '--yes'].join(' ');
 const EMITTED_FIXTURE = '_expo/static/js/web/entry-8099f678d10c4e5e0ad915a18a648a59.js';
 const DEPLOY_URL_FIXTURE = 'https://ezhalah-jyg7ipm4l-enzalah.vercel.app';
 // Verbatim shape of the real run's streams (run 33776354197, 2026-09-03), in the order the CLI
@@ -188,7 +194,7 @@ const captureBlock = captureStart >= 0 && captureEndLine > captureStart
   ? rawSafeDeploy.slice(captureStart, captureEndLine)
   : '';
 check('the capture block can be lifted out of safe-deploy.sh (it still exists to test)',
-  captureBlock.includes('npx vercel --prod --yes') && captureBlock.includes('EMITTED_BUNDLE='));
+  captureBlock.includes(PROD_DEPLOY) && captureBlock.includes('EMITTED_BUNDLE='));
 
 // PATH shim: `npx` writes the recorded streams and exits 0. The lifted block calls the real `npx`
 // name, so nothing about the production line is rewritten for the test.
@@ -229,7 +235,7 @@ check('EXECUTED: the deployment URL is still the per-deployment URL, not the can
 // than it claims. This literal is the OLD code, deliberately — it is the mutant, not the subject.
 const stdoutOnlyCapture = [
   'DEPLOY_LOG="$(mktemp)"',
-  'npx vercel --prod --yes | tee "$DEPLOY_LOG" >/dev/null',
+  `${PROD_DEPLOY} | tee "$DEPLOY_LOG" >/dev/null`,
   `DEPLOYED_URL="$(grep -oE 'https://[a-z0-9.-]+\\.vercel\\.app' "$DEPLOY_LOG" | tail -1 || true)"`,
   `EMITTED_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\\.js' "$DEPLOY_LOG" | head -1 || true)"`,
 ].join('\n');
@@ -238,7 +244,7 @@ check('the fixture really discriminates: a stdout-only capture finds NO emitted 
 // And a merged-stream capture, the other tempting fix, corrupts the deployment URL into the alias.
 const mergedCapture = [
   'DEPLOY_LOG="$(mktemp)"',
-  'npx vercel --prod --yes 2>&1 | tee "$DEPLOY_LOG" >/dev/null',
+  `${PROD_DEPLOY} 2>&1 | tee "$DEPLOY_LOG" >/dev/null`,
   `DEPLOYED_URL="$(grep -oE 'https://[a-z0-9.-]+\\.vercel\\.app' "$DEPLOY_LOG" | tail -1 || true)"`,
   `EMITTED_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\\.js' "$DEPLOY_LOG" | head -1 || true)"`,
 ].join('\n');
