@@ -68,6 +68,14 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // Explicitly routed rather than left to the #2 fallback, so a cost alert arrives with an owner.
   { routine: 7, test: /^ai_cost_health$/ },
   { routine: 7, test: /^search_index_diverges_from_sync_source$/ },
+  // The `*_check_failed` family (2026-09-04) — a SCHEDULED WORKFLOW ITSELF went red. Raised by
+  // scripts/ops/raise-workflow-alert.mjs, one open alert per workflow file, self-healing on the
+  // next green run. Before it, 17 scheduled workflows could fail and alert nobody (issue #1349:
+  // ui-parity red five nights, zero alerts). Each kind is routed to the routine that owns the
+  // SURFACE the dead check was watching, per this file's rule that ownership follows the surface —
+  // so the engineer who would have received the finding also receives the fact that the finder
+  // stopped working. `seam_check_failed` is the deploy/certification plumbing this routine owns.
+  { routine: 7, test: /^seam_check_failed$/ },
   // p0_delivery_sla — the 5-minute P0 delivery SLO and its dedicated fast lane (2026-08-30). This
   // routine owns that mechanism end to end, yet the kind matched no rule and fell through to the
   // #2 fallback: the alert saying "a P0 did not reach a human in time" was itself being filed to
@@ -78,12 +86,17 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 7, test: /^p0_delivery/ },
 
   // 5 🎯 Advanced Filter + Trending — before #3/#4, whose patterns overlap AF field names.
+  // `af_live_check_failed` (the workflow-failure family above) needs no rule of its own: `^af_`
+  // already claims it, and adding a redundant pattern would be a second statement of the same fact.
+  // scripts/verify-scheduled-checks-alert-on-failure.ts EXECUTES routineForKind() on that kind, so
+  // narrowing `^af_` later cannot silently drop it onto the #2 fallback.
   { routine: 5, test: /^(af_|monthly_af|trending_)/ },
 
   // 4 🧪 Search & Matching QA — the served search surface, matching, diversity, card handoff.
   { routine: 4, test: /^(search_gate_leak|searchability_collapse|filter_barrier_leak)$/ },
   { routine: 4, test: /^(filter_default_suppresses_inventory|unsortable_served_listing)$/ },
   { routine: 4, test: /^(unlocated_search_contract|ranking_|diversity|card_)/ },
+  { routine: 4, test: /^search_live_check_failed$/ },
 
   // 1 ⚡ Junior Scraping — the capture layer: runs, sources, proxies, per-platform fetch health.
   { routine: 1, test: /^(silent_scraper_death|silent_partial_success|zero_new_stall)$/ },
@@ -92,9 +105,11 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 1, test: /^(wasalt_enrich|summary_only_capture|unattributable_platform_runs)/ },
   { routine: 1, test: /^(liveness_cap_degraded|source_limited_contradicted|unprobed_source_waiver)/ },
   { routine: 1, test: /^gathern_liveness/ },
+  { routine: 1, test: /^ingestion_check_failed$/ },
 
   // 6 👣 Journey & Persistence — chat/session/auth state, never matching itself.
   { routine: 6, test: /^(transcript_|filter_state_lost|chat_|session_|auth|sidebar)/ },
+  { routine: 6, test: /^journey_live_check_failed$/ },
 
   // 3 🛡️ Data Integrity — source-truth on listing fields. Broadest; must stay last.
   { routine: 3, test: /price|district|amenity|^rent_period|^manufactured_rent_period/ },
@@ -107,6 +122,7 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 3, test: /^(phasea_offregion_pick|discarded_location_resolution|aqar)/ },
   { routine: 3, test: /^(commercial_|index_label_unrepairable|refresh_coverage|orphaned_search_row)/ },
   { routine: 3, test: /^search_index_freshness$/ },
+  { routine: 3, test: /^data_live_check_failed$/ },
 ];
 
 /** Every routine label, for `gh label create`. */
