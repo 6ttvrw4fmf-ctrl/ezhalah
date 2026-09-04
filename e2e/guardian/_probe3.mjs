@@ -30,7 +30,7 @@ for (const door of ['about', 'support']) {
     url: location.href,
     close: document.querySelectorAll('[data-testid="info-modal-close"]').length,
     textareas: document.querySelectorAll('textarea').length,
-    body: document.body.innerText.replace(/\n{2,}/g, '\n').slice(0, 700),
+    body: document.body.innerText.replace(/\n{2,}/g, '\n').slice(0, 2600),
   })), null, 1));
   const c = await page.$('[data-testid="info-modal-close"]');
   if (c) { await c.click(); await sleep(1500); }

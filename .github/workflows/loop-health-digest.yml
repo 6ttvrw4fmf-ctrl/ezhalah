@@ -115,7 +115,16 @@ jobs:
             fi
           } > body.md
 
-          num=$(gh issue list --repo "$REPO" --search "$TITLE in:title" --state all --limit 20 \
+          # Find the issue by LABEL, then match the title client-side. Not by `--search`: GitHub's
+          # issue search is an index, it lags writes, and a title containing brackets does not match
+          # the way you expect — `--search "[alert] foo in:title"` returned NOTHING for an issue that
+          # demonstrably existed while this was being written. alert-dispatch.yml already uses the
+          # label+jq shape for the same reason. A lookup that silently finds nothing here would make
+          # this workflow open a SECOND issue every day, which is precisely the stream it exists to
+          # avoid. `gh label create --force` above guarantees the label exists before the first read.
+          gh label create loop-health --repo "$REPO" --force --color 0E8A16 \
+            --description "Autonomous engineering loop health" >/dev/null
+          num=$(gh issue list --repo "$REPO" --label loop-health --state all --limit 100 \
                   --json number,title,state \
                   --jq "[.[] | select(.title == \"$TITLE\")] | sort_by(.number) | last | .number // empty")
 
@@ -135,8 +144,6 @@ jobs:
             gh issue reopen "$num" --repo "$REPO" 2>/dev/null || true
             echo "loop needs attention — issue #$num updated"
           else
-            gh label create loop-health --repo "$REPO" --force --color 0E8A16 \
-              --description "Autonomous engineering loop health" >/dev/null
             gh issue create --repo "$REPO" --title "$TITLE" --label loop-health --body-file body.md
             echo "loop needs attention — issue created"
           fi
