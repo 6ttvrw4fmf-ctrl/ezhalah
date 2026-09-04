@@ -10,7 +10,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
          findings, skips, skip, ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
-         closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE } from './harness.mjs';
+         closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
+         classifySearchRpc, SELECTED_CITY_MARKER } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -57,7 +58,7 @@ JOURNEYS['cold-open'] = async (mobile) => withPage({ mobile }, async (page, bag)
   if (text.length < 200) defect(name, 'blank page', `body innerText is ${text.length} chars`);
   else pass(name, `rendered (${text.length} chars)`);
   if (!text.includes('بحث')) defect(name, 'missing primary control', '«بحث» not rendered on Filter home');
-  if (bag.pageErrors.length) defect(name, 'page error on cold open', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on cold open', errs.join(' | ')); }
   if (mobile) {
     const ov = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
     if (ov.sw > ov.cw + 1) defect(name, 'horizontal overflow', `scrollWidth ${ov.sw} > clientWidth ${ov.cw}`);
@@ -147,7 +148,7 @@ JOURNEYS['open-saved-chat'] = async (mobile) => withPage({ mobile, signedIn: tru
   } else {
     pass(name, `opened without duplicating (${(after || []).length} rows)`);
   }
-  if (bag.pageErrors.length) defect(name, 'page error while opening a saved chat', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while opening a saved chat', errs.join(' | ')); }
 });
 
 /** J5 — NEW CHAT must start genuinely blank (PART 5 shape 1). Type into the agent composer, then
@@ -178,7 +179,7 @@ JOURNEYS['new-chat-blank'] = async (mobile) => withPage({ mobile, signedIn: true
   } else {
     pass(name, 'New Chat starts blank');
   }
-  if (bag.pageErrors.length) defect(name, 'page error on New Chat', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on New Chat', errs.join(' | ')); }
 });
 
 /** J6 — a rapid double-click on «بحث» must run the search ONCE (PART 5 shape 7).
@@ -191,6 +192,21 @@ JOURNEYS['new-chat-blank'] = async (mobile) => withPage({ mobile, signedIn: true
  *  would have", so a single click in its own fresh context IS the oracle — measured every run
  *  rather than hard-coded, because that call count is routine #4's to change freely and a constant
  *  here would rot into a false alarm the day they do. */
+/** Bring the Filter home to the one state in which pressing «بحث» is allowed to search at all.
+ *
+ *  IT MUST PROVE ITS OWN PRECONDITION, NOT ASSUME IT. This used to end at "«بحث» exists", which is
+ *  true of a form the app will REFUSE to submit: `onSearch` returns at `if (!citySelected)` with a
+ *  validation message and zero requests (src/app/index.tsx:712), because only a TAPPED suggestion
+ *  row commits a city and every keystroke clears it (owner spec 2026-07-17, "never guess a
+ *  location"). The suggestion tap is a race — the list has to have rendered — and when it loses,
+ *  the caller is handed a primed-looking form that cannot search.
+ *
+ *  `double-click-search` then read "zero search RPCs" as «dead control: «بحث» single click fired no
+ *  search at all» — its most alarming verdict, filed against the app doing exactly what it was
+ *  specified to do (measured on WebKit desktop, 2026-09-04, on a bundle Chromium and Firefox ran
+ *  clean). SELECTED_CITY_MARKER renders iff `citySelected` is non-null, so an unprimed form now
+ *  returns false and the journey SKIPS with "search could not be primed" instead of accusing.
+ */
 const primeSearch = async (page) => {
   await clickText(page, 'شراء');
   await sleep(600);
@@ -202,29 +218,80 @@ const primeSearch = async (page) => {
   await sleep(2500);
   await clickText(page, 'الرياض', { exact: true, nth: 0 });
   await sleep(1500);
+  if (!(await page.locator(SELECTED_CITY_MARKER).count())) return false;
   return (await page.getByText('بحث', { exact: true }).last().count()) > 0;
 };
 
 JOURNEYS['double-click-search'] = async (mobile) => {
   const name = `double-click-search:${mobile ? 'mobile375' : 'desktop1440'}`;
+  // COUNT SEARCHES, NOT CALLS. `location_search_candidates_ar` is the results query AND the RPC
+  // behind both per-option count helpers, which fire one `p_limit: 1` call PER VISIBLE OPTION on
+  // the screen the search just produced (see classifySearchRpc in harness.mjs). So the raw call
+  // count measures how much the results screen decided to decorate itself, not how many searches
+  // were submitted — and it filed «double-click fired the search twice: single -> 1, double -> 6»
+  // on WebKit mobile, 2026-09-04, when both sides had submitted exactly one search.
+  //
+  // Measured on production, mobile, 2/2 each: a single press → 1 results call + 5 option counts; a
+  // DOUBLE press → 1 results call + 5 option counts. The results class gives 1 = 1, which is the
+  // question this journey asks; the option-count class is noise to it and varies with the data.
+  //
+  // BOTH SIDES ARE STILL COUNTED ONLY ONCE THEY STOP GROWING. This also used to read after a fixed
+  // `sleep(10_000)`, which PART 11.2 forbids as an oracle. The dangerous direction there is the
+  // quiet one: if the DOUBLE side is the short capture, a genuine double-fire compares as
+  // `double <= single` and PASSES — the guard silently failing to guard on any engine slow enough.
+  // An UNSETTLED count is therefore refused as a measurement rather than compared.
+  const searchRpcs = (bag, from, cls) =>
+    bag.rpc.slice(from).filter((r) => classifySearchRpc(r) === cls).length;
+  const settledSearchRpcs = (bag, from) => settledCount(() => searchRpcs(bag, from, 'results'));
+
+  // A CLICK THAT NEVER LANDED IS NOT EVIDENCE ABOUT THE CONTROL. This swallowed its click error in
+  // a bare `.catch(() => {})`, so an intercepted or non-actionable «بحث» produced zero RPCs and the
+  // journey called it a DEAD CONTROL — the most alarming verdict it can reach, from the least
+  // evidence. Measured 2026-09-04: «dead control: «بحث» single click fired no search at all» 2/2 on
+  // WebKit desktop, on a bundle where Chromium and Firefox both ran the same journey clean.
+  //
+  // Same swallowed-catch shape as PR #1146's 2.4s no-op retries and as the «إغلاق» locator earlier
+  // in this suite: the failure is absorbed into silence and the next reader is pointed at the wrong
+  // screen. The click error is now carried out and the journey SKIPS with the real reason —
+  // Playwright's own log names the interceptor, which is exactly the discriminator PART 9.1 wants.
   const press = (clicks) => withPage({ mobile }, async (page, bag) => {
     if (!(await primeSearch(page))) return null;
     const from = bag.rpc.length;
+    let clickErr = null;
     await page.getByText('بحث', { exact: true }).last()
-      .click({ clickCount: clicks, delay: 40 }).catch(() => {});
-    await sleep(10_000);
-    return bag.rpc.slice(from).filter((r) => r.name === 'location_search_candidates_ar').length;
+      .click({ clickCount: clicks, delay: 40 })
+      .catch((e) => {
+        const lines = String(e).split('\n');
+        clickErr = lines.find((l) => /intercepts pointer events/.test(l))?.trim() || lines[0];
+      });
+    if (clickErr) return { clickErr };
+    const out = await settledSearchRpcs(bag, from);
+    // Carried out for the verdict line, and so an unparsable body can never be guessed into a class.
+    return { ...out, optionCounts: searchRpcs(bag, from, 'option-count'), unknown: searchRpcs(bag, from, 'unknown') };
   });
 
   const single = await press(1);
   const double = await press(2);
   if (single === null || double === null) { skip(name, 'search could not be primed'); return; }
-  if (single === 0) { defect(name, 'dead control', '«بحث» single click fired no search at all'); return; }
-  if (double > single) {
+  // Judged BEFORE the dead-control check, deliberately: a control that was never actually clicked
+  // must never be reported as one that did nothing when clicked.
+  if (single.clickErr) { skip(name, `the single click on «بحث» never landed: ${single.clickErr}`); return; }
+  if (double.clickErr) { skip(name, `the double click on «بحث» never landed: ${double.clickErr}`); return; }
+  // A count that never stopped growing is not a measurement. Refuse to compare rather than compare
+  // two numbers of unknown completeness — that is what produced the false verdict above.
+  if (single.n > 0 && !single.settled) { skip(name, `single-click RPC count never settled (still ${single.n} at the budget)`); return; }
+  if (double.n > 0 && !double.settled) { skip(name, `double-click RPC count never settled (still ${double.n} at the budget)`); return; }
+  // A call whose body would not parse belongs to no class. Refuse the run rather than let a guess
+  // land in the results class and manufacture the double-fire this journey exists to detect.
+  const unknown = single.unknown + double.unknown;
+  if (unknown) { skip(name, `${unknown} search RPC(s) had an unreadable body — class unknown, so the counts are not comparable`); return; }
+  if (single.n === 0) { defect(name, 'dead control', '«بحث» single click fired no search at all'); return; }
+  const mix = `single ${single.n} results +${single.optionCounts} option-counts / double ${double.n} results +${double.optionCounts}`;
+  if (double.n > single.n) {
     defect(name, 'double-click fired the search twice',
-      `single click -> ${single} search RPCs, double click -> ${double}`);
+      `single click -> ${single.n} RESULTS searches (settled), double click -> ${double.n} (settled); ${mix}`);
   } else {
-    pass(name, `double-click ran one search (single ${single} / double ${double} RPCs)`);
+    pass(name, `double-click ran one search (${mix}, both settled)`);
   }
 };
 
@@ -261,7 +328,7 @@ JOURNEYS['back-after-search'] = async (mobile) => withPage({ mobile }, async (pa
   if (text.length < 200) defect(name, 'Back stranded the user', `body is ${text.length} chars at ${url}`);
   else if (!text.includes('بحث')) defect(name, 'Back landed off-route', `no Filter home controls at ${url}`);
   else pass(name, `Back returned to a usable screen (${url})`);
-  if (bag.pageErrors.length) defect(name, 'page error on Back', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on Back', errs.join(' | ')); }
 });
 
 /** J8 — voice: FEATURE DETECTION and the control's presence. PART 10: this is engine evidence on
@@ -277,7 +344,8 @@ JOURNEYS['voice-control'] = async (mobile) => withPage({ mobile }, async (page, 
   if (micCount) {
     await mic.first().click().catch(() => {});
     await sleep(2500);
-    if (bag.pageErrors.length) defect(name, 'mic tap threw', bag.pageErrors.join(' | '));
+    const micErrs = appPageErrors(bag, name);
+    if (micErrs.length) defect(name, 'mic tap threw', micErrs.join(' | '));
     else pass(name, 'mic tap did not throw');
   }
 });
@@ -472,7 +540,7 @@ JOURNEYS['sidebar-row-actions'] = async (mobile) => withPage({ mobile, signedIn:
   } else {
     pass(name, 'delete survived a refresh');
   }
-  if (bag.pageErrors.length) defect(name, 'page error during row actions', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during row actions', errs.join(' | ')); }
 });
 
 /** Locate the rename TextInput. It carries no testID, and RN-web renders it as a plain <input>
@@ -569,7 +637,7 @@ JOURNEYS['sidebar-rename'] = async (mobile) => withPage({ mobile, signedIn: true
   } else {
     pass(name, 'the rename survived a refresh with the order intact');
   }
-  if (bag.pageErrors.length) defect(name, 'page error during rename', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during rename', errs.join(' | ')); }
 });
 
 /** J9–J11 — THE ADVERSARIAL SET (PART 4). A fixed checklist only ever catches bugs someone already
@@ -595,7 +663,7 @@ JOURNEYS['adv-double-open'] = async (mobile) => withPage({ mobile, signedIn: tru
   } else {
     pass(name, `repeat open created no duplicate (${(after || []).length} rows)`);
   }
-  if (bag.pageErrors.length) defect(name, 'page error on repeat open', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on repeat open', errs.join(' | ')); }
 });
 
 /** J10 — New Chat pressed WHILE a restore is still landing must produce a genuinely blank chat,
@@ -615,7 +683,7 @@ JOURNEYS['adv-newchat-mid-restore'] = async (mobile) => withPage({ mobile, signe
   if (leaked) defect(name, 'interrupted restore leaked into the new chat', 'a restored search bubble is on the blank chat');
   else if (composer.trim()) defect(name, 'New Chat inherited composer text', `holds «${composer}»`);
   else pass(name, 'New Chat is blank even when it interrupts a restore');
-  if (bag.pageErrors.length) defect(name, 'page error on interrupted restore', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on interrupted restore', errs.join(' | ')); }
 });
 
 /** J11 — a backgrounded tab suspends rAF. React Native Web drives Animated off rAF, so anything
@@ -634,7 +702,7 @@ JOURNEYS['adv-background-tab'] = async (mobile) => withPage({ mobile, signedIn: 
   if (t.length < 200) defect(name, 'backgrounded tab came back blank', `body is ${t.length} chars`);
   else if (!t.includes('بحث')) defect(name, 'controls missing after backgrounding', 'no «بحث» on return');
   else pass(name, `survived 45s backgrounded (${t.length} chars, controls present)`);
-  if (bag.pageErrors.length) defect(name, 'page error after backgrounding', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error after backgrounding', errs.join(' | ')); }
   await other.close().catch(() => {});
 });
 
@@ -692,7 +760,7 @@ JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobi
   if (!row) defect(name, 'the favourited chat vanished from the sidebar after navigation', '«فلل جدة» is not rendered at all');
   else if (!starHeader) defect(name, 'the favourited chat is no longer in المفضلة after navigation', 'the row is present but the Starred bucket is gone');
   else pass(name, 'the row is still rendered under المفضلة after navigation');
-  if (bag.pageErrors.length) defect(name, 'page error during the favourite navigation trip', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the favourite navigation trip', errs.join(' | ')); }
 });
 
 /** J17 — THE MODE TOGGLE COSTS NO HISTORY, from the user's side (PART 5 shape 9).
@@ -765,7 +833,7 @@ JOURNEYS['adv-modeswitch-back-push-vs-replace'] = async (mobile) => withPage({ m
       pass(name, `one Back landed on a usable in-app screen (${url})`);
     }
   }
-  if (bag.pageErrors.length) defect(name, 'page error during the mode-switch round trips', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the mode-switch round trips', errs.join(' | ')); }
 });
 
 // ── appearance: the auth gate, in a REAL browser ────────────────────────────────────────────────
@@ -805,7 +873,7 @@ JOURNEYS['appearance-guest-light'] = async (mobile) => withPage({ mobile }, asyn
   } else {
     pass(name, `guest stayed light at both layers with stored «${after.stored}»`);
   }
-  if (bag.pageErrors.length) defect(name, 'page error on the guest appearance path', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the guest appearance path', errs.join(' | ')); }
 });
 
 /** J15 — إلغاء MUST NOT TOUCH THE THEME. The owner rule (theme.tsx, 2026-08-28) is that only a
@@ -868,7 +936,7 @@ JOURNEYS['appearance-cancel-keeps-dark'] = async (mobile) => withPage({ mobile, 
   } else {
     pass(name, 'إلغاء left both the theme and the stored preference untouched');
   }
-  if (bag.pageErrors.length) defect(name, 'page error on the cancel path', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the cancel path', errs.join(' | ')); }
 });
 
 /** J19 — SIGN-OUT LEAVES NO TRACE OF THE PREVIOUS USER (PART 3 item 1; PART 5 shapes 1, 7 and 8).
@@ -999,7 +1067,7 @@ JOURNEYS['signout-leaves-no-trace'] = async (mobile) => withPage({ mobile, signe
     else pass(name, 'still no previous-account chat title after a reload');
   }
 
-  if (bag.pageErrors.length) defect(name, 'page error on the sign-out path', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the sign-out path', errs.join(' | ')); }
 });
 
 /** J20 — GOOGLE ONE TAP MUST NOT SIT ON TOP OF THE APP'S OWN CONTROLS (PART 5 shapes 6 and 11).
@@ -1032,14 +1100,34 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
 
   // Wait for the sheet to ARRIVE and finish GROWING: it is inserted ~1.3s after load at height 0 and
   // animates up to 144px. Measuring once at load reads 0 and would judge a covered control clear.
+  //
+  //  THE PROMPT IS NOT THE SAME ELEMENT ON EVERY ENGINE (measured 2026-09-03, the first WebKit and
+  //  Firefox runs this suite has ever had). This detector matched `#credential_picker_iframe` — the
+  //  id GIS uses for its FedCM prompt, which is what CHROMIUM gets. WebKit and Firefox get Google's
+  //  classic bottom-sheet instead, an iframe with NO id and a generated class:
+  //      <iframe class="L5Fo6c-PQbLGe" title="مربع حوار تسجيل الدخول باستخدام حساب Google"
+  //              src="https://accounts.google.com/gsi/...">
+  //  So on both engines this returned null and the journey skipped «Google never showed the One Tap
+  //  prompt this run» — 4/4 on each — while the prompt was demonstrably ON SCREEN in the same run:
+  //  `adv-modeswitch-back-push-vs-replace` failed to click «تصفية» 2/2 on mobile because THAT iframe
+  //  intercepted the tap. One run, two journeys, flatly contradicting each other.
+  //
+  //  The cost is the whole point of this barrier: PR #1461 fixed One Tap sitting on top of «بحث» and
+  //  the Agent composer, and the guard against that regression could only ever fire on Chromium —
+  //  on the two engines where a bottom-docked sheet is MORE likely, it reported a tidy skip.
+  //
+  //  Matching on the GIS src covers every variant, present and future, and still resolves to the
+  //  same element on Chromium.
+  const SHEET_SEL = 'iframe#credential_picker_iframe, iframe[src*="accounts.google.com/gsi"]';
   const waitForSheet = async (page) => {
     for (let i = 0; i < 40; i++) {
-      const r = await page.evaluate(() => {
-        const f = document.querySelector('#credential_picker_iframe');
-        if (!f) return null;
-        const q = f.getBoundingClientRect();
-        return q.height > 0 ? { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height) } : null;
-      });
+      const r = await page.evaluate((sel) => {
+        for (const f of document.querySelectorAll(sel)) {
+          const q = f.getBoundingClientRect();
+          if (q.height > 0) return { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height) };
+        }
+        return null;
+      }, SHEET_SEL);
       if (r) return r;
       await sleep(500);
     }
@@ -1054,11 +1142,14 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
   // self-contradictory pass line «(587-606) is clear of the prompt (558-812)». The verdict was always
   // sound (elementFromPoint + a real click decide it), but a message whose numbers disagree with its
   // own conclusion is how a future reader talks themselves out of a real finding.
-  const winnerAt = (page, sel) => page.evaluate((s) => {
+  const winnerAt = (page, sel) => page.evaluate(({ s, sheetSel }) => {
     const el = s === 'cta'
       ? [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && (e.textContent || '').trim() === 'بحث')
-      : document.querySelector('textarea');
-    const f = document.querySelector('#credential_picker_iframe');
+      : s === 'modeswitch'
+        ? [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && (e.textContent || '').trim() === 'تصفية')
+        : document.querySelector('textarea');
+    // Same engine-agnostic selector as waitForSheet — the FIRST prompt iframe with a real height.
+    const f = [...document.querySelectorAll(sheetSel)].find((n) => n.getBoundingClientRect().height > 0) || null;
     const q = f && f.getBoundingClientRect();
     const sheetNow = q && q.height > 0 ? `${Math.round(q.top)}-${Math.round(q.bottom)}` : 'gone';
     if (!el) return { missing: true, sheetNow };
@@ -1067,13 +1158,45 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), sheetNow,
              winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}` : null,
              isSelf: !!t && (t === el || t.contains(el) || el.contains(t)) };
-  }, sel);
+  }, { s: sel, sheetSel: SHEET_SEL });
 
   await withPage({ mobile }, async (page, bag) => {
     const sheet = await waitForSheet(page);
     if (!sheet) { skip(name, 'Google never showed the One Tap prompt this run — nothing to clear'); return; }
     // Desktop renders the prompt in a corner, not docked to the bottom; there is nothing to reserve.
-    if (sheet.bottom < 660 && !mobile) { pass(name, `desktop prompt is not bottom-docked (${sheet.top}-${sheet.bottom})`); return; }
+    // Desktop's prompt sits in a corner rather than docked, so «بحث» needs no reserved space there —
+    // but the mode-switch check below still runs, because a corner prompt on a 1440px viewport can
+    // still land on a control near the top edge, and "not bottom-docked" says nothing about that.
+    const desktopCornerPrompt = sheet.bottom < 660 && !mobile;
+    if (desktopCornerPrompt) pass(name, `desktop prompt is not bottom-docked (${sheet.top}-${sheet.bottom})`);
+
+
+    // THE MODE SWITCH, because the prompt is not bottom-docked on every engine (measured 2026-09-03,
+    // first WebKit/Firefox runs). PR #1461 fixed a BOTTOM-docked sheet covering «بحث» and the
+    // composer; on WebKit the prompt renders at the TOP instead (measured 20-170 in an 812px
+    // viewport), where the control at risk is «تصفية» — the Filter/Agent mode switch, a primary
+    // control on the busiest screen (PART 1). This is not a hypothetical: in the first WebKit and
+    // Firefox sweeps `adv-modeswitch-back-push-vs-replace` could not click «تصفية» on mobile, 2/2 on
+    // each, with Playwright naming that iframe as the interceptor. That was a real user-visible
+    // obstruction discovered by accident, in a journey about something else, and reported as a skip.
+    // Measured deliberately here so it is a verdict rather than a side effect.
+    const ms = await winnerAt(page, 'modeswitch');
+    if (ms.missing) skip(`${name}/modeswitch`, '«تصفية» not rendered');
+    else if (!ms.isSelf) {
+      defect(`${name}/modeswitch`, 'the One Tap prompt is covering «تصفية» (the mode switch)',
+        `sheet now ${ms.sheetNow}; «تصفية» ${ms.top}-${ms.bottom}; a tap at its centre goes to ${ms.winner}`);
+    } else {
+      let msErr = null;
+      await page.getByText('تصفية', { exact: true }).first().click({ timeout: 10_000 })
+        .catch((e) => { msErr = String(e).split('\n')[0]; });
+      if (msErr) defect(`${name}/modeswitch`, '«تصفية» hit-tests clear but a real click still does not land', msErr);
+      else pass(`${name}/modeswitch`, `«تصفية» (${ms.top}-${ms.bottom}) is clear of the prompt (now ${ms.sheetNow}) and clickable`);
+    }
+
+    // MEASURED BEFORE «بحث» IS CLICKED, and that ordering is load-bearing: the successful branch
+    // below CLICKS «بحث», which submits a search and replaces the screen. Judging «تصفية» after that
+    // would measure a different page — and, since the mode switch may not even be rendered there,
+    // would quietly degrade into a skip that looks like coverage.
 
     // Scroll the filter form as far as a person can — the worst case, where «بحث» comes to rest.
     await page.evaluate(() => {
@@ -1084,9 +1207,10 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     });
     await sleep(1200);
 
-    const cta = await winnerAt(page, 'cta');
-    if (cta.missing) { skip(name, '«بحث» not rendered'); return; }
-    if (!cta.isSelf) {
+    const cta = desktopCornerPrompt ? { skipCta: true } : await winnerAt(page, 'cta');
+    if (cta.skipCta) { /* handled above — fall through to the mode-switch check */ }
+    else if (cta.missing) { skip(name, '«بحث» not rendered'); }
+    else if (!cta.isSelf) {
       defect(name, 'the One Tap prompt is covering «بحث»',
         `sheet now ${cta.sheetNow}; «بحث» ${cta.top}-${cta.bottom}; a tap at its centre goes to ${cta.winner}`);
     } else {
@@ -1097,7 +1221,8 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
       if (err) defect(name, '«بحث» hit-tests clear but a real click still does not land', err);
       else pass(name, `«بحث» (${cta.top}-${cta.bottom}) is clear of the prompt (now ${cta.sheetNow}) and clickable`);
     }
-    if (bag.pageErrors.length) defect(name, 'page error while the prompt was up', bag.pageErrors.join(' | '));
+
+    { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while the prompt was up', errs.join(' | ')); }
   });
 
   // The same class on the OTHER busy screen: the Agent composer is bottom-anchored, so padding the
@@ -1231,7 +1356,7 @@ JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile
     } else pass(`${name}/x`, 'the draft also survived the X');
   } else skip(`${name}/x`, 'no close control found on the dialog');
 
-  if (bag.pageErrors.length) defect(name, 'page error on the support-form path', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the support-form path', errs.join(' | ')); }
 });
 
 /** J21 — THE ERROR STATE MUST NAME THE RIGHT FAILURE.
@@ -1295,7 +1420,7 @@ JOURNEYS['support-error-copy'] = async (mobile) => withPage({ mobile }, async (p
   if (body.includes(SUP.connErr)) pass(name, 'a genuine server failure still says "check your connection"');
   else defect(name, 'a real failure lost its connection copy', `neither message matched after a 500; body has «${body.slice(0, 120)}»`);
 
-  if (bag.pageErrors.length) defect(name, 'page error on the support error path', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the support error path', errs.join(' | ')); }
 });
 
 /** J22 — TWO TABS ARE ONE ACCOUNT. PART 5 shape 3 ("a sidebar action creating a duplicate or
@@ -1365,7 +1490,7 @@ JOURNEYS['adv-crosstab-no-clobber'] = async (mobile) => withPage(
       pass(name, `the deletion held and the first tab kept its own change (disk [${ids(final)}], starred [${flagged}])`);
     }
   }
-  if (bag.pageErrors.length) defect(name, 'page error during the cross-tab race', bag.pageErrors.join(' | '));
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the cross-tab race', errs.join(' | ')); }
   await tabB.close().catch(() => {});
 });
 
