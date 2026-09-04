@@ -186,11 +186,60 @@ function removeLastPillProblems(src: string): string[] {
   return p;
 }
 
+/**
+ * THE CLASS IS NOT ONE FILE, AND RUN #144 PROVED IT TWICE MORE (2026-09-04).
+ *
+ * With the option-card and remove-last-pill journeys fixed and the browser jobs serialized, run #144
+ * turned BOTH of the original reds green — and two OTHER journeys went red for the identical reason,
+ * each with a fixed sleep where a poll belongs:
+ *
+ *   verify-combined-budget-live.ts       slept 16s after «بحث», read searches[] once, found it empty,
+ *                                        and reported FIVE product failures against a request nobody
+ *                                        made — ending with "this is the pre-2026-09-02 defect:
+ *                                        priceFilter() applied the BUY pair to every row". Every
+ *                                        number in that accusation was 0 because 0 rows were fetched.
+ *   verify-trending-live-four-way-truth  slept 4s after focusing the city input and reported
+ *                                        "Trending Cities rendered rows in the DOM … (none)" — on a
+ *                                        panel driven by top_cities_by_deal_ar, measured at 14-19s.
+ *
+ * Both now poll for a full agent turn and classify a non-arrival against production's own signal.
+ * Both count `undecided` into their exit code, so NOT EXERCISED can never read as success.
+ */
+function journeyFailsClosed(src: string, name: string, sites: [string, string][]): string[] {
+  const p: string[] = [];
+  if (!/settleUntil/.test(src)) p.push(`${name} does not use the shared settleUntil primitive — it cannot know whether what it asserted on ever arrived`);
+  if (!/AGENT_TURN_MS/.test(src)) p.push(`${name} has no agent-turn budget`);
+  if (!/paceUntilHealthy/.test(src)) p.push(`${name} does not pace against production load before measuring it`);
+  if (!/process\.exit\(failures \+ undecided \? 1 : 0\)|failures \+ undecided\)/.test(src)) {
+    p.push(`${name}: NOT EXERCISED does not reach the exit code — a journey that observed nothing would report success`);
+  }
+  const unobs = src.match(/const unobserved = async[\s\S]*?\n\};/)?.[0] ?? '';
+  if (!unobs) p.push(`${name} has no unobserved() classifier`);
+  else {
+    if (!/verdictForNonArrival/.test(unobs)) p.push(`${name}: unobserved() does not consult production load`);
+    if (!/check\(label, false/.test(unobs)) p.push(`${name}: unobserved() never reports a real FAILURE`);
+    if (!/undecided\+\+/.test(unobs)) p.push(`${name}: unobserved() does not COUNT the non-arrival`);
+  }
+  for (const [needle, why] of sites) if (!src.includes(needle)) p.push(why);
+  return p;
+}
+
 // ── the real files must be clean ─────────────────────────────────────────────────────────────────
 const CE = read('verify-af-card-evidence-live.ts');
 const LT = read('verify-af-live-truth.ts');
 const OC = read('verify-af-option-card-truth-live.ts');
 const RL = read('verify-af-remove-last-pill-live.ts');
+const CB = read('verify-combined-budget-live.ts');
+const TF = read('verify-trending-live-four-way-truth.ts');
+
+const CB_SITES: [string, string][] = [
+  ['if (!landed.settled)', 'verify-combined-budget-live.ts no longer abandons when no search was captured — the five-failure cascade against a request nobody made is back'],
+  ['(n) => n > armed', 'verify-combined-budget-live.ts no longer waits for a NEW search — it would read a stale one from before «بحث»'],
+];
+const TF_SITES: [string, string][] = [
+  ['if (!cityRows.settled)', 'verify-trending-live-four-way-truth.ts no longer abandons when the Trending panel never rendered'],
+  ['(rows: any[]) => rows.length > 0', 'the Trending poll no longer requires a ROW — it would settle on an empty panel'],
+];
 
 {
   const p = cardEvidenceProblems(CE);
@@ -207,6 +256,14 @@ const RL = read('verify-af-remove-last-pill-live.ts');
 {
   const p = removeLastPillProblems(RL);
   check('verify-af-remove-last-pill-live.ts fails CLOSED, and NOT EXERCISED reaches its exit code', p.length === 0, p.join(' | '));
+}
+{
+  const p = journeyFailsClosed(CB, 'verify-combined-budget-live.ts', CB_SITES);
+  check('verify-combined-budget-live.ts polls for its committed search and fails CLOSED', p.length === 0, p.join(' | '));
+}
+{
+  const p = journeyFailsClosed(TF, 'verify-trending-live-four-way-truth.ts', TF_SITES);
+  check('verify-trending-live-four-way-truth.ts polls for the Trending panel and fails CLOSED', p.length === 0, p.join(' | '));
 }
 
 // ── mutation proofs — each reversion to the bug class must turn this barrier RED ──────────────────
@@ -278,6 +335,30 @@ mustReject('the re-open read stops abandoning on a card that never rendered',
 
 mustReject('the remove-last-pill classifier stops counting the non-arrival',
   removeLastPillProblems(RL.replace('undecided++;', '')), 'cannot reach the exit code');
+
+// ── the two journeys run #144 caught, each mutated back to the sleep-then-assert it came from ─────
+mustReject('the combined-budget journey stops abandoning when no search was captured',
+  journeyFailsClosed(CB.replace('if (!landed.settled)', 'if (false)'), 'CB', CB_SITES),
+  'five-failure cascade');
+
+mustReject('the combined-budget journey settles on a STALE search from before «بحث»',
+  journeyFailsClosed(CB.replace('(n) => n > armed', '(n) => n >= 0'), 'CB', CB_SITES),
+  'stale one from before');
+
+mustReject('the combined-budget journey stops pacing and measures the queue',
+  journeyFailsClosed(CB.replace(/paceUntilHealthy/g, 'noPace'), 'CB', CB_SITES), 'does not pace');
+
+mustReject('the Trending journey stops abandoning when the panel never rendered',
+  journeyFailsClosed(TF.replace('if (!cityRows.settled)', 'if (false)'), 'TF', TF_SITES),
+  'never rendered');
+
+mustReject('the Trending poll settles on an EMPTY panel',
+  journeyFailsClosed(TF.replace('(rows: any[]) => rows.length > 0', '(rows: any[]) => true'), 'TF', TF_SITES),
+  'settle on an empty panel');
+
+mustReject('the Trending journey drops NOT EXERCISED from its exit code',
+  journeyFailsClosed(TF.replace(/failures \+ undecided/g, 'failures'), 'TF', TF_SITES),
+  'would report success');
 
 console.log(failures
   ? `\n✗ verify-af-live-journey-polling: ${failures} failure(s)\n`
