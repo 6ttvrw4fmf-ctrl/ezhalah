@@ -23,11 +23,12 @@
 //   M1 pickPool combined branch back to [...pools.mixRent, ...pools.mixBuy]  → A + B fail
 //   M2 pickPool type branch back to "walk every bucket" (villa, apartment…) → C fails
 //   M3 buildPools stores `all` REVERSED / re-sorted by id                   → A, C, D fail
+//   M4 platformIdentity compares exact lowercase names (no alnum fold)       → A (website) + F fail
 //
 //   node --experimental-strip-types scripts/verify-pool-keeps-fetched-order.ts   (in `npm test`)
 
 import { buildPools, type Listing } from '../src/data/listings.ts';
-import { distinctPlatformCount, platformIdentity } from '../src/lib/platformDiversity.ts';
+import { distinctPlatformCount, orderByScope, platformIdentity, type RankedRow } from '../src/lib/platformDiversity.ts';
 import { initialReveal } from '../src/lib/initialReveal.ts';
 import { liftSymbols } from './lib/liftSymbols.ts';
 
@@ -47,21 +48,32 @@ const lifted = await liftSymbols(
 const pickPool = lifted.pickPool as (q: unknown, pools: unknown) => Listing[];
 
 // ── Fixture: the production RPC's real first-21 for الرياض + شراء + إيجار (2026-09-04), cycled ──────
-const RPC_CYCLE: Array<[string, 'Rent' | 'Buy']> = [
-  ['therc', 'Rent'], ['aqarmonthly', 'Rent'], ['aqargate', 'Buy'], ['dealapp', 'Rent'], ['sanadak', 'Buy'],
-  ['aqar', 'Buy'], ['muktamel', 'Buy'], ['aldarim', 'Buy'], ['gathern', 'Rent'], ['wasalt', 'Buy'],
-  ['aqaratikom', 'Buy'], ['satel', 'Rent'], ['sadin', 'Buy'], ['aqarcity', 'Buy'], ['raghdan', 'Buy'],
-  ['mizlaj', 'Rent'], ['nowaisiry', 'Buy'], ['souq24', 'Rent'], ['alhoshan', 'Buy'], ['fursaghyr', 'Buy'],
+// [DB slug the RPC returns, registry name the hydrated listing carries, deal]. The RPC keys its
+// round-robin on the SLUG, so aqar AND aqarmonthly both sit in its first cycle — they are one website
+// (sa.aqar.fm) and the client's orderByScope must fold them (live 2026-09-04: «عقار» showed twice).
+const RPC_CYCLE: Array<[string, string, 'Rent' | 'Buy']> = [
+  ['therc', 'THE RC', 'Rent'], ['aqarmonthly', 'Aqar Monthly', 'Rent'], ['aqargate', 'Aqargate', 'Buy'],
+  ['dealapp', 'Deal App', 'Rent'], ['sanadak', 'Sanadak', 'Buy'], ['aqar', 'Aqar', 'Buy'],
+  ['muktamel', 'Muktamel', 'Buy'], ['aldarim', 'Aldarim', 'Buy'], ['gathern', 'Gathern', 'Rent'],
+  ['wasalt', 'Wasalt', 'Buy'], ['aqaratikom', 'Aqaratikom', 'Buy'], ['satel', 'Satel', 'Rent'],
+  ['sadin', 'Sadin', 'Buy'], ['aqarcity', 'Aqarcity', 'Buy'], ['raghdan', 'Raghdan', 'Buy'],
+  ['mizlaj', 'Mizlaj', 'Rent'], ['nowaisiry', 'Al Nowaisiry', 'Buy'], ['souq24', '24 Souq', 'Rent'],
+  ['alhoshan', 'Alhoshan', 'Buy'], ['fursaghyr', 'Fursaghyr', 'Buy'],
 ];
+const WEBSITES = new Set(RPC_CYCLE.map(([slug]) => platformIdentity(slug))).size;   // 19: aqar family folds
+// The RPC's rows, hydrated exactly as remote.ts does (platform = slug, l.source = registry name),
+// then diversified by the real orderByScope for a region-scoped search — the order buildPools sees.
 function rows(types: string[], cycles = 3): Listing[] {
-  const out: Listing[] = [];
+  const ranked: RankedRow<Listing>[] = [];
   for (let c = 0; c < cycles; c++) {
-    RPC_CYCLE.forEach(([source, deal], i) => out.push({
-      id: c * 100 + i + 1, source, deal, type: types[(c * RPC_CYCLE.length + i) % types.length],
-      price: deal === 'Rent' ? 'SAR 45,000/year' : 'SAR 900,000', listed: 'today',
-    } as unknown as Listing));
+    RPC_CYCLE.forEach(([slug, source, deal], i) => {
+      const rank = c * RPC_CYCLE.length + i;
+      const l = { id: c * 100 + i + 1, source, deal, type: types[rank % types.length],
+        price: deal === 'Rent' ? 'SAR 45,000/year' : 'SAR 900,000', listed: 'today' } as unknown as Listing;
+      ranked.push({ l, platform: slug, city: 'الرياض', region: 'الرياض', district: '', rank, source_table: `${slug}_residential_listings` });
+    });
   }
-  return out;
+  return orderByScope(ranked, 'region').map((r) => r.l);
 }
 const ids = (l: Listing[]) => l.map((r) => r.id).join(',');
 // Exactly agent.tsx's call: floor 10, widened to the distinct matching platforms, capped by fetched.
@@ -77,9 +89,25 @@ const firstScreen = (drawn: Listing[]) =>
     `got ${ids(drawn).slice(0, 80)}…`);
   const screen = firstScreen(drawn);
   const distinct = new Set(screen.map((r) => platformIdentity(r.source))).size;
-  check(`A. combined: first screen (${screen.length}) is one per platform`, distinct === screen.length,
+  check(`A. combined: first screen (${screen.length}) is one card per WEBSITE`, distinct === screen.length,
     `${distinct} distinct in ${screen.length}`);
+  check(`A. combined: first screen is as wide as the market (${WEBSITES} websites)`, screen.length === WEBSITES,
+    `screen=${screen.length}`);
   check('A. combined: first screen shows Buy AND Rent', screen.some((r) => r.deal === 'Buy') && screen.some((r) => r.deal === 'Rent'));
+}
+
+// ── F. One WEBSITE is one identity, whichever spelling reaches the key ─────────────────────────────
+// The diversity row carries the DB slug (RPC), the listing carries the registry name (hydration);
+// distinctPlatformCount reads the latter, rankedKey the former. Both must agree, or the count says
+// 19 while the order still seats 20 — and «عقار» appears twice.
+{
+  check('F. Aqar / Aqar Monthly / aqar / aqarmonthly are ONE identity (sa.aqar.fm)',
+    new Set(['Aqar', 'Aqar Monthly', 'aqar', 'aqarmonthly', 'AQAR MONTHLY'].map(platformIdentity)).size === 1
+      && platformIdentity('aqarmonthly') === 'sa.aqar.fm');
+  check('F. slug and spaced brand name agree (therc / THE RC, rawasidark / RawasiDark)',
+    platformIdentity('therc') === platformIdentity('THE RC') && platformIdentity('rawasidark') === platformIdentity('RawasiDark'));
+  check('F. different websites never fold', new Set(['aqar', 'wasalt', 'aqargate', 'aqarcity', 'aqaratikom'].map(platformIdentity)).size === 5);
+  check('F. an unregistered slug stays its own identity', platformIdentity('newsite') === 'newsite');
 }
 
 // ── B. bothDeals (agent could not tell rent from buy) takes the same path ──────────────────────────
