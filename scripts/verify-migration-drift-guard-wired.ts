@@ -29,6 +29,7 @@
 import { join } from 'node:path';
 import { npmTestRuns } from './lib/testRegistry.ts';
 import { readFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { buildRepoMigrationVersions } from './build-repo-migration-versions.cjs';
 
 const CHECK_SCRIPT = 'scripts/verify-migration-drift-vs-production.ts';
@@ -156,6 +157,33 @@ check(npmTestRuns(ROOT, PURE_TEST.replace(/\.ts$/, '')),
   'npm test runs the offline mirror-integrity test',
   `package.json's "test" script no longer runs ${PURE_TEST} — the four-condition detection logic ` +
   `(and its mutation proof) would go unchecked on PRs`);
+
+// 6. FAIL CLOSED — EXECUTED, not read (2026-09-04).
+//    Until today both live checkers caught `fetch` and `process.exit(0)`. Every 15 minutes the
+//    workflow could fail to reach production and still go green: the barrier's whole promise
+//    ("detect immediately") quietly depended on the network never hiccuping. Asserting the fix by
+//    grepping for the absence of `exit(0)` would be a comment-shaped check; instead this RUNS each
+//    real script pointed at a closed port and requires a non-zero exit. A future refactor that
+//    reintroduces the skip-and-pass posture turns this red.
+const UNREACHABLE = 'http://127.0.0.1:1';
+for (const live of [CHECK_SCRIPT, 'scripts/verify-migration-content-parity.ts']) {
+  const env = { ...process.env, SUPABASE_URL: UNREACHABLE, EXPO_PUBLIC_SUPABASE_URL: UNREACHABLE };
+  delete env.SUPABASE_SERVICE_ROLE_KEY; // no alert side-effect, and nothing to write to anyway
+  const run = spawnSync(
+    process.execPath,
+    ['--experimental-strip-types', '--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', live],
+    { cwd: ROOT, env, encoding: 'utf8', timeout: 60000 },
+  );
+  const said = `${run.stdout ?? ''}${run.stderr ?? ''}`;
+  check(run.status === 1,
+    `${live} FAILS CLOSED when it cannot read production (exit ${run.status})`,
+    `${live} exited ${run.status} with production unreachable — a check that could not run must ` +
+    `never report success. "I could not tell" is not "there is no drift".`);
+  check(/COULD NOT CHECK/.test(said),
+    `${live} says COULD NOT CHECK, distinctly from a real drift finding`,
+    `${live} did not print COULD NOT CHECK — an unreadable production must be distinguishable ` +
+    `from a clean one AND from a drifted one. Got: ${said.slice(0, 300)}`);
+}
 
 console.log('migration-drift-guard-wired: the continuous drift barrier must stay actually connected\n');
 for (const o of ok) console.log(`  ✓ ${o}`);
