@@ -31,13 +31,17 @@ DIRECT_REVISIT = "DIRECT_REVISIT"
 CANDIDATE_PLUS_DIRECT = "CANDIDATE_PLUS_DIRECT"
 CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 
-# REGISTERED IS NOT THE SAME AS SEARCHABLE (2026-09-03). abralosol, aouj, arkaan, rawasidark and
-# therc have 4,314 production_ready rows live in search_listings_ar and rows in
+# REGISTERED IS NOT THE SAME AS SEARCHABLE (2026-09-03, corrected 2026-09-04). abralosol, aouj,
+# arkaan, rawasidark and therc have 4,314 production_ready rows live in search_listings_ar and rows in
 # ops_liveness_registry (migration 20260903042707), so MONITORING must know their strategy — a live
-# row nothing grades is exactly the blind spot this registry exists to remove. They are deliberately
-# NOT in the client's RES_TABLES/COM_TABLES and no search can return them yet: district
-# canonicalization, af_platform_mapping and a SOURCE_TOKENS entry are still missing per platform.
-# Their unreachability is declared and counted by scripts/verify-every-live-table-is-searchable.ts.
+# row nothing grades is exactly the blind spot this registry exists to remove.
+#
+# They ARE searchable now: PR #1548 added all ten tables to the client lists, and the searchable
+# inventory is no longer a hand-kept list at all — src/data/remote.ts's SEARCHABLE_TABLES is generated
+# from production's own union arms (scripts/gen-searchable-tables.ts). The join between "live in the
+# database" and "reachable by a real search" is asserted, in both directions, by
+# scripts/verify-searchable-scope-matches-inventory.ts, which superseded
+# verify-every-live-table-is-searchable.ts and its acknowledged-debt list.
 #
 # Platforms that exist in scrapers/ but are NOT production-searchable, so they need no policy.
 # Kept in sync with scrapers/RETIRED_PLATFORMS.txt + the paused/gated ones.
