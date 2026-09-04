@@ -2,7 +2,10 @@
 // the first page must show the widest platform mix; a platform with more matches must never be
 // invisible just because another platform's rows dominate the recency-ordered candidate window).
 // Zero-dependency (no supabase/react-native imports) so it can be unit-tested directly — mirrors
-// src/lib/searchDefaults.ts / src/lib/arabicText.ts's design.
+// src/lib/searchDefaults.ts / src/lib/arabicText.ts's design. The one import below is the platform
+// REGISTRY, which is itself a plain array with only a type import — relative + extensioned so a
+// bare `node --experimental-strip-types` run can still load this module.
+import { PLATFORMS } from '../data/platforms.ts';
 
 export type DiversityCand = {
   source_table: string;
@@ -50,8 +53,25 @@ function normLocKey(s: string): string {
     .trim();
 }
 
+// Fold platform entries that are THE SAME WEBSITE into one diversity identity — the platform twin
+// of normLocKey() above. Aqar and Aqar Monthly are two PLATFORMS rows and two DB source strings,
+// but they are one site (sa.aqar.fm) rendering one logo, one name and one link. So the first screen
+// showed «عقار» twice and "one listing per platform" was broken — reported from production on a
+// الرياض search that filled 21 slots from 21 slugs but only 20 distinct websites.
+// Keyed on the registry's DOMAIN rather than a hardcoded pair, so any future vertical of an existing
+// site folds automatically and a genuinely new site never does. Display is untouched: each card
+// still renders its own source exactly, just as normLocKey leaves the city spelling alone.
+const DOMAIN_BY_PLATFORM: ReadonlyMap<string, string> = new Map(
+  PLATFORMS.map((p) => [p.name.toLowerCase(), p.domain]),
+);
+export function platformIdentity(platform: string | null | undefined): string {
+  const p = (platform ?? '').trim();
+  if (!p) return '';
+  return DOMAIN_BY_PLATFORM.get(p.toLowerCase()) ?? p.toLowerCase();
+}
+
 function rankedKey<L extends { cleanType?: string | null; rentPeriod?: string | null }>(r: RankedRow<L>, k: string): string {
-  return k === 'platform' ? r.platform
+  return k === 'platform' ? platformIdentity(r.platform)
     : k === 'city' ? normLocKey(r.city)
     : k === 'region' ? normLocKey(r.region)
     : k === 'district' ? normLocKey(r.district)
@@ -139,7 +159,7 @@ export function orderByScope<L extends { cleanType?: string | null; rentPeriod?:
 export function distinctPlatformCount(rows: ReadonlyArray<{ source?: string | null }> | null | undefined): number {
   const seen = new Set<string>();
   for (const r of rows ?? []) {
-    const p = (r?.source ?? '').trim();
+    const p = platformIdentity(r?.source);
     if (p) seen.add(p);          // a blank/unknown source must not invent a platform slot
   }
   return seen.size;
