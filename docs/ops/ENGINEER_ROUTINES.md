@@ -190,6 +190,35 @@ SENTRY ISSUE → CLAIM → REPRODUCE → ROOT CAUSE → FIX → BARRIER/MUTATION
   If the Sentry read fails, say so plainly in the report (`SENTRY CONNECTION WORKING: NO`) rather
   than silently skipping it.
 
+### §G.6b — YOUR INCIDENT QUEUE IS READ AT THE START, LIKE SENTRY (2026-09-04)
+
+Sentry is read first because an error nobody looked at is not being handled. The same is true of a
+finding another routine routed to you — and unlike Sentry, that queue is never empty by accident.
+Immediately after §G.6, read it:
+
+```sql
+select id, severity, title, surface, state, last_progress_at, detail
+  from ops_incident
+ where owner_routine = '<your routine slug>' and state not in ('resolved','wont_fix')
+ order by severity, last_progress_at;
+```
+
+Every row is work, exactly as an open alert is (`AGENT_AUTHORITY.md`: *"an open alert is work, not
+wallpaper… age confers no immunity"*). Drive each to a terminal state this run using §G.1's chain:
+
+- `incident_advance(id, 'investigating'|'reproduced'|'fixed'|'verifying', root_cause, fix_pr)` as you go;
+- `incident_resolve(id, 'scripts/verify-<barrier>.ts', now())` — refused without a barrier AND a
+  production verification, so §G.1's "PERMANENT BARRIER" step is no longer something you can forget;
+- `incident_handoff(id, '<their slug>', '<why>')` for §G.2 (d)/(e) — the ownership and permission
+  boundaries §G.3 says to ROUTE;
+- `incident_block(id, '<a|b|c|f>', '<what you need>')` only for a genuine owner decision;
+- `incident_wont_fix(id, '<why this is not a bug>')` when it is not one.
+
+Report `INCIDENTS WORKED / RESOLVED / HANDED OFF / BLOCKED` in your §G.8 block.
+`mon_detect_stalled_incident()` raises a P1 naming any routine whose queue stops moving inside its
+severity SLA (P0 4h, P1 24h, P2 72h, P3 14d), so an unworked queue is attributable rather than
+anonymous. Full contract: `docs/ops/AUTONOMOUS_INCIDENT_LOOP.md`.
+
 ### §G.7 — NOTHING ABOVE WEAKENS ANY EXISTING GUARD
 
 Source-truth rules, migration/deploy protections, cost protections, single-writer ownership, the
