@@ -49,9 +49,15 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
 
   // Bilingual share message — Arabic when the UI is Arabic, English otherwise — so WhatsApp (and any
   // share target) carries the text in the user's own language, not always English. (user request.)
-  const msg = (locale === 'ar'
-    ? 'إزهله — مكان واحد تستكشف فيه كل إعلانات العقارات في ثواني. جرّبها الآن: '
-    : 'Ezhalah — one place to explore all property listings in seconds. Try it now: ') + LINK;
+  //
+  // ONE LINK PER POST. `lead` is the sentence on its own; `msg` is that sentence WITH the link.
+  // A target with no url parameter (WhatsApp, Mail, Copy) must carry the link inside its text; a
+  // target that takes the link separately (X's `url=`, Telegram's `url=`) gets `lead` — handing it
+  // `msg` too pre-filled the composer with the link TWICE.
+  const lead = locale === 'ar'
+    ? 'إزهله — مكان واحد تستكشف فيه كل إعلانات العقارات في ثواني. جرّبها الآن:'
+    : 'Ezhalah — one place to explore all property listings in seconds. Try it now:';
+  const msg = `${lead} ${LINK}`;
   const copy = async () => {
     // expo-clipboard works on web (navigator.clipboard) and native alike.
     try { await Clipboard.setStringAsync(msg); } catch { /* ignore */ }
@@ -78,7 +84,8 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
     close();
   };
 
-  const text = encodeURIComponent(msg);
+  const text = encodeURIComponent(msg);          // the sentence AND the link (no url= parameter)
+  const textNoLink = encodeURIComponent(lead);   // the sentence alone (the target appends url=)
   const link = encodeURIComponent(LINK);
   const subject = encodeURIComponent(t('Ezhalah'));
 
@@ -87,8 +94,8 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
   // covers any other target (Messages, AirDrop, etc.) automatically. (user request.)
   const apps: { name: string; bg: string; fg: string; icon: any; onPress: () => void }[] = [
     { name: t('WhatsApp'),  bg: '#25d366', fg: '#fff', icon: 'logo-whatsapp', onPress: () => openShare(`https://wa.me/?text=${text}`) },
-    { name: 'X',            bg: '#000',    fg: '#fff', icon: 'logo-twitter',  onPress: () => openShare(`https://twitter.com/intent/tweet?text=${text}&url=${link}`) },
-    { name: t('Telegram'),  bg: '#27a4e3', fg: '#fff', icon: 'paper-plane',   onPress: () => openShare(`https://t.me/share/url?url=${link}&text=${text}`) },
+    { name: 'X',            bg: '#000',    fg: '#fff', icon: 'logo-twitter',  onPress: () => openShare(`https://twitter.com/intent/tweet?text=${textNoLink}&url=${link}`) },
+    { name: t('Telegram'),  bg: '#27a4e3', fg: '#fff', icon: 'paper-plane',   onPress: () => openShare(`https://t.me/share/url?url=${link}&text=${textNoLink}`) },
     { name: t('Mail'),      bg: '#2a8cf0', fg: '#fff', icon: 'mail',          onPress: () => openShare(`mailto:?subject=${subject}&body=${text}`) },
   ];
 
@@ -135,21 +142,26 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
 
 const s = StyleSheet.create({
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60, justifyContent: 'flex-end' },
-  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.4)' },
-  card: { backgroundColor: '#f2f2f5', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 12, paddingTop: 10 },
-  grip: { width: 38, height: 5, borderRadius: 3, backgroundColor: '#c8c8cf', alignSelf: 'center', marginTop: 2, marginBottom: 12 },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.scrim },
+  // THEMED like every other card in the app (owner incident 2026-09-04: the sheet body stayed light
+  // while the panels inside it went dark). The ground a `colors.surface` panel sits on is
+  // `colors.paper` here exactly as in AdvancedQuestionCard/MiningTransition/the sidebar panel; the
+  // grab handle is the app's hairline. No raw color may live in this sheet — it all flows through
+  // var(--ez-*) so the whole surface re-skins together.
+  card: { backgroundColor: colors.paper, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 12, paddingTop: 10 },
+  grip: { width: 38, height: 5, borderRadius: 3, backgroundColor: colors.line, alignSelf: 'center', marginTop: 2, marginBottom: 12 },
 
   preview: { flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: colors.surface, borderRadius: 16, padding: 14 },
   logo: { width: 50, height: 50, borderRadius: 12, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   pvT: { fontSize: 15, fontWeight: '700', color: colors.ink },
-  pvS: { fontSize: 12, color: '#6b7a72', lineHeight: 16, marginTop: 2 },
+  pvS: { fontSize: 12, color: colors.muted, lineHeight: 16, marginTop: 2 },
   pvL: { fontSize: 11.5, color: colors.primary, fontWeight: '600', marginTop: 4 },
 
   // Note #3 — 4 share targets spread evenly across the sheet.
   apps: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingTop: 18, paddingBottom: 10, paddingHorizontal: 6 },
   app: { alignItems: 'center', gap: 7 },
   appIc: { width: 58, height: 58, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  appNm: { fontSize: 11, color: '#45524b' },
+  appNm: { fontSize: 11, color: colors.body },
 
   rows: { marginTop: 14, backgroundColor: colors.surface, borderRadius: 14, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 15, paddingHorizontal: 16 },
