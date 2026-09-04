@@ -44,7 +44,8 @@ jobs:
     # Measured 2026-09-03: the nine steps below took 16m44s of work plus ~1m of setup. 35 leaves
     # roughly 2x headroom. Whenever a step is ADDED here, re-measure — a budget that silently
     # becomes too small skips the tail of this job (see the af-surface-region comment below).
-    timeout-minutes: 35
+    # 2026-09-04: +71s for the city-bucket step (measured), so 37 keeps the same headroom.
+    timeout-minutes: 37
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -111,6 +112,23 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-filter-state-live.ts
+
+      # THE OTHER HALF OF "Trending count = committed search count" (added 2026-09-04). The step above
+      # proves Trending honours the PREDICATES it is handed. This one proves it buckets by the same
+      # CITY the results path delivers under: the results path widens through `match_city_ids`, while
+      # top_cities_by_deal_ar ends in `group by co.city_id`, so a row can be delivered under الهفوف and
+      # counted under الاحساء. Measured 2026-09-04: exactly 2 of 362 cities are affected (the al_ahsa
+      # cluster, 5,955 of 197,095 production_ready rows) and it reproduces identically on origin/main.
+      # No fix is applied — bucketing on unnest(match_city_ids) would count those rows in two city
+      # buckets, so the city rows would stop summing to total_in_cohort; that is a product decision.
+      # This PINS the exception instead: a gap on a non-clustered city fails, and the known gap
+      # disappearing (someone changed the bucketing) fails too. Measured runtime 71s.
+      - name: A Trending city row must advertise what clicking it delivers
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-city-bucket-matches-delivery.ts
 
       # THE ROOT-CAUSE JOIN (added 2026-09-03). Activating a platform is a DATABASE act; the client's
       # RES_TABLES/COM_TABLES are a SOURCE-CODE act; until now nothing checked that the two agreed.
