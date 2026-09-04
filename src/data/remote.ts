@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
-import { listingPriceString, type Listing } from './listings';
+import { listingPriceString, isDerivedTotal, type Listing } from './listings';
 import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -1793,7 +1793,14 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // A genuinely MONTHLY rental → show its monthly figure (price_annual was stored as monthly×12, so
     // dividing back gives the exact monthly rent). Annual rentals keep the yearly figure. A rent row
     // whose source published NO period gets the bare figure with no suffix — see listingPriceString().
-    const priceStr = listingPriceString(deal, r.rent_period, r.price_annual, r.price_total);
+    // Per-metre-only SALE rows get a DERIVED total here, by the same rule the SQL generated
+    // column search_listings_ar.price_total_effective uses to decide budget matching — so a
+    // listing can never match a budget the card then fails to show. It renders with a '≈' and
+    // the card adds an explicit «محتسب من سعر المتر» note; the source per-metre figure is kept
+    // untouched in pricePerMeter below. (owner rule 2026-09-03)
+    const priceStr = listingPriceString(deal, r.rent_period, r.price_annual, r.price_total,
+                                        r.price_per_meter, r.area_m2);
+    const priceIsDerived = isDerivedTotal(deal, r.price_total, r.price_annual, r.price_per_meter, r.area_m2);
     // Aqar (both residential & commercial) scrapes its own "no photo" placeholder graphic
     // (villa-default.png, at one of a couple CDN sizes, sometimes with a corrupted trailing
     // backslash) as a literal photo_urls entry - filter it out so a listing with only this
@@ -1835,6 +1842,7 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // whether to SHOW it (and the «سعر المتر 1» placeholder rule) lives in ResultCard, so this
       // field always means "what the source published", nothing else.
       pricePerMeter: typeof r.price_per_meter === 'number' ? r.price_per_meter : null,
+      priceIsDerived,
       area: r.area_m2 ?? 0,
       beds: r.bedrooms ?? 0,
       // CRITICAL: source comes from the DB row, never hardcoded — the card's logo, "Hosted on X",

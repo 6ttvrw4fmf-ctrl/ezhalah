@@ -248,6 +248,41 @@ def fetch_cities(s: cc.Session) -> list[dict]:
     return []
 
 
+_REJECTS: list[dict] = []
+_REJECT_LIMIT = 6
+
+# gathern answers a rate limit with HTTP 400 and this message, not with 429 (observed live
+# 2026-09-03). Matched on the BODY so a genuinely malformed request is still treated as fatal.
+_THROTTLE_BODY_RE = re.compile(r"too\s+many\s+requests|rate\s*limit", re.I)
+
+
+def _is_throttle_body(body: str) -> bool:
+    return bool(_THROTTLE_BODY_RE.search(body or ""))
+
+
+def _record_reject(city_id: int, page: int, code: int, params: dict, body: str) -> None:
+    """Keep the first few rejections VERBATIM (bounded), so the API's own words are the evidence.
+
+    An error body is the source telling us exactly what it dislikes about our request. It is not
+    listing data and carries no PII, but it is bounded and passed through _redact() anyway — this
+    ends up in a CI log."""
+    if len(_REJECTS) >= _REJECT_LIMIT:
+        return
+    _REJECTS.append({
+        "city": city_id, "page": page, "code": code,
+        "params": dict(params),
+        "body": (_redact(re.sub(r"\s+", " ", body or "")) or "")[:400],
+    })
+
+
+def reject_report() -> str:
+    """One-line-per-rejection dump for the run log. Empty when nothing was rejected."""
+    return "\n".join(
+        f"  [reject] city={r['city']} page={r['page']} HTTP {r['code']} "
+        f"params={r['params']} body={r['body']}"
+        for r in _REJECTS)
+
+
 def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tuple[list[dict], dict, str]:
     """One MONTHLY-mode search page. Retries flaky empty/non-JSON bodies (Gathern rate-limits).
 
@@ -273,7 +308,26 @@ def fetch_page(s: cc.Session, city_id: int, page: int, ci: str, co: str) -> tupl
         if r.status_code == 429 or r.status_code >= 500:
             time.sleep(3 * (attempt + 1)); continue
         if r.status_code != 200:
-            return [], {}, f"http_{r.status_code}"  # a hard 4xx (not throttle) → no point retrying
+            # gathern signals THROTTLING WITH HTTP 400, not 429. Observed live 2026-09-03 (run
+            # 33816958296, shard 2): the rejected request is byte-for-byte the same shape as the
+            # ones that succeeded seconds earlier in the same shard —
+            #   params={'lang':'ar','city':1626,'page':2,'calendar_type':'monthly',
+            #           'check_in':'2026-09-04','check_out':'2026-10-04','has_available':'true'}
+            #   body={"success":false,"message":"Too many requests. Please try again later."}
+            # so there is no malformed parameter. Treating that as a permanent client error and
+            # giving up ("no point retrying") is what silently cost the crawl whole cities: the big
+            # cities early in a shard spend the budget (At Taif alone reads 33 pages) and every
+            # later city in that shard is refused.
+            #
+            # Discriminate on the BODY, never on the status alone: a genuinely malformed request
+            # must still fail fast rather than spin through the retry ladder.
+            if _is_throttle_body(getattr(r, "text", "")):
+                time.sleep(3 * (attempt + 1)); continue
+            # Capture the REJECTION ITSELF. Without the body and the exact params, the only way
+            # forward is guessing which parameter is wrong, and guessing at an unobserved request is
+            # how the sadin selector fix failed earlier today.
+            _record_reject(city_id, page, r.status_code, params, getattr(r, "text", ""))
+            return [], {}, f"http_{r.status_code}"  # a genuine hard 4xx → no point retrying
         try:
             j = r.json()
         except Exception:
@@ -716,6 +770,9 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
             outcomes[outcome] = outcomes.get(outcome, 0) + 1
             if outcome == "failed":
                 failed_cities.append(f"{name}:{status}")
+                outcomes.setdefault("failed_city_ids", [])
+                if len(outcomes["failed_city_ids"]) < 12:
+                    outcomes["failed_city_ids"].append(cid)
                 # The REASON is what separates "throttled" (429 → exhausted) from "blocked" (403)
                 # from "the endpoint moved" (404). Keep it QUERYABLE, not merely loggable: a log
                 # line dies with the runner, and answering "why did coverage drop?" from CI logs
@@ -778,8 +835,13 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
     if verbose and (failed_cities or incomplete_cities):
         # Loud, because this is the difference between "the source is smaller today" and
         # "the source stopped answering us" — and only one of those is our problem.
-        print(f"  ⚠ city coverage gap: failed={failed_cities[:8]} incomplete={incomplete_cities[:8]}",
+        print(f"  ⚠ city coverage gap: failed={failed_cities[:12]} incomplete={incomplete_cities[:8]}",
               flush=True)
+        # And the source's OWN words about what it rejected, with the exact request that drew it.
+        # This is what turns "http_400" from a symptom into a root cause.
+        rep = reject_report()
+        if rep:
+            print(rep, flush=True)
     return rows_by_ad, scanned, per_city, outcomes
 
 
@@ -972,7 +1034,9 @@ def main() -> int:
                           + (" city_fail_reasons=" + ",".join(
                               f"{k.split(':', 1)[1]}:{v}"
                               for k, v in sorted(outcomes.items()) if k.startswith("reason:"))
-                             if any(k.startswith("reason:") for k in outcomes) else "")),
+                             if any(k.startswith("reason:") for k in outcomes) else "")
+                          + (" failed_city_ids=" + ",".join(str(i) for i in outcomes["failed_city_ids"])
+                             if outcomes.get("failed_city_ids") else "")),
                    check_tables=["gathern_residential_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)

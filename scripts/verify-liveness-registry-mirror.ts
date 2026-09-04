@@ -121,10 +121,29 @@ check('the JSON mirror matches liveness_policies.py exactly',
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // 3. The migration that seeds ops_liveness_registry.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-const seedFile = readdirSync(MIGRATIONS).find((f) => f.startsWith(SEED_MIGRATION));
-check('the seeding migration is mirrored in the repo', Boolean(seedFile),
-  seedFile ?? `no file starting ${SEED_MIGRATION} — ops_liveness_registry exists in production ` +
-  'with no committed source (migration drift).');
+// EVERY migration that seeds the registry, not one pinned version (fixed 2026-09-03).
+//
+// THE BLIND SPOT THIS CLOSES. This check used to read only the file starting SEED_MIGRATION. On
+// 2026-09-03, migration 20260903042707 re-applied the canonical seed with FIVE new platforms
+// (abralosol, arkaan, therc, rawasidark, aouj). Production's ops_liveness_registry gained five rows
+// that liveness_policies.py and the JSON mirror knew nothing about — the exact three-way drift this
+// file exists to catch — and it passed anyway, because the later migration was invisible to it. A
+// pinned version answers "did the FIRST seed match?", which stops being the question the moment a
+// second seed exists. What production runs is the LATEST seed, so that is what must match.
+const seedFiles = readdirSync(MIGRATIONS)
+  .filter((f) => f.endsWith('.sql')
+    && /insert\s+into\s+public\.ops_liveness_registry/i.test(readFileSync(join(MIGRATIONS, f), 'utf8')))
+  .sort();                                    // filenames are version-prefixed, so sort == chronological
+check('at least one migration seeding ops_liveness_registry is mirrored in the repo', seedFiles.length > 0,
+  `none found — ops_liveness_registry exists in production with no committed source (migration drift).`);
+check('the ORIGINAL seeding migration is still mirrored in the repo',
+  seedFiles.some((f) => f.startsWith(SEED_MIGRATION)),
+  `no file starting ${SEED_MIGRATION} — the detector-splice assertions below have no source.`);
+// The LAST one is what production ran, so it is the one the two declarations must agree with.
+const seedFile = seedFiles.length ? seedFiles[seedFiles.length - 1] : undefined;
+if (seedFiles.length > 1) {
+  console.log(`  ⓘ ${seedFiles.length} registry seeds; checking the latest: ${seedFile}`);
+}
 
 if (seedFile) {
   const sql = readFileSync(join(MIGRATIONS, seedFile), 'utf8');
@@ -159,22 +178,29 @@ if (seedFile) {
   // mon_run_all_detectors by the replace(). The migration's own post-check reads the same names in
   // single quotes, so accepting either form would let the roster entry be deleted while the
   // post-check's mention alone kept this green (it did, until the mutation run caught it).
+  //
+  // Read from the ORIGINAL seed, not the latest: the roster splice happened once, when the detectors
+  // were created. A later re-seed adds platforms and has no reason to touch the roster, so pointing
+  // this at the latest file would turn "the detectors are wired" into "the most recent migration
+  // happened to mention them" — a check that fails for the wrong reason and gets deleted.
+  const originSeedFile = seedFiles.find((f) => f.startsWith(SEED_MIGRATION));
+  const originSql = originSeedFile ? readFileSync(join(MIGRATIONS, originSeedFile), 'utf8') : '';
   for (const fn of ['mon_detect_liveness_coverage_ramp', 'mon_detect_liveness_verification_sla']) {
     check(`${fn} is spliced into the mon_run_all_detectors roster by the migration`,
-      sql.includes(`''${fn}''`),
+      originSql.includes(`''${fn}''`),
       `no ''${fn}'' literal in the roster replace() — a detector nothing calls is decoration`);
   }
   check('the roster edit refuses rather than silently no-ops if its anchor moved',
-    /raise exception 'roster anchor not found/.test(sql),
+    /raise exception 'roster anchor not found/.test(originSql),
     'without this, a rebuilt mon_run_all_detectors would leave both detectors unreachable and ' +
     'the migration would still report success');
   check('the census is scheduled, not left to be called by hand',
-    /cron\.schedule\('liveness-coverage-snapshot'/.test(sql));
+    /cron\.schedule\('liveness-coverage-snapshot'/.test(originSql));
 
   // The two thresholds the owner set are load-bearing; changing them is a decision, not a nit.
-  check('the ramp monitor is temporary and self-retiring', /v_expires date := date '2026-10-15'/.test(sql));
+  check('the ramp monitor is temporary and self-retiring', /v_expires date := date '2026-10-15'/.test(originSql));
   check('the SLA monitor is grace-dated rather than alerting from day one',
-    /v_active_from date := date '2026-09-13'/.test(sql),
+    /v_active_from date := date '2026-09-13'/.test(originSql),
     'day-one coverage is 0% everywhere by construction; alerting immediately would produce 29 ' +
     'alerts that say only "the column is new"');
 }

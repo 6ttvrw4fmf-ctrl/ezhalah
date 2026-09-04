@@ -87,8 +87,15 @@ check('a price-less row still falls back to the «السعر عند الطلب»
 
 const REMOTE = readFileSync('src/data/remote.ts', 'utf8');
 const finalizeSrc = REMOTE.slice(REMOTE.indexOf('function finalize('));
+// The call gained two arguments on 2026-09-03 (price_per_meter, area_m2) when the owner ruled that
+// a per-metre-only SALE listing must show a computed total — see data/listings.ts::
+// derivedTotalFromPerMeter and scripts/verify-derived-total-rule-parity.ts. The INVARIANT this
+// check exists for is unchanged and still enforced: finalize() must DELEGATE the price line rather
+// than format it itself, so the period rule keeps exactly one owner. Only the argument list moved,
+// so the pattern now allows the extra source fields (and a line break) without allowing a
+// re-inlined formatter — the two checks below still forbid that.
 check('finalize() delegates the price line to listingPriceString()',
-  /const priceStr = listingPriceString\(deal, r\.rent_period, r\.price_annual, r\.price_total\)/
+  /const priceStr = listingPriceString\(deal, r\.rent_period, r\.price_annual, r\.price_total\s*(?:,[\s\S]{0,80}?)?\)/
     .test(finalizeSrc),
   'finalize() no longer calls listingPriceString — the formatting rule has a second owner again, '
   + 'and the behavioural checks above no longer cover what the card actually renders');
