@@ -1,3 +1,28 @@
+// ── OWNER REVERSAL, 2026-09-03 — READ BEFORE CHANGING ANYTHING BELOW ───────────────────────────
+// The 2026-08-09 instruction this file was built on ("NEVER calculate or invent a total price") was
+// REVERSED by the owner on 2026-09-03: "if it's price per meter multiply it by the size and show
+// the total price, make that a rule" — because the Filter asks for a TOTAL budget, so a
+// per-metre-only listing could never match any budget search and its card showed a per-metre figure
+// beside totals in the millions.
+//
+// WHAT THAT REVERSAL DID **NOT** LICENCE, and what this file still guards in full:
+//   • Deriving price_per_meter FROM price_total/area — the ORIGINAL poisoning direction, which
+//     wrote a computed rate into a column named after a source field (trg_aqar_parse, 24,345 rows).
+//     Still banned everywhere, unchanged.
+//   • Any derivation inside scrapers/ or into the base tables. price_total still means "the SOURCE
+//     stated this total". Enforced by verify-no-derived-price.ts, untouched.
+//   • Presenting a derived total as if the advertiser published it.
+//
+// WHAT IS NOW ALLOWED, in exactly one place: a DISPLAY/SEARCH-layer total in
+// data/listings.ts::derivedTotalFromPerMeter, mirroring the SQL generated column
+// search_listings_ar.price_total_effective. It is sale-only, requires that the source published NO
+// price at all, requires a real per-metre price and a real area, is capped at a credible bound, and
+// is rendered with '≈' plus an explicit «محتسب من سعر المتر × المساحة» note. The two halves are
+// pinned together by scripts/verify-derived-total-rule-parity.ts (mutation-proven, 5 mutations).
+//
+// So the exemption below is NARROW BY CONSTRUCTION: it names one file and one function. Every other
+// file, and any other function in that file, is still held to the original ban.
+
 // Automated test — price_per_meter is SEARCHABLE, SOURCE-ONLY, and can never be mistaken for or
 // matched against a total price. 2026-08-09.
 //
@@ -30,7 +55,7 @@
 // Run: node --experimental-strip-types scripts/verify-ppm-searchable-and-filter-safe.ts
 // (wired into `npm test`)
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 let failed = 0;
@@ -78,17 +103,26 @@ check('remote.ts passes price_per_meter through verbatim',
 // No arithmetic anywhere on the rate. Reading it, comparing it, and formatting it are fine;
 // multiplying/dividing/adding it is the derivation hazard.
 for (const { p, text } of ALL) {
-  const bad = text.match(/pricePerMeter\s*[*/+-]\s*[^=\s]|[^=\s]\s*[*/]\s*pricePerMeter/g);
-  check(`no arithmetic on pricePerMeter in ${p.slice(SRC.length)}`, bad === null,
-        bad ? `found: ${bad.join(', ')}` : '');
+  // The owner-sanctioned derivation lives in ONE named function; strip only that body before
+  // scanning, so the rest of the file — and every other file — stays under the original ban.
+  const scanned = p.endsWith('data/listings.ts')
+    ? text.replace(/export function derivedTotalFromPerMeter[\s\S]*?\n}\n/, '\n')
+    : text;
+  const bad = scanned.match(/pricePerMeter\s*[*/+-]\s*[^=\s]|[^=\s]\s*[*/]\s*pricePerMeter/g);
+  check(`no arithmetic on pricePerMeter in ${p.slice(SRC.length)} (outside the sanctioned fn)`,
+        bad === null, bad ? `found: ${bad.join(', ')}` : '');
 }
 
 // ── 4. a TOTAL is never derived from the rate ──────────────────────────────────────────────────
 for (const { p, text } of ALL) {
+  const scanned = p.endsWith('data/listings.ts')
+    ? text.replace(/export function derivedTotalFromPerMeter[\s\S]*?\n}\n/, '\n')
+    : text;
   const derivesTotal =
-    /pricePerMeter\s*\*\s*(listing\.)?area/i.test(text) ||
-    /(listing\.)?area\s*\*\s*(listing\.)?pricePerMeter/i.test(text);
-  check(`no total derived from rate × area in ${p.slice(SRC.length)}`, !derivesTotal);
+    /pricePerMeter\s*\*\s*(listing\.)?area/i.test(scanned) ||
+    /(listing\.)?area\s*\*\s*(listing\.)?pricePerMeter/i.test(scanned);
+  check(`no total derived from rate × area in ${p.slice(SRC.length)} (outside the sanctioned fn)`,
+        !derivesTotal);
 }
 
 // ── 5. the card shows it as an explicit per-m² rate ────────────────────────────────────────────
@@ -97,6 +131,22 @@ check('the card labels the value as a per-m² rate, not a price',
       'without the unit the number reads as a total price');
 check('the card still withholds non-positive / placeholder rates',
       /listing\.pricePerMeter\s*>\s*1/.test(CARD));
+
+// ── THE EXEMPTION IS NOT A BLANK CHEQUE ─────────────────────────────────────────────────────────
+// If the sanctioned function ever loses its guards, the narrow carve-out above would quietly become
+// a general licence to derive. Assert the guards are still inside it.
+{
+  const lst = ALL.find((f) => f.p.endsWith('data/listings.ts'))?.text ?? '';
+  const fn = lst.match(/export function derivedTotalFromPerMeter[\s\S]*?\n}\n/)?.[0] ?? '';
+  check('the sanctioned derivation still exists and is scannable', fn.length > 0);
+  check('  …it is sale-only', /deal !== 'Buy'/.test(fn));
+  check('  …it refuses when the source published any price',
+    /typeof priceTotal === 'number' \|\| typeof priceAnnual === 'number'/.test(fn));
+  check('  …it requires a real area > 0', /areaM2 !== 'number' \|\| !\(areaM2 > 0\)/.test(fn));
+  check('  …it keeps the credibility bound', /DERIVED_TOTAL_MAX/.test(fn));
+  check('the cross-check barrier that pins SQL↔TS parity still exists',
+    existsSync(new URL('./verify-derived-total-rule-parity.ts', import.meta.url)));
+}
 
 console.log(failed === 0
   ? '\n✓ price_per_meter is searchable, source-only, and filter-safe (never a total, never derived)'
