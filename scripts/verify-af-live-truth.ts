@@ -547,5 +547,13 @@ await runJourney('Residential/Buy/Apartment/Riyadh — BACK/change-answer case',
 
 await browser.close();
 if (notExercised.length) console.log(`\n${notExercised.length} rule(s) NOT EXERCISED this run (not proved, not counted as passes):\n  ${notExercised.join('\n  ')}`);
-console.log(`\n${failures === 0 ? '✓ AF backend truth audit — all checks passed' : `✗ ${failures} check(s) FAILED`}`);
+// NAME the failures in the closing summary, do not merely count them. Every FAIL is already printed
+// inline, but this file is step 6 of a 16-step CI job whose later steps keep running, so the inline
+// lines end up thousands of lines from the end of the log — and the tooling an agent has for reading
+// a job log reads the TAIL. On 2026-09-04 that turned a red step into an unreadable one: the check
+// passed locally, twice, against the same production bundle, and the CI cause could not be seen at
+// all. A summary that names its failures is legible from the tail whatever ran afterwards.
+console.log(`\n${failures === 0
+  ? '✓ AF backend truth audit — all checks passed'
+  : `✗ ${failures} check(s) FAILED:\n` + REPORT.filter((r) => !r.ok).map((r) => `    • ${r.label}${r.detail ? `\n      ${r.detail}` : ''}`).join('\n')}`);
 process.exit(failures === 0 ? 0 : 1);
