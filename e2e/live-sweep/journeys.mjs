@@ -15,7 +15,15 @@ const enc = encodeURIComponent;
 const DISTRICT_PANEL_BUDGET_MS = 15000;
 
 /** The district-panel scrape, lifted out of the journey so the readiness poll re-runs the EXACT
- *  same reading rather than a second, subtly different one. Structure only — never spelling. */
+ *  same reading rather than a second, subtly different one.
+ *
+ *  Match the trending list's STRUCTURE — «1.» / name / «N إعلان» — not the district's spelling.
+ *  Until 2026-08-24 this tested /^حي /, which is not a property of a district name: 1,082 of the
+ *  index's 3,694 (city, district) pairs — 32,712 production-ready rows — carry no «حي » prefix,
+ *  and whole cities have none at all. بيش renders «الخضراء 1 · 4 إعلان», «الحزم 1», «الصفاء»;
+ *  the harness saw zero rows, skipped, and failed the run on a missed coverage floor while
+ *  production was working perfectly. A barrier that cannot see 16% of the inventory reports its
+ *  own blindness as a defect (§40.7), and silently drops the journey the floor exists to force. */
 const scrapeDistrictRows = () => {
   const t = document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean);
   const out = [];
@@ -110,13 +118,6 @@ export async function trendingDistrict(plan) {
       rpc.returned = true; rpc.ms = Date.now() - clickAt;
     });
     await page.locator('[data-testid="district-input"]').click();
-    // Match the trending list's STRUCTURE — «1.» / name / «N إعلان» — not the district's spelling.
-    // Until 2026-08-24 this tested /^حي /, which is not a property of a district name: 1,082 of the
-    // index's 3,694 (city, district) pairs — 32,712 production-ready rows — carry no «حي » prefix,
-    // and whole cities have none at all. بيش renders «الخضراء 1 · 4 إعلان», «الحزم 1», «الصفاء»;
-    // the harness saw zero rows, skipped, and failed the run on a missed coverage floor while
-    // production was working perfectly. A barrier that cannot see 16% of the inventory reports its
-    // own blindness as a defect (§40.7), and silently drops the journey the floor exists to force.
     // POLL FOR READINESS; NEVER SLEEP A FIXED AMOUNT AND LOOK ONCE. This was `sleep(4200)` followed
     // by a single scrape, which is a RACE dressed as a budget: the panel's RPC answers in ~0.6-1.5 s
     // warm, so 4.2 s usually won — and when it did not (cold plan, or a browser job starved by the
