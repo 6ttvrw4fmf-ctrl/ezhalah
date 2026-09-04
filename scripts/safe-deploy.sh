@@ -419,12 +419,24 @@ echo ""
 echo "Recording $LOCAL as the new approved production baseline..."
 { echo "$LOCAL"; tail -n +2 docs/DEPLOY_BASELINE.txt; echo "# $(date +%F)  ${LOCAL:0:7}  deployed via safe-deploy.sh"; } > docs/DEPLOY_BASELINE.txt.tmp \
   && mv docs/DEPLOY_BASELINE.txt.tmp docs/DEPLOY_BASELINE.txt
-if git add docs/DEPLOY_BASELINE.txt && git commit -m "chore(deploy): record approved baseline ${LOCAL:0:7}" --quiet; then
+# THREE OUTCOMES, NAMED (2026-09-04). This used to be two branches, and the failure branch said
+# "NOTE: baseline unchanged (no diff)" — which is what a healthy no-op says. So every deploy from
+# .github/workflows/deploy-frontend.yml, where the runner has no git identity, printed a reassuring
+# no-op line while `git commit` died on "Author identity unknown" and the baseline silently stayed
+# where it was (stale since PR #1470, 2026-09-01; deploy run 33898889593 is the recorded case).
+# A commit that COULD NOT RUN must never read the same as a commit that HAD NOTHING TO DO.
+# The identity is supplied inline with `git -c`, so a runner with none can still record the
+# baseline and nothing about the caller's global git config is mutated.
+if git diff --quiet -- docs/DEPLOY_BASELINE.txt; then
+  echo "NOTE: baseline already records ${LOCAL:0:7} — nothing to commit."
+elif git add docs/DEPLOY_BASELINE.txt \
+  && git -c user.name="ezhalah-deploy" -c user.email="deploy@users.noreply.github.com" \
+       commit -m "chore(deploy): record approved baseline ${LOCAL:0:7}" --quiet; then
   git push origin main --quiet 2>/dev/null \
     && echo "Baseline advanced to ${LOCAL:0:7} and pushed." \
-    || echo "WARNING: baseline commit made locally but push failed (main moved?). Push docs/DEPLOY_BASELINE.txt manually so the next preflight is accurate."
+    || echo "WARNING: baseline commit made locally but the push to main FAILED (main moved, or branch protection refuses a direct push from this runner). Open a PR that sets docs/DEPLOY_BASELINE.txt to ${LOCAL} so the next preflight is accurate."
 else
-  echo "NOTE: baseline unchanged (no diff)."
+  echo "WARNING: the baseline commit FAILED — this is NOT a no-op. docs/DEPLOY_BASELINE.txt still records $(head -1 docs/DEPLOY_BASELINE.txt | cut -c1-7) while production now serves ${LOCAL:0:7}, so the next preflight measures against a stale floor. Fix the cause above and record ${LOCAL} by PR."
 fi
 
 echo ""
