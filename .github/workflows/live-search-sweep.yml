@@ -71,3 +71,30 @@ jobs:
           path: ${{ runner.temp }}/live-sweep
           if-no-files-found: ignore
           retention-days: 14
+
+  # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────────
+  # This workflow runs unattended: a red run notifies nobody, so it has to reach alert_event to
+  # reach a human. One open P1 per workflow file (dedup workflow_failed:live-search-sweep.yml), and
+  # the next green run resolves it.
+  #
+  # A SEPARATE JOB, not a step in `sweep`, ON PURPOSE. mon_raise needs the service role; the browser
+  # job must never hold it (it drives production and logs everything it sees — see
+  # verify-live-sweep-coverage-contract.ts, which asserts exactly that about the sweep job). Keeping
+  # the write in its own job satisfies both rules instead of trading one for the other.
+  alert:
+    needs: [sweep]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bridge this run's result to alert_event
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind search_live_check_failed
+          --workflow live-search-sweep.yml
+          --status ${{ contains(needs.*.result, 'failure') && 'failure' || (contains(needs.*.result, 'cancelled') && 'cancelled' || 'success') }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
