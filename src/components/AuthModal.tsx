@@ -9,8 +9,9 @@ import { useI18n, t } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { DOCK_BREAKPOINT } from '@/lib/responsive';
-import { canDragAuthPopup, clampAuthPopupOffset, AUTH_POPUP_POS_KEY } from '@/lib/authPopupBehavior';
-import { attachCardDrag } from '@/lib/cardDrag';
+import { canDragAuthPopup } from '@/lib/authPopupBehavior';
+import { attachCardDrag, clampOffsetOnScreen } from '@/lib/cardDrag';
+import { hasLegalDocs } from '@/data/legal';
 import {
   isBackendLive,
   signInWithProvider,
@@ -88,25 +89,12 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
     const node = popRef.current as unknown as HTMLElement | null;
     const grip = gripRef.current as unknown as HTMLElement | null;
     if (!node || !grip) return;
-    // OFFSET MODE: the machinery (lib/cardDrag.ts — shared with the small SignInCard) paints an
-    // offset from wherever flex centering rests the card. The clamp derives the UNTRANSLATED base
-    // rect per call — live rect minus the currently painted offset — so viewport resizes and
-    // content growth (error rows, the country list) are always measured fresh, never cached stale.
-    const painted = () => {
-      const m = /translate3d\((-?[\d.]+)px, (-?[\d.]+)px/.exec(node.style.transform || '');
-      return m ? { x: +m[1], y: +m[2] } : { x: 0, y: 0 };
-    };
+    // OFFSET MODE (lib/cardDrag.ts — shared with the small SignInCard and «من نحن»): the painted
+    // translate is an offset from wherever flex centering rests the card; clampOffsetOnScreen
+    // measures the live geometry per call. NO position memory (owner 2026-09-03): every open starts
+    // perfectly centered — only a move changes where the card is, and only for that open.
     return attachCardDrag(node, grip, {
-      posKey: AUTH_POPUP_POS_KEY,
-      clamp: (p) => {
-        const r = node.getBoundingClientRect();
-        const o = painted();
-        return clampAuthPopupOffset(
-          p,
-          { left: r.left - o.x, top: r.top - o.y, width: r.width, height: r.height },
-          { w: innerWidth, h: innerHeight },
-        );
-      },
+      clamp: clampOffsetOnScreen(node),
     });
   }, [drag]);
 
@@ -158,18 +146,17 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
             onPress={() => {}}
           >
             <Animated.View style={[s.pop, drag && s.popWide, cardStyle]}>
-              {/* Desktop grab strip — a designated header region that picks the whole card up. It
-                  overlays the grabber pill + eagle area only (never the form), and the close X sits
-                  ABOVE it in the stack so closing never begins a drag. Mobile/native: not rendered. */}
+              {/* Desktop grab strip — a designated header region (the logo band) that picks the
+                  whole card up. It never overlaps the heading, the privacy link or the buttons, so
+                  every interactive element stays plainly clickable; the cursor alone announces the
+                  gesture (owner 2026-09-03: no visible handle). Mobile/native: not rendered. */}
               {drag && (
                 <View
                   ref={gripRef}
                   // @ts-expect-error web-only DOM props on the RNW host node
                   dataSet={{ testid: 'auth-popup-drag-handle' }}
                   style={[s.grip, { cursor: 'grab', touchAction: 'none', userSelect: 'none' } as never]}
-                >
-                  <View style={s.gripPill} />
-                </View>
+                />
               )}
               <AuthForm onRequestClose={close} onSignedIn={onSignedIn} backRef={backRef} />
             </Animated.View>
@@ -194,7 +181,11 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
   backRef?: { current: () => void };
 }) {
   const { isRTL } = useI18n();
+  const { openModal } = useApp();
   const cp = !!compact;
+  // «الشروط والخصوصية» is a link ONLY once the owner's legal text exists (src/data/legal.ts); until
+  // then it is emphasized plain text — never a link to nothing.
+  const legalLive = hasLegalDocs();
   const [step, setStep] = useState<Step>('main');
   const [faceDone, setFaceDone] = useState(false);
   const [hideEmail, setHideEmail] = useState(false);
@@ -278,27 +269,48 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
 
   return (
     <>
-              <Pressable
-                onPress={back}
-                style={[s.popClose, cp && c.popClose]}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel={t('Close')}
-                // @ts-expect-error web-only DOM props on the RNW host node
-                dataSet={{ testid: 'auth-popup-close' }}
-              >
-                <Ionicons
-                  name={step === 'main' ? 'close' : isRTL ? 'chevron-forward' : 'chevron-back'}
-                  size={20}
-                  color={colors.ink}
-                />
-              </Pressable>
+              {/* The centered modal has NO × on its main step (owner 2026-09-03): a press on the
+                  ground closes it. The compact SignInCard keeps its × — that is how the card is
+                  dismissed — and the preview-only inner steps keep their back chevron. */}
+              {(cp || step !== 'main') && (
+                <Pressable
+                  onPress={back}
+                  style={[s.popClose, cp && c.popClose]}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('Close')}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ testid: 'auth-popup-close' }}
+                >
+                  <Ionicons
+                    name={step === 'main' ? 'close' : isRTL ? 'chevron-forward' : 'chevron-back'}
+                    size={20}
+                    color={colors.ink}
+                  />
+                </Pressable>
+              )}
               <RNImage source={LOGO} style={[s.popEagle, cp && c.popEagle]} resizeMode="contain" />
               {/* ── main ───────────────────────────────────────────────── */}
               {step === 'main' && (
                 <>
-                  <Text style={[s.formHead, cp && c.formHead]}>{t('Sign in or create your account')}</Text>
-                  <Text style={[s.agree, cp && c.agree]}>{t("By continuing you agree to Ezhalah's Terms & Privacy Policy.")}</Text>
+                  <Text style={[s.formHead, cp && c.formHead]}>{t('Sign in or create your free account')}</Text>
+                  <Text style={[s.formSub, cp && c.formSub]}>{t('Sign in to unlock more of Ezhalah.')}</Text>
+                  <Text style={[s.agree, cp && c.agree]}>
+                    {t('By continuing, you agree to our')}{' '}
+                    {legalLive ? (
+                      <Text
+                        style={[s.agreeLink, s.agreeLinkLive]}
+                        accessibilityRole="link"
+                        onPress={() => openModal('legal')}
+                        // @ts-expect-error web-only DOM props on the RNW host node
+                        dataSet={{ testid: 'auth-privacy-link' }}
+                      >
+                        {t('Terms & Privacy')}
+                      </Text>
+                    ) : (
+                      <Text style={s.agreeLink}>{t('Terms & Privacy')}</Text>
+                    )}
+                  </Text>
 
                   <Pressable
                     style={[s.oauth, cp && c.oauth, s.google]}
@@ -424,7 +436,8 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
 const c = StyleSheet.create({
   popClose: { top: 8, end: 8, width: 26, height: 26, borderRadius: 13 },
   popEagle: { width: 52, height: 42, marginTop: 10, marginBottom: 6 },
-  formHead: { fontSize: 15.5, lineHeight: 22, marginBottom: 4, letterSpacing: 0 },
+  formHead: { fontSize: 15.5, lineHeight: 22, marginBottom: 2 },
+  formSub: { fontSize: 11.5, lineHeight: 16, marginBottom: 4 },
   agree: { fontSize: 10.5, lineHeight: 15, marginBottom: 12, paddingHorizontal: 0 },
   oauth: { height: 40, borderRadius: 11, marginTop: 8, gap: 7 },
   oauthText: { fontSize: 12.5 },
@@ -435,7 +448,11 @@ const s = StyleSheet.create({
   // ShareSheet 60, InfoModal 70, IntroVideo 100), so the sign-in popup always wins the stack even if
   // one of those happens to be open at the same time.
   root: { position: OVERLAY_POSITION, top: 0, left: 0, right: 0, bottom: 0, zIndex: 200 },
-  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(23, 37, 30, 0.18)' },
+  // Dim + blur (web): the page stays visible and softened behind; the card is the one sharp layer.
+  backdrop: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.42)',
+    ...(Platform.OS === 'web' ? ({ backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' } as any) : {}),
+  },
   scrollHost: { flex: 1 },
   scrollContent: { flexGrow: 1 },
   // Fills the viewport and centers the card; pressing the empty ground closes the popup. Mobile: the
@@ -443,20 +460,16 @@ const s = StyleSheet.create({
   // second breakpoint.
   center: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   popWrap: { width: '100%', maxWidth: 400 },
-  // LARGER on desktop (owner 2026-08-28: "larger and more prominent") — the card grows to 470 with
-  // a touch more breathing room and a deeper resting shadow. Mobile keeps the owner-approved 400
-  // cap and styling exactly as specified 2026-08-15.
-  popWrapWide: { maxWidth: 470 },
-  popWide: { paddingTop: 40, paddingBottom: 34, paddingHorizontal: 32, shadowOpacity: 0.26, shadowRadius: 44 },
-  // The grab strip: an invisible header region (grabber pill + eagle area) that drags the card.
-  // zIndex 4 keeps it UNDER the close X (zIndex 5) where the two overlap.
-  grip: { position: 'absolute', top: 0, left: 0, right: 0, height: 96, zIndex: 4, alignItems: 'center' },
-  // The visible affordance: an iOS-sheet grabber pill in the brand's dark green, quiet but legible
-  // ("intentionally draggable" — the card announces the gesture instead of hiding it).
-  gripPill: { marginTop: 12, width: 44, height: 5, borderRadius: 3, backgroundColor: 'rgba(29, 74, 55, 0.22)' },
+  // LARGER on desktop (owner 2026-09-03, the Perplexity-proportion brief): 500 wide, more internal
+  // padding, more space between every element. Mobile keeps the 400 cap with safe edge margins.
+  popWrapWide: { maxWidth: 500 },
+  popWide: { paddingTop: 40, paddingBottom: 36, paddingHorizontal: 36, shadowOpacity: 0.24, shadowRadius: 44 },
+  // The grab strip: an invisible header region (the logo band) that drags the card. It ends above
+  // the heading so the text, the privacy link and the buttons never start a drag.
+  grip: { position: 'absolute', top: 0, left: 0, right: 0, height: 120, zIndex: 4 },
   pop: {
     backgroundColor: colors.surface,
-    borderRadius: 26,
+    borderRadius: 24,
     paddingTop: 34,
     paddingBottom: 30,
     paddingHorizontal: 26,
@@ -477,14 +490,19 @@ const s = StyleSheet.create({
   // The bare dark-green eagle mark. No separate fly-in/bounce/wink — the whole card (including this)
   // fades+scales in together as ONE motion (owner 2026-08-15: "no bouncing, spinning, excessive
   // movement, or flashy animation" — a back-eased overshoot + blink sequence doesn't qualify).
-  popEagle: { alignSelf: 'center', width: 92, height: 74, marginBottom: 12 },
-  // Desktop: the mark grows with the card so the larger popup reads as designed, not stretched.
-  popEagleWide: { width: 104, height: 84, marginTop: 6 },
+  popEagle: { alignSelf: 'center', width: 100, height: 80, marginBottom: 14 },
 
-  formHead: { fontSize: 26, fontWeight: '800', color: colors.ink, textAlign: 'center', marginBottom: 10, lineHeight: 38, letterSpacing: -0.3 },
-  agree: { fontSize: 12.5, color: colors.muted, textAlign: 'center', marginBottom: 22, lineHeight: 18, paddingHorizontal: 8 },
+  // Arabic typography: weights carry the hierarchy — no Latin letter-spacing on Arabic script.
+  formHead: { fontSize: 24, fontWeight: '800', color: colors.ink, textAlign: 'center', marginBottom: 6, lineHeight: 34 },
+  formSub: { fontSize: 14.5, color: colors.body, textAlign: 'center', marginBottom: 10, lineHeight: 22 },
+  // Owner 2026-09-04: the agreement line reads as its own, separate block below the intro — not
+  // packed against the subline. marginTop 14 (on top of formSub's own marginBottom 10) opens a
+  // ~24px gap, matching the gap already below this line before the OAuth buttons.
+  agree: { fontSize: 12.5, color: colors.muted, textAlign: 'center', marginTop: 14, marginBottom: 24, lineHeight: 18, paddingHorizontal: 8 },
+  agreeLink: { color: colors.ink, fontWeight: '600' },
+  agreeLinkLive: { textDecorationLine: 'underline' },
 
-  oauth: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 52, borderRadius: 14, marginTop: 11 },
+  oauth: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, height: 54, borderRadius: 14, marginTop: 12 },
   google: { backgroundColor: colors.dark },
   apple: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine },
   oauthText: { fontSize: 15, fontWeight: '600', color: colors.ink },

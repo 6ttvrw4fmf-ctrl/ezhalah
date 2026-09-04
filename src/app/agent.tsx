@@ -24,6 +24,7 @@ import VoiceWaveform from '@/components/VoiceWaveform';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure } from '@/lib/initialReveal';
+import { distinctPlatformCount } from '@/lib/platformDiversity';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
@@ -200,11 +201,13 @@ const resultDone = (locale: Locale): string => {
 // the same random pick maps to the same translated slogan in either language. (user-reported:
 // "I sent in English but the slogan came back Arabic — see, didn't get translated.")
 // DETERMINISTIC location-certainty backstop (does NOT depend on the model). Returns an Arabic clarification
-// question when the parsed query's location is not confident enough to search — (a) no location at all and
-// the user did not ask Kingdom-wide, or (b) a bare district that exists in SEVERAL cities with no city given.
+// question when the parsed query's location is not confident enough to search — (a) no location at all
+// (INCLUDING a Kingdom-wide request: nationwide is not a supported scope, so it asks like any other
+// missing city), or (b) a bare district that exists in SEVERAL cities with no city given.
 // Else null (search). The app's resolver knows the ambiguity even when Gemini decides to search anyway.
 // (user: ask when unsure — «ابي بيت» must ask «في أي مدينة؟», «حي البلد» must ask which city.)
-const KINGDOM_WIDE = /السعودي|المملك|كل المدن|كل المملك|كل مدن|في كل مكان|بأي مكان|أي مكان|اي مكان|everywhere|kingdom|\bsaudi\b/i;
+// KINGDOM_WIDE was deleted 2026-09-04: nationwide is not a supported search scope, and a live
+// regex kept around "just in case" is how a removed scope gets re-wired by accident.
 // The user signalling they already want the WHOLE region/city — so we should NOT ask to narrow, just
 // search it all. (user: "if the user wants a broad search, that is fine — search the whole region/city.")
 const WHOLE_AREA = /كامل|كاملة|بالكامل|كلها|كل المدين|كل المنطق|المدينة كلها|المنطقة كلها|كل الأحياء|أي حي|اي حي|\bwhole\b|\bentire\b|all of/i;
@@ -244,7 +247,13 @@ function regionOrCityTwin(loc: string | undefined): string | null {
 function locationClarification(q: SearchQuery, userText: string): string | null {
   const loc = (q.location ?? '').trim();
   if (!loc) {
-    if (KINGDOM_WIDE.test(userText)) return null; // user explicitly wants the whole Kingdom
+    // NATIONWIDE IS NOT A SUPPORTED SCOPE (owner, 2026-09-04). A Kingdom-wide phrase used to skip
+    // this question and run an UNSCOPED search — reproduced in production before this change:
+    // «ابغى شقة للبيع في كل مدن المملكة» sent p_cities/p_districts/p_region_ids all null, returned
+    // 39,042 listings across every city, and printed «المدينة: المملكة العربية السعودية». The Filter
+    // has always refused a search with no city («الرجاء اختيار مدينة من القائمة»); this 2026-06-24
+    // backstop simply never caught up. Falling through to the city ask below is the aligned
+    // behaviour — the SAME question the agent already asks, no new wording invented.
     // SMART, conversational city ask for a proximity/landmark search with no city: echo the user's OWN
     // phrase instead of a generic question — «قريب من الافنيوز» → «في أي مدينة تبحث عن عقار قريب من
     // الافنيوز؟». Feels like a continuation; never invents a city. On their answer the search resumes with
@@ -253,10 +262,11 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
       .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
       .filter(Boolean);
     if (prox.length) return `في أي مدينة تبحث عن عقار ${prox.join(' و')}؟`;
-    return 'في أي مدينة تبحث؟ (وإذا تبي كل المملكة قل لي «كل مدن المملكة»)';
+    return 'في أي مدينة تبحث؟';
   }
-  // The user explicitly asked for the whole area (or the whole Kingdom) — honour it, don't ask to narrow.
-  if (WHOLE_AREA.test(userText) || KINGDOM_WIDE.test(userText)) return null;
+  // The user asked for the whole CITY or REGION — honour it, don't ask to narrow. Kingdom-wide is
+  // deliberately NOT in this test any more: «الرياض كاملة» is a supported scope, «كل المملكة» is not.
+  if (WHOLE_AREA.test(userText)) return null;
   const lm = resolveLocation(loc, 'ar');
   // The user NAMED the scope in THIS message — «مدينة الرياض» / «منطقة الرياض» — either answering the
   // region-vs-city question below or saying it up front. That word IS the answer, and send() has
@@ -846,7 +856,7 @@ export default function Agent() {
   // delay also clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s), so the
   // first move already reads the settled height of the thing being landed on.
   const LAND_PASSES_MS = [1400, 3200];
-  const FIRST_PAGE = 10; // show the first 10; «عرض المزيد» pages the rest of the matched set. (owner 2026-07-08.)
+  const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
   // INTERVIEW_STOP_AT (25): the same line at which Advanced Filter stops narrowing (R11.1) and the set
@@ -857,7 +867,7 @@ export default function Agent() {
   // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
   // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
   const initialReveal = (r: SearchResult | undefined | null): number =>
-    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT });
+    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings) });
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
@@ -2382,7 +2392,7 @@ export default function Agent() {
       // proximity search the city is the highest-value missing piece, and we never invent one. On the
       // user's answer the search resumes with city + the same proximity (re-parsed across the attempt).
       const proxAll = parseProximity(attemptText);
-      if (proxAll.length && !combined.location && !KINGDOM_WIDE.test(attemptText) && askCountRef.current < 2) {
+      if (proxAll.length && !combined.location && askCountRef.current < 2) {
         const phrase = proxAll
           .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
           .filter(Boolean)

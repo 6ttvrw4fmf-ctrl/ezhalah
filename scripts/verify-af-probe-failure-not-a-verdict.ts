@@ -128,5 +128,43 @@ console.log('\n── mutation proofs ──');
     && !mayAssertNothingToNarrow('unknown') && !mayOpenInterview('unknown'));
 }
 
+// ── THE SAME RULE, APPLIED TO THE TEST HARNESS (2026-09-04) ──────────────────────────────────────
+//
+// UNKNOWN-is-not-NO binds whatever ASSERTS on the product too. web-runtime-smoke's Journey [J]
+// (Factory / RentAnnual / الرياض, the 1-question street_width cohort) clicked `snap.options[0]`
+// only `if (snap.options.length)` — correct — and then demanded a narrowed count UNCONDITIONALLY.
+// When the count probes returned UNDETERMINED, resolveOptions offered ZERO options exactly as this
+// file requires, the harness answered nothing, and the run failed with `start=26 final=26`.
+//
+// That is a demand the product does not owe: an interview nobody answered MUST leave the count
+// alone. It failed for the OPPOSITE of a defect — the product correctly declining to invent options
+// it has no counts for — and a red that means "the environment was slow" trains people to ignore
+// the check, or to delete the narrowing assertion to make it quiet. Both lose the real guard.
+//
+// DB truth for that cohort, measured 2026-09-04: base 26 → ≥15m 24, ≥20m 24, ≥25m 8, ≥30m 6. No
+// option the card can offer returns 26, so `final === start` PROVES nothing was answered.
+{
+  const smoke = readFileSync(new URL('./verify-web-runtime-smoke.mjs', import.meta.url), 'utf8');
+  const jBlock = smoke.slice(smoke.indexOf('[J] 1-question scope'), smoke.indexOf('[J0]'));
+  check('[J] smoke journey exists to guard', jBlock.length > 500);
+  // 1. It must RECORD that an answer really happened...
+  check('[J] records whether an option was actually answered',
+    /jAnswered\s*=\s*snap\.options\[0\]/.test(jBlock));
+  // 2. ...and must not demand narrowing when none was.
+  check('[J] does not demand narrowing when AF offered no options',
+    /if \(jOpened && !jAnswered\)/.test(jBlock) && /SKIP\s+\[J\]/.test(jBlock));
+  // 3. But the narrowing assertion itself must SURVIVE — quieting the flake by deleting the rule is
+  //    the regression this pairing exists to prevent.
+  check('[J] still enforces real narrowing once an option IS answered',
+    /jFinal < jStart/.test(jBlock) && /genuinely narrowed/.test(jBlock));
+
+  // MUTATION SELF-PROOF: the two failure modes this pairing must catch.
+  const unconditional = jBlock.replace(/if \(jOpened && !jAnswered\)/, 'if (false)');
+  check('MUTATION reverting [J] to an unconditional demand is caught',
+    !/if \(jOpened && !jAnswered\)/.test(unconditional));
+  const gutted = jBlock.replace(/jFinal < jStart/g, 'true');
+  check('MUTATION deleting [J]\u2019s narrowing rule is caught', !/jFinal < jStart/.test(gutted));
+}
+
 console.log(failed ? `\n${failed} FAILED` : '\nUNKNOWN is never treated as NO');
 process.exit(failed ? 1 : 0);

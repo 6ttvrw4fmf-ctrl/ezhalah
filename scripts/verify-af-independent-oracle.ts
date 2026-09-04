@@ -22,7 +22,15 @@
 // (the clause's unlocated-countrywide fallback only applies when NO location filter is given), so
 // the two paths are comparing the same population and a difference is always a predicate defect.
 //
-//   node --experimental-strip-types scripts/verify-af-independent-oracle.ts   (wired into `npm test`)
+// WHERE THIS RUNS (changed 2026-09-02, PR #1527 — this line said `npm test` and was wrong for a day).
+// NOT in `npm test`: every assertion here calls production through the committed anon key, so a
+// production hiccup failed unrelated PRs — the pattern #1486 removed. It now runs as a step in
+// .github/workflows/af-live-truth-check.yml (daily cron + after every production deploy + dispatch),
+// listed in scripts/test-exclusions.txt and named as a departure in verify-test-registry-complete.ts.
+// CONSEQUENCE, stated plainly: this check no longer gates a PR. The hermetic proofs of the oracle's
+// own logic — verify-af-oracle-filter-translator.ts and verify-af-oracle-soundness.ts — still do.
+//
+//   node --experimental-strip-types scripts/verify-af-independent-oracle.ts
 
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 

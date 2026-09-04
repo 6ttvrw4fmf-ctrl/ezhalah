@@ -150,12 +150,43 @@ echo "Clean, on main, matches origin/main, required Vercel env present ($LOCAL).
 # fallback proof that the alias actually MOVED to something new.
 PRE_BUNDLE="$(curl -s -H 'Cache-Control: no-cache' "https://ezhalah-app.vercel.app/?_=$(date +%s%N)" | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
 
-# Capture the unique deployment URL vercel prints, so we can PROVE the canonical alias actually
-# received THIS build (not just that ezhalah-app.vercel.app serves some valid old bundle).
+# Capture the unique deployment URL vercel prints, and — the load-bearing one — the artifact THIS
+# BUILD EMITTED. Expo prints it in the build log ("› web bundles (1): _expo/.../entry-<md5>.js"), so
+# "what did we just build" is known WITHOUT any network read at all.
+#
+# ── THE TWO STREAMS ARE CAPTURED SEPARATELY, ON PURPOSE (2026-09-04) ──────────────────────────────
+# This block used to be `npx vercel --prod --yes | tee "$DEPLOY_LOG"`, which captures STDOUT ONLY —
+# and in the pinned CLI (vercel 54.18.0) the build log is NOT on stdout. Everything the CLI prints
+# goes through `output_manager_default` = `new Output(process.stderr, …)`
+# (node_modules/vercel/dist/chunks/chunk-Z5SBJH6L.js:4673; Output.print → this.stream.write), and
+# the build log specifically is `displayBuildLogs → printBuildLog(event, output_manager_default.print)`
+# (chunk-UNIIXDM2.js:1741). The ONLY stdout write on the deploy path is the bare deployment URL
+# (chunk-UNIIXDM2.js:2077 `process.stdout.write("https://" + event.payload.url)`). So the
+# `› web bundles (1): _expo/.../entry-<md5>.js` line never reached DEPLOY_LOG, EMITTED_BUNDLE was
+# ALWAYS empty, EXPECTED_BUNDLE fell back to the (unreadable, protection-gated) NEW_BUNDLE, and the
+# gate collapsed onto the PRE_BUNDLE-diff last resort this whole guard exists to remove.
+# They are captured to SEPARATE files rather than merged with `2>&1` because a merged log breaks the
+# URL parse: stderr also carries `▲ Aliased  https://ezhalah-app.vercel.app`, so `tail -1` of a
+# merged log would set DEPLOYED_URL to the CANONICAL ALIAS — making the fallback read the alias to
+# learn what the alias should serve, which is circular and always "passes".
+# Stderr is written to a file and echoed after the CLI exits (rather than streamed through a
+# process-substitution tee) so the read below cannot race an unflushed tee. The build log therefore
+# appears at the end of the step instead of live; that is the whole cost of this trade.
 DEPLOY_LOG="$(mktemp)"
-npx vercel --prod --yes | tee "$DEPLOY_LOG"
+DEPLOY_ERR="$(mktemp)"
+DEPLOY_RC=0
+npx vercel --prod --yes 2>"$DEPLOY_ERR" | tee "$DEPLOY_LOG" || DEPLOY_RC=$?
+cat "$DEPLOY_ERR" >&2
+if [ "$DEPLOY_RC" -ne 0 ]; then
+  echo "REFUSING TO CONTINUE: 'vercel --prod' exited $DEPLOY_RC (see its output above)."
+  rm -f "$DEPLOY_LOG" "$DEPLOY_ERR"
+  exit "$DEPLOY_RC"
+fi
+# stdout only: the bare deployment URL. Never parse this out of the merged streams (see above).
 DEPLOYED_URL="$(grep -oE 'https://[a-z0-9.-]+\.vercel\.app' "$DEPLOY_LOG" | tail -1 || true)"
-rm -f "$DEPLOY_LOG"
+# stderr carries the build log; stdout is searched too so this keeps working if a future CLI moves it.
+EMITTED_BUNDLE="$(grep -hoE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$DEPLOY_ERR" "$DEPLOY_LOG" | head -1 || true)"
+rm -f "$DEPLOY_LOG" "$DEPLOY_ERR"
 
 # ── POST-DEPLOY BUNDLE VERIFICATION (rewritten 2026-09-03 after run 33706257876) ───────────────────
 # This used to be TWO sequential checks. One polled ANY currently-served bundle for `supabase.co`
@@ -163,84 +194,123 @@ rm -f "$DEPLOY_LOG"
 # THIS deploy. The other read the fresh deployment's unique URL ONCE, with no retry, to learn the
 # expected bundle hash for dtg_alias_serves (blocking, ~90s) — on 2026-09-03 that single curl
 # returned nothing in 69ms on a perfectly healthy deploy, so it warned-and-skipped and the propagation
-# match never actually ran. Merged into ONE bounded, cache-busted, BLOCKING loop that proves BOTH
-# properties before the baseline is allowed to advance:
-#   (a) the canonical alias serves a bundle dtg_alias_serves() recognizes as the just-deployed one —
-#       retried every attempt instead of read once outside the loop; and, only if the deployment's
-#       own URL never yields a hash at all, a fallback proof that the alias moved away from PRE_BUNDLE;
-#   (b) that bundle's content includes supabase.co, proving the EXPO_PUBLIC_* vars inlined.
+# match never actually ran. Merged into ONE bounded, cache-busted, BLOCKING loop.
+#
+# ── WHAT THIS ASSERTS, AND WHY IT CHANGED AGAIN (run 33776354197, 2026-09-03) ──────────────────────
+# The merged loop then failed CLOSED on a HEALTHY deploy, and the reason was that it was asserting the
+# wrong invariant. Its expected-hash source was the deployment's own URL, which is behind Vercel
+# deployment protection and answers HTTP 302 → vercel.com/sso-api (15 bytes) — unreadable, always. So
+# it fell through to the only other proof it had: "the alias hash must DIFFER from PRE_BUNDLE". A
+# rebuild that is byte-identical to what is already live emits the SAME md5-named bundle, so that
+# demand is UNSATISFIABLE — the deploy shipped, `▲ Aliased https://ezhalah-app.vercel.app` printed,
+# the blocking hydration gate passed, and the step still went red, so the baseline never advanced and
+# every subsequent preflight flagged main as unapproved.
+#
+# The TRUE invariant — the one that is satisfiable for an identical rebuild and still fails on a stale
+# or off-target alias — is: THE ALIAS SERVES THE ENTRY THIS RUN EMITTED, AND THOSE BYTES REALLY ARE
+# THAT ENTRY. Both halves are now proven, and neither depends on the protected per-deployment URL:
+#   (a) the alias's entry path == EMITTED_BUNDLE, read from THIS run's own build log (dtg_alias_serves,
+#       the same predicate the regression test asserts — never satisfied by an empty or stale read);
+#   (b) md5(the bytes the alias actually returns) == the hash in that filename (dtg_bundle_is_authentic).
+#       Expo content-hashes the web entry bundle, so name and bytes must agree; a stale alias, an error
+#       page, or a truncated CDN read all fail here;
+#   (c) those same bytes contain supabase.co, proving the EXPO_PUBLIC_* vars inlined at build time.
+# Deployment protection is therefore no longer on the critical path: the deployment-URL read is kept
+# ONLY as a fallback for the case where the build log names no bundle (a reused/cached deployment that
+# never ran the export), and the PRE_BUNDLE-diff fallback below it only for when neither source knows
+# what was built. Deliberately NOT added: a protection-bypass token — the repo has none, and the build
+# log makes one unnecessary. Add one only if a future check genuinely needs the deployment URL itself.
 # Window is 5 minutes, not 90s: CDN propagation is the documented false-negative mode here (PR
-# #48/FIX A, PR #58/dpl_2gVFqg) — a bounded wait is cheaper than a false "investigate now" alarm, and
-# cheaper than blocking baseline advance on a deploy that is actually fine. BLOCKING: do not weaken
-# this into a warning again — a bundle that never proves the Supabase config is the 2026-07-10 P0
-# signature, and never proving the alias moved is the 2026-07-21 off-target signature.
+# #48/FIX A, PR #58/dpl_2gVFqg) — a bounded wait is cheaper than a false "investigate now" alarm.
+# BLOCKING: do not weaken this into a warning, a bypass flag, or a hash-agnostic "something is served"
+# check — a bundle that never proves the Supabase config is the 2026-07-10 P0 signature, and an alias
+# that never proves it serves THIS build is the 2026-07-21 off-target signature.
 echo ""
-echo "Verifying the canonical alias serves the new, Supabase-configured bundle (polling up to 5m)..."
+echo "Verifying the canonical alias serves the bundle this run emitted (${EMITTED_BUNDLE:-<not named in the build log>}), polling up to 5m..."
 NEW_BUNDLE=""
 ALIAS_BUNDLE=""
+EXPECTED_BUNDLE=""
 BUNDLE_OK=0
+AUTH_FAIL=""
+SUPA_FAIL=""
 # ── WHY the read failed, not just that it did (routine #7, 2026-09-03, issue #1563) ───────────────
 # 14 consecutive deploys (runs 242-254) ended `failure` here reporting `alias now serving: <none>`
 # and `expected: <never readable>` — EMPTY reads, which is a different fact from "the alias did not
-# move" and the message could not tell them apart. Vercel confirms every one of those deploys reached
-# READY/production, so the deploys shipped and only this check failed; meanwhile the very same curl,
-# cache-buster included, reads the alias fine from outside CI, and the hydration gate loads the same
-# URL in a real browser seconds later. So the cause is in HOW the runner's read fails, and nothing in
-# the log recorded it. These vars capture the HTTP status and body size of the LAST read of each URL,
-# in the SAME request (`-o` + `-w`, no extra traffic — deliberately, since request volume is itself
-# one of the hypotheses), and the failure block prints them. Diagnostics only: no control flow, no
-# threshold and no gate behaviour changes here — this step stays BLOCKING and still exits 1.
-ALIAS_BODY="$(mktemp)"; NEW_BODY="$(mktemp)"
+# move" and the message could not tell them apart. These vars capture the HTTP status and body size
+# of the LAST read of each URL, in the SAME request (`-o` + `-w`, no extra traffic — deliberately,
+# since request volume is itself one of the hypotheses), and the failure block prints them.
+ALIAS_BODY="$(mktemp)"; NEW_BODY="$(mktemp)"; BUNDLE_BODY="$(mktemp)"
 ALIAS_HTTP=""; NEW_HTTP=""
 ALIAS_BYTES=0; NEW_BYTES=0
 POLL_DEADLINE=$(( SECONDS + 300 ))
 while [ "$SECONDS" -lt "$POLL_DEADLINE" ]; do
-  if [ -z "$NEW_BUNDLE" ] && [ -n "${DEPLOYED_URL:-}" ]; then
+  # Only consult the deployment's own URL when the build log did NOT name the emitted bundle. It is
+  # normally unreadable (deployment protection), and skipping it halves this loop's request volume.
+  if [ -z "$EMITTED_BUNDLE" ] && [ -z "$NEW_BUNDLE" ] && [ -n "${DEPLOYED_URL:-}" ]; then
     NEW_HTTP="$(curl -s -o "$NEW_BODY" -w '%{http_code}' -H 'Cache-Control: no-cache' "${DEPLOYED_URL}/?_=$(date +%s%N)" || echo 000)"
     NEW_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$NEW_BODY" 2>/dev/null | head -1 || true)"
   fi
+  EXPECTED_BUNDLE="${EMITTED_BUNDLE:-$NEW_BUNDLE}"
   ALIAS_HTTP="$(curl -s -o "$ALIAS_BODY" -w '%{http_code}' -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' "https://ezhalah-app.vercel.app/?_=$(date +%s%N)" || echo 000)"
   ALIAS_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$ALIAS_BODY" 2>/dev/null | head -1 || true)"
   MATCHED=0
-  # dtg_alias_serves: succeeds ONLY when the canonical alias serves the exact just-deployed bundle
+  # dtg_alias_serves: succeeds ONLY when the canonical alias serves the exact bundle this run built
   # (same predicate the regression test asserts) — never on an empty/stale read.
-  if dtg_alias_serves "$NEW_BUNDLE" "$ALIAS_BUNDLE"; then
+  if dtg_alias_serves "$EXPECTED_BUNDLE" "$ALIAS_BUNDLE"; then
     MATCHED=1
-  elif [ -z "$NEW_BUNDLE" ] && [ -n "$ALIAS_BUNDLE" ] && [ "$ALIAS_BUNDLE" != "$PRE_BUNDLE" ]; then
-    MATCHED=1 # DEPLOYED_URL never resolved a bundle; the alias moving away from PRE_BUNDLE is the fallback proof it advanced.
+  elif [ -z "$EXPECTED_BUNDLE" ] && [ -n "$ALIAS_BUNDLE" ] && [ "$ALIAS_BUNDLE" != "$PRE_BUNDLE" ]; then
+    MATCHED=1 # Nothing knows what was built; the alias moving away from PRE_BUNDLE is the last-resort proof it advanced.
   fi
-  if [ "$MATCHED" = 1 ] && curl -s -H 'Cache-Control: no-cache' "https://ezhalah-app.vercel.app/$ALIAS_BUNDLE?_=$(date +%s%N)" | grep -q "supabase.co"; then
-    BUNDLE_OK=1
-    break
+  if [ "$MATCHED" = 1 ]; then
+    # Accept-Encoding: identity — md5 must be taken over the artifact's own bytes, not a re-encoding.
+    curl -s -o "$BUNDLE_BODY" -H 'Accept-Encoding: identity' -H 'Cache-Control: no-cache' \
+      "https://ezhalah-app.vercel.app/$ALIAS_BUNDLE?_=$(date +%s%N)" || true
+    if ! dtg_bundle_is_authentic "$BUNDLE_BODY" "$ALIAS_BUNDLE"; then
+      AUTH_FAIL="md5($(wc -c < "$BUNDLE_BODY" 2>/dev/null || echo 0) bytes)=$(dtg_md5 "$BUNDLE_BODY" 2>/dev/null || echo '<none>')"
+    elif ! grep -q "supabase.co" "$BUNDLE_BODY"; then
+      SUPA_FAIL="yes"
+    else
+      BUNDLE_OK=1
+      break
+    fi
   fi
   sleep 5
 done
 ALIAS_BYTES="$(wc -c < "$ALIAS_BODY" 2>/dev/null || echo 0)"
 NEW_BYTES="$(wc -c < "$NEW_BODY" 2>/dev/null || echo 0)"
 ALIAS_HEAD="$(head -c 200 "$ALIAS_BODY" 2>/dev/null | tr -d '\n' || true)"
-rm -f "$ALIAS_BODY" "$NEW_BODY"
+rm -f "$ALIAS_BODY" "$NEW_BODY" "$BUNDLE_BODY"
 if [ "$BUNDLE_OK" = 1 ]; then
-  echo "OK: https://ezhalah-app.vercel.app serves $ALIAS_BUNDLE (expected: ${NEW_BUNDLE:-<unreadable from $DEPLOYED_URL — matched via PRE_BUNDLE diff instead>}) and it references supabase.co."
+  echo "OK: https://ezhalah-app.vercel.app serves $ALIAS_BUNDLE — the entry this run emitted; md5(bytes) matches its filename, and it references supabase.co."
 else
   echo ""
-  echo "❌ REFUSING TO ADVANCE THE BASELINE: the canonical alias never proved it serves a new,"
-  echo "   Supabase-configured build after 5 minutes."
+  echo "❌ REFUSING TO ADVANCE THE BASELINE: the canonical alias never proved it serves the bundle"
+  echo "   this run built, with matching bytes and the Supabase config, after 5 minutes."
   echo "   before deploy:                 ${PRE_BUNDLE:-<none>}"
-  echo "   expected (from $DEPLOYED_URL):  ${NEW_BUNDLE:-<never readable>}"
+  echo "   this run emitted (build log):  ${EMITTED_BUNDLE:-<not named in the build log>}"
+  echo "   expected (from $DEPLOYED_URL):  ${NEW_BUNDLE:-<never readable — normal, deployment protection>}"
   echo "   alias now serving:              ${ALIAS_BUNDLE:-<none>}"
   # An EMPTY read and a STALE read are different failures and used to print identically (issue #1563).
   echo "   last alias read:                HTTP ${ALIAS_HTTP:-000}, ${ALIAS_BYTES} bytes"
   echo "   last deployment-URL read:       HTTP ${NEW_HTTP:-000}, ${NEW_BYTES} bytes"
   echo "   alias body starts:              ${ALIAS_HEAD:-<empty>}"
-  echo "   Read those two lines FIRST. HTTP 200 with a healthy byte count but no entry- hash means the"
-  echo "   page rendered without the bundle reference; 401/403 means deployment protection or a bot"
+  if [ -n "$AUTH_FAIL" ]; then
+    echo "   served bytes DID NOT match that filename's hash: $AUTH_FAIL — not the artifact it claims"
+    echo "   to be (error page / truncated CDN read). Re-read the alias before trusting this deploy."
+  fi
+  if [ -n "$SUPA_FAIL" ]; then
+    echo "   bundle is authentic but contains NO supabase.co — the EXPO_PUBLIC_* vars did not inline"
+    echo "   (2026-07-10 P0 signature). Investigate before declaring this deploy healthy."
+  fi
+  echo "   Read those lines FIRST. If 'this run emitted' and 'alias now serving' DIFFER, the alias did"
+  echo "   not advance to this build — promote it: npx vercel promote ${DEPLOYED_URL:-<unknown>} --yes"
+  echo "   On the alias read: HTTP 200 with a healthy byte count but no entry- hash means the page"
+  echo "   rendered without the bundle reference; 401/403 means deployment protection or a bot"
   echo "   challenge; 429 means this loop's own request rate; 000 means the runner could not connect"
-  echo "   at all. Only the first of those is a deploy problem."
+  echo "   at all. Only the first of those is a deploy problem. A <never readable> deployment-URL read"
+  echo "   is EXPECTED and no longer matters — the build log is the source of the expected hash."
   echo "   The Vercel deploy already happened (this check cannot un-deploy it) — but the baseline will"
   echo "   NOT advance, so the NEXT preflight-verify.sh will flag this commit as unapproved."
-  echo "   If the alias never moved, promote it explicitly: npx vercel promote ${DEPLOYED_URL:-<unknown>} --yes"
-  echo "   If it DID move but supabase.co is missing, the env vars did not inline (2026-07-10 P0"
-  echo "   signature) — investigate before declaring this deploy healthy."
   exit 1
 fi
 
@@ -349,12 +419,24 @@ echo ""
 echo "Recording $LOCAL as the new approved production baseline..."
 { echo "$LOCAL"; tail -n +2 docs/DEPLOY_BASELINE.txt; echo "# $(date +%F)  ${LOCAL:0:7}  deployed via safe-deploy.sh"; } > docs/DEPLOY_BASELINE.txt.tmp \
   && mv docs/DEPLOY_BASELINE.txt.tmp docs/DEPLOY_BASELINE.txt
-if git add docs/DEPLOY_BASELINE.txt && git commit -m "chore(deploy): record approved baseline ${LOCAL:0:7}" --quiet; then
+# THREE OUTCOMES, NAMED (2026-09-04). This used to be two branches, and the failure branch said
+# "NOTE: baseline unchanged (no diff)" — which is what a healthy no-op says. So every deploy from
+# .github/workflows/deploy-frontend.yml, where the runner has no git identity, printed a reassuring
+# no-op line while `git commit` died on "Author identity unknown" and the baseline silently stayed
+# where it was (stale since PR #1470, 2026-09-01; deploy run 33898889593 is the recorded case).
+# A commit that COULD NOT RUN must never read the same as a commit that HAD NOTHING TO DO.
+# The identity is supplied inline with `git -c`, so a runner with none can still record the
+# baseline and nothing about the caller's global git config is mutated.
+if git diff --quiet -- docs/DEPLOY_BASELINE.txt; then
+  echo "NOTE: baseline already records ${LOCAL:0:7} — nothing to commit."
+elif git add docs/DEPLOY_BASELINE.txt \
+  && git -c user.name="ezhalah-deploy" -c user.email="deploy@users.noreply.github.com" \
+       commit -m "chore(deploy): record approved baseline ${LOCAL:0:7}" --quiet; then
   git push origin main --quiet 2>/dev/null \
     && echo "Baseline advanced to ${LOCAL:0:7} and pushed." \
-    || echo "WARNING: baseline commit made locally but push failed (main moved?). Push docs/DEPLOY_BASELINE.txt manually so the next preflight is accurate."
+    || echo "WARNING: baseline commit made locally but the push to main FAILED (main moved, or branch protection refuses a direct push from this runner). Open a PR that sets docs/DEPLOY_BASELINE.txt to ${LOCAL} so the next preflight is accurate."
 else
-  echo "NOTE: baseline unchanged (no diff)."
+  echo "WARNING: the baseline commit FAILED — this is NOT a no-op. docs/DEPLOY_BASELINE.txt still records $(head -1 docs/DEPLOY_BASELINE.txt | cut -c1-7) while production now serves ${LOCAL:0:7}, so the next preflight measures against a stale floor. Fix the cause above and record ${LOCAL} by PR."
 fi
 
 echo ""

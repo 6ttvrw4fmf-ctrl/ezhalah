@@ -19,6 +19,17 @@
 //      cannot become a graveyard, and cannot quietly retire a check by naming nowhere.
 //   3. THE RUNNER IS THE ONLY ENTRY POINT. package.json's "test" must invoke the runner and must NOT
 //      regrow an inline chain, or the hotspot comes straight back.
+//   4. THE FLOOR MAY ONLY MOVE THROUGH A NAMED DEPARTURE. The floor is not a number typed here — it
+//      is 200 minus BASELINE_DEPARTURES below, and every entry states the script, the PR, its new
+//      home, and whether per-PR coverage was LOST. Lowering the floor without adding an entry fails
+//      this file, and every run PRINTS the departures so the trade is never tribal knowledge.
+//
+// THE DISCLOSURE RULE (added 2026-09-03, after a review of PR #1527). A PR that lowers the floor
+// MUST say so in its BODY, naming the moved script and its new home. #1527 moved
+// verify-af-independent-oracle.ts out of the required `npm test` into af-live-truth-check.yml and
+// took the floor 200 → 199; the diff was correct and the justification was sound, but the PR body
+// never mentioned it, so the one fact a reviewer most needed — "a check stopped running on PRs" —
+// was reachable only by diffing three files. The list below is where that fact now lives.
 //
 //   node --experimental-strip-types scripts/verify-test-registry-complete.ts   (in `npm test`)
 
@@ -42,11 +53,47 @@ const { run, excluded, baseline } = loadRegistry(root);
 const runSet = new Set(run);
 
 // ── 1. THE BASELINE FLOOR ────────────────────────────────────────────────────────────────────────
-// 199, not 200, since 2026-09-02: verify-af-independent-oracle.ts left the baseline DELIBERATELY —
-// it is a live production call (committed anon key) that gated every PR through the required
-// `npm test`, the exact pattern #1486 removed for the trending live half. It now runs in
-// .github/workflows/af-live-truth-check.yml (see scripts/test-exclusions.txt). Nothing else moved.
-check('the zero-loss baseline is present and substantial', baseline.length >= 199, `${baseline.length} entries`);
+// The floor started at 200 (the checks the old `&&` chain ran). It moves ONLY by naming a departure
+// here, and the run prints them — so "why is the floor 199?" is answered by running the barrier,
+// not by archaeology through three files and a merge commit.
+const ORIGINAL_FLOOR = 200;
+const BASELINE_DEPARTURES = [
+  {
+    script: 'verify-af-independent-oracle.ts',
+    pr: '#1527',
+    date: '2026-09-02',
+    home: '.github/workflows/af-live-truth-check.yml',
+    why: 'wholly live: 9 hand-written PostgREST predicates + the UNKNOWN partition against production '
+      + 'through the committed anon key, inside the REQUIRED npm test — the pattern #1486 removed. Unlike '
+      + '#1486 there was no offline half to split off and leave behind, so the whole file moved.',
+    // Say the cost plainly. A relocation with a real home is not a loss; leaving PRs uncovered is.
+    perPrCoverage: 'PARTIAL LOSS — af-live-truth-check.yml has no pull_request trigger, so this no longer runs '
+      + 'on PRs at all (daily cron + every production deploy + dispatch). Its hermetic siblings '
+      + 'verify-af-oracle-filter-translator.ts and verify-af-oracle-soundness.ts stay in npm test, so the '
+      + 'oracle LOGIC is still gated per PR; what left is its live AGREEMENT with production.',
+  },
+];
+const BASELINE_FLOOR = ORIGINAL_FLOOR - BASELINE_DEPARTURES.length;
+console.log(`\n  Baseline floor ${BASELINE_FLOOR} = ${ORIGINAL_FLOOR} original − ${BASELINE_DEPARTURES.length} named departure(s):`);
+for (const d of BASELINE_DEPARTURES) {
+  console.log(`    • ${d.script} — left in ${d.pr} (${d.date}) → ${d.home}`);
+  console.log(`      why:  ${d.why}`);
+  console.log(`      cost: ${d.perPrCoverage}`);
+}
+console.log('');
+check('the zero-loss baseline is present and substantial', baseline.length >= BASELINE_FLOOR, `${baseline.length} entries`);
+// The ledger must describe reality, not intent: a departed script is really gone from the baseline,
+// really excluded, and really has the home the entry claims. Otherwise the floor could be lowered by
+// writing a paragraph. (Every exclusion's home is separately proven to EXIST in §2 below.)
+for (const d of BASELINE_DEPARTURES) {
+  check(`departure is out of the baseline: ${d.script}`, !baseline.includes(d.script),
+    baseline.includes(d.script) ? 'still in the baseline — raise the floor back instead of listing it here' : '');
+  const ex = excluded.find((e) => e.name === d.script);
+  check(`departure is a stated exclusion with the home this ledger claims: ${d.script}`,
+    !!ex && ex.where === d.home, ex ? `exclusions say ${ex.where}` : 'not in test-exclusions.txt');
+  check(`departure states whether per-PR coverage was lost: ${d.script}`,
+    /LOSS|NO LOSS/.test(d.perPrCoverage), d.perPrCoverage.slice(0, 60));
+}
 const missing = baseline.filter((b) => !runSet.has(b));
 check('EVERY baseline check is still discovered and run (no test silently disappeared)',
   missing.length === 0,

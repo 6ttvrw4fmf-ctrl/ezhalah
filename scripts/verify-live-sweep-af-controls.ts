@@ -51,9 +51,23 @@ const journeysSrc = read(JOURNEYS);
 const journeys = codeOnly(journeysSrc);
 
 // Isolate the AF journey so an unrelated journey's selectors cannot satisfy these checks.
-const afStart = journeys.indexOf('export async function advancedFilter');
-const afEnd = journeys.indexOf('export async function', afStart + 10);
-const af = afStart >= 0 ? journeys.slice(afStart, afEnd > afStart ? afEnd : undefined) : '';
+//
+// commitOneAfAnswer (extracted 2026-09-04, zero behavior change) carries the entire testID-driving
+// sequence this barrier inspects — advancedFilter itself is now a thin wrapper (search, delegate,
+// assertChain) that showmore.mjs's AF-scoped pagination journey ALSO calls, so the two must keep
+// sharing one real implementation rather than fork into a copy this barrier would not see. Both
+// functions are adjacent in the file with nothing else between them; the span starts at whichever of
+// the two appears first and ends at the next DIFFERENTLY-named export after both, so it stays correct
+// regardless of which one is declared first.
+function afJourneySpan(src: string): string {
+  const a = src.indexOf('export async function commitOneAfAnswer');
+  const b = src.indexOf('export async function advancedFilter');
+  if (a < 0 || b < 0) return '';
+  const start = Math.min(a, b);
+  const end = src.indexOf('export async function', Math.max(a, b) + 10);
+  return src.slice(start, end > start ? end : undefined);
+}
+const af = afJourneySpan(journeys);
 check('the AF journey exists in the live sweep', af.length > 0);
 
 // ── 1. every testID the AF journey drives is one the card actually renders ───────────────────────
@@ -149,9 +163,7 @@ const mutations: Mutation[] = [
 
 for (const m of mutations) {
   const mutated = codeOnly(m.apply(journeysSrc));
-  const s = mutated.indexOf('export async function advancedFilter');
-  const e = mutated.indexOf('export async function', s + 10);
-  const mutatedAf = s >= 0 ? mutated.slice(s, e > s ? e : undefined) : '';
+  const mutatedAf = afJourneySpan(mutated);
   check(`mutation caught — ${m.name}`, !m.predicate(mutatedAf, cardSrc),
     'this check passes on deliberately broken source, so it protects nothing');
 }

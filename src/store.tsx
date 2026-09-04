@@ -144,8 +144,8 @@ type AppState = {
   setActiveChat: (id: string | null) => void;
   // Support / About Us are shown as in-app popups (centered dialog over a dimmed page) rather than
   // full-screen routes, so they open from the drawer without navigating away.
-  modal: 'support' | 'about' | null;
-  openModal: (m: 'support' | 'about') => void;
+  modal: 'support' | 'about' | 'legal' | 'privacy' | null;
+  openModal: (m: 'support' | 'about' | 'legal' | 'privacy') => void;
   closeModal: () => void;
   // Sign-in popup (owner 2026-08-15): a true in-place overlay, same pattern as modal/openModal/
   // closeModal above — never a route, so the screen underneath (the Filter page, wherever the user
@@ -245,7 +245,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const historyRef = useRef<HistoryItem[]>([]);
   useEffect(() => { historyRef.current = history; }, [history]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [modal, setModal] = useState<'support' | 'about' | null>(null);
+  const [modal, setModal] = useState<'support' | 'about' | 'legal' | 'privacy' | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [pendingMessage, setPendingMessageState] = useState<string | null>(null);
   // `null` while the saved flag is still being read from storage; the intro stays hidden until then.
@@ -412,6 +412,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch {}
     AsyncStorage.setItem(key, json).catch(() => {});
   }, [history, user]);
+
+  // ── ANOTHER TAB IS THE SAME ACCOUNT, NOT A DIFFERENT DEVICE ───────────────────────────────────
+  // The effect above writes the ENTIRE array on every mutation, and until this listener existed
+  // nothing anywhere subscribed to `storage`. Two tabs on one browser therefore held two forks of
+  // one list, and whichever mutated LAST overwrote the other's work wholesale.
+  //
+  // MEASURED, not theorised — 2/2 in fresh browsers against production (2026-09-04): both tabs
+  // load [h1,h2,h3]; tab B deletes h3 through the «حذف نهائي» gate, disk becomes [h1,h2]; tab A —
+  // which never learned about it — favourites an unrelated chat, and its whole-array write puts
+  // [h1,h2,h3] back. **A confirmed deletion silently returns**, and the same shape loses a chat
+  // created in the other tab. Having two tabs open is the ordinary case, not an exotic one.
+  //
+  // ADOPTING THE INCOMING LIST IS SAFE HERE, and that is a property of this store rather than a
+  // general truth about storage events: our own writes are SYNCHRONOUS (the effect above exists
+  // precisely so a refresh right after a star/delete cannot lose the change), so at the instant a
+  // foreign event arrives our in-memory state is exactly what we last put on disk. There is no
+  // local-only edit for adoption to discard. This is the server sync's "two writers, one list"
+  // problem with the easy half of it: same device, same storage, so the disk IS the shared truth
+  // and no per-entry precedence is needed to decide a winner.
+  //
+  // Two guards, both load-bearing:
+  //   · Compare against OUR OWN serialization first. `storage` never fires in the writing tab, but
+  //     adopting always re-runs the persist effect above, which writes the identical JSON back and
+  //     fires an event at the other tab — an endless ping-pong of no-op writes without this. Equal
+  //     serialization ⇒ the disk view already agrees ⇒ do nothing, and the loop dies at hop one.
+  //   · A REMOVAL (`newValue === null`) is deliberately ignored. That is sign-out / delete-account
+  //     clearing the key, which has its own sequenced teardown; reacting to it here would reach
+  //     into auth architecture rather than fix a persistence clobber.
+  //
+  // FEATURE-DETECTED, NOT PLATFORM-ASSUMED. Every other storage path in this file guards with
+  // `typeof localStorage !== 'undefined'` and pairs it with AsyncStorage, because this store mounts
+  // on native too — and these two lines are the first `window.` in the whole file. React Native
+  // defines a `window`, so `typeof window === 'undefined'` alone would NOT have kept us out of it;
+  // what varies is whether `addEventListener` is there. Detect the method, not the platform.
+  useEffect(() => {
+    if (!user || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+    const key = historyKey(user.sub);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== key || e.newValue == null) return;
+      let incoming: HistoryItem[];
+      try {
+        const parsed = JSON.parse(e.newValue);
+        if (!Array.isArray(parsed)) return;            // malformed: ignore, never crash the list
+        incoming = parsed as HistoryItem[];
+      } catch { return; }
+      if (serializeHistoryForDisk(historyRef.current) === e.newValue) return; // already agreed
+      setHistory(incoming.map((h) => ({ ...h, query: migrateGroups({ ...h.query }) })));
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [user]);
 
   // ── SERVER SYNC (owner 2026-08-25 — conversations survive a new browser and logging back in) ──
   // Pull: after the local restore for a signed-in account, fetch the server's chat metas and merge

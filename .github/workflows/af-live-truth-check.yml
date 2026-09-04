@@ -41,11 +41,20 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     name: AF UI count = count RPC = result RPC = independent DB truth
     runs-on: ubuntu-latest
-    # Measured 2026-09-03: the nine steps below took 16m44s of work plus ~1m of setup. 35 leaves
-    # roughly 2x headroom. Whenever a step is ADDED here, re-measure — a budget that silently
-    # becomes too small skips the tail of this job (see the af-surface-region comment below).
-    # 2026-09-04: +71s for the city-bucket step (measured), so 37 keeps the same headroom.
-    timeout-minutes: 37
+    # RE-MEASURED 2026-09-04, because the old note was already wrong. It read "16m44s of work plus
+    # ~1m of setup, roughly 2x headroom" from a quiet 2026-09-03. Run #137 took 27m50s of this
+    # 35-minute budget against a production whose search mean had risen 773ms → 5,109ms — 7 minutes
+    # of headroom, not 2x. On top of that the pacing gate added below may wait up to PACE_BUDGET_MS
+    # (10 min) for production to come back inside its envelope before the first journey starts, and
+    # 27m50s + 10m does not fit in 35.
+    #
+    # So this is measured headroom for work that is already happening, not room made for a slower
+    # test: 50 covers the observed 27m50s plus a full pacing wait plus margin. The workflow's own
+    # rule below still applies — whenever a step is ADDED, re-measure, because a budget that
+    # silently becomes too small skips the TAIL of this job, and the tail is where the AF pill and
+    # strict-parity checks live.
+    # 2026-09-04: +71s for the city-bucket step (measured) fits inside the margin below.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -131,18 +140,31 @@ jobs:
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-city-bucket-matches-delivery.ts
 
       # THE ROOT-CAUSE JOIN (added 2026-09-03). Activating a platform is a DATABASE act; the client's
-      # RES_TABLES/COM_TABLES are a SOURCE-CODE act; until now nothing checked that the two agreed.
+      # searchable-table scope is a SOURCE-CODE act; until now nothing checked that the two agreed.
       # Five platforms went live in search_listings_ar with 4,314 production_ready rows and joined
-      # neither list, so no search could return them while Trending — called without p_tables —
-      # counted them anyway (الهفوف/أرض سكنية/بيع: 2,478 advertised, 109 delivered). The AF matrix
-      # barrier caught it only on `bathrooms=1`, the one predicate wide enough to admit the new rows.
-      # This asks the question directly instead of waiting for a wide enough predicate.
-      - name: Every platform live in search must be reachable by a real search
+      # neither of the two hand-maintained client lists, so no search could return them while
+      # Trending — called without p_tables — counted them anyway (الرياض/شقة/إيجار/سنوي, bath>=1:
+      # 3,422 advertised, 3,340 delivered). The AF matrix barrier caught it only on `bathrooms=1`,
+      # the one predicate wide enough to admit the new rows. This asks the question directly, in
+      # both directions, by EXECUTING the real scope functions against the live inventory.
+      - name: The client scope and the live searchable inventory are the same set
         if: ${{ !cancelled() }}
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
-        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-every-live-table-is-searchable.ts
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-searchable-scope-matches-inventory.ts
+
+      # CARD IDENTITY against the string production really stores (added 2026-09-04). Found by
+      # looking at live cards: 3,165 abralosol/therc/rawasidark listings rendered as «عقار» with a
+      # click-through to sa.aqar.fm, because the DB `source` values carry spaces ('Abr Alosol',
+      # 'THE RC', 'Rawasi Dark') and every branch tested a closed-up slug. Its offline sibling
+      # feeds the matcher names this repo invented, so only a LIVE read can catch this class.
+      - name: Every card must carry the identity of the platform that published it
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-platform-identity-matches-live-source.ts
 
       # COMBINED شراء+إيجار in a REAL browser (added 2026-09-02). The Filter offers two independent
       # budgets and the RPC splits them by the row's own deal; until 2026-09-02 the client re-applied
@@ -222,8 +244,27 @@ jobs:
   # budget is sized for its own work, and the `attendance` gate at the bottom of this file turns
   # any cancelled/timed-out/skipped job into a red run. Pinned by
   # scripts/verify-live-check-workflow-attendance.ts.
+  # SWEEPS RUN AFTER THE BROWSER JOBS, NEVER BESIDE THEM (2026-09-04). All five jobs used to start at
+  # once: two browser jobs and three heavy RPC sweeps, each sweep self-limited to 2 in flight. That is
+  # ~6-10 concurrent probes against a production whose MEASURED envelope is a concurrency knee of 3 and
+  # ~1.5 searches/s sustained (SEARCH_MATCH_QA_ENGINEER.md §40.1). The sweeps are throughput work and
+  # survive it; the browser journeys are latency work behind a paid agent turn, and they do not.
+  #
+  # PROVEN BY EXPERIMENT, not inferred from the timings: verify-af-option-card-truth-live.ts passes
+  # 426/426 run alone against production, and FAILS (exit 1) when run concurrently with
+  # verify-af-full-surface-differential.ts — «the AF offer is present again on a fresh load» and «the
+  # journey completed without a harness error», which is exactly the shape CI kept reporting. Across
+  # runs 131/132/134 the red set GREW (option-card, then remove-last-pill, then trending four-way) as
+  # the afternoon got busier, which is load, not a spreading product defect: every one of those checks
+  # passes alone against the same deployed bundle.
+  #
+  # `if: always()` is load-bearing. A plain `needs:` SKIPS a dependent when its dependency fails, and a
+  # skipped sweep is lost coverage that the attendance job would then have to report — the 2026-09-03
+  # lesson about a guard that skips exactly what it exists to protect. These must run whatever the
+  # browser jobs concluded; attendance still requires all five to have concluded success.
   af-surface-region:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: [af-truth, af-card-state]
+    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     name: Every certified AF option shows DB truth and clicks to exactly that set (region)
     runs-on: ubuntu-latest
     # THE TWO SWEEPS GET A JOB EACH (2026-09-03). They are independent scopes and each is an
@@ -260,7 +301,8 @@ jobs:
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
 
   af-surface-city:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: [af-truth, af-card-state]
+    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     name: …and the same option surface inside a CITY scope (جدة), single-type stages
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -284,7 +326,26 @@ jobs:
   # af-surface above: these four were steps 17-20 of the old serial job and were the ones actually
   # skipped when it hit its cap). Browser journeys, so they need Chromium.
   af-card-state:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    # THE LAST RACE IN THIS WORKFLOW (2026-09-04). Making the three sweeps wait for the browser jobs
+    # fixed sweep-vs-journey contention and the reds SURVIVED it: run #137 failed BOTH browser jobs
+    # while no sweep had started. The two browser jobs were still racing EACH OTHER, and an AF card
+    # is a paid agent turn plus a count RPC — two journeys driving that at once is enough.
+    #
+    # PROVEN BY EXPERIMENT, not inferred. verify-af-option-card-truth-live.ts, same deployed bundle:
+    #     alone                                          426 checks, 0 failures, exit 0
+    #     beside verify-af-live-truth.ts (the CI shape)   5 failures — "the round walked at least one
+    #                                                     question", "chip == the current eligible
+    #                                                     total", "confirming the answer produced a
+    #                                                     search", the same shapes CI reported
+    # Measured the same afternoon: apartment_guided_counts_ar on an unfiltered Buy scope took 14-19s
+    # and 57014'd in CI at ~21s, while fleet search mean rose 773ms → 5,109ms at ~3.8 q/s against a
+    # safe envelope of 1.5 q/s. Latency work cannot share a database with more latency work.
+    #
+    # `if: always()` for the same reason as the sweeps below: a plain `needs:` SKIPS a dependent when
+    # its dependency fails, and a skipped browser job is lost coverage on the surface it exists to
+    # protect. Attendance still requires all five jobs to have concluded success.
+    needs: [af-truth]
+    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     name: The rendered card, the removed pill and the scope change all tell one truth
     runs-on: ubuntu-latest
     # 45 → 60 on 2026-09-03: two more browser journeys (the §12A card-evidence pair) live here now.
@@ -378,7 +439,8 @@ jobs:
   # options / tens of thousands of rows, so it runs as its OWN job in parallel with the browser
   # journeys rather than inside their 30-minute budget. Offline twin: scripts/verify-af-matrix-truth.ts.
   af-matrix:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: [af-truth, af-card-state]
+    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     name: Every certified AF option shows, sends, applies, returns and carries one truth
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -414,6 +476,10 @@ jobs:
     if: always()
     needs: [af-truth, af-surface-region, af-surface-city, af-card-state, af-matrix]
     steps:
+      # The bridge step below runs a script from the repo, so this job needs a checkout of its own —
+      # it previously had none, because asserting over `needs` requires nothing on disk.
+      - uses: actions/checkout@v4
+
       - name: Refuse to report a clean run when a job was cancelled, skipped or failed
         env:
           RESULTS: ${{ toJSON(needs) }}
@@ -437,3 +503,22 @@ jobs:
             exit 1
           fi
           echo "all $n live AF/Trending jobs concluded success"
+
+      # This workflow is the only live check that was still able to fail silently (2026-09-04): 9 AF
+      # journeys going red notified nobody. It is also the one that matters most on a deploy day —
+      # it chains off a successful production deploy, and for 11 consecutive deploys reported as
+      # `failure` (a shell defect in the post-deploy bundle gate, fixed in this same change) it never
+      # ran at all. Hooked to the ATTENDANCE job on purpose: attendance already computes the
+      # aggregate verdict across all five jobs, so a green shard cannot resolve an alert that a red
+      # sibling just raised.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind af_live_check_failed
+          --workflow af-live-truth-check.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
