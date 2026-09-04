@@ -298,7 +298,26 @@ jobs:
   # af-surface above: these four were steps 17-20 of the old serial job and were the ones actually
   # skipped when it hit its cap). Browser journeys, so they need Chromium.
   af-card-state:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    # THE LAST RACE IN THIS WORKFLOW (2026-09-04). Making the three sweeps wait for the browser jobs
+    # fixed sweep-vs-journey contention and the reds SURVIVED it: run #137 failed BOTH browser jobs
+    # while no sweep had started. The two browser jobs were still racing EACH OTHER, and an AF card
+    # is a paid agent turn plus a count RPC — two journeys driving that at once is enough.
+    #
+    # PROVEN BY EXPERIMENT, not inferred. verify-af-option-card-truth-live.ts, same deployed bundle:
+    #     alone                                          426 checks, 0 failures, exit 0
+    #     beside verify-af-live-truth.ts (the CI shape)   5 failures — "the round walked at least one
+    #                                                     question", "chip == the current eligible
+    #                                                     total", "confirming the answer produced a
+    #                                                     search", the same shapes CI reported
+    # Measured the same afternoon: apartment_guided_counts_ar on an unfiltered Buy scope took 14-19s
+    # and 57014'd in CI at ~21s, while fleet search mean rose 773ms → 5,109ms at ~3.8 q/s against a
+    # safe envelope of 1.5 q/s. Latency work cannot share a database with more latency work.
+    #
+    # `if: always()` for the same reason as the sweeps below: a plain `needs:` SKIPS a dependent when
+    # its dependency fails, and a skipped browser job is lost coverage on the surface it exists to
+    # protect. Attendance still requires all five jobs to have concluded success.
+    needs: [af-truth]
+    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     name: The rendered card, the removed pill and the scope change all tell one truth
     runs-on: ubuntu-latest
     # 45 → 60 on 2026-09-03: two more browser journeys (the §12A card-evidence pair) live here now.
