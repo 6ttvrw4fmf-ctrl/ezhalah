@@ -1154,6 +1154,22 @@ const MONTHLY_ONLY_TABLE = /^(gathern|aqarmonthly)_/;
 const RES_TABLES = SEARCHABLE_TABLES.filter((t) => t.endsWith('_residential_listings') && !MONTHLY_ONLY_TABLE.test(t));
 const COM_TABLES = SEARCHABLE_TABLES.filter((t) => t.endsWith('_commercial_listings') && !MONTHLY_ONLY_TABLE.test(t));
 
+// The DEEP-LINK RESOLVER's scope — the same one inventory, ordered for latency only.
+//
+// fetchListingById() carried its OWN 73-entry literal until 2026-09-04: the third hand-maintained
+// copy of "the platforms Ezhalah searches", and it had already drifted. It was MISSING
+// aqarmonthly_residential_listings (1,731 production_ready rows, reachable through any monthly
+// search) and gathern_commercial_listings, and it still probed six RETIRED tables (toor, awal,
+// alnokhba × res+com). A deep link or a restored session pointing at an aqarmonthly listing
+// therefore resolved to NULL — the listing was findable in search and unopenable by id.
+//
+// Ids are unique across every table (one shared sequence), so ORDER is a latency choice, nothing
+// more: residential first because those tables are far larger, so the loop below usually stops early.
+const DEEPLINK_TABLES = [
+  ...SEARCHABLE_TABLES.filter((t) => t.endsWith('_residential_listings')),
+  ...SEARCHABLE_TABLES.filter((t) => t.endsWith('_commercial_listings')),
+];
+
 // The monthly-only sources are held OUT of the two base lists above and folded back in here, only
 // when the search's period scope includes monthly. That conditional is the product rule, not an
 // optimisation: [[gathern-source]] is rent-only and monthly-only, so it must never appear in a Buy
@@ -1724,48 +1740,10 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   const hit = LISTING_CACHE.get(id);
   if (hit) return hit;
   if (!supabase) return null;
-  // All four tables share one id sequence, so an id is unique across them. Try residential first
-  // (far larger), then commercial; try Aqar before Wasalt only because Aqar is bigger.
-  for (const table of [
-    'aqar_residential_listings', 'aqar_commercial_listings',
-    'wasalt_residential_listings', 'wasalt_commercial_listings',
-    'gathern_residential_listings',
-    'aldarim_residential_listings', 'aldarim_commercial_listings',
-    'aqargate_residential_listings', 'aqargate_commercial_listings',
-    'alhoshan_residential_listings', 'alhoshan_commercial_listings',
-    'hajer_residential_listings', 'hajer_commercial_listings',
-    'sanadak_residential_listings', 'sanadak_commercial_listings',
-    'eastabha_residential_listings', 'eastabha_commercial_listings',
-    'aqarcity_residential_listings', 'aqarcity_commercial_listings',
-    'raghdan_residential_listings', 'raghdan_commercial_listings',
-    'eaqartabuk_residential_listings', 'eaqartabuk_commercial_listings',
-    'satel_residential_listings', 'satel_commercial_listings',
-    'sadin_residential_listings', 'sadin_commercial_listings',
-    'toor_residential_listings', 'toor_commercial_listings',
-    'mustqr_residential_listings', 'mustqr_commercial_listings',
-    'ramzalqasim_residential_listings', 'ramzalqasim_commercial_listings',
-    'fursaghyr_residential_listings', 'fursaghyr_commercial_listings',
-    'jazwtn_residential_listings', 'jazwtn_commercial_listings',
-    'mizlaj_residential_listings', 'mizlaj_commercial_listings',
-    'muktamel_residential_listings', 'muktamel_commercial_listings',
-    'aqaratikom_residential_listings', 'aqaratikom_commercial_listings',
-    'awal_residential_listings', 'awal_commercial_listings',
-    'alkhaas_residential_listings', 'alkhaas_commercial_listings',
-    'abeea_residential_listings', 'abeea_commercial_listings',
-    'jurash_residential_listings', 'jurash_commercial_listings',
-    'alnokhba_residential_listings', 'alnokhba_commercial_listings',
-    'dealapp_residential_listings', 'dealapp_commercial_listings',
-    
-    'erapulse_residential_listings', 'erapulse_commercial_listings',
-    'nowaisiry_residential_listings', 'nowaisiry_commercial_listings',
-    'october_residential_listings', 'october_commercial_listings',
-    'souq24_residential_listings', 'souq24_commercial_listings',
-    'therc_residential_listings', 'therc_commercial_listings',
-    'aouj_residential_listings', 'aouj_commercial_listings',
-    'abralosol_residential_listings', 'abralosol_commercial_listings',
-    'arkaan_residential_listings', 'arkaan_commercial_listings',
-    'rawasidark_residential_listings', 'rawasidark_commercial_listings',
-  ]) {
+  // ONE inventory — see DEEPLINK_TABLES. Never re-list the tables here: this loop is the surface a
+  // deep link and a restored session both land on, and a private copy of the fleet is how it came to
+  // miss aqarmonthly (a live, monthly-searchable platform) while still probing three retired ones.
+  for (const table of DEEPLINK_TABLES) {
     const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).limit(1);
     if (error || !data || !data.length) continue;
     const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');

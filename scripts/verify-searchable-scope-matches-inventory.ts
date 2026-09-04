@@ -39,7 +39,9 @@
 //
 // LIVE CHECK — excluded from `npm test` (scripts/test-exclusions.txt); runs in
 // .github/workflows/af-live-truth-check.yml with the other production-truth barriers.
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { stripComments } from './lib/stripComments.ts';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
@@ -71,18 +73,20 @@ const lifted = await liftSymbols(
     { header: 'const MONTHLY_ONLY_TABLE = ', endsWith: /;$/ },
     { header: 'const RES_TABLES = ', endsWith: /;$/ },
     { header: 'const COM_TABLES = ', endsWith: /;$/ },
+    { header: 'const DEEPLINK_TABLES = [', endsWith: /^\];$/ },
     { header: 'function monthlyInScope(' },
     { header: 'function monthlyOnly(' },
     { header: 'function resTables(' },
     { header: 'function comTables(' },
   ],
-  ['SEARCHABLE_TABLES', 'RES_TABLES', 'COM_TABLES', 'monthlyInScope', 'resTables', 'comTables'],
+  ['SEARCHABLE_TABLES', 'RES_TABLES', 'COM_TABLES', 'DEEPLINK_TABLES', 'monthlyInScope', 'resTables', 'comTables'],
   'type SearchQuery = { deal?: string; rentPeriod?: string; dealCombined?: boolean };\n',
 ).catch((e) => die(`could not lift the scope out of src/data/remote.ts — ${(e as Error).message}`));
 
 const SEARCHABLE_TABLES = lifted.SEARCHABLE_TABLES as string[];
 const RES_TABLES = lifted.RES_TABLES as string[];
 const COM_TABLES = lifted.COM_TABLES as string[];
+const DEEPLINK_TABLES = lifted.DEEPLINK_TABLES as string[];
 const monthlyInScope = lifted.monthlyInScope as (q: Q) => boolean;
 const resTables = lifted.resTables as (q: Q) => string[];
 const comTables = lifted.comTables as (q: Q) => string[];
@@ -107,6 +111,45 @@ check('every inventory table is reachable in at least one search mode',
   `${unreachableInEveryMode.join(', ')} — in the inventory, returnable by NO search`);
 const invented = [...everReachable].filter((t) => !SEARCHABLE_TABLES.includes(t)).sort();
 check('no mode invents a table outside the inventory', invented.length === 0, invented.join(', '));
+
+// ── 1b. THE DEEP-LINK RESOLVER READS THE SAME ONE INVENTORY ──────────────────────────────────────
+// fetchListingById() is the OTHER surface that has to know the fleet: an in-app-browser deep link and
+// a restored session both resolve a listing by id through it. Until 2026-09-04 it looped over a THIRD
+// hand-maintained literal, and this barrier — which only ever looked at resTables/comTables — could
+// not see it, which is precisely why it had drifted: MISSING aqarmonthly_residential_listings (1,731
+// production_ready rows, reachable through any monthly search) and gathern_commercial_listings, while
+// still probing six RETIRED tables (toor, awal, alnokhba × res+com). The user-visible effect was a
+// monthly listing that search could find and no deep link could open.
+//
+// Two assertions, because either alone is satisfiable by the bug: the lifted DEEPLINK_TABLES must BE
+// the inventory (set equality, both directions), and the resolver's own body must contain no table
+// name at all — a private literal that happened to match today would pass the first check and drift
+// again tomorrow.
+const dlMissing = SEARCHABLE_TABLES.filter((t) => !DEEPLINK_TABLES.includes(t)).sort();
+const dlExtra = DEEPLINK_TABLES.filter((t) => !SEARCHABLE_TABLES.includes(t)).sort();
+check('the deep-link resolver covers every inventory table', dlMissing.length === 0,
+  `${dlMissing.join(', ')} — searchable, but fetchListingById() would resolve them to NULL`);
+check('the deep-link resolver names no table outside the inventory', dlExtra.length === 0,
+  `${dlExtra.join(', ')} — probed by id but not searchable (a retired or renamed table)`);
+check('the deep-link order is a permutation, not a filter',
+  DEEPLINK_TABLES.length === SEARCHABLE_TABLES.length
+    && new Set(DEEPLINK_TABLES).size === DEEPLINK_TABLES.length,
+  `${DEEPLINK_TABLES.length} entries vs ${SEARCHABLE_TABLES.length} in the inventory`);
+
+// A COMMENT IS NOT A CODE PATH: read the resolver's body with comments stripped and COUNT the table
+// names left in the CODE. The prose above fetchListingById names tables on purpose; only a literal
+// that the loop could actually iterate is a finding.
+const remoteSrc = await readFile(join(ROOT, 'src/data/remote.ts'), 'utf8')
+  .catch((e) => die(`could not read src/data/remote.ts — ${(e as Error).message}`));
+const fnStart = remoteSrc.indexOf('export async function fetchListingById(');
+const fnBody = fnStart < 0 ? '' : stripComments(remoteSrc.slice(fnStart, remoteSrc.indexOf('\n}', fnStart)));
+check('fetchListingById() is still there to assert on', fnStart >= 0 && fnBody.length > 0);
+const literalTables = fnBody.match(/['"`][a-z0-9]+_(residential|commercial)_listings['"`]/g) ?? [];
+check('fetchListingById() carries NO private table literal (it iterates the one inventory)',
+  literalTables.length === 0 && /for \(const table of DEEPLINK_TABLES\)/.test(fnBody),
+  literalTables.length
+    ? `${literalTables.length} table name(s) hardcoded in the resolver: ${[...new Set(literalTables)].join(', ')}`
+    : 'the loop no longer iterates DEEPLINK_TABLES — it is reading some other list');
 
 // ── 2. THE MONTHLY-ONLY CONDITIONAL, BY EXECUTION, IN EVERY MODE ─────────────────────────────────
 // gathern_* and aqarmonthly_* are monthly-only verticals: every listing is a monthly rental. They
