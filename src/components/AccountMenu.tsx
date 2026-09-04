@@ -350,9 +350,9 @@ export default function AccountMenu({
               <Row icon="globe-outline" label={t('Language')} value="العربية" chevron onPress={() => go('language', 1)} testID="account-menu-language" />
               <Row icon="help-circle-outline" label={t('Help')} onPress={() => { onClose(); onHelp(); }} testID="account-menu-help" />
               <Row icon="person-outline" label={t('Manage account')} chevron onPress={() => { setEditing(false); go('account', 1); }} testID="account-menu-account" />
-              {/* «الشروط والخصوصية» (owner 2026-09-03) — directly above «تسجيل الخروج». Rendered
-                  ONLY once the owner's legal text exists (src/data/legal.ts): a row that opens an
-                  empty reader would be worse than no row. */}
+              {/* «الشروط والخصوصية» (owner 2026-09-03, text drafted 2026-09-04) — directly above
+                  «تسجيل الخروج». Still gated on hasLegalDocs(): a row that opens an empty reader
+                  would be worse than no row, so the gate stays even now that text exists. */}
               {hasLegalDocs() && (
                 <Row icon="document-text-outline" label={t('Terms & Privacy')} onPress={() => { onClose(); onLegal(); }} testID="account-menu-legal" />
               )}

@@ -183,7 +183,7 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
   const { isRTL } = useI18n();
   const { openModal } = useApp();
   const cp = !!compact;
-  // «سياسة الخصوصية» is a link ONLY once the owner's legal text exists (src/data/legal.ts); until
+  // «الشروط والخصوصية» is a link ONLY once the owner's legal text exists (src/data/legal.ts); until
   // then it is emphasized plain text — never a link to nothing.
   const legalLive = hasLegalDocs();
   const [step, setStep] = useState<Step>('main');
@@ -301,14 +301,14 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
                       <Text
                         style={[s.agreeLink, s.agreeLinkLive]}
                         accessibilityRole="link"
-                        onPress={() => openModal('privacy')}
+                        onPress={() => openModal('legal')}
                         // @ts-expect-error web-only DOM props on the RNW host node
                         dataSet={{ testid: 'auth-privacy-link' }}
                       >
-                        {t('Privacy Policy')}
+                        {t('Terms & Privacy')}
                       </Text>
                     ) : (
-                      <Text style={s.agreeLink}>{t('Privacy Policy')}</Text>
+                      <Text style={s.agreeLink}>{t('Terms & Privacy')}</Text>
                     )}
                   </Text>
 
@@ -495,7 +495,10 @@ const s = StyleSheet.create({
   // Arabic typography: weights carry the hierarchy — no Latin letter-spacing on Arabic script.
   formHead: { fontSize: 24, fontWeight: '800', color: colors.ink, textAlign: 'center', marginBottom: 6, lineHeight: 34 },
   formSub: { fontSize: 14.5, color: colors.body, textAlign: 'center', marginBottom: 10, lineHeight: 22 },
-  agree: { fontSize: 12.5, color: colors.muted, textAlign: 'center', marginBottom: 24, lineHeight: 18, paddingHorizontal: 8 },
+  // Owner 2026-09-04: the agreement line reads as its own, separate block below the intro — not
+  // packed against the subline. marginTop 14 (on top of formSub's own marginBottom 10) opens a
+  // ~24px gap, matching the gap already below this line before the OAuth buttons.
+  agree: { fontSize: 12.5, color: colors.muted, textAlign: 'center', marginTop: 14, marginBottom: 24, lineHeight: 18, paddingHorizontal: 8 },
   agreeLink: { color: colors.ink, fontWeight: '600' },
   agreeLinkLive: { textDecorationLine: 'underline' },
 

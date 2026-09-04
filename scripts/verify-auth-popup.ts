@@ -192,9 +192,9 @@ check('the centered modal renders NO × on its main step; the compact card and i
 check('NO email (or any) text input on the sign-in surfaces — Google and Apple only (owner 2026-09-03)',
   !/<TextInput/.test(authModal) && !/TextInput/.test(authModal.slice(0, authModal.indexOf('export default')))
   && authModal.includes("t('Continue with Google')") && authModal.includes("t('Continue with Apple')"));
-check('the privacy sentence links to the legal reader ONLY when real legal text exists (never a link to nothing)',
+check('the agreement sentence links to the legal reader ONLY when real legal text exists (never a link to nothing)',
   authModal.includes('const legalLive = hasLegalDocs();') && /legalLive \? \(/.test(authModal)
-  && authModal.includes("onPress={() => openModal('privacy')}"));
+  && authModal.includes("onPress={() => openModal('legal')}"));
 check('WIRING themed from birth: the card paints with var(--ez-*) token roles, no hardcoded surface hexes',
   signInCard.includes('colors.surface') && signInCard.includes('colors.fieldLine')
   && !/backgroundColor:\s*'#/.test(signInCard));
