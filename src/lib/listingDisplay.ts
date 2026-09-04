@@ -37,7 +37,18 @@ export function listingPriceAr(listing: Listing): string {
 // imports this back for its own badge/host-name text. Exhaustive per-platform matching preserved
 // verbatim, including the Al Khaas space/no-space fix (found live 2026-07-25).
 export function sourceName(source: string): string {
-  const s = source.toLowerCase();
+  // SPACING IS NOT IDENTITY (production defect, 2026-09-04). Every branch below tests a closed-up
+  // slug, but the DB `source` value is a human brand string that often carries SPACES: production
+  // stores 'Abr Alosol', 'THE RC' and 'Rawasi Dark', so `includes('abralosol' | 'therc' |
+  // 'rawasidark')` all missed and 3,165 live listings fell through to the Aqar fallback below —
+  // Aqar's name, Aqar's logo, and a click-through to sa.aqar.fm on another company's listing. Same
+  // trap that hit 'Al Khaas' and 'Al Nokhba', which were each patched one-off with an extra alias.
+  // Searching BOTH the raw string and a space-stripped copy retires the whole class instead of the
+  // next instance of it: a spaced brand and its slug now match the same branch, and the existing
+  // spaced tokens ('al khaas') keep working because the raw form is still in the haystack. The '|'
+  // separator cannot appear in any token, so nothing can match across the join.
+  const raw = source.toLowerCase();
+  const s = raw + '|' + raw.replace(/\s+/g, '');
   if (s.includes('wasalt')) return 'Wasalt';
   if (s.includes('aldarim')) return 'Aldarim Real Estate';
   if (s.includes('aqargate')) return 'Aqar Gate';
