@@ -108,6 +108,16 @@ jobs:
             echo "| Acknowledged, all time | $al_ackall |"
             echo "| Oldest open | ${al_oldd}d |"
             echo
+            echo
+            echo "### Backlog by owning routine"
+            echo
+            echo "| routine | open | unacknowledged | oldest |"
+            echo "|---|---:|---:|---:|"
+            # A total is a fact nobody owns. This is the same number, made answerable — and
+            # '(unrouted)' is shown as its own row rather than folded into routine #2, because
+            # "nobody has computed an owner yet" and "routine #2 owns this" are different facts.
+            jq -r '.alerts.by_owner | to_entries[] | "| \(.key) | \(.value.open) | \(.value.unacknowledged) | \(.value.oldest_days)d |"' <<<"$health"
+            echo
             if [ "$al_unack" -gt 0 ]; then
               echo "> An unacknowledged alert is an unstarted task, not a status. Each owning routine"
               echo "> claims its own with \`gh issue list --label ezhalah-alert --label <routine-label> --state open\`"
