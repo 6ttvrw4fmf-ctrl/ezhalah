@@ -594,7 +594,15 @@ export function searchTableScope(q: SearchQuery): SearchTableScope | null {
   return { p_tables: mainTables, ...scopeB, isBroadCommercial };
 }
 
-export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null> {
+// UNKNOWN IS NOT AN HONEST ZERO (P2, found 2026-09-04). `null` from here means the location genuinely
+// resolves to nothing, and every caller renders that as an empty result set — the "no listings here,
+// try broadening your search" screen. The resolve_district_cities failure branch below used to return
+// that SAME null, so a backend outage was drawn as a truthful-looking verdict about the user's search.
+// It now returns PROBE_FAILED — the sentinel this file already uses for AF counts (src/lib/afProbe.ts,
+// «couldn't determine because the backend failed» ≠ «the source answered: nothing») — so the caller can
+// surface the retry posture it already has for a failed page-0 search. Callers must check
+// isProbeFailure() BEFORE `!scope`; TypeScript enforces it, since ProbeFailed is truthy.
+export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null | ProbeFailed> {
   const tableScope = searchTableScope(q);
   if (!tableScope) return null;
 
@@ -632,11 +640,18 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
       inFlightDistrictCities,
       JSON.stringify(q.districts),
       async () => {
-        const r = await supabase!.rpc('resolve_district_cities', { p_districts: q.districts });
+        // bounded() — the same timeout discipline every other data-layer call in this file already
+        // has (RC-A 2026-07-13). This was the ONE RPC still issued bare: supabase-js sets no request
+        // timeout, so a stalled response never settled, this await never returned, and the «إزهله
+        // يبحث» loader spun forever with no recovery. bounded() aborts at RPC_TIMEOUT_MS and shapes
+        // the timeout exactly like a backend error, which the PROBE_FAILED branch below then reports.
+        const r = await bounded(supabase!.rpc('resolve_district_cities', { p_districts: q.districts }));
         return { data: r.data as { city_ar: string; match_count: number }[] | null, error: r.error };
       },
     );
-    if (districtCitiesError) return null;        // RPC failure ≠ genuine zero matches — give up, don't fall through unrestricted
+    // RPC failure/timeout ≠ genuine zero matches. NOT null — see this function's header: null is the
+    // honest zero every caller renders as an empty result set.
+    if (districtCitiesError) return PROBE_FAILED;
     const dcRows = (districtCities as { city_ar: string; match_count: number }[] | null) ?? [];
     if (dcRows.length === 1) {
       cities = [dcRows[0].city_ar];
@@ -744,6 +759,7 @@ const inFlightAgeCounts = new Map<string, Promise<AgeOptionCounts | null>>();
 export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeOptionCounts | null | ProbeFailed> {
   if (!supabase) return null;
   const scope = await resolveSearchScope(q);
+  if (isProbeFailure(scope)) return PROBE_FAILED;   // scope resolution failed = never learned the answer
   if (!scope) {
     return { cnt_new: 0, cnt_1_2: 0, cnt_3_5: 0, cnt_6_9: 0, cnt_10p: 0, cnt_unknown: 0, cnt_total: 0, platform_breakdown: null };
   }
@@ -836,6 +852,7 @@ const inFlightGuidedCounts = new Map<string, Promise<GuidedCounts | null>>();
 export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<GuidedCounts | null | ProbeFailed> {
   if (!supabase) return null;
   const scope = await resolveSearchScope(q);
+  if (isProbeFailure(scope)) return PROBE_FAILED;   // scope resolution failed = never learned the answer
   if (!scope) return null;
   const { isBroadCommercial, ...scopeParams } = scope;
   return dedupeInFlight(inFlightGuidedCounts, JSON.stringify(q), async () => {
@@ -927,7 +944,10 @@ export async function fetchScopeOptionCounts(
   const raw: Record<string, number | ProbeFailed> = {};
   const probe = async ({ key, query }: { key: string; query: SearchQuery }): Promise<number | ProbeFailed> => {
     const scope = await resolveSearchScope(query);
-    if (!scope) return PROBE_FAILED;               // unresolvable scope → never learned, never a fake 0
+    // `!scope` is an unresolvable scope; isProbeFailure() is resolveSearchScope's own RPC failing.
+    // Both are "never learned" — and the sentinel is a truthy object, so `!scope` alone would let it
+    // through to be spread as scope params below.
+    if (isProbeFailure(scope) || !scope) return PROBE_FAILED;
     const { isBroadCommercial, ...scopeParams } = scope;
     const result = await withTimeout(
       supabase!.rpc('location_search_candidates_ar', {
@@ -962,8 +982,10 @@ export async function fetchDistrictEligibleCounts(
   options: { districtAr: string; matchValues: string[] }[],
 ): Promise<Record<string, number> | null> {
   if (!supabase || !options.length) return null;
+  // null is this helper's own "no honest number available" value — index.tsx prints no count for a
+  // null result rather than a 0 — so a failed scope collapses into it legitimately (see the caller).
   const scope = await resolveSearchScope(q);
-  if (!scope) return null;
+  if (isProbeFailure(scope) || !scope) return null;
   const { isBroadCommercial, ...scopeParams } = scope;
   const base = {
     ...scopeParams,
@@ -1514,6 +1536,11 @@ export async function fetchListingsForQuery(
   if (signal?.aborted) return { listings: null, pageCandidates, pageTotal }; // Stop pressed before any network call started
   // Location/table/region scope — shared with the advanced-filter option-count RPCs (resolveSearchScope).
   const scope = await resolveSearchScope(q);
+  // THE USER-VISIBLE HALF OF THE FIX. `listings: []` is the honest-zero screen ("no listings here,
+  // try broadening"); `listings: null` is the retryable-error posture this function already uses for
+  // every backend failure (store.tsx passes it to runSearch as fetchFailed). A scope that FAILED must
+  // take the second path — it is our outage, not a fact about their search.
+  if (isProbeFailure(scope)) return { listings: null, pageCandidates, pageTotal };
   if (!scope) return { listings: [], pageCandidates, pageTotal };
   const { isBroadCommercial, ...scopeParams } = scope;
 
