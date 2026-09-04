@@ -13,7 +13,7 @@ name: Guardian journeys (production)
 on:
   schedule:
     # 05:40 UTC — off-peak, and after UI parity (05:10) so the two browser jobs do not contend.
-    - cron: '40 5 * * *'
+    - cron: '5 6 * * *'
   workflow_run:
     workflows: ['Deploy frontend (production)']
     types: [completed]

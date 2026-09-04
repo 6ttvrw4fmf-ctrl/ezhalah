@@ -1,0 +1,21 @@
+# Firings per UTC day for every scheduled workflow, at the time the stagger landed.
+# A FLOOR, in the same sense as scripts/test-baseline.txt: spreading load may move WHEN a check
+# runs, never HOW OFTEN. Lowering a number here takes a deliberate, reviewed edit — it cannot
+# happen as a side effect of restaggering. Enforced by scripts/verify-live-check-schedule-stagger.ts.
+af-live-truth-check.yml 1
+audit-invariants.yml 1
+count-rpc-parity-live-check.yml 4
+district-suggestion-parity-live-check.yml 4
+diversity-live-check.yml 4
+frontend-bundle-source-parity-live-check.yml 4
+guardian-journeys.yml 1
+journey-sweep.yml 1
+live-search-sweep.yml 1
+loader-active-platforms-check.yml 4
+location-placeholder-monitor.yml 2
+migration-drift-guard.yml 96
+photo-rotation-live-check.yml 4
+recency-fallback-live-check.yml 4
+region-scoped-city-live-check.yml 4
+selector-e2e.yml 4
+ui-parity.yml 1

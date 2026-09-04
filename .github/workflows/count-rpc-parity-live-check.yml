@@ -13,7 +13,7 @@
 
 on:
   schedule:
-    - cron: '47 */6 * * *' # every 6 hours (offset from the diversity/district checks)
+    - cron: '45 1-19/6 * * *' # every 6 hours (offset from the diversity/district checks)
   workflow_dispatch:
 
 concurrency:

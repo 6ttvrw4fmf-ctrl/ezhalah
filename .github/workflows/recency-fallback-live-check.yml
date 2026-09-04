@@ -23,7 +23,7 @@ name: Recency fallback — live behavioral check
 
 on:
   schedule:
-    - cron: '27 */6 * * *' # every 6 hours, off the other live checks' minutes
+    - cron: '25 1-19/6 * * *' # every 6 hours, off the other live checks' minutes
   workflow_dispatch:
 
 concurrency:

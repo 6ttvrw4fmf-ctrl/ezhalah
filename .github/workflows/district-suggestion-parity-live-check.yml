@@ -13,7 +13,7 @@ name: District suggestions — no dead ends (live check)
 
 on:
   schedule:
-    - cron: '37 */6 * * *' # every 6 hours (offset from the diversity check)
+    - cron: '25 3-21/6 * * *' # every 6 hours (offset from the diversity check)
   workflow_dispatch:
 
 concurrency:

@@ -21,7 +21,7 @@ name: Selector E2E (production)
 
 on:
   schedule:
-    - cron: '23 */6 * * *'   # every 6h, offset to avoid the :00/:15 cron rush
+    - cron: '5 3-21/6 * * *'   # every 6h, offset to avoid the :00/:15 cron rush
   workflow_dispatch: {}
   workflow_run:
     workflows: ["Deploy frontend (production)"]

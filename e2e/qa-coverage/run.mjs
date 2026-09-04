@@ -21,6 +21,34 @@ const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'applic
 const BUDGET = Number(process.env.QA_BUDGET) || DAILY_BUDGET;
 const CONCURRENCY = 2;
 const MIN_GAP_MS = 700;                       // ≤1.5 searches/sec sustained
+
+// ── ADAPTIVE PACING (owner directive, 2026-09-04) ────────────────────────────────────────────────
+// 700 ms keeps THIS run inside the §40.1 envelope of 1.5 searches/second. It says nothing about the
+// SUM. On 2026-09-04 the seven daily routines were each individually compliant and collectively at
+// 2.5-3.2/s, and real search traffic averaged ~2 s while cron sat at zero — self-inflicted
+// contention that no per-run constant can see, because every run's constant is correct in
+// isolation. Staggering fixes the scheduled half; nothing can stagger interactive sessions.
+//
+// So the run asks how loaded Search actually is and spaces itself out when the instance is already
+// busy. This NEVER drops a search, narrows a predicate, or skips an assertion — the plan, the
+// oracle and the ledger writes are byte-for-byte identical either way. Only wall-clock moves, and
+// only while someone else is hurting. §33: correctness outranks latency, in both directions.
+const BUSY_GAP_MS = Number(process.env.QA_BUSY_GAP_MS) || 2100;   // ~0.5/s while the box is loaded
+const LOAD_RECHECK_MS = 60000;                                    // one cheap probe a minute, at most
+let pacingGap = MIN_GAP_MS, lastLoadCheck = 0, backedOff = 0;
+async function currentGap() {
+  if (Date.now() - lastLoadCheck < LOAD_RECHECK_MS) return pacingGap;
+  lastLoadCheck = Date.now();
+  try {
+    const [load] = (await rpc('ops_search_load_now', {})) ?? [];
+    // Unreadable or not yet sampled ⇒ keep the normal pace. A missing signal must never be read as
+    // "the box is on fire" and silently triple every run's duration.
+    const busy = !!load?.degraded;
+    if (busy && pacingGap === MIN_GAP_MS) backedOff++;
+    pacingGap = busy ? BUSY_GAP_MS : MIN_GAP_MS;
+  } catch { pacingGap = MIN_GAP_MS; }
+  return pacingGap;
+}
 const LEDGER_DIMENSION = 'rpc_cohort';
 
 const rest = (p) => fetch(`${SUPA}/rest/v1/${p}`, { headers: H }).then((r) => r.json());
@@ -115,7 +143,7 @@ async function worker() {
     const i = cursor++;
     if (i >= searches.length) return;
     const s = searches[i];
-    const gap = MIN_GAP_MS - (Date.now() - lastFire);
+    const gap = (await currentGap()) - (Date.now() - lastFire);
     if (gap > 0) await sleep(gap);
     lastFire = Date.now();
     const body = buildRequest(COHORT.get(s.uiType), s);
@@ -167,6 +195,7 @@ DUPLICATE IDS SERVED:         ${out.reduce((a, r) => a + r.dupes, 0)}
 HONEST-ZERO SEARCHES:         ${zero}
 HARNESS ERRORS:               ${errors.length}
 LATENCY ms:                   p50 ${lat[Math.floor(lat.length * 0.5)]}  p95 ${lat[Math.floor(lat.length * 0.95)]}  max ${lat[lat.length - 1]}
+PACED BACK FOR OTHER LOAD:    ${backedOff} time(s) — searches unchanged, only spacing
 (browser journeys and exact-set SQL differentials are reported by their own layers — never merged in)`);
 if (errors.length) console.log('ERRORS:\n' + errors.slice(0, 15).join('\n'));
 

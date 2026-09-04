@@ -12,7 +12,7 @@ on:
     # DeepSeek's PEAK window, where every token costs DOUBLE. Measured 2026-08-31: the account's
     # actual $/request came in ~20% above the blended model precisely because our automation ran
     # inside peak. 04:00-06:00 is off-peak; same test, half price. (owner ruling 2026-08-31)
-    - cron: '40 4 * * *'   # nightly 04:40 UTC — off-peak
+    - cron: '35 4 * * *'   # nightly 04:40 UTC — off-peak
   workflow_dispatch: {}
 
 jobs:
