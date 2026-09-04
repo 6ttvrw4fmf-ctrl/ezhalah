@@ -14,14 +14,38 @@
 // flex-centered rest; the card paints its ABSOLUTE position) by supplying `clamp` — the same
 // clampAuthPopupOffset either way, closed over the right base rect.
 
+import { clampAuthPopupOffset } from './authPopupBehavior';
+
 export type CardDragOpts = {
-  /** sessionStorage key for this surface's position memory. */
-  posKey: string;
+  /** sessionStorage key for this surface's position memory. OMIT it and the surface has no memory:
+   *  every open starts where flex centering rests it (owner 2026-09-03 for the centered popups —
+   *  "dragging only changes its position AFTER the user moves it"); the small SignInCard keeps its. */
+  posKey?: string;
   /** Clamp a candidate painted vector fully on-screen. Called fresh per event (live geometry). */
   clamp: (p: { x: number; y: number }) => { x: number; y: number };
   /** The vector to paint before any saved position is restored (default {0,0}). */
   initial?: () => { x: number; y: number };
 };
+
+/** OFFSET-MODE clamp for a flex-centered surface: the painted translate is an offset from wherever
+ *  centering rests the card, so the clamp derives the UNTRANSLATED base rect per call — live rect
+ *  minus the currently painted offset — and viewport resizes / content growth are always measured
+ *  fresh, never cached stale. Shared by the sign-in popup and «من نحن». */
+export function clampOffsetOnScreen(node: HTMLElement): CardDragOpts['clamp'] {
+  const painted = () => {
+    const m = /translate3d\((-?[\d.]+)px, (-?[\d.]+)px/.exec(node.style.transform || '');
+    return m ? { x: +m[1], y: +m[2] } : { x: 0, y: 0 };
+  };
+  return (p) => {
+    const r = node.getBoundingClientRect();
+    const o = painted();
+    return clampAuthPopupOffset(
+      p,
+      { left: r.left - o.x, top: r.top - o.y, width: r.width, height: r.height },
+      { w: innerWidth, h: innerHeight },
+    );
+  };
+}
 
 /** Attach the drag to `node` (painted) via `grip` (grabbed). Returns a cleanup function. */
 export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardDragOpts): () => void {
@@ -33,7 +57,7 @@ export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardD
   // Restore this session's moved position (owner: "preserve if safe/easy"), re-clamped so a
   // narrower window since then can never restore the surface off-screen.
   try {
-    const saved = sessionStorage.getItem(opts.posKey);
+    const saved = opts.posKey ? sessionStorage.getItem(opts.posKey) : null;
     if (saved) {
       const p = JSON.parse(saved);
       if (typeof p?.x === 'number' && typeof p?.y === 'number') { off = opts.clamp(p); paint(); }
@@ -90,7 +114,7 @@ export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardD
     }
     const project = (v: number, rate = 0.998) => (v / 1000) * rate / (1 - rate);
     const target = opts.clamp({ x: off.x + project(vx), y: off.y + project(vy) });
-    try { sessionStorage.setItem(opts.posKey, JSON.stringify(target)); } catch { /* non-fatal */ }
+    if (opts.posKey) { try { sessionStorage.setItem(opts.posKey, JSON.stringify(target)); } catch { /* non-fatal */ } }
     if (reduced) { off = target; paint(); return; }
     // SAFETY NET: rAF is fully suspended in a hidden/occluded tab, which would strand the surface
     // at its rubber-banded release position — possibly past the bounds — until the next grab.
