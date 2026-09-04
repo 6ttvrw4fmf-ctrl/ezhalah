@@ -6,6 +6,31 @@ import {
 } from './sweep.mjs';
 
 const enc = encodeURIComponent;
+
+// The district panel's readiness ceiling, and deliberately NOT a number of this harness's own
+// invention. src/data/locations.ts aborts the district_options_ar call at 15 s; a harness that gives
+// up sooner than the product does reports its own impatience as a product defect (§40.7). This is a
+// CEILING, not a wait: the loop below breaks the moment the panel is ready (~0.6-1.5 s warm), so the
+// passing path is faster than the fixed 4.2 s sleep it replaces, and only a genuine failure pays it.
+const DISTRICT_PANEL_BUDGET_MS = 15000;
+
+/** The district-panel scrape, lifted out of the journey so the readiness poll re-runs the EXACT
+ *  same reading rather than a second, subtly different one. Structure only — never spelling. */
+const scrapeDistrictRows = () => {
+  const t = document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean);
+  const out = [];
+  for (let i = 0; i < t.length - 2; i++) {
+    // ordinal marker, then the name, then its count line
+    if (/^\d+\.$/.test(t[i]) && /إعلان/.test(t[i + 2]) && !/إعلان/.test(t[i + 1])) out.push([t[i + 1], t[i + 2]]);
+  }
+  // Fallback for a rendering without ordinals: any line immediately followed by a count line.
+  if (!out.length) {
+    for (let i = 0; i < t.length - 1; i++) {
+      if (/إعلان/.test(t[i + 1]) && !/إعلان/.test(t[i]) && t[i].length < 40 && /[؀-ۿ]/.test(t[i])) out.push([t[i], t[i + 1]]);
+    }
+  }
+  return out.slice(0, 6);
+};
 /** The DB-truth filter for a plain city+deal(+period) search, in PostgREST's own operators. */
 export function truthFilter({ city, deal, period, types }) {
   let f = `city_ar=eq.${enc(city)}`;
@@ -74,7 +99,17 @@ export async function trendingDistrict(plan) {
     // A narrowing filter is the point: an unnarrowed district count cannot expose the class of bug
     // this journey exists for (the count that ignores the active filter).
     if (plan.priceMax) { await page.locator('[data-testid="price-max-input"]').fill(String(plan.priceMax)).catch(() => {}); await sleep(1600); }
-    await page.locator('[data-testid="district-input"]').click(); await sleep(4200);
+    // R14.4.2 OBSERVER. Attached BEFORE the click so the panel's own RPC cannot land unseen. It is
+    // what lets an empty panel be told apart from a slow one — see the decision below.
+    const rpc = { returned: false, rows: null, ms: null, status: null };
+    const clickAt = Date.now();
+    page.on('response', async (r) => {
+      if (!r.url().includes('district_options_ar') || rpc.returned) return;
+      rpc.status = r.status();
+      try { const b = await r.json(); rpc.rows = Array.isArray(b) ? b.length : -1; } catch { rpc.rows = -1; }
+      rpc.returned = true; rpc.ms = Date.now() - clickAt;
+    });
+    await page.locator('[data-testid="district-input"]').click();
     // Match the trending list's STRUCTURE — «1.» / name / «N إعلان» — not the district's spelling.
     // Until 2026-08-24 this tested /^حي /, which is not a property of a district name: 1,082 of the
     // index's 3,694 (city, district) pairs — 32,712 production-ready rows — carry no «حي » prefix,
@@ -82,22 +117,39 @@ export async function trendingDistrict(plan) {
     // the harness saw zero rows, skipped, and failed the run on a missed coverage floor while
     // production was working perfectly. A barrier that cannot see 16% of the inventory reports its
     // own blindness as a defect (§40.7), and silently drops the journey the floor exists to force.
-    const rows = await page.evaluate(() => {
-      const t = document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean);
-      const out = [];
-      for (let i = 0; i < t.length - 2; i++) {
-        // ordinal marker, then the name, then its count line
-        if (/^\d+\.$/.test(t[i]) && /إعلان/.test(t[i + 2]) && !/إعلان/.test(t[i + 1])) out.push([t[i + 1], t[i + 2]]);
+    // POLL FOR READINESS; NEVER SLEEP A FIXED AMOUNT AND LOOK ONCE. This was `sleep(4200)` followed
+    // by a single scrape, which is a RACE dressed as a budget: the panel's RPC answers in ~0.6-1.5 s
+    // warm, so 4.2 s usually won — and when it did not (cold plan, or a browser job starved by the
+    // concurrent RPC sweeps, the load defect #1692 fixed), the scrape read a panel that had not
+    // rendered yet. Polling passes as soon as the panel is actually ready, so the normal case gets
+    // FASTER, and the slow case becomes a real reading instead of a coin flip.
+    let rows = [];
+    while (Date.now() - clickAt < DISTRICT_PANEL_BUDGET_MS) {
+      rows = await page.evaluate(scrapeDistrictRows);
+      if (rows.length) break;
+      await sleep(250);
+    }
+    const renderMs = Date.now() - clickAt;
+    // AN EMPTY PANEL IS NOT AUTOMATICALLY A SKIP. The old line noted "no numbered district rows" and
+    // returned null for BOTH of the two cases below, so a panel that never rendered was recorded as
+    // a skip — green, and indistinguishable from a city that genuinely has no districts. That is the
+    // shape R14.4.2 exists to forbid ("the field goes empty and the user loses the surface"), and it
+    // is exactly why the district render bug could fail once, pass on re-run, and never be a defect.
+    // The panel's OWN RPC settles it: what the surface was given is not a guess.
+    if (!rows.length) {
+      if (!rpc.returned) {
+        defect(name, 'R14.4.2', `district panel never rendered: district_options_ar had not answered `
+          + `${renderMs} ms after the field was opened. The user is left with an empty surface.`);
+      } else if (rpc.rows > 0) {
+        defect(name, 'R14.4.2', `district panel rendered NO rows ${renderMs} ms after the field was `
+          + `opened, but district_options_ar answered ${rpc.rows} option(s) in ${rpc.ms} ms `
+          + `(status ${rpc.status}). The data arrived and the surface did not show it.`);
+      } else {
+        note(`${name}: district_options_ar returned ${rpc.rows} options in ${rpc.ms} ms — this scope `
+          + `genuinely has no districts, skipped`);
       }
-      // Fallback for a rendering without ordinals: any line immediately followed by a count line.
-      if (!out.length) {
-        for (let i = 0; i < t.length - 1; i++) {
-          if (/إعلان/.test(t[i + 1]) && !/إعلان/.test(t[i]) && t[i].length < 40 && /[؀-ۿ]/.test(t[i])) out.push([t[i], t[i + 1]]);
-        }
-      }
-      return out.slice(0, 6);
-    });
-    if (!rows.length) { note(`${name}: no numbered district rows — skipped`); return null; }
+      return null;
+    }
     const [districtName, countText] = rows[0];
     const advertised = num(countText);
     // §41.2: take the ELEMENT, never bare viewport coordinates. The same shape of click in
