@@ -77,7 +77,14 @@ const PINNED_CHROMIUM = process.env.PW_EXECUTABLE_PATH || '/opt/pw-browsers/chro
  * instead of a journey silently passing on the one engine that happens to exist.
  */
 export function engineAvailable(engine) {
-  if (engine === 'chromium') return existsSync(PINNED_CHROMIUM);
+  // CHROMIUM LIVES IN TWO DIFFERENT PLACES, and checking only one of them made the fail-closed
+  // guard refuse a perfectly good browser. In the agent container it is the image's pinned
+  // /opt/pw-browsers build; on a GitHub runner `npx playwright install chromium` puts it in
+  // Playwright's own cache and PINNED_CHROMIUM does not exist at all. Measured 2026-09-03: the
+  // all-engines dispatch exited 2 with «JOURNEY_ENGINE=chromium is not installed here» on a runner
+  // that had just installed it — the guard doing real damage in the direction it exists to prevent,
+  // by calling a present engine absent. Accept EITHER location; the launcher picks the same one.
+  if (engine === 'chromium' && existsSync(PINNED_CHROMIUM)) return true;
   try { return existsSync(ENGINES[engine].executablePath()); } catch { return false; }
 }
 
@@ -122,7 +129,10 @@ function launchOpts(engine) {
     : {};
   if (engine !== 'chromium') return { ...proxy };
   return {
-    executablePath: PINNED_CHROMIUM,
+    // Only pin the path when that binary actually exists (the agent container). On a runner,
+    // letting Playwright resolve its own installed build is correct — and forcing a nonexistent
+    // executablePath would fail every launch.
+    ...(existsSync(PINNED_CHROMIUM) ? { executablePath: PINNED_CHROMIUM } : {}),
     ...proxy,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-quic',
            '--ignore-certificate-errors', '--ssl-version-max=tls1.2'],
@@ -571,6 +581,46 @@ export async function sidebarIsOpen(page, { guestOk = false } = {}) {
   if (!guestOk) return false;
   return (await page.locator(SIDEBAR_OPEN_MARKER_GUEST).count()) > 0;
 }
+
+// ── A COMMITTED CITY IS THE ONLY THING THAT MAKES A SEARCH VALID ────────────────────────────────
+// src/app/index.tsx:1219 renders this image ONLY when `citySelected` is non-null, and `onSearch`
+// (index.tsx:712) returns at `if (!citySelected)` with a validation message and ZERO requests. That
+// refusal is the owner's spec, 2026-07-17: "The user must select a valid city result. Do not accept
+// arbitrary free text and never guess a location." `citySelected` is cleared on every keystroke, so
+// only a TAPPED suggestion row sets it.
+//
+// A journey that types a city, fails to land the suggestion tap, presses «بحث» and observes no
+// request has therefore observed the app OBEYING ITS SPEC — not a broken control. Measured
+// 2026-09-04: `double-click-search` filed «dead control: «بحث» single click fired no search at all»
+// on WebKit desktop from exactly that state. This marker is what lets a journey tell the two apart
+// BEFORE it reaches a verdict, and it is a testID rather than visible text for the same reason the
+// sidebar oracle is (see above): text answers true from the wrong screen.
+export const SELECTED_CITY_MARKER = '[data-testid="selected-city-visual"]';
+
+// ── ONE RPC NAME, THREE DIFFERENT QUESTIONS ─────────────────────────────────────────────────────
+// `location_search_candidates_ar` is not "a search". src/data/remote.ts calls it from three places:
+//   · line 1476 — the RESULTS query, `p_limit: pageLimit` (1500 in production)
+//   · line  920 — fetchScopeOptionCounts,      `p_limit: 1`, ONE CALL PER VISIBLE SCOPE OPTION
+//   · line  965 — fetchDistrictEligibleCounts, `p_limit: 1`, ONE CALL PER VISIBLE DISTRICT OPTION,
+//                 and only "when a narrowing filter beyond district_options_ar's scope is active"
+// The count helpers fan out in parallel, one call per option ON SCREEN, so the raw number of calls
+// is a property of what the results screen decided to decorate — not of how many searches were
+// submitted. Measured on production 2026-09-04, mobile, 2/2 each: one press → 6 calls = 1 results
+// (p_limit 1500) + 5 option counts; a DOUBLE press → also 6 = 1 results + 5 option counts.
+//
+// So `double (6) > single (1)` says nothing about double-submission, which is precisely the verdict
+// `double-click-search` filed on WebKit mobile. Counting the RESULTS class alone answers the
+// question the journey is actually asking, and gives the same number on both sides.
+//
+// An unparsable body is 'unknown' rather than being folded into either class: guessing would push
+// it into 'results' and manufacture the very double-fire this is meant to measure.
+export function classifySearchRpc(r) {
+  if (!r || r.name !== 'location_search_candidates_ar') return 'other';
+  const lim = r.body ? r.body.p_limit : undefined;
+  if (lim === 1) return 'option-count';
+  if (typeof lim === 'number' && lim > 1) return 'results';
+  return 'unknown';
+}
 // ── THE OPENING NAVIGATION: TRANSPORT FAILURE IS NOT A PRODUCT DEFECT ───────────────────────────
 // PART 9 opens by naming two opposite errors, and this function exists because the runner was
 // committing the FIRST one automatically. `run.mjs` wraps each journey in
@@ -612,6 +662,101 @@ export const isTransportError = (err) => {
   const s = String(err && err.message ? err.message : err);
   return TRANSPORT_ERRORS.some((code) => s.includes(code));
 };
+
+// ── A NETWORK FAILURE IS NOT AN APPLICATION EXCEPTION, EVEN WHEN THE ENGINE REPORTS IT AS ONE ────
+//
+// Eighteen journeys end with `if (bag.pageErrors.length) defect(...)`, on the reasonable premise
+// that an uncaught page error is a product defect. On WebKit that premise breaks: a failed
+// cross-origin fetch surfaces as a PAGE error, not merely a console message, so a network blip on
+// a GitHub runner reads as an Ezhalah bug — PART 9's first and most expensive error, arriving from
+// inside the harness.
+//
+// ADJUDICATED, NOT ASSUMED (2026-09-03). `appearance-guest-light` failed 4/10 desktop and 2/10
+// mobile on WebKit with «Fetch API cannot load …/rpc/top_cities_by_deal_ar due to access control
+// checks», while every product assertion in the same journey passed, and Chromium and Firefox were
+// clean on the identical bundle. The deciding experiment forced that exact request to fail on
+// CHROMIUM (`route.abort('failed')`, 2/2 fresh contexts): the app produced **0 page errors** — three
+// `requestfailed` entries and nothing else — because `src/data/locations.ts` catches it and returns
+// `[]`. So the app's handling is correct and engine-independent, and what differs is purely how
+// WebKit REPORTS a dead request. That is the positive proof PART 9.1's inverse rule demands before
+// a reproducible failure may be called environment.
+//
+// THIS MUST NEVER SWALLOW A REAL EXCEPTION, so it matches only network-specific wording. A
+// `TypeError: Failed to fetch` is transport; a `TypeError: undefined is not an object (evaluating
+// 'x.y')` is a product defect and stays one. The partition is REPORTED as a note either way —
+// exactly as `gotoOrRetryTransport` names its blip — so the rate stays visible across runs instead
+// of disappearing.
+const TRANSPORT_PAGE_ERROR_SHAPES = [
+  /Fetch API cannot load [\s\S]*due to access control checks/i, // WebKit's wording for a dead fetch
+  /\bLoad failed\b/,                                            // WebKit's generic fetch failure
+  /The network connection was lost/i,                           // WebKit/CFNetwork
+  /Failed to fetch/i,                                           // Blink
+  /NetworkError when attempting to fetch resource/i,            // Gecko
+  /\bERR_[A-Z_]+\b/,                                            // net:: codes, wherever they surface
+];
+
+/** Is this page error a NETWORK failure rather than an application exception? */
+export const isTransportPageError = (err) => {
+  const s = String(err && err.message ? err.message : err);
+  return isTransportError(s) || TRANSPORT_PAGE_ERROR_SHAPES.some((re) => re.test(s));
+};
+
+/**
+ * The page errors that are actually the APP's, with the network-class ones split off and named.
+ *
+ * Journeys call this instead of reading `bag.pageErrors` directly. Nothing is hidden: a transport
+ * page error is announced as a note carrying its full text, so a genuine outage still reads as one
+ * (every journey noting the same failure) and a one-off runner blip stops being filed as a defect.
+ */
+/**
+ * Poll `readCount` until it STOPS GROWING, from a non-zero start.
+ *
+ * A fixed sleep is never a correctness oracle (PART 11.2), and this is the measured proof: one press
+ * of «بحث» fires SIX `location_search_candidates_ar` calls (§11.3), and a WebKit mobile run on
+ * 2026-09-03 captured only ONE inside a 10s window. The comparison then read `double (6) > single
+ * (1)` and filed «double-click fired the search twice» against a correct app. The dangerous
+ * direction is the mirror: a short capture on the DOUBLE side compares as `double <= single` and
+ * PASSES, hiding the exact regression the journey exists to catch.
+ *
+ * A zero count is never "settled" — the app types an intro before the first request, so an early
+ * zero means "not started", not "fired nothing" (PART 11.2 rule 1). `settled:false` is returned
+ * rather than a number the caller might compare, because an unfinished count is not a measurement.
+ *
+ * `sleepFn` is injectable so `scripts/verify-journey-settled-count.ts` can EXECUTE this instead of
+ * grepping it, without spending real seconds.
+ */
+export async function settledCount(readCount, { budgetMs = 45_000, stableMs = 5_000, minObserveMs = 12_000, sleepFn = sleep, now = () => Date.now() } = {}) {
+  const started = now();
+  const until = started + budgetMs;
+  let last = -1, stableSince = started;
+  while (now() < until) {
+    const n = readCount();
+    if (n !== last) { last = n; stableSince = now(); }
+    // THE CONTRACT: settled = no new call for `stableMs`. That constant must exceed the plausible
+    // gap BETWEEN arrivals, or a slow trickle settles early on a partial count — the original bug
+    // wearing a confident label. The six calls from one press are fired concurrently and arrive
+    // within jitter of each other, not seconds apart, so 5s is comfortably above the real gap while
+    // staying well inside the 45s budget. A trickle slower than `stableMs` is outside this
+    // function's contract by construction; `minObserveMs` is the floor that makes "stopped growing" mean it. Stability ALONE settles too
+    // early when calls TRICKLE: six arriving 6s apart look stable for 6s between each, so a 3s
+    // window would return `{n: 1, settled: true}` — the original partial capture wearing a
+    // confident label, which is worse than the fixed sleep it replaced. Requiring a minimum
+    // observation before any verdict removes that, and costs a few seconds per measurement.
+    else if (n > 0 && now() - stableSince >= stableMs && now() - started >= minObserveMs) return { n, settled: true };
+    await sleepFn(250);
+  }
+  return { n: readCount(), settled: false };
+}
+
+export function appPageErrors(bag, journey) {
+  const app = [], transport = [];
+  for (const e of bag.pageErrors) (isTransportPageError(e) ? transport : app).push(e);
+  if (transport.length) {
+    note(`${journey}: ${transport.length} TRANSPORT-class page error(s) — a dead request, not an app `
+      + `exception, so NOT counted as a product defect (see harness.mjs): ${transport.join(' | ').slice(0, 300)}`);
+  }
+  return app;
+}
 export async function gotoOrRetryTransport(page, url, { timeout = 90_000 } = {}) {
   try {
     return await page.goto(url, { waitUntil: 'load', timeout });

@@ -38,7 +38,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { liftSymbols } from './lib/liftSymbols.ts';
+import { liftSearchScope } from './lib/liftSearchScope.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 
@@ -143,13 +143,7 @@ const slugOf = (t: string) => t.replace(/_(residential|commercial)_listings$/, '
 // they are now DERIVED from the generated SEARCHABLE_TABLES inventory, and the old regex silently
 // matched nothing — res=0, com=0 — which is exactly why a check must run the thing it is checking
 // rather than read it. liftSymbols runs the real declarations out of remote.ts.
-const lifted = await liftSymbols(join(ROOT, 'src/data/remote.ts'), [
-  { header: 'const SEARCHABLE_TABLES = [', endsWith: /\];$/ },
-  { header: 'const MONTHLY_ONLY_TABLE = ', endsWith: /;$/ },
-  { header: 'const RES_TABLES = ', endsWith: /;$/ },
-  { header: 'const COM_TABLES = ', endsWith: /;$/ },
-  { header: 'const DEEPLINK_TABLES = [', endsWith: /^\];$/ },
-], ['SEARCHABLE_TABLES', 'RES_TABLES', 'COM_TABLES', 'DEEPLINK_TABLES']);
+const lifted = await liftSearchScope(ROOT);
 const resTables = new Set(lifted.RES_TABLES as string[]);
 const comTables = new Set(lifted.COM_TABLES as string[]);
 check('RES_TABLES / COM_TABLES executed out of remote.ts', resTables.size > 25 && comTables.size > 25,

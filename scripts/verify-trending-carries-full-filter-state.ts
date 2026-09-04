@@ -40,7 +40,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { liftSymbols } from './lib/liftSymbols.ts';
+import { liftSearchScope } from './lib/liftSearchScope.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 
@@ -204,21 +204,8 @@ check('district count signature invalidates on EVERY advanced answer (AF_PREDICA
 // set. The LIVE half — is the committed inventory still the DB's inventory — cannot be answered
 // offline and lives in scripts/verify-searchable-scope-matches-inventory.ts.
 type ScopeQ = { deal?: string; rentPeriod?: string; dealCombined?: boolean };
-const scope = await liftSymbols(
-  join(ROOT, 'src/data/remote.ts'),
-  [
-    { header: 'const SEARCHABLE_TABLES = [', endsWith: /\];$/ },
-    { header: 'const MONTHLY_ONLY_TABLE = ', endsWith: /;$/ },
-    { header: 'const RES_TABLES = ', endsWith: /;$/ },
-    { header: 'const COM_TABLES = ', endsWith: /;$/ },
-    { header: 'function monthlyInScope(' },
-    { header: 'function monthlyOnly(' },
-    { header: 'function resTables(' },
-    { header: 'function comTables(' },
-  ],
-  ['SEARCHABLE_TABLES', 'RES_TABLES', 'COM_TABLES', 'resTables', 'comTables'],
-  'type SearchQuery = { deal?: string; rentPeriod?: string; dealCombined?: boolean };\n',
-);
+const scope = await liftSearchScope(ROOT);
+
 const INVENTORY = scope.SEARCHABLE_TABLES as string[];
 const resT = scope.resTables as (q: ScopeQ) => string[];
 const comT = scope.comTables as (q: ScopeQ) => string[];

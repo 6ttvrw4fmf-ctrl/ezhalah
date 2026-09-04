@@ -22,7 +22,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { liftSymbols } from './lib/liftSymbols.ts';
+import { liftSearchScope } from './lib/liftSearchScope.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -79,15 +79,7 @@ check('migration patches all THREE readers (counts must match results)',
 // MONTHLY_ONLY_TABLE. A regex pinned to yesterday's LAYOUT cannot see today's BEHAVIOUR, in either
 // direction: it went red on a correct refactor, and it would have gone green on a filter that
 // returned the wrong set as long as the two strings stayed next to each other. So run the function.
-const bothScope = await liftSymbols(join(root, 'src/data/remote.ts'), [
-  { header: 'const SEARCHABLE_TABLES = [', endsWith: /\];$/ },
-  { header: 'const MONTHLY_ONLY_TABLE = ', endsWith: /;$/ },
-  { header: 'const RES_TABLES = ', endsWith: /;$/ },
-  { header: 'const COM_TABLES = ', endsWith: /;$/ },
-  { header: 'function monthlyInScope(' },
-  { header: 'function monthlyOnly(' },
-  { header: 'function resTables(' },
-], ['resTables'], 'type SearchQuery = { deal?: string; rentPeriod?: string; dealCombined?: boolean };\n');
+const bothScope = await liftSearchScope(root);
 const resTablesFn = bothScope.resTables as (q: { deal?: string; rentPeriod?: string; dealCombined?: boolean }) => string[];
 const monthlyIn = (q: { deal?: string; rentPeriod?: string; dealCombined?: boolean }) =>
   resTablesFn(q).filter((t) => /^(gathern|aqarmonthly)_/.test(t)).sort();
