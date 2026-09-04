@@ -503,6 +503,32 @@ Things that cost a previous run real time, and are NOT product defects:
    bolder label — the option container's own background does NOT change, so a background-colour probe
    reports every option unselected.
 
+18. **A CI-only red on a browser journey is a LOAD question before it is a product question, and the
+    answer is measurable — do not argue it from timings** (2026-09-04). Three AF checks were red in CI
+    and green locally, and the red set kept GROWING between runs. A defect does not spread; load does.
+    Two causes, both proven by controlled experiment rather than inferred:
+    - **Contention.** `verify-af-option-card-truth-live.ts` returns 426 checks / 0 failures run ALONE
+      against production, and fails with the exact CI shapes run beside `verify-af-live-truth.ts`.
+      Serializing the sweeps behind the browser jobs was not enough — run #137 failed both browser
+      jobs with no sweep started, because the two browser jobs were still racing each other. They are
+      serialized now (`af-card-state` `needs: [af-truth]`). Reproduce with the two scripts side by
+      side; `PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`.
+    - **The harness asserted on a state it never observed.** `readCardUntil` returned the last state
+      it happened to see when its budget expired, and callers judged it. One missed Q1→Q2 transition
+      became 45 option-level "failures" comparing Q1's pills against a Q2 oracle (driver_room 13 vs 6,
+      balcony 176 vs 22). Fixed by `readCardSettled` — see `scripts/lib/afJourneyPacing.ts` for the
+      rule and `scripts/verify-af-live-journey-polling.ts` for the barrier that keeps it.
+
+19. **`public.ops_search_load_now()` is the standing answer to "is production fit to be measured right
+    now?"** (2026-09-04, shipped by the search-latency routine). Anon-callable; returns
+    `recent_mean_ms`, `search_qps`, `safe_qps`, `degraded`. The AF journeys now WAIT (bounded) for it
+    to clear before starting, and classify a non-arrival against it: a real red when production was
+    healthy, NOT EXERCISED when it was not — and NOT EXERCISED still fails the journey, so this is
+    never a route to green. Do not re-derive fleet load by hand, and do not raise a timeout to get
+    past a degraded window. Context for scale: on 2026-09-04 fleet search mean rose 773ms → 5,109ms at
+    ~3.8 q/s against a measured safe envelope of 1.5 q/s (§40.1), and `apartment_guided_counts_ar` on
+    an unfiltered Buy scope took 14–19s, tripping the anon statement timeout (57014) in CI.
+
 ## Hard safety rails (same as every other engineer — non-negotiable)
 
 Never modify data to make a test pass. Never manufacture attributes, turn UNKNOWN into false,
