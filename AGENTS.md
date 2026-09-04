@@ -85,6 +85,30 @@ should look at it; effort scales with what you find; never manufacture a 10/10; 
 every run and resolve an issue only after the production fix is verified; and none of it weakens an
 existing guard. Every routine's live prompt carries a condensed copy — §G is the source of truth.
 
+**A FAILED FETCH IS NOT AN EMPTY ANSWER (permanent rule, 2026-09-04).** The single largest defect
+class this codebase has — five of the fifteen a 74-agent audit confirmed in one day — is a request
+that failed being rendered to the user as a confident negative: "there are no listings in this
+location" for a region holding 32,203; "I showed you all N" after a load-more that errored; the
+logged-out screen after a sign-out that did not happen; a favourite that was never pushed. This is
+the owner-locked **SOURCE IS TRUTH — silent→NULL, never unknown→NO** rule, violated in the FETCH
+layer instead of the data layer, and it keeps recurring because `supabase-js NEVER THROWS`: a failed
+request returns `{ data: null, error }`, so `data ?? []`, `if (data)` and a bare `catch {}` all turn a
+failure into a plausible empty value that no type checker and no count-honesty barrier can see.
+
+The mechanism already exists — **do not invent a second one.** `src/lib/afProbe.ts` defines
+`PROBE_FAILED` / `isProbeFailure()` / `probeVerdict()`, distinguishing `'unknown'` from
+`'known-empty'`. Use it. A fetch that can fail must return a value the caller can tell apart from
+success and from a genuine zero, and every RPC goes through the `bounded()` timeout wrapper — a call
+with no timeout wedges the loader forever, which reads to a user as a hang, not an error.
+
+**Barriers for this class must EXECUTE the function against an injected failure.** Every one of these
+five defects had a barrier over the exact line, and every one of those barriers was a source-TEXT
+tripwire that passed for the entire time the defect was live — two of them literally pinned the
+defective line as correct. `scripts/lib/liftSymbols.ts` lifts a real symbol out of a module so you can
+run it against a stub client that RESOLVES `{data:null,error}` the way supabase-js really does.
+Reference implementations: `scripts/verify-failed-location-index-is-not-a-load.ts`,
+`scripts/verify-scope-failure-is-not-an-honest-zero.ts`, `scripts/verify-signout-failure-is-not-silent.ts`.
+
 **A finding now has a durable home with one owner, and closing it is EARNED —
 `docs/ops/AUTONOMOUS_INCIDENT_LOOP.md` is canonical (owner brief, 2026-09-04).** Read it before
 routing, parking, or closing anything. In one line: `alert_event` says whether a CONDITION is true

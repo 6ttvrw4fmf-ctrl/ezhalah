@@ -83,7 +83,10 @@ type AppState = {
   // Fetch a transcript this device no longer holds locally (pruned cache / fresh sign-in) from the
   // server, validate it, and attach it to the entry. Resolves to the transcript or null.
   hydrateTranscript: (id: string) => Promise<PersistedChat | null>;
-  loadMoreListings: (q: SearchQuery, offset: number) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean }>;
+  // `failed` = the backend page errored. Nothing advanced: `nextOffset` and `hasMore` come back
+  // exactly as they went in, so the caller re-offers «عرض المزيد» on the same page instead of
+  // recording a failure as "that was the last page".
+  loadMoreListings: (q: SearchQuery, offset: number) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
   dataSource: DataSource;
   // Auth. SEARCH IS FREE, ALWAYS (owner rule 2026-08-15, retiring the PRD §9 gate): a guest can run
   // unlimited searches; sign-in only adds persistence (saved history/language). The old `gated`
@@ -204,6 +207,40 @@ const chatMetaOf = (it: HistoryItem): ChatMeta => {
   const { snapshot: _s, transcript: _t, txStale: _x, ...meta } = it as HistoryItem & { txStale?: boolean };
   return meta as ChatMeta;
 };
+
+// WHAT THE SERVER ALREADY HOLDS, as a comparable string. Key order is normalised (recursively, and
+// `undefined` members dropped exactly as JSON.stringify would) because the baseline side of the
+// comparison came back through Postgres `jsonb`, which reorders object keys — so the same content
+// must compare equal no matter which side produced it.
+const canonicalJson = (v: unknown): string => {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v) ?? 'null';
+};
+
+// THE PUSH DIFF IS ON CONTENT, NEVER ON A CLOCK (defect hunt-2026-09-04:chat_persistence:01).
+// This used to compare `Math.max(it.ts, it.tRev ?? 0)` against the same stamp taken from the server
+// row — an ACTIVITY stamp. Favourite, rename and manual drag-order deliberately move NEITHER `ts`
+// («when this search ran» — a rename must not resort the sidebar) nor `tRev` (the transcript's own
+// revision), so the stamp never advanced, every one of those edits was diffed as "already synced",
+// and `upsertChat` was never called: the owner contract below promises the sidebar the user built by
+// hand survives a new browser, and only the transcript actually did. Comparing the BYTES WE WOULD
+// SEND makes that structural instead of a promise — any field of the meta, including the next one
+// added, is synced by construction, and nothing needs its own timestamp to be noticed.
+const syncKeyOf = (it: HistoryItem): string => canonicalJson(chatMetaOf(it));
+const chatNeedsPush = (it: HistoryItem, base: Map<string, string>): boolean => base.get(it.id) !== syncKeyOf(it);
+
+// …but a meta-only edit must NEVER carry a STALE transcript up with it. `txStale` means "the server
+// reports newer activity than this device's cached copy" (src/lib/chatMerge.ts), and pushing that
+// copy would overwrite the newer conversation permanently — the exact silent history loss chatMerge
+// exists to prevent. `undefined` leaves the server's stored transcript untouched (chatSync.upsertChat),
+// so starring a chat whose transcript this device hasn't caught up on syncs the star and nothing else.
+const pushableTranscript = (it: HistoryItem): PersistedChat | undefined =>
+  (it as { txStale?: boolean }).txStale ? undefined : it.transcript;
 
 // Erase storage keys SYNCHRONOUSLY on web. AsyncStorage's own removal resolves a tick later, and
 // both sign-out and delete-account are followed by a navigation ~1.2s later (settings.tsx) — a
@@ -492,21 +529,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return [...byId.values()].sort((a, b) => (b.order ?? b.ts) - (a.order ?? a.ts)).slice(0, 50);
       });
       // Baseline AFTER the merge lands so the first push diff is against what the server now holds.
-      syncBaselineRef.current = new Map(rows.map((r) => {
-        const m = r.meta as unknown as HistoryItem;
-        return [r.id, Math.max(m.ts ?? 0, m.tRev ?? 0)];
-      }));
+      syncBaselineRef.current = new Map(rows.map((r) =>
+        [r.id, syncKeyOf({ ...r.meta, id: r.id } as unknown as HistoryItem)] as const));
       syncReadyRef.current = key;
     }).catch(() => { /* offline → local-only session; next sign-in retries */ });
   }, [authChecked, user]);
 
-  // Push: debounced write-through. Diffs against the last known server state (per-entry activity
-  // stamp) and upserts only changed chats — meta always, transcript only when this device holds one
-  // whose tRev moved (never nulling a server transcript a pruned local cache no longer has).
+  // Push: debounced write-through. Diffs against the last known server state (the exact meta bytes
+  // it confirmed — see syncKeyOf) and upserts only chats whose content actually differs: meta
+  // always, transcript only when this device holds one it can trust (never nulling a server
+  // transcript a pruned local cache no longer has, never overwriting a newer one with a stale copy).
   // Deletions propagate ONLY for ids the server was known to hold (the baseline), so a not-yet-
   // merged local list can never mass-delete the account's server history. Fire-and-forget with the
   // baseline updated per row on success; a failed write simply retries on the next change.
-  const syncBaselineRef = useRef<Map<string, number>>(new Map());
+  const syncBaselineRef = useRef<Map<string, string>>(new Map());
   const syncReadyRef = useRef<string | null>(null);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -519,9 +555,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const seen = new Set<string>();
       for (const it of items) {
         seen.add(it.id);
-        const stamp = Math.max(it.ts, it.tRev ?? 0);
-        if ((base.get(it.id) ?? -1) >= stamp) continue;
-        void upsertChat(it.id, chatMetaOf(it), it.transcript).then((ok) => { if (ok) base.set(it.id, stamp); });
+        if (!chatNeedsPush(it, base)) continue;
+        const key = syncKeyOf(it);
+        void upsertChat(it.id, chatMetaOf(it), pushableTranscript(it)).then((ok) => { if (ok) base.set(it.id, key); });
       }
       const gone = [...base.keys()].filter((id) => !seen.has(id));
       if (gone.length) void deleteChats(gone).then((ok) => { if (ok) for (const id of gone) base.delete(id); });
@@ -886,7 +922,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadMoreListings: async (q: SearchQuery, offset: number) => {
         const PAGE_MORE = 500;
         const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE });
-        const r = runSearch(q, buildPools(rows ?? []));
+        // A FAILED PAGE IS NOT PROGRESS (defect hunt-2026-09-04:pagination:06). `rows === null` is
+        // this fetch's backend-error signal — the SAME one page 0 hands runSearch as `fetchFailed`
+        // rather than a second invention. It used to be swallowed by `rows ?? []`, which made an
+        // errored page identical to a genuinely empty one: the cursor jumped forward by `cand` (0 on
+        // failure, so 500 real matches could be skipped) and `hasMore` went false, retiring
+        // «عرض المزيد» forever and letting the closing line claim every match had been shown. So
+        // record NOTHING: the cursor and hasMore come back exactly as they went in, the button stays,
+        // and the next tap retries this same page. (A genuinely empty page is still hasMore:false —
+        // an honest end — which is what keeps the two cases distinguishable.)
+        if (rows === null) return { listings: [], nextOffset: offset, hasMore: true, failed: true };
+        const r = runSearch(q, buildPools(rows));
         return { listings: r.listings, nextOffset: offset + cand, hasMore: cand >= PAGE_MORE };
       },
       trackOpen: (listing) => {

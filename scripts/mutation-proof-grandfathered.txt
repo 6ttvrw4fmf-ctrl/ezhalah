@@ -123,7 +123,6 @@ verify-bottom-prompt-inset.ts
 verify-buy-rent-combined-af-gating.ts
 verify-card-attr-value-coercion.ts
 verify-chat-persistence-live.mjs
-verify-chat-persistence.ts
 verify-chat-title.ts
 verify-ci-enforces-full-suite.ts
 verify-city-field.ts
@@ -326,7 +325,6 @@ verify-typewriter-completion-guarantee.ts
 verify-ui-controls-have-predicates.ts
 verify-unknown-rent-period-not-annual.ts
 verify-unlocated-fallback-scope-live.ts
-verify-voice-composer-contract.ts
 verify-voice-error-classification.ts
 verify-voice-ios-capture-and-stop-loading.ts
 verify-voice-safari-support-detection.ts

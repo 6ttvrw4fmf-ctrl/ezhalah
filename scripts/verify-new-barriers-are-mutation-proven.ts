@@ -73,8 +73,13 @@ const grandSet = new Set(grandfathered);
 
 console.log('\nEvery NEW barrier is proven to fail — the grandfather list can only shrink\n');
 
+// A pure predicate, so the mutation proof below can feed it a synthetic over-ceiling length. The
+// first version asserted `grandfathered.length + 1 > CEILING` directly, which made the barrier FAIL
+// the moment the list SHRANK — the exact direction the ratchet exists to encourage. Caught by an
+// agent that tried to remove a newly-proven barrier from the list and could not.
+const exceedsCeiling = (n: number) => n > GRANDFATHERED_CEILING;
 check(`the grandfather list has not grown (${grandfathered.length} <= ${GRANDFATHERED_CEILING})`,
-  grandfathered.length <= GRANDFATHERED_CEILING,
+  !exceedsCeiling(grandfathered.length),
   `${grandfathered.length} names listed. A new barrier was added to the exemption list instead of being proven. ` +
   `If that is genuinely intended, raise GRANDFATHERED_CEILING in this file so the decision is reviewable.`);
 
@@ -120,7 +125,9 @@ const mustCatch = (label: string, caught: boolean) => {
 };
 
 mustCatch('a new barrier added to the grandfather list instead of being proven',
-  grandfathered.length + 1 > GRANDFATHERED_CEILING);
+  exceedsCeiling(GRANDFATHERED_CEILING + 1));
+mustCatch('the ratchet refusing to let the list SHRINK (the direction it exists to encourage)',
+  !exceedsCeiling(GRANDFATHERED_CEILING - 1));
 mustCatch('a barrier whose only "proof" is prose',
   !PROOF.test('// this file is mutation-proven, honestly it is\ncheck("a", true);'));
 mustCatch('a proof that passes a literal true and can never fail',
