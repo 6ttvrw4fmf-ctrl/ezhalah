@@ -469,6 +469,33 @@ Things that cost a previous run real time, and are NOT product defects:
    surest way to end it before the next question can be tested — and the resulting "it didn't
    advance" failure is a correct production, not a defect. Pick the narrowest option leaving **>25**,
    and report NOT EXERCISED when the cohort offers none.
+15. **A CI job log can only be read from the TAIL, so a red step in the middle of a job is invisible**
+   (2026-09-04). The live-check jobs are long chains (`af-truth` is 16 steps) and every step runs
+   behind `if: !cancelled()`, so a failing step's own summary ends up thousands of lines from the
+   end — and `get_job_logs` returns a tail. Three red steps cost most of a run to diagnose this way.
+   What actually works, in order: (a) if the failing check's summary NAMES its failures, a tail of
+   ~120 lines is enough — `verify-af-option-card-truth-live.ts` and `verify-af-live-truth.ts` both do
+   this now, and any new live check must; (b) otherwise **re-run that one check locally against
+   production** (`PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node
+   --experimental-strip-types scripts/verify-<x>.ts`), which is faster than fetching log pages and
+   gives the real assertion; (c) a check that passes locally but fails on the runner is
+   runner-latency, i.e. the §14-below class — not a product defect, and not to be reported as one.
+16. **The searchable index is REBUILT under any sweep longer than about an hour** (2026-09-04).
+   `sync_search_listings_ar` (pg_cron jobid 28) runs at `:14` past every hour and the location MV
+   refresh (jobid 17) at `:20`. A witness captured once and reused across a cohort — the chip in
+   `verify-af-full-surface-differential.ts` was captured per cohort and judged minutes later — is
+   stale by construction, and the resulting failure is a comparison between two databases, not a
+   product defect. `settleOnOneIndex()` in `scripts/lib/afSurfaceJudge.ts` is the answer: bracket a
+   re-read with an index fingerprint and report UNDECIDED when it moved. Never widen a tolerance.
+17. **Never assert on a UI state the journey has not OBSERVED itself reach** (2026-09-04). The AF
+   card renders behind a paid LLM turn measured near 40 s, and its meaning is step-dependent: R8.2.1
+   (Back steps to the previous question) and R8.2.2 (Back on question ONE cancels the round, leaving
+   no card) are different, correct behaviours of the same button. A journey that sleeps a fixed
+   1,200 ms and then clicks «رجوع» is sampling a race, and when it loses, production's CORRECT
+   R8.2.2 is reported as a broken R8.2.1. This class has produced four false accusations
+   (2026-08-24, 2026-09-03, 2026-09-04 ×2), each previously "fixed" by widening a number. It is now
+   pinned in source by `scripts/verify-af-live-journey-polling.ts` (offline, in `npm test`): poll
+   for the state, and report NOT EXERCISED when the precondition is genuinely unreachable.
 5. **Advanced Filter lives in the «الوكيل الذكي» (agent) flow, not the Normal Filter «بحث» flow.**
    Reaching it: send an Arabic request, answer the agent's disambiguation (a city that is also a
    region needs «مدينة …»; «تقصد المدينة كاملة، أو حي معيّن؟» needs «المدينة كاملة»), then click
