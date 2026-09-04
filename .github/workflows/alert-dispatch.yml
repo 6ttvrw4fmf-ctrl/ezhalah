@@ -166,9 +166,17 @@ jobs:
           #   * it is one mechanism instead of two, so there is no create-path/backfill-path skew.
           # Only issues with NO routine-* label are touched, so a human re-routing an issue by hand
           # is respected and never fought over on the next tick.
+          # Every OPEN alert issue is walked, not only the unlabelled ones (changed 2026-09-04). The
+          # label half is unchanged and still only applied when absent, so a human re-routing an
+          # issue by hand is still respected. What is new is the write-back below: alert_event now
+          # carries owner_routine, and the ~100 issues labelled before that column existed would
+          # otherwise never get one, leaving mon_detect_alert_queue_unworked() reporting them all as
+          # '(unrouted)' forever. Same idempotent-sweep philosophy this step already documents:
+          # backfill by re-deriving, never by a one-off migration.
           gh issue list --repo "$REPO" --label ezhalah-alert --state open --limit 200 --json number,title,labels \
-            | jq -c '.[] | select(([.labels[].name] | map(startswith("routine-")) | any) | not)' | while read -r issue; do
+            | jq -c '.[] | {number, title, routed: ([.labels[].name] | map(startswith("routine-")) | any)}' | while read -r issue; do
             num=$(jq -r .number <<<"$issue")
+            already=$(jq -r .routed <<<"$issue")
             dedup=$(jq -r '.title | sub("^\\[alert\\] "; "")' <<<"$issue")
             enc=$(jq -rn --arg s "$dedup" '$s|@uri')
             # Route on the alert's KIND, not its dedup_key: the key carries the instance (platform,
@@ -183,8 +191,21 @@ jobs:
             if [ -z "$kind" ]; then kind="$dedup"; fi
             label=$(node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
               scripts/alert-routing-label.ts "$kind")
-            gh issue edit "$num" --repo "$REPO" --add-label "$label"
-            echo "routed #${num} (${kind}) -> ${label}"
+            if [ "$already" = "false" ]; then
+              gh issue edit "$num" --repo "$REPO" --add-label "$label"
+              echo "routed #${num} (${kind}) -> ${label}"
+            fi
+            # PROJECT the same answer into the row, so a DETECTOR can attribute the backlog. SQL
+            # cannot call routineForKind(), and copying that map into SQL would be the two-copies
+            # divergence this repo has been burned by -- so the one implementation writes its result
+            # down instead. Only ever fills a NULL: a value already written is never overwritten, so
+            # a hand-corrected owner survives every later tick.
+            curl -sf -X PATCH \
+              "$SUPABASE_URL/rest/v1/alert_event?dedup_key=eq.${enc}&resolved_at=is.null&owner_routine=is.null" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+              -H 'Content-Type: application/json' -H 'Prefer: return=minimal' \
+              -d "{\"owner_routine\":\"${label}\"}" >/dev/null \
+              || echo "::warning::could not write owner_routine for #${num} (${label})"
           done
 
       - name: Close issues whose alerts resolved
