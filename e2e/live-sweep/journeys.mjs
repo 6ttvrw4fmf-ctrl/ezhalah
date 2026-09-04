@@ -142,6 +142,99 @@ export async function trendingDistrict(plan) {
  * picks up the result cards behind the overlay: a text-based reader on this same screen returned
  * «رقم رخصة الإعلان / 7100249846» and «عمر العقار / 2025» as if they were the question's options.
  */
+// Extracted from advancedFilter (below) 2026-09-04, ZERO behavior change, so
+// afScopedShowMoreJourney (showmore.mjs) can commit a real AF predicate through the exact same UI
+// path instead of a second hand-rolled copy of this ~75-line interaction sequence. Opens the AF
+// entry point on an ALREADY-SEARCHED page, answers the first offered question's first option, then
+// تخطي's the rest of the round so exactly ONE predicate is committed (matching every other AF
+// journey's "one predicate" discipline). Returns null (with a `note`) on every harness/product
+// condition that means "nothing to assert here" — AF not offered, no question card, no options, an
+// unclickable control — exactly as advancedFilter always has. `served` (optional) is cleared at the
+// SAME instant as `requests` — right before the AF-narrowed search's own request fires — so a caller
+// tracking response bodies (showmore.mjs) sees exactly that narrowed search's rows, not whatever the
+// pre-AF (broader) search already served.
+export async function commitOneAfAnswer(page, name, requests, before, served) {
+  const narrow = page.getByText('خلّنا نحدد الطلب أكثر', { exact: false });
+  if (!await narrow.count()) {
+    if (before != null && before > 25) note(`${name}: AF not offered at ${before} results (allowed: needs a useful question)`);
+    return null;
+  }
+  await narrow.first().scrollIntoViewIfNeeded(); await narrow.first().click();
+  await sleep(9500);
+
+  // Everything below reads ONLY inside af-card.
+  const readCard = () => page.evaluate(() => {
+    const card = document.querySelector('[data-testid="af-card"]');
+    if (!card) return null;
+    const txt = (el) => (el?.innerText || '').trim();
+    return {
+      title: txt(card.querySelector('[data-testid="af-question-title"]')) || null,
+      confirm: txt(card.querySelector('[data-testid="af-confirm"]')) || null,
+      hasSkip: !!card.querySelector('[data-testid="af-skip"]'),
+      showResults: /عرض النتائج/.test(txt(card)),
+      options: [...card.querySelectorAll('[data-testid^="af-option-"]')].map((e) => ({
+        key: e.getAttribute('data-testid').replace('af-option-', ''),
+        text: txt(e).replace(/\n+/g, ' '),
+      })),
+    };
+  });
+
+  const first = await readCard();
+  if (!first || !first.title) { note(`${name}: AF opened but no question card rendered — skipped`); return null; }
+  if (!first.options.length) { note(`${name}: question «${first.title}» rendered no options — skipped`); return null; }
+  // The removed control must not come back inside the flow — a live check on R8.3.1.
+  if (first.showResults) {
+    defect(name, 'UI→UI', `«عرض النتائج» is back inside the AF card — the owner removed it 2026-08-28 (af-no-show-results-in-flow)`);
+  }
+
+  const pick = first.options[0];
+  const promised = num((pick.text.match(/([\d,٬]+)\s*$/) || [])[1]);
+  const footBefore = num((first.confirm || '').match(/([\d,٬]+)/)?.[1]);
+  const clicked = await page.locator(`[data-testid="af-option-${pick.key}"]`).first()
+    .click({ timeout: 9000 }).then(() => true).catch(() => false);
+  if (!clicked) { note(`${name}: option «${pick.key}» not clickable — harness, skipped`); return null; }
+  await sleep(3000);
+
+  // R7.1.2 — the Continue button shows the count for the current tentative selection.
+  const afterPick = await readCard();
+  const footAfter = num((afterPick?.confirm || '').match(/([\d,٬]+)/)?.[1]);
+  if (promised != null && footAfter != null) observeWatch('monthly-af-counts-update');
+  if (promised != null && footAfter != null && footAfter !== promised) {
+    defect(name, 'UI→UI', `chip «${pick.key}» promised ${promised} but «متابعة» reads ${footAfter}`
+      + `${footBefore != null ? ` (was ${footBefore})` : ''} (monthly-af-counts-update)`);
+  }
+
+  // Commit this answer, then تخطي the rest of the round so exactly ONE predicate is committed.
+  requests.length = 0;
+  if (served) served.length = 0;
+  const beforeTurns = await page.evaluate(() => [...document.body.innerText.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].length);
+  let advanced = await page.locator('[data-testid="af-confirm"]').first()
+    .click({ timeout: 9000 }).then(() => true).catch(() => false);
+  if (!advanced) { note(`${name}: «متابعة» not clickable — harness, skipped`); return null; }
+  // Bounded skip-out, the same shape verify-af-live-truth.ts uses: AF_ROUND_MAX_QUESTIONS is 4,
+  // so 8 hops cannot loop forever even if a click is swallowed. Break when the card is gone (the
+  // round ended) or when it is open with no تخطي (the intro/mining state has no question to skip).
+  for (let hop = 0; hop < 8; hop++) {
+    await sleep(5000);
+    const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
+    if (!open) break;
+    const skippable = await page.evaluate(() => !!document.querySelector('[data-testid="af-skip"]'));
+    if (!skippable) break;
+    if (!await page.locator('[data-testid="af-skip"]').first().click({ timeout: 9000 }).then(() => true).catch(() => false)) {
+      note(`${name}: «تخطي» not clickable at hop ${hop} — harness`); break;
+    }
+  }
+  await page.waitForFunction((n) => [...document.body.innerText.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].length > n,
+    beforeTurns, { timeout: 50000 }).catch(() => {});
+  await sleep(3500);
+
+  const landed = lastCount(await page.evaluate(() => document.body.innerText));
+  if (promised != null && landed != null && promised !== landed) {
+    defect(name, 'UI→RENDERED', `AF chip «${pick.key}» promised ${promised}, landed ${landed}`);
+  }
+  return { title: first.title, pick, promised, landed };
+}
+
 export async function advancedFilter(plan) {
   const name = `af:${plan.city}/${plan.deal}${plan.period ? '/' + plan.period : ''}/${plan.typeLabel ?? 'any'}`;
   return withPage(false, async (page, requests) => {
@@ -155,84 +248,9 @@ export async function advancedFilter(plan) {
     await runSearch(page);
     const before = lastCount(await page.evaluate(() => document.body.innerText));
 
-    const narrow = page.getByText('خلّنا نحدد الطلب أكثر', { exact: false });
-    if (!await narrow.count()) {
-      if (before != null && before > 25) note(`${name}: AF not offered at ${before} results (allowed: needs a useful question)`);
-      return null;
-    }
-    await narrow.first().scrollIntoViewIfNeeded(); await narrow.first().click();
-    await sleep(9500);
-
-    // Everything below reads ONLY inside af-card.
-    const readCard = () => page.evaluate(() => {
-      const card = document.querySelector('[data-testid="af-card"]');
-      if (!card) return null;
-      const txt = (el) => (el?.innerText || '').trim();
-      return {
-        title: txt(card.querySelector('[data-testid="af-question-title"]')) || null,
-        confirm: txt(card.querySelector('[data-testid="af-confirm"]')) || null,
-        hasSkip: !!card.querySelector('[data-testid="af-skip"]'),
-        showResults: /عرض النتائج/.test(txt(card)),
-        options: [...card.querySelectorAll('[data-testid^="af-option-"]')].map((e) => ({
-          key: e.getAttribute('data-testid').replace('af-option-', ''),
-          text: txt(e).replace(/\n+/g, ' '),
-        })),
-      };
-    });
-
-    const first = await readCard();
-    if (!first || !first.title) { note(`${name}: AF opened but no question card rendered — skipped`); return null; }
-    if (!first.options.length) { note(`${name}: question «${first.title}» rendered no options — skipped`); return null; }
-    // The removed control must not come back inside the flow — a live check on R8.3.1.
-    if (first.showResults) {
-      defect(name, 'UI→UI', `«عرض النتائج» is back inside the AF card — the owner removed it 2026-08-28 (af-no-show-results-in-flow)`);
-    }
-
-    const pick = first.options[0];
-    const promised = num((pick.text.match(/([\d,٬]+)\s*$/) || [])[1]);
-    const footBefore = num((first.confirm || '').match(/([\d,٬]+)/)?.[1]);
-    const clicked = await page.locator(`[data-testid="af-option-${pick.key}"]`).first()
-      .click({ timeout: 9000 }).then(() => true).catch(() => false);
-    if (!clicked) { note(`${name}: option «${pick.key}» not clickable — harness, skipped`); return null; }
-    await sleep(3000);
-
-    // R7.1.2 — the Continue button shows the count for the current tentative selection.
-    const afterPick = await readCard();
-    const footAfter = num((afterPick?.confirm || '').match(/([\d,٬]+)/)?.[1]);
-    if (promised != null && footAfter != null) observeWatch('monthly-af-counts-update');
-    if (promised != null && footAfter != null && footAfter !== promised) {
-      defect(name, 'UI→UI', `chip «${pick.key}» promised ${promised} but «متابعة» reads ${footAfter}`
-        + `${footBefore != null ? ` (was ${footBefore})` : ''} (monthly-af-counts-update)`);
-    }
-
-    // Commit this answer, then تخطي the rest of the round so exactly ONE predicate is committed.
-    requests.length = 0;
-    const beforeTurns = await page.evaluate(() => [...document.body.innerText.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].length);
-    let advanced = await page.locator('[data-testid="af-confirm"]').first()
-      .click({ timeout: 9000 }).then(() => true).catch(() => false);
-    if (!advanced) { note(`${name}: «متابعة» not clickable — harness, skipped`); return null; }
-    // Bounded skip-out, the same shape verify-af-live-truth.ts uses: AF_ROUND_MAX_QUESTIONS is 4,
-    // so 8 hops cannot loop forever even if a click is swallowed. Break when the card is gone (the
-    // round ended) or when it is open with no تخطي (the intro/mining state has no question to skip).
-    for (let hop = 0; hop < 8; hop++) {
-      await sleep(5000);
-      const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
-      if (!open) break;
-      const skippable = await page.evaluate(() => !!document.querySelector('[data-testid="af-skip"]'));
-      if (!skippable) break;
-      if (!await page.locator('[data-testid="af-skip"]').first().click({ timeout: 9000 }).then(() => true).catch(() => false)) {
-        note(`${name}: «تخطي» not clickable at hop ${hop} — harness`); break;
-      }
-    }
-    await page.waitForFunction((n) => [...document.body.innerText.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].length > n,
-      beforeTurns, { timeout: 50000 }).catch(() => {});
-    await sleep(3500);
-
-    const landed = lastCount(await page.evaluate(() => document.body.innerText));
-    if (promised != null && landed != null && promised !== landed) {
-      defect(name, 'UI→RENDERED', `AF chip «${pick.key}» promised ${promised}, landed ${landed}`);
-    }
-    return assertChain(`${name}:${first.title}`, { intent: { city: plan.city, deal: plan.deal, period: plan.period }, page, requests });
+    const answer = await commitOneAfAnswer(page, name, requests, before);
+    if (!answer) return null;
+    return assertChain(`${name}:${answer.title}`, { intent: { city: plan.city, deal: plan.deal, period: plan.period }, page, requests });
   });
 }
 

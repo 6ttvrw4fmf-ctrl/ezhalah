@@ -25,7 +25,23 @@
 // searches — autocomplete reuses the same RPC at p_limit 1).
 
 import { withPage, setDeal, setPeriod, pickCity, runSearch, visibleState, num,
-         defect, note, sleep } from './sweep.mjs';
+         defect, note, sleep, lastCount, tapByText } from './sweep.mjs';
+import { commitOneAfAnswer } from './journeys.mjs';
+
+// The AF params REQUEST-DRIFT must also watch once a predicate is committed — every certified AF
+// field's RPC param name (src/data/advancedFilters.ts). A page carrying a DIFFERENT AF param set
+// than the page before it silently dropped or invented a predicate mid-browse.
+const AF_PARAMS = [
+  'p_amenities', 'p_bath_min', 'p_furnished', 'p_street_width_min', 'p_rating_min', 'p_reviews_min',
+  'p_unit_subtypes', 'p_age_min', 'p_age_max', 'p_directions',
+];
+
+// SCOPE questions (src/data/advancedFilters.ts SCOPE_QUESTIONS) share the AF card UI and round
+// machinery with the 9 certified predicate questions, but narrow via p_types/p_types2, not any
+// AF_PARAMS field — R13.1 draws this exact line (scope tiers are not certified AF predicates). The
+// AF-not-carried check below only means something for a CERTIFIED predicate answer; a scope answer
+// legitimately carries nothing in AF_PARAMS and must not be flagged.
+const SCOPE_QUESTION_TITLES = ['أي نوع من العقارات تبحث عنه؟', 'أي نوع عقار تحديدًا؟'];
 
 const countCards = (page) => page.evaluate(() => (document.body.innerText.match(/الضغط على هذا الإعلان/g) || []).length);
 
@@ -97,7 +113,37 @@ export async function showMoreJourney(plan) {
     if (plan.deal) await setDeal(page, plan.deal);
     if (plan.period) await setPeriod(page, plan.period);
     if (!await pickCity(page, plan.city)) { note(`${name}: city not offered — skipped`); return null; }
+    // Only needed to reach a group/type narrow enough to genuinely offer AF (plan.af) — a bare
+    // city+deal search rarely has a useful AF question. Same tapByText journeys.mjs's normalFilter
+    // and advancedFilter use; unused (and a no-op) when plan.group/typeLabel are absent, so every
+    // existing showMoreJourney caller is unaffected.
+    if (plan.group) { await tapByText(page, plan.group); await sleep(1200); }
+    if (plan.typeLabel) { await tapByText(page, plan.typeLabel); await sleep(1000); }
     await runSearch(page);
+
+    // AF-SCOPED PAGINATION (owner PERMANENT, 2026-09-04): "the app's actual Load More UI, under an
+    // active AF state, must preserve the exact eligible set — no duplicates, no skips, and the
+    // committed predicate must not silently change mid-browse." Reuses the exact AF-answering UI path
+    // journeys.mjs's advancedFilter drives (commitOneAfAnswer) so this is the SAME real predicate a
+    // user commits, not a hand-built request. Everything below this block — settle, pager, the
+    // duplicate/skip/drift checks — is the identical pagination machinery every showMoreJourney run
+    // already proves; only the starting state (AF-narrowed instead of a bare search) and the widened
+    // REQUEST-DRIFT key list (AF_PARAMS) differ.
+    let afTitle = null;
+    let afIsScope = false;
+    if (plan.af) {
+      const before = lastCount(await page.evaluate(() => document.body.innerText));
+      // `served` is passed through so commitOneAfAnswer clears it at the exact instant it clears
+      // `requests` — right before the AF-narrowed search's own request fires. Clearing it any later
+      // (e.g. after this call returns) is too late: «عرض المزيد» reveals more of an ALREADY-fetched
+      // response rather than re-querying (see the duplicate-check comment below), so the narrowed
+      // search's own response — the only evidence this journey's pagination can be checked against —
+      // fires DURING commitOneAfAnswer's «متابعة» click, not after it.
+      const answer = await commitOneAfAnswer(page, name, requests, before, served);
+      if (!answer) { note(`${name}: no AF predicate could be committed — skipped`); return null; }
+      afTitle = answer.title;
+      afIsScope = SCOPE_QUESTION_TITLES.includes(afTitle);
+    }
 
     const state0 = await visibleState(page);
     if (state0.zero) { note(`${name}: honest zero — not a pagination cohort, skipped`); return null; }
@@ -106,6 +152,21 @@ export async function showMoreJourney(plan) {
     const searches = () => requests.filter((r) => (r.p_limit ?? 0) > 1);
     const req0 = searches().at(-1) ?? {};
     const total0 = state0.headline;
+    if (plan.af) {
+      if (afIsScope) {
+        // A scope question (group/type) narrows via p_types/p_types2, not AF_PARAMS — R13.1 draws
+        // this line. That narrowing is already watched by the base REQUEST-DRIFT keys (p_types is in
+        // both branches below); nothing here is a certified-predicate claim to verify.
+        note(`${name}: AF-scoped pagination cohort — «${afTitle}» is a SCOPE question, not a certified predicate (allowed)`);
+      } else {
+        const activeAf = AF_PARAMS.filter((k) => req0[k] != null && !(Array.isArray(req0[k]) && req0[k].length === 0));
+        if (!activeAf.length) {
+          defect(name, 'AF-NOT-CARRIED', `committed AF answer «${afTitle}» but the post-answer search carries no AF param (${JSON.stringify(req0)})`);
+        } else {
+          note(`${name}: AF-scoped pagination cohort — «${afTitle}», carrying ${activeAf.join(',')}`);
+        }
+      }
+    }
 
     let n = await settle(page);
     const batches = [{ batch: 0, cards: n, headline: total0 }];
@@ -154,8 +215,14 @@ export async function showMoreJourney(plan) {
       if (st.latinInCards.length) defect(name, 'RENDER', `undefined/NaN in batch ${b}: ${st.latinInCards.join(',')}`);
 
       // A later batch must not re-issue a DIFFERENT search — same predicate, later offset only.
+      // AF_PARAMS join the watch list whenever this journey is AF-scoped: a certified AF answer is
+      // exactly as much "the committed predicate" as p_deal/p_cities always were, and must survive
+      // every «عرض المزيد» click identically — never silently dropped, never invented mid-browse.
       const req = searches().at(-1) ?? {};
-      for (const k of ['p_deal', 'p_rent_period', 'p_cities', 'p_districts', 'p_category', 'p_types']) {
+      const driftKeys = plan.af
+        ? ['p_deal', 'p_rent_period', 'p_cities', 'p_districts', 'p_category', 'p_types', 'p_types2', ...AF_PARAMS]
+        : ['p_deal', 'p_rent_period', 'p_cities', 'p_districts', 'p_category', 'p_types'];
+      for (const k of driftKeys) {
         if (JSON.stringify(req[k]) !== JSON.stringify(req0[k])) {
           defect(name, 'REQUEST-DRIFT', `batch ${b} changed ${k}: ${JSON.stringify(req0[k])} → ${JSON.stringify(req[k])}`);
         }
