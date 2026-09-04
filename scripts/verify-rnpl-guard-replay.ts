@@ -64,6 +64,21 @@ console.log('\nRNPL/Monthly guard — asserted against the REPLAYED final state 
 // confirmed not to touch the RNPL/Monthly predicates. Remove an entry the moment its migration is
 // superseded by an explicit definition.
 const AUDITED_UNINTERPRETABLE = new Map<string, string>([
+  ['20260904143246_location_search_candidates_ar_distinct_platform_count.sql',
+   'audited 2026-09-04 (mine, read line by line): a platform-diversity experiment (distinct_platform_' +
+   'count as a new OUT column) later superseded by PR #1688\'s client-side distinctPlatformCount() ' +
+   'and fully reverted by 20260904150500 — kept as history per the migration-mirror rule. Adding an ' +
+   'OUT column changes the anonymous RETURNS TABLE row type, which CREATE OR REPLACE refuses (42P13, ' +
+   'confirmed live) — so this is DROP FUNCTION <exact old signature> followed by EXECUTE of a body ' +
+   'built from pg_get_functiondef() at apply time via seven anchor-count-guarded inline replace() ' +
+   'calls, all inside one atomic DO block. Uninterpretable to the replayer for two independent ' +
+   'reasons: the `drop function public.location_search_candidates_ar(` statement matches its ' +
+   'dropsOrAlters short-circuit outright, and separately the replace() calls pass literal strings ' +
+   'directly rather than through declared `NAME text := \'literal\'` variables, so extractPatches\' ' +
+   'idiom (a)/(b) cannot resolve them either. VERIFIED BY GREP: ZERO payment_monthly, ZERO ' +
+   'rent_now_pay_later/rnpl/RNPL, ZERO literal CREATE FUNCTION / CREATE OR REPLACE FUNCTION text (the ' +
+   'CREATE keyword only appears inside the dynamically-built new_body string). Every anchor it ' +
+   'touches names output columns or the FROM clause of the final SELECT — none is a WHERE predicate.'],
   ['20260903230551_buy_price_predicate_uses_price_total_effective_everywhere.sql',
    'audited 2026-09-03 (mine, read line by line): points the BUY budget comparison at the new ' +
    'generated column search_listings_ar.price_total_effective in four RPCs, so the Filter, the ' +

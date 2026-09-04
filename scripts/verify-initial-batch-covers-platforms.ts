@@ -171,8 +171,17 @@ const rowsFor = (platforms: string[]) =>
   // exactly the moment someone needs to look.
   check((replayed.body ?? '').length > 0, 'the results RPC replays to a body to assert against');
   const migDir = join(root, 'supabase/migrations');
+  // AUDITED — named, dated, read line by line. Each entry's has_photo/partition-by hit is a false
+  // positive from THIS check's own text scan, not a real touch to the photo/partition ordering: a
+  // short-lived distinct_platform_count experiment (2026-09-04, superseded same-day by this file's
+  // own client-side distinctPlatformCount()) that inserted a new output column next to the existing
+  // `m.has_photo` in an anchor string — has_photo is carried through unchanged, never reordered.
+  const AUDITED_FALSE_POSITIVE = new Set([
+    '20260904143246_location_search_candidates_ar_distinct_platform_count.sql',
+  ]);
   const opaqueTouchingOrder = replayed.unresolved
     .map((u) => u.replace(/ \(.*$/, ''))
+    .filter((f) => !AUDITED_FALSE_POSITIVE.has(f))
     .filter((f) => {
       const t = readFileSync(join(migDir, f), 'utf8');
       return /has_photo/i.test(t) || /partition\s+by/i.test(t);
