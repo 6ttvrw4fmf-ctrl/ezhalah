@@ -73,8 +73,42 @@ try {
     p_repo_versions,
   });
 } catch (e) {
-  console.warn(`⚠ migration-drift-vs-production SKIPPED (network unavailable: ${e}) — run again with network; CI must not skip.`);
-  process.exit(0);
+  // FAIL CLOSED IN CI (2026-09-04). This branch used to exit 0 unconditionally, and its own comment
+  // already said "CI must not skip" — but nothing implemented that, so it did. An unreachable
+  // production, a rotated key, or an ops_deploy_preflight_checks that a future migration renames or
+  // drops all landed here, and the scheduled guard went GREEN having checked nothing. Four of the
+  // five drift conditions would have been dark with every signal reading healthy, which is the exact
+  // "a monitor that cannot fire reads as a clean bill of health" shape this repo keeps re-learning.
+  // Condition #5 has a heartbeat detector that would eventually notice; conditions #1-#4 have none,
+  // so silence here is permanent.
+  //
+  // Unattended runs (CI) now fail. A developer's local run without network still exits 0 — that is
+  // the case the original exemption was written for, and failing it would only teach people to
+  // ignore this check.
+  console.warn(`⚠ migration-drift-vs-production could not reach production: ${e}`);
+  if (!process.env.CI) {
+    console.warn('  (local run, no CI env — exiting 0. In CI this is a failure.)');
+    process.exit(0);
+  }
+  // Best effort: the host may be up and only this RPC broken, in which case the alert still lands.
+  // A total outage cannot be alerted from here by any means — the red job is the ceiling, and
+  // pretending otherwise by exiting 0 is what this change removes.
+  if (SERVICE_ROLE_KEY) {
+    try {
+      await callRpc(`${URL_BASE}/rest/v1/rpc/mon_raise`, SERVICE_ROLE_KEY, {
+        p_sev: 'P1', p_kind: DEDUP_KEY, p_platform: null, p_dedup: `${DEDUP_KEY}_unreachable`,
+        p_detail: {
+          why: 'the migration drift check (conditions #1-#4) could not reach production, so it verified nothing. Unknown is not clean.',
+          error: String(e),
+          first_check: 'Actions > Migration drift guard — is ops_deploy_preflight_checks still present and anon-executable?',
+        },
+      });
+    } catch (e2) {
+      console.warn(`⚠ could not raise the unreachable alert either (production may be down): ${e2}`);
+    }
+  }
+  console.error('✗ migration-drift-vs-production: production unreachable — FAILING CLOSED (an unchecked barrier is not a passing one).');
+  process.exit(1);
 }
 
 // The four drift conditions (owner permanent barrier). #1 missing_in_git and #4 duplicate_overloads
@@ -122,6 +156,13 @@ if (SERVICE_ROLE_KEY) {
         p_dedup: DEDUP_KEY,
       });
     }
+    // Reaching this line at all means the RPC answered, so the unreachable alert (raised by the
+    // catch above) is stale in BOTH directions — resolve it whether or not drift was found, or a
+    // one-off network blip leaves a P1 open for good.
+    await callRpc(`${URL_BASE}/rest/v1/rpc/mon_resolve_key`, SERVICE_ROLE_KEY, {
+      p_kind: DEDUP_KEY,
+      p_dedup: `${DEDUP_KEY}_unreachable`,
+    });
   } catch (e) {
     console.warn(`⚠ could not update alert_event (non-fatal, exit code is unaffected): ${e}`);
   }

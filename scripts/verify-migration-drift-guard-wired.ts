@@ -101,6 +101,40 @@ check(/SUPABASE_SERVICE_ROLE_KEY/.test(wf),
   `${WORKFLOW} never sets SUPABASE_SERVICE_ROLE_KEY — drift would only show as a GitHub Actions ` +
   `red X, never as a dashboard alert_event P1`);
 
+// 4b. BOTH live checkers must FAIL CLOSED when production is unreachable (2026-09-04).
+//
+// Until today both ended their network catch with a bare `process.exit(0)` under a comment that
+// said "CI must not skip" — a stated intent nothing implemented. Anything that stopped the RPC from
+// answering (host down, key rotated, ops_deploy_preflight_checks renamed or dropped by a later
+// migration) produced a GREEN scheduled run that had verified nothing. For conditions #1-#4 that
+// silence is permanent: unlike condition #5 they stamp no heartbeat, so no staleness detector would
+// ever notice. "Could not check" must never render as "checked, and clean".
+//
+// The rule pinned here is the shape, not the wording: the unreachable path must reach a
+// `process.exit(1)`, and any surviving `exit(0)` must be guarded by the local-developer escape
+// (`process.env.CI`) rather than taken unconditionally.
+for (const f of [CHECK_SCRIPT, 'scripts/verify-migration-content-parity.ts']) {
+  const src = existsSync(f) ? readFileSync(f, 'utf8') : '';
+  // Strip comments at the READER — prose describing fail-closed must not read as fail-closed.
+  const code = src.replace(/^\s*\/\/[^\n]*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  check(/process\.env\.CI/.test(code),
+    `${f} distinguishes an unattended run from a local one`,
+    `${f} never reads process.env.CI — its network-failure branch cannot tell a developer's ` +
+    `offline laptop from a scheduled guard run, so it must be treating both the same way`);
+  check(/process\.exit\(1\)/.test(code),
+    `${f} can exit non-zero when production is unreachable`,
+    `${f} has no process.exit(1) — an unreachable production would end the run successfully`);
+  // Every exit(0) must sit inside an `if (!process.env.CI)` block. Counting is the honest test:
+  // one unguarded exit(0) on the failure path re-opens the hole no matter how many guarded ones
+  // surround it.
+  const exitZeros = (code.match(/process\.exit\(0\)/g) ?? []).length;
+  const guardedExitZeros = (code.match(/if\s*\(!process\.env\.CI\)\s*\{[^}]*process\.exit\(0\)/g) ?? []).length;
+  check(exitZeros === guardedExitZeros,
+    `${f}: all ${exitZeros} exit(0) call(s) are behind the non-CI guard`,
+    `${f}: ${exitZeros} process.exit(0) call(s) but only ${guardedExitZeros} inside an ` +
+    `if (!process.env.CI) block — an unguarded one makes an unchecked run report success in CI`);
+}
+
 // 5. No second, independently-maintained copy of the migration-filename parser. safe-deploy.sh and
 //    the continuous checker MUST derive from the one shared file, or they can silently disagree
 //    about what counts as "in git" (exactly the class of bug the shared file's own header warns

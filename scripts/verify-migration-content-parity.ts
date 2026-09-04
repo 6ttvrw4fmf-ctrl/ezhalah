@@ -134,10 +134,24 @@ if (import.meta.filename === process.argv[1]) {
       codeMd5: d.code_md5,
     }));
   } catch (e) {
-    // Same posture as the drift checker: a container with no network must not silently pass in CI,
-    // but must not fail a developer's local run either. CI runs it with network.
-    console.warn(`⚠ migration-content-parity SKIPPED (network unavailable: ${e}) — run again with network; CI must not skip.`);
-    process.exit(0);
+    // Same posture as the drift checker, and now the same IMPLEMENTATION of it (2026-09-04): the
+    // "CI must not skip" this comment always claimed was never enforced, so an unreachable
+    // production exited 0 and the guard reported success having compared nothing. Unattended runs
+    // now fail; a developer's local run without network still exits 0, which is the only case the
+    // exemption was ever for.
+    //
+    // No unreachable-alert is raised from here on purpose: this check stamps
+    // ops_content_parity_heartbeat on every completed run, and mon_detect_migration_content_parity_stale
+    // already pages from inside the database when that heartbeat goes quiet. A second alert for the
+    // same silence would be noise. (Conditions #1-#4 have no such heartbeat, which is why the drift
+    // checker does raise one.)
+    console.warn(`⚠ migration-content-parity could not reach production: ${e}`);
+    if (!process.env.CI) {
+      console.warn('  (local run, no CI env — exiting 0. In CI this is a failure.)');
+      process.exit(0);
+    }
+    console.error('✗ migration-content-parity: production unreachable — FAILING CLOSED (nothing was compared, so nothing passed).');
+    process.exit(1);
   }
 
   const baseline = readBaseline();
