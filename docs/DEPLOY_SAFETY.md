@@ -82,6 +82,20 @@ so the approved baseline never advanced and every later `preflight-verify.sh` fl
 unapproved. A `<never readable>` deployment-URL read in that failure block is now expected and
 harmless. The gate stays BLOCKING; do not add a bypass flag.
 
+**The build log is on STDERR, so it must be captured from stderr.** The first version of that fix
+still read the build log out of `npx vercel --prod --yes | tee "$DEPLOY_LOG"` — a stdout-only
+capture — so `EMITTED_BUNDLE` was *always empty* and the gate silently fell right back onto the
+PRE_BUNDLE-diff last resort it was written to remove. In the pinned CLI (vercel 54.18.0) everything
+the CLI prints goes through `new Output(process.stderr, …)`
+(`node_modules/vercel/dist/chunks/chunk-Z5SBJH6L.js:4673`), the build log via
+`displayBuildLogs → printBuildLog(event, output_manager_default.print)`
+(`chunk-UNIIXDM2.js:1741`); the only stdout write on the deploy path is the bare deployment URL
+(`chunk-UNIIXDM2.js:2077`). The two streams are captured to **separate** files: a merged `2>&1` log
+ends on `▲ Aliased https://ezhalah-app.vercel.app`, so `tail -1` would set `DEPLOYED_URL` to the
+canonical alias and the fallback would read the alias to learn what the alias should serve.
+`scripts/verify-deploy-target-guard.ts` now *executes* the lifted capture block against a shim that
+replays both real streams, so "the grep runs and finds something" is asserted, not assumed.
+
 ## Approved baseline record
 
 This is the last known-good state, confirmed live and verified, kept up to date after every

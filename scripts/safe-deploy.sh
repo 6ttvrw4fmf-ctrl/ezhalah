@@ -153,11 +153,40 @@ PRE_BUNDLE="$(curl -s -H 'Cache-Control: no-cache' "https://ezhalah-app.vercel.a
 # Capture the unique deployment URL vercel prints, and — the load-bearing one — the artifact THIS
 # BUILD EMITTED. Expo prints it in the build log ("› web bundles (1): _expo/.../entry-<md5>.js"), so
 # "what did we just build" is known WITHOUT any network read at all.
+#
+# ── THE TWO STREAMS ARE CAPTURED SEPARATELY, ON PURPOSE (2026-09-04) ──────────────────────────────
+# This block used to be `npx vercel --prod --yes | tee "$DEPLOY_LOG"`, which captures STDOUT ONLY —
+# and in the pinned CLI (vercel 54.18.0) the build log is NOT on stdout. Everything the CLI prints
+# goes through `output_manager_default` = `new Output(process.stderr, …)`
+# (node_modules/vercel/dist/chunks/chunk-Z5SBJH6L.js:4673; Output.print → this.stream.write), and
+# the build log specifically is `displayBuildLogs → printBuildLog(event, output_manager_default.print)`
+# (chunk-UNIIXDM2.js:1741). The ONLY stdout write on the deploy path is the bare deployment URL
+# (chunk-UNIIXDM2.js:2077 `process.stdout.write("https://" + event.payload.url)`). So the
+# `› web bundles (1): _expo/.../entry-<md5>.js` line never reached DEPLOY_LOG, EMITTED_BUNDLE was
+# ALWAYS empty, EXPECTED_BUNDLE fell back to the (unreadable, protection-gated) NEW_BUNDLE, and the
+# gate collapsed onto the PRE_BUNDLE-diff last resort this whole guard exists to remove.
+# They are captured to SEPARATE files rather than merged with `2>&1` because a merged log breaks the
+# URL parse: stderr also carries `▲ Aliased  https://ezhalah-app.vercel.app`, so `tail -1` of a
+# merged log would set DEPLOYED_URL to the CANONICAL ALIAS — making the fallback read the alias to
+# learn what the alias should serve, which is circular and always "passes".
+# Stderr is written to a file and echoed after the CLI exits (rather than streamed through a
+# process-substitution tee) so the read below cannot race an unflushed tee. The build log therefore
+# appears at the end of the step instead of live; that is the whole cost of this trade.
 DEPLOY_LOG="$(mktemp)"
-npx vercel --prod --yes | tee "$DEPLOY_LOG"
+DEPLOY_ERR="$(mktemp)"
+DEPLOY_RC=0
+npx vercel --prod --yes 2>"$DEPLOY_ERR" | tee "$DEPLOY_LOG" || DEPLOY_RC=$?
+cat "$DEPLOY_ERR" >&2
+if [ "$DEPLOY_RC" -ne 0 ]; then
+  echo "REFUSING TO CONTINUE: 'vercel --prod' exited $DEPLOY_RC (see its output above)."
+  rm -f "$DEPLOY_LOG" "$DEPLOY_ERR"
+  exit "$DEPLOY_RC"
+fi
+# stdout only: the bare deployment URL. Never parse this out of the merged streams (see above).
 DEPLOYED_URL="$(grep -oE 'https://[a-z0-9.-]+\.vercel\.app' "$DEPLOY_LOG" | tail -1 || true)"
-EMITTED_BUNDLE="$(grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$DEPLOY_LOG" | head -1 || true)"
-rm -f "$DEPLOY_LOG"
+# stderr carries the build log; stdout is searched too so this keeps working if a future CLI moves it.
+EMITTED_BUNDLE="$(grep -hoE '_expo/static/js/web/entry-[a-f0-9]+\.js' "$DEPLOY_ERR" "$DEPLOY_LOG" | head -1 || true)"
+rm -f "$DEPLOY_LOG" "$DEPLOY_ERR"
 
 # ── POST-DEPLOY BUNDLE VERIFICATION (rewritten 2026-09-03 after run 33706257876) ───────────────────
 # This used to be TWO sequential checks. One polled ANY currently-served bundle for `supabase.co`
