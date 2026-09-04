@@ -20,17 +20,39 @@ const empty = {
   location: null, type: null, price: null, detail: null, amenities: null, af: null, priorAskAbout: null,
 } as const;
 
-console.log('\n(a) merged-state has real signal, askCount=0 -> listings\n');
+// SUPERSEDED 2026-09-04 — read this before "fixing" a failure here.
+// This block used to assert that ANY single signal, WITH NO LOCATION, searched immediately
+// ("search anyway ... broad/nationwide if that's nothing at all", owner 2026-08-30). The owner
+// removed nationwide from the product on 2026-09-04: a search with no city is the one search that
+// cannot be scoped, and it was reaching production (39,055 listings, p_cities null). LOCATION IS
+// NOW REQUIRED; the 2026-08-30 rule still governs every OPTIONAL field.
+// The original intent — "real signal means search, don't interrogate" — is preserved and still
+// asserted, now paired with a city. The second loop pins the new half.
+console.log('\n(a) real signal + a real city, askCount=0 -> listings\n');
 for (const [label, state] of [
   ['location', { ...empty, location: 'الرياض' }],
+  ['type', { ...empty, location: 'الرياض', type: 'Villa' }],
+  ['price', { ...empty, location: 'الرياض', price: '500000' }],
+  ['detail', { ...empty, location: 'الرياض', detail: '3' }],
+  ['amenities', { ...empty, location: 'الرياض', amenities: ['parking'] }],
+  ['af', { ...empty, location: 'الرياض', af: { bathrooms: 2 } }],
+] as const) {
+  const r = decideAgentTurn({ rawText: 'شقة', locationAmbiguous: false, establishedState: state, askCount: 0 });
+  check(`(a) ${label} + city -> listings`, r.kind === 'listings' && r.askCount === 0, JSON.stringify(r));
+}
+
+console.log('\n(a2) the SAME signal with NO usable location -> message (nationwide is not a scope)\n');
+for (const [label, state] of [
   ['type', { ...empty, type: 'Villa' }],
   ['price', { ...empty, price: '500000' }],
   ['detail', { ...empty, detail: '3' }],
   ['amenities', { ...empty, amenities: ['parking'] }],
   ['af', { ...empty, af: { bathrooms: 2 } }],
+  ['country-as-location', { ...empty, type: 'Villa', location: 'المملكة العربية السعودية' }],
+  ['«كل مدن المملكة»', { ...empty, type: 'Apartment', location: 'كل مدن المملكة' }],
 ] as const) {
   const r = decideAgentTurn({ rawText: 'شقة', locationAmbiguous: false, establishedState: state, askCount: 0 });
-  check(`(a) ${label} alone -> listings`, r.kind === 'listings' && r.askCount === 0, JSON.stringify(r));
+  check(`(a2) ${label} without a real place -> message`, r.kind === 'message', JSON.stringify(r));
 }
 
 console.log('\n(b) truly nothing at all, askCount=0 -> message\n');
@@ -69,22 +91,38 @@ console.log('\n(d) ask_about=["size"] present, askCount=2 (budget exhausted) -> 
     rawText: 'بيت كبير', locationAmbiguous: false,
     establishedState: { ...empty, priorAskAbout: null }, askCount: QUESTION_BUDGET_CEILING,
   });
+  // SUPERSEDED 2026-09-04: the ceiling no longer converts "nothing known" into a NATIONWIDE search,
+  // because nationwide is not a supported scope. With no place named it keeps asking for the city —
+  // exactly what the Normal Filter does. The ceiling's real job (ask_about provenance must not
+  // change the outcome) is unchanged and still asserted, now with a real city present.
   check('(d) askCount at the ceiling -> listings regardless of ask_about provenance',
-    viaBudget.kind === 'listings' && viaBudget.askCount === QUESTION_BUDGET_CEILING, JSON.stringify(viaBudget));
+    decideAgentTurn({ rawText: 'بيت كبير', locationAmbiguous: false,
+      establishedState: { ...empty, location: 'الرياض', priorAskAbout: null }, askCount: QUESTION_BUDGET_CEILING }).kind === 'listings',
+    JSON.stringify(viaBudget));
+  check('(d) at the ceiling with NO place named -> still asks (nationwide is not a scope)',
+    viaBudget.kind === 'message', JSON.stringify(viaBudget));
 
   const viaCarried = decideAgentTurn({
     rawText: 'بيت كبير', locationAmbiguous: false,
-    establishedState: { ...empty, priorAskAbout: ['size'] }, askCount: 1,
+    establishedState: { ...empty, location: 'الرياض', priorAskAbout: ['size'] }, askCount: 1,
   });
-  check('(d) ask_about carried from a PRIOR turn -> listings even before the ceiling',
+  check('(d) ask_about carried from a PRIOR turn + a city -> listings even before the ceiling',
     viaCarried.kind === 'listings' && viaCarried.askCount === 1, JSON.stringify(viaCarried));
 }
 
-console.log('\n(e) askCount at the ceiling with EVERYTHING empty too -> listings anyway, broad/nationwide\n');
+console.log('\n(e) askCount at the ceiling with EVERYTHING empty -> ASKS FOR THE CITY, never a nationwide search\n');
 {
+  // SUPERSEDED 2026-09-04. This asserted the opposite: "listings anyway, broad/nationwide".
+  // The owner removed nationwide from the product; a search with no place is the only search that
+  // cannot be scoped, and it was live (39,055 rows, p_cities null). "Missing optional information
+  // must not block it" (2026-08-30) still holds for every OPTIONAL field — location is not one.
+  // The trade is deliberate and stated: a user who never names a place keeps getting the city
+  // question instead of results. That is precisely what the Normal Filter already does.
   const r = decideAgentTurn({ rawText: 'ما ادري', locationAmbiguous: false, establishedState: empty, askCount: QUESTION_BUDGET_CEILING });
-  check('(e) budget exhausted, nothing known -> listings ("missing optional information must not block it")',
-    r.kind === 'listings' && r.askCount === QUESTION_BUDGET_CEILING, JSON.stringify(r));
+  check('(e) budget exhausted with NO place named -> message, never a nationwide search', r.kind === 'message', JSON.stringify(r));
+  const withCity = decideAgentTurn({ rawText: 'ما ادري', locationAmbiguous: false, establishedState: { ...empty, location: 'الرياض' }, askCount: QUESTION_BUDGET_CEILING });
+  check('(e) budget exhausted WITH a city -> listings (optional fields still never block)',
+    withCity.kind === 'listings' && withCity.askCount === QUESTION_BUDGET_CEILING, JSON.stringify(withCity));
   // One below the ceiling, still nothing -> must still ask (the ceiling is a HARD boundary, not "close").
   const under = decideAgentTurn({ rawText: 'ما ادري', locationAmbiguous: false, establishedState: empty, askCount: QUESTION_BUDGET_CEILING - 1 });
   check('(e) one question short of the ceiling, nothing known -> still asks', under.kind === 'message');
