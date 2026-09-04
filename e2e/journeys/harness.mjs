@@ -78,9 +78,32 @@ export function engineAvailable(engine) {
   try { return existsSync(ENGINES[engine].executablePath()); } catch { return false; }
 }
 
-/** Chromium takes the container flags; WebKit/Firefox take the proxy only (they have no such CLI). */
+/** Chromium takes the container flags; WebKit/Firefox take the proxy only (they have no such CLI).
+ *
+ *  THE LOCALHOST BYPASS IS NOT A CONVENIENCE. Production is the only thing these journeys score
+ *  (PART 3), but a `src/` fix has to be provable in a real browser BEFORE it ships, and the only
+ *  build that carries an unmerged fix is a local one — `scripts/verify-web-runtime-smoke.mjs`
+ *  serves `dist/` on 127.0.0.1 for exactly that reason, and sets this same bypass.
+ *
+ *  With the proxy set and no bypass, 127.0.0.1 is routed through the egress proxy and never
+ *  resolves; unsetting the proxy (the obvious workaround) loads the page but cuts the browser off
+ *  from Supabase entirely. The bypass is the only combination that can be both, so it belongs here.
+ *
+ *  IT IS NOT SUFFICIENT, AND SAYING SO IS THE POINT. Against a local `dist/` every SIDEBAR journey
+ *  still skips — «row ⋯ menu would not open» — and that is measured on the EXISTING, known-good
+ *  `sidebar-row-actions` as well as on a new one (2/2 each, 2026-09-04), while both pass against
+ *  production. Same journeys, same harness, different target: the local static export is the
+ *  differing variable, not the journey and not the app (PART 9.1's inverse rule — a failure is
+ *  closed as harness/target only on positive proof, and this is that proof).
+ *
+ *  CONSEQUENCE FOR A `src/` FIX: local-build verification of anything behind the signed-in sidebar
+ *  is NOT available in this container today. Such a fix is proved by the production journey AFTER
+ *  deploy (PART 7), and a run must not report a local green as if it were that. Making the local
+ *  export usable for signed-in journeys is unfinished work, recorded here rather than rediscovered. */
 function launchOpts(engine) {
-  const proxy = process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {};
+  const proxy = process.env.HTTPS_PROXY
+    ? { proxy: { server: process.env.HTTPS_PROXY, bypass: '127.0.0.1,localhost' } }
+    : {};
   if (engine !== 'chromium') return { ...proxy };
   return {
     executablePath: PINNED_CHROMIUM,
