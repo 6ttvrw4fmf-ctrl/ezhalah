@@ -28,11 +28,12 @@
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 // Resolved through the shared helper, never a repo secret, so the check is self-sufficient in a
 // scheduled run — and so it asserts WHICH backend it proved something about.
-const { url: EXPECTED_SUPABASE } = resolvePublicSupabase(process.env);
+const { url: EXPECTED_SUPABASE, key: ANON_KEY } = resolvePublicSupabase(process.env);
 
 const CLICK_LEAF = (txt: string) => {
   let best: any = null;
@@ -60,7 +61,31 @@ const check = (label: string, ok: boolean, detail = '') => {
   if (!ok) failures++;
 };
 
+// ── A SEARCH THAT NEVER ARRIVED IS NOT A MEASUREMENT ───────────────────────────────────────────
+// Rationale and the reproduction: scripts/lib/afJourneyPacing.ts. Measured here 2026-09-04 (run
+// #144): the journey slept a FIXED 16s after «بحث», the search had not landed yet on a degraded
+// production, and `searches[]` was empty — so `req` was `{}` and FIVE checks reported a product
+// defect built on a request nobody made, ending with the alarming "this is the pre-2026-09-02
+// defect: priceFilter() applied the BUY pair to every row". Every one of those numbers was zero
+// because zero rows had been fetched.
+//
+// UNDECIDED counts against the exit code below, exactly like a failure: a journey that captured no
+// search certified nothing, so this can never be a route to green.
+let undecided = 0;
+const undecidedLabels: string[] = [];
+const unobserved = async (label: string, detail: string) => {
+  const l = await readSearchLoad(EXPECTED_SUPABASE, { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` });
+  if (verdictForNonArrival(l) === 'red') {
+    check(label, false, `${detail} · ${describeLoad(l)} — production was NOT degraded, so this is a real failure`);
+    return;
+  }
+  console.log(`SKIP  ${label}\n      NOT EXERCISED — the committed search never arrived within ${AGENT_TURN_MS}ms and ${describeLoad(l)}. ${detail}`);
+  undecided++; undecidedLabels.push(label);
+};
+
 const BUY_FLOOR = 500000;
+/** Marks an abort raised because the committed search was never OBSERVED (see the catch below). */
+const UNOBSERVED_ABORT = '[unobserved]';
 
 const browser = await chromium.launch({
   ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
@@ -113,6 +138,14 @@ const tap = async (txt: string, timeoutMs = 10000) => {
 };
 
 try {
+  // Measure the product, not the queue — see scripts/lib/afJourneyPacing.ts.
+  const startLoad = await paceUntilHealthy(
+    () => readSearchLoad(EXPECTED_SUPABASE, { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` }),
+    (ms) => page.waitForTimeout(ms), PACE_BUDGET_MS, PACE_POLL_MS, (s) => console.log(s));
+  console.log(startLoad.degraded
+    ? `[pace] STARTING ANYWAY after ${Math.round(PACE_BUDGET_MS / 60000)}min — ${describeLoad(startLoad)}`
+    : `[pace] production is inside its envelope — ${describeLoad(startLoad)}`);
+
   await gotoLive(page, `${BASE}/`, { timeout: 60000 });
   await page.waitForTimeout(5000);
 
@@ -140,8 +173,28 @@ try {
   await page.fill('[data-testid="price-min-input"]', String(BUY_FLOOR));
   await page.waitForTimeout(600);
 
+  const armed = searches.length;
   await tap('بحث');
-  await page.waitForTimeout(16000);
+  // POLL for the committed search, do not sleep at it. 16s was a guess about a good day; the search
+  // that follows «بحث» is a real RPC against a database whose measured mean reached 5,109ms under
+  // fleet load, and every assertion below reads the request it produces.
+  const landed = await settleUntil(
+    async () => searches.length, (n) => n > armed, AGENT_TURN_MS, (ms) => page.waitForTimeout(ms), 500);
+  if (!landed.settled) {
+    // ONE cause, ONE reason. Reporting the six assertions below against a request nobody made is
+    // how run #144 accused a correct production of the pre-2026-09-02 rent-deletion defect.
+    for (const [label, detail] of [
+      [`the browser talked to the expected backend (${EXPECTED_SUPABASE})`, `origins seen: ${[...searchOrigins].join(', ') || '(no search request captured)'}`],
+      ['p_deal is null — the RPC is being asked for Buy AND Rent in one set', 'no request to read'],
+      [`the Buy floor reached the RPC as p_price_min=${BUY_FLOOR}`, 'no request to read'],
+      ['no rent bound was sent, so the RPC returns the cohort\'s rent rows unbounded', 'no request to read'],
+      ['the backend handed the app rent rows (otherwise step 5 could pass vacuously)', `${hydrated.length} row(s) hydrated`],
+      ['RENT cards are on screen — the Buy floor did not delete them', 'no search landed, so no card could'],
+    ] as const) {
+      await unobserved(label, detail);
+    }
+    throw new Error(`${UNOBSERVED_ABORT} no search request was captured within ${AGENT_TURN_MS}ms of «بحث»`);
+  }
 
   // ── 4. the request really is the combined shape this test needs ───────────────────────────────
   const req = searches[searches.length - 1] ?? {};
@@ -180,13 +233,21 @@ try {
     + `(price-bearing text nodes: ${shown.sar}). Zero here with rent rows in the RPC response is the `
     + 'pre-2026-09-02 defect: priceFilter() applied the BUY pair to every row, rent included.');
 } catch (e) {
-  check('the journey ran to completion', false, String(e));
+  // An abort raised BECAUSE the search was never observed has already been classified against
+  // production's own load signal; re-reporting it here would state a second, wronger reason for one
+  // cause. Every other throw is a genuine harness failure and stays red.
+  if (String((e as any)?.message ?? '').startsWith(UNOBSERVED_ABORT)) {
+    console.log(`      [diag] journey abandoned: ${String((e as any).message).slice(UNOBSERVED_ABORT.length).trim()}`);
+  } else {
+    check('the journey ran to completion', false, String(e));
+  }
 } finally {
   await browser.close();
 }
 
-if (failures) {
-  console.error(`\n✗ ${failures} check(s) FAILED — a combined Buy+Rent search is not showing the rent side\n`);
+if (failures + undecided) {
+  console.error(`\n✗ ${failures} check(s) FAILED, ${undecided} NOT EXERCISED — a combined Buy+Rent search was not certified\n`
+    + undecidedLabels.map((l) => `    • NOT EXERCISED ${l}`).join('\n') + '\n');
   process.exit(1);
 }
 console.log('\n✓ a combined Buy+Rent search shows BOTH sides in a real browser: each budget binds only its own deal\n');
