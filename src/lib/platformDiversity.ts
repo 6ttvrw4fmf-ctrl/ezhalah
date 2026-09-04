@@ -114,3 +114,33 @@ export function orderByScope<L extends { cleanType?: string | null; rentPeriod?:
   const keys = multiType ? [...withPeriod, 'cleanType'] : withPeriod;
   return interleaveRanked(rows, keys);
 }
+
+// ── HOW MANY PLATFORMS GENUINELY MATCH THIS SEARCH ────────────────────────────────────────────
+// Owner PERMANENT rule 2026-09-02: the initial batch is
+//   min(genuine matches, max(10, distinct matching platforms))
+// so the first screen carries one listing from EVERY platform that has a real match, instead of a
+// fixed ten. This function supplies the "distinct matching platforms" term.
+//
+// DERIVED, NEVER LISTED. The count is read from the eligible rows themselves — no allowlist, no
+// array of platform names, no number to bump. A new scraper participates the moment it contributes
+// one genuine matching listing; a platform that is disabled, retired, or simply has no match for
+// THIS search contributes nothing. («therc» entered the Riyadh villa set during this work with no
+// ranking code edited — that is the intended behaviour.)
+//
+// COUNTING THE FETCHED PAGE IS EXACT, NOT APPROXIMATE. Both ordering layers emit one row per
+// platform before any platform repeats — the RPC's div_rank is a per-platform row_number(), and
+// interleaveRanked() above round-robins with `platform` as the OUTERMOST key — so a page of 1,500
+// already contains every platform that has a match.
+//
+// IT CANNOT HARM MATCHING. This only sizes a PREFIX of an array the RPC has already filtered to the
+// true eligible set. It cannot add a row, widen a predicate, or reach outside the set; the only
+// thing it can change is how much of what already matched is revealed. MATCH stays absolute by
+// construction rather than by promise.
+export function distinctPlatformCount(rows: ReadonlyArray<{ source?: string | null }> | null | undefined): number {
+  const seen = new Set<string>();
+  for (const r of rows ?? []) {
+    const p = (r?.source ?? '').trim();
+    if (p) seen.add(p);          // a blank/unknown source must not invent a platform slot
+  }
+  return seen.size;
+}
