@@ -1,0 +1,61 @@
+# Rent-period fallback live check (2026-09-04 daily engineer production integrity incident).
+#
+# The owner's 2026-08-18 product decision (migration 20260818221919) makes every confirmed rent
+# listing with no explicit source period fall back to a canonical سنوي (شهري on the monthly-only
+# platforms, gathern/aqarmonthly), so no rent listing is ever unreachable by either period chip in
+# Normal Filter, Advanced Filter, Trending or the AI agent — they all read
+# search_listings_ar.rent_period_ar as the one canonical field. That fallback silently reverted in
+# production sometime after being installed and proven working (same shape as the same-day
+# af_rebuild_would_revert() incident: a later CREATE OR REPLACE built from a stale base definition
+# silently dropped an unrelated migration's fix), stranding 891 active rent listings across 20
+# platforms with rent_period_ar = NULL — the live cause of nine open searchability_collapse alerts.
+#
+# This job re-derives the exact fallback-eligible population through the anon-readable REST path a
+# real client hits (never the service role — memory: verify-via-anon-key rule) and turns RED the
+# moment it is ever nonzero again, independent of whether any PR touches the sync function.
+#
+# Read-only (anon key, RLS-respecting). Not wired into `npm test` — same precedent as every other
+# *-live.ts check (CI has no network/DB); see scripts/test-exclusions.txt.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *' # every 6 hours (offset from the count-rpc-parity live check)
+  workflow_dispatch:
+
+concurrency:
+  group: rent-period-fallback-live-check
+  cancel-in-progress: false
+
+jobs:
+  rent-period-fallback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Live rent-period fallback assertion
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-rent-period-fallback-not-reverted-live.ts
+
+      # ── Failure→alert bridge (issue #1349 pattern, see count-rpc-parity-live-check.yml) ─────────
+      # This job runs unattended: a red run notifies nobody, so it has to reach alert_event to reach
+      # a human. rent_period_ar is a canonical search-index CLASSIFICATION field (not itself an AF
+      # predicate rewrite), so this routes to Data Integrity — one open P1 per workflow file (dedup
+      # workflow_failed:rent-period-fallback-live-check.yml), and the next green run resolves it.
+      # `always()` so a failing run still gets here.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind data_live_check_failed
+          --workflow rent-period-fallback-live-check.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
