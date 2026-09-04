@@ -126,6 +126,18 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-every-live-table-is-searchable.ts
 
+      # CARD IDENTITY against the string production really stores (added 2026-09-04). Found by
+      # looking at live cards: 3,165 abralosol/therc/rawasidark listings rendered as «عقار» with a
+      # click-through to sa.aqar.fm, because the DB `source` values carry spaces ('Abr Alosol',
+      # 'THE RC', 'Rawasi Dark') and every branch tested a closed-up slug. Its offline sibling
+      # feeds the matcher names this repo invented, so only a LIVE read can catch this class.
+      - name: Every card must carry the identity of the platform that published it
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-platform-identity-matches-live-source.ts
+
       # COMBINED شراء+إيجار in a REAL browser (added 2026-09-02). The Filter offers two independent
       # budgets and the RPC splits them by the row's own deal; until 2026-09-02 the client re-applied
       # the BUY pair to every returned row, so a Buy floor deleted every rent card the server had
