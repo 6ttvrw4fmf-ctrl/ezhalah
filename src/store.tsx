@@ -440,8 +440,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   //   · A REMOVAL (`newValue === null`) is deliberately ignored. That is sign-out / delete-account
   //     clearing the key, which has its own sequenced teardown; reacting to it here would reach
   //     into auth architecture rather than fix a persistence clobber.
+  //
+  // FEATURE-DETECTED, NOT PLATFORM-ASSUMED. Every other storage path in this file guards with
+  // `typeof localStorage !== 'undefined'` and pairs it with AsyncStorage, because this store mounts
+  // on native too — and these two lines are the first `window.` in the whole file. React Native
+  // defines a `window`, so `typeof window === 'undefined'` alone would NOT have kept us out of it;
+  // what varies is whether `addEventListener` is there. Detect the method, not the platform.
   useEffect(() => {
-    if (!user || typeof window === 'undefined') return;
+    if (!user || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
     const key = historyKey(user.sub);
     const onStorage = (e: StorageEvent) => {
       if (e.key !== key || e.newValue == null) return;
