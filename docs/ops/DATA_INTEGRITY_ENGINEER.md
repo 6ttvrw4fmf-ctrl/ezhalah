@@ -438,7 +438,17 @@ So the residue was a **product** gap, not a data bug, and the disposition was an
 (§16 stop condition 2). The verdict is also attached to the detector via `COMMENT ON FUNCTION`, so it is
 recoverable from the database alone.
 
-### 22.1 The owner ANSWERED this on 2026-08-18 — do not re-litigate it, and do not read the fallback as a fabrication
+### 22.1 SUPERSEDED on 2026-09-03 — the «سنوي» fallback is RETIRED. Read §22.2 before acting on anything below.
+
+> **STOP. The 2026-08-18 fallback described in this section is no longer in force.** On 2026-09-03 the
+> owner restated the rule as *"Never infer Monthly or Yearly when the source does not explicitly
+> support it"*, and migration `20260903175817_unknown_rent_period_stays_unknown_never_defaults_to_annual.sql`
+> removed the fallback from `sync_search_listings_ar`. A source-silent rent row now correctly carries
+> **NULL**, not «سنوي». The rest of this section is kept as the historical record of the 2026-08-18
+> decision and of *why* the fallback was not a fabrication at the time — **not** as current behaviour.
+> Current behaviour is §22.2.
+
+### 22.1(historical) The owner ANSWERED this on 2026-08-18 — do not re-litigate it, and do not read the fallback as a fabrication
 
 **This section used to end "an autonomous run must not pick one." That is no longer true, and leaving
 it standing was itself a trap** — Data Integrity run #38 (2026-08-23) re-derived the whole cohort from
@@ -482,6 +492,37 @@ priced. **Buy rows carrying `rent_period_ar`: 0 on every platform**, so the stru
 gathern/aqarmonthly still fall back to شهري · an explicit source period still beats the fallback. A
 *rise* in the fallback count is worth investigating as a possible parser regression upstream; the
 absolute count is not a defect.
+
+### 22.2 CURRENT RULE (owner restatement 2026-09-03): an unknown rent period stays unknown
+
+> Never infer Monthly or Yearly when the source does not explicitly support it.
+
+Implemented in `20260903175817_unknown_rent_period_stays_unknown_never_defaults_to_annual.sql`, which
+changed the unknown branch of `sync_search_listings_ar` from `else 'سنوي'` to `else null::text`. What
+holds today:
+
+* **Explicit source period always wins** — `monthly → شهري`, `annual → سنوي`. Unchanged, and still
+  barriered (`explicit_monthly_lost`, `explicit_annual_lost`).
+* **Source silent → NULL**, on every platform except the two monthly-only verticals. This is not a
+  lost listing: `location_search_candidates_ar` treats NULL as "in neither period bucket", so the row
+  still returns on an unfiltered rent search and is correctly excluded from strict شهري / سنوي.
+* **gathern and aqarmonthly still fall back to شهري** — a documented platform fact
+  (`MONTHLY_ONLY_TABLE`), not an inference about the row.
+* **Never on a sale listing** — protected by construction, inside the `transaction_type='rent'` case.
+* The raw `<platform>_*_listings` tables are still never written. Source truth stays NULL.
+
+**`rent_without_period` is now an OBSERVATION, not a breach** (Data Integrity run 2026-09-04). It was
+891–901 rows across 33 platforms the day this landed. `mon_detect_rent_period_contract()` had gone on
+counting it as a contract violation, so it raised P1 continuously from 2026-09-03 17:58 and could
+never go green — which also meant `mon_raise()` deduping would have swallowed a REAL breach in any of
+its other checks. It now reports the number without raising on it, and instead raises on
+**`period_manufactured`**: an index period the source never published, on a non-monthly-only platform
+(migration `20260904144530`). That is the direction the 2026-09-03 rule is actually about.
+
+**What to check here on a future run:** `period_manufactured` is 0 · no Buy row carries
+`rent_period_ar` · gathern/aqarmonthly are still شهري · an explicit source period still wins · a *rise*
+in `rent_without_period` is worth investigating as an upstream parser regression, and its absolute
+value is not a defect.
 
 **The general rule this pins:** when a field is missing and a re-enrich path exists, run it `--dry-run`
 FIRST and read the diff. "The parser dropped it" and "the source never published it" look identical in
