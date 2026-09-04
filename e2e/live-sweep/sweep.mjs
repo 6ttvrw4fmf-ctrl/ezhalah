@@ -496,17 +496,30 @@ const runSearch = async (page) => {
   // scroll (866 of 866) puts «بحث» at y=583, fully inside the 664 px viewport, `reachable: true`.
   // A human scrolling the form on a phone reaches the button normally. §40.7: harness, not product.
   //
-  // ⚠️ STILL OPEN, and this comment must not be read as a fix. In the FULL journey — which calls
-  // setDeal() and setPeriod() before picking the city — the click still times out even with the
-  // scroll above. Verified against sweeps #4, #5 and #6: mobile journeys 0, floor missed. What is
-  // narrowed: it is not the below-the-fold position alone (the scroll demonstrably resolves that in
-  // isolation), not "two «بحث» nodes" (there is exactly 1), and not the environment (it reproduces
-  // locally every time on the default «بيع»). What is NOT isolated: what setDeal/setPeriod leave on
-  // the page that keeps the click from landing. Owned by this routine; next run continues here.
+  // ✅ NO LONGER REPRODUCES — measured on production 2026-09-04, three independent ways. The
+  // paragraph that stood here said this was STILL OPEN, that the click timed out in the FULL
+  // journey even with the scroll above, and that all three mobile journeys died on every «بيع»
+  // rotation. None of that is true any more, and leaving it said so was its own cost: it told the
+  // next engineer the §34 mobile floor was not being exercised and the workflow was red, so nobody
+  // would look. A stale "STILL OPEN" is as misleading as a dark detector.
   //
-  // Cost of the bug: ALL THREE mobile journeys die on every «بيع» rotation (CI runs #10 and #11,
-  // local sweeps #3–#6), so the owner-mandated §34 mobile floor is not actually being exercised and
-  // the workflow is red on those runs — the same wound as a dark detector.
+  // What was actually run, on the real site at 390 px (iPhone 13), each ending in rendered results:
+  //   • the live sweep's own mobile journey — الباحة / both / الأراضي السكنية — passed inside a
+  //     9-journey run with 0 mismatches at every seam;
+  //   • a hand journey driving setDeal(«إيجار») + setPeriod(«شهري») — the exact pair this comment
+  //     accused — reached «بحث» and searched in 17.5 s;
+  //   • a hand journey on the DEFAULT «بيع», the specific rotation named above, searched in 7.1 s
+  //     with p_deal serialized as «بيع» (§41.10). That third one matters: the first two do not
+  //     test the claim, and inferring it from them would have been the same shortcut that let the
+  //     original claim stand unverified.
+  // Instrumented at the moment of the click, «بحث» was in-viewport and elementFromPoint returned
+  // the button itself — not an overlay, exactly 1 node.
+  //
+  // The scroll machinery below is what fixes it and MUST STAY: on a 390 px viewport «بحث» renders
+  // below the fold, Playwright's scrollIntoViewIfNeeded() does not move a react-native-web
+  // ScrollView, and only the DOM-level scrollIntoView() does. Removing it puts the timeout back.
+  // If a mobile «بحث» timeout is ever seen again, re-open this with the failing rotation named —
+  // do not restore the old text, which no longer describes anything observable.
   const search = page.getByText('بحث', { exact: true }).first();
   // Wait for it to EXIST first — scrolling to an element that has not mounted is a silent no-op, and
   // then the click just waits out its timeout below the fold exactly as before.
