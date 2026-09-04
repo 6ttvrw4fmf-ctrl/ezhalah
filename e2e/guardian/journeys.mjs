@@ -821,6 +821,11 @@ const G9 = {
 // which the 22× miss above trips and which hourly churn can never reach.
 const PROMISE_BAND = 4;
 
+/** A search these two journeys drive themselves. Wider than the harness default: production has
+ *  been measured taking over 90s for an unfiltered capital-city search, and a budget that expires
+ *  on a slow-but-working search turns a healthy product into an UNDETERMINED run. */
+const SLOW_SEARCH_BUDGET_MS = 150000;
+
 /** The trending list as the user sees it: label + the count it advertises. */
 const trendingRows = (page) => page.evaluate(() =>
   [...document.querySelectorAll('[data-testid="trending-row"]')].map((e) => {
@@ -915,7 +920,7 @@ const G10 = {
     const dealShown = 'بيع';
 
     // ── the search the product actually ran ───────────────────────────────────────────────────
-    await runSearch(page);
+    await runSearch(page, SLOW_SEARCH_BUDGET_MS);
     const body = listingFetch(ctx);
     if (!body) throw new HarnessError('the results screen sent no paged property-search RPC — there is no search state to compare the trending row against');
     evidence.rpc = { p_cities: body.p_cities, p_districts: body.p_districts, p_deal: body.p_deal };
@@ -993,7 +998,11 @@ const afState = (page) => page.evaluate((selFill) => {
     skip: !!document.querySelector('[data-testid="af-skip"]'),
     intro: (card.innerText || '').includes('يلا نبدأ'),
     options: [...document.querySelectorAll('[data-testid^="af-option-"]')].map((o) => {
-      const lines = (o.innerText || '').split('\n').map((l) => l.trim()).filter(Boolean);
+      // The row's selection check is an ICON FONT glyph, so it is a non-empty innerText line that
+      // renders as nothing — taking it as the label prints «» into every violation this journey can
+      // raise. Keep only lines that carry a letter or a digit.
+      const lines = (o.innerText || '').split('\n').map((l) => l.trim())
+        .filter((l) => /[\p{L}\p{N}]/u.test(l));
       const bg = getComputedStyle(o.parentElement).backgroundColor;
       return {
         key: o.getAttribute('data-testid').replace('af-option-', ''),
@@ -1273,7 +1282,7 @@ const G12 = {
 
     // ── and off the wire ──────────────────────────────────────────────────────────────────────
     if (!await pickCity(page, 'الرياض')) throw new HarnessError('the product did not offer the city «الرياض» after the clear');
-    await runSearch(page);
+    await runSearch(page, SLOW_SEARCH_BUDGET_MS);
     const body = listingFetch(ctx);
     if (!body) throw new HarnessError('the search after the clear sent no paged property-search RPC to inspect');
     evidence.rpcAfterClear = {
