@@ -1513,7 +1513,20 @@ Deno.serve(async (req: Request) => {
         // to the model's own reply text/phrasing (owner-confirmed: the platform enforces THAT this
         // turn is a clarification, never WHAT it asks about).
         const reply = ambiguityReply ?? noPlaceReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities));
-        return json({ kind: "message", reply, query: understoodState(), askCount: decision.askCount });
+        // THIS QUESTION IS NOT OPTIONAL (owner, 2026-09-05). The client keeps its own ask-ceiling —
+        // "asked twice already and we can see some intent, so stop pestering and just search"
+        // (src/app/agent.tsx). For an ordinary clarification that is right. For a LOCATION question
+        // it silently chose the user's search scope: it discarded this reply and searched whatever
+        // the parser had produced. Measured in production 2026-09-05 — the edge returned
+        // ««الرياض» اسم مدينة واسم منطقة… تقصد مدينة الرياض ولا منطقة الرياض كاملة؟» and the client
+        // never showed it, searching منطقة الرياض (10,932 rows across 20 cities) instead.
+        //
+        // So the DECISION AUTHORITY says so explicitly rather than the client re-deriving it: this
+        // flag is set only for the two location questions (an unresolved ambiguity, or no usable
+        // place at all), and the client's ceiling must not fire when it is true. Everything else is
+        // still subject to the ceiling exactly as before.
+        const locationQuestion = !!(ambiguityReply ?? noPlaceReply);
+        return json({ kind: "message", reply, locationQuestion, query: understoodState(), askCount: decision.askCount });
       }
 
       // decision.kind === "listings"
