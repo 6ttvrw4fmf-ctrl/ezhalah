@@ -43,6 +43,10 @@ claims it — if they disagree, that itself is a Sentry issue for routine #2 to 
 | 5 | 🎯 **AF + Trending Data Integrity** | `src/data/advancedFilters.ts`, `src/lib/afRanking.ts`, `src/lib/afCohorts.ts`, `src/lib/afSteps.ts`, `src/lib/afSummary.ts`, `src/lib/afPlan.ts`, `src/components/AdvancedQuestionCard.tsx`, `src/components/TrendingChips.tsx`, `src/components/TrendingList.tsx` | AF question wrong/missing/repeated, AF count wrong, Skip/Back/Show-Results wrong, pill wrong, Trending count wrong |
 | 6 | 👣 **Journey & Persistence** | `src/store.tsx`, `src/lib/chatTranscript.ts`, `src/lib/chatMerge.ts`, `src/lib/chatSync.ts`, `src/lib/auth.ts`, `src/components/Sidebar.tsx`, `src/components/GoogleOneTap.tsx`, `src/components/AuthModal.tsx`, `src/lib/voiceInput.ts`, `src/lib/readAloud*.ts`, `src/lib/webRefreshRoute.ts`, `src/lib/appSession.ts`, `src/app/agent.tsx` (chat plumbing paths, not AF logic) | sign-in fails, One Tap misbehaves, chat lost/duplicated/mutated, refresh strands the user, sidebar wrong, voice/read-aloud crash, page load blank |
 | 7 | 🧵 **Systems Seam** | `src/lib/supabase.ts`, `src/data/clicks.ts`, RLS-boundary code paths, error paths whose reason names a cron/detector/alert/migration/RPC-schema seam, network-layer wrappers | RLS refused, cron→detector→alert chain broke, migration-drift symptom in the client, PostgREST schema mismatch, deploy-claim vs served-bundle disagreement |
+| 8 | 🔴 **Regression Hunter** | no file surface of its own — it claims a Sentry issue only when the stack spans TWO owners' files, or when the issue is a REOPEN of one a previous fix closed | an error that reproduces only in a combination (AF × pagination × Back), or a regression of something already marked fixed |
+| 9 | 🔬 **Production Red Team** | no file surface of its own — it claims an issue whose symptom is two LAYERS disagreeing (displayed count vs returned set, request vs RPC params, card vs DB) | "the number on screen is not the number in the database" shaped errors, post-deploy drift |
+| 10 | 🧱 **Bug Prevention & Barrier** | `scripts/verify-*`, `scripts/lib/testRegistry.ts`, `scripts/lib/liftSymbols.ts`, `scripts/run-tests.mjs`, `e2e/**` harness code (not the product it drives) | a check crashed, a harness threw, CI tooling broke — never a product symptom |
+| 11 | ♻️ **Listing Lifecycle** | `scrapers/common/liveness_contract.py`, `scrapers/common/liveness_policies.py`, deletion/prune/recovery paths, and any error raised while removing or restoring a listing | a dead listing still rendered, a false resurrection, a deletion that left orphans, UNKNOWN treated as dead |
 
 ### §2.1 — Unownable / ignore-list
 
@@ -61,6 +65,20 @@ claims it — if they disagree, that itself is a Sentry issue for routine #2 to 
   the actual owner and continues rather than fixing outside their surface.
 - **P1 severity + unclaimed for 4h** → routine #2 takes it regardless of top-frame path. P1 does
   not wait for the next daily cycle.
+
+
+**Disambiguating #8, #9 and #10 (added 2026-09-04).** All three are cross-cutting, so the tie-break is
+the OBJECT of the issue, applied in this order:
+
+1. Does the stack trace sit in `scripts/verify-*` or `e2e/**` harness code? → **#10 🧱**. The
+   apparatus broke, not the product.
+2. Is the symptom two LAYERS disagreeing about the same question? → **#9 🔬**.
+3. Does it reproduce only in a COMBINATION, or is it a reopen of something already closed? → **#8 🔴**.
+4. Otherwise it belongs to the surface owner in rows 1–7 and 11, exactly as before.
+
+None of #8/#9/#10 may claim an issue that resolves cleanly to a single surface owner — they ROUTE it
+with `incident_handoff()` and continue. That rule is what stops three new routines from becoming
+three new claimants on every crash.
 
 ## §3 — The mandatory check (identical wording in every routine spec)
 

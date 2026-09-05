@@ -56,14 +56,17 @@ check('every clean type in the hierarchy has a curated Arabic plural (no silent 
 console.log('\n── B. the retired success beat stays retired ──');
 
 const mining = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
+// Named so section D can feed the SAME predicate a source with the retired beat put back.
+const successBeatGone = (s: string) => !s.includes('We found {count} properties closest to your request');
 check('the «We found {count} properties closest to your request» claim is GONE from the transition',
-  !mining.includes('We found {count} properties closest to your request'));
+  successBeatGone(mining));
 check('the transition renders the dynamic sentence through the ONE executed builder',
   /deepSearchLine\(/.test(mining) && /from '@\/lib\/afDeepSearchCopy'/.test(mining));
 check('no platform logos/pills reach the transition (no loaderPlatforms import, no Image pills)',
   !/loaderPlatforms|PlatformPill|pillLogo/.test(mining));
+const backdropIsOpaque = (s: string) => /backgroundColor: colors\.paper, opacity: 0\.9[5-9]/.test(s);
 check('the backdrop is the near-opaque THEME surface (covers the searching turn behind it)',
-  /backgroundColor: colors\.paper, opacity: 0\.9[5-9]/.test(mining));
+  backdropIsOpaque(mining));
 check('reduced motion renders the static composition (no moving cards)',
   /useReducedMotion/.test(mining) && /!reduced \?/.test(mining));
 
@@ -77,6 +80,36 @@ check('dismissal is a plain setTimeout latch with the 15s failsafe (never an ani
   /timers\.push\(setTimeout\(\(\) => \{ if \(stillMining\(\)\) setAgeFlow\(\(f\) => \(f\?\.phase === 'mining' \? null : f\)\); \}, 15000\)\)/.test(agent));
 check('the hand-off is DIRECT: the overlay dismisses on a short seal (wait + 450), no reading pause',
   /wait \+ 450/.test(agent));
+
+// ── D. MUTATION PROOFS — every rule above, fed the defect it exists to catch ─────────────────────
+// A barrier nobody has watched fail is a comment that runs. Each proof below applies THIS file's own
+// predicate to a deliberately broken input and asserts the predicate rejects it.
+console.log('\n── D. mutation proofs ──');
+const mustCatch = (what: string, caught: boolean) =>
+  check(`(mutation) catches ${what}`, caught,
+    'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
+
+// The retired white success dialog, put back into the real component source.
+const beatRestored = mining.replace('<Text style={st.headline}>',
+  '<Text>We found {count} properties closest to your request</Text>\n        <Text style={st.headline}>');
+mustCatch('the retired «We found N properties closest to your request» success beat coming back',
+  beatRestored !== mining && !successBeatGone(beatRestored));
+
+// A see-through backdrop is how the platform-pill roster read through the overlay.
+const backdropThinned = mining.replace('opacity: 0.96', 'opacity: 0.6');
+mustCatch('the backdrop being thinned so the searching turn reads through it',
+  backdropThinned !== mining && !backdropIsOpaque(backdropThinned));
+
+// A builder that falls back to the raw taxonomy key instead of «العقارات».
+const leakyBuilder = (t: string | null) => `إزهله يدقّق في ${t ?? 'العقارات'} المطابقة لطلبك…`;
+mustCatch('a builder that leaks the English type key into the Arabic sentence',
+  leakyBuilder('Castle').includes('Castle'));
+
+// Silent truncation: the pre-cap builder quoted only the first MAX_QUOTED and said nothing.
+const truncatingBuilder = (labels: string[]) =>
+  `إزهله يدقّق في الشقق بـ${labels.slice(0, MAX_QUOTED).map((l) => `«${l}»`).join(' و')} للعثور على الأقرب لطلبك…`;
+mustCatch('a builder that truncates past the cap without the honest «وغيرها»',
+  !truncatingBuilder(['أ', 'ب', 'ج', 'د', 'هـ']).includes('وغيرها'));
 
 console.log(failures === 0
   ? '\n✓ deep-search transition: the user\'s own selections, one honest number, no success beat\n'

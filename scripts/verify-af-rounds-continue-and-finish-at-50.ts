@@ -106,6 +106,39 @@ check('re-showing a step prefers the FRESH resolution whenever the probe ANSWERE
 check('this barrier is discovered and run by npm test (not excluded)',
   !read('scripts/test-exclusions.txt').includes('verify-af-rounds-continue-and-finish-at-50'));
 
+// ── 7. MUTATION PROOFS — each rule above, fed the regression it exists to catch ─────────────────
+const mustCatch = (what: string, caught: boolean) =>
+  check(`(mutation) catches ${what}`, caught,
+    'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
+
+// The stop line reverted to its pre-2026-09-04 value: a finished 37-result set stops being revealed
+// in full and gets a first page with «عرض المزيد» again.
+mustCatch('the stop line reverted to 25 — a ≤ 50 set is no longer revealed in full',
+  initialReveal({ fetched: 37, honestTotal: 37, firstPage: FP, stopAt: 25 }) !== 37);
+
+// The canonical constant retyped as a literal at the call site — the shape that drifts the next time
+// the owner moves the line.
+{
+  const retyped = agent.replace('stopAt: INTERVIEW_STOP_AT', 'stopAt: 50');
+  mustCatch('agent.tsx retyping the stop line as a literal instead of importing it',
+    retyped !== agent
+    && !(/stopAt: INTERVIEW_STOP_AT/.test(retyped) && !/stopAt: 25\b/.test(retyped) && !/stopAt: 50\b/.test(retyped)));
+}
+
+// A second setCompleted(true) site is exactly how "nothing truthful left" becomes a silent lock
+// instead of the spoken line.
+mustCatch('a second setCompleted(true) site locking the chat outside the ≤ 50 rule',
+  ((agent + "\nif (verdict === 'no') setCompleted(true);").match(/setCompleted\(true\)/g) ?? []).length !== 1);
+
+// The round losing its carry: round N+1 re-asks everything round N already asked.
+mustCatch('the next round dropping the answered-or-skipped carry (questions repeat)',
+  !/afCarryRef\.current = \{ msgId, originQ: continueGuided\.baseQ, facets: continueGuided\.facets, asked: continueGuided\.asked \};/
+    .test(fin.replace('asked: continueGuided.asked }', 'asked: [] }')));
+
+// The card keyed on the title alone — the stale-selection defect, verbatim.
+mustCatch('the card selection keyed on titleKey alone (a re-shown tier keeps the old selection)',
+  !/\}, \[titleKey, optionKeySig, initialSig\]\);/.test(card.replace('}, [titleKey, optionKeySig, initialSig]);', '}, [titleKey]);')));
+
 console.log(failed
   ? `\n✗ ${failed} check(s) FAILED — the interview can again stop early, repeat a question, lock a big set, or show a stale selection`
   : '\n✓ rounds continue only through the shared assessment while > 50; ≤ 50 finishes and reveals all; nothing truthful left is SAID; skipped/answered never repeat; the card never shows a stale selection');

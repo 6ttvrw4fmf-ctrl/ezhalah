@@ -11,6 +11,7 @@
 //      a chat that holds a conversation (that was the fragmentation/loss bug).
 //   3. The WIRING — agent capture/restore, store persistence + server sync, sidebar routing.
 import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import { mergeOne, withFreshTranscript } from '../src/lib/chatMerge.ts';
 import { serializeChat, restoreChat, sameTranscript, TRANSCRIPT_LISTING_CAP, TRANSCRIPT_FIRST_PAGE, LOCAL_TRANSCRIPT_ENTRIES } from '../src/lib/chatTranscript.ts';
 
@@ -114,12 +115,73 @@ check('pull: server metas merge after sign-in, via the single shared precedence 
   check('…proved by execution: a server-only chat appears',
     (mergeOne(undefined, { id: 'z', ts: 5 }) as { id: string }).id === 'z');
 }
-check('push: debounced write-through diffs per-entry activity stamps', /const stamp = Math\.max\(it\.ts, it\.tRev \?\? 0\);/.test(store));
+// PUSH DIFF — EXECUTED, not matched. This check used to PIN THE DEFECT: it asserted the literal
+// `const stamp = Math.max(it.ts, it.tRev ?? 0);` was present and called that "correct", so the one
+// barrier covering the push stayed green through the entire life of the bug it was supposed to
+// catch. (hunt-2026-09-04:chat_persistence:01 — favourite / rename / manual drag order move NEITHER
+// `ts` nor `tRev` by deliberate design, so an activity-stamp diff skipped the upsert and those three
+// user-made states never left the device. Owner contract, store.tsx: «conversations survive a new
+// browser and logging back in».) The invariant is now stated as behaviour and proved by running the
+// shipped helpers: A CHAT IS PUSHED WHEN THE BYTES WE WOULD SEND DIFFER FROM THE BYTES THE SERVER
+// CONFIRMED — never when a clock happens to move.
+const pushDiff = (() => {
+  const m = store.match(/const chatMetaOf = [\s\S]*?txStale \? undefined : it\.transcript;/);
+  if (!m) {
+    console.error('FAIL  could not lift the push-diff helpers out of src/store.tsx — were they moved or renamed?');
+    process.exit(1);
+  }
+  const js = stripTypeScriptTypes(m[0], { mode: 'strip' });
+  return new Function(`${js}\nreturn { chatMetaOf, syncKeyOf, chatNeedsPush, pushableTranscript };`)() as {
+    chatMetaOf: (it: any) => Record<string, unknown>;
+    syncKeyOf: (it: any) => string;
+    chatNeedsPush: (it: any, base: Map<string, string>) => boolean;
+    pushableTranscript: (it: any) => unknown;
+  };
+})();
+// One chat, exactly as the pull leaves it: local entry + the row the server sent. The server side
+// came back through Postgres `jsonb`, which returns object keys in ITS order, not ours — written out
+// shuffled here on purpose, because a diff that noticed key order would re-push all 50 chats on
+// every single sign-in.
+const chat = {
+  id: 'c1', label: 'شقق للإيجار', query: { deal: 'Rent', city: 'الرياض', beds: 3 }, ts: 1000, tRev: 900,
+  title: 'شقق الرياض', titleSource: 'auto', starred: false,
+  snapshot: { cards: 20 }, transcript: { msgs: 4 },
+};
+const serverMeta = { ts: 1000, query: { beds: 3, city: 'الرياض', deal: 'Rent' }, label: 'شقق للإيجار', title: 'شقق الرياض', starred: false, titleSource: 'auto', tRev: 900, id: 'c1' };
+const base = new Map([['c1', pushDiff.syncKeyOf({ ...serverMeta, id: 'c1' })]]);
+check('push: a chat the server already holds is NOT re-pushed (jsonb key order is irrelevant)',
+  pushDiff.chatNeedsPush(chat, base) === false);
+check('push: FAVOURITING is pushed — it moves no clock, which is exactly why the stamp diff missed it',
+  pushDiff.chatNeedsPush({ ...chat, starred: true }, base) === true);
+check('push: RENAMING is pushed (`ts` must NOT move on a rename, so only content can notice it)',
+  pushDiff.chatNeedsPush({ ...chat, title: 'بحثي المفضل', titleSource: 'manual', titleUpdatedAt: 2000 }, base) === true);
+check('push: MANUAL DRAG ORDER is pushed (a midpoint `order` can even be lower than the old stamp)',
+  pushDiff.chatNeedsPush({ ...chat, order: 500 }, base) === true);
+check('push: a new transcript revision still pushes (tRev — unchanged behaviour)',
+  pushDiff.chatNeedsPush({ ...chat, tRev: 2000 }, base) === true);
+check('push: a field added to HistoryItem later is covered by construction, with no new timestamp',
+  pushDiff.chatNeedsPush({ ...chat, pinned: true }, base) === true);
+check('push: device-local cache fields never travel and never cause a push (snapshot/transcript/txStale)',
+  pushDiff.chatNeedsPush({ ...chat, snapshot: { cards: 1 }, transcript: { msgs: 99 }, txStale: true }, base) === false);
+check('push: once the write lands the baseline stops it repeating (no write loop)', (() => {
+  const starred = { ...chat, starred: true };
+  const after = new Map(base);
+  if (pushDiff.chatNeedsPush(starred, after)) after.set('c1', pushDiff.syncKeyOf(starred));
+  return pushDiff.chatNeedsPush(starred, after) === false;
+})());
+check('push: a STALE local transcript is never carried up by a meta-only edit (chatMerge’s loss guard holds)',
+  pushDiff.pushableTranscript({ ...chat, starred: true, txStale: true }) === undefined);
+check('push: a trusted transcript still goes up with the meta',
+  pushDiff.pushableTranscript({ ...chat, starred: true }) !== undefined);
+check('push: the shipped effect uses that predicate, and the activity-stamp diff is GONE from the source',
+  !/const stamp = Math\.max\(it\.ts, it\.tRev \?\? 0\);/.test(store)
+  && /if \(!chatNeedsPush\(it, base\)\) continue;/.test(store)
+  && /new Map\(rows\.map\(\(r\) =>\n\s*\[r\.id, syncKeyOf\(/.test(store));
 check('push: gated on the pull having merged (a not-yet-merged list can never mass-delete server history)',
   /if \(syncReadyRef\.current !== historyKey\(user\.sub\)\) return; \/\/ push only after the pull merged/.test(store));
 check('push: deletions propagate only for ids the server was known to hold', /const gone = \[\.\.\.base\.keys\(\)\]\.filter\(\(id\) => !seen\.has\(id\)\);/.test(store));
 check('a transcript the local cache pruned is never nulled on the server (meta-only upsert)',
-  /void upsertChat\(it\.id, chatMetaOf\(it\), it\.transcript\)/.test(store));
+  /void upsertChat\(it\.id, chatMetaOf\(it\), pushableTranscript\(it\)\)/.test(store));
 const sync = readFileSync(new URL('../src/lib/chatSync.ts', import.meta.url), 'utf8');
 check('chatSync: upsert leaves the server transcript untouched when the caller holds none',
   /if \(transcript !== undefined\) row\.transcript = transcript;/.test(sync));
@@ -181,5 +243,50 @@ check('sidebar: EVERY chat opens through the replay path (chat-only entries rest
   /router\.replace\(\{ pathname: '\/agent', params: \{ filter: JSON\.stringify\(c\.query\), replay: '0', hid: c\.id \} \}\);/.test(sidebar)
   && !/params: \{ fresh: String\(Date\.now\(\)\) \}/.test(sidebar));
 
+// ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
+// This file shipped a green check that PINNED the defect verbatim for the bug's whole lifetime, so
+// nothing here is trusted until it has been watched failing on the real thing.
+console.log('\n  mutation proof — each push guard must FAIL on its own defect\n');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+// (a) THE DEFECT ITSELF, re-executed side by side with the fix.
+{
+  const stampBase = new Map([['c1', Math.max(chat.ts, chat.tRev)]]);
+  const stampDiff = (it: { id: string; ts: number; tRev?: number }, b: Map<string, number>) =>
+    Math.max(it.ts, it.tRev ?? 0) > (b.get(it.id) ?? -1);
+  mustCatch('the activity-stamp diff calling a FAVOURITE "already synced"',
+    stampDiff({ ...chat, starred: true }, stampBase) === false && pushDiff.chatNeedsPush({ ...chat, starred: true }, base));
+  mustCatch('the activity-stamp diff calling a RENAME "already synced" (titleUpdatedAt is not the stamp)',
+    stampDiff({ ...chat, title: 'x', titleUpdatedAt: 9e12 }, stampBase) === false
+    && pushDiff.chatNeedsPush({ ...chat, title: 'x', titleUpdatedAt: 9e12 }, base));
+  mustCatch('the activity-stamp diff calling a REORDER "already synced"',
+    stampDiff({ ...chat, order: 500 }, stampBase) === false && pushDiff.chatNeedsPush({ ...chat, order: 500 }, base));
+}
+// (b) an ignore-list creeping into the diff key (the shape that made the stamp version wrong).
+{
+  const blindKey = (it: Record<string, unknown>) => pushDiff.syncKeyOf({ ...it, starred: false, order: undefined });
+  mustCatch('a diff key that skips `starred`/`order`',
+    blindKey({ ...chat, starred: true }) === blindKey(chat)
+    && pushDiff.syncKeyOf({ ...chat, starred: true }) !== pushDiff.syncKeyOf(chat));
+}
+// (c) a raw JSON.stringify key — content-correct, but it would re-push all 50 chats on every sign-in
+//     because the baseline side came back through jsonb in a different key order.
+mustCatch('a non-canonical key that mistakes jsonb key order for a change',
+  JSON.stringify(pushDiff.chatMetaOf(chat)) !== JSON.stringify(serverMeta)
+  && pushDiff.chatNeedsPush(chat, base) === false);
+// (d) the history-loss hazard a content diff would otherwise open: a star pushing a stale transcript.
+mustCatch('a meta-only push carrying a STALE transcript over the server’s newer copy',
+  pushDiff.pushableTranscript({ ...chat, txStale: true }) === undefined && chat.transcript !== undefined);
+// (e) the source-level half going blind if the defective line is put back.
+mustCatch('the activity-stamp diff creeping back into store.tsx',
+  /const stamp = Math\.max\(it\.ts, it\.tRev \?\? 0\);/.test(
+    store.replace('if (!chatNeedsPush(it, base)) continue;', 'const stamp = Math.max(it.ts, it.tRev ?? 0);')));
+
+if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 console.log(failed ? `\n✗ ${failed} check(s) FAILED — conversation persistence is drifting` : '\n✓ conversations persist in full — exact transcript, one identity, local + server, ChatGPT-grade');
 process.exit(failed ? 1 : 0);

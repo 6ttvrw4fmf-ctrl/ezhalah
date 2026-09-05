@@ -83,6 +83,38 @@ const i18n = read('src/i18n.tsx');
   }
 }
 
+// ── 5. MUTATION PROOFS — each rule above, fed the source it exists to reject ──────────────────
+// The regexes below are the SAME ones the checks use, run against the real agent source with the
+// removed scope put back. A tripwire nobody has watched fail is a comment that runs.
+const mustCatch = (what: string, caught: boolean) =>
+  check(caught, `(mutation) catches ${what}`,
+    'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
+
+{
+  // The 2026-06-24 invitation, restored inside the city question itself.
+  const readvertised = agent.replace("'في أي مدينة تبحث؟'",
+    "'في أي مدينة تبحث؟ وإذا تبي كل المملكة قل لي، أبحث في كل مدن المملكة'");
+  mustCatch('the Kingdom-wide invitation coming back into the city question',
+    readvertised !== agent && /كل مدن المملكة/.test(readvertised) && /وإذا تبي كل المملكة/.test(readvertised));
+
+  // A KINGDOM_WIDE matcher re-wired in — the short-circuit that skipped the city question.
+  const rewired = agent.replace('const WHOLE_AREA', 'const KINGDOM_WIDE = /كل المملكة/i;\nconst WHOLE_AREA');
+  mustCatch('a KINGDOM_WIDE matcher being re-wired into the agent screen',
+    rewired !== agent && /KINGDOM_WIDE/.test(rewired));
+
+  // The guard gutted while the symbol survives — the exact mutation that beat the first version of
+  // check §2 (it asserted the SYMBOL, not the call).
+  const gutted = agent.replace('if (WHOLE_AREA.test(userText)) return null;', 'if (false) return null;');
+  mustCatch('the whole-city short-circuit gutted to `if (false)` while the WHOLE_AREA symbol survives',
+    gutted !== agent && /WHOLE_AREA/.test(gutted)
+    && !/if \(WHOLE_AREA\.test\(userText\)\) return null;/.test(gutted));
+
+  // The Filter's own city requirement quietly dropped from i18n.
+  const noMsg = i18n.replaceAll('CITY_REQUIRED_MSG', 'CITY_OPTIONAL_MSG');
+  mustCatch('the Filter losing CITY_REQUIRED_MSG (a search with no city stops being refused)',
+    noMsg !== i18n && !/CITY_REQUIRED_MSG/.test(noMsg));
+}
+
 console.log(failed === 0
   ? '\n✅ verify-no-nationwide-search-scope: all checks passed.'
   : `\n❌ verify-no-nationwide-search-scope: ${failed} check(s) failed.`);

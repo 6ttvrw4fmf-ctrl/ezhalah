@@ -65,6 +65,35 @@ for (const path of [...sourcedOnly].sort()) {
   console.log(`SKIP  ${path} is only sourced, never executed — no executable bit required`);
 }
 
+// ── MUTATION PROOFS. The two predicates this barrier turns on are SCRIPT_RE (does a workflow line
+//    EXECUTE the script, or merely `source` it?) and the mode comparison. Both are applied here to
+//    inputs that carry the exact defect — including the 2026-09-05 one: safe-deploy.sh committed
+//    100644, which killed every production deploy with exit 126 while every check stayed green.
+const classify = (line: string): { path: string; sourced: boolean } | null => {
+  SCRIPT_RE.lastIndex = 0;                       // /g is stateful — a shared regex must be rewound
+  const m = SCRIPT_RE.exec(line);
+  return m ? { path: m[3], sourced: Boolean(m[2]) } : null;
+};
+const mustCatch = (what: string, wouldFail: boolean) =>
+  check(`MUTATION: catches ${what}`, wouldFail);
+
+mustCatch('a bare `scripts/x.sh` being treated as anything but EXECUTED',
+  classify('  run: scripts/safe-deploy.sh')?.sourced === false);
+mustCatch('`./scripts/x.sh` being treated as anything but EXECUTED',
+  classify('  ./scripts/safe-deploy.sh --prod')?.sourced === false);
+mustCatch('`source scripts/x.sh` being misread as EXECUTED (the false alarm that teaches people to chmod 644 files)',
+  classify('  source scripts/deploy-target-guard.sh')?.sourced === true);
+mustCatch('`. scripts/x.sh` (dot-source) being misread as EXECUTED',
+  classify('  . scripts/deploy-target-guard.sh')?.sourced === true);
+mustCatch('the mode predicate accepting 100644 — the exact bit that killed every deploy in #1759',
+  !('100644' === '100755'));
+mustCatch('a script the scan cannot see at all (an empty executed set reading as clean)',
+  !(new Map().size > 0));
+// …and not vacuous: the real workflow scan must still have found something to grade.
+mustCatch('nothing — the real scan still found executed scripts, so the checks above are not idling',
+  executed.size > 0);
+
+
 if (failed) {
   console.error(`\n${failed} check(s) FAILED — a workflow would die on "Permission denied" before running`);
   process.exit(1);

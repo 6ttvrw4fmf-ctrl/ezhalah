@@ -74,6 +74,15 @@ const AUTOSCROLL_EDGE_PX = 48;   // start auto-scrolling when the pointer is thi
 const AUTOSCROLL_STEP_PX = 6;    // per 16ms tick — controlled, never a fling
 const ROW_H_FALLBACK = 37;
 
+// The row hosts the drag gesture, so a pointerdown ANYWHERE in it used to start a hold — including
+// on the ⋯ button, where a mouse-down that drifted ~25px down lifted the row and committed a real
+// reorder (owner journey 2026-09-04). ⋯ is a menu affordance, not a drag handle. A control that
+// owns its own pointer marks itself `dataSet={{ nodrag: '1' }}` (react-native-web renders that as
+// `data-nodrag`); text fields are excluded by tag. The row body itself carries no marker, so the
+// intended press-hold-drag — and the drag into Favourites — is untouched.
+const NO_DRAG_SEL = '[data-nodrag], input, textarea';
+const startsOnControl = (target: any): boolean => !!target?.closest?.(NO_DRAG_SEL);
+
 // Note #9 — TWO sections only: Starred (always kept) and Recent (last 60 DAYS, newest first).
 // Anything older than 60 days drops out of Recent but Starred items stay forever. Both buckets are
 // sorted by most-recent activity. (user request: "Recent chats should be ordered by most recent
@@ -363,6 +372,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
 
   const beginHold = (c: HistoryItem, bucket: string, index: number, count: number, ids: string[], node: any, e: PointerEvent) => {
     if (!reorderEnabled || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    if (startsOnControl(e.target)) return;   // the press belongs to ⋯ / a field, not to the row
     if (dragRef.current) return;
     const prevent = (ev: Event) => ev.preventDefault();
     const onMove = (ev: PointerEvent) => {
@@ -801,7 +811,15 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                             {c.starred && <Ionicons name="star" size={13} color={GOLD} />}
                           </Pressable>
                         )}
-                        <Pressable style={s.dots} hitSlop={6} onPress={(e) => openMenu(c.id, e)}>
+                        {/* ⋯ owns its own pointer: `data-nodrag` keeps a press here out of the row's
+                            hold-to-drag (a mouse-down that drifted used to reorder the chat). */}
+                        <Pressable
+                          style={s.dots}
+                          hitSlop={6}
+                          // @ts-expect-error web-only DOM props on the RNW host node
+                          dataSet={{ nodrag: '1' }}
+                          onPress={(e) => openMenu(c.id, e)}
+                        >
                           <Ionicons name="ellipsis-horizontal" size={16} color={hot ? '#cfe0d5' : '#9aa6a0'} />
                         </Pressable>
                       </View>

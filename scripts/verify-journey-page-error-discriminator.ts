@@ -106,5 +106,35 @@ check('no journey still treats bag.pageErrors directly as a defect list',
 check('every page-error check goes through appPageErrors()',
   (run.match(/appPageErrors\(bag, name\)/g) || []).length >= 18);
 
+// ── 6. MUTATION PROOFS — both directions the classifier can rot, executed ───────────────────────
+// This barrier's whole value is that it is PAIRED, so each proof re-breaks one half and asserts the
+// OTHER half's rule rejects it. A discriminator nobody watched fail is a blindfold with a comment.
+const mustCatch = (what: string, caught: boolean) => check(`(mutation) catches ${what}`, caught);
+
+// TOO LOOSE — the obvious "does the message mention the network?" implementation. It excuses real
+// crashes whose wording merely brushes against transport («TypeError: fetchListings is not a
+// function»). §2's rule — every APP entry must classify false — is what rejects it.
+const looseMutant = (m: string) => /fetch|load|network|connection/i.test(m);
+mustCatch('a discriminator loose enough to excuse a real crash that merely mentions fetch/load',
+  APP.some(looseMutant));
+
+// TOO NARROW — only the Chromium/Firefox wording. It re-files the measured WebKit «access control
+// checks» string as an Ezhalah defect: the original 4/10 false failure. §1's rule rejects it.
+const narrowMutant = (m: string) => /Failed to fetch|net::ERR_/.test(m);
+mustCatch('a discriminator too narrow to excuse the measured WebKit «access control checks» string',
+  !TRANSPORT.every(narrowMutant));
+
+// A partition that drops the WHOLE bag once any transport error is present masks a real crash that
+// happened alongside a blip. §3's mixed-bag rule is what rejects it.
+const maskingPartition = (bag: { pageErrors: string[] }) =>
+  bag.pageErrors.some((e) => isTransportPageError(e)) ? [] : bag.pageErrors;
+mustCatch('a partition that masks a real crash sitting next to a transport blip',
+  maskingPartition(bagOf(['Load failed', "TypeError: undefined is not an object (evaluating 'x.y')"])).length !== 1);
+
+// §5: a journey that reads bag.pageErrors directly is back outside the discriminator entirely.
+mustCatch('a journey reading bag.pageErrors directly instead of routing through appPageErrors()',
+  (run.replaceAll('appPageErrors(bag, name)', 'bag.pageErrors')
+     .match(/appPageErrors\(bag, name\)/g) || []).length < 18);
+
 if (failed) { console.error(`\nverify-journey-page-error-discriminator: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-journey-page-error-discriminator: dead requests excused, real crashes never.');

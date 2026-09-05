@@ -2,7 +2,7 @@
 //
 // Sibling of scripts/verify-data-integrity-contract.ts and
 // scripts/verify-journey-seam-engineer-contracts.ts, built to the same shape for the same reason:
-// §G of docs/ops/ENGINEER_ROUTINES.md is what makes all SEVEN routines finish their own work
+// §G of docs/ops/ENGINEER_ROUTINES.md is what makes ALL the routines finish their own work
 // instead of handing safely fixable defects back to the owner, and a routine prompt lives outside
 // this repo and drifts. The file wins — but only while something checks the file.
 //
@@ -92,15 +92,23 @@ const region = (hay: string, from: string, to: string): string => {
   return hay.slice(a, b < 0 ? hay.length : b);
 };
 
-// ── 0. §G exists at all, and is scoped to all seven ───────────────────────────────────────────
+// ── 0. §G exists at all, and names the scope it binds ─────────────────────────────────────────
 check(/##\s*§G\s*—\s*GLOBAL ENGINEERING POLICY/i.test(routines),
   '§G — GLOBAL ENGINEERING POLICY section is present',
   `${ROUTINES} has lost its §G GLOBAL ENGINEERING POLICY section — the seven routines revert to ` +
   `monitoring agents that find defects and hand them back to the owner`);
 
-check(/binds ALL SEVEN routines/i.test(routines),
-  '§G declares that it binds ALL SEVEN routines',
-  `${ROUTINES} §G no longer says it binds ALL SEVEN routines — a policy that does not name its ` +
+// The SCOPE must be named, and it must match how many routines actually exist. Pinning the literal
+// word "SEVEN" made this barrier fail the day an eighth routine was added — punishing a correct
+// change instead of catching an incorrect one. What matters is that §G never goes quiet about who it
+// binds, so the count is read from the roster table and the wording is required to agree with it.
+// Counted on the RAW file: norm() collapses whitespace, which destroys the line anchors a
+// markdown table row needs.
+const ROUTINE_ROWS = (rawRoutines.match(/^\| \d+ \| /gm) ?? []).length;
+const SCOPE_WORD = ['','ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN','ELEVEN','TWELVE'][ROUTINE_ROWS] ?? '';
+check(ROUTINE_ROWS >= 7 && SCOPE_WORD !== '' && new RegExp(`binds ALL ${SCOPE_WORD} routines`, 'i').test(routines),
+  `§G declares that it binds ALL ${SCOPE_WORD} routines (the roster lists ${ROUTINE_ROWS})`,
+  `${ROUTINES} §G no longer says it binds ALL ${SCOPE_WORD} routines — a policy that does not name its ` +
   `scope gets read as applying to whichever routine is convenient`);
 
 // The whole §G region. Every scoped check below runs inside it, and every one of them first
@@ -117,7 +125,7 @@ check(G.length > 0,
   `"## 1. ⚡ Daily JUNIOR SCRAPING Engineer". Every §G check below would then pass vacuously, so ` +
   `this guard fails here first rather than reporting a green policy that is not in the file.`);
 
-// ── 1. All SEVEN routines are named in §G itself ──────────────────────────────────────────────
+// ── 1. Every routine is named in §G itself ────────────────────────────────────────────────────
 // Not "the file mentions them somewhere" — inside the policy region, so a reader of §G alone knows
 // who it binds. Names, not just numbers: a bare "#4" survives a rename that guts the roster.
 for (const name of [
@@ -126,7 +134,7 @@ for (const name of [
 ]) {
   check(G.length > 0 && has(G, name),
     `§G names routine "${name}"`,
-    `${ROUTINES} §G no longer names the "${name}" routine. §G binds all seven by name so no ` +
+    `${ROUTINES} §G no longer names the "${name}" routine. §G binds every routine by name so no ` +
     `routine can read itself out of the policy; a missing name is exactly how that starts.`);
 }
 
@@ -296,7 +304,7 @@ check(has(routines, '10/10 ACHIEVED: NO') && has(routines, 'citing which of §G.
 // ── 7. §G.6 — Sentry first, and resolve ONLY after production verification ────────────────────
 check(has(routines, 'SENTRY IS MANDATORY AND FIRST'),
   '§G.6 keeps Sentry as mandatory and first',
-  `${ROUTINES} §G.6 no longer makes the Sentry read mandatory and first. On 2026-08-29 all seven ` +
+  `${ROUTINES} §G.6 no longer makes the Sentry read mandatory and first. On 2026-08-29 all ` +
   `routines had the connector attached and not one prompt mentioned it; §G.6 is what changed that.`);
 
 check(has(routines,
@@ -423,7 +431,7 @@ check(npmTestRuns(REPO_ROOT, 'verify-global-engineering-policy'),
   '`npm test` no longer runs verify-global-engineering-policy.ts (see scripts/test-exclusions.txt) — the guard is inert');
 
 console.log(
-  'global-engineering-policy: §G must keep binding all SEVEN routines to fix-first/report-last,\n' +
+  'global-engineering-policy: §G must keep binding EVERY routine to fix-first/report-last,\n' +
   '                           keep its six stop categories narrow, keep the real 10/10 standard,\n' +
   '                           keep Sentry first with resolve-after-production-verify, and stay linked\n');
 for (const o of ok) console.log(`  ✓ ${o}`);

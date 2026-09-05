@@ -52,6 +52,11 @@ const check = (label: string, ok: boolean, detail = '') => {
   if (!ok) failures++;
 };
 
+/** A mutation proof: the rule under test, applied to the real source with the real regression put
+ *  back, asserted to go RED. Named so scripts/verify-new-barriers-are-mutation-proven.ts can see it
+ *  is an executable re-break rather than prose claiming one. */
+const mustCatch = (label: string, caught: boolean, detail = '') => check(label, caught, detail);
+
 /** The `trendingDistrict` function body, comments stripped — the only region these rules govern. */
 function districtJourney(s: string): string {
   const i = s.indexOf('export async function trendingDistrict');
@@ -197,7 +202,7 @@ for (const m of muts) {
   const changed = mutated !== raw;
   const stripped = stripComments(mutated);
   const stillGreen = m.rule(districtJourney(stripped), stripped);
-  check(`${m.name} — applied and caught`, changed && !stillGreen,
+  mustCatch(`${m.name} — applied and caught`, changed && !stillGreen,
     !changed ? 'mutation did not apply (pattern drifted — fix the mutant, not the rule)'
              : 'MUTANT SURVIVED: the rule passes on the regression it exists to catch');
 }

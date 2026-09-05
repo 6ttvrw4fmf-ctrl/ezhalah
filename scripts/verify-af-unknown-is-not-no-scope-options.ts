@@ -31,6 +31,12 @@ const check = (label: string, ok: boolean, why = '') => {
 const root = join(import.meta.dirname, '..');
 const read = (rel: string) => readFileSync(join(root, rel), 'utf8');
 const label = (k: string) => `L:${k}`;
+// A mutation proof is an EXECUTABLE re-break, never prose about one: the pre-fix logic is rebuilt
+// inline below and this barrier's OWN assertions are shown to reject it
+// (scripts/verify-new-barriers-are-mutation-proven.ts).
+const mustCatch = (what: string, caught: boolean) =>
+  check(`MUTATION PROOF: ${what}`, caught,
+    'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
 
 console.log('\nUNKNOWN IS NOT NO — scope options survive a slow count (owner 2026-09-04)\n');
 
@@ -69,11 +75,11 @@ const mutantOld = (ks: readonly string[], counts: Record<string, number | null> 
   .filter((k) => (counts?.[k] ?? 0) > 0)                       // the 2026-09-04 defect, verbatim
   .map((k) => ({ key: k, label: label(k), count: counts![k] as number }));
 const mutantOffered = mutantOld(keys, { [SCOPE_TOTAL_KEY]: 21892, Room: 1, 'Residential Building': 1554, Studio: null }).map((o) => o.key);
-check('MUTATION PROOF: the old `(count ?? 0) > 0` filter DROPS Apartment/Floor/Studio — these checks would catch it',
+mustCatch('the old `(count ?? 0) > 0` filter DROPPING Apartment/Floor/Studio when their counts are slow',
   !mutantOffered.includes('Apartment') && !mutantOffered.includes('Floor') && !mutantOffered.includes('Studio'));
 const mutantZero = (ks: readonly string[], counts: Record<string, number | null> | null) => ks
   .filter((k) => counts?.[k] !== 0).map((k) => ({ key: k, label: label(k), count: counts?.[k] ?? 0 }));
-check('MUTATION PROOF: an unknown rendered as 0 (`?? 0`) is rejected — UNKNOWN is not zero',
+mustCatch('an unknown count rendered as 0 (`?? 0`) — UNKNOWN is not zero',
   mutantZero(keys, { Room: 1 }).some((o) => o.count === 0));
 
 // ── 3. The advanced pool never SCORES an unknown as a fact (type-level guard, executed) ───────────

@@ -264,8 +264,20 @@ const authSurface = (page) => page.evaluate((phoneSrc) => {
     const st = getComputedStyle(e);
     return st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0.01;
   };
-  // ONE invitation = one auth-popup-close. The signed-out card and the centred AuthModal are two
-  // presentations of the same component (src/components/AuthModal.tsx) and each carries exactly one.
+  // ONE invitation = one auth-popup-close.
+  //
+  // KNOWN DEFECT, ROUTED NOT PATCHED (incident hunt-2026-09-04:auth:22). The owner's 2026-09-04 popup
+  // redesign removed the × from the sign-in sheet, so on a phone — where the desktop signin-card does
+  // not exist and the invitation is the centred AuthModal — this counts 0 and the journey reports
+  // «the only sign-in entry point at this viewport is dead» against a modal that is open and correct.
+  // Measured on production: auth-popup-close 0, signin-card 0, Google button 1, heading present.
+  //
+  // Counting the Google button instead was TRIED HERE and made things WORSE: dismissAuthInvitation
+  // verifies the same way, and with no × and no working Escape it returned 'stuck', which took the
+  // suite from 15 PASS / 1 FAIL / 0 UNDETERMINED to 11 / 0 / 5 — the auth modal then covered the city
+  // field and broke four unrelated mobile journeys. Reverted. The detector and the DISMISSAL have to
+  // change together, with a real dismissal mechanism for a sheet that has no ×, and that is routine
+  // #6's surface. Left exactly as main had it so the failure stays a single, honest, known one.
   const invitations = [...document.querySelectorAll('[data-testid="auth-popup-close"]')].filter(vis);
   const scope = invitations.map((c) => c.closest('[data-testid="signin-card"]') || c.parentElement?.parentElement?.parentElement || document.body);
   const text = scope.map((s) => s.innerText || '').join('\n') || document.body.innerText;
@@ -537,8 +549,16 @@ const G6 = {
 // open it. THE SUPPORT FORM IS ASSERTED TO RENDER AND NEVER SENT — pressing «إرسال» would write a
 // row to support_messages, and harness.mjs's FORBIDDEN_LABELS refuses that click structurally.
 const DOORS = [
-  { path: '/support', must: ['تواصل مع الدعم', 'الموضوع', 'الرسالة', 'بريدك الإلكتروني', 'وقت الاستجابة'], form: true },
-  { path: '/about', must: ['من نحن', 'الثقة والشفافية', 'إخلاء المسؤولية'], form: false },
+  { path: '/support', must: ['تواصل مع الدعم', 'الموضوع', 'الرسالة', 'بريدك الإلكتروني', 'وقت الاستجابة'],
+    form: true, closer: '[data-testid="info-modal-close"]' },
+  // «من نحن» HAS NO ×, BY DESIGN. InfoModal.tsx: `const hasClose = kind !== 'about'` — the owner's
+  // 2026-09-04 popup redesign removed it from About and the sign-in sheet, leaving it on Support and
+  // the legal reader, which are a form and a long read. This journey used to assert the × for BOTH
+  // doors and therefore reported «/about never raised the info modal» on a modal that was open and
+  // correct in front of it — a false alarm on a deliberate product decision. The open-signal and the
+  // close step are per-door now: a door with no closer is asserted on its CONTENT and its close
+  // mechanism is left uncovered rather than guessed at.
+  { path: '/about', must: ['من نحن', 'الثقة والشفافية', 'إخلاء المسؤولية'], form: false, closer: null },
 ];
 
 const G7 = {
@@ -549,14 +569,18 @@ const G7 = {
     'Navigate to https://ezhalah-app.vercel.app/support — assert the info modal opens on the home URL.',
     'Assert the support screen renders its heading, its Subject/Message/Email fields and the response-time panel. Do NOT press «إرسال».',
     'Press the modal close control and assert the modal is gone and the app is still rendered.',
-    'Repeat for /about, asserting «من نحن», «الثقة والشفافية» and «إخلاء المسؤولية».',
+    'Repeat for /about, asserting «من نحن», «الثقة والشفافية» and «إخلاء المسؤولية». /about has no × by design, so it is proven open by its own copy and its close mechanism is recorded as NOT COVERED.',
   ],
   async run(page, ctx) {
     const bad = [];
     const evidence = {};
     for (const door of DOORS) {
-      await open(page, door.path, { expect: '[data-testid="info-modal-close"]' });
-      const opened = await until(async () => (await countVisible(page, '[data-testid="info-modal-close"]')) === 1, 20000);
+      // A door with a × is proven open by its ×; a door without one is proven open by its own copy.
+      const openSignal = door.closer ?? null;
+      await open(page, door.path, openSignal ? { expect: openSignal } : {});
+      const opened = openSignal
+        ? await until(async () => (await countVisible(page, openSignal)) === 1, 20000)
+        : await until(async () => (await bodyText(page)).includes(door.must[0]), 20000);
       if (!opened) throw new HarnessError(`${door.path} never raised the info modal`);
       const text = await bodyText(page);
       const missing = door.must.filter((m) => !text.includes(m));
@@ -570,13 +594,18 @@ const G7 = {
         if (!fields.textareas) bad.push(`${door.path}: the support message form rendered no message field`);
         if (!fields.send) bad.push(`${door.path}: the support message form rendered no «إرسال» control`);
       }
-      const close = await page.$('[data-testid="info-modal-close"]');
-      await close.click().catch(() => {});
-      const closed = await until(async () => (await countVisible(page, '[data-testid="info-modal-close"]')) === 0, 12000);
-      if (!closed) bad.push(`${door.path}: the info modal did not close when its close control was pressed`);
-      const alive = await until(() => page.$('[data-testid="city-input"]'), 20000);
-      if (!alive) bad.push(`${door.path}: closing the info modal did not leave a rendered app behind`);
-      evidence[door.path] = { url: page.url(), missing, closed: !!closed };
+      let closed = null;
+      if (door.closer) {
+        const close = await page.$(door.closer);
+        await close.click().catch(() => {});
+        closed = await until(async () => (await countVisible(page, door.closer)) === 0, 12000);
+        if (!closed) bad.push(`${door.path}: the info modal did not close when its close control was pressed`);
+        const alive = await until(() => page.$('[data-testid="city-input"]'), 20000);
+        if (!alive) bad.push(`${door.path}: closing the info modal did not leave a rendered app behind`);
+      }
+      // NOT a silent skip: a door whose close mechanism this journey does not cover says so in its
+      // own evidence, so "we did not look" can never read as "we looked and it was fine".
+      evidence[door.path] = { url: page.url(), missing, closed: door.closer ? !!closed : 'NOT COVERED — this door has no × by design' };
     }
     if (ctx.pageErrors.length) bad.push(`uncaught page error on the info doors: ${ctx.pageErrors[0]}`);
     return bad.length ? violated(bad, evidence) : ok(evidence);

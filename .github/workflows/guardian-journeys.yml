@@ -23,6 +23,11 @@ on:
         description: 'Target URL (defaults to production)'
         required: false
         default: 'https://ezhalah-app.vercel.app'
+      prove_filing:
+        description: 'Also prove the incident-filing path end to end (files one synthetic P3 and closes it immediately)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   guardian:
@@ -53,6 +58,15 @@ jobs:
       # next green run resolves it. `always()` so a failing run still gets here.
       # scripts/verify-scheduled-checks-alert-on-failure.ts fails if this step is missing or names a
       # workflow file other than its own.
+      # Explicit, never automatic. See e2e/guardian/prove-filing.mjs for why the one call that turns a
+      # finding into owned work needs a deliberate round trip to be considered working at all.
+      - name: Prove the incident-filing path end to end
+        if: ${{ inputs.prove_filing }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node e2e/guardian/prove-filing.mjs
+
       - name: Bridge this run's result to alert_event
         if: always()
         env:

@@ -535,12 +535,24 @@ export async function ensureLocationIndex(): Promise<void> {
       const _ac = new AbortController();
       const _t = setTimeout(() => _ac.abort(), 15000);
       let data: any = null;
+      let error: any = null;
       try {
-        ({ data } = await supabase.from('location_index_live').select('city,district,region,n').abortSignal(_ac.signal));
+        ({ data, error } = await supabase.from('location_index_live').select('city,district,region,n').abortSignal(_ac.signal));
       } finally {
         clearTimeout(_t);
       }
-      if (data) {
+      // A FAILED FETCH IS NOT A LOAD (P1, found 2026-09-04). supabase-js NEVER throws on a failed
+      // request — `shouldThrowOnError` is false and the underlying promise is caught internally, so
+      // an aborted/500/offline GET simply resolves `{ data: null, error }`. The `error` half used to
+      // be discarded, so control fell straight past `if (data)` to `_liveLoaded = true` and the catch
+      // below — whose entire purpose is to let a failed load retry — was UNREACHABLE for this call.
+      // One transient blip on this single boot-time GET therefore emptied the live location index for
+      // the whole page session, and a region search told the user "no listings in this location" for a
+      // region holding 32,203 of them: our outage rendered as their honest zero. Throwing hands the
+      // failure to the existing RC-A recovery (null `_livePromise`, `_liveLoaded` stays false) so the
+      // next call retries, with the catalog-only resolver as the fallback in the meantime.
+      if (error || !data) throw new Error(`location_index_live load failed: ${error?.message ?? 'no rows'}`);
+      {
         LIVE_DISTRICTS = data.filter((r: any) => r.city && r.district) as LiveDistrict[];
         // City→region aggregation over EVERY row (a city counts even where its district is null), so
         // any city with listings resolves and carries its real region.

@@ -12,7 +12,7 @@ import { useI18n } from '@/i18n';
 import { detectDevice, readDeviceEnv } from '@/lib/deviceInfo';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { pickName, buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
-import { isBackendLive, persistDisplayName } from '@/lib/auth';
+import { isBackendLive, persistDisplayName, signOutBackend } from '@/lib/auth';
 import {
   currentSessionId, lastActiveLabel, listDeviceSessions, revokeDeviceSession,
   signOutOtherDevices, type DeviceSession,
@@ -86,6 +86,10 @@ export default function AccountMenu({
       if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
       setShown(true);
       setView('root');
+      // Neutral on every open, exactly like the view. A destructive flow that ended — or that was
+      // dismissed mid-flight — must never hand the next open a spinner and a permanently disabled
+      // button (ops_incident hunt-2026-09-04:modal:04).
+      setLoggingOut(false); setDeleting(false); setLogoutError(null); setDeleteError(null);
       enter.value = reduced ? 1 : 0;
       enter.value = withTiming(1, { duration: reduced ? 0 : ENTER_MS, easing: EASE_OUT });
       return;
@@ -147,6 +151,7 @@ export default function AccountMenu({
   const [justSaved, setJustSaved] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const nameChanged = name.trim().length > 0 && name.trim() !== shownName;
   useEffect(() => {
@@ -182,12 +187,30 @@ export default function AccountMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sign out with the same short, intentional loading beat the old modal had, then land on the
-  // logged-out home. Guarded against double taps.
-  const onLogout = () => {
+  // SERVER-FIRST sign-out, for the same reason deletion is server-first: the logged-out UI is never
+  // shown while a valid session is still stored. supabase-js keeps the session in localStorage when
+  // the logout request fails, so the old fire-and-forget version dropped to the guest home over a
+  // live token and the next reload signed the user back in (ops_incident hunt-2026-09-04:auth:03).
+  // The short, intentional loading beat the old modal had is kept — it now runs ALONGSIDE the real
+  // call instead of standing in for it, so a fast network still gets the same deliberate pause.
+  // Guarded against double taps.
+  const onLogout = async () => {
     if (loggingOut) return;
     setLoggingOut(true);
-    setTimeout(() => { signOut(); router.replace('/'); }, 1200);
+    setLogoutError(null);
+    const [ok] = await Promise.all([signOutBackend(), new Promise((r) => setTimeout(r, 1200))]);
+    if (!ok) {
+      setLoggingOut(false);
+      setLogoutError(t("Couldn't sign out this device. Try again."));
+      return;
+    }
+    signOut();
+    router.replace('/');
+    // Land the menu in its neutral state. This component stays MOUNTED while it renders null
+    // (`!user`), so a `loggingOut` left true survives into the next signed-in state as a stuck
+    // confirmation with a dead button.
+    setLoggingOut(false);
+    onClose();
   };
 
   // SERVER-FIRST deletion (PR #725): nothing is destroyed unless the server confirms, and a failure
@@ -207,6 +230,10 @@ export default function AccountMenu({
     // server-confirmed guard; owner 2026-08-28/29) — ONE mechanism, shared with sign-out, so
     // this handler no longer re-stamps 'light' into storage after the store just cleared it.
     router.replace('/');
+    // …and leave the menu neutral, for the same reason onLogout does: the component is still
+    // mounted behind the null render.
+    setDeleting(false);
+    onClose();
   };
 
   // ── «الأجهزة المسجّل عليها الدخول» (owner Phase 2, 2026-08-29) ──────────────────────────────────
@@ -641,6 +668,7 @@ export default function AccountMenu({
                   <Text style={s.confirmBtnText}>{t('Log out')}</Text>
                 )}
               </Pressable>
+              {logoutError ? <Text style={s.deleteError}>{logoutError}</Text> : null}
               <Pressable testID="logout-popup-cancel" style={s.cancelBtn} onPress={onClose} disabled={loggingOut}>
                 <Text style={s.cancelText}>{t('Cancel')}</Text>
               </Pressable>

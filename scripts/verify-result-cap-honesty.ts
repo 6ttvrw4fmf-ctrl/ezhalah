@@ -11,11 +11,13 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripTypeScriptTypes } from 'node:module';
 import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '../src/data/resultCount.ts';
 
 const root = join(import.meta.dirname, '..');
 const code = readFileSync(join(root, 'src', 'app', 'agent.tsx'), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/^\s*\/\/.*$/gm, '');
+const storeSrc = readFileSync(join(root, 'src', 'store.tsx'), 'utf8');
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -84,6 +86,71 @@ check('a client-narrowed search never quotes the untrusted RPC total',
 check('no hardcoded 100 stands in for a result count in the closing message block',
   !/endTotal: *100|trueTotal = 100|matchTotal \?\? 100/.test(code));
 
+// ── 6. A FAILED PAGE IS NOT PROGRESS (hunt-2026-09-04:pagination:06) ───────────────────────────
+// Everything above executes pure counting helpers with hand-written inputs, and the whole error
+// path sat outside it: `loadMoreListings` did `buildPools(rows ?? [])`, which erases the ONE signal
+// that says the backend page failed. An errored page then read exactly like a genuinely empty one —
+// the cursor advanced, `hasMore` went false, «عرض المزيد» disappeared for good, and the closing line
+// went on to state the true total as if all of it had been shown. So this section runs the SHIPPED
+// function, lifted out of src/store.tsx (it is a closure inside AppProvider and cannot be imported),
+// against a fetch that FAILS.
+const loadMore = (() => {
+  const m = storeSrc.match(/loadMoreListings: async \(q: SearchQuery, offset: number\) => \{[\s\S]*?\n {6}\},/);
+  if (!m) {
+    console.error('FAIL  could not lift loadMoreListings out of src/store.tsx — was it moved or renamed?');
+    process.exit(1);
+  }
+  const js = stripTypeScriptTypes(`const surface = { ${m[0]} };`, { mode: 'strip' });
+  return new Function('fetchListingsForQuery', 'runSearch', 'buildPools', `${js}\nreturn surface.loadMoreListings;`) as
+    (f: unknown, r: unknown, b: unknown) => (q: unknown, offset: number) =>
+      Promise<{ listings: unknown[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
+})();
+// The real remote contract: `listings: null` IS the backend-error signal (src/data/remote.ts), the
+// same one runQuery hands runSearch as `fetchFailed` for page 0. runSearch/buildPools are stubbed to
+// pass the rows straight through, so what is measured is purely this function's own bookkeeping.
+const pageFrom = (rows: unknown[] | null, cand: number) =>
+  loadMore(async () => ({ listings: rows, pageCandidates: cand }), (_q: unknown, pools: unknown[]) => ({ listings: pools }), (rows: unknown[]) => rows);
+const row = (i: number) => ({ id: i, source: 'aqar' });
+const page = (n: number, from = 0) => Array.from({ length: n }, (_, i) => row(from + i));
+
+{
+  const fail = await pageFrom(null, 0)({}, 1000);
+  check('a FAILED page advances the cursor by nothing (retry hits the same page, no 500 skipped)', fail.nextOffset === 1000, `nextOffset=${fail.nextOffset}`);
+  check('a FAILED page leaves hasMore alone, so «عرض المزيد» survives to be tapped again', fail.hasMore === true);
+  check('a FAILED page invents no listings', fail.listings.length === 0);
+  check('a FAILED page says so (failed:true) — it is never dressed up as a completed page', fail.failed === true);
+}
+{
+  // Failure is decided by the error signal, not by whatever count rode along with it.
+  const fail = await pageFrom(null, 500)({}, 1000);
+  check('a FAILED page ignores the payload’s own numbers (cursor still pinned at 1000)',
+    fail.nextOffset === 1000 && fail.hasMore === true && fail.failed === true, `nextOffset=${fail.nextOffset}`);
+}
+{
+  const empty = await pageFrom([], 0)({}, 1000);
+  check('a genuinely EMPTY page is still an honest end (hasMore false, not "failed")',
+    empty.hasMore === false && empty.nextOffset === 1000 && empty.failed === undefined);
+}
+{
+  const full = await pageFrom(page(500), 500)({}, 1000);
+  check('a FULL page still advances 500 and keeps paging (success path untouched)',
+    full.listings.length === 500 && full.nextOffset === 1500 && full.hasMore === true && full.failed === undefined);
+  const partial = await pageFrom(page(120), 120)({}, 1000);
+  check('a PARTIAL page advances by what it found and ends honestly (success path untouched)',
+    partial.listings.length === 120 && partial.nextOffset === 1120 && partial.hasMore === false);
+}
+{
+  // The user taps «عرض المزيد» again after a failure: the SAME page is refetched and the 500 rows
+  // that the swallowed error would have skipped forever actually arrive.
+  const failed = await pageFrom(null, 0)({}, 1000);
+  const retry = await pageFrom(page(500, 1000), 500)({}, failed.nextOffset);
+  check('retrying after a failure delivers the very page that was lost (nothing skipped)',
+    retry.listings.length === 500 && retry.nextOffset === 1500 && (retry.listings[0] as { id: number }).id === 1000);
+}
+check('the failure signal is not swallowed in the source (`rows ?? []` is gone from loadMoreListings)',
+  /if \(rows === null\) return \{ listings: \[\], nextOffset: offset, hasMore: true, failed: true \};/.test(storeSrc)
+  && !/buildPools\(rows \?\? \[\]\)\);\n\s*return \{ listings: r\.listings, nextOffset: offset \+ cand/.test(storeSrc));
+
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 console.log('\n  mutation proof — each guard must FAIL on its own defect\n');
 let mutFail = 0;
@@ -119,6 +186,34 @@ mustCatch('paging past the last real match',
 // (e) the source-level gate check going blind
 mustCatch('the cap gate creeping back into loadMore source',
   /BROWSE_CAP/.test(code.replace('const cur = revealCount[mid]', 'if (cur >= BROWSE_CAP) return; const cur = revealCount[mid]')));
+
+// ── (f)–(i) THE DEFECT ITSELF: a failed page presented as "no more rows" ────────────────────────
+// The defective implementation, executed rather than described: `rows ?? []` turns the null error
+// signal into an empty page, so a failure is reported as a completed, final one.
+{
+  const swallowed = async (offset: number) => {
+    const { listings: rows, pageCandidates: cand } = await (async () => ({ listings: null as unknown[] | null, pageCandidates: 0 }))();
+    const r = { listings: (rows ?? []) as unknown[] };
+    return { listings: r.listings, nextOffset: offset + cand, hasMore: cand >= 500 };
+  };
+  const bug = await swallowed(1000);
+  const fixed = await pageFrom(null, 0)({}, 1000);
+  mustCatch('a failed page reported as hasMore:false — «عرض المزيد» gone forever, "I showed you all N"',
+    bug.hasMore === false && fixed.hasMore === true);
+  mustCatch('a failed page recorded as progress (the cursor moving past 500 unseen matches)',
+    (await (async () => { const b = await swallowed(1000); return b.nextOffset; })()) === 1000
+    && fixed.nextOffset === 1000 && fixed.failed === true);
+}
+// (g) a failure that keeps hasMore but still burns the page (the half-fix)
+mustCatch('a failure that keeps the button but skips the page anyway',
+  (() => { const half = { listings: [], nextOffset: 1500, hasMore: true }; return half.nextOffset !== 1000; })());
+// (h) a "failure" flag on a page that genuinely ended — crying wolf at the honest end
+mustCatch('a genuinely empty page mislabelled as a failure (the retry loop that never ends)',
+  (await pageFrom([], 0)({}, 1000)).failed === undefined && (await pageFrom(null, 0)({}, 1000)).failed === true);
+// (i) the source-level half going blind if the swallow is put back
+mustCatch('`rows ?? []` creeping back into loadMoreListings',
+  !/if \(rows === null\) return \{ listings: \[\], nextOffset: offset, hasMore: true, failed: true \};/.test(
+    storeSrc.replace('if (rows === null) return { listings: [], nextOffset: offset, hasMore: true, failed: true };', 'const r0 = buildPools(rows ?? []);')));
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }

@@ -40,6 +40,15 @@ const WORKFLOW = join(ROOT, '.github/workflows/guardian-journeys.yml');
 /** The surfaces this suite is required to cover. Each maps to an owning routine in the migration. */
 const REQUIRED_SURFACES = [
   'theme', 'chat_persistence', 'auth', 'navigation', 'result_card', 'loading_states', 'modal', 'search',
+  // Second tranche (2026-09-04) — the surfaces the owner named that had no journey until then.
+  // pagination, trending, advanced_filter, normal_filter and voice journeys were WRITTEN on
+  // 2026-09-04 but are NOT in this floor yet: their author hit a session limit before the two
+  // end-to-end verification runs, and the single verification run that did happen produced three
+  // false alarms out of 26 (a mobile auth click that missed a live control, a doors assertion on a ×
+  // that About deliberately does not have, and a 150s timeout). A journey that cries wolf is worse
+  // than no journey — it files a false P1 against routine #6 every night — so the expansion is
+  // deferred to its own change rather than shipped unverified. The written version is preserved in
+  // this branch's history; incident hunt-2026-09-04:monitoring:21 tracks finishing it.
 ];
 /** The two viewports, as the owner's bug reports arrive: a desktop and a phone. */
 const REQUIRED_VIEWPORTS = [
@@ -187,7 +196,7 @@ check(ALLOWED_SURFACES.length === REQUIRED_SURFACES.length && REQUIRED_SURFACES.
 // ── 2. Routing, against the REAL mapping and the REAL routines ────────────────────────────────────
 const migrations = readdirSync(join(ROOT, 'supabase/migrations'))
   .filter((f) => f.endsWith('.sql') && readFileSync(join(ROOT, 'supabase/migrations', f), 'utf8').includes('function public.incident_route_owner'));
-check(migrations.length > 0, `incident_route_owner() found in ${migrations[0]}`,
+check(migrations.length > 0, `incident_route_owner() found in ${migrations[migrations.length - 1]} (latest of ${migrations.length} definitions)`,
   'no migration defines incident_route_owner() — the surface→owner mapping this suite depends on is missing');
 const routeMap = migrations.length
   ? parseRouteOwner(readFileSync(join(ROOT, 'supabase/migrations', migrations[migrations.length - 1]!), 'utf8'))
@@ -223,9 +232,39 @@ const vp = viewportProblems(VIEWPORTS);
 check(vp.length === 0, `both viewports are driven (${VIEWPORTS.map((v) => `${v.name} ${v.width}x${v.height}`).join(', ')})`,
   vp.join('; '));
 
-// ── 4. The suite can never close an incident ──────────────────────────────────────────────────────
-const rzp = resolveProblems(sources);
-check(rzp.length === 0, 'no guardian source can resolve, close or re-state an incident', rzp.join('; '));
+// ── 4. The JOURNEY PATH can never close an incident ───────────────────────────────────────────────
+// The invariant is about the journeys: a passing journey must never close an incident, because "it
+// stopped reproducing" is not "fixed, with a barrier" — and the database would refuse anyway.
+//
+// e2e/guardian/prove-filing.mjs is the ONE deliberate exception, and the exception is itself checked
+// below rather than merely trusted. It exists because openIncident() only ever executes when a
+// journey FAILS, so the single call that turns a finding into owned work had never actually run
+// against production — an unexecuted path is an assumption, not a mechanism. It is fenced four ways:
+// a reserved fingerprint no journey can produce, wont_fix as its only closing verb, no import from
+// the runner, and a workflow step gated behind an explicit dispatch input. This was originally
+// written inside run.mjs and THIS BARRIER REJECTED IT — correctly: keeping the runner's rule blunt
+// ("it cannot close anything, full stop") is stronger than "it may close, but only when…", and it
+// keeps run.mjs at exactly one incident_open call site, which is what lets the drop-a-parameter
+// mutation below actually fail.
+const workflowSrc = existsSync(WORKFLOW) ? readFileSync(WORKFLOW, 'utf8') : '';
+const PROVER = 'e2e/guardian/prove-filing.mjs';
+const journeySources = Object.fromEntries(Object.entries(sources).filter(([f]) => f !== PROVER));
+const rzp = resolveProblems(journeySources);
+check(rzp.length === 0, 'no guardian JOURNEY source can resolve, close or re-state an incident', rzp.join('; '));
+
+const prover = sources[PROVER] ?? '';
+check(prover !== '', 'the filing-path prover exists (the one call that turns a finding into owned work is testable)');
+check(/guardian:self-test:filing/.test(prover),
+  'the prover uses a RESERVED fingerprint no journey can ever produce',
+  'without a reserved fingerprint the self-test could collide with a real finding');
+check(!/incident_resolve|incident_advance|incident_block|incident_handoff/.test(prover),
+  'the prover may only close its own synthetic row with wont_fix — never resolve/advance/block/handoff',
+  'resolve() would claim a barrier and a production verification that do not exist');
+check(!Object.entries(sources).some(([f, src]) => f !== PROVER && src.includes('prove-filing')),
+  'no journey source imports or invokes the prover — it runs only from its own workflow step');
+check(/inputs\.prove_filing/.test(workflowSrc) && /prove-filing\.mjs/.test(workflowSrc),
+  'the prover runs ONLY behind an explicit workflow_dispatch input, never on the schedule',
+  'a self-test that runs automatically would file a synthetic incident every night');
 
 // ── 5. The support form is never submitted, and no OAuth button is ever pressed ───────────────────
 const sgp = submitGuardProblems(FORBIDDEN_LABELS, sources);
@@ -289,6 +328,11 @@ mutation('the runner starts writing incident state',
   resolveProblems({ 'e2e/guardian/run.mjs': "body: JSON.stringify({ state: 'resolved' })" }));
 mutation('the runner drops an incident_open() parameter',
   payloadProblems(openParams, (sources['e2e/guardian/run.mjs'] ?? '').replace(/p_surface\s*:/, 'p_area:')));
+mutation('the prover losing its reserved fingerprint (it could then collide with a real finding)',
+  /guardian:self-test:filing/.test(prover.replace('guardian:self-test:filing', 'journey:dark-mode-is-honest:desktop'))
+    ? [] : ['reserved fingerprint gone']);
+mutation('a JOURNEY source gaining a close call even though the prover is exempt',
+  resolveProblems({ 'e2e/guardian/journeys.mjs': "await rpc(c, 'incident_wont_fix', { p_id: id });" }));
 mutation('the support-form submit guard is removed from FORBIDDEN_LABELS',
   submitGuardProblems(FORBIDDEN_LABELS.filter((l) => l !== SUPPORT_SUBMIT), {}));
 mutation('a journey clicks the support-form send control',

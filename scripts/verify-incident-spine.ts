@@ -58,8 +58,30 @@ const migrationNamed = (...needles: string[]): string => {
   return hits[0] ?? '';
 };
 
+// The LAST migration that defines a function is the one production runs — `create or replace` means
+// later definitions win, so a barrier that reads the FIRST one is reading history. incident_route_owner
+// has been redefined twice since the spine (the surface vocabulary, then the four new routines), and
+// reading the original is how this check came to assert "all seven routines" against an eleven-routine
+// system.
+const latestMigrationDefining = (needle: string): string => {
+  let last = '';
+  for (const f of readdirSync(migDir).sort()) {
+    if (!f.endsWith('.sql')) continue;
+    const body = readFileSync(join(migDir, f), 'utf8');
+    if (body.includes(needle)) last = body;
+  }
+  return last;
+};
+
 const spine = migrationNamed('create table if not exists public.ops_incident');
 const roster = migrationNamed('mon_run_all_detectors', 'mon_detect_stalled_incident');
+/** The CURRENT surface→owner map and surface vocabulary, wherever they were last redefined. */
+const routing = latestMigrationDefining('function public.incident_route_owner');
+// The surface VOCABULARY, added 2026-09-04 after a coverage audit found ~9 real user-reachable
+// surfaces with no name — so findings on them fell through to the routine-2 fallback and arrived
+// indistinguishable from noise.
+const vocab = latestMigrationDefining('incident_known_surfaces');
+const guard = migrationNamed('unknown incident surface');
 
 console.log('\nIncident spine — resolution stays earned, and ownership stays total\n');
 
@@ -94,8 +116,8 @@ check('an ownership/permission block is REFUSED in favour of routing (§G.3)',
 
 // ── 2. OWNERSHIP IS TOTAL AND AGREES WITH alertRouting.ts ──────────────────────────────────────
 const sqlSlugs = new Set(
-  [...spine.matchAll(/then\s+'(routine-[a-z0-9-]+)'/g)].map((m) => m[1]));
-const elseSlug = /else\s+'(routine-[a-z0-9-]+)'\s*\n?\s*end/.exec(spine)?.[1] ?? '';
+  [...routing.matchAll(/then\s+'(routine-[a-z0-9-]+)'/g)].map((m) => m[1]));
+const elseSlug = /else\s+'(routine-[a-z0-9-]+)'\s*\n?\s*end/.exec(routing)?.[1] ?? '';
 if (elseSlug) sqlSlugs.add(elseSlug);
 
 // Execute the real module rather than string-matching it — the repo's standing rule.
@@ -108,9 +130,38 @@ check('the fallback owner is the standing triage router, routine #2',
 check('every routine slug in SQL exists in scripts/lib/alertRouting.ts',
   [...sqlSlugs].every((s) => tsSlugs.has(s)),
   `SQL-only slugs: ${[...sqlSlugs].filter((s) => !tsSlugs.has(s)).join(', ') || '(none)'}`);
-check('all seven routines are reachable as incident owners',
+check(`all ${new Set(Object.values(ROUTINES).map((r: { label: string }) => r.label)).size} routines are reachable as incident owners`,
   [...tsSlugs].every((s) => sqlSlugs.has(s)),
   `routines no incident can ever be routed to: ${[...tsSlugs].filter((s) => !sqlSlugs.has(s)).join(', ') || '(none)'}`);
+
+// ── 2c. the surface vocabulary: unknown must be LOUD, never a silent fallback ───────────────────
+// Routing stays total (a fallback is a real owner, not a bin), but "I deliberately chose #2" and
+// "I typed `resultcard` instead of `result_card`" must not produce the same row. An unrecognised
+// surface is UNKNOWN, and this repo's standing rule is that unknown is never quietly answered.
+check('the surface vocabulary is committed', vocab !== '');
+check('incident_open REFUSES a surface nobody named',
+  /raise exception 'unknown incident surface/.test(guard),
+  'an unknown surface would route to #2 and be indistinguishable from a deliberate assignment');
+check('the refusal names the whole valid vocabulary, so a caller can fix it without reading the migration',
+  /array_to_string\(public\.incident_known_surfaces\(\), ', '\)/.test(guard));
+check('the guard runs BEFORE the row is created (a bad surface never lands)',
+  guard.indexOf("raise exception 'unknown incident surface") < guard.indexOf('insert into public.ops_incident'));
+
+// Every named surface must reach a REAL routine. Parsed out of the vocabulary list and mapped
+// through the same CASE the database uses, so a surface added to one and not the other is caught.
+const known = (/incident_known_surfaces\(\)[\s\S]*?select array\[([\s\S]*?)\]/.exec(vocab)?.[1] ?? '')
+  .match(/'([a-z_]+)'/g)?.map((q) => q.slice(1, -1)) ?? [];
+const routeCase = /create or replace function public\.incident_route_owner[\s\S]*?\$fn\$;/.exec(routing)?.[0] ?? '';
+const mapped = new Set([...routeCase.matchAll(/when '([a-z_]+)'\s+then/g)].map((m) => m[1]));
+check(`the vocabulary is non-trivial (${known.length} surfaces)`, known.length >= 30,
+  `parsed only ${known.length} surfaces — the reader is broken, so the checks below would pass vacuously`);
+const unmapped = known.filter((k) => !mapped.has(k));
+check('every named surface has an EXPLICIT route (none relies on the fallback)',
+  unmapped.length === 0,
+  `named but not mapped, so they would silently land on #2: ${unmapped.join(', ')}`);
+for (const s of ['agent', 'interview', 'share', 'account_menu', 'browser', 'devices', 'support', 'intro', 'mode_switch', 'feedback']) {
+  check(`'${s}' is nameable (a finding there can be delivered)`, known.includes(s));
+}
 
 // ── 3. the state machine covers the owner's loop, end to end ───────────────────────────────────
 const states = /state\s+text\s+not null default 'open'\s*\n?\s*check \(state in \(([\s\S]*?)\)\)/.exec(spine)?.[1] ?? '';
@@ -182,6 +233,14 @@ mustCatch('an ownership boundary becoming parkable as blocked instead of routed'
 // Prove the routing check can fail: a kind nothing claims MUST read as the fallback.
 mustCatch('a loop kind that lost its explicit route (falls back to #2)',
   routineForKind('a_kind_no_rule_will_ever_claim_xyzzy') === FALLBACK_ROUTINE);
+
+mustCatch('incident_open losing its unknown-surface guard',
+  !/raise exception 'unknown incident surface/.test(guard.replace(/raise exception 'unknown incident surface[\s\S]*?end if;/, '')));
+mustCatch('a surface named in the vocabulary but never routed',
+  (() => { const k = [...known, 'a_surface_with_no_route']; return k.filter((x) => !mapped.has(x)).length > 0; })());
+mustCatch('the guard being moved AFTER the insert (a bad surface would already have landed)',
+  (() => { const bad = "insert into public.ops_incident\n raise exception 'unknown incident surface";
+           return bad.indexOf("raise exception 'unknown incident surface") > bad.indexOf('insert into public.ops_incident'); })());
 
 mustCatch('the migration-finder going blind when the table is gone',
   (() => { const s = spine.replace('create table if not exists public.ops_incident', 'create table x');

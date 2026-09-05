@@ -196,5 +196,45 @@ check('an uncommitted city returns FALSE (→ the caller skips), rather than bei
 check('the marker is checked BEFORE the «بحث»-exists check that used to be the whole precondition',
   prime.indexOf('SELECTED_CITY_MARKER') < prime.indexOf("getByText('بحث'"));
 
+// ── 9. MUTATION PROOFS — the oracle this replaced, run against the same measured fixtures ───────
+const mustCatch = (what: string, caught: boolean) => check(`(mutation) catches ${what}`, caught);
+
+// THE PRE-FIX ORACLE, rebuilt: sleep a fixed window, read once, declare it a measurement. Against
+// §2's measured shape (six calls 2 s apart, spanning 12 s) it reports 5 of 6 and swears it settled —
+// which is exactly how «single -> 1, double -> 6» was filed against an app that did nothing wrong.
+{
+  const c = fakeClock();
+  const counter = risingCounter(c, 6, 2_000);
+  await c.sleepFn(10_000);
+  const r = { n: counter(), settled: true };
+  mustCatch('the fixed-10s-sleep oracle reporting a PARTIAL count as a settled measurement',
+    !(r.n === 6 && r.settled === true));
+}
+
+// §4: dropping the non-zero-start requirement turns a search that has not begun into a dead control.
+const zeroIsSettled = (n: number) => ({ n, settled: true });
+mustCatch('a settle rule that calls a stuck-at-0 count settled (a not-yet-started search read as a dead control)',
+  !(zeroIsSettled(0).n === 0 && zeroIsSettled(0).settled === false));
+
+// §5: returning at the first repeated reading instead of waiting out the stability window drops the
+// late 6th call — the partial-capture bug with extra steps.
+{
+  const c = fakeClock();
+  const at = () => (c.now() >= 2_000 ? 6 : 5);
+  let prev = -1, n = at();
+  while (n !== prev) { prev = n; await c.sleepFn(250); n = at(); }
+  mustCatch('an oracle that settles on the first repeated reading, missing a call inside the window',
+    !(n === 6));
+}
+
+// §7: counting every call with that RPC name — the raw count that manufactured the double-fire.
+{
+  const nameOnly = (r: { name: string }) => (r.name === 'location_search_candidates_ar' ? 'results' : 'other');
+  const press = [{ name: 'location_search_candidates_ar', body: { p_limit: 1500 } },
+    ...Array.from({ length: 5 }, () => ({ name: 'location_search_candidates_ar', body: { p_limit: 1 } }))];
+  mustCatch('counting every location_search_candidates_ar call as a search (one press reads as six)',
+    press.filter((r) => nameOnly(r) === 'results').length !== 1);
+}
+
 if (failed) { console.error(`\nverify-journey-settled-count: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-journey-settled-count: counts are compared only once they have stopped moving.');

@@ -4,8 +4,12 @@
 > (`trig_01Tr6Rb6XPggFXqCf3EKG62y`, daily 05:00 Arizona / 12:00 UTC) carries this text; **this file is the source of
 > truth** — if the routine prompt and this file ever differ, update the routine to match this file.
 > This is a SEPARATE routine from the 🎖️ Daily Senior Production Engineer (which keeps its own
-> original scope, daily 04:30 Arizona / 11:30 UTC): **Advanced Filter is out of scope for this routine** — it
-> belongs to the senior. See `docs/ops/ENGINEER_ROUTINES.md` for the three-engineer contract.
+> original scope, daily 04:30 Arizona / 11:30 UTC): **Advanced Filter is out of scope for this
+> routine** — it belongs to **routine #5 (🎯 Senior Advanced Filter + Trending)**, which took it on
+> 2026-08-23. This sentence said "the senior" (#2) until 2026-09-04; `AF_TRENDING_DATA_INTEGRITY_
+> ENGINEER.md` had claimed the correction was made the day #5 was created, but it was never applied
+> here, so a run reading its own canonical spec routed AF findings to the wrong engineer for twelve
+> days. See `docs/ops/ENGINEER_ROUTINES.md` for the seven-engineer contract.
 
 **Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
 
@@ -89,7 +93,7 @@ manufactured 10/10 obtained by deleting uncertain listings.
 
 ---
 
-Ignore Advanced Filter for this routine.
+Ignore Advanced Filter for this routine — it belongs to routine #5, not to #2.
 
 Your job is to verify everything Ezhalah scrapes from every active platform, from source all the
 way to the normal searchable inventory.

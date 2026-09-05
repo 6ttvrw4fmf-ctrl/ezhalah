@@ -134,7 +134,7 @@ check(lc.includes('remaining genuine source limitations'),
 // (FOUR until 2026-08-11, FIVE from 2026-08-23 — routine #5, AF + Trending Data Integrity, a
 // distinctly-scoped engineer the owner added, not a duplicate of this one). What must never
 // happen is the lock disappearing silently — check the header still states SOME exact count.
-check(/exactly\s+(FOUR|FIVE|SIX|SEVEN|EIGHT)\s+separate cloud routines/i.test(routines),
+check(/exactly\s+(FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE)\s+separate cloud routines/i.test(routines),
   'ENGINEER_ROUTINES.md is still owner-locked at an explicit routine count (no silent duplicate engineers)',
   `${ROUTINES} no longer states an explicit owner-locked routine count — duplicate/overlapping ` +
   `engineers are exactly what the owner said not to create`);

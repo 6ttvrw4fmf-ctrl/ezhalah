@@ -28,19 +28,23 @@ const decide = (state: Record<string, unknown>, askCount = 0, locationAmbiguous 
   decideAgentTurn({ rawText: 'شقة', locationAmbiguous, establishedState: state as never, askCount }).kind;
 
 // ── 1. THE COUNTRY IS NOT A PLACE ─────────────────────────────────────────────────────────────
+// Hoisted to module scope so §7's mutation proofs feed the SAME two vocabularies to a broken
+// predicate and watch these rules reject it.
+const NOT_A_PLACE = [
+  'المملكة العربية السعودية', 'المملكة', 'السعودية', 'السعوديه', 'كل المملكة', 'كل مدن المملكة',
+  'في كل مدن المملكة', 'جميع مدن السعودية', 'Saudi Arabia', 'saudi', 'KSA', 'the Kingdom', '', '   ',
+  // «سعودية» without the definite article is caught ONLY by the exact-alias branch — the loose
+  // Kingdom test looks for «السعودي». Without this case that branch is untested and a mutation
+  // deleting it survives (it did, on the first run of this barrier).
+  'سعودية',
+];
+const A_REAL_PLACE = ['الرياض', 'جدة', 'حي الملقا', 'منطقة الرياض', 'المدينة المنورة', 'الخبر', 'أبها'];
 {
-  for (const loc of [
-    'المملكة العربية السعودية', 'المملكة', 'السعودية', 'السعوديه', 'كل المملكة', 'كل مدن المملكة',
-    'في كل مدن المملكة', 'جميع مدن السعودية', 'Saudi Arabia', 'saudi', 'KSA', 'the Kingdom', '', '   ',
-    // «سعودية» without the definite article is caught ONLY by the exact-alias branch — the loose
-    // Kingdom test looks for «السعودي». Without this case that branch is untested and a mutation
-    // deleting it survives (it did, on the first run of this barrier).
-    'سعودية',
-  ]) {
+  for (const loc of NOT_A_PLACE) {
     check(!hasUsableLocation({ location: loc } as never), `«${loc || '(empty)'}» is NOT a usable location`);
   }
   // Real places must stay usable — a fix that also blocks these has gone too far.
-  for (const loc of ['الرياض', 'جدة', 'حي الملقا', 'منطقة الرياض', 'المدينة المنورة', 'الخبر', 'أبها']) {
+  for (const loc of A_REAL_PLACE) {
     check(hasUsableLocation({ location: loc } as never), `«${loc}» IS a usable location`);
   }
 }
@@ -167,6 +171,42 @@ const decide = (state: Record<string, unknown>, askCount = 0, locationAmbiguous 
   check(!/!locationAmbiguous && !hasUsableLocation/.test(decideSrc),
     'the no-place gate carries NO ambiguity exemption — it must hold even if the ladder is reordered');
 }
+// ── 8. MUTATION PROOFS — the pre-fix rules, rebuilt and fed to the assertions above ───────────
+// This barrier exists because a rule that was never watched fail is indistinguishable from prose.
+// Each mutant is the behaviour production actually shipped on 2026-09-04.
+const mustCatch = (what: string, caught: boolean) =>
+  check(caught, `(mutation) catches ${what}`,
+    'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
+
+// THE DEFECT VERBATIM: any non-empty location string counts as a place, so «كل مدن المملكة» searched
+// the whole Kingdom. §1's rule — every NOT_A_PLACE entry must be unusable — rejects it.
+const anyStringIsAPlace = (st: { location?: string }) => !!st.location?.trim();
+mustCatch('a location rule where any non-empty string is a place (the Kingdom-wide search, verbatim)',
+  NOT_A_PLACE.some((loc) => anyStringIsAPlace({ location: loc })));
+
+// THE OVER-BLOCKING DIRECTION, which is the real risk of this rule: a fix that also refuses short
+// real city names. §1's second half — every A_REAL_PLACE entry must stay usable — rejects it.
+const overBlocking = (st: { location?: string }) => (st.location ?? '').trim().length >= 8;
+mustCatch('an over-blocking rule that also refuses real short city names («جدة», «أبها»)',
+  !A_REAL_PLACE.every((loc) => overBlocking({ location: loc })));
+
+// THE LADDER's pre-fix shape: any single signal was enough to search. §2's rule rejects it.
+const anySignalSearches = (st: Record<string, unknown>) =>
+  st.type || st.price || st.detail || st.amenities || st.af || st.location ? 'listings' : 'message';
+mustCatch('a ladder where a bare type is enough to search (no place required)',
+  anySignalSearches({ type: 'Villa' }) !== 'message');
+mustCatch('a ladder that treats the COUNTRY as a scope it can search',
+  anySignalSearches({ type: 'Apartment', location: 'كل مدن المملكة' }) !== 'message');
+
+// THE BUDGET CEILING manufacturing a search out of impatience — the half that actually bit.
+const ceilingSearchesAnyway = (_st: Record<string, unknown>, askCount: number) =>
+  askCount >= QUESTION_BUDGET_CEILING ? 'listings' : 'message';
+mustCatch('a budget ceiling that searches anyway once the questions run out',
+  ceilingSearchesAnyway({ type: 'Apartment' }, QUESTION_BUDGET_CEILING) !== 'message');
+
+// §3's over-blocking mirror: a rule that stops real cities searching at all.
+mustCatch('a rule that refuses a real city outright (supported scopes must be unaffected)',
+  ((st: Record<string, unknown>) => (st.location === 'الرياض' ? 'message' : 'listings'))({ location: 'الرياض' }) !== 'listings');
 
 console.log(failed === 0
   ? '\n✅ verify-search-requires-a-real-place: all checks passed.'
