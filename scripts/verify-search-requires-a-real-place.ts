@@ -85,16 +85,14 @@ const decide = (state: Record<string, unknown>, askCount = 0, locationAmbiguous 
     'a real place at the budget ceiling still searches — optional fields never block');
 }
 
-// ── 4. AN AMBIGUOUS PLACE IS A NAMED PLACE ───────────────────────────────────────────────────
-// «الهفوف» exists in two regions. The user DID name somewhere; the 2026-08-30 round-2 fix converges
-// that on a search once the budget is spent instead of asking forever. This rule must not silently
-// reintroduce that unbounded loop — the search it converges on is scoped to the term, not nationwide.
+// ── 4. AN AMBIGUOUS PLACE ASKS — SUPERSEDED 2026-09-05, AND IT WAS MY OWN ERROR ──────────────
+// This section previously asserted that an ambiguity CONVERGES to listings once the budget is
+// spent, on the stated belief that "the search it converges on is scoped to the term, not
+// nationwide". That belief was wrong: turnWiring cleared the location outright and its own comment
+// said so — "absent, nationwide, never guessed". The assertion was therefore pinning the bug.
+// Section 7 below now owns this case, including the termination proof.
 {
-  check(decide({}, 0, true) === 'message', 'ambiguous place under the ceiling → still asks');
-  for (const askCount of [QUESTION_BUDGET_CEILING, 50]) {
-    check(decide({}, askCount, true) === 'listings',
-      `ambiguous place at askCount=${askCount} → converges to listings (no unbounded loop)`);
-  }
+  check(decide({}, 0, true) === 'message', 'ambiguous place under the ceiling → asks');
 }
 
 // ── 5. THE COUNTRY VOCABULARY IS A DOCUMENTED MIRROR, NOT A SILENT COPY ──────────────────────
@@ -125,6 +123,49 @@ const decide = (state: Record<string, unknown>, askCount = 0, locationAmbiguous 
     'a loc_classify ambiguity still wins — its question is more specific than the generic city ask');
   check(/!ambiguityReply && !hasUsableLocation/.test(idx),
     'the no-place question never overrides an ambiguity question');
+}
+
+// ── 7. A TWIN/AMBIGUOUS PLACE ASKS — AND NEVER DEGRADES INTO A NATIONWIDE SEARCH ─────────────
+// «الرياض» is a twin (city AND region). Answering the city question with it used to reach
+// kind="listings" once the budget was spent; turnWiring then CLEARED the location, whose own comment
+// said it outright — "absent, nationwide, never guessed". Measured in production 2026-09-05:
+// p_cities/p_districts/p_region_ids all null, 39,015 listings, top result in جدة.
+// The bounded question now outranks the ceiling (owner, 2026-09-05).
+{
+  for (const askCount of [0, 1, QUESTION_BUDGET_CEILING, QUESTION_BUDGET_CEILING + 3, 50]) {
+    check(decide({}, askCount, true) === 'message',
+      `an unresolved twin at askCount=${askCount} → asks, never a nationwide search`);
+  }
+  // TERMINATION. The owner's other requirement: this must not become an infinite loop. It cannot,
+  // because the question is CLOSED — it names both options and the client resolves either answer
+  // deterministically. Prove the exit exists: once the answer is folded in, the very next turn
+  // searches, at ANY askCount.
+  for (const answered of ['مدينة الرياض', 'منطقة الرياض', 'الرياض', 'الهفوف']) {
+    check(decide({ location: answered }, 50, false) === 'listings',
+      `«${answered}» resolved → listings on the next turn (the loop has an exit)`);
+  }
+  // …and the exit is a REAL place, never the country sneaking back in through the twin door.
+  check(decide({ location: 'المملكة العربية السعودية' }, 50, false) === 'message',
+    'the twin exit cannot resolve to the country');
+
+  // turnWiring must NEVER clear a location into absence again. Absence IS nationwide downstream.
+  const wiring = readFileSync(join(root, 'supabase/functions/agent/turnWiring.ts'), 'utf8');
+  check(!/location = "";/.test(wiring),
+    'turnWiring never blanks the location (absence is what the RPC reads as the whole Kingdom)');
+  check(/decision = \{ kind: "message"/.test(wiring),
+    'an unresolved ambiguity that somehow reached "listings" degrades to a QUESTION, fail-closed');
+
+  // The ladder must not re-acquire a budget bound on the ambiguity step.
+  const decideSrc = readFileSync(join(root, 'supabase/functions/agent/decide.ts'), 'utf8');
+  check(!/locationAmbiguous && askCount < QUESTION_BUDGET_CEILING/.test(decideSrc),
+    'the twin question is NOT bounded by the question budget (that bound is what produced the bug)');
+  // DEFENCE IN DEPTH, pinned at the source because it is deliberately unreachable today and so has
+  // no behaviour to mutate: step 1 always asks on an ambiguity, so the no-place gate below never
+  // sees one. Keep it unexempted anyway — the safety of that gate must not depend on the ladder's
+  // ORDER staying exactly as it is. (A mutation restoring the exemption is invisible at runtime,
+  // which is precisely why it needs a source assertion rather than none.)
+  check(!/!locationAmbiguous && !hasUsableLocation/.test(decideSrc),
+    'the no-place gate carries NO ambiguity exemption — it must hold even if the ladder is reordered');
 }
 
 console.log(failed === 0
