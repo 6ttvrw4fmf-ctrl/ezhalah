@@ -1789,7 +1789,17 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   // deep link and a restored session both land on, and a private copy of the fleet is how it came to
   // miss aqarmonthly (a live, monthly-searchable platform) while still probing three retired ones.
   for (const table of DEEPLINK_TABLES) {
-    const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).limit(1);
+    // `.eq('active', true)` — A DEEP LINK IS A SEARCH SURFACE (P1, incident #34, found by routine #11's
+    // first run). Every other surface — results, AF, Trending, counts, pagination — resolves through
+    // active_listing_ids_v2, whose arms are all `WHERE active IS TRUE`. This one path read the raw
+    // table with no predicate at all, and LIST_SELECT does not even fetch the `active` column, so the
+    // client could not have noticed. 68,788 rows are active=false fleet-wide and every one of them
+    // rendered as a live card here: a shared or bookmarked link to a delisted property showed it as
+    // if it were still on the market, permanently — the search stack heals in ~50 minutes, this never
+    // did, and on the 60 tables with no retention policy there is no hard delete to eventually end it.
+    // Proven with the production ANON key, not privileged SQL: ids 585260 / 629782 / 4744698 each
+    // returned a full card payload carrying "active": false.
+    const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).eq('active', true).limit(1);
     if (error || !data || !data.length) continue;
     const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');
     if (row) { LISTING_CACHE.set(row.id, row); return row; }
