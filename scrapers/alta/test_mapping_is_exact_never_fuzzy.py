@@ -92,3 +92,27 @@ row, _ = _post(["شقق"], ["ايجار"], [], "شقة للايجار السعر
 assert row["rent_period"] == "annual"
 
 print("ok: alta mapping is exact-only, wanted-ads excluded, sold→inactive, price/period = source")
+
+# 10. THE SOLD-PIN. Observed 2026-09-05: the first successful run landed at 05:20 UTC — the minute
+#     auto_recover_false_inactive() fires — and all 9 source-confirmed sold rows came back
+#     active=true, missing_count=0. The honest active=false is written, then erased, unless the
+#     run pins it. Pin the SHAPE here: run.py must call _pin_sold_inactive AFTER the upsert, for
+#     both tables, and it must write BOTH active=false and a missing_count above the recover
+#     job's `coalesce(missing_count,0)=0` condition.
+import inspect  # noqa: E402
+import re as _re  # noqa: E402
+from scrapers.alta import run as _run  # noqa: E402
+
+_pin = inspect.getsource(_run._pin_sold_inactive)
+assert '"active": False' in _pin and '"missing_count": 3' in _pin, (
+    "the pin must set BOTH active=false and missing_count>0, or the sweep re-activates it")
+
+_main = inspect.getsource(_run.main)
+_up = _main.index("upsert_alta_commercial_batch")
+assert _main.index("_pin_sold_inactive") > _up, "the pin must run AFTER the upsert resets missing_count"
+for tbl in ("alta_residential_listings", "alta_commercial_listings"):
+    assert f'_pin_sold_inactive("{tbl}"' in _main, f"{tbl} sold rows are never pinned"
+assert _re.search(r'if not row\["active"\]:\s*\n\s*\(sold_com if cat == "commercial" else sold_res\)',
+                  _main), "sold ad_numbers must be collected per category"
+
+print("ok: alta sold rows are pinned after upsert so the 05:20 sweep cannot resurrect them")

@@ -270,6 +270,30 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]]) -> tuple[Optional[dict]
     return row, category
 
 
+def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+    """Make source-confirmed sold/rented rows survive the nightly auto_recover_false_inactive().
+
+    OBSERVED HERE, NOT THEORISED (2026-09-05): the first successful run landed at 05:20 UTC —
+    the exact minute that pg_cron job fires — and all 9 rows whose own status_ar said تم البيع /
+    غير متاح came back active=true, missing_count=0. The job re-activates any active=false row
+    with coalesce(missing_count,0)=0 and a fresh last_seen_at, and the shared batch upsert
+    (db._wasalt_batch) unconditionally writes missing_count=0 for every row it touches. So the
+    honest active=false this scraper computes is erased moments after it is written.
+
+    Same remedy awal uses: AFTER the batch upsert, pin sold rows to missing_count=3 (the prune
+    3-strike threshold) + active=false. prune_unseen() never undoes this — it only selects
+    active=true rows. When a listing is genuinely relisted, its next upsert carries active=true
+    and the upsert's own missing_count=0 reset applies, so the pin only ever describes rows the
+    source calls sold on THIS crawl.
+    """
+    for i in range(0, len(ad_numbers), 200):
+        db._execute(
+            db.sb().table(table).update({"active": False, "missing_count": 3})
+            .in_("ad_number", ad_numbers[i:i + 200]),
+            what=table + ".sold_pin",
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -281,6 +305,8 @@ def main() -> int:
     run_id = None if args.limit else db.begin_run("alta")
     res: list[dict] = []
     com: list[dict] = []
+    sold_res: list[str] = []
+    sold_com: list[str] = []
     gone_ct = 0
     try:
         tax = fetch_taxonomies(s)
@@ -307,11 +333,18 @@ def main() -> int:
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)
+            if not row["active"]:
+                (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
 
         if res:
             db.upsert_alta_residential_batch(res)
         if com:
             db.upsert_alta_commercial_batch(com)
+        # Immediately after the upsert (which reset missing_count to 0) — see _pin_sold_inactive.
+        if sold_res:
+            _pin_sold_inactive("alta_residential_listings", sold_res)
+        if sold_com:
+            _pin_sold_inactive("alta_commercial_listings", sold_com)
 
         if args.limit:
             print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial "
