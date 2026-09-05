@@ -78,6 +78,34 @@ check(!/locationAmbiguous && askCount < QUESTION_BUDGET_CEILING/.test(strip(deci
 check(!/location = "";/.test(strip(readFileSync(join(root, 'supabase/functions/agent/turnWiring.ts'), 'utf8'))),
   'turnWiring still never blanks the location (blank == nationwide downstream)');
 
+// ── 6. THE CLIENT MAY NOT SEARCH PAST A LOCATION QUESTION ────────────────────────────────────
+// The edge asking is only half of it. The client keeps its OWN ask-ceiling ("asked twice and we can
+// see some intent, so just search"), and that ceiling discarded the twin question and searched
+// منطقة الرياض — 10,932 rows across 20 cities — for a user who had said only «الرياض» (production,
+// 2026-09-05). The edge now flags the two location questions and the ceiling must honour the flag.
+{
+  const client = strip(readFileSync(join(root, 'src/app/agent.tsx'), 'utf8'));
+  const dataAgent = strip(readFileSync(join(root, 'src/data/agent.ts'), 'utf8'));
+
+  check(/const locationQuestion = !!\(ambiguityReply \?\? noPlaceReply\);/.test(code),
+    'the edge flags a location question (ambiguity OR no usable place)');
+  check(/kind: "message", reply, locationQuestion,/.test(code),
+    'and ships that flag on the message turn');
+  check(/locationQuestion\?: boolean/.test(dataAgent),
+    'the client TYPE carries the flag');
+  check(/d\.locationQuestion === true \? \{ locationQuestion: true \}/.test(dataAgent),
+    'and it is read from the edge verbatim, never inferred client-side');
+
+  check(/const mustAnswer = turn\.kind === 'message' && turn\.locationQuestion === true;/.test(client),
+    'the client derives mustAnswer from the edge flag alone');
+  check(/askCountRef\.current >= 2 && !mustAnswer/.test(client),
+    'the client ask-ceiling does NOT fire on a location question',
+    'this is the branch that searched منطقة الرياض instead of showing the question');
+  // The ceiling must still work for everything else — this fix must not disable it wholesale.
+  check(/if \(hasIntent && askCountRef\.current >= 2 && !mustAnswer\)/.test(client),
+    '…and still fires for an ordinary clarification (hasIntent + the count are both still required)');
+}
+
 // ── MUTATION PROOF ───────────────────────────────────────────────────────────────────────────
 console.log('\n  mutation proof — each guard must FAIL on its own defect\n');
 const mustCatch = (label: string, caught: boolean) => {
@@ -98,6 +126,24 @@ mustCatch('the question deleted entirely',
 mustCatch('a silent default that guesses the city',
   /else\s*\{[^}]*location\s*=/.test(
     mut('else if (!wantsCity && !wantsRegion) {', 'else { location = nm; } else if (false) {')));
+{
+  const client = strip(readFileSync(join(root, 'src/app/agent.tsx'), 'utf8'));
+  const mutC = (from: string, to: string) => {
+    if (!client.includes(from)) throw new Error(`client anchor missing: ${from.slice(0, 50)}`);
+    return client.replace(from, to);
+  };
+  mustCatch('the client ask-ceiling searching past a location question again (the production defect)',
+    !/askCountRef\.current >= 2 && !mustAnswer/.test(
+      mutC('askCountRef.current >= 2 && !mustAnswer', 'askCountRef.current >= 2')));
+  mustCatch('the client inferring the flag itself instead of trusting the edge',
+    !/const mustAnswer = turn\.kind === 'message' && turn\.locationQuestion === true;/.test(
+      mutC("const mustAnswer = turn.kind === 'message' && turn.locationQuestion === true;",
+           "const mustAnswer = /مدينة|منطقة/.test(turn.reply);")));
+  mustCatch('the ceiling disabled wholesale (it must still apply to ordinary clarifications)',
+    !/if \(hasIntent && askCountRef\.current >= 2 && !mustAnswer\)/.test(
+      mutC('if (hasIntent && askCountRef.current >= 2 && !mustAnswer)', 'if (false)')));
+}
+
 mustCatch('«منطقة X» no longer resolving to the region',
   !/if \(wantsRegion && !wantsCity\) location = `منطقة \$\{nm\}`;/.test(
     mut('if (wantsRegion && !wantsCity) location = `منطقة ${nm}`;',
