@@ -1373,7 +1373,25 @@ Deno.serve(async (req: Request) => {
           // function); a bare city name resolves as an exact single city. Never touch regionPin here.
           if (wantsRegion && !wantsCity) location = `منطقة ${nm}`;
           else if (wantsCity && !wantsRegion) location = nm;
-          else if (!wantsCity && !wantsRegion && !alreadyAsked) {
+          else if (!wantsCity && !wantsRegion) {
+            // NO `!alreadyAsked` HERE (owner, 2026-09-05): «city or region?» OUTRANKS the
+            // ask-once guard. Everywhere else `alreadyAsked` is right — it stops us repeating a
+            // question the user already heard. For THIS one it silently decided the search scope
+            // instead: a conversation that had asked ANY earlier location question suppressed the
+            // twin question, `locationAmbiguous` came back false, and the ladder searched with
+            // whatever the parser happened to produce. Reproduced in production 2026-09-05 — the
+            // user answered «الرياض» and got منطقة الرياض (10,745 rows across 20 cities) without
+            // ever being asked which one they meant. A fresh «ابغى فيلا للبيع في الرياض» asked
+            // correctly in the same build, which is what made this look like it worked.
+            //
+            // Guessing is the one thing not allowed here: «الرياض» is a city AND a region, the two
+            // are different searches, and neither reading is safe to assume.
+            //
+            // NOT A LOOP. The question is CLOSED — it names both options — and either answer
+            // resolves it deterministically on the very next turn through the two branches above
+            // («مدينة X» → wantsCity, «منطقة X» → wantsRegion), with no model round-trip. Repeating
+            // it only happens when the user's reply is ambiguous AGAIN, which is when asking is the
+            // correct behaviour: the Normal Filter refuses a search with no city for the same reason.
             ambiguityReply = `«${nm}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${nm} ولا منطقة ${nm} كاملة؟`;
           }
         } else if (ck === "twin_city") {
