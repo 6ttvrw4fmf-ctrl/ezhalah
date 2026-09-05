@@ -22,6 +22,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { liftSearchScope } from './lib/liftSearchScope.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -71,10 +72,30 @@ check('migration patches all THREE readers (counts must match results)',
   && /property_age_option_counts_ar/.test(migrations));
 
 // ── 2. monthly-only platforms are in scope whenever the period scope includes monthly ────────────
+// EXECUTED, not text-matched (2026-09-03). This used to require the two table names to appear
+// ADJACENT in the source — `'gathern_residential_listings', 'aqarmonthly_residential_listings'` —
+// which was true only while resTables spliced them in by hand. They now live in the generated
+// SEARCHABLE_TABLES inventory (alphabetical, so not adjacent) and are folded in generically by
+// MONTHLY_ONLY_TABLE. A regex pinned to yesterday's LAYOUT cannot see today's BEHAVIOUR, in either
+// direction: it went red on a correct refactor, and it would have gone green on a filter that
+// returned the wrong set as long as the two strings stayed next to each other. So run the function.
+const bothScope = await liftSearchScope(root);
+const resTablesFn = bothScope.resTables as (q: { deal?: string; rentPeriod?: string; dealCombined?: boolean }) => string[];
+const monthlyIn = (q: { deal?: string; rentPeriod?: string; dealCombined?: boolean }) =>
+  resTablesFn(q).filter((t) => /^(gathern|aqarmonthly)_/.test(t)).sort();
+
 check("resTables adds the monthly-only sources for 'both', not just 'monthly'",
-  /rentPeriod\s*===\s*'monthly'\s*\|\|\s*q\.rentPeriod\s*===\s*'both'/.test(remote)
-  && /gathern_residential_listings'?,\s*'aqarmonthly_residential_listings/.test(remote),
-  'without this a both-search returns an annual-only pool while claiming to cover both periods');
+  monthlyIn({ deal: 'Rent', rentPeriod: 'both' }).length >= 2
+  && monthlyIn({ deal: 'Rent', rentPeriod: 'monthly' }).length >= 2,
+  `both → [${monthlyIn({ deal: 'Rent', rentPeriod: 'both' }).join(', ')}] — without this a both-search `
+  + 'returns an annual-only pool while claiming to cover both periods');
+
+// The other side of the same rule, and the one an over-eager "just always include them" fix breaks:
+// Gathern is monthly-only AND rent-only, so it must never reach a Buy or an ANNUAL rent result.
+check('the monthly-only sources stay OUT of Buy and of an annual Rent search',
+  monthlyIn({ deal: 'Buy' }).length === 0
+  && monthlyIn({ deal: 'Rent', rentPeriod: 'annual' }).length === 0,
+  `Buy → [${monthlyIn({ deal: 'Buy' }).join(', ')}], annual → [${monthlyIn({ deal: 'Rent', rentPeriod: 'annual' }).join(', ')}]`);
 
 check("candidate-level period filter has an explicit 'both' branch",
   /rentPeriod\s*===\s*'both'\s*\)\s*\{[\s\S]{0,220}?\.in\(\s*'rent_period',\s*\[\s*'monthly',\s*'annual'\s*\]/.test(remote),

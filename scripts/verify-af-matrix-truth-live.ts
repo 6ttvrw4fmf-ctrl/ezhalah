@@ -43,7 +43,7 @@
 // LIVE CHECK — excluded from `npm test` (scripts/test-exclusions.txt); runs in
 // .github/workflows/af-live-truth-check.yml with the other production-truth barriers.
 import { join } from 'node:path';
-import { liftSymbols } from './lib/liftSymbols.ts';
+import { liftSearchScope } from './lib/liftSearchScope.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import {
@@ -144,10 +144,12 @@ async function fetchCols(ids: string[], cols: string[]): Promise<Map<string, Rec
 // ── reference data + the app's own table lists ───────────────────────────────────────────────────
 const TYPE_MACROS: Record<string, string> = Object.fromEntries(
   (await (await http('known_type_ar?select=type_ar,macro')).json() as any[]).map((x) => [x.type_ar, x.macro]));
-const tables = await liftSymbols(join(ROOT, 'src/data/remote.ts'),
-  [{ header: 'const RES_TABLES', endsWith: /\];$/ }, { header: 'const COM_TABLES', endsWith: /\];$/ }, { header: 'function resTables' }],
-  ['RES_TABLES', 'COM_TABLES', 'resTables'], 'type SearchQuery = any;') as
-  { RES_TABLES: string[]; COM_TABLES: string[]; resTables: (q: SearchQuery) => string[] };
+// THE ONE LIFT SPEC (scripts/lib/liftSearchScope.ts). This file used to carry its own copy, pinned
+// to `endsWith: /\];$/` — a terminator no line matches since RES_TABLES/COM_TABLES became derived
+// one-liners (#1653). The slice then ran on to DEEPLINK_TABLES, swallowed COM_TABLES, and the lifted
+// module declared it twice: this whole matrix died with a SyntaxError before its first assertion,
+// invisible because a live check is excluded from `npm test`.
+const tables = await liftSearchScope(ROOT);
 
 function scopeBody(cell: Cell): Record<string, unknown> {
   const typesAr = typeArForTypes(cell.scope.types) ?? [];
@@ -256,6 +258,14 @@ async function verifyCell(cell: Cell) {
         args.p_category = cell.scope.category;
         args.p_types = body0.p_types;
         Object.assign(args, L.rpcAllNarrowingParams(q1));
+        // THE TABLE SCOPE, exactly as locations.ts now sends it (fix 2026-09-03). Trending used to go
+        // out with no p_tables while the results body carried one, so it counted platform tables the
+        // results RPC excludes — and this very check was what caught it, on `bathrooms=1`, the one
+        // predicate wide enough to admit the five uncertified platforms live in search_listings_ar.
+        // Taken from body0, the RESULTS body, so the two sides are compared on one scope by
+        // construction: if the client ever stops sending it, the identity below breaks again.
+        args.p_tables = body0.p_tables;
+        if (body0.p_tables2) { args.p_tables2 = body0.p_tables2; args.p_types2 = body0.p_types2; }
         const rows = await rpc<any[]>('top_cities_by_deal_ar', args);
         const row = rows.find((r) => r.city_ar === CITY);
         check(`${tag}/${fid}=${o.key}: Trending advertises for ${CITY} exactly the committed count`,

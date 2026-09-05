@@ -1,0 +1,66 @@
+# GUARDIAN JOURNEYS (2026-09-04). The production journey suite for the user-facing surfaces that had
+# ZERO live browser coverage — dark mode, New Chat starting blank, the signed-out auth surface, Back
+# after a search, ResultCard field content, loaders resolving, the /about + /support doors, and
+# empty-result honesty. Those are exactly the surfaces the owner has been testing by hand.
+#
+# Read-only against production: never signs in, never submits the support form, never writes through
+# the UI. A PRODUCT failure opens an owned ops_incident (P1, source 'journey'); a HARNESS failure is
+# reported UNDETERMINED and files nothing — see e2e/guardian/run.mjs for why that split is the whole
+# point. Runs daily, and again after every successful production deploy, because a deploy is when a
+# surface most often breaks.
+name: Guardian journeys (production)
+
+on:
+  schedule:
+    # 05:40 UTC — off-peak, and after UI parity (05:10) so the two browser jobs do not contend.
+    - cron: '40 5 * * *'
+  workflow_run:
+    workflows: ['Deploy frontend (production)']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Target URL (defaults to production)'
+        required: false
+        default: 'https://ezhalah-app.vercel.app'
+
+jobs:
+  guardian:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # A deploy that FAILED shipped nothing; re-driving production would only measure the old bundle.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright + browser
+        run: |
+          npm i -D @playwright/test@^1.49
+          npx playwright install --with-deps chromium
+      - name: Drive the guardian journeys against production
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url || 'https://ezhalah-app.vercel.app' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GUARDIAN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node e2e/guardian/run.mjs
+
+      # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
+      # This job runs unattended: a red run notifies nobody, so it has to reach alert_event to reach
+      # a human. One open P1 per workflow file (dedup workflow_failed:guardian-journeys.yml), and the
+      # next green run resolves it. `always()` so a failing run still gets here.
+      # scripts/verify-scheduled-checks-alert-on-failure.ts fails if this step is missing or names a
+      # workflow file other than its own.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind journey_live_check_failed
+          --workflow guardian-journeys.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

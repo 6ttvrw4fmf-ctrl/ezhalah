@@ -85,6 +85,19 @@ should look at it; effort scales with what you find; never manufacture a 10/10; 
 every run and resolve an issue only after the production fix is verified; and none of it weakens an
 existing guard. Every routine's live prompt carries a condensed copy — §G is the source of truth.
 
+**A finding now has a durable home with one owner, and closing it is EARNED —
+`docs/ops/AUTONOMOUS_INCIDENT_LOOP.md` is canonical (owner brief, 2026-09-04).** Read it before
+routing, parking, or closing anything. In one line: `alert_event` says whether a CONDITION is true
+right now; `ops_incident` says who owns a FINDING and what has been done about it. Start every run by
+reading `ops_incident where owner_routine = '<your slug>' and state not in ('resolved','wont_fix')`;
+route anything outside your lane with `incident_open()` / `incident_handoff()` instead of dropping it
+(§G.3's mechanism, which did not exist before); and note that `resolved` is unreachable without
+naming a permanent barrier AND a production verification — a CHECK constraint enforces it, so the
+"every bug gets a barrier" rule no longer depends on anyone remembering. `blocked` is the only state
+that routinely reaches the owner and must cite one of §G.2's six reasons; categories (d) and (e) are
+refused, because those are things to ROUTE. Why it exists, measured: 1,014 alerts raised all-time and
+**2 ever acknowledged**.
+
 **Owner-granted engineering/product decisions belong in this repo, not just in an agent's own memory.**
 When the owner gives you a permanent rule, architecture decision, or business/compliance decision:
 land it in `docs/ARCHITECTURE.md` (or the relevant `docs/ops/*.md`) in the same session, not only in
@@ -422,6 +435,17 @@ Three rules keep that safe, all enforced by `scripts/verify-test-registry-comple
    be discovered and run. Removing a test therefore takes a deliberate, reviewed edit to the
    baseline — it cannot happen as a side effect of a rename, a bad glob, or a merge resolution.
    Adding a test needs no baseline edit at all.
+
+   **Lowering the floor is a two-part act, and the second part is a PR-body line.** The floor is
+   computed as `200 − BASELINE_DEPARTURES` in `verify-test-registry-complete.ts`; you cannot lower it
+   by editing a number. Add a departure entry naming the script, the PR, its new home, and — the part
+   reviewers actually need — whether **per-PR coverage was LOST**. A relocation with a real execution
+   home is not a loss; a script that afterwards runs on no PR **is** a partial loss and must be said
+   in those words. The barrier prints every departure on every run. Then **say it in the PR body**,
+   naming the moved script and its new home: PR #1527 moved `verify-af-independent-oracle.ts` out of
+   the required `npm test` into `af-live-truth-check.yml` and took the floor 200 → 199 for good
+   reasons, but its body never mentioned it, so the one fact a reviewer most needed was reachable
+   only by diffing three files.
 2. **Every exclusion names a reason AND a home that exists.** `scripts/test-exclusions.txt` is
    `name | where it DOES run | why`, and the "where" must be a workflow file that exists, an npm
    script that exists, or an explicit `manual`. Live/browser checks that need production belong

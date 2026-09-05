@@ -88,10 +88,16 @@ check(
 );
 
 // ── 4. The last-resort fallback must not silently drop the advanced answers ──────────────────────
+// The guard now asks "are any of these keys a PREDICATE the user chose?" rather than "is this object
+// non-empty" (2026-09-03): `af` also carries the search's TABLE SCOPE, which is present on every call
+// including a completely unfiltered one. A plain non-empty test would pin hasNarrowing true forever
+// and silently disable every widening fallback below — a blank city field where a widened one
+// belongs. Both halves are asserted: the guard exists, AND it discounts the scope keys.
 check(
-  /const hasNarrowing = Object\.keys\(af \?\? \{\}\)\.length > 0/.test(loc),
+  /const hasNarrowing = Object\.keys\(af \?\? \{\}\)\.some\(\(k\) => !TABLE_SCOPE_KEYS\.includes\(k\)\)/.test(loc)
+    && /TABLE_SCOPE_KEYS = \['p_tables', 'p_tables2', 'p_types2'\]/.test(loc),
   'the code knows whether any advanced answer is present',
-  'src/data/locations.ts: no `hasNarrowing` guard — the fallback chain cannot tell a narrowed search from a plain one (renamed + widened 2026-08-22 to cover bedrooms/price/area too).',
+  'src/data/locations.ts: no `hasNarrowing` guard — the fallback chain cannot tell a narrowed search from a plain one (renamed + widened 2026-08-22 to cover bedrooms/price/area too; scope keys discounted 2026-09-03).',
 );
 check(
   /if \(res\.error && periodTok !== null && !hasNarrowing\)/.test(loc),

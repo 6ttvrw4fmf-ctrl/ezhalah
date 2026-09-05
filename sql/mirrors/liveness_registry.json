@@ -6,6 +6,12 @@
     "grace": 3
   },
   {
+    "platform": "abralosol",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "aldarim",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -19,6 +25,12 @@
   },
   {
     "platform": "alkhaas",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "aouj",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3
@@ -49,6 +61,12 @@
   },
   {
     "platform": "aqarmonthly",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "arkaan",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3
@@ -114,6 +132,12 @@
     "grace": 3
   },
   {
+    "platform": "muktamel",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "mustqr",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -144,6 +168,12 @@
     "grace": 3
   },
   {
+    "platform": "rawasidark",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "sadin",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -163,6 +193,12 @@
   },
   {
     "platform": "souq24",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "therc",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3

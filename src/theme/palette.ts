@@ -12,6 +12,7 @@
 export const lightColors = {
   primary: '#2f7247', // primary green
   dark: '#1d4a37', // dark green
+  hoverRow: '#1d4a37', // SIDEBAR hover fill — the dark green («محادثة جديدة»'s interaction color)
   tint: '#eef6f0', // light-green tint
   tintFill: '#e9f4ec', // agent box fill
   userBubble: '#d7eede', // user chat bubble — light green
@@ -63,6 +64,9 @@ export const darkColors: Record<PaletteKey, string> = {
   // this file IS the dark redesign; no component carries its own dark hex.
   primary: '#3f9a63', // brand green, lifted for legibility on neutral dark
   dark: '#2b6f4c', // interaction fill (hover/press)
+  // SIDEBAR hover fill in dark (owner 2026-09-03): a MUTED deep green-gray — clearly visible on the
+  // charcoal panel, keeps white text/icons legible, still Ezhalah green, never bright/neon.
+  hoverRow: '#26483f',
   tint: '#1e2320', // agent box fill — near-neutral with the faintest warm-green cast
   tintFill: '#1c211e',
   userBubble: '#2f2f2f', // user bubble — neutral gray (green must not dominate)

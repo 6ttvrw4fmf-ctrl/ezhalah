@@ -134,16 +134,21 @@ check(
   Number.isFinite(topClear) && (topClear as number) >= footprint + (CLOSE_GAP ?? 0),
   `expr: ${topClearExpr || '(missing)'} → ${topClear}`,
 );
-// REDESIGN (owner 2026-08-29): the artwork hero replaced bodyPadM/heroCol. The SAME arithmetic
-// contract holds — the hero band's height AND its inner text clearance both derive from TOP_CLEAR,
-// so the lockup starts below the floating × on every screen, never via a re-hardcoded literal.
+// REDESIGN (owner 2026-09-03): «من نحن» has NO close button at all — its header is the drag grip
+// and the backdrop closes it — so it reserves nothing for a × it never renders. The × is GATED on
+// the dialog kind; every dialog that keeps one (Support, the legal reader) starts its heading in
+// the title band BELOW the button's top, derived from TOP_CLEAR — never a re-hardcoded literal.
 check(
-  'the About hero band derives its height from TOP_CLEAR (no re-hardcoded literal)',
-  /heroArt:\s*\{\s*height:\s*TOP_CLEAR \+ \d+/.test(src),
+  'the × is rendered only for dialogs that have one (gated on the kind, never unconditional)',
+  /const hasClose = kind !== 'about';/.test(src) && /\{hasClose && \(/.test(src),
 );
 check(
-  'the About hero inner content derives its paddingTop from TOP_CLEAR (lockup clears the ×)',
-  /heroInner:\s*\{[^}]*paddingTop:\s*TOP_CLEAR/.test(src),
+  'the title band derives its top padding from TOP_CLEAR (headings start below the ×, no literal)',
+  /head:\s*\{[^}]*paddingTop:\s*TOP_CLEAR/.test(src),
+);
+check(
+  '«من نحن» reserves no × clearance because it renders no × (the old hero bands are gone)',
+  !/heroArt|heroInner/.test(src),
 );
 
 console.log(

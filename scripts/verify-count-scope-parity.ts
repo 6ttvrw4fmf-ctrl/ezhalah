@@ -39,8 +39,8 @@ const poolCalls: Array<[string, RegExp, RegExp]> = [
   ['ensureCityFieldIndex', /ensureCityFieldIndex\(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams\)/g, /ensureCityFieldIndex\(effDeal, rentPeriodTok\)[^,]/g],
   ['topCitiesByListings', /topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)/g, /topCitiesByListings\(effDeal, rentPeriodTok, 6\)/g],
   ['matchCitiesByText', /matchCitiesByText\(effDeal, rentPeriodTok, effCategory, /g, /matchCitiesByText\(effDeal, rentPeriodTok, [^e]/g],
-  ['ensureDistrictOptions', /ensureDistrictOptions\(cid, effDeal, effCategory, rentPeriodTok, cohortTypes\)/g, /ensureDistrictOptions\([^)]*query\.category/g],
-  ['topDistrictsForCityId', /topDistrictsForCityId\((?:cid|citySelected\.cityId), effDeal, effCategory, rentPeriodTok, 6, cohortTypes\)/g, /topDistrictsForCityId\([^)]*query\.category/g],
+  ['ensureDistrictOptions', /ensureDistrictOptions\(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope\)/g, /ensureDistrictOptions\([^)]*query\.category/g],
+  ['topDistrictsForCityId', /topDistrictsForCityId\((?:cid|citySelected\.cityId), effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope\)/g, /topDistrictsForCityId\([^)]*query\.category/g],
   ['matchDistrictsByCityId', /matchDistrictsByCityId\((?:cid|citySelected\.cityId), effDeal, effCategory, rentPeriodTok, /g, /matchDistrictsByCityId\([^)]*query\.category/g],
 ];
 for (const [name, good, bad] of poolCalls) {
@@ -52,7 +52,7 @@ for (const [name, good, bad] of poolCalls) {
 // ── Cache keys include the effective category — a category flip can never serve the other scope's
 //    counts from cache. ──
 check('city pool cache key includes category', /const cityPoolKey = \(deal: Deal \| null, periodTok: string \| null, category: Category \| null, types: string\[\] \| null = null, af: AfParams \| null = null\) => `\$\{deal\}:\$\{pmKey\(periodTok\)\}:\$\{category \?\? ''\}:\$\{typesKey\(types\)\}:\$\{afKey\(af\)\}`/.test(locSrc));
-check('district cache key includes category (pre-existing, pinned)', /const districtCacheKey = \(cityId: number, deal: Deal \| null, category: Category \| null, periodTok: string \| null, types: string\[\] \| null = null\) => `\$\{cityId\}:\$\{deal\}:\$\{category \?\? ''\}:\$\{pmKey\(periodTok\)\}:\$\{typesKey\(types\)\}`/.test(locSrc));
+check('district cache key includes category (pre-existing, pinned)', /const districtCacheKey = \(cityId: number, deal: Deal \| null, category: Category \| null, periodTok: string \| null, types: string\[\] \| null = null, scope: AfParams \| null = null\) => `\$\{cityId\}:\$\{deal\}:\$\{category \?\? ''\}:\$\{pmKey\(periodTok\)\}:\$\{typesKey\(types\)\}:\$\{afKey\(scope\)\}`/.test(locSrc));
 
 // ── The city RPC is called WITH the named p_category arg, plus a compat fallback that drops it on
 //    an older signature (the p_category migration is landing separately — see the TODO). ──

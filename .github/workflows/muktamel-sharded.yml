@@ -1,0 +1,88 @@
+# Muktamel sharded crawl — the full-inventory coverage fleet, mirroring dealapp-sharded.yml.
+#
+# WHY THIS EXISTS (2026-09-03): a single sequential scan cannot cover the live id band inside
+# GitHub's per-job timeout. Measured throughput across 4 real crawls (300-id samples, 8 workers,
+# post-deadlock-fix): 21 ids in 46s, 301 ids in 12-17 min. Worst observed: ~301 ids / 17 min ≈
+# 17.7 ids/min. The evidenced live band is 24000-32300 (see run.py's module docstring for how that
+# was measured and why the old "~100-31000" estimate was stale) — 8301 ids. At the worst observed
+# rate that is ~470 minutes sequentially: no single job's timeout covers it, and it will only grow
+# as the site's inventory does. Sharding fixes this exactly the way dealapp-sharded.yml already
+# does: N parallel runners, each on its own IP, each owning a disjoint slice of the id space.
+#
+# SHARD COUNT IS SIZED FROM MEASUREMENT, per the same discipline as dealapp-sharded.yml (see that
+# file's own comment for the story of what happens when a shard count is guessed instead). Sizing
+# on the worst observed rate, 17.7 ids/min, over the 8301-id evidenced range:
+#     4 shards → 2075 ids/shard → ~117 min  ✗ tight against even a 120m cap, no real headroom
+#     6 shards → 1384 ids/shard → ~78 min   ✓ comfortable inside 120m
+#     8 shards → 1038 ids/shard → ~59 min   ✓ 50%+ headroom              <- chosen
+# 8 matches dealapp's own chosen count and gives real margin for a slower day (retries, a
+# temporarily slow origin) without either extending this comment's math or guessing a new number.
+#
+# SAFETY. Shard membership is `listing_id % 8` (scrapers/muktamel/run.py's own id-space modulo,
+# the same total-function argument as db._ad_shard's docstring: every id maps to exactly one
+# shard, no id maps to two, the union of shards 0..7 is the complete evidenced range). db.
+# prune_unseen's shards=/shard= guard (already generic — dealapp uses the identical mechanism)
+# filters the existing-active set by the same key, so a shard can only ever age out ids it owns,
+# and a blocked or 0-row shard prunes nothing. Proven by
+# scrapers/common/tests/test_muktamel_shard_partition.py.
+#
+# The MIN/MAX below are this workflow's own evidenced range, not scrapers/muktamel/run.py's
+# MIN_ID_DEFAULT (deliberately left at 1 — see that file's docstring for why). Re-measure with
+# scrapers/muktamel/diag_page_structure.py before widening either bound.
+
+name: Muktamel sharded crawl
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_id:
+        description: "Lowest listing id across ALL shards"
+        required: false
+        default: "24000"
+      max_id:
+        description: "Highest listing id across ALL shards"
+        required: false
+        default: "32300"
+
+concurrency:
+  group: muktamel-sharded
+  cancel-in-progress: false  # never interrupt a crawl mid-run — a half-run prunes nothing anyway
+
+jobs:
+  crawl:
+    name: Muktamel shard ${{ matrix.shard }}/8
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false   # one blocked/slow shard must never cancel the other seven
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+
+      # Stagger the start so eight runners do not hit muktamel's origin in the same second.
+      # 8 shards x 15s = at most ~2 minutes of skew, negligible against an ~59 minute worst-case shard.
+      - name: Stagger shard start
+        run: sleep $(( ${{ matrix.shard }} * 15 ))
+
+      - name: Crawl shard ${{ matrix.shard }} of 8
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MUKTAMEL_WORKERS: "8"
+        run: >-
+          exec python -m scrapers.muktamel.run --type all
+          --min-id ${{ github.event.inputs.min_id || '24000' }}
+          --max-id ${{ github.event.inputs.max_id || '32300' }}
+          --shards 8 --shard ${{ matrix.shard }}

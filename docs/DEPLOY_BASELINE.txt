@@ -1,5 +1,12 @@
-7fa870f911f544f116d2cca38e8d8e1bc68705e6
+238dd19d4e9534a90d973f168275b80260e98990
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
+# 2026-09-04  57dd41e  deployed via .github/workflows/deploy-frontend.yml run 33898889593.
+#   Recorded BY PR, not by the deploy: the runner has no git identity, so safe-deploy.sh's
+#   `git commit` failed on «Author identity unknown» and its old else-branch reported that as
+#   «baseline unchanged (no diff)» — which is why this file sat on 254baca since PR #1470.
+#   The deploy itself is verified: ezhalah-app.vercel.app serves
+#   _expo/static/js/web/entry-2cb5e91d2daebdff29c78bb857e259da.js, md5(bytes) == that filename,
+#   and the alias/bundle gate (#1648) passed on it. The message is fixed in the same PR.
 # The first line MUST be the full/short commit SHA. scripts/preflight-verify.sh refuses any deploy
 # whose HEAD does NOT contain this commit (that would drop approved UI — the 2026-07-09 incident).
 # safe-deploy.sh advances this to the newly-deployed SHA after every successful production deploy.
@@ -280,3 +287,5 @@
 # 2026-08-11  91e0e43  deployed via safe-deploy.sh
 # 2026-08-14  94dad2b  deployed via safe-deploy.sh
 # 2026-09-01  7fa870f  advanced via PR: migration-drift (7 unrelated migrations from other sessions, tracked separately) had been blocking safe-deploy.sh's automatic post-deploy baseline-advance step, leaving this file stale at f90ebfd8 across ~150 commits; verified src/lib/ageFilterTypes.ts is the ONLY src/ or assets/ deletion in that span, and it is PR #1470's reviewed, CI-green replacement of the old age-filter-types module by cohortAllows (not a regression) -- see PR #1470
+# 2026-09-03  254baca  advanced via PR: §12A shipped (the «مطابق لطلبك» card-evidence strip, af_canon, and the R12A.6 live journey's card-listing-<id> testID). safe-deploy.sh's automatic post-deploy advance refused on BOTH of the day's deploys for the SAME reason and it is not a deploy fault: the alias had already moved to the new bundle, but the check could not read the deployment URL (HTTP 302, 15 bytes) so it never obtained an "expected" hash to compare against -- the issue #1563 shape, owned by routine #7. Advanced by hand only after all three of that step's own conditions were re-verified independently: the alias serves a bundle different from the pre-deploy one, that bundle references supabase.co (env vars inlined), the live search RPC answered HTTP 200 with a valid body, and ops_deploy_preflight_checks reported missing_in_git=0 / duplicate_overloads=0. Previous first line 7fa870f9 (PR #1470, 2026-09-01) -- stale across every deploy since.
+# 2026-09-04  238dd19  deployed via safe-deploy.sh

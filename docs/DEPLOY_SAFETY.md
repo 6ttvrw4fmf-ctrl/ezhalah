@@ -56,6 +56,46 @@ grep -c "p_tables2" /tmp/bundle-check.js   # commercial fix marker — should be
 one. The bundle hash (`entry-<hash>.js`) is content-based — an unchanged hash after a deploy you
 expected to change something means the deploy didn't actually include what you think it did.
 
+An unchanged hash is NOT by itself a failure, though: re-deploying the same frontend code emits a
+byte-identical bundle with the same name, and that is a healthy deploy. Prove the bundle rather than
+the change:
+
+```bash
+md5sum /tmp/bundle-check.js     # macOS: md5 -q — must equal the <hash> in entry-<hash>.js
+```
+
+The Expo web entry filename IS the md5 of its own bytes, so name and content must agree. A mismatch
+means the alias served something that is not that artifact (error page, truncated CDN read).
+
+### What the post-deploy gate in `safe-deploy.sh` asserts (and why it was wrong once)
+
+The gate proves the canonical alias serves **the entry THIS RUN emitted** — read from the run's own
+build log line `› web bundles (1): _expo/static/js/web/entry-<md5>.js` — that `md5(served bytes)`
+equals the hash in that filename, and that those bytes contain `supabase.co`.
+
+It used to take the expected hash from the per-deployment URL (`https://ezhalah-<id>.vercel.app`).
+That URL is behind Vercel deployment protection and answers `HTTP 302 → vercel.com/sso-api`, 15
+bytes, so the hash was never readable from CI; the gate then fell back to demanding that the alias
+hash **differ** from the pre-deploy hash — impossible for an identical rebuild. Run 33776354197
+deployed fine (`▲ Aliased https://ezhalah-app.vercel.app`, hydration gate green) and still went red,
+so the approved baseline never advanced and every later `preflight-verify.sh` flagged `main` as
+unapproved. A `<never readable>` deployment-URL read in that failure block is now expected and
+harmless. The gate stays BLOCKING; do not add a bypass flag.
+
+**The build log is on STDERR, so it must be captured from stderr.** The first version of that fix
+still read the build log out of `npx vercel --prod --yes | tee "$DEPLOY_LOG"` — a stdout-only
+capture — so `EMITTED_BUNDLE` was *always empty* and the gate silently fell right back onto the
+PRE_BUNDLE-diff last resort it was written to remove. In the pinned CLI (vercel 54.18.0) everything
+the CLI prints goes through `new Output(process.stderr, …)`
+(`node_modules/vercel/dist/chunks/chunk-Z5SBJH6L.js:4673`), the build log via
+`displayBuildLogs → printBuildLog(event, output_manager_default.print)`
+(`chunk-UNIIXDM2.js:1741`); the only stdout write on the deploy path is the bare deployment URL
+(`chunk-UNIIXDM2.js:2077`). The two streams are captured to **separate** files: a merged `2>&1` log
+ends on `▲ Aliased https://ezhalah-app.vercel.app`, so `tail -1` would set `DEPLOYED_URL` to the
+canonical alias and the fallback would read the alias to learn what the alias should serve.
+`scripts/verify-deploy-target-guard.ts` now *executes* the lifted capture block against a shim that
+replays both real streams, so "the grep runs and finds something" is asserted, not assumed.
+
 ## Approved baseline record
 
 This is the last known-good state, confirmed live and verified, kept up to date after every

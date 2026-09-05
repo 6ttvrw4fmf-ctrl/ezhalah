@@ -49,7 +49,14 @@ load_dotenv()
 _TRANSIENT_MARKERS = ("522", "520", "524", "503", "502", "504", "429", "408",
                       "timed out", "timeout", "connection", "json could not be generated",
                       "temporarily unavailable", "eof", "reset by peer", "server disconnected",
-                      "pgrst002")
+                      "pgrst002",
+                      # "broken pipe" / httpx.WriteError: the socket died while the REQUEST was
+                      # still being written. Textbook transient, and it matched NOTHING above
+                      # ("[Errno 32] Broken pipe" contains no other marker), so it was re-raised as
+                      # permanent and threw away the whole crawl. Observed 2026-09-03 on arkaan:
+                      # 1,072 listings fetched, 689 written, run lost on one write. Every caller of
+                      # _execute is idempotent (upsert on ad_number), so retrying is safe.
+                      "broken pipe", "writeerror", "write error")
 
 
 def _execute(query, *, what: str = "db", tries: int = 5):
@@ -1169,6 +1176,46 @@ def upsert_nowaisiry_residential_batch(rows: list[dict[str, Any]]) -> None:
 
 def upsert_nowaisiry_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("nowaisiry_commercial_listings", rows)
+
+
+def upsert_therc_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("therc_residential_listings", rows)
+
+
+def upsert_therc_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("therc_commercial_listings", rows)
+
+
+def upsert_aouj_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aouj_residential_listings", rows)
+
+
+def upsert_aouj_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aouj_commercial_listings", rows)
+
+
+def upsert_abralosol_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("abralosol_residential_listings", rows)
+
+
+def upsert_abralosol_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("abralosol_commercial_listings", rows)
+
+
+def upsert_arkaan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("arkaan_residential_listings", rows)
+
+
+def upsert_arkaan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("arkaan_commercial_listings", rows)
+
+
+def upsert_rawasidark_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("rawasidark_residential_listings", rows)
+
+
+def upsert_rawasidark_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("rawasidark_commercial_listings", rows)
 
 
 def upsert_october_residential_batch(rows: list[dict[str, Any]]) -> None:

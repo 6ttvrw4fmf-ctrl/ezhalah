@@ -628,6 +628,7 @@ const AR: Record<string, string> = {
   'Your budget': 'ميزانيتك',
   'Monthly Rent': 'الإيجار الشهري',
   'Annual Equivalent': 'المعادل السنوي',
+  'Calculated from price per m² × area — not published by the source': 'محتسب من سعر المتر × المساحة — غير معلن من المصدر',
   'Price Per m²': 'سعر المتر',
   // Unit suffix for the source-published «سعر المتر» rate. It is printed NEXT TO the number so the
   // card reads «سعر المتر 750 ريال/م²» — a per-square-metre RATE, never mistakable for a total.
@@ -883,6 +884,11 @@ const AR: Record<string, string> = {
   '24 Souq':                           'سوق العقار ٢٤',
   'Era Pulse':                         'نبض العصر',
   'Al Nowaisiry Real Estate':          'النويصري العقارية',
+  'The Right Choice Real Estate': 'الخيار الصحيح للخدمات العقارية',
+  'Aouj Estates': 'عوج العقارية',
+  'Abr Al Osol Real Estate': 'عبر الأصول للخدمات العقارية',
+  'Arkaan Al Aqar': 'أركان العقار',
+  'Rawasi Dark Real Estate': 'رواسي دارك العقارية',
   '1 October Real Estate':             '1 أكتوبر العقارية',
   'Additional Information':            'معلومات إضافية',
   'See more':                          'عرض المزيد',
@@ -990,7 +996,9 @@ const AR: Record<string, string> = {
   // Auth hero — new title + subtitle (user-supplied Arabic; English mirrors it without naming
   // platforms, per the platform-confidentiality rule). The title carries the brand "Ezhalah".
   'Looking for a property? Ezhalah.': 'تدور على عقار؟ إزهله.',
-  'Sign in or create your account': 'سجّل الدخول أو أنشئ حسابك',
+  // Sign-in popup heading + support line (owner 2026-09-03: simple, natural Arabic).
+  'Sign in or create your free account': 'سجّل دخولك أو أنشئ حسابك مجاناً',
+  'Sign in to unlock more of Ezhalah.': 'احفظ بحثك واحصل على المزيد',
   'More than 25 Saudi property platforms — in one place.': 'أكثر من ٢٥ منصة عقارية سعودية — في مكان واحد.',
   'Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.':
     'إزهله تجمع العقارات المعروضة من مختلف منصات العقار السعودية في مكان واحد.',
@@ -1000,7 +1008,8 @@ const AR: Record<string, string> = {
   'Saudi mobile numbers start with 5': 'أرقام الجوال السعودية تبدأ بالرقم 5',
   'Enter 9 digits': 'أدخل 9 أرقام',
   'Continue': 'متابعة',
-  "By continuing you agree to Ezhalah's Terms & Privacy Policy.": 'بالمتابعة فإنك توافق على شروط إزهله وسياسة الخصوصية.',
+  // The privacy sentence is composed: this lead + the «سياسة الخصوصية» link ('Privacy Policy' below).
+  'By continuing, you agree to our': 'بالمتابعة، أنت توافق على',
   // Country names + dial-prefix hints (phone picker)
   'United Arab Emirates': 'الإمارات العربية المتحدة',
   'Qatar': 'قطر',
@@ -1077,11 +1086,15 @@ const AR: Record<string, string> = {
     'أرسلت عدة رسائل خلال وقت قصير. انتظر ساعة تقريباً قبل إرسال رسالة جديدة.',
   'Terms of Service': 'شروط الخدمة',
   'Privacy Policy': 'سياسة الخصوصية',
+  // «الشروط والخصوصية» reader (owner 2026-09-03): the account-menu row + its two tabs.
+  'Terms & Privacy': 'الشروط والخصوصية',
+  'Terms of Use': 'شروط الاستخدام',
   'Ezhalah v{version}': 'إزهله الإصدار {version}',
 
   // Drawer / sidebar
   'New Chat': 'محادثة جديدة',
   'Search complete': 'اكتمل البحث',
+  'No further truthful narrowing question exists for this scope — these are all the genuine matches.': 'ما فيه سؤال إضافي موثوق يضيّق هذا النطاق أكثر — هذي كل النتائج المطابقة فعلاً.',
   'Start a new chat to search again': 'ابدأ محادثة جديدة للبحث من جديد',
   // Sidebar chat search (owner 2026-08-24): ChatGPT-style in-sidebar search, Arabic-first. The
   // empty state + hint are deliberately calm Saudi copy — never an English "No results".

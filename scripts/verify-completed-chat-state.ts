@@ -32,14 +32,23 @@ check("a forged non-boolean value is not honoured", !("completed" in (restoreCha
 
 console.log("\n── the ONLY two ways a chat completes are the canonical AF stop conditions ──");
 const trueSites = (agent.match(/setCompleted\(true\)/g) ?? []).length;
-check(`setCompleted(true) appears exactly twice (R11.1 + R11.2), found ${trueSites}`, trueSites === 2,
-  "a third site means a count alone, or a plain first search, can lock the composer");
+// OWNER PRODUCT RULE 2026-09-04: ONLY the ≤ INTERVIEW_STOP_AT (50) final set completes the chat
+// (R11.1). A set that is still ABOVE 50 with no truthful certified question left (the old R11.2)
+// is SAID OUT LOUD and the genuine results stay on screen with the composer LIVE — the user may
+// still refine by typing; the interview never invents a question, and never silently locks the
+// chat on a big set. So exactly ONE completion site remains.
+check(`setCompleted(true) appears exactly once (R11.1 — the ≤50 final set), found ${trueSites}`, trueSites === 1,
+  "a second site means a count alone, a plain first search, or an exhausted-but-large set can lock the composer");
 check("R11.1: the post-round honest total ≤ INTERVIEW_STOP_AT completes, inside finishGuided's onFetched",
-  /onFetched: \(total\) => \{[\s\S]{0,300}?if \(total != null && total <= INTERVIEW_STOP_AT\) setCompleted\(true\);/.test(agent));
-check("R11.2: the offer probe's `false` verdict completes ONLY after a committed AF round (afCarryRef)",
-  /if \(!ok && afCarryRef\.current\) setCompleted\(true\);/.test(agent));
+  /onFetched: \(total\) => \{[\s\S]{0,900}?if \(total != null && total <= INTERVIEW_STOP_AT\) setCompleted\(true\);/.test(agent));
+check("R11.2 (revised 2026-09-04): a MEASURED 'no' after a committed AF round is SPOKEN, not a silent completion",
+  /verdict === 'no' && afCarryRef\.current && !noMoreSaidRef\.current\[m\.id\]/.test(agent)
+  && /No further truthful narrowing question exists for this scope/.test(agent)
+  && !/if \(!ok && afCarryRef\.current\) setCompleted\(true\);/.test(agent));
 check("...and that verdict path still records afCanNarrow first (the «تحديد أكثر» gate is untouched)",
-  /setAfCanNarrow\(\(c\) => \(\{ \.\.\.c, \[m\.id\]: ok \}\)\);\s*\n[^\n]*\n\s*if \(!ok && afCarryRef\.current\) setCompleted\(true\);/.test(agent));
+  /setAfCanNarrow\(\(c\) => \(\{ \.\.\.c, \[m\.id\]: verdict === 'yes' \}\)\);/.test(agent));
+check("the spoken line is said at most ONCE per results turn (noMoreSaidRef guard)",
+  /noMoreSaidRef\.current\[m\.id\] = true;/.test(agent));
 
 console.log("\n── the composer is REPLACED, not merely hidden; the mic goes with it ──");
 const wrapIdx = agent.indexOf("{completed ? (");

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, I18nManager, Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import Animated, {
   Easing,
@@ -8,11 +8,9 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useResolvedTheme, useThemePalette } from '@/lib/appearance';
-import { alpha0 } from '@/theme/palette';
 import { colors, cardShadow } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { useApp } from '@/store';
@@ -21,6 +19,11 @@ import {
   sendSupportMessage, validateSupportMessage, type SupportField,
 } from '@/lib/support';
 import { useReducedMotion } from '@/lib/useReducedMotion';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { ABOUT_ART_BREAKPOINT, DOCK_BREAKPOINT } from '@/lib/responsive';
+import { canDragAuthPopup } from '@/lib/authPopupBehavior';
+import { attachCardDrag, clampOffsetOnScreen } from '@/lib/cardDrag';
+import { LEGAL_DOCS, hasLegalDocs } from '@/data/legal';
 import { PLATFORM_META } from '@/data/loaderPlatforms';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -39,48 +42,59 @@ const WEB_SMOOTH = IS_WEB ? ({ transitionProperty: 'background-color, transform,
 // (2026-08-23: the Support heading «المساعدة/تواصل معنا» lost its first word under the ×).
 // CLOSE_CLEAR is DERIVED from the button, never hand-tuned separately, so resizing/moving the
 // button keeps the heading clear. scripts/verify-info-modal-header-clearance.ts pins the arithmetic.
-const BODY_PAD = 24; // body horizontal padding — already buys the heading this much
-const CLOSE_INSET = 14; // button offset from the card's top/right edges
+const BODY_PAD = 28; // body horizontal padding — already buys the heading this much
+const CLOSE_INSET = 16; // button offset from the card's top/right edges
 const CLOSE_SIZE = 34; // button diameter
 const CLOSE_GAP = 8; // minimum breathing room between the heading and the button
 // Extra PHYSICAL-right padding a heading needs. `paddingRight` is physical in React Native and
 // react-native-web alike (only the *Start/*End variants flip under RTL) — which is exactly what we
 // want, because the button is pinned to the physical right in both LTR and RTL.
 const CLOSE_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP - BODY_PAD;
-// Vertical clearance for content that starts in the button's top band (the About hero): the RTL
-// reading edge is the physical right — exactly where the × lives — so the first line must start
-// BELOW the button, derived from the same constants.
+// Vertical clearance for content that starts in the button's top band: the RTL reading edge is the
+// physical right — exactly where the × lives — so a heading in that band starts BELOW the button's
+// top, derived from the same constants. (Only dialogs that HAVE a × need it; «من نحن» has none.)
 const TOP_CLEAR = CLOSE_INSET + CLOSE_SIZE + CLOSE_GAP;
 
-// (The 2026-08-24 two-panel desktop composition and its ABOUT_WIDE_MIN_W breakpoint were retired by
-// the owner's 2026-08-29 redesign — one artwork-led column now serves every breakpoint.)
+// Widths (owner 2026-09-03, the Perplexity-proportion brief): wide, spacious, one simple floating
+// card; height follows content, never a screen takeover.
+const SUPPORT_MAX_W = 540;
+const ABOUT_MAX_W = 760;
+const LEGAL_MAX_W = 640;
+const ABOUT_MAX_H = 700;
 
 const EAGLE = require('../../assets/images/eagle-mark.png');
-const HERO = require('../../assets/images/hero-bg.png');
-// «من نحن» artwork (owner 2026-08-30): the EXISTING Ezhalah eagle looking over the Kingdom's properties
-// — assets/images/eagle-night.jpg, 900×1317, previously unreferenced. Dark-native, so it needs no
-// theme swap and reads correctly under both palettes; the melt gradient below it does the integration.
+// «من نحن» artwork (owner 2026-08-30): the EXISTING Ezhalah eagle looking over the Kingdom's
+// properties — assets/images/eagle-night.jpg, 900×1317 (portrait). Owner 2026-09-03: it lives in
+// its OWN box now — never a background under text, never zoomed, cropped or stretched.
 const ABOUT_ART = require('../../assets/images/eagle-night.jpg');
+const ABOUT_ART_RATIO = 900 / 1317;
 
 // The only number «من نحن» shows. Derived from the shipped partner roster at compile time — never a
 // hardcoded count that goes stale, and never a dynamic listings/cities figure we'd have to fake.
 const PLATFORM_COUNT = PLATFORM_META.length;
 
-// In-app popup that hosts the Support / About content as a centered dialog over a blurred, dimmed
-// page (owner 2026-07-09: premium redesign — Apple/Perplexity/Notion quality, LOCKED). Mounted at
-// the app root (Shell) so it overlays every screen and works in both the mobile drawer and the
-// docked web sidebar. Driven by the global `modal` state.
+type Kind = 'support' | 'about' | 'legal';
+
+// In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
+// blurred, dimmed page. Mounted at the app root (Shell) so it overlays every screen and works in
+// both the mobile drawer and the docked web sidebar. Driven by the global `modal` state:
+// 'privacy' is the legal dialog opened on its privacy tab (the login popup's link).
 export default function InfoModal() {
   const { modal, closeModal } = useApp();
   if (!modal) return null;
-  return <Sheet kind={modal} onClose={closeModal} />;
+  const kind: Kind = modal === 'privacy' ? 'legal' : modal;
+  return <Sheet kind={kind} legalTab={modal === 'privacy' ? 'privacy' : 'terms'} onClose={closeModal} />;
 }
 
-function Sheet({ kind, onClose }: { kind: 'support' | 'about'; onClose: () => void }) {
+function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'privacy'; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const { t } = useI18n();
   const reduced = useReducedMotion();
+  const about = kind === 'about';
+  // «من نحن» has NO close button (owner 2026-09-03): the backdrop closes it, and its header is the
+  // drag grip. Support and the legal reader keep the × — they are forms and long reads.
+  const hasClose = kind !== 'about';
 
   const progress = useSharedValue(0);
   useEffect(() => {
@@ -90,7 +104,7 @@ function Sheet({ kind, onClose }: { kind: 'support' | 'about'; onClose: () => vo
   const cardStyle = useAnimatedStyle(
     () => ({
       opacity: progress.value,
-      transform: [{ scale: reduced ? 1 : interpolate(progress.value, [0, 1], [0.92, 1]) }],
+      transform: [{ scale: reduced ? 1 : interpolate(progress.value, [0, 1], [0.94, 1]) }],
     }),
     [reduced],
   );
@@ -102,75 +116,85 @@ function Sheet({ kind, onClose }: { kind: 'support' | 'about'; onClose: () => vo
     });
   };
 
-  // «من نحن» (owner redesign 2026-08-29, supersedes the 2026-08-24 two-panel composition): ONE
-  // artwork-led column serves every breakpoint — 640 wide on desktop, edge-inset on mobile. The
-  // desktop map panel is gone; the Ezhalah artwork now leads the page itself.
+  // DESKTOP DRAG for «من نحن» (owner 2026-09-03): the same owner-loved machinery the sign-in popup
+  // uses (lib/cardDrag.ts) — 1:1 pointer tracking from the header grip, rubber-band at the viewport
+  // edges, a critically damped settle. The offset is painted on the HOST wrapper, a different node
+  // from the reanimated card, so the entrance fade+scale and the drag never fight over one
+  // transform. No position memory: every open starts perfectly centered; only a move changes it.
+  const docked = useAtLeast(DOCK_BREAKPOINT);
+  const drag = about && canDragAuthPopup({ isWeb: IS_WEB, docked });
+  // Side-by-side art box vs stacked — an SSR-safe flag (useAtLeast), never a raw width compare.
+  const wide = useAtLeast(ABOUT_ART_BREAKPOINT);
+  const hostRef = useRef<View | null>(null);
+  const gripRef = useRef<View | null>(null);
+  useEffect(() => {
+    if (!drag) return;
+    const node = hostRef.current as unknown as HTMLElement | null;
+    const grip = gripRef.current as unknown as HTMLElement | null;
+    if (!node || !grip) return;
+    return attachCardDrag(node, grip, { clamp: clampOffsetOnScreen(node) });
+  }, [drag]);
+
   const availH = height - insets.top - insets.bottom - 48;
-  const maxH = Math.min(availH, kind === 'about' ? 660 : 680);
+  const maxH = Math.min(availH, about ? ABOUT_MAX_H : 720);
+  const maxW = about ? ABOUT_MAX_W : kind === 'legal' ? LEGAL_MAX_W : SUPPORT_MAX_W;
 
   return (
-    <View style={s.overlay}>
-      {/* Blurred + softly darkened page behind the dialog — the popup is the single clear focus.
-          (owner: keep the blur, increase it slightly, add a subtle dark overlay.) */}
+    <View style={[s.overlay, kind === 'legal' && s.overlayTop]}>
+      {/* Blurred + softly darkened page behind the dialog — the page stays visible, the card is
+          the single sharp layer. */}
       <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close} />
-      <Animated.View style={[s.card, { maxWidth: Math.min(width - 32, kind === 'about' ? 640 : 560), maxHeight: maxH }, cardStyle]}>
-        {/* Close — a circular button pinned to the PHYSICAL top-right (owner: right side, premium,
-            subtle shadow, gentle hover — like modern Apple/Notion dialogs). */}
-        {/* testID because the ACCESSIBILITY LABEL IS NOT UNIQUE on this screen: AuthModal raises
-            itself for signed-out visitors and carries its own `accessibilityLabel={t('Close')}`, so
-            on desktop a `getByLabel('إغلاق').first()` picks AuthModal's × sitting behind this
-            dialog — pointer-blocked, so the click times out and the check quietly SKIPS. Measured
-            2026-09-03 at 1440px: two «إغلاق» buttons, nth(0) at x=1389 (AuthModal, unclickable),
-            nth(1) at x=952 (this one, closes the dialog). A skip that looks like coverage is the
-            exact failure this run exists to remove. */}
-        <Pressable
-          onPress={close}
-          hitSlop={8}
-          testID="info-modal-close"
-          accessibilityRole="button"
-          accessibilityLabel={t('Close')}
-          style={({ hovered, pressed }: any) => [s.xBtn, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
-        >
-          <Ionicons name="close" size={18} color={colors.body} />
-        </Pressable>
-        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-          {kind === 'support' ? <SupportBody t={t} /> : <AboutBody t={t} reduced={reduced} />}
-        </ScrollView>
-      </Animated.View>
+      <View ref={hostRef} style={[s.cardHost, { maxWidth: Math.min(width - 32, maxW) }]}>
+        <Animated.View style={[s.card, { maxHeight: maxH }, cardStyle]}>
+          {/* Close — a quiet control pinned INSIDE the card's PHYSICAL top-right corner (owner
+              2026-09-03: part of the modal, small, neutral, clear hover, comfortable hit area). */}
+          {/* testID because the ACCESSIBILITY LABEL IS NOT UNIQUE on this screen: AuthModal carries
+              its own `accessibilityLabel={t('Close')}` (measured 2026-09-03 at 1440px: two «إغلاق»
+              buttons), so a label-based locator can pick a pointer-blocked × and quietly SKIP. */}
+          {hasClose && (
+            <Pressable
+              onPress={close}
+              hitSlop={8}
+              testID="info-modal-close"
+              accessibilityRole="button"
+              accessibilityLabel={t('Close')}
+              style={({ hovered, pressed }: any) => [s.xBtn, WEB_SMOOTH, (hovered || pressed) && s.xBtnHover]}
+            >
+              {({ hovered, pressed }: any) => (
+                <Ionicons name="close" size={20} color={hovered || pressed ? colors.ink : colors.muted} />
+              )}
+            </Pressable>
+          )}
+          <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+            {kind === 'support' ? <SupportBody t={t} />
+              : kind === 'about' ? <AboutBody t={t} reduced={reduced} gripRef={gripRef} drag={drag} wide={wide} />
+              : <LegalBody t={t} initial={legalTab} />}
+          </ScrollView>
+        </Animated.View>
+      </View>
     </View>
   );
 }
 
-// Support (owner visual refresh 2026-08-30): the last body in this dialog still wearing the
-// pre-redesign look — centered icon-over-text cards — now speaks the same artwork-led language the
-// 2026-08-29 «من نحن» redesign locked in: skyline hero melting into the surface, RTL rows led by a
-// distinct glyph per channel, and the response promise as a quiet tinted band instead of a third
-// boxed card. VISUAL ONLY — same two addresses, same strings, same non-interactive cards.
+// ————————————————————————————————— «المساعدة / تواصل معنا» ———————————————————————————————————
+// Owner 2026-09-03 (the Perplexity-proportion brief): one clean white card, wider, every section
+// with room to breathe — title band, the support form, then partnerships and the response promise
+// as quieter secondary sections. VISUAL ONLY — same strings, same fields, same actions, same icons.
 function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => string }) {
-  // Literal palette for the hero gradient only (var() breaks inside parsed gradient colors —
-  // same rule as AboutBody); everything else keeps the theme-reactive tokens.
-  const pal = useThemePalette();
-  const dark = useResolvedTheme() === 'dark';
   return (
     <View>
-      {/* The artwork hero — identical composition contract to «من نحن»: full-bleed skyline,
-          gradient melt into the surface, heading rising from the lower band. Style `h` keeps its
-          CLOSE_CLEAR physical-right padding so the title can never slide under the floating ×. */}
-      <View style={s.supHero}>
-        <RNImage source={HERO} style={[s.supHeroImg, { opacity: dark ? 0.22 : 0.5 }]} resizeMode="cover" />
-        {/* locations-first prop order is deliberate: verify-about-premium-contract locates the
-            ABOUT hero by the exact `LinearGradient colors={[alpha0(...)…` substring, and this
-            earlier Support occurrence must not shadow it. */}
-        <LinearGradient locations={[0.1, 0.94]} colors={[alpha0(pal.paper), pal.paper]} style={StyleSheet.absoluteFill} />
-        <View style={s.supHeroInner}>
-          <Text style={s.h}>{t('Support')}</Text>
-        </View>
+      {/* Style `h` keeps its CLOSE_CLEAR physical-right padding so the title can never slide under
+          the floating × (verify-info-modal-header-clearance pins that arithmetic). */}
+      <View style={s.head}>
+        <Text style={s.h}>{t('Support')}</Text>
       </View>
 
       <View style={s.bodyPad}>
         <SupportForm t={t} />
         {/* Partnerships stay an ADDRESS, not a form: those threads are commercial, they come from
-            outside the app as often as inside it, and they are not what «تواصل مع الدعم» is for. */}
+            outside the app as often as inside it, and they are not what «تواصل مع الدعم» is for.
+            A hairline separates it from the form — a secondary contact option, not part of it. */}
+        <View style={s.sep} />
         <SupCard
           icon="business-outline"
           email="partners@ezhalah.com"
@@ -210,6 +234,8 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
   const [message, setMessage] = useState(() => recallSupportDraft()?.message ?? '');
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [touched, setTouched] = useState(false);
+  // Which field has the caret — a clear focus ring is part of the 2026-09-03 input brief.
+  const [focus, setFocus] = useState<SupportField | null>(null);
   // WHY the send failed, not just THAT it did. A rate limit and a dead connection are different
   // events with different advice, and telling someone to "check your connection" when the server
   // said 429 sends them to fix a network that is working, then offers a retry that cannot succeed
@@ -270,10 +296,12 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
         </View>
       </View>
 
-      <Field label={t('Subject')} invalid={touched && missing === 'subject'}>
+      <Field label={t('Subject')} invalid={touched && missing === 'subject'} focused={focus === 'subject'}>
         <TextInput
           value={subject}
           onChangeText={setSubject}
+          onFocus={() => setFocus('subject')}
+          onBlur={() => setFocus(null)}
           editable={!sending}
           maxLength={SUBJECT_MAX}
           placeholder={t('What is this about?')}
@@ -282,10 +310,12 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
         />
       </Field>
 
-      <Field label={t('Message')} invalid={touched && missing === 'message'}>
+      <Field label={t('Message')} invalid={touched && missing === 'message'} focused={focus === 'message'}>
         <TextInput
           value={message}
           onChangeText={setMessage}
+          onFocus={() => setFocus('message')}
+          onBlur={() => setFocus(null)}
           editable={!sending}
           maxLength={MESSAGE_MAX}
           multiline
@@ -297,10 +327,12 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
         />
       </Field>
 
-      <Field label={t('Your email')} invalid={touched && missing === 'email'}>
+      <Field label={t('Your email')} invalid={touched && missing === 'email'} focused={focus === 'email'}>
         <TextInput
           value={email}
           onChangeText={setEmail}
+          onFocus={() => setFocus('email')}
+          onBlur={() => setFocus(null)}
           editable={!sending}
           keyboardType="email-address"
           autoCapitalize="none"
@@ -325,7 +357,7 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
       <Pressable
         onPress={send}
         disabled={sending}
-        style={[s.sendBtn, sending && s.sendBtnBusy]}
+        style={({ hovered, pressed }: any) => [s.sendBtn, WEB_SMOOTH, (hovered || pressed) && !sending && s.sendBtnHover, sending && s.sendBtnBusy]}
         accessibilityRole="button"
         accessibilityState={{ disabled: sending }}
       >
@@ -340,29 +372,27 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
   );
 }
 
-function Field({ label, invalid, children }: { label: string; invalid: boolean; children: React.ReactNode }) {
+function Field({ label, invalid, focused, children }: { label: string; invalid: boolean; focused: boolean; children: React.ReactNode }) {
   return (
     <View style={s.field}>
       <Text style={s.fieldLabel}>{label}</Text>
-      <View style={[s.fieldBox, invalid && s.fieldBoxBad]}>{children}</View>
+      <View style={[s.fieldBox, WEB_SMOOTH, focused && s.fieldBoxFocus, invalid && s.fieldBoxBad]}>{children}</View>
     </View>
   );
 }
 
 // ————————————————————————————————— «من نحن» ————————————————————————————————————————————————————
-// Premium single-screen company card (owner 2026-08-23 — replaces the five-card scroll; compact
-// copy approved, legal facts preserved, no dashes, no invented numbers).
-//
-// Desktop (≥768): one row — hero column (wordmark + thesis sentence + four verb-led value blocks)
-// beside a 340px abstract Saudi map panel (street grid, parcels, two pinned listing abstractions,
-// the hand-drawn skyline settling at its base under «إزهله وفالك طيب»), closed by a four-column
-// small-print legal strip. Fits 800×580 with zero scroll (owner 2026-08-24: compact dialog, not a screen takeover).
-// Mobile: the same story stacked — hero, value list, legal card, skyline footer — about one screen.
+// Owner 2026-09-03 (design correction): NOT text written over a large background image. A clean
+// surface with an intentional structure — header (eyebrow + lockup), the artwork in its OWN box,
+// the thesis sentence, «+29» as a real statistic, the four verbs as a 2×2 of feature cards, the
+// trust card, the brand line. Every string, icon and fact from the previous composition survives;
+// only the composition changed. Desktop (≥640): the art box sits beside the intro column (the
+// image is portrait, so beside — never stretched across — is the honest placement). Mobile: the
+// same story stacked, the art box centered.
 //
 // Motion: the Sheet entrance is the container's only large motion. Inside, a single subtle stagger
-// (web only, state + CSS transitions per the RNW idiom): hero 40ms → panel 80ms (fade only) →
-// value cells 110/140/170/200ms → legal 230ms (fade only). Everything settles by ~430ms. Native
-// renders instantly; reduced motion renders instantly AND the Sheet falls back to a plain fade.
+// (web only, state + CSS transitions per the RNW idiom) that settles by ~430ms. Native renders
+// instantly; reduced motion renders instantly AND the Sheet falls back to a plain fade.
 
 type Tr = (s: string, v?: Record<string, string>) => string;
 
@@ -383,8 +413,8 @@ function useShown(instant: boolean): boolean {
   return shown;
 }
 
-// Staggered entrance wrapper. `fadeOnly` for large/background surfaces (the map panel, small print)
-// which must not slide — only content blocks get the 8px rise.
+// Staggered entrance wrapper. `fadeOnly` for large surfaces (the art box, small print) which must
+// not slide — only content blocks get the 8px rise.
 function Reveal({ shown, animate, delay, fadeOnly, style, children }: {
   shown: boolean; animate: boolean; delay: number; fadeOnly?: boolean; style?: any; children: React.ReactNode;
 }) {
@@ -398,8 +428,10 @@ function Reveal({ shown, animate, delay, fadeOnly, style, children }: {
   );
 }
 
-function AboutBody({ t, reduced }: { t: Tr; reduced: boolean }) {
-  // Literal palette for gradients/surfaces — gradient colors are parsed, var() breaks.
+function AboutBody({ t, reduced, gripRef, drag, wide }: {
+  t: Tr; reduced: boolean; gripRef: React.MutableRefObject<View | null>; drag: boolean; wide: boolean;
+}) {
+  // Literal palette for the themed surfaces (the About sheet is a factory, see makeAbout).
   const pal = useThemePalette();
   const dark = useResolvedTheme() === 'dark';
   const animate = IS_WEB && !reduced;
@@ -420,72 +452,137 @@ function AboutBody({ t, reduced }: { t: Tr; reduced: boolean }) {
     { icon: 'lock-closed-outline', label: t('Data & privacy'), text: t('We collect only what the service needs, and we do not sell user data.') },
   ];
 
-  return (
-    <View>
-      {/* ── The artwork IS the hero (owner 2026-08-29): the hand-drawn Saudi skyline bleeds the
-          card's full width and melts downward into the surface through a gradient — part of the
-          composition, never an image in a box. The lockup rises out of its lower band; TOP_CLEAR
-          keeps everything under the floating ×. ── */}
-      <Reveal {...rev} delay={40} fadeOnly style={a.heroArt}>
-        <RNImage source={ABOUT_ART} style={a.heroImg} resizeMode="cover" />
-        <LinearGradient colors={[alpha0(pal.paper), pal.paper]} locations={[0.15, 0.96]} style={StyleSheet.absoluteFill} />
-        <View style={a.heroInner}>
+  // The intro column: eyebrow + lockup are the drag grip (desktop) — the "safe upper area" — then
+  // the thesis sentence and the one statistic. On desktop the art box sits beside this column.
+  const intro = (
+    <View style={a.introCol}>
+      <View ref={gripRef} style={[a.head, drag && ({ cursor: 'grab', touchAction: 'none', userSelect: 'none' } as any)]}>
+        <Reveal {...rev} delay={40}>
           <Text style={a.eyebrow}>{t('About Us')}</Text>
           <View style={a.lockup}>
             <RNImage source={EAGLE} style={a.eagle} resizeMode="contain" />
             <Text style={a.wordmark}>{t('Ezhalah')}</Text>
             <View style={a.wordDot} />
           </View>
+        </Reveal>
+      </View>
+      <Reveal {...rev} delay={90}>
+        <Text style={a.heroLine}>{t('Smarter property search, bringing the Saudi market together in one place.')}</Text>
+      </Reveal>
+      {/* One quiet statistic — the number leads, the sentence explains. */}
+      <Reveal {...rev} delay={130} style={a.statBand}>
+        <Text style={a.statNum}>+{String(PLATFORM_COUNT)}</Text>
+        <Text style={a.statLabel}>{t('Real-estate platforms, searched as one.')}</Text>
+      </Reveal>
+    </View>
+  );
+
+  // The artwork in its own box: the real image, its real aspect ratio, contained — never a
+  // wallpaper, never a crop, no text on top. (verify-about-premium-contract pins this.)
+  const art = (
+    <Reveal {...rev} delay={70} fadeOnly style={[a.artBox, wide ? a.artBoxWide : a.artBoxNarrow]}>
+      <RNImage source={ABOUT_ART} style={a.artImg} resizeMode="contain" />
+    </Reveal>
+  );
+
+  return (
+    <View style={a.body}>
+      {wide ? (
+        <View style={a.topRow}>
+          {intro}
+          {art}
         </View>
+      ) : (
+        <>
+          {intro}
+          {art}
+        </>
+      )}
+
+      {/* The four verbs as a 2×2 of feature cards — short, scannable, never a wall of text. */}
+      <View style={a.vGrid}>
+        {values.map((v, i) => (
+          <Reveal key={v.label} {...rev} delay={170 + i * 30} style={a.vCard}>
+            <View style={a.vIcon}><Ionicons name={v.icon} size={16} color={pal.primary} /></View>
+            <Text style={a.vLabel}>{v.label}</Text>
+            <Text style={a.vLine}>{v.line}</Text>
+          </Reveal>
+        ))}
+      </View>
+
+      {/* Trust — present, readable, designed: one quiet card, four icon-led rows. */}
+      <Reveal {...rev} delay={310} fadeOnly style={a.trustCard}>
+        <Text style={a.trustTitle}>{t('Trust & transparency')}</Text>
+        {legal.map((l) => (
+          <View key={l.label} style={a.trustRow}>
+            <View style={a.trustIcon}><Ionicons name={l.icon} size={13} color={pal.primary} /></View>
+            <Text style={a.trustText}>
+              <Text style={a.trustLead}>{l.label + ': '}</Text>
+              {l.text}
+            </Text>
+          </View>
+        ))}
       </Reveal>
 
-      <View style={a.body}>
-        <Reveal {...rev} delay={90}>
-          <Text style={a.heroLine}>{t('Smarter property search, bringing the Saudi market together in one place.')}</Text>
-        </Reveal>
+      <Reveal {...rev} delay={360} fadeOnly style={a.footer}>
+        <Text style={a.brandLine}>{t('Ezhalah, and may your luck be good.')}</Text>
+      </Reveal>
+    </View>
+  );
+}
 
-        {/* One quiet stat — the number leads, the sentence explains. */}
-        <Reveal {...rev} delay={130} style={a.statBand}>
-          <Text style={a.statNum}>+{String(PLATFORM_COUNT)}</Text>
-          <Text style={a.statLabel}>{t('Real-estate platforms, searched as one.')}</Text>
-        </Reveal>
-
-        {/* The four verbs as a 2×2 of soft cards — short, scannable, never a wall of text. */}
-        <View style={a.vGrid}>
-          {values.map((v, i) => (
-            <Reveal key={v.label} {...rev} delay={170 + i * 30} style={a.vCard}>
-              <View style={a.vIcon}><Ionicons name={v.icon} size={15} color={pal.primary} /></View>
-              <Text style={a.vLabel}>{v.label}</Text>
-              <Text style={a.vLine}>{v.line}</Text>
-            </Reveal>
+// ————————————————————————————————— «الشروط والخصوصية» ——————————————————————————————————————
+// A reading dialog with two tabs. The TEXT is the owner's (src/data/legal.ts) — nothing here is
+// invented, and the dialog is unreachable until both documents exist (hasLegalDocs gates the
+// account-menu row and the login popup's link).
+function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
+  const [tab, setTab] = useState<'terms' | 'privacy'>(initial);
+  const docs = hasLegalDocs() ? LEGAL_DOCS[tab] : [];
+  const tabs: { key: 'terms' | 'privacy'; label: string }[] = [
+    { key: 'terms', label: t('Terms of Use') },
+    { key: 'privacy', label: t('Privacy Policy') },
+  ];
+  return (
+    <View>
+      <View style={s.head}>
+        <View style={s.legalLockup}>
+          <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
+          <Text style={[s.h, s.legalTitle]}>{t('Terms & Privacy')}</Text>
+        </View>
+      </View>
+      <View style={s.bodyPad}>
+        <View style={s.seg} accessibilityRole="tablist">
+          {tabs.map((x) => (
+            <Pressable
+              key={x.key}
+              onPress={() => setTab(x.key)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tab === x.key }}
+              style={({ hovered, pressed }: any) => [s.segBtn, WEB_SMOOTH, tab === x.key && s.segBtnOn, (hovered || pressed) && tab !== x.key && s.segBtnHover]}
+            >
+              <Text style={[s.segTx, tab === x.key && s.segTxOn]}>{x.label}</Text>
+            </Pressable>
           ))}
         </View>
-
-        {/* Trust — present, readable, designed: one quiet card, four icon-led rows. */}
-        <Reveal {...rev} delay={310} fadeOnly style={a.trustCard}>
-          <Text style={a.trustTitle}>{t('Trust & transparency')}</Text>
-          {legal.map((l) => (
-            <View key={l.label} style={a.trustRow}>
-              <View style={a.trustIcon}><Ionicons name={l.icon} size={13} color={pal.primary} /></View>
-              <Text style={a.trustText}>
-                <Text style={a.trustLead}>{l.label + ': '}</Text>
-                {l.text}
-              </Text>
-            </View>
-          ))}
-        </Reveal>
-
-        <Reveal {...rev} delay={360} fadeOnly style={a.footer}>
-          <Text style={a.brandLine}>{t('Ezhalah, and may your luck be good.')}</Text>
-        </Reveal>
+        {/* The legal text names the contact address as the {{CONTACT_EMAIL}} token, substituted here
+            — never as a literal in src/data/legal.ts — so verify-info-routes-single-source.ts's
+            "no second @ezhalah.com copy anywhere in src/" rule stays true of the DATA layer too,
+            not just the other UI surfaces it was written for. This IS the canonical address for
+            both: partners@ (Terms) for business/support-shaped inquiries, admin@ (Privacy, owner
+            2026-09-04) for data-rights/PDPL requests — a normal split, not a drift risk, since both
+            literals still live only here. */}
+        {docs.map((p, i) => (
+          <Text key={i} style={s.legalP}>
+            {p.replace('{{CONTACT_EMAIL}}', tab === 'privacy' ? 'admin@ezhalah.com' : 'partners@ezhalah.com')}
+          </Text>
+        ))}
       </View>
     </View>
   );
 }
 
 // One channel = one RTL row: a distinct glyph names the audience, the address is the hero line
-// (kept LTR internally — it's latin), the purpose sentence sits beneath. Rows, not centered
-// shrines — the reader scans down the right edge in one pass.
+// (kept LTR internally — it's latin), the purpose sentence sits beneath.
 function SupCard({ icon, email, desc }: { icon: keyof typeof Ionicons.glyphMap; email: string; desc: string }) {
   return (
     <View style={s.supCard}>
@@ -509,135 +606,155 @@ function RtRow({ text }: { text: string }) {
 
 const s = StyleSheet.create({
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 70, alignItems: 'center', justifyContent: 'center', padding: 16 },
-  // Deeper dim + a real blur (web) so the dialog is unmistakably the focus. (owner request.)
+  // The legal reader can be opened FROM the sign-in popup (zIndex 200), so it must sit above it.
+  overlayTop: { zIndex: 210 },
+  // Dim + a real blur (web) so the dialog is unmistakably the focus; the page stays visible behind.
   backdrop: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.55)',
-    ...(IS_WEB ? ({ backdropFilter: 'blur(10px)' } as any) : {}),
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.5)',
+    ...(IS_WEB ? ({ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' } as any) : {}),
   },
-  // overflow hidden lets the map panel / skyline footer bleed edge-to-edge inside the corners.
-  card: { width: '100%', backgroundColor: colors.paper, borderRadius: 24, overflow: 'hidden', ...cardShadow, shadowOpacity: 0.26, shadowRadius: 32 },
-  // Circular close pinned to the PHYSICAL top-right (RN `right` is physical — RTL never flips it).
+  // The drag paints its translate on this host; the reanimated card inside keeps its own transform.
+  cardHost: { width: '100%' },
+  // One simple floating card: white surface, soft corners, a hairline edge, one quiet shadow.
+  card: {
+    width: '100%', backgroundColor: colors.surface, borderRadius: 22, overflow: 'hidden',
+    borderWidth: 1, borderColor: colors.line,
+    ...cardShadow, shadowColor: '#0b140f', shadowOpacity: 0.18, shadowRadius: 40, shadowOffset: { width: 0, height: 18 },
+  },
+  // Close, pinned to the PHYSICAL top-right (RN `right` is physical — RTL never flips it): a
+  // quiet neutral glyph at rest, a soft fill on hover, hitSlop widening the target to ≥ 44.
   xBtn: {
     // Physical top-right under BOTH directions: RTL (forced app-wide for Arabic) flips `right:` to
     // the physical left, so the physical right is spelled `left:` there. (owner 2026-08-29)
     position: 'absolute', top: CLOSE_INSET, ...(I18nManager.isRTL ? { left: CLOSE_INSET } : { right: CLOSE_INSET }), zIndex: 5,
     width: CLOSE_SIZE, height: CLOSE_SIZE, borderRadius: CLOSE_SIZE / 2,
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine,
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: 'rgba(20,40,30,1)', shadowOpacity: 0.14, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 3,
     ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
   },
-  xBtnHover: { backgroundColor: colors.surface2, transform: [{ scale: 1.06 }] },
+  xBtnHover: { backgroundColor: colors.surface2 },
   scroll: { paddingTop: 0, paddingBottom: 0 },
-  scrollFill: { flexGrow: 1 },
-  bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 14, paddingBottom: 8 },
+  bodyPad: { paddingHorizontal: BODY_PAD, paddingTop: 4, paddingBottom: BODY_PAD },
 
-  // ——— Support (2026-08-30 refresh — the «من نحن» artwork language) ———
-  // The skyline hero: full-bleed at the card's top, melting into the surface. The heading rises
-  // from its lower band; TOP_CLEAR-derived height keeps it under the floating × band, and style
-  // `h` STILL reserves CLOSE_CLEAR on the physical right (verify-info-modal-header-clearance
-  // pins that arithmetic — the clearance is belt-and-braces, not decoration).
-  supHero: { height: TOP_CLEAR + 66, overflow: 'hidden', justifyContent: 'flex-end' },
-  supHeroImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100%' },
-  supHeroInner: { paddingHorizontal: BODY_PAD, paddingBottom: 0 },
+  // ——— title band (Support + legal) ———
+  // The heading starts BELOW the ×'s top band (TOP_CLEAR-derived padding) and, being RTL, keeps
+  // CLOSE_CLEAR of physical-right room so its first word can never sit under the button.
+  head: { paddingHorizontal: BODY_PAD, paddingTop: TOP_CLEAR - CLOSE_GAP - 2, paddingBottom: 10 },
   // paddingRight keeps the heading out from under the close button (see CLOSE_CLEAR).
-  h: { fontSize: 24, lineHeight: 32, fontWeight: '800', color: colors.ink, textAlign: 'right', writingDirection: 'auto' as any, paddingRight: CLOSE_CLEAR },
-  supBody: { flex: 1, minWidth: 0 },
-  supCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.fieldLine,
-    paddingVertical: 15, paddingHorizontal: 16, marginBottom: 10,
-  },
-  cardIc: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center' },
-  mail: { fontSize: 15, fontWeight: '800', color: colors.ink, textAlign: 'right', writingDirection: 'ltr' as any },
-  desc: { fontSize: 12.5, color: colors.muted, textAlign: 'right', marginTop: 3, lineHeight: 19 },
+  h: { fontSize: 22, lineHeight: 30, fontWeight: '800', color: colors.ink, textAlign: 'right', writingDirection: 'auto' as any, paddingRight: CLOSE_CLEAR },
+  sep: { height: 1, backgroundColor: colors.line, marginTop: 24, marginBottom: 20 },
+  // The legal reader's title row adds the eagle mark ahead of «الشروط والخصوصية». Under RTL that
+  // icon becomes the row's LEADING (rightmost) element — the exact slot verify-info-modal-header-
+  // clearance.ts exists because a heading once painted under the × there. So CLOSE_CLEAR moves to
+  // the ROW, not the text: `h`'s own paddingRight (still asserted by that barrier, untouched) is
+  // cancelled back to 0 on this specific usage so the clearance is never reserved twice.
+  legalLockup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: CLOSE_CLEAR },
+  legalEagle: { width: 20, height: 20 },
+  legalTitle: { paddingRight: 0, flexShrink: 1 },
 
-  // The response promise: a quiet tinted band, not a third boxed card competing with the channels.
-  rt: { backgroundColor: colors.tint, borderRadius: 18, padding: 16, marginTop: 8, marginBottom: 18 },
-  rtHead: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 8 },
+  // ——— «تواصل مع الدعم» form (owner 2026-09-02; spacing/inputs 2026-09-03) ———
+  // The form is the card's main content now — no box-inside-a-box; sections separate by space.
+  form: { marginTop: 8 },
+  formHead: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 22 },
+  supBody: { flex: 1, minWidth: 0 },
+  cardIc: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center' },
+  mail: { fontSize: 15.5, fontWeight: '800', color: colors.ink, textAlign: 'right', writingDirection: 'ltr' as any },
+  desc: { fontSize: 13, color: colors.muted, textAlign: 'right', marginTop: 3, lineHeight: 20 },
+  field: { marginBottom: 18 },
+  fieldLabel: { fontSize: 13, fontWeight: '700', color: colors.body, textAlign: 'right', marginBottom: 8 },
+  // Inputs: one height, one radius, a subtle edge, a clear focus ring (brand green), RTL text.
+  fieldBox: { backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.fieldLine, paddingHorizontal: 14 },
+  fieldBoxFocus: { borderColor: colors.primary, ...(IS_WEB ? ({ boxShadow: '0 0 0 3px rgba(47,114,71,0.16)' } as any) : {}) },
+  fieldBoxBad: { borderColor: colors.danger },
+  input: {
+    // 16px on web is not a design choice: under 16 iOS Safari zooms the page on focus and never
+    // zooms back. (verify-input-font-no-ios-zoom caught this form at 14.)
+    fontSize: IS_WEB ? 16 : 14, color: colors.ink, textAlign: 'right', paddingVertical: 12, minHeight: 48,
+    ...(IS_WEB ? ({ outlineStyle: 'none' } as any) : {}),
+  },
+  inputLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
+  area: { minHeight: 132, paddingTop: 12, lineHeight: 22 },
+  errRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12 },
+  errTx: { flex: 1, fontSize: 12.5, color: colors.danger, textAlign: 'right', lineHeight: 18 },
+  // Send: full width, the brand green, the same radius as the inputs, spaced from the email field.
+  sendBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.primary, borderRadius: 12, height: 50, marginTop: 6,
+    ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  sendBtnHover: { backgroundColor: colors.dark },
+  sendBtnBusy: { opacity: 0.75 },
+  sendTx: { fontSize: 15, fontWeight: '800', color: colors.onFill },
+  sentCard: { alignItems: 'center', paddingVertical: 28, paddingHorizontal: 18 },
+  sentIc: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  sentH: { fontSize: 17, fontWeight: '800', color: colors.ink, textAlign: 'center' },
+  sentTx: { fontSize: 13.5, color: colors.body, textAlign: 'center', marginTop: 6, lineHeight: 20 },
+  againBtn: { marginTop: 16, paddingVertical: 8, paddingHorizontal: 14, ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}) },
+  againTx: { fontSize: 13.5, fontWeight: '700', color: colors.primary },
+
+  // ——— secondary contact + response promise ———
+  supCard: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 4, marginBottom: 18 },
+  rt: { backgroundColor: colors.tint, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16 },
+  rtHead: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 6 },
   rtH: { fontSize: 13.5, fontWeight: '800', color: colors.ink, textAlign: 'right' },
   rtRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
   rtText: { flex: 1, fontSize: 13, color: colors.body, lineHeight: 20, textAlign: 'right' },
 
-  // ——— «تواصل مع الدعم» form (owner 2026-09-02) ———
-  form: {
-    backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.fieldLine,
-    padding: 16, marginBottom: 10,
-  },
-  formHead: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
-  field: { marginBottom: 12 },
-  fieldLabel: { fontSize: 12.5, fontWeight: '700', color: colors.muted, textAlign: 'right', marginBottom: 6 },
-  fieldBox: { backgroundColor: colors.paper, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine, paddingHorizontal: 12 },
-  fieldBoxBad: { borderColor: colors.danger },
-  input: {
-    // 16px on web is not a design choice: under 16 iOS Safari zooms the page on focus and never
-    // zooms back. (verify-input-font-no-ios-zoom caught this form at 14.)
-    fontSize: IS_WEB ? 16 : 14, color: colors.ink, textAlign: 'right', paddingVertical: 11, minHeight: 44,
-    ...(IS_WEB ? ({ outlineStyle: 'none' } as any) : {}),
-  },
-  inputLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
-  area: { minHeight: 108, paddingTop: 11, lineHeight: 21 },
-  errRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
-  errTx: { flex: 1, fontSize: 12.5, color: colors.danger, textAlign: 'right', lineHeight: 18 },
-  sendBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 13,
-    ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}),
-  },
-  sendBtnBusy: { opacity: 0.75 },
-  sendTx: { fontSize: 14.5, fontWeight: '800', color: colors.onFill },
-  sentCard: {
-    alignItems: 'center', backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1,
-    borderColor: colors.fieldLine, paddingVertical: 24, paddingHorizontal: 18, marginBottom: 10,
-  },
-  sentIc: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  sentH: { fontSize: 16, fontWeight: '800', color: colors.ink, textAlign: 'center' },
-  sentTx: { fontSize: 13, color: colors.body, textAlign: 'center', marginTop: 6, lineHeight: 20 },
-  againBtn: { marginTop: 14, paddingVertical: 8, paddingHorizontal: 14, ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}) },
-  againTx: { fontSize: 13.5, fontWeight: '700', color: colors.primary },
+  // ——— legal reader ———
+  seg: { flexDirection: 'row', backgroundColor: colors.segTrack, borderRadius: 12, padding: 4, gap: 4, marginBottom: 20 },
+  segBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', height: 40, borderRadius: 9, ...(IS_WEB ? ({ cursor: 'pointer' } as any) : {}) },
+  segBtnOn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
+  segBtnHover: { backgroundColor: colors.surface2 },
+  segTx: { fontSize: 13.5, fontWeight: '700', color: colors.muted },
+  segTxOn: { color: colors.ink },
+  legalP: { fontSize: 14.5, lineHeight: 26, color: colors.body, textAlign: 'right', marginBottom: 14 },
 });
 
 // «من نحن» styles. Arabic typography rules: NO letterSpacing anywhere (Latin tracking mangles
 // Arabic script), weights carry the hierarchy, body leading stays generous (~1.7).
-// Palette-driven About styles (owner redesign 2026-08-29): the dialog now themes fully — dark mode
-// gets a real dark composition, not a light card in a dark app. No letterSpacing anywhere (Latin
-// tracking mangles Arabic script — pinned by verify-about-premium-contract).
+// Palette-driven About styles: the dialog themes fully — dark mode gets a real dark composition,
+// not a light card in a dark app. (pinned by verify-about-premium-contract)
 function makeAbout(pal: Record<string, string>, dark: boolean) {
   return StyleSheet.create({
-    // The artwork hero: full-bleed at the card's top, melting into the surface. paddingTop derives
-    // from TOP_CLEAR so the lockup can never collide with the floating × (same arithmetic contract
-    // as before — verify-info-modal-header-clearance pins it).
-    heroArt: { height: TOP_CLEAR + 176, overflow: 'hidden', justifyContent: 'flex-end' },
-    heroImg: { position: 'absolute', left: 0, right: 0, bottom: 0, width: '100%', height: '215%', opacity: dark ? 0.78 : 0.62 },
-    heroInner: { paddingHorizontal: 24, paddingTop: TOP_CLEAR, paddingBottom: 2 },
-    eyebrow: { fontSize: 12, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 6 },
+    body: { paddingHorizontal: BODY_PAD + 4, paddingTop: BODY_PAD, paddingBottom: BODY_PAD },
+    topRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 28 },
+    introCol: { flex: 1, minWidth: 0 },
+    head: { paddingBottom: 6 },
+    eyebrow: { fontSize: 12.5, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 8 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     eagle: { width: 30, height: 30, opacity: 0.9 },
-    wordmark: { fontSize: 36, lineHeight: 44, fontWeight: '800', color: pal.ink },
+    wordmark: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: pal.ink },
     wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: pal.accentLeaf ?? pal.primary, alignSelf: 'flex-end', marginBottom: 8 },
+    heroLine: { fontSize: 16.5, lineHeight: 27, fontWeight: '500', color: pal.body, marginTop: 12 },
 
-    body: { paddingHorizontal: 24, paddingBottom: 18 },
-    heroLine: { fontSize: 16.5, lineHeight: 27, fontWeight: '500', color: pal.body, marginTop: 8 },
+    // The artwork's own box: rounded, hairline edge, a quiet ground, the image CONTAINED at its
+    // real aspect ratio (900×1317). Desktop: a fixed-width portrait card beside the intro; mobile:
+    // a centered portrait card. No opacity, no gradient, nothing painted on top.
+    artBox: { borderRadius: 16, borderWidth: 1, borderColor: pal.line, backgroundColor: dark ? pal.surface2 : pal.tint, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+    artBoxWide: { width: 212, aspectRatio: ABOUT_ART_RATIO, marginTop: 4 },
+    artBoxNarrow: { alignSelf: 'center', width: '60%', maxWidth: 220, aspectRatio: ABOUT_ART_RATIO, marginTop: 20 },
+    artImg: { width: '100%', height: '100%' },
 
-    statBand: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginTop: 18, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: pal.line },
-    statNum: { fontSize: 30, lineHeight: 34, fontWeight: '800', color: pal.primary, fontVariant: ['tabular-nums'] },
-    statLabel: { flex: 1, fontSize: 13.5, lineHeight: 20, fontWeight: '600', color: pal.ink },
+    // The statistic: the number leads at display size, the sentence explains, hairlines frame it.
+    statBand: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 20, paddingVertical: 14, borderTopWidth: 1, borderBottomWidth: 1, borderColor: pal.line },
+    statNum: { fontSize: 36, lineHeight: 42, fontWeight: '800', color: pal.primary, fontVariant: ['tabular-nums'] },
+    statLabel: { flex: 1, fontSize: 14, lineHeight: 21, fontWeight: '600', color: pal.ink },
 
-    vGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 18 },
-    vCard: { flexGrow: 1, flexBasis: '44%', minWidth: 200, backgroundColor: dark ? pal.surface : pal.tint, borderRadius: 16, borderWidth: 1, borderColor: dark ? pal.line : pal.tintLine, padding: 14 },
-    vIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: dark ? pal.tint : pal.surface, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-    vLabel: { fontSize: 14.5, lineHeight: 21, fontWeight: '800', color: pal.ink },
-    vLine: { fontSize: 12.5, lineHeight: 20, fontWeight: '400', color: pal.body, marginTop: 4 },
+    // Feature cards: real cards — padding, an icon well, a title, a line — light and simple.
+    vGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 24 },
+    vCard: { flexGrow: 1, flexBasis: '44%', minWidth: 200, backgroundColor: dark ? pal.surface2 : pal.tint, borderRadius: 14, borderWidth: 1, borderColor: dark ? pal.line : pal.tintLine, padding: 16 },
+    vIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: dark ? pal.tint : pal.surface, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+    vLabel: { fontSize: 15, lineHeight: 22, fontWeight: '800', color: pal.ink },
+    vLine: { fontSize: 13, lineHeight: 20, fontWeight: '400', color: pal.body, marginTop: 4 },
 
-    trustCard: { backgroundColor: pal.surface, borderRadius: 16, borderWidth: 1, borderColor: pal.line, padding: 16, marginTop: 18, gap: 12 },
+    trustCard: { backgroundColor: dark ? pal.surface2 : pal.surface, borderRadius: 14, borderWidth: 1, borderColor: pal.line, padding: 16, marginTop: 20, gap: 12 },
     trustTitle: { fontSize: 13.5, lineHeight: 20, fontWeight: '800', color: pal.dark ?? pal.ink },
     trustRow: { flexDirection: 'row', gap: 10 },
     trustIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: pal.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-    trustText: { flex: 1, fontSize: 12, lineHeight: 19, fontWeight: '400', color: pal.body },
+    trustText: { flex: 1, fontSize: 12.5, lineHeight: 20, fontWeight: '400', color: pal.body },
     trustLead: { fontWeight: '800', color: pal.dark ?? pal.ink },
 
-    footer: { alignItems: 'center', marginTop: 18 },
+    footer: { alignItems: 'center', marginTop: 20 },
     brandLine: { fontSize: 13, fontWeight: '700', color: pal.dark ?? pal.ink },
   });
 }
