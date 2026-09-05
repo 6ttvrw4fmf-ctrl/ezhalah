@@ -330,7 +330,18 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       }
       return last;
     };
-    let st = await readCardUntil((s) => s.hasCard && s.chip != null);
+    // ONE BUDGET, NOT TWO (2026-09-05). This first read used the 9s default while every sibling
+    // read below already waits AGENT_TURN_MS — yet THIS is the read that must survive the AF round's
+    // opening probe (rankQuestions + a count RPC per candidate question), the slowest transition in
+    // the journey. Under production load it exceeds 9s, and the failure did not look like a timeout:
+    // the card read back {hasCard:false,q:null,chip:null} and the journey reported "AF card opened on
+    // a real question" as FALSE — an app defect that was not there.
+    // PROVEN, not guessed: run 33939914275 reported hasCard=false for Rent-Monthly/Apartment/الرياض;
+    // driving the identical journey by hand against the same production build opened the card on
+    // «كم التقييم اللي تفضله؟» with chip 9,130 and options 9.5+/9.0+/9.0_rc10 — byte-identical to the
+    // last GREEN run (33922383826: q="كم التقييم اللي تفضله؟", chip=9130, afterSelect=4945).
+    // Waiting longer cannot hide a regression: a card that never opens still fails, just honestly.
+    let st = await readCardUntil((s) => s.hasCard && s.chip != null, AGENT_TURN_MS);
     check(`${name}: AF card opened on a real question`, st.hasCard && !!st.q, JSON.stringify(st));
     const baselineChip = st.chip;
 
@@ -366,16 +377,30 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     if (answerAmenityIndex != null) {
       const opts = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
       const testid = opts[answerAmenityIndex];
+      // NEVER CLICK A SELECTOR BUILT FROM undefined. When the card did not render, `opts` is empty
+      // and this became page.click('[data-testid="undefined"]') — a 30s Playwright timeout that then
+      // failed a SECOND check ("journey completed without throwing") with a stack trace, burying the
+      // real cause. Fail on the real fact instead. (Same guard as the backAndChange branch below.)
+      if (!testid) {
+        check(`${name}: an option was available to answer`, false,
+          `the card rendered no [data-testid^="af-option-"] to click (opts=${opts.length}) — refusing to click a selector built from undefined`);
+        await ctx.close(); return;
+      }
       await page.click(`[data-testid="${testid}"]`);
     } else {
       const opts = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
+      if (!opts[0]) {
+        check(`${name}: an option was available to answer`, false,
+          `the card rendered no [data-testid^="af-option-"] to click (opts=${opts.length}) — refusing to click a selector built from undefined`);
+        await ctx.close(); return;
+      }
       await page.click(`[data-testid="${opts[0]}"]`); // first option — deterministic, whatever the question is
     }
     // `s.chip !== baselineChip` alone is satisfied BY the pending window's null (fix 2026-08-26), so
     // this captured a blank as "the answer's count" — which both passed this check for the wrong
     // reason and then poisoned the Back comparison below with `expected=null`. Demand a resolved
     // number; the assertion itself is unchanged and now cannot pass on a chip that never resolves.
-    const afterSelect = await readCardUntil((s) => s.chip != null && s.chip !== baselineChip);
+    const afterSelect = await readCardUntil((s) => s.chip != null && s.chip !== baselineChip, AGENT_TURN_MS);
     check(`${name}: count changed after selecting an answer`, afterSelect.chip != null && afterSelect.chip !== baselineChip, `base=${baselineChip} afterSelect=${afterSelect.chip}`);
     // THE CARD'S NUMBER IS THE COUNT RPC's cnt_selected (added 2026-09-02). lastCountResp had been
     // captured since 2026-08-24 and never READ — the chip was compared only with itself (changed,
@@ -396,7 +421,18 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // a final search that never fires still leaves lastSearchBody null and still fails.
     lastSearchBody = null; lastSearchResp = null;
     await page.click('[data-testid="af-confirm"]');
-    await page.waitForTimeout(1200);
+    // WAIT FOR THE REQUEST, NOT FOR A GUESS (2026-09-05). The confirm fires the final search; this
+    // was a fixed 1,200 ms sleep, so on a slow turn the journey read lastSearchBody while it was
+    // still null and reported "final search request was captured: null" — indistinguishable, in the
+    // log, from a search that never fired. Three journeys failed that way in run 33939914275
+    // (Jeddah/bathrooms, SKIP, BACK) while the app was fine. Poll for the real thing instead: this
+    // is STRICTLY stronger than the sleep it replaces — a search that genuinely never fires still
+    // leaves it null and still fails, it just no longer fails when the search was merely slow.
+    {
+      const until = Date.now() + AGENT_TURN_MS;
+      while (Date.now() < until && lastSearchBody === null) await page.waitForTimeout(250);
+      await page.waitForTimeout(600);   // let the count/render settle once the body has landed
+    }
 
     if (backAndChange) {
       // WHICH RULE A BACK CLICK MEANS IS DECIDED BY THE STEP THE CARD IS ON, so this journey must
@@ -448,7 +484,7 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       if (!opts2.length) { await ctx.close(); return; }
       const otherIdx = opts2.length > 1 ? 1 : 0;
       await page.click(`[data-testid="${opts2[otherIdx]}"]`);
-      const changed = await readCardUntil((s) => s.chip != null && s.chip !== afterSelect.chip);
+      const changed = await readCardUntil((s) => s.chip != null && s.chip !== afterSelect.chip, AGENT_TURN_MS);
       check(`${name}: changing the answer recomputes the count`, changed.chip !== afterSelect.chip || opts2.length === 1, `after1st=${afterSelect.chip} afterChange=${changed.chip}`);
       lastSearchBody = null; lastSearchResp = null;   // re-arm: this confirm is now the committing one
       await page.click('[data-testid="af-confirm"]');
