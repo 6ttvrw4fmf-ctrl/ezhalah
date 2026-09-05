@@ -30,12 +30,16 @@
 #      production moved while the recorded floor did not. It must never exit 0 having done nothing.
 #
 # THE ONE THING ONLY THE OWNER CAN DO. A PR opened with the built-in GITHUB_TOKEN does NOT trigger
-# other workflows (GitHub's recursion guard), so its three required checks never start and it cannot
-# merge itself — it waits for a human click. Give the deploy a repository secret named
-# BASELINE_PR_TOKEN (a fine-grained PAT with Contents: read+write and Pull requests: read+write on
-# this repo) and pushes made with it DO start the required checks, so the PR can go green and merge
-# on its own. This script prefers that token when it is present and works without it otherwise.
-# Nothing here bypasses a gate: the baseline PR runs the same required checks as any other PR.
+# other workflows (GitHub's recursion guard), so its three required checks never even start. Give
+# the deploy a repository secret named BASELINE_PR_TOKEN (a fine-grained PAT with Contents:
+# read+write and Pull requests: read+write on this repo) and pushes made with it DO start the
+# required checks, so the PR can go green. This script prefers that token when it is present and
+# works without it otherwise.
+#
+# This script never merges the baseline PR — merging it either way is a human click, or a run of
+# the one sanctioned merge gate (`scripts/safe-pr-merge.ts`, AGENTS.md) once its required checks are
+# green. Nothing here bypasses a gate, and nothing here becomes a second one: the baseline PR runs
+# the same required checks as any other PR, and only the sanctioned gate (or a human) ever merges it.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -74,11 +78,14 @@ open_baseline_pr() {   # $1 = sha, $2 = branch
 refused by branch protection from a runner, so the baseline is recorded the way protection intends —
 as a PR, running the same required checks as any other." 2>&1)" || { echo "   gh pr create failed: $url"; return 1; }
   echo "   Baseline PR: $url"
-  # Merge it if the repo allows auto-merge; otherwise it waits for one click. Never --admin.
-  gh pr merge --squash --auto "$url" >/dev/null 2>&1 \
-    && echo "   auto-merge armed — it lands as soon as the required checks pass." \
-    || echo "   auto-merge not available (repo setting off, or the required checks cannot start" \
-            "without BASELINE_PR_TOKEN). MERGE THIS PR to advance the recorded floor."
+  # This script never merges it. AGENTS.md's merge gate is a single sanctioned door
+  # (scripts/safe-pr-merge.ts) and nothing else in the tree may invoke that GitHub action or call
+  # its CLI equivalent (scripts/verify-merge-gate-transport.ts enforces that by scanning every
+  # tracked file) — arming GitHub's own auto-merge here would be exactly the second door that rule
+  # exists to prevent. Advance the floor via `scripts/safe-pr-merge.ts` once its required checks
+  # are green, or by hand.
+  echo "   MERGE THIS PR to advance the recorded floor — via scripts/safe-pr-merge.ts once its" \
+       "required checks are green, or by hand."
   return 0
 }
 
