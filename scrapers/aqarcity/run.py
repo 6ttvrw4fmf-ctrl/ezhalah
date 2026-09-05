@@ -581,7 +581,14 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         # (annualize is only applied on the monthly branch), so the published number is preserved
         # exactly and the card renders it with no period suffix.
         if is_daily_priced(body, price):
-            rent_period = None
+            # db.AUTHORITATIVE_NULL, NOT None. An upsert drops a None so a FAILED read cannot erase a
+            # known value (_unknown_must_not_overwrite_known, owner rule 2026-08-09) — and that guard
+            # cannot tell "we could not read the period" from "we read it and it is genuinely not
+            # representable". Writing None here left the stale rent_period='monthly' in place beside
+            # the corrected price_annual=300, and the card then rendered 300/12 = «25 SAR/month» —
+            # worse than the defect. AUTHORITATIVE_NULL is the sentinel added for exactly this
+            # (owner decision 2026-08-22): the source settled it, so write the NULL.
+            rent_period = db.AUTHORITATIVE_NULL
         else:
             rent_period = "monthly" if is_monthly_rental(body, unit, price, title_raw) else "annual"
     area = _float(pi.get("مساحة العقار"))
