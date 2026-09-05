@@ -523,6 +523,8 @@ const THERC_LOGO = require('../../assets/images/therc.png');
 const RAWASIDARK_LOGO = require('../../assets/images/rawasidark.png');
 const AOUJ_LOGO = require('../../assets/images/aouj.png');
 const AQARATIKOM_LOGO = require('../../assets/images/aqaratikom.jpg');
+const ALTA_LOGO = require('../../assets/images/alta.png');
+const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
 const AWAL_LOGO = require('../../assets/images/awal.jpg');
 const ALKHAAS_LOGO = require('../../assets/images/alkhaas.jpg');
 const ABEEA_LOGO = require('../../assets/images/abeea.jpg');
@@ -593,6 +595,8 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('mizlaj')) return <Image source={MIZLAJ_LOGO} style={card.hostBadge} contentFit="contain" />;
   // Batch 7 — text-chips until the user supplies logos.
   if (s.includes('aqaratikom')) return <Image source={AQARATIKOM_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('shmou al shmal') || s.includes('shmoualshmal')) return <Image source={SHMOUALSHMAL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
@@ -654,6 +658,8 @@ function sourceHost(source: string): string {
   // Real Aqaratikom listing_url is always nawait.sa (confirmed live, 0 exceptions) — matches
   // sourceName()'s own 'Nawait' label for the same source string. (found live 2026-07-25.)
   if (s.includes('aqaratikom')) return 'nawait.sa';
+  if (s.includes('shmou al shmal') || s.includes('shmoualshmal')) return 'shmoua-alshmal.com';
+  if (s.includes('alta')) return 'alta.com.sa';
   if (s.includes('awal')) return 'awaalun.com';
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/

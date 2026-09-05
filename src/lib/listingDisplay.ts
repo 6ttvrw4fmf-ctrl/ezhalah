@@ -69,6 +69,15 @@ export function sourceName(source: string): string {
   if (s.includes('mizlaj')) return 'Mizlaj Real Estate';
   if (s.includes('muktamel')) return 'Muktamel';
   if (s.includes('aqaratikom')) return 'Nawait';
+  // 'Shmou Al Shmal' is stored WITH spaces. The space-stripped half of `s` above would already
+  // catch it, but the branch tests the SPACED form too — the same belt-and-braces shape 'Al Khaas'
+  // uses. That keeps the branch self-sufficient (it matches on the raw string alone, so it cannot
+  // regress if the haystack trick is ever refactored away) and is what
+  // verify-platform-registration-complete.ts requires: that barrier models a plain
+  // name.toLowerCase() with NO space-stripping, so a slug-only token reads to it as unclaimed and
+  // the card falls to the Aqar branch.
+  if (s.includes('shmou al shmal') || s.includes('shmoualshmal')) return 'Shmou Al Shmal Real Estate';
+  if (s.includes('alta')) return 'Alta Real Estate Services';
   if (s.includes('awal')) return 'Awal United for Real Estate';
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
