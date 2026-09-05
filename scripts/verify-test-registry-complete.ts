@@ -136,11 +136,25 @@ for (const e of excluded) {
   check(`exclusion states a reason: ${e.name}`, e.reason.length >= 15, e.reason || '(empty)');
   // "where it runs instead" must be a workflow that exists, an npm script that exists, or an
   // explicit admission that nothing schedules it — never a comforting blank.
-  const wf = e.where.startsWith('.github/') && existsSync(join(root, e.where));
-  const npmScript = e.where.startsWith('npm run ')
-    && Object.keys(JSON.parse(read('package.json')).scripts ?? {}).includes(e.where.replace('npm run ', '').trim());
+  //
+  // THE HOME MUST INVOKE THE SCRIPT, NOT MERELY EXIST (hardened 2026-09-04 by routine #10).
+  // This asked `existsSync(home)` for a workflow and `scripts[name] !== undefined` for an npm script
+  // — both of which a row can satisfy while naming a place the check never actually runs. That is
+  // the shortcut BARRIER_ENGINEER.md §PART 4.7 names by incident: on 2026-09-03 a bare existence/
+  // includes test left two checks named only by a workflow COMMENT saying they were deliberately NOT
+  // run there, and neither had executed anywhere for weeks. The departures check above was already
+  // asking `workflowInvokes()`; the exclusions loop — the bigger list, 39 rows against 4 — was not.
+  // Measured before hardening: all 32 workflow-homed rows genuinely invoke their script and all 3
+  // npm-script homes genuinely name their file, so this closes the hole without excusing one.
+  const wf = e.where.startsWith('.github/') && existsSync(join(root, e.where))
+    && workflowInvokes(read(e.where), e.name);
+  const npmCmd = e.where.startsWith('npm run ')
+    ? (JSON.parse(read('package.json')).scripts ?? {})[e.where.replace('npm run ', '').trim()]
+    : undefined;
+  const npmScript = typeof npmCmd === 'string' && npmCmd.includes(e.name);
   const manual = /^manual/i.test(e.where);
-  check(`exclusion names a home that exists: ${e.name}`, wf || npmScript || manual, e.where || '(nowhere)');
+  check(`exclusion names a home that RUNS it: ${e.name}`, wf || npmScript || manual,
+    `${e.where || '(nowhere)'} — the home must actually invoke ${e.name}, not merely exist`);
 }
 // An exclusion must never cover a check the baseline says must run — that is the contradiction that
 // would let someone retire a guaranteed test by adding one line.
@@ -200,6 +214,35 @@ check('no check proves its own wiring by string-matching package.json (it must a
 check('.ts checks are invoked with type stripping', argvFor('verify-x.ts').includes('--experimental-strip-types'));
 check('.mjs checks are invoked without it', !argvFor('verify-x.mjs').includes('--experimental-strip-types'));
 check('the run order is deterministic (sorted)', run.join(',') === [...run].sort().join(','));
+
+// ── mutation proofs for the exclusion-home rule (added 2026-09-04 by routine #10) ────────────────
+// Re-applied to a REAL workflow and a REAL npm script, with the invocation removed.
+{
+  const mustCatch = (label: string, caught: boolean) =>
+    check(`MUTATION catches ${label}`, caught, 'the mutant survived — the home check is blind');
+
+  const sample = excluded.find((e) => e.where.startsWith('.github/'));
+  check('there is a workflow-homed exclusion to prove the rule against', !!sample);
+  if (sample) {
+    const wfSrc = read(sample.where);
+    mustCatch(`an exclusion naming a workflow that EXISTS but never invokes it (${sample.name})`,
+      workflowInvokes(wfSrc, sample.name)
+      && !workflowInvokes(wfSrc.replaceAll(sample.name, 'verify-something-else.ts'), sample.name));
+    mustCatch('a home naming the script only inside a YAML COMMENT (the 2026-09-03 incident)',
+      !workflowInvokes(`jobs:\n  x:\n    steps:\n      # ${sample.name} is deliberately not run here\n      - run: echo hi\n`,
+        sample.name));
+    mustCatch(`…while the real home is still accepted, not vacuously red (${sample.where})`,
+      workflowInvokes(wfSrc, sample.name));
+  }
+
+  const npmRow = excluded.find((e) => e.where.startsWith('npm run '));
+  if (npmRow) {
+    const cmd = (JSON.parse(read('package.json')).scripts ?? {})[npmRow.where.replace('npm run ', '').trim()];
+    mustCatch(`an npm-script home that exists but runs a DIFFERENT file (${npmRow.name})`,
+      typeof cmd === 'string' && cmd.includes(npmRow.name)
+      && !cmd.replace(npmRow.name, 'verify-something-else.ts').includes(npmRow.name));
+  }
+}
 
 console.log(`\n  ${run.length} run · ${excluded.length} excluded · ${baseline.length} baseline floor`);
 console.log(failures === 0

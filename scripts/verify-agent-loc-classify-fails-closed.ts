@@ -168,6 +168,57 @@ async function main() {
     check(`untouched: ${mustStillExist}`, agentSrc.includes(mustStillExist));
   }
 
+  // ── MUTATION PROOFS (added 2026-09-04 by routine #10, leaving the grandfather list) ───────────
+  //
+  // (a)–(f) already EXECUTE the real locClassify against injected failures, which is the right shape
+  // for this class. Section (g) is the half that is source text — it is the CALL SITE, and a call
+  // site can only be read, not run, because this branch of runModel() closes over ~15 turn-scoped
+  // locals. So every (g) predicate is re-applied here to the REAL agent source with the fail-OPEN
+  // behaviour re-introduced, and must flip. Nobody had ever watched any of them go red.
+  console.log("\n(h) mutation proofs — the fail-open defect, re-introduced into the real source\n");
+  const mustCatch = (label: string, caught: boolean) =>
+    check(`MUTATION catches ${label}`, caught,
+      "the mutant survived — this predicate cannot tell the defect from health");
+
+  const GUARD_RE = /if\s*\(cls\s*===\s*LOC_CLASSIFY_FAILED\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*location\s*=\s*"";/;
+  const OLD_FAIL_OPEN = /if\s*\(!r\.ok\)\s*return null;/;
+  const OLD_SWALLOW = /catch\s*\{\s*return null;\s*\}/;
+
+  // M1 — the pre-fix bug verbatim: an RPC error silently becomes "proceed unchanged".
+  mustCatch("the old fail-open `if (!r.ok) return null;` returning to the agent source",
+    OLD_FAIL_OPEN.test(`${agentSrc}\n  if (!r.ok) return null;`) && !OLD_FAIL_OPEN.test(agentSrc));
+  mustCatch("a bare `catch { return null; }` swallowing the failure again",
+    OLD_SWALLOW.test(`${agentSrc}\n  catch { return null; }`) && !OLD_SWALLOW.test(agentSrc));
+
+  // M2 — the guard deleted outright: the sentinel arrives and nothing clears the guessed location.
+  const noGuard = agentSrc.replace(GUARD_RE, 'if (cls === LOC_CLASSIFY_FAILED) {');
+  check("MUTATION anchor: the fail-closed guard could be neutralised", noGuard !== agentSrc);
+  mustCatch("the `location = \"\"` clear being removed from the LOC_CLASSIFY_FAILED branch",
+    !GUARD_RE.test(noGuard));
+
+  // M3 — the guard demoted to a COMMENT. This is the shape §0.1's five blind barriers all wore, so
+  // the predicate must reject a commented-out statement even though every identifier survives.
+  const commented = agentSrc.replace(GUARD_RE, 'if (cls === LOC_CLASSIFY_FAILED) { /* location = ""; */');
+  check("MUTATION anchor: the clear could be demoted to a comment", commented !== agentSrc);
+  mustCatch("the clear surviving only as a COMMENT while every identifier stays present",
+    !GUARD_RE.test(commented) && commented.includes('location = ""'));
+
+  // M4 — the REORDER dodge: both strings stay present, but `cls?.kind` is read before the guard, so
+  // a failed classification is treated as a kind. Ordering, not existence, is what makes this safe.
+  const guardText = GUARD_RE.exec(agentSrc)?.[0] ?? "";
+  const ckText = 'const ck = String(cls?.kind ?? "");';
+  const reordered = agentSrc.replace(guardText, "___GUARD___").replace(ckText, `${ckText}\n${guardText}`)
+    .replace("___GUARD___", "");
+  check("MUTATION anchor: the guard could be moved after the kind read", reordered !== agentSrc);
+  mustCatch("the guard REORDERED after `cls?.kind` is read (both strings still present)",
+    (() => { const g = reordered.indexOf(guardText); const c = reordered.indexOf(ckText);
+             return g > -1 && c > -1 && g > c; })());
+
+  // CONTROL — the shipped source is not flagged by any of the four (the predicates are not vacuous).
+  mustCatch("CONTROL the shipped agent source passing all four (not vacuously red)",
+    GUARD_RE.test(agentSrc) && !OLD_FAIL_OPEN.test(agentSrc) && !OLD_SWALLOW.test(agentSrc)
+    && agentSrc.indexOf(guardText) < agentSrc.indexOf(ckText));
+
   console.log(failures === 0
     ? "\n✅ verify-agent-loc-classify-fails-closed: all checks passed.\n"
     : `\n❌ verify-agent-loc-classify-fails-closed: ${failures} check(s) failed.\n`);

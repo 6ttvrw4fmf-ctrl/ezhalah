@@ -149,6 +149,21 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-category-respects-table-scope.ts
 
+      # THE OTHER HALF OF THE SAME QUESTION (🔴 Regression Hunter, routine #8, 2026-09-04). The check
+      # above proves a category count agrees with Search on WHICH TABLE a row lives in; this one
+      # proves every surface that displays a NUMBER resolves the whole scope — purity gate included —
+      # the way the search does. Both halves come from the same root: top_cities_by_deal_ar is the one
+      # RPC of five whose category-purity gate was never loosened for misfile recovery, so the Trending
+      # chip advertised 266 for «فئة تجاري / بيع / الرياض» where district_options_ar and the results
+      # RPC both said 3,358. ops_incident #31 (and #32 for the district panel's strict city_id
+      # resolution). Two barriers because a fix to one predicate does not prove the other.
+      - name: Every count surface resolves its scope, and its purity gate, the way the search does
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-count-surfaces-share-the-results-purity-gate.ts
+
       # CARD IDENTITY against the string production really stores (added 2026-09-04). Found by
       # looking at live cards: 3,165 abralosol/therc/rawasidark listings rendered as «عقار» with a
       # click-through to sa.aqar.fm, because the DB `source` values carry spaces ('Abr Alosol',
