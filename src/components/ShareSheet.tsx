@@ -13,9 +13,12 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
+import { SHARE_BLURB_AR, SHARE_BLURB_EN, SHARE_LEAD_AR, SHARE_LEAD_EN, SHARE_LINK, SHARE_MESSAGE_AR, SHARE_MESSAGE_EN } from '@/lib/share';
 
 // Real, resolvable share link (the deployed app), not a placeholder.
-const LINK = 'https://ezhalah-app.vercel.app';
+// The link, the sentence and the message all come from lib/share.ts. This file used to hold its own
+// copy of every one of them, and they drifted: the sheet and the OS share text said different things.
+const LINK = SHARE_LINK;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const SLIDE_IN = { duration: 280, easing: Easing.bezier(0.22, 1, 0.36, 1) };
@@ -54,10 +57,10 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
   // A target with no url parameter (WhatsApp, Mail, Copy) must carry the link inside its text; a
   // target that takes the link separately (X's `url=`, Telegram's `url=`) gets `lead` — handing it
   // `msg` too pre-filled the composer with the link TWICE.
-  const lead = locale === 'ar'
-    ? 'إزهله — مكان واحد تستكشف فيه كل إعلانات العقارات في ثواني. جرّبها الآن:'
-    : 'Ezhalah — one place to explore all property listings in seconds. Try it now:';
-  const msg = `${lead} ${LINK}`;
+  // ONE source of truth for the wording — lib/share.ts. This file used to hold its own copy of
+  // the sentence, and the two drifted apart until they said different things in different places.
+  const lead = locale === 'ar' ? SHARE_LEAD_AR : SHARE_LEAD_EN;
+  const msg = locale === 'ar' ? SHARE_MESSAGE_AR : SHARE_MESSAGE_EN;
   const copy = async () => {
     // expo-clipboard works on web (navigator.clipboard) and native alike.
     try { await Clipboard.setStringAsync(msg); } catch { /* ignore */ }
@@ -109,7 +112,7 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
           <RNImage source={require('../../assets/images/ezhalah-logo.png')} style={s.logo} resizeMode="cover" />
           <View style={{ flex: 1 }}>
             <Text style={s.pvT}>{t('Ezhalah')}</Text>
-            <Text style={s.pvS}>{t('One place to explore all listings and more in seconds. Try now.')}</Text>
+            <Text style={s.pvS}>{locale === 'ar' ? SHARE_BLURB_AR : SHARE_BLURB_EN}</Text>
             <Text style={s.pvL}>{LINK}</Text>
           </View>
         </View>

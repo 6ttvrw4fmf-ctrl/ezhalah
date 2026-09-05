@@ -1044,6 +1044,7 @@ const AR: Record<string, string> = {
   'Sign in to': 'تسجيل الدخول إلى',
   'with your Apple Account': 'باستخدام حساب Apple الخاص بك',
   'Hide My Email': 'إخفاء بريدي الإلكتروني',
+  'Share': 'مشاركة',
   'Share My Email': 'مشاركة بريدي الإلكتروني',
   "Ezhalah won't see your address": 'لن تطّلع إزهله على عنوانك',
   // Apple Face ID
@@ -1295,8 +1296,10 @@ const AR: Record<string, string> = {
   '1 week': 'أسبوع واحد',
 
   // Share sheet
+  // Owner wording 2026-09-05 — the SAME sentence as og:description, so the card we draw in-app and
+  // the card WhatsApp draws from the page say the same thing. «في المملكة» says where.
   'One place to explore all listings and more in seconds. Try now.':
-    'مكان واحد لاستكشاف جميع الإعلانات والمزيد في ثواني. جرّب الآن.',
+    'مكان واحد لاستكشاف كل إعلانات العقارات في المملكة في ثواني. جرّبها الآن.',
   'Copy Link': 'نسخ الرابط',
   'Copied!': 'تم النسخ!',
   'Messages': 'الرسائل',

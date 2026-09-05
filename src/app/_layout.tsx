@@ -12,6 +12,8 @@ import { ThemeProvider, useTheme } from '@/theme/theme';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import { markAppSessionStarted } from '@/lib/appSession';
 import { useBottomPromptInset } from '@/lib/bottomPromptInset';
+import Head from 'expo-router/head';
+import { OG_IMAGE, SHARE_BLURB_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
@@ -139,6 +141,46 @@ function Shell() {
   );
 }
 
+// SHARE METADATA — what a person receives, not what our own share sheet draws.
+//
+// The in-app ShareSheet has always rendered a handsome preview card with the eagle, the name and the
+// tagline. That card is painted BY US and never leaves the app. WhatsApp, iMessage, X, Telegram and
+// LinkedIn build their own card by fetching the page and reading these tags — and until now the page
+// had NONE, so a shared Ezhalah link arrived as a bare grey URL. The app was showing the sender a
+// preview the recipient could never get.
+//
+// WHY THIS LIVES IN <Head> AND NOT IN +html.tsx: expo-router renders the document title through
+// react-helmet, and helmet's <title data-rh="true"> is emitted FIRST in <head>. A browser honours the
+// first title it meets, so a <title> added further down +html.tsx is dead markup — which is exactly
+// why every tab read "ezhalah-app.vercel.app" while an empty <title></title> sat above it. Routing
+// the title through the same helmet instance is what actually fills it.
+//
+// og:image must be ABSOLUTE (a crawler has no origin to resolve a relative path against), and it is
+// a crop of the eagle artwork already in the repo — see lib/share.ts.
+function ShareMeta() {
+  return (
+    <Head>
+      <title>{SHARE_TITLE_AR}</title>
+      <meta name="description" content={SHARE_BLURB_AR} />
+      <meta property="og:type" content="website" />
+      <meta property="og:site_name" content={SHARE_TITLE_AR} />
+      <meta property="og:locale" content="ar_SA" />
+      <meta property="og:title" content={SHARE_TITLE_AR} />
+      <meta property="og:description" content={SHARE_BLURB_AR} />
+      <meta property="og:url" content={SHARE_LINK} />
+      <meta property="og:image" content={OG_IMAGE} />
+      <meta property="og:image:width" content="1200" />
+      <meta property="og:image:height" content="630" />
+      <meta property="og:image:alt" content={SHARE_TITLE_AR} />
+      {/* summary_large_image, not summary: the small variant crops the eagle to a square thumbnail. */}
+      <meta name="twitter:card" content="summary_large_image" />
+      <meta name="twitter:title" content={SHARE_TITLE_AR} />
+      <meta name="twitter:description" content={SHARE_BLURB_AR} />
+      <meta name="twitter:image" content={OG_IMAGE} />
+    </Head>
+  );
+}
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -146,6 +188,7 @@ export default function RootLayout() {
         <ThemeProvider>
         <LocaleProvider>
         <AppProvider>
+          <ShareMeta />
           <Shell />
         </AppProvider>
         </LocaleProvider>
