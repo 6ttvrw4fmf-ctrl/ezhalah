@@ -148,6 +148,21 @@ echo "Clean, on main, matches origin/main, required Vercel env present ($LOCAL).
 # Capture what the canonical alias serves BEFORE deploying. If the fresh deployment's own unique URL
 # can never be read below (deployment protection / a cold-start URL nobody has hit yet), this is the
 # fallback proof that the alias actually MOVED to something new.
+# ── SCHEMA-DRIFT GATE, *BEFORE* THE POINT OF NO RETURN (incident #61, routine-7-seam 2026-09-05) ──
+# This gate used to run ONLY after `vercel --prod` and the alias check, so on run 33949619528 it
+# reported a real failure 2 seconds AFTER production had already been updated and aliased. A gate
+# that names PGRST203 ("search dies app-wide") cannot prevent that outage from behind the deploy.
+# It now runs HERE too, first, and refuses to deploy at all on drift. The post-deploy call is kept
+# verbatim below — nothing was relaxed, prevention was added.
+# SMOKE_ANON_KEY is defined further down for the smoke test; the gate needs it now, so the public
+# anon key is resolved here and reused there.
+PRE_DRIFT_ANON_KEY="${EXPO_PUBLIC_SUPABASE_ANON_KEY:-${EXPO_PUBLIC_SUPABASE_KEY:-${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhbm5hcmJrd2N5bXJvdHp3ZGJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0MDgxMDAsImV4cCI6MjA5NTk4NDEwMH0.Z-GhSpan6otYWkc8sU43Dw5PT5T_VBUMr0IDZShCQw0}}}"
+scripts/schema-drift-gate.sh pre "$PRE_DRIFT_ANON_KEY" || {
+  echo ""
+  echo "safe-deploy: REFUSED before deploying — production schema drift (see ❌ above). Nothing deployed."
+  exit 1
+}
+
 PRE_BUNDLE="$(curl -s -H 'Cache-Control: no-cache' "https://ezhalah-app.vercel.app/?_=$(date +%s%N)" | grep -oE '_expo/static/js/web/entry-[a-f0-9]+\.js' | head -1 || true)"
 
 # Capture the unique deployment URL vercel prints, and — the load-bearing one — the artifact THIS
@@ -175,6 +190,7 @@ PRE_BUNDLE="$(curl -s -H 'Cache-Control: no-cache' "https://ezhalah-app.vercel.a
 DEPLOY_LOG="$(mktemp)"
 DEPLOY_ERR="$(mktemp)"
 DEPLOY_RC=0
+
 npx vercel --prod --yes 2>"$DEPLOY_ERR" | tee "$DEPLOY_LOG" || DEPLOY_RC=$?
 cat "$DEPLOY_ERR" >&2
 if [ "$DEPLOY_RC" -ne 0 ]; then
@@ -367,50 +383,10 @@ fi
 # exception: HTTP 404 (PGRST202 — function not in the schema cache) means the RPC itself has not
 # shipped to prod yet, which is expected ONLY for the deploy that ships it, so it warns and
 # continues instead of failing; every other non-200 fails CLOSED.
-echo ""
-echo "Running the schema-drift + duplicate-overload gate (ops_deploy_preflight_checks against production)..."
-DRIFT_URL="https://aannarbkwcymrotzwdbo.supabase.co/rest/v1/rpc/ops_deploy_preflight_checks"
-# Shared with scripts/verify-migration-drift-vs-production.ts (the continuous, push/schedule-driven
-# half of this same gate) so there is exactly ONE parser for "what migrations does the repo claim" —
-# see build-repo-migration-versions.cjs's header for why a second copy is exactly the kind of drift
-# this repo keeps getting bitten by.
-DRIFT_BODY="$(node -e 'process.stdout.write(JSON.stringify({p_repo_versions: require("./scripts/build-repo-migration-versions.cjs").buildRepoMigrationVersions()}))')"
-DRIFT_HTTP="$(curl -s -o /tmp/safe-deploy-drift-response.json -w '%{http_code}' --max-time 20 \
-  -X POST "$DRIFT_URL" \
-  -H "apikey: $SMOKE_ANON_KEY" \
-  -H "Authorization: Bearer $SMOKE_ANON_KEY" \
-  -H "Content-Type: application/json" \
-  -d "$DRIFT_BODY" || echo "curl_failed")"
-if [ "$DRIFT_HTTP" = "404" ]; then
-  echo "WARNING: ops_deploy_preflight_checks not found in production (HTTP 404) — the gate RPC has"
-  echo "not shipped yet. Expected ONLY for the deploy that ships it (batch 4). Apply"
-  echo "supabase/migrations/20260716_batch4_deploy_preflight_rpc.sql so every future deploy is gated."
-elif [ "$DRIFT_HTTP" = "200" ]; then
-  DRIFT_MISSING="$(node -pe 'JSON.parse(require("fs").readFileSync("/tmp/safe-deploy-drift-response.json","utf8")).missing_in_git.length' 2>/dev/null || echo "parse_error")"
-  DRIFT_DUPS="$(node -pe 'JSON.parse(require("fs").readFileSync("/tmp/safe-deploy-drift-response.json","utf8")).duplicate_overloads.length' 2>/dev/null || echo "parse_error")"
-  if [ "$DRIFT_MISSING" = "0" ] && [ "$DRIFT_DUPS" = "0" ]; then
-    echo "OK: no uncommitted prod migrations past the baseline, no duplicate public function overloads."
-    rm -f /tmp/safe-deploy-drift-response.json
-  else
-    echo ""
-    echo "❌ REFUSING TO ADVANCE THE BASELINE: production schema drift detected."
-    echo "   missing_in_git: $DRIFT_MISSING migration(s) applied to prod but absent from this repo"
-    echo "   duplicate_overloads: $DRIFT_DUPS public function name(s) with more than one overload"
-    echo "   Full response saved: /tmp/safe-deploy-drift-response.json — details:"
-    node -e 'console.log(JSON.stringify(JSON.parse(require("fs").readFileSync("/tmp/safe-deploy-drift-response.json","utf8")), null, 2))' 2>/dev/null || cat /tmp/safe-deploy-drift-response.json
-    echo "   Duplicate overloads are the EXACT 2026-07-16 outage signature (PGRST203: PostgREST refuses"
-    echo "   every call to an ambiguous RPC — search dies app-wide), and uncommitted migrations are how"
-    echo "   that overload got there. Recover the missing SQL verbatim into supabase/migrations/ (from"
-    echo "   supabase_migrations.schema_migrations) and/or drop the stale overload, then re-run."
-    exit 1
-  fi
-else
-  echo ""
-  echo "❌ REFUSING TO ADVANCE THE BASELINE: drift gate could not run (HTTP ${DRIFT_HTTP:-none})."
-  echo "   Response (if any): /tmp/safe-deploy-drift-response.json. This check fails CLOSED — a gate"
-  echo "   that cannot run must not bless a deploy. Fix connectivity / the RPC, then re-run."
-  exit 1
-fi
+# Runs a SECOND time here (see scripts/schema-drift-gate.sh's header, incident #61). The PRE call
+# above is what prevents a drifted deploy; this POST call keeps the original baseline-advance
+# refusal AND catches drift a concurrent session introduced during this deploy's own window.
+scripts/schema-drift-gate.sh post "$SMOKE_ANON_KEY" || exit 1
 
 # ── ADVANCE THE APPROVED BASELINE to the just-deployed commit, so every FUTURE preflight refuses to
 # deploy anything that doesn't contain THIS UI. This is what keeps the safety floor current.

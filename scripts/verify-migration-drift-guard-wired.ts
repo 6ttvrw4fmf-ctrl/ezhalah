@@ -36,6 +36,7 @@ const CHECK_SCRIPT = 'scripts/verify-migration-drift-vs-production.ts';
 const SHARED_PARSER = 'scripts/build-repo-migration-versions.cjs';
 const WORKFLOW = '.github/workflows/migration-drift-guard.yml';
 const SAFE_DEPLOY = 'scripts/safe-deploy.sh';
+const DRIFT_GATE = 'scripts/schema-drift-gate.sh';
 const PACKAGE_JSON = 'package.json';
 const ROOT = join(import.meta.dirname, '..');
 const DRIFT_MODULE = 'scripts/lib/migrationDrift.ts';
@@ -107,10 +108,26 @@ check(/SUPABASE_SERVICE_ROLE_KEY/.test(wf),
 //    about what counts as "in git" (exactly the class of bug the shared file's own header warns
 //    about — see build-repo-migration-versions.cjs).
 const deploySh = existsSync(SAFE_DEPLOY) ? readFileSync(SAFE_DEPLOY, 'utf8') : '';
-check(deploySh.includes('build-repo-migration-versions'),
-  'safe-deploy.sh sources the shared migration-versions parser',
-  `${SAFE_DEPLOY} no longer references ${SHARED_PARSER} — check whether it re-inlined its own ` +
+// The deploy-time gate was EXTRACTED into scripts/schema-drift-gate.sh on 2026-09-05 (incident
+// #61) so it could be called twice — once BEFORE the production deploy step, to prevent a drifted
+// deploy, and
+// once after to guard the baseline advance. The intent of this check is unchanged: exactly ONE
+// implementation of "what migrations does the repo claim", shared with the continuous checker.
+// It therefore follows the extraction rather than demanding the string stay in safe-deploy.sh —
+// and it separately asserts safe-deploy still INVOKES the gate, so the indirection cannot become
+// a way for the gate to go missing entirely.
+const gateSh = existsSync(DRIFT_GATE) ? readFileSync(DRIFT_GATE, 'utf8') : '';
+check(gateSh.includes('build-repo-migration-versions'),
+  'the deploy-time drift gate sources the shared migration-versions parser',
+  `${DRIFT_GATE} no longer references ${SHARED_PARSER} — check whether it re-inlined its own ` +
   `copy of the filename-parsing logic, which can silently diverge from the continuous checker`);
+check(deploySh.includes('schema-drift-gate.sh pre') && deploySh.includes('schema-drift-gate.sh post'),
+  'safe-deploy.sh still invokes the drift gate on BOTH sides of the deploy',
+  `${SAFE_DEPLOY} must call ${DRIFT_GATE} with phase "pre" (prevents a drifted deploy) AND "post" ` +
+  `(guards the baseline advance and catches a mid-deploy race) — see incident #61`);
+check(!deploySh.includes('build-repo-migration-versions'),
+  'safe-deploy.sh does NOT keep a second copy of the gate inline',
+  `${SAFE_DEPLOY} still builds the migration-versions list itself — the gate must live only in ${DRIFT_GATE}`);
 const checkScript = existsSync(CHECK_SCRIPT) ? readFileSync(CHECK_SCRIPT, 'utf8') : '';
 check(checkScript.includes('build-repo-migration-versions'),
   'verify-migration-drift-vs-production.ts sources the shared migration-versions parser',
