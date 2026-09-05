@@ -15,6 +15,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { closingNoteKey, keyOffersNarrow } from '../src/data/resultCount.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -51,9 +52,23 @@ check('the OLD unconditional-button shape (no canNarrowFurther guard around the 
   !/<View style=\{\[s\.mBtnRow,[\s\S]{0,300}?<Pressable\s+style=\{s\.mBtnAlt\}/.test(ag),
   'this shape means the narrow-it-down button rendered with no count check at all — the exact bug this test locks out');
 
-check('the closing message drops the "help you find more precise ones?" invitation when canNarrowFurther is false',
-  /canNarrowFurther\s*\?\s*\n?\s*t\('I showed you all \{n\} matching listings\. Want help finding more precise ones\?'/.test(ag)
-  && /:\s*\n?\s*t\('I showed you all \{n\} matching listings\.'/.test(ag));
+// The invitation used to be an inline ternary in agent.tsx and was asserted here by matching that
+// text. Since 2026-09-05 the sentence's KEY comes from the pure `closingNoteKey` in
+// src/data/resultCount.ts, because the old wording was blind to two further gates the buttons carry
+// (`isLatestResults` and `!ageFlow`) and promised «عرض المزيد» with zero buttons rendered — measured
+// live on الرياض/بيع/فيلا. So this rule is now EXECUTED against that function rather than matched
+// against a source line: the same property, proven instead of spelled.
+check('the closing message drops the "help you find more precise ones?" invitation when the button is not offered',
+  !keyOffersNarrow(closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: false }))
+  && !keyOffersNarrow(closingNoteKey({ endKind: 'more', quoteTotal: true, offersMore: true, offersNarrow: false })),
+  'a ≤25 set must never be invited to narrow further');
+check('…and still makes the invitation when the button IS offered',
+  keyOffersNarrow(closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: true })),
+  'dropping the false offers must not retire the true one');
+check('agent.tsx feeds that function the RENDERED-button booleans, not the raw gates',
+  /const offersNarrow = canNarrowFurther && showActionsRow;/.test(ag)
+  && /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow \}\)/.test(ag),
+  'the pure function can only be as right as the values handed to it');
 
 check("both new ≤25 copy variants have real Arabic translations (no English key leak)",
   i18n.includes("'I showed you the first {n} listings. Want me to show more?': '")

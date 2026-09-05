@@ -174,20 +174,60 @@ export async function showMoreJourney(plan) {
     for (let b = 1; b <= (plan.batches ?? 3); b++) {
       const btn = await pager(page);
       if (!btn) {
-        // CONTINUATION CONTRACT (owner 2026-08-29): the pager may be absent ONLY when everything
-        // matching is already on screen. With more matches remaining, a missing pager is now a
-        // DEFECT — the exact ceiling the owner removed. The closing line must state the honest
-        // count of what is on screen; when it can state a total, that total must be the search's
-        // true total, never a batch size.
-        if (num(total0) > n) {
+        // Read the closing line and the AF-card state in ONE evaluate, so both describe the same
+        // instant as the pager probe above.
+        //
+        // THE CLOSING LINE IS READ **LAST-FIRST**, MATCHING `visibleState.headline` (2026-09-05).
+        // It used to be read with `.match()` — the FIRST «من أصل|لقينا N إعلان» in the whole
+        // document — while `headline` is `[...matchAll].pop()`, the LAST. This is a CHAT: the
+        // transcript keeps every earlier search's closing line, so the two readings land on
+        // different messages the moment a journey runs a second search. Every AF-scoped pagination
+        // run does exactly that by construction (search, then the AF-narrowed search), so this
+        // journey reported a TRUE-TOTAL defect on every single AF run since it was added on
+        // 2026-09-04. Measured 2026-09-05 on الرياض/بيع/فيلا: the document held ["11,254","5,970"],
+        // the harness compared 11,254 against a headline of 5,970 and called production wrong —
+        // while 11,254 was the villa search's own true total and 5,970 the same search plus
+        // p_street_width_min 20, both confirmed exactly against the RPC. §40.7's cardinal sin:
+        // an oracle accusing the product for its own imprecision.
+        const st = await page.evaluate(() => {
+          const txt = document.body.innerText;
+          return {
+            closing: ([...txt.matchAll(/(?:من أصل|لقينا)\s+([\d,٬]+)\s+إعلان/g)].pop() || [])[1] ?? null,
+            // The Advanced Filter interview deliberately hides the whole actions row while it is
+            // open (owner 2026-08-21): the AF card is an absolute overlay and buttons underneath it
+            // are unreachable. That is intended product behaviour, not a missing pager.
+            afOpen: !!document.querySelector('[data-testid="af-card"]'),
+            loadMoreButtons: document.querySelectorAll('[data-testid="results-load-more"]').length,
+            // Does the visible closing sentence still ASK the user to load more?
+            promisesMore: /تبي أعرض لك المزيد/.test(txt),
+          };
+        });
+
+        if (st.afOpen) {
+          // The pager is intentionally absent here — so assert the contract that still applies
+          // instead of accusing, and assert it for real: the sentence must not offer a button the
+          // interview has removed. This is the defect this journey actually found on 2026-09-05
+          // («عرضت لك أول 10 من أصل 5,970 … تبي أعرض لك المزيد؟» with zero results-load-more
+          // elements in the document), fixed in src/data/resultCount.ts + agent.tsx.
+          if (st.promisesMore && st.loadMoreButtons === 0) {
+            defect(name, 'PROMISE-WITHOUT-BUTTON',
+              `the closing line offers «عرض المزيد» while the Advanced Filter interview is open and zero «عرض المزيد» buttons are rendered (${n} cards, search found ${total0})`);
+          } else {
+            note(`${name}: Advanced Filter interview open — actions row correctly hidden (owner 2026-08-21) and the closing line offers nothing it cannot deliver`);
+          }
+        } else if (num(total0) > n) {
+          // CONTINUATION CONTRACT (owner 2026-08-29): with no AF interview open, the pager may be
+          // absent ONLY when everything matching is already on screen. Anything else is the exact
+          // lifetime ceiling the owner removed.
           defect(name, 'PAGER-MISSING', `no «عرض المزيد» at ${n} cards while the search found ${total0} — the removed lifetime cap is back`);
         } else {
           note(`${name}: all ${n} matching cards on screen — pager legitimately absent`);
         }
-        const closing = await page.evaluate(() => (document.body.innerText
-          .match(/(?:من أصل|لقينا)\s+([\d,٬]+)\s+إعلان/) || []).slice(1, 2));
-        if (closing.length === 1 && closing[0] !== total0 && num(closing[0]) > 0 && num(total0) > 0 && num(closing[0]) !== n) {
-          defect(name, 'TRUE-TOTAL', `closing message quotes ${closing[0]} but the search found ${total0}`);
+
+        // The closing line must state the search's TRUE total, never a batch size — compared
+        // against the headline read the SAME way, off the SAME message.
+        if (st.closing && st.closing !== total0 && num(st.closing) > 0 && num(total0) > 0 && num(st.closing) !== n) {
+          defect(name, 'TRUE-TOTAL', `closing message quotes ${st.closing} but the search found ${total0}`);
         }
         break;
       }

@@ -71,6 +71,48 @@ check('the «عرض المزيد» journey asserts continuation (pager present w
   /TRUE-TOTAL/.test(showMore) && /PAGER-MISSING/.test(showMore),
   'the continuation is only honest while a missing pager with matches remaining is a defect');
 
+// ── 1b. THE CLOSING LINE AND THE HEADLINE MUST BE READ THE SAME WAY (2026-09-05) ────────────────
+// The journey used to read the closing line with `.match()` — the FIRST «من أصل|لقينا N إعلان» in
+// the document — while `visibleState.headline` is `[...matchAll].pop()`, the LAST. The results
+// screen is a CHAT: every earlier search's closing line stays in the transcript, so the two
+// readings land on DIFFERENT messages as soon as a journey searches twice. The AF-scoped pagination
+// journey does that by construction, so it reported a false TRUE-TOTAL on every AF run from the day
+// it was added (2026-09-04) until this fix. Measured 2026-09-05 on الرياض/بيع/فيلا: the document
+// held ["11,254","5,970"] and the harness compared the first against a headline of the last —
+// while BOTH numbers were exactly right (11,254 = the villa search, 5,970 = the same plus
+// p_street_width_min 20, each confirmed against the RPC). §40.7: never report a harness failure as
+// a product failure.
+//
+// EXECUTED, not asserted about: both readings are run against a synthetic two-message transcript.
+const TRANSCRIPT = [
+  'لقينا 11,254 إعلان', '…cards…', 'عرضت لك أول 13 من أصل 11,254 إعلان مطابق.',
+  'لقينا 5,970 إعلان', '…cards…', 'عرضت لك أول 10 من أصل 5,970 إعلان مطابق.',
+].join('\n');
+const CLOSING_RE = /(?:من أصل|لقينا)\s+([\d,٬]+)\s+إعلان/g;
+const HEADLINE_RE = /لقينا\s+([\d,٬]+)\s+إعلان/g;
+const firstRead = (TRANSCRIPT.match(new RegExp(CLOSING_RE.source)) ?? [])[0];
+const lastRead = ([...TRANSCRIPT.matchAll(CLOSING_RE)].pop() ?? [])[1];
+const headlineRead = ([...TRANSCRIPT.matchAll(HEADLINE_RE)].pop() ?? [])[1];
+check('MUTATION — the OLD first-match reading really disagrees with the headline (the false defect)',
+  /11,254/.test(String(firstRead)) && headlineRead === '5,970',
+  'if these agreed, the barrier below would prove nothing');
+check('the FIXED last-match reading agrees with the headline on the same transcript',
+  lastRead === headlineRead, `closing=${lastRead} headline=${headlineRead}`);
+check('the journey reads the closing line LAST-first, the same way visibleState reads the headline',
+  /\[\.\.\.txt\.matchAll\(\/\(\?:من أصل\|لقينا\)/.test(showMore) && /\.pop\(\)/.test(showMore),
+  'a first-match read compares two different messages and accuses production of its own imprecision');
+
+// The Advanced Filter interview deliberately hides the whole actions row (owner 2026-08-21), so a
+// missing pager THERE is intended. The journey must consult that state before accusing — and must
+// still assert the contract that does apply: the closing sentence may not offer a button the
+// interview has removed (the real defect this journey found on 2026-09-05).
+check('the «عرض المزيد» journey checks whether the AF interview is open before calling a pager missing',
+  /data-testid="af-card"/.test(showMore) && /afOpen/.test(showMore),
+  'without this the intended AF behaviour reads as the removed lifetime cap');
+check('the journey still fails when the closing line offers «عرض المزيد» with no button rendered',
+  /PROMISE-WITHOUT-BUTTON/.test(showMore) && /results-load-more/.test(showMore),
+  'standing down on the AF case must not mean standing down on the defect inside it');
+
 // ── 2. the floors, at or above the values the owner set ─────────────────────────────────────────
 const REQUIRED_FLOORS: Record<string, number> = {
   nonRiyadhCities: 3, mobileJourneys: 1, afJourneys: 1, trendingCityJourneys: 1,
