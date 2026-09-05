@@ -109,6 +109,35 @@ run it against a stub client that RESOLVES `{data:null,error}` the way supabase-
 Reference implementations: `scripts/verify-failed-location-index-is-not-a-load.ts`,
 `scripts/verify-scope-failure-is-not-an-honest-zero.ts`, `scripts/verify-signout-failure-is-not-silent.ts`.
 
+**MATCH FIRST — the eligible set is decided ONCE, by matching (permanent rule, owner 2026-09-04).**
+Everything that happens to the result list afterwards — platform diversity, region/source
+round-robin, natural spread, rotation, sorting, relevance ranking, «عرض المزيد» pagination, Trending
+continuation, any future photo preference or UI ordering — may **reorder** the matched set and may
+show a **page** of it. None of them may add a listing the match did not produce. In the owner's
+words: *never widen the search to satisfy diversity*; diversity operates only inside the
+already-correct eligible set.
+
+The machine-checkable form is a set relation, and it is now enforced as one by
+`scripts/verify-match-first-stages-are-order-only.ts` (in `npm test`):
+
+> for every post-match stage S: `ids(S(input)) ⊆ ids(input)` with no duplicates,
+> and for a PERMUTATION stage `ids(S(input)) === ids(input)`.
+
+**Every registered stage is EXECUTED against a synthetic result set and compared by id** — not
+grepped. That distinction is the whole point: all five defects of 2026-09-04 had a barrier over the
+exact line, and every one of those barriers was a source-TEXT tripwire that stayed green for as long
+as the defect was live.
+
+The barrier's second half is why it keeps working: it **discovers** post-match stages by shape
+(`X[] → X[]` in `src/data/search.ts` and `src/lib/platformDiversity.ts`) and fails on any it finds
+that is not in its registry. So the guard is not a list someone has to remember to update — a new
+stage added tomorrow is RED until it is registered and its kind declared. A builder like
+`pool(rows: Row[]): Listing[]` changes type and is outside the shape by construction, not by
+exemption.
+
+If you add a stage, add its registry entry and say which kind it is. If it must genuinely narrow
+(a page, a cap), it is a `subset` — and a subset is still forbidden from adding.
+
 **A finding now has a durable home with one owner, and closing it is EARNED —
 `docs/ops/AUTONOMOUS_INCIDENT_LOOP.md` is canonical (owner brief, 2026-09-04).** Read it before
 routing, parking, or closing anything. In one line: `alert_event` says whether a CONDITION is true
