@@ -91,6 +91,16 @@ const TYPE_MACROS = await (async () => {
   return Object.fromEntries((await r.json()).map((x: any) => [x.type_ar, x.macro]));
 })();
 
+// city_id → cluster_key, the resolver's own declaration that several city_ids are ONE search
+// entity. The client collapses a cluster to a single row carrying the union, so this journey has to
+// know about it to compare the right two numbers. Read live, and FAIL CLOSED: pretending there are
+// no clusters would silently restore the false accusation this fixes.
+const clusterKeyOf = await (async () => {
+  const r = await fetch(`${REST_URL}/rest/v1/loc_city_cluster?select=city_id,cluster_key`, { headers: H });
+  if (!r.ok) throw new Error(`loc_city_cluster unreadable (${r.status}) — cannot judge clustered city rows`);
+  return new Map<number, string>(((await r.json()) as any[]).map((x) => [Number(x.city_id), String(x.cluster_key)]));
+})();
+
 // RESOLVE ONLY THE NAMES THE REQUEST ACTUALLY USES (2026-09-01, second pass).
 //
 // The first version of this read the WHOLE district reference set: 192,125 rows paged 1,000 at a
@@ -234,11 +244,33 @@ async function runJourney(j: Journey) {
       const call = cityCalls[cityCalls.length - 1];
       // Every visible row must be backed by the RPC's own number — a row showing a count the RPC
       // did not return is a stale count from a previous filter state.
+      // CANONICAL CITY CLUSTERS (2026-09-05). Since 25c9934 the client presents a cluster as ONE
+      // row carrying the cluster's UNION — applyClusterUnion() in src/data/locations.ts — because
+      // clicking any member's name returns that union through match_city_ids. The RPC deliberately
+      // still returns one row PER member (collapsing it there removed الاحساء from the tap-only
+      // autocomplete pool and was reverted). So a clustered city's DISPLAYED count is legitimately
+      // larger than its own RPC row, and comparing the two accused a correct production: this check
+      // was red on الهفوف (shown 4,419 vs rpc 4,015 — the missing 404 is الاحساء) on every cohort.
+      // Expected display = what applyClusterUnion computes, so a genuine stale row is still caught.
       const rpcByName = new Map<string, number>();
+      const rawByName = new Map<string, number>();
+      const idByName = new Map<string, number>();
       for (const r of call.rows) {
         const label = r.city_ar ?? r.city ?? r.name_ar ?? r.label;
         const n = Number(r.listing_count ?? r.total ?? r.cnt ?? r.count ?? r.total_count);
-        if (label != null && Number.isFinite(n)) rpcByName.set(String(label), n);
+        if (label != null && Number.isFinite(n)) {
+          rawByName.set(String(label), n);
+          if (r.city_id != null) idByName.set(String(label), Number(r.city_id));
+        }
+      }
+      const unionByKey = new Map<string, number>();
+      for (const [label, n] of rawByName) {
+        const key = clusterKeyOf.get(idByName.get(label) ?? -1);
+        if (key) unionByKey.set(key, (unionByKey.get(key) ?? 0) + n);
+      }
+      for (const [label, n] of rawByName) {
+        const key = clusterKeyOf.get(idByName.get(label) ?? -1);
+        rpcByName.set(label, key ? unionByKey.get(key)! : n);
       }
       const mismatched = visibleCities
         .filter((v) => rpcByName.has(v.label))

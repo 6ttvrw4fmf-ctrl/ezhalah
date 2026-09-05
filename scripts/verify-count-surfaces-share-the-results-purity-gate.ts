@@ -160,6 +160,14 @@ const SHAPES: Shape[] = [
 /** THE INVARIANT, as a pure predicate — so the mutation proofs below can feed it a broken pair. */
 export const countDescribesTheSearch = (advertised: number, delivered: number): boolean => advertised === delivered;
 
+/**
+ * What a collapsed cluster chip must advertise: the SUM of its members' rows, because clicking any
+ * member's name returns the union. Pure, so the mutation proofs can show that reading one member's
+ * count instead — the shape that would accuse a correct production — is caught.
+ */
+export const clusterUnion = (rows: Array<{ listing_count: number | string }>): number =>
+  rows.reduce((n, c) => n + Number(c.listing_count), 0);
+
 console.log('\nEvery count surface reconciles against the results RPC, under the identical scope\n');
 for (const sh of SHAPES) {
   const RES = S.resTables(sh.q), COM = S.comTables(sh.q);
@@ -206,6 +214,72 @@ for (const sh of SHAPES) {
   }
 }
 
+// ── 2b. CANONICAL CITY CLUSTERS — covered by NAME, never by ranking. ────────────────────────────────
+//
+// WHY THIS SECTION EXISTS (ops_incident #32, 2026-09-05). The loop above samples the top 3 chips, so
+// which cities it exercises depends on the counts it is trying to check. الهفوف was caught only
+// because a 92% under-count had pushed it into the top 3; the moment that was fixed and the ranking
+// corrected, الهفوف fell out of the sample and its own live defect stopped being tested. Coverage
+// that depends on the bug being present is not coverage.
+//
+// THE INVARIANT IS NOT chip == search FOR ONE MEMBER, and asserting that would be a false accusation.
+// loc_city_cluster declares that several city_ids are ONE search entity: composite_match_city_ids
+// packs every sibling into match_city_ids, so clicking ANY member's name returns the cluster's UNION.
+// top_cities_by_deal_ar deliberately keeps one row PER member — collapsing it there removed الاحساء
+// from the tap-only autocomplete pool and made it unselectable (reverted 2026-09-04), so the collapse
+// lives in the display layer (applyClusterUnion in src/data/locations.ts). The RPC-level contract that
+// makes that client collapse correct is therefore:
+//
+//     sum(chip counts of the cluster's members) == the search for any member's name
+//
+// and the district panel, which IS keyed by a single committed city_id, must already answer with the
+// whole union — that is the half fixed in 20260905112745.
+const clusters = (await (await fetch(`${BASE}/rest/v1/loc_city_cluster?select=city_id,cluster_key`, { headers: H })).json()) as Array<{ city_id: number; cluster_key: string }>;
+if (!Array.isArray(clusters)) die('could not read loc_city_cluster — the cluster half of the contract is unverifiable');
+if (clusters.length) {
+  console.log('\nCanonical city clusters reconcile as a UNION (selected by name, not by ranking)\n');
+  const byKey = new Map<string, number[]>();
+  for (const c of clusters) byKey.set(c.cluster_key, [...(byKey.get(c.cluster_key) ?? []), c.city_id]);
+
+  for (const [key, members] of byKey) {
+    const rep = Math.min(...members);
+    for (const sh of SHAPES) {
+      const RES = S.resTables(sh.q), COM = S.comTables(sh.q);
+      const scope = sh.broad
+        ? { p_tables: RES, p_tables2: COM, p_types2: COM_ALL }
+        : { p_tables: RES, p_tables2: COM.filter((t) => !RES.includes(t)), p_types2: sh.types! };
+      const cohort = { p_deal: sh.deal, p_category: sh.cat, ...(sh.types ? { p_types: sh.types } : {}) };
+
+      const chips = await rpc('top_cities_by_deal_ar', { ...cohort, ...scope });
+      const rows = chips.filter((c: any) => members.includes(Number(c.city_id)));
+      if (!rows.length) continue;                        // this cohort has no inventory in the cluster
+      const repName = (chips.find((c: any) => Number(c.city_id) === rep) ?? rows[0]).city_ar;
+      const union = clusterUnion(rows);
+
+      const search = await rpc('location_search_candidates_ar', {
+        ...cohort, ...(sh.broad ? { p_types: COM_RES } : {}), ...scope,
+        p_cities: [repName], p_per_platform: null, p_limit: 1, p_offset: 0,
+      });
+      const delivered = Number(search[0]?.total_count ?? 0);
+      check(`${sh.label} · cluster ${key} (${rows.length} member row(s)): chip union ${union} == search ${delivered}`,
+        countDescribesTheSearch(union, delivered),
+        `clicking «${repName}» returns the cluster union, so the member chips must sum to it — ` +
+        `otherwise applyClusterUnion() shows a collapsed row whose count is not what the click delivers`);
+
+      const dist = await rpc('district_options_ar', {
+        p_city_id: rep, p_deal: sh.deal, p_category: sh.cat,
+        ...(sh.types ? { p_types: sh.types } : {}), ...scope,
+      });
+      if (dist.length) {
+        check(`${sh.label} · cluster ${key}: district panel ${Number(dist[0]?.total_in_city ?? 0)} == search ${delivered}`,
+          countDescribesTheSearch(Number(dist[0]?.total_in_city ?? 0), delivered),
+          `district_options_ar is keyed by the ONE city_id the collapsed chip commits (${rep}), so it must ` +
+          `resolve that city the way the search does — through the cluster, not a strict city_id match`);
+      }
+    }
+  }
+}
+
 // ── 3. MUTATION PROOF — feed each predicate the real broken input and watch it be caught. ───────────
 let mutFail = 0;
 const mustCatch = (label: string, caught: boolean) => {
@@ -223,6 +297,15 @@ mustCatch('a 2-row misfile-recovery gap (شقة/إيجار/مكة المكرمة
   !countDescribesTheSearch(601, 603));
 mustCatch('a predicate that only tolerates agreement — an equal pair must NOT be reported as a defect',
   countDescribesTheSearch(3358, 3358));
+
+// M1b — the CLUSTER half (ops_incident #32). Real measured rows: الهفوف 335 + الاحساء 244, and the
+// search for either name delivers 579.
+mustCatch('the live defect: the الهفوف district panel advertising 335 where the search delivers 579',
+  !countDescribesTheSearch(335, 579));
+mustCatch('a cluster chip that advertises ONE member instead of the union (335, not 335+244)',
+  clusterUnion([{ listing_count: 335 }]) !== 579 && clusterUnion([{ listing_count: 335 }, { listing_count: 244 }]) === 579);
+mustCatch('a correct cluster union must NOT be reported as a defect',
+  countDescribesTheSearch(clusterUnion([{ listing_count: 335 }, { listing_count: 244 }]), 579));
 
 // M2 — the DISCOVERY half: a sixth count surface appears, wired with the scope and reconciled by
 // nobody. The barrier must name it rather than pass quietly, which is the staleness trap PART 6
