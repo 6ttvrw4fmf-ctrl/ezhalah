@@ -174,7 +174,7 @@ def _keep(out: list[str], u: Any) -> None:
         out.append(full)
 
 
-def _photos(s: cc.Session, item: dict) -> list[str]:
+def _photos(s: Optional[cc.Session], item: dict) -> list[str]:
     out: list[str] = []
     for u in item.get("images") or []:
         _keep(out, u)
@@ -189,6 +189,13 @@ def _photos(s: cc.Session, item: dict) -> list[str]:
     # returns -WxH crops of the same originals the media endpoint returns un-cropped, so the
     # _full() dedupe in _keep() collapses them. A failed or empty media call keeps exactly what
     # fgh gave — degrade to FEWER images, never a wrong one.
+    #
+    # s is OPTIONAL because map_listing has callers that never fetch: four shared tests
+    # (catalog-fallback, price-fidelity, rent-period) build rows from a bare item dict, and making
+    # the session required broke all four on 2026-09-05. No session -> no top-up, exactly the
+    # pre-fix fgh-only set — the same degrade-to-fewer path a failed media call takes.
+    if s is None:
+        return out
     try:
         _throttle()
         r = s.get(MEDIA, params={"parent": item["id"], "per_page": 100, "orderby": "date",
@@ -292,7 +299,7 @@ def _resolve_total(total: Optional[int], meter: Optional[int], area: Optional[in
     return None
 
 
-def map_listing(item: dict, s: cc.Session) -> tuple[Optional[dict], str]:
+def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[dict], str]:
     rea = item.get("rea") or {}
     item_id = item.get("id")
     if not item_id:
