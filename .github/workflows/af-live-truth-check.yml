@@ -121,6 +121,17 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-filter-state-live.ts
 
+      # A Trending number must equal the exact set a click returns — for canonical city CLUSTERS too
+      # (owner 2026-09-04). loc_city_cluster declares which city_ids are one search entity; before the
+      # collapse migration the al_ahsa cluster showed الهفوف 4,305 + الاحساء 648 while both clicked to
+      # 4,953. This derives the clusters from that table and asserts one canonical row == click == DB.
+      - name: Trending collapses canonical city clusters to one truthful row
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-cluster-collapse-live.ts
+
       # THE ROOT-CAUSE JOIN (added 2026-09-03). Activating a platform is a DATABASE act; the client's
       # searchable-table scope is a SOURCE-CODE act; until now nothing checked that the two agreed.
       # Five platforms went live in search_listings_ar with 4,314 production_ready rows and joined
