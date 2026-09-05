@@ -63,6 +63,9 @@ import { AGENT_TURN_MS, describeLoad, readSearchLoad, settleUntil, verdictForNon
 /** Marks an abort raised because a card was never OBSERVED, so the catch does not double-report it. */
 const UNOBSERVED_ABORT = '[unobserved]';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
+import { initialReveal } from '../src/lib/initialReveal.ts';
+import { distinctPlatformCount } from '../src/lib/platformDiversity.ts';
+import { INTERVIEW_STOP_AT } from '../src/lib/afRanking.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
@@ -186,8 +189,16 @@ const R = {
   appRowsInOracle: (rows: string[], oracle: Set<string>) => rows.length > 0 && rows.every((id) => oracle.has(id)) && new Set(rows).size === rows.length,
   /** R10.1.1 — page 0 is complete: min(total, buffer) rows, never a short page under a full headline. */
   pageZeroComplete: (rows: number, total: number | null, buffer: number) => total != null && Number.isFinite(total) && rows === Math.min(total, buffer),
-  /** R9.2.2 — the restored turn RENDERED exactly the first page of cards under its headline. */
-  renderedFirstPage: (delta: number, total: number | null, firstPage: number) => total != null && Number.isFinite(total) && delta === Math.min(total, firstPage),
+  /** R9.2.2 — the restored turn RENDERED exactly the first page of cards under its headline.
+   *  `expected` comes from the PRODUCT's own initialReveal(), never from a copy of the rule here:
+   *  FIRST_PAGE stopped being a cap on 2026-09-02 (#1688, owner PERMANENT rule) and became a FLOOR —
+   *  reveal max(10, distinct matching platforms). This assertion still read the old `min(total, 10)`
+   *  and so called a correct production broken the moment a scope matched more than ten platforms
+   *  (measured: الرياض restored turn rendered 13 cards for 13 platforms, and this reported
+   *  `expected=10`). Equality is unchanged — only the number it compares against is now the one the
+   *  app actually computes, so the two can never drift apart again. */
+  renderedFirstPage: (delta: number, expected: number | null) =>
+    expected != null && Number.isFinite(expected) && delta === expected,
   /** R9.1.1 — the summary line that sat above the pills is gone too. */
   summaryGone: (occurrences: number) => occurrences === 0,
   /** R9.2.2 — every headline already on screen is still there, in place, unchanged. */
@@ -329,7 +340,7 @@ const page = await ctx.newPage();
 // Requests and responses are paired by the request OBJECT, never by RPC name: several
 // location_search_candidates_ar calls can be in flight at once, and name-matching silently pairs a
 // body with somebody else's totals.
-const searches: { body: any; total: number | null; rows: string[] }[] = [];
+const searches: { body: any; total: number | null; rows: string[]; platforms: number }[] = [];
 const origins = new Set<string>();
 page.on('response', async (r) => {
   if (!r.url().includes('/rpc/location_search_candidates_ar') || r.request().method() !== 'POST') return;
@@ -338,7 +349,10 @@ page.on('response', async (r) => {
     const j = await r.json();
     if (!Array.isArray(j)) return;
     searches.push({ body: JSON.parse(r.request().postData() || '{}'), total: j.length ? Number(j[0]?.total_count ?? NaN) : 0,
-      rows: j.map((x: any) => `${x.source_table}:${x.listing_id}`) });   // what the APP received — not a Node replay
+      rows: j.map((x: any) => `${x.source_table}:${x.listing_id}`),      // what the APP received — not a Node replay
+      // Counted HERE, off the response's own `platform` column, because `rows` above is flattened to
+      // "source_table:listing_id" strings and the platform is gone by the time anyone reads it.
+      platforms: distinctPlatformCount(j.map((x: any) => ({ source: x?.platform }))) });
   } catch { /* a body we could not read is not a search we can assert on */ }
 });
 
@@ -427,7 +441,7 @@ let chipAfterSelect: number | null = null;
 let headlinesBefore: string[] = [], headlinesAfter: string[] = [];
 let summaryLine: string | null = null, summaryAfter = -1, pillsAfter = -1;
 let replayN2: number = NaN, oracleN2: number | null = null;
-let ROWS2: string[] = [], cardsDelta = -1;
+let ROWS2: string[] = [], cardsDelta = -1, expectedFirstPage: number | null = null, platforms2 = -1;
 
 try {
   console.log(`── scope: ${CITY} · ${GROUP} · ${TYPE} · ${DEAL} · ${MOBILE ? 'MOBILE 390x844' : 'desktop 1440x900'} ──\n`);
@@ -609,8 +623,13 @@ try {
   }
   check('R10.1.1 — the restored turn\'s page 0 is complete (the app received min(N2, buffer) rows, no short page)',
     R.pageZeroComplete(ROWS2.length, N2, PAGE0_BUFFER), `rows=${ROWS2.length} N2=${N2} buffer=${PAGE0_BUFFER}`);
+  platforms2 = searches[searches.length - 1]?.platforms ?? 0;
+  expectedFirstPage = N2 == null ? null : initialReveal({
+    fetched: ROWS2.length, honestTotal: N2, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
+  });
   check('R9.2.2 — the restored turn RENDERED exactly the first page of cards under the N0 headline (not the narrowed turn\'s cards, not none)',
-    R.renderedFirstPage(cardsDelta, N2, FIRST_PAGE), `new cards=${cardsDelta} expected=${N2 == null ? '?' : Math.min(N2, FIRST_PAGE)}`);
+    R.renderedFirstPage(cardsDelta, expectedFirstPage),
+    `new cards=${cardsDelta} expected=${expectedFirstPage ?? '?'} (initialReveal: floor ${FIRST_PAGE}, ${platforms2} matching platform(s), ${ROWS2.length} fetched)`);
 
   // ── 5. the assertions, on the request the browser actually sent and the turn that landed ──────
   check('R9.2.1 — B2 carries ZERO AF predicates', R.noAfPredicate(B2), `AF predicates on B2: ${afValues(B2)}`);
@@ -692,9 +711,11 @@ try {
   mut('a duplicated app row is caught by appRowsInOracle', ROWS2.length > 0 && !R.appRowsInOracle([...ROWS2, ROWS2[0]], new Set(ROWS2)));
   mut('an empty app response under a non-zero headline is caught by appRowsInOracle', !R.appRowsInOracle([], new Set(ROWS2)));
   mut('a short page 0 (one row fewer) is caught by pageZeroComplete', N2 != null && !R.pageZeroComplete(Math.min(N2, PAGE0_BUFFER) - 1, N2, PAGE0_BUFFER));
-  mut('a restored turn that rendered NO cards is caught by renderedFirstPage', N2 != null && N2 > 0 && !R.renderedFirstPage(0, N2, FIRST_PAGE));
+  mut('a restored turn that rendered NO cards is caught by renderedFirstPage', expectedFirstPage != null && expectedFirstPage > 0 && !R.renderedFirstPage(0, expectedFirstPage));
   mut('a restored turn that rendered one card too many/few is caught by renderedFirstPage',
-    N2 != null && !R.renderedFirstPage(Math.min(N2, FIRST_PAGE) + 1, N2, FIRST_PAGE) && !R.renderedFirstPage(Math.min(N2, FIRST_PAGE) - 1, N2, FIRST_PAGE));
+    expectedFirstPage != null && !R.renderedFirstPage(expectedFirstPage + 1, expectedFirstPage) && !R.renderedFirstPage(expectedFirstPage - 1, expectedFirstPage));
+  mut('a first page sized by the OLD fixed cap of 10 is caught once the scope matches more platforms',
+    expectedFirstPage == null || platforms2 <= FIRST_PAGE || !R.renderedFirstPage(FIRST_PAGE, expectedFirstPage));
   if (B_DECOY) mut('a rebuild from an OLDER query (the decoy city) is caught by scopeRestored', !R.scopeRestored(B0, { ...B2, p_cities: B_DECOY.p_cities }));
   mut('a scope key moved by the rebuild is caught by scopeRestored',
     !R.scopeRestored(B0, { ...B2, p_cities: [...(B2?.p_cities ?? []), '__not_a_city__'] }) && !R.scopeRestored(B0, { ...B2, p_deal: `${B2?.p_deal}__mutated__` }));

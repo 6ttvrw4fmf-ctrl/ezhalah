@@ -43,6 +43,7 @@ import { npmTestRuns } from './lib/testRegistry.ts';
 const ROOT = join(import.meta.dirname, '..');
 const COMBINED = 'scripts/verify-combined-budget-live.ts';
 const TRENDING = 'scripts/verify-trending-live-four-way-truth.ts';
+const PILL = 'scripts/verify-af-remove-last-pill-live.ts';
 const rawOf = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 
 let failures = 0;
@@ -88,8 +89,27 @@ function trendingRules(src: string) {
   };
 }
 
+/** PILL: the first-page size must come from the PRODUCT's initialReveal(), not a copy of the rule.
+ *
+ *  The second way a live journey calls a correct production broken: it keeps its own copy of a
+ *  product rule and the product moves. FIRST_PAGE stopped being a cap on 2026-09-02 (#1688, owner
+ *  PERMANENT rule) and became a FLOOR — reveal max(10, distinct matching platforms) — but this
+ *  journey still asserted `min(total, 10)`, so the restored الرياض turn rendering 13 cards for its
+ *  13 matching platforms was reported as `expected=10`. Calling the real function cannot drift. */
+function pillRules(src: string) {
+  return {
+    callsProduct: /initialReveal\(\{/.test(src) && /from '\.\.\/src\/lib\/initialReveal\.ts'/.test(src),
+    usesRealPlatformCount: /distinctPlatformCount\(/.test(src)
+      && /from '\.\.\/src\/lib\/platformDiversity\.ts'/.test(src),
+    // the stale cap must not come back, in the rule or at the call site
+    noLocalCap: !/renderedFirstPage:[^\n]*Math\.min\([^\n]*firstPage/.test(src)
+      && !/renderedFirstPage\([^)]*,\s*N2\s*,\s*FIRST_PAGE\s*\)/.test(src),
+  };
+}
+
 const combined = combinedRules(stripComments(rawOf(COMBINED)));
 const trending = trendingRules(stripComments(rawOf(TRENDING)));
+const pill = pillRules(stripComments(rawOf(PILL)));
 
 console.log(`  ${COMBINED}`);
 check('the readiness wait exists', combined.exists, 'no `const results = await settleUntil`');
@@ -110,6 +130,14 @@ check('a readiness wait is used instead', trending.hasReadinessWait, 'no settleU
 check('it settles on QUIESCENCE, not first sight', trending.quiescent, 'no comparison against prevHeadline');
 check('the readiness condition is NEUTRAL (never waits for the count to equal the RPC)',
   trending.neutral, 'the wait references the asserted equality');
+
+console.log(`\n  ${PILL}`);
+check('the first-page size is read from the PRODUCT\'s initialReveal(), not re-derived',
+  pill.callsProduct, 'the journey keeps its own copy of a rule the product owns');
+check('the platform count comes from the product\'s distinctPlatformCount()',
+  pill.usesRealPlatformCount, 'a hand-rolled platform count will drift from the product\'s');
+check('the pre-#1688 fixed cap min(total, FIRST_PAGE) is gone', pill.noLocalCap,
+  'the stale cap is back — a scope matching >10 platforms will be reported as a product defect');
 
 console.log('');
 check('npm test discovers and runs this check',
@@ -135,6 +163,14 @@ const muts: Mut[] = [
     apply: (s) => s.replace(/  let prev = \{ rows: -1, sar: -1 \};[\s\S]*?\n  \}\n\n(?=  const rentRows)/,
       '  // let prev = { rows: -1, sar: -1 };\n  // const results = await settleUntil(...) === prev.rows ... unobserved(\n'),
     rule: (s) => combinedRules(s).exists && combinedRules(s).ordered },
+  { name: 'M7 restore the pre-#1688 fixed cap in the rule', file: PILL,
+    apply: (s) => s.replace(
+      /renderedFirstPage: \(delta: number, expected: number \| null\) =>\n\s*expected != null && Number\.isFinite\(expected\) && delta === expected,/,
+      'renderedFirstPage: (delta: number, total: number | null, firstPage: number) => total != null && Number.isFinite(total) && delta === Math.min(total, firstPage),'),
+    rule: (s) => pillRules(s).noLocalCap },
+  { name: 'M8 stop calling the product and re-derive the first page locally', file: PILL,
+    apply: (s) => s.replace("import { initialReveal } from '../src/lib/initialReveal.ts';", ''),
+    rule: (s) => pillRules(s).callsProduct },
   { name: 'M6 stop reporting a non-arrival (silently pass over it)', file: COMBINED,
     apply: (s) => s.replace(/if \(!results\.settled\) \{[\s\S]*?\n  \}\n/, ''),
     rule: (s) => combinedRules(s).reportsNonArrival },
