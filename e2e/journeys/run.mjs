@@ -763,6 +763,48 @@ JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobi
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the favourite navigation trip', errs.join(' | ')); }
 });
 
+/** J16c — A DOUBLE-CLICK ON ⋯ OPENS AND CLOSES THE MENU. IT DOES NOT RENAME (PART 5 shape 7).
+ *
+ *  ops_incident #20, reproduced 3/3 on production before the fix: the row host binds `dblclick` →
+ *  beginRename, and opening then closing the ⋯ menu is two clicks on that same host, so the row
+ *  silently dropped into rename mode. The pointerdown/hold-to-drag handler had already been given
+ *  `startsOnControl()` on 2026-09-04 for the identical reason (a mouse-down on ⋯ that drifted 25px
+ *  lifted the row and committed a real reorder); the dblclick binding was left without it.
+ *
+ *  WHY A JOURNEY AND NOT ONLY THE SOURCE PIN. verify-sidebar-reorder.ts pinned that exact line by
+ *  regex the whole time the defect was live, and passed — it asserted the line said what it said,
+ *  which was true and was the bug. Only pressing the button twice in a real browser can tell you
+ *  what the second click actually did. Both now exist; this one is the one that would have caught it. */
+JOURNEYS['sidebar-dblclick-on-menu'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
+  const name = `sidebar-dblclick-on-menu:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const editors = () => page.evaluate(() => [...document.querySelectorAll('input')]
+    .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (e.value || '').trim().length > 0; })
+    .map((e) => e.value));
+
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+  const row = page.getByText('فلل جدة', { exact: true }).first();
+  if (!(await row.count())) { skip(name, 'the target row is not rendered'); return; }
+  await row.hover().catch(() => {});
+  await sleep(700);
+  const dots = await dotsCentre(page, 'فلل جدة');
+  if (!dots) { skip(name, 'the ⋯ button could not be located on the row'); return; }
+
+  const before = await editors();
+  await page.mouse.dblclick(dots.x, dots.y).catch(() => {});
+  await sleep(1600);
+  const after = await editors();
+
+  // A rename editor is an input carrying the row's CURRENT title — that is what beginRename seeds.
+  const opened = after.filter((v) => !before.includes(v));
+  if (opened.length) {
+    defect(name, 'double-clicking the ⋯ menu button started a rename',
+      `a rename editor holding «${opened[0]}» appeared after two clicks on ⋯ — the menu affordance must open and close, never rename (ops_incident #20)`);
+  } else {
+    pass(name, 'two clicks on ⋯ opened and closed the menu without starting a rename');
+  }
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the ⋯ double-click', errs.join(' | ')); }
+});
+
 /** J16b — REMOVING A FAVOURITE REMOVES THE STAR, NOT THE CHAT (PART 1: "Favorites: add, REMOVE, and
  *  the favorited state surviving navigation and refresh"; PART 5 shape 3).
  *
