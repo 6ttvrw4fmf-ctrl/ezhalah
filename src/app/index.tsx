@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -99,6 +99,7 @@ const AREA_HINT: RangeHintCfg = {
 // plain Node test can execute them — imported above).
 
 export default function Home() {
+  const { width: shareBarWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale, isRTL } = useI18n();
@@ -841,6 +842,9 @@ export default function Home() {
     const shared = await shareNative();
     if (!shared) setShareOpen(true);
   };
+  // Below this the top bar carries the logo, a sign-in pill and this button; the label is the first
+  // thing that has to give, not the button.
+  const shareLabelled = shareBarWidth >= 380;
 
   const detail = query.type ? detailFor(query.type) : null;
   // Context-level detail: shown at category/group level when no specific type is selected.
@@ -1033,15 +1037,28 @@ export default function Home() {
                   <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
                 </Pressable>
               )}
+              {/* Share — a labelled pill, not a bare glyph (owner 2026-09-05). An unlabelled icon in a
+                  corner reads as decoration; «مشاركة» beside it states the action, which is what every
+                  major platform does with the one control it wants people to use. The label is hidden
+                  on very narrow screens where the top bar has no room for it, and the icon-only form
+                  keeps its accessibilityLabel so the action is never nameless. */}
               <Pressable
-                style={({ pressed }) => [s.shareBtn, pressed && s.shareBtnPressed]}
+                style={({ pressed, hovered }: any) => [
+                  s.shareBtn,
+                  shareLabelled && s.shareBtnWide,
+                  hovered && s.shareBtnHover,
+                  pressed && s.shareBtnPressed,
+                ]}
                 hitSlop={8}
                 onPress={onShare}
                 onPressIn={() => shareSpring(0.94)}
                 onPressOut={() => shareSpring(1)}
+                accessibilityRole="button"
+                accessibilityLabel={t('Share')}
               >
-                <RNAnimated.View style={{ transform: [{ scale: shareScale }] }}>
-                  <Ionicons name="share-outline" size={19} color={colors.chipIcon} />
+                <RNAnimated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
+                  <Ionicons name="share-social-outline" size={17} color={colors.primary} />
+                  {shareLabelled ? <Text style={s.shareBtnText}>{t('Share')}</Text> : null}
                 </RNAnimated.View>
               </Pressable>
             </View>
@@ -1950,7 +1967,11 @@ const s = StyleSheet.create({
   // Redesigned to match the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius,
   // soft green-tinted lift) so the pill + share read as one control cluster (owner redesign 2026-07-24 r2).
   shareBtn: {
-    width: 46,
+    // minWidth, NOT width: the labelled variant has to grow sideways, and a fixed `width` cannot be
+    // released by a later style — React Native Web drops `width: undefined` on merge instead of
+    // overriding, which pinned the pill at 46px and let «مشاركة» spill outside its own background.
+    minWidth: 46,
+    paddingHorizontal: 0,
     height: 46,
     borderRadius: radius.pill,
     alignItems: 'center',
@@ -1964,7 +1985,13 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 2,
   },
-  shareBtnPressed: { opacity: 0.85 },
+  shareBtnPressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
+  // Labelled form: a pill that grows sideways from the same 46px circle, so the two states share a
+  // height and the bar never reflows vertically when the label drops at narrow widths.
+  shareBtnWide: { paddingHorizontal: 15 },
+  shareInner: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  shareBtnText: { fontSize: 13.5, fontWeight: '700', color: colors.primary, includeFontPadding: false },
+  shareBtnHover: { backgroundColor: colors.tintFill, borderColor: colors.primary },
   // Top-bar sign-in (mobile, logged-out only — owner 2026-08-19). Compact pill matching the sidebar's
   // CTA green so the action is unmistakable. On desktop the docked sidebar already shows it.
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },

@@ -66,8 +66,6 @@ const PATH_RE = /(?:scripts|e2e)\/[A-Za-z0-9_@./-]+\.(?:ts|mjs|js|cjs|sh|py)/g;
  * graveyard of stale excuses. It may only shrink.
  */
 const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
-  { path: 'scripts/verify-p0-fast-lane-detection.ts', owner: 'routine-7-seam',
-    why: 'claimed by 20260831192229_p0_detection_leaves_the_long_sweep_transaction.sql; detector/alert seam' },
   { path: 'scripts/verify-run-field-range-composite-baseline-live.ts', owner: 'routine-3-data-integrity',
     why: 'claimed by 20260821031350_fix_run_field_range_composite_baseline.sql; scraped-field range baselines' },
   // CLOSED 2026-09-05 by routine-2-production (PR #1850), the routine this gap was routed to.

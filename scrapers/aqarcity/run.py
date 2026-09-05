@@ -222,6 +222,74 @@ def is_monthly_rental(body: str, unit: str, price: Optional[int], title: str = "
     return keyword_monthly  # numbers don't line up either way — unchanged fallback
 
 
+# ── DAILY-PRICED ADS (source-proven 2026-09-05, listing 30260, ops_incident #63) ───────────────
+# aqarcity hosts short-let ads that publish a DAILY rate. Ezhalah cannot represent one:
+# search_listings_ar.rent_period_ar has exactly three states — سنوي, شهري and NULL (measured
+# 2026-09-05: 44,469 / 32,228 / 127,763). Calling a daily rate «monthly» renders it as the monthly
+# rent (listing 30260: «300/month» for a room the source prices at 300 PER NIGHT); calling it
+# «annual» is the same lie in the other direction. Per SOURCE IS TRUTH the honest state is UNKNOWN:
+# keep the published number exactly as published, publish NO period, and let the card show a bare
+# figure with no suffix — the behaviour 127,763 rows already have.
+#
+# WHY THIS IS NOT unitText. A previous attempt made unitText=YEAR authoritative and was reverted the
+# same day: three existing tests prove aqarcity emits unitText=YEAR as an unreliable DEFAULT even on
+# plainly monthly ads (is_monthly_rental("…السعر: 1700 ريال شهري…", "YEAR", 1700) must stay MONTHLY),
+# which is exactly why the numeric disambiguation in is_monthly_rental() exists. The structured unit
+# cannot arbitrate the period here. The PROSE can — but only when it ties the captured number to a
+# daily marker, which is the same discipline is_monthly_rental() already applies to «شهري».
+#
+# NARROWNESS IS THE WHOLE POINT. This fires only when ALL of:
+#   1. the body carries an explicit DAILY-RENT phrase (not merely the word «يوم» somewhere), and
+#   2. offers.price appears as a number inside that daily phrase's own SEGMENT, and
+#   3. that same number is NOT tied to a «شهري» marker anywhere — a genuine monthly reading wins.
+# A monthly or annual ad that never mentions daily rent is untouched, and so is a mixed ad whose
+# captured price is the MONTHLY one.
+_DAILY_PHRASE = re.compile(
+    r"(?:ال[إأآا]?يجار|الاجار|السعر|سعر|للايجار|للإيجار|للآجار|للاجار)\s*(?:ال)?يومي"
+    r"|(?:ال)?يومي\s*(?:و\s*(?:ال)?شهري)?\s*[:\s]"
+    r"|/\s*(?:اليوم|يوم)\b"
+)
+# Segment on the separators listers actually use: newlines, bullets, and the emoji/□ dividers that
+# fill these ads. A segment is "one priced clause".
+_SEGMENT_SPLIT = re.compile(r"[\n\r•·|]+|[🔶🔷🔴🔵▪️▫️◾◽●○★☆✅✔️➖—–]+")
+_NUM_IN_TEXT = re.compile(r"\d[\d,٬.]*")
+
+
+def _numbers_in(text: str) -> set[int]:
+    out = set()
+    for raw in _NUM_IN_TEXT.findall(text):
+        n = _int(raw.rstrip(".,٬"))
+        if n:
+            out.add(n)
+    return out
+
+
+def is_daily_priced(body: str, price: Optional[int]) -> bool:
+    """True iff the source clearly publishes THIS captured price as a DAILY rate.
+
+    Deliberately conservative: an ad that merely offers daily lets, without the captured number
+    sitting in the daily clause, returns False and keeps its existing classification.
+    """
+    if not price or not body:
+        return False
+    if not _DAILY_PHRASE.search(body):
+        return False
+    # (3) a number the prose explicitly calls شهري outranks the daily reading — same numeric
+    # discipline is_monthly_rental() uses, so the two functions cannot contradict each other.
+    monthly_nums = {
+        n for pair in re.findall(
+            r"(\d[\d,٬.]*)\s*(?:ريال)?\s*شهري[ًا]?|شهري[ًا]?\s*[:\s]*(\d[\d,٬.]*)", body)
+        for g in pair if g for n in [_int(g.rstrip(".,٬"))] if n
+    }
+    if price in monthly_nums:
+        return False
+    # (2) the captured price must live in a segment that carries the daily phrase.
+    for seg in _SEGMENT_SPLIT.split(body):
+        if _DAILY_PHRASE.search(seg) and price in _numbers_in(seg):
+            return True
+    return False
+
+
 def _float(v: Any) -> Optional[float]:
     if v in (None, "", "—"):
         return None
@@ -508,7 +576,14 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     price = _price_round(offers.get("price"))
     rent_period = None
     if is_rent:
-        rent_period = "monthly" if is_monthly_rental(body, unit, price, title_raw) else "annual"
+        # THREE-WAY, not binary. A daily-priced ad gets NO period rather than a false monthly or a
+        # false annual — see is_daily_priced(). price_annual below then stores `price` verbatim
+        # (annualize is only applied on the monthly branch), so the published number is preserved
+        # exactly and the card renders it with no period suffix.
+        if is_daily_priced(body, price):
+            rent_period = None
+        else:
+            rent_period = "monthly" if is_monthly_rental(body, unit, price, title_raw) else "annual"
     area = _float(pi.get("مساحة العقار"))
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None

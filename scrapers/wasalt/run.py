@@ -285,6 +285,19 @@ def _base_additional_info(prop: dict, info: dict) -> list[dict[str, Any]]:
     return out
 
 
+# A published amount of 0 or 1 is wasalt's unset-form default, not a quote. Returns the amount when
+# it is a real published figure, else None. See THE PLACEHOLDER RULE at the rentFreq read below.
+_PLACEHOLDER_AMOUNTS = (0, 1)
+
+
+def _placeholder_free(v: Any) -> Optional[int]:
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return None if n in _PLACEHOLDER_AMOUNTS else n
+
+
 def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -> Optional[dict[str, Any]]:
     info = prop.get("propertyInfo") or {}
     pid = prop.get("id")
@@ -383,12 +396,44 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
     # We now preserve the raw block verbatim. No parsing, no derivation, no behaviour change.
     rent_freq_evidence = None
     rent_is_monthly = False
+    # A PLACEHOLDER IS NOT A PUBLISHED PRICE (owner product rule, 2026-09-05, ops_incident #63/#65).
+    # When the period cannot be asserted truthfully this stays False and rent_period is written NULL
+    # rather than defaulting to "annual" — the third state search_listings_ar already supports.
+    rent_period_known = True
     if is_rent:
         rent_freq = info.get("rentFreq") or {}
         rf_monthly = rent_freq.get("monthly") or {}
         rf_yearly = rent_freq.get("yearly") or {}
         rent_freq_evidence = rent_freq or None
-        if rf_monthly.get("default_freq") and rf_monthly.get("amount"):
+        # ── THE PLACEHOLDER RULE (owner, 2026-09-05) ──────────────────────────────────────────
+        # wasalt's listing form defaults an unset rent to 1, and that 1 is published in the payload
+        # exactly like a real quote. Measured across the whole live fleet on 2026-09-05: of 11,599
+        # active rows carrying rentFreq, exactly 2 have any amount <= 1 (0.017%), and only 2 have a
+        # monthly between 2 and 100. A value of 1 is therefore a SENTINEL, not a price — a statement
+        # about the source's own data, not a judgement about what a property should cost.
+        #
+        # Owner's rule: if one side is clearly the default placeholder and the other is a real
+        # published amount, do not display or derive from the placeholder — preserve the REAL figure
+        # and its REAL period. If both are placeholders there is no published price, so publish none
+        # rather than fabricate one.
+        #
+        # Live example this was written for — WST5892686, a 3,519 m2 commercial tower in Riyadh:
+        # rentFreq.monthly.amount = 1 (default_freq true) beside rentFreq.yearly.amount = 50,000.
+        # The old code took the default and x12'd it to 12, so the card read «1 SAR/month».
+        m_amt = _placeholder_free(rf_monthly.get("amount"))
+        y_amt = _placeholder_free(rf_yearly.get("amount"))
+        _m_sent = rf_monthly.get("amount") is not None
+        _y_sent = rf_yearly.get("amount") is not None
+        if _m_sent and m_amt is None and y_amt is not None:
+            rent_is_monthly = False          # placeholder default, real yearly → keep the real one
+            rent_price = y_amt
+        elif _y_sent and y_amt is None and m_amt is not None:
+            rent_is_monthly = True           # mirror case (0 rows today; keeps the rule symmetric)
+            rent_price = m_amt * 12
+        elif (_m_sent or _y_sent) and m_amt is None and y_amt is None:
+            rent_price = None                # every published amount is a placeholder → assert none
+            rent_period_known = False
+        elif rf_monthly.get("default_freq") and rf_monthly.get("amount"):
             rent_is_monthly = True
             # DELIBERATELY still x12, and deliberately NOT switched to rf_yearly["amount"].
             # Measured on contemporaneous rows (ar snapshot <=48h old, so both endpoints describe the
@@ -481,7 +526,7 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
            if rent_freq_evidence else {}),
         "price_annual": int(rent_price) if (is_rent and rent_price) else None,
         "price_total": int(sale_price) if (not is_rent and sale_price) else None,
-        "rent_period": ("monthly" if rent_is_monthly else "annual") if is_rent else None,
+        "rent_period": (("monthly" if rent_is_monthly else "annual") if rent_period_known else None) if is_rent else None,
         "city": city,
         "neighborhood": info.get("zone") or info.get("address"),
         "title": info.get("title"),
