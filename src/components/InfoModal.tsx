@@ -101,10 +101,16 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
     progress.value = withTiming(1, reduced ? IN_REDUCED : IN);
   }, [progress, reduced]);
 
+  // Scale pinned at 1 on WEB, not just under reduced motion (iOS focus-zoom, 2026-09-05): this card
+  // holds the support form's TextInputs, and iOS Safari decides zoom-on-focus from the EFFECTIVE
+  // text size at focus time. A 0.94-scale entrance renders the 16px inputs at 15.04px for the whole
+  // entrance window — and users tap the field they opened the form to fill immediately, inside that
+  // window — so Safari zoomed the page and never zoomed back (owner report, with screenshot). The
+  // fade keeps the feedback; only the scale had to go. verify-input-font-no-ios-zoom.ts §3 pins this.
   const cardStyle = useAnimatedStyle(
     () => ({
       opacity: progress.value,
-      transform: [{ scale: reduced ? 1 : interpolate(progress.value, [0, 1], [0.94, 1]) }],
+      transform: [{ scale: reduced || IS_WEB ? 1 : interpolate(progress.value, [0, 1], [0.94, 1]) }],
     }),
     [reduced],
   );

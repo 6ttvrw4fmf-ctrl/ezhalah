@@ -431,7 +431,11 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
             rent_is_monthly = True           # mirror case (0 rows today; keeps the rule symmetric)
             rent_price = m_amt * 12
         elif (_m_sent or _y_sent) and m_amt is None and y_amt is None:
-            rent_price = None                # every published amount is a placeholder → assert none
+            # AUTHORITATIVE_NULL, not None — see the aqarcity note: a plain None is DROPPED by
+            # _unknown_must_not_overwrite_known, so a row that previously stored a fabricated
+            # 1x12 = 12 would keep it. The source published only placeholders; that is a settled
+            # fact about the source, not a failed read.
+            rent_price = db.AUTHORITATIVE_NULL
             rent_period_known = False
         elif rf_monthly.get("default_freq") and rf_monthly.get("amount"):
             rent_is_monthly = True
@@ -524,9 +528,13 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
         # question is answerable from the DB forever. Written only when the source sent one.
         **({"source_capture": {"schema": "wasalt.list.v1", "rent_freq": rent_freq_evidence}}
            if rent_freq_evidence else {}),
-        "price_annual": int(rent_price) if (is_rent and rent_price) else None,
+        # AUTHORITATIVE_NULL is deliberately falsy, so it must be selected BEFORE the truthiness
+        # test that follows — otherwise it collapses to a plain None and the guard drops it.
+        "price_annual": (rent_price if isinstance(rent_price, type(db.AUTHORITATIVE_NULL))
+                         else (int(rent_price) if (is_rent and rent_price) else None)),
         "price_total": int(sale_price) if (not is_rent and sale_price) else None,
-        "rent_period": (("monthly" if rent_is_monthly else "annual") if rent_period_known else None) if is_rent else None,
+        "rent_period": ((("monthly" if rent_is_monthly else "annual") if rent_period_known
+                         else db.AUTHORITATIVE_NULL) if is_rent else None),
         "city": city,
         "neighborhood": info.get("zone") or info.get("address"),
         "title": info.get("title"),

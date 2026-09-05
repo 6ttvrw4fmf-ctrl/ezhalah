@@ -964,11 +964,18 @@ export default function Home() {
     opacity: v,
     transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [lift, 0] }) }],
   });
+  // Scale pinned at 1 on WEB (iOS focus-zoom, 2026-09-05): this card holds the city/district and
+  // budget/area TextInputs, and iOS Safari decides zoom-on-focus from the EFFECTIVE text size at
+  // focus time. The 0.965-scale entrance renders the 16px inputs at 15.44px for the whole entrance
+  // window — which replays on EVERY return to this screen (useFocusEffect → playEntrance) — and the
+  // first thing a user does here is tap the city field, inside that window. Safari zoomed and never
+  // zoomed back. Fade + lift keep the entrance; only the scale had to go on web.
+  // verify-input-font-no-ios-zoom.ts §3 pins this.
   const entranceStyle = {
     opacity: entrance,
     transform: [
       { translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [22, 0] }) },
-      { scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.965, 1] }) },
+      { scale: Platform.OS === 'web' ? 1 : entrance.interpolate({ inputRange: [0, 1], outputRange: [0.965, 1] }) },
     ],
   };
   const heroOpacity = heroAnim.interpolate({
