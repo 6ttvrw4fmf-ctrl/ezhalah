@@ -194,7 +194,21 @@ def _image(p: dict, html_text: str) -> list[str]:
     emb = (((p.get("_embedded") or {}).get("wp:featuredmedia") or [{}])[0]).get("source_url")
     if isinstance(emb, str) and emb.startswith("http") and "Screen-Shot" not in emb:
         return [emb]
-    return []
+    # REM stores the gallery photo in its own meta and does not always sync it to WP
+    # featured_media (live 2026-09-05: 47/119 listings have featured_media=0, e.g. posts 1510 and
+    # 1441), so the REST-only read above returns [] while the detail page — already in hand for
+    # rem_fields() — renders the real photo in its Main Slider as
+    # <img class="skip-lazy rem-slider-image" src="…">. That class appears ONLY inside this
+    # listing's own slider (verified: related-listings blocks use different markup; the sole other
+    # uploads on the page are the 3 placeholder-logo sizes), so per-listing binding is safe, and
+    # findall document order IS the slider's gallery order. Same Screen-Shot guard as above: the
+    # placeholder is "Screen-Shot-2025-09-12…" (hyphenated), real photos "Screenshot-2026-…".
+    out: list[str] = []
+    for tag in re.findall(r'<img[^>]*\brem-slider-image\b[^>]*>', html_text):
+        m = re.search(r'src="(https?://[^"]+)"', tag)
+        if m and "Screen-Shot" not in m.group(1) and m.group(1) not in out:
+            out.append(m.group(1))
+    return out
 
 
 def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:

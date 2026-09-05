@@ -348,8 +348,38 @@ def _dd_field(html: str, label: str) -> Optional[str]:
 def _photos(html: str, pid: str) -> list[str]:
     urls: list[str] = []
     seen: set[str] = set()
-    # 2026-07 redesign moved the gallery from /static/properties/ to /media/properties/ — accept both.
-    for u in re.findall(r'(?:src|href)="(/(?:static|media)/properties/[^"]+\.(?:png|jpe?g|webp))"', html, re.I):
+    # Newer detail pages moved the gallery AGAIN (same partial-redesign pattern as the 08-14→09-03
+    # description outage), to /media/property-assets/{PID}/{32-hex}/display?v=N — extensionless, so
+    # the legacy .png/.jpe?g/.webp pass below scored 0 hits on 4/4 sampled live pages (2026-09-05)
+    # despite 17-21 photos each. Read this shape FIRST, pid-anchored so a related-listings block can
+    # never donate its photos. ONLY <img src= and data-gallery-item= (thumbnails live in the latter,
+    # not src/href) — never bare src=, because each video's own /display?v=N URL is embedded as
+    # <source src="..." type="video/mp4"> (live-verified: 200 video/mp4, 97MB) and bare src= would
+    # sweep it into photo_urls. Belt-and-braces: every video asset also emits a poster URL, so its
+    # 32-hex hash is excluded outright. findall document order + seen-dedupe preserves the source's
+    # gallery order (hero <img> equals og:image and comes first — verified on 3MJ6E and QMWAU); do
+    # NOT apply the legacy main.png-first sort to these. Host: the APEX serves these 200 image/*
+    # while www. 308-redirects, so don't reuse BASE (the www host) here.
+    vid_hashes = set(re.findall(
+        r'/media/property-assets/' + re.escape(pid) + r'/([0-9a-f]{32})/poster\?', html))
+    for u, h in re.findall(
+            r'(?:<img[^>]+src|data-gallery-item)="(/media/property-assets/'
+            + re.escape(pid) + r'/([0-9a-f]{32})/display\?v=\d+)"', html):
+        if h in vid_hashes or u in seen:
+            continue
+        seen.add(u)
+        urls.append("https://sadin.com.sa" + u)
+    if urls:
+        # New gallery found → skip the legacy pass entirely: the one legacy reference left on new
+        # pages is the JSON-LD main.png, which IS the hero already captured above.
+        return urls[:30]
+    # 2026-07 redesign moved the gallery from /static/properties/ to /media/properties/ — accept
+    # both. Widened 2026-09-05 to also accept the absolute-URL form (the JSON-LD image is
+    # "https://sadin.com.sa/media/properties/{PID}/main.png" — a leading-"/" requirement missed it),
+    # normalized back to a path so dedupe/filter/prefix behave exactly as before.
+    for u in re.findall(r'(?:src|href)="((?:https?://(?:www\.)?sadin\.com\.sa)?'
+                        r'/(?:static|media)/properties/[^"]+\.(?:png|jpe?g|webp))"', html, re.I):
+        u = re.sub(r'^https?://(?:www\.)?sadin\.com\.sa', '', u)
         if u in seen:
             continue
         seen.add(u)
