@@ -230,7 +230,16 @@ async function main() {
   console.error(`OPEN INCIDENTS NOTED AS PASSING (state untouched): ${noted.length ? noted.join(', ') : 0}`);
   if (fileErrors.length) { console.error('INCIDENT WRITES THAT FAILED:'); fileErrors.forEach((e) => console.error(`  ✗ ${e}`)); }
   if (!c) console.error('INCIDENTS: NOT FILED — no service-role credentials (see the warning above)');
-  console.error(`SURFACES COVERED: ${[...new Set(outcomes.map((o) => o.surface))].length}/${ALLOWED_SURFACES.length}`);
+  // `n/ALLOWED_SURFACES.length` is 8/8 BY CONSTRUCTION — the denominator is the list we chose to
+  // cover, so this ratio can never read anything else and cannot fail. Left as-is it is a false
+  // green: it looks like a coverage score and is really a tautology. Labelled for what it measures,
+  // and printed beside the coverage this suite genuinely does NOT have.
+  console.error(`SURFACES COVERED (logged-out): ${[...new Set(outcomes.map((o) => o.surface))].length}/${ALLOWED_SURFACES.length}`);
+  console.error('SIGNED-IN COVERAGE: NONE — every journey above runs LOGGED OUT (ops_incident #29).');
+  console.error('  Favorites, saved chats, account flows and authenticated persistence have no');
+  console.error('  automated journey at all. Auth is Google + Apple only, so no harness can complete');
+  console.error('  the consent flow; closing this needs a QA identity, which is an owner decision.');
+  console.error('  The line above is logged-out coverage only. It is not a coverage score.');
   console.error('══════════════════════════════════════════════════════════════\n');
 
   if (process.env.GUARDIAN_JSON) console.log(JSON.stringify(outcomes, null, 2));

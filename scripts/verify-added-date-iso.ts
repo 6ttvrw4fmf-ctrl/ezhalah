@@ -108,5 +108,74 @@ check('the «أضيف» chip still renders from listedClean = cleanDate(listing.
       && /\{listedClean \? <Stat icon="calendar-outline" big=\{t\('Added'\)\} small=\{listedClean\} \/> : null\}/.test(CARD));
 check("i18n renders «أضيف» for 'Added'", /'Added':\s*'أضيف'/.test(I18N));
 
+// ── mutation proofs (added 2026-09-04 by routine #10, leaving the grandfather list) ─────────────
+//
+// This barrier already EXECUTES the shipped cleanDate rather than grepping for it — the §0.1 audit
+// entry calling it a source-text tripwire is stale, and the read above confirms it. What it lacked
+// was the other half: nobody had ever watched it go red. So the defect is re-introduced into the
+// REAL ResultCard source, the mutant is re-lifted and re-executed, and the same production rows are
+// re-run through it. `build()` is the same lift the healthy path uses, so a proof cannot diverge
+// from what is actually being tested.
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${label}`); return; }
+  mutFail++;
+  console.error(`FAIL  (mutation) BLIND to ${label}`);
+};
+
+const build = (fnSource: string): ((raw?: string) => string) => {
+  const b = fnSource
+    .replace('const cleanDate = (raw?: string): string =>', '(raw) =>')
+    .replace(/;$/, '');
+  return new Function('t', `return ${b};`)((k: string) => (k === 'recently' ? AR_RECENTLY : k)) as
+    (raw?: string) => string;
+};
+
+/** The regression, stated as a predicate over a mutated cleanDate: does any real row lose its date? */
+const dropsASourceDate = (fn: (raw?: string) => string) => ROWS.some((r) => fn(r.raw) === '');
+
+const ISO_ROWS = ROWS.filter((r) => r.raw.includes('-'));
+
+// M1 — the original defect verbatim: delete the ISO branch and every aqarcity/eaqartabuk/eastabha
+// date disappears from the card again.
+const noIso = srcMatch[0].replace(/const iso = raw\.match[\s\S]*?if \(iso\) return[^;]*;/, '');
+mustCatch('the ISO-8601 branch being deleted — the 2,544-listing defect, verbatim',
+  noIso !== srcMatch[0] && dropsASourceDate(build(noIso)));
+
+// M2 — the subtler shape, and the one a "nothing was dropped" check cannot see: drop the ISO branch
+// AND widen the length tail, so an ISO stamp comes back as the RAW 25-character timestamp. Nothing
+// is empty, so the dropped-date predicate alone stays green — the card would simply render
+// «2025-09-21T20:33:43+03:00» at the user. Only the per-row EXPECTED-VALUE assertions catch it,
+// which is why this barrier pins values and not just non-emptiness.
+const rawTail = noIso.replace('return raw.length <= 12 ? raw : \'\';', 'return raw;');
+const rawTailFn = build(rawTail);
+mustCatch('an ISO stamp leaking to the card RAW instead of being reordered to DD/MM/YYYY',
+  rawTail !== noIso &&
+  ISO_ROWS.length > 0 &&
+  ISO_ROWS.every((r) => rawTailFn(r.raw) === r.raw && r.raw !== r.expect) &&
+  !dropsASourceDate(rawTailFn));
+
+// M3 — the timezone rule: parsing the stamp instead of reading it textually shifts the day the
+// SOURCE published for any viewer west of Saudi. Proven against the check's own predicate.
+const TZ = /new Date\s*\(|Date\.parse|toLocaleDateString/;
+mustCatch('cleanDate starting to parse the stamp through a Date (viewer-timezone drift)',
+  TZ.test('const d = new Date(raw); return d.toLocaleDateString();'));
+mustCatch('…while the shipped textual implementation is NOT flagged (not vacuously red)',
+  !TZ.test(codeOnly));
+
+// M4 — the anchor itself. If the signature is reformatted, the lift finds nothing and this barrier
+// must fail loudly rather than silently testing an empty function.
+mustCatch('the cleanDate signature drifting out from under the lift',
+  CARD.replace('const cleanDate = (raw?: string): string => {', 'const cleanDate = (raw) => {')
+      .match(/const cleanDate = \(raw\?: string\): string => \{[\s\S]*?\n {2}\};/) === null);
+
+// CONTROL — the shipped function still returns every real production date.
+mustCatch('the shipped cleanDate passing all 9 frozen production rows (the proof is not vacuous)',
+  !dropsASourceDate(cleanDate) && ROWS.every((r) => cleanDate(r.raw) === r.expect));
+
+if (mutFail) {
+  console.error(`\n${mutFail} guard(s) are BLIND to their own defect`);
+  process.exit(1);
+}
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);

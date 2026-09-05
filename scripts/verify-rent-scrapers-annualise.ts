@@ -63,15 +63,64 @@ const LABELS_MONTHLY = /rent_period\s*=[^\n]*["']monthly["']|["']rent_period["']
 // demanded "annualiz/s" and so silently dropped rent_period_and_annual, flagging aouj for using a
 // converter this barrier is supposed to endorse.
 const ANNUALISING_CALL = /\b[A-Za-z_]*annual[A-Za-z_]*\s*\(/;
-export const annualisesNearPriceAnnual = (src: string): boolean => {
-  if (ANNUALISING_CALL.test(src)) return true;
-  const lines = src.split('\n');
-  return lines.some((l, i) =>
-    /price_annual/.test(l) && lines.slice(Math.max(0, i - 3), i + 4).some((w) => /\*\s*12\b/.test(w)));
+
+// STRIP PYTHON COMMENTS AT THE READER (added 2026-09-04 by routine #10 — two proven holes).
+//
+// HOLE 1, the comment dodge. `# TODO: call annualize_rent(price, period) here one day` satisfied
+// ANNUALISING_CALL, so the muktamel defect verbatim plus that one comment line read as CONVERTED and
+// was never flagged. Watched: offends(<defect + that comment>) returned false. The barrier's own
+// mutation claimed to cover this ("the converter mentioned in a COMMENT is not a call") but used a
+// mention with NO parentheses — the one form the regex already rejected — so it proved the case that
+// was never in doubt and passed straight over the case that was.
+//
+// HOLE 2, the unwindowed name. ANNUALISING_CALL was tested against the WHOLE FILE while the ×12 form
+// was windowed to the write — and the file's own comment gives the reason windowing is required: a
+// match far from `price_annual` "would be satisfied by an unrelated multiplication … a predicate
+// loose enough to pass the very defect it exists to catch". That argument applies verbatim to a
+// converter call sitting in the SALE branch, or in a helper for another field. Watched:
+// offends(<defect + an unrelated `annual_report_page()` 80 lines away>) returned false.
+//
+// MEASURED BEFORE TIGHTENING, so this cannot be a barrier that cries wolf: all 13 monthly-labelling
+// scrapers in the fleet carry their annualisation evidence WITHIN the ±3-line window already.
+const stripPyComments = (src: string): string =>
+  src.split('\n').map((l) => l.replace(/(^|[^'"])#.*$/, '$1')).join('\n');
+
+/**
+ * The annualisation evidence must sit next to the price_annual write — or next to the assignment of
+ * the variable that write reads.
+ *
+ * ONE HOP, ON PURPOSE. Windowing on the write alone is too tight for a real, correct shape: wasalt
+ * computes `rent_price = int(rf_monthly["amount"]) * 12` at line 404 and writes
+ * `"price_annual": int(rent_price) …` at line 482, 78 lines later. Tightening to the write alone
+ * flagged wasalt, which is CORRECT code — so the window follows the value instead of widening to
+ * accept anything. A stray `* 12` still proves nothing unless it lands on the assignment of the very
+ * identifier the write consumes.
+ *
+ * CEILING: one hop, textual. A value laundered through two intermediate variables would read as
+ * unconverted (a false RED — the safe direction: it demands a human look, it never waves a defect
+ * through). If a scraper ever legitimately needs two hops, follow the chain — do not widen the
+ * window, and do not add an exemption.
+ */
+export const annualisesNearPriceAnnual = (raw: string): boolean => {
+  const lines = stripPyComments(raw).split('\n');
+  const near = (i: number) =>
+    lines.slice(Math.max(0, i - 3), i + 4).some((w) => ANNUALISING_CALL.test(w) || /\*\s*12\b/.test(w));
+
+  const writes = lines.map((l, i) => [l, i] as const).filter(([l]) => /price_annual/.test(l));
+  if (writes.some(([, i]) => near(i))) return true;
+
+  // One hop: the identifiers the write reads, and where each is assigned.
+  const feeds = new Set(writes.flatMap(([l]) => l.match(/[A-Za-z_]\w*/g) ?? []));
+  feeds.delete('price_annual');
+  return lines.some((l, i) => {
+    const assigned = /^\s*([A-Za-z_]\w*)\s*=[^=]/.exec(l)?.[1];
+    return !!assigned && feeds.has(assigned) && near(i);
+  });
 };
 
 /** A scraper that writes a monthly rent_period but never routes through the fleet converter. */
-export const offends = (src: string): boolean => LABELS_MONTHLY.test(src) && !annualisesNearPriceAnnual(src);
+export const offends = (raw: string): boolean =>
+  LABELS_MONTHLY.test(stripPyComments(raw)) && !annualisesNearPriceAnnual(raw);
 
 // ── 1. WIRING, across every scraper in the tree. ──────────────────────────────────────────────
 const runs = readdirSync(SCRAPERS, { withFileTypes: true })
@@ -81,7 +130,7 @@ const runs = readdirSync(SCRAPERS, { withFileTypes: true })
 check(`the scan still sees the fleet (${runs.length} scrapers with a run.py)`, runs.length >= 20,
   `found only ${runs.length} — the scan has gone blind`);
 
-const monthly = runs.filter((r) => LABELS_MONTHLY.test(r.src));
+const monthly = runs.filter((r) => LABELS_MONTHLY.test(stripPyComments(r.src)));
 check(`at least one scraper labels a monthly period (${monthly.length} do) — the rule has subjects`,
   monthly.length > 0);
 
@@ -132,10 +181,24 @@ mustCatch('nothing — a scraper that labels monthly AND converts is not flagged
 // A scraper that never labels a monthly period is out of scope entirely.
 mustCatch('nothing — a Buy-only scraper with no rent_period at all is out of scope',
   !offends('price_total = price'));
-// The converter mentioned in a COMMENT is not a call.
+// The converter mentioned in a COMMENT is not a call. BOTH forms, because only the second one was
+// ever in doubt: the original mutation used a mention with no parentheses, which ANNUALISING_CALL
+// already rejected, so it proved nothing and the parenthesised form walked straight through.
 mustCatch('a scraper that only MENTIONS the converter in prose',
-  offends('rent_period = "monthly"\n# TODO: call annualize_rent here one day\nprice_annual = price')
-  === false ? false : true);
+  offends('rent_period = "monthly"\n# TODO: call annualize_rent here one day\nprice_annual = price'));
+mustCatch('the comment dodge — a converter named WITH PARENTHESES inside a Python comment',
+  offends('rent_period = "monthly"\n# TODO: call annualize_rent(price, period) here one day\nprice_annual = price'));
+mustCatch('a converter named in a trailing comment on the write line itself',
+  offends('rent_period = "monthly"\nprice_annual = price  # should be annualize_rent(price)'));
+// The windowing must bind the CALL form exactly as it binds the ×12 form.
+mustCatch('a real converter call that is nowhere near the price_annual write (a SALE-branch call)',
+  offends(`def annual_report_page():\n    pass\n${'\n'.repeat(80)}rent_period = "monthly"\nprice_annual = price`));
+
+// The one-hop rule, both directions — wasalt's real shape, and the same shape with the ×12 removed.
+mustCatch('nothing — a ×12 on the ASSIGNMENT that feeds the write counts, however far away (wasalt)',
+  !offends(`rent_period = "monthly"\nrent_price = int(amount) * 12\n${'\n'.repeat(60)}"price_annual": int(rent_price),`));
+mustCatch('the same distant shape with the ×12 REMOVED (the hop must carry evidence, not just exist)',
+  offends(`rent_period = "monthly"\nrent_price = int(amount)\n${'\n'.repeat(60)}"price_annual": int(rent_price),`));
 
 mustCatch('a stray unrelated `* 12` standing in for a real annualisation',
   offends('rent_period = "monthly"\nPAGE = n * 12\n\n\n\n\n\nprice_annual = price'));

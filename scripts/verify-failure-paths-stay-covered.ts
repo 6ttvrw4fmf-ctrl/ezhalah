@@ -59,6 +59,12 @@ export const FAILURE_PATHS: ReadonlyArray<{ fn: string; module: string; barrier:
 // deliberate, reviewable act — not an edit to a list.
 const REGISTRY_FLOOR = 4;
 
+// Pure, so the mutation proof below applies THE CHECK'S OWN predicate to a shrunken registry. The
+// first version proved the floor with `mustCatch('…', (REGISTRY_FLOOR - 1) < REGISTRY_FLOOR)` — a
+// literal `3 < 4`, true for every possible value of every variable, which is `mustCatch('…', true)`
+// wearing arithmetic. It would have stayed green if the check below had been deleted outright.
+export const belowFloor = (n: number) => n < REGISTRY_FLOOR;
+
 // A barrier "injects a failure" if it constructs one. These are the shapes the five reference
 // implementations actually use: an error-shaped result (supabase-js never throws), a rejected
 // promise, a thrown error, or one of the repo's own failure sentinels.
@@ -104,7 +110,7 @@ const readOr = (p: string): string | null => {
 console.log('\nFailure paths — a failed fetch must never be rendered as an empty answer\n');
 
 check(`the registry has not shrunk (${FAILURE_PATHS.length} >= ${REGISTRY_FLOOR})`,
-  FAILURE_PATHS.length >= REGISTRY_FLOOR,
+  !belowFloor(FAILURE_PATHS.length),
   'a failure path stopped being watched; removing one is a reviewable act, not a list edit');
 
 const problems = coverageProblems(FAILURE_PATHS, readOr);
@@ -143,7 +149,9 @@ mustCatch('the module itself disappearing',
   coverageProblems([ok], (p) => (p === 'm.ts' ? null : readGood(p))).length > 0);
 mustCatch('a healthy entry still reading as covered (the predicate is not vacuously red)',
   coverageProblems([ok], readGood).length === 0);
-mustCatch('the registry being shrunk below its floor', (REGISTRY_FLOOR - 1) < REGISTRY_FLOOR);
+mustCatch('the registry being shrunk below its floor', belowFloor(FAILURE_PATHS.length - 1));
+mustCatch('…while the registry as it actually stands is NOT flagged (the floor is not vacuously red)',
+  !belowFloor(FAILURE_PATHS.length));
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }

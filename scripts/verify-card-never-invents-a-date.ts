@@ -35,7 +35,15 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 
 // Shims for what finalize() closes over. None of them touches `listed`; they exist so the real
-// mapping can run. `cleanDate` is the ONE that must stay honest, so it is lifted for real below.
+// mapping can run.
+//
+// NO cleanDate SHIM (removed 2026-09-04 by routine #10). The prelude used to carry a nine-line
+// HAND-COPIED reimplementation of ResultCard's cleanDate, above a header line claiming it was "lifted
+// for real below". Neither half was true: it was a copy, not a lift, and finalize() never calls it —
+// `listed: r.date_added ?? ''` is the whole mapping, and cleanDate appears in remote.ts only inside a
+// comment. So the copy was dead weight that could drift from the shipped function while reading like
+// coverage of it. The real cleanDate IS executed, by verify-added-date-iso.ts, which lifts it out of
+// ResultCard.tsx and runs it against frozen production rows. One copy, in one place, that runs.
 const PRELUDE = `
 type Listing = Record<string, any>;
 type Deal = 'Buy' | 'Rent';
@@ -47,15 +55,6 @@ const gathernDistrictFallback = () => null;
 const isDerivedTotal = () => false;
 const isJunkLocationToken = () => false;
 const listingPriceString = () => '';
-const cleanDate = (raw?: string): string => {
-  if (!raw) return '';
-  const m = raw.match(/(\\d{1,2}\\/\\d{1,2}\\/\\d{4})/);
-  if (m) return m[1];
-  const iso = raw.match(/^\\s*(\\d{4})-(\\d{2})-(\\d{2})(?!\\d)/);
-  if (iso) return \`\${iso[3]}/\${iso[2]}/\${iso[1]}\`;
-  if (/^\\s*recently\\s*$|مؤخر/.test(raw)) return 'RECENTLY';
-  return raw.length <= 12 ? raw : '';
-};
 `;
 
 const load = async (source: string) => {
@@ -119,7 +118,11 @@ check('ResultCard still hides the chip entirely when the date is empty (this fix
   /\{listedClean \?/.test(card));
 check('…and cleanDate still maps a «recently»/«مؤخر» string to a VISIBLE chip — so the card cannot ' +
       'tell a fabricated sentinel from a real source claim, which is why the mapping must not make one',
-  /recently\\s\*\$\|مؤخر/.test(card) || /مؤخر/.test(card));
+  // The first alternative here used to be /recently\\s\*\$\|مؤخر/ — an escaped literal matching the
+  // TEXT `recently\s*$|مؤخر`, which no source file can contain. It could never match, so the whole
+  // check rested entirely on the `||` behind it. Assert what is actually meant: cleanDate maps BOTH
+  // sentinels to a visible chip, which is exactly why the mapping layer must never manufacture one.
+  /recently/.test(card) && /مؤخر/.test(card));
 
 check('npm test runs this guard', npmTestRuns(ROOT, 'verify-card-never-invents-a-date'),
   'the guard is inert');

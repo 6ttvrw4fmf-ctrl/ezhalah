@@ -115,6 +115,63 @@ console.log('\n── B. a probe that did not answer is not a zero ──');
     'a genuine zero still drops the step');
 }
 
+// ── MUTATION PROOFS (added 2026-09-04 by routine #10, leaving the grandfather list) ──────────────
+//
+// Section A2 already EXECUTES the shipped toLatinDigits. A1, A3 and B are source text over three
+// modules, and none of them had ever been watched to fail. Each mutant below re-introduces the real
+// defect into the REAL source and asserts this file's own predicate flips — plus a control, so an
+// over-broad predicate cannot pass by being red at everything.
+console.log('\n── mutation proofs ──');
+const mustCatch = (label: string, caught: boolean) => check(caught, `MUTATION catches ${label}`,
+  'the mutant survived — this predicate cannot tell the defect from health');
+
+// A. DIGITS — the executed half. JS \d is ASCII-only, so a latinizer that drops a script is silent.
+mustCatch('a latinizer that folds Arabic-Indic ٠-٩ but MISSES the Persian ۰-۹ range',
+  ((fake: (s: string) => string) => fake('۳ غرف') !== toLatinDigits('۳ غرف'))
+    ((t) => t.replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))));
+mustCatch('a latinizer that extracts the digits and THROWS THE SENTENCE AWAY (the digitsOnly mix-up ' +
+  'this whole file exists to prevent — the city and type dictionaries would stop matching)',
+  ((fake: (s: string) => string) => {
+    const ar = 'ابغى شقة للايجار في الرياض ٣ غرف';
+    return !/[أ-ي]/.test(fake(ar)) && /[أ-ي]/.test(toLatinDigits(ar));
+  })((t) => (t.match(/[0-9٠-٩]/g) ?? []).join('')));
+
+// A1. THE ROOT CAUSE — one name, one meaning. A second export of toLatinDigits makes importing the
+// WRONG one possible again, which is exactly how the original defect happened.
+const dupExport = /export\s+(?:async\s+)?function\s+toLatinDigits\b/;
+mustCatch('a SECOND module re-exporting toLatinDigits (the ambiguity restored)',
+  dupExport.test(`${read('src/data/search.ts')}\nexport function toLatinDigits(s: string) { return s; }`)
+  && !dupExport.test(read('src/data/search.ts')));
+
+// A3. WIRING — parseQuery must latinize AT THE DOOR. Reading the raw text instead is the defect.
+const agentTs = stripComments(read('src/data/agent.ts'));
+const DOOR = /export function parseQuery\(text: string\): SearchQuery \{\s*const src = toLatinDigits\(text\);/;
+const rawRead = agentTs.replace('const src = toLatinDigits(text);', 'const src = text;');
+mustCatch('parseQuery reading the RAW text instead of latinizing at the door',
+  rawRead !== agentTs && !DOOR.test(rawRead) && DOOR.test(agentTs));
+
+// B2. UNKNOWN IS NOT NO — the structural check. The defect is `if (n === 'unknown') continue;`, which
+// DELETES a committed answer because a probe timed out; both identifiers survive it, which is why the
+// predicate asserts the keep is the BODY of the unknown branch rather than merely co-located.
+const agentTsx = stripComments(read('src/app/agent.tsx'));
+const fnIdx = agentTsx.indexOf('const revalidateStepsAfter');
+const body = agentTsx.slice(fnIdx, agentTsx.indexOf('ageFlowStepsRef.current = [...steps.slice(0, from + 1)', fnIdx));
+const KEEPS = /if \(n === 'unknown'\) \{[^}]*kept\.push\(st\)/;
+const dropsUnknown = body.replace(/if \(n === 'unknown'\) \{[^}]*kept\.push\(st\);?/,
+  "if (n === 'unknown') continue;");
+mustCatch("an UNDETERMINED probe DELETING a committed answer (`if (n === 'unknown') continue;`)",
+  dropsUnknown !== body && !KEEPS.test(dropsUnknown) && dropsUnknown.includes("n === 'unknown'"));
+mustCatch('the old null-collapsing guard coming back (a null count treated as a real zero)',
+  /if \(n == null \|\| n <= 0\) continue;/.test(`${body}\n  if (n == null || n <= 0) continue;`)
+  && !/if \(n == null \|\| n <= 0\) continue;/.test(body));
+mustCatch('a genuine ZERO no longer dropping the step (the rule must still cut real emptiness)',
+  !/if \(n <= 0\) continue;/.test(body.replace('if (n <= 0) continue;', 'if (false) continue;')));
+
+// CONTROL — the shipped source satisfies every one of them.
+mustCatch('CONTROL the shipped code passes all four wiring predicates (not vacuously red)',
+  DOOR.test(agentTs) && KEEPS.test(body) && /if \(n <= 0\) continue;/.test(body)
+  && !dupExport.test(read('src/data/search.ts')));
+
 console.log(failed === 0
   ? '\n✅ verify-af-unknown-is-not-no-and-digits-are-script-blind: all checks passed.'
   : `\n❌ verify-af-unknown-is-not-no-and-digits-are-script-blind: ${failed} check(s) failed.`);

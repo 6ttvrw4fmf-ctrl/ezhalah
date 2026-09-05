@@ -71,6 +71,8 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'THERC',        i18nKey: 'The Right Choice Real Estate',            logo: require('../../assets/images/therc.png') },
   { name: 'Rawasi Dark',  i18nKey: 'Rawasi Dark Real Estate',                 logo: require('../../assets/images/rawasidark.png') },
   { name: 'Aouj',         i18nKey: 'Aouj Estates',                            logo: require('../../assets/images/aouj.png') },
+  { name: 'Alta',           i18nKey: 'Alta Real Estate Services',      logo: require('../../assets/images/alta.png') },
+  { name: 'Shmou Al Shmal', i18nKey: 'Shmou Al Shmal Real Estate',     logo: require('../../assets/images/shmoualshmal.png') },
   { name: 'Awal',         i18nKey: 'Awal United for Real Estate',             logo: require('../../assets/images/awal.jpg') },
 ];
 
@@ -93,6 +95,8 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['erapulse', 'Era Pulse'], ['pulse', 'Era Pulse'], ['nowaisiry', 'Al Nowaisiry'], ['october', '1 October'],
   ['muktamel', 'Muktamel'], ['arkaan', 'Arkaan'],
   ['abralosol', 'Abralosol'], ['therc', 'THERC'], ['rawasidark', 'Rawasi Dark'], ['aouj', 'Aouj'],
+  ['alta', 'Alta'],
+  ['shmoualshmal', 'Shmou Al Shmal'],
   ['awal', 'Awal'],
   ['aqar', 'Aqar'],
 ];

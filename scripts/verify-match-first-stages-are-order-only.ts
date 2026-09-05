@@ -67,18 +67,44 @@ const REGISTRY: Stage[] = [
 // ── DISCOVERY: is the registry complete? ──────────────────────────────────────────────────────
 // A post-match stage has the shape `(…: X[], …): X[]`. Anything matching that in the result path
 // and not registered is an unguarded stage.
-const SHAPE = /^(?:export )?function ([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?\(([^)]*)\)\s*:\s*([A-Za-z_][A-Za-z0-9_]*(?:<[^>]*>)?\[\])\s*\{/;
-const found: string[] = [];
-for (const file of [SEARCH, DIVERSITY]) {
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
-    const m = SHAPE.exec(line);
+// TWO SHAPES, AND PARAMS MAY CONTAIN PARENTHESES (widened 2026-09-04 by routine #10).
+//
+// The first version matched only `function name(…)` with a parameter list containing NO `)`, which
+// made the DISCOVERY half — the entire reason this barrier says it exists ("a NEW stage added
+// tomorrow … would be completely unguarded") — blind to the two most likely ways a new stage gets
+// written here:
+//   * an arrow const: `export const preferListingsWithPhotos = (rows: Listing[]): Listing[] => {`
+//     was invisible, and that is this codebase's dominant declaration style;
+//   * a callback parameter: `[^)]*` cannot cross the `)` in `key: (x: T) => string`, so the REAL,
+//     ALREADY-REGISTERED `naturalSpread<T>(items: T[], key: (x: T) => string): T[]` was never
+//     discovered either. Measured: discovery reported 7 stages for a registry of 8, and the
+//     `found.length >= 7` floor was sitting exactly on that hole rather than exposing it.
+// Widened and re-measured: discovery now finds all 8 registered stages and no unregistered ones, so
+// the floor rises to the real number.
+const FN_SHAPE = /^(?:export )?function ([A-Za-z_]\w*)(?:<[^>]*>)?\((.*)\)\s*:\s*([A-Za-z_]\w*(?:<[^>]*>)?\[\])\s*\{/;
+const ARROW_SHAPE = /^(?:export )?const ([A-Za-z_]\w*)\s*=\s*(?:<[^>]*>)?\((.*)\)\s*:\s*([A-Za-z_]\w*(?:<[^>]*>)?\[\])\s*=>/;
+const SHAPES = [FN_SHAPE, ARROW_SHAPE];
+
+/** The declared name of a post-match stage on this line, or null. Pure, so a mutant can be fed in. */
+export function stageOnLine(line: string): string | null {
+  for (const re of SHAPES) {
+    const m = re.exec(line);
     if (!m) continue;
     const [, name, params, ret] = m;
     // The first parameter must be an array of the SAME type the function returns. `string[]` helper
-    // builders (budgetLines, notes, …) take a query, not a list, so they never match.
-    const firstParamType = (params.split(',')[0] ?? '').split(':').slice(1).join(':').trim();
-    if (firstParamType !== ret) continue;
-    found.push(name);
+    // builders (budgetLines, notes, …) take a query, not a list, so they never match. Split on the
+    // top-level comma only, so a callback parameter does not truncate the first type.
+    const firstParamType = (params.split(/,(?![^(]*\))/)[0] ?? '').split(':').slice(1).join(':').trim();
+    if (firstParamType === ret) return name;
+  }
+  return null;
+}
+
+const found: string[] = [];
+for (const file of [SEARCH, DIVERSITY]) {
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    const name = stageOnLine(line);
+    if (name) found.push(name);
   }
 }
 
@@ -90,10 +116,10 @@ check(unregistered.length === 0,
   `result list must declare whether it is a permutation or a subset, and be proven never to ` +
   `introduce a listing the match did not produce. Add it to REGISTRY in this file.`);
 
-check(found.length >= 7,
-  `discovery still sees the result path (${found.length} stages)`,
-  `discovery found only ${found.length} stages — the scan has stopped matching (a reformat, a moved ` +
-  `file, or a signature style change) and this guard is now blind`);
+check(found.length >= REGISTRY.length,
+  `discovery still sees the whole result path (${found.length} stages, registry holds ${REGISTRY.length})`,
+  `discovery found only ${found.length} of ${REGISTRY.length} registered stages — the scan has stopped ` +
+  `matching (a reformat, a moved file, or a signature style change) and this guard is now partly blind`);
 
 // ── EXECUTION: run each stage and compare sets by id ──────────────────────────────────────────
 const PRELUDE = `
@@ -186,8 +212,20 @@ for (const stage of REGISTRY) {
 
 // The one thing execution cannot show: rankResults must never REACH for rows. A stage that fetches
 // can introduce a listing the match never produced no matter how well it permutes what it was given.
+// BOUNDED BY THE REAL TERMINATOR, NOT BY A FIXED 1,200 CHARACTERS (hardened 2026-09-04, routine #10).
+// Measured honestly: rankResults is 1,038 characters today, so the old fixed window did cover the
+// whole function — this was NOT a live blindness, and nothing slipped past it. It was correct by
+// luck. The window is a constant and the function is not: the day rankResults grows past 1,200 chars,
+// the check silently starts reading a prefix and says nothing about the rest. The body is now bounded
+// by its own terminator — a `}` in column 0 — and the slice ASSERTS it found one, so a reformat fails
+// loudly here instead of quietly shrinking the window.
 const rankSrc = readFileSync(SEARCH, 'utf8');
-const rankBody = rankSrc.slice(rankSrc.indexOf('function rankResults('), rankSrc.indexOf('function rankResults(') + 1200);
+const rankStart = rankSrc.indexOf('function rankResults(');
+const rankEnd = rankSrc.indexOf('\n}\n', rankStart);
+check(rankStart > -1 && rankEnd > rankStart,
+  `rankResults body located by its real bounds (${rankEnd - rankStart} chars, not a fixed window)`,
+  'rankResults could not be bounded — the no-fetch check below would be reading an arbitrary slice');
+const rankBody = rankSrc.slice(rankStart, rankEnd > rankStart ? rankEnd : rankStart + 1200);
 const REACHES = /await |fetch\(|supabase|\brpc\(|pools\./;
 check(!REACHES.test(rankBody),
   'rankResults performs no fetch — it can only reorder what the match handed it',
@@ -215,9 +253,29 @@ mustCatch('a subset stage legitimately returning a page — this must NOT be fla
   violates('subset', SAMPLE, SAMPLE.slice(0, 10)) === null);
 mustCatch('a ranking stage that starts fetching its own rows',
   REACHES.test('  const extra = await supabase.rpc(\'more_listings_ar\', {});'));
-mustCatch('a new unregistered X[] → X[] stage appearing in the result path',
-  SHAPE.test('function preferListingsWithPhotos(rows: Listing[]): Listing[] {') &&
-  !registered.has('preferListingsWithPhotos'));
+// DISCOVERY, proven in every declaration style a new stage could plausibly use. The original proof
+// tested only the `function` form — the one form the old regex already matched — so it passed while
+// discovery was blind to arrow consts and to callback parameters.
+for (const [style, decl] of [
+  ['a plain function', 'function preferListingsWithPhotos(rows: Listing[]): Listing[] {'],
+  ['an exported arrow const', 'export const preferListingsWithPhotos = (rows: Listing[]): Listing[] => {'],
+  ['an arrow const', 'const preferListingsWithPhotos = (rows: Listing[]): Listing[] => {'],
+  ['a stage taking a callback', 'function preferListingsWithPhotos(rows: Listing[], key: (x: Listing) => string): Listing[] {'],
+] as const) {
+  mustCatch(`a new unregistered stage declared as ${style}`,
+    stageOnLine(decl) === 'preferListingsWithPhotos' && !registered.has('preferListingsWithPhotos'));
+}
+mustCatch('…while a BUILDER that changes type is still not mistaken for a stage (no false alarm)',
+  stageOnLine('function pool(rows: Row[]): Listing[] {') === null);
+mustCatch('…and the callback-parameter shape that was silently missed is now a REAL discovery ' +
+  '(naturalSpread, already in the registry, is found by the scan instead of only by the registry)',
+  found.includes('naturalSpread'));
+// The bound is real, and it grows with the function instead of stopping at a constant: a fetch
+// appended to the ACTUAL body — i.e. rankResults having grown — is still seen.
+mustCatch('a fetch appended to the real rankResults body, wherever the function grows to',
+  REACHES.test(`${rankBody}\n  const extra = await supabase.rpc('more_listings_ar', {});`));
+mustCatch('…and the bound is the function\'s own terminator, not a fixed window',
+  rankEnd > rankStart && rankSrc.slice(rankEnd, rankEnd + 3) === '\n}\n');
 
 console.log(
   'match-first: the eligible set is decided by matching, and every stage after it may reorder\n' +

@@ -100,30 +100,36 @@ check('WIRING startRefine is no longer reachable from an UNDETERMINED plan',
   !/if \(fallbackToRefine\) startRefine\(q\);/.test(agent) && /mayAssertNothingToNarrow\(verdict\)\) startRefine\(q\)/.test(agent));
 
 // ── 6. MUTATION PROOFS — each way of reintroducing the bug must be caught ────────────────────────
-console.log('\n── mutation proofs ──');
+//
+// These were written as `check('MUT-n …', …)`, which the mutation-proof ratchet cannot recognise, so
+// this barrier sat on the grandfather list despite carrying real proofs. Renamed to the recognised
+// helper and, more importantly, EXTENDED below: the WIRING half (section 5) is the part of this file
+// that is source-text, and none of it had ever been watched to fail. Each wiring mutant re-introduces
+// the collapse into the REAL src/ source and asserts this file's own predicate flips.
+const mustCatch = (label: string, caught: boolean) => check(`MUTATION ${label}`, caught);
 {
   // M1: the original defect — treat a failed probe as an answer.
   const collapsed = (useful: number, _failed: boolean) => (useful > 0 ? 'useful' : 'known-empty');
-  check('MUT-1 collapsing unknown into known-empty is DETECTED',
+  mustCatch('MUT-1 collapsing unknown into known-empty is DETECTED',
     collapsed(0, true) !== probeVerdict(0, true) && probeVerdict(0, true) === 'unknown');
   // M2: letting an undetermined verdict assert "nothing to narrow".
   const lax = (_v: string) => true;
-  check('MUT-2 a permissive mayAssertNothingToNarrow is DETECTED',
+  mustCatch('MUT-2 a permissive mayAssertNothingToNarrow is DETECTED',
     lax('unknown') !== mayAssertNothingToNarrow('unknown'));
   // M3: opening an empty card on unknown.
   const eager = (v: string) => v !== 'known-empty';
-  check('MUT-3 opening AF on an undetermined batch is DETECTED',
+  mustCatch('MUT-3 opening AF on an undetermined batch is DETECTED',
     eager('unknown') !== mayOpenInterview('unknown'));
   // M4: an unbounded retry loop.
   const unbounded = (v: string, _a: number) => v === 'unknown';
-  check('MUT-4 an unbounded retry is DETECTED',
+  mustCatch('MUT-4 an unbounded retry is DETECTED',
     [0,1,2,3].filter((a) => unbounded('unknown', a)).length !== [0,1,2,3].filter((a) => shouldRetryProbes('unknown', a)).length);
   // M5: a sentinel that any object satisfies.
   const loose = (v: unknown) => !!v && typeof v === 'object';
-  check('MUT-5 a sentinel test that matches ANY object is DETECTED',
+  mustCatch('MUT-5 a sentinel test that matches ANY object is DETECTED',
     loose({ cnt_total_base: 0 }) !== isProbeFailure({ cnt_total_base: 0 }));
   // CONTROL: the real implementations are not flagged by their own mutation tests.
-  check('CONTROL the shipped rule still behaves correctly',
+  mustCatch('CONTROL the shipped rule still behaves correctly',
     probeVerdict(0, true) === 'unknown' && probeVerdict(0, false) === 'known-empty'
     && !mayAssertNothingToNarrow('unknown') && !mayOpenInterview('unknown'));
 }
@@ -164,6 +170,100 @@ console.log('\n── mutation proofs ──');
     !/if \(jOpened && !jAnswered\)/.test(unconditional));
   const gutted = jBlock.replace(/jFinal < jStart/g, 'true');
   check('MUTATION deleting [J]\u2019s narrowing rule is caught', !/jFinal < jStart/.test(gutted));
+}
+
+// ── 7. THE WIRING, PROVEN — AND COUNTED (added 2026-09-04 by routine #10) ────────────────────────
+//
+// Section 5 asserts in source text that the shipped code consults the rule. Text is the only tool for
+// "does this call site exist", but a text predicate nobody has watched fail is the shape that stayed
+// green through all five of the 2026-09-04 defects — so each one is re-applied here to the REAL
+// module with the collapse re-introduced.
+//
+// DOING THAT FOUND A LIVE BLINDNESS, which is why this section counts instead of matching. Three of
+// section 5's predicates are `.test()` calls over patterns that occur at SEVERAL call sites —
+// `'timedOut' in result) return PROBE_FAILED;` appears 3×, `if (error) return PROBE_FAILED;` 3×, the
+// guidedOptions honest-shape 2×. `.test()` is satisfied by ANY ONE of them, so collapsing two of the
+// three timeout handlers back to `return null` left every one of those checks GREEN. Watched: the
+// first three wiring mutants below survived until this was fixed. That is precisely the failure the
+// ratchet's own header names — "a mutation proof that silently stopped failing when a second call
+// site appeared" — reached from the other direction.
+//
+// The repair is COUNT over SHAPE: every timeout handler must return the sentinel, not just one.
+console.log('\n── wiring, counted (the defect, re-introduced into the real source) ──');
+const countOf = (src: string, re: RegExp) => (src.match(re) ?? []).length;
+
+// (a) EVERY 'timedOut' handler must hand the caller something it cannot mistake for an answer —
+//     expressed as an equality, so it stays true as call sites are added or removed and can only
+//     fail when one of them starts lying.
+//
+//     TWO HONEST SHAPES, and the distinction is the point (Prohibition 1: teach the check to
+//     DISTINGUISH, never lower its bar). Three fetchers `return PROBE_FAILED` — they owe the caller a
+//     value. The fourth, inside `Promise.all(options.map(…))` writing a Record, does a bare `return`
+//     and leaves the KEY ABSENT, which the caller reads as "fall back to the scope count". Absent is
+//     not zero, so that is the same rule obeyed by omission rather than by sentinel. An equality
+//     against PROBE_FAILED alone would have been RED on correct code — and the tempting repair
+//     (drop back to `.test()`) is exactly the widening that made this blind in the first place.
+//     What is forbidden is a handler that produces a VALUE: `return null`, `return 0`, `return []`.
+const TIMEOUT_SITES = /'timedOut' in result\)/g;
+const TIMEOUT_HONEST = /'timedOut' in result\) return(?: PROBE_FAILED)?;/g;
+const timeoutTotal = countOf(remote, TIMEOUT_SITES);
+const timeoutHonest = countOf(remote, TIMEOUT_HONEST);
+check(`WIRING all ${timeoutTotal} 'timedOut' handlers return the sentinel or nothing at all — never a value (${timeoutHonest} honest)`,
+  timeoutTotal > 0 && timeoutHonest === timeoutTotal,
+  `${timeoutHonest} of ${timeoutTotal} — a handler collapses a timeout to a value the caller reads as an answer`);
+
+// (b) and (c) are floors at the counts measured 2026-09-04. A collapse at ANY site drops the count.
+const ERROR_HONEST = /if \(error\) return PROBE_FAILED;/g;
+const errorHonest = countOf(remote, ERROR_HONEST);
+check(`WIRING all 3 transport-error handlers still return PROBE_FAILED (${errorHonest} found)`,
+  errorHonest >= 3, `only ${errorHonest} — a fetcher started reading a transport error as "nothing"`);
+
+const GUIDED_HONEST = /isProbeFailure\(counts\)\) return \{ options: \[\], unknownCount: null, total: 0, probeFailed: true \}/g;
+const guidedHonest = countOf(af, GUIDED_HONEST);
+check(`WIRING both probe-guarded option builders report the failure honestly (${guidedHonest} found)`,
+  guidedHonest >= 2, `only ${guidedHonest} — one builder reports an empty scope for a probe that never answered`);
+
+{
+  // Each mutant collapses ONE site (replace, not replaceAll) — the case the old `.test()` predicates
+  // could not see. The counted predicates above must all flip on a single-site regression.
+  const one = (t: string, from: RegExp | string, to: string) => t.replace(from, to);
+
+  const mut1 = one(remote, /'timedOut' in result\) return PROBE_FAILED;/, "'timedOut' in result) return null;");
+  check('WIRING-MUT anchor: one timeout handler could be collapsed', mut1 !== remote);
+  mustCatch('WIRING ONE of four timeout handlers collapsing a probe failure to null',
+    countOf(mut1, TIMEOUT_HONEST) !== countOf(mut1, TIMEOUT_SITES));
+
+  // …and the omit-the-key handler regressing into a FABRICATED ZERO, the same rule one shape over.
+  const mut1b = one(remote, "if ('timedOut' in result) return;",
+    "if ('timedOut' in result) { out[opt.districtAr] = 0; return; }");
+  check('WIRING-MUT anchor: the omit-the-key handler could be collapsed', mut1b !== remote);
+  mustCatch('WIRING the absent-key timeout handler writing a fabricated 0 instead of omitting it',
+    countOf(mut1b, TIMEOUT_HONEST) !== countOf(mut1b, TIMEOUT_SITES));
+
+  const mut2 = one(remote, /if \(error\) return PROBE_FAILED;/, 'if (error) return null;');
+  check('WIRING-MUT anchor: one transport-error handler could be collapsed', mut2 !== remote);
+  mustCatch('WIRING ONE of three transport-error handlers reading an error as "nothing"',
+    countOf(mut2, ERROR_HONEST) < 3);
+
+  const mut3 = one(af,
+    'isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true }',
+    'isProbeFailure(counts)) return { options: [], unknownCount: 0, total: 0, probeFailed: false }');
+  check('WIRING-MUT anchor: one option builder could be collapsed', mut3 !== af);
+  mustCatch('WIRING ONE of two option builders fabricating unknownCount: 0 on a failed probe',
+    countOf(mut3, GUIDED_HONEST) < 2);
+
+  // The two single-site predicates keep their original form; a mutant still has to flip them.
+  const mut4 = af.replace('const anyProbeFailed = probes.some', 'const anyProbeFailed = false && probes.some');
+  mustCatch('WIRING rankQuestions forgetting whether any probe in the batch failed',
+    mut4 !== af && !/const anyProbeFailed = probes\.some/.test(mut4));
+  const mut5 = agent.replaceAll('mayAssertNothingToNarrow(verdict)', 'true');
+  mustCatch('WIRING the OPENING decision no longer consulting the verdict',
+    mut5 !== agent && !/mayAssertNothingToNarrow\(verdict\)/.test(mut5));
+
+  // NOT VACUOUS: the shipped source passes every counted predicate.
+  mustCatch('CONTROL the shipped wiring satisfies all three counted predicates (not vacuously red)',
+    countOf(remote, TIMEOUT_HONEST) === countOf(remote, TIMEOUT_SITES)
+    && countOf(remote, ERROR_HONEST) >= 3 && countOf(af, GUIDED_HONEST) >= 2);
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nUNKNOWN is never treated as NO');
