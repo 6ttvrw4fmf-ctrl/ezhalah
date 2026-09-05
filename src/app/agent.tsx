@@ -58,6 +58,7 @@ import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
 import { BROWSE_BATCH, nextBatchTarget, resultCounts, closingNoteKey } from '@/data/resultCount';
+import { afInterviewOwnsBrowsing } from '@/lib/afBrowsingGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
@@ -954,10 +955,18 @@ export default function Agent() {
   // summary. The turn trades its action buttons for a read-only receipt — it is history now, and only
   // the newest result turn carries live actions.
   const [afReceipt, setAfReceipt] = useState<Record<string, string>>({});
-  // COMPLETED SEARCH (owner 2026-08-30). Set ONLY by the canonical AF stop conditions — R11.1 (the
-  // post-round honest total ≤ INTERVIEW_STOP_AT) and R11.2 (the offer probe finds no useful question
-  // left after a committed round). Never by a plain first search, never by a count alone: a fresh
-  // 20-result search with no AF round is not "finished", it is a search the user may still refine.
+  // COMPLETED SEARCH (owner 2026-08-30). Set ONLY by R11.1 — the post-round honest total lands at or
+  // below INTERVIEW_STOP_AT. Never by a plain first search, never by a count alone: a fresh 20-result
+  // search with no AF round is not "finished", it is a search the user may still refine.
+  //
+  // R11.2 (the offer probe finds no useful question left after a committed round) does NOT set this,
+  // and must not — corrected 2026-09-05, when the owner settled the browsing question. This comment
+  // used to name R11.2 as a second trigger; the code has only ever had one, and the owner's ruling is
+  // that the one is right: «once the Advanced Filter interview is actually finished, normal
+  // browsing/pagination can resume if needed». A round that runs out of questions with 3,000 matches
+  // still on the table has finished INTERVIEWING, not searching — the user must be free to keep
+  // browsing. Only the small-result threshold ends the flow, which is R11.1 exactly.
+  // Pinned by scripts/verify-af-interview-owns-browsing.ts.
   // Persisted with the transcript so Back / saved chats reopen READ-ONLY, never with a live composer.
   const [completed, setCompleted] = useState(false);
   // Whether a results turn still has a question worth asking — resolved by a REAL probe (below),
@@ -3240,7 +3249,16 @@ export default function Agent() {
                         const cascading = revealing && revealActiveRef.current?.id === m.id;
                         // HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21) — see the comment on the
                         // buttons row below; the SAME gate decides whether Read Aloud may mention them too.
-                        const showActionsRow = (hasMore || canNarrowFurther) && !ageFlow;
+                        // THE AF INTERVIEW OWNS BROWSING ONLY WHILE IT STILL HAS SOMETHING TO ASK
+                        // (owner rule 2026-09-05 — see src/lib/afBrowsingGate.ts for the four clauses).
+                        // Was a bare `!ageFlow`, which satisfied the rule for every phase that exists
+                        // today but only by accident: nothing tied the gate to question availability,
+                        // so a phase added later — or an interview left open in a dead state — would
+                        // withhold the pager from a user with thousands of matches. The predicate is
+                        // now exhaustive over the phase union and fails the BUILD if a new phase is
+                        // added without a decision. Behaviour today is identical by construction.
+                        const showActionsRow = (hasMore || canNarrowFurther)
+                          && !afInterviewOwnsBrowsing(ageFlow?.phase ?? null);
                         // NEVER PROMISE A BUTTON THAT IS NOT ON SCREEN (2026-09-05, §42 visible output
                         // contract). `moreNoteText` used to be worded from `rc.endKind`/`canNarrowFurther`
                         // alone, while the buttons it names carry TWO further gates — `isLatestResults`
