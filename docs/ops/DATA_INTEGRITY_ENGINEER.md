@@ -990,6 +990,48 @@ pattern — so the detector keeps discriminating and only an adjudicated, eviden
 exempt. Also an owner call: whether a listing whose source no longer publishes a price should keep
 being served at all. Neither was decided autonomously.
 
+## 30. A fixed scraper, a green barrier, and 130 listings still priced at one twelfth (settled 2026-09-05, incident #38)
+
+**§21 said a code fix needs a paired data retraction. This is the first time the missing half was
+caught by a barrier written for the code half — and the barrier was green the whole time.**
+
+muktamel's `run.py` did `price_annual = price` for both rent periods. `price_annual` is a YEARLY
+column and `src/data/listings.ts` divides it by 12 for a monthly row, so all 130 monthly listings
+(113 residential + 17 commercial) were advertised at one twelfth of their rent — a 2,500/month
+apartment shown as «ر.س 208», a 75,000/month showroom as 6,250. The scraper was fixed the same day
+(commit `4c06c07`, now calling `normalize.annualize_rent`) and `scripts/verify-rent-scrapers-
+annualise.ts` went green **while every wrong row was still being served**. `gh-muktamel-weekly`
+(cron jobid 14) is `active=false`, so no future crawl would ever have corrected them.
+
+**The evidence that made this a repair rather than a reprice.** muktamel publishes one figure
+(`offer.price`) plus its own period flag (`offer.isRentPerYear`), and we archive that flag per row
+in `additional_info.is_rent_per_year`. It reads **false on 130 of 130** rows. The old code applied
+no transform, so the stored `price_annual` **is** `offer.price` verbatim. ×12 is therefore Ezhalah's
+own unit contract applied to the source's own declared period — exactly what the fixed scraper now
+emits. Nothing was estimated. `ops_rent_annualisation_repair` records `price_before` per row, so the
+source's published figure stays recoverable and the repair is reversible.
+
+Two independent confirmations that no row had already been annualised (which would have made ×12 a
+doubling): every monthly row's last scrape is **2026-09-03 18:54**, before the fix; and only 2 of
+113 were divisible by 12, where an annualised cohort would be 113 of 113.
+
+**The barrier had to read DATA, not code.** `mon_detect_unannualised_rent_cohort()` (P1,
+roster-wired, ~40 ms) flags a platform whose **median** monthly row implies < 500 SAR/month over
+≥ 20 rows. It is cohort-level *by design*: a per-listing floor is a magnitude heuristic and would
+fire on source-backed rows — wasalt's cheapest monthly row implies 1 SAR/month, dealapp's 100, and
+both must be preserved exactly (§8). What no market produces is a whole platform whose **median**
+sits there. Measured medians, SAR/month: muktamel 188 (the defect) · sanadak 1,500 · aqarcity 1,900 ·
+mustqr 2,500 · dealapp 2,500 · wasalt 2,800 · gathern 6,960 · aqarmonthly 10,800. The floor sits 3×
+below the lowest legitimate platform and 2.7× above the defect, so it discriminates. Both directions
+proven live: raised exactly 1 key on the pre-repair index, resolved on the post-repair index,
+`insta_resolves = 0`.
+
+**The rule this pins, and it generalises past rent:** *when you remove a fabrication or a unit error
+from a scraper, ask in the same breath which rows the old code already wrote and whether anything
+will ever re-visit them.* A disabled cron turns "the next crawl will fix it" into "nothing ever
+will" — and a code-shape barrier goes green at the moment the data is still wrong, which is the
+worst possible time for a green light.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve
