@@ -69,9 +69,14 @@ check('placeholder monthly + real yearly → the REAL 50,000 is kept, with its R
   Number(pa(0)) === 50000 && rp(0) === 'annual',
   `got price_annual=${pa(0)} rent_period=${rp(0)} — must not be 12/monthly`);
 check('…and specifically NOT the 1×12 = 12 the defect produced', Number(pa(0)) !== 12);
-check('both placeholders → NO price and NO period is asserted',
-  pa(1) === null && rp(1) === null,
-  `got price_annual=${pa(1)} rent_period=${rp(1)} — a 50-bedroom listing must not advertise 1 SAR`);
+// AUTHORITATIVE_NULL, not a plain null. An upsert DROPS a plain None so a failed read cannot erase a
+// known value (_unknown_must_not_overwrite_known, owner rule 2026-08-09) — which would leave the old
+// fabricated 12 in place. AUTHORITATIVE_NULL is the sentinel for "the source settled this" (owner,
+// 2026-08-22) and is the only value that actually writes the NULL. Asserting `=== null` here would
+// pass on the version that silently keeps the old price, so the sentinel is asserted by NAME.
+check('both placeholders → the source published NO price, written as the AUTHORITATIVE null',
+  String(pa(1)) === 'AUTHORITATIVE_NULL' && String(rp(1)) === 'AUTHORITATIVE_NULL',
+  `got price_annual=${pa(1)} rent_period=${rp(1)} — a plain None would be dropped and the stale 12 kept`);
 check('a published 0 is a placeholder as well', Number(pa(6)) === 72000 && rp(6) === 'annual');
 
 // ── NON-INTERFERENCE — everything outside the placeholder class is byte-for-byte unchanged ────
@@ -102,17 +107,20 @@ mustCatch('the placeholder set being emptied — the tower returns to 1×12 = 12
 //     and 1×12 = 12 is fabricated again. Replacing its body with `pass` would NOT discriminate —
 //     rent_price is already None by default, so the answer would not change and the mutant would
 //     survive while proving nothing. The branch has to actually go.
-const bothFab = mutate('(b)', (s) => s.replace(
-  '        elif (_m_sent or _y_sent) and m_amt is None and y_amt is None:\n' +
-  '            rent_price = None                # every published amount is a placeholder → assert none\n' +
-  '            rent_period_known = False\n', ''), [[1, 1]]);
+const bothFab = mutate('(b)', (s) => {
+  const i = s.indexOf('        elif (_m_sent or _y_sent) and m_amt is None and y_amt is None:');
+  if (i < 0) return s;
+  const j = s.indexOf('        elif rf_monthly.get("default_freq")', i);
+  return j < 0 ? s : s.slice(0, i) + s.slice(j);
+}, [[1, 1]]);
 mustCatch('the both-placeholder branch being removed — 1×12 = 12 is fabricated again',
   bothFab !== null && Number(bothFab[0]?.price_annual) === 12);
 
 // (c) the three-way period collapsed back to binary — UNKNOWN silently becomes "annual".
 const binary = mutate('(c)', (s) => s.replace(
-  '"rent_period": (("monthly" if rent_is_monthly else "annual") if rent_period_known else None) if is_rent else None,',
-  '"rent_period": ("monthly" if rent_is_monthly else "annual") if is_rent else None,'), [[1, 1]]);
+  '        "rent_period": ((("monthly" if rent_is_monthly else "annual") if rent_period_known\n'
+  + '                         else db.AUTHORITATIVE_NULL) if is_rent else None),',
+  '        "rent_period": ("monthly" if rent_is_monthly else "annual") if is_rent else None,'), [[1, 1]]);
 mustCatch('the period collapsing back to binary, so UNKNOWN is published as "annual"',
   binary !== null && binary[0]?.rent_period === 'annual');
 
