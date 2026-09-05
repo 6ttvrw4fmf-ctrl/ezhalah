@@ -32,17 +32,22 @@ export default function Root({ children }: PropsWithChildren) {
                 404, and keeps showing whatever it remembered — which is why the old Expo chevron
                 survived a favicon replacement that WAS live and correct on the server.
               • Modern browsers prefer a PNG at a known size over an .ico when both are offered.
-            ?v=2 is deliberate. A browser's favicon store is not the HTTP cache: it is keyed by URL
+            ?v=3 is deliberate. A browser's favicon store is not the HTTP cache: it is keyed by URL
             and ignores revalidation, so replacing the bytes at an unchanged path can leave a stale
             icon in the tab and the address bar indefinitely. Changing the URL is the only reliable
             way to retire an old icon. BUMP THIS when an icon changes — that is the whole point of it.
-            Files live in public/ (copied to the web root verbatim by the Expo web build). */}
-        <link rel="icon" href="/favicon.ico?v=2" sizes="any" />
-        <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png?v=2" />
-        <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=2" />
+            Files live in public/ (copied to the web root verbatim by the Expo web build), INCLUDING
+            favicon.ico. app.json deliberately has NO `web.favicon`: setting it makes Expo append its
+            own <link rel="icon" href="/favicon.ico"> with NO version token, last in the head — and
+            Safari, which keys its icon store by URL, then kept its pre-existing entry for that exact
+            unchanged URL and went on drawing the old Expo chevron while every versioned link beside
+            it already served the eagle. One icon source, one URL, always versioned. */}
+        <link rel="icon" href="/favicon.ico?v=3" sizes="any" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png?v=3" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=3" />
         {/* Opaque on purpose: iOS composites this on BLACK and applies its own corner radius, so a
             transparent or pre-rounded source shows black corners on the home screen. */}
-        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=3" />
         {/* FULL-APP THEME (owner 2026-08-28): both palettes as CSS custom properties — light on
             :root, dark on data-theme="dark" AND on the OS preference when no explicit choice is
             stored. Every entry of tokens.ts `colors` is a var() over these, so the whole app
