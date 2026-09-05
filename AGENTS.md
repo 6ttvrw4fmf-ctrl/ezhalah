@@ -76,14 +76,24 @@ outside the roster is decoration. Adjudicate every finding against source before
    cases, and prove both directions. (Run #15 assumed absence meant silence on 13 aqaratikom rows;
    the source published «سنوي» on all 13.)
 
-**GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds ALL SEVEN routines. Canonical text:
-`docs/ops/ENGINEER_ROUTINES.md` §G; the file wins over any routine prompt.** In one line each:
+**GLOBAL ENGINEERING POLICY (owner, 2026-08-29, extended 2026-09-04) — binds ALL ELEVEN routines.
+Canonical text: `docs/ops/ENGINEER_ROUTINES.md` §G; the file wins over any routine prompt.** It said
+"ALL SEVEN" until 2026-09-05, four routines after the roster grew to eleven — and this is the file
+every agent loads first, so a routine reading only this line could conclude §G did not bind it. If
+you are one of the eleven, §G binds you. In one line each:
 fix first, report last (a found bug is not a finished job); exactly SIX legitimate reasons to stop
-without fixing (§G.2) and nothing else; if the blocker is ownership or permissions, ROUTE the
-defect to the write-authorized routine with reproduction and root cause rather than saying someone
-should look at it; effort scales with what you find; never manufacture a 10/10; read Sentry FIRST
-every run and resolve an issue only after the production fix is verified; and none of it weakens an
-existing guard. Every routine's live prompt carries a condensed copy — §G is the source of truth.
+without fixing (§G.2) and nothing else, and "a human could technically approve this" is not among
+them (§G.2b); if the blocker is ownership or permissions, ROUTE the defect to the write-authorized
+routine with reproduction and root cause rather than saying someone should look at it (§G.3);
+effort scales with what you find; never manufacture a 10/10; read Sentry FIRST every run and your
+own incident queue with it (§G.6, §G.6b), and resolve an issue only after the production fix is
+verified; **a bug is CLOSED only when all seven of §G.9 hold — root cause fixed, related variants
+checked, a permanent barrier exists, A MUTATION HAS BEEN WATCHED TO CATCH IT, the full suite passes,
+PRODUCTION IS VERIFIED THROUGH THE REAL PATH A USER HITS, and no equivalent hidden path remains;
+anything short of that is UNKNOWN, never "fixed"**; every report carries BEFORE/AFTER and ends with
+§G.10's block; tokens are not the constraint (§G.11); and none of it weakens an existing guard
+(§G.7). Every routine's live prompt carries a condensed copy — §G is the source of truth, and where
+a prompt is older than §G's latest extension the FILE governs.
 
 **A FAILED FETCH IS NOT AN EMPTY ANSWER (permanent rule, 2026-09-04).** The single largest defect
 class this codebase has — five of the fifteen a 74-agent audit confirmed in one day — is a request
