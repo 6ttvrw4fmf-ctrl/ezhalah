@@ -42,6 +42,9 @@
 //
 // LIVE CHECK — excluded from `npm test` (scripts/test-exclusions.txt); runs in
 // .github/workflows/af-live-truth-check.yml with the other production-truth barriers.
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { join } from 'node:path';
 import { liftSearchScope } from './lib/liftSearchScope.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';

@@ -24,7 +24,7 @@ on:
   schedule:
     # 04:40 UTC — off the :00/:14 data-refresh ticks (pg_cron jobids 17 and 28) that PART 9.2 (5)
     # warns make live reads move under a journey, and clear of the 15-minute drift-guard slots.
-    - cron: '40 4 * * *'
+    - cron: '5 5 * * *'
   workflow_dispatch:
     inputs:
       engine:

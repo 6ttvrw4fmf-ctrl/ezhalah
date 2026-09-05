@@ -43,6 +43,9 @@
 // LIVE CHECK — excluded from `npm test` (it drives a real browser against production), runs in
 // .github/workflows/af-live-truth-check.yml alongside the other AF live journeys.
 
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';

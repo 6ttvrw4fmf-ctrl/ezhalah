@@ -54,6 +54,9 @@
 //   AF_LAST_DEAL=buy|rent|rent-monthly              deal leg (default buy; rent = Rent-Annual)
 //   AF_LAST_MOBILE=1                                390x844 touch viewport
 
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { chromium } from 'playwright';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { gotoLive } from './lib/liveNav.ts';

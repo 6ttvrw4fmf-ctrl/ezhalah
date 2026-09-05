@@ -9,6 +9,8 @@
 //
 // The run prints the SIX SEPARATE NUMBERS the owner requires (2026-08-28) — it never collapses them
 // into one "searches" figure, because a request count is not a coverage claim.
+import '../../scripts/lib/searchPacer.mjs';   // shared pacing: wraps fetch, spaces searches against ALL routines
+import { pacingStats } from '../../scripts/lib/searchPacer.mjs';
 import { createHash } from 'node:crypto';
 import { buildRequest, cohortKey, PAGE_LIMIT } from './request.mjs';
 import { dbCount, dbFilterFromRequest, cityCatalog } from '../live-sweep/sweep.mjs';
@@ -21,6 +23,11 @@ const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'applic
 const BUDGET = Number(process.env.QA_BUDGET) || DAILY_BUDGET;
 const CONCURRENCY = 2;
 const MIN_GAP_MS = 700;                       // ≤1.5 searches/sec sustained
+
+// Pacing lives in the SHARED pacer (imported at the top of this file), not here. It wraps fetch, so
+// every search this run fires is spaced against every OTHER routine's searches too — which is the
+// whole point: a per-run constant is correct in isolation and blind to the sum. See
+// scripts/lib/searchPacer.mjs for why this is one module rather than seven rate limiters.
 const LEDGER_DIMENSION = 'rpc_cohort';
 
 const rest = (p) => fetch(`${SUPA}/rest/v1/${p}`, { headers: H }).then((r) => r.json());
@@ -115,9 +122,7 @@ async function worker() {
     const i = cursor++;
     if (i >= searches.length) return;
     const s = searches[i];
-    const gap = MIN_GAP_MS - (Date.now() - lastFire);
-    if (gap > 0) await sleep(gap);
-    lastFire = Date.now();
+    // No local gap: the shared pacer spaces every search at the fetch layer.
     const body = buildRequest(COHORT.get(s.uiType), s);
     const t0 = Date.now();
     let rows;
@@ -167,6 +172,7 @@ DUPLICATE IDS SERVED:         ${out.reduce((a, r) => a + r.dupes, 0)}
 HONEST-ZERO SEARCHES:         ${zero}
 HARNESS ERRORS:               ${errors.length}
 LATENCY ms:                   p50 ${lat[Math.floor(lat.length * 0.5)]}  p95 ${lat[Math.floor(lat.length * 0.95)]}  max ${lat[lat.length - 1]}
+PACED BACK FOR OTHER LOAD:    ${pacingStats().backedOff} time(s), ${pacingStats().paced} searches paced — count unchanged
 (browser journeys and exact-set SQL differentials are reported by their own layers — never merged in)`);
 if (errors.length) console.log('ERRORS:\n' + errors.slice(0, 15).join('\n'));
 

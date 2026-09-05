@@ -56,6 +56,9 @@
 //
 // LIVE CHECK — excluded from `npm test` (it drives a real browser against production).
 
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { chromium } from 'playwright';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { gotoLive } from './lib/liveNav.ts';

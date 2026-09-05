@@ -62,6 +62,9 @@
 // LIVE CHECK — excluded from `npm test` (see scripts/test-exclusions.txt); runs in the AF live
 // workflow, like every other check that talks to production.
 
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { COHORT_QUESTIONS, COHORT_CHIPS } from '../src/lib/afCohorts.ts';
 import { typeArForTypes, CLEAN_MACRO } from '../src/data/propertyTypes.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';

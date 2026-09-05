@@ -21,6 +21,9 @@
 //
 // Read-only. Hits ONLY Ezhalah's own index, never a source platform (§40.6), at the measured safe
 // envelope (concurrency 2, ≤1.5 searches/sec).
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import '../../scripts/lib/searchPacer.mjs';
 import { buildRequest, PAGE_LIMIT } from './request.mjs';
 
 const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
@@ -28,7 +31,6 @@ const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.EXPO_PUBLIC
   || 'sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB';
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
 const COHORT_BUDGET = Number(process.env.QA_NARROW_COHORTS) || 14;
-const MIN_GAP_MS = 700;
 const LEDGER_DIMENSION = 'narrowing_invariant';
 
 // A broad set must be FULLY held to be a valid superset reference: above the page limit the client
@@ -45,11 +47,11 @@ const rpc = async (fn, body) => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-let lastFire = 0;
+// Pacing is the SHARED pacer's job (imported at the top): it wraps fetch, so this probe's searches
+// are spaced against every OTHER routine's too. A private 700 ms gap here was correct in isolation
+// and blind to the sum — which is exactly how seven individually-compliant routines reached 3.2
+// searches/second together.
 async function search(cohort, s) {
-  const gap = MIN_GAP_MS - (Date.now() - lastFire);
-  if (gap > 0) await sleep(gap);
-  lastFire = Date.now();
   const body = buildRequest(cohort, s);
   const rows = await rpc('location_search_candidates_ar', body);
   if (!Array.isArray(rows)) throw new Error(`unexpected RPC shape: ${JSON.stringify(rows).slice(0, 140)}`);

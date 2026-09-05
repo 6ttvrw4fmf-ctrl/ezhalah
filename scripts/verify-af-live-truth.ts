@@ -7,6 +7,9 @@
 // calling our RPC again, NOT by re-running our SQL — translating only the specific params the
 // captured request actually carried. Diffs exact (source_table,listing_id) sets: missing / extra /
 // duplicate, not just counts.
+// Shared pacing (owner 2026-09-04): wraps fetch so this harness's production searches are
+// spaced against every OTHER routine's, not just its own. Never drops or alters a request.
+import './lib/searchPacer.mjs';
 import { chromium } from 'playwright';
 import { openAfOffer } from './lib/afOfferLive.ts';
 
