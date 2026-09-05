@@ -568,6 +568,73 @@ runs (kill a retry mid-flight, expire a token mid-request, race two sessions aga
 migration). Scheduled for 03:30 Arizona, 30 minutes after #6 and ahead of the entire #1–#5 block
 — see "Schedule note (2026-08-26, revised same day)" above for why, and what changes as a result.
 
+## 8. 🔴 Daily Regression Hunter (new, 2026-09-04)
+
+Canonical spec: **`docs/ops/REGRESSION_HUNTER_ENGINEER.md`** (file wins over the live prompt on any
+divergence). Owns exactly two objects, and nothing else: **the seam between two owned surfaces**,
+and **a fix that did not hold**. Every other routine tests its own surface correctly and
+completely; this one exists because a bug can be invisible from inside each surface separately and
+obvious the moment they are combined, and because "the symptom went away" has repeatedly turned out
+to mean "one of four call sites was patched". It is adversarial by design and assumes every
+previous fix is incomplete until it has re-attacked the class rather than the instance.
+
+The routing test is one question: *could a single-surface owner have found this by testing only
+their own surface, correctly and completely?* If yes, it is theirs — #8 routes it with reproduction
+and root cause rather than adopting it, because adopting single-surface defects dissolves the only
+thing that distinguishes #8 from #4/#5/#6. Writing a **new** barrier for its own finding is #8's
+work; repairing an existing **blind** barrier is #10's.
+
+## 9. 🔬 Daily Production Red Team (new, 2026-09-04)
+
+Canonical spec: **`docs/ops/PRODUCTION_RED_TEAM_ENGINEER.md`** (file wins over the live prompt on
+any divergence). Owns **the agreement between layers on production**, walked as one chain with an
+independent reader at every link: user action → frontend request → RPC params → DB truth set →
+displayed count → returned ids → card evidence → pagination and Trending continuation. It
+distrusts every harness in the tree, including the ones this repo added the same week, and its
+first-class prey is the **false green** — a barrier that passes while production is wrong. Of the
+five defects a 74-agent audit confirmed on 2026-09-04, every one had a barrier over the exact line
+and every one of those barriers was green for the entire time the defect was live.
+
+Runs last of the eleven (15:00 UTC) precisely so that today's ten reports are its input, not its
+background reading. A disagreement that no check covers at all routes to #10 as `barrier`; one
+layer wrong but faithfully rendered everywhere is **not** a #9 finding — that is one layer, not
+two, and belongs to #3 (or #11 if the listing is dead).
+
+## 10. 🧱 Daily Bug Prevention & Barrier Engineer (new, 2026-09-04)
+
+Canonical spec: **`docs/ops/BARRIER_ENGINEER.md`** (file wins over the live prompt on any
+divergence). Owns **the verification apparatus itself, never the product**: barriers that assert
+the bug instead of the invariant, checks with no mutation proof, source-TEXT tripwires over code
+paths that must be EXECUTED, silent NULL/UNKNOWN→false/0 conversions, hand-edited logic that
+bypasses a canonical generator, and coverage that reads as protection while protecting nothing.
+Its one inviolable rule, in the owner's words: **it must never weaken a detector just to make it
+green.** A routine with write access to every barrier in the tree and permission to relax them
+would be the most dangerous role here, so the direction of travel is fixed — make a check
+distinguish cases and prove both directions, never lower its bar.
+
+It fixes the apparatus; the product defect behind a blind barrier belongs to whoever owns that
+surface, and routing a live defect to #10 is not a way to leave it standing overnight.
+
+## 11. ♻️ Daily Listing Lifecycle Engineer (new, 2026-09-04)
+
+Canonical spec: **`docs/ops/LISTING_LIFECYCLE_ENGINEER.md`** (file wins over the live prompt on any
+divergence). Owns **a listing after its source confirms it is gone**, link by link: source →
+scraper/liveness → DB active state → index → Normal Search → Advanced Filter → Trending → counts →
+pagination → deep link, plus the 30-day retention window and the permanent delete at the end of it.
+
+Its first rule is the one it can never bend, and it is stated at the top of the spec in the owner's
+words: **UNKNOWN IS NOT DEAD.** A timeout, a blocked source, a proxy failure, a parser failure, a
+missing crawl, a 403 or a 500 is not evidence of death, must never remove a listing, and must never
+start the 30-day clock — because what waits at the end of that clock is a permanent, unrecoverable
+delete. Only a DIRECT fetch of the listing's own URL, at full grace, can kill. If the source proves
+a listing alive again before the 30 days elapse, the row is restored and the deletion cancelled.
+This is `docs/ops/LISTING_LIVENESS.md`'s three-valued rule carried through to its irreversible end.
+
+Running the already-approved 30-day deletion is GREEN. Anything bulk, anything outside that rule,
+and any change to what starts the clock is an owner decision — see incident #24, which records that
+the clock is today started by crawl **absence** and is gated on direct evidence only at the final
+step.
+
 ## Reporting rules (permanent, owner-locked 2026-08-13)
 
 **Every engineer report MUST state the rating as `Rating Before → Rating After`, never a single

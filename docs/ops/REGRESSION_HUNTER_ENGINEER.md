@@ -151,6 +151,16 @@ For every defect you find, ask exactly one question, and answer it before you to
   `incident_handoff(<id>, '<their routine slug>', '<why it is not yours>')`. Never merely state that
   someone should fix it — §G.3.
 
+  **Fingerprint vocabulary (shared, so a finding is recognisable as yours from its key alone).**
+  Use `hunter-<date>:<kind>:<slug>` where `<kind>` is one of the four this routine routes on in
+  `scripts/lib/alertRouting.ts`: **`cross_surface_<a>_<b>`** (a seam between two named owners),
+  **`seam_between_owners`** (the general case), **`incomplete_fix`** (a repair whose class is still
+  reachable), **`regression_survived`** (a barrier existed and the class came back anyway). #9 uses
+  `layer_disagreement` / `count_vs_set` / `displayed_vs_truth` / `prod_differential` against the same
+  convention (`docs/ops/PRODUCTION_RED_TEAM_ENGINEER.md`), and #10 uses `barrier_` / `blind_guard` /
+  `green_while_broken` — so the key alone says which of the three cross-cutting routines a finding
+  came from, without opening it.
+
 - **NO → it is yours.** It only exists because two correct surfaces were composed, or because a
   previous fix left the class reachable. Keep it, fix it, barrier it, close it under §G.9.
 
@@ -158,6 +168,17 @@ For every defect you find, ask exactly one question, and answer it before you to
 routes nine well-rooted defects to five owners and fixes two seam defects itself has done exactly
 the job. Report both numbers; never inflate the "fixed" column by adopting someone else's bug, and
 never deflate it by routing your own.
+
+> **This is deliberately stricter than §G.2(d) requires, and stricter than #9's reading of it.**
+> `docs/ops/PRODUCTION_RED_TEAM_ENGINEER.md` reads (d) as an *active single-writer conflict* and so
+> fixes single-surface defects itself while filing them on the owning surface. That reading is
+> defensible for a routine whose object is one production action. It is wrong for this one: your
+> object is defined by the boundary, so adopting a single-surface defect does not just risk a
+> collision — it dissolves the only thing that distinguishes you from #4, #5 and #6. §G says a spec
+> may be stricter than §G and then governs. **Here it is stricter: a defect that resolves cleanly to
+> one surface owner is routed, every time, however easy the fix looks.** The same rule is already
+> owner-locked for Sentry in `SENTRY_ROUTING.md` §2 ("none of #8/#9/#10 may claim an issue that
+> resolves cleanly to a single surface owner"); this extends it to every finding, not just crashes.
 
 ### 1.3 The escalation you must not skip
 
@@ -193,12 +214,15 @@ One line per neighbour, stated in terms of the OBJECT each owns. When in doubt, 
   a single-action layer disagreement is theirs (`layer_disagreement`, `count_vs_set`,
   `displayed_vs_truth`, `prod_differential`); yours is whether a **sequence** of actions across
   surfaces stays coherent.
-- **#10 🧱 Bug Prevention & Barrier** owns *the verification apparatus itself, never the product* — a
-  barrier that asserts the bug, has no mutation proof, or is green while production is wrong is
-  theirs (`barrier_`, `mutation_`, `blind_guard`, `green_while_broken`, `test_infra_`); **a barrier
-  that is correct but whose FIX was incomplete is yours** (`incomplete_fix`, `regression_survived`).
-  Said once more because these two are the pair most likely to collide: #10 asks *"can this check
-  fail?"*; you ask *"is the class it guards still reachable by another route?"*
+- **#10 🧱 Bug Prevention & Barrier** owns *the verification apparatus itself, never the product* —
+  `scripts/verify-*`, `scripts/lib/testRegistry.ts`, `scripts/run-tests.mjs` and `e2e/**` harness
+  code (not the product it drives) — so a barrier that asserts the bug, has no mutation proof, or is
+  green while production is wrong is theirs (`barrier_`, `mutation_`, `blind_guard`,
+  `green_while_broken`, `test_infra_`); **a barrier that is correct but whose FIX was incomplete is
+  yours** (`incomplete_fix`, `regression_survived`). Said once more because these two are the pair
+  most likely to collide: #10 asks *"can this check fail?"*; you ask *"is the class it guards still
+  reachable by another route?"* Writing a **new** barrier for a defect you own is your duty under
+  §G.1 and is not an incursion; **repairing an existing blind one is theirs.**
 
 Also not yours, briefly and for completeness: whether the crawl ran (#1), the broad 33-section
 production audit and the AI Agent surface (#2), the field truth of a live listing (#3), and what
@@ -314,7 +338,7 @@ definite. Related barriers to extend rather than duplicate:
 
 **H. A mid-day deploy or index rebuild under a live walk.** The hourly matview refresh and
 `sync_search_listings_ar()` (see `ENGINEER_ROUTINES.md`, "Repair ordering") land at fixed minutes.
-#7 owns whether the sync ran; #4 owns whether the pager is gap-free.
+Routine #7 owns whether the sync ran; #4 owns whether the pager is gap-free.
 *Attack:* start a paged walk deliberately spanning the rebuild minute.
 *Invariant:* the walk either completes coherently or reports honestly — it may not silently serve
 page 4 from a different index generation than page 1. If you cannot decide, the honest verdict is
@@ -547,6 +571,14 @@ bundle that did not change are two different facts.
 Read today's freshest reports from #1–#7 on the way in — you run after them precisely so you can.
 Read #10's report from 06:30 as well: if it repaired or invalidated a barrier over a class you were
 about to trust, that class needs re-attacking, not re-reading.
+
+**Your same-day report is #9's input.** 🔬 Production Red Team runs at 08:00, one hour after you, and
+`docs/ops/PRODUCTION_RED_TEAM_ENGINEER.md` §1.5 makes every fix you landed an hour ago a priority
+target for its layer-agreement rotation — precisely because nobody else has verified it yet. Write
+the report so that is usable: name the surfaces each fix touched and the exact production path you
+verified it on, so #9 can re-derive the chain rather than guess at it. And expect the traffic in the
+other direction: a defect you route as `production_truth` reaches #9, and a repair whose *detector
+history* is the question (rather than its class) reaches #7's orphaned-guarantee sweep.
 
 Respect `ops_deploy_lock` exactly as every other routine does; it is the real mutex across all
 eleven. You sit 30 minutes after #10 and 30 before #11, and a run lasts 30–60+ minutes, so overlap
