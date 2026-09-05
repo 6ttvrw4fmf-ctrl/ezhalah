@@ -56,7 +56,7 @@ import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
-import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '@/data/resultCount';
+import { BROWSE_BATCH, nextBatchTarget, resultCounts, closingNoteKey } from '@/data/resultCount';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
@@ -1371,7 +1371,25 @@ export default function Agent() {
     if (!m.result.hasMore || !q || loadingMore[mid]) return;
     setLoadingMore((s) => ({ ...s, [mid]: true }));
     try {
-      const { listings: more, nextOffset, hasMore } = await loadMoreListings(q, m.result.pageOffset ?? 0);
+      const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, m.result.pageOffset ?? 0);
+      // A FAILED PAGE IS NOT AN EMPTY PAGE (AGENTS.md permanent rule, 2026-09-04; incident #33).
+      // store.tsx already refuses to treat a backend error as progress — the cursor and `hasMore`
+      // come back exactly as they went in, so the pager is correctly re-offered. But nothing here
+      // READ `failed`, and every downstream value then made the failure indistinguishable from
+      // success: `more` is [], so `add` is [], so `mergedLen === fetched`, so `nextBatchTarget`
+      // returns `cur` and `cascadeIn(cur, cur)` is a no-op. The user taps «عرض المزيد», the spinner
+      // runs, ZERO cards appear, no error is shown, and the button stays — a silent dead tap, which
+      // is a failed fetch rendered to the user as a successful nothing.
+      //
+      // So say it. Same wording and same posture page 0 already uses for its own fetch failure
+      // (`fetchFailed` → runSearch's retry suggestion, src/data/search.ts): tell the user to try
+      // again rather than implying there was nothing more to show. Nothing is merged and the cursor
+      // is untouched, so the next tap retries this exact page.
+      if (failed) {
+        setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
+          text: t('Loading listings — please try again in a few seconds.') }]);
+        return;
+      }
       // De-dup against the CLOSURE copy (same data the message holds) so the cascade target is exact.
       const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
       const add = more.filter((l) => !seen.has(`${l.source}:${l.id}`));
@@ -3205,23 +3223,43 @@ export default function Agent() {
                         // was falsely lighting every visible «عرض المزيد»).
                         const fetching = !!loadingMore[m.id];
                         const cascading = revealing && revealActiveRef.current?.id === m.id;
-                        const moreNoteText = rc.endKind === 'more'
-                          ? (quoteTotal
-                              // Trusted total + more remain: BOTH honest numbers, and the door stays open.
-                              ? (canNarrowFurther
-                                  ? t('I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?', { shown: rc.endShown.toLocaleString('en-US'), total: rc.endTotal.toLocaleString('en-US') })
-                                  : t('I showed you the first {shown} of {total} matching listings. Want me to show more?', { shown: rc.endShown.toLocaleString('en-US'), total: rc.endTotal.toLocaleString('en-US') }))
-                              // Narrowed search (total not quotable): word it from what's on screen only.
-                              : (canNarrowFurther
-                                  ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: rc.endShown.toLocaleString('en-US') })
-                                  : t('I showed you the first {n} listings. Want me to show more?', { n: rc.endShown.toLocaleString('en-US') })))
-                          // Everything matching is on screen — state the real matched count.
-                          : (canNarrowFurther
-                              ? t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') })
-                              : t('I showed you all {n} matching listings.', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') }));
                         // HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21) — see the comment on the
                         // buttons row below; the SAME gate decides whether Read Aloud may mention them too.
                         const showActionsRow = (hasMore || canNarrowFurther) && !ageFlow;
+                        // NEVER PROMISE A BUTTON THAT IS NOT ON SCREEN (2026-09-05, §42 visible output
+                        // contract). `moreNoteText` used to be worded from `rc.endKind`/`canNarrowFurther`
+                        // alone, while the buttons it names carry TWO further gates — `isLatestResults`
+                        // (folded into `hasMore`) and `!ageFlow`. Whenever either was false the user read
+                        // «تبي أعرض لك المزيد؟» under a results block with no button to tap.
+                        //
+                        // Measured in production 2026-09-05, الرياض/بيع/فيلا: after committing one Advanced
+                        // Filter answer the page held TWO visible closing lines — «عرضت لك أول 13 من أصل
+                        // 11,254 … تبي أعرض لك المزيد؟» and «عرضت لك أول 10 من أصل 5,970 … تبي أعرض لك
+                        // المزيد، أو أساعدك توصل لنتائج أدق؟» — and `document.querySelectorAll(
+                        // '[data-testid="results-load-more"]').length === 0`. Both counts were exactly right
+                        // (11,254 = the villa search, 5,970 = the same + p_street_width_min 20); only the
+                        // OFFER was false. It needs no Advanced Filter to reproduce either: any second search
+                        // leaves the earlier turn quoting an offer that `isLatestResults` has already retired.
+                        //
+                        // So the wording is derived from what is ACTUALLY RENDERED — the same two values the
+                        // Pressables are gated on. `readAloudClosingNote` below has always done this (it
+                        // refuses to speak an action that is not on screen); the visible text now matches it.
+                        // The COUNTS are untouched and still state the true totals: only the question is
+                        // dropped, never a number. This does not decide whether «عرض المزيد» should be
+                        // available during an open AF interview — that is the owner's 2026-08-21 call and is
+                        // left exactly as it is.
+                        const offersMore = hasMore && showActionsRow;
+                        const offersNarrow = canNarrowFurther && showActionsRow;
+                        // The KEY comes from the pure module that already owns the counts, so the gate and
+                        // the sentence can never disagree and one exhaustive test locks both.
+                        const moreNoteText = t(
+                          closingNoteKey({ endKind: rc.endKind, quoteTotal, offersMore, offersNarrow }),
+                          {
+                            shown: rc.endShown.toLocaleString('en-US'),
+                            total: rc.endTotal.toLocaleString('en-US'),
+                            n: (rc.endKind === 'more' ? rc.endShown : (clientNarrowed ? rc.endShown : rc.endTotal)).toLocaleString('en-US'),
+                          },
+                        );
                         // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the
                         // button also") — names the SAME button label(s) actually rendered below, in the same
                         // order, so it can never mention an action that isn't on screen to tap.

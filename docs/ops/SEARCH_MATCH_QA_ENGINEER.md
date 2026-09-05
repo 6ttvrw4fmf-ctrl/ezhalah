@@ -759,6 +759,38 @@ appears broken.
     and the product disagree by the whole result set, suspect the probe's ability to express the
     question before you suspect the product's ability to answer it.**
 
+19. **The results screen is a CHAT, so "the closing line" is not a single thing — read it the SAME
+    way you read the headline** (hit 2026-09-05, on every AF-scoped pagination run since the journey
+    landed on 2026-09-04). `e2e/live-sweep/showmore.mjs` read the closing line with `.match()` — the
+    **FIRST** «من أصل|لقينا N إعلان» in the whole document — while `visibleState.headline` is
+    `[...matchAll].pop()`, the **LAST**. Every earlier search's closing line stays in the transcript,
+    so the two readings land on DIFFERENT MESSAGES the moment a journey searches twice — which the
+    AF-scoped journey does by construction (the plain search, then the AF-narrowed one). Measured on
+    الرياض/بيع/فيلا: the document held `["11,254","5,970"]`, the harness compared 11,254 against a
+    headline of 5,970 and reported «closing message quotes 11,254 but the search found 5,970».
+    Production was exactly right on BOTH: 11,254 is the villa search's own total and 5,970 the same
+    search plus `p_street_width_min: 20`, each confirmed against the RPC. Fixed by reading last-first
+    on both sides; pinned, with an executed mutation proof that the old first-match reading really
+    disagrees, by `scripts/verify-live-sweep-coverage-contract.ts` §1b.
+
+    **But the SAME journey's PAGER-MISSING finding on that run was REAL, and telling them apart is
+    the whole skill.** The Advanced Filter interview deliberately hides the entire actions row while
+    it is open (`showActionsRow = (hasMore || canNarrowFurther) && !ageFlow`, owner 2026-08-21: the
+    AF card is an absolute overlay and buttons underneath it are unreachable), so a missing pager
+    THERE is intended. What was NOT intended is that the closing line kept promising it:
+    «عرضت لك أول 10 من أصل 5,970 إعلان مطابق. تبي أعرض لك المزيد، أو أساعدك توصل لنتائج أدق؟» with
+    `document.querySelectorAll('[data-testid="results-load-more"]').length === 0`. Two rendered,
+    visible sentences offering buttons that were not on the page. It needs no Advanced Filter to
+    reproduce the class: `isLatestResults` retires the actions row on every superseded turn, and the
+    wording never saw that gate either. Fixed by deriving the sentence from the same booleans the
+    Pressables are gated on (`closingNoteKey`, `src/data/resultCount.ts`), and pinned exhaustively
+    over all 16 states by `scripts/verify-closing-note-never-promises-a-missing-button.ts`.
+
+    The general lesson, and it cuts BOTH ways from traps 15–18: when an oracle and the product
+    disagree, suspect the oracle first — but *finish* the diagnosis. One run here produced one false
+    defect and one real one from the same journey, and stopping at "the harness was wrong" would have
+    shipped the real one straight past.
+
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 
 > **What the user sees must match the actual listing/search truth exactly, in clean Arabic, with no

@@ -756,10 +756,27 @@ export default function Home() {
       districtLabel: districtsSelected.length === 0 ? undefined
         : districtsSelected.length === 1 ? districtsSelected[0].districtAr
         : `${districtsSelected.slice(0, -1).map((d) => d.districtAr).join('، ')} و${districtsSelected[districtsSelected.length - 1].districtAr}`,
-      // Live count at the current deal/category scope — for multi-select the SUM of the picked
-      // districts' counts (folds are disjoint, so the sum IS the union size at that scope) — so the
-      // 0-results path can still tell an EMPTY area ("widen area") from a type mismatch ("widen type").
-      districtListingCount: districtsSelected.length
+      // Live count for the picked districts — for multi-select the SUM (folds are disjoint, so the
+      // sum IS the union size at that scope) — so the 0-results path can tell an EMPTY area
+      // ("widen area") from a type mismatch ("widen type").
+      //
+      // ONLY SENT WHEN IT IS ACTUALLY CATEGORY-SCOPED (2026-09-05, ops_incident #16). The consumer
+      // in src/data/search.ts branches on the DOCUMENTED meaning — "the district's own count at the
+      // deal/category scope" — and that is the only meaning that can separate the two cases: a count
+      // over ALL types is what tells you the area has listings but not YOURS. Since the district
+      // picker became type-scoped (`p_types` in ensureDistrictOptions, sharpened again by the
+      // 2026-09-03 af_eligibility_clause migration) these counts are per-TYPE, which INVERTS both
+      // branches: a حي full of villas with zero apartments reports 0 and is diagnosed as an empty
+      // AREA, so the user is offered a wider area when the area was never the problem — and after a
+      // «تصفية» round-trip the same search can answer differently depending on whether a نوع was
+      // selected yet.
+      //
+      // The picker's own counts must STAY type-scoped — that is what the user is choosing between,
+      // and it is what makes the number beside each حي true. So the diagnosis simply declines to
+      // speak when it has no category-scoped number to speak from: `undefined` makes
+      // noResultsSuggestion fall through to its generic probes, which re-count against the real pool
+      // and are correct in both cases. A message we cannot ground is worse than the general one.
+      districtListingCount: districtsSelected.length && !(cohortTypes && cohortTypes.length)
         ? districtsSelected.reduce((sum, d) => sum + d.listingCount, 0)
         : undefined,
     };
