@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
+import { TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
@@ -2911,7 +2912,15 @@ export default function Agent() {
         {/* Mobile only: a plain hamburger that opens the existing sidebar — same clean style as the
             home screen's. On desktop the sidebar is docked, so just a small spacer. No eagle here. */}
         {!docked ? (
-          <Pressable style={s.hamb} hitSlop={8} onPress={() => setSidebarOpen(true)}>
+          <Pressable
+            style={s.hamb}
+            hitSlop={8}
+            // hitSlop is a NO-OP on react-native-web; the 44px floor comes from
+            // TAP_TARGET_CSS via this marker (ops_incident #17).
+            // @ts-expect-error web-only DOM props on the RNW host node
+            dataSet={{ ...TAP44 }}
+            onPress={() => setSidebarOpen(true)}
+          >
             <Ionicons name="menu" size={22} color={colors.ink} />
           </Pressable>
         ) : (
@@ -2925,7 +2934,13 @@ export default function Agent() {
         <View style={{ flex: 1 }} />
         {/* Logged-out sign-in (mobile only — desktop has the docked sidebar CTA). Owner 2026-08-19. */}
         {!user && !docked && (
-          <Pressable style={s.topSignIn} onPress={openAuth} hitSlop={6}>
+          <Pressable
+            style={s.topSignIn}
+            onPress={openAuth}
+            hitSlop={6}
+            // @ts-expect-error web-only DOM props on the RNW host node
+            dataSet={{ ...TAP44 }}
+          >
             <Ionicons name="person-outline" size={15} color="#fff" />
             <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
           </Pressable>
@@ -3500,7 +3515,14 @@ export default function Agent() {
               {busy || revealing ? (
                 // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
                 // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
-                <Pressable onPress={stop} style={s.stopBtn} hitSlop={8} accessibilityLabel={t('Stop')}>
+                <Pressable
+                  onPress={stop}
+                  style={s.stopBtn}
+                  hitSlop={8}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  accessibilityLabel={t('Stop')}
+                >
                   <Ionicons name="stop" size={15} color="#fff" />
                 </Pressable>
               ) : (
@@ -3520,6 +3542,8 @@ export default function Agent() {
                     testID="voice-mic"
                     onPress={() => { void startVoice(); }}
                     hitSlop={8}
+                    // @ts-expect-error web-only DOM props on the RNW host node
+                    dataSet={{ ...TAP44 }}
                     accessibilityLabel={t('Voice input')}
                     style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed]}
                   >
@@ -3534,6 +3558,8 @@ export default function Agent() {
                     onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
                     onHoverOut={() => { setSendHover(false); sendSpring(1); }}
                     hitSlop={6}
+                    // @ts-expect-error web-only DOM props on the RNW host node
+                    dataSet={{ ...TAP44 }}
                     accessibilityLabel={t('Search')}
                     style={!typed.trim() ? s.sendDisabled : undefined}
                   >
@@ -3561,6 +3587,8 @@ export default function Agent() {
                   testID="voice-cancel"
                   onPress={cancelVoice}
                   hitSlop={8}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Cancel recording')}
                   style={({ pressed }: any) => [s.voiceRoundBtn, pressed && s.micBtnPressed]}
                 >
@@ -3577,6 +3605,8 @@ export default function Agent() {
                   testID="voice-stop"
                   onPress={stopVoice}
                   hitSlop={8}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Stop recording')}
                   style={({ pressed }: any) => [s.voiceRoundBtn, pressed && s.micBtnPressed]}
                 >
@@ -3588,6 +3618,8 @@ export default function Agent() {
                   onPressIn={() => sendSpring(0.9)}
                   onPressOut={() => sendSpring(1)}
                   hitSlop={6}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Send')}
                 >
                   <Animated.View style={[s.sendBtn, { transform: [{ scale: sendScale }] }]}>
