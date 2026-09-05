@@ -545,7 +545,10 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
   return (
     <View>
       <View style={s.head}>
-        <Text style={s.h}>{t('Terms & Privacy')}</Text>
+        <View style={s.legalLockup}>
+          <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
+          <Text style={[s.h, s.legalTitle]}>{t('Terms & Privacy')}</Text>
+        </View>
       </View>
       <View style={s.bodyPad}>
         <View style={s.seg} accessibilityRole="tablist">
@@ -564,9 +567,14 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
         {/* The legal text names the contact address as the {{CONTACT_EMAIL}} token, substituted here
             — never as a literal in src/data/legal.ts — so verify-info-routes-single-source.ts's
             "no second @ezhalah.com copy anywhere in src/" rule stays true of the DATA layer too,
-            not just the other UI surfaces it was written for. This IS the canonical address. */}
+            not just the other UI surfaces it was written for. This IS the canonical address for
+            both: partners@ (Terms) for business/support-shaped inquiries, admin@ (Privacy, owner
+            2026-09-04) for data-rights/PDPL requests — a normal split, not a drift risk, since both
+            literals still live only here. */}
         {docs.map((p, i) => (
-          <Text key={i} style={s.legalP}>{p.replace('{{CONTACT_EMAIL}}', 'partners@ezhalah.com')}</Text>
+          <Text key={i} style={s.legalP}>
+            {p.replace('{{CONTACT_EMAIL}}', tab === 'privacy' ? 'admin@ezhalah.com' : 'partners@ezhalah.com')}
+          </Text>
         ))}
       </View>
     </View>
@@ -634,6 +642,14 @@ const s = StyleSheet.create({
   // paddingRight keeps the heading out from under the close button (see CLOSE_CLEAR).
   h: { fontSize: 22, lineHeight: 30, fontWeight: '800', color: colors.ink, textAlign: 'right', writingDirection: 'auto' as any, paddingRight: CLOSE_CLEAR },
   sep: { height: 1, backgroundColor: colors.line, marginTop: 24, marginBottom: 20 },
+  // The legal reader's title row adds the eagle mark ahead of «الشروط والخصوصية». Under RTL that
+  // icon becomes the row's LEADING (rightmost) element — the exact slot verify-info-modal-header-
+  // clearance.ts exists because a heading once painted under the × there. So CLOSE_CLEAR moves to
+  // the ROW, not the text: `h`'s own paddingRight (still asserted by that barrier, untouched) is
+  // cancelled back to 0 on this specific usage so the clearance is never reserved twice.
+  legalLockup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: CLOSE_CLEAR },
+  legalEagle: { width: 20, height: 20 },
+  legalTitle: { paddingRight: 0, flexShrink: 1 },
 
   // ——— «تواصل مع الدعم» form (owner 2026-09-02; spacing/inputs 2026-09-03) ———
   // The form is the card's main content now — no box-inside-a-box; sections separate by space.

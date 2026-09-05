@@ -165,8 +165,13 @@ check(
   /const dedupedFacets = dedupeFacetsByLabel\(facets\);\s*\n\s*return \{ query, askedIds, labels: dedupedFacets\.flatMap\(\(f\) => f\.labels\), facets: dedupedFacets \};/.test(afStepsSrc),
 );
 check(
+  // 2026-08-31 (deep-search redesign): the combine is HOISTED into `dedupedFacets` so the SAME
+  // deduped set feeds guided.facets AND the transition's sentence/chips — the dedup guarantee is
+  // unchanged, and a raw spread reaching `facets:` is still rejected.
   "agent.tsx's cross-round combine (carry + this round's facets) calls dedupeFacetsByLabel — not a raw spread",
-  /facets: dedupeFacetsByLabel\(\[\.\.\.\(carry\?\.facets \?\? \[\]\), \.\.\.ageFlowFacetsRef\.current\]\)/.test(agent),
+  /const dedupedFacets = dedupeFacetsByLabel\(\[\.\.\.\(carry\?\.facets \?\? \[\]\), \.\.\.ageFlowFacetsRef\.current\]\)/.test(agent)
+  && /facets: dedupedFacets,/.test(agent)
+  && !/facets: \[\.\.\./.test(agent),
 );
 check(
   'a chat restored from a saved transcript (openSaved) is ALSO deduped — a chat saved before this fix shipped cannot resurrect a baked-in duplicate pill',

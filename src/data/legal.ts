@@ -18,7 +18,10 @@
 // The contact address below is the LITERAL TOKEN `{{CONTACT_EMAIL}}`, never the real address —
 // verify-info-routes-single-source.ts refuses a second @ezhalah.com literal anywhere in src/ outside
 // InfoModal.tsx, and that rule is right (a stale second copy is exactly how this repo's /support and
-// /about doors drifted before). InfoModal.tsx's LegalBody substitutes the real address at render.
+// /about doors drifted before). InfoModal.tsx's LegalBody substitutes the token AT RENDER, and picks
+// the address by which tab is showing (owner 2026-09-04): partners@ for the Terms of Use, admin@ for
+// the Privacy Policy's data-rights contact — two real addresses, still only ever spelled out in that
+// one file.
 // This is a strong draft, not a substitute for a Saudi lawyer's review before relying on it fully.
 export const LEGAL_DOCS: { terms: string[]; privacy: string[] } = {
   terms: [
