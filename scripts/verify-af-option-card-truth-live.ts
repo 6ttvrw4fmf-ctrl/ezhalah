@@ -882,8 +882,24 @@ try {
   // here — and the DOM is asserted to reveal from that set and nothing else.
   // Snapshot the badge count once the landed turn's first page has finished dripping in: the
   // newest turn already shows min(total, FIRST_PAGE) cards, so "revealed" adds that back.
-  let cardsBefore: number = await page.evaluate(COUNT_CARDS);
-  for (let i = 0; i < 10; i++) { await page.waitForTimeout(700); const n: number = await page.evaluate(COUNT_CARDS); if (n === cardsBefore) break; cardsBefore = n; }
+  // WAIT FOR THE CASCADE TO START, THEN FOR IT TO SETTLE (2026-09-05). The old loop broke the moment
+  // two consecutive samples matched — including 0 == 0, before the reveal had begun. agent.tsx gates
+  // the ENTIRE actions block (Show More included) on `shown < initialReveal(...)`, so sampling during
+  // the cascade sees no cards AND no button, and the loop below would then break on a missing button
+  // and report «no button» against a turn that was still dripping its first page in. A turn with a
+  // non-zero total must eventually render at least one card; waiting for that is not a weakened
+  // assertion, because a button that never arrives still fails — only the race is removed.
+  let cardsBefore = 0;
+  {
+    const until = Date.now() + 30_000;
+    let stable = 0;
+    while (Date.now() < until) {
+      await page.waitForTimeout(700);
+      const n: number = await page.evaluate(COUNT_CARDS);
+      if (n > 0 && n === cardsBefore) { if (++stable >= 2) break; } else { stable = 0; }
+      cardsBefore = n;
+    }
+  }
   const alreadyShown = Math.min(landed.total ?? 0, FIRST_PAGE);
   const armed4 = searches.length;
   let clicks = 0;
@@ -895,8 +911,18 @@ try {
   for (let i = 0; i < MAX_LOAD_MORE_CLICKS; i++) {
     if (networkPageSeen) break;
     await scrollToBottom();
-    const btns = await page.$$('[data-testid="results-load-more"]');
-    const btn = btns[btns.length - 1];
+    // On the FIRST pass, give the button a bounded chance to arrive rather than concluding from one
+    // sample that it is absent — same reason as the cascade wait above. Later passes break at once:
+    // by then the button has been seen, so its disappearance is the real end of the set.
+    let btn = (await page.$$('[data-testid="results-load-more"]')).at(-1);
+    if (!btn && i === 0) {
+      const until = Date.now() + 20_000;
+      while (!btn && Date.now() < until) {
+        await page.waitForTimeout(700);
+        await scrollToBottom();
+        btn = (await page.$$('[data-testid="results-load-more"]')).at(-1);
+      }
+    }
     if (!btn) break;
     const shownBefore: number = await page.evaluate(COUNT_CARDS);
     await btn.click();
@@ -919,8 +945,20 @@ try {
   const pages = searches.slice(armed4).filter((s) => Number(s.body?.p_offset ?? 0) > 0);
   pageBodies = pages.map((p) => p.body);
   unionIds = [...landed.rows, ...pages.flatMap((p) => p.rows)];
+  // WHEN THE BUTTON IS ABSENT, SAY WHAT ELSE WAS ON SCREEN. Without this the failure reads «no
+  // button» and cannot distinguish a real R10.1.1 defect from the owner's 2026-08-21 call that the
+  // whole actions row is hidden while the AF interview overlay is open — the AF card is absolute, so
+  // buttons underneath it are unreachable and hiding them is correct. Two different verdicts, one
+  // indistinguishable message, which is how a barrier ends up accusing a correct production.
+  const absentDiag = clicks > 0 ? '' : await page.evaluate(() => {
+    const q = (s: string) => document.querySelectorAll(s).length;
+    const afOpen = q('[data-testid="af-card"]') > 0 || q('[data-testid^="af-option"]') > 0;
+    return ` · cards on screen=${q('[data-testid^="card-listing-"]')} · af overlay open=${afOpen}` +
+           ` · load-more elements anywhere=${q('[data-testid="results-load-more"]')}` +
+           ` · af pills=${q('[data-testid^="af-pill-"]')}`;
+  }).catch(() => ' · (diagnostic unavailable)');
   check('4. R10.1.1 — «عرض المزيد» was exercised (the button was there to click)', clicks > 0 || (landed.total ?? 0) <= FIRST_PAGE,
-    clicks ? `${clicks} click(s), ${pages.length} network page(s) fired (p_offset ${pages.map((p) => p.body.p_offset).join(',') || '— buffer served every click'})` : `no button and total=${landed.total} > ${FIRST_PAGE}`);
+    clicks ? `${clicks} click(s), ${pages.length} network page(s) fired (p_offset ${pages.map((p) => p.body.p_offset).join(',') || '— buffer served every click'})` : `no button and total=${landed.total} > ${FIRST_PAGE}${absentDiag}`);
   // THE NETWORK PAGE IS THE POINT. Below the buffer every click is served from page 0 and nothing
   // about "the same predicate on every page" is exercised — so that case is a loud SKIP, not a PASS.
   if (paginationPossible) {
