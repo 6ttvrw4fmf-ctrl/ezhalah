@@ -30,7 +30,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { stripComments } from './lib/stripComments.ts';
-import { AF_PREDICATE_FIELDS, emptyQuery } from '../src/lib/searchDefaults.ts';
+import { AF_PREDICATE_FIELDS, RNPL_TOKENS, emptyQuery } from '../src/lib/searchDefaults.ts';
 import { COHORT_QUESTIONS } from '../src/lib/afCohorts.ts';
 import { withoutFacet } from '../src/lib/afCarry.ts';
 import { CLEAN_MACRO, groupsOf } from '../src/data/propertyTypes.ts';
@@ -38,6 +38,7 @@ import {
   AF_EVIDENCE, AMENITY_COL, AMENITY_LABEL, afActive, afEvidence, normDirectionAr,
   type ActiveAf, type AfCanon, type T,
 } from '../src/lib/afEvidence.ts';
+import { isRnpl } from '../src/lib/afCertify.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -265,6 +266,46 @@ console.log('\n── T2b. multi-value semantics + adjectival direction + AND on
   assert(same(rn.map((a) => a.id), ['rnpl', 'amenities']), 'rnpl rides q.amenities but is its own question; kitchen stays under amenities');
   assert(afEvidence([{ id: 'rnpl', keys: ['rnpl'] }], { rent_now_pay_later: null }, t).length === 0, 'rnpl: NULL → nothing');
   assert(afEvidence([{ id: 'rnpl', keys: ['rnpl'] }], { rent_now_pay_later: false }, t).length === 0, 'rnpl: false → nothing');
+
+  // ── T2b. THE EVIDENCE REGISTRY COVERS EXACTLY THE CERTIFICATION GATE'S RNPL TOKEN SET ──────────
+  // The gate (afCertify.isRnpl), the intent clear/keep, and the evidence registry all consume the
+  // SAME shared RNPL_TOKENS now. Before that, isRnpl accepted 'rent_now_pay_later' while the registry
+  // matched only 'rnpl', so a search narrowed by the alias FILTERED (3,005 real rows, anon-proven) yet
+  // rendered NO chip — an R12A.1 hole (a committed AF predicate invisible on the card). These checks
+  // pin registry ⇔ gate BY EXECUTION so a future alias added to one and not the other fails here.
+  // COVERAGE IS ANCHORED TO THE SQL, NOT TO THE CONSTANT UNDER TEST. af_eligibility_clause.sql maps
+  // its RNPL tokens to `s.rent_now_pay_later` in ONE line: `not (''a'' = any(p_amenities) or ''b'' =
+  // any(p_amenities)) or s.rent_now_pay_later`. Those are the tokens the RPC actually honours as RNPL.
+  // Deriving the expected set from the clause (independent of RNPL_TOKENS) is what makes SHRINKING
+  // RNPL_TOKENS fail here — otherwise the barrier's own test surface would shrink with it.
+  const clause = readFileSync(join(ROOT, 'sql/mirrors/af_eligibility_clause.sql'), 'utf8');
+  const rnplLine = clause.split('\n').find((l) => /any\(p_amenities\)[\s\S]*s\.rent_now_pay_later/.test(l)) ?? '';
+  const sqlRnplTokens = [...rnplLine.matchAll(/''([a-z_]+)''\s*=\s*any\(p_amenities\)/g)].map((m) => m[1]);
+  assert(sqlRnplTokens.length >= 2, `clause exposes ≥2 RNPL tokens (got [${sqlRnplTokens.join(', ')}])`);
+  for (const tok of sqlRnplTokens) {
+    assert(RNPL_TOKENS.includes(tok), `RNPL_TOKENS covers every RNPL token the RPC filters on: «${tok}» (clause) must be in the shared set`);
+    assert(isRnpl(tok), `gate covers every RNPL token the RPC filters on: isRnpl(«${tok}») (else a filtered predicate is uncertified)`);
+    const act = afActive({ ...emptyQuery(), amenities: [tok] } as any);
+    assert(same(act.map((a) => a.id), ['rnpl']), `evidence renders the RPC's RNPL token «${tok}» via the rnpl def (an R12A.1 hole otherwise)`);
+    assert(afEvidence(act, { rent_now_pay_later: true }, t).length === 1, `evidence: RPC token «${tok}» on an RNPL row → the installment chip`);
+  }
+  for (const tok of RNPL_TOKENS) {
+    assert(isRnpl(tok), `gate: isRnpl accepts the registry token «${tok}»`);
+    // routes to the rnpl def, never leaks into the generic amenities def
+    const act = afActive({ ...emptyQuery(), amenities: [tok] } as any);
+    assert(same(act.map((a) => a.id), ['rnpl']), `evidence: «${tok}» activates ONLY the rnpl def (not amenities)`);
+    // and renders the installment chip on a real RNPL row — the exact behaviour that was silent
+    assert(afEvidence(act, { rent_now_pay_later: true }, t).length === 1, `evidence: «${tok}» on an RNPL row → the installment chip`);
+    // still honours UNKNOWN: a NULL row shows nothing even via the alias
+    assert(afEvidence(act, { rent_now_pay_later: null }, t).length === 0, `evidence: «${tok}» on a NULL row → nothing (UNKNOWN stays UNKNOWN)`);
+  }
+  // the reverse inclusion: a GENERIC amenity token the gate does NOT treat as rnpl must route to the
+  // amenities def, so the two sets cannot silently overlap (a decoy proves isRnpl is not "accept all").
+  for (const generic of ['kitchen', 'parking', 'gym']) {
+    assert(!isRnpl(generic), `gate: isRnpl rejects the generic amenity «${generic}»`);
+    assert(afActive({ ...emptyQuery(), amenities: [generic] } as any).some((a) => a.id === 'amenities'),
+      `evidence: generic «${generic}» routes to the amenities def, not rnpl`);
+  }
   // a NON-number where a number is expected is UNKNOWN too (never Number()-coerced)
   assert(afEvidence([{ id: 'bathrooms', keys: ['3'] }], { bathrooms: '4' }, t).length === 0, 'bathrooms: a string "4" is not a count → nothing');
   assert(afEvidence([{ id: 'furnished', keys: ['yes'] }], { furnished: 'yes' }, t).length === 0, 'furnished: a string is not a boolean → nothing');
