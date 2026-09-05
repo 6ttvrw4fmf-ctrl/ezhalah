@@ -1080,6 +1080,75 @@ will ever re-visit them.* A disabled cron turns "the next crawl will fix it" int
 will" — and a code-shape barrier goes green at the moment the data is still wrong, which is the
 worst possible time for a green light.
 
+## 31. STRICT PERIODS, HONEST UNKNOWN — the owner's rule of 2026-09-05, and why a monitor kept calling it a bug
+
+**Owner rule, verbatim in intent. Do not re-litigate it and do not restore any fallback.**
+
+> Keep the strict period behavior. If the source does not truthfully establish the rent period, keep
+> `rent_period = NULL`. A NULL/UNKNOWN-period rental may remain searchable when the user applies no
+> period filter, but it must not appear under **شهري**, **سنوي**, or **كلاهما**. Do not restore any
+> fallback and do not infer the period from price, description tokens, or neighboring listings.
+
+This supersedes §22.1's product fallback, which the owner retired on 2026-09-03
+(`20260903175817_unknown_rent_period_stays_unknown_never_defaults_to_annual`). §22's original
+position — source truth stays NULL — is now the whole rule at *every* layer, not just the raw tables.
+
+**The search behaviour was already correct, and was verified before anything was changed.** Proven
+on production through the anon RPC with a positive control, which is the half that makes it evidence
+rather than assertion: raghdan (all 130 rent rows NULL) returns **شهري 0 · سنوي 0 · كلاهما 0 ·
+no-filter 130**; eastabha (mixed) returns **شهري 25 · سنوي 21 · كلاهما 46 · no-filter 83** — كلاهما
+is *exactly* 25+21, and no-filter is exactly 46+37 UNKNOWN. `كلاهما` is a real token, never `null`
+(`rentPeriodParam` in `src/data/remote.ts`); `null` means "apply no period filter" and would sweep
+every UNKNOWN row into a chip the user reads as strict. **No `src/` change and no deploy were needed.**
+
+**What WAS broken was the monitor, and it had been red for two days describing correct behaviour.**
+`mon_searchability_now.pct_period_searchable` divided rows-reachable-by-chip by *all* rent apartments
+held (minus `ops_rent_period_source_limited`, a table with **0 rows** that has never had any). Every
+honest UNKNOWN therefore sat in the denominator. When the fallback was retired those rows reverted to
+their truthful NULL and seven platforms went ~100% → 0% overnight — raghdan 0/72, eaqartabuk 4/85,
+alkhaas 0/10, mizlaj 0/5, hajer 0/3, jurash 0/1, sadin 0/1 — raising seven P1 SEARCHABILITY_COLLAPSE
+alerts. And because `mon_raise()` dedups on an open key, while those seven sat open **a real collapse
+on those platforms could not raise at all** (§23a/§25a). All nine alerts (7 P1 + 2 P2) resolved.
+
+**The fix is the denominator, and it is era-proof by construction:** *of the listings whose period
+the source DID establish, how many are reachable?* An UNKNOWN row now leaves the numerator **and** the
+denominator together, so it cannot move the metric in either direction — no future decision about
+UNKNOWN handling can make this detector lie again. Recomputed against the live 14-day history, every
+platform's baseline matches its current value (aqar 100→100, gathern 100→100, wasalt 100→99.9,
+eastabha 96.2→97.1, abeea 87.1→87.1, erapulse 66.7→66.7); the seven honest-UNKNOWN platforms read the
+new verdict `OK_NO_SOURCE_ESTABLISHED_PERIOD` — *nothing to measure*, stated as its own outcome so a
+reader can tell it from *measured and fine*.
+
+**Two traps this run hit, both worth keeping:**
+
+1. **A statistical coverage limb would have re-created the same false alerts.** The obvious way to
+   keep the protection the new denominator gives up is "alert if the share of rows carrying a period
+   collapses". Measured before shipping: those seven platforms' 14-day baseline coverage is **100%**,
+   *because the retired fallback was filling it in* — so that limb fires on exactly the same seven.
+   The baseline straddles a deliberate product change. Replaced with an **evidence** limb that no
+   product decision can fool: `mon_detect_source_proven_period_unreachable()` (P1, roster-wired) fires
+   only where `ops_rent_period_source_probe` records a **live observation that the source publishes a
+   period** while we serve the row as NULL — a period we LOST, never one the source withheld. Honest
+   UNKNOWN has no such probe and can never trip it. Mirror of
+   `mon_detect_rent_period_contradicts_probe()` (which catches us *inventing* a period); together they
+   pin both directions of PERIOD = SOURCE. Reads **0** — a standing 0 is the healthy reading (§24c).
+2. **Adding a healthy verdict nearly created a permanently-red alert.** The collapse detector raised on
+   `verdict <> 'OK'` and self-healed on `verdict = 'OK'` — two phrasings of one question, which agree
+   only while `'OK'` is the single healthy value. `OK_NO_SOURCE_ESTABLISHED_PERIOD` is `<> 'OK'` (so it
+   would raise) and not `= 'OK'` (so it could never clear). Fixed structurally per §25a — live keys
+   derived from the raising cohort and handed to `mon_resolve_stale_keys()`, one predicate,
+   `verdict NOT LIKE 'OK%'` written once, so a future `OK_SOMETHING` inherits the right behaviour.
+
+**Barriers:** `scripts/verify-unknown-period-excluded-from-strict-chips.ts` (in `npm test`) **executes**
+the real `rentPeriodParam` through `liftSymbols` — a regex proves a shape, only a call proves a
+behaviour — and mutation-proves the SQL predicates. The detector's own proof is executed against live
+objects in `20260905183836`: inject a synthetic probe → raises exactly that key → retract → clears;
+raised 18:37:31.837, resolved 18:37:50.035, held open 18.2 s, `insta_resolves = 0`. No listing row is
+touched at any point, so no period is fabricated even transiently. **Note the assertion deliberately
+omitted there:** inside one transaction Postgres freezes `now()`, so a raise-then-resolve *necessarily*
+shares a timestamp; the insta-resolve check is only meaningful across transactions, and asserting it
+in-migration fails on a transaction artifact (it did, and the migration was rolled back).
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve
