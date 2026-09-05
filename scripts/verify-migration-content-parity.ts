@@ -56,6 +56,8 @@ const KIND = 'migration_content_parity';
 // divergence hide a new dangerous one. verify-migration-parity-class-split.ts pins the split.
 export const CODE_DEDUP_KEY = 'migration_content_parity_diverged:code';
 export const COMMENT_DEDUP_KEY = 'migration_content_parity_diverged:comments';
+/** Separate key: "the check could not run" is a different fact from "the content diverged". */
+export const PARITY_UNAVAILABLE_KEY = 'migration_content_parity_check_unavailable';
 
 // The digest must be computed identically on both sides or every file reads as diverged. Server:
 // left(md5(array_to_string(statements, E'\n')), 10). Here: the same md5 over the file's bytes with
@@ -134,10 +136,26 @@ if (import.meta.filename === process.argv[1]) {
       codeMd5: d.code_md5,
     }));
   } catch (e) {
-    // Same posture as the drift checker: a container with no network must not silently pass in CI,
-    // but must not fail a developer's local run either. CI runs it with network.
-    console.warn(`⚠ migration-content-parity SKIPPED (network unavailable: ${e}) — run again with network; CI must not skip.`);
-    process.exit(0);
+    // FAILS CLOSED (2026-09-04), same as the drift checker it shares a workflow with. The old
+    // posture ("must not fail a developer's local run") bought a quiet laptop at the price of a
+    // lying schedule: every 15 minutes this could fail to read production and still exit 0.
+    // A read that did not happen tells us NOTHING about parity, and nothing is not clean.
+    if (SERVICE_ROLE_KEY) {
+      try {
+        await callRpc(`${URL_BASE}/rest/v1/rpc/mon_raise`, SERVICE_ROLE_KEY, {
+          p_sev: 'P1',
+          p_kind: PARITY_UNAVAILABLE_KEY,
+          p_platform: null,
+          p_dedup: PARITY_UNAVAILABLE_KEY,
+          p_detail: { reason: String(e).slice(0, 500), checker: 'verify-migration-content-parity.ts', at: new Date().toISOString() },
+        });
+      } catch (e2) {
+        console.warn(`\u26a0 could not raise ${PARITY_UNAVAILABLE_KEY} (the exit code below is still the gate): ${e2}`);
+      }
+    }
+    console.error(`✗ migration-content-parity COULD NOT CHECK (${e}).`);
+    console.error(`  Failing closed: an unchecked production is not a clean production.`);
+    process.exit(1);
   }
 
   const baseline = readBaseline();
@@ -203,6 +221,11 @@ if (import.meta.filename === process.argv[1]) {
           'assumes. Reconcile the file when convenient. Kept on its OWN dedup key so it can never ' +
           'suppress the P1 code-level class.',
       );
+      // The read demonstrably worked — so the "could not check" P1 is over.
+      await callRpc(`${URL_BASE}/rest/v1/rpc/mon_resolve_key`, SERVICE_ROLE_KEY, {
+        p_kind: PARITY_UNAVAILABLE_KEY,
+        p_dedup: PARITY_UNAVAILABLE_KEY,
+      });
     } catch (e) {
       console.warn(`⚠ could not record heartbeat/alert (non-fatal, exit code is unaffected): ${e}`);
     }

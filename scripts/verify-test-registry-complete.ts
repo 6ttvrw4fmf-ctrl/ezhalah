@@ -35,7 +35,7 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadRegistry, argvFor } from './lib/testRegistry.ts';
+import { loadRegistry, argvFor, workflowInvokes } from './lib/testRegistry.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -62,15 +62,23 @@ const BASELINE_DEPARTURES = [
     script: 'verify-af-independent-oracle.ts',
     pr: '#1527',
     date: '2026-09-02',
-    home: '.github/workflows/af-live-truth-check.yml',
+    home: '.github/workflows/af-oracle-pr-check.yml',
     why: 'wholly live: 9 hand-written PostgREST predicates + the UNKNOWN partition against production '
       + 'through the committed anon key, inside the REQUIRED npm test — the pattern #1486 removed. Unlike '
       + '#1486 there was no offline half to split off and leave behind, so the whole file moved.',
     // Say the cost plainly. A relocation with a real home is not a loss; leaving PRs uncovered is.
-    perPrCoverage: 'PARTIAL LOSS — af-live-truth-check.yml has no pull_request trigger, so this no longer runs '
-      + 'on PRs at all (daily cron + every production deploy + dispatch). Its hermetic siblings '
-      + 'verify-af-oracle-filter-translator.ts and verify-af-oracle-soundness.ts stay in npm test, so the '
-      + 'oracle LOGIC is still gated per PR; what left is its live AGREEMENT with production.',
+    // 2026-09-04: the cost is PAID BACK, not re-narrated. #1527 left the oracle in
+    // af-live-truth-check.yml, which has no pull_request trigger, so for two days it gated nothing
+    // at review time — recorded here as PARTIAL LOSS. af-oracle-pr-check.yml now runs this one
+    // script (7.8s, no browser, no agent message, no secret) on every pull_request, as its own
+    // status check outside `npm test`. Both of #1527's properties hold at once: the live call is
+    // still not in the required hermetic suite, AND the oracle gates a PR. The floor stays 199
+    // because the script is still not RUN BY `npm test` — which is what the baseline measures.
+    perPrCoverage: 'NO LOSS — .github/workflows/af-oracle-pr-check.yml runs it on every pull_request (and on '
+      + 'push to main, and on dispatch) as its own required status check, retried 3x so a production hiccup '
+      + 'cannot fail an unrelated PR. It ALSO still runs post-deploy in af-live-truth-check.yml. Its hermetic '
+      + 'siblings verify-af-oracle-filter-translator.ts and verify-af-oracle-soundness.ts stay in npm test, so '
+      + 'the oracle LOGIC is gated there and its live AGREEMENT with production is gated here.',
   },
 ];
 const BASELINE_FLOOR = ORIGINAL_FLOOR - BASELINE_DEPARTURES.length;
@@ -94,6 +102,22 @@ for (const d of BASELINE_DEPARTURES) {
   check(`departure states whether per-PR coverage was lost: ${d.script}`,
     /LOSS|NO LOSS/.test(d.perPrCoverage), d.perPrCoverage.slice(0, 60));
 }
+// A LEDGER LINE IS A CLAIM; EXECUTE IT. «NO LOSS» is only true if the home this entry names really
+// is triggered by pull_request and really invokes the script. That is the exact property #1527 lost
+// in silence — the entry could have claimed anything and nothing in the repo would have disagreed.
+for (const d of BASELINE_DEPARTURES) {
+  const homeSrc = existsSync(join(root, d.home)) ? read(d.home) : '';
+  // Strip comments at the READER: this repo documents heavily inside workflows, and «pull_request»
+  // appears in prose in several of them.
+  const code = homeSrc.split('\n').filter((l) => !/^\s*#/.test(l)).map((l) => l.replace(/\s#.*$/, '')).join('\n');
+  const onPullRequest = /^\s+pull_request:/m.test(code);
+  const claimsNoLoss = /NO LOSS/.test(d.perPrCoverage);
+  check(`per-PR claim matches the home's actual triggers: ${d.script}`, claimsNoLoss === onPullRequest,
+    `${d.perPrCoverage.slice(0, 11)}… but ${d.home} ${onPullRequest ? 'HAS' : 'has NO'} pull_request trigger`);
+  check(`the home actually invokes it (not just names it in a comment): ${d.script}`,
+    workflowInvokes(homeSrc, d.script), d.home);
+}
+
 const missing = baseline.filter((b) => !runSet.has(b));
 check('EVERY baseline check is still discovered and run (no test silently disappeared)',
   missing.length === 0,

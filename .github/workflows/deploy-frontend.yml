@@ -61,6 +61,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # THE MINIMUM THE BASELINE RECORD NEEDS, and nothing else (naming any permission sets every
+    # other one to none, so this is a tightening of the repo default as well as a grant).
+    # Settings → Actions → Workflow permissions is "Read" on this repo, which is why the old
+    # `git push origin main` at the end of safe-deploy.sh could not have worked from here even if
+    # main were unprotected: the token had no write at all. It is protected, so the push is refused
+    # anyway — scripts/record-deploy-baseline.sh therefore records the baseline as a PR, which needs
+    # exactly these two: push the one-file branch, open the pull request. It cannot merge to main
+    # itself; the PR faces the same required checks as any other.
+    permissions:
+      contents: write
+      pull-requests: write
+
     steps:
       - name: Confirmation gate
         # A misclick in the Actions UI must not ship production.
@@ -178,6 +190,19 @@ jobs:
             echo "Re-run with **dry_run unchecked** and \`confirm: DEPLOY\` to ship."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Baseline recording path probe (dry run only — nothing is deployed)
+        # AGENTS.md forbids deploying in order to test the deploy pipeline, which is exactly why the
+        # baseline record went stale unnoticed for three days: the only way to exercise it was to
+        # ship. This runs the REAL scripts/record-deploy-baseline.sh in probe mode on a REAL runner
+        # with the REAL token — it reports whether this token may push to main and what main's
+        # protection requires, then opens and immediately closes a throwaway PR to prove the
+        # fallback works. It never touches main and never deploys.
+        if: ${{ inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_PR_TOKEN: ${{ secrets.BASELINE_PR_TOKEN }}
+        run: scripts/record-deploy-baseline.sh --probe
+
       - name: Deploy via the sanctioned guarded entrypoint
         if: ${{ !inputs.dry_run }}
         env:
@@ -189,6 +214,13 @@ jobs:
           # (npm ci + expo export + alias polling), so give it room — the lock still self-expires so
           # a killed runner can never wedge production.
           DEPLOY_LOCK_TTL_SECONDS: "1800"
+          # The baseline record at the end of safe-deploy.sh opens a PR when the direct push to main
+          # is refused (it always is, from here). BASELINE_PR_TOKEN is optional and preferred: a
+          # branch pushed with the built-in token starts no workflows, so the baseline PR's required
+          # checks never run and it waits for a human click. With the PAT they run and it can merge
+          # itself. See the header of scripts/record-deploy-baseline.sh.
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_PR_TOKEN: ${{ secrets.BASELINE_PR_TOKEN }}
         # Captured to a log because `job.status` alone CANNOT distinguish "refused before deploying"
         # from "deployed, then a post-deploy check failed" — and reporting the second as the first is
         # a safety defect (see the Report step). pipefail keeps the step's exit code from `tee`.

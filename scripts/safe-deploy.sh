@@ -413,31 +413,19 @@ else
 fi
 
 # ── ADVANCE THE APPROVED BASELINE to the just-deployed commit, so every FUTURE preflight refuses to
-# deploy anything that doesn't contain THIS UI. This is what keeps the safety floor current. Metadata
-# only (one line + a log entry); best-effort push — a failure here never undoes the successful deploy.
-echo ""
-echo "Recording $LOCAL as the new approved production baseline..."
-{ echo "$LOCAL"; tail -n +2 docs/DEPLOY_BASELINE.txt; echo "# $(date +%F)  ${LOCAL:0:7}  deployed via safe-deploy.sh"; } > docs/DEPLOY_BASELINE.txt.tmp \
-  && mv docs/DEPLOY_BASELINE.txt.tmp docs/DEPLOY_BASELINE.txt
-# THREE OUTCOMES, NAMED (2026-09-04). This used to be two branches, and the failure branch said
-# "NOTE: baseline unchanged (no diff)" — which is what a healthy no-op says. So every deploy from
-# .github/workflows/deploy-frontend.yml, where the runner has no git identity, printed a reassuring
-# no-op line while `git commit` died on "Author identity unknown" and the baseline silently stayed
-# where it was (stale since PR #1470, 2026-09-01; deploy run 33898889593 is the recorded case).
-# A commit that COULD NOT RUN must never read the same as a commit that HAD NOTHING TO DO.
-# The identity is supplied inline with `git -c`, so a runner with none can still record the
-# baseline and nothing about the caller's global git config is mutated.
-if git diff --quiet -- docs/DEPLOY_BASELINE.txt; then
-  echo "NOTE: baseline already records ${LOCAL:0:7} — nothing to commit."
-elif git add docs/DEPLOY_BASELINE.txt \
-  && git -c user.name="ezhalah-deploy" -c user.email="deploy@users.noreply.github.com" \
-       commit -m "chore(deploy): record approved baseline ${LOCAL:0:7}" --quiet; then
-  git push origin main --quiet 2>/dev/null \
-    && echo "Baseline advanced to ${LOCAL:0:7} and pushed." \
-    || echo "WARNING: baseline commit made locally but the push to main FAILED (main moved, or branch protection refuses a direct push from this runner). Open a PR that sets docs/DEPLOY_BASELINE.txt to ${LOCAL} so the next preflight is accurate."
-else
-  echo "WARNING: the baseline commit FAILED — this is NOT a no-op. docs/DEPLOY_BASELINE.txt still records $(head -1 docs/DEPLOY_BASELINE.txt | cut -c1-7) while production now serves ${LOCAL:0:7}, so the next preflight measures against a stale floor. Fix the cause above and record ${LOCAL} by PR."
-fi
+# deploy anything that doesn't contain THIS UI. This is what keeps the safety floor current.
+#
+# The whole act lives in scripts/record-deploy-baseline.sh, because inline here it could only ever be
+# run by deploying production — and AGENTS.md forbids deploying to test the deploy pipeline. That is
+# why the one step nothing had exercised is the one that broke in silence (stale 2026-09-01 → 09-04).
+# It is now runnable on its own: `scripts/record-deploy-baseline.sh --probe` proves the path from a
+# runner without shipping anything, and deploy-frontend.yml's dry run does exactly that.
+#
+# It is NOT best-effort any more. A baseline that cannot be recorded leaves the next preflight
+# measuring against a stale floor, so the script exits non-zero and says so with the phrase the
+# workflow's Report step greps for. `set -e` therefore fails this run — AFTER a successful deploy,
+# which the Report step already reports correctly (deployed, then a post-deploy step failed).
+scripts/record-deploy-baseline.sh "$LOCAL"
 
 echo ""
 echo "Deployed. Now verify search actually renders cards in a browser (not just the bundle), then"
