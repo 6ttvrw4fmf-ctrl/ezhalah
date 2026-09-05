@@ -142,6 +142,53 @@ def fetch_taxonomies(s: cc.Session) -> dict[str, dict[int, str]]:
     return out
 
 
+def fetch_images(s: cc.Session, posts: list[dict]) -> dict[int, list[str]]:
+    """{wp_post_id: [full-size image URL, ...]}, featured image FIRST.
+
+    alta exposes no property_meta over REST, so the gallery is read the way WordPress itself models
+    attachment ownership: /wp/v2/media?parent=<post_id>. That binding is the whole point — the
+    attachment's OWN parent field, not proximity on a rendered page.
+
+    THIS IS THE TRAP THIS FUNCTION EXISTS TO AVOID, and it is the same one that nearly bound the
+    wrong PRICE on this source. alta's detail page renders a "related properties" block, so the
+    page's image gallery contains OTHER listings' photos. Scraping images off the HTML would put a
+    neighbouring property's facade on this card — a listing-fidelity breach that looks perfectly
+    plausible in the data. `parent=` cannot make that mistake: an attachment has exactly one parent.
+    Verified 2026-09-05: post 25759 -> 23 attachments, 24870 -> 27, 24864 -> 1. Distinct sets.
+
+    featured_media names the image the site itself leads with, so it is hoisted to the front; the
+    rest follow in the order WordPress returns them. The first url is the card thumbnail.
+
+    Failure degrades to fewer images, never to a wrong one: a listing whose attachments cannot be
+    read keeps an EMPTY list rather than inheriting anything.
+    """
+    out: dict[int, list[str]] = {}
+    for p in posts:
+        pid = p.get("id")
+        if not isinstance(pid, int):
+            continue
+        try:
+            r = s.get(f"{REST}/media?parent={pid}&per_page=100", timeout=40)
+            if r.status_code != 200:
+                continue
+            media = r.json()
+        except Exception:
+            continue                    # a lost gallery costs images, never a wrong image
+        if not isinstance(media, list):
+            continue
+        urls: list[str] = []
+        featured = p.get("featured_media")
+        for m in media:
+            if isinstance(m, dict) and m.get("source_url"):
+                if isinstance(featured, int) and m.get("id") == featured:
+                    urls.insert(0, m["source_url"])     # the image the SITE leads with
+                else:
+                    urls.append(m["source_url"])
+        if urls:
+            out[pid] = list(dict.fromkeys(urls))        # de-dupe, preserve order
+    return out
+
+
 def fetch_listings(s: cc.Session) -> list[dict]:
     out: list[dict] = []
     # Records WHY enumeration stopped. A timeout, a 403 and a genuinely empty source are three
@@ -172,7 +219,8 @@ def fetch_listings(s: cc.Session) -> list[dict]:
     return out
 
 
-def map_listing(p: dict, tax: dict[str, dict[int, str]]) -> tuple[Optional[dict], str]:
+def map_listing(p: dict, tax: dict[str, dict[int, str]],
+                images: Optional[dict[int, list[str]]] = None) -> tuple[Optional[dict], str]:
     link = p.get("link")
     if not link:
         return None, "residential"
@@ -249,7 +297,7 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]]) -> tuple[Optional[dict]
         "rega_location_verified": False,
         "title": title,
         "description": _redact(body),
-        "photo_urls": [],
+        "photo_urls": (images or {}).get(p.get("id"), []),
         "additional_info": {},
     }
 
@@ -310,6 +358,7 @@ def main() -> int:
     try:
         tax = fetch_taxonomies(s)
         posts = fetch_listings(s)
+        images = fetch_images(s, posts) if posts else {}
         if not posts:
             raise RuntimeError(f"REST returned no listings — {LAST_FETCH_NOTE}")
         if args.limit:
@@ -319,7 +368,7 @@ def main() -> int:
 
         unmapped: dict[str, int] = {}
         for p in posts:
-            row, cat = map_listing(p, tax)
+            row, cat = map_listing(p, tax, images)
             if not row:
                 names = tax.get('property_category') or {}
                 for tid in (p.get('property_category') or []):

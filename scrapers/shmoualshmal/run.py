@@ -132,6 +132,66 @@ def fetch_taxonomies(s: cc.Session) -> dict[str, dict[int, str]]:
     return out
 
 
+def fetch_images(s: cc.Session, posts: list[dict]) -> dict[int, list[str]]:
+    """{wp_post_id: [full-size image URL, ...]} in the SOURCE'S OWN GALLERY ORDER.
+
+    Houzez stores the gallery as attachment IDs in `fave_property_images` (a comma-joined string
+    or a list, depending on how WP serialised it), with the first entry also mirrored in
+    `featured_media` / `_thumbnail_id`. Those IDs are resolved to URLs in BULK through
+    /wp/v2/media?include=... — one request per 100 attachments instead of one per image.
+
+    ORDER IS NOT COSMETIC AND THE ENDPOINT DOES NOT PRESERVE IT. Verified 2026-09-05: requesting
+    include=18747,18739,18741 returns [18747, 18741, 18739]. The FIRST url in photo_urls is what a
+    result card renders as its thumbnail, so the ids are re-sorted back into the source's order
+    after the fetch. Taking the response order would silently show a bathroom where the site shows
+    the facade.
+
+    Failure is degradation, never invention: any id that does not resolve is dropped, and a listing
+    whose gallery cannot be read keeps an EMPTY list rather than borrowing another listing's photo.
+    """
+    want: dict[int, list[int]] = {}
+    for p in posts:
+        pid = p.get("id")
+        if not isinstance(pid, int):
+            continue
+        # NOT _meta1 HERE, AND THE DIFFERENCE IS THE WHOLE GALLERY. _meta1 unwraps a list to its
+        # FIRST element, which is right for the single-value meta WP wraps in a 1-element list
+        # (fave_property_size, fave_property_bedrooms…). fave_property_images is a genuine
+        # MULTI-value meta: ['18741','18739','18747','18746','18743',…]. Passing it through _meta1
+        # silently yielded one photo per listing instead of five — the card still looked fine,
+        # which is exactly why it needed catching here rather than by eye. (2026-09-05)
+        raw = (p.get("property_meta") or {}).get("fave_property_images")
+        ids: list[int] = []
+        if isinstance(raw, str):
+            ids = [int(x) for x in re.findall(r"\d+", raw)]
+        elif isinstance(raw, list):
+            for x in raw:
+                ids += [int(y) for y in re.findall(r"\d+", str(x))]
+        # featured_media is the gallery's first image; keep it first even if the meta omits it.
+        fm = p.get("featured_media")
+        if isinstance(fm, int) and fm > 0 and fm not in ids:
+            ids.insert(0, fm)
+        if ids:
+            # de-dupe while PRESERVING first-seen order
+            want[pid] = list(dict.fromkeys(ids))
+
+    all_ids = sorted({i for ids in want.values() for i in ids})
+    url_by_id: dict[int, str] = {}
+    for i in range(0, len(all_ids), 100):
+        chunk = all_ids[i:i + 100]
+        try:
+            r = s.get(f"{REST}/media?include={','.join(map(str, chunk))}&per_page=100", timeout=40)
+            if r.status_code != 200:
+                continue
+            for m in r.json():
+                if isinstance(m, dict) and m.get("source_url"):
+                    url_by_id[m["id"]] = m["source_url"]
+        except Exception:
+            continue                    # a lost chunk costs images, never a wrong image
+
+    return {pid: [url_by_id[i] for i in ids if i in url_by_id] for pid, ids in want.items()}
+
+
 def fetch_listings(s: cc.Session) -> list[dict]:
     """Every property post. An unparseable body ends enumeration rather than raising — the guard
     awal's 2026-07-27 parking incident put in every WP scraper."""
@@ -164,7 +224,8 @@ def fetch_listings(s: cc.Session) -> list[dict]:
     return out
 
 
-def map_listing(p: dict, tax: dict[str, dict[int, str]]) -> tuple[Optional[dict], str]:
+def map_listing(p: dict, tax: dict[str, dict[int, str]],
+                images: Optional[dict[int, list[str]]] = None) -> tuple[Optional[dict], str]:
     link = p.get("link")
     if not link:
         return None, "residential"
@@ -225,7 +286,7 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]]) -> tuple[Optional[dict]
         "rega_location_verified": False,
         "title": title,
         "description": description,
-        "photo_urls": [],
+        "photo_urls": (images or {}).get(p.get("id"), []),
         "additional_info": {},
     }
 
@@ -267,6 +328,7 @@ def main() -> int:
     try:
         tax = fetch_taxonomies(s)
         posts = fetch_listings(s)
+        images = fetch_images(s, posts) if posts else {}
         if not posts:
             raise RuntimeError(f"REST returned no listings — {LAST_FETCH_NOTE}")
         if args.limit:
@@ -276,7 +338,7 @@ def main() -> int:
 
         unmapped: dict[str, int] = {}
         for p in posts:
-            row, cat = map_listing(p, tax)
+            row, cat = map_listing(p, tax, images)
             if not row:
                 names = tax.get('property_type') or {}
                 for tid in (p.get('property_type') or []):
