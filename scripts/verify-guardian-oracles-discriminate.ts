@@ -174,7 +174,14 @@ console.log('§2 mutations — the real file is edited and re-executed');
       const r = await mod.dismissAuthInvitation(p as never, 300);
       mustCatch(label, expectBroken(r, p));
     } catch (e) {
-      mustCatch(`${label} (module threw: ${String(e).slice(0, 60)})`, true);
+      // A THROW IS NOT A KILLED MUTATION. All three mutations here are string substitutions that
+      // must still parse and still run — the evidence has to be the BEHAVIOUR changing, never the
+      // module falling over. Counting a throw as a pass is the "proof that cannot fail" shape
+      // verify-new-barriers-are-mutation-proven.ts exists to reject, and it caught this exact line
+      // in the first draft of this file. So a throw fails the check and says what broke.
+      console.error(`  FAIL  (mutation) «${label}» broke the module instead of changing its `
+        + `behaviour — no behavioural evidence was obtained: ${String(e).slice(0, 120)}`);
+      failed++;
     } finally {
       writeFileSync(HARNESS, original);
     }
