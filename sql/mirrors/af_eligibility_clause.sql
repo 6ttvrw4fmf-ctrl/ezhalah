@@ -27,6 +27,27 @@
 -- Body below is byte-identical to production: md5 of everything below this header block (with its
 -- trailing newline): 47feed9ce3a08e743c44a7fb978f4278 — read live from pg_get_functiondef.
 --
+-- Re-verified 2026-09-05 (migration 20260905112036). Read live from production:
+--   md5(pg_get_functiondef) = 47feed9ce3a08e743c44a7fb978f4278 — byte-identical to the md5 this file
+--   already records. THE CLAUSE ITSELF DID NOT CHANGE and nothing in the body was edited; the
+--   staleness checker named this mirror because that migration MENTIONS the clause, not because it
+--   modifies it.
+--
+--   What that migration actually did, and why it matters to this file: top_cities_by_deal_ar — the
+--   FIFTH surface embedding this clause, still not in af_rpc_templates — had DIVERGED from it again.
+--   Migration 20260905045146 (04:51 UTC) retyped its category-purity gate to bind the table-suffix
+--   case to every type instead of only the dual-macro ones, so the Trending chip stopped counting
+--   commercial types filed in residential tables: broad Commercial/بيع showed الرياض 269 against a
+--   click-through of 3,361. 20260905112036 put THIS clause back into that function verbatim, by
+--   inverse substitution from af_eligibility_clause() rather than by retyping the predicate.
+--
+--   The lesson for whoever reads this next: 20260904143656 already swapped this clause into
+--   top_cities_by_deal_ar once, and eight days' worth of care did not stop it drifting again within
+--   24 hours — because that function is the one clause-carrying surface rebuild_af_filter_rpcs()
+--   cannot reach. mon_detect_af_count_surfaces_carry_af DID catch it, at 04:59, and the alert went
+--   unread for six hours. The durable fix is to bring top_cities_by_deal_ar into af_rpc_templates so
+--   the rebuild owns it; that is open work, not done here.
+--
 -- ── prior history, kept ──────────────────────────────────────────────────────────────────────
 -- Re-verified 2026-09-04 (rebuild guard, migration 20260904120741). Read live from production:
 --   md5(pg_get_functiondef) = 178deacbfa50de38e6b5a18e09bc737b, byte-identical to the md5 this file

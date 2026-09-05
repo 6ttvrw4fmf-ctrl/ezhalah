@@ -667,6 +667,16 @@ const AR: Record<string, string> = {
   'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد، أو أساعدك توصل لنتائج أدق؟',
   'I showed you the first {n} listings. Want me to show more?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟',
   'I showed you all {n} matching listings.': 'عرضت لك كل النتائج المطابقة ({n} إعلان).',
+  // NO-OFFER variants (2026-09-05): the same honest counts, with NO invitation, for the states where
+  // the actions row is not rendered — an older results turn that is no longer the latest, or an open
+  // Advanced Filter interview (the `!ageFlow` gate, owner 2026-08-21). The counts are unchanged and
+  // still true; only the question is dropped, because there is no button on screen to answer it with.
+  'I showed you the first {shown} of {total} matching listings.': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق.',
+  'I showed you the first {n} listings.': 'عرضت لك أول {n} إعلانات.',
+  // …and the narrow-only pair: «عرض المزيد» is not rendered but «خلّنا نحدد الطلب أكثر» is, so the
+  // sentence invites exactly the one button that exists.
+  'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أساعدك توصل لنتائج أدق؟',
+  'I showed you the first {n} listings. Want help finding more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أساعدك توصل لنتائج أدق؟',
   // CAPPED variants (owner 2026-08-20): when MORE than the browse cap actually match, the truth has two
   // numbers — the real match total AND the capped number shown. Never imply that only {shown} matched.
   'We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها. تبي أساعدك نلقى نتائج أدق؟',

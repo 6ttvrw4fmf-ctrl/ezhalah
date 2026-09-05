@@ -76,29 +76,30 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260830140831_res_com_collision_repair_regression_detector.sql, '
     + 'which ships + rosters + mutation-proves mon_detect_res_com_collision_repair_regression() — a '
     + 'detector that watches THIS repair (the adjudication ledger it wrote), not just its class',
-  // Fourth instance of the two-migrations-minutes-apart shape (incident #38). The repair
-  // re-annualises 130 muktamel monthly rent rows whose scraper stored the RAW monthly figure in
-  // price_annual — a YEARLY column the app divides by 12, so every one of them was advertised at a
-  // twelfth of its rent. Its detector lands three minutes later in 20260905071148, so the repair
-  // file itself never reaches a mon_detect_* in executed SQL.
+  // Fourth instance of the two-migrations-minutes-apart shape, and the first one this barrier could
+  // only ever have seen AFTER the mirror was repaired: all six of the 2026-09-05 migrations were
+  // applied to production and never committed, so while the drift was open this file did not exist
+  // in git and the barrier could not weigh it at all. That is the drift-blinds-barriers shape in
+  // miniature — the check was green because the evidence was missing, not because the rule held.
   //
-  // The companion is the precedent-1/2 shape: it RE-ASSERTS the repair idempotently from the
-  // ops_rent_annualisation_repair ledger (which holds price_before AND price_after per row) and
-  // then RUNS mon_detect_unannualised_rent_cohort(), which is on the mon_run_all_detectors()
-  // roster and therefore re-answers the question twice an hour.
+  // The repair (incident #38) re-annualises 130 muktamel rent rows whose scraper stored the RAW
+  // monthly figure in the yearly price_annual column, so the app's /12 rendered them at a twelfth of
+  // the advertised rent. Its detector lands 3 minutes later in 20260905071148, so the repair file
+  // itself never reaches a mon_detect_* in executed SQL.
   //
-  // Two things worth checking in that companion rather than taking on trust. It re-asserts ONLY
-  // rows still holding the exact ledgered price_before; a row that has moved to a third value is
-  // left alone and raised as a warning, because overwriting an unexplained value is how a repair
-  // becomes a sweep. And the detector genuinely covers THIS repair, not merely its class in the
-  // abstract: if these 130 rows ever revert, muktamel's median monthly rent falls from ~2,256 back
-  // to ~188 SAR and the detector fires on it — the same signal that would have caught the original
-  // defect eight weeks earlier.
+  // Same reasoning as the first two waivers: the detector watches a CLASS (a whole platform's
+  // monthly-rent cohort sitting below a 500 SAR/month median), so it cannot by itself tell whether
+  // this particular repair still holds — which is why the companion RE-ASSERTS it. Re-assertion
+  // matters more here than in any prior case: gh-muktamel-weekly (cron jobid 14) is active=false, so
+  // no future crawl will ever re-correct these rows, and the ledger's price_before/price_after are
+  // the only record of what the source actually published. Open the two companions to check this
+  // reason rather than taking it on trust.
   '20260905070828_repair_muktamel_raw_monthly_rent_stored_in_price_annual.sql':
-    'watched by its companion 20260905072446_rent_annualisation_repair_reasserts_itself_and_runs_'
-    + 'its_watching_detector.sql, which re-asserts the same UPDATE from the repair ledger and runs '
-    + 'mon_detect_unannualised_rent_cohort() — a rostered detector whose median-based predicate '
-    + 'fires if these exact rows ever revert',
+    'watched by its companions 20260905071148_barrier_a_whole_platform_monthly_rent_cohort_that_was_'
+    + 'never_annualised.sql, which ships + rosters mon_detect_unannualised_rent_cohort(), and '
+    + '20260905072446_rent_annualisation_repair_reasserts_itself_and_runs_its_watching_detector.sql, '
+    + 'which re-asserts the same UPDATE idempotently from the ops_rent_annualisation_repair ledger '
+    + 'and runs that detector',
   // A different shape from the three above: this one is NOT A REPAIR AT ALL. Its statement is
   // `update search_listings_ar set city_id = city_id where city_id in (3677, 12)` — a self
   // assignment. It writes each row's existing value back over itself and therefore cannot change,

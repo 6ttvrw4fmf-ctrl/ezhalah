@@ -64,3 +64,77 @@ export function resultCounts(args: {
   const endKind: EndKind = hasMore ? 'more' : 'all';
   return { reachable: trueTotal, hasMore, endKind, endTotal: trueTotal, endShown: shown };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// NEVER PROMISE A BUTTON THAT IS NOT ON SCREEN (2026-09-05, §42 visible output contract).
+//
+// The closing sentence used to be worded from `endKind` and "could we narrow further?" alone, while
+// the buttons it names carry TWO further gates the wording never saw:
+//   • `isLatestResults` — only the NEWEST results turn keeps live actions (owner 2026-08-24), so
+//     every earlier turn in a multi-search chat kept an offer it could no longer honour.
+//   • `!ageFlow` — the whole actions row is hidden while the Advanced Filter interview is open
+//     (owner 2026-08-21), because the AF card is an absolute overlay and buttons underneath it are
+//     unreachable.
+//
+// Measured in production 2026-09-05 (الرياض/بيع/فيلا, then one AF answer): the page held two visible
+// closing lines promising «تبي أعرض لك المزيد؟» over 11,254 and 5,970 matches, and
+// `[data-testid="results-load-more"]` matched ZERO elements. Both COUNTS were exactly right — only
+// the offer was false.
+//
+// So the offer is decided here, from the same booleans the Pressables are gated on, and the caller
+// maps the returned KEY to its translation. The key — not the translated string — keeps this module
+// free of a translation table (its original design note) while making the whole decision pure,
+// exhaustively testable, and impossible to get right in speech and wrong in text.
+//
+// This does NOT decide whether «عرض المزيد» should be available during an open AF interview; that is
+// the owner's 2026-08-21 call. It only makes the sentence tell the truth about what is rendered.
+
+/** The i18n keys the closing sentence can take. Every key that asks a question requires its button. */
+export type ClosingNoteKey =
+  | 'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?'
+  | 'I showed you the first {shown} of {total} matching listings. Want me to show more?'
+  | 'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?'
+  | 'I showed you the first {shown} of {total} matching listings.'
+  | 'I showed you the first {n} listings. Want me to show more, or help you find more precise ones?'
+  | 'I showed you the first {n} listings. Want me to show more?'
+  | 'I showed you the first {n} listings. Want help finding more precise ones?'
+  | 'I showed you the first {n} listings.'
+  | 'I showed you all {n} matching listings. Want help finding more precise ones?'
+  | 'I showed you all {n} matching listings.';
+
+export function closingNoteKey(args: {
+  endKind: EndKind;
+  /** The whole filter ran server-side, so the exact total may be quoted. */
+  quoteTotal: boolean;
+  /** A «عرض المزيد» button is ACTUALLY RENDERED right now. */
+  offersMore: boolean;
+  /** A «خلّنا نحدد الطلب أكثر» button is ACTUALLY RENDERED right now. */
+  offersNarrow: boolean;
+}): ClosingNoteKey {
+  const { quoteTotal, offersMore, offersNarrow } = args;
+  if (args.endKind === 'more') {
+    if (quoteTotal) {
+      if (offersMore && offersNarrow) return 'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?';
+      if (offersMore) return 'I showed you the first {shown} of {total} matching listings. Want me to show more?';
+      // No «عرض المزيد» on screen. The counts stay exactly as true as they were; the question goes —
+      // but a narrow button that IS rendered still gets its invitation, or the fix would silently
+      // retire a working affordance instead of telling the truth about which ones exist.
+      if (offersNarrow) return 'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?';
+      return 'I showed you the first {shown} of {total} matching listings.';
+    }
+    if (offersMore && offersNarrow) return 'I showed you the first {n} listings. Want me to show more, or help you find more precise ones?';
+    if (offersMore) return 'I showed you the first {n} listings. Want me to show more?';
+    if (offersNarrow) return 'I showed you the first {n} listings. Want help finding more precise ones?';
+    return 'I showed you the first {n} listings.';
+  }
+  // Everything matching is on screen — there is nothing to page, so only the narrow offer can apply.
+  return offersNarrow
+    ? 'I showed you all {n} matching listings. Want help finding more precise ones?'
+    : 'I showed you all {n} matching listings.';
+}
+
+/** Does this key ask the user to tap «عرض المزيد»? */
+export const keyOffersMore = (k: ClosingNoteKey): boolean => k.includes('Want me to show more');
+/** Does this key ask the user to tap «خلّنا نحدد الطلب أكثر»? */
+export const keyOffersNarrow = (k: ClosingNoteKey): boolean =>
+  k.includes('help you find more precise ones') || k.includes('Want help finding more precise ones');

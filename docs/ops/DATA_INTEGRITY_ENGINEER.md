@@ -11,7 +11,25 @@
 > here, so a run reading its own canonical spec routed AF findings to the wrong engineer for twelve
 > days. See `docs/ops/ENGINEER_ROUTINES.md` for the seven-engineer contract.
 
-**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner,
+2026-08-29, **extended 2026-09-04**) — binds this routine too, in FULL and as it stands today, not as
+it stood when this line was first written: fix first / report last (§G.1); the six and only six
+reasons to stop without fixing (§G.2), and **"a human could technically approve this" is not one of
+them (§G.2b)**; automatic cross-routine handoff via `incident_open()` / `incident_handoff()` rather
+than a sentence saying someone should look at it (§G.3); adaptive effort (§G.4); the real 10/10
+standard (§G.5); Sentry first, and your own incident queue read alongside it (§G.6, §G.6b);
+**§G.9 — a bug is CLOSED only when all seven hold: root cause fixed, related variants checked, a
+permanent barrier exists, a MUTATION has been watched to catch recurrence, the full regression suite
+passes, PRODUCTION is verified through the real path a user hits, and no equivalent hidden path
+remains. Anything short of all seven is UNKNOWN with the reason — never "fixed."** §G.10 — every
+report carries BEFORE/AFTER and ends with the mandatory block. §G.11 — tokens are not the
+constraint; optimise for correctness and permanent bug reduction. §G.7 — none of it weakens an
+existing guard.
+
+It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs. This
+enumeration was stale from 2026-09-04 to 2026-09-05: it named only the original sections, so §G.9's
+mutation and production-verification requirements reached this routine by inheritance rather than by
+being stated. They were always binding. Now they are also visible.
 
 ## §0. Standing operating contract (owner-granted, 2026-08-12 — permanent)
 
@@ -114,11 +132,41 @@ total sits inside the «سعر المتر» slot — **kept**. Of 31 rows that a
 shape `area = price`, exactly **1** was ours. A repair that cannot name the mechanism Ezhalah used
 to create the wrong value is not a repair; it is data loss with good intentions.
 
+## §M — MUTATION PROOF IS REQUIRED, NOT DISCRETIONARY (owner, 2026-09-05)
+
+This spec used to say a barrier should be "mutation-proven **where meaningful**". That phrase is
+deleted and must not come back. It let the single most load-bearing step in §G.9 be skipped by
+judgement, and judgement is exactly what fails here: the barriers this repo has found sitting green
+over a live defect were all written by someone who believed the check was obviously correct.
+Measured on 2026-09-04: all five defects of that day had a barrier over the exact line, and two of
+those barriers pinned the defective line as CORRECT. On 2026-09-05 routine #10 planted six mutants
+in this suite and all six survived a fully green run.
+
+**The rule.** Every correctness fix carries a mutation proof: the defect is RE-INTRODUCED, the
+barrier is WATCHED to go red, and the tree is restored. Not reasoned about — executed and observed.
+A barrier nobody has seen fail is a comment that runs.
+
+**The only way out is one of §G.2's six documented stop reasons genuinely making it impossible** —
+and then the report says **UNKNOWN** with which of the six applies and why, never "fixed". Two
+honest cases, both narrow:
+
+- The check is a LIVE production read with no pure predicate a synthetic mutant could be fed. Then
+  the proof is the apply itself — RED before the change, GREEN after — and that red→green must be
+  recorded in the PR body. `scripts/verify-detector-total-matches-its-breakdown-live.ts` was proven
+  exactly that way on 2026-09-05 (red 05:32Z, green 05:53Z).
+- The barrier genuinely cannot fail in any meaningful way. Be sceptical of yourself here: this is
+  the escape hatch that gets abused, and `scripts/verify-new-barriers-are-mutation-proven.ts`
+  requires a written reason and rejects a proof whose expression is a bare literal.
+
+"Weird does not mean wrong" (§0) governs whether to REPAIR data. It never governs whether to prove
+a barrier. Those are different questions and this section settles the second one.
+
 ## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
 
 On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
 whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
-cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+cause → fix → permanent regression barrier → **mutation proof: re-introduce the defect and WATCH the
+barrier go red, then restore** → deploy through the
 sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
 a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
 contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS

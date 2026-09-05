@@ -445,7 +445,12 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const bindRowHost = (c: HistoryItem, bucket: string, index: number, count: number, ids: string[]) => (node: any) => {
     if (Platform.OS !== 'web' || !node || typeof node.addEventListener !== 'function') return;
     if (node.__ezDbl) node.removeEventListener('dblclick', node.__ezDbl);
-    const dbl = () => { if (!dragRef.current?.active) beginRename(c); };
+    // ⋯ IS A MENU AFFORDANCE, NOT A RENAME TARGET (ops_incident #20, fixed 2026-09-05). Opening and
+    // then closing the ⋯ menu is two clicks on this same host, so the browser reports a dblclick and
+    // the row silently dropped into rename mode — reproduced 3/3 on production. This is the exact
+    // defect the pointerdown handler above already guards with startsOnControl(): a gesture that
+    // STARTS inside a control belongs to that control, not to the row. Both gestures now agree.
+    const dbl = (e: any) => { if (!dragRef.current?.active && !startsOnControl(e?.target)) beginRename(c); };
     node.__ezDbl = dbl;
     node.addEventListener('dblclick', dbl);
     if (node.__ezHold) node.removeEventListener('pointerdown', node.__ezHold);
