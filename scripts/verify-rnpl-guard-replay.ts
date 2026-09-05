@@ -120,7 +120,7 @@ const AUDITED_UNINTERPRETABLE = new Map<string, string>([
    'predicate and reintroduce exactly the drift this guard exists to catch. The RNPL/Monthly ' +
    'predicates therefore reach the new function ONLY through that canonical clause, unchanged, and ' +
    'mon_detect_af_count_surfaces_carry_af asserts the byte-identity live every sweep.'],
-  ['20260905044047_top_cities_category_check_must_verify_the_table_too.sql',
+  ['20260905045146_top_cities_category_check_must_verify_the_table_too.sql',
    'audited 2026-09-05 (mine, read line by line): fixes top_cities_by_deal_ar\'s p_category exists-' +
    'clause, which admitted a row into a category cohort on known_type_ar.macro alone — never ' +
    'checking the row\'s own source_table suffix unless macro=\'both\' — so a شقة-typed row sitting ' +
