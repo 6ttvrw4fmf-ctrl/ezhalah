@@ -682,6 +682,10 @@ export type CityOption = {
   regionAr: string | null;
   listingCount: number;
   totalInCohort: number; // ALL eligible listings in the whole cohort (denominator for the honest %)
+  // The canonical cluster this city belongs to (loc_city_cluster), or absent when it stands alone.
+  // Set at pool-build by applyClusterUnion(); Trending collapses a cluster to ONE row while
+  // autocomplete keeps every member. See the cluster block below.
+  clusterKey?: string;
 };
 
 // Keyed by Deal ('Buy'/'Rent') — the Top-6 + typed-autocomplete pool is scoped to the deal the user
@@ -744,6 +748,71 @@ export function cityPoolStatus(deal: Deal | null, periodTok: string | null, cate
 export function districtPoolStatus(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, types: string[] | null = null, scope: AfParams | null = null): PoolStatus {
   const key = districtCacheKey(cityId, deal, category, periodTok, types, scope);
   return _districtCache.has(key) ? 'ready' : _districtPoolStatus.get(key) ?? 'loading';
+}
+
+// ── CANONICAL CITY CLUSTERS — a Trending row must equal its click, WITHOUT breaking autocomplete ──
+//
+// loc_city_cluster is the resolver's OWN declaration that several city_ids are ONE search entity:
+// composite_match_city_ids' CLUSTER EXPANSION packs every sibling into match_city_ids, so a click on
+// ANY member's name returns the whole cluster's UNION (al_ahsa = الهفوف 12 + الاحساء 3677 → 4,953).
+//
+// The fix is DISPLAY-LAYER, here, NOT in top_cities_by_deal_ar: that RPC also feeds the tap-only city
+// autocomplete pool, and collapsing it there removed الاحساء's row and made الاحساء UNSELECTABLE
+// (reverted 2026-09-04). So instead:
+//   • every clustered option's listingCount is set to the cluster UNION (so shown == the click set
+//     everywhere it is displayed), tagged with its clusterKey — applyClusterUnion(), at pool-build;
+//   • TRENDING (topCitiesByListings) presents the cluster ONCE, via its representative (min city_id
+//     member — for al_ahsa that is الهفوف 12, the principal city);
+//   • AUTOCOMPLETE (matchCitiesByText) keeps EVERY member, so الاحساء AND الهفوف both stay selectable,
+//     each showing the union it clicks to. A non-clustered twin like الهفوف/Riyadh (city_id 501,
+//     absent from the cluster) is untouched and stays a separate option.
+let _clusterMap: Map<number, string> | null = null;
+let _clusterPromise: Promise<Map<number, string>> | null = null;
+export async function ensureClusterMap(): Promise<Map<number, string>> {
+  if (_clusterMap) return _clusterMap;
+  if (_clusterPromise) return _clusterPromise;
+  _clusterPromise = (async () => {
+    const m = new Map<number, string>();
+    if (supabase) {
+      try {
+        const { data } = await supabase.from('loc_city_cluster').select('city_id,cluster_key');
+        for (const r of ((data as any[]) ?? [])) m.set(r.city_id, r.cluster_key);
+      } catch { /* clusters are an enhancement; if the fetch fails the pool is simply not collapsed */ }
+    }
+    _clusterMap = m;
+    _clusterPromise = null;
+    return m;
+  })();
+  return _clusterPromise;
+}
+// PURE. Set every clustered option's listingCount to its cluster's union (the sum of the cluster's
+// member counts present in THIS pool) and tag it with clusterKey. Members stay as distinct options.
+export function applyClusterUnion(opts: CityOption[], clusterMap: Map<number, string>): CityOption[] {
+  const unionByKey = new Map<string, number>();
+  for (const o of opts) {
+    const key = clusterMap.get(o.cityId);
+    if (key) unionByKey.set(key, (unionByKey.get(key) ?? 0) + o.listingCount);
+  }
+  if (!unionByKey.size) return opts;
+  return opts.map((o) => {
+    const key = clusterMap.get(o.cityId);
+    return key ? { ...o, clusterKey: key, listingCount: unionByKey.get(key)! } : o;
+  });
+}
+// PURE. Trending view of a (union-counted) pool: each cluster appears once, via its representative
+// (the smallest city_id among the cluster's members present in the pool); non-clustered cities pass
+// through. Re-sorted by the (union) count so a collapsed cluster ranks by what it truly delivers.
+export function collapseClustersForTrending(pool: CityOption[]): CityOption[] {
+  const repByKey = new Map<string, number>();
+  for (const o of pool) {
+    if (!o.clusterKey) continue;
+    const cur = repByKey.get(o.clusterKey);
+    if (cur === undefined || o.cityId < cur) repByKey.set(o.clusterKey, o.cityId);
+  }
+  return pool
+    .filter((o) => !o.clusterKey || repByKey.get(o.clusterKey) === o.cityId)
+    .slice()
+    .sort((a, b) => b.listingCount - a.listingCount);
 }
 
 // Loads the deal-scoped cities-with-listings pool once per deal per session (a few hundred rows at
@@ -824,7 +893,7 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
         clearTimeout(_t);
       }
       if (data) {
-        const opts: CityOption[] = (data as any[]).map((r) => ({
+        const rawOpts: CityOption[] = (data as any[]).map((r) => ({
           cityId: r.city_id,
           cityAr: r.city_ar,
           regionId: r.region_id ?? null,
@@ -832,6 +901,9 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
           listingCount: Number(r.listing_count) || 0,
           totalInCohort: Number(r.total_in_cohort) || 0,
         }));
+        // Bake the canonical-cluster union count into the pool ONCE (see the cluster block above),
+        // so both surfaces read a truthful count and Trending can present one row per cluster.
+        const opts = applyClusterUnion(rawOpts, await ensureClusterMap());
         CITY_FIELD_POOLS.set(key, opts);
         _cityPoolStatus.set(key, 'ready');
         return opts;
@@ -862,7 +934,10 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
 // call site must now pass its cohortTypesAr(query) explicitly; TypeScript refuses to compile a caller
 // that forgets it, so this class of drift can never silently reappear. [[cohortTypesAr]]
 export function topCitiesByListings(deal: Deal | null, periodTok: string | null, category: Category | null, k: number, types: string[] | null, af: AfParams | null): CityOption[] {
-  return (CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af)) ?? []).filter((c) => c.listingCount > 0).slice(0, k);
+  const pool = CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af)) ?? [];
+  // Trending: one row per cluster (via its representative), each already carrying the union count
+  // it clicks to; autocomplete (matchCitiesByText) still offers every member.
+  return collapseClustersForTrending(pool).filter((c) => c.listingCount > 0).slice(0, k);
 }
 
 // ── District field (city_id-scoped) — mirrors the City field. ────────────────────────────────────
