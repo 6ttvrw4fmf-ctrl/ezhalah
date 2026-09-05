@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
+import { TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
@@ -57,6 +58,7 @@ import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
 import { BROWSE_BATCH, nextBatchTarget, resultCounts, closingNoteKey } from '@/data/resultCount';
+import { afInterviewOwnsBrowsing } from '@/lib/afBrowsingGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
@@ -953,10 +955,18 @@ export default function Agent() {
   // summary. The turn trades its action buttons for a read-only receipt — it is history now, and only
   // the newest result turn carries live actions.
   const [afReceipt, setAfReceipt] = useState<Record<string, string>>({});
-  // COMPLETED SEARCH (owner 2026-08-30). Set ONLY by the canonical AF stop conditions — R11.1 (the
-  // post-round honest total ≤ INTERVIEW_STOP_AT) and R11.2 (the offer probe finds no useful question
-  // left after a committed round). Never by a plain first search, never by a count alone: a fresh
-  // 20-result search with no AF round is not "finished", it is a search the user may still refine.
+  // COMPLETED SEARCH (owner 2026-08-30). Set ONLY by R11.1 — the post-round honest total lands at or
+  // below INTERVIEW_STOP_AT. Never by a plain first search, never by a count alone: a fresh 20-result
+  // search with no AF round is not "finished", it is a search the user may still refine.
+  //
+  // R11.2 (the offer probe finds no useful question left after a committed round) does NOT set this,
+  // and must not — corrected 2026-09-05, when the owner settled the browsing question. This comment
+  // used to name R11.2 as a second trigger; the code has only ever had one, and the owner's ruling is
+  // that the one is right: «once the Advanced Filter interview is actually finished, normal
+  // browsing/pagination can resume if needed». A round that runs out of questions with 3,000 matches
+  // still on the table has finished INTERVIEWING, not searching — the user must be free to keep
+  // browsing. Only the small-result threshold ends the flow, which is R11.1 exactly.
+  // Pinned by scripts/verify-af-interview-owns-browsing.ts.
   // Persisted with the transcript so Back / saved chats reopen READ-ONLY, never with a live composer.
   const [completed, setCompleted] = useState(false);
   // Whether a results turn still has a question worth asking — resolved by a REAL probe (below),
@@ -2902,7 +2912,15 @@ export default function Agent() {
         {/* Mobile only: a plain hamburger that opens the existing sidebar — same clean style as the
             home screen's. On desktop the sidebar is docked, so just a small spacer. No eagle here. */}
         {!docked ? (
-          <Pressable style={s.hamb} hitSlop={8} onPress={() => setSidebarOpen(true)}>
+          <Pressable
+            style={s.hamb}
+            hitSlop={8}
+            // hitSlop is a NO-OP on react-native-web; the 44px floor comes from
+            // TAP_TARGET_CSS via this marker (ops_incident #17).
+            // @ts-expect-error web-only DOM props on the RNW host node
+            dataSet={{ ...TAP44 }}
+            onPress={() => setSidebarOpen(true)}
+          >
             <Ionicons name="menu" size={22} color={colors.ink} />
           </Pressable>
         ) : (
@@ -2916,7 +2934,13 @@ export default function Agent() {
         <View style={{ flex: 1 }} />
         {/* Logged-out sign-in (mobile only — desktop has the docked sidebar CTA). Owner 2026-08-19. */}
         {!user && !docked && (
-          <Pressable style={s.topSignIn} onPress={openAuth} hitSlop={6}>
+          <Pressable
+            style={s.topSignIn}
+            onPress={openAuth}
+            hitSlop={6}
+            // @ts-expect-error web-only DOM props on the RNW host node
+            dataSet={{ ...TAP44 }}
+          >
             <Ionicons name="person-outline" size={15} color="#fff" />
             <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
           </Pressable>
@@ -3225,7 +3249,16 @@ export default function Agent() {
                         const cascading = revealing && revealActiveRef.current?.id === m.id;
                         // HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21) — see the comment on the
                         // buttons row below; the SAME gate decides whether Read Aloud may mention them too.
-                        const showActionsRow = (hasMore || canNarrowFurther) && !ageFlow;
+                        // THE AF INTERVIEW OWNS BROWSING ONLY WHILE IT STILL HAS SOMETHING TO ASK
+                        // (owner rule 2026-09-05 — see src/lib/afBrowsingGate.ts for the four clauses).
+                        // Was a bare `!ageFlow`, which satisfied the rule for every phase that exists
+                        // today but only by accident: nothing tied the gate to question availability,
+                        // so a phase added later — or an interview left open in a dead state — would
+                        // withhold the pager from a user with thousands of matches. The predicate is
+                        // now exhaustive over the phase union and fails the BUILD if a new phase is
+                        // added without a decision. Behaviour today is identical by construction.
+                        const showActionsRow = (hasMore || canNarrowFurther)
+                          && !afInterviewOwnsBrowsing(ageFlow?.phase ?? null);
                         // NEVER PROMISE A BUTTON THAT IS NOT ON SCREEN (2026-09-05, §42 visible output
                         // contract). `moreNoteText` used to be worded from `rc.endKind`/`canNarrowFurther`
                         // alone, while the buttons it names carry TWO further gates — `isLatestResults`
@@ -3482,7 +3515,14 @@ export default function Agent() {
               {busy || revealing ? (
                 // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
                 // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
-                <Pressable onPress={stop} style={s.stopBtn} hitSlop={8} accessibilityLabel={t('Stop')}>
+                <Pressable
+                  onPress={stop}
+                  style={s.stopBtn}
+                  hitSlop={8}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  accessibilityLabel={t('Stop')}
+                >
                   <Ionicons name="stop" size={15} color="#fff" />
                 </Pressable>
               ) : (
@@ -3502,6 +3542,8 @@ export default function Agent() {
                     testID="voice-mic"
                     onPress={() => { void startVoice(); }}
                     hitSlop={8}
+                    // @ts-expect-error web-only DOM props on the RNW host node
+                    dataSet={{ ...TAP44 }}
                     accessibilityLabel={t('Voice input')}
                     style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed]}
                   >
@@ -3516,6 +3558,8 @@ export default function Agent() {
                     onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
                     onHoverOut={() => { setSendHover(false); sendSpring(1); }}
                     hitSlop={6}
+                    // @ts-expect-error web-only DOM props on the RNW host node
+                    dataSet={{ ...TAP44 }}
                     accessibilityLabel={t('Search')}
                     style={!typed.trim() ? s.sendDisabled : undefined}
                   >
@@ -3543,6 +3587,8 @@ export default function Agent() {
                   testID="voice-cancel"
                   onPress={cancelVoice}
                   hitSlop={8}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Cancel recording')}
                   style={({ pressed }: any) => [s.voiceRoundBtn, pressed && s.micBtnPressed]}
                 >
@@ -3559,6 +3605,8 @@ export default function Agent() {
                   testID="voice-stop"
                   onPress={stopVoice}
                   hitSlop={8}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Stop recording')}
                   style={({ pressed }: any) => [s.voiceRoundBtn, pressed && s.micBtnPressed]}
                 >
@@ -3570,6 +3618,8 @@ export default function Agent() {
                   onPressIn={() => sendSpring(0.9)}
                   onPressOut={() => sendSpring(1)}
                   hitSlop={6}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Send')}
                 >
                   <Animated.View style={[s.sendBtn, { transform: [{ scale: sendScale }] }]}>

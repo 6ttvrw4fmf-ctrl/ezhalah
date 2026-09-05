@@ -39,6 +39,15 @@ jobs:
         if: always()
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-liveness-claims-are-earned.ts
 
+      # Third face of the same subject: a platform must not be represented as more than it is, and
+      # it must not serve users from OUTSIDE the set the detectors read. muktamel sat at
+      # status='dormant' while serving 523 production_ready rows, so mon_detect_silent_scraper_death
+      # skipped it entirely (senior production run 2026-09-05). Same anon read, so it shares this
+      # job. `if: always()` so an earlier red check cannot hide an unwatched live platform.
+      - name: Every production-searchable platform is inside the monitored registry
+        if: always()
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-searchable-platforms-are-monitored.ts
+
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
       # This job runs unattended: a red run notifies nobody, so it has to reach alert_event to reach
       # a human. One open P1 per workflow file (dedup workflow_failed:loader-active-platforms-check.yml), and the next

@@ -763,6 +763,103 @@ JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobi
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the favourite navigation trip', errs.join(' | ')); }
 });
 
+/** J16d — THE 44px TAP FLOOR, MEASURED IN A REAL BROWSER (ops_incident #17; PART 5 shapes 6 and 11).
+ *
+ *  `hitSlop` is a NO-OP on react-native-web — only the legacy `Touchable` reads it, and all 39
+ *  declarations in src/ are on `Pressable`. Nine controls on the two busiest mobile screens shipped
+ *  at 24-36px on their short axis against the repo's own stated 44pt floor, each one already
+ *  declaring a hitSlop that would have cleared it. TAP_TARGET_CSS restores the intent with a
+ *  centred, out-of-flow `::after`.
+ *
+ *  THIS JOURNEY EXISTS BECAUSE THE SOURCE HALF CANNOT SEE A PIXEL. scripts/verify-tap-target-css.ts
+ *  pins the declarations; only a browser can say what a control actually measures, and only a
+ *  browser can catch the two ways this fix could go wrong in practice:
+ *    · someone "fixes" a future control with padding instead — the HOST box then grows past 44 and
+ *      the layout moves. Asserted directly: a marked control's own border box must stay UNDER the
+ *      floor while its hit box clears it. That is layout neutrality stated without needing a
+ *      before-and-after baseline.
+ *    · an expanded region swallows a neighbour. Asserted by hit-testing each control's own visual
+ *      centre and four edges and requiring they still resolve to that control.
+ *
+ *  Measured before shipping: 0 of 1,218,000 pixels differ between the old and new bundles on both
+ *  screens, and every control's box is unchanged. */
+JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `tap-targets-meet-44:${mobile ? 'mobile375' : 'desktop1440'}`;
+  if (!mobile) { skip(name, 'the 44pt floor is a touch-target rule — asserted at 375px only'); return; }
+
+  const READ = `(() => {
+    const isCtrl = (e) => { const st = getComputedStyle(e); const r = e.getAttribute('role');
+      return r === 'button' || r === 'link' || st.cursor === 'pointer'; };
+    const outer = (el) => { let n = el, f = null; while (n) { if (n.nodeType === 1 && isCtrl(n)) f = n; n = n.parentElement; } return f; };
+    const inert = (e) => { let n = e; while (n && n !== document.body) { if (getComputedStyle(n).pointerEvents === 'none') return true; n = n.parentElement; } return false; };
+    const out = [];
+    for (const e of document.querySelectorAll('[data-tap44="1"]')) {
+      const r = e.getBoundingClientRect();
+      const st = getComputedStyle(e);
+      if (r.width <= 0 || r.height <= 0 || st.visibility === 'hidden' || st.display === 'none') continue;
+      const aft = getComputedStyle(e, '::after');
+      const num = (v) => (v && v.endsWith('px') ? parseFloat(v) : 0);
+      const hw = Math.max(r.width, num(aft.width));
+      const hh = Math.max(r.height, num(aft.height));
+      const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+      const own = {};
+      if (!inert(e)) {
+        for (const [k, x, y] of [['centre', cx, cy], ['left', r.x + 2, cy], ['right', r.right - 2, cy],
+                                 ['top', cx, r.y + 2], ['bottom', cx, r.bottom - 2]]) {
+          if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
+          const hit = document.elementFromPoint(x, y);
+          const o = hit ? outer(hit) : null;
+          if (o !== e) own[k] = o ? (o.getAttribute('aria-label') || o.dataset.testid || 'another control') : 'nothing';
+        }
+      }
+      out.push({
+        label: (e.getAttribute('aria-label') || e.dataset.testid || (e.innerText || '').trim().slice(0, 24) || e.tagName).replace(/\\s+/g, ' '),
+        w: Math.round(r.width), h: Math.round(r.height), hw: Math.round(hw), hh: Math.round(hh),
+        afterPos: aft.position, inert: inert(e), stolen: own,
+      });
+    }
+    return { ctrls: out, sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth };
+  })()`;
+
+  const assess = async (where) => {
+    const { ctrls, sw, cw } = await page.evaluate(READ);
+    if (!ctrls.length) { defect(name, 'no tap-target-marked control on screen', `${where}: nothing carries data-tap44, so the 44px floor is not applied anywhere here`); return; }
+    for (const c of ctrls) {
+      const who = `${where} «${c.label}»`;
+      if (c.afterPos !== 'absolute') {
+        defect(name, 'the tap-target overlay is in flow', `${who}: ::after position is «${c.afterPos}», not absolute — it can move the control and its siblings`);
+      }
+      if (c.hw < 44 || c.hh < 44) {
+        defect(name, 'a control is under the 44px tap floor', `${who}: effective hit box ${c.hw}x${c.hh} (visual ${c.w}x${c.h})`);
+      }
+      // LAYOUT NEUTRALITY, stated without a baseline: the visual box must NOT have grown to meet the
+      // floor. A control that reaches 44 by growing its own box is the padding "fix" this rule
+      // exists to avoid. A control genuinely designed at >= 44 is not marked, so it never lands here.
+      if (c.w >= 44 && c.h >= 44) {
+        defect(name, 'a marked control grew its own box to reach the floor',
+          `${who}: visual box is ${c.w}x${c.h} — at or over 44 on BOTH axes. The floor must come from the out-of-flow overlay, never from padding on the control (that moves the layout).`);
+      }
+      const stolen = Object.entries(c.stolen);
+      if (stolen.length) {
+        defect(name, 'a control no longer owns its own visual area',
+          `${who}: ${stolen.map(([k, v]) => `${k} resolves to ${v}`).join(', ')} — an expanded tap area is capturing presses meant for this control`);
+      }
+    }
+    const ok = ctrls.filter((c) => c.hw >= 44 && c.hh >= 44).length;
+    pass(name, `${where}: ${ok}/${ctrls.length} marked controls clear 44px, all boxes still under it, none capturing a neighbour`);
+    if (sw > cw + 1) defect(name, 'horizontal overflow at 375px', `${where}: scrollWidth ${sw} > clientWidth ${cw}`);
+  };
+
+  await assess('Filter home');
+  if (await clickText(page, 'الوكيل الذكي')) {
+    await sleep(4000);
+    await assess('AI Agent');
+  } else {
+    skip(name, `mode switch to the agent screen: ${clickReason()}`);
+  }
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while measuring tap targets', errs.join(' | ')); }
+});
+
 /** J16c — A DOUBLE-CLICK ON ⋯ OPENS AND CLOSES THE MENU. IT DOES NOT RENAME (PART 5 shape 7).
  *
  *  ops_incident #20, reproduced 3/3 on production before the fix: the row host binds `dblclick` →
