@@ -17,7 +17,7 @@
 // verify-*-live.ts barriers. The exclusion is declared in scripts/test-exclusions.txt with a
 // pointer to the workflow that runs it.
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 // Parse PLATFORM_META names and SOURCE_TOKENS from the source file rather than importing the
 // module — `loaderPlatforms.ts` calls `require()` for its bundled logo assets (Metro's require),
@@ -115,27 +115,46 @@ if (!Array.isArray(raws)) process.exit(1);
 //
 // Before this, the check read "has rows" as "must have a logo" and went red for six platforms that
 // are all correctly absent — a barrier failing for a reason its own header disagrees with.
+//
+// ── 2026-09-05 CORRECTION: THE CARVE-OUT WAS SUBTRACTED FROM THE WRONG SIDE ────────────────────
+// The carve-outs above were applied to `advertisable`, i.e. removed from the LIVE set. That made
+// any carved-out platform look ADVERTISED-BUT-DEAD the moment someone did the very thing the
+// carve-out asks for. Measured on clean main 2026-09-05: abralosol, aouj, arkaan, muktamel,
+// rawasidark and THERC were all reported "dead in catalog (rows=0 in search_listings_ar)" while
+// abralosol alone had 2,667 live rows — because each had since gained BOTH a logo asset and a
+// PLATFORM_META entry, and NO_LOGO_ASSET_YET (a hand-kept list, dated 2026-09-03) was never
+// updated. The header even instructs "delete the name here"; two of three steps were done.
+//
+// The carve-outs only ever answer ONE question: "is it acceptable that this live platform is NOT
+// advertised yet?" They can never make an ADVERTISED platform dead. So they now apply to the
+// live-but-hidden direction ONLY, and the dead-catalog direction compares against the FULL live
+// set — the authoritative truth, loader_active_platforms_ar(), with nothing subtracted.
+//
+// NO_LOGO_ASSET_YET is also gone as a hand-kept list: "has no logo asset" is a fact about the
+// filesystem, so it is DERIVED by looking for assets/images/<slug>.<ext>. It cannot go stale.
 const RETIRED = new Set(
   readFileSync(new URL('../scrapers/RETIRED_PLATFORMS.txt', import.meta.url).pathname, 'utf8')
     .split('\n').map((l) => l.split('#')[0].trim()).filter(Boolean),
 );
 check('the retirement list parsed non-empty (parser sanity)', RETIRED.size > 0, `${RETIRED.size} slugs`);
-// Searched, registered end-to-end, but no logo image exists yet. Onboarded 2026-09-03 (PR #1548).
-const NO_LOGO_ASSET_YET = new Set(['abralosol', 'arkaan', 'therc', 'rawasidark', 'aouj']);
+// DERIVED, not listed: a platform has no strip logo iff assets/images/<slug>.<ext> is absent.
+const LOGO_EXTS = ['png', 'jpg', 'jpeg', 'webp'];
+const hasLogoAsset = (slug: string): boolean =>
+  LOGO_EXTS.some((e) => existsSync(new URL(`../assets/images/${slug}.${e}`, import.meta.url).pathname));
 
-const excluded: string[] = [];
-const advertisable = (raws as string[]).filter((raw) => {
-  if (RETIRED.has(raw)) { excluded.push(`${raw} (retired/paused — rows kept searchable by contract)`); return false; }
-  if (NO_LOGO_ASSET_YET.has(raw)) { excluded.push(`${raw} (searched + registered, but assets/images/ has no logo yet)`); return false; }
-  return true;
-});
-if (excluded.length) console.log(`  ⓘ live but not advertisable: ${excluded.join('; ')}`);
+// The carve-outs answer ONLY "is it acceptable that this live platform is not advertised yet?"
+// They are NEVER subtracted from the live set — see the 2026-09-05 correction in the header.
+const excusedIfHidden = (raw: string): string | null => {
+  if (RETIRED.has(raw)) return `${raw} (retired/paused — rows kept searchable by contract)`;
+  if (!hasLogoAsset(raw)) return `${raw} (searched + registered, but assets/images/ has no logo yet)`;
+  return null;
+};
 
 // ── 2. Map raw DB names → canonical loader names via SOURCE_TOKENS (the SAME normalizer the
 //       client uses) so the comparison is apples-to-apples.
 const liveCanon = new Set<string>();
 const unmapped: string[] = [];
-for (const raw of advertisable) {
+for (const raw of raws as string[]) {
   const n = normalizeSource(raw);
   if (n) liveCanon.add(n);
   else unmapped.push(raw);
@@ -149,7 +168,19 @@ const catalog = new Set(PLATFORM_META_NAMES);
 // ── 4. The two sets must be equal — every advertised logo has a live platform, every live
 //       platform is advertised.
 const advertisedButDead = [...catalog].filter((n) => !liveCanon.has(n)).sort();
-const liveButHidden = [...liveCanon].filter((n) => !catalog.has(n)).sort();
+
+// A live platform that is NOT advertised is a finding only when nothing excuses it. The excuse is
+// evaluated on the RAW slug (that is what RETIRED_PLATFORMS.txt and the asset filenames use).
+const rawBySlugCanon = new Map<string, string>();
+for (const raw of raws as string[]) { const n = normalizeSource(raw); if (n) rawBySlugCanon.set(n, raw); }
+const excused: string[] = [];
+const liveButHidden = [...liveCanon].filter((n) => {
+  if (catalog.has(n)) return false;
+  const why = excusedIfHidden(rawBySlugCanon.get(n) ?? n);
+  if (why) { excused.push(why); return false; }
+  return true;
+}).sort();
+if (excused.length) console.log(`  ⓘ live but not advertised (excused): ${excused.join('; ')}`);
 
 check(
   `PLATFORM_META advertises no dead platforms (rows=0 in search_listings_ar)`,
