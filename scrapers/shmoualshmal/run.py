@@ -176,20 +176,39 @@ def fetch_images(s: cc.Session, posts: list[dict]) -> dict[int, list[str]]:
             want[pid] = list(dict.fromkeys(ids))
 
     all_ids = sorted({i for ids in want.values() for i in ids})
-    url_by_id: dict[int, str] = {}
+    # Keep the attachment's PARENT alongside its url. The gallery meta is just a list of integers —
+    # if it ever references an attachment owned by another post (a theme bug, an editor mistake, a
+    # cloned draft), resolving blindly would put ANOTHER property's photo on this card. alta guards
+    # this by construction (it queries media?parent=); here the meta chooses the ids, so the parent
+    # must be checked explicitly on the way back. Found by adversarial review of this recipe, not
+    # by a failure — 62/62 attachments currently parent correctly, and this keeps it that way.
+    media_by_id: dict[int, tuple[str, Any]] = {}
     for i in range(0, len(all_ids), 100):
         chunk = all_ids[i:i + 100]
         try:
-            r = s.get(f"{REST}/media?include={','.join(map(str, chunk))}&per_page=100", timeout=40)
+            r = s.get(f"{REST}/media?include={','.join(map(str, chunk))}"
+                      f"&per_page=100&_fields=id,post,source_url", timeout=40)
             if r.status_code != 200:
                 continue
             for m in r.json():
                 if isinstance(m, dict) and m.get("source_url"):
-                    url_by_id[m["id"]] = m["source_url"]
+                    media_by_id[m["id"]] = (m["source_url"], m.get("post"))
         except Exception:
             continue                    # a lost chunk costs images, never a wrong image
 
-    return {pid: [url_by_id[i] for i in ids if i in url_by_id] for pid, ids in want.items()}
+    out: dict[int, list[str]] = {}
+    for pid, ids in want.items():
+        urls: list[str] = []
+        for i in ids:
+            got = media_by_id.get(i)
+            if not got:
+                continue
+            url, parent = got
+            # bind or drop: a missing/NULL parent is dropped too — never fall through to "probably fine"
+            if parent == pid:
+                urls.append(url)
+        out[pid] = urls
+    return out
 
 
 def fetch_listings(s: cc.Session) -> list[dict]:

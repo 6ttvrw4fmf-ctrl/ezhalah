@@ -106,10 +106,15 @@ const shmImages = shm.slice(shm.indexOf('def fetch_images'), shm.indexOf('def fe
 check('shmoualshmal reads fave_property_images RAW, not through _meta1',
   /\.get\("fave_property_images"\)/.test(shmImages) && !/_meta1\([^)]*fave_property_images/.test(shmImages),
   '_meta1 unwraps a list to its FIRST element — it silently reduced a 10-image gallery to 1');
-check('shmoualshmal re-sorts ids back into the source gallery order after the bulk fetch',
-  /url_by_id\[i\] for i in ids/.test(shmImages),
+check('shmoualshmal binds each resolved attachment to its PARENT (bind or drop, never fall through)',
+  /parent == pid/.test(shmImages) && /_fields=id,post,source_url/.test(shmImages),
+  'the gallery meta is just a list of ints — without the post==pid check, a foreign attachment id ' +
+  'would put ANOTHER property\'s photo on this card. Found by adversarial review, pinned here.');
+check('shmoualshmal emits urls in the SOURCE gallery order, never the response order',
+  /for i in ids:/.test(shmImages) && !/for m in r\.json\(\)[\s\S]{0,120}urls\.append/.test(shmImages),
   '/wp/v2/media?include= does NOT preserve requested order (verified: 18747,18739,18741 -> ' +
-  '18747,18741,18739). The first url is the card thumbnail.');
+  '18747,18741,18739). Ordering must come from iterating the meta ids, or the card thumbnail ' +
+  'becomes a bathroom instead of the facade.');
 
 // ── 3. MUTATION PROOF — the static predicate, against scrapers that should FAIL ─────────────────
 console.log('\n  mutation proof — the same predicate, against broken sources\n');
