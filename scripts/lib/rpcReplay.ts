@@ -172,6 +172,17 @@ function looksLikeUninterpretedChange(sql: string, fn: string): boolean {
   // MENTIONS — in a comment, or inside a format() string it assembles — is reported uninterpretable.
   // Collect the declared targets so inspect-vs-rewrite can be judged the same way.
   for (const m of sql.matchAll(/p\.proname\s*=\s*'([a-z0-9_]+)'/gi)) definedHere.push(m[1].toLowerCase());
+  // THE SAME TARGET, SPELLED THE OTHER WAY THIS REPO ACTUALLY WRITES IT:
+  //     d := pg_get_functiondef('public.top_cities_by_deal_ar'::regproc);
+  // 20 migrations use the regproc cast instead of a pg_proc lookup. Read only the proname form and
+  // such a migration declares NO target at all — `definedHere` stays empty, the inspect-vs-rewrite
+  // branch below is skipped, and every tracked RPC the file merely MENTIONS (in a header comment,
+  // typically) reads as an uninterpreted rewrite. Found 2026-09-04: the city-bucket migration edits
+  // top_cities_by_deal_ar and names location_search_candidates_ar only in prose explaining WHY the
+  // results path widens — and that prose alone failed the guard. This teaches the spelling, it does
+  // not relax the rule: a migration whose regproc target IS a tracked function still sets
+  // definesTracked and still reports unresolved, and the dynamic-rebuild loophole guard still runs.
+  for (const m of sql.matchAll(/pg_get_functiondef\s*\(\s*'public\.([a-z0-9_]+)'\s*::\s*regproc/gi)) definedHere.push(m[1].toLowerCase());
   const definesTracked = definedHere.includes(fn.toLowerCase());
   if (!definesTracked && definedHere.length > 0) {
     // Guard the loophole: a dynamic rebuild names the target in the EXECUTE string rather than in a
