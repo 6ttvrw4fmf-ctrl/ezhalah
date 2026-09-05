@@ -7,7 +7,10 @@ cloud-friendly (public API on the same domain).
 API:
   POST https://www.alhoshan.sa/api/alhoshan/properties/search   body {page, limit<=20}
        → {success, data:{items:[…]} | [...], meta:{page,total,totalPages,hasNext}}
-  (the list item IS the full record — the detail endpoint adds nothing.)
+  GET  https://www.alhoshan.sa/api/alhoshan/properties/{id GUID}/media
+       → {data:[{cdnUrl,…}…]}  the FULL gallery, in the site's own order
+  (the list item IS the full record for FIELDS, but for images it carries only primaryImageUrl —
+   the gallery hides behind /media, keyed by the internal `id` GUID; the {publicId} form 400s.)
 
 Field map (Al Hoshan item → our schema):
   publicId                         → ad_number (AH{publicId}) + listing_url /properties/{publicId}
@@ -18,7 +21,7 @@ Field map (Al Hoshan item → our schema):
   specs.district                   → neighborhood
   specs.area / bedrooms / bathrooms→ area_m2 / bedrooms / bathrooms
   advertisingLicenseNumber         → rega_location_verified
-  primaryImageUrl                  → photo_urls (only ~15/24 have one)
+  id (GUID) → /media data[].cdnUrl → photo_urls (fallback primaryImageUrl; ~3 publish no photo)
   specs.{yearBuilt,direction,floors,parkingSpaces,features} → additional_info
 
 Usage:  python -m scrapers.alhoshan.run [--limit-test] [--type residential|commercial|all]
@@ -46,6 +49,9 @@ _PII = {"advertiser", "brokerageBadge", "brokerageContract"}
 
 BASE = "https://www.alhoshan.sa"
 SEARCH = f"{BASE}/api/alhoshan/properties/search"
+# Full gallery per listing. Takes the internal `id` GUID from the list item — the {publicId}
+# form returns 400 (verified live 2026-09-05).
+MEDIA = BASE + "/api/alhoshan/properties/{guid}/media"
 PAGE_SIZE = 20  # server caps pageSize at 20
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
@@ -153,6 +159,32 @@ def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], dict]:
     return [], {}
 
 
+def fetch_media(s: cc.Session, guid: Any) -> Optional[list[str]]:
+    """One listing's full gallery, in the site's own order (first = card thumbnail).
+
+    The list item exposes ONLY primaryImageUrl, so 7/33 listings with 2-27 source photos were
+    stored with exactly 1 (verified live 2026-09-05 on 1003 + 1021: /media's data[].cdnUrl is
+    identical, in content AND order, to the detail page's rendered gallery, and its first element
+    equals primaryImageUrl). Binding is structural: the endpoint is keyed by the listing's own
+    internal GUID and every returned cdnUrl lives under /property-images/{that same GUID}/, so a
+    related-listing's photo cannot leak in. None on ANY failure → caller degrades to the old
+    primaryImageUrl behavior (fewer images, never wrong ones). [] is a real source answer
+    (the 3 imageless listings) and must stay [].
+    """
+    if not guid:
+        return None
+    _throttle()
+    try:
+        r = s.get(MEDIA.format(guid=guid), timeout=30)
+        if r.status_code != 200:
+            return None
+        return [m["cdnUrl"] for m in ((r.json() or {}).get("data") or [])
+                if isinstance(m, dict) and isinstance(m.get("cdnUrl"), str)
+                and m["cdnUrl"].startswith("http")]
+    except Exception:
+        return None
+
+
 def _additional_info(p: dict, specs: dict) -> list[dict[str, Any]]:
     """The card's detailed-specs panel — mirrors Al Hoshan's own 'المواصفات التفصيلية' extras
     (the ones not already shown as card fields: floor, building age, parking, facade, features,
@@ -178,7 +210,7 @@ def _additional_info(p: dict, specs: dict) -> list[dict[str, Any]]:
     return rows
 
 
-def map_listing(p: dict) -> tuple[Optional[dict], str]:
+def map_listing(p: dict, photos: Optional[list[str]] = None) -> tuple[Optional[dict], str]:
     pub = p.get("publicId")
     if not pub:
         return None, "residential"
@@ -232,8 +264,9 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
     # scraper's own region signal) disambiguates same-name twins (e.g. «بيش» Asir vs Jazan).
     cid, rid = to_catalog(raw_city, region_hint=region)
     # Complete-source capture (capture-once contract): the whole API item MINUS broker PII. The Al
-    # Hoshan list item IS the full record (description, lat/lng, street, all specs, seo*) — no detail
-    # endpoint to chase. Stored in source_capture, which the app never selects. Numbers unchanged.
+    # Hoshan list item IS the full record for FIELDS (description, lat/lng, street, all specs, seo*)
+    # — images are the one exception, chased via fetch_media(). Stored in source_capture, which the
+    # app never selects. Numbers unchanged.
 
     row = {
         "ad_number": f"AH{pub}",
@@ -263,7 +296,10 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "region": region,
         "neighborhood": specs.get("district") or None,
         "title": p.get("title"),
-        "photo_urls": [photo] if photo else [],
+        # /media gallery when the fetch succeeded (source order preserved, first = thumbnail);
+        # a failed fetch (photos=None) degrades to the list item's primaryImageUrl, and an empty
+        # source gallery stays [] — fewer images on failure, never a wrong or invented one.
+        "photo_urls": photos if photos else ([photo] if photo else []),
         "rega_location_verified": bool(p.get("advertisingLicenseNumber")),
         "additional_info": _additional_info(p, specs),
         # ── Arabic-native (additive, shadow) + complete-source capture ──────────
@@ -296,7 +332,7 @@ def main() -> int:
         page = 1
         while True:
             for p in items:
-                row, cat = map_listing(p)
+                row, cat = map_listing(p, fetch_media(s, p.get("id")))
                 if not row:
                     continue
                 if args.type != "all" and cat != args.type:
