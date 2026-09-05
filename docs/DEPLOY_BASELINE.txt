@@ -1,4 +1,4 @@
-15979fbd6db426a0da6bed432b930ae4c0995e18
+2c906206e629bf67ce387adfdad56169dcb3b2d6
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # 2026-09-04  57dd41e  deployed via .github/workflows/deploy-frontend.yml run 33898889593.
 #   Recorded BY PR, not by the deploy: the runner has no git identity, so safe-deploy.sh's
@@ -290,3 +290,4 @@
 # 2026-09-03  254baca  advanced via PR: §12A shipped (the «مطابق لطلبك» card-evidence strip, af_canon, and the R12A.6 live journey's card-listing-<id> testID). safe-deploy.sh's automatic post-deploy advance refused on BOTH of the day's deploys for the SAME reason and it is not a deploy fault: the alias had already moved to the new bundle, but the check could not read the deployment URL (HTTP 302, 15 bytes) so it never obtained an "expected" hash to compare against -- the issue #1563 shape, owned by routine #7. Advanced by hand only after all three of that step's own conditions were re-verified independently: the alias serves a bundle different from the pre-deploy one, that bundle references supabase.co (env vars inlined), the live search RPC answered HTTP 200 with a valid body, and ops_deploy_preflight_checks reported missing_in_git=0 / duplicate_overloads=0. Previous first line 7fa870f9 (PR #1470, 2026-09-01) -- stale across every deploy since.
 # 2026-09-04  238dd19  deployed via safe-deploy.sh
 # 2026-09-04  15979fb  deployed via safe-deploy.sh
+# 2026-09-05  2c90620  deployed via safe-deploy.sh
