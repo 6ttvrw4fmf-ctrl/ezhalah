@@ -18,7 +18,11 @@
  *   2. og:image is ABSOLUTE — a crawler has no origin to resolve "/og-image.jpg" against, so a
  *      relative path silently yields a preview with no picture;
  *   3. the image file EXISTS, is 1200x630, and is small enough that a crawler will actually fetch it;
- *   4. the description is the OWNER'S wording, including «في المملكة» — the words that say WHERE;
+ *   4. the description is the OWNER'S wording, and it NAMES THE COUNTRY. The literal was «في المملكة»
+ *      when this was written and is «في السعودية» after the owner's 2026-09-05 rewrite — the rule was
+ *      never about one phrase, it is that the line must say WHERE. A property search that could be
+ *      anywhere is a slogan; one that says Saudi Arabia is a product. The literal moves when the
+ *      owner rewrites it; the country requirement does not.
  *   5. the title goes through expo-router's <Head> (helmet). A <title> anywhere else in +html.tsx is
  *      dead markup: helmet emits its own FIRST in <head> and the first title is the one a browser
  *      honours. That is precisely why the tab was blank while a <title> sat lower in the document;
@@ -35,8 +39,10 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
-const OG_FILE = 'public/og-image-v2.jpg';
-const REQUIRED_AR = 'مكان واحد لاستكشاف كل إعلانات العقارات في المملكة في ثواني. جرّبها الآن.';
+const OG_FILE = 'public/og-image-v3.jpg';
+const REQUIRED_AR = 'موقع واحد. كل إعلانات العقار في السعودية، بثوانٍ. جرّبه الآن.';
+// Either word names the country. Owner wording moved from «المملكة» to «السعودية» on 2026-09-05.
+const NAMES_COUNTRY = /في\s+(المملكة|السعودية)/;
 
 // JSX comments are stripped: this file's own prose quotes the tags it is checking for.
 const code = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -65,7 +71,7 @@ export function auditShareMeta(layout: string, share: string, exists: (p: string
     bad.push('OG_IMAGE is not an absolute, VERSION-NAMED url — crawlers cache previews by URL, so the file must be renamed when the art changes, never overwritten');
   const blurb = s.match(/export const SHARE_BLURB_AR = '([^']+)'/)?.[1];
   if (blurb !== REQUIRED_AR) bad.push(`the Arabic description is not the owner's wording: ${blurb ?? '(missing)'}`);
-  if (!/في المملكة/.test(blurb ?? '')) bad.push('«في المملكة» is gone — the line no longer says WHERE');
+  if (!NAMES_COUNTRY.test(blurb ?? '')) bad.push('the description no longer names the country — it must say «في السعودية» (or «في المملكة»)');
   // The OS share text and the in-app sheet must read from the same constant, not their own copy.
   if (!/blurb: SHARE_BLURB_AR/.test(s)) bad.push('the Arabic share text no longer reuses SHARE_BLURB_AR');
 
@@ -89,7 +95,7 @@ mustCatch('og:image made relative (crawler cannot resolve it)',
   auditShareMeta(L, S.replace(/export const OG_IMAGE = `\$\{SHARE_LINK\}\/og-image-v\d+\.jpg`;/, "export const OG_IMAGE = '/og-image.jpg';"), yes));
 mustCatch('the share image loses its version suffix (new art, stale cached previews everywhere)',
   auditShareMeta(L, S.replace(/og-image-v\d+\.jpg/, 'og-image.jpg'), yes));
-mustCatch('«في المملكة» removed from the description',
+mustCatch('the country is removed from the description',
   auditShareMeta(L, S.replace(REQUIRED_AR, 'مكان واحد لاستكشاف كل إعلانات العقارات في ثواني. جرّبها الآن.'), yes));
 mustCatch('the share image file is deleted', auditShareMeta(L, S, () => false));
 mustCatch('twitter:card downgraded to the small variant',
