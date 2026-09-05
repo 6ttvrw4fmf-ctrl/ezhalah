@@ -123,6 +123,15 @@ jobs:
           - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
           - { source: therc,       cmd: "python -m scrapers.therc.run --type all" }
           - { source: aouj,        cmd: "python -m scrapers.aouj.run --type all" }
+          # Two GREEN-audited additions (owner-instructed 2026-09-05, from the 40-candidate audit).
+          # Both are WordPress REST sources whose taxonomies resolve live, so their type/city maps
+          # are fetched per run rather than frozen here.
+          #   alta          17 posts; 10 already تم البيع/تم التأجير → stored active=false. Only 1
+          #                 post states a price, so 15 carry NULL — a SOURCE fact, never inferred.
+          #   shmoualshmal   6 posts, all Tabuk. The site publishes NO price at all (it shows
+          #                 «اتصل»), so every price column is NULL by design. See each run.py.
+          - { source: alta,         cmd: "python -m scrapers.alta.run --type all" }
+          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all" }
           - { source: abralosol,   cmd: "python -m scrapers.abralosol.run --type all" }
           - { source: arkaan,      cmd: "python -m scrapers.arkaan.run --type all" }
           - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }
