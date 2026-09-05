@@ -3,7 +3,9 @@
 No auth, no token, no rate-limit. Listings are a WordPress custom post type exposed at
 /wp-json/wp/v2/properties (paginated, X-WP-TotalPages header). ~257 listings. Each carries the full
 Saudi REGA ad data under property_meta.advertisement_response (price, area, rooms, plan/land number,
-license, and a clean {region, city, district} location). The featured image is a direct `thumbnail` URL.
+license, and a clean {region, city, district} location). The featured image is a direct `thumbnail` URL;
+the FULL gallery lives behind /wp-json/wp/v2/media?parent=<post id> (the Houzez fave_property_images
+list is not exposed in the properties payload — see fetch_gallery).
 
 Field map (Aqargate property → our schema):
   property_type_text (Arabic)        → property_type (TYPE_MAP_AR) + residential/commercial routing
@@ -12,7 +14,8 @@ Field map (Aqargate property → our schema):
   ad.location.district               → neighborhood
   ad.propertyPrice / landTotalAnnualRent → price_total | price_annual
   ad.propertyArea / numberOfRooms    → area_m2 / bedrooms
-  thumbnail                          → photo_urls (full URL, verified to load)
+  media?parent=<id> attachments      → photo_urls (featured first, then source's ascending-id order;
+                                       `thumbnail` is the fallback when the parent query fails/is empty)
   ad.propertyAge/Face/planNumber/... → additional_info (Age, Facade, Plan/Land number, Street width, Usage)
   link, fave_property_id             → listing_url, ad_number
 
@@ -43,6 +46,7 @@ _PII = {"advertiserId", "advertiserName", "responsibleEmployeeName",
         "responsibleEmployeePhoneNumber", "phoneNumber"}
 
 API = "https://aqargate.com/wp-json/wp/v2/properties"
+MEDIA_API = "https://aqargate.com/wp-json/wp/v2/media"
 HEADERS = {"Accept": "application/json"}
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 PER_PAGE = 100  # WordPress REST cap
@@ -96,6 +100,39 @@ def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], int]:
         total_pages = int(r.headers.get("X-WP-TotalPages") or 1)
         return (r.json() or []), total_pages
     return [], 0
+
+
+def fetch_gallery(s: cc.Session, post_id: Any, featured_id: Any) -> Optional[list[str]]:
+    """Full gallery for one property via the WP media endpoint. The Houzez gallery
+    (fave_property_images) is NOT in the properties payload, but every gallery photo IS a media
+    attachment whose parent is the property post id — verified live 2026-09-05 on 3 listings
+    (e.g. 57251: `thumbnail` is false yet 34 live attachments; the thumbnail-only path stored it
+    with 0 images and capped every multi-photo gallery to 1). Order = the source's own: ascending
+    attachment id with the featured image first (it is the card thumbnail on the site).
+
+    Returns None — meaning "caller keeps the thumbnail fallback" — on request failure AND on an
+    empty-but-successful parent query: ~27% of listings (live 2026-09-05: 55102, 51336, 52193,
+    53809) upload their media UNATTACHED (post:null), so an empty result is not "no photos" and
+    storing [] there would hide a source-published photo. Genuinely imageless rows (e.g. 53151)
+    still end at [] because their `thumbnail` is false too. Non-image attachments are excluded by
+    mime_type. Cost: one throttled GET per listing (~200 rows × 0.3s ≈ 60s/run, no auth)."""
+    if not post_id:
+        return None
+    _throttle()
+    try:
+        r = s.get(f"{MEDIA_API}?parent={post_id}&per_page=100&orderby=id&order=asc"
+                  "&_fields=id,source_url,mime_type", timeout=30)
+        if r.status_code != 200:
+            return None
+        atts = [a for a in (r.json() or [])
+                if str(a.get("mime_type") or "").startswith("image/")
+                and isinstance(a.get("source_url"), str)]
+    except Exception:
+        return None
+    if not atts:
+        return None
+    atts.sort(key=lambda a: (a.get("id") != featured_id, a.get("id") or 0))
+    return [a["source_url"] for a in atts]
 
 
 def _int(v: Any) -> Optional[int]:
@@ -180,7 +217,7 @@ def _rent_annualize(
     return rent, "annual"
 
 
-def map_listing(p: dict) -> tuple[Optional[dict], str]:
+def map_listing(p: dict, s: Optional[cc.Session] = None) -> tuple[Optional[dict], str]:
     meta = p.get("property_meta") or {}
     ar = meta.get("advertisement_response") or {}
     pid = _text(meta.get("fave_property_id")) or str(p.get("id") or "")
@@ -228,6 +265,9 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         _price_int(rent), has_annual_field=ar.get("landTotalAnnualRent") is not None, title_text=title_text,
     ) if is_rent else (None, None)
     thumb = p.get("thumbnail")
+    # Gallery from the media endpoint; None (fetch failed OR empty parent query) keeps the old
+    # thumbnail fallback so failure degrades to FEWER images, never [] over a live photo.
+    gallery = fetch_gallery(s, p.get("id"), p.get("featured_media")) if s is not None else None
     row = {
         "ad_number": f"AG{pid.replace('AG-', '').replace('AG', '')}",
         "listing_url": p.get("link"),
@@ -267,7 +307,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "city": city,
         "neighborhood": loc.get("district") or None,
         "title": (p.get("title") or {}).get("rendered"),
-        "photo_urls": [thumb] if isinstance(thumb, str) and thumb.startswith("http") else [],
+        "photo_urls": gallery if gallery is not None
+                      else ([thumb] if isinstance(thumb, str) and thumb.startswith("http") else []),
         "property_age": _int(ar.get("propertyAge")),
         "rega_location_verified": bool(ar.get("adLicenseNumber")),
         "additional_info": _additional_info(ar),
@@ -300,7 +341,7 @@ def main() -> int:
             if not listings:
                 break
             for p_ in listings:
-                row, cat = map_listing(p_)
+                row, cat = map_listing(p_, s)
                 if not row or not row.get("property_type"):
                     continue
                 if args.type != "all" and cat != args.type:
