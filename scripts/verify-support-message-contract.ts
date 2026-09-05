@@ -65,7 +65,20 @@ check('no mail-provider or service-role credential is referenced anywhere in src
 
 // ── 3-6. the edge function ──
 const fn = readFileSync('supabase/functions/support-message/index.ts', 'utf8');
-check('the support inbox is support@ezhalah.com', fn.includes('const SUPPORT_INBOX = "support@ezhalah.com"'));
+// The destination became configurable on 2026-09-03 (no mailbox exists at support@ezhalah.com yet,
+// so delivery has to be pointed at an inbox the owner actually reads). What must NOT change is the
+// FALLBACK: an unset or misspelled secret has to land on the address the product promises, never on
+// an empty string — which would send a real user's support request to nobody at all.
+check('the support inbox is configurable, and DEFAULTS to support@ezhalah.com',
+  /const SUPPORT_INBOX = Deno\.env\.get\("SUPPORT_INBOX"\) \|\| "support@ezhalah\.com";/.test(fn));
+check('the inbox default is a real address, never an empty fallback',
+  !/SUPPORT_INBOX"\)\s*(\?\?|\|\|)\s*""/.test(fn));
+check('the email is addressed to that inbox', /to: \[SUPPORT_INBOX\]/.test(fn));
+// Reply-to is the whole point of the feature: the owner opens the mail, presses Reply, and it goes
+// to the person who wrote in. Without it every support message is a dead end that has to be answered
+// by hand-copying an address out of the body — and nothing else in this file noticed it was missing.
+check("the reply-to carries the USER's address, so Reply answers the person who wrote in",
+  /reply_to: row\.reply_email,/.test(fn));
 check('the honeypot short-circuits BEFORE anything is stored',
   fn.indexOf('payload.website') > -1 && fn.indexOf('payload.website') < fn.indexOf('.insert('));
 check('a honeypot hit answers 200 (a bot learns nothing from the response)',

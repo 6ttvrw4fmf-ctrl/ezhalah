@@ -1,0 +1,69 @@
+# THE INDEPENDENT AF ORACLE, BACK ON EVERY PULL REQUEST.
+#
+# WHAT HAPPENED. PR #1527 moved scripts/verify-af-independent-oracle.ts out of the REQUIRED
+# `npm test` — correctly: it calls production on every PR, the exact pattern #1486 removed, so a
+# production hiccup failed unrelated PRs. Its new home, af-live-truth-check.yml, has no
+# pull_request trigger (it drives real browsers and 11 PAID agent messages per run, so it must
+# not), which means from 2026-09-02 the oracle gated NOTHING at review time. The registry ledger
+# in scripts/verify-test-registry-complete.ts recorded that honestly as "PARTIAL LOSS".
+#
+# WHAT THIS FILE RESTORES, keeping BOTH properties #1527 traded between:
+#   • the live call is still OUT of `npm test` (that suite stays hermetic and offline), and
+#   • the oracle is a PR check again — its own status check, so it can go red without touching
+#     the required npm-test suite.
+#
+# WHY THIS IS CHEAP ENOUGH TO RUN PER PR (measured 2026-09-04): 7.8s wall, ~30 anon PostgREST/RPC
+# reads, no browser, no npm install, no AI agent message. It is nothing like its siblings in
+# af-live-truth-check.yml, and that is the whole reason it can live here and they cannot.
+#
+# NO SECRETS, SO FORK PRs WORK. scripts/lib/public-supabase.ts carries the anon key as a committed
+# constant (it ships in every visitor's bundle; it is not a credential). A fork PR gets no secrets
+# and a read-only token — this job needs neither, so it runs identically from a fork. Nothing here
+# checks out or executes untrusted PR code with elevated rights: `pull_request` (never
+# `pull_request_target`) means the fork's code runs with no secrets and no write token.
+#
+# THE HICCUP PROBLEM, HANDLED RATHER THAN IGNORED. The reason #1527 gave for leaving npm test is
+# real: production can be briefly unhealthy and that must not fail someone's unrelated PR. So the
+# step retries. A transient 5xx/timeout passes on attempt 2 or 3; a predicate that MEANS something
+# different fails all three, because the disagreement is deterministic. Retrying cannot mask a
+# defect it re-measures every time.
+name: AF independent oracle (live)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: af-oracle-pr-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oracle:
+    # NOTE: this job name is the branch-protection required-status-check context. Renaming it
+    # silently drops the gate — change both together (same rule as full-verification-ci.yml).
+    name: AF predicates vs an independent oracle (live)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      # No `npm ci`: the script imports nothing outside node builtins and scripts/lib/public-supabase.ts.
+      - name: Every AF predicate agrees with an independently hand-written predicate, and unknown never passes
+        run: |
+          for attempt in 1 2 3; do
+            if node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+                 scripts/verify-af-independent-oracle.ts; then
+              exit 0
+            fi
+            echo "::warning::oracle attempt $attempt failed — retrying in 20s (a real predicate defect fails all three)"
+            sleep 20
+          done
+          echo "::error::The AF independent oracle disagreed with production on three consecutive attempts."
+          exit 1
