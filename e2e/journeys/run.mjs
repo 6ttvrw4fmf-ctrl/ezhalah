@@ -763,6 +763,124 @@ JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobi
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the favourite navigation trip', errs.join(' | ')); }
 });
 
+/** J16c — A DOUBLE-CLICK ON ⋯ OPENS AND CLOSES THE MENU. IT DOES NOT RENAME (PART 5 shape 7).
+ *
+ *  ops_incident #20, reproduced 3/3 on production before the fix: the row host binds `dblclick` →
+ *  beginRename, and opening then closing the ⋯ menu is two clicks on that same host, so the row
+ *  silently dropped into rename mode. The pointerdown/hold-to-drag handler had already been given
+ *  `startsOnControl()` on 2026-09-04 for the identical reason (a mouse-down on ⋯ that drifted 25px
+ *  lifted the row and committed a real reorder); the dblclick binding was left without it.
+ *
+ *  WHY A JOURNEY AND NOT ONLY THE SOURCE PIN. verify-sidebar-reorder.ts pinned that exact line by
+ *  regex the whole time the defect was live, and passed — it asserted the line said what it said,
+ *  which was true and was the bug. Only pressing the button twice in a real browser can tell you
+ *  what the second click actually did. Both now exist; this one is the one that would have caught it. */
+JOURNEYS['sidebar-dblclick-on-menu'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
+  const name = `sidebar-dblclick-on-menu:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const editors = () => page.evaluate(() => [...document.querySelectorAll('input')]
+    .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (e.value || '').trim().length > 0; })
+    .map((e) => e.value));
+
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+  const row = page.getByText('فلل جدة', { exact: true }).first();
+  if (!(await row.count())) { skip(name, 'the target row is not rendered'); return; }
+  await row.hover().catch(() => {});
+  await sleep(700);
+  const dots = await dotsCentre(page, 'فلل جدة');
+  if (!dots) { skip(name, 'the ⋯ button could not be located on the row'); return; }
+
+  const before = await editors();
+  await page.mouse.dblclick(dots.x, dots.y).catch(() => {});
+  await sleep(1600);
+  const after = await editors();
+
+  // A rename editor is an input carrying the row's CURRENT title — that is what beginRename seeds.
+  const opened = after.filter((v) => !before.includes(v));
+  if (opened.length) {
+    defect(name, 'double-clicking the ⋯ menu button started a rename',
+      `a rename editor holding «${opened[0]}» appeared after two clicks on ⋯ — the menu affordance must open and close, never rename (ops_incident #20)`);
+  } else {
+    pass(name, 'two clicks on ⋯ opened and closed the menu without starting a rename');
+  }
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error during the ⋯ double-click', errs.join(' | ')); }
+});
+
+/** J16b — REMOVING A FAVOURITE REMOVES THE STAR, NOT THE CHAT (PART 1: "Favorites: add, REMOVE, and
+ *  the favorited state surviving navigation and refresh"; PART 5 shape 3).
+ *
+ *  WHY THIS EXISTS, AND WHY IT IS NOT A DUPLICATE. `adv-favorites-remove` has carried a ledger row
+ *  reading «tested once, PASSED» since 2026-08-30 — written by the ad-hoc script of that day's run,
+ *  which was never committed (the story is in scripts/verify-journey-ledger-reachable.ts's header).
+ *  Its two siblings from that script were landed as real journeys on 2026-08-31; this one was not.
+ *  So the ledger has asserted coverage for the REMOVE half of the Favorites mandate for six days
+ *  while no committed journey exercised it at all — the worst of the three stale rows, because a
+ *  bare gap sorts to the top of the oldest-first rotation and gets looked at, whereas a gap wearing
+ *  a green badge is skipped past forever. `adv-favorite-survives-navigation` covers ADD + navigate;
+ *  `sidebar-row-actions` owns whether the star LANDS. Nothing covers taking it off.
+ *
+ *  THE ASSERTION THAT MATTERS IS THE SECOND ONE. "The star cleared" is the easy half. The failure
+ *  that would actually hurt is unstar removing the CHAT along with the star, or leaving a copy
+ *  behind in Recent while the المفضلة bucket still renders one — a row lost or duplicated by a
+ *  sidebar action, which is exactly PART 5 shape 3 and the shape sidebar work keeps producing.
+ *  So this asserts on the row's SURVIVAL and its COUNT, not just on the flag going false. */
+JOURNEYS['adv-favorites-remove'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
+  const name = `adv-favorites-remove:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const starredIds = async () => ((await storedHistory(page)) || [])
+    .filter((x) => x.starred || x.favorite || x.pinned).map((x) => x.id).join(',');
+  const allIds = async () => ((await storedHistory(page)) || []).map((x) => x.id).sort().join(',');
+
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+  const idsAtStart = await allIds();
+
+  // ── star it (setup, not the assertion) ────────────────────────────────────────────────────────
+  if (!(await openRowMenu(page, 'فلل جدة'))) { skip(name, 'row ⋯ menu would not open'); return; }
+  if (!(await clickText(page, 'أضف إلى المفضلة'))) { skip(name, 'favourite action not in the menu'); return; }
+  await sleep(1800);
+  // Whether the star LANDS is sidebar-row-actions' assertion. If it did not land there is nothing
+  // to un-star, so this skips rather than filing a second copy of a defect another journey owns.
+  const starred = await starredIds();
+  if (starred !== 'h2') { skip(name, `favourite did not land (flagged [${starred}]) — sidebar-row-actions owns that assertion`); return; }
+
+  // ── take it off again — the part nothing has ever tested ──────────────────────────────────────
+  if (!(await openRowMenu(page, 'فلل جدة'))) { skip(name, 'row ⋯ menu would not reopen on the starred row'); return; }
+  if (!(await clickText(page, 'أزل من المفضلة'))) {
+    defect(name, 'a favourited chat offers no way to un-favourite it',
+      'the ⋯ menu on a starred row does not carry «أزل من المفضلة» — the star is a one-way door');
+    return;
+  }
+  await sleep(1800);
+
+  const after = await starredIds();
+  if (after !== '') {
+    defect(name, 'removing a favourite did not clear the star',
+      `still flagged [${after}] after «أزل من المفضلة» — the menu action ran and the state did not change`);
+  } else {
+    pass(name, 'the star cleared from the stored chat');
+  }
+
+  // THE CHAT MUST SURVIVE ITS OWN UNSTARRING. Losing the row, or leaving a second copy behind while
+  // the Starred bucket unmounts, is PART 5 shape 3 — and it is invisible to a flag-only assertion.
+  const idsAfter = await allIds();
+  if (idsAfter !== idsAtStart) {
+    defect(name, 'un-favouriting changed the set of saved chats',
+      `[${idsAtStart}] before, [${idsAfter}] after — removing a star must move a row between buckets, never add or delete one`);
+  } else {
+    pass(name, `all ${idsAfter.split(',').length} saved chats survived the unstar`);
+  }
+
+  // ON DISK IS NOT ON SCREEN (the inverse of its sibling's closing check): the row must come BACK
+  // into the plain list, exactly once, and the المفضلة bucket must be gone now that it is empty.
+  if (!(await ensureSidebar(page, mobile))) { skip(name, 'sidebar would not reopen after the unstar'); return; }
+  const rows = await page.getByText('فلل جدة', { exact: true }).count();
+  const starHeader = await page.getByText('المفضلة', { exact: true }).count();
+  if (rows === 0) defect(name, 'the chat vanished from the sidebar when its star was removed', '«فلل جدة» is not rendered at all after «أزل من المفضلة»');
+  else if (rows > 1) defect(name, 'un-favouriting duplicated the chat row', `«فلل جدة» is rendered ${rows} times — the row was copied out of المفضلة rather than moved`);
+  else if (starHeader) defect(name, 'the المفضلة bucket is still rendered with nothing in it', 'the last favourite was removed but the Starred header remains');
+  else pass(name, 'the row returned to the plain list exactly once and the empty المفضلة bucket is gone');
+
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while removing a favourite', errs.join(' | ')); }
+});
+
 /** J17 — THE MODE TOGGLE COSTS NO HISTORY, from the user's side (PART 5 shape 9).
  *
  *  Owner rule (src/app/index.tsx, defect fix 2026-08-23): the Filter/Agent pill is a MODE TOGGLE

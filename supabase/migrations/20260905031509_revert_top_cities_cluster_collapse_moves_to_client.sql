@@ -2,13 +2,13 @@
 --
 -- WHY REVERTED. Collapsing clusters inside top_cities_by_deal_ar made the Trending count correct
 -- (الهفوف 4,953 == click) but OVER-REACHED: that RPC also feeds the city AUTOCOMPLETE pool
--- (CITY_FIELD_POOLS -> matchCitiesByText), and the city field is tap-only (city-id-search identity
+-- (CITY_FIELD_POOLS → matchCitiesByText), and the city field is tap-only (city-id-search identity
 -- rule). Removing الاحساء's row from the pool made الاحساء UNSELECTABLE by typing — a real regression
 -- (verified live: typing «الاحساء» returned zero suggestions). Trending (top-6 shown on focus) and
 -- typing must be collapsed TOGETHER, and only the client distinguishes those two surfaces, so the
 -- collapse must live there — where typing any cluster-member name can still resolve to the one
 -- canonical option. This restores the RPC to per-city rows (the pre-collapse status quo); the
--- client-side collapse ships in a follow-up once the frontend deploy is unblocked.
+-- client-side collapse ships in the same change once the frontend deploy is unblocked.
 --
 -- Needle-edits the LIVE def (reverse of the collapse), preserving the clause/CTE byte-for-byte.
 do $mig$
@@ -18,7 +18,18 @@ begin
   if position('cluster_rep' in v_def) = 0 then
     raise exception 'top_cities_by_deal_ar has no cluster_rep — nothing to revert (already per-city)';
   end if;
-  v_new := replace(v_def, $new$  , cluster_rep as (
+  v_new := replace(v_def, $new$  -- CLUSTER COLLAPSE (owner rule 2026-09-04): a Trending row's count MUST equal what CLICKING it
+  -- returns. loc_city_cluster is the canonical resolver's OWN declaration that a set of city_ids is
+  -- ONE search entity (composite_match_city_ids' CLUSTER EXPANSION packs every sibling into
+  -- match_city_ids, so clicking any member's name delivers the whole cluster's union). Presenting each
+  -- member as its own row showed e.g. الهفوف 4,305 and الاحساء 648 while BOTH clicked to 4,953. Collapse
+  -- members onto their representative (min city_id in the cluster; for the sole cluster al_ahsa that is
+  -- الهفوف 12 — the principal city, and its most-populated member) so the ONE row's count IS the union
+  -- the click delivers. Non-clustered cities map to themselves and are byte-identical to before.
+  -- Canonical identity is untouched: 12 and 3677 stay distinct catalog cities and الاحساء is still
+  -- typeable; only the Trending PRESENTATION of the cluster is de-duplicated — the «one canonical
+  -- option» the owner specified.
+  , cluster_rep as (
     select city_id, min(city_id) over (partition by cluster_key) as rep_id from public.loc_city_cluster
   )
   select coalesce(cr.rep_id, co.city_id) as city_id, c.city_ar, c.region_id, r.region_ar,
@@ -40,6 +51,10 @@ begin
   if v_new = v_def then raise exception 'reverse replacement did not apply'; end if;
   execute v_new;
 end $mig$;
--- NOTE: this mirror records the SEMANTIC revert; the live apply on 2026-09-04 stripped the collapse
--- comment block as part of the same reverse edit. The net live state is per-city (self-checked: 2
--- al_ahsa rows), which this migration reproduces from any collapsed starting def.
+
+do $check$
+declare v_rows int;
+begin
+  select count(*) into v_rows from public.top_cities_by_deal_ar(p_deal := 'بيع') where city_id in (12, 3677);
+  if v_rows <> 2 then raise exception 'expected TWO al_ahsa rows after revert (per-city), got %', v_rows; end if;
+end $check$;

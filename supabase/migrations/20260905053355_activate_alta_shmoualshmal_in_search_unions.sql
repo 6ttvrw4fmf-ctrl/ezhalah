@@ -6,21 +6,10 @@
 -- Snapshot label: 'pre_alta_shmoualshmal_activation_20260905' — 11 views + 2 matviews + 21 indexes
 -- + 480 grants, captured in dependency order (ordinal = depth from the root).
 --
--- MEASURED RESULT (verified immediately after, see the trailing SELECT):
---   active_listing_ids_v2   200,884 -> 200,897  (+13 = alta 7 active + shmoualshmal 6)
---   platforms                    36 -> 38
---   listing_location_index  197,439 -> 200,853
---
--- THE lli DELTA IS NOT +13, AND THAT IS EXPECTED. Rebuilding a matview repopulates it from the
--- CURRENT base data, and listing_location_index was ~3,400 rows STALE relative to
--- active_listing_ids_v2 before this ran (abralosol alone was short by hundreds). After the rebuild
--- the two agree platform-for-platform, with 0 duplicates on either side. The ONE remaining
--- discrepancy is pre-existing and unrelated: souq24 has 44 Buy/Rent rows in active_listing_ids_v2
--- and 0 in listing_location_index, because souq24 has never had an arm in the location index.
--- Recorded here rather than silently fixed — it predates this change and deserves its own review.
---
--- alta's other 9 rows are source-confirmed sold/rented (تم البيع / تم التأجير / غير متاح) and carry
--- active=false, so the union's `active IS TRUE` predicate correctly excludes them from search.
+-- Baseline immediately before: active_listing_ids_v2 200,884 rows / 36 platforms;
+-- listing_location_index 197,439. Expected delta: +13 rows in both (alta 7 active, shmoualshmal 6)
+-- and 38 platforms. alta's other 9 rows are source-confirmed sold/rented and carry active=false,
+-- so the union's `active IS TRUE` predicate correctly excludes them.
 --
 -- IDEMPOTENT: each half is guarded on whether the arm is already present in the live definition,
 -- and the arms are GENERATED from the current catalog rather than pasted, so replaying this after
@@ -99,6 +88,7 @@ BEGIN
     BEGIN
       EXECUTE r.ddl;
     EXCEPTION
+      -- an object/index/grant that survived the CASCADE is already correct; anything else is real
       WHEN duplicate_table OR duplicate_object THEN NULL;
       WHEN OTHERS THEN failed := failed || (r.obj_kind||':'||r.obj_name||' -> '||SQLERRM);
     END;
@@ -108,7 +98,3 @@ BEGIN
   END IF;
 END
 $restore$;
-
-select (select count(*) from active_listing_ids_v2) v2_rows,
-       (select count(*) from listing_location_index) lli_rows,
-       (select count(distinct split_part(source_table,'_',1)) from active_listing_ids_v2) v2_platforms;

@@ -54,6 +54,33 @@ jobs:
         run: npm ci
       - name: Install Chromium for Playwright
         run: npx playwright install --with-deps chromium
+      # ── REFRESH THE CLIENT TABLE-SCOPE REGISTRY FIRST (2026-09-05) ─────────────────────────────
+      # `ops_qa_scope` records the `p_tables` production actually sends. Three layers read it: the
+      # unreachable-inventory detector, `ops_qa_cohort_catalog()` (every p_tables the daily coverage
+      # layer and the narrowing probe send), and `ops_qa_diff`. It is a HARVEST, so it rots whenever
+      # the client's table list changes — and on 2026-09-04 the detector was hardened with a
+      # three-day freshness gate whose stated dependency, this harvester, had never been written.
+      # Seventeen hours later two new platforms shipped and the detector raised false P1s calling 13
+      # findable listings invisible. This step is what actually keeps it current.
+      #
+      # It runs BEFORE the sweep so the sweep's own oracle reasons from a fresh registry, and
+      # `continue-on-error` so a harvest hiccup can never hide a real defect the sweep would have
+      # found. A failed harvest is NOT silent: the registry simply stays as it was, and
+      # `mon_detect_search_scope_unreachable_inventory()` goes P2-loud within its staleness window
+      # while explicitly withdrawing any standing unreachable claim. That is the designed signal —
+      # louder and more honest than failing this job.
+      #
+      # ANON KEY ONLY. `ops_qa_record_scope` is a SECURITY DEFINER RPC granted to anon precisely so
+      # this browser-driving job never has to hold the service role (the same shape as
+      # ops_qa_record_coverage), which verify-live-sweep-coverage-contract.ts asserts about this job.
+      - name: Refresh the client table-scope registry (ops_qa_scope)
+        continue-on-error: true
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node e2e/qa-coverage/harvest-scope.mjs
+
       - name: Drive production like a real user
         env:
           BASE_URL: ${{ github.event.inputs.base_url || 'https://ezhalah-app.vercel.app' }}
