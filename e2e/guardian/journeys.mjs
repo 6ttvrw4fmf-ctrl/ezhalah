@@ -226,7 +226,10 @@ const G2 = {
     const before = await resultsState(page);
     if (!before.cards) throw new HarnessError('the search produced no cards to clear — nothing to prove about New Chat');
 
-    const searchesBefore = ctx.searches.length;
+    // SUBMITTED searches, not raw RPC traffic — the Filter home legitimately decorates its scope
+    // options with p_limit:1 counts on every boot, and counting those filed ops_incident #51 as a
+    // P1 against an app that had executed nothing. See isResultsSearch() / §11.3.
+    const searchesBefore = ctx.resultsSearches.length;
     await page.reload({ waitUntil: 'load', timeout: 90000 })
       .catch((e) => { throw new HarnessError(`reload failed: ${String(e).slice(0, 160)}`); });
     const booted = await until(() => page.$('[data-testid="city-input"],[data-testid^="card-listing-"]'), 45000);
@@ -235,7 +238,7 @@ const G2 = {
     await sleep(6000);
 
     const after = await resultsState(page);
-    const fired = ctx.searches.length - searchesBefore;
+    const fired = ctx.resultsSearches.length - searchesBefore;
     const bad = [];
     if (after.cards > 0) bad.push(`New Chat left ${after.cards} result card(s) on screen`);
     if (after.afCards > 0) bad.push(`New Chat left ${after.afCards} Advanced-Filter card(s) on screen`);
@@ -264,28 +267,43 @@ const authSurface = (page) => page.evaluate((phoneSrc) => {
     const st = getComputedStyle(e);
     return st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0.01;
   };
-  // ONE invitation = one auth-popup-close.
+  // ONE invitation = one presentation of the one AuthForm, detected by what the product ACTUALLY
+  // renders on each (incident #23, fixed 2026-09-05).
   //
-  // KNOWN DEFECT, ROUTED NOT PATCHED (incident hunt-2026-09-04:auth:22). The owner's 2026-09-04 popup
-  // redesign removed the × from the sign-in sheet, so on a phone — where the desktop signin-card does
-  // not exist and the invitation is the centred AuthModal — this counts 0 and the journey reports
-  // «the only sign-in entry point at this viewport is dead» against a modal that is open and correct.
-  // Measured on production: auth-popup-close 0, signin-card 0, Google button 1, heading present.
+  // This used to count `auth-popup-close`. The owner's 2026-09-03 redesign removed the × from the
+  // centered modal's main step on purpose — «a press on the ground closes it» — so on a phone,
+  // where the desktop signin-card does not exist and the invitation IS that centered AuthModal,
+  // this counted 0 and the journey reported «the only sign-in entry point at this viewport is dead»
+  // against a modal that was open and entirely correct. It filed P1 ops_incident #4 five times.
   //
-  // Counting the Google button instead was TRIED HERE and made things WORSE: dismissAuthInvitation
-  // verifies the same way, and with no × and no working Escape it returned 'stuck', which took the
-  // suite from 15 PASS / 1 FAIL / 0 UNDETERMINED to 11 / 0 / 5 — the auth modal then covered the city
-  // field and broke four unrelated mobile journeys. Reverted. The detector and the DISMISSAL have to
-  // change together, with a real dismissal mechanism for a sheet that has no ×, and that is routine
-  // #6's surface. Left exactly as main had it so the failure stays a single, honest, known one.
-  const invitations = [...document.querySelectorAll('[data-testid="auth-popup-close"]')].filter(vis);
-  const scope = invitations.map((c) => c.closest('[data-testid="signin-card"]') || c.parentElement?.parentElement?.parentElement || document.body);
+  // The two presentations are MUTUALLY EXCLUSIVE by design — shouldShowSignInCard() returns false
+  // while modalOpen (src/lib/authPopupBehavior.ts) — so counting both hosts still yields exactly one
+  // whenever an invitation is up, and still catches the "two invitations stacked" regression this
+  // assertion exists for. Measured on production 2026-09-05, 2/2 fresh contexts each:
+  //   mobile 375  fresh → popup 0, card 0;  after «إنشاء حساب / تسجيل الدخول» → popup 1, card 0
+  //   desktop 1440 fresh → popup 0, card 1
+  //
+  // The earlier attempt at this counted the Google button and took the suite to 11 PASS / 0 FAIL /
+  // 5 UNDETERMINED, because dismissAuthInvitation still verified via the × and returned 'stuck',
+  // leaving the modal over the city field in four unrelated mobile journeys. The lesson recorded
+  // there was right: the DETECTOR and the DISMISSAL have to change together. They do now — the
+  // dismissal presses the ground when there is no ×, proven on production (popup 1 → 0, 2/2).
+  const invitations = [...document.querySelectorAll('[data-testid="auth-popup"],[data-testid="signin-card"]')].filter(vis);
+  const scope = invitations;
   const text = scope.map((s) => s.innerText || '').join('\n') || document.body.innerText;
   const phoneFields = [...document.querySelectorAll('input')].filter(vis).filter((e) => {
     const hay = `${e.type} ${e.placeholder} ${e.inputMode} ${e.name} ${e.autocomplete}`;
     return e.type === 'tel' || /tel|phone|otp|one-time/i.test(hay);
   }).map((e) => e.placeholder || e.type);
   // Is the primary CTA reachable, or does the invitation sit on top of it?
+  //
+  // THE CARD ONLY, DELIBERATELY. This encodes the owner's 2026-08-29 ruling about the UNPROMPTED
+  // surface — «i dont want this popup to show, i want it small … put it in the side» — i.e. a
+  // sign-in offer the visitor never asked for must not block the thing they came to do. The
+  // centered AuthModal is opened by an explicit press and covering the page is exactly what a modal
+  // is for; the visitor closes it with a ground press. Widening this to auth-popup when the detector
+  // above widened would have swapped one false P1 for another, so the scope is stated rather than
+  // inherited: `signin-card` only, which is what the previous selector pair resolved to in practice.
   let ctaCovered = null;
   for (const e of document.querySelectorAll('*')) {
     if (e.children.length === 0 && (e.textContent || '').trim() === 'بحث') {
@@ -293,7 +311,7 @@ const authSurface = (page) => page.evaluate((phoneSrc) => {
       const r = e.getBoundingClientRect();
       if (r.width && r.height && r.top >= 0 && r.bottom <= innerHeight) {
         const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-        ctaCovered = top ? !!(top.closest('[data-testid="signin-card"]') || top.closest('[data-testid="auth-popup-close"]')) : null;
+        ctaCovered = top ? !!top.closest('[data-testid="signin-card"]') : null;
       }
       break;
     }
@@ -417,7 +435,9 @@ const G4 = {
     if (!before.countChip) throw new HarnessError('the results screen rendered no count chip to compare');
 
     const bad = [];
-    const rpcBefore = ctx.searches.length;
+    // SUBMITTED searches only (isResultsSearch) — the return trip and the filter home both fire
+    // p_limit:1 option counts as a matter of course, and those are not a re-run search (§11.3).
+    const rpcBefore = ctx.resultsSearches.length;
     const opening = page.context().waitForEvent('page', { timeout: 25000 }).catch(() => null);
     const clicked = await page.locator('[data-testid^="card-listing-"]').first()
       .click({ timeout: 20000 }).then(() => true).catch(() => false);
@@ -431,16 +451,16 @@ const G4 = {
     if (after.countChip !== before.countChip) bad.push(`returning from the listing changed the count chip: «${before.countChip}» → «${after.countChip}»`);
     if (after.firstCard !== before.firstCard) bad.push(`returning from the listing changed the first card: ${before.firstCard} → ${after.firstCard}`);
     if (after.cards === 0) bad.push('returning from the listing left zero result cards on screen');
-    const duplicate = ctx.searches.length - rpcBefore;
+    const duplicate = ctx.resultsSearches.length - rpcBefore;
     if (duplicate > 0) bad.push(`returning from the listing fired ${duplicate} duplicate property-search RPC(s)`);
 
     // Browser Back out of results.
-    const rpcBeforeBack = ctx.searches.length;
+    const rpcBeforeBack = ctx.resultsSearches.length;
     const went = await page.goBack({ timeout: 40000 }).then(() => true).catch(() => false);
     if (!went) throw new HarnessError('browser Back did not navigate');
     const home = await until(() => page.$('[data-testid="city-input"]'), 30000);
     if (!home) bad.push('browser Back out of the results screen did not land on a rendered filter home — the filter form never appeared');
-    const backSearches = ctx.searches.length - rpcBeforeBack;
+    const backSearches = ctx.resultsSearches.length - rpcBeforeBack;
     if (backSearches > 0) bad.push(`browser Back fired ${backSearches} property-search RPC(s) — going back must not re-run a search`);
 
     if (ctx.pageErrors.length) bad.push(`uncaught page error during the return trip: ${ctx.pageErrors[0]}`);

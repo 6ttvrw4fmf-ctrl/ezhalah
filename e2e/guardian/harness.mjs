@@ -37,6 +37,28 @@ export const VIEWPORTS = [
 export const SEARCH_RPC = '/rpc/location_search_candidates_ar';
 
 /**
+ * ONE RPC NAME, TWO COMPLETELY DIFFERENT ACTS — never count by name alone (§11.3, owner-locked).
+ *
+ * `location_search_candidates_ar` is reused for BOTH the submitted results search AND the per-option
+ * COUNT calls that decorate whatever scope options happen to be on screen (`fetchScopeOptionCounts`
+ * / `fetchDistrictEligibleCounts`, src/data/remote.ts:920/:965 — one call per VISIBLE option, always
+ * `p_limit: 1`). The results search is the one with a real page size (`p_limit: 1500`).
+ *
+ * So the call COUNT is a property of how many options a screen decided to decorate — it moves with
+ * the data and with the layout — while the number of SEARCHES SUBMITTED is the thing every journey
+ * here actually asserts on. §11.3 records the false verdict this exact conflation already produced
+ * once in the other suite («double-click fired the search twice» when both sides had submitted
+ * exactly one search), which is why `e2e/journeys/harness.mjs` classifies. This suite did not, and
+ * on 2026-09-05 it filed P1 ops_incident #51 — «New Chat fired 1 property-search RPC, it must
+ * execute nothing» — against a Filter home that had submitted nothing and merely counted an option.
+ *
+ * Same taxonomy as classifySearchRpc() in e2e/journeys/harness.mjs, over a raw request body.
+ */
+export function isResultsSearch(body) {
+  return typeof body?.p_limit === 'number' && body.p_limit > 1;
+}
+
+/**
  * Controls this suite may NEVER click, whatever a journey asks for. `tap()` refuses them.
  * «إرسال» sends the support message form, which WRITES to support_messages — a live production
  * write from a monitoring run. The guard lives here, in the one place every click goes through,
@@ -92,7 +114,9 @@ const BENIGN_PAGE_ERROR = /Minified React error #(418|423|425)/;
 
 /**
  * Run `fn(page, ctx)` in a fresh browser at `viewport`.
- * `ctx.searches` is every property-search RPC body the page sent, in order.
+ * `ctx.searches` is every location_search_candidates_ar body the page sent, in order — the RAW
+ * traffic, kept for evidence. `ctx.resultsSearches` is the subset that actually SUBMITTED a search
+ * (isResultsSearch); assert on that one, never on the raw count.
  * `ctx.pageErrors` is every uncaught page error.
  */
 export async function withPage(viewport, fn) {
@@ -107,14 +131,20 @@ export async function withPage(viewport, fn) {
   });
   const page = await context.newPage();
   const searches = [];
+  const resultsSearches = [];
   const pageErrors = [];
   page.on('request', (r) => {
     if (!r.url().includes(SEARCH_RPC)) return;
-    try { searches.push(JSON.parse(r.postData() || '{}')); } catch { searches.push({}); }
+    let body;
+    try { body = JSON.parse(r.postData() || '{}'); } catch { body = {}; }
+    searches.push(body);
+    // A journey asserting "no search fired" means SUBMITTED — never the p_limit:1 option counts
+    // that ride the same RPC name. See isResultsSearch() above and ops_incident #51.
+    if (isResultsSearch(body)) resultsSearches.push(body);
   });
   page.on('pageerror', (e) => { const m = String(e); if (!BENIGN_PAGE_ERROR.test(m)) pageErrors.push(m.slice(0, 240)); });
   try {
-    return await fn(page, { searches, pageErrors, viewport });
+    return await fn(page, { searches, resultsSearches, pageErrors, viewport });
   } finally {
     await browser.close().catch(() => {});
   }
@@ -196,16 +226,33 @@ export async function tap(page, label, timeout = 15000) {
   return el.click({ timeout }).then(() => true).catch(() => false);
 }
 
+/** The auth invitation has TWO presentations and they are dismissed differently. Both are the one
+ *  AuthForm (src/lib/authPopupBehavior.ts), and they are mutually exclusive by design — the card is
+ *  suppressed while the modal is open — so counting both selectors yields exactly one whenever an
+ *  invitation is on screen, on either viewport. */
+export const AUTH_INVITATION_SELECTOR = '[data-testid="auth-popup"],[data-testid="signin-card"]';
+
 /**
  * Close the signed-out sign-in invitation, the way a real guest does.
- * Returns 'dismissed' | 'absent' — never throws: on a narrow viewport the product may legitimately
- * not offer the card, and "it was not there" is a fact, not a failure.
+ * Returns 'dismissed' | 'absent' | 'still-open' — never throws: on a narrow viewport the product may
+ * legitimately not offer the card unprompted, and "it was not there" is a fact, not a failure.
+ *
+ * TWO DISMISSAL MECHANISMS, BECAUSE THE PRODUCT HAS TWO (incident #23, fixed 2026-09-05). The
+ * compact SignInCard keeps its ×. The centered AuthModal deliberately has NO × on its main step
+ * (owner 2026-09-03, AuthModal.tsx:272) — «a press on the ground closes it», the outer Pressable
+ * that fills the viewport. Looking only for the × made this return 'stuck' against a modal that
+ * closes perfectly well, which is why the earlier attempt at incident #23 had to be reverted: the
+ * detector was fixed while the dismissal was left blind, so the modal stayed up and covered the city
+ * field in four unrelated mobile journeys. Measured on production 2026-09-05, mobile 375, 2/2 fresh
+ * contexts: a ground press at (10,10) takes auth-popup from 1 to 0.
  */
 export async function dismissAuthInvitation(page, budgetMs = 6000) {
-  const close = await until(() => page.$('[data-testid="auth-popup-close"]'), budgetMs);
-  if (!close) return 'absent';
-  await close.click().catch(() => {});
-  const gone = await until(async () => (await countVisible(page, '[data-testid="auth-popup-close"]')) === 0, 8000);
+  const invitation = await until(() => page.$(AUTH_INVITATION_SELECTOR), budgetMs);
+  if (!invitation) return 'absent';
+  const close = await page.$('[data-testid="auth-popup-close"]');
+  if (close) await close.click().catch(() => {});
+  else await page.mouse.click(10, 10).catch(() => {});  // the empty ground, well clear of the card
+  const gone = await until(async () => (await countVisible(page, AUTH_INVITATION_SELECTOR)) === 0, 8000);
   return gone ? 'dismissed' : 'still-open';
 }
 
