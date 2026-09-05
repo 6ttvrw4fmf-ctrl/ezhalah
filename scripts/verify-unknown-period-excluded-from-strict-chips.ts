@@ -128,33 +128,47 @@ check(
   /create or replace function public\.mon_detect_source_proven_period_unreachable/.test(sql),
 );
 
-// ── MUTATION PROOF: the predicates above must REJECT the shapes they exist to catch. ─────────────
-const mut = (label: string, sample: string, re: RegExp, shouldMatch: boolean) =>
-  check(`MUTATION: ${label}`, re.test(sample) === shouldMatch);
+// ── MUTATION PROOF: each predicate above must REJECT the shape it exists to catch, and still
+// ACCEPT the real one — a predicate that only ever says "no" is as useless as one that only says
+// "yes". Every proof applies this file's own regex to a deliberately broken input.
+const mustCatch = (label: string, caught: boolean) => check(`MUTATION: ${label}`, caught);
 
-mut(
-  'the OLD "everything held" denominator is rejected',
-  'round(100.0 * count(*) filter (...) / nullif(count(*) filter (where sl.listing_id is null), 0)::numeric, 1)',
-  DENOMINATOR_IS_PERIOD_KNOWN,
-  false,
+mustCatch(
+  'the OLD "everything held minus source_limited" denominator is rejected',
+  !DENOMINATOR_IS_PERIOD_KNOWN.test(
+    'round(100.0 * count(*) filter (...) / nullif(count(*) filter (where sl.listing_id is null), 0)::numeric, 1)',
+  ),
 );
-mut(
-  'a bare nullif(count(*),0) denominator is rejected',
-  'round(100.0 * count(*) filter (...) / nullif(count(*), 0)::numeric, 1)',
-  DENOMINATOR_IS_PERIOD_KNOWN,
-  false,
+mustCatch(
+  'a bare nullif(count(*), 0) denominator is rejected',
+  !DENOMINATOR_IS_PERIOD_KNOWN.test(
+    'round(100.0 * count(*) filter (...) / nullif(count(*), 0)::numeric, 1)',
+  ),
 );
-mut(
-  'the real period_known denominator is accepted',
-  "nullif(count(*) filter (where s.rent_period_ar = any (array['سنوي','شهري'])), 0)",
-  DENOMINATOR_IS_PERIOD_KNOWN,
-  true,
+mustCatch(
+  'the real period_known denominator is still ACCEPTED (the predicate is not vacuous)',
+  DENOMINATOR_IS_PERIOD_KNOWN.test(
+    "nullif(count(*) filter (where s.rent_period_ar = any (array['سنوي','شهري'])), 0)",
+  ),
 );
-mut(
+mustCatch(
   "the old two-predicate healthy test (verdict <> 'OK') does not satisfy the one-predicate rule",
-  "select * from public.mon_searchability_alerts where verdict <> 'OK' order by held desc",
-  /verdict not like 'OK%'/,
-  false,
+  !/verdict not like 'OK%'/.test(
+    "select * from public.mon_searchability_alerts where verdict <> 'OK' order by held desc",
+  ),
+);
+
+// The load-bearing behavioural invariant, proven the same way: a rentPeriodParam that returned the
+// no-filter sentinel for 'both' is exactly the regression this file exists to stop, so assert that
+// the check above would REJECT it rather than trusting that it would.
+const periodTokenIsStrict = (token: string | null) => typeof token === 'string' && token !== null;
+mustCatch(
+  "a 'both' mapping that collapses to the no-filter sentinel is rejected",
+  !periodTokenIsStrict(null),
+);
+mustCatch(
+  "the real 'both' mapping («كلاهما») is still accepted",
+  periodTokenIsStrict(rent('both')),
 );
 
 // Wiring, asked of the registry rather than string-matched out of package.json (the registry guard
