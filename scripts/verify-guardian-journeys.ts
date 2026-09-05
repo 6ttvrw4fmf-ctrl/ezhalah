@@ -203,8 +203,15 @@ for (const s of [...covered].sort()) if (routeMap[s as string]) ok.push(`  ${s} 
 // Not testable against the live database from here (no service-role credentials outside CI), so the
 // signature is checked against the migration that defines it: a renamed parameter would otherwise
 // surface only as a 404 inside a nightly CI run, on the one path whose whole job is to report.
-const spineSql = migrations.length
-  ? readFileSync(join(ROOT, 'supabase/migrations', migrations[migrations.length - 1]!), 'utf8') : '';
+// incident_open() is looked up by ITS OWN latest defining migration, independent of whichever
+// migration most recently touched incident_route_owner() — the two functions do not have to share a
+// file (they didn't, from 2026-09-05: incident_route_owner() gained a migration of its own that
+// leaves incident_open() untouched), and assuming co-location silently zeroed this check the moment
+// that happened.
+const openMigrations = readdirSync(join(ROOT, 'supabase/migrations'))
+  .filter((f) => f.endsWith('.sql') && readFileSync(join(ROOT, 'supabase/migrations', f), 'utf8').includes('function public.incident_open('));
+const spineSql = openMigrations.length
+  ? readFileSync(join(ROOT, 'supabase/migrations', openMigrations[openMigrations.length - 1]!), 'utf8') : '';
 const openParams = parseIncidentOpenParams(spineSql);
 check(openParams.length === 7, `incident_open() takes ${openParams.length} parameters (${openParams.join(', ')})`,
   `incident_open()'s signature could not be parsed (${openParams.length} params) — the payload check below would pass trivially`);
