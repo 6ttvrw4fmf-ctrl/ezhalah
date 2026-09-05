@@ -4,7 +4,7 @@ import type { ProximityIntent } from './proximity';
 import { scoreListingProximity } from './proximity';
 import { cityHasListings, nearbyCityWithListings, cityDisplay } from './locations';
 import { detailFor, priceBandRange } from './taxonomy';
-import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
+import { LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
 // The app's single Arabic folding helper — it documents itself as mirroring the RPC's normalize_ar,
 // so district matching on the client and in the RPC stay one definition. (listingInDistricts)
@@ -741,7 +741,7 @@ function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
   // over the whole fetched set and let matchesType decide. (The old keyword→mock-pool buckets only
   // covered a few residential types and would silently drop Shop/Office/Residential Building/etc.)
-  if (q.type || (q.types && q.types.length) || effectiveGroups(q).length) return allRows(pools);
+  if (q.type || (q.types && q.types.length) || effectiveGroups(q).length) return pools.all;
   const t = q.type?.toLowerCase();
   if (t) {
     if (t.includes('villa')) return pools.villa;
@@ -752,8 +752,10 @@ function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // "Rent or Buy" (deal unknown, OR the Filter's شراء+إيجار both selected) with no specific type →
   // draw from BOTH the rent and buy mixes so the results can actually contain each (runSearch then
   // keeps both). Otherwise the rent-only mix would never surface a Buy listing. (bothDeals/
-  // dealCombined correctness.)
-  if (q.bothDeals || q.dealCombined) return [...pools.mixRent, ...pools.mixBuy];
+  // dealCombined correctness.) `all`, NOT [...mixRent, ...mixBuy]: that splice put every Rent row
+  // ahead of every Buy row and destroyed the RPC's platform round-robin (live 2026-09-04 — 21 rentals
+  // from ~10 platforms, 9 Buy-only platforms invisible). See Pools.all in listings.ts.
+  if (q.bothDeals || q.dealCombined) return pools.all;
   if (q.deal === 'Buy') {
     const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10);
     if (amount > 50_000 && amount <= 700_000) return pools.budget;
@@ -988,16 +990,6 @@ function matchesType(l: Listing, q: SearchQuery): boolean {
   // أرض تجارية) would previously slip past this unconditional `return true` safety net untouched.
   // Enforce the same Residential default client-side too. (residential-commercial-isolation-audit-2026-07-17)
   return (l.macro ?? CLEAN_MACRO[c] ?? 'Residential') === 'Residential';
-}
-
-// Every fetched row, deduped by id. The server fetch already scoped rows to the selected clean type's
-// raw set + tables, so when a type/group is chosen we run matchesType over the WHOLE fetched set
-// rather than a single mock "pool" (which buckets by old raw type and could drop e.g. Shop/Building).
-function allRows(pools: Pools): Listing[] {
-  const seen = new Set<number>();
-  const out: Listing[] = [];
-  for (const arr of Object.values(pools)) for (const l of arr) if (!seen.has(l.id)) { seen.add(l.id); out.push(l); }
-  return out;
 }
 
 // The bedroom counts selected at the filter's category/group level: the multi-select list
@@ -1325,7 +1317,7 @@ function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): L
   return out;
 }
 
-export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean }): SearchResult {
+export function runSearch(q: SearchQuery, pools: Pools, opts?: { fetchFailed?: boolean }): SearchResult {
   let eligible = pickPool(q, pools)
     // bothDeals (agent searched without knowing rent/buy) or dealCombined (Filter شراء+إيجار both
     // selected) → show BOTH; otherwise filter to the single selected deal. supports() checks the

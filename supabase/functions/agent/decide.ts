@@ -97,6 +97,43 @@ export function wantsGuidedInterview(rawText: string): boolean {
   return INTERVIEW_PHRASE_RE.test(String(rawText ?? ""));
 }
 
+/**
+ * A COUNTRY-LEVEL LOCATION IS NOT A LOCATION (owner, 2026-09-04).
+ *
+ * Nationwide / «كل المملكة» was removed from the product: the Normal Filter has always refused a
+ * search with no city («الرجاء اختيار مدينة من القائمة»). The agent had no such rule, so a turn
+ * whose resolved location was «المملكة العربية السعودية» — or nothing at all — still reached
+ * hasEnoughToSearch() through some OTHER signal (a bare type is enough) and searched unscoped.
+ * Reproduced in production 2026-09-04, after the client-side affordance was already removed:
+ *   «ابغى شقة للبيع في كل مدن المملكة» → p_cities/p_districts/p_region_ids all null → 39,055 rows.
+ *
+ * LITERAL MIRROR of COUNTRY_ALIASES + the loose Kingdom test in src/data/regions.ts
+ * (isCountryWideQuery). Kept as a physical copy for the same reason INTERVIEW_PHRASE_RE is: this
+ * file must stay Deno- and plain-Node-importable with zero module-alias resolution, and
+ * regions.ts pulls in the app's module graph. If you change one, change both —
+ * scripts/verify-agent-decide-turn.ts is the tripwire.
+ */
+const COUNTRY_ONLY_RE =
+  /^(the\s+)?(kingdom( of saudi arabia)?|saudi( arabia)?|ksa|المملكة( العربية السعودية)?|السعودية|السعوديه|العربية السعودية|سعودية)$/i;
+
+/** Strips the Arabic "all of / in all of" prefixes that do not change the place being named. */
+function bareLocation(v: unknown): string {
+  return String(v ?? "").trim().replace(/^(في\s+)?(كل|جميع)\s+/i, "").replace(/^في\s+/i, "").trim();
+}
+
+/**
+ * A search needs a REAL place. False when the location is absent, or names the country rather than
+ * a city/region/district — the two cases that produce an unscoped result set.
+ */
+export function hasUsableLocation(state: EstablishedState): boolean {
+  const loc = bareLocation(state.location);
+  if (!loc) return false;
+  if (COUNTRY_ONLY_RE.test(loc)) return false;
+  // «كل مدن المملكة» / «مدن السعودية» and friends: names the Kingdom, not a city.
+  if (/(المملك|السعودي|\bksa\b|\bsaudi\b|\bkingdom\b)/i.test(loc) && !/[،,]/.test(loc)) return false;
+  return true;
+}
+
 /** Hard, code-enforced ceiling on clarifying questions before the first search (owner ruling). */
 export const QUESTION_BUDGET_CEILING = 2;
 
@@ -148,6 +185,28 @@ export function decideAgentTurn(input: DecideInput): DecideResult {
     return { kind: "message", askCount: askCount + 1 };
   }
 
+  // 1c. LOCATION IS REQUIRED, NOT OPTIONAL (owner, 2026-09-04). Every step below this line may
+  // decide to SEARCH; none of them may do so without a real place, because the only search that
+  // can be issued without one is the nationwide search the product removed.
+  //
+  // THIS DELIBERATELY NARROWS the 2026-08-30 rule one line down ("search anyway ... broad/nationwide
+  // if that's nothing at all — missing optional information must not block it"). That rule stands
+  // for every OPTIONAL field; location is not one of them. The Normal Filter has always enforced
+  // exactly this and refuses with «الرجاء اختيار مدينة من القائمة»; the agent was the only surface
+  // that did not, which is why a removed scope stayed reachable in production until 2026-09-04.
+  //
+  // Note the consequence, accepted knowingly: a user who never names a city keeps getting the city
+  // question instead of results. That is the same answer the Filter gives, and an honest question is
+  // better than 39,055 listings from cities the user never asked about.
+  // EXEMPTION — an AMBIGUOUS place is a named place. Step 1 above already owns that case: the user
+  // said «الهفوف», we simply cannot tell WHICH one, and once the budget is spent it converges on a
+  // search rather than asking forever (the round-2 unbounded-loop fix, 2026-08-30). That search is
+  // still SCOPED — to the ambiguous term — so it is not the nationwide search this step forbids.
+  // Without this exemption that fix would silently regress into the very loop it removed.
+  if (!locationAmbiguous && !hasUsableLocation(establishedState)) {
+    return { kind: "message", askCount: askCount + 1 };
+  }
+
   // 2. Enough merged signal to mean something → search, unconditionally. THIS is the step that
   // deletes the old HARD RULE #8 self-judged "genuine clarification" escape hatch: once this is
   // true there is no override left anywhere else in the code.
@@ -155,8 +214,8 @@ export function decideAgentTurn(input: DecideInput): DecideResult {
     return { kind: "listings", askCount };
   }
 
-  // 3. Budget exhausted → search anyway with whatever is known, broad/nationwide if that's
-  // nothing at all. "Missing optional information must not block it" (owner, verbatim).
+  // 3. Budget exhausted → search anyway with whatever is known. Location is already guaranteed
+  // usable by step 1c, so "broad" here means a whole city/region — never the whole Kingdom.
   if (askCount >= QUESTION_BUDGET_CEILING) {
     return { kind: "listings", askCount };
   }

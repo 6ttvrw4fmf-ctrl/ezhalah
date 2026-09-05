@@ -46,7 +46,7 @@
 // spaced against every OTHER routine's, not just its own. Never drops or alters a request.
 import './lib/searchPacer.mjs';
 import { join } from 'node:path';
-import { liftSymbols } from './lib/liftSymbols.ts';
+import { liftSearchScope } from './lib/liftSearchScope.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import {
@@ -147,10 +147,12 @@ async function fetchCols(ids: string[], cols: string[]): Promise<Map<string, Rec
 // ── reference data + the app's own table lists ───────────────────────────────────────────────────
 const TYPE_MACROS: Record<string, string> = Object.fromEntries(
   (await (await http('known_type_ar?select=type_ar,macro')).json() as any[]).map((x) => [x.type_ar, x.macro]));
-const tables = await liftSymbols(join(ROOT, 'src/data/remote.ts'),
-  [{ header: 'const RES_TABLES', endsWith: /\];$/ }, { header: 'const COM_TABLES', endsWith: /\];$/ }, { header: 'function resTables' }],
-  ['RES_TABLES', 'COM_TABLES', 'resTables'], 'type SearchQuery = any;') as
-  { RES_TABLES: string[]; COM_TABLES: string[]; resTables: (q: SearchQuery) => string[] };
+// THE ONE LIFT SPEC (scripts/lib/liftSearchScope.ts). This file used to carry its own copy, pinned
+// to `endsWith: /\];$/` — a terminator no line matches since RES_TABLES/COM_TABLES became derived
+// one-liners (#1653). The slice then ran on to DEEPLINK_TABLES, swallowed COM_TABLES, and the lifted
+// module declared it twice: this whole matrix died with a SyntaxError before its first assertion,
+// invisible because a live check is excluded from `npm test`.
+const tables = await liftSearchScope(ROOT);
 
 function scopeBody(cell: Cell): Record<string, unknown> {
   const typesAr = typeArForTypes(cell.scope.types) ?? [];

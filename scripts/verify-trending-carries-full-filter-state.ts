@@ -39,6 +39,10 @@
 //   node --experimental-strip-types scripts/verify-trending-carries-full-filter-state.ts
 
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { liftSearchScope } from './lib/liftSearchScope.ts';
+
+const ROOT = join(import.meta.dirname, '..');
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -186,6 +190,69 @@ for (const field of ['detail', 'priceMin', 'priceMax', 'areaMin', 'areaMax']) {
 check('district count signature invalidates on EVERY advanced answer (AF_PREDICATE_FIELDS, spread)',
   /districtNarrowingSig[\s\S]{0,1400}\.\.\.AF_PREDICATE_FIELDS\.map\(\(f\) => query\[f\]\)/.test(index),
   'a hand-typed subset leaves every unnamed advanced answer out of the invalidation');
+
+
+// ── THE TABLE SCOPE IS ONE LIST, PROVEN BY EXECUTION (2026-09-03) ────────────────────────────────
+// The checks above pin that Trending SENDS the scope. These pin what the scope IS. Until today it
+// was two hand-maintained 31-entry literals, RES_TABLES and COM_TABLES; five platforms were
+// activated in production and joined neither, so 4,314 production_ready rows were returnable by no
+// search while Trending counted them. Two lists is one list too many.
+//
+// Both are now a partition of ONE generated inventory by table-name suffix. These run the REAL
+// functions (lifted out of remote.ts, never re-typed) rather than reading the source for a shape:
+// a regex saying "RES_TABLES is a .filter(...)" stays green over a filter that returns the wrong
+// set. The LIVE half — is the committed inventory still the DB's inventory — cannot be answered
+// offline and lives in scripts/verify-searchable-scope-matches-inventory.ts.
+type ScopeQ = { deal?: string; rentPeriod?: string; dealCombined?: boolean };
+const scope = await liftSearchScope(ROOT);
+
+const INVENTORY = scope.SEARCHABLE_TABLES as string[];
+const resT = scope.resTables as (q: ScopeQ) => string[];
+const comT = scope.comTables as (q: ScopeQ) => string[];
+const isMonthlyOnlySrc = (t: string) => /^(gathern|aqarmonthly)_/.test(t);
+
+check('the searchable inventory lifted and is plausibly the fleet', INVENTORY.length >= 50,
+  `got ${INVENTORY.length} table(s)`);
+
+// TOTALITY — every inventory table reachable in some mode, and no mode inventing one outside it.
+// A table that falls out of every mode is the original bug wearing different clothes.
+const widest = new Set([...resT({ dealCombined: true }), ...comT({ dealCombined: true })]);
+check('every inventory table is reachable in at least one search mode',
+  INVENTORY.every((t) => widest.has(t)),
+  `${INVENTORY.filter((t) => !widest.has(t)).join(', ')} — in the inventory, returnable by NO search`);
+check('no mode invents a table outside the inventory',
+  [...widest].every((t) => INVENTORY.includes(t)),
+  `${[...widest].filter((t) => !INVENTORY.includes(t)).join(', ')}`);
+
+// DERIVATION — the two kinds must be a PARTITION of the inventory by suffix, not two curated lists.
+// Executed, so a re-hardcoded pair that happens to be complete today still fails the moment the
+// inventory line moves without it.
+const suffix = (sfx: string) => INVENTORY.filter((t) => t.endsWith(sfx) && !isMonthlyOnlySrc(t)).sort();
+check('RES_TABLES is exactly the inventory\'s non-monthly residential tables',
+  JSON.stringify((scope.RES_TABLES as string[]).slice().sort()) === JSON.stringify(suffix('_residential_listings')),
+  'the residential scope is no longer derived from the inventory — that is the drift class itself');
+check('COM_TABLES is exactly the inventory\'s non-monthly commercial tables',
+  JSON.stringify((scope.COM_TABLES as string[]).slice().sort()) === JSON.stringify(suffix('_commercial_listings')),
+  'the commercial scope is no longer derived from the inventory — that is the drift class itself');
+
+// THE MONTHLY-ONLY CONDITIONAL — a product rule (Gathern is rent-only and monthly-only; it must
+// never appear in a Buy result, CLAUDE.md), so it is executed over every mode the Filter produces.
+const monthlySources = INVENTORY.filter(isMonthlyOnlySrc).sort();
+check('the inventory contains monthly-only sources to gate', monthlySources.length >= 2,
+  `got ${monthlySources.join(', ') || '(none)'} — otherwise every gate assertion below is vacuous`);
+for (const [label, q, wantMonthly] of [
+  ['Buy', { deal: 'Buy' }, false],
+  ['Rent · annual', { deal: 'Rent', rentPeriod: 'annual' }, false],
+  ['Rent · no period', { deal: 'Rent' }, false],
+  ['Rent · monthly', { deal: 'Rent', rentPeriod: 'monthly' }, true],
+  ['Rent · both periods', { deal: 'Rent', rentPeriod: 'both' }, true],
+  ['Buy+Rent combined', { dealCombined: true }, true],
+] as Array<[string, ScopeQ, boolean]>) {
+  const got = [...resT(q), ...comT(q)].filter(isMonthlyOnlySrc).sort();
+  check(`${label} → monthly-only sources ${wantMonthly ? 'IN' : 'OUT'}`,
+    JSON.stringify(got) === JSON.stringify(wantMonthly ? monthlySources : []),
+    `got [${got.join(', ')}]`);
+}
 
 
 console.log(failures === 0

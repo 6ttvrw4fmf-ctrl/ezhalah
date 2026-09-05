@@ -50,6 +50,9 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 // A soft background fade on hover/press (web) so the nav links + profile row don't snap harshly.
 // The active-chat row is deliberately NOT given this — it keeps its instant, clear green highlight.
 const WEB_SMOOTH = Platform.OS === 'web' ? ({ transitionProperty: 'background-color', transitionDuration: '160ms' } as any) : null;
+// A row is "on" for hover (web), keyboard focus, or press — the same three signals «محادثة جديدة»
+// has always used; every other clickable sidebar row now shares them (owner 2026-09-03).
+const isOn = (st: { hovered?: boolean; pressed?: boolean; focused?: boolean }) => !!(st.hovered || st.pressed || st.focused);
 // Drawer slide: a touch slower on the way in so it glides, snappier on the way out.
 const SLIDE_IN = { duration: 320, easing: Easing.bezier(0.22, 1, 0.36, 1) };
 const SLIDE_OUT = { duration: 230, easing: Easing.in(Easing.cubic) };
@@ -544,7 +547,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // Support / About Us / Sign-in open as in-app popups (centered dialog) rather than full-screen
   // routes: close the drawer, then raise the overlay so it sits on top of the current page (owner
   // 2026-08-15: sign-in must never navigate away from the Filter — see AuthModal.tsx).
-  const openInfo = (m: 'support' | 'about') => {
+  const openInfo = (m: 'support' | 'about' | 'legal') => {
     animateOut(() => {
       if (!docked) onClose();
       setTimeout(() => openModal(m), 10);
@@ -599,17 +602,26 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     : baseGroups;
   const NavLinks = (
     <View style={s.nav}>
-      <Pressable testID="sidebar-settings-link" style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && (dark ? dks.navLinkHover : s.navLinkHover)]} onPress={() => (user ? openAccountMenu() : openSignIn())}>
-        <Ionicons name="settings-outline" size={19} color={TC.ink} />
-        <Text style={[s.navText, dark && dks.navText]}>{t('Settings')}</Text>
+      {/* Owner 2026-09-03: EVERY clickable sidebar row gives the exact feedback «محادثة جديدة» gives —
+          the whole row fills with colors.hoverRow (dark green in light, muted deep green in dark) and
+          the icon + label flip to white. Children-as-function so the glyph and text flip with the fill. */}
+      <Pressable testID="sidebar-settings-link" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => (user ? openAccountMenu() : openSignIn())}>
+        {(st) => (<>
+          <Ionicons name="settings-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
+          <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{t('Settings')}</Text>
+        </>)}
       </Pressable>
-      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && (dark ? dks.navLinkHover : s.navLinkHover)]} onPress={() => openInfo('support')}>
-        <Ionicons name="chatbubble-ellipses-outline" size={19} color={TC.ink} />
-        <Text style={[s.navText, dark && dks.navText]}>{t('Support')}</Text>
+      <Pressable style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => openInfo('support')}>
+        {(st) => (<>
+          <Ionicons name="chatbubble-ellipses-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
+          <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{t('Support')}</Text>
+        </>)}
       </Pressable>
-      <Pressable style={({ hovered, pressed }: any) => [s.navLink, WEB_SMOOTH, (hovered || pressed) && (dark ? dks.navLinkHover : s.navLinkHover)]} onPress={() => openInfo('about')}>
-        <Ionicons name="information-circle-outline" size={19} color={TC.ink} />
-        <Text style={[s.navText, dark && dks.navText]}>{t('About Us')}</Text>
+      <Pressable style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => openInfo('about')}>
+        {(st) => (<>
+          <Ionicons name="information-circle-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
+          <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{t('About Us')}</Text>
+        </>)}
       </Pressable>
     </View>
   );
@@ -628,13 +640,13 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
               <Text ref={noTranslateRef} style={[s.word, dark && dks.word]}>{t('EZHALAH')}</Text>
               {!searching && (
                 <Pressable
-                  style={({ hovered, pressed }: any) => [s.searchTopBtn, WEB_SMOOTH, (hovered || pressed) && (dark ? dks.searchTopBtnHover : s.searchTopBtnHover)]}
+                  style={(st) => [s.searchTopBtn, WEB_SMOOTH, isOn(st) && s.searchTopBtnHover]}
                   onPress={openSearch}
                   hitSlop={4}
                   accessibilityLabel={t('Search chats')}
                   testID="sidebar-search-btn"
                 >
-                  <Ionicons name="search" size={18} color={dark ? '#a9c9b4' : colors.dark} />
+                  {(st) => <Ionicons name="search" size={18} color={isOn(st) ? colors.onFill : dark ? '#a9c9b4' : colors.dark} />}
                 </Pressable>
               )}
             </View>
@@ -665,7 +677,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                       {/* Dark appearance lightens only the RESTING glyph; the light-mode contract
                           (rest = dark green, interaction = white) is untouched and still pinned by
                           verify-sidebar-light-green-interaction.ts. */}
-                      <Ionicons name="add" size={18} color={dark && !on ? '#cfe0d5' : on ? colors.surface : colors.dark} />
+                      <Ionicons name="add" size={18} color={dark && !on ? '#cfe0d5' : on ? colors.onFill : colors.dark} />
                       <Text style={[s.newChatText, dark && dks.newChatText, on && s.newChatTextOn]}>{t('New Chat')}</Text>
                     </>
                   );
@@ -807,15 +819,17 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
             <Pressable
               testID="account-menu-trigger"
               accessibilityLabel={t('Account menu')}
-              style={({ hovered, pressed }: any) => [s.userRow, dark && dks.userRow, WEB_SMOOTH, (hovered || pressed || acctOpen) && (dark ? dks.userRowHover : s.userRowHover), { direction: 'ltr' } as any]}
+              style={(st) => [s.userRow, dark && dks.userRow, WEB_SMOOTH, (isOn(st) || acctOpen) && s.userRowHover, { direction: 'ltr' } as any]}
               onPress={() => (acctOpen ? setAcctOpen(false) : openAccountMenu())}
             >
-              <View style={s.userAv}><Text style={s.userAvText}>{initialsOf(pickName(user, locale))}</Text></View>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.userName, dark && dks.userName]} numberOfLines={1}>{pickName(user, locale)}</Text>
-                {!!user.sub && <Text style={[s.userSub, dark && dks.userSub]} numberOfLines={1}>{user.sub}</Text>}
-              </View>
-              <Ionicons name="ellipsis-horizontal" size={15} color={dark ? darkColors.muted : '#9aa6a0'} />
+              {(st) => { const on = isOn(st) || acctOpen; return (<>
+                <View style={s.userAv}><Text style={s.userAvText}>{initialsOf(pickName(user, locale))}</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.userName, dark && dks.userName, on && s.userTextOn]} numberOfLines={1}>{pickName(user, locale)}</Text>
+                  {!!user.sub && <Text style={[s.userSub, dark && dks.userSub, on && s.userSubOn]} numberOfLines={1}>{user.sub}</Text>}
+                </View>
+                <Ionicons name="ellipsis-horizontal" size={15} color={on ? colors.onFill : dark ? darkColors.muted : '#9aa6a0'} />
+              </>); }}
             </Pressable>
           </>
         ) : (
@@ -837,7 +851,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
             <View style={[s.divider, dark && dks.divider]} />
             {NavLinks}
             <Pressable
-              style={s.cta}
+              style={(st) => [s.cta, WEB_SMOOTH, isOn(st) && s.ctaHover]}
               onPress={openSignIn}
               // @ts-expect-error web-only DOM props on the RNW host node
               dataSet={{ testid: 'sidebar-signin-cta' }}
@@ -866,17 +880,23 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           menu.openUp ? { bottom: Math.max(8, menu.panelH - menu.top + 4) } : { top: menu.top + 4 },
         ]}
       >
-        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && (dark ? dks.rowMenuItemHover : s.rowMenuItemHover)]} onPress={() => { const item = history.find((c) => c.id === menu.id); setMenu(null); if (item) beginRename(item); }}>
-          <Ionicons name="pencil-outline" size={15} color={TC.ink} />
-          <Text style={[s.rowMenuText, dark && dks.rowMenuText]} numberOfLines={1}>{t('Rename')}</Text>
+        <Pressable style={(st) => [s.rowMenuItem, WEB_SMOOTH, isOn(st) && s.rowMenuItemHover]} onPress={() => { const item = history.find((c) => c.id === menu.id); setMenu(null); if (item) beginRename(item); }}>
+          {(st) => (<>
+            <Ionicons name="pencil-outline" size={15} color={isOn(st) ? colors.onFill : TC.ink} />
+            <Text style={[s.rowMenuText, dark && dks.rowMenuText, isOn(st) && s.rowMenuTextOn]} numberOfLines={1}>{t('Rename')}</Text>
+          </>)}
         </Pressable>
-        <Pressable style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && (dark ? dks.rowMenuItemHover : s.rowMenuItemHover)]} onPress={() => { toggleStar(menu.id); setMenu(null); }}>
-          <Ionicons name={menuItem.starred ? 'star' : 'star-outline'} size={15} color={menuItem.starred ? GOLD : TC.ink} />
-          <Text style={[s.rowMenuText, dark && dks.rowMenuText]} numberOfLines={1}>{menuItem.starred ? t('Unstar') : t('Star')}</Text>
+        <Pressable style={(st) => [s.rowMenuItem, WEB_SMOOTH, isOn(st) && s.rowMenuItemHover]} onPress={() => { toggleStar(menu.id); setMenu(null); }}>
+          {(st) => (<>
+            <Ionicons name={menuItem.starred ? 'star' : 'star-outline'} size={15} color={menuItem.starred ? GOLD : isOn(st) ? colors.onFill : TC.ink} />
+            <Text style={[s.rowMenuText, dark && dks.rowMenuText, isOn(st) && s.rowMenuTextOn]} numberOfLines={1}>{menuItem.starred ? t('Unstar') : t('Star')}</Text>
+          </>)}
         </Pressable>
-        <Pressable testID="chat-delete-open-confirm" style={({ hovered }: any) => [s.rowMenuItem, WEB_SMOOTH, hovered && (dark ? dks.rowMenuItemHover : s.rowMenuItemHover)]} onPress={() => { deleteFiredRef.current = false; setConfirmDeleteId(menu.id); setMenu(null); }}>
-          <Ionicons name="trash-outline" size={15} color="#c0392b" />
-          <Text style={[s.rowMenuText, { color: '#c0392b' }]} numberOfLines={1}>{t('Delete')}</Text>
+        <Pressable testID="chat-delete-open-confirm" style={(st) => [s.rowMenuItem, WEB_SMOOTH, isOn(st) && s.rowMenuItemHover]} onPress={() => { deleteFiredRef.current = false; setConfirmDeleteId(menu.id); setMenu(null); }}>
+          {(st) => (<>
+            <Ionicons name="trash-outline" size={15} color={isOn(st) ? colors.onFill : '#c0392b'} />
+            <Text style={[s.rowMenuText, { color: '#c0392b' }, isOn(st) && s.rowMenuTextOn]} numberOfLines={1}>{t('Delete')}</Text>
+          </>)}
         </Pressable>
       </View>
     </>
@@ -940,7 +960,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         ) : null}
         {menuOverlay}
         {deleteConfirmOverlay}
-        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} />
+        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} onLegal={() => openInfo('legal')} />
       </View>
     );
   }
@@ -957,7 +977,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
         ) : null}
-        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} />
+        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} onLegal={() => openInfo('legal')} />
       </Animated.View>
     </View>
   );
@@ -981,16 +1001,16 @@ const s = StyleSheet.create({
   // Header search entry (owner 2026-08-24 rev 2): a quiet ~42px circular target at header level —
   // neutral by default, a soft green wash on hover/press. Never a big outlined button.
   searchTopBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', marginLeft: 'auto' },
-  searchTopBtnHover: { backgroundColor: colors.tint },
+  searchTopBtnHover: { backgroundColor: colors.hoverRow },
   logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   word: { fontSize: 15, fontWeight: '800', letterSpacing: 2, color: colors.ink },
 
   // Owner 2026-08-24: LIGHT green default (dark-green text) → DARK green with white text only on
   // hover/focus/press. The dark green is the interaction color, never the resting color.
   newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.tint, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12, borderWidth: 1, borderColor: colors.tintLine },
-  newChatHover: { backgroundColor: colors.dark, borderColor: colors.dark },
+  newChatHover: { backgroundColor: colors.hoverRow, borderColor: colors.hoverRow },
   newChatText: { fontSize: 14, fontWeight: '600', color: colors.dark },
-  newChatTextOn: { color: colors.surface },
+  newChatTextOn: { color: colors.onFill },
   // Chat search (owner 2026-08-24). The button mirrors the nav-link language (quiet, discoverable);
   // the input row keeps the exact same footprint so the sidebar never jumps when it morphs.
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, marginTop: 8, borderWidth: 1, borderColor: colors.primary, backgroundColor: '#ffffff' },
@@ -1010,12 +1030,12 @@ const s = StyleSheet.create({
   // Interaction color for rows (owner 2026-08-24): dark-green fill with white label on hover/press.
   // DISTINCT from histRowActive below — the current chat keeps its persistent light-green highlight
   // and never takes this fill, so hovered vs selected can't be confused.
-  histRowHot: { backgroundColor: colors.dark },
+  histRowHot: { backgroundColor: colors.hoverRow },
   // The row being DRAGGED: same dark-card/white-label pair as hover — deterministic regardless of
   // hover flicker, and opaque so rows it glides over never show through. (A forced-white card here
   // once made the hovered-white title invisible for the whole drag.)
-  histRowDragging: { backgroundColor: colors.dark },
-  histLabelHot: { color: colors.surface },
+  histRowDragging: { backgroundColor: colors.hoverRow },
+  histLabelHot: { color: colors.onFill },
   histRowOpen: { backgroundColor: '#f3f5f3' },
   // The chat the user is currently in — a light green wash so it's obvious which conversation is open.
   histRowActive: { backgroundColor: '#dcefe1' },
@@ -1044,14 +1064,18 @@ const s = StyleSheet.create({
     shadowColor: '#0b140f', shadowOpacity: 0.22, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 16,
   },
   rowMenuItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 9 },
-  rowMenuItemHover: { backgroundColor: '#f3f5f3' },
+  rowMenuItemHover: { backgroundColor: colors.hoverRow },
   rowMenuText: { fontSize: 13.5, fontWeight: '600', color: colors.ink },
+  rowMenuTextOn: { color: colors.onFill },
 
   divider: { height: 1, backgroundColor: colors.fieldLine, marginHorizontal: 2, marginBottom: 16 },
   nav: { gap: 4, marginBottom: 18 },
   navLink: { flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 11, paddingHorizontal: 6, borderRadius: 11 },
-  navLinkHover: { backgroundColor: '#eef1ef' },
+  // The sidebar's ONE interaction fill (owner 2026-09-03): colors.hoverRow — dark green in light,
+  // the muted deep green-gray in dark — on every clickable row, with white text/icons on top.
+  navLinkHover: { backgroundColor: colors.hoverRow },
   navText: { fontSize: 14.5, fontWeight: '500', color: colors.ink },
+  navTextOn: { color: colors.onFill },
 
   lang: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: colors.segTrack, borderRadius: radius.pill, padding: 4, gap: 4, marginBottom: 18 },
   langBtn: { paddingVertical: 8, paddingHorizontal: 22, borderRadius: radius.pill },
@@ -1061,7 +1085,9 @@ const s = StyleSheet.create({
 
   // Vertically center the name/email block against the avatar; tighter gap = closer to the avatar.
   userRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingTop: 12, paddingBottom: 8, paddingHorizontal: 8, borderRadius: 11, borderTopWidth: 1, borderTopColor: '#eef1ef' },
-  userRowHover: { backgroundColor: '#eef1ef' },
+  userRowHover: { backgroundColor: colors.hoverRow },
+  userTextOn: { color: colors.onFill },
+  userSubOn: { color: 'rgba(255,255,255,0.78)' },
   userAv: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   userAvText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   // Name + email both ALIGN LEFT (same left edge) and use writingDirection 'auto' so the Arabic name
@@ -1084,7 +1110,8 @@ const s = StyleSheet.create({
   dcCancel: { width: '100%', paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   dcCancelText: { fontSize: 14, fontWeight: '500', color: colors.muted },
   srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
-  cta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13 },
+  cta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13, ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : null) },
+  ctaHover: { backgroundColor: colors.hoverRow },
   ctaTitle: { fontSize: 13, fontWeight: '700', color: '#fff' },
   ctaSub: { fontSize: 10.5, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
 });
@@ -1097,7 +1124,6 @@ const dks = StyleSheet.create({
   panel: { backgroundColor: darkColors.paper },
   dockPanel: { backgroundColor: darkColors.paper, borderRightColor: darkColors.line },
   word: { color: darkColors.ink },
-  searchTopBtnHover: { backgroundColor: darkColors.tint },
   newChat: { backgroundColor: darkColors.tint, borderColor: darkColors.tintLine },
   newChatText: { color: '#cfe0d5' },
   searchRow: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
@@ -1111,13 +1137,10 @@ const dks = StyleSheet.create({
   histLabel: { color: darkColors.ink },
   histInput: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
   rowMenu: { backgroundColor: darkColors.surface, borderColor: darkColors.fieldLine },
-  rowMenuItemHover: { backgroundColor: '#1d2a22' },
   rowMenuText: { color: darkColors.ink },
   divider: { backgroundColor: darkColors.fieldLine },
-  navLinkHover: { backgroundColor: '#1d2620' },
   navText: { color: darkColors.ink },
   userRow: { borderTopColor: '#1d2620' },
-  userRowHover: { backgroundColor: '#1d2620' },
   userName: { color: darkColors.ink },
   userSub: { color: darkColors.muted },
 });

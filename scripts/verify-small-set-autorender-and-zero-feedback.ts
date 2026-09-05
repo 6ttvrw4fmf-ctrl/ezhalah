@@ -22,9 +22,9 @@ check("13 matches → all 13 revealed, no «عرض المزيد»", r(13, 13) ==
 check("...and resultCounts agrees there is nothing more", resultCounts({ trueTotal: 13, shown: 13, fetched: 13, serverMore: false }).hasMore === false);
 
 console.log("\n── the cutoff IS the canonical stop line, not a new number ──");
-check(`stopAt is INTERVIEW_STOP_AT = ${STOP} (imported, never retyped)`, STOP === 25);
-check("exactly at the stop line (25) → all revealed", r(25, 25) === 25);
-check("one past the stop line (26) → first page only (larger sets are untouched)", r(26, 26) === FP);
+check(`stopAt is INTERVIEW_STOP_AT = ${STOP} (imported, never retyped; owner 2026-09-04: 50)`, STOP === 50);
+check("exactly at the stop line (50) → all revealed", r(50, 50) === 50);
+check("one past the stop line (51) → first page only (larger sets are untouched)", r(51, 51) === FP);
 check("a 111-result set still previews 10", r(111, 111) === FP);
 check("a 1,500-buffered broad set still previews 10", r(1500, 9892) === FP);
 

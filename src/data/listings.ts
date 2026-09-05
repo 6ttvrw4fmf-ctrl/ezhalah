@@ -298,7 +298,12 @@ export const POOLS = {
 export const ALL_LISTINGS: Listing[] = Object.values(POOLS).flat();
 
 export type PoolKey = keyof typeof POOLS;
-export type Pools = Record<PoolKey, Listing[]>;
+// `all` = EVERY fetched row in FETCHED order. The per-type / per-deal buckets each preserve that order
+// internally, but any CONCATENATION of buckets ([...mixRent, ...mixBuy], "every pool") throws it away
+// — shipped live 2026-09-04: شراء+إيجار put every Rent row before every Buy row, so the first screen
+// was 21 rentals cycling through ~10 platforms while 9 Buy-only platforms never appeared. Anything
+// that needs more than ONE bucket must read `all`, never splice buckets together.
+export type Pools = Record<PoolKey, Listing[]> & { all: Listing[] };
 
 // The listing id encodes its pool (1xxx villa, 2xxx apartment, …) so a flat set fetched from the
 // backend regroups into the same curated pools the search logic expects.
@@ -312,7 +317,7 @@ const POOL_BY_BASE: Record<number, PoolKey> = {
 // Each row goes into multiple pools (per-type AND per-deal AND budget if cheap) so it's
 // discoverable however the engine searches.
 export function buildPools(rows: Listing[]): Pools {
-  const out: Pools = { villa: [], apartment: [], land: [], budget: [], mixRent: [], mixBuy: [], room: [] };
+  const out: Pools = { villa: [], apartment: [], land: [], budget: [], mixRent: [], mixBuy: [], room: [], all: rows };
   const TYPE_TO_POOL: Record<string, PoolKey> = {
     Villa: 'villa',
     Apartment: 'apartment',

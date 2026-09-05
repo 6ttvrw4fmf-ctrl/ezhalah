@@ -37,6 +37,10 @@
 //   node --experimental-strip-types scripts/verify-platform-registration-complete.ts   (in `npm test`)
 
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { liftSearchScope } from './lib/liftSearchScope.ts';
+
+const ROOT = join(import.meta.dirname, '..');
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -135,13 +139,14 @@ for (const p of PLATFORMS) {
 const remoteSrc = read('src/data/remote.ts');
 const dbSrc = read('scrapers/common/db.py');
 const slugOf = (t: string) => t.replace(/_(residential|commercial)_listings$/, '');
-const listAfter = (marker: string) => {
-  const i = remoteSrc.indexOf(marker);
-  return i < 0 ? [] : [...remoteSrc.slice(i, remoteSrc.indexOf('];', i)).matchAll(/'([a-z0-9]+_(?:residential|commercial)_listings)'/g)].map((m) => m[1]);
-};
-const resTables = new Set(listAfter('const RES_TABLES ='));
-const comTables = new Set(listAfter('const COM_TABLES ='));
-check('RES_TABLES / COM_TABLES parsed', resTables.size > 25 && comTables.size > 25,
+// EXECUTED, not text-parsed (2026-09-03). These were two hand-typed literals a regex could read;
+// they are now DERIVED from the generated SEARCHABLE_TABLES inventory, and the old regex silently
+// matched nothing — res=0, com=0 — which is exactly why a check must run the thing it is checking
+// rather than read it. liftSymbols runs the real declarations out of remote.ts.
+const lifted = await liftSearchScope(ROOT);
+const resTables = new Set(lifted.RES_TABLES as string[]);
+const comTables = new Set(lifted.COM_TABLES as string[]);
+check('RES_TABLES / COM_TABLES executed out of remote.ts', resTables.size > 25 && comTables.size > 25,
   `res=${resTables.size} com=${comTables.size}`);
 
 // Every residential table has its commercial twin and vice versa — a half-registered platform is
@@ -171,14 +176,19 @@ for (const t of resTables) {
   check(`${slug}: db.py has both upsert helpers`, hasUpsert('residential') && hasUpsert('commercial'));
 }
 
-// The single-listing by-id lookup walks its own table list; a platform missing there cannot be
-// reopened from a shared/saved link even though it is fully searchable.
-const byIdStart = remoteSrc.indexOf('for (const table of [');
-const byIdBlock = remoteSrc.slice(byIdStart, remoteSrc.indexOf(']', byIdStart));
-for (const t of resTables) {
-  const slug = slugOf(t);
-  if (MONTHLY_ONLY.has(slug)) continue;
-  check(`${slug}: present in the by-id lookup list`, byIdBlock.includes(`'${slug}_residential_listings'`));
+// The single-listing by-id lookup: a platform missing there cannot be reopened from a shared or
+// saved link even though it is fully searchable.
+//
+// EXECUTED, and NO LONGER SKIPPING THE MONTHLY-ONLY SOURCES (2026-09-04). This used to slice the
+// literal out of `for (const table of [` and text-match slugs in it, with `MONTHLY_ONLY` skipped —
+// so the one platform actually missing from that list, aqarmonthly, was the one platform this check
+// deliberately did not ask about. (gathern_commercial_listings was missing too.) The list is now
+// DEEPLINK_TABLES, derived from the same SEARCHABLE_TABLES inventory, so ask the real question of
+// the real value: every searchable table must be resolvable by id, monthly-only sources included.
+const deeplink = new Set(lifted.DEEPLINK_TABLES as string[]);
+check('DEEPLINK_TABLES executed out of remote.ts', deeplink.size > 50, `got ${deeplink.size}`);
+for (const t of (lifted.SEARCHABLE_TABLES as string[])) {
+  check(`${t}: resolvable by id (in DEEPLINK_TABLES)`, deeplink.has(t));
 }
 
 console.log(failed === 0

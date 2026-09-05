@@ -132,6 +132,12 @@
     "grace": 3
   },
   {
+    "platform": "muktamel",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "mustqr",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,

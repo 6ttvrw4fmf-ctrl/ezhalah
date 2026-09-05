@@ -32,6 +32,7 @@ import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: REST_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -69,6 +70,22 @@ const failedLabels: string[] = [];
 const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
   if (!ok) { failures++; failedLabels.push(label); }
+};
+
+// ── A ROW THAT NEVER RENDERED IS NOT A MEASUREMENT ─────────────────────────────────────────────
+// Rationale and reproduction: scripts/lib/afJourneyPacing.ts. UNDECIDED counts against the exit
+// code exactly like a failure — a journey that never saw the panel certified nothing — so this can
+// never be a route to green; it only replaces a wrong reason with the measured one.
+let undecided = 0;
+const undecidedLabels: string[] = [];
+const unobserved = async (label: string, detail: string) => {
+  const l = await readSearchLoad(REST_URL, H);
+  if (verdictForNonArrival(l) === 'red') {
+    check(label, false, `${detail} · ${describeLoad(l)} — production was NOT degraded, so this is a real failure`);
+    return;
+  }
+  console.log(`SKIP  ${label}\n      NOT EXERCISED — ${detail}, and ${describeLoad(l)}.`);
+  undecided++; undecidedLabels.push(label);
 };
 
 const TYPE_MACROS = await (async () => {
@@ -200,10 +217,20 @@ async function runJourney(j: Journey) {
     // ── PART 2 — TRENDING CITIES ────────────────────────────────────────────────────────────────
     // Trending renders on focus of the city input, before any city is chosen.
     await page.click('[data-testid="city-input"]');
-    await page.waitForTimeout(4000);
-    const visibleCities = await page.evaluate(READ_TRENDING_ROWS);
-    check(`${name}: Trending Cities rendered rows in the DOM`, visibleCities.length > 0,
-      visibleCities.map((c) => `${c.label} ${c.count}`).join(' · ') || '(none)');
+    // POLL, do not sleep at it. Trending Cities is top_cities_by_deal_ar over the whole narrowed
+    // cohort — measured at 14-19s on an unfiltered Buy scope under fleet load on 2026-09-04, when a
+    // fixed 4s read reported "(none)" and this check accused a correct product of rendering nothing.
+    const cityRows = await settleUntil(
+      () => page.evaluate(READ_TRENDING_ROWS), (rows: any[]) => rows.length > 0,
+      AGENT_TURN_MS, (ms) => page.waitForTimeout(ms), 500);
+    const visibleCities = cityRows.value;
+    if (!cityRows.settled) {
+      await unobserved(`${name}: Trending Cities rendered rows in the DOM`,
+        `no Trending row reached the DOM within ${AGENT_TURN_MS}ms of focusing the city input`);
+    } else {
+      check(`${name}: Trending Cities rendered rows in the DOM`, visibleCities.length > 0,
+        visibleCities.map((c) => `${c.label} ${c.count}`).join(' · ') || '(none)');
+    }
     check(`${name}: the Trending Cities RPC was captured`, cityCalls.length > 0);
 
     if (cityCalls.length && visibleCities.length) {
@@ -285,7 +312,27 @@ async function runJourney(j: Journey) {
     // ── run the search and close the chain against independent DB truth ─────────────────────────
     await page.keyboard.press('Escape').catch(() => {});
     await tap('بحث');
-    await page.waitForTimeout(14000);
+    // 14s was a guess about a good day, and a guess is a RACE with a nicer name. The search that
+    // follows «بحث» is a real RPC plus per-platform hydration plus paint, against a database whose
+    // measured mean reached 5,109ms under fleet load — so on a bad day the read below lands on a
+    // half-painted screen, and on a good day 14s is 12s of dead time in every cohort. Wait for the
+    // headline to ARRIVE AND STOP MOVING instead: neutral, because it is not the thing asserted.
+    // The assertion is that the number EQUALS the RPC's total_count, and a wrong number is just as
+    // stable as a right one — so a real product mismatch still settles here and still fails below.
+    let prevHeadline: number | null = null;
+    const READ_HEADLINE = () => {
+      const m = document.body.innerText.match(/لقينا\s*([\d,٬]+)\s*إعلان/);
+      return m ? m[1] : null;
+    };
+    await settleUntil(
+      async () => {
+        const raw = await page.evaluate(READ_HEADLINE);
+        const cur = raw ? parseInt(raw.replace(/[^\d]/g, ''), 10) : null;
+        const stable = !!lastSearch && cur != null && cur === prevHeadline;
+        prevHeadline = cur;
+        return stable;
+      },
+      (v) => v, AGENT_TURN_MS, (ms) => page.waitForTimeout(ms), 1000);
 
     check(`${name}: the search request was captured after click-through`, !!lastSearch);
     if (lastSearch) {
@@ -536,6 +583,15 @@ async function runAfReentryJourney(j: {
   }
 }
 
+// Measure the product, not the queue — see scripts/lib/afJourneyPacing.ts.
+{
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const l = await paceUntilHealthy(() => readSearchLoad(REST_URL, H), sleep, PACE_BUDGET_MS, PACE_POLL_MS, (s) => console.log(s));
+  console.log(l.degraded
+    ? `[pace] STARTING ANYWAY after ${Math.round(PACE_BUDGET_MS / 60000)}min — ${describeLoad(l)}`
+    : `[pace] production is inside its envelope — ${describeLoad(l)}`);
+}
+
 // Rotate cities AND regions, desktop and mobile — never Riyadh-only (PART 5).
 await runJourney({ name: 'Riyadh · Buy · Apartment — no extra narrowing', city: 'الرياض',
   deal: [], group: 'الشقق والسكن المشترك', type: 'شقة' });
@@ -552,9 +608,9 @@ await runAfReentryJourney({ name: 'RE-ENTRY · Riyadh · Rent-Annual · Shop + p
   deal: ['إيجار', 'شراء', 'سنوي'], category: 'تجاري', group: 'التجزئة والمكاتب', type: 'محل', afOption: 'af-option-new' });
 
 await browser.close();
-console.log(failures
-  ? `\n✗ ${failures} check(s) FAILED (${unverified} request(s) the oracle honestly declined):\n` +
-    failedLabels.map((l) => `    • ${l}`).join('\n') + '\n'
+console.log(failures + undecided
+  ? `\n✗ ${failures} check(s) FAILED, ${undecided} NOT EXERCISED (${unverified} request(s) the oracle honestly declined):\n` +
+    failedLabels.map((l) => `    • FAIL ${l}`).concat(undecidedLabels.map((l) => `    • NOT EXERCISED ${l}`)).join('\n') + '\n'
   : `\n✓ Trending live four-way truth — all checks passed` +
     `${unverified ? ` (${unverified} request(s) the oracle honestly declined — see SKIP lines)` : ''}\n`);
-process.exit(failures ? 1 : 0);
+process.exit(failures + undecided ? 1 : 0);

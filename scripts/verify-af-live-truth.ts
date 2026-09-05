@@ -21,7 +21,9 @@ import { openAfOffer } from './lib/afOfferLive.ts';
 // rendered" on the same slow afternoon against a production that was fine (each passed locally on
 // the same bundle). A budget set by a good day is not a budget; 60s is set by the worst turn
 // actually measured, and still fails in bounded time.
-const AGENT_TURN_MS = 60_000;
+// ONE definition of that budget, shared with the sibling journeys (2026-09-04) — a constant that
+// exists three times drifts three ways, and this one is load-bearing in all three.
+import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad } from './lib/afJourneyPacing.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
@@ -510,6 +512,20 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
   } finally {
     await ctx.close();
   }
+}
+
+// ── MEASURE THE PRODUCT, NOT THE QUEUE ─────────────────────────────────────────────────────────
+// Nine journeys of paid agent turns. Starting them while production is outside its own safe
+// envelope measures the queue in front of the database — every wait below then expires against a
+// card that was simply still coming. Wait (bounded) for production's own signal, then measure. If
+// it never clears we still run and still report honestly; we never invent a pass. Rationale and
+// the reproduction: scripts/lib/afJourneyPacing.ts.
+{
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const l = await paceUntilHealthy(() => readSearchLoad(REST_URL, H), sleep, PACE_BUDGET_MS, PACE_POLL_MS, (s) => console.log(s));
+  console.log(l.degraded
+    ? `[pace] STARTING ANYWAY after ${Math.round(PACE_BUDGET_MS / 60000)}min — ${describeLoad(l)}`
+    : `[pace] production is inside its envelope — ${describeLoad(l)}`);
 }
 
 // ── the required coverage matrix ───────────────────────────────────────────────────────────────

@@ -90,6 +90,10 @@ export const FLOORS = {
   zeroResultJourneys: 1,
   cardClickBackJourneys: 1,
   showMoreJourneys: 1,
+  // owner PERMANENT, 2026-09-04: AF-scoped pagination — «عرض المزيد» under an active AF predicate
+  // must preserve the exact eligible set and the committed predicate, same floor discipline as every
+  // other daily-required journey.
+  showMoreAfJourneys: 1,
 };
 
 // ── THE PERMANENT WATCHES — one per defect fixed on 2026-08-23. These are not generic checks; each
