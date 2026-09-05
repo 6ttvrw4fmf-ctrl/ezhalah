@@ -34,6 +34,8 @@ export const VIEWPORTS = [
 ];
 
 /** The property-search RPC. Journeys count these to prove "no search fired" / "no duplicate". */
+import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';
+
 export const SEARCH_RPC = '/rpc/location_search_candidates_ar';
 
 /**
@@ -105,19 +107,23 @@ const launchOpts = () => ({
     : {}),
 });
 
-// React's minified hydration notices fire on this statically-rendered export, PREDATE this suite and
-// break no journey (project memory react-418-is-preexisting-not-the-both-feature-2026-08-15; the
-// same allowance scripts/verify-web-runtime-smoke.mjs makes). Treating them as product failures
-// would fail every journey nightly on a defect nobody introduced — the cry-wolf shape this suite
-// must not have. Anything else uncaught is a real finding.
-const BENIGN_PAGE_ERROR = /Minified React error #(418|423|425)/;
+// React's recoverable hydration notices are ruled pre-existing on this statically-rendered export.
+// THE RULING NOW LIVES IN ONE PLACE, e2e/lib/pageErrors.mjs, shared with the journey suite — two
+// copies of it is the drift this repo keeps paying for, and the two suites had in fact already
+// diverged: this one dropped the notice AT CAPTURE (so a spike was invisible) while the journey
+// suite counted it as a product defect (34 false defects in one sweep, 2026-09-05).
+//
+// They are no longer dropped. They are captured, classified, and REPORTED with their count, so the
+// steady state stays legible and a spike is not indistinguishable from it. `ctx.pageErrors` keeps
+// its exact previous meaning — app-class errors only — so no journey's assertion changes.
 
 /**
  * Run `fn(page, ctx)` in a fresh browser at `viewport`.
  * `ctx.searches` is every location_search_candidates_ar body the page sent, in order — the RAW
  * traffic, kept for evidence. `ctx.resultsSearches` is the subset that actually SUBMITTED a search
  * (isResultsSearch); assert on that one, never on the raw count.
- * `ctx.pageErrors` is every uncaught page error.
+ * `ctx.pageErrors` is every uncaught APP-class page error; `ctx.hydrationNotices` holds React's
+ * recoverable-hydration notices, reported but never counted as a defect (e2e/lib/pageErrors.mjs).
  */
 export async function withPage(viewport, fn) {
   const { chromium, devices } = await import('@playwright/test');
@@ -133,6 +139,7 @@ export async function withPage(viewport, fn) {
   const searches = [];
   const resultsSearches = [];
   const pageErrors = [];
+  const hydrationNotices = [];
   page.on('request', (r) => {
     if (!r.url().includes(SEARCH_RPC)) return;
     let body;
@@ -142,10 +149,15 @@ export async function withPage(viewport, fn) {
     // that ride the same RPC name. See isResultsSearch() above and ops_incident #51.
     if (isResultsSearch(body)) resultsSearches.push(body);
   });
-  page.on('pageerror', (e) => { const m = String(e); if (!BENIGN_PAGE_ERROR.test(m)) pageErrors.push(m.slice(0, 240)); });
+  page.on('pageerror', (e) => {
+    const m = String(e).slice(0, 240);
+    (isHydrationNoticePageError(m) ? hydrationNotices : pageErrors).push(m);
+  });
   try {
-    return await fn(page, { searches, resultsSearches, pageErrors, viewport });
+    return await fn(page, { searches, resultsSearches, pageErrors, hydrationNotices, viewport });
   } finally {
+    // Never silent: the count and text are printed even though no journey fails on them.
+    if (hydrationNotices.length) console.log(`  note    ${hydrationNoticeNote('guardian', hydrationNotices)}`);
     await browser.close().catch(() => {});
   }
 }
