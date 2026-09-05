@@ -40,6 +40,7 @@ from scrapers.common.arabic_location import to_catalog
 
 BASE = "https://fursaghyr.com"
 LIST = f"{BASE}/wp-json/fgh/v1/properties"
+MEDIA = f"{BASE}/wp-json/wp/v2/media"  # standard WP core media, open, no auth
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
 # Fursaghyr rea.property_type (Arabic) → our canonical English taxonomy.
@@ -159,16 +160,46 @@ def _full(url: str) -> str:
     return _FULLRES_RE.sub(r"\1", url)
 
 
-def _photos(item: dict) -> list[str]:
+_BAD_IMG_TOKENS = ("placeholder", "no-image", "no_image", "default", "logo")
+
+
+def _keep(out: list[str], u: Any) -> None:
+    """Append u to out if it's a real image URL, filtered + deduped on the full-res original."""
+    if not isinstance(u, str) or not u.startswith("http"):
+        return
+    if any(bad in u.lower() for bad in _BAD_IMG_TOKENS):
+        return
+    full = _full(u)
+    if full not in out:
+        out.append(full)
+
+
+def _photos(s: cc.Session, item: dict) -> list[str]:
     out: list[str] = []
     for u in item.get("images") or []:
-        if not isinstance(u, str) or not u.startswith("http"):
-            continue
-        if any(bad in u.lower() for bad in ("placeholder", "no-image", "no_image", "default", "logo")):
-            continue
-        full = _full(u)
-        if full not in out:
-            out.append(full)
+        _keep(out, u)
+    # Top-up from WP core media (found live 2026-09-05): the custom fgh endpoint under-reports
+    # some galleries — post 27171's item["images"] held only the featured image
+    # (88C6DD2E-…-768x1152.png) while the page's own Houzez gallery also shows IMG_8293-1.jpeg,
+    # which the media library DOES carry as an attachment of that post. ?parent=<post id> returns
+    # only attachments owned by THIS listing, so related-listing thumbs and the agent avatar
+    # (d455ad43-…-150x150.jpeg, agent-details block, unparented) can never leak in. date-asc
+    # matches the page's slide order (88C6DD2E uploaded 16:22 = slide 1, IMG_8293 16:31 = slide 2);
+    # item["images"] stays first because its [0] is the featured image = banner slide 1. fgh
+    # returns -WxH crops of the same originals the media endpoint returns un-cropped, so the
+    # _full() dedupe in _keep() collapses them. A failed or empty media call keeps exactly what
+    # fgh gave — degrade to FEWER images, never a wrong one.
+    try:
+        _throttle()
+        r = s.get(MEDIA, params={"parent": item["id"], "per_page": 100, "orderby": "date",
+                                 "order": "asc", "_fields": "id,source_url,media_type"},
+                  timeout=30)
+        media = r.json() if r.status_code == 200 else []
+    except Exception:
+        media = []
+    for m in media if isinstance(media, list) else []:
+        if isinstance(m, dict) and m.get("media_type") == "image":
+            _keep(out, m.get("source_url"))
     return out
 
 
@@ -261,7 +292,7 @@ def _resolve_total(total: Optional[int], meter: Optional[int], area: Optional[in
     return None
 
 
-def map_listing(item: dict) -> tuple[Optional[dict], str]:
+def map_listing(item: dict, s: cc.Session) -> tuple[Optional[dict], str]:
     rea = item.get("rea") or {}
     item_id = item.get("id")
     if not item_id:
@@ -317,7 +348,7 @@ def map_listing(item: dict) -> tuple[Optional[dict], str]:
     if not city and raw_city:
         catalog_city_id, catalog_region_id = to_catalog(raw_city, region_hint=region)
 
-    photos = _photos(item)
+    photos = _photos(s, item)
 
     title = _redact(item.get("title"))
     listing_url = item.get("permalink")
@@ -387,7 +418,7 @@ def main() -> int:
 
     try:
         for it in items:
-            row, cat = map_listing(it)
+            row, cat = map_listing(it, s)
             if not row:
                 continue
             if args.type != "all" and cat != args.type:

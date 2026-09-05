@@ -21,6 +21,9 @@ APIs:
           (sale|rent|investment), location, city, district, lat, lng, area, bedrooms, bathrooms,
           features[], parcel_number, plan_id, plan_title.
   GET /wp-json/public/v1/property/{id}         (description HTML — content field)
+  GET /wp-json/wp/v2/media?parent={id}&per_page=100&orderby=id&order=asc   (GALLERY)
+        → the post's own media attachments (standard WP endpoint, open on this site);
+          each image's source_url is the full-res gallery slide.
 
 Field map (Eaqar Tabuk → our schema):
   id                                  → ad_number (ET{id})
@@ -32,7 +35,7 @@ Field map (Eaqar Tabuk → our schema):
   meta.area / bedrooms / bathrooms    → area_m2 / bedrooms / bathrooms
   candles-map.district / city         → neighborhood ; city is ALWAYS Tabuk (the `city` field
                                         often actually holds a district like "حي الورود")
-  featured_image (strip -WxH)         → photo_urls (gallery is thin — usually 1)
+  featured_image + wp/v2/media gallery → photo_urls (featured first, then the post's attachments)
   candles-map.{lat,lng,features,parcel_number,plan_id}, status_ar, operation_ar → additional_info
 
 PRICE (verified against samples): meta.price is INCONSISTENT —
@@ -72,6 +75,7 @@ BASE = "https://eaqartabuk.com"
 LIST = f"{BASE}/wp-json/public/v1/properties"
 MAP = f"{BASE}/wp-json/candles-map/v1/property"
 DETAIL = f"{BASE}/wp-json/public/v1/property"
+MEDIA = f"{BASE}/wp-json/wp/v2/media"
 PAGE_SIZE = 50
 WORKERS = int(os.environ.get("EAQARTABUK_WORKERS", "5"))
 
@@ -267,8 +271,46 @@ def catalogue_is_unreachable(meta: dict) -> bool:
     return not meta or "total" not in meta
 
 
-def _enrich(pid: int) -> tuple[dict, Optional[str]]:
-    """Return (candles-map record, description HTML). Both best-effort."""
+def _gallery(pid: int) -> list[str]:
+    """The post's OWN attachment gallery, full-res, in source order. Best-effort → [].
+
+    Image-capture fix (2026-09-05): featured_image is a single field, but RealHomes stores every
+    gallery slide as a media ATTACHMENT of the property post — live post 10470 has 7 attachments
+    = its 7 on-page flexslider slides, yet the scraper only ever read featured_image, so every
+    multi-photo listing was truncated to exactly 1 photo. Binding is exact by construction:
+    `parent={pid}` returns only attachments of THAT post, so similar-properties thumbnails and
+    site chrome cannot leak in (live-verified parent=10272 → 0, parent=6674 → 1, parent=10470 →
+    the exact 7 slides). orderby=id&order=asc matched the live flexslider slide order on the
+    verified sample (…-1-1 … …-7-1, featured as slide 1). media_type=='image' keeps video/audio/
+    file attachments out. Any failure or empty response degrades to the featured-only list in
+    map_listing — FEWER images, never a wrong one.
+    """
+    s = _session()
+    for attempt in range(3):
+        try:
+            r = s.get(MEDIA, params={"parent": pid, "per_page": 100,
+                                     "orderby": "id", "order": "asc"}, timeout=40)
+            if r.status_code == 200:
+                j = r.json()
+                if not isinstance(j, list):  # WP error object → no gallery, not retryable
+                    return []
+                out: list[str] = []
+                for m in j:
+                    if isinstance(m, dict) and m.get("media_type") == "image":
+                        # source_url is already full-res (_SIZE_RE is a no-op) but _full_img's
+                        # _BAD_IMG guard still filters any logo/placeholder attachment.
+                        u = _full_img(m.get("source_url"))
+                        if u:
+                            out.append(u)
+                return out
+        except Exception:
+            pass
+        time.sleep(1.2 * (attempt + 1))
+    return []
+
+
+def _enrich(pid: int) -> tuple[dict, Optional[str], list[str]]:
+    """Return (candles-map record, description HTML, gallery URLs). All best-effort."""
     s = _session()
     mp: dict = {}
     desc: Optional[str] = None
@@ -288,7 +330,7 @@ def _enrich(pid: int) -> tuple[dict, Optional[str]]:
             desc = j2.get("content") or j2.get("description")
     except Exception:
         pass
-    return mp, desc
+    return mp, desc, _gallery(pid)
 
 
 _PERIOD_MONTHLY_RE = re.compile(r"شهري|شهريا|بالشهر|/\s*شهر|في\s*الشهر")
@@ -369,7 +411,8 @@ def _price_on_request(*texts: Optional[str]) -> bool:
     return False
 
 
-def map_listing(item: dict, mp: dict, desc_html: Optional[str]) -> tuple[Optional[dict], str]:
+def map_listing(item: dict, mp: dict, desc_html: Optional[str],
+                gallery: Optional[list[str]] = None) -> tuple[Optional[dict], str]:
     pid = item.get("id")
     if not pid:
         return None, "residential"
@@ -427,8 +470,15 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str]) -> tuple[Optiona
     title = _redact(_strip_tags(item.get("title")))
     description = _redact(_strip_tags(desc_html) or _strip_tags(item.get("excerpt")))
 
+    # Featured first (it is slide 1 on the live flexslider AND our card thumbnail), then the rest
+    # of the post's own gallery in attachment-id order (see _gallery). `not in` dedupes the
+    # featured repeat — the gallery always contains it again — while preserving source order.
+    # Gallery fetch failed / no attachments → featured-only, exactly the pre-fix behaviour.
     photo = _full_img(item.get("featured_image"))
     photos = [photo] if photo else []
+    for u in gallery or []:
+        if u not in photos:
+            photos.append(u)
 
     features = mp.get("features") if isinstance(mp.get("features"), list) else []
     info: dict[str, Any] = {
@@ -541,8 +591,8 @@ def main() -> int:
             pid = item.get("id")
             if not pid:
                 return None
-            mp, desc = _enrich(int(pid))
-            return map_listing(item, mp, desc)
+            mp, desc, gallery = _enrich(int(pid))
+            return map_listing(item, mp, desc, gallery)
 
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             for result in ex.map(process, items):
@@ -569,7 +619,7 @@ def main() -> int:
                 print("  ", {k: r.get(k) for k in (
                     "ad_number", "property_type", "transaction_type", "city", "region",
                     "neighborhood", "area_m2", "bedrooms", "price_total", "price_annual", "rent_period")})
-                print("     photo:", (r["photo_urls"] or ["(none)"])[0][:78])
+                print(f"     photos: {len(r['photo_urls'])} —", (r["photo_urls"] or ["(none)"])[0][:78])
             return 0
 
         # Full run: prune listings that were active before but weren't seen this crawl.
