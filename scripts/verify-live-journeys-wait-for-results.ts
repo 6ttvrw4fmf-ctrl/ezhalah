@@ -52,6 +52,11 @@ const check = (label: string, ok: boolean, detail = '') => {
   if (!ok) failures++;
 };
 
+/** A mutation proof: the rule under test, applied to the real source with the real regression put
+ *  back, asserted to go RED. Named so scripts/verify-new-barriers-are-mutation-proven.ts can see it
+ *  is an executable re-break rather than prose claiming one. */
+const mustCatch = (label: string, caught: boolean, detail = '') => check(label, caught, detail);
+
 // ── the rules, each computed from stripped source ───────────────────────────────────────────────
 
 /** COMBINED: the readiness wait must sit between the request-landed check and the result reads. */
@@ -182,7 +187,7 @@ for (const m of muts) {
   const mutated = m.apply(raw);
   const changed = mutated !== raw;
   const stillGreen = m.rule(stripComments(mutated));
-  check(`${m.name} — applied and caught`, changed && !stillGreen,
+  mustCatch(`${m.name} — applied and caught`, changed && !stillGreen,
     !changed ? 'mutation did not apply (pattern drifted — fix the mutant, not the rule)'
              : 'MUTANT SURVIVED: the rule passes on the regression it exists to catch');
 }

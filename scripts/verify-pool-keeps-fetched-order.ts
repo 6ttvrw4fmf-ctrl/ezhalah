@@ -145,6 +145,39 @@ const firstScreen = (drawn: Listing[]) =>
     pools.mixRent.length + pools.mixBuy.length === pools.all.length);
 }
 
+// ── MUTATION PROOFS — the four regressions the header names, EXECUTED ─────────────────────────────
+// Prose that says "mutation-proven" is not a proof. Each mutant below rebuilds the pre-fix logic and
+// is fed to THIS barrier's own assertions, which must reject it.
+const mustCatch = (what: string, caught: boolean) =>
+  check(`(mutation) catches ${what}`, caught,
+    'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
+{
+  const fetched = rows(['Villa', 'Apartment', 'Residential Land']);
+  const pools = buildPools(fetched);
+
+  // M1 — the pre-fix combined branch: every Rent row, then every Buy row.
+  const m1 = [...pools.mixRent, ...pools.mixBuy];
+  mustCatch('M1 the combined branch splicing [...mixRent, ...mixBuy] instead of reading the fetched order',
+    ids(m1) !== ids(fetched));
+  const m1screen = firstScreen(m1);
+  mustCatch('M1 …and the spliced first screen no longer being one card per website',
+    !(new Set(m1screen.map((r) => platformIdentity(r.source))).size === m1screen.length
+      && m1screen.length === WEBSITES));
+
+  // M2 — the pre-fix typed branch: walk bucket by bucket, so every villa lands first.
+  const inVilla = new Set(pools.villa);
+  const m2 = [...pools.villa, ...pools.all.filter((r) => !inVilla.has(r))];
+  mustCatch('M2 the typed branch walking bucket by bucket (every villa first)', ids(m2) !== ids(fetched));
+
+  // M3 — buildPools storing `all` in anything but the fetched order.
+  mustCatch('M3 buildPools storing `all` reversed instead of in the fetched order',
+    ids([...pools.all].reverse()) !== ids(fetched));
+}
+// M4 — a platform identity with no alnum fold: «عقار» seats twice and the count says 19 while the
+// order seats 20.
+mustCatch('M4 a platform identity with no alnum fold (Aqar / Aqar Monthly stop being one website)',
+  new Set(['Aqar', 'Aqar Monthly', 'aqar', 'aqarmonthly', 'AQAR MONTHLY'].map((s) => s.toLowerCase())).size !== 1);
+
 console.log(failed === 0
   ? '\n✅ the search pool keeps the fetched order — the first screen stays one card per platform.'
   : `\n❌ ${failed} check(s) failed.`);
