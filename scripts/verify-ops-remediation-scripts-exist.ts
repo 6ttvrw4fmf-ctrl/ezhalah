@@ -70,6 +70,13 @@ const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
     why: 'claimed by 20260831192229_p0_detection_leaves_the_long_sweep_transaction.sql; detector/alert seam' },
   { path: 'scripts/verify-run-field-range-composite-baseline-live.ts', owner: 'routine-3-data-integrity',
     why: 'claimed by 20260821031350_fix_run_field_range_composite_baseline.sql; scraped-field range baselines' },
+  // CLOSED 2026-09-05 by routine-2-production (PR #1850), the routine this gap was routed to.
+  // scripts/verify-searchable-platforms-are-monitored.ts now exists and calls
+  // ops_searchable_platforms_unmonitored() — the external reader migration 20260905062027 created
+  // the RPC for. It is registered exactly as this ledger required a LIVE check to be: a
+  // test-exclusions.txt row naming .github/workflows/loader-active-platforms-check.yml as its home,
+  // never the required hermetic npm test. The routing worked end to end — the gap was raised by the
+  // session that mirrored the migration, and closed by the surface that owns the predicate.
   { path: 'scripts/verify-sentry-heartbeat-detector-wired.ts', owner: 'routine-7-seam',
     why: 'claimed by 20260830183604_sentry_check_heartbeat_and_silent_detector_layer2.sql; detector roster seam' },
   { path: 'scripts/verify-unlocated-fallback-scope.ts', owner: 'routine-3-data-integrity',

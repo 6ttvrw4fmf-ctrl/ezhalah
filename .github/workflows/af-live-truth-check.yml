@@ -149,6 +149,20 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-category-respects-table-scope.ts
 
+      # A COUNT IS A LOSSY PROJECTION OF A SET (added 2026-09-05). The two checks above, and every
+      # other Trending barrier in this repo, compare NUMBERS — so one dropped row and one added row
+      # cancel out and all of them stay green while the user is shown a listing outside their search
+      # and denied one inside it. This walks the CLICK to exhaustion by p_offset on the anon path and
+      # DIFFERENCES the (source_table, listing_id) set against an independent PostgREST reading of
+      # search_listings_ar: chip == click total == truth total, missing = extra = duplicates = 0,
+      # over a cluster, a plain city, broad Commercial and a narrowed child of the plain city.
+      - name: The Trending chip's number is the exact SET the click delivers
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-trending-set-equals-the-click-live.ts
+
       # THE OTHER HALF OF THE SAME QUESTION (🔴 Regression Hunter, routine #8, 2026-09-04). The check
       # above proves a category count agrees with Search on WHICH TABLE a row lives in; this one
       # proves every surface that displays a NUMBER resolves the whole scope — purity gate included —
@@ -163,6 +177,17 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-count-surfaces-share-the-results-purity-gate.ts
+
+      # THE CLASS BEHIND ops_incident #31/#59: a surface that inlines af_eligibility_clause() but is
+      # not rendered from it. mon_detect_af_clause_surface_untemplated() is the continuous guard, but
+      # a detector can only be verified by reading its own body — this executes the same predicate
+      # through the anon path, from OUTSIDE the detector, so it going dark is visible.
+      - name: Every surface that inlines the eligibility clause is owned by the rebuild
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-clause-carrying-rpcs-are-templated.ts
 
       # A DETECTOR'S HEADLINE MUST EQUAL THE BREAKDOWN IT PUBLISHES BESIDE IT (added 2026-09-05,
       # routine #9's first run). price_fidelity() returned `mismatches: 2` while its own by_platform

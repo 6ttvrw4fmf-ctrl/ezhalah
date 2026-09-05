@@ -428,6 +428,15 @@ identity, or a QA account whose credentials live in GitHub Actions secrets. **Ad
 not help — routines #8 through #11 are guests too.**
 
 ## 1. ⚡ Daily JUNIOR SCRAPING Engineer (original, unmodified)
+Canonical spec: **`docs/ops/JUNIOR_SCRAPING_ENGINEER.md`** (file wins over the live prompt on any
+divergence). Written 2026-09-05 by RECONSTRUCTION from repo evidence, because this routine had no
+spec file at all and its instructions existed only in a cloud prompt outside this repo — the state
+the owner's audit called unauditable. Every claim in it carries a citation. Its
+`## UNRECOVERED — owner must supply` section lists what could NOT be recovered — roughly 9,700 of
+the prompt's 9,971 characters, the run procedure, the pass/fail thresholds, and the `[DEEP AUDIT]`
+escalation schema. **Until the owner pastes those in, that file is a partial spec and the live
+prompt is still the only complete copy.**
+
 
 Original owner prompt (9,971 chars), untouched since creation. Runs on branch `ops/daily-engineer`,
 writes `docs/ops/daily-metrics.jsonl`, escalates via `[DEEP AUDIT]` GitHub issues.
@@ -438,6 +447,14 @@ new-listing discovery, reachability. It does NOT do deep production audits, filt
 integrity sweeps — it detects and escalates to the senior.
 
 ## 2. 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit (original prompt, made daily)
+Canonical spec: **`docs/ops/SENIOR_PRODUCTION_ENGINEER.md`** (file wins over the live prompt on any
+divergence). Written 2026-09-05 by RECONSTRUCTION from repo evidence, for the same reason as #1.
+Its `## UNRECOVERED — owner must supply` section is the larger of the two: 31 of the prompt's 33
+sections, §23/§24 in full, and the ~29-check checklist by name. This is the routine with the
+broadest authority and the fallback ownership of every unrouted alert kind — a fallback that has
+grown from 1 kind to 26 — so the gap matters most here. **Partial spec; the live prompt is still
+the only complete copy.**
+
 
 The owner's original 33-section Senior Production Engineer routine (restored byte-faithfully on
 2026-08-10 after an incorrect conversion; the ONLY subsequent edits are the two cadence mentions
