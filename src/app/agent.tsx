@@ -2441,7 +2441,16 @@ export default function Agent() {
         // a usable detail (a type, a city, a size, a budget) and we've asked twice, stop pestering and
         // just search with whatever we have. (user request: max 2 asks → skip → scrape.)
         const hasIntent = !!(combined.type || combined.location || combined.detail || combined.priceInput);
-        if (hasIntent && askCountRef.current >= 2) {
+        // A LOCATION QUESTION OUTRANKS THIS CEILING (owner, 2026-09-05). The rule below — "asked
+        // twice and we can see some intent, so stop pestering and just search" — is right for an
+        // ordinary clarification. It is wrong for the one question whose answer DEFINES the search
+        // scope: skipping it does not save the user a question, it picks a scope for them.
+        // Measured in production: the edge asked «تقصد مدينة الرياض ولا منطقة الرياض كاملة؟» and
+        // this branch discarded it and searched منطقة الرياض — 10,932 rows across 20 cities — for a
+        // user who had said only «الرياض». The flag is the EDGE's verdict (it owns the classifier),
+        // never re-derived here, so the two surfaces cannot drift.
+        const mustAnswer = turn.kind === 'message' && turn.locationQuestion === true;
+        if (hasIntent && askCountRef.current >= 2 && !mustAnswer) {
           askCountRef.current = 0;
           saidRef.current = [];
           beginSearching(statusId, combined); // loader + min-beat overlap the fetch (like filter/refine)

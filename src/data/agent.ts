@@ -28,7 +28,7 @@ export type AgentTurn =
   | { kind: 'listings'; reply: string; query: SearchQuery; askCount?: number }
   // `query` is the state the agent understood on a turn that did NOT search — a clarification.
   // Optional because most message turns carry nothing; present, it MUST be remembered (see below).
-  | { kind: 'message'; reply: string; query?: SearchQuery; askCount?: number }
+  | { kind: 'message'; reply: string; query?: SearchQuery; askCount?: number; locationQuestion?: boolean }
   | { kind: 'interview'; askCount?: number };
 
 // "ask me questions" → hand off to the guided interview.
@@ -770,7 +770,11 @@ async function callAgentBackend(
             d.query,
           )
         : undefined;
-      return { kind: 'message', reply: String(d.reply ?? ''), askCount: askCountOut, ...(understood ? { query: understood } : {}) };
+      // locationQuestion — the edge's own verdict that this question must be ANSWERED, never
+      // searched past (see supabase/functions/agent/index.ts). Carried verbatim; never inferred here.
+      return { kind: 'message', reply: String(d.reply ?? ''), askCount: askCountOut,
+               ...(d.locationQuestion === true ? { locationQuestion: true } : {}),
+               ...(understood ? { query: understood } : {}) };
     }
     return null;
   } catch {
