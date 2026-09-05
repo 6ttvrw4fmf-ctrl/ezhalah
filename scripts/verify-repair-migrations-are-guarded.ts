@@ -76,6 +76,29 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260830140831_res_com_collision_repair_regression_detector.sql, '
     + 'which ships + rosters + mutation-proves mon_detect_res_com_collision_repair_regression() — a '
     + 'detector that watches THIS repair (the adjudication ledger it wrote), not just its class',
+  // Fourth instance of the two-migrations-minutes-apart shape (incident #38). The repair
+  // re-annualises 130 muktamel monthly rent rows whose scraper stored the RAW monthly figure in
+  // price_annual — a YEARLY column the app divides by 12, so every one of them was advertised at a
+  // twelfth of its rent. Its detector lands three minutes later in 20260905071148, so the repair
+  // file itself never reaches a mon_detect_* in executed SQL.
+  //
+  // The companion is the precedent-1/2 shape: it RE-ASSERTS the repair idempotently from the
+  // ops_rent_annualisation_repair ledger (which holds price_before AND price_after per row) and
+  // then RUNS mon_detect_unannualised_rent_cohort(), which is on the mon_run_all_detectors()
+  // roster and therefore re-answers the question twice an hour.
+  //
+  // Two things worth checking in that companion rather than taking on trust. It re-asserts ONLY
+  // rows still holding the exact ledgered price_before; a row that has moved to a third value is
+  // left alone and raised as a warning, because overwriting an unexplained value is how a repair
+  // becomes a sweep. And the detector genuinely covers THIS repair, not merely its class in the
+  // abstract: if these 130 rows ever revert, muktamel's median monthly rent falls from ~2,256 back
+  // to ~188 SAR and the detector fires on it — the same signal that would have caught the original
+  // defect eight weeks earlier.
+  '20260905070828_repair_muktamel_raw_monthly_rent_stored_in_price_annual.sql':
+    'watched by its companion 20260905072446_rent_annualisation_repair_reasserts_itself_and_runs_'
+    + 'its_watching_detector.sql, which re-asserts the same UPDATE from the repair ledger and runs '
+    + 'mon_detect_unannualised_rent_cohort() — a rostered detector whose median-based predicate '
+    + 'fires if these exact rows ever revert',
   // A different shape from the three above: this one is NOT A REPAIR AT ALL. Its statement is
   // `update search_listings_ar set city_id = city_id where city_id in (3677, 12)` — a self
   // assignment. It writes each row's existing value back over itself and therefore cannot change,
