@@ -25,6 +25,7 @@
 // Run: node --experimental-strip-types scripts/verify-aqarcity-daily-rate-is-not-a-monthly-rent.ts
 
 import { readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { pyCall } from './lib/pythonMutant.ts';
 import { npmTestRuns } from './lib/testRegistry.ts';
@@ -72,6 +73,29 @@ check('in a mixed daily+monthly ad, a number the prose calls شهري outranks t
   d[7] === false);
 check('…while the number in the DAILY clause of that same ad still fires', d[8] === true);
 
+// ── 2b. THE CALL SITE, against the REAL PAGE — the half that caught my own mistake ────────────
+// Everything above exercises is_daily_priced() with a CLEAN description string. Production does not
+// pass that: map_listing(body, url) receives the RAW PAGE HTML. I tested the clean string, shipped,
+// and the first re-scrape half-applied the fix — price_annual corrected 3600 -> 300 while
+// rent_period stayed 'monthly', so the card computed 300/12 and advertised «25 SAR/month», worse
+// than the defect it replaced. Two separate causes, both invisible to a unit test on a clean string:
+//   • the input shape (raw HTML, not the extracted description), and
+//   • the WRITE — an upsert DROPS a plain None (_unknown_must_not_overwrite_known, owner rule
+//     2026-08-09) so a failed read cannot erase a known value. The fix must write
+//     db.AUTHORITATIVE_NULL, the sentinel added for "the source settled this" (owner, 2026-08-22).
+// So this section runs the REAL map_listing() over REAL production bytes and asserts the WRITTEN row.
+// scripts/fixtures/aqarcity-30260.html.gz is the first 40,000 chars of the page as actually served
+// (HTTP 200, 2026-09-05), verified to map identically to the full 119,739-char response.
+const fixtureRow = pyCall(ROOT, 'scripts.lib.aqarcity_fixture', 'map_fixture', [[]])[0] as Record<string, unknown>;
+check('map_listing on the REAL page keeps the published number exactly (300, not 3600, not 25)',
+  Number(fixtureRow.price_annual) === 300,
+  `got ${fixtureRow.price_annual}`);
+check('…and writes the period as AUTHORITATIVE_NULL, not a plain None the upsert would DROP',
+  fixtureRow.rent_period_is_authoritative_null === true,
+  'a plain None leaves the stale rent_period=monthly beside the corrected price — the card then shows 300/12 = 25 SAR/month');
+check('…and the row is not otherwise mangled (it still carries its ad number)',
+  String(fixtureRow.ad_number || '').includes('30260'));
+
 // ── 3. is_monthly_rental IS UNCHANGED — the exact three cases that reverted the last attempt ──
 const m = pyCall(ROOT, MOD, 'is_monthly_rental', [
   [MONTHLY_1700, 'YEAR', 1700, 'شقة'],
@@ -101,13 +125,27 @@ const mustCatch = (what: string, wouldFail: boolean) => check(`MUTATION: catches
 // guard already short-circuited, so all three mutants "survived" while proving nothing. A mutation
 // that cannot change an answer is not a proof; it is a comment that runs.
 
-// (a) the daily branch at the call site, disabled — listing 30260 returns to a false monthly.
-const noBranch = real.replace(
-  '        if is_daily_priced(body, price):\n            rent_period = None\n        else:\n',
-  '        if False:\n            rent_period = None\n        else:\n');
-check('MUTATION: catches the daily branch being disabled at the call site',
-  noBranch !== real && !noBranch.includes('if is_daily_priced(body, price):'),
-  'the call-site anchor drifted — the branch may no longer be wired');
+// (a) THE CALL SITE, mutated, run over the REAL page. This is the load-bearing proof: it asserts
+//     the WRITTEN row changes, not that a string matched. An earlier version only checked that the
+//     anchor still existed — which passes even if the branch writes the wrong thing.
+const FIXTURE = gunzipSync(readFileSync(join(ROOT, 'scripts/fixtures/aqarcity-30260.html.gz'))).toString('utf8');
+const URL30260 = 'https://www.aqarcity.net/property/30260';
+const mapWith = (src?: string) => {
+  try {
+    return (pyCall(ROOT, MOD, 'map_listing', [[FIXTURE, URL30260]], src) as unknown[])[0] as unknown[];
+  } catch { return null; }
+};
+const disabled = (() => {
+  const m = real.replace('        if is_daily_priced(body, price):', '        if False:');
+  if (m === real) { check('MUTATION (a): ANCHOR DRIFTED — the call-site branch was not found', false); return null; }
+  return mapWith(m);
+})();
+// map_listing returns the tuple (row, reason); pyCall JSON-decodes it, so index the row and read
+// its fields as DATA. An earlier version regex-matched Python-repr quotes against a JSON string and
+// reported a working mutant as a failure — the assertion was wrong, not the mutation.
+const disabledRow = (disabled && typeof disabled[0] === 'object' ? disabled[0] : null) as Record<string, unknown> | null;
+mustCatch('the daily branch disabled at the call site — the REAL page reverts to a monthly claim',
+  disabledRow !== null && disabledRow.rent_period === 'monthly' && Number(disabledRow.price_annual) === 3600);
 
 // (b) the SEGMENT requirement dropped. Input: a daily ad whose captured number lives in a
 //     NON-daily segment (an area, not a rate) and is not شهري-labelled, so only the segment rule

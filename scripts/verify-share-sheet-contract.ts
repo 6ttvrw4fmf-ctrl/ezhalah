@@ -53,7 +53,18 @@ const stmt = (name: string): string => {
   if (!m) { check(`ShareSheet declares \`${name}\``, false, 'declaration not found — the extraction below cannot run'); return `const ${name} = undefined;`; }
   return m[0];
 };
-const LINK = /const LINK = '([^']+)';/.exec(src)?.[1] ?? '';
+// The sheet used to hardcode its own copy of the link AND its own copy of the sentence, and both
+// drifted from lib/share.ts until the OS share text and this sheet said different things. It now
+// imports them, so this check follows the value to its source instead of demanding a literal here —
+// and REQUIRES the import, because a literal reappearing is the drift coming back.
+const importsShared = /import \{[^}]*\bSHARE_LINK\b[^}]*\} from '@\/lib\/share';/.test(src)
+  && /const LINK = SHARE_LINK;/.test(src);
+const literal = /const LINK = '([^']+)';/.exec(src)?.[1] ?? '';
+const shareSrc = readFileSync('src/lib/share.ts', 'utf8');
+const shared = /export const SHARE_LINK = '([^']+)';/.exec(shareSrc)?.[1] ?? '';
+const LINK = importsShared ? shared : literal;
+check('the share LINK comes from lib/share.ts, not a second copy here', importsShared,
+  literal ? `ShareSheet re-declares its own literal: ${literal}` : 'SHARE_LINK import missing');
 check('the share LINK is a real absolute URL', /^https:\/\/\S+$/.test(LINK), LINK || '(missing)');
 
 // name → the intent-URL template literal, exactly as the component writes it.
@@ -65,7 +76,26 @@ check('all four share targets were extracted (WhatsApp / X / Telegram / Mail)',
   targets.length === 4 && ['WhatsApp', 'X', 'Telegram', 'Mail'].every((n) => targets.some(([k]) => k === n)),
   targets.map(([k]) => k).join(', '));
 
+// The sheet's wording now lives in lib/share.ts, so the extracted statements reference imported
+// names. Feed the REAL exported values into the sandbox — extracted from share.ts, never retyped —
+// so this still executes the component's own template literals rather than a paraphrase of them.
+const shareConst = (name: string) => {
+  const m = new RegExp(`export const ${name} = '([\\s\\S]*?)';`).exec(shareSrc)
+    ?? new RegExp(`export const ${name} = \`([\\s\\S]*?)\`;`).exec(shareSrc);
+  if (!m) check(`lib/share.ts exports ${name}`, false, 'not found');
+  return m?.[1] ?? '';
+};
+const AR_LEAD = shareConst('SHARE_LEAD_AR'), EN_LEAD = shareConst('SHARE_LEAD_EN');
+const preamble = [
+  `const SHARE_LINK = ${JSON.stringify(shared)};`,
+  `const SHARE_LEAD_AR = ${JSON.stringify(AR_LEAD.replace(/\\n/g, '\n'))};`,
+  `const SHARE_LEAD_EN = ${JSON.stringify(EN_LEAD.replace(/\\n/g, '\n'))};`,
+  'const SHARE_MESSAGE_AR = `${SHARE_LEAD_AR}\n${SHARE_LINK}`;',
+  'const SHARE_MESSAGE_EN = `${SHARE_LEAD_EN}\n${SHARE_LINK}`;',
+].join('\n');
+
 const body = [
+  preamble,
   stmt('LINK'), stmt('lead'), stmt('msg'),
   stmt('text'), stmt('textNoLink'), stmt('link'), stmt('subject'),
   `return { msg, text, textNoLink, link, urls: { ${targets.map(([n, tpl]) => `${JSON.stringify(n)}: ${tpl}`).join(', ')} } };`,
