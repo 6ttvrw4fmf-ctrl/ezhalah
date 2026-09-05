@@ -198,7 +198,7 @@ const cancelBranch = (src: string) => {
 };
 const backToStartCancels = (src: string) =>
   /if \(stepIndex <= 0\) \{[\s\S]{0,220}?setAgeFlow\(null\);/.test(src)
-  && /\(hasMore \|\| canNarrowFurther\) && !ageFlow/.test(src)
+  && /\(hasMore \|\| canNarrowFurther\)\s*\n\s*&& !afInterviewOwnsBrowsing\(ageFlow\?\.phase \?\? null\)/.test(src)
   && /ageFlowStepsRef\.current = \[\];/.test(cancelBranch(src))
   && /syncGuidedFromSteps\(0\);/.test(cancelBranch(src))
   && !/runRefine|finishGuided|commitGuidedStep/.test(cancelBranch(src));
@@ -329,8 +329,8 @@ mustCatch('the walk-back capturing the PRE-bump token (postfix ++ hands presentG
   !backTokenOk(mut(agentSrc, 'const back = ++ageFlowTokenRef.current;', 'const back = ageFlowTokenRef.current++;')));
 mustCatch('Back-to-start no longer restoring the pre-AF controls',
   !backToStartCancels(mut(agentSrc, /if \(stepIndex <= 0\) \{/, 'if (false) {')));
-mustCatch('the pre-AF CTA row losing its !ageFlow gate',
-  !backToStartCancels(mut(agentSrc, '(hasMore || canNarrowFurther) && !ageFlow', '(hasMore || canNarrowFurther)')));
+mustCatch('the pre-AF CTA row losing its AF-interview gate',
+  !backToStartCancels(mut(agentSrc, '&& !afInterviewOwnsBrowsing(ageFlow?.phase ?? null);', ';')));
 // The round-era defects the original two conditions could not see. `syncGuidedFromSteps(0);` is the
 // one line unique to this branch — anchoring on `ageFlowStepsRef.current = [];` or `setAgeFlow(null);`
 // would land the mutation in startAgeFlow and prove nothing about onAgeBack.

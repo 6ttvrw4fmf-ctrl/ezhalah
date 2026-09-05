@@ -1008,6 +1008,38 @@ migration-drift-guard rule in `AGENTS.md`).
     measured gap (7 certified amenity tokens undrawable, a 6-item cap, and four fields visible only
     on Wasalt-style cards).
 
+21. **If a platform serves users, its `platform_registry` row must be the kind the detectors read.**
+    Every per-platform detector — `mon_detect_silent_scraper_death`, `mon_detect_zero_new_stall`,
+    `mon_detect_stale_active_fraction`, `mon_detect_field_integrity`,
+    `mon_detect_stale_no_remediation_path` and the rest — filters on
+    `status = 'active' AND kind = 'source'`. A row with any other status is not "a quieter platform";
+    it is a platform **no detector evaluates at all**. So the invariant is a set relation, not a
+    habit: *every platform with `production_ready` rows in `search_listings_ar` is in that filter.*
+
+    Recorded because it failed silently (senior production run, 2026-09-05). muktamel sat at
+    `status='dormant'` while serving **523 production_ready listings**, with 28 scrape runs in the
+    preceding 7 days — absent from the silent-scraper-death cohort (37 platforms, muktamel not among
+    them). Its capture could have died and stranded those listings with no P0. The dormant status was
+    the un-landed second half of `20260904151723_muktamel_liveness_policy_paused_is_not_unsearchable`,
+    which settled that "paused" is a CADENCE fact and corrected `ops_liveness_registry` — but left
+    this row stale, with a note still claiming "0 rows ever active".
+
+    **Why the existing guard could not see it:** `mon_detect_registry_orphans` had two limbs and the
+    defect fell between them — limb 1 only inspects rows *already* `active`, limb 2 only fires when a
+    scrape_runs label has *no registry row at all*. A row that exists but excludes itself was a blind
+    spot by construction. Limb 3 (`registry_orphan_unmonitored`, migration `20260905061753`) closes
+    it, derived from production's own searchable set rather than any list, so a platform onboarded
+    tomorrow is covered without anyone remembering.
+
+    **The barrier deliberately does not read that detector.** `ops_searchable_platforms_unmonitored()`
+    (`20260905062027`, anon-executable, returns only platform slugs + counts) computes the invariant
+    independently, and `scripts/verify-searchable-platforms-are-monitored.ts` executes it — so the
+    guard survives limb 3 being rewritten or deleted. It treats a failed fetch as UNKNOWN and fails,
+    never as "no unmonitored platforms": an empty result is the PASS state here, which is exactly the
+    shape the "A FAILED FETCH IS NOT AN EMPTY ANSWER" rule exists to stop. Runs in
+    `.github/workflows/loader-active-platforms-check.yml` (live by necessity; excluded from `npm test`
+    for the reason that file states).
+
 ---
 
 ## 21. Open questions / decisions still pending

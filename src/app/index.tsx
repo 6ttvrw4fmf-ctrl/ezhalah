@@ -5,6 +5,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useThemePalette } from '@/lib/appearance';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
+import { TAP44 } from '@/theme/palette';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
 import { OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
@@ -1002,7 +1003,15 @@ export default function Home() {
           <View ref={setLtr} style={s.top}>
             {!docked ? (
               <View style={s.topLeft}>
-                <Pressable style={s.hamb} hitSlop={8} onPress={() => setSidebarOpen(true)}>
+                <Pressable
+                  style={s.hamb}
+                  hitSlop={8}
+                  // hitSlop is a NO-OP on react-native-web; the 44px floor comes from
+                  // TAP_TARGET_CSS via this marker (ops_incident #17).
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  onPress={() => setSidebarOpen(true)}
+                >
                   <Ionicons name="menu" size={22} color={colors.ink} />
                 </Pressable>
                 <Text ref={noTranslateRef} style={s.topBrand}>{t('Ezhalah')}</Text>
@@ -1013,7 +1022,13 @@ export default function Home() {
                   On desktop the docked sidebar already shows it; on mobile the sidebar is a drawer,
                   so without this the sign-in CTA is invisible until the hamburger is tapped. */}
               {!user && !docked && (
-                <Pressable style={s.topSignIn} onPress={openAuth} hitSlop={6}>
+                <Pressable
+                  style={s.topSignIn}
+                  onPress={openAuth}
+                  hitSlop={6}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                >
                   <Ionicons name="person-outline" size={15} color="#fff" />
                   <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
                 </Pressable>

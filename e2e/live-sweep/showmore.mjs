@@ -197,13 +197,20 @@ export async function showMoreJourney(plan) {
             // open (owner 2026-08-21): the AF card is an absolute overlay and buttons underneath it
             // are unreachable. That is intended product behaviour, not a missing pager.
             afOpen: !!document.querySelector('[data-testid="af-card"]'),
+            // …but ONLY while it still has a question to ask (owner rule 2026-09-05). An AF card
+            // sitting open with NO question is not narrowing and not browsing — it is a stuck
+            // interview holding the pager hostage, which is the removed lifetime cap wearing the
+            // interview's clothes. So the stand-down is conditioned on a real question being on
+            // screen, not on the card merely existing.
+            afAsking: !!document.querySelector('[data-testid="af-question-title"]')
+              && !!document.querySelector('[data-testid="af-confirm"]'),
             loadMoreButtons: document.querySelectorAll('[data-testid="results-load-more"]').length,
             // Does the visible closing sentence still ASK the user to load more?
             promisesMore: /تبي أعرض لك المزيد/.test(txt),
           };
         });
 
-        if (st.afOpen) {
+        if (st.afAsking) {
           // The pager is intentionally absent here — so assert the contract that still applies
           // instead of accusing, and assert it for real: the sentence must not offer a button the
           // interview has removed. This is the defect this journey actually found on 2026-09-05
@@ -211,10 +218,18 @@ export async function showMoreJourney(plan) {
           // elements in the document), fixed in src/data/resultCount.ts + agent.tsx.
           if (st.promisesMore && st.loadMoreButtons === 0) {
             defect(name, 'PROMISE-WITHOUT-BUTTON',
-              `the closing line offers «عرض المزيد» while the Advanced Filter interview is open and zero «عرض المزيد» buttons are rendered (${n} cards, search found ${total0})`);
+              `the closing line offers «عرض المزيد» while the Advanced Filter interview is asking a question and zero «عرض المزيد» buttons are rendered (${n} cards, search found ${total0})`);
           } else {
-            note(`${name}: Advanced Filter interview open — actions row correctly hidden (owner 2026-08-21) and the closing line offers nothing it cannot deliver`);
+            note(`${name}: Advanced Filter interview is asking — actions row correctly hidden (owner 2026-08-21/2026-09-05) and the closing line offers nothing it cannot deliver`);
           }
+        } else if (st.afOpen && num(total0) > n) {
+          // An AF card with NO question on it, while matches remain unreached. The interview is not
+          // narrowing (nothing to answer) and the user cannot browse (row withheld) — a dead end that
+          // the old `afOpen` stand-down would have swallowed silently. `loading` and `mining` are
+          // both transient and latch to closed, so seeing this settled is a real defect, not a race:
+          // settle() has already waited for the card count to stop moving before we get here.
+          defect(name, 'AF-HOLDS-PAGER-WITH-NO-QUESTION',
+            `an Advanced Filter card is open with no question on it while ${n} of ${total0} matches are shown and no «عرض المزيد» is offered — the interview is holding browsing without narrowing`);
         } else if (num(total0) > n) {
           // CONTINUATION CONTRACT (owner 2026-08-29): with no AF interview open, the pager may be
           // absent ONLY when everything matching is already on screen. Anything else is the exact
