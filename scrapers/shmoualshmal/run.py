@@ -42,7 +42,6 @@ from scrapers.common import db, normalize  # noqa: E402
 BASE = "https://shmoua-alshmal.com"
 REST = f"{BASE}/wp-json/wp/v2"
 SOURCE = "Shmou Al Shmal"
-CHECK_TABLES = ["shmoualshmal_residential_listings", "shmoualshmal_commercial_listings"]
 LAST_FETCH_NOTE = ""
 PREFIX = "SHM"
 
@@ -306,7 +305,8 @@ def main() -> int:
             # that looks successful but wrote nothing real. Fail CI on a demotion rather than
             # reporting a silent success (the same check awal makes).
             healthy = db.end_run(run_id, ok=True, rows_seen=n, rows_upserted=n,
-                                 check_tables=CHECK_TABLES)
+                                 check_tables=["shmoualshmal_residential_listings",
+                                               "shmoualshmal_commercial_listings"])
             if not healthy:
                 print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI "
                       "instead of reporting a silent success.", flush=True)
