@@ -50,7 +50,10 @@ CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 # its two tables never left the client scope, and a gated run put 523 production_ready rows into
 # search_listings_ar with 0 ever verified alive and no grace contract. Production re-seeded the
 # registry with it at CRAWL_PRESENCE_ONLY/3/168; this mirror follows production, it does not vote.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "awal", "deal", "common"})
+# awal LEFT this set on 2026-09-04 (migration 20260905023206_awal_un_retired_source_serves_real_listings_again):
+# awaalun.com no longer serves the 2026-07-28 parking-page stub — x-wp-total 128, 128 distinct
+# ad_numbers parsed by the unchanged shipped scraper. Registered at CRAWL_PRESENCE_ONLY/168/3 below.
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common"})
 
 
 class _P(dict):
@@ -114,7 +117,7 @@ POLICIES: dict[str, _P] = {
               "reported as unverified, never as verified-alive.")
         for p in (
             "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "aouj", "aqaratikom",
-            "aqarcity", "aqargate", "aqarmonthly", "arkaan", "eaqartabuk", "eastabha", "erapulse",
+            "aqarcity", "aqargate", "aqarmonthly", "arkaan", "awal", "eaqartabuk", "eastabha", "erapulse",
             "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry",
             "october",
             "raghdan", "ramzalqasim", "rawasidark", "sadin", "sanadak", "satel", "souq24", "therc",

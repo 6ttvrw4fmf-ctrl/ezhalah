@@ -72,6 +72,12 @@
     "grace": 3
   },
   {
+    "platform": "awal",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "dealapp",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 96,
