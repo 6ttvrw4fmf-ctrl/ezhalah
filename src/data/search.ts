@@ -585,7 +585,7 @@ const SOURCE_LABELS: Record<string, string> = {
   hajer: 'Hajer Houses Real Estate', sanadak: 'Sanadak', eastabha: 'East Abha Real Estate', aqarcity: 'Aqar City', raghdan: 'Raghdan Real Estate',
   eaqartabuk: 'Eqar Tabuk', satel: 'Satel', sadin: 'Sadin for Real Estate', toor: 'TOOR', mustqr: 'Mustaqarr Real Estate',
   ramzalqasim: 'Ramz Al Qassim Real Estate Investment', fursaghyr: 'Fursa Ghyr Real Estate', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj Real Estate',
-  muktamel: 'Muktamel', aqaratikom: 'Nawait', awal: 'Awal United for Real Estate', alkhaas: 'Al Khaas',
+  muktamel: 'Muktamel', aqaratikom: 'Nawait', awal: 'Awal United for Real Estate', alta: 'Alta Real Estate Services', shmoualshmal: 'Shmou Al Shmal Real Estate', alkhaas: 'Al Khaas',
   abeea: 'Abeea Real Estate', jurash: 'Jurash Real Estate', alnokhba: 'Al Nokhba', dealapp: 'Deal App',
   erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry Real Estate', october: '1 October Real Estate', gathern: 'Gathern',
 };

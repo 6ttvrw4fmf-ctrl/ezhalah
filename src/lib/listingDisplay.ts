@@ -69,6 +69,11 @@ export function sourceName(source: string): string {
   if (s.includes('mizlaj')) return 'Mizlaj Real Estate';
   if (s.includes('muktamel')) return 'Muktamel';
   if (s.includes('aqaratikom')) return 'Nawait';
+  // 'Shmou Al Shmal' is stored WITH spaces, so this branch matches only through the space-stripped
+  // half of `s` above — the exact mechanism the 2026-09-04 fix added. Verified by
+  // verify-platform-identity-matches-live-source.ts, which feeds it the real stored string.
+  if (s.includes('shmoualshmal')) return 'Shmou Al Shmal Real Estate';
+  if (s.includes('alta')) return 'Alta Real Estate Services';
   if (s.includes('awal')) return 'Awal United for Real Estate';
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
