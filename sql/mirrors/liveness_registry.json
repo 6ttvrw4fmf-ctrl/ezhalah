@@ -30,6 +30,12 @@
     "grace": 3
   },
   {
+    "platform": "alta",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "aouj",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -193,6 +199,12 @@
   },
   {
     "platform": "satel",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "shmoualshmal",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3
