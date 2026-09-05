@@ -25,6 +25,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import { resultsRowIsReady } from '../src/lib/afResultsRowGate.ts';
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const agent = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
 
@@ -40,7 +42,23 @@ check('Typer delegates to runTypewriter (no re-inlined duplicate interval that c
 check('BrandReveal delegates to runTypewriter too (the listings-reply path, not just plain chat replies)', /function BrandReveal\(\{ brand, text, onDone \}[\s\S]{0,300}?return runTypewriter\(full\.length, setN, onDone\);/.test(agent));
 // 2026-08-30: the gate's second clause now falls back to initialReveal(m.result) (a ≤INTERVIEW_STOP_AT set renders
 // in full — src/lib/initialReveal.ts). The invariant pinned here is the FIRST clause: still gated on doneTyping[m.id].
-check('the closing block (AF button / Load more / feedback row / Read Aloud) is still gated on doneTyping — this fix guarantees that gate resolves promptly, it does not remove the gate', /if \(\(m\.typing && !doneTyping\[m\.id\]\) \|\| shown < initialReveal\(m\.result\)\) return null;/.test(agent));
+//
+// 2026-09-05 (ops_incident #66): the gate moved into the pure predicate resultsRowIsReady(), because
+// its SECOND clause could strand a user forever when a card cascade halted below its reveal target —
+// the closing block holds «عرض المزيد», so waiting on a cascade that had already stopped withheld the
+// only control that could reach the rest of the set.
+//
+// This check used to pin the gate's exact source LINE, so it failed on that refactor even though the
+// invariant it names — "still gated on doneTyping" — was fully preserved. A pin that matches text
+// rather than meaning is the shape AGENTS.md calls this repo's most expensive recurring failure, and
+// it was pinning an implementation detail one clause away from a live defect. It now asserts the
+// invariant TWO ways: the source still feeds `doneTyping` into the decision, and the decision itself
+// is EXECUTED and observed to withhold while typing. A future edit that drops the typing gate fails
+// the second assertion even if it keeps the first one's wording.
+check('the closing block (AF button / Load more / feedback row / Read Aloud) is still gated on doneTyping — this fix guarantees that gate resolves promptly, it does not remove the gate',
+  /introStillTyping:\s*!!\(m\.typing && !doneTyping\[m\.id\]\)/.test(agent)
+  && /resultsRowIsReady\(\{/.test(agent)
+  && !resultsRowIsReady({ introStillTyping: true, shown: 999, initialReveal: 1, cascadeStarted: true, cascadeRunningForThisTurn: false }));
 
 // ── EXECUTED: a faithful pure replica of runTypewriter, driven by an injectable fake clock (owner
 //    2026-08-23) — no real timers, so this runs instantly regardless of the ceiling being tested.

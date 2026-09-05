@@ -59,6 +59,7 @@ import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
 import { BROWSE_BATCH, nextBatchTarget, resultCounts, closingNoteKey } from '@/data/resultCount';
 import { afInterviewOwnsBrowsing } from '@/lib/afBrowsingGate';
+import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
@@ -3206,7 +3207,24 @@ export default function Agent() {
                         // min(FIRST_PAGE, fetched): a search with <10 matches still gets its closing message.
                         // ALSO gates FeedbackRow/Read Aloud below (merged into one block, owner 2026-08-23 — the
                         // spoken closing note must reuse this SAME computed text, never re-derive it separately).
-                        if ((m.typing && !doneTyping[m.id]) || shown < initialReveal(m.result)) return null;
+                        //
+                        // A HALTED CASCADE MUST NOT STRAND THE USER (ops_incident #66, 2026-09-05). The second
+                        // clause used to be a bare `shown < initialReveal(m.result)`, which waits for a cascade
+                        // that is not guaranteed to arrive: dripRange()'s ownership guard stops a drip SILENTLY
+                        // when a newer turn takes the shared active-ref, and its own comment offers «عرض المزيد»
+                        // as the way back — a control rendered INSIDE this very block. Measured on production:
+                        // after one AF answer the 6,723-match turn rendered NO closing note at all (the block
+                        // returned null) while the older 11,161 turn still showed its own, and
+                        // `[data-testid="results-load-more"]` matched zero elements anywhere. 20 cards, no way
+                        // to reach the other 6,703. The decision now lives in one pure, exhaustively-tested
+                        // predicate that withholds only while THIS turn's cascade is genuinely still running.
+                        if (!resultsRowIsReady({
+                          introStillTyping: !!(m.typing && !doneTyping[m.id]),
+                          shown,
+                          initialReveal: initialReveal(m.result),
+                          cascadeStarted: !!dripStartedRef.current[m.id],
+                          cascadeRunningForThisTurn: revealing && revealActiveRef.current?.id === m.id,
+                        })) return null;
                         // BROWSE-CONTINUATION RULE (owner 2026-08-29, supersedes the 2026-08-20 cap) — the
                         // "load more" gate and the closing count come from ONE pure function
                         // (src/data/resultCount.ts), so they can never disagree and one test locks them. The
