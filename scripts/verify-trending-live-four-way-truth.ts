@@ -309,7 +309,27 @@ async function runJourney(j: Journey) {
     // ── run the search and close the chain against independent DB truth ─────────────────────────
     await page.keyboard.press('Escape').catch(() => {});
     await tap('بحث');
-    await page.waitForTimeout(14000);
+    // 14s was a guess about a good day, and a guess is a RACE with a nicer name. The search that
+    // follows «بحث» is a real RPC plus per-platform hydration plus paint, against a database whose
+    // measured mean reached 5,109ms under fleet load — so on a bad day the read below lands on a
+    // half-painted screen, and on a good day 14s is 12s of dead time in every cohort. Wait for the
+    // headline to ARRIVE AND STOP MOVING instead: neutral, because it is not the thing asserted.
+    // The assertion is that the number EQUALS the RPC's total_count, and a wrong number is just as
+    // stable as a right one — so a real product mismatch still settles here and still fails below.
+    let prevHeadline: number | null = null;
+    const READ_HEADLINE = () => {
+      const m = document.body.innerText.match(/لقينا\s*([\d,٬]+)\s*إعلان/);
+      return m ? m[1] : null;
+    };
+    await settleUntil(
+      async () => {
+        const raw = await page.evaluate(READ_HEADLINE);
+        const cur = raw ? parseInt(raw.replace(/[^\d]/g, ''), 10) : null;
+        const stable = !!lastSearch && cur != null && cur === prevHeadline;
+        prevHeadline = cur;
+        return stable;
+      },
+      (v) => v, AGENT_TURN_MS, (ms) => page.waitForTimeout(ms), 1000);
 
     check(`${name}: the search request was captured after click-through`, !!lastSearch);
     if (lastSearch) {

@@ -209,6 +209,57 @@ try {
     req.p_price_min_rent == null && req.p_price_max_rent == null,
     `p_price_min_rent=${JSON.stringify(req.p_price_min_rent)} p_price_max_rent=${JSON.stringify(req.p_price_max_rent)}`);
 
+  // THE RESULTS ARE NOT THE REQUEST, AND `landed` ONLY PROVED THE REQUEST. settleUntil above returns
+  // the moment «بحث» produces a POST to location_search_candidates_ar — which is the FIRST thing that
+  // happens, not the last. The rows come back afterwards in the per-platform hydration GETs, and the
+  // cards paint after that. Reading `hydrated` and the DOM straight after the request is therefore a
+  // RACE, and on production it loses: measured 2026-09-04 driving this exact flow by hand, the search
+  // answers «لقينا 28,846 إعلان», hydrates 9,421 rows and paints «/سنوياً» and «/شهرياً» cards — while
+  // this journey, reading immediately, saw `0 row(s) hydrated` and `0 «/سنوياً» + 0 «/شهرياً»` and
+  // reported production as carrying the pre-2026-09-02 rent-deletion defect. It was reading an empty
+  // screen. Byte-identical failures reproduced with production INSIDE its own envelope (909 ms,
+  // 1.53 q/s, degraded=false), so this was never latency — the wait was simply for the wrong event.
+  //
+  // WAIT FOR "THE RESULTS ARRIVED", NEVER FOR "THE THING I AM ABOUT TO ASSERT". Waiting until rent
+  // rows appear would make a genuine rent-deletion regression — the exact defect this journey exists
+  // to catch — never settle, and it would then be filed as a non-arrival instead of the red it is.
+  // So the readiness condition is deliberately neutral: any rows hydrated, and any price on screen.
+  // A product that deletes rent rows still hydrates Buy rows and still paints prices, so it settles
+  // here and fails the rent assertions below, exactly as it must.
+  // QUIESCENCE, not first-sight. "Some price is on screen" settles on the FIRST card to paint, which
+  // is a Buy card far more often than a rent one — the RPC returns 28,846 rows for this cohort and
+  // the rent ones are a minority arriving across several per-platform hydration GETs. Settling there
+  // reproduced the same false red on two of the three assertions. The honest readiness signal is that
+  // the results STOPPED ARRIVING: rows hydrated and prices painted, both unchanged across consecutive
+  // polls. Still neutral — a build that deletes rent rows quiesces on its Buy cards just the same and
+  // fails the rent assertion below, which is the whole point of the journey.
+  let prev = { rows: -1, sar: -1 };
+  const results = await settleUntil(
+    async () => {
+      const now = {
+        rows: hydrated.length,
+        sar: await page.evaluate(() => (document.body.innerText.match(/ر\.?س|SAR/g) || []).length),
+      };
+      const stable = now.rows > 0 && now.sar > 0 && now.rows === prev.rows && now.sar === prev.sar;
+      prev = now;
+      return { ...now, stable };
+    },
+    (v) => v.stable,
+    AGENT_TURN_MS, (ms) => page.waitForTimeout(ms), 1000);
+  if (!results.settled) {
+    for (const [label, detail] of [
+      ['the backend handed the app rent rows (otherwise step 5 could pass vacuously)',
+        `${results.value.rows} row(s) hydrated`],
+      [`...and some are priced BELOW the ${BUY_FLOOR.toLocaleString('en-US')} Buy floor — exactly what the old code deleted`,
+        'no results arrived, so none could be priced'],
+      ['RENT cards are on screen — the Buy floor did not delete them',
+        `no results arrived within ${AGENT_TURN_MS}ms of the committed search (price-bearing text nodes: ${results.value.sar})`],
+    ] as const) {
+      await unobserved(label, detail);
+    }
+    throw new Error(`${UNOBSERVED_ABORT} the committed search produced no rendered results within ${AGENT_TURN_MS}ms`);
+  }
+
   const rentRows = hydrated.filter((r: any) => r.transaction_type === 'Rent');
   const cheapRent = rentRows.filter((r: any) => Number(r.price_annual) > 0 && Number(r.price_annual) < BUY_FLOOR);
   check('the backend handed the app rent rows (otherwise step 5 could pass vacuously)',

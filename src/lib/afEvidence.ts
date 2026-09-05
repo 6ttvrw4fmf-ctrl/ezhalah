@@ -31,7 +31,7 @@
 // cohortAllows() gates on). The barrier derives that set by execution and fails on any certified
 // question without a def here, and on any AF_PREDICATE_FIELDS member not owned by exactly one def.
 import type { SearchQuery } from '@/data/search';
-import { AF_PREDICATE_FIELDS } from './searchDefaults.ts';
+import { AF_PREDICATE_FIELDS, RNPL_TOKENS } from './searchDefaults.ts';
 
 type AfField = (typeof AF_PREDICATE_FIELDS)[number];
 export type T = (en: string, vars?: Record<string, string | number>) => string;
@@ -139,7 +139,7 @@ function ageText(v: number, t: T): string {
 export const AF_EVIDENCE: Record<string, EvidenceDef> = {
   rnpl: {
     fields: ['amenities'],
-    active: (q) => (q.amenities?.includes('rnpl') ? ['rnpl'] : null),
+    active: (q) => (q.amenities?.some((x) => RNPL_TOKENS.includes(x)) ? ['rnpl'] : null),
     reads: () => ['rent_now_pay_later'],
     ok: (_k, r) => r.rent_now_pay_later === true,
     chips: (_k, _r, t) => [t('Offers installments')],
@@ -153,7 +153,7 @@ export const AF_EVIDENCE: Record<string, EvidenceDef> = {
   },
   amenities: {
     fields: ['amenities'],
-    active: (q) => { const k = (q.amenities ?? []).filter((x) => x !== 'rnpl'); return k.length ? k : null; },
+    active: (q) => { const k = (q.amenities ?? []).filter((x) => !RNPL_TOKENS.includes(x)); return k.length ? k : null; },
     reads: (k) => k.map((x) => AMENITY_COL[x] ?? `__unknown_amenity__${x}`),
     ok: (k, r) => k.every((x) => r[AMENITY_COL[x]] === true),           // AND — every token must hold
     // R12A.5 is enforced STATICALLY by scripts/verify-af-card-evidence.ts (T5), which fails CI if any

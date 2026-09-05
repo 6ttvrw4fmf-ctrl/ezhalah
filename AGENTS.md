@@ -445,7 +445,14 @@ Three rules keep that safe, all enforced by `scripts/verify-test-registry-comple
    naming the moved script and its new home: PR #1527 moved `verify-af-independent-oracle.ts` out of
    the required `npm test` into `af-live-truth-check.yml` and took the floor 200 → 199 for good
    reasons, but its body never mentioned it, so the one fact a reviewer most needed was reachable
-   only by diffing three files.
+   only by diffing three files. **A relocation owes the PR its coverage back.** #1527's new home has
+   no `pull_request` trigger, so the oracle gated nothing at review time for two days; the repair was
+   not to rewrite the ledger line but to give that one script its own 8-second PR workflow
+   (`.github/workflows/af-oracle-pr-check.yml` — live, but outside the hermetic required suite, no
+   secrets so forks run it, retried 3× so a production blip cannot fail an unrelated PR). The floor
+   stays 199 because the baseline measures what `npm test` RUNS. A departure claiming `NO LOSS` is
+   now EXECUTED, not believed: `verify-test-registry-complete.ts` opens the home it names and fails
+   unless that workflow really has a `pull_request` trigger and really invokes the script.
 2. **Every exclusion names a reason AND a home that exists.** `scripts/test-exclusions.txt` is
    `name | where it DOES run | why`, and the "where" must be a workflow file that exists, an npm
    script that exists, or an explicit `manual`. Live/browser checks that need production belong
