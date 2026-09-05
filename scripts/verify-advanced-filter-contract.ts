@@ -44,7 +44,7 @@ check('the pool contains all five questions and rankQuestions re-ranks it contex
   // INTERVIEW_STOP_AT/MIN_TOTAL_TO_SHOW moved to afRanking.ts (2026-08-22, pure-module extraction);
   // advancedFilters.ts still re-exports them (checked separately below) so every existing importer
   // is unaffected.
-  && /INTERVIEW_STOP_AT = 25/.test(rankingSrc)
+  && /INTERVIEW_STOP_AT = 50/.test(rankingSrc)   // owner product rule 2026-09-04 (was 25)
   && /MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT \+ 1/.test(rankingSrc)
   && /INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW/.test(advSrc));
 // MECHANISM CHANGE (owner 2026-08-22, «رجوع»): asked-tracking is no longer an incremental
@@ -78,7 +78,7 @@ check('installments is ask-first via a TIER applied in the sort, never by bypass
 // pure implementation OR in advancedFilters.ts's thin wrapper.
 check('scoreQuestion gates on scope size and the shared narrowing predicate, not selectivity',
   /if \(N < MIN_TOTAL_TO_SHOW\) return null;/.test(rankingSrc)
-  && /const narrowing = result\.options\.filter\(\(o\) => optionNarrowsMeaningfully\(o\.count, N\)\);/.test(rankingSrc)
+  && /const narrowing = result\.options\.filter\(\(o\) => o\.count != null && optionNarrowsMeaningfully\(o\.count, N\)\);/.test(rankingSrc)   // an UNKNOWN count is skipped, never scored (2026-09-04)
   && /if \(narrowing\.length < minOptionsFor\(selection\)\) return null;/.test(rankingSrc)
   && !/Math\.max\(15, Math\.ceil\(0\.08 \* N\)\)/.test(rankingSrc)
   && !/o\.count <= 0\.9 \* N/.test(rankingSrc)
@@ -323,20 +323,28 @@ check('the result-intro count comes from matchTotal via quotableTotal(), never a
     /priceIsAnnual \|\| hasClientOnlyNarrowing\(r\.query\)\)\) return null/.test(fn));
 }
 
-// ── Mining transition (owner 2026-08-16 §9) ─────────────────────────────────────────────────────
-// The «digging through the market» beat is DECORATION: its dismissal is driven by plain setTimeout
-// latches in finishGuided (never an animation callback — src/lib/afterAnimation.ts's rule), it uses
-// the REAL from/to counts, and a hard failsafe dismisses it even if the search turn dies.
+// ── Deep-search transition (owner 2026-08-16 §9, redesigned 2026-08-31) ─────────────────────────
+// The deep-search beat is DECORATION: its dismissal is driven by plain setTimeout latches in
+// finishGuided (never an animation callback — src/lib/afterAnimation.ts's rule), a hard failsafe
+// dismisses it even if the search turn dies, and per the 2026-08-31 redesign it carries NO success
+// beat: the «لقينا N عقار أقرب لطلبك» claim is GONE (the overlay hands off directly to the results),
+// the headline is the dynamic «إزهله يدقّق في …» sentence built from the user's OWN committed
+// selections (src/lib/afDeepSearchCopy.ts), and the only number spoken is the honest from-count.
 const miningSrc = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
-check('mining dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
+check('deep-search dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
   /phase: 'mining'/.test(agentSrc)
   && /timers\.push\(setTimeout\(/.test(agentSrc)
   && /15000/.test(agentSrc)
   && !/\.start\(\s*\(/.test(miningSrc));
-check('mining shows real numbers and respects reduced motion',
+check('deep-search speaks the user\'s selections, claims no completion count, respects reduced motion',
   /Going through \{count\} properties/.test(miningSrc)
-  && /We found \{count\} properties closest to your request/.test(miningSrc)
+  && /deepSearchLine\(/.test(miningSrc)
+  && !/We found \{count\} properties closest to your request/.test(miningSrc)
   && /useReducedMotion/.test(miningSrc));
+check('the overlay sentence and the results pills are fed by the SAME deduped facet set',
+  /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
+  && /labels: dedupedFacets\.flatMap\(\(f\) => f\.labels\)/.test(agentSrc)
+  && /facets: dedupedFacets,/.test(agentSrc));
 
 // ── Results summary + removable pills (owner 2026-08-16 §10) ────────────────────────────────────
 // Removal is PURE recomputation — rebuild from the interview's baseQ by re-applying the remaining

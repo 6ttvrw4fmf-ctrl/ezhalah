@@ -112,8 +112,13 @@ check('the results headline quotes the SAME helper as the overlay',
   'two surfaces describing one search must not compute the total two different ways');
 
 const mining = strip(readFileSync(new URL('../src/components/MiningTransition.tsx', import.meta.url), 'utf8'));
-check('MiningTransition states only the count it is handed (no local fallback to invent one)',
-  /\{ count: grouped\(to\) \}/.test(mining) && !/listings|matchTotal|1500/.test(mining));
+// 2026-08-31 redesign: the overlay claims NO completion count at all (the «لقينا N» beat is gone —
+// even stronger than "only the handed count"); the sole number it may speak is the handed
+// from-count, and it still has no path to a locally-invented total.
+check('MiningTransition claims no completion count and cannot invent one locally',
+  !/grouped\(to\)/.test(mining)
+  && /\{ count: grouped\(from\) \}/.test(mining)
+  && !/listings|matchTotal|1500/.test(mining));
 
 // ── D. MUTATION PROOF (self-checking) ────────────────────────────────────────────────────────────
 // The removed bug, restored in miniature: quoting `total` instead of `matchTotal`. If this ever

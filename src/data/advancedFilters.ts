@@ -2,6 +2,8 @@ import type { SearchQuery } from './search';
 import { hasClientOnlyNarrowing } from './search';
 import { isProbeFailure } from '@/lib/afProbe';
 import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, fetchScopeOptionCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
+import { scopeOptionsFromCounts, SCOPE_TOTAL_KEY } from '@/lib/afScopeOptions';
+export { scopeOptionsFromCounts };
 import {
   SCOPE_GROUP_ID, SCOPE_TYPE_ID, scopeCandidates, applyScopeAnswer, unresolvedScopeTiers, type ScopeTier,
 } from '@/lib/afPlan';
@@ -484,7 +486,7 @@ export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
 // A zero-count option is dropped: it is a dead end that would promise results it cannot deliver.
 // NO other usefulness floor is applied, so a genuinely small branch (4 listings) is still offered —
 // hiding it would be the silent amputation of a real part of the tree.
-const SCOPE_TOTAL_KEY = '__scope_total__';
+// scopeOptionsFromCounts + SCOPE_TOTAL_KEY live in @/lib/afScopeOptions (pure, barrier-executable).
 
 async function scopeQuestionOptions(tier: ScopeTier, q: SearchQuery): Promise<AdvancedQuestionResult> {
   const keys = scopeCandidates(tier, q);
@@ -494,24 +496,7 @@ async function scopeQuestionOptions(tier: ScopeTier, q: SearchQuery): Promise<Ad
     { key: SCOPE_TOTAL_KEY, query: q },
     ...keys.map((key) => ({ key, query: applyScopeAnswer(tier, q, [key]) })),
   ]);
-  const options = keys
-    .filter((key) => (counts?.[key] ?? 0) > 0)
-    .map((key) => ({ key, label: t(key), count: counts![key] }));
-  const offered = options.reduce((n, o) => n + o.count, 0);
-  const total = counts?.[SCOPE_TOTAL_KEY] ?? offered;
-  // THE OPTIONS DO NOT ALWAYS SUM TO THE SCOPE, and that gap is honest rather than a rounding error:
-  // a listing whose source type is «غير معروف» is real, searchable, and counted in the scope, but it
-  // belongs to no taxonomy group — filing it under one would be inventing a type it does not have
-  // (SOURCE IS TRUTH). Measured live 2026-08-23: Riyadh / Rent / annual / سكني = 21,681 with 21,679
-  // across the four groups; the 2 are literally typed «غير معروف». Skipping the step keeps every one
-  // of them, which is precisely what "I'm open" has to mean.
-  //
-  // The remainder is reported as `unknownCount` because that is what the field MEANS. Note the shared
-  // card currently ignores it (`unknownCount: _unknownCount` — the per-question caption was replaced
-  // by one generic line), so this renders nothing today; it is carried as correct data, not as a
-  // promise of UI. Re-introducing a caption would change the card for EVERY question and is a
-  // design-contract §1 decision, not a change to make from inside one question.
-  return { options, unknownCount: Math.max(0, total - offered), total };
+  return scopeOptionsFromCounts(keys, counts, (key) => t(key));
 }
 
 const GROUP_QUESTION: AdvancedQuestion = {

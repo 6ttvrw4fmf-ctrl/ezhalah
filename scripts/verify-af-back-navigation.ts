@@ -144,8 +144,8 @@ check('the tap log is cleared when the question changes (no cross-question doubl
 // ── 9. the card: «رجوع» exists and is restorable ────────────────────────────────────────────────
 check('«رجوع» renders on the question card with a stable testID and rides onBack',
   /testID="af-back"/.test(cardSrc) && /onPress=\{onBack\}/.test(cardSrc) && /t\('Back'\)/.test(cardSrc));
-check('the card restores the recorded answer instead of clearing on every question change',
-  /setSel\(initialKeys \?\? \[\]\)/.test(cardSrc) && !/^\s*setSel\(\[\]\);$/m.test(cardSrc));
+check('the card restores the recorded answer instead of clearing on every question change (filtered to keys on THIS card — 2026-09-04 stale-state fix)',
+  /setSel\(\(initialKeys \?\? \[\]\)\.filter\(\(k\) => onCard\.has\(k\)\)\);/.test(cardSrc) && !/^\s*setSel\(\[\]\);$/m.test(cardSrc));
 
 // ── 10. the orchestrator: cursor, restoration, revalidation, back-to-start ──────────────────────
 // onAgeBack is read SEMANTICALLY, not as a literal line: the walk-back is the part of the handler
@@ -221,9 +221,10 @@ check('re-validation keeps a skip, and drops only ineligible or zero-yield later
   && !/if \(n == null \|\| n <= 0\) continue;/.test(agentSrc));
 // Count honesty applies to the option pills too: a step re-shown after an EARLIER answer changed
 // would otherwise display the counts captured under the old scope.
-check('a re-presented question re-resolves its option counts against the CURRENT scope',
+check('a re-presented question re-resolves its option counts against the CURRENT scope (and prefers the fresh answer whenever the probe ANSWERED — 2026-09-04)',
   /fresh = await st\.question\.resolveOptions\(q0\)/.test(agentSrc)
-  && /const options = fresh\?\.options\.length \? fresh\.options : st\.options;/.test(agentSrc));
+  && /const answered = !!fresh && !fresh\.probeFailed;/.test(agentSrc)
+  && /const options = answered \? fresh!\.options : st\.options;/.test(agentSrc));
 // Found live on production 2026-08-22: with the auto-advance gone, a user could sit on a SELECTED
 // but uncommitted option and leave via «عرض النتائج», which ran finishGuided directly and discarded
 // the visible answer (10,945 delivered against a chip reading 2,488). The fix routed every exit
@@ -316,7 +317,8 @@ mustCatch('a rival double-click handler being added',
 mustCatch('«رجوع» losing its testID',
   !/testID="af-back"/.test(mut(cardSrc, 'testID="af-back"', '')));
 mustCatch('the card going back to clearing the selection on every question',
-  !/setSel\(initialKeys \?\? \[\]\)/.test(mut(cardSrc, 'setSel(initialKeys ?? [])', 'setSel([])')));
+  !/setSel\(\(initialKeys \?\? \[\]\)\.filter\(\(k\) => onCard\.has\(k\)\)\);/.test(
+    mut(cardSrc, 'setSel((initialKeys ?? []).filter((k) => onCard.has(k)));', 'setSel([]);')));
 mustCatch('Back walking the cursor somewhere other than exactly one question back',
   backCursors(mut(agentSrc, 'presentGuided(stepIndex - 1, back)', 'presentGuided(stepIndex, back)'))[0] !== 'stepIndex - 1');
 mustCatch('Back skipping two questions at once',

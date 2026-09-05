@@ -856,6 +856,9 @@ export default function Agent() {
   // delay also clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s), so the
   // first move already reads the settled height of the thing being landed on.
   const LAND_PASSES_MS = [1400, 3200];
+  // Beat between a round's count landing and the NEXT round's card opening (owner 2026-09-04): long
+  // enough to read «لقينا N عقار أقرب لطلبك», short enough that the interview reads as one flow.
+  const AF_NEXT_ROUND_DELAY_MS = 900;
   const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
@@ -887,10 +890,13 @@ export default function Agent() {
     // the intro's «عرض النتائج» link was removed by the owner 2026-08-28, same day as the footer's.
     | { phase: 'intro'; total: number | null }
     | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; initialKeys: string[]; progressCur: number; progressTotal: number }
-    // The «digging through the market» beat (owner 2026-08-16): shown once after the interview
-    // finishes while the final search runs behind it. Dismissal is driven by plain setTimeout
-    // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
-    | { phase: 'mining'; from: number | null; to: number | null }
+    // The DEEP-SEARCH beat (owner redesign 2026-08-31, supersedes the 2026-08-16 «digging» card):
+    // shown once after the interview finishes while the final search runs behind it. `labels` +
+    // `type` feed the dynamic «إزهله يدقّق في …» sentence and the criteria chips (the user's OWN
+    // committed selections — deduped carry included); there is no success beat and no count claim
+    // on completion — the overlay hands off directly to the results. Dismissal is driven by plain
+    // setTimeout latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts).
+    | { phase: 'mining'; from: number | null; to: number | null; labels: string[]; type: string | null }
     | null
   >(null);
   // The query accumulates answers as the flow advances; `token` supersedes a stale async fetch when a
@@ -1565,6 +1571,40 @@ export default function Agent() {
   // It probes with the SAME rankQuestions call and the SAME carried asked-set the round itself will
   // use, so the offer and the round can never disagree. This is PASSIVE: it renders a button and
   // nothing else — it never opens the overlay. The interview stays a manual tap (owner 2026-08-19).
+  const noMoreSaidRef = useRef<Record<string, true>>({});
+  // ONE ASSESSMENT, TWO CALLERS (owner 2026-09-04). Walks the scope tiers exactly as presentGuided
+  // does, then ranks the advanced pool with the SAME carried asked-set the round will use, so the
+  // offer button, the automatic round continuation and the round itself can never disagree.
+  //   'yes'     a truthful, certified, unasked question exists for this scope → a round can follow
+  //   'no'      MEASURED: nothing certified remains that narrows (never invented — R5 exhaustion)
+  //   'unknown' a count could not be determined even after one bounded retry — no verdict earned
+  const assessNarrowing = async (q0: SearchQuery, asked: Iterable<string>): Promise<'yes' | 'no' | 'unknown'> => {
+    let scoped = q0;
+    const seen = new Set<string>(asked);
+    for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
+      let res: AdvancedQuestionResult | null = null;
+      try { res = await scopeQuestionFor(tier).resolveOptions(scoped); } catch { res = null; }
+      // UNKNOWN MUST NOT HARDEN INTO NO. A turn showing more than INTERVIEW_STOP_AT matches cannot
+      // truthfully have an empty scope, so a failed/timed-out tier count is not a fact.
+      if (!res || res.probeFailed) return 'unknown';
+      if (res.options.length > 1) return 'yes';              // a real scope question follows
+      seen.add(tier);                                        // resolved (auto-commit or open skip) —
+      if (res.options.length === 1)                          // never re-asked, same as the walk
+        scoped = scopeQuestionFor(tier).apply(scoped, [res.options[0].key]);
+    }
+    // An empty POOL is certain — no RPC was even issued — and is the common "nothing left" case.
+    if (!eligibleQuestions(scoped).some((qq) => !seen.has(qq.id))) return 'no';
+    // Bounded single retry on an undetermined batch (never a poll), per src/lib/afProbe.ts.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let ranked: Awaited<ReturnType<typeof rankQuestions>> | null = null;
+      try { ranked = await rankQuestions(scoped, seen); } catch { ranked = null; }
+      if (ranked && ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options))) return 'yes';
+      if (ranked && !ranked.probeFailed) return 'no';         // every probe ANSWERED: nothing narrows
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 2500));
+    }
+    return 'unknown';
+  };
+
   const afProbedRef = useRef<Record<string, true>>({});
   useEffect(() => {
     const m = lastResultsMsg;
@@ -1576,66 +1616,19 @@ export default function Agent() {
     const probeKey = `${m.id}|${[...asked].sort().join(',')}`;               // a later carry re-probes
     if (afProbedRef.current[probeKey]) return;
     afProbedRef.current[probeKey] = true;
-    // An unresolved CATEGORY→GROUP→TYPE tier is itself a real narrowing step, and it is what unlocks
-    // the advanced pool at all (afPlan.ts) — ranking that pool now would score it against a scope the
-    // user has not picked yet and come back empty by construction. ASK THE SAME QUESTION THE WALK
-    // ASKS (review 2026-08-25): nextScopeTier, not `unresolvedScopeTiers(q).length`. A tier the user
-    // SKIPPED stays unresolved forever while being permanently un-re-askable, so the raw-length test
-    // promised a round whose scope walk falls straight through — a button that opened and closed.
-    // …AND WALK THAT TIER, DON'T ASSUME IT (fix 2026-08-25). `nextScopeTier` returning a tier used to
-    // short-circuit straight to `true`, which is not the same question the walk asks: presentGuided
-    // AUTO-COMMITS a tier that resolves to ≤1 option (one option is not a choice — it is the scope the
-    // user already has) and moves DOWN, so a tier existing proves nothing about a round following it.
-    // REPRODUCED live 2026-08-25 — الطائف / إيجار / شهري / «الاستراحات والريف», 43 matches: the group's
-    // five member types have exactly ONE populated here (شاليه), the type tier auto-committed it, and
-    // Chalet certifies no monthly cohort, so the round asked ZERO questions and closed. The user tapped
-    // «خلّنا نحدد الطلب أكثر», was never asked anything, and got a duplicate 43-result turn plus a
-    // receipt reading «اختياراتك: شاليه» — a choice they never made.
-    //
-    // So the probe now walks the tiers exactly as presentGuided does — resolve, auto-commit a ≤1-option
-    // tier onto a LOCAL copy of the query, move on — and only offers when it finds a tier that is a real
-    // question, or when the RESOLVED scope's advanced pool has something to ask. Cost is bounded and is
-    // the same work the tap itself would do a moment later: at most two tier resolutions per turn, and
-    // the common case (a tier with a real choice) exits after the first one. Still ONE probe per turn,
-    // still passive — it renders a button and never opens the overlay (owner 2026-08-19).
-    void (async () => {
-      const offer = (ok: boolean) => {
-        setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
-        // R11.2: an AF round was committed (afCarryRef) and NO remaining question can narrow — done.
-        if (!ok && afCarryRef.current) setCompleted(true);
-      };
-      let scoped = q;
-      const seen = new Set<string>(asked);
-      for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
-        let res: AdvancedQuestionResult | null = null;
-        try { res = await scopeQuestionFor(tier).resolveOptions(scoped); } catch { res = null; }
-        // UNKNOWN MUST NOT HARDEN INTO NO. A turn showing more than INTERVIEW_STOP_AT matches cannot
-        // truthfully have an empty scope, so `total === 0` here is a failed/timed-out count RPC, not a
-        // fact — keep offering, exactly as this line did before the fix. Only a MEASURED tier may hide
-        // the button.
-        if (!res || res.total === 0) { offer(true); return; }
-        if (res.options.length > 1) { offer(true); return; }   // a real scope question follows the tap
-        seen.add(tier);                                        // resolved (auto-commit or open skip) —
-        if (res.options.length === 1)                          // never re-asked, same as the walk
-          scoped = scopeQuestionFor(tier).apply(scoped, [res.options[0].key]);
+    // PASSIVE: renders the «تحديد أكثر» button and nothing else. Automatic continuation of an
+    // interview the user already opened lives in finishGuided (owner 2026-09-04) — this effect
+    // never opens the overlay on a plain search turn (owner 2026-08-19 stands).
+    void assessNarrowing(q, asked).then((verdict) => {
+      setAfCanNarrow((c) => ({ ...c, [m.id]: verdict === 'yes' }));
+      // A MEASURED "nothing left" after an AF round is said out loud, not silently swallowed
+      // (owner 2026-09-04): the chat stays open — the user may still refine by typing — and the
+      // results shown are the genuine set. ≤ INTERVIEW_STOP_AT is handled in finishGuided.
+      if (verdict === 'no' && afCarryRef.current && !noMoreSaidRef.current[m.id]) {
+        noMoreSaidRef.current[m.id] = true;
+        setMsgs((mm) => [...mm, { id: uid(), role: 'agent', text: t('No further truthful narrowing question exists for this scope — these are all the genuine matches.'), typing: true }]);
       }
-      // UNKNOWN MUST NOT HARDEN INTO NO (permanent fleet rule). A count RPC that times out resolves to
-      // an EMPTY option set (remote.ts withTimeout → null → `{ options: [], total: 0 }`), which
-      // scoreQuestion then drops — so a 4s blip is indistinguishable from an honest "nothing narrows",
-      // and caching that verdict hid «تحديد أكثر» on this turn for the rest of the chat. An empty rank
-      // while questions REMAIN eligible is therefore treated as unknown and re-probed exactly once
-      // (bounded: never a poll). An empty POOL is certain — no RPC was even issued — and settles first
-      // pass, which is the common "nothing left to ask" case, so this costs nothing there.
-      const poolLeft = eligibleQuestions(scoped).filter((qq) => !seen.has(qq.id)).length;
-      const probe = (attempt: number) => void rankQuestions(scoped, seen)
-        .then((ranked) => {
-          const ok = ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options));
-          if (!ok && !ranked.length && poolLeft && attempt === 0) { setTimeout(() => probe(1), 2500); return; }
-          offer(ok);
-        })
-        .catch(() => { if (attempt === 0) setTimeout(() => probe(1), 2500); });   // stays unknown ⇒ hidden
-      probe(0);
-    })();
+    });
   }, [lastResultsMsg, guidedPills]);
 
   // Run a refine answer (tapped chip OR typed reply): echo `label` as the user's bubble, merge the one
@@ -1751,9 +1744,16 @@ export default function Agent() {
         try { fresh = await st.question.resolveOptions(q0); } catch { fresh = null; }
         if (ageFlowTokenRef.current !== token) return;
       }
-      const options = fresh?.options.length ? fresh.options : st.options;
-      const unknownCount = fresh?.options.length ? fresh.unknownCount : st.unknownCount;
-      const total = fresh?.options.length ? fresh.total : st.total;
+      // Prefer the FRESH resolution whenever the probe ANSWERED (owner 2026-09-04, stale-state fix):
+      // the recorded options were resolved for the scope this step was FIRST shown in; after an
+      // earlier answer changed, an honest result for the CURRENT scope — even an empty one — must
+      // replace them, never be papered over by the old list. Only a probe that FAILED (threw, or
+      // reported probeFailed) keeps what we had, and a scope tier can no longer fail into an empty
+      // list at all (UNKNOWN options are kept without a number — scopeOptionsFromCounts).
+      const answered = !!fresh && !fresh.probeFailed;
+      const options = answered ? fresh!.options : st.options;
+      const unknownCount = answered ? fresh!.unknownCount : st.unknownCount;
+      const total = answered ? fresh!.total : st.total;
       ageFlowStepsRef.current = steps.map((x, i) => (i === stepIndex ? { ...x, options, unknownCount, total } : x));
       ageFlowTotalRef.current = total;
       setAgeFlow({
@@ -1934,7 +1934,7 @@ export default function Agent() {
   // TIMING (all plain setTimeout — never an animation callback, per src/lib/afterAnimation.ts):
   //   finish → mining overlay (from = last known narrowed total) + the search starts immediately
   //   search resolves → hold until ≥ 1.4s total has played (never artificially longer)
-  //   → swap copy to «لقينا N عقار أقرب لطلبك» → ~1.1s beat → dismiss, revealing the result cards.
+  //   → the pipeline seals (no copy swap, no count claim) → ~0.45s → dismiss into the results.
   // A 15s failsafe (and a catch on the search itself) dismisses the overlay even if the turn dies,
   // so the user can never be trapped behind a stuck animation.
   const finishGuided = (token: number) => {
@@ -1942,10 +1942,6 @@ export default function Agent() {
     const q = ageFlowQueryRef.current;
     if (!(q && ageFlowChangedRef.current)) { setAgeFlow(null); return; }
     const startedAt = Date.now();
-    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current, to: null });
-    const timers = miningTimersRef.current;
-    const stillMining = () => ageFlowTokenRef.current === token;
-    timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
     // CUMULATIVE, ANCHORED TO THE TRUE PRE-AF ORIGIN (owner 2026-08-24). `ageFlowBaseQRef` stays the
     // ROUND's own start — deriveGuided rebuilds this round's query from it, and anchoring it to the
     // origin instead would silently drop the earlier rounds' predicates. The PILLS anchor one level
@@ -1953,13 +1949,23 @@ export default function Agent() {
     // an answer given in round 1 is still visible and removable after round 2 and removing it rebuilds
     // from the origin through everything that survived.
     const carry = afCarryRef.current;
+    // Deduped across rounds (owner audit, 2026-08-27), not a raw concatenation — a carried round's
+    // facet and this round's facet can never both be kept if they resolve to the same displayed
+    // label, whatever question id produced either one. Computed ONCE here: the same committed set
+    // feeds the results pills (guided.facets) AND the deep-search overlay's sentence + chips, so
+    // the transition can never speak a selection the pills don't carry.
+    const dedupedFacets = dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]);
+    setAgeFlow({
+      phase: 'mining', from: ageFlowTotalRef.current, to: null,
+      labels: dedupedFacets.flatMap((f) => f.labels), type: q.type ?? null,
+    });
+    const timers = miningTimersRef.current;
+    const stillMining = () => ageFlowTokenRef.current === token;
+    timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
     const guided = ageFlowBaseQRef.current
       ? {
           baseQ: carry?.originQ ?? ageFlowBaseQRef.current,
-          // Deduped across rounds (owner audit, 2026-08-27), not a raw concatenation — a carried
-          // round's facet and this round's facet can never both be kept if they resolve to the same
-          // displayed label, whatever question id produced either one.
-          facets: dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]),
+          facets: dedupedFacets,
           asked: [...ageFlowAskedRef.current],   // already unioned with the carry by syncGuidedFromSteps
         }
       : undefined;
@@ -1972,13 +1978,40 @@ export default function Agent() {
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
-        // R11.1: the round narrowed the set to its FINAL size — the search is complete.
+        // R11.1 (owner product rule 2026-09-04, threshold 25 → 50): the round narrowed the set to
+        // ≤ INTERVIEW_STOP_AT — the search is COMPLETE. Every remaining listing is revealed by
+        // initialReveal (honestTotal ≤ stopAt ⇒ reveal all fetched — no «عرض المزيد»), the composer
+        // is replaced by «محادثة جديدة», and the transcript is saved in that state.
         if (total != null && total <= INTERVIEW_STOP_AT) setCompleted(true);
+        // ROUNDS CONTINUE AUTOMATICALLY WHILE TRUTHFUL QUESTIONS REMAIN (owner product rule
+        // 2026-09-04, supersedes the 2026-08-24 "continuing is a manual tap" wording for a round the
+        // user has already opened; the 2026-08-19 "never auto-open on a plain search turn" rule is
+        // untouched — this only continues an interview the user started). After the count lands,
+        // the SAME assessment the offer button uses decides: 'yes' → the next round opens on the
+        // narrowed cohort with every answered AND skipped question carried (never re-asked; Back and
+        // pill-removal keep working through the same carry); 'no' → the offer effect says so and
+        // shows the genuine results; 'unknown' → the button stays, nothing is asserted.
+        const continueQ = q; const continueGuided = guided;
+        if (total != null && total > INTERVIEW_STOP_AT && continueGuided && msgId) {
+          void assessNarrowing(continueQ, continueGuided.asked).then((verdict) => {
+            if (!stillMining() || verdict !== 'yes') return;
+            timers.push(setTimeout(() => {
+              if (ageFlowTokenRef.current !== token) return;
+              afCarryRef.current = { msgId, originQ: continueGuided.baseQ, facets: continueGuided.facets, asked: continueGuided.asked };
+              void startAgeFlow(continueQ);
+            }, Math.max(0, 1400 - (Date.now() - startedAt)) + 1100 + AF_NEXT_ROUND_DELAY_MS));
+          });
+        }
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
         timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
+        // DIRECT hand-off (owner redesign 2026-08-31): `to` landing only settles the pipeline —
+        // there is no found-count beat to read anymore, so the overlay dismisses after a short
+        // 450ms seal instead of the old 1100ms reading pause, revealing the results immediately.
+        timers.push(setTimeout(() => {
+          if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
+        }, wait + 450));
         timers.push(setTimeout(() => {
           if (!stillMining()) return;
-          setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
           // LAND ON THE NEW TURN (owner 2026-08-24): the old cards stay exactly where they are, and the
           // thread eases down so the user reads their selection receipt → the new count → the new
           // cards. Never a jump to the bottom.
@@ -3543,7 +3576,7 @@ export default function Agent() {
               onClose={onIntroShowResults}
             />
           ) : ageFlow.phase === 'mining' ? (
-            <MiningTransition from={ageFlow.from} to={ageFlow.to} />
+            <MiningTransition from={ageFlow.from} to={ageFlow.to} type={ageFlow.type} labels={ageFlow.labels} />
           ) : (
             <AdvancedQuestionCard
               titleKey={ageFlow.question.titleKey}
