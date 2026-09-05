@@ -196,7 +196,7 @@ check(ALLOWED_SURFACES.length === REQUIRED_SURFACES.length && REQUIRED_SURFACES.
 // ── 2. Routing, against the REAL mapping and the REAL routines ────────────────────────────────────
 const migrations = readdirSync(join(ROOT, 'supabase/migrations'))
   .filter((f) => f.endsWith('.sql') && readFileSync(join(ROOT, 'supabase/migrations', f), 'utf8').includes('function public.incident_route_owner'));
-check(migrations.length > 0, `incident_route_owner() found in ${migrations[0]}`,
+check(migrations.length > 0, `incident_route_owner() found in ${migrations[migrations.length - 1]} (latest of ${migrations.length} definitions)`,
   'no migration defines incident_route_owner() — the surface→owner mapping this suite depends on is missing');
 const routeMap = migrations.length
   ? parseRouteOwner(readFileSync(join(ROOT, 'supabase/migrations', migrations[migrations.length - 1]!), 'utf8'))

@@ -264,8 +264,20 @@ const authSurface = (page) => page.evaluate((phoneSrc) => {
     const st = getComputedStyle(e);
     return st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0.01;
   };
-  // ONE invitation = one auth-popup-close. The signed-out card and the centred AuthModal are two
-  // presentations of the same component (src/components/AuthModal.tsx) and each carries exactly one.
+  // ONE invitation = one auth-popup-close.
+  //
+  // KNOWN DEFECT, ROUTED NOT PATCHED (incident hunt-2026-09-04:auth:22). The owner's 2026-09-04 popup
+  // redesign removed the × from the sign-in sheet, so on a phone — where the desktop signin-card does
+  // not exist and the invitation is the centred AuthModal — this counts 0 and the journey reports
+  // «the only sign-in entry point at this viewport is dead» against a modal that is open and correct.
+  // Measured on production: auth-popup-close 0, signin-card 0, Google button 1, heading present.
+  //
+  // Counting the Google button instead was TRIED HERE and made things WORSE: dismissAuthInvitation
+  // verifies the same way, and with no × and no working Escape it returned 'stuck', which took the
+  // suite from 15 PASS / 1 FAIL / 0 UNDETERMINED to 11 / 0 / 5 — the auth modal then covered the city
+  // field and broke four unrelated mobile journeys. Reverted. The detector and the DISMISSAL have to
+  // change together, with a real dismissal mechanism for a sheet that has no ×, and that is routine
+  // #6's surface. Left exactly as main had it so the failure stays a single, honest, known one.
   const invitations = [...document.querySelectorAll('[data-testid="auth-popup-close"]')].filter(vis);
   const scope = invitations.map((c) => c.closest('[data-testid="signin-card"]') || c.parentElement?.parentElement?.parentElement || document.body);
   const text = scope.map((s) => s.innerText || '').join('\n') || document.body.innerText;

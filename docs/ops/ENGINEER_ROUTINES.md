@@ -1,8 +1,8 @@
-# ENGINEER ROUTINES — THE SEVEN DAILY ENGINEERS (canonical, owner-locked 2026-08-11, extended 2026-08-23, extended 2026-08-26)
+# ENGINEER ROUTINES — THE ELEVEN DAILY ENGINEERS (canonical, owner-locked 2026-08-11; extended 2026-08-23, 2026-08-26, and 2026-09-04)
 
-> Owner rule: there are **exactly SEVEN separate cloud routines, all DAILY** (the fourth added by
+> Owner rule: there are **exactly ELEVEN separate cloud routines, all DAILY** (the fourth added by
 > the owner 2026-08-11; the fifth added 2026-08-23; the sixth and seventh added 2026-08-26, moved to
-> 03:00/03:30 Arizona same-day). They are never merged, renamed into each other, or
+> 03:00/03:30 Arizona same-day; the eighth through eleventh added 2026-09-04). They are never merged, renamed into each other, or
 > scope-swapped. Converting one into another (which happened once on 2026-08-10 and was reverted)
 > is a violation, not a refactor. If a routine's live prompt ever diverges from what this file
 > describes, restore the routine to match this file.
@@ -16,6 +16,10 @@
 | 5 | 🎯 Senior Advanced Filter + Trending Data Integrity Engineer | `trig_01FmaKmMVJgT5VHFj8Mk9q13` | 04:00 | 11:00 | claude-opus-5 | Advanced Filter + Trending Cities/Districts + the data integrity behind every AF predicate, end to end |
 | 6 | 👣 Daily Journey & Persistence Engineer | `trig_011mQL1FvMQiS8bwx2fp76QN` | 03:00 | 10:00 | claude-opus-5 | Real-user journeys: state, navigation, sessions, sidebar/history/Favorites, cross-browser/device — never search matching itself |
 | 7 | 🧵 Daily Systems Seam Engineer | `trig_01T5yuLGCj3yDqPDsVrPjNmd` | 03:30 | 10:30 | claude-opus-5 | Cross-system integration integrity: cron→detector→alert, migration→mirror→prod, deploy-claim-vs-served-bundle, RLS, orphaned guarantees |
+| 8 | 🔴 Daily REGRESSION HUNTER | _owner to create_ | 07:00 | 14:00 | claude-opus-5 | **The GAPS BETWEEN owned surfaces**, and fixes that did not hold. Adversarial, cross-boundary, assumes every previous fix is incomplete |
+| 9 | 🔬 Daily PRODUCTION RED TEAM | _owner to create_ | 08:00 | 15:00 | claude-opus-5 | **The AGREEMENT between layers on production**: action = request = RPC params = DB truth = displayed count = returned ids = card evidence. Distrusts every harness |
+| 10 | 🧱 Daily BUG PREVENTION & BARRIER | _owner to create_ | 06:30 | 13:30 | claude-opus-5 | **The VERIFICATION APPARATUS itself**, never the product: barriers that assert the bug, checks with no mutation proof, tests that pass while production is wrong |
+| 11 | ♻️ Daily LISTING LIFECYCLE | _owner to create_ | 07:30 | 14:30 | claude-opus-5 | **A listing AFTER its source confirms it is gone**: inactive → unsearchable → 30 days → deleted, and every way a dead listing can still be seen, counted or resurrected |
 
 **Schedule note (2026-08-23):** routine #5 runs at the SAME 04:00 Arizona slot as routine #1
 (owner's explicit instruction), not staggered 30 minutes like #1–#4 are from each other. It does
@@ -39,6 +43,23 @@ business hours" to "audit the full prior 24 hours — every cron, every deploy, 
 before the day's other six routines start building on top of whatever they find." That is a
 different question, not a worse one: #7 still gets a complete day's activity to examine, it just
 examines yesterday's complete day instead of a partial today.
+
+**Schedule note (2026-09-04) — the second block, 06:30–08:00 Arizona.** Routines #10 (🧱), #8 (🔴),
+#11 (♻️) and #9 (🔬) run at **06:30, 07:00, 07:30 and 08:00 Arizona** (13:30–15:00 UTC), 30 minutes
+apart, AFTER the whole #6→#4 block has finished. Three reasons, all checked against the live cron
+topology before choosing:
+
+1. **No contention.** The database's own heavy jobs cluster at :00–:20 of each hour and in the
+   03:00–07:00 UTC pipeline window (aqar liveness 01:00, stale-listings-mark 04:00, wasalt enrich
+   05:00, aqarmonthly 06:00, auto-recover-false-inactive 05:20). 13:30–15:00 UTC is clear of both
+   that window and the 10:00–12:30 UTC routine block.
+2. **The order is a dependency chain, not a queue.** 🧱 goes first because it repairs the
+   VERIFICATION APPARATUS, and every routine after it hunts with instruments it has just checked.
+   🔴 hunts next, with better instruments. ♻️ then walks the lifecycle. 🔬 runs LAST and deliberately
+   distrusts everything the day produced — including the other ten routines' own green reports.
+3. **They read the same day, not the previous one.** Unlike #6/#7, this block runs after #1–#5, so
+   its input is today's freshest reports. That is the point: #8 and #9 exist to find what the
+   surface owners just missed, which is only possible if they read what those owners just did.
 
 **Times are anchored to ARIZONA, not UTC (owner decision, 2026-08-21).** Arizona does not observe
 DST, so 04:00 America/Phoenix is 11:00 UTC every day of the year — the schedule never drifts and
@@ -72,7 +93,7 @@ The 11:00–12:30 UTC block also sits clear of the heavy daily pipeline window (
 scrapers 04:22/04:40, aqarmonthly 06:00, `sync-rich-attrs-wasalt` 06:47, the AF barriers 06:52), so
 each engineer audits settled data with that morning's detectors already run.
 
-## §S — SENTRY (mandatory every run, owner rule 2026-08-28) — applies to ALL SEVEN routines
+## §S — SENTRY (mandatory every run, owner rule 2026-08-28) — applies to ALL ELEVEN routines
 On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
 whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
 cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
@@ -86,9 +107,9 @@ owner take it on their next run. Ambiguous or multi-owner issues escalate to rou
 Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
 doc for the claim-before-you-fix protocol that prevents seven routines from working the same crash.
 
-## §G — GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds ALL SEVEN routines
+## §G — GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds ALL ELEVEN routines
 
-> Owner rule, 2026-08-29. This section binds **all seven** routines: ⚡ Junior Scraping (#1),
+> Owner rule, 2026-08-29, extended 2026-09-04. This section binds **all eleven** routines: ⚡ Junior Scraping (#1),
 > 🎖️ Senior Production (#2), 🛡️ Data Integrity (#3), 🧪 Search & Matching QA (#4), 🎯 AF + Trending
 > (#5), 👣 Journey & Persistence (#6), 🧵 Systems Seam (#7). Each live routine prompt carries a
 > condensed copy so a run that never opens this file still obeys — but **this file is the canonical
@@ -219,6 +240,91 @@ Report `INCIDENTS WORKED / RESOLVED / HANDED OFF / BLOCKED` in your §G.8 block.
 severity SLA (P0 4h, P1 24h, P2 72h, P3 14d), so an unworked queue is attributable rather than
 anonymous. Full contract: `docs/ops/AUTONOMOUS_INCIDENT_LOOP.md`.
 
+### §G.2b — "A HUMAN COULD APPROVE THIS" IS NOT A REASON TO ASK (owner, 2026-09-04)
+
+The six reasons above are the whole list, and they are about the NATURE of the change, not about who
+is technically entitled to authorise it. The owner's words: *"I do not want obvious safe bugs routed
+back to me just because a human could technically approve them."*
+
+So: **if a fix is safe, in-scope, reversible, and crosses none of the six, fix it.** Do not escalate
+because the fix touches several files, because it is in a file you did not write, because it is
+"arguably product", because you would like a second opinion, or because escalating feels safer than
+deciding. §G.2(a) says *destructive or high-risk*, and a defect repair that is reversible by a normal
+revert is neither, however important the surface. A run that returns a safe, provable, in-scope fix
+as a question has failed §G.1, not been careful.
+
+Reversibility is the practical test to apply, in this order:
+- Can a plain `git revert` undo it, or does it also need a data or schema rollback?
+- Does it change what a SUCCESSFUL path returns, or only what a FAILING one reports?
+- Is anything about it irreversible for a real user (a deletion, a sent message, a charge)?
+If the answers are revert-only / failing-path-only / nothing-irreversible, that is GREEN and you own it.
+
+### §G.9 — WHAT "CLOSED" MEANS (owner, 2026-09-04)
+
+**A bug is not closed because the symptom disappeared.** The owner's standing complaint is the loop
+this rule ends: *bug found → partial fix → a related bug appears later → another routine finds it →
+repeat.* That pattern is not bad luck; it is what happens when a symptom is treated as the defect.
+
+All seven of these must be true, and the report must say so for each:
+
+1. **Root cause fixed** — you can name the mechanism that produced the wrong behaviour, not the line
+   that displayed it.
+2. **Related variants checked** — the same mechanism hunted everywhere else it exists. If the diff
+   key was wrong for one field, every field on that payload was checked; if one fetcher conflated
+   failure with emptiness, its siblings were read.
+3. **A permanent detector or barrier exists** — the class cannot return unnoticed.
+4. **A mutation proves the barrier can catch recurrence** — the defect was RE-INTRODUCED and the
+   barrier was watched to go red, then restored. A barrier nobody has seen fail is a comment that runs.
+5. **The regression suite passes** — the full one, not the file you touched.
+6. **Production behaviour is verified** — through the real path a user hits. A green unit test is not
+   production, and a successful deploy is not verification.
+7. **No equivalent hidden path remains** — you looked for the same shape behind a different name and
+   said what you found, including "none".
+
+If any of the seven cannot be met, the honest state is UNKNOWN with the reason — never "fixed".
+
+### §G.10 — EVERY REPORT CARRIES BEFORE/AFTER AND ENDS WITH THE SAME BLOCK (owner, 2026-09-04)
+
+Each report opens with what was true when you arrived and closes with what is true now.
+
+**BEFORE:** bugs found · broken behaviours · failed checks · affected listings/users/surfaces.
+**AFTER:** bugs fixed · barriers added · mutations added · tests passed · production verification ·
+remaining bugs · final score.
+
+And every report — all eleven routines, every run, clean or not — ENDS with exactly this block:
+
+```
+BUGS FOUND:
+BUGS FIXED:
+BUGS REMAINING:
+ROOT CAUSES ELIMINATED:
+BARRIERS ADDED:
+MUTATIONS PASSED:
+REGRESSION TESTS:
+MERGED:
+DEPLOYED/APPLIED:
+PRODUCTION VERIFIED:
+OPEN P0:
+OPEN P1:
+UNKNOWN/UNVERIFIED:
+BEFORE SCORE:
+AFTER SCORE:
+DONE: YES/NO
+```
+
+`DONE: YES` requires §G.9's seven conditions on every bug the run touched. Anything unproven goes in
+`UNKNOWN/UNVERIFIED` — that field existing is what makes the rest of the block trustworthy, so an
+empty one on a run that hit anything ambiguous is itself the defect. **No fake 10/10, no "looks
+good", no hand-waving.** A truthful 8.7 with named gaps is worth more than a 10 nobody can check.
+
+### §G.11 — TOKENS ARE NOT THE CONSTRAINT (owner, 2026-09-04)
+
+*"I do not care if the next runs burn a lot more tokens or take longer. I care about eliminating bugs
+properly and permanently."* Optimise these runs for correctness and permanent bug reduction, not for
+cost. Investigate deeply, check related surfaces, run the full suite, verify production. The token
+discipline in AGENTS.md is about not dumping whole files into context to answer a question you could
+grep — it was never a licence to stop early, and it does not override this.
+
 ### §G.7 — NOTHING ABOVE WEAKENS ANY EXISTING GUARD
 
 Source-truth rules, migration/deploy protections, cost protections, single-writer ownership, the
@@ -251,16 +357,14 @@ Routines whose canonical spec already defines a richer domain report block **kee
 this block at the end**. The `Rating Before → Rating After` pair required by "Reporting rules"
 below is unaffected and still mandatory; `TRUE SCORE` does not replace it.
 
-## §R — WHY THERE ARE SEVEN, AND WHAT WOULD CHANGE THAT (reviewed 2026-09-04)
+## §R — WHY THERE ARE ELEVEN (reviewed 2026-09-04, owner decision the same day)
 
-The owner asked directly whether specialised engineers should be ADDED, and was explicit: *"Do not
-add engineers just to increase the number. Add them only when they give us meaningfully better bug
-discovery, faster ownership, or safer autonomous fixing."*
+### §R.0 — What the analysis said, and what the owner decided
 
-**Verdict: no new routines.** A 74-agent audit (run `wf_01c03538-2c0`) hunted ten surfaces in
-parallel, confirmed 15 defects through 2-of-3 independent adversarial refutation, and put the
-question to three judges reasoning separately from coverage, from ownership clarity, and from
-operational cost. All three returned the same answer, and the decisive evidence is the same in each:
+A 74-agent audit (`wf_01c03538-2c0`) hunted ten surfaces in parallel, confirmed 15 defects through
+2-of-3 independent adversarial refutation, and put the question of adding engineers to three judges
+reasoning separately from coverage, from ownership clarity, and from operational cost. **All three
+recommended adding none**, on this evidence:
 
 | Owner | Confirmed defects that run |
 |---|---|
@@ -268,57 +372,50 @@ operational cost. All three returned the same answer, and the decisive evidence 
 | #4 Search & Matching QA | 5 |
 | #3 Data Integrity | 2 |
 | #1, #2, #5, #7 | 0 |
-| **a surface no routine owns** | **0** |
+| **a surface no routine owned** | **0** |
 
-Not one defect needed an owner that did not already exist. They went undiscovered because **nobody
-was looking at those screens with a browser**, which is a throughput fact, not an ownership one — and
-throughput is bought with journeys and hunt agents, which cost no boundary. The marginal cost of a
-routine is not its run; it is its **boundary**. An eighth owner means editing, in lockstep,
-`incident_route_owner()`, `scripts/lib/alertRouting.ts`, `SENTRY_ROUTING.md` §2, `ALERT_ROUTING.md`,
-this file, `e2e/guardian/journeys.mjs`, and `scripts/verify-incident-spine.ts`. Boundary maintenance
-is empirically the thing this system is worst at: the same audit found ten documented ownership
-contradictions across four routing mechanisms, two of which had misrouted Advanced Filter for twelve
-days.
+Their argument: the defects went undiscovered because nobody was LOOKING at those screens, which is
+throughput, not ownership — and the marginal cost of a routine is not its run, it is its BOUNDARY.
 
-**What was actually missing, and is now fixed:** the routing *vocabulary*. Ten real user-reachable
-surfaces (`share`, `feedback`, `account_menu`, `devices`, `support`, `interview`, `browser`, `intro`,
-`mode_switch`, `agent`) had no name, so findings on them fell through to the #2 fallback and arrived
-indistinguishable from noise. They are named now, and an unknown surface RAISES at `incident_open()`
-instead of silently joining #2's pile.
+**The owner read that and decided to add four anyway, on 2026-09-04.** That decision stands and this
+section records it honestly rather than quietly deleting the analysis. His reasoning, which the
+judges did not weigh: the mechanism that actually found those 15 — parallel adversarial hunting —
+existed only as an ad-hoc session. Making it a ROUTINE is what makes it recur without him asking.
+The judges measured whether a new owner would receive work the seven already own; he was answering a
+different question, which is whether the work happens at all when nobody is watching.
 
-### §R.1 — The one split that is pre-authorised, on a falsifiable trigger
+The four were also chosen so they do NOT split a surface. That is the part that answers the judges'
+strongest objection: **#8–#11 own a different OBJECT, not a narrower topic.** Splitting a surface
+creates a boundary dispute; giving a routine a different object does not.
 
-#6 owns nine of the routed surfaces and took 53% of that run's defects, two of them inside PART 1
-bullets it simply had not reached. That is a real capacity argument, and it is the only one. It is
-NOT acted on yet, because the mechanism that found those eight was not a routine — it was ten hunt
-agents in one session, which scales on demand and costs no boundary.
+| # | Owns the… | So it can never collide with a surface owner because… |
+|---|---|---|
+| 🔴 8 | **gaps BETWEEN owned surfaces**, and fixes that did not hold | a defect living entirely inside one surface is ROUTED to that owner, never kept |
+| 🔬 9 | **agreement BETWEEN layers on production** | its finding is a *disagreement*, which by definition spans layers no single owner sees end to end |
+| 🧱 10 | **verification apparatus itself** | its target is a guard that cannot fail — never the product. A product bug found here is ROUTED |
+| ♻️ 11 | **a listing AFTER its source says it is gone** | #1 owns whether the crawl ran, #3 owns the field truth of a LIVE listing; #11 starts where both stop |
 
-**Trigger (measure it, do not re-argue it):** if over any 14-day window #6-owned surfaces produce
-more than half of all confirmed defects **and** fewer than a third of those were found by #6's own
-runs, split it. #6a keeps auth / session / One Tap / sidebar / chat persistence / favorites /
-navigation; #6b takes voice, read-aloud, share, feedback, theme, the modals, mobile hit targets and
-the cross-browser matrix. Nothing moves out of #3/#4/#5/#7, so the split adds one boundary rather
-than redrawing four. Until the trigger fires, #6 should exploit the rotation ledger it already has
-(`ops_qa_coverage_ledger`, `journey_` prefix) rather than be subdivided.
+### §R.1 — The measurement that would justify splitting #6
 
-### §R.2 — Proposals considered and rejected, so they are not re-litigated
+#6 owns nine routed surfaces and took 53% of that audit's defects. That is the one genuine capacity
+argument, and it is still NOT acted on. **Trigger, to measure rather than re-argue:** if over any
+14-day window #6-owned surfaces produce more than half of all confirmed defects AND fewer than a
+third of those were found by #6's own runs, split it — #6a keeps auth / session / One Tap / sidebar /
+chat persistence / favorites / navigation; #6b takes voice, read-aloud, share, feedback, theme, the
+modals, mobile hit targets and the cross-browser matrix. Nothing moves out of #3/#4/#5/#7.
 
-- **Frontend/Visual QA** — wholly inside #6's charter (`JOURNEY_PERSISTENCE_ENGINEER.md:78-79`). The
-  share-sheet dark-mode defect proves that surface is under-exercised, not unowned.
-- **Mobile / RTL** — mobile is an *axis*, not a surface: a mobile AF bug would belong to #5 and to
-  the mobile engineer simultaneously, on every surface. The measured gap is CONFIG (a second
-  Playwright project, two unset env vars, two hardcoded viewports), not capacity.
-- **Failure-Path / Degradation** — the largest defect class (5 of 15) and the most tempting proposal.
-  Rejected because a cross-cutting CLASS is what a BARRIER is for, not an owner: ownership here is
-  keyed on surface, so a class-owner would collide with every surface owner at once — the "two
-  routines working the same crash" failure `SENTRY_ROUTING.md` §4 exists to prevent. A daily agent
-  re-derives the same judgement every day; a barrier makes it permanent for free. The replacement is
-  `scripts/verify-failure-is-not-emptiness.ts`.
-- **AI Agent / Conversation** — the one proposal with a genuine ownership hole, and it is BLOCKED
-  rather than refused: it would have to be carved out of #2, and **#2 is the only routine with no
-  canonical spec in this repo** (its sections live at claude.ai). You cannot carve a surface out of a
-  contract you cannot read. Writing #2's spec into this repo is the prerequisite, and it is an owner
-  action.
+### §R.2 — Proposals still rejected, so they are not re-litigated
+
+- **Frontend/Visual QA** — wholly inside #6's charter. The share-sheet dark-mode defect proved that
+  surface is under-exercised, not unowned.
+- **Mobile / RTL** — mobile is an AXIS, not a surface: a mobile AF bug would belong to #5 and to the
+  mobile engineer simultaneously, on every surface. The measured gap is CONFIG (a second Playwright
+  project, two unset env vars, two hardcoded viewports), not capacity.
+- **A "failure-path" engineer** — the largest defect class (5 of 15) and the most tempting proposal.
+  A cross-cutting CLASS is what a BARRIER is for, not an owner: ownership here is keyed on surface, so
+  a class-owner would collide with every surface owner at once. Replaced by
+  `scripts/verify-failure-paths-stay-covered.ts` and the AGENTS.md rule "A FAILED FETCH IS NOT AN
+  EMPTY ANSWER". #10 🧱 now owns keeping that registry growing.
 
 ### §R.3 — The gap no engineer can close
 
@@ -326,9 +423,9 @@ than redrawing four. Until the trigger fires, #6 should exploit the rotation led
 2026-09-01), so every synthetic journey is permanently a guest. The entire signed-in half of the
 product — sidebar history lifecycle, favorites, rename, reorder, account menu, devices, deletion,
 appearance/dark mode — has no live coverage and cannot get any until a non-OAuth QA session exists.
-This is an owner decision (§G.2(a)/(b)), not an engineering one: it needs either anonymous sign-in
-enabled for a dedicated test identity, or a QA account whose credentials live in GitHub Actions
-secrets. Adding a routine does not help; that routine would be a guest too.
+That is an owner decision (§G.2(a)/(b)): either anonymous sign-in enabled for a dedicated test
+identity, or a QA account whose credentials live in GitHub Actions secrets. **Adding a routine does
+not help — routines #8 through #11 are guests too.**
 
 ## 1. ⚡ Daily JUNIOR SCRAPING Engineer (original, unmodified)
 

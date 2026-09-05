@@ -1,4 +1,6 @@
-// Which of the seven daily engineer routines owns an alert, by alert KIND.
+// Which of the ELEVEN daily engineer routines owns an alert, by alert KIND.
+// (Seven surface owners, plus four added 2026-09-04 whose object is a gap, a layer disagreement,
+// the verification apparatus, or a listing lifecycle — see ROUTINES below.)
 //
 // WHY THIS FILE EXISTS. Delivery was fixed on 2026-08-26 (alert-dispatch.yml files one GitHub
 // issue per dedup_key). Delivery is not the same as OWNERSHIP: measured 2026-08-28, 55 open
@@ -10,7 +12,7 @@
 // alert_event did not. This is that same routing, for the other queue, and it deliberately reuses
 // SENTRY_ROUTING's two load-bearing conventions rather than inventing a second scheme:
 //   * routine #2 (🎖️ Senior Production) is the STANDING TRIAGE ROUTER for anything ambiguous;
-//   * one owner per item, so seven engineers do not work the same incident.
+//   * one owner per item, so eleven engineers do not work the same incident.
 //
 // THIS FILE IS EXECUTED BY THE WORKFLOW, NOT MIRRORED BY IT. alert-dispatch.yml checks the repo
 // out and calls routineForKind() directly. That is the whole reason there is no drift barrier
@@ -25,7 +27,7 @@
 // new detectors add more every week, so an exhaustive kind list would rot into that hole within
 // days. Patterns + a mandatory fallback is what keeps it total.
 
-/** The seven daily routines, keyed by their number in docs/ops/ENGINEER_ROUTINES.md. */
+/** The eleven daily routines, keyed by their number in docs/ops/ENGINEER_ROUTINES.md. */
 export const ROUTINES = {
   1: { label: 'routine-1-scraping', name: '⚡ Junior Scraping' },
   2: { label: 'routine-2-production', name: '🎖️ Senior Production' },
@@ -34,6 +36,14 @@ export const ROUTINES = {
   5: { label: 'routine-5-af-trending', name: '🎯 Advanced Filter + Trending' },
   6: { label: 'routine-6-journey', name: '👣 Journey & Persistence' },
   7: { label: 'routine-7-seam', name: '🧵 Systems Seam' },
+  // ── Added 2026-09-04 (owner). Four routines whose object is DIFFERENT from the seven above, not
+  // whose topic is narrower — that is what keeps ownership non-overlapping. #1-#7 own SURFACES;
+  // these own, in order: the gaps BETWEEN surfaces, the AGREEMENT between layers on production, the
+  // VERIFICATION APPARATUS itself, and the LIFECYCLE of a listing after its source drops it.
+  8: { label: 'routine-8-regression-hunter', name: '🔴 Regression Hunter' },
+  9: { label: 'routine-9-red-team', name: '🔬 Production Red Team' },
+  10: { label: 'routine-10-barrier', name: '🧱 Bug Prevention & Barrier' },
+  11: { label: 'routine-11-lifecycle', name: '♻️ Listing Lifecycle' },
 } as const;
 
 export type RoutineNumber = keyof typeof ROUTINES;
@@ -118,6 +128,26 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // 6 👣 Journey & Persistence — chat/session/auth state, never matching itself.
   { routine: 6, test: /^(transcript_|filter_state_lost|chat_|session_|auth|sidebar)/ },
   { routine: 6, test: /^journey_live_check_failed$/ },
+
+  // 11 ♻️ Listing Lifecycle — what happens to a listing AFTER its source confirms it is gone.
+  // Deliberately narrow and deliberately BEFORE #3: #3 owns the field truth of a listing that is
+  // alive, #1 owns whether the crawl ran at all, and this owns the inactive→30-day-delete chain and
+  // every way a dead listing can still be seen, counted, or resurrected. `unknown_treated_as_dead`
+  // is the safety rule that matters most: UNKNOWN is not DEAD.
+  { routine: 11, test: /^(inactive_still_searchable|inactive_still_counted|false_resurrection)$/ },
+  { routine: 11, test: /^(unknown_treated_as_dead|deletion_clock_|orphan_after_delete)/ },
+  { routine: 11, test: /^lifecycle_/ },
+
+  // 10 🧱 Bug Prevention & Barrier — the VERIFICATION APPARATUS, never the product. A barrier that
+  // asserts the bug, a check with no mutation proof, a test that passes while production is wrong.
+  { routine: 10, test: /^(barrier_|mutation_|blind_guard|green_while_broken|test_infra_)/ },
+
+  // 9 🔬 Production Red Team — DISAGREEMENT between layers on production: action vs request vs RPC
+  // params vs DB truth vs displayed count vs returned ids vs card evidence.
+  { routine: 9, test: /^(layer_disagreement|count_vs_set|displayed_vs_truth|prod_differential)/ },
+
+  // 8 🔴 Regression Hunter — the GAPS BETWEEN owned surfaces, and fixes that did not hold.
+  { routine: 8, test: /^(cross_surface_|regression_survived|incomplete_fix|seam_between_owners)/ },
 
   // 3 🛡️ Data Integrity — source-truth on listing fields. Broadest; must stay last.
   { routine: 3, test: /price|district|amenity|^rent_period|^manufactured_rent_period/ },
