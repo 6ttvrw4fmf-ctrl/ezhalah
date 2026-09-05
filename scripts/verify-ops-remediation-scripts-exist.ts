@@ -74,6 +74,17 @@ const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
     why: 'claimed by 20260830183604_sentry_check_heartbeat_and_silent_detector_layer2.sql; detector roster seam' },
   { path: 'scripts/verify-unlocated-fallback-scope.ts', owner: 'routine-3-data-integrity',
     why: 'claimed by 20260810123000_unlocated_fallback_must_only_rescue_unlocated_rows.sql; location source truth' },
+  // Found by THIS barrier, 2026-09-05, the moment the drifted migrations were mirrored into git
+  // (PR #1863) — which is the point: the claim was invisible while the migration existed only in
+  // production. 20260905062027 says «scripts/verify-searchable-platforms-are-monitored.ts calls
+  // this and fails on any row» about a file that was never written, in the same batch of work that
+  // produced the four gaps above. The RPC it names, ops_searchable_platforms_unmonitored(), is live
+  // and currently returns 0 rows (checked 2026-09-05 09:1xZ, after 20260905061827 corrected the
+  // muktamel registry row), so nothing is unmonitored right now — the missing piece is the barrier
+  // that would notice if that changed. It is a LIVE production read, so its home is a scheduled
+  // workflow beside the other production-truth checks, not the hermetic npm test suite.
+  { path: 'scripts/verify-searchable-platforms-are-monitored.ts', owner: 'routine-7-seam',
+    why: 'claimed by 20260905062027_ops_searchable_platforms_unmonitored_is_readable_by_a_barrier.sql; the platform-registry monitoring seam, same batch as the two entries above' },
 ];
 
 console.log('ops remediation scripts — every barrier a migration claims must exist and run');
