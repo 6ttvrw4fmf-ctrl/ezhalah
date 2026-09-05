@@ -31,14 +31,15 @@
 //
 // AN EMPTY RESULT IS THE PASS STATE, SO A FAILED FETCH MUST NEVER LOOK LIKE ONE. This is the precise
 // shape the "A FAILED FETCH IS NOT AN EMPTY ANSWER" rule exists to stop: `data ?? []` here would
-// turn every outage into a clean bill of health. Every non-200, non-array body and thrown request is
-// therefore a FAILURE, never a pass.
+// turn every outage into a clean bill of health. The decision is therefore a PURE function over an
+// explicitly-tagged answer — readable rows, or an error — so "unreadable" cannot be spelled the same
+// way as "no rows", and the mutation proofs at the bottom execute both directions.
 //
 // LIVE, so deliberately NOT in the hermetic `npm test` — the same reason AGENTS.md pins the
 // migration drift guard out of it: a required check must not go red on every unrelated PR because
 // production is momentarily unreachable. Its home is .github/workflows/p0-fast-lane-coverage.yml
 // (recorded in scripts/test-exclusions.txt), which runs it on pull_request, on push to main, and
-// every 15 minutes — the cadence that matters, since this invariant breaks when someone APPLIES a
+// on a schedule — the cadence that matters, since this invariant breaks when someone APPLIES a
 // migration, not when someone opens a PR.
 //
 //   node --experimental-strip-types scripts/verify-p0-fast-lane-detection.ts
@@ -48,10 +49,80 @@ const { url, key } = resolvePublicSupabase();
 const ENDPOINT = `${url}/rest/v1/rpc/ops_p0_detectors_off_fast_lane`;
 const ATTEMPTS = 3;
 
-type OffLane = { detector: string; why: string };
+export type OffLane = { detector: string; why: string };
 
-async function readOffLane(): Promise<OffLane[]> {
-  let lastError = '';
+/** Readable rows, or an error. There is deliberately no third spelling of "nothing came back". */
+export type LaneAnswer =
+  | { readable: true; rows: OffLane[] }
+  | { readable: false; error: string };
+
+/**
+ * The WHOLE decision, pure and executable. Unreadable is a FAILURE, never a pass — an empty array is
+ * what healthy looks like here, so an outage must not be able to imitate it.
+ */
+export function laneVerdict(answer: LaneAnswer): { pass: boolean; reason: string } {
+  if (!answer.readable) {
+    return { pass: false, reason: `UNREADABLE — ${answer.error}` };
+  }
+  if (answer.rows.length > 0) {
+    return {
+      pass: false,
+      reason: `${answer.rows.length} P0-capable detector(s) off the fast lane: `
+        + answer.rows.map((r) => r.detector).join(', '),
+    };
+  }
+  return { pass: true, reason: 'every P0-capable detector is on the mon_run_p0_detectors() roster' };
+}
+
+/** Turn one HTTP response into a LaneAnswer. A non-200 or a non-array body is NOT "no rows". */
+export function interpret(status: number, bodyText: string): LaneAnswer {
+  if (status !== 200) return { readable: false, error: `HTTP ${status}: ${bodyText.slice(0, 200)}` };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return { readable: false, error: `body was not JSON: ${bodyText.slice(0, 200)}` };
+  }
+  if (!Array.isArray(parsed)) {
+    return { readable: false, error: `expected a JSON array, got ${typeof parsed}` };
+  }
+  return { readable: true, rows: parsed as OffLane[] };
+}
+
+// ── MUTATION PROOFS — executed, not described ───────────────────────────────────────────────────
+let failures = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) console.log(`  PASS  MUTATION — ${label}`);
+  else { failures++; console.error(`  FAIL  MUTATION NOT CAUGHT — ${label}`); }
+};
+
+const rowsOffLane: OffLane[] = [{ detector: 'mon_detect_stalled_incident', why: 'stranded' }];
+
+mustCatch('a detector off the lane is DETECTED (the defect this file exists for)',
+  laneVerdict({ readable: true, rows: rowsOffLane }).pass === false);
+
+mustCatch('an HTTP failure is a FAILURE, never an honest empty answer',
+  laneVerdict(interpret(503, 'upstream unavailable')).pass === false);
+
+mustCatch('a non-array 200 body is UNREADABLE, not zero rows',
+  laneVerdict(interpret(200, '{"code":"PGRST202","message":"function not found"}')).pass === false);
+
+mustCatch('an unparseable body is UNREADABLE, not zero rows',
+  laneVerdict(interpret(200, '<html>gateway timeout</html>')).pass === false);
+
+// NEGATIVE CONTROL. Without this, a predicate that simply always failed would satisfy every proof
+// above — the checks would be green and the barrier would be worthless.
+mustCatch('a genuine empty answer still PASSES (the predicate is not merely always-fail)',
+  laneVerdict(interpret(200, '[]')).pass === true);
+
+if (failures > 0) {
+  console.error(`✗ ${failures} mutation proof(s) failed — the predicate does not discriminate.`);
+  process.exit(1);
+}
+
+// ── THE LIVE CHECK ──────────────────────────────────────────────────────────────────────────────
+async function readOffLane(): Promise<LaneAnswer> {
+  let last: LaneAnswer = { readable: false, error: 'never attempted' };
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {
       const res = await fetch(ENDPOINT, {
@@ -59,44 +130,31 @@ async function readOffLane(): Promise<OffLane[]> {
         headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: '{}',
       });
-      if (!res.ok) {
-        lastError = `HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`;
-      } else {
-        const body: unknown = await res.json();
-        // A non-array body is NOT "no rows". Treat it as unreadable, never as healthy.
-        if (!Array.isArray(body)) {
-          lastError = `expected a JSON array, got ${typeof body}: ${JSON.stringify(body).slice(0, 300)}`;
-        } else {
-          return body as OffLane[];
-        }
-      }
+      last = interpret(res.status, await res.text());
+      if (last.readable) return last;
     } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
+      last = { readable: false, error: e instanceof Error ? e.message : String(e) };
     }
     if (attempt < ATTEMPTS) await new Promise((r) => setTimeout(r, attempt * 1500));
   }
-  // Unreadable after every retry. FAIL — the alternative is reporting an outage as full coverage.
-  console.error('✗ could not read ops_p0_detectors_off_fast_lane() from production.');
-  console.error(`  last error after ${ATTEMPTS} attempts: ${lastError}`);
-  console.error('  This is a FAILURE, not a pass: an empty answer is what "healthy" looks like');
-  console.error('  here, so an unreadable one must never be allowed to imitate it.');
-  process.exit(1);
+  return last;
 }
 
-const offLane = await readOffLane();
+const verdict = laneVerdict(await readOffLane());
 
-if (offLane.length > 0) {
-  console.error(`✗ ${offLane.length} P0-capable detector(s) are NOT on the fast lane:`);
-  for (const row of offLane) console.error(`    ${row.detector}\n      ${row.why}`);
+if (!verdict.pass) {
+  console.error(`✗ p0-fast-lane detection: ${verdict.reason}`);
   console.error('');
-  console.error('  Each one is evaluated only inside mon_run_all_detectors(), whose runtime is');
-  console.error('  charged in full against the 300s P0 delivery SLO before dispatch begins.');
+  console.error('  A P0-capable detector that is not on the lane is evaluated only inside');
+  console.error('  mon_run_all_detectors(), whose runtime is charged in full against the 300s P0');
+  console.error('  delivery SLO before dispatch begins.');
   console.error('  FIX: add it to the c_p0_detectors roster in mon_run_p0_detectors(), by');
   console.error('  needle-editing the LIVE definition (never a full-body replace from a snapshot —');
   console.error('  concurrent sessions edit that same roster).');
   console.error('  NEVER widen the 300s SLO, and never change another owner\'s cron schedule to');
-  console.error('  paper over this.');
+  console.error('  paper over this. If the answer was UNREADABLE, that is a failure too: an empty');
+  console.error('  result is the healthy state here, so an outage must never imitate one.');
   process.exit(1);
 }
 
-console.log('✓ p0-fast-lane detection: every P0-capable mon_detect_* is on the mon_run_p0_detectors() roster');
+console.log(`✓ p0-fast-lane detection: ${verdict.reason}`);
