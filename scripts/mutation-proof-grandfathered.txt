@@ -5,7 +5,6 @@
 verify-abeea-identity-supersession.ts
 verify-about-premium-contract.ts
 verify-account-deletion.ts
-verify-added-date-iso.ts
 verify-adjudication-is-never-undone.ts
 verify-advanced-filter-contract.ts
 verify-advanced-filter-count-honesty.ts
@@ -45,7 +44,6 @@ verify-af-option-count-equals-listings.ts
 verify-af-oracle-classifies-every-search-param.ts
 verify-af-oracle-soundness.ts
 verify-af-pill-removal-live.ts
-verify-af-probe-failure-not-a-verdict.ts
 verify-af-property-type-differential.ts
 verify-af-question-gate-is-one-predicate.ts
 verify-af-rejection-is-spoken.ts
@@ -63,7 +61,6 @@ verify-af-survives-filter-reentry.ts
 verify-af-takes-over-cta.ts
 verify-af-two-option-survival.ts
 verify-af-unknown-count-truthful.ts
-verify-af-unknown-is-not-no-and-digits-are-script-blind.ts
 verify-age-filter-gate.ts
 verify-agent-af-intent-coverage.ts
 verify-agent-amenities-certification.ts
@@ -79,7 +76,6 @@ verify-agent-furnished-certification.ts
 verify-agent-health-alert.ts
 verify-agent-history-trim-safety.ts
 verify-agent-knows-what-it-knows.ts
-verify-agent-loc-classify-fails-closed.ts
 verify-agent-location-ambiguity.ts
 verify-agent-nonreasoning-model.ts
 verify-agent-platform-and-currency.ts
@@ -127,7 +123,6 @@ verify-chat-title.ts
 verify-ci-enforces-full-suite.ts
 verify-city-field.ts
 verify-city-never-rescoped-to-district.ts
-verify-city-rehydration.ts
 verify-clarification-never-loses-state.ts
 verify-cleanup-anomaly-gate.ts
 verify-cleanup-drain-requires-soft-close-marker.ts
@@ -216,7 +211,6 @@ verify-loader-platforms-match-active.ts
 verify-loc-classify-postgrest-latency.ts
 verify-loc-rel-age-expression-indexes.ts
 verify-loc-rel-tick-single-statement-cron.ts
-verify-location-index-source.ts
 verify-merge-gate-transport.ts
 verify-migration-content-parity-wired.ts
 verify-migration-content-parity.ts
