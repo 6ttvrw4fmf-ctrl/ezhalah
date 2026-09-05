@@ -1895,7 +1895,15 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       source: r.source ?? 'Aqar',
       // Same rule as priceStr above: an unpublished period stays NULL, it never becomes 'annual'.
       rentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
-      listed: r.date_added ?? 'recently',
+      // UNKNOWN IS NOT «مؤخراً» (P2, 107,254 active listings — 54.3% of inventory). This used to be
+      // `?? 'recently'`, manufacturing a positive FRESHNESS CLAIM out of a date the source never
+      // published, one layer above any display guard that could have caught it: ResultCard already
+      // renders no date chip for an empty value, but cleanDate() maps the 'recently' sentinel to
+      // «أضيف مؤخراً», so the invention was indistinguishable from a source that really did say it.
+      // '' (not undefined) keeps `listed: string` intact, and the RECENCY lookup in search.ts misses
+      // on '' exactly as it already misses on every real scraped date — so ordering is untouched.
+      // A source that genuinely publishes «مؤخراً» still shows it; only the fabrication is gone.
+      listed: r.date_added ?? '',
       photo,
       source_url: r.listing_url,
       // Rich extras for the new card design — all optional, fall back to safe defaults.
