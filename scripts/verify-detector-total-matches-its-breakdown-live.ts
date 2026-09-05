@@ -51,9 +51,14 @@
 //
 //   node --experimental-strip-types scripts/verify-detector-total-matches-its-breakdown-live.ts
 
-const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
-const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.EXPO_PUBLIC_SUPABASE_KEY
-  || 'sb_publishable_vXzwxdpfrzmbwtbR5aXcKA_cMUO8hVB';
+// resolvePublicSupabase(), NOT a hand-rolled process.env read with a literal fallback — caught by
+// scripts/verify-live-checks-self-sufficient.ts on this file's first scheduled run, whose message
+// names the exact history: a live barrier that reaches for a repo secret directly "can only run if
+// a repo secret happens to be set, which is exactly how both barriers silently never ran". The
+// shared resolver is what makes a scheduled live check self-sufficient.
+import { resolvePublicSupabase } from './lib/public-supabase.ts';
+
+const { url: SUPA, key: KEY } = resolvePublicSupabase();
 
 /** Detector functions whose payload carries a total beside a breakdown. Anon-callable, read-only. */
 const DETECTORS = ['price_fidelity'];
