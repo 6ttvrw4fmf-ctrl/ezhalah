@@ -119,9 +119,13 @@ check("the LISTINGS reply is grounded, now with the amenities it will actually c
 // is now the ONE place that decides a turn is a clarification, so both collapsed into a single
 // return building a local `reply` const first — same grounding, one fewer path to keep in sync, not
 // a weakening. The regex below tracks that real code shape rather than the pre-consolidation one.
+// 2026-09-04: `noPlaceReply` joins ambiguityReply ahead of the model prose. Both are PLATFORM-built
+// questions with no inventory claims in them, so neither needs grounding — what must stay true is
+// that the MODEL's text is still the thing that gets grounded, and it is: the fallback arm is
+// unchanged. A mutation removing groundReply from that arm still fails this check.
 check("the MESSAGE reply is grounded, also amenity-aware",
-  /const reply = ambiguityReply \?\? oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale, outAmenities\)\);/.test(edge));
-const paths = (edge.match(/reply: groundReply\(|reply: oneQuestionOnly\(groundReply\(|const reply = ambiguityReply \?\? oneQuestionOnly\(groundReply\(/g) ?? []).length;
+  /const reply = ambiguityReply \?\? noPlaceReply \?\? oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale, outAmenities\)\);/.test(edge));
+const paths = (edge.match(/reply: groundReply\(|reply: oneQuestionOnly\(groundReply\(|const reply = ambiguityReply \?\? (?:noPlaceReply \?\? )?oneQuestionOnly\(groundReply\(/g) ?? []).length;
 check(`every reply path goes through it (${paths} found)`, paths >= 2,
   "listings + the one unified clarification path (empty-search and the model's-own-question cases are now the SAME return)");
 check("no reply path bypasses the guard",
@@ -137,8 +141,15 @@ console.log("\n── do not search too early ──");
 // searches" and "genuinely empty still asks" cases this section used to pin here). What THIS barrier
 // still owns: that index.ts actually WIRES its resolved fields into the ladder instead of silently
 // keeping its own second copy of the decision.
+// The import list grew on 2026-09-04 (hasUsableLocation, for the no-place city question). Match the
+// SYMBOL inside the decide.ts import rather than the exact list, so adding a second import from the
+// same module is not a false failure — while still proving index.ts takes it from the single
+// decision authority instead of keeping a private copy.
 check("index.ts imports wantsGuidedInterview from ./decide.ts",
-  /import \{ wantsGuidedInterview \} from "\.\/decide\.ts";/.test(edge));
+  /import \{[^}]*\bwantsGuidedInterview\b[^}]*\} from "\.\/decide\.ts";/.test(edge));
+check("index.ts takes hasUsableLocation from the SAME single decision authority",
+  /import \{[^}]*\bhasUsableLocation\b[^}]*\} from "\.\/decide\.ts";/.test(edge),
+  'the no-place question must reuse the ladder\'s own predicate, never a second copy');
 // EXTRACTED (round 2, "UNTESTED WIRING / FOOLABLE REGEX"): the establishedState-construction +
 // decideAgentTurn() call site used to live inline in index.ts, guarded only by the source-regexes
 // below — which round 1 proved a plausible mutation could pass. It is now buildTurnDecision() in
