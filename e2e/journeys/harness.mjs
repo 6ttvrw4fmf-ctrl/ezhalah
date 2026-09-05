@@ -29,6 +29,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { chromium, webkit, firefox, devices } from '@playwright/test';
 import { existsSync } from 'node:fs';
+import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';
 
 // The production target lock (AGENTS.md): the ONE URL these journeys score. Named rather than
 // inlined so `ledgerRecord` can refuse to mint coverage for anything else.
@@ -749,12 +750,20 @@ export async function settledCount(readCount, { budgetMs = 45_000, stableMs = 5_
 }
 
 export function appPageErrors(bag, journey) {
-  const app = [], transport = [];
-  for (const e of bag.pageErrors) (isTransportPageError(e) ? transport : app).push(e);
+  const app = [], transport = [], hydration = [];
+  for (const e of bag.pageErrors) {
+    if (isTransportPageError(e)) transport.push(e);
+    else if (isHydrationNoticePageError(e)) hydration.push(e);   // shared ruling — e2e/lib/pageErrors.mjs
+    else app.push(e);
+  }
   if (transport.length) {
     note(`${journey}: ${transport.length} TRANSPORT-class page error(s) — a dead request, not an app `
       + `exception, so NOT counted as a product defect (see harness.mjs): ${transport.join(' | ').slice(0, 300)}`);
   }
+  // NOT a silent drop: the guardian suite used to swallow these at capture, so a spike was
+  // indistinguishable from the steady state. Reported here with its count and text for the same
+  // reason the transport class is.
+  if (hydration.length) note(hydrationNoticeNote(journey, hydration));
   return app;
 }
 export async function gotoOrRetryTransport(page, url, { timeout = 90_000 } = {}) {
