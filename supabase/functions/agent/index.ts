@@ -56,7 +56,7 @@ import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWes
 // See decide.ts's header for the full rationale. The model's own `kind` field is read ONLY to
 // decide whether to retry for wrong language; it is never trusted as the final answer again after
 // that — decideAgentTurn() (called from ./turnWiring.ts, below) is the one place that assigns kind.
-import { wantsGuidedInterview } from "./decide.ts";
+import { wantsGuidedInterview, hasUsableLocation } from "./decide.ts";
 // The establishedState-construction + decideAgentTurn() call site, extracted so it is Node-importable
 // and unit-testable end-to-end (round 2 fix, "untested wiring / foolable regex") — see its own header.
 import { buildTurnDecision } from "./turnWiring.ts";
@@ -1477,10 +1477,24 @@ Deno.serve(async (req: Request) => {
       }
 
       if (decision.kind === "message") {
+        // A NO-PLACE REFUSAL MUST ASK FOR THE CITY (owner, 2026-09-04). Same shape as ambiguityReply
+        // directly below: when the PLATFORM is the reason this turn is a clarification, the platform
+        // supplies the question — the model does not know it was refused and writes as if it were
+        // about to search. Verified live on 2026-09-05 with the ladder fix already deployed:
+        // «ابغى شقة للبيع في كل مدن المملكة» correctly issued ZERO searches, but the reply still read
+        // «أبشر، بدور لك على شقق للبيع في كل مدن المملكة» — a promise to search the Kingdom, followed
+        // by nothing, and no city ever requested. Refusing silently is its own kind of lying.
+        //
+        // Deliberately narrower than the general rule one line down ("the platform enforces THAT this
+        // turn is a clarification, never WHAT it asks about"): here the platform genuinely does know
+        // what is missing, exactly as it does for a loc_classify ambiguity.
+        const noPlaceReply = !ambiguityReply && !hasUsableLocation(wired.establishedState)
+          ? (locale === "en" ? "Which city are you searching in?" : "في أي مدينة تبحث؟")
+          : null;
         // A genuine loc_classify ambiguity has a specific, pre-built question; otherwise fall back
         // to the model's own reply text/phrasing (owner-confirmed: the platform enforces THAT this
         // turn is a clarification, never WHAT it asks about).
-        const reply = ambiguityReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities));
+        const reply = ambiguityReply ?? noPlaceReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities));
         return json({ kind: "message", reply, query: understoodState(), askCount: decision.askCount });
       }
 

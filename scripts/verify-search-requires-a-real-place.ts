@@ -109,6 +109,24 @@ const decide = (state: Record<string, unknown>, askCount = 0, locationAmbiguous 
   }
 }
 
+// ── 6. THE REFUSAL ASKS FOR THE CITY — it never just goes quiet ──────────────────────────────
+// Closing the search without asking anything is its own defect: verified live 2026-09-05, the
+// ladder correctly issued ZERO searches but the reply still read «أبشر، بدور لك على شقق للبيع في
+// كل مدن المملكة» — a promise to search the Kingdom, followed by nothing.
+{
+  const idx = readFileSync(join(root, 'supabase/functions/agent/index.ts'), 'utf8');
+  check(/const noPlaceReply\s*=/.test(idx),
+    'index.ts builds a deterministic reply when the turn was refused for having no place');
+  check(/hasUsableLocation\(wired\.establishedState\)/.test(idx),
+    'that reply is gated on the SAME hasUsableLocation() the ladder used — not a second rule');
+  check(/في أي مدينة تبحث؟/.test(idx),
+    'the refusal asks the city question in Arabic');
+  check(/ambiguityReply \?\? noPlaceReply \?\?/.test(idx),
+    'a loc_classify ambiguity still wins — its question is more specific than the generic city ask');
+  check(/!ambiguityReply && !hasUsableLocation/.test(idx),
+    'the no-place question never overrides an ambiguity question');
+}
+
 console.log(failed === 0
   ? '\n✅ verify-search-requires-a-real-place: all checks passed.'
   : `\n❌ verify-search-requires-a-real-place: ${failed} check(s) failed.`);
