@@ -35,7 +35,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
-const OG_FILE = 'public/og-image.jpg';
+const OG_FILE = 'public/og-image-v2.jpg';
 const REQUIRED_AR = 'مكان واحد لاستكشاف كل إعلانات العقارات في المملكة في ثواني. جرّبها الآن.';
 
 // JSX comments are stripped: this file's own prose quotes the tags it is checking for.
@@ -61,8 +61,8 @@ export function auditShareMeta(layout: string, share: string, exists: (p: string
     if (!re.test(l)) bad.push(`${name} is missing or no longer bound to the shared constant`);
   }
 
-  if (!/export const OG_IMAGE = `\$\{SHARE_LINK\}\/og-image\.jpg`;/.test(s))
-    bad.push('OG_IMAGE is not built from SHARE_LINK — og:image must be an ABSOLUTE url for a crawler');
+  if (!/export const OG_IMAGE = `\$\{SHARE_LINK\}\/og-image-v\d+\.jpg`;/.test(s))
+    bad.push('OG_IMAGE is not an absolute, VERSION-NAMED url — crawlers cache previews by URL, so the file must be renamed when the art changes, never overwritten');
   const blurb = s.match(/export const SHARE_BLURB_AR = '([^']+)'/)?.[1];
   if (blurb !== REQUIRED_AR) bad.push(`the Arabic description is not the owner's wording: ${blurb ?? '(missing)'}`);
   if (!/في المملكة/.test(blurb ?? '')) bad.push('«في المملكة» is gone — the line no longer says WHERE');
@@ -86,7 +86,9 @@ mustCatch('og:description deleted', auditShareMeta(L.replace(/<meta property="og
 mustCatch('the title stops going through <Head> (empty tab returns)',
   auditShareMeta(L.replace('<title>{SHARE_TITLE_AR}</title>', ''), S, yes));
 mustCatch('og:image made relative (crawler cannot resolve it)',
-  auditShareMeta(L, S.replace(/export const OG_IMAGE = `\$\{SHARE_LINK\}\/og-image\.jpg`;/, "export const OG_IMAGE = '/og-image.jpg';"), yes));
+  auditShareMeta(L, S.replace(/export const OG_IMAGE = `\$\{SHARE_LINK\}\/og-image-v\d+\.jpg`;/, "export const OG_IMAGE = '/og-image.jpg';"), yes));
+mustCatch('the share image loses its version suffix (new art, stale cached previews everywhere)',
+  auditShareMeta(L, S.replace(/og-image-v\d+\.jpg/, 'og-image.jpg'), yes));
 mustCatch('«في المملكة» removed from the description',
   auditShareMeta(L, S.replace(REQUIRED_AR, 'مكان واحد لاستكشاف كل إعلانات العقارات في ثواني. جرّبها الآن.'), yes));
 mustCatch('the share image file is deleted', auditShareMeta(L, S, () => false));

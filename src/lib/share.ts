@@ -7,7 +7,12 @@ export const SHARE_LINK = 'https://ezhalah-app.vercel.app';
 // ABSOLUTE url — a crawler fetching the page has no origin to resolve "/og-image.jpg" against — and
 // it is a crop of assets/images/eagle-night.jpg, the same artwork «من نحن» leads with. No new logo
 // was drawn for it: the brand image already existed, it had simply never been offered to a crawler.
-export const OG_IMAGE = `${SHARE_LINK}/og-image.jpg`;
+// THE FILENAME CARRIES A VERSION, AND THAT IS LOAD-BEARING. WhatsApp, Facebook and LinkedIn cache a
+// link's preview card KEYED BY URL and re-fetch it on their own schedule — the same trap Chrome's
+// favicon store sprang on 2026-09-05, where correct new bytes at an unchanged path stayed invisible
+// for months. Replacing the bytes of og-image.jpg would leave everyone who has ever shared the link
+// on the old picture. RENAME THE FILE when the artwork changes; never overwrite it in place.
+export const OG_IMAGE = `${SHARE_LINK}/og-image-v2.jpg`;
 // ONE sentence, used in three places that used to drift apart: the OS share text, the in-app sheet's
 // preview, and og:description. Owner wording, 2026-09-05 — «في المملكة» is load-bearing, it says
 // WHERE, and the line read as a generic slogan without it.
