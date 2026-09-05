@@ -73,7 +73,12 @@ const exempt = new Set(
     .matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]),
 );
 const scraperDirs = readdirSync(join(ROOT, 'scrapers'), { withFileTypes: true })
-  .filter((d) => d.isDirectory() && !d.name.startsWith('__') && d.name !== 'tests')
+  // `.` prefix excludes local, gitignored tooling directories (`scrapers/.venv` is in
+  // scrapers/.gitignore). Those are never a platform — no platform name can start with a dot — so
+  // this cannot hide a real unregistered scraper, and without it any developer who creates a
+  // virtualenv turns this barrier red for a reason that does not exist in CI. A liveness barrier
+  // that is red on every laptop is one people learn to skip.
+  .filter((d) => d.isDirectory() && !d.name.startsWith('__') && !d.name.startsWith('.') && d.name !== 'tests')
   .map((d) => d.name);
 
 const missing = scraperDirs.filter((p) => !declared.has(p) && !exempt.has(p));
