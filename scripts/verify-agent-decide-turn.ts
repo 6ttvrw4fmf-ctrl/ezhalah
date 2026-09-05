@@ -149,10 +149,25 @@ console.log('\n(f2) UNBOUNDED LOCATION-AMBIGUITY LOOP (round 2 fix) — the ambi
     const r = decideAgentTurn({ rawText: 'الهفوف', locationAmbiguous: true, establishedState: empty, askCount });
     check(`(f2) askCount=${askCount} (under the ceiling) -> still asks`, r.kind === 'message' && r.askCount === askCount + 1, JSON.stringify(r));
   }
+  // SUPERSEDED 2026-09-05 (owner). "Converges to listings" was the round-2 fix for round 1's
+  // infinite ask — but the thing it converged ON was a NATIONWIDE search: turnWiring cleared the
+  // unresolved location, and absence is what the results RPC reads as the whole Kingdom. Verified
+  // in production: answering the city question with «الرياض» (a twin) returned p_cities=null and
+  // 39,015 listings. The bounded question now outranks the ceiling instead.
+  //
+  // Round 1's loop is NOT back, and the next block proves it rather than asserting it: the question
+  // is CLOSED (it names both options) and the client resolves either answer deterministically, so a
+  // resolved location searches on the very next turn, at any askCount.
   for (const askCount of [QUESTION_BUDGET_CEILING, QUESTION_BUDGET_CEILING + 3, 50]) {
     const r = decideAgentTurn({ rawText: 'الهفوف', locationAmbiguous: true, establishedState: empty, askCount });
-    check(`(f2) askCount=${askCount} (at/past the ceiling) -> converges to listings, not an infinite ask`,
-      r.kind === 'listings' && r.askCount === askCount, JSON.stringify(r));
+    check(`(f2) askCount=${askCount} -> still asks the bounded question, never a nationwide search`,
+      r.kind === 'message', JSON.stringify(r));
+  }
+  for (const askCount of [QUESTION_BUDGET_CEILING, 50]) {
+    const r = decideAgentTurn({ rawText: 'مدينة الرياض', locationAmbiguous: false,
+      establishedState: { ...empty, location: 'مدينة الرياض' }, askCount });
+    check(`(f2) THE EXIT: once answered, askCount=${askCount} searches immediately (no infinite loop)`,
+      r.kind === 'listings', JSON.stringify(r));
   }
 }
 

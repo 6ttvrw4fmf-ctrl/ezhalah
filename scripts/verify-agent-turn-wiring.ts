@@ -116,16 +116,30 @@ console.log('\n(4) establishedState FIELD-NAME BUG — a REAL prevQuery (SearchQ
   check('(4) priceMin/priceMax (no priceInput) also carries forward', rangeOnly.decision.kind === 'listings');
 }
 
-console.log('\n(2) UNBOUNDED LOCATION-AMBIGUITY LOOP — the wiring must clear the unresolved term, never guess it\n');
+console.log('\n(2) AN UNRESOLVED AMBIGUITY ASKS — it is never downgraded into a nationwide search\n');
 {
+  // SUPERSEDED 2026-09-05 (owner). This asserted that an exhausted budget CONVERGES to listings and
+  // that the wiring CLEARS the unresolved term. Both were true, and together they were the bug:
+  // clearing the location makes it absent, and absence is exactly what the results RPC reads as the
+  // whole Kingdom. Verified in production — answering the city question with «الرياض» (a twin)
+  // produced p_cities/p_districts/p_region_ids all null and 39,015 listings.
   const exhausted = buildTurnDecision({
     ...base, text: 'الهفوف', location: 'الهفوف', ambiguityReply: 'أي منطقة تقصد؟', askCount: 2,
   });
-  check('(2) budget exhausted + unresolved ambiguity -> listings (converges, no infinite ask)',
-    exhausted.decision.kind === 'listings', JSON.stringify(exhausted.decision));
-  check('(2) the STILL-UNRESOLVED location term is cleared, never guessed/searched as-is',
-    exhausted.location === '', `location leaked through as ${JSON.stringify(exhausted.location)}`);
-
+  check('(2) budget exhausted + unresolved ambiguity -> message (asks; never a nationwide search)',
+    exhausted.decision.kind === 'message', JSON.stringify(exhausted.decision));
+  check('(2) the unresolved term is NOT blanked — blanking it is what produced the nationwide search',
+    exhausted.location !== '', JSON.stringify({ location: exhausted.location }));
+  // THE EXIT — the loop terminates the moment the user answers, at any askCount.
+  const answered = buildTurnDecision({
+    ...base, text: 'مدينة الرياض', location: 'مدينة الرياض', ambiguityReply: null, askCount: 50,
+  });
+  check('(2) THE EXIT: once the twin is answered, the next turn searches (no infinite loop)',
+    answered.decision.kind === 'listings', JSON.stringify(answered.decision));
+  check('(2) …and it searches the RESOLVED place, not a blank one',
+    answered.location === 'مدينة الرياض', JSON.stringify({ location: answered.location }));
+  // Budget REMAINING behaves the same way it always did — the change is that the ceiling no longer
+  // ends the asking, so these two now hold at every askCount rather than only below the ceiling.
   const stillAsking = buildTurnDecision({
     ...base, text: 'الهفوف', location: 'الهفوف', ambiguityReply: 'أي منطقة تقصد؟', askCount: 0,
   });
@@ -135,6 +149,30 @@ console.log('\n(2) UNBOUNDED LOCATION-AMBIGUITY LOOP — the wiring must clear t
     stillAsking.location === 'الهفوف');
 }
 
+console.log('\n(4) establishedState FIELD-NAME BUG — a REAL prevQuery (SearchQuery shape) must be read correctly\n');
+{
+  // A REAL SearchQuery shape (src/data/search.ts): priceInput/priceMin/priceMax, never `.price`; flat
+  // AF keys like ratingMin/bathMin, never a nested `.af`. Nothing established THIS turn.
+  const realPrevQuery = {
+    deal: 'Rent', location: '', category: null, type: null, detail: null,
+    location: 'الرياض', priceInput: '720000', priceBand: null, ratingMin: 9.0, bathMin: 2,
+  };
+  const r = buildTurnDecision({ ...base, text: 'وش رايك', prevQuery: realPrevQuery, askCount: 0 });
+  check('(4) an earlier-turn price (priceInput) is visible to hasEnoughToSearch() -> listings',
+    r.decision.kind === 'listings', JSON.stringify(r.decision));
+  check('(4) establishedState.price actually carries the real prevQuery value, not undefined',
+    r.establishedState.price === '720000', JSON.stringify(r.establishedState.price));
+  check('(4) establishedState.af actually carries the flat AF facts (ratingMin/bathMin), not null',
+    JSON.stringify(r.establishedState.af) === JSON.stringify({ ratingMin: 9.0, bathMin: 2 }),
+    JSON.stringify(r.establishedState.af));
+
+  // Same shape but with only priceMin/priceMax set (the Filter-form pair) — still visible.
+  const rangeOnly = buildTurnDecision({
+    ...base, text: 'وش رايك',
+    prevQuery: { deal: 'Buy', location: 'الرياض', priceMin: '400000', priceMax: '900000' },
+  });
+  check('(4) priceMin/priceMax (no priceInput) also carries forward', rangeOnly.decision.kind === 'listings');
+}
 console.log(failures === 0
   ? '\n✅ verify-agent-turn-wiring: all checks passed.\n'
   : `\n❌ verify-agent-turn-wiring: ${failures} check(s) failed.\n`);
