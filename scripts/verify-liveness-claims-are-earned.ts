@@ -124,6 +124,38 @@ export function judge(live: CoverageRow[], mirror: MirrorRow[]): string[] {
   return bad;
 }
 
+// ── MUTATION PROOFS. judge() was written as a pure function precisely so these could execute the
+//    REAL rule rather than a re-implementation of it (see its doc comment). Each feeds it rows that
+//    carry the forgery this barrier exists to catch, and asserts judge() reports it. They run on
+//    import as well as as the entrypoint, so a caller cannot get the rule without its proof.
+{
+  const mustCatch = (what: string, wouldFail: boolean) => {
+    if (!wouldFail) {
+      console.error(`✗ MUTATION SURVIVED: ${what} would NOT be caught`);
+      process.exit(1);
+    }
+  };
+  const OK: MirrorRow[] = [{ platform: 'p1', strategy: UNVERIFIABLE_TIER }];
+  const row = (o: Partial<CoverageRow> = {}): CoverageRow =>
+    ({ platform: 'p1', strategy: UNVERIFIABLE_TIER, active: 100, verified_ever: 0, verified_in_sla: 0, ...o });
+
+  mustCatch('a stamp on a CRAWL_PRESENCE_ONLY platform (the forgery this barrier exists for)',
+    judge([row({ verified_ever: 7 })], OK).length > 0);
+  mustCatch('a stamp that is inside SLA but never counted as ever-verified',
+    judge([row({ verified_in_sla: 3 })], OK).length > 0);
+  mustCatch('production serving a tier the committed mirror never declared',
+    judge([row({ strategy: 'DIRECT_REVISIT' })], OK).length > 0);
+  mustCatch('a platform graded in production that is in no committed mirror',
+    judge([row(), row({ platform: 'ghost' })], OK).length > 0);
+  mustCatch('a registered platform production reports no coverage row for',
+    judge([row()], [...OK, { platform: 'missing', strategy: 'DIRECT_REVISIT' }]).length > 0);
+  mustCatch('an EMPTY read being read as clean (the dark-detector shape)',
+    judge([], OK).length > 0);
+  // …and the rule is not vacuous: a genuinely honest tier-3 platform must pass.
+  mustCatch('nothing — an honest CRAWL_PRESENCE_ONLY platform with zero stamps still passes',
+    judge([row()], OK).length === 0);
+}
+
 // ── The live read. Only runs when this file is the entrypoint, so the mutation proof and any other
 //    caller can import judge() without touching production. ────────────────────────────────────
 if (import.meta.filename === process.argv[1]) {
