@@ -11,6 +11,21 @@ block"). This file adds a routine spec; it does not widen GREEN, narrow RED, or 
 
 ---
 
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner,
+2026-08-29, extended 2026-09-04) — binds this routine too, in full: fix first / report last (§G.1);
+the six and only six reasons to stop without fixing (§G.2), and "a human could technically approve
+this" is not one of them (§G.2b); automatic cross-routine handoff via `incident_open()` /
+`incident_handoff()` (§G.3); adaptive effort (§G.4); the real 10/10 standard (§G.5); Sentry first
+and your own incident queue with it (§G.6, §G.6b); **§G.9 — closed means all seven: root cause
+fixed, related variants checked, a permanent barrier exists, a MUTATION watched to catch recurrence,
+the full suite green, PRODUCTION verified through the real path a user hits, and no equivalent
+hidden path left. Short of all seven the honest state is UNKNOWN, never "fixed."** §G.10 —
+BEFORE/AFTER and the mandatory block. §G.11 — tokens are not the constraint. §G.7 — none of it
+weakens an existing guard.
+
+It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs. In
+particular §0's **UNKNOWN IS NOT DEAD** outranks every efficiency consideration in §G.
+
 ## §0 — THE RULE THAT OUTRANKS EVERYTHING ELSE IN THIS FILE
 
 > # **UNKNOWN IS NOT DEAD.**
