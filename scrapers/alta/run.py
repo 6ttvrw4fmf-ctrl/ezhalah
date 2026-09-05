@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import html as ihtml
 import re
 import sys
@@ -48,6 +49,8 @@ from scrapers.common import db, normalize  # noqa: E402
 BASE = "https://alta.com.sa"
 REST = f"{BASE}/wp-json/wp/v2"
 SOURCE = "Alta"
+CHECK_TABLES = ["alta_residential_listings", "alta_commercial_listings"]
+LAST_FETCH_NOTE = ""
 PREFIX = "ALT"
 
 TAXONOMIES = ("property_category", "property_action_category", "property_city",
@@ -94,9 +97,20 @@ _PHONE_LOOSE = re.compile(r"(?:[\d٠-٩][\s\-]?){9,}")
 
 
 def session() -> cc.Session:
+    """Impersonating session, routed through the Saudi residential proxy when one is configured.
+
+    WHY THE PROXY MATTERS HERE (measured 2026-09-05): from a laptop every endpoint answers in
+    well under a second, but the first CI run made SIX taxonomy requests and burned 3m40s before
+    reporting "no listings" — every request from the GitHub runner's datacenter IP timed out.
+    The source was never down; the caller was unreachable. Same class of block the wasalt path
+    documents. PROXY_URL holds only the env NAME — the value lives in the secret, never here.
+    """
     s = cc.Session(impersonate="chrome124")
     s.headers.update({"Accept": "application/json,text/html;q=0.9",
                       "Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
+    purl = os.environ.get("WASALT_PROXY_URL", "").strip()
+    if purl:
+        s.proxies = {"http": purl, "https": purl}
     return s
 
 
@@ -131,18 +145,27 @@ def fetch_taxonomies(s: cc.Session) -> dict[str, dict[int, str]]:
 
 def fetch_listings(s: cc.Session) -> list[dict]:
     out: list[dict] = []
+    # Records WHY enumeration stopped. A timeout, a 403 and a genuinely empty source are three
+    # different incidents; collapsing them into "no listings" sent the first CI run chasing a
+    # dead source that was actually fine (2026-09-05).
+    global LAST_FETCH_NOTE
+    LAST_FETCH_NOTE = "no pages attempted"
     for page in range(1, 30):
         try:
             r = s.get(f"{REST}/estate_property?per_page=100&page={page}", timeout=40)
-        except Exception:
+        except Exception as e:
+            LAST_FETCH_NOTE = f"page {page} raised {type(e).__name__}: {str(e)[:120]}"
             break
         if r.status_code != 200:
+            LAST_FETCH_NOTE = f"page {page} returned HTTP {r.status_code}"
             break
         try:
             batch = r.json()
         except Exception:
+            LAST_FETCH_NOTE = f"page {page} body was not JSON (parked/blocked/truncated)"
             break                       # unparseable body ends enumeration, never loops
         if not isinstance(batch, list) or not batch:
+            LAST_FETCH_NOTE = f"page {page} returned an empty list (end of source)"
             break
         out.extend(x for x in batch if isinstance(x, dict))
         if len(batch) < 100:
@@ -263,7 +286,7 @@ def main() -> int:
         tax = fetch_taxonomies(s)
         posts = fetch_listings(s)
         if not posts:
-            raise RuntimeError("REST returned no listings (source down, parked, or blocked)")
+            raise RuntimeError(f"REST returned no listings — {LAST_FETCH_NOTE}")
         if args.limit:
             posts = posts[: args.limit]
         print(f"{SOURCE}: {len(posts)} posts from WP REST"
@@ -298,7 +321,16 @@ def main() -> int:
                       f"{str(r['property_type']):10s} {str(r['city']):14s} "
                       f"{str(r['area_m2']):>7}m² price={r['price_total']}")
         else:
-            db.end_run(run_id, ok=True, found=len(res) + len(com))
+            n = len(res) + len(com)
+            # end_run returns the EFFECTIVE ok it actually wrote: its RC-B guard can demote a run
+            # that looks successful but wrote nothing real. Fail CI on a demotion rather than
+            # reporting a silent success (the same check awal makes).
+            healthy = db.end_run(run_id, ok=True, rows_seen=n, rows_upserted=n,
+                                 check_tables=CHECK_TABLES)
+            if not healthy:
+                print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI "
+                      "instead of reporting a silent success.", flush=True)
+                return 1
             print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted "
                   f"({gone_ct} sold/rented)")
         if unmapped:
@@ -309,7 +341,7 @@ def main() -> int:
         return 0
     except Exception as e:
         if run_id:
-            db.end_run(run_id, ok=False, error=str(e)[:500])
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=str(e)[:300])
         print(f"✗ {SOURCE}: {e}", file=sys.stderr)
         return 1
 
