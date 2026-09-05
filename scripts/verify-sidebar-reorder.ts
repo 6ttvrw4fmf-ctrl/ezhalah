@@ -114,8 +114,14 @@ check('a quick tap still ONLY arms the delayed open (drag never calls openHistor
   && !/beginHold[\s\S]{0,3000}openHistory\(/.test(sidebar.slice(sidebar.indexOf('const beginHold'), sidebar.indexOf('const bindRowHost'))));
 check('the landed hold cancels the armed open (a long-press can never open a chat)',
   /d\.active = true;[\s\S]{0,200}cancelArmedOpen\(\);/.test(sidebar));
-check('a landed hold cannot rename, and a double-click mid-hold cannot fire rename',
-  /const dbl = \(\) => \{ if \(!dragRef\.current\?\.active\) beginRename\(c\); \};/.test(sidebar));
+// Retargeted 2026-09-05 with ops_incident #20's fix. The pin gained its THIRD clause — a
+// double-click that STARTS on ⋯ (or any control that marks itself data-nodrag) must not rename —
+// because opening and closing that menu is two clicks on this very host and the row was dropping
+// into rename mode, 3/3 on production. The pointerdown handler already guards exactly this way;
+// this asserts both gestures still agree. The BEHAVIOUR is executed in a real browser by
+// e2e/journeys/run.mjs's `sidebar-dblclick-on-menu`; this keeps the source honest alongside it.
+check('a landed hold cannot rename, a double-click mid-hold cannot fire rename, and a double-click on ⋯ cannot either',
+  /const dbl = \(e: any\) => \{ if \(!dragRef\.current\?\.active && !startsOnControl\(e\?\.target\)\) beginRename\(c\); \};/.test(sidebar));
 check('touch long-press rename is gone from the row (hold belongs to reorder now)',
   !/onLongPress=\{\(\) => beginRename/.test(sidebar));
 check('touch rename lives in the ⋯ menu instead', /pencil-outline/.test(sidebar) && /\{t\('Rename'\)\}/.test(sidebar));
