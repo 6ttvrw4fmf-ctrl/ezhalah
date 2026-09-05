@@ -116,6 +116,33 @@ check('safe-deploy.sh actually runs the recorder (not just mentions it in a comm
 check('safe-deploy.sh does NOT keep its own inline baseline push (one recorder, one behaviour)',
   !/git push origin main/.test(safeDeploy));
 
+// ── 7. MUTATION PROOFS for §6. Checks 1-5 above are already executions — they run the REAL recorder
+// against a bare repo whose pre-receive hook refuses refs/heads/main the way GH006 does, so a broken
+// recorder fails them by construction. §6 is the one half that is a source predicate, and a source
+// predicate is exactly the shape that has passed over a live defect in this repo before — so both of
+// its predicates are applied here to a deliberately broken safe-deploy.sh.
+const mustCatch = (what: string, wouldFail: boolean) =>
+  check(`MUTATION: catches ${what}`, wouldFail);
+
+// The call demoted to a comment — the original defect's shape: mentioned, never executed.
+mustCatch('the recorder call being commented out of safe-deploy.sh',
+  !/^\s*scripts\/record-deploy-baseline\.sh\s+"\$LOCAL"/m.test(
+    safeDeploy.replace(/^(\s*)(scripts\/record-deploy-baseline\.sh)/m, '$1# $2')));
+
+// The call losing its argument — it would run, and record the wrong thing.
+mustCatch('the recorder being called without "$LOCAL"',
+  !/^\s*scripts\/record-deploy-baseline\.sh\s+"\$LOCAL"/m.test(
+    safeDeploy.replace(/(record-deploy-baseline\.sh)\s+"\$LOCAL"/, '$1')));
+
+// A second, inline pusher creeping back in beside the recorder — two behaviours, one of which is the
+// fiction PR #1747 removed.
+mustCatch('an inline `git push origin main` returning to safe-deploy.sh',
+  /git push origin main/.test(`${safeDeploy}\n  git push origin main\n`));
+
+// …and the predicate is not vacuous: the REAL file must still satisfy it.
+mustCatch('nothing — the real safe-deploy.sh still passes both predicates (the proofs are not inverted)',
+  /^\s*scripts\/record-deploy-baseline\.sh\s+"\$LOCAL"/m.test(safeDeploy) && !/git push origin main/.test(safeDeploy));
+
 console.log(failures === 0
   ? '\n✅ verify-baseline-record-path: the baseline is recorded, or the run goes red saying it was not.\n'
   : `\n❌ verify-baseline-record-path: ${failures} check(s) failed.\n`);
