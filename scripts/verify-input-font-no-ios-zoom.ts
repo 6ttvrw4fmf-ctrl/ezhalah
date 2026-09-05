@@ -167,7 +167,55 @@ for (const file of files) {
   }
 }
 
+// ── 3. an entrance may not SCALE a container of TextInputs below 1 on web ────────────────────────
+// Found live 2026-09-05 (owner screenshot: the support form zooming on focus). Every input was a
+// compliant 16px — but the modal card entered at scale 0.94, and iOS Safari decides zoom-on-focus
+// from the EFFECTIVE text size at focus time: 16 × 0.94 = 15.04px, under the threshold, for the
+// whole entrance window. Users tap the field they opened the form to fill immediately — inside that
+// window — and a page Safari zooms never zooms back on its own. The same shape sat on the Filter
+// home card (0.965, replayed on EVERY return to the screen) and the auth popup (0.96). So the
+// declared-font check in §1 is not sufficient: a transform can undo it. The rule: in any file that
+// renders a <TextInput>, a scale entrance with a sub-1 bound must pin scale to 1 on web
+// (`IS_WEB ? 1 : …` / `Platform.OS === 'web' ? 1 : …`). Files with no inputs (result cards, the
+// read-aloud player) keep their scale-pop — nothing focusable lives inside them.
+// Entrance-style scales only: [0.9x, 1]. Icon feedback (the category checkmark's 0.5→1 pop, card
+// press pops) uses deeper or upward scales and never wraps an input — flagging those would kill
+// legitimate micro-animation for no zoom benefit. A container entrance below 0.9 would look broken
+// long before it zoomed anyone; the floor check below still notices if the known set shrinks.
+const SUB1_SCALE = /\[\s*0?\.9\d*\s*,\s*1\s*\]/;           // [0.94, 1] positional or outputRange value
+const WEB_PIN = /IS_WEB|Platform\.OS\s*===\s*['"]web['"]/; // any of this repo's web-flag idioms
+/** The full `{ scale: … }` transform entry starting at `at` (brace-balanced). */
+const scaleEntry = (src: string, at: number): string => balanced(src, src.lastIndexOf('{', at), '{', '}');
+let scaleEntrances = 0;
+for (const file of files) {
+  const src = readFileSync(file, 'utf8');
+  if (!/<TextInput\s/.test(src)) continue;
+  const rel = relative(root, file);
+  for (const m of src.matchAll(/\bscale:\s/g)) {
+    const entry = scaleEntry(src, m.index!);
+    if (!SUB1_SCALE.test(entry)) continue; // not a sub-1 entrance (static scale, or a >=1 pop)
+    scaleEntrances++;
+    const line = src.slice(0, m.index!).split('\n').length;
+    check(`${rel}:${line} sub-1 scale entrance wrapping TextInputs is pinned to 1 on web`,
+      WEB_PIN.test(entry),
+      `${entry.slice(0, 140)} — at focus time this renders every input inside it below ${MIN}px effective, and iOS zooms`);
+  }
+}
+// 2 today: the InfoModal card (0.94 — the support form) and the Filter-home card (0.965 — the
+// city/district/budget/area inputs). The auth popup's 0.96 entrance is deliberately NOT counted:
+// AuthModal renders no TextInput at all (Google/Apple only), so nothing focusable lives inside it
+// and its scale-pop stays.
+check(`found the known sub-1 scale entrances around inputs (${scaleEntrances} scanned)`, scaleEntrances >= 2,
+  `only ${scaleEntrances} matched — if they were legitimately removed, lower this floor deliberately; if not, the scanner broke`);
+
+// hermetic self-test: the scanner must be able to fail — feed it both shapes directly.
+const GOOD = "{ scale: reduced || IS_WEB ? 1 : interpolate(progress.value, [0, 1], [0.94, 1]) }";
+const BAD = "{ scale: interpolate(progress.value, [0, 1], [0.94, 1]) }";
+check('(mutation) an unpinned sub-1 scale entrance is caught', SUB1_SCALE.test(BAD) && !WEB_PIN.test(BAD));
+check('(mutation) a web-pinned entrance passes', SUB1_SCALE.test(GOOD) && WEB_PIN.test(GOOD));
+check('(mutation) a static scale entry is not flagged', !SUB1_SCALE.test("{ scale: 1 }"));
+
 console.log(failed === 0
-  ? `\n✓ no input can trip the iOS Safari focus-zoom trap (${inputs} inputs, all >= ${MIN}px on web)\n`
+  ? `\n✓ no input can trip the iOS Safari focus-zoom trap (${inputs} inputs, all >= ${MIN}px on web; ${scaleEntrances} scale entrances web-pinned)\n`
   : `\n✗ ${failed} check(s) FAILED — a sub-16px input would zoom iPhone users and strand them zoomed in\n`);
 process.exit(failed === 0 ? 0 : 1);
