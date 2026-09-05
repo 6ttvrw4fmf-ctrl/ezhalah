@@ -54,6 +54,22 @@ jobs:
         run: npm ci
       - name: Install Chromium for Playwright
         run: npx playwright install --with-deps chromium
+      # The table scope the client sends is HARVESTED, never assumed (§41.6) — and until 2026-09-04
+      # nothing refreshed it, so it drifted fifteen days: ten false P1 "unreachable inventory" alerts
+      # on 4,320 rows production reaches fine, while this routine's own coverage silently excluded
+      # them. ops_qa_cohort_catalog() joins that registry, so the sweep and the RPC layer both build
+      # p_tables from whatever it holds. Harvest FIRST, so the run that follows tests the scope
+      # production actually uses. Anon-only, like the rest of this workflow: the write goes through
+      # ops_qa_record_scope() (SECURITY DEFINER), never a service-role key.
+      # This step is also what keeps mon_detect_search_scope_unreachable_inventory out of its
+      # P2 "registry stale" state — if this stops running, that detector goes loud in 3 days.
+      - name: Refresh the harvested client table scope
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node e2e/qa-coverage/harvest-scope.mjs
+
       - name: Drive production like a real user
         env:
           BASE_URL: ${{ github.event.inputs.base_url || 'https://ezhalah-app.vercel.app' }}

@@ -618,6 +618,31 @@ appears broken.
    mapping made the differential oracle under-count five searches; they read as product defects until
    the mapping was re-derived from the harvest. `ops_qa_cohort` / `ops_qa_scope` hold the harvested
    truth — refresh them, never hand-edit them.
+
+   **"Refresh each run" needs a MACHINE, not a memory (2026-09-04).** This rule existed from the
+   start and nothing implemented it: `ops_qa_scope` was hand-built on 2026-08-20 and drifted fifteen
+   days. Because a snapshot has no way to say how old it is, the drift was silent in three places at
+   once — `mon_detect_search_scope_unreachable_inventory` raised **ten false P1s** claiming 4,320
+   production-ready listings were "stored, indexed and invisible" (the served bundle carried all ten
+   tables); `ops_qa_cohort_catalog()` joins the same registry, so the daily RPC layer and the
+   narrowing probe had been excluding those 4,320 rows from every search they fired, self-consistently
+   and therefore invisibly; and had the client instead **dropped** a table, the stale registry would
+   have kept listing it and the detector would have called it reachable — the one bug class it exists
+   to catch, walking straight through it.
+
+   Re-harvesting once fixes none of that; it resets the clock. The standing arrangement is:
+   - **`node e2e/qa-coverage/harvest-scope.mjs`** drives one real production search per scope label
+     and reads `p_tables` out of the intercepted request — the client's own serialization, never a
+     second copy of `RES_TABLES`/`COM_TABLES`. It refuses a PARTIAL harvest, and
+     `ops_qa_record_scope()` refuses an EMPTY table list, because a blanked label reads to the
+     detector as "everything is reachable".
+   - The **live sweep workflow runs it first**, before driving the sweep, so each run tests the scope
+     production actually uses.
+   - The detector now separates **EMPTY / STALE / FRESH**: past 3 days it withdraws its per-table
+     claims and raises a P2 saying it cannot judge, rather than making confident claims on old
+     evidence. It also **self-heals** — the old body never resolved a per-table key, so the ten false
+     P1s would have stayed open forever even after the registry was corrected.
+   - Pinned and mutation-proven by `scripts/verify-search-scope-registry-freshness.ts` in `npm test`.
 7. **«شهري» alone needs two clicks, in order.** The period chips are a multi-select with a
    minimum-one rule: سنوي is on by default and cannot be deselected while it is the only one.
    Select شهري first (state becomes «كلاهما»), then deselect سنوي. There is no third «كلاهما»
