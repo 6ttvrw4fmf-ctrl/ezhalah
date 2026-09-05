@@ -467,7 +467,16 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
         # labelled MONTHLY — and a monthly label makes the reader divide by 12. Absence is unknown.
         _per_year = offer.get("isRentPerYear")
         rent_period = None if _per_year is None else ("annual" if _per_year else "monthly")
-        price_annual = price
+        # ANNUALISE, like every other rent scraper in the fleet. `price_annual` is a CONTRACT: the
+        # column holds a YEARLY figure, and src/data/listings.ts divides it by 12 for a row labelled
+        # monthly. Storing the raw monthly figure here therefore showed the user 1/12 of the rent the
+        # source published — 2,500/month rendered as ~208, a 75,000 showroom as 6,250.
+        # This is the SAME defect aqarcity fixed on 2026-07-13 ("storing the raw monthly showed 1/12
+        # of the real rent"); muktamel was the one rent scraper that never received it — it labelled
+        # the period and skipped the conversion. annualize_rent() is the fleet's single implementation
+        # and is period-driven, so it leaves an "annual" row alone and — per the SOURCE IS TRUTH note
+        # above — leaves an UNKNOWN period's figure exactly as published, never guessing a period.
+        price_annual = normalize.annualize_rent(price, rent_period)
     elif property_type in LAND_TYPES and price and price <= 100_000:
         # LAND: offer.price is the SAR-per-m² RATE, not a total. Store it as the rate and leave
         # price_total NULL — the source publishes no total here. The ≤100k guard only ROUTES the

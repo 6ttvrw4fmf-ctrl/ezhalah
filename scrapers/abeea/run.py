@@ -666,7 +666,13 @@ def map_listing(body: str, url: str,
         "bathrooms": baths,
         "halls": halls,
         "price_total": price if not is_rent else None,
-        "price_annual": None if dual_unsuffixed_rent else (price if is_rent else None),
+        # ANNUALISE — `price_annual` is a YEARLY column and src/data/listings.ts divides it by 12 for
+        # a row labelled monthly, so storing the raw monthly figure here shows 1/12 of the source
+        # price. Same defect muktamel carried on 113 live rows (incident #11) and aqarcity fixed on
+        # 2026-07-13; abeea's was latent only because it has no active monthly rows today.
+        # annualize_rent() is period-driven: it leaves "annual" alone and — matching the UNKNOWN rule
+        # above — leaves a periodless figure exactly as published rather than guessing a period.
+        "price_annual": None if dual_unsuffixed_rent else (normalize.annualize_rent(price, rent_period) if is_rent else None),
         "price_per_meter": ppm,
         "rent_period": rent_period,
         "city": city,
