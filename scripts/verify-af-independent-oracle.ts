@@ -157,6 +157,8 @@ for (const c of CASES) {
   }
 }
 
+check('SCRATCH PROOF (branch scratch/prove-oracle-gate-red-2026-09-04, never merged) — forced disagreement to demonstrate the pull_request gate actually goes red', false, 'intentional failure injected only to verify CI wiring for PR #1759');
+
 console.log(failures === 0
   ? '\n✓ every AF predicate agrees with an independent implementation, and unknown never passes\n'
   : `\n✗ ${failures} check(s) FAILED — an AF answer means something different than the product intends\n`);
