@@ -136,8 +136,13 @@ check(`8. all ${REQUIRED.length} required legal/brand/hero strings are rendered 
 
 // ── 9. Reduced motion is respected ──────────────────────────────────────────────────────────────
 check(
+  // Strengthened 2026-09-05 (iOS focus-zoom fix): the card scale is now pinned to 1 under reduced
+  // motion OR on web — `reduced || IS_WEB ? 1 : interpolate` — because a sub-1 scale entrance over
+  // the support form's TextInputs made Safari zoom on focus (verify-input-font-no-ios-zoom.ts §3).
+  // The reduced-motion pin is a strict subset of the new guard; requiring the full guard here means
+  // dropping EITHER half re-reddens this check.
   '9. reduced motion: hook wired, Sheet scale pinned to 1, stagger disabled (IS_WEB && !reduced)',
-  /useReducedMotion\(\)/.test(modal) && /reduced \? 1 : interpolate/.test(modal) &&
+  /useReducedMotion\(\)/.test(modal) && /reduced \|\| IS_WEB \? 1 : interpolate/.test(modal) &&
     /IS_WEB && !reduced/.test(modal) && /IN_REDUCED/.test(modal) && /OUT_REDUCED/.test(modal),
 );
 
