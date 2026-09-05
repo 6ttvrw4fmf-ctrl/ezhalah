@@ -55,8 +55,8 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
   // target that takes the link separately (X's `url=`, Telegram's `url=`) gets `lead` — handing it
   // `msg` too pre-filled the composer with the link TWICE.
   const lead = locale === 'ar'
-    ? 'إزهله — مكان واحد تستكشف فيه كل إعلانات العقارات في ثواني. جرّبها الآن:'
-    : 'Ezhalah — one place to explore all property listings in seconds. Try it now:';
+    ? 'إزهله — مكان واحد تستكشف فيه كل إعلانات العقارات في المملكة في ثواني. جرّبها الآن:'
+    : 'Ezhalah — one place to explore every property listing in Saudi Arabia in seconds. Try it now:';
   const msg = `${lead} ${LINK}`;
   const copy = async () => {
     // expo-clipboard works on web (navigator.clipboard) and native alike.
