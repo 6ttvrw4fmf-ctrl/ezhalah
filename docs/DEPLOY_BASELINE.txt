@@ -1,4 +1,4 @@
-15979fbd6db426a0da6bed432b930ae4c0995e18
+2c906206e629bf67ce387adfdad56169dcb3b2d6
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # 2026-09-04  57dd41e  deployed via .github/workflows/deploy-frontend.yml run 33898889593.
 #   Recorded BY PR, not by the deploy: the runner has no git identity, so safe-deploy.sh's
