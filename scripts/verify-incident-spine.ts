@@ -74,7 +74,16 @@ const latestMigrationDefining = (needle: string): string => {
 };
 
 const spine = migrationNamed('create table if not exists public.ops_incident');
-const roster = migrationNamed('mon_run_all_detectors', 'mon_detect_stalled_incident');
+// `proname = 'mon_run_all_detectors'` rather than the bare name: the needle must match a migration
+// that EDITS that roster, not one that merely mentions it. On 2026-09-05 the two-needle set went
+// ambiguous — 20260905183026 adds mon_detect_stalled_incident to the *P0 fast lane*
+// (mon_run_p0_detectors) and refers to mon_run_all_detectors only in prose explaining why the slow
+// sweep costs the P0 SLO. Both names appear, so both files matched and the check failed loudly, as
+// designed. That migration is a mirror of what production ran and is therefore byte-frozen, so the
+// fix belongs here: tighten the needle to the pg_proc lookup only a roster EDIT performs. This is
+// strictly more precise, not looser — the intended file still matches (twice), and a migration that
+// stopped editing the roster would still go unmatched.
+const roster = migrationNamed("proname = 'mon_run_all_detectors'", 'mon_detect_stalled_incident');
 /** The CURRENT surface→owner map and surface vocabulary, wherever they were last redefined. */
 const routing = latestMigrationDefining('function public.incident_route_owner');
 // The surface VOCABULARY, added 2026-09-04 after a coverage audit found ~9 real user-reachable
