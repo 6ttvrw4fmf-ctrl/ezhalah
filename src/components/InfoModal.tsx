@@ -570,12 +570,20 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
             not just the other UI surfaces it was written for. This IS the canonical address for
             both: partners@ (Terms) for business/support-shaped inquiries, admin@ (Privacy, owner
             2026-09-04) for data-rights/PDPL requests — a normal split, not a drift risk, since both
-            literals still live only here. */}
-        {docs.map((p, i) => (
-          <Text key={i} style={s.legalP}>
-            {p.replace('{{CONTACT_EMAIL}}', tab === 'privacy' ? 'admin@ezhalah.com' : 'partners@ezhalah.com')}
-          </Text>
-        ))}
+            literals still live only here.
+            BIDI (owner-caught 2026-09-04, production): every sentence ends "…عبر {email}." — an LTR
+            run immediately followed by RTL-context trailing punctuation. Isolating ONLY the address
+            (LRI/PDI, U+2066/U+2069, punctuation left outside) is NOT enough — measured empirically at
+            two container widths and two punctuation marks (period, Arabic comma): the trailing mark
+            still resolves against the OUTER paragraph and renders at the address's FRONT, not its
+            end (".partners@ezhalah.com" instead of "partners@ezhalah.com."). The punctuation must be
+            captured INSIDE the isolate, so it's part of the SAME atomic LTR run and simply reads
+            left-to-right within it, wherever that run lands in the RTL line. */}
+        {docs.map((p, i) => {
+          const email = tab === 'privacy' ? 'admin@ezhalah.com' : 'partners@ezhalah.com';
+          const text = p.replace(/\{\{CONTACT_EMAIL\}\}([.,،؛؟:;]*)/, (_m, trailing) => `⁦${email}${trailing}⁩`);
+          return <Text key={i} style={s.legalP}>{text}</Text>;
+        })}
       </View>
     </View>
   );
