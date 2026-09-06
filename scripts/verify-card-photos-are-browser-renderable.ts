@@ -32,6 +32,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { photoDisplayUrl } from '../src/lib/photoUrl.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => {
@@ -71,7 +72,16 @@ const PLATFORM_TABLES = [
 
 type Verdict = { platform: string; url: string; status: number; ctype: string; corp: string; renderable: boolean; why: string };
 
-const judge = async (platform: string, imgUrl: string): Promise<Verdict> => {
+// THE PRODUCTION ORIGIN, because a same-origin display url (the Sadin proxy path `/_img/sadin/*`)
+// only resolves against the deployed app — that Vercel rewrite is what makes it renderable at all.
+const ORIGIN = 'https://ezhalah-app.vercel.app';
+
+const judge = async (platform: string, storedUrl: string): Promise<Verdict> => {
+  // Judge what the BROWSER actually loads. Every photo entering the client passes through
+  // photoDisplayUrl (remote.ts finalize), so checking the raw stored url would test a string no
+  // <img> ever receives — and would have reported Sadin broken after the proxy fixed it.
+  const display = photoDisplayUrl(storedUrl);
+  const imgUrl = display.startsWith('/') ? ORIGIN + display : display;
   try {
     // GET, not HEAD: some hosts answer HEAD differently from the GET a browser actually issues.
     const r = await fetch(imgUrl, { method: 'GET', redirect: 'follow' });
@@ -79,11 +89,16 @@ const judge = async (platform: string, imgUrl: string): Promise<Verdict> => {
     const corp = (r.headers.get('cross-origin-resource-policy') || '').toLowerCase();
     const okStatus = r.status === 200;
     const okType = ctype.startsWith('image/');
-    // cross-origin: only 'cross-origin' (or absent) permits embedding from another origin.
-    const okCorp = corp === '' || corp === 'cross-origin';
+    // CORP IS A CROSS-ORIGIN-ONLY CHECK. `same-origin` blocks an <img> on ANOTHER origin and
+    // PERMITS one served from our own — which is the entire mechanism the Sadin proxy relies on.
+    // Judging it without asking "same origin as the app?" would condemn the very fix that works:
+    // measured live, the proxied url decoded at 900x1600 in the production browser while still
+    // carrying `cross-origin-resource-policy: same-origin` from Sadin's upstream response.
+    const sameOrigin = display.startsWith('/');
+    const okCorp = sameOrigin || corp === '' || corp === 'cross-origin';
     const why = !okStatus ? `HTTP ${r.status}`
       : !okType ? `content-type ${ctype || '(none)'}`
-      : !okCorp ? `cross-origin-resource-policy: ${corp} — the browser will REFUSE to display this on another origin`
+      : !okCorp ? `cross-origin-resource-policy: ${corp} on a CROSS-origin url — the browser will REFUSE to display it (route the host through the same-origin proxy, as photoDisplayUrl does for Sadin)`
       : '';
     return { platform, url: imgUrl, status: r.status, ctype, corp, renderable: okStatus && okType && okCorp, why };
   } catch (e) {
@@ -116,38 +131,27 @@ if (rows.length) {
     console.log(`   ${v.renderable ? '✓' : '✗'} ${v.platform.padEnd(14)} ${v.renderable ? 'renderable' : v.why}`);
   }
 
-  // THE ONE DECLARED, DATED EXCEPTION — same shape verify-no-derived-price.ts uses for sadin's
-  // prose price. sadin.com.sa sends `cross-origin-resource-policy: same-origin` on every media
-  // response (apex and www alike), which is an explicit, deliberate anti-hotlink measure. No URL
-  // form defeats it. Its cards therefore show the honest "No photo available" placeholder, which
-  // layer 1 above guarantees they now reach instead of a blank box.
-  //
-  // THIS IS NOT A PASS. It is a known cost held in view: the fix would be re-hosting sadin's
-  // images through our own origin, which is an OWNER decision (bandwidth, and deliberately
-  // circumventing a measure the source chose to set) — not an engineering default. If sadin ever
-  // relaxes the header, this entry must be REMOVED, and the check below fails until it is, so the
-  // exception cannot outlive the reason for it.
-  const BLOCK_ALLOWLIST = new Set(['sadin']);
-  const unexpected = blocked.filter((b) => !BLOCK_ALLOWLIST.has(b.platform));
-
-  check('no NEW platform stores photos the browser refuses to display',
-    unexpected.length === 0,
-    unexpected.length
-      ? unexpected.map((b) => `${b.platform}: ${b.why}`).join('; ')
-        + '\n      A host that blocks embedding cannot be fixed by rewriting the URL. Cards fall back to '
-        + 'the honest placeholder (layer 1). Re-hosting another company\'s images to defeat their '
-        + 'anti-hotlink header is an OWNER decision, never an engineering default.'
+  // NO ALLOWLIST. There was one for Sadin while its CORP block had no answer; the same-origin
+  // proxy (PR #1918, src/lib/photoUrl.ts + the vercel.json rewrite) removed the reason for it, so
+  // the exception is gone rather than left behind to rot. Every platform is now simply required to
+  // render — which is the assertion we actually want.
+  check('every sampled platform\'s photo is BROWSER-RENDERABLE at its DISPLAY url',
+    blocked.length === 0,
+    blocked.length
+      ? blocked.map((b) => `${b.platform}: ${b.why}`).join('; ')
+        + '\n      If the host sends a blocking cross-origin-resource-policy, no URL rewrite fixes it: '
+        + 'either route that host through the same-origin proxy the way photoDisplayUrl() does for '
+        + 'Sadin, or accept the placeholder. Re-hosting another company\'s images is an OWNER '
+        + 'decision, never an engineering default.'
       : '');
 
-  check('the sadin block is still REAL (the exception cannot outlive its reason)',
-    blocked.some((b) => b.platform === 'sadin'),
-    'sadin no longer blocks embedding — delete it from BLOCK_ALLOWLIST so its photos are required '
-    + 'to render, and re-run the scraper so the cards pick them up.');
-
-  if (blocked.length) {
-    console.log(`\n  ⚠ ${blocked.length} host(s) refuse cross-origin embedding — cards show the honest`);
-    console.log('    placeholder. Owner decision pending: proxy their images, or accept the placeholder.');
-    for (const b of blocked) console.log(`      · ${b.platform}: ${b.corp || b.why}`);
+  // The proxy is load-bearing: prove it is actually still rewriting, not quietly a no-op.
+  const sadinRow = rows.find((r) => r.platform === 'sadin');
+  if (sadinRow) {
+    check('sadin photos are routed through the same-origin proxy (the raw host still blocks)',
+      photoDisplayUrl(sadinRow.url).startsWith('/_img/sadin'),
+      `photoDisplayUrl left ${sadinRow.url.slice(0, 60)} untouched — sadin.com.sa sends CORP `
+      + 'same-origin, so an un-proxied url renders as a blank card.');
   }
 }
 
@@ -160,9 +164,9 @@ const mustCatch = (label: string, caught: boolean) => {
   console.error(`  FAIL  BLIND to: ${label}`);
 };
 // This is the predicate layer 2 applies, extracted so the mutants exercise the real rule.
-const renderable = (status: number, ctype: string, corp: string) =>
+const renderable = (status: number, ctype: string, corp: string, sameOrigin = false) =>
   status === 200 && ctype.toLowerCase().startsWith('image/')
-  && (corp === '' || corp.toLowerCase() === 'cross-origin');
+  && (sameOrigin || corp === '' || corp.toLowerCase() === 'cross-origin');
 
 mustCatch('THE SADIN CASE: 200 + image/png + CORP same-origin (curl says fine, browser refuses)',
   renderable(200, 'image/png', 'same-origin') === false);
@@ -181,6 +185,13 @@ mustCatch('an explicit CORP cross-origin is allowed',
   renderable(200, 'image/webp', 'cross-origin') === true);
 mustCatch('content-type with charset/params still counts as an image',
   renderable(200, 'image/svg+xml; charset=utf-8', '') === true);
+// THE PROXY'S WHOLE POINT, and the bug this predicate had on its first draft: the SAME response
+// Sadin blocks cross-origin is renderable once it is served from our own origin. Measured live —
+// the proxied url decoded at 900x1600 while still carrying CORP same-origin upstream.
+mustCatch('CORP same-origin is ALLOWED when the url is served same-origin (the proxy path)',
+  renderable(200, 'image/png', 'same-origin', true) === true);
+mustCatch('...but the identical response is still refused cross-origin',
+  renderable(200, 'image/png', 'same-origin', false) === false);
 
 if (mutFail > 0) failed += mutFail;
 
