@@ -825,7 +825,33 @@ function priceFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
   }
   if (lo != null || hi != null) {
     const min = lo ?? 0, max = hi ?? Infinity;
-    return (l) => withinValue(l.price, min, max);
+    // MIRROR THE SERVER, ROW BY ROW — the same rule the dealCombined branch above follows, applied to
+    // the branch it left behind. location_search_candidates_ar's single-deal arm reads THIS pair as:
+    //     بيع   → price_total_effective, against the bounds as typed
+    //     إيجار → price_annual, against the bounds ANNUALISED the way rentPeriodParam() labelled the
+    //             search:  price_annual >= p_price_min * (case when p_rent_period='شهري' then 12 else 1 end)
+    // The card prints a source-MONTHLY rent at price_annual÷12 (listingPriceString), so comparing the
+    // DISPLAYED figure against that pair reads TWO different units on one search the moment the
+    // returned set spans both periods — which is precisely what «شهري+سنوي» (rentPeriod 'both') asks
+    // for, and what the annual arm's rent-now-pay-later branch admits as well. Measured live
+    // 2026-09-06 on الرياض/إيجار/كلاهما with a 20,000 floor: the RPC counted 28,626 and this net
+    // deleted 8,651 of them — every monthly card — because 2,500/mo reads as 2,500 against a yearly
+    // 20,000 floor. rentAnnualValue() is the client's reconstruction of price_annual, so comparing on
+    // it IS the server's comparison, not a second opinion about it.
+    // (found 2026-09-06 by the regression hunter re-attacking the 2026-09-02 combined-budget fix at
+    //  its siblings; scripts/verify-combined-deal-budget-split.ts §5.)
+    const rentK = q.rentPeriod === 'monthly' ? 12 : 1;
+    return (l) => {
+      if (l.deal !== 'Rent') return withinValue(l.price, min, max);
+      // bothDeals sends p_deal NULL and NO rent bound — p_price_min_rent/p_price_max_rent are spread
+      // only under dealCombined — so the server leaves every rent row unbounded here. Deleting one
+      // client-side is the exact defect this branch is being repaired for, one deal over. (Latent
+      // today: nothing sets priceMin/priceMax alongside bothDeals — the Filter home deliberately does
+      // not restore bothDeals, searchDefaults.ts — but the pair must not disagree if it ever can.)
+      if (q.bothDeals) return true;
+      const annual = rentAnnualValue(l);
+      return annual >= min * rentK && annual <= max * rentK;
+    };
   }
   if (q.priceBand) {
     const r = priceBandRange(q.priceBand);
@@ -1098,6 +1124,18 @@ const SORT_NOTE: Record<SortKey, string> = {
 // unknown price to 0. Used only for OBJECTIVE sorting — never to judge a listing.
 const priceOf = (l: Listing): number => listingPriceValue(l.price);
 
+// The SAME basis the RPC ordered the whole matched set on. location_search_candidates_ar sorts by
+// `effective_price = coalesce(price_total_effective, price_annual)` BEFORE limit/offset, so a client
+// re-sort that keys on the DISPLAYED figure disagrees with it exactly where the two differ: a
+// source-monthly rent card prints price_annual÷12. On a «شهري+سنوي» set that puts every monthly card
+// ahead of every annual one under «الأرخص أولاً» regardless of the actual rent, and — because the
+// server chose WHICH rows are on this page by its own key — page 2 can then display a cheaper card
+// than page 1, so a paged cheapest-first walk stops being monotonic.
+// Identity everywhere the two bases cannot differ: a Buy row's displayed total already IS the RPC's
+// key, and in a single-period rent set every row scales by the same factor. (found 2026-09-06 with
+// the priceFilter unit seam above — one mechanism, three consumers.)
+const sortPriceOf = (l: Listing): number => (l.deal === 'Rent' ? rentAnnualValue(l) : priceOf(l));
+
 // Ascending/descending by a possibly-NaN value — an unknown value (no price, no area) always sorts to
 // the END regardless of direction, never treated as the cheapest/lowest. (found live 2026-07-25: the
 // old `priceOf(a) - priceOf(b)` coerced "Price on request" to SAR 0, ranking it #1 under "cheapest
@@ -1120,12 +1158,14 @@ function sortListings(list: Listing[], sort: SortKey): Listing[] {
   // that never matches a LISTED_SEQ token — that mismatch made both comparators a permanent no-op
   // against real data before recencyRank existed (found live 2026-07-25).
   const recency = (l: Listing) => l.recencyRank ?? RECENCY[l.listed] ?? 99;
-  const ppm = (l: Listing) => (l.area > 0 ? priceOf(l) / l.area : NaN);
+  // Same basis as the price sorts: a SAR/m²/month figure and a SAR/m²/year figure are not comparable
+  // numbers, and ppm is the one sort the RPC does not compute, so nothing downstream would catch it.
+  const ppm = (l: Listing) => (l.area > 0 ? sortPriceOf(l) / l.area : NaN);
   switch (sort) {
     case 'newest':    out.sort((a, b) => recency(a) - recency(b)); break;
     case 'oldest':    out.sort((a, b) => recency(b) - recency(a)); break;
-    case 'price_asc': out.sort(byValue(priceOf, 1)); break;
-    case 'price_desc':out.sort(byValue(priceOf, -1)); break;
+    case 'price_asc': out.sort(byValue(sortPriceOf, 1)); break;
+    case 'price_desc':out.sort(byValue(sortPriceOf, -1)); break;
     case 'area_asc':  out.sort((a, b) => a.area - b.area); break;
     case 'area_desc': out.sort((a, b) => b.area - a.area); break;
     case 'ppm_asc':   out.sort(byValue(ppm, 1)); break;
@@ -1220,7 +1260,11 @@ function budgetCap(q: SearchQuery): number | null {
 function closenessScore(l: Listing, q: SearchQuery, cap: number | null): number {
   let bonus = 0;
   if (cap && cap > 0) {
-    const v = listingPriceValue(l.price);
+    // budgetCap() states its own unit — "annual basis" for rentPeriod 'both' — so the listing must be
+    // read on that same basis, or a 2,500/mo card scores as comfortably inside a 30,000 yearly cap
+    // while its actual rent IS 30,000. Same mechanism as sortPriceOf above; identity on Buy and on
+    // any single-period rent set. (2026-09-06.)
+    const v = l.deal === 'Rent' ? rentAnnualValue(l) : listingPriceValue(l.price);
     if (!Number.isNaN(v) && v > 0) bonus += 1 - Math.min(1, Math.max(0, v - cap) / cap);
   }
   const target = exactSizeTarget(q);
@@ -1258,7 +1302,11 @@ function diversifyBySource(listings: Listing[]): Listing[] {
 function closenessBonus(l: Listing, q: SearchQuery, cap: number | null): number {
   let bonus = 0;
   if (cap && cap > 0) {
-    const v = listingPriceValue(l.price);
+    // budgetCap() states its own unit — "annual basis" for rentPeriod 'both' — so the listing must be
+    // read on that same basis, or a 2,500/mo card scores as comfortably inside a 30,000 yearly cap
+    // while its actual rent IS 30,000. Same mechanism as sortPriceOf above; identity on Buy and on
+    // any single-period rent set. (2026-09-06.)
+    const v = l.deal === 'Rent' ? rentAnnualValue(l) : listingPriceValue(l.price);
     if (!Number.isNaN(v) && v > 0) bonus += 1 - Math.min(1, Math.max(0, v - cap) / cap);
   }
   const target = exactSizeTarget(q);
