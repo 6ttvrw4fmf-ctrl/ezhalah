@@ -64,6 +64,14 @@ jobs:
       shipped: ${{ steps.decide.outputs.shipped }}
     steps:
       - uses: actions/checkout@v4
+      # PINNED, and not optional. This job is the only thing standing between a shipped deploy and
+      # the five live jobs below: if it fails, `shipped` is empty, every job skips, and the barrier
+      # is dark again — the exact failure this whole change exists to end, reintroduced one level
+      # up. `--experimental-strip-types` needs Node >= 22.6, and the runner's default `node` is not
+      # guaranteed to be that. No `npm ci`: the gate script imports nothing outside node: builtins.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - id: decide
         env:
           GITHUB_TOKEN: ${{ github.token }}
