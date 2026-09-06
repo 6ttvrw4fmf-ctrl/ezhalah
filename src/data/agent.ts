@@ -526,6 +526,38 @@ export function statedKeys(b: BackendQuery): string[] {
   return said;
 }
 
+// AREA CONSTRAINT FROM NATURAL LANGUAGE (bug 2026-09-06). The agent path put a size into `detail`
+// for DISPLAY + price-per-m² math ONLY — it was NEVER turned into areaMin/areaMax, and the results
+// RPC filters area solely from those (remote.ts p_area_min/p_area_max). So «فيلا مساحتها فوق 1000
+// متر» searched with NO area filter and returned villas of every size. This parses an EXPLICIT size
+// range / minimum / maximum from the user's OWN words (a size unit — متر/م²/sqm — must be adjacent,
+// so a budget like «فوق مليون ريال» is never mistaken for an area). A bare exact size with no
+// operator stays display-only ("around N"); only an explicit ≥ / ≤ / range becomes a hard filter.
+const _AR_DIGITS = '٠١٢٣٤٥٦٧٨٩';
+function _n(x: string): number { return parseInt(x.replace(/[,،\s]/g, ''), 10) || 0; }
+export function parseAreaConstraint(text: string): { areaMin?: number; areaMax?: number } {
+  if (!text) return {};
+  const s = text.replace(/[٠-٩]/g, (d) => String(_AR_DIGITS.indexOf(d)));
+  const U = '(?:م²|م2|م\\.?|متر\\s?مربع|متر|mts?|m²|m2|sq\\.?\\s?m|sqm|square\\s?met(?:er|re)s?|met(?:er|re)s?)';
+  const N = '(\\d[\\d,،\\s]*\\d|\\d)';
+  // RANGE first: «من X إلى Y (متر)» | «بين X و Y (متر)» | «X - Y متر»
+  let m = s.match(new RegExp(`(?:من|from)\\s*${N}\\s*(?:إلى|الى|to|-|–|—|حتى)\\s*${N}\\s*${U}`, 'i'))
+       || s.match(new RegExp(`(?:بين|between)\\s*${N}\\s*(?:و|and|-)\\s*${N}\\s*${U}`, 'i'))
+       || s.match(new RegExp(`${N}\\s*(?:-|–|—)\\s*${N}\\s*${U}`, 'i'));
+  if (m) { const a = _n(m[1]), b = _n(m[2]); if (a > 0 && b > 0) return { areaMin: Math.min(a, b), areaMax: Math.max(a, b) }; }
+  // MIN: «فوق/أكثر من/أكبر من/… N متر»  OR  «N متر فأكثر/وفوق/فما فوق/أو أكثر/+»
+  const MIN = '(?:فوق|اكثر\\s?من|أكثر\\s?من|اكبر\\s?من|أكبر\\s?من|ما\\s?فوق|not\\s?less\\s?than|at\\s?least|over|above|more\\s?than|min(?:imum)?|starting\\s?(?:from|at))';
+  m = s.match(new RegExp(`${MIN}\\s*${N}\\s*${U}`, 'i'))
+   || s.match(new RegExp(`${N}\\s*${U}\\s*(?:فأكثر|فاكثر|و\\s?فوق|وفوق|فما\\s?فوق|أو\\s?أكثر|او\\s?اكثر|\\+|and\\s?(?:up|above|over)|or\\s?more|and\\s?more)`, 'i'))
+   || s.match(new RegExp(`${N}\\s*${U}\\s*\\+`, 'i'));
+  if (m) { const a = _n(m[1]); if (a > 0) return { areaMin: a }; }
+  // MAX: «تحت/أقل من/أصغر من/لا يتجاوز/… N متر»
+  const MAX = '(?:تحت|اقل\\s?من|أقل\\s?من|اصغر\\s?من|أصغر\\s?من|حد\\s?اقصى|حد\\s?أقصى|لا\\s?يتجاوز|up\\s?to|under|below|less\\s?than|no\\s?more\\s?than|max(?:imum)?|at\\s?most)';
+  m = s.match(new RegExp(`${MAX}\\s*${N}\\s*${U}`, 'i'));
+  if (m) { const a = _n(m[1]); if (a > 0) return { areaMax: a }; }
+  return {};
+}
+
 export function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
   let q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
@@ -569,6 +601,20 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   // choice). We keep whatever was given; the summary labels it Bedrooms vs Size by its value.
   const detail = typeof b.detail === 'string' && b.detail.trim() ? b.detail.trim() : null;
   if (detail) q.detail = detail;
+
+  // Apply an EXPLICIT area range/min/max from the user's words (see parseAreaConstraint). Parsed over
+  // every message of THIS attempt (a size can arrive a turn before the city). When it fires, the size
+  // becomes a real filter via areaMin/areaMax and we drop the now-duplicate cosmetic `detail` size so
+  // the summary shows one honest "المساحة: من N" line, not both.
+  const _areaTexts = (proximityTexts && proximityTexts.length) ? proximityTexts : [userText];
+  let _area: { areaMin?: number; areaMax?: number } = {};
+  for (const _tx of _areaTexts) { const r = parseAreaConstraint(_tx); if (r.areaMin != null || r.areaMax != null) { _area = r; break; } }
+  if (_area.areaMin != null) q.areaMin = String(_area.areaMin);
+  if (_area.areaMax != null) q.areaMax = String(_area.areaMax);
+  if ((_area.areaMin != null || _area.areaMax != null) && q.detail
+      && !/^([1-4]|5\+?)$/.test(q.detail) && /\d/.test(q.detail)) {
+    q.detail = null;
+  }
 
   q.priceInput = String(b.price ?? '').replace(/[^\d]/g, '');
   if (typeof b.priceOriginal === 'string' && b.priceOriginal.trim()) q.priceOriginal = b.priceOriginal.trim();
