@@ -46,6 +46,7 @@
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { awaitAfStep } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -223,17 +224,28 @@ const walkOneRound = async (): Promise<boolean> => {
     .then(() => true)
     .catch(async () => tap('نحدد الطلب أكثر').then(() => true).catch(() => false));
   if (!opened) return false;
-  await page.waitForTimeout(3500);
-  for (let step = 1; step <= 8 && searches.length === before; step++) {
-    const opts = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
-    if (!opts.length) break;
-    await page.click(`[data-testid="${opts[0]}"]`);
+  // OBSERVE EACH STEP; NEVER SLEEP A FIXED TIME FOR ONE (2026-09-06). This walked the round on two
+  // fixed sleeps — 3,500ms for the first question's options and 3,800ms after each answer. Both
+  // were wrong at both ends: the options behind a step come from a paid agent turn (variable,
+  // measured near 40s), and the step after the LAST answer is the searching beat, which the owner
+  // raised to ten seconds that morning. So the walk read an empty option list on a healthy card and
+  // broke early, leaving round 1 with fewer than 2 removable pills — and where it did not break it
+  // clicked into the loader, which reported «subtree intercepts pointer events». The round then
+  // failed for having too few pills to remove, an accusation about the product made by a stopwatch.
+  const step = () => awaitAfStep(
+    () => page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')]
+      .map((e) => e.getAttribute('data-testid') || '')),
+    () => page.$('[data-testid="af-card"]').then((h) => !!h),
+    async () => searches.length > before,
+    (ms) => page.waitForTimeout(ms));
+  for (let i = 1; i <= 8; i++) {
+    const s = await step();
+    if (s.outcome !== 'options') break;
+    await page.click(`[data-testid="${s.options[0]}"]`);
     await page.waitForTimeout(1400);
     const confirm = await page.$('[data-testid="af-confirm"]');
     if (!confirm) break;
     await confirm.click();
-    await page.waitForTimeout(3800);
   }
   for (let i = 0; i < 12 && searches.length === before; i++) await page.waitForTimeout(1500);
   return searches.length > before;

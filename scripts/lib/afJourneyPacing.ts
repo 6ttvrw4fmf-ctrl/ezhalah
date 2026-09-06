@@ -123,3 +123,119 @@ export async function paceUntilHealthy(
   }
   return l;
 }
+
+// ── THE SEARCHING BEAT: THE SAME LESSON, ON THE OTHER SIDE OF THE COMMIT ────────────────────────
+//
+// Everything above is about waiting for the NEXT AF QUESTION. This half is about waiting for the
+// RESULTS TURN that a committed answer produces — and it is the half that was missing on
+// 2026-09-06, when seven live steps went red across five scripts in one night.
+//
+// WHAT HAPPENED. The owner raised the searching beat that morning: "let the user wait 10 seconds …
+// make sure all the platforms in the animation show clearly, cuz doing it quick will make them
+// lost" (agent.tsx SEARCH_MIN_MS 2,200 → 10,000, + LOADER_EXIT_MS 450). The beat HOLDS THE PREVIOUS
+// SCREEN while it plays: the loader is on top, and it intercepts pointer events. Every AF journey
+// that committed an answer and then read the screen after a FIXED sleep of 2.5–6s was now sampling
+// the middle of the animation. verify-af-card-evidence-live.ts read at +4,000ms and found 0 cards
+// and 0 «مطابق لطلبك» strips, and reported «§12A is not honest on the live card» — an accusation
+// against a product rule the owner had shipped three days earlier, and which was in fact working.
+// Two other scripts failed on `subtree intercepts pointer events`: the click landed on the loader.
+//
+// This is EXACTLY the class the header of this file was written about, one commit later and one
+// screen further on. The product was fine; a fixed sleep sized for the old beat judged a state it
+// had never observed. Do not fix it by raising a number — the number is what broke.
+//
+// TWO RULES.
+//   1. NOBODY TYPES THE FLOOR. It is DERIVED from the product's own constants, so the next time an
+//      owner changes the beat the harness follows instead of accusing. A private per-file copy of a
+//      shared vocabulary is the drift this surface keeps paying for (AGENTS.md harness note 13);
+//      verify-web-runtime-smoke.mjs had already hard-coded its own 12000 for this very reason.
+//   2. OBSERVE THE ARRIVAL. Poll for the results turn to actually be on screen and tell the caller
+//      whether it ever arrived — `settleUntil` already does this, so this is not a second mechanism.
+
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/**
+ * Read the product's OWN searching-beat constants out of `src/app/agent.tsx`.
+ *
+ * agent.tsx is JSX, so a plain Node barrier cannot import it — the same constraint
+ * `src/lib/searchLoaderTiming.ts` documents in its own header, and the reason
+ * `verify-search-loader-shows-every-platform.ts` already reads SEARCH_MIN_MS by regex. This shares
+ * that one read instead of adding a second copy of it.
+ *
+ * FAILS CLOSED. If either constant cannot be read this THROWS rather than falling back to a
+ * default: a harness that silently guesses the beat is how the accusation above got written.
+ */
+export function readSearchBeatMs(agentSrc?: string): { floorMs: number; exitMs: number } {
+  const src = agentSrc ?? readFileSync(join(REPO_ROOT, 'src', 'app', 'agent.tsx'), 'utf8');
+  const floor = src.match(/^const SEARCH_MIN_MS = (\d+);/m);
+  const exit = src.match(/^const LOADER_EXIT_MS = (\d+);/m);
+  if (!floor || !exit) {
+    throw new Error(
+      'afJourneyPacing: could not read SEARCH_MIN_MS / LOADER_EXIT_MS from src/app/agent.tsx. ' +
+      'The searching beat is the thing every post-search read must outlast, so a harness that ' +
+      'cannot see it must stop, not guess.');
+  }
+  return { floorMs: Number(floor[1]), exitMs: Number(exit[1]) };
+}
+
+/** The full beat a committed answer must outlast before the new results turn is on screen. */
+export const SEARCH_BEAT_MS = (() => { const b = readSearchBeatMs(); return b.floorMs + b.exitMs; })();
+
+/**
+ * Budget for a post-search read: the beat, plus the real network/render time that follows it, plus
+ * an agent turn's headroom because a committed AF answer re-runs the search through the agent.
+ * Generous on purpose — `settleUntil` returns the INSTANT the state arrives, so a large budget
+ * costs a fast run nothing and only decides how long a genuinely stuck screen is given.
+ */
+export const POST_SEARCH_BUDGET_MS = SEARCH_BEAT_MS + AGENT_TURN_MS;
+
+/**
+ * Wait for the results turn a committed answer produced to be ON SCREEN, and say whether it ever
+ * arrived. `settled:false` means it never did — the caller must abandon every assertion that reads
+ * that screen and report NOT EXERCISED (rule 2 in the header), never judge what it found.
+ */
+export async function awaitResultsTurn(
+  readCardCount: () => Promise<number>,
+  sleep: (ms: number) => Promise<void>,
+  budgetMs = POST_SEARCH_BUDGET_MS,
+): Promise<{ settled: boolean; cards: number }> {
+  const r = await settleUntil(readCardCount, (n) => n > 0, budgetMs, sleep);
+  return { settled: r.settled, cards: r.value };
+}
+
+/**
+ * Wait for the AF round's NEXT step to actually be readable: either its options have rendered, or
+ * the round has ended (the card is gone, or the committed search has left the page).
+ *
+ * WHY THIS IS SHARED. Three journeys had grown their own private version of this wait, each a
+ * different fixed sleep (2,500 / 3,500 / 3,800 ms), and each one sized for a build that no longer
+ * exists. The options behind an AF step come from a PAID AGENT TURN, not a paint (AGENT_TURN_MS),
+ * and the step AFTER the last one is the searching beat — so a fixed sleep is wrong at both ends.
+ * A per-file copy of a shared vocabulary is the drift this surface keeps paying for.
+ *
+ * Returns what was OBSERVED, never a guess: 'options' (readable, and they are returned),
+ * 'ended' (the round finished — a search left the page or the card is gone), or 'timeout'
+ * (nothing was ever observed; the caller must not assert on the screen).
+ */
+export async function awaitAfStep(
+  readOptions: () => Promise<string[]>,
+  cardPresent: () => Promise<boolean>,
+  searchFired: () => Promise<boolean>,
+  sleep: (ms: number) => Promise<void>,
+  budgetMs = AGENT_TURN_MS,
+  pollMs = 500,
+): Promise<{ outcome: 'options' | 'ended' | 'timeout'; options: string[] }> {
+  const until = Date.now() + budgetMs;
+  for (;;) {
+    if (await searchFired()) return { outcome: 'ended', options: [] };
+    const opts = await readOptions();
+    if (opts.length) return { outcome: 'options', options: opts };
+    if (!(await cardPresent())) return { outcome: 'ended', options: [] };
+    if (Date.now() >= until) return { outcome: 'timeout', options: [] };
+    await sleep(pollMs);
+  }
+}
