@@ -1194,6 +1194,22 @@ def upsert_aouj_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("aouj_commercial_listings", rows)
 
 
+def upsert_bahadhabab_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("bahadhabab_residential_listings", rows)
+
+
+def upsert_bahadhabab_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("bahadhabab_commercial_listings", rows)
+
+
+def upsert_alobid_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alobid_residential_listings", rows)
+
+
+def upsert_alobid_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alobid_commercial_listings", rows)
+
+
 def upsert_abwbna_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("abwbna_residential_listings", rows)
 
