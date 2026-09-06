@@ -11,7 +11,7 @@
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
          findings, skips, skip, ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
-         classifySearchRpc, SELECTED_CITY_MARKER } from './harness.mjs';
+         classifySearchRpc, classifyTapOwnership, SELECTED_CITY_MARKER } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -802,6 +802,9 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
       const hw = Math.max(r.width, num(aft.width));
       const hh = Math.max(r.height, num(aft.height));
       const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+      // RAW FACTS ONLY — the verdict is classifyTapOwnership()'s, in Node, where a barrier can
+      // execute it. A point that resolved to another CONTROL and a point whose hit test found
+      // nothing are different findings and must not arrive here as the same string (#120).
       const own = {};
       if (!inert(e)) {
         for (const [k, x, y] of [['centre', cx, cy], ['left', r.x + 2, cy], ['right', r.right - 2, cy],
@@ -809,20 +812,34 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
           if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
           const hit = document.elementFromPoint(x, y);
           const o = hit ? outer(hit) : null;
-          if (o !== e) own[k] = o ? (o.getAttribute('aria-label') || o.dataset.testid || 'another control') : 'nothing';
+          if (o === e) continue;
+          own[k] = {
+            hitNull: !hit,
+            hitTag: hit ? hit.tagName.toLowerCase() : null,
+            ownerLabel: o ? (o.getAttribute('aria-label') || o.dataset.testid || 'another control') : null,
+            at: [Math.round(x), Math.round(y)],
+          };
         }
       }
       out.push({
         label: (e.getAttribute('aria-label') || e.dataset.testid || (e.innerText || '').trim().slice(0, 24) || e.tagName).replace(/\\s+/g, ' '),
         w: Math.round(r.width), h: Math.round(r.height), hw: Math.round(hw), hh: Math.round(hh),
+        rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
         afterPos: aft.position, inert: inert(e), stolen: own,
       });
     }
-    return { ctrls: out, sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth };
+    // The viewport the hit test was performed against, so a null result can be read rather than
+    // guessed at on the next run (#120): a point inside the layout box but outside the VISUAL
+    // viewport is a different story from one the engine simply refuses to resolve.
+    const vv = window.visualViewport;
+    return { ctrls: out, sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+             vp: { iw: innerWidth, ih: innerHeight, sx: Math.round(scrollX), sy: Math.round(scrollY),
+                   vv: vv ? { w: Math.round(vv.width), h: Math.round(vv.height),
+                              ox: Math.round(vv.offsetLeft), oy: Math.round(vv.offsetTop), scale: vv.scale } : null } };
   })()`;
 
   const assess = async (where) => {
-    const { ctrls, sw, cw } = await page.evaluate(READ);
+    const { ctrls, sw, cw, vp } = await page.evaluate(READ);
     if (!ctrls.length) { defect(name, 'no tap-target-marked control on screen', `${where}: nothing carries data-tap44, so the 44px floor is not applied anywhere here`); return; }
     for (const c of ctrls) {
       const who = `${where} «${c.label}»`;
@@ -839,10 +856,22 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
         defect(name, 'a marked control grew its own box to reach the floor',
           `${who}: visual box is ${c.w}x${c.h} — at or over 44 on BOTH axes. The floor must come from the out-of-flow overlay, never from padding on the control (that moves the layout).`);
       }
-      const stolen = Object.entries(c.stolen);
-      if (stolen.length) {
+      // TWO DIFFERENT FINDINGS, TWO DIFFERENT MESSAGES (#120). Only a point that resolved to
+      // ANOTHER CONTROL is a neighbour capturing the press; a hit test that found no control there
+      // is reported as what it is, with the numbers needed to tell an engine artifact from a
+      // genuinely unreachable control. Neither is excused — both still fail.
+      const { stolen: taken, blind } = classifyTapOwnership(c.stolen);
+      const takenPts = Object.entries(taken);
+      if (takenPts.length) {
         defect(name, 'a control no longer owns its own visual area',
-          `${who}: ${stolen.map(([k, v]) => `${k} resolves to ${v}`).join(', ')} — an expanded tap area is capturing presses meant for this control`);
+          `${who}: ${takenPts.map(([k, v]) => `${k} resolves to ${v}`).join(', ')} — an expanded tap area is capturing presses meant for this control`);
+      }
+      const blindPts = Object.entries(blind);
+      if (blindPts.length) {
+        defect(name, 'the tap-target hit test found no control at the control\'s own points',
+          `${who}: ${blindPts.map(([k, v]) => `${k} — ${v}`).join('; ')}. MEASURED, NOT INFERRED: `
+          + `nothing was observed capturing the press, so this is not a neighbour stealing it. `
+          + `rect(x,y,w,h)=${JSON.stringify(c.rect)} viewport=${JSON.stringify(vp)}`);
       }
     }
     const ok = ctrls.filter((c) => c.hw >= 44 && c.hh >= 44).length;
