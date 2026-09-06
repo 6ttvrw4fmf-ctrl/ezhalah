@@ -199,6 +199,12 @@ re-points the production alias to an already-built deployment instantly, no rebu
 ```bash
 scripts/emergency-rollback.sh dpl_8ML9bBf2b8c7RKXe4VR4tMdbNQMe
 ```
+Rehearse it first if you have a moment — `DRY_RUN=1 scripts/emergency-rollback.sh <id>` walks the
+whole path (argument check, repo root, deploy-lock acquire/release) and prints the rollback command
+instead of running it, so a missing `SUPABASE_SERVICE_ROLE_KEY` surfaces before the outage rather
+than during it. It changes nothing. `scripts/verify-emergency-rollback-path.ts` runs that same path
+in `npm test`, which is why this script no longer sits untested until the night it is needed.
+
 Use the deployment ID from the "Approved baseline record" table above (or a newer one if this
 document has been kept up to date since). This is the right first move in a live incident — it
 restores service in seconds while you investigate. (The raw `npx vercel rollback ... --yes` command
