@@ -41,8 +41,19 @@ const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
 
 let failures = 0;
+// A PASSING LINE MUST NOT CARRY THE WORDS THAT DESCRIBE A FAILURE (incident #42, 2026-09-05).
+// `detail` is the explanation of what went WRONG — `mustCatch` below hands it the constant
+// «the mutant survived — the home check is blind», and the exclusion loop hands it «the home must
+// actually invoke X, not merely exist». Printed unconditionally, a healthy run read:
+//   ✓ MUTATION catches an exclusion naming a workflow that EXISTS … — the mutant survived …
+// i.e. the tick and the prose said opposite things, on the one barrier whose job is to stop checks
+// going dark. Same form as the sibling verify-rent-scrapers-annualise.ts. Kept as its own function
+// so the rule can be EXECUTED in both directions by
+// scripts/verify-barrier-pass-line-carries-no-failure-text.ts, rather than grepped.
+const renderLine = (cond: boolean, name: string, detail: string) =>
+  `  ${cond ? '✓' : '❌'} ${name}${cond || !detail ? '' : ` — ${detail}`}`;
 const check = (name: string, cond: boolean, detail = '') => {
-  console.log(`  ${cond ? '✓' : '❌'} ${name}${detail ? ` — ${detail}` : ''}`);
+  console.log(renderLine(cond, name, detail));
   if (!cond) failures++;
 };
 
