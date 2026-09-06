@@ -42,13 +42,27 @@ check('1b. the input is never programmatically focused (no inputRef.current.focu
   'a mount effect calling focus() would auto-open the keyboard');
 
 // ── 2. real keyboard tracking via visualViewport, no hardcoded height ────────────────────────────
-check('2a. mobile keyboard height is read from window.visualViewport (not hardcoded)',
-  /window\.visualViewport/.test(code) && /visualViewport/.test(code));
+// RETARGETED 2026-09-05, not relaxed. These three checks required agent.tsx to read visualViewport
+// ITSELF, and that turned out to be only half of the problem: compensating for the shrinking visual
+// viewport put the composer in the right place while iOS ALSO scrolled the layout viewport, so the
+// conversation above it slid off the top of the screen (owner: "i basically lose the conversation
+// above it"). The mechanism moved to lib/visualViewportFrame.ts and is applied once at the app root,
+// so it now fixes every screen instead of this one — and a screen keeping its own copy would
+// compensate TWICE, measured live as a 259px gap. The invariant is unchanged and is asserted here
+// against the module that now owns it: measured, never hardcoded, and listening to both events.
+// The geometry itself is EXECUTED across 64 phone/keyboard/scroll combinations by
+// scripts/verify-mobile-keyboard-layout.ts, which is strictly stronger than these greps.
+const frame = readFileSync('src/lib/visualViewportFrame.ts', 'utf8');
+check('2a. mobile keyboard geometry is read from window.visualViewport (not hardcoded)',
+  /window\.visualViewport/.test(frame));
 check('2b. it listens to BOTH resize and scroll on the visual viewport (keyboard animates smoothly)',
-  /addEventListener\(['"]resize['"]/.test(code) && /addEventListener\(['"]scroll['"]/.test(code));
-check('2c. the keyboard inset is derived from innerHeight - vv.height (the uncovered slice)',
-  /window\.innerHeight\s*-\s*\w+\.height/.test(code),
-  'kbInset must be the real geometry, never a fixed pixel guess');
+  /addEventListener\(['"]resize['"]/.test(frame) && /addEventListener\(['"]scroll['"]/.test(frame));
+check('2c. the root frame is derived from the live viewport, never a fixed pixel guess',
+  /visualHeight: vv\.height, visualOffsetTop: vv\.offsetTop/.test(frame)
+  && !/=\s*\d{2,}\s*;\s*\/\/\s*keyboard/i.test(frame),
+  'the frame must be real geometry, never a magic number');
+check('2d. the screen contributes no keyboard padding of its own (no double lift)',
+  /const kbInset = screenKeyboardInset\(\);/.test(code));
 // The lift must actually be applied to the KeyboardAvoidingView, and only on web.
 check('2d. the KeyboardAvoidingView is lifted by kbInset on web (composer sits ABOVE the keyboard)',
   /IS_WEB\s*&&\s*kbInset\s*>\s*0\s*\?\s*\{\s*paddingBottom:\s*kbInset/.test(code),

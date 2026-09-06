@@ -12,6 +12,7 @@ import { ThemeProvider, useTheme } from '@/theme/theme';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import { markAppSessionStarted } from '@/lib/appSession';
 import { useBottomPromptInset } from '@/lib/bottomPromptInset';
+import { useVisualViewportRoot } from '@/lib/visualViewportFrame';
 import Head from 'expo-router/head';
 import { OG_IMAGE, SHARE_BLURB_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -61,6 +62,10 @@ function Shell() {
   // converted per-surface (Sidebar + account menu in this pass); the Stack's contentStyle stays the
   // light paper until each screen's inks are converted — flipping it first would break readability.
   const { resolved } = useTheme();
+  // Pin the app to what the user can actually SEE. On iOS the keyboard both shrinks the visual
+  // viewport and scrolls the layout one; without this the conversation slides out of the top while
+  // the composer still looks correct. See lib/visualViewportFrame.ts for the measurements.
+  useVisualViewportRoot();
   const pathname = usePathname();
   const router = useRouter();
   // The AUTO-SHOWING centered popup (owner 2026-08-28) was RETIRED by the owner's 2026-08-29
