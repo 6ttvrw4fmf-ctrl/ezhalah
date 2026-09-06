@@ -40,9 +40,27 @@ check(/تقصد مدينة \$\{nm\} ولا منطقة \$\{nm\} كاملة؟/.tes
 
 // ── 2. IT IS NOT SUPPRESSED ──────────────────────────────────────────────────────────────────
 // The whole defect in one assertion: this branch must not consult the ask-once guard.
-check(!/alreadyAsked/.test(branch),
-  'the city-vs-region question is NOT gated on alreadyAsked',
+// SHARPENED 2026-09-05. This used to assert that the word `alreadyAsked` appears NOWHERE in the
+// branch — a proxy for the real rule. The real rule is that the QUESTION must not be suppressed by
+// it; recognising the ANSWER with it is not only allowed but required, because a bare «المدينة» is
+// only unambiguous BECAUSE we asked (a lone «المدينة» could otherwise mean المدينة المنورة).
+// The proxy would have blocked that fix, so it is replaced by the invariant it stood for — which is
+// strictly tighter: it pins the exact code that decides whether to ask.
+const asksBranch = (() => {
+  const i = branch.indexOf('else if (!wantsCity && !wantsRegion)');
+  const j = branch.indexOf('ambiguityReply = `«${nm}»');
+  return i >= 0 && j > i ? branch.slice(i, j) : '';
+})();
+check(asksBranch.length > 0, 'the ask-or-not branch is still locatable');
+check(!/alreadyAsked/.test(asksBranch),
+  'the city-vs-region QUESTION is NOT gated on alreadyAsked',
   'that guard silently chose the scope instead of asking — it must outrank the ask-once rule');
+// …and alreadyAsked may appear in the branch ONLY to recognise the user's answer, nowhere else.
+const allowed = (branch.match(/alreadyAsked/g) ?? []).length;
+const inBareRules = (branch.match(/const bare(?:City|Region) = alreadyAsked &&/g) ?? []).length;
+check(allowed === inBareRules,
+  'every alreadyAsked in this branch gates ANSWER recognition (bareCity/bareRegion), never the question',
+  `found ${allowed} mention(s), ${inBareRules} of them on the bare-answer rules`);
 
 // ── 3. IT NEVER GUESSES ──────────────────────────────────────────────────────────────────────
 // The only two ways to resolve it are the user SAYING «مدينة» or «منطقة». There must be no
