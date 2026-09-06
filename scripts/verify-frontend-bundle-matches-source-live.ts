@@ -92,9 +92,36 @@ const orderedRun = (bundle: string, tokens: readonly string[]): boolean =>
 const quotedAnywhere = (bundle: string, t: string): boolean =>
   bundle.includes(`'${t}'`) || bundle.includes(`"${t}"`);
 
-/** The compiled form of `base.push('furnished')` survives minification as `<v>.push('furnished')`. */
-const pushedAtRuntime = (bundle: string, t: string): boolean =>
-  bundle.includes(`.push('${t}')`) || bundle.includes(`.push("${t}")`);
+// How far past a literal group's own occurrence the compiled body that spreads it may sit. Measured
+// on the served bundle 2026-09-06: `const y=[…],_=[…];function h(t){…u.push('furnished'),u}` puts the
+// append 391 characters after the base run begins. Generous enough to absorb ordinary layout churn;
+// a genuine reflow past it goes RED and gets read, which is the correct direction for a detector.
+const APPEND_REGION = 2_000;
+
+/**
+ * The compiled form of `base.push('furnished')` survives minification as `<v>.push('furnished')` —
+ * but ONLY inside the function that builds the list. Searching the whole bundle for that call is not
+ * enough, and this is not hypothetical: the served bundle carries TWO `.push('furnished')` sites, the
+ * certification's own and afCertify's rejection path ~4,700 characters earlier. Deleting the
+ * certification's append from the real artifact left the whole-bundle form reporting no problems —
+ * the exact leg that exists to be stronger than "the word appears somewhere" was satisfied by an
+ * unrelated call. So the search is scoped to a window anchored at a lifted literal group's own
+ * occurrence in the bundle: the append the source writes is adjacent to the array it appends to.
+ */
+const pushedAtRuntime = (bundle: string, t: string, groups: readonly LiteralGroup[]): boolean => {
+  const calls = [`.push('${t}')`, `.push("${t}")`];
+  for (const g of groups) {
+    if (g.tokens.length === 0) continue;
+    for (const q of ["'", '"']) {
+      const run = g.tokens.map((x) => `${q}${x}${q}`).join(',');
+      for (let i = bundle.indexOf(run); i >= 0; i = bundle.indexOf(run, i + 1)) {
+        const region = bundle.slice(i, i + APPEND_REGION);
+        if (calls.some((c) => region.includes(c))) return true;
+      }
+    }
+  }
+  return false;
+};
 
 /**
  * Every way the live bundle can be BEHIND the source it was built from, as a list of problems.
@@ -134,10 +161,10 @@ export function bundleParityProblems(
   for (const c of cohorts) {
     for (const t of c.certified) {
       if (inSomeGroup.has(t)) continue;
-      if (!pushedAtRuntime(bundle, t)) {
+      if (!pushedAtRuntime(bundle, t, groups)) {
         problems.push(
           `${c.label} certifies '${t}', which no lifted literal group contains, and the live bundle has no ` +
-          `.push('${t}') call site — the runtime append that adds it has not shipped.`);
+          `.push('${t}') call site beside any lifted literal group — the runtime append that adds it has not shipped.`);
       }
     }
     // 3. Belt and braces: every certified token exists in the bundle as a string at all.
@@ -252,6 +279,24 @@ mustCatch('THE INCIDENT, against the REAL served bundle: one extra token certifi
     [{ name: groups[0].name, tokens: [...groups[0].tokens, 'undeployed_probe_token'] }, groups[1]],
     cohorts.map((c) => ({ ...c, certified: [...c.certified, 'undeployed_probe_token'] })),
   ).length > problems.length);
+
+// The RUNTIME-APPEND leg, proven the same way — on production's own bytes, not a fixture. The
+// synthetic proof above removes every trace of the word, which is the easy half; the half that
+// matters is a bundle where the certification's append is gone and an UNRELATED `.push('furnished')`
+// (afCertify's rejection path) is still there. That is what a bundle predating the furnished chip
+// actually looks like, and the whole-bundle form of this leg reported no problems against it.
+// Differential, for the same reason as the proof above.
+const appendedTokens = [...new Set(cohorts.flatMap((c) => c.certified))]
+  .filter((t) => !groups.some((g) => g.tokens.includes(t)));
+for (const t of appendedTokens) {
+  const call = `.push('${t}')`;
+  const groupAt = bundle.indexOf(groups[0].tokens.map((x) => `'${x}'`).join(','));
+  const at = groupAt < 0 ? -1 : bundle.indexOf(call, groupAt);
+  const stripped = at < 0 ? bundle : bundle.slice(0, at) + '.pushNOTHING()' + bundle.slice(at + call.length);
+  mustCatch(
+    `the certification's own .push('${t}') missing from the REAL served bundle while ${Math.max(0, stripped.split(call).length - 1)} unrelated ${call} site(s) remain`,
+    at >= 0 && bundleParityProblems(stripped, groups, cohorts).length > problems.length);
+}
 
 if (mutFail > 0) console.error(`\n✗ ${mutFail} mutation proof(s) FAILED — this barrier can no longer be trusted`);
 console.log(failed === 0 && mutFail === 0
