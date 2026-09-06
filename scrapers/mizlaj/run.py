@@ -54,7 +54,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, http_liveness, normalize  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://mizlaj.com.sa"
@@ -161,6 +161,53 @@ def session() -> cc.Session:
         "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
     })
     return s
+
+
+# ── Liveness oracle ────────────────────────────────────────────────────────
+# Until 2026-09-06 this scraper called db.prune_unseen() with NO oracle, so three missed crawls
+# deactivated a listing on crawl ABSENCE alone — the inference docs/ops/LISTING_LIVENESS.md §1–§3
+# forbids, because a throttled run or a source-side index gap is indistinguishable from a removal.
+#
+# MEASURED 2026-09-06 over EVERY inactive row plus interleaved known-active controls (interleaved so
+# a mid-run block shows in BOTH cohorts instead of reading as a dead cohort — the failure that made
+# 3,273 wasalt rows look dead in §5.3):
+#   dead      4/4 already-inactive rows → HTTP 404 with a 2,216-byte error page
+#   controls  24/24 known-active rows → HTTP 200 at 193-223 KB
+#   The populations do not overlap on status. The TITLE is deliberately unused: this
+#   source serves ONE shared <title> on every live page, so it discriminates nothing.
+#
+# NO LIVE LIMB, deliberately. This platform's detail parser takes a session and a
+# pre-fetched dict (`fetch_detail` / `map_listing`), not raw HTML, so there is no pure way
+# to certify a page as THIS listing from the probe's body alone. Rather than invent a
+# marker, the oracle states only the removal signal it measured. Consequence, stated
+# plainly: a row that keeps answering 200 is held at UNKNOWN and never deactivated — safe,
+# and never self-healed either, so its strike count stays where it is.
+#
+# The three-valued LAW is not restated here. `scrapers/common/http_liveness.decide()` owns it and
+# cannot be relaxed from this file: whatever `_signal` says, a 401/403/407/408/429, any 5xx, a
+# network error or an empty body can never become a death.
+def _oracle_session() -> cc.Session:
+    """Transport seam for the probe. Tests replace this; the law is never replaced."""
+    return session()
+
+
+def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+    """mizlaj's OWN measured signal, and nothing else. `None` means "no opinion" — never
+    "probably gone"."""
+    if path_changed:
+        return None                      # an unresolved redirect: we do not know where we landed
+    if status in (404, 410):
+        return "gone"
+    return None
+
+
+_probe = http_liveness.LivenessProbe(
+    platform="mizlaj",
+    signal=_signal,
+    session=_oracle_session,
+    url_for=http_liveness.stored_listing_url(("mizlaj_residential_listings", "mizlaj_commercial_listings")),
+)
+
 
 
 def _num(v: Any) -> Optional[float]:
@@ -547,7 +594,8 @@ def main() -> int:
         pruned = 0
         for tbl, rows_seen in (("mizlaj_residential_listings", res),
                                ("mizlaj_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Mizlaj")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Mizlaj",
+                                verify_gone=_probe.verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
