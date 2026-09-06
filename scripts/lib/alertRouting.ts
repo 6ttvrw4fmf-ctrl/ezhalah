@@ -152,6 +152,10 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // 3 🛡️ Data Integrity — source-truth on listing fields. Broadest; must stay last.
   { routine: 3, test: /price|district|amenity|^rent_period|^manufactured_rent_period/ },
   { routine: 3, test: /^(field_integrity|city_|region_label|english_|type_|v2_discards)/ },
+  // Incident #45. A served area that no longer matches the source text the row carries — including
+  // a source-published 0 that someone "repaired" to NULL. Named explicitly because the broad
+  // routine-3 patterns above are about price/district/amenity and would drop this on the fallback.
+  { routine: 3, test: /^area_contradicts_capture$/ },
   { routine: 3, test: /^(deletion_spike|mass_inactivation|unverified_inactivation|inactivation)/ },
   { routine: 3, test: /^(stale_|quarantine_growth|prune_|cleanup_evidence_gap)/ },
   { routine: 3, test: /^(served_after_source_gone|deleted_but_source_live|unledgered_hard_delete)/ },
