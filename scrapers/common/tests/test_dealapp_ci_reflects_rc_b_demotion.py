@@ -35,7 +35,11 @@ from scrapers.dealapp import run
 
 def _stub_common_db_writes(monkeypatch, *, end_run_returns: bool) -> None:
     monkeypatch.setattr(run.db, "begin_run", lambda platform: 999)
-    monkeypatch.setattr(run.db, "prune_unseen", lambda tbl, seen, source: 0)
+    # **kwargs, not a fixed signature: this stub stands in for a PRODUCTION function whose
+    # keyword arguments legitimately grow (shards/shard, and verify_gone from 2026-09-06).
+    # A stub narrower than the real callee turns an unrelated production change into a red
+    # test that says nothing about the behaviour under test.
+    monkeypatch.setattr(run.db, "prune_unseen", lambda tbl, seen, source, **_kw: 0)
     # main() also retires cross-table orphans (db.retire_superseded_siblings) — stub it here for
     # the same reason as every other db call: this test is about main()'s exit/notes contract.
     monkeypatch.setattr(run.db, "retire_superseded_siblings", lambda **kw: 0)

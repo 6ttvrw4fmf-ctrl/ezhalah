@@ -41,12 +41,22 @@ import scrapers.common.http_liveness as L
 mut = os.environ.get("MUTATE")
 if mut:
     find, repl = json.loads(mut)
-    src = textwrap.dedent(inspect.getsource(L.decide))
-    if find not in src:
-        print(json.dumps({"error": "mutation target not found: %r" % find})); sys.exit(0)
-    ns = dict(L.__dict__)
-    exec(compile(src.replace(find, repl), "<mutant>", "exec"), ns)
-    L.decide = ns["decide"]
+    target = "verify_gone" if "self.canary" in find else "decide"
+    if target == "decide":
+        src = textwrap.dedent(inspect.getsource(L.decide))
+        if find not in src:
+            print(json.dumps({"error": "mutation target not found: %r" % find})); sys.exit(0)
+        ns = dict(L.__dict__)
+        exec(compile(src.replace(find, repl), "<mutant>", "exec"), ns)
+        L.decide = ns["decide"]
+    else:
+        src = textwrap.dedent(inspect.getsource(L.LivenessProbe.verify_gone))
+        if find not in src:
+            print(json.dumps({"error": "mutation target not found: %r" % find})); sys.exit(0)
+        ns = dict(L.__dict__)
+        ns.update({"decide": L.decide, "read_is_unbelievable": L.read_is_unbelievable})
+        exec(compile(src.replace(find, repl), "<mutant>", "exec"), ns)
+        L.LivenessProbe.verify_gone = ns["verify_gone"]
 
 BODY = "<html><title>a real listing</title>" + "x" * 4000 + "</html>"
 
@@ -131,6 +141,12 @@ class Stub:
             url = item[2] if len(item) > 2 else "https://x.test/listing/1"
         return R()
 
+def probe_with_canary(seq, canary_ok, signal=say_gone):
+    stub = Stub(seq)
+    p = L.LivenessProbe("t", signal, lambda: stub, lambda ad: "https://x.test/l/1", attempts=2,
+                        canary=(lambda: (canary_ok, "canary says %s" % canary_ok)))
+    return p.verify_gone("AD1")
+
 def probe(seq, signal=say_gone, url="https://x.test/listing/1"):
     # ONE stub for the whole probe: LivenessProbe calls session() per attempt, so handing back a
     # fresh Stub would replay attempt 1 forever and the retry path would never be exercised.
@@ -153,6 +169,12 @@ wired = {
   "live_claim_on_empty_twice": probe([(200, ""), (200, "")], say_live),
   "live_claim_empty_then_ok":  probe([(200, ""), (200, BODY)], say_live),
   "gone_claim_blocked_then_ok": probe([(403, BODY), (404, BODY)], say_gone),
+  # THE §5.4 IN-RUN POSITIVE CONTROL. It gates removals only, and it fails CLOSED.
+  "canary_ok_gone":      probe_with_canary([(404, BODY)], True)[0],
+  "canary_bad_gone":     probe_with_canary([(404, BODY)], False)[0],
+  "canary_bad_reason":   probe_with_canary([(404, BODY)], False)[1],
+  "canary_bad_still_live": probe_with_canary([(200, BODY)], False, say_live)[0],
+  "no_canary_gone":      probe([(404, BODY)]),
 }
 print(json.dumps({"law": law, "permits": permits, "restorative": restorative,
                   "misc": misc, "unbelievable": unbelievable, "wired": wired}))
@@ -184,9 +206,12 @@ const holds = (r: Result): string[] => {
   if (r.restorative?.live_on_empty === null) h.push('restore:empty-refused');
   if (r.misc?.signal_raises === 'unknown') h.push('misc:raises');
   if (r.misc?.signal_junk === 'unknown') h.push('misc:junk');
+  if (r.wired?.canary_ok_gone === 'gone') h.push('canary:permits');
+  if (r.wired?.canary_bad_gone === 'unknown') h.push('canary:withholds');
+  if (r.wired?.canary_bad_still_live === 'live') h.push('canary:restore-not-gated');
   return h;
 };
-const TOTAL = UNKNOWN_SHAPES.length + PERMITS.length + 6;
+const TOTAL = UNKNOWN_SHAPES.length + PERMITS.length + 9;
 
 const base = run();
 check(!base.error, 'the shared law imports and runs', base.error ?? '');
@@ -244,6 +269,27 @@ check(base.wired?.redirect_detected === 'gone',
   'LivenessProbe: a platform may treat a redirect off the listing path as its removal signal');
 check(base.wired?.no_redirect === 'unknown',
   'LivenessProbe: …and does not see a redirect that did not happen');
+
+// ── The in-run positive control (LISTING_LIVENESS.md §5.4) ─────────────────────────────────────
+// A per-row oracle cannot see what a RUN looks like, and some sources degrade in a way that mimics
+// death: gathern answered blocking with its own 404 at a measured 100% false-death rate, dealapp
+// serves listing-less shells to datacenter egress. An aggregate alive-rate is a LAGGING signal —
+// gathern inactivated 302 rows on one day and 106 the next before its collapse was visible.
+check(base.wired?.canary_ok_gone === 'gone',
+  'a removal proceeds while the canary proves the source still serves real listings');
+check(base.wired?.canary_bad_gone === 'unknown',
+  'a removal is WITHHELD when the canary says the source has stopped answering properly',
+  'returned ' + JSON.stringify(base.wired?.canary_bad_gone));
+check(typeof base.wired?.canary_bad_reason === 'string' &&
+      /withheld/.test(base.wired.canary_bad_reason as string),
+  '…and the withheld verdict records WHY, so a held run is auditable rather than silent',
+  JSON.stringify(base.wired?.canary_bad_reason));
+check(base.wired?.canary_bad_still_live === 'live',
+  'the canary gates REMOVALS ONLY — a live reading survives a failing canary',
+  'a degraded environment cannot manufacture a live page (DELETION_SAFETY.md §2.4); gating the ' +
+  'restore leg would turn a safety control into a second way to lose listings');
+check(base.wired?.no_canary_gone === 'gone',
+  'a platform with NO canary configured is unchanged (the control is opt-in, not silently on)');
 // An UNKNOWN that does not say WHY is unfalsifiable from the record (ops_incident #84: the aqarcity
 // oracle was found mapping "unparseable page" to gone, and deciding whether 254 same-day kills were
 // right needed a by-hand re-probe because nothing stored said which condition had fired).
@@ -284,6 +330,14 @@ mustCatch('the ALIVE limb no longer certifying a served listing',
 // An empty body accepted as a live verification.
 mustCatch('an empty body being accepted as proof of life',
   ['if status is None or not body:', 'if False:']);
+
+// The §5.4 control removed: a shelled environment would deactivate everything it probes.
+mustCatch('the in-run canary no longer gating removals',
+  ['if decided[0] == "gone" and self.canary is not None:', 'if False:']);
+// …and the inverse: the canary wrongly gating the RESTORE leg, which would make a degraded run
+// unable to heal a wrongly-struck row — a safety control turned into a second way to lose listings.
+mustCatch('the canary gating a LIVE reading as well as a removal',
+  ['if decided[0] == "gone" and self.canary is not None:', 'if self.canary is not None:']);
 
 // The control: an edit that changes nothing relevant must NOT read as caught.
 const noop = run(['# --- law ---', '# --- law (unchanged) ---']);
