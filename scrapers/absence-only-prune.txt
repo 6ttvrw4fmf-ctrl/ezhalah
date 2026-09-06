@@ -1,0 +1,62 @@
+# PLATFORMS WHOSE PRUNE STILL DEACTIVATES ON CRAWL ABSENCE ALONE
+#
+# Every platform listed here calls db.prune_unseen() WITHOUT a verify_gone oracle, so a row that
+# misses three consecutive crawls is deactivated with NO affirmative answer from the source. That is
+# EvidenceKind.ABSENCE deciding a listing's fate, which docs/ops/LISTING_LIVENESS.md §1-§3 says it
+# may never do: a throttled run, a partial page or a source-side index gap is indistinguishable from
+# a removal. Downstream, the row stops being searchable, ages into the 30-day retention window, and
+# on an `enabled` platform is deleted permanently.
+#
+# THIS FILE IS A LEDGER OF A KNOWN GAP, NOT A PERMISSION SLIP. It exists so the gap is COUNTED and
+# ATTRIBUTABLE instead of silent — the failure mode this repo has been burned by before (nine dark
+# detectors reading as a clean bill of health). scripts/verify-prune-without-oracle-is-declared.ts
+# enforces three things:
+#
+#   1. a production-searchable platform that prunes without an oracle and is NOT listed here is a
+#      RED — a new platform cannot silently join this club;
+#   2. a platform listed here that has SINCE gained an oracle must be deleted from this file — the
+#      ledger is forced to shrink as platforms are fixed, so it cannot rot into a to-do list nobody
+#      revisits;
+#   3. the count is ratcheted. It may fall. Raising it is a deliberate, reviewed edit.
+#
+# HOW A PLATFORM LEAVES THIS FILE: give its scraper a control-validated `_verify_gone` and pass it to
+# prune_unseen. scrapers/aqargate/run.py is the worked example (2026-09-06) and its barrier,
+# scripts/verify-aqargate-absence-cannot-deactivate.ts, is the shape to copy — it EXECUTES the oracle
+# against every UNKNOWN shape rather than grepping its source. Validate against the failure mode the
+# platform ACTUALLY uses, not the one that is easiest to test: aqargate keeps serving HTTP 200 on an
+# expired ad and only flips a status field, so "200 means live" would have called every dead ad
+# alive. abeea learned the same lesson the expensive way and 9 rows were wrongly restored.
+#
+# format:  platform | probe status (as last measured) | note
+#
+abralosol      | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven (LISTING_LIFECYCLE_ENGINEER.md §8.6)
+aldarim        | UNPROBED                    |
+alhoshan       | UNPROBED                    |
+alkhaas        | UNPROBED                    |
+aouj           | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven
+aqaratikom     | UNPROBED                    |
+aqarmonthly    | UNPROBED                    |
+arkaan         | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven
+awal           | UNPROBED                    | un-retired 2026-09-04; source serves real listings again
+dealapp        | ORACLE EXISTS, NOT WIRED HERE | scrapers/dealapp/liveness_run.py is a real DIRECT sweep, but run.py's own prune still ages rows out on absence — a second, unevidenced deactivation path beside the good one
+eaqartabuk     | UNPROBED                    |
+eastabha       | UNPROBED                    |
+erapulse       | UNPROBED                    |
+fursaghyr      | UNPROBED                    |
+gathern        | ORACLE EXISTS, NOT WIRED HERE | tier-1 DIRECT_REVISIT via scrapers/gathern/liveness.py, yet run.py prunes on absence at two call sites — same second-path problem as dealapp
+hajer          | UNPROBED                    |
+jazwtn         | UNPROBED                    |
+jurash         | UNPROBED                    |
+mizlaj         | UNPROBED                    |
+muktamel       | UNPROBED                    | sharded prune
+mustqr         | ORACLE AVAILABLE            | 2026-09-06: the listing URL is a byte-identical SPA shell for every id (no signal), but run.py already reads a per-id Supabase REST endpoint carrying `status` — a discriminating oracle exists and is unwired. Could not be control-validated from the cloud sandbox: its API host is denied by that egress (403 CONNECT), which is UNKNOWN about our read, not about the platform.
+nowaisiry      | UNPROBED                    |
+october        | UNPROBED                    |
+raghdan        | ORACLE AVAILABLE            | 2026-09-06: source discriminates cleanly — a live listing returns 200 with a per-listing <title>, a removed one a byte-identical 39,130-byte 404. 6/8 canaries live, 2/8 genuinely gone; 5/5 rows we had aged out returned 404. Needs a control-validated _verify_gone, not a new signal.
+ramzalqasim    | UNPROBED                    |
+rawasidark     | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven
+sadin          | UNPROBED                    | 2026-09-06: listing URL 308-redirects to the apex, which did not answer from the cloud sandbox's egress. UNKNOWN about our read — NOT evidence the platform lacks a signal.
+sanadak        | ORACLE AVAILABLE            | 2026-09-06: source discriminates — a live listing SSRs a real <title> in a ~480-716KB page, a removed one an empty <title> in ~144KB. 8/8 canaries live, 29/29 rows we had aged out empty-titled. Needs a control-validated _verify_gone.
+satel          | UNPROBED                    |
+souq24         | UNPROBED                    |
+therc          | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven

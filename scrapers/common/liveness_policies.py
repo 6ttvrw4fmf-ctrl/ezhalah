@@ -115,6 +115,33 @@ POLICIES: dict[str, _P] = {
         "see docs/ops/LISTING_LIVENESS.md §5.1-5.2.",
     ),
     # ── Tier 3: known gaps — recorded honestly so monitoring can see them ───────────────────────
+    # aqargate is spelled out rather than left in the comprehension below, because the
+    # comprehension's shared death_signals string ("none (absence from the crawl only)") stopped
+    # being true for it on 2026-09-06: its prune now requires an affirmative per-listing answer.
+    # The TIER is deliberately unchanged, and that is the honest reading, not a downgrade:
+    # CANDIDATE_PLUS_DIRECT is what the DEACTIVATION PATH now does, but the tier and its SLA measure
+    # whether the POPULATION carries recent affirmative verification — and it still does not, because
+    # prune_unseen() probes only the handful of rows already at grace and never stamps
+    # last_verified_alive_at. Relabelling it tier 2 today would claim coverage nothing measures and
+    # would raise a guaranteed P1 liveness_verification_sla from 2026-09-13 (floor 50%, actual ~0%),
+    # which LISTING_LIVENESS.md §7 forbids answering with a label change. Promoting it is earned by
+    # adding a sweep that verifies the population, not by editing this string.
+    "aqargate": _P(
+        _pol("aqargate", 3, 168), CRAWL_PRESENCE_ONLY,
+        "wp-json post status: `expired` (and draft/pending/private/trash/future), or a 404 the API "
+        "itself attributes to rest_post_invalid_id (post deleted). A 404 WITHOUT that code, any "
+        "401/403/408/429/5xx, an unparseable body, an id mismatch and an unrecognised status are all "
+        "UNKNOWN and hold the strike without deactivating.",
+        "Absence from the full-catalogue crawl now only SELECTS candidates; scrapers/aqargate/run.py"
+        "::_verify_gone gives each at-grace row a DIRECT confirm before prune_unseen may deactivate "
+        "it. Control-validated 2026-09-06 against the failure mode this platform actually uses: "
+        "aqargate usually does NOT delete a lapsed post, it flips wp status publish -> expired and "
+        "keeps serving HTTP 200, so a naive 200⇒live oracle would have called every expired ad "
+        "alive. Measured that day: 7/7 rows aged out were `expired`, 8/8 healthy rows `publish`, and "
+        "the only 3 active rows absent from the source's 200-id published set were exactly the 3 "
+        "carrying strikes (1 expired, 2 hard-deleted). Population coverage is still 0% — see the "
+        "tier note above.",
+    ),
     **{
         p: _P(_pol(p, 3, 168), CRAWL_PRESENCE_ONLY,
               "none (absence from the crawl only)",
@@ -123,7 +150,7 @@ POLICIES: dict[str, _P] = {
               "reported as unverified, never as verified-alive.")
         for p in (
             "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "alta", "aouj", "aqaratikom",
-            "aqarcity", "aqargate", "aqarmonthly", "arkaan", "awal", "eaqartabuk", "eastabha", "erapulse",
+            "aqarcity", "aqarmonthly", "arkaan", "awal", "eaqartabuk", "eastabha", "erapulse",
             "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry",
             "october",
             "raghdan", "ramzalqasim", "rawasidark", "sadin", "sanadak", "satel", "shmoualshmal",
