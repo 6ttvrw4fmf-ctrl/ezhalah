@@ -1,5 +1,17 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
 --
+-- Re-verified 2026-09-06 (Search & Matching QA daily heartbeat): UNCHANGED — and a MENTION, not a
+--   redefinition, which is the distinction this file keeps having to make. Migration
+--   20260906082233 (district display canon refresh + two new detectors) names
+--   `af_eligibility_clause` only inside the prose of `mon_detect_district_token_stranded`'s alert
+--   payload, where it lists the callers a future widening of norm_district_tok() would have to
+--   account for. verify-sql-mirrors-not-stale matches the object name with a word-boundary regex
+--   over the whole migration body, so a string literal trips it exactly like a CREATE OR REPLACE
+--   would — correctly, since the guard cannot know which it is, and asking a human to look is the
+--   whole point. Read live from production to settle it:
+--   md5(pg_get_functiondef) = 47feed9ce3a08e743c44a7fb978f4278 — byte-identical to the md5 this
+--   file already records, so the body below stands untouched.
+--
 -- Refreshed 2026-09-04 — a real redefinition, and the one this file has been warning about.
 --   Migration 20260904143250 moved the per-m² × area derived total INTO this canonical clause. Until
 --   then the four AF RPCs ran `price_total_effective` as HAND-EDITED copies while this clause — the
