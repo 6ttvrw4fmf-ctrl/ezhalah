@@ -15,19 +15,19 @@ export const SHARE_LINK = 'https://ezhalah-app.vercel.app';
 // favicon store sprang on 2026-09-05, where correct new bytes at an unchanged path stayed invisible
 // for months. Replacing the bytes of og-image.jpg would leave everyone who has ever shared the link
 // on the old picture. RENAME THE FILE when the artwork changes; never overwrite it in place.
-export const OG_IMAGE = `${SHARE_LINK}/og-image-v3.jpg`;
+export const OG_IMAGE = `${SHARE_LINK}/og-image-v4.jpg`;
 // ONE message, owner-authored 2026-09-05, used everywhere that used to keep its own copy and drift:
 // the OS share text, the in-app sheet, X/Telegram/WhatsApp/Mail, and the og: card. The LEAD is the
 // sentence alone — targets that take the link in their own `url=` parameter must not be handed it
 // twice — and MESSAGE is that lead plus the link, for targets that carry everything in one string.
-export const SHARE_LEAD_AR = 'إزهله. موقع واحد. كل إعلانات العقار في السعودية، بثوانٍ.\nجرّبه الآن 👇';
+export const SHARE_LEAD_AR = 'إزهله. موقع واحد. كل إعلانات العقار في السعودية، بثواني.\nجرّبه الآن 👇';
 export const SHARE_LEAD_EN = 'Ezhalah. One site. Every property listing in Saudi Arabia, in seconds.\nTry it now 👇';
 export const SHARE_MESSAGE_AR = `${SHARE_LEAD_AR}\n${SHARE_LINK}`;
 export const SHARE_MESSAGE_EN = `${SHARE_LEAD_EN}\n${SHARE_LINK}`;
 // og:description and the in-app preview get the sentence WITHOUT the emoji or the link: a preview
 // card already shows the domain under it, and repeating the url inside the description is the mark
 // of a page that was never actually looked at in a chat window.
-export const SHARE_BLURB_AR = 'موقع واحد. كل إعلانات العقار في السعودية، بثوانٍ. جرّبه الآن.';
+export const SHARE_BLURB_AR = 'موقع واحد. كل إعلانات العقار في السعودية، بثواني. جرّبه الآن.';
 export const SHARE_BLURB_EN = 'One site. Every property listing in Saudi Arabia, in seconds. Try it now.';
 export const SHARE_TITLE_AR = 'إزهله';
 const SHARE = {
