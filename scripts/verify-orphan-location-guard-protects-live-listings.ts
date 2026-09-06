@@ -22,9 +22,11 @@
 //      one case (1) cannot see.
 // Absence ALONE is never sufficient, exactly as it is never sufficient to deactivate a listing.
 //
-// WHAT THIS FILE CAN AND CANNOT CLAIM. The SQL is staged, not yet applied (see the header of the
-// file it reads and ops_incident #134): applying it now would stack a third deploy block behind
-// the two mirror PRs already waiting for human merge. So this barrier asserts the STAGED TEXT
+// WHAT THIS FILE CAN AND CANNOT CLAIM. The SQL is committed but NOT YET APPLIED (ops_incident
+// #134). It was first staged in `sql/proposed/` while two mirror PRs were blocking deploys; it is
+// now a real migration awaiting human merge, and it is deliberately not applied from an autonomous
+// run — the ordering lesson of 2026-09-06 is PR first, apply after merge, never the reverse. So
+// this barrier asserts the COMMITTED TEXT
 // carries every guard — the two-fact predicate, the injection seam, the trigger propagation, and
 // the self-test that refuses to delete when any direction fails. The four-way behavioural proof of
 // the predicate was executed against production as pure SQL before the file was written (a live
@@ -34,7 +36,21 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
-const SQL = join(ROOT, 'sql', 'proposed', 'orphan_location_propagation.sql');
+
+// THE GUARD FOLLOWS THE FILE THROUGH PROMOTION. This repair was first staged in
+// `sql/proposed/`, deliberately, so it would not stack a third deploy block behind two mirror PRs
+// waiting for human merge. Once promoted to `supabase/migrations/` a barrier hard-coded to the
+// staging path would either go RED on a correct promotion or — far worse if someone "fixed" it by
+// making the read optional — go DARK on the exact change it exists to guard.
+//
+// So the file is RESOLVED, not assumed: the migration home wins where it exists, staging is the
+// fallback, and neither existing is a loud failure rather than a skip. Both existing is also a
+// failure unless they are byte-identical, because a staged copy that has drifted from what actually
+// ships is a barrier reading the wrong text while believing it read the right one.
+const STAGED = join(ROOT, 'sql', 'proposed', 'orphan_location_propagation.sql');
+const MIGRATION = join(ROOT, 'supabase', 'migrations',
+  '20260906190500_orphan_location_propagation.sql');
+const SQL = existsSync(MIGRATION) ? MIGRATION : STAGED;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {
@@ -45,8 +61,14 @@ const check = (ok: boolean, what: string, detail = '') => {
 
 console.log('verify-orphan-location-guard-protects-live-listings: absence alone may not delete a location.');
 
-check(existsSync(SQL), 'the staged repair is committed', SQL);
+check(existsSync(SQL), 'the repair is committed, in one of its two homes', `${MIGRATION} | ${STAGED}`);
 if (!existsSync(SQL)) { console.log('\n❌ nothing to check.'); process.exit(1); }
+check(!(existsSync(MIGRATION) && existsSync(STAGED))
+  || readFileSync(MIGRATION, 'utf8') === readFileSync(STAGED, 'utf8'),
+  'no drifted staging copy sits beside the migration',
+  'both homes exist and their text differs — this barrier reads the migration, so a stale copy in ' +
+  'sql/proposed/ is a second source of truth that nothing grades. Delete it after promotion.');
+console.log('  ⓘ judging: ' + SQL.slice(ROOT.length + 1));
 const live = readFileSync(SQL, 'utf8');
 
 // The rules, as a pure function so the mutations below execute the same judgement.

@@ -178,6 +178,13 @@ POLICIES: dict[str, _P] = {
         for p, sig in (
             ("abeea", "the listing's own page answering with an affirmative removal; a 200 we cannot "
                       "recognise is UNKNOWN (9 rows were once wrongly restored by a 200-means-alive rule)"),
+            ("aldarim", "a 200 SOFT-404 titled «Property Not Found» with no RealEstate schema block, "
+                        "and CANARY-GATED: the not-found page is rendered by a front end whose "
+                        "backend a degraded run may fail to reach, so no removal is believed unless "
+                        "the site is still rendering real listings to us that second. A RealEstate "
+                        "block IS proof of life. Measured on 50 live controls and 6 not-served ids; "
+                        "the removal limb has no real dead cohort — this platform has never "
+                        "deactivated a listing — which is why it is gated"),
             ("aqarcity", "the «الإعلان منتهي» expiry banner on the listing's own page, plus 404/410"),
             ("eastabha", "this listing's OWN slider-property-status ribbon reading تأجرت / تم البيع "
                          "(the related-listings carousel's ribbons are explicitly not read), plus 404/410"),
@@ -203,7 +210,7 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abralosol", "abwbna", "aldarim", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "aouj", "aqaratikom",
+            "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "aouj", "aqaratikom",
             "aqarmonthly", "arkaan", "awal", "bahadhabab", "eaqartabuk", "erapulse",
             "fursaghyr", "jurash", "muktamel", "mustqr",
             "october",
