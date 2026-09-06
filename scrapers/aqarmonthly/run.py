@@ -379,6 +379,20 @@ def main() -> int:
         if run_id is not None:
             healthy = db.end_run(run_id, ok=True, rows_seen=len(ids), rows_upserted=len(rows),
                        degraded=pruned < 0,  # a tripped prune guard is an integrity trip → honest red
+                       # SANITY FLOOR (added after the 2026-08-22/29 + 2026-09-05 Saturday incidents):
+                       # every one of the 16 shards independently re-discovers the SAME live vertical
+                       # via discover_ids(), which this file's own 0-row-semantics comment above
+                       # documents as "~100-240 ids [per shard] — never legitimately empty while the
+                       # vertical is alive". Three consecutive Saturdays it collapsed to ~15-16/shard
+                       # (a ~93% drop, full recovery the very next day) while still reporting
+                       # rows_seen>0 and ok=True — the exact "silent_partial_success" shape:
+                       # ok=true suppresses every failure barrier, and a short-but-nonzero list can
+                       # look like a legitimately small run. 50 sits well below the documented normal
+                       # floor (100) and well above the observed collapse (15-16), for both the
+                       # sharded (~100-240) and unsharded/full (~1.5k-3.8k) paths — so a real
+                       # discovery collapse now demotes this run to ok=False via end_run()'s existing
+                       # RC-B floor guard instead of silently succeeding.
+                       floor=50,
                        notes=f"shard={args.shard or 'full'} priced={counter['ok']}/{len(ids)} "
                              f"pruned={max(pruned, 0)}", check_tables=["aqarmonthly_residential_listings"])
         if not healthy:
