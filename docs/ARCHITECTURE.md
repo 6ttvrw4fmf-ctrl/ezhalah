@@ -797,12 +797,27 @@ positively (passes today) and negatively (a simulated break fails it).
 | Tripwire | File | Asserts |
 |---|---|---|
 | Taxonomy coverage | `scripts/verify-taxonomy.ts` | every live `search_listings_ar.type_ar` maps to exactly one clean type (except the documented «عمارة»/Building ambiguity resolved by source-table kind); any orphan (unmapped → unreachable) blocks deploy. `--emit-sql` regenerates `sql/known_type_ar.generated.sql` — this is the wire to the novel-type alarm. |
-| Gathern rent-only (§20.8) | `scripts/verify-gathern-rent-only.ts` | 3 layers: (1) DATA — 0 gathern/aqarmonthly rows tagged `deal_ar='بيع'`; (2) RPC — a Buy search pointed at those tables returns 0 (with a Rent-monthly positive control); (3) CODE — `RES_TABLES`/`COM_TABLES` exclude them and `resTables()`/`tablesFor()` only add them under the monthly-rent gate. |
+| Gathern rent-only (§20.8) | `scripts/verify-rent-period-both.ts` | the CODE layer, EXECUTED (not text-matched): it lifts the real `resTables()` and asserts the two monthly-only sources are in scope for `monthly`/`both`/combined **and stay OUT of Buy and of an annual Rent search**. |
 
-**Note:** `scripts/verify-locations.mjs` (the older location tripwire) is currently NOT wired into the
-build — it fails on a pre-existing `PGRST203` overload ambiguity for `location_search_candidates_ar`
-(minimal-param sentinel calls can't resolve since the RPC gained a second signature). Fix belongs to the
-search-RPC workstream; re-wire it into `npm run verify` once the overload is disambiguated.
+**Corrected 2026-09-06 (routine #10).** Until this date the row above named
+`scripts/verify-gathern-rent-only.ts` and promised three layers — DATA (`0 rows tagged
+deal_ar='بيع'`), RPC (a Buy search returns 0) and CODE. **That file has never existed anywhere in the
+tree**, so a reader consulting this table for "is the rent-only rule guarded?" got a confident yes
+from a citation nobody had executed. The DATA layer as written is also no longer expressible:
+`gathern_residential_listings` and `aqarmonthly_residential_listings` carry no `deal_ar` column at
+all, so a row cannot be tagged «بيع» in the first place — the invariant moved from a guarded value to
+a structural impossibility. The CODE layer is genuinely covered, by the file now named. The RPC layer
+is not separately asserted; that is a known gap, stated rather than implied away.
+`scripts/verify-docs-name-real-barriers.ts` (in `npm test`) now fails on any `scripts/` path this or
+any other doc names that is not a real file, so a phantom citation cannot survive a PR again.
+
+**Note:** `scripts/verify-locations.mjs` (the older location tripwire) no longer exists — it was
+removed rather than re-wired, and this note used to describe it as merely "not wired into the build",
+which read as a guard waiting to be switched back on. The location surface is covered by
+`scripts/verify-location-index-covers-every-searchable-platform.ts`,
+`scripts/verify-location-index-source.ts`, and
+`scripts/verify-failed-location-index-is-not-a-load.ts` (which EXECUTES `ensureLocationIndex()`
+against an injected failure, so a failed index load can never be rendered as an empty one).
 
 **Scraper visibility rule (2026-07-06):** a green cron/workflow is **not** proof of data. Runs must fail
 loudly — a scraper that fetched 0 rows when it had URLs exits non-zero and logs per-URL status (fixed for
