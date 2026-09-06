@@ -58,8 +58,17 @@ check('remote.ts maps every real photo URL through photoDisplayUrl (the single c
 const mustCatch = (label: string, invariantHeldOnBrokenInput: boolean) =>
   check(`MUTATION ${label} — caught`, invariantHeldOnBrokenInput === false,
     'the invariant held on a broken input, so the check cannot catch this bug');
-// If photoDisplayUrl were a no-op (the reverted-fix regression), the Sadin URL would stay cross-origin.
-mustCatch('no-op helper leaves Sadin cross-origin', 'https://sadin.com.sa/x'.startsWith('/_img/'));
+// If photoDisplayUrl were a no-op (the reverted-fix regression), the Sadin URL would stay
+// cross-origin. Stated DIFFERENTIALLY against the REAL helper (2026-09-06, routine #10): the first
+// version asked `'https://sadin.com.sa/x'.startsWith('/_img/')` — a constant expression over a
+// hand-written string that never called photoDisplayUrl at all, so it passed for every possible
+// implementation of it, this file's whole subject. It was a hand-SIMULATION of what the mutant would
+// return, which is the "keep a copy of production logic in the barrier" class wearing proof syntax.
+// Now the no-op mutant and the shipped helper are both applied to the same input and must disagree.
+const noop = (u: string) => u;
+const SADIN = 'https://sadin.com.sa/x';
+mustCatch('no-op helper leaves Sadin cross-origin',
+  noop(SADIN).startsWith('/_img/') === photoDisplayUrl(SADIN).startsWith('/_img/'));
 // If it rewrote the WRONG host, aqar would get proxied (breaking a working platform).
 mustCatch('over-broad rewrite proxies aqar too', photoDisplayUrl('https://images.aqar.fm/a.jpg').startsWith('/_img/'));
 
