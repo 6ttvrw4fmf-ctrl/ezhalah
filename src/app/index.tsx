@@ -19,7 +19,7 @@ import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { buildAfSummary, grouped, type SearchQuery } from '@/data/search';
-import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope } from '@/data/remote';
+import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
 import { reconcileCommittedAf, withoutFacet, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
@@ -221,11 +221,18 @@ export default function Home() {
   // period rows (no period filter at all, matching the backend's p_rent_period IS NULL branch), same
   // null-means-unrestricted convention Buy already uses. effDeal reads as null under combined mode,
   // so `effDeal !== 'Rent'` already covers that case with no separate dealCombined check needed.
-  const rentPeriodTok: string | null =
-    effDeal !== 'Rent' ? null
-    : rentPeriod === 'monthly' ? 'شهري'
-    : rentPeriod === 'both' ? 'كلاهما'
-    : 'سنوي';
+  //
+  // ONE DERIVATION (2026-09-06, regression hunter). This used to be a hand-written ternary over
+  // effDeal/rentPeriod that the comment above called "the SAME token" remote.ts sends. It was a
+  // claim, not a shared function, and the two disagreed on one input: bothDeals + deal 'Rent', where
+  // rentPeriodParam() returns null (no period filter, unpublished-period rows included) and the copy
+  // returned 'سنوي'/'شهري'/'كلاهما'. That is the 2026-09-03 Trending-vs-results scope defect on the
+  // period parameter — the advertised count describing a different set than the search returns. It
+  // was unreachable only because sanitizeForFilterRestore()'s allowlist, in a THIRD file, strips
+  // bothDeals from every write into this store; parity that depends on an unrelated guard is not
+  // parity. Call the results RPC's own derivation instead, so the two cannot diverge at all.
+  // (scripts/verify-rent-period-token-has-one-derivation.ts)
+  const rentPeriodTok: string | null = rentPeriodParam(query);
   // COUNT-SCOPE PARITY (findings 2026-08-13, R1): every City/District pool call is scoped to the
   // category the results RPC will ACTUALLY search — the picked category, else the same implied
   // default remote.ts applies to a category-less search (imported, never a duplicated literal).

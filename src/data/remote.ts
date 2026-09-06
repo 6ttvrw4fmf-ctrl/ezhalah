@@ -1242,7 +1242,15 @@ function comTables(q: SearchQuery): string[] {
 // one ('شهري'/'سنوي'); Buy, "rent or buy" (bothDeals), or no-period send null so the RPC applies NO period
 // filter (and Buy stays untouched). Keeps the candidate budget filled with the correct period so monthly
 // results aren't crowded out by annual. (owner rent-period rule 2026-07-06.)
-function rentPeriodParam(q: SearchQuery): string | null {
+// EXPORTED because the COUNT surfaces need the identical token (2026-09-06, regression hunter).
+// src/app/index.tsx used to re-derive it by hand for top_cities_by_deal_ar / district_options_ar and
+// every locations.ts pool wrapping them, with a comment claiming it was "the SAME token" — a claim,
+// not a shared function. The two expressions disagreed on exactly one input (bothDeals + deal Rent:
+// this returns null, the copy returned a period token), which is the 2026-09-03 Trending-vs-results
+// scope class on the period parameter instead of the table scope. Nothing asserted they agreed;
+// verify-count-scope-parity.ts pins that the token is THREADED to every pool call, never that it is
+// COMPUTED the same way. One derivation, so the count and the search cannot describe different sets.
+export function rentPeriodParam(q: SearchQuery): string | null {
   // dealCombined's Rent side has no period selector — it accepts both known periods AND
   // unpublished-period rows (no period filter at all), same as Buy/bothDeals. (owner 2026-08-20.)
   if (q.bothDeals || q.dealCombined || q.deal !== 'Rent') return null;
