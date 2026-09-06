@@ -448,12 +448,15 @@ integrity sweeps — it detects and escalates to the senior.
 
 ## 2. 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit (original prompt, made daily)
 Canonical spec: **`docs/ops/SENIOR_PRODUCTION_ENGINEER.md`** (file wins over the live prompt on any
-divergence). Written 2026-09-05 by RECONSTRUCTION from repo evidence, for the same reason as #1.
-Its `## UNRECOVERED — owner must supply` section is the larger of the two: 31 of the prompt's 33
-sections, §23/§24 in full, and the ~29-check checklist by name. This is the routine with the
-broadest authority and the fallback ownership of every unrouted alert kind — a fallback that has
-grown from 1 kind to 26 — so the gap matters most here. **Partial spec; the live prompt is still
-the only complete copy.**
+divergence). `§Identity`–`§4` were written 2026-09-05 by RECONSTRUCTION from repo evidence, for the
+same reason as #1. **`§R` closed the gap on 2026-09-06**: all 33 sections — §23 and §24 in full —
+are now in the repo, transcribed by that day's scheduled run from the prompt the scheduler delivered
+to it. That is *"what ran"*, not a diff against the owner's 2026-08-10 restore, and `§R` says so in
+its own provenance note; the owner's copy wins on any divergence. Four things genuinely remain, under
+`## UNRECOVERED — what genuinely remains`: byte-fidelity against that restore, the ~29-check
+checklist BY NAME (runs 93 and 97 disagree on the denominator, which is the evidence it is still
+open), the 04:30-Arizona vs 06:00-UTC divergence with `AGENT_AUTHORITY.md:284`, and what to do with a
+fallback that has grown from 1 kind to 26. **No longer a partial spec for the prompt text itself.**
 
 
 The owner's original 33-section Senior Production Engineer routine (restored byte-faithfully on
