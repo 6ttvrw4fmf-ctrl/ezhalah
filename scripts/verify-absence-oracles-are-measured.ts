@@ -38,7 +38,7 @@ import scrapers.common.http_liveness as L
 
 MUT = os.environ.get("MUTATE")
 
-PLATFORMS = ["jazwtn", "mizlaj", "nowaisiry", "souq24", "eastabha", "dealapp", "hajer"]
+PLATFORMS = ["jazwtn", "mizlaj", "nowaisiry", "souq24", "eastabha", "dealapp", "hajer", "aldarim"]
 out = {}
 SIGNALS = {}
 for name in PLATFORMS:
@@ -172,6 +172,31 @@ out["hajer"]["style_attr_selector_beside_live"] = hj_d(200, HJ_SEL + HJ_AVAIL + 
 out["hajer"]["no_badge_at_all"] = hj_d(200, BODY)
 out["hajer"]["reserved"]        = hj_d(200, HJ_CSS + HJ_RESV + BODY)
 
+# aldarim: a SOFT-404 platform whose removal limb is validated against SYNTHETIC not-served ids,
+# because it has never deactivated a listing and so has no dead cohort. That weaker evidence is
+# exactly why the removal limb is canary-gated, and the canary is asserted here as part of the
+# signal rather than as a nice-to-have: the not-found page is rendered by a front end whose backend
+# this sandbox cannot even reach, so a backend outage would mimic death for every probed row.
+import scrapers.aldarim.run as al
+AL_LD    = '<script type="application/ld+json">{"@context":"https://schema.org","@type":"RealEstate","name":"Villa"}</script>'
+AL_NF    = '<title>Property Not Found | ALDARIM Real Estate</title>'
+AL_OTHER = '<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization"}</script>'
+def al_d(status, body, moved=False):
+    # SIGNALS["aldarim"], not al._signal: under MUTATE the mutant lives in SIGNALS.
+    r = L.decide(status, body, moved, SIGNALS["aldarim"])
+    return None if r is None else r[0]
+out["aldarim"]["real_estate_schema"]  = al_d(200, AL_LD + BODY)
+out["aldarim"]["soft_404"]            = al_d(200, AL_NF + BODY)
+out["aldarim"]["bare_shell"]          = al_d(200, BODY)
+out["aldarim"]["other_schema_only"]   = al_d(200, AL_OTHER + BODY)
+out["aldarim"]["schema_beside_nf"]    = al_d(200, AL_LD + AL_NF + BODY)
+out["aldarim"]["soft_404_redirected"] = al_d(200, AL_NF + BODY, True)
+out["aldarim"]["has_canary"]          = al._probe.canary is not None
+# The canary must fail CLOSED with nothing supplied, and it must not be satisfied by the very page
+# shape it exists to distrust.
+al.set_liveness_canaries([])
+out["aldarim"]["canary_empty_refuses"] = not al._canary_ok()[0]
+
 # souq24's id parser: strict, because a loose one probes another platform's page.
 import scrapers.souq24.run as sq
 out["souq24"]["pid_ok"] = sq._pid_of("SQ24-1278")
@@ -197,7 +222,7 @@ const run = (mutate?: [string, string, string]): Result => {
   return JSON.parse(out.trim().split('\n').pop() as string) as Result;
 };
 
-const PLATFORMS = ['jazwtn', 'mizlaj', 'nowaisiry', 'souq24', 'eastabha', 'dealapp', 'hajer'] as const;
+const PLATFORMS = ['jazwtn', 'mizlaj', 'nowaisiry', 'souq24', 'eastabha', 'dealapp', 'hajer', 'aldarim'] as const;
 
 // What each platform was MEASURED to do. Changing a row here is changing a claim about a source,
 // which needs a fresh measurement — not a convenient edit.
@@ -219,6 +244,9 @@ const MEASURED: Record<string, { gone: string[]; notGone: string[] }> = {
   // permalinks with Arabic slugs, and an edited slug 404s a URL whose listing is perfectly alive.
   // Its entire removal signal is the own-badge check asserted below.
   hajer: { gone: [], notGone: ['gone_404', 'gone_410', 'redirect_200', 'redirect_404', 'plain_200'] },
+  // aldarim answers a not-served id with a 200 SOFT-404, so no status code is a removal here
+  // either. Its whole signal is the page shape, asserted below.
+  aldarim: { gone: [], notGone: ['gone_404', 'gone_410', 'redirect_200', 'redirect_404', 'plain_200'] },
 };
 
 const holds = (r: Result): string[] => {
@@ -255,6 +283,19 @@ const holds = (r: Result): string[] => {
     if (hj.style_attr_selector_beside_live !== 'gone') h.push('hajer:style-stripped-before-reading');
     if (hj.no_badge_at_all !== 'gone') h.push('hajer:no-badge-not-a-removal');
     if (hj.reserved !== 'gone' && hj.reserved !== 'live') h.push('hajer:reserved-unmeasured-no-opinion');
+  }
+  const al = r.aldarim as unknown as Record<string, unknown> | undefined;
+  if (al) {
+    if (al.real_estate_schema === 'live') h.push('aldarim:schema-is-life');
+    if (al.soft_404 === 'gone') h.push('aldarim:soft-404-is-a-removal');
+    if (al.bare_shell !== 'gone') h.push('aldarim:shell-not-a-removal');
+    if (al.bare_shell !== 'live') h.push('aldarim:shell-not-a-verification');
+    if (al.other_schema_only !== 'gone' && al.other_schema_only !== 'live')
+      h.push('aldarim:another-schema-type-decides-nothing');
+    if (al.schema_beside_nf === 'live') h.push('aldarim:real-listing-wins-over-a-not-found-string');
+    if (al.soft_404_redirected !== 'gone') h.push('aldarim:redirected-soft-404-not-a-removal');
+    if (al.has_canary === true) h.push('aldarim:has-canary');
+    if (al.canary_empty_refuses === true) h.push('aldarim:canary-fails-closed');
   }
   return h;
 };
@@ -351,6 +392,35 @@ check(hj.reserved !== 'gone' && hj.reserved !== 'live',
   'hajer: status-reserved (محجوز) gets NO opinion — zero rows in either cohort carried it',
   'the crawl path treats محجوز as gone; having no opinion can never contradict it, guessing can');
 
+// aldarim: a proof-of-life limb plus a canary-gated soft-404 limb. The removal limb is the one
+// validated against SYNTHETIC not-served ids rather than a real dead cohort (this platform has
+// never deactivated a listing), which is precisely why the canary is asserted here as load-bearing.
+const al = base.aldarim as unknown as Record<string, unknown>;
+check(al.real_estate_schema === 'live',
+  'aldarim: a RealEstate schema block on the listing own URL is PROOF OF LIFE',
+  '50 of 50 known-active controls carried it (25 residential + 25 commercial)');
+check(al.soft_404 === 'gone',
+  'aldarim: the «Property Not Found» soft-404 IS this source removal signal',
+  '6 of 6 ids the backend does not serve rendered it; 0 of 50 live controls did');
+check(al.bare_shell !== 'gone', 'aldarim: a 200 we cannot recognise is never a removal');
+check(al.bare_shell !== 'live',
+  'aldarim: …and it is not a verification either — an unrecognised 200 verifies nothing');
+check(al.other_schema_only !== 'gone' && al.other_schema_only !== 'live',
+  'aldarim: a schema block of a DIFFERENT @type decides nothing',
+  'the site carries Organization/WebSite schema too; only RealEstate is about a listing');
+check(al.schema_beside_nf === 'live',
+  'aldarim: a real listing beside a stray not-found STRING is still alive',
+  'proof of life is checked FIRST, so a phrase appearing anywhere in 250KB of markup cannot ' +
+  'outvote the listing own schema block');
+check(al.soft_404_redirected !== 'gone',
+  'aldarim: a soft-404 reached after a REDIRECT is not a removal — we do not know where we landed');
+check(al.has_canary === true,
+  'aldarim: the removal limb is canary-gated',
+  'the not-found page is rendered by a front end whose backend is unreachable from here; a ' +
+  'backend outage would mimic death for every probed row — the dealapp/gathern shape');
+check(al.canary_empty_refuses === true,
+  'aldarim: with no canary supplied, no removal may be believed (fails CLOSED)');
+
 check(base.souq24.pid_ok === 1278, 'souq24: SQ24-1278 parses to its pid', String(base.souq24.pid_ok));
 check((base.souq24.pid_bad ?? []).every((x) => x === null),
   'souq24: every malformed ad_number yields no pid rather than a guessed one',
@@ -378,6 +448,7 @@ const CALL_EVERYTHING_GONE: Record<string, [string, string]> = {
   dealapp: ['    adid = getattr(_ORACLE_ADID, "adid", None)',
             '    return "gone"\n    adid = getattr(_ORACLE_ADID, "adid", None)'],
   hajer: ['    if path_changed:', '    if True:\n        return "gone"\n    if path_changed:'],
+  aldarim: ['    if path_changed:', '    if True:\n        return "gone"\n    if path_changed:'],
 };
 for (const p of PLATFORMS) {
   const [find, repl] = CALL_EVERYTHING_GONE[p];
@@ -433,6 +504,27 @@ mustCatch('hajer adopting a 404-means-gone rule it never measured',
 mustCatch('hajer treating an available badge as a removal',
   ['hajer', '    if any(b in _GONE_BADGE for b in badges):',
    '    if any(b in _GONE_BADGE + _ALIVE_BADGE for b in badges):']);
+
+// aldarim losing its proof-of-life limb: an absent-but-alive row would never get a strike reset.
+mustCatch('aldarim losing the RealEstate schema that is its proof of life',
+  ['aldarim', '    if _LD_REAL_ESTATE.search(body or ""):', '    if False:']);
+// …and losing the soft-404 that is its only removal signal.
+mustCatch('aldarim losing the soft-404 that IS its only removal signal',
+  ['aldarim', '    if _NOT_FOUND_TITLE.search(body or ""):', '    if False:']);
+// THE ORDER MATTERS. Checking the not-found phrase BEFORE the listing's own schema lets a stray
+// string anywhere in ~250KB of markup outvote the listing's own proof of life.
+mustCatch('aldarim checking the not-found phrase before the listing own schema',
+  ['aldarim',
+   '    if _LD_REAL_ESTATE.search(body or ""):\n        return "live"',
+   '    if _NOT_FOUND_TITLE.search(body or ""):\n        return "gone"\n' +
+   '    if _LD_REAL_ESTATE.search(body or ""):\n        return "live"']);
+// aldarim reading an UNRECOGNISED 200 as a removal — the dealapp shell mistake on a new source.
+mustCatch('aldarim treating any unrecognised 200 as a removal',
+  ['aldarim', '    return None                          # a 200 we cannot recognise is not a verification',
+   '    return "gone"']);
+// aldarim accepting a soft-404 reached after a redirect off the listing's own path.
+mustCatch('aldarim accepting a redirected soft-404 as a removal',
+  ['aldarim', '    if path_changed:\n        return None', '    if path_changed:\n        pass']);
 
 console.log(failed === 0
   ? '\n✅ verify-absence-oracles-are-measured: every signal says only what its source was measured to say.'

@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,7 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize
+from scrapers.common import db, http_liveness, normalize
 from scrapers.common.arabic_location import to_catalog
 
 # PDPL: never store advertiser contact/identity. The rest of the API item is kept.
@@ -82,6 +84,106 @@ def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     s.headers.update(HEADERS)
     return s
+
+
+# ── Liveness oracle for prune_unseen ────────────────────────────────────────────────────────────
+# THE GAP. This is a FULL-REFRESH crawl, and the comment at the prune call site below says a row not
+# seen this run "is gone". That is the strongest form crawl absence can take — and it is still only
+# absence. docs/ops/LISTING_LIVENESS.md §1–§3: a partial page, a throttled run or a source-side index
+# gap is indistinguishable from a removal, and this platform has never had a per-listing revisit at
+# all. hajer was a full-refresh crawl too, and it deactivated HJ1512 on 2026-07-31 while the source
+# was serving it.
+#
+# WHAT THE SITE ANSWERS. aldarim.sa server-renders each listing page from the same backend the crawl
+# reads. A real listing carries a `application/ld+json` block whose `@type` is `RealEstate`; an id
+# the backend does not serve gets a 200 SOFT-404 titled «Property Not Found» with no such block.
+#
+# MEASURED 2026-09-06 — 50 interleaved known-active controls (25 residential + 25 commercial) and 6
+# ids the backend does not serve:
+#   controls   50/50 HTTP 200, 50/50 carried the RealEstate block, 0/50 said Property Not Found,
+#              0/50 redirected off their own path
+#   not-found   6/6 HTTP 200, 0/6 carried the block, 6/6 said Property Not Found
+# Perfect separation, no overlap in either direction.
+#
+# THE HONEST LIMIT, STATED. Those 6 are SYNTHETIC ids, not a real dead cohort: aldarim has never
+# deactivated a listing, so there is nothing to validate a removal signal against. They are the
+# right shape — the SPA asks the backend for an id it does not serve, which is what a removed
+# listing becomes — but "the right shape" is weaker evidence than a measured dead row.
+#
+# SO THE REMOVAL LIMB IS CANARY-GATED, and that is not decoration. The not-found page is rendered by
+# a front-end whose data comes from a backend this sandbox cannot even reach (403 at the gateway) —
+# so a backend outage would plausibly render «Property Not Found» for a listing that is perfectly
+# alive. That is the dealapp/gathern shape (§5.1, §5.4): a source answering degradation with
+# something that MIMICS death. The canary asks, before every single removal, whether the site is
+# still rendering real listings to us right now, using URLs THIS RUN already fetched successfully.
+# It fails CLOSED: no canary, no removal.
+_LD_REAL_ESTATE = re.compile(
+    r'<script[^>]+application/ld\+json[^>]*>\s*\{[^<]*"@type"\s*:\s*"RealEstate"', re.S)
+_NOT_FOUND_TITLE = re.compile(r"<title[^>]*>\s*Property Not Found\b", re.I)
+
+_canary: dict[str, Any] = {"urls": [], "verdict": None, "reason": "not evaluated"}
+_CANARY_LOCK = threading.Lock()
+
+
+def set_liveness_canaries(urls) -> None:
+    """Hand the oracle a few listing URLs this run has ALREADY fetched and parsed successfully."""
+    with _CANARY_LOCK:
+        _canary["urls"] = [u for u in (urls or []) if u][:3]
+        _canary["verdict"] = None
+        _canary["reason"] = "not evaluated"
+
+
+def _canary_ok() -> tuple[bool, str]:
+    """Is the site still rendering real listings to us right now? Memoised per run, fails closed."""
+    with _CANARY_LOCK:
+        if _canary["verdict"] is not None:
+            return _canary["verdict"], _canary["reason"]
+        urls = list(_canary["urls"])
+    ok, reason = False, "no canary was supplied, so no removal can be believed"
+    for u in urls:
+        status, body, _moved = _probe.fetch(u)
+        if status == 200 and body and _LD_REAL_ESTATE.search(body):
+            ok, reason = True, f"canary {u[-12:]} still renders its own listing"
+            break
+        reason = f"canary {u[-12:]} did not render a listing (HTTP {status})"
+    with _CANARY_LOCK:
+        _canary["verdict"], _canary["reason"] = ok, reason
+    return ok, reason
+
+
+_oracle_sess: Any = None
+
+
+def _oracle_session():
+    """Transport seam for the probe. Tests replace this; the shared law is never replaced."""
+    global _oracle_sess
+    if _oracle_sess is None:
+        _oracle_sess = session()
+    _throttle()
+    return _oracle_sess
+
+
+def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+    """aldarim's OWN measured signal. `None` means "no opinion" — never "probably gone"."""
+    if path_changed:
+        return None                      # an unresolved redirect: we do not know where we landed
+    if status != 200:
+        return None                      # every non-200 shape is unmeasured here; hold at UNKNOWN
+    if _LD_REAL_ESTATE.search(body or ""):
+        return "live"                    # 50/50 controls; this is the proof-of-life limb
+    if _NOT_FOUND_TITLE.search(body or ""):
+        return "gone"                    # 6/6 not-served ids, 0/50 controls — and canary-gated
+    return None                          # a 200 we cannot recognise is not a verification
+
+
+_probe = http_liveness.LivenessProbe(
+    platform="aldarim",
+    signal=_signal,
+    session=_oracle_session,
+    url_for=http_liveness.stored_listing_url(
+        ("aldarim_residential_listings", "aldarim_commercial_listings")),
+    canary=_canary_ok,
+)
 
 
 def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], int]:
@@ -374,14 +476,23 @@ def main() -> int:
         if com_rows:
             db.upsert_aldarim_commercial_batch(com_rows)
         # FULL-REFRESH liveness: we just fetched the COMPLETE available inventory, so any Aldarim
-        # row NOT seen this run is gone (sold/rented/removed) → mark it inactive. This makes the daily
-        # sync self-cleaning, so we never show a stale listing. (Replaces a separate liveness job.)
+        # row NOT seen this run is a CANDIDATE for removal — not a removal. That distinction is the
+        # whole of docs/ops/LISTING_LIVENESS.md §1–§3, and until 2026-09-06 this call site did not
+        # make it: absence alone marked the row inactive with no answer from the source at all. A
+        # full refresh is the strongest absence there is, and it is still absence — hajer was a
+        # full-refresh crawl too and it deactivated HJ1512 while the source was serving the page.
+        # verify_gone now re-fetches each at-grace row's OWN URL and requires an affirmative answer,
+        # canary-gated. See the oracle block near the top of this file.
         pruned = 0
         if not args.pages or pages >= last_page:  # only prune on a FULL crawl, never a partial run
             seen_res = [r["ad_number"] for r in res_rows]
             seen_com = [r["ad_number"] for r in com_rows]
+            # Canaries come from THIS run's own successful fetches, so "is the site still serving us
+            # real listings right now" is answered with rows we have just proven it serves.
+            set_liveness_canaries([r.get("listing_url") for r in (res_rows + com_rows)[:3]])
             for tbl, seen_ads in (("aldarim_residential_listings", seen_res), ("aldarim_commercial_listings", seen_com)):
-                n = db.prune_unseen(tbl, set(seen_ads), source="Aldarim")
+                n = db.prune_unseen(tbl, set(seen_ads), source="Aldarim",
+                                    verify_gone=_probe.verify_gone)
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
