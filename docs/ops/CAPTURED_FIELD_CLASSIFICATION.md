@@ -22,6 +22,36 @@ This sits under `ADVANCED_FILTER_SOURCE_TRUTH.md` (the tri-state law and "when t
 ambiguous, stop and ask") and adds the product half that document does not state: capture is
 necessary for a filter, and nowhere near sufficient.
 
+## Owner rulings on this classification, 2026-09-06 (second pass) — PERMANENT
+
+Given after the classification below was delivered, and binding on it:
+
+1. **Coordinates: keep captured and preserved, build nothing.** `latitude`/`longitude` stay captured
+   and must not be dropped or allowed to stop being captured — but **do not build map or radius
+   search, and do not change the Region → City → District product model.** They are **future
+   capability only**. Nothing in the search path, the RPC surface or the card may start reading them
+   on the strength of this ruling: "preserved" keeps the option open, it is not a licence to use it.
+2. **`living_rooms` goes through the normal AF certification process, owned by the Advanced Filter
+   owner (routine #5).** It may be exposed **for Villa only**, and only if it passes **every existing
+   AF requirement**: source truth · usefulness · UNKNOWN handling · count correctness · click-set
+   correctness · card evidence · barrier · mutation. This classification's recommendation is an
+   input to that process, never a substitute for it, and never a pre-authorisation to ship.
+3. **No additional product surface may be created from any remaining captured field without a
+   separate, evidence-backed product decision.** The verdicts below are final for this round: the
+   two *proposed* EVIDENCE-ONLY entries stay proposals, and the twelve UNPLUMBED entries stay
+   unplumbed. Re-opening any of them takes new evidence and a new decision, not a new run.
+
+**One measured fact recorded for whoever eventually picks the coordinates up**, so it is not
+rediscovered from scratch: of the 100,304 rows carrying coordinates, **77 fall outside a rough
+Saudi bounding box** (lat 15–33, lon 34–56). That is 0.08%, it is not acted on here, and it is not a
+defect claim — it is noted because any future map or radius feature meets it on day one.
+
+**Nothing currently watches that the coordinates stay populated.** No `scripts/verify-*` names
+`latitude` at all, and no consumer reads it, so a silent stop in enrichment or a future cleanup
+would go unnoticed. That gap is routed to routine #7 as `ops_incident` #101 rather than closed here:
+building a bespoke ratchet for a field with no reader would itself be the additional surface
+ruling 3 forbids.
+
 ## The four verdicts
 
 | Verdict | Meaning |
@@ -49,8 +79,8 @@ Coverage is share of the 203,233-row searchable index. Semantics read from the L
 | 1 | `installment_available` | 88,778 (43.7%) | **`<platform>.rent_now_pay_later AS installment_available` on every branch — a pure alias.** 88,778 both-known, **0 differ, ever** | **NOT A CENSUS ENTRY** — already filterable (`p_amenities` token `rnpl`) and already rendered (RnplBanner). Census corrected 17 → 16 |
 | 2 | `installment_amount` | 15,377 (7.6%) | the RNPL companion `ADVANCED_FILTER_SOURCE_TRUTH.md` §3 requires ("the installment amount exactly as published"); never present without `rnpl = true` | **EVIDENCE ONLY — already satisfied, proven not assumed.** It is the same figure the card already shows: `installment_amount = rent_now_pay_later_monthly` on **15,377 of 15,377 rows, 0 differ**, and `ResultCard.tsx:283` renders it via `RnplBanner monthly=`. Not a filter: aqar-only, and "installment ≤ X" is a budget question the price filter answers |
 | 3 | `living_rooms` | 34,659 (17.1%) | `sane_count(halls)` (aqar «الصالات»), plus two other platforms — a real structured field | **THE ONE FILTER CANDIDATE — Villa cohorts only.** See below |
-| 4 | `latitude` | 100,304 (49.4%) | `ar_data.location.lat` and equivalents, 17 platforms — real geo | **ROUTED to the owner.** A coordinate is not an AF chip; it is the input to map/radius search, a new product surface, and our location model is the owner-owned Region → City → District |
-| 5 | `longitude` | 100,304 (49.4%) | as above | **ROUTED** with `latitude` |
+| 4 | `latitude` | 100,304 (49.4%) | `ar_data.location.lat` and equivalents, 17 platforms — real geo | **PRESERVED, FUTURE CAPABILITY ONLY** (owner ruling 1, above). Kept captured and not to be dropped; no map/radius search, no geo predicate, no card rendering, no change to Region → City → District. Not a filter and not evidence — a held option |
+| 5 | `longitude` | 100,304 (49.4%) | as above | **PRESERVED, FUTURE CAPABILITY ONLY** with `latitude` |
 | 6 | `postal_code` | 67,508 (33.2%) | `additionalAttributes[zipCode]` — real | **UNPLUMBED.** 3,363 distinct codes; nobody searches property by postal code, and Region/City/District already answers location. Noise on a card |
 | 7 | `frontage_count` | 20,382 (10.0%) | `additionalAttributes[propertyFacade]`, mapped **only** «ثلاثة شوارع»→3 and «أربعة شوارع»→4; **every other value → NULL** | **UNPLUMBED + capture defect ROUTED.** 99.8% of stored values are "3" not because most properties front three streets but because one- and two-street properties — surely the majority — are silently dropped. Honest (NULL, not fabricated) but severely partial: "3+ frontages" is meaningless when 1 and 2 cannot be represented |
 | 8 | `rega_license_status` | 19,685 (9.7%) | `regaVerifiedInfo[].fields[status]` (wasalt), «حالة ترخيص الإعلان» (aqarcity) — a real REGA ad-licence status | **EVIDENCE ONLY (proposed).** **Every populated row says "active"** — «نشط» 91.9% + «فعال» 8.1%, the same meaning in two platforms' wording. A predicate over a single-valued field narrows nothing, and `p_has_license` over `license_number` already exists. Genuine trust signal on a card; the two spellings must be normalised first |
@@ -89,6 +119,23 @@ Certifying it is **routine #5's** work (AF + Trending owns the surface): an RPC 
 entry, an `af_canon` evidence key, the mandatory card chip, and the barriers. It is not landed here
 — adding an AF field is new product semantics, which AGENTS.md places behind owner approval, and
 this classification is the recommendation, not the implementation.
+
+**The owner's gate (2026-09-06), which #5 applies in full and in the normal order — Villa only, and
+every one of these, not a subset:**
+
+| gate | what it means for `living_rooms` |
+|---|---|
+| **source truth** | the value is the source's own structured field, proven against a live page, never prose-derived — `sane_count(halls)` is the starting point, not the proof |
+| **usefulness** | the rungs genuinely narrow on the Villa cohorts at LIVE counts, not the ones in the table above |
+| **UNKNOWN** | 52–75% of Villa rows have no value; unknown stays unknown, excluded from both sides, never counted as "1" |
+| **count** | the AF live count equals DB truth for every rung |
+| **click-set** | clicking a rung returns exactly the set the count promised |
+| **card evidence** | mandatory, not optional — the chip carries the LISTING's own value, and a row whose source never published it renders nothing |
+| **barrier** | a permanent check over the predicate and the evidence |
+| **mutation** | that barrier watched to go RED against the defect re-introduced, then green on restore |
+
+A failure at any gate means it is **not** exposed. An honest "not certified" is a correct outcome
+here; there is no expectation that this field ships. Tracked as `ops_incident` #96.
 
 ## What this classification did NOT do, deliberately
 
