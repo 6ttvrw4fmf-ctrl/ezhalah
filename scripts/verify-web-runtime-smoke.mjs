@@ -888,8 +888,24 @@ try {
       // المزيد» is still deliberately showing because more locally-fetched cards remain to drip
       // in. Poll for it to disappear rather than sampling once (found live 2026-09-06: this exact
       // single-shot read failed CI while the sibling lockBtn poll a few lines below passed).
+      //
+      // 90s STILL WASN'T ENOUGH (found live 2026-09-06, same day): a first attempt at this poll
+      // used a 90s budget and still timed out on CI twice in a row. Investigated end-to-end before
+      // widening blindly: the totals math (src/data/resultCount.ts) is provably correct once
+      // shown===fetched, and a local, isolated repro of this exact journey (real browser, real
+      // interview answer, real narrowed 49-of-238 result) settled cleanly with NO stall — «عرض
+      // المزيد» never got stuck, it just took real wall-clock time for the ~50-card drip
+      // (REVEAL_STEP_MS=130 in src/app/agent.tsx, but each step is a full React re-render, not a
+      // bare timer). Cross-journey contamination from Journey I (a much larger الرياض/فيلا scope
+      // immediately before this one) was ruled out too: Journey J does a full `page.goto()` before
+      // it starts, which remounts the whole app and drops every ref Journey I could have left
+      // dirty. That leaves plain CI-runner slowness under load as the only remaining explanation —
+      // exactly the class of flake already documented and fixed the same way a few hundred lines
+      // up for Journey I's own AF-open poll ("Failures duly clustered ACROSS BRANCHES... a harness
+      // bug and not non-determinism in the product... 4x headroom on an idle backend, none on a
+      // busy one"). Same fix here: more margin, not a product change chased on an unreproduced race.
       let stillOffered = true;
-      for (const deadline = Date.now() + 90_000; Date.now() < deadline; ) {
+      for (const deadline = Date.now() + 180_000; Date.now() < deadline; ) {
         stillOffered = (await body()).includes('عرض المزيد');
         if (!stillOffered) break;
         await page.waitForTimeout(1_000);
