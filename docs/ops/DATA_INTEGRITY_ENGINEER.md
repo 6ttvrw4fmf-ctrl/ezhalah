@@ -1149,6 +1149,64 @@ omitted there:** inside one transaction Postgres freezes `now()`, so a raise-the
 shares a timestamp; the insta-resolve check is only meaningful across transactions, and asserting it
 in-migration fails on a transaction artifact (it did, and the migration was rolled back).
 
+## 32. A source that publishes «المساحة 0 م» — settled 2026-09-06, incident #45. Do not re-open.
+
+**Two abralosol Residential Land rows carry `area_m2 = 0`. They are correct. Do not null them, do
+not compute an area for them, do not deactivate them.**
+
+ABR6396 (id 10301921, `https://abralosol.com/6396`) and ABR6243 (id 10301955,
+`https://abralosol.com/6243`). The incident that raised them recorded the deciding fetch as FAILED —
+abralosol.com 403s that egress — and correctly changed nothing on an unproven hypothesis. **The
+re-fetch was never needed: the source's own text was already on the rows**, twice over and from two
+independent pages:
+
+| where | value |
+|---|---|
+| `source_capture->'index'->>'area_cell'` | `المساحة 0م` |
+| `source_capture->'detail_blocks'` | `🟨 المساحة 0 م` |
+
+Both are raw source text — `scrapers/abralosol/run.py::_flat()` strips tags and collapses whitespace
+and does nothing else — so the `0` is abralosol's character, not ours. `_AREA` lifts it to
+`area_raw = "0"` and `normalize.to_int("0")` is `0`. The parser is also demonstrably not using 0 as
+a missing-value sentinel: **117 of 2,667 abralosol rows publish no area at all and are stored NULL**
+(103 residential + 14 commercial), which is what made the "unknown became zero" hypothesis worth
+testing and what disproves it.
+
+**Why the source publishes 0.** Both ads are multi-plot bundles — four adjoining plots on one deed
+set, and twelve — so the seller left the single area field at 0 and wrote the per-plot areas into
+the description (`219.69 / 215.33 …`, and `306.78 / 250×9 / 263 / 304.60`). Weird does not mean
+wrong (§0).
+
+**What an automated "fix" would have produced, concretely.** Summing those figures gives 866 m² and
+3,124 m² — our arithmetic over prose, on a searchable card, for a bundle whose plots are also sold
+separately. Nulling instead erases a value the source did state. Both are the same error in
+different directions, and this is the rule §7/§8 already carry, stated for a value that happens to
+be zero: **SOURCE IS TRUTH runs both ways — silence becomes NULL, and a published figure becomes the
+stored figure, including a published zero.**
+
+**Nothing downstream is harmed, checked rather than assumed.** `price_total_effective` refuses to
+derive a total from a zero area (its `area_m2 > 0` guard, migration `20260903230451`), so no 0-SAR
+total exists; every client consumer gates on `area > 0` (`ResultCard.tsx:294`, the area filter, ppm
+and relevance in `src/data/search.ts`), so nothing renders «0 م²» and no area search matches them.
+`area_m2 = 0` exists on exactly these 2 rows out of every `*_listings` table in the database.
+
+**The barrier is the invariant, not the two ids.** `mon_detect_area_contradicts_capture()` compares
+the area we SERVE against the area the source TEXT carries, for every abralosol row, in both
+directions: `fabricated` (silence became a number), `erased` (a published figure became NULL — the
+arm that fires if anyone "repairs" these two rows), `rewritten` (a different number). An allowlist
+of the two ids would have pinned the symptom, protected nothing else, and gone stale the moment
+abralosol edits an ad. Verified over all of production before shipping: `area_raw` NULL ⟺ `area_m2`
+NULL with zero exceptions either way, and `area_m2` equals the integer part of `area_raw` on all
+2,550 rows that have one. Mutation-proven on live data inside aborting transactions: nulling id
+10301921 raised the `erased` arm, giving an unpublished-area row an area raised the `fabricated`
+arm, and both rolled back. `scripts/verify-abralosol-area-is-source-verbatim.ts` pins the detector
+against deletion, narrowing, and being turned into an id allowlist, and mutation-proves each of
+those pins.
+
+**The generalisable half:** a "failed fetch" in an incident report is a reason to look harder at what
+we already stored, not a licence to guess — and `source_capture` is usually the probe you were about
+to go and re-run.
+
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
 source publish? What did we scrape? What did we store? How did we classify it? How did we resolve
