@@ -1,4 +1,4 @@
-942b44ac52eb29f049782675e7438463516e42e9
+54de7477c0cc714ddbffc548f2e1164ab83e7e0a
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # 2026-09-04  57dd41e  deployed via .github/workflows/deploy-frontend.yml run 33898889593.
 #   Recorded BY PR, not by the deploy: the runner has no git identity, so safe-deploy.sh's
@@ -292,3 +292,11 @@
 # 2026-09-04  15979fb  deployed via safe-deploy.sh
 # 2026-09-05  5021dda  deployed via safe-deploy.sh
 # 2026-09-05  942b44a  deployed via safe-deploy.sh
+# 2026-09-06  54de747  advanced via PR: remal + amaall search-union activation deployed
+#   (PR#1961/#1979/#1998, migration-drift cleanup PR#2003). safe-deploy.sh's automatic post-deploy
+#   advance failed CLOSED on purpose -- GITHUB_TOKEN cannot push to protected main or open a PR
+#   (org policy). The deploy itself is verified independently: ezhalah-app.vercel.app serves
+#   entry-3ca2879b8e515d5f9ca0b14c261e9d7b.js (md5(bytes) matches the filename and it references
+#   supabase.co), remal_residential_listings and amaall_residential_listings are both present in
+#   that served bundle, the live search RPC answered HTTP 200 with a valid body, and the [post]
+#   schema-drift + duplicate-overload gate reported clean against production.
