@@ -1,22 +1,29 @@
-// ── The AF deep-search transition contract (owner redesign, 2026-08-31) ──────────────────────────
+// ── The AF search transition contract (owner 2026-08-16; RESTORED by the owner 2026-09-06) ───────
 //
-// After the Advanced Filter interview submits, the owner retired the white success dialog and its
-// «لقينا N عقار أقرب لطلبك» beat, and the platform-pill roster must not read through the overlay.
-// What ships instead: a full-bleed themed surface whose headline is the DYNAMIC «إزهله يدقّق في …»
-// sentence woven from the user's OWN committed selections, the honest from-count as the only number,
-// the criteria as chips, a card-pipeline animation — and a DIRECT hand-off to the results.
+// After the Advanced Filter interview submits, an overlay plays while the final search runs behind
+// it. Between 2026-08-31 and 2026-09-06 that overlay was a full-bleed OPAQUE surface with a dynamic
+// «إزهله يدقّق في …» sentence and a card-pipeline gate (PR #1440). The owner saw it live and reverted
+// it in one line — "remove this design its ass and shit, keep it how it was" — and asked, in the same
+// message, that the platform roster be clearly visible during a search.
 //
-// This barrier EXECUTES the pure sentence builder (src/lib/afDeepSearchCopy.ts) under Node — the
-// repo rule since the 2026-08-29 comment-blindness incidents: run the real code, don't grep for its
-// shape — and pins the structural halves (no success copy, opaque backdrop, orchestrator latches)
-// that cannot be executed headlessly.
+// So this file no longer protects that design. It protects the RESTORATION, and specifically the two
+// properties that would regress silently if someone re-applied the redesign from memory:
+//
+//   1. THE PIPELINE STAYS RETIRED. No dynamic-sentence builder, no gate, no flowing cards.
+//   2. THE BACKDROP STAYS TRANSLUCENT. This is not a style opinion — it is the owner's «make sure all
+//      the platforms show clearly» requirement expressed structurally. The redesign's near-opaque
+//      surface existed precisely to hide the searching turn (platform pills included) behind it; an
+//      opaque backdrop therefore silently un-does what the owner asked for.
+//
+// The count-honesty half lives in verify-mining-total-honesty.ts (the overlay may speak only counts
+// HANDED to it, both from quotableTotal()); the latch/failsafe half lives in
+// verify-advanced-filter-contract.ts §9. This file does not duplicate either.
 //
 //   node --experimental-strip-types scripts/verify-af-deep-search-transition.ts   (auto-discovered by npm test)
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { deepSearchLine, typePluralAr, MAX_QUOTED } from '../src/lib/afDeepSearchCopy.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0;
@@ -25,93 +32,82 @@ const check = (name: string, ok: boolean, detail?: string) => {
   if (!ok) failures += 1;
 };
 
-console.log('\n── A. the sentence builder, EXECUTED ──');
-
-const two = deepSearchLine('Apartment', ['تقييم 9.0+', '10 تقييمات أو أكثر']);
-check('the owner\'s example composes exactly as specified (type plural + quoted labels + close)',
-  two === 'إزهله يدقّق في الشقق بـ«تقييم 9.0+» و«10 تقييمات أو أكثر» للعثور على الأقرب لطلبك…', two);
-
-check('an unresolved type says «العقارات» — generic and truthful, never a guessed plural',
-  deepSearchLine(null, ['مفروشة']) === 'إزهله يدقّق في العقارات بـ«مفروشة» للعثور على الأقرب لطلبك…');
-check('an unknown type key also falls back (never leaks the English key into the Arabic sentence)',
-  !deepSearchLine('Castle', ['أي']).includes('Castle') && deepSearchLine('Castle', []).includes('العقارات'));
-check('no selections → the no-facet sentence, no dangling «بـ»',
-  deepSearchLine('Villa', []) === 'إزهله يدقّق في الفلل المطابقة لطلبك…');
-check('blank labels are ignored, not quoted as empty «»',
-  deepSearchLine('Villa', ['  ', '']) === 'إزهله يدقّق في الفلل المطابقة لطلبك…'
-  && !deepSearchLine('Villa', [' ', 'جديد']).includes('««'));
-
-const five = deepSearchLine('Apartment', ['أ', 'ب', 'ج', 'د', 'هـ']);
-check(`more than ${MAX_QUOTED} labels → first ${MAX_QUOTED} quoted + honest «وغيرها», never silent truncation`,
-  five.includes('«أ»') && five.includes('«ج»') && !five.includes('«د»') && five.includes('وغيرها'));
-check('exactly at the cap there is no «وغيرها» (nothing was left out)',
-  !deepSearchLine('Apartment', ['أ', 'ب', 'ج']).includes('وغيرها'));
-
-check('every clean type in the hierarchy has a curated Arabic plural (no silent fallback for real types)',
-  ['Apartment', 'Floor', 'Studio', 'Room', 'Residential Building', 'Villa', 'Duplex', 'Rest House',
-   'Chalet', 'Camp', 'Farm', 'Agriculture Plot', 'Residential Land', 'Office', 'Shop', 'Showroom',
-   'Warehouse', 'Workshop', 'Factory', 'Commercial Building', 'Hotel', 'Gas Station', 'Staff Housing',
-   'Commercial Land', 'Industrial Land'].every((k) => typePluralAr(k) !== 'العقارات'));
-
-console.log('\n── B. the retired success beat stays retired ──');
-
 const mining = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
-// Named so section D can feed the SAME predicate a source with the retired beat put back.
-const successBeatGone = (s: string) => !s.includes('We found {count} properties closest to your request');
-check('the «We found {count} properties closest to your request» claim is GONE from the transition',
-  successBeatGone(mining));
-check('the transition renders the dynamic sentence through the ONE executed builder',
-  /deepSearchLine\(/.test(mining) && /from '@\/lib\/afDeepSearchCopy'/.test(mining));
-check('no platform logos/pills reach the transition (no loaderPlatforms import, no Image pills)',
-  !/loaderPlatforms|PlatformPill|pillLogo/.test(mining));
-const backdropIsOpaque = (s: string) => /backgroundColor: colors\.paper, opacity: 0\.9[5-9]/.test(s);
-check('the backdrop is the near-opaque THEME surface (covers the searching turn behind it)',
-  backdropIsOpaque(mining));
-check('reduced motion renders the static composition (no moving cards)',
-  /useReducedMotion/.test(mining) && /!reduced \?/.test(mining));
-
-console.log('\n── C. the orchestrator hand-off (direct, latch-driven) ──');
-
 const agent = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
-check('the mining state carries the committed labels + resolved type for the sentence',
-  /phase: 'mining'; from: number \| null; to: number \| null; labels: string\[\]; type: string \| null/.test(agent)
-  && /<MiningTransition from=\{ageFlow\.from\} to=\{ageFlow\.to\} type=\{ageFlow\.type\} labels=\{ageFlow\.labels\}/.test(agent));
-check('dismissal is a plain setTimeout latch with the 15s failsafe (never an animation callback)',
-  /timers\.push\(setTimeout\(\(\) => \{ if \(stillMining\(\)\) setAgeFlow\(\(f\) => \(f\?\.phase === 'mining' \? null : f\)\); \}, 15000\)\)/.test(agent));
-check('the hand-off is DIRECT: the overlay dismisses on a short seal (wait + 450), no reading pause',
-  /wait \+ 450/.test(agent));
 
-// ── D. MUTATION PROOFS — every rule above, fed the defect it exists to catch ─────────────────────
-// A barrier nobody has watched fail is a comment that runs. Each proof below applies THIS file's own
-// predicate to a deliberately broken input and asserts the predicate rejects it.
+// CODE ONLY. The restored component's header explains, in prose, which redesign was reverted and
+// which module went with it — and a scan that reads comments would take that explanation for the
+// defect itself. (The inverse mistake — a barrier satisfied by a comment — is the 2026-08-29
+// comment-blindness incident this repo already carries a rule about; both directions are the same
+// error: asserting on prose instead of on code.)
+const strip = (s: string) => s
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+
+console.log('\n── A. the 2026-08-31 pipeline redesign stays retired ──');
+
+// Named predicates: section D feeds each the exact defect it exists to catch.
+const pipelineGone = (src: string) => {
+  const s = strip(src);
+  return !/deepSearchLine|afDeepSearchCopy/.test(s) && !/PipeCard|laneLine|st\.gate/.test(s);
+};
+check('no dynamic-sentence builder and no card-pipeline/gate remain in the transition',
+  pipelineGone(mining));
+check('the sentence builder module itself is gone (nothing can import it back by accident)',
+  !existsSync(join(root, 'src/lib/afDeepSearchCopy.ts')));
+check('the overlay no longer takes the redesign-only props (agent.tsx passes just the two counts)',
+  /<MiningTransition from=\{ageFlow\.from\} to=\{ageFlow\.to\} \/>/.test(agent)
+  && !/labels=\{ageFlow\.labels\}|type=\{ageFlow\.type\}/.test(agent));
+
+console.log('\n── B. the platform roster reads through — the owner\'s «show clearly» rule ──');
+
+// The restored card sits on colors.scrim (translucent). The redesign used colors.paper at
+// opacity 0.9x, which is what hid the searching turn — and the pills with it.
+const backdropIsScrim = (src: string) => {
+  const s = strip(src);
+  return /backdrop: \{ \.\.\.fill, backgroundColor: colors\.scrim \}/.test(s)
+    && !/backgroundColor: colors\.paper, opacity: 0\.9/.test(s);
+};
+check('the backdrop is the translucent scrim, so the searching turn (platform pills included) shows through',
+  backdropIsScrim(mining),
+  'an opaque backdrop silently reverses the owner\'s «make sure all the platforms show clearly» ask');
+check('the transition is a boxed card, not a full-bleed takeover',
+  /card: \{[\s\S]{0,200}?maxWidth: 380/.test(mining));
+
+console.log('\n── C. the copy the owner restored ──');
+
+check('the searching line and the honest from-count subline are both present',
+  /Finding the closest match for you/.test(mining)
+  && /Going through \{count\} properties to pull out the best fit/.test(mining));
+check('the «لقينا N عقار أقرب لطلبك» completion beat is back',
+  /We found \{count\} properties closest to your request/.test(mining));
+check('reduced motion renders the static composition (no drifting fragments)',
+  /useReducedMotion/.test(mining) && /!reduced && !done \?/.test(mining));
+
 console.log('\n── D. mutation proofs ──');
 const mustCatch = (what: string, caught: boolean) =>
   check(`(mutation) catches ${what}`, caught,
     'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
 
-// The retired white success dialog, put back into the real component source.
-const beatRestored = mining.replace('<Text style={st.headline}>',
-  '<Text>We found {count} properties closest to your request</Text>\n        <Text style={st.headline}>');
-mustCatch('the retired «We found N properties closest to your request» success beat coming back',
-  beatRestored !== mining && !successBeatGone(beatRestored));
+// The redesign coming back, in the two shapes it would actually return in.
+const pipelineBack = mining.replace('<View style={st.stage}>',
+  '<View style={st.stage}><PipeCard index={0} settled={done} />');
+mustCatch('the card-pipeline being re-added to the transition',
+  pipelineBack !== mining && !pipelineGone(pipelineBack));
 
-// A see-through backdrop is how the platform-pill roster read through the overlay.
-const backdropThinned = mining.replace('opacity: 0.96', 'opacity: 0.6');
-mustCatch('the backdrop being thinned so the searching turn reads through it',
-  backdropThinned !== mining && !backdropIsOpaque(backdropThinned));
+const sentenceBack = mining.replace('{t(\'Finding the closest match for you\')}',
+  '{deepSearchLine(type ?? null, chips)}');
+mustCatch('the dynamic «إزهله يدقّق في …» sentence builder being wired back in',
+  sentenceBack !== mining && !pipelineGone(sentenceBack));
 
-// A builder that falls back to the raw taxonomy key instead of «العقارات».
-const leakyBuilder = (t: string | null) => `إزهله يدقّق في ${t ?? 'العقارات'} المطابقة لطلبك…`;
-mustCatch('a builder that leaks the English type key into the Arabic sentence',
-  leakyBuilder('Castle').includes('Castle'));
-
-// Silent truncation: the pre-cap builder quoted only the first MAX_QUOTED and said nothing.
-const truncatingBuilder = (labels: string[]) =>
-  `إزهله يدقّق في الشقق بـ${labels.slice(0, MAX_QUOTED).map((l) => `«${l}»`).join(' و')} للعثور على الأقرب لطلبك…`;
-mustCatch('a builder that truncates past the cap without the honest «وغيرها»',
-  !truncatingBuilder(['أ', 'ب', 'ج', 'د', 'هـ']).includes('وغيرها'));
+// The opaque backdrop — the exact line that hid the platform roster.
+const backdropOpaque = mining.replace(
+  'backdrop: { ...fill, backgroundColor: colors.scrim }',
+  'backdrop: { ...fill, backgroundColor: colors.paper, opacity: 0.96 }');
+mustCatch('the backdrop being made opaque again (which hides the platform pills the owner asked to see)',
+  backdropOpaque !== mining && !backdropIsScrim(backdropOpaque));
 
 console.log(failures === 0
-  ? '\n✓ deep-search transition: the user\'s own selections, one honest number, no success beat\n'
-  : `\n✗ ${failures} check(s) FAILED — the AF hand-off could drift back to the retired popup\n`);
+  ? '\n✓ AF transition: the restored card, a translucent scrim, and the retired pipeline still retired\n'
+  : `\n✗ ${failures} check(s) FAILED — the transition could drift back to the design the owner rejected\n`);
 process.exit(failures === 0 ? 0 : 1);

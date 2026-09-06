@@ -370,10 +370,18 @@ const SEARCH_MS = 600;
 // highlight wave — starts the INSTANT Search is pressed and runs through the whole real search;
 // results show the moment they're ready, no artificial holds beyond this floor). SEARCH_MIN_MS is
 // the MINIMUM visible searching-beat, counted from when the loader appears: it overlaps the bubble
-// typing + network wait and never adds once consumed. It MUST cover the full pill reveal —
-// 32 pills × 60ms stagger + 260ms fade = last pill fully landed at ~2120ms — otherwise a fast query
-// cuts the roster tail and breaks the "COMPLETE roster, never flashed away" rule (review finding).
-const SEARCH_MIN_MS = 2200;
+// typing + network wait and never adds once consumed.
+//
+// TEN SECONDS (owner, 2026-09-06): "let the user wait 10 seconds … and make sure all the platforms
+// in the animation show clearly, cuz doing it quick will make them lost." The platform roster is the
+// product's primary trust signal — it is the moment the user learns Ezhalah searches the WHOLE Saudi
+// market — and at the old 2.2s floor the pills landed and were gone before any of them could be
+// read. The floor must therefore cover the full reveal AND at least one complete highlight sweep, so
+// every platform is individually lit at least once before the loader may exit:
+//     reveal (LOADER_REVEAL_MS ≈ 2.2s) + one sweep (LOADER_SWEEP_MS = 7.6s) = 9.8s ≤ 10s.
+// scripts/verify-search-loader-shows-every-platform.ts executes that arithmetic against the shipped
+// constants, so the two files cannot drift apart silently.
+const SEARCH_MIN_MS = 10000;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
 // fade-out this long — the strip glides away into the results state instead of vanishing in a frame.
 const LOADER_EXIT_MS = 450;
@@ -879,13 +887,12 @@ export default function Agent() {
     // the intro's «عرض النتائج» link was removed by the owner 2026-08-28, same day as the footer's.
     | { phase: 'intro'; total: number | null }
     | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; initialKeys: string[]; progressCur: number; progressTotal: number }
-    // The DEEP-SEARCH beat (owner redesign 2026-08-31, supersedes the 2026-08-16 «digging» card):
-    // shown once after the interview finishes while the final search runs behind it. `labels` +
-    // `type` feed the dynamic «إزهله يدقّق في …» sentence and the criteria chips (the user's OWN
-    // committed selections — deduped carry included); there is no success beat and no count claim
-    // on completion — the overlay hands off directly to the results. Dismissal is driven by plain
-    // setTimeout latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts).
-    | { phase: 'mining'; from: number | null; to: number | null; labels: string[]; type: string | null }
+    // The «digging through the market» beat (owner 2026-08-16, RESTORED 2026-09-06 after the owner
+    // rejected the 2026-08-31 pipeline redesign): shown once after the interview finishes while the
+    // final search runs behind it. Carries only the two counts it may speak — both handed in from
+    // quotableTotal(), never computed in the overlay. Dismissal is driven by plain setTimeout
+    // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
+    | { phase: 'mining'; from: number | null; to: number | null }
     | null
   >(null);
   // The query accumulates answers as the flow advances; `token` supersedes a stale async fetch when a
@@ -1963,7 +1970,7 @@ export default function Agent() {
   // TIMING (all plain setTimeout — never an animation callback, per src/lib/afterAnimation.ts):
   //   finish → mining overlay (from = last known narrowed total) + the search starts immediately
   //   search resolves → hold until ≥ 1.4s total has played (never artificially longer)
-  //   → the pipeline seals (no copy swap, no count claim) → ~0.45s → dismiss into the results.
+  //   → swap copy to «لقينا N عقار أقرب لطلبك» → ~1.1s beat → dismiss, revealing the result cards.
   // A 15s failsafe (and a catch on the search itself) dismisses the overlay even if the turn dies,
   // so the user can never be trapped behind a stuck animation.
   const finishGuided = (token: number) => {
@@ -1980,14 +1987,12 @@ export default function Agent() {
     const carry = afCarryRef.current;
     // Deduped across rounds (owner audit, 2026-08-27), not a raw concatenation — a carried round's
     // facet and this round's facet can never both be kept if they resolve to the same displayed
-    // label, whatever question id produced either one. Computed ONCE here: the same committed set
-    // feeds the results pills (guided.facets) AND the deep-search overlay's sentence + chips, so
-    // the transition can never speak a selection the pills don't carry.
+    // label, whatever question id produced either one. It feeds the results pills (guided.facets).
+    // (Until 2026-09-06 it also fed the deep-search overlay's sentence + chips; that redesign is
+    // reverted, and the restored card speaks no selections — but the dedupe rule is the PILLS' own
+    // and is unaffected.)
     const dedupedFacets = dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]);
-    setAgeFlow({
-      phase: 'mining', from: ageFlowTotalRef.current, to: null,
-      labels: dedupedFacets.flatMap((f) => f.labels), type: q.type ?? null,
-    });
+    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current, to: null });
     const timers = miningTimersRef.current;
     const stillMining = () => ageFlowTokenRef.current === token;
     timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
@@ -2033,12 +2038,14 @@ export default function Agent() {
         }
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
         timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
-        // DIRECT hand-off (owner redesign 2026-08-31): `to` landing only settles the pipeline —
-        // there is no found-count beat to read anymore, so the overlay dismisses after a short
-        // 450ms seal instead of the old 1100ms reading pause, revealing the results immediately.
+        // RESTORED 2026-09-06 (owner rejected the 2026-08-31 direct hand-off along with the redesign
+        // it belonged to): `to` landing swaps the card's copy to the «لقينا N عقار أقرب لطلبك» beat,
+        // and the overlay then holds ~1.1s so that sentence is actually readable before the results
+        // are revealed. A 450ms seal was right for a card that said nothing on completion; it is too
+        // short to read a sentence.
         timers.push(setTimeout(() => {
           if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
-        }, wait + 450));
+        }, wait + 1100));
         timers.push(setTimeout(() => {
           if (!stillMining()) return;
           // LAND ON THE NEW TURN (owner 2026-08-24): the old cards stay exactly where they are, and the
@@ -3679,7 +3686,7 @@ export default function Agent() {
               onClose={onIntroShowResults}
             />
           ) : ageFlow.phase === 'mining' ? (
-            <MiningTransition from={ageFlow.from} to={ageFlow.to} type={ageFlow.type} labels={ageFlow.labels} />
+            <MiningTransition from={ageFlow.from} to={ageFlow.to} />
           ) : (
             <AdvancedQuestionCard
               titleKey={ageFlow.question.titleKey}
