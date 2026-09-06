@@ -84,6 +84,7 @@ export function sourceName(source: string): string {
   if (s.includes('amaall')) return 'Amaall Real Estate Services';
   if (s.includes('alta')) return 'Alta Real Estate Services';
   if (s.includes('awal')) return 'Awal United for Real Estate';
+  if (s.includes('azdad')) return 'Azdad Al Aqariah';
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
   // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.

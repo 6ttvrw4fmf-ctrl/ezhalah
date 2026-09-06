@@ -59,7 +59,9 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // absence-only prune — the second-unevidenced-path shape. The prune now CALLS classify_dealapp, so
 // no dealapp semantics are restated anywhere, and carries an in-run canary because that classifier
 // pairs with a RUN-level trust gate a per-row callback cannot see. It is the largest platform here.
-const RATCHET = 24;
+// 26 → 25 later still: azdad onboarded (own Next.js + Supabase stack, a corrected 40-candidate-
+// audit link) — same unevidenced-absence-only shape as every other freshly onboarded platform.
+const RATCHET = 25;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

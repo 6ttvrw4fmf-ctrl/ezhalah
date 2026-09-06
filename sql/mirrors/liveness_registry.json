@@ -102,6 +102,12 @@
     "grace": 3
   },
   {
+    "platform": "azdad",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "bahadhabab",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,

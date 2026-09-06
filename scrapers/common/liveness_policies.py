@@ -211,7 +211,7 @@ POLICIES: dict[str, _P] = {
               "reported as unverified, never as verified-alive.")
         for p in (
             "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "aouj", "aqaratikom",
-            "aqarmonthly", "arkaan", "awal", "bahadhabab", "eaqartabuk", "erapulse",
+            "aqarmonthly", "arkaan", "awal", "azdad", "bahadhabab", "eaqartabuk", "erapulse",
             "fursaghyr", "jurash", "muktamel", "mustqr",
             "october",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
