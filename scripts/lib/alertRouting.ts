@@ -142,6 +142,15 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // asserts the bug, a check with no mutation proof, a test that passes while production is wrong.
   { routine: 10, test: /^(barrier_|mutation_|blind_guard|green_while_broken|test_infra_)/ },
 
+  // 2 🎖️ Senior Production — an ALERT that misdescribes its own subject. Written explicitly even
+  // though #2 is the fallback and this kind would reach it anyway: ALERT_ROUTING.md's own drift
+  // signal is the fallback column growing, so a kind whose owner is actually known must say so
+  // rather than arrive as one more unclaimed thing. Raised by mon_detect_alert_subject_fk()
+  // (migration 20260906062217) when a payload's foreign key resolves to a different listing than
+  // the alert is about — operational-logging correctness, which is #2's §23 surface, and NOT the
+  // deleted_but_source_live finding itself, which stays #3's below.
+  { routine: 2, test: /^alert_payload_/ },
+
   // 9 🔬 Production Red Team — DISAGREEMENT between layers on production: action vs request vs RPC
   // params vs DB truth vs displayed count vs returned ids vs card evidence.
   { routine: 9, test: /^(layer_disagreement|count_vs_set|displayed_vs_truth|prod_differential)/ },
