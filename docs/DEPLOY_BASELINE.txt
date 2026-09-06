@@ -1,4 +1,4 @@
-54de7477c0cc714ddbffc548f2e1164ab83e7e0a
+737abdee65b09f7344f99036a8158cb4b4530a8c
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # 2026-09-04  57dd41e  deployed via .github/workflows/deploy-frontend.yml run 33898889593.
 #   Recorded BY PR, not by the deploy: the runner has no git identity, so safe-deploy.sh's
@@ -300,3 +300,4 @@
 #   supabase.co), remal_residential_listings and amaall_residential_listings are both present in
 #   that served bundle, the live search RPC answered HTTP 200 with a valid body, and the [post]
 #   schema-drift + duplicate-overload gate reported clean against production.
+# 2026-09-06  737abde  deployed via safe-deploy.sh
