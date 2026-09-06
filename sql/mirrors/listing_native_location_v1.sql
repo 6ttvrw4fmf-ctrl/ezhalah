@@ -1,6 +1,20 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-09-06 (remal/amaall activation + 18-migration mirror recovery): UNCHANGED.
+--   Two independent reasons this run touched the view without redefining it. (1) The migration
+--   that trips this checker, 20260906042602_the_tree_carries_the_final_text_of_the_detector_it_
+--   needle_edited.sql, MENTIONS the view exactly once and only inside a detector's human-readable
+--   `why` string ("listing_native_location_v1's \"legacy\" arm reads …") — it creates no view and
+--   replaces no function body. (2) Separately, THIS view was itself DROPPED and RECREATED during
+--   today's remal/amaall search-union activation: its parent listing_location_index was rebuilt
+--   (the same CASCADE this file's 2026-09-03 entry describes), and listing_native_location_v1 was
+--   restored from the ops_ddl_snapshot catalog snapshot taken immediately before, not from
+--   anything hand-written. Re-ran md5(pg_get_viewdef('public.listing_native_location_v1'::regclass,
+--   true)) against live production AFTER that restore: still 31036a9c8b92fddc5293b700985b869d at
+--   14127 chars — byte-identical to the body below, independent proof the restore was faithful, so
+--   only the re-verification date advances.
+--
 -- Re-verified 2026-09-04 (migration-mirror recovery): UNCHANGED. The migration that trips this
 --   checker, 20260904161552_dlr_detector_stops_evaluating_the_whole_v2_union.sql, MENTIONS the view
 --   exactly once and only inside a detector's human-readable `why` string ("the precedence in

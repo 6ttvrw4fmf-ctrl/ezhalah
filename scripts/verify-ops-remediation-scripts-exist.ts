@@ -79,6 +79,18 @@ const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
     why: 'claimed by 20260830183604_sentry_check_heartbeat_and_silent_detector_layer2.sql; detector roster seam' },
   { path: 'scripts/verify-unlocated-fallback-scope.ts', owner: 'routine-3-data-integrity',
     why: 'claimed by 20260810123000_unlocated_fallback_must_only_rescue_unlocated_rows.sql; location source truth' },
+  // Both raised 2026-09-06 while recovering 18 migrations that were live in production but never
+  // mirrored to this repo (found because they blocked the remal/amaall launch deploy). Recovered
+  // verbatim from supabase_migrations.schema_migrations.statements — the SQL each names below is
+  // real and running; only the repo-side test file that would prove it was never committed by
+  // whichever session authored it.
+  { path: 'scripts/verify-declared-alert-kind-has-an-emitter.ts', owner: 'routine-11',
+    why: 'claimed by 20260906041438_a_declared_alert_kind_without_an_emitter_is_decoration.sql; '
+      + 'its own sibling 20260906041121_routine11_lifecycle_the_last_four_alert_kinds_get_an_emitter.sql '
+      + 'names the owning routine in its filename — the alert-kind/emitter roster this session shipped' },
+  { path: 'scripts/verify-placeholder-price-detector-sees-the-whole-sentinel-set.ts', owner: 'routine-3-data-integrity',
+    why: 'claimed by 20260906043755_wasalt_form_default_prices_are_retracted_and_watched.sql '
+      + '(ops_incident #63/#65); wasalt placeholder-price detection is price/listing data integrity' },
 ];
 
 console.log('ops remediation scripts — every barrier a migration claims must exist and run');

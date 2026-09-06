@@ -114,6 +114,19 @@ const WAIVED: Record<string, string> = {
     'not a repair — the UPDATE is a self-assignment (city_id = city_id) that exists solely to fire '
     + 'the set_match_city_ids trigger; it writes each row its own existing value, so no listing '
     + 'data changes and there is no repaired state to decay',
+  // Recovered 2026-09-06 (mirroring 18 migrations that blocked the remal/amaall launch deploy —
+  // live in production, never committed). ops_incident #78: wasalt_placeholder_price_is_never_
+  // stored() is a STANDING TRIGGER (CREATE OR REPLACE FUNCTION ... RETURNS TRIGGER), not an ad-hoc
+  // UPDATE — it corrects every future write on the way in, so there is no one-time repaired state
+  // that can silently decay. The migration's own header calls it "prevention layered on top of"
+  // mon_detect_placeholder_price_stored (20260906043755, ops_incident #63), which already reads
+  // every stored row against its archived source payload twice an hour and would report within 30
+  // minutes if this trigger were ever dropped — the detector this classifier is looking for exists,
+  // it simply predates this migration by one file rather than following it.
+  '20260906045735_a_merged_scraper_fix_does_not_bind_a_running_job.sql':
+    'a standing trigger (prevention), not a backfill — watched by mon_detect_placeholder_price_'
+    + 'stored (20260906043755, ops_incident #63), which the migration\'s own header names as the '
+    + 'detection layer this trigger sits in front of',
 };
 
 // Enforcement starts here — the day this rule landed.
