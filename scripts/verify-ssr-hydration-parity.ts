@@ -114,12 +114,25 @@ for (const [file, what] of [
     const code = strip(readFileSync(file, 'utf8'));
     // A width/height compared against a numeric literal is a viewport breakpoint being evaluated at
     // render time. Style objects (`height: 48`) are assignments, not comparisons, so they don't match.
-    const hits = [...code.matchAll(/\b(?:width|height)\s*[<>]=?\s*\d+/g)].map((m) => m[0]);
+    // The identifier may be RENAMED: PR #1893 wrote `const { width: shareBarWidth } =
+    // useWindowDimensions()` then `shareBarWidth >= 380`, and the old `\bwidth` pattern never saw it —
+    // React #418 on every ≥380px client, and every production deploy failed the post-deploy hydration
+    // gate for a day. So match ANY identifier containing width/height. The literal needs ≥2 digits:
+    // breakpoints are tens-to-thousands, while `> 0`/`> 9` are runtime-measurement sanity checks
+    // (bottomPromptInset.ts), not viewport gates.
+    const hits = [...code.matchAll(/\b\w*(?:width|height)\w*\s*[<>]=?\s*\d{2,}/gi)].map((m) => m[0]);
     if (hits.length) offenders.push(`${rel} → ${hits.slice(0, 2).join(', ')}`);
   }
   check('C. every viewport breakpoint in src/ lives in lib/responsive.ts and goes through useAtLeast()',
     offenders.length === 0,
     offenders.join('\n      ') || undefined);
+
+  // C-MUTATION — the scan must catch the EXACT line that got past its previous shape. PR #1893's
+  // renamed destructure is fed to the same regex; if a refactor ever narrows the pattern back to
+  // bare `width`, this goes red before the next #418 does.
+  const escaped = 'const shareLabelled = shareBarWidth >= 380;';
+  check('C-MUT. the renamed-width shape that evaded the old scan (PR #1893) is caught by the current one',
+    /\b\w*(?:width|height)\w*\s*[<>]=?\s*\d{2,}/gi.test(escaped));
 }
 
 console.log(failures === 0
