@@ -207,6 +207,21 @@
       "floor_pct": 97,
       "today_pct": 100.0,
       "active_rows": 36
+    },
+    "abwbna": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 189
+    },
+    "alobid": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 138
+    },
+    "bahadhabab": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 53
     }
   }
 }
