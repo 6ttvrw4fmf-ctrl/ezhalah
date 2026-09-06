@@ -233,20 +233,23 @@ const walkOneRound = async (): Promise<boolean> => {
   // broke early, leaving round 1 with fewer than 2 removable pills — and where it did not break it
   // clicked into the loader, which reported «subtree intercepts pointer events». The round then
   // failed for having too few pills to remove, an accusation about the product made by a stopwatch.
-  const step = () => awaitAfStep(
+  const step = (previousOptions?: readonly string[]) => awaitAfStep(
     () => page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')]
       .map((e) => e.getAttribute('data-testid') || '')),
     () => page.$('[data-testid="af-card"]').then((h) => !!h),
     async () => searches.length > before,
-    (ms) => page.waitForTimeout(ms));
+    (ms) => page.waitForTimeout(ms),
+    undefined, undefined, previousOptions);
+  let previous: string[] | undefined;
   for (let i = 1; i <= 8; i++) {
-    const s = await step();
+    const s = await step(previous);
     if (s.outcome !== 'options') break;
     await page.click(`[data-testid="${s.options[0]}"]`);
     await page.waitForTimeout(1400);
     const confirm = await page.$('[data-testid="af-confirm"]');
     if (!confirm) break;
     await confirm.click();
+    previous = s.options;   // the next step must show a DIFFERENT question, not this one again
   }
   for (let i = 0; i < 12 && searches.length === before; i++) await page.waitForTimeout(1500);
   if (searches.length === before) return false;

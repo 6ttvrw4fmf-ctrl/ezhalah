@@ -228,13 +228,25 @@ export async function awaitAfStep(
   sleep: (ms: number) => Promise<void>,
   budgetMs = AGENT_TURN_MS,
   pollMs = 500,
+  /**
+   * The options of the question just ANSWERED. Pass it and the poll will not return until the card
+   * shows a DIFFERENT set — because "some options are on screen" is true the instant after a
+   * confirm, while the card still shows the question that was just answered. A walk that trusts
+   * that reading clicks the same question's option a second time (toggling the answer it just
+   * committed) and the round ends one question in. That is the shape the fixed 3,800ms sleep this
+   * replaced was really buying, and dropping the sleep without expressing the CONDITION reproduced
+   * it — measured 2026-09-06: round 1 committed 1 answer on a cohort with 4 useful questions.
+   */
+  previousOptions?: readonly string[],
 ): Promise<{ outcome: 'options' | 'ended' | 'timeout'; options: string[] }> {
   const until = Date.now() + budgetMs;
+  const same = (a: string[]) => previousOptions != null
+    && a.length === previousOptions.length && a.every((o, i) => o === previousOptions[i]);
   for (;;) {
     if (await searchFired()) return { outcome: 'ended', options: [] };
     const opts = await readOptions();
-    if (opts.length) return { outcome: 'options', options: opts };
-    if (!(await cardPresent())) return { outcome: 'ended', options: [] };
+    if (opts.length && !same(opts)) return { outcome: 'options', options: opts };
+    if (!opts.length && !(await cardPresent())) return { outcome: 'ended', options: [] };
     if (Date.now() >= until) return { outcome: 'timeout', options: [] };
     await sleep(pollMs);
   }
