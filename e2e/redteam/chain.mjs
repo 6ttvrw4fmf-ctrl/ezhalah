@@ -161,7 +161,30 @@ export async function visibleState(page) {
  * p_rotation_seed is an ORDERING input with no effect on the set, so it is explicitly ignored rather
  * than left to trip the refusal.
  */
-export function oracleFilterFromRequest(p) {
+/**
+ * The live category → type_ar map, read from `known_type_ar` — the SAME reference table
+ * af_eligibility_clause() joins against, and NOT a constant this repo chose. Fetched from the
+ * database, so it stays independent of the client (which carries its own CLEAN_MACRO copy).
+ * Throws when unreadable: without it the oracle cannot apply category purity and must refuse
+ * rather than count a wider set.
+ *
+ * MEASURED, 2026-09-06: omitting this made the oracle over-count Buy/المدينة المنورة by exactly
+ * 1,389 rows — أرض تجارية (1,306) + أرض صناعية (83), both macro='Commercial' sitting in RESIDENTIAL
+ * tables. 4,509 − 1,389 = 3,120, the number the screen showed. Production was right; the oracle was
+ * the defect. `عمارة` is macro 'both' (a Residential Building in a residential table, a Commercial
+ * Building in a commercial one), so 'both' belongs on EVERY category's side.
+ */
+export async function categoryTypeMap() {
+  const r = await fetch(`${SUPA}/rest/v1/known_type_ar?select=type_ar,macro`, {
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}` }, signal: AbortSignal.timeout(60000),
+  });
+  if (!r.ok) throw new Error(`known_type_ar unreadable (${r.status}) — the oracle cannot apply category purity`);
+  const rows = await r.json();
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error('known_type_ar returned no rows — refusing to guess');
+  return (category) => rows.filter((x) => x.macro === category || x.macro === 'both').map((x) => x.type_ar);
+}
+
+export function oracleFilterFromRequest(p, typesForCategory = null) {
   const inList = (vals) => `(${vals.map((v) => `"${String(v).replace(/"/g, '')}"`).join(',')})`;
   const parts = [];
   if (p.p_deal) parts.push(`deal_ar=eq.${encodeURIComponent(p.p_deal)}`);
@@ -171,15 +194,29 @@ export function oracleFilterFromRequest(p) {
   if (p.p_platforms?.length) parts.push(`platform=in.${encodeURIComponent(inList(p.p_platforms))}`);
   if (p.p_region_ids?.length) parts.push(`region_id=in.(${p.p_region_ids.join(',')})`);
 
+  // CATEGORY PURITY. A category search does NOT mean "every row in the residential tables": those
+  // tables also hold the commercial types the source files under residential (أرض تجارية, أرض صناعية,
+  // مستودع, فندق…). When the user picked no explicit type, the residential half is restricted to the
+  // category's own types, read from the LIVE known_type_ar map — never from a list this repo wrote.
   const t1 = p.p_tables ?? [], t2 = p.p_tables2 ?? [], ty2 = p.p_types2 ?? [];
-  if (t1.length && t2.length) {
-    if (!ty2.length) return { unhandled: ['p_tables2 without p_types2'] };
-    parts.push(`or=${encodeURIComponent(
-      `(source_table.in.${inList(t1)},and(source_table.in.${inList(t2)},type_ar.in.${inList(ty2)}))`)}`);
-  } else if (t1.length) {
-    parts.push(`source_table=in.${encodeURIComponent(inList(t1))}`);
+  let t1Types = p.p_types?.length ? p.p_types : null;
+  if (!t1Types && p.p_category) {
+    if (!typesForCategory) return { unhandled: [`p_category=${p.p_category} without the live known_type_ar map`] };
+    t1Types = typesForCategory(p.p_category);
+    if (!t1Types.length) return { unhandled: [`p_category=${p.p_category} has no types in known_type_ar`] };
   }
-  if (p.p_types?.length) parts.push(`type_ar=in.${encodeURIComponent(inList(p.p_types))}`);
+  // The type restriction must survive even when no table list came with the request — otherwise a
+  // category-only request silently loses category purity and the oracle over-counts (caught while
+  // testing this function: `p_tables: []` dropped the restriction and reproduced the 4,509 over-count).
+  const half1 = t1.length
+    ? (t1Types ? `and(source_table.in.${inList(t1)},type_ar.in.${inList(t1Types)})` : `source_table.in.${inList(t1)}`)
+    : (t1Types ? `type_ar.in.${inList(t1Types)}` : null);
+  const half2 = (t2.length && ty2.length) ? `and(source_table.in.${inList(t2)},type_ar.in.${inList(ty2)})` : null;
+  if (t2.length && !ty2.length) return { unhandled: ['p_tables2 without p_types2'] };
+  if (half1 && half2) parts.push(`or=${encodeURIComponent(`(${half1},${half2})`)}`);
+  else if (half1) parts.push(`or=${encodeURIComponent(`(${half1})`)}`);
+  else if (half2) parts.push(`or=${encodeURIComponent(`(${half2})`)}`);
+  else if (p.p_types?.length) parts.push(`type_ar=in.${encodeURIComponent(inList(p.p_types))}`);
 
   const HANDLED = new Set(['p_deal', 'p_rent_period', 'p_cities', 'p_districts', 'p_platforms',
     'p_region_ids', 'p_tables', 'p_tables2', 'p_types', 'p_types2', 'p_limit', 'p_offset',

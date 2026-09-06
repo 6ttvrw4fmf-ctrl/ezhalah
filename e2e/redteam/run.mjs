@@ -7,7 +7,13 @@
 // A layer this run could not REACH is printed and counted separately — never folded into the passes
 // (PART 7: "a rule this run could not reach is not a rule this run proved").
 
-import { chain, tap, setDeal, setPeriod, pickCity, runSearch, visibleState, oracleCount, oracleFilterFromRequest, sleep, BASE } from './chain.mjs';
+import { chain, tap, setDeal, setPeriod, pickCity, runSearch, visibleState, oracleCount, oracleFilterFromRequest, categoryTypeMap, sleep, BASE } from './chain.mjs';
+
+// The live category -> type_ar map, fetched ONCE. If it cannot be read the oracle refuses every
+// category-carrying request rather than counting a wider set (PART 2.2 rule 2).
+let typesForCategory = null;
+try { typesForCategory = await categoryTypeMap(); }
+catch (e) { console.log(`! known_type_ar unreadable (${e.message}) — every category chain will REFUSE at L4`); }
 
 const PLANS = [
   // Never Riyadh-heavy (§40.2). Deliberately spread across deal × period × region × viewport.
@@ -96,7 +102,7 @@ for (const plan of (ONLY ? PLANS.filter((p) => ONLY.includes(p.id)) : PLANS)) {
       if (ids.length !== new Set(ids).size) r.findings.push(`L6 DUPLICATES: ${ids.length} rows, ${new Set(ids).size} distinct`);
 
       // ── L4 DB TRUTH — the INDEPENDENT oracle, built ONLY from the captured request ──────────────
-      const tr = oracleFilterFromRequest(last);
+      const tr = oracleFilterFromRequest(last, typesForCategory);
       if (tr.unhandled) {
         // The oracle REFUSES rather than guesses (PART 2.2 rule 2): silently dropping a parameter
         // widens the oracle's set until it agrees, which is the agreement-for-the-wrong-reason failure.
