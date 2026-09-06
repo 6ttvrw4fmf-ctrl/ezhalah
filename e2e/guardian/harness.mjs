@@ -273,34 +273,81 @@ export async function dismissAuthInvitation(page, budgetMs = 6000) {
 export const SETTLED_RE = /لقينا|ما لقيت|ما فيه/;
 
 /**
- * Type a city and commit it. Returns true only when the APP confirmed the selection (the field
- * holds it) — a click that missed leaves the search to be refused later, which reads as a broken
- * product instead of a harness miss.
+ * The one control the product renders IF AND ONLY IF a city has been confirmed by a tap on a
+ * suggestion: `citySelected ? <Image testID="selected-city-visual"…> : <pin>` (src/app/index.tsx
+ * :1279). It is the same `citySelected` onSearch refuses to search without, so it is the app's own
+ * answer to "is there a city?" rather than ours.
+ */
+export const CITY_CONFIRMED_SELECTOR = '[data-testid="selected-city-visual"]';
+
+/**
+ * Did the APP accept this city, or does the field merely hold the text we typed into it? PURE, and
+ * the guardian barrier EXECUTES it against the two states measured on production.
+ *
+ * THE `hasConfirmedVisual` TERM IS THE WHOLE POINT. pickCity used to return true on the field value
+ * alone — a value `input.fill(city)` had just written itself, so the check could not fail and the
+ * missed suggestion-tap it existed to catch went through as a success. The product then did exactly
+ * the right thing (`onSearch`: no citySelected ⇒ «الرجاء اختيار مدينة من القائمة.», no RPC) and the
+ * journey reported «the results screen never settled within 150000ms» — a harness miss wearing a
+ * product failure's clothes. Measured on production 2026-09-06, mobile 390, the G12 flow:
+ *   suggestion list closed at press → confirmed visual present → search fires 2.0s, settles 6.0s
+ *   suggestion list still open      → visual ABSENT, field still reads «الرياض» → CITY_REQUIRED, 0 RPC
+ * Returns the reasons it is NOT confirmed, so an empty array is the only "yes".
+ */
+export function pickProblems(fieldValue, city, hasConfirmedVisual) {
+  const out = [];
+  const v = String(fieldValue ?? '');
+  if (!v || !(v.includes(city) || city.includes(v))) out.push(`the city field reads «${v}» instead of «${city}»`);
+  if (!hasConfirmedVisual) {
+    out.push(`the city field holds «${v}» but the app is not showing a confirmed city — the suggestion was never actually tapped, so «بحث» will refuse with «${CITY_REQUIRED_MSG}» and run nothing`);
+  }
+  return out;
+}
+
+/** The product's own words when it refuses a search for an unconfirmed city (src/i18n.tsx:1361). */
+export const CITY_REQUIRED_MSG = 'الرجاء اختيار مدينة من القائمة.';
+
+/**
+ * Type a city and commit it. Returns true only when the APP confirmed the selection — see
+ * pickProblems() above for why the field's own text is not that confirmation.
+ *
+ * The suggestion row is scrolled in with the DOM's own scrollIntoView, NOT Playwright's
+ * scrollIntoViewIfNeeded(), which does not move a react-native-web ScrollView — the same reason
+ * tap() scrolls the way it does. That is what made the tap miss in the first place: by the second
+ * city pick of a journey the form is ~1,400 px down a 844 px phone, and the row never came into
+ * reach.
  */
 export async function pickCity(page, city) {
   const input = page.locator('[data-testid="city-input"]');
-  await input.click();
-  await input.fill(city);
   const optionSrc = (c) => [...document.querySelectorAll('div')].filter((e) => {
     const t = (e.innerText || '').trim();
     return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
   }).pop();
-  const appeared = await page.waitForFunction(
-    (c) => [...document.querySelectorAll('div')].some((e) => {
-      const t = (e.innerText || '').trim();
-      return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
-    }), city, { timeout: 20000 }).then(() => true).catch(() => false);
-  if (!appeared) return false;
-  const handle = await page.evaluateHandle(optionSrc, city);
-  const option = handle.asElement();
-  if (!option) return false;
-  await option.scrollIntoViewIfNeeded().catch(() => {});
-  await option.click().catch(() => {});
-  const committed = await until(async () => {
-    const v = await input.inputValue().catch(() => '');
-    return v && (v.includes(city) || city.includes(v)) ? v : null;
-  }, 8000);
-  return !!committed;
+
+  // Two attempts: a miss is a miss, not a verdict about the product.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await input.click().catch(() => {});
+    await input.fill(city).catch(() => {});
+    const appeared = await page.waitForFunction(
+      (c) => [...document.querySelectorAll('div')].some((e) => {
+        const t = (e.innerText || '').trim();
+        return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
+      }), city, { timeout: 20000 }).then(() => true).catch(() => false);
+    if (!appeared) return false;
+    const handle = await page.evaluateHandle(optionSrc, city);
+    const option = handle.asElement();
+    if (!option) return false;
+    await option.evaluate((e) => e.scrollIntoView({ block: 'center' })).catch(() => {});
+    await sleep(400);
+    await option.click().catch(() => {});
+    const confirmed = await until(async () => {
+      const v = await input.inputValue().catch(() => '');
+      const seen = (await countVisible(page, CITY_CONFIRMED_SELECTOR)) > 0;
+      return pickProblems(v, city, seen).length === 0 ? true : null;
+    }, 8000);
+    if (confirmed) return true;
+  }
+  return false;
 }
 
 /** Press «بحث» and wait for the results screen to reach a terminal state. Harness-fails if not. */

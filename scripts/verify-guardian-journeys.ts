@@ -30,7 +30,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROUTINES } from './lib/alertRouting.ts';
 import { JOURNEYS, ALLOWED_SURFACES } from '../e2e/guardian/journeys.mjs';
-import { VIEWPORTS, FORBIDDEN_LABELS, tap } from '../e2e/guardian/harness.mjs';
+import { VIEWPORTS, FORBIDDEN_LABELS, tap, pickProblems } from '../e2e/guardian/harness.mjs';
 import { incidentAction, statusForThrow, fingerprintFor, SEVERITY, SOURCE } from '../e2e/guardian/run.mjs';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -40,15 +40,19 @@ const WORKFLOW = join(ROOT, '.github/workflows/guardian-journeys.yml');
 /** The surfaces this suite is required to cover. Each maps to an owning routine in the migration. */
 const REQUIRED_SURFACES = [
   'theme', 'chat_persistence', 'auth', 'navigation', 'result_card', 'loading_states', 'modal', 'search',
-  // Second tranche (2026-09-04) — the surfaces the owner named that had no journey until then.
-  // pagination, trending, advanced_filter, normal_filter and voice journeys were WRITTEN on
-  // 2026-09-04 but are NOT in this floor yet: their author hit a session limit before the two
-  // end-to-end verification runs, and the single verification run that did happen produced three
-  // false alarms out of 26 (a mobile auth click that missed a live control, a doors assertion on a ×
-  // that About deliberately does not have, and a 150s timeout). A journey that cries wolf is worse
-  // than no journey — it files a false P1 against routine #6 every night — so the expansion is
-  // deferred to its own change rather than shipped unverified. The written version is preserved in
-  // this branch's history; incident hunt-2026-09-04:monitoring:21 tracks finishing it.
+  // Second tranche — WRITTEN 2026-09-04, VERIFIED AND IN THE FLOOR 2026-09-06 (ops_incident #21).
+  // These five sat outside the floor for two days on purpose: their author hit a session limit
+  // before the two mandated end-to-end runs, and the single run that did happen produced three
+  // false alarms out of 26 (a mobile auth detector that read a × the redesign had deliberately
+  // removed, a doors assertion on a × «من نحن» does not have by design, and a filter-state timeout).
+  // A journey that cries wolf is worse than no journey — it files a false P1 against routine #6
+  // every night — so the floor stayed at 8 until the journeys had actually been run.
+  //
+  // All three false alarms are fixed at their root (the detector and the dismissal changed
+  // together; the close control is per-door; the slow-search budget is stated once as
+  // SLOW_SEARCH_BUDGET_MS), and the suite was then run END TO END TWICE against production with
+  // identical results before this line was widened. Evidence is on the incident.
+  'pagination', 'trending', 'advanced_filter', 'normal_filter', 'voice',
 ];
 /** The two viewports, as the owner's bug reports arrive: a desktop and a phone. */
 const REQUIRED_VIEWPORTS = [
@@ -82,6 +86,19 @@ export function journeyProblems(journeys: Journey[], allowed: string[]): string[
     if (typeof j?.run !== 'function') out.push(`${where}: has no run()`);
   }
   return out;
+}
+
+/**
+ * Every required surface no journey covers. THE FLOOR, as a pure function so it can be mutated:
+ * a surface leaves this suite only by a deliberate edit to REQUIRED_SURFACES, never by a journey
+ * quietly disappearing or having its `surface` retyped. Inline, this check could not be proven to
+ * fail — and the five tranche-2 surfaces spent two days outside the floor (ops_incident #21), which
+ * is exactly the state a silent drop would look like.
+ */
+export function coverageProblems(journeys: Journey[], required: string[]): string[] {
+  const covered = new Set(journeys.map((j) => j?.surface));
+  return required.filter((s) => !covered.has(s))
+    .map((s) => `surface "${s}" lost its journey — the coverage this suite exists for is gone`);
 }
 
 /** Every required viewport that the suite does not actually drive. */
@@ -186,9 +203,9 @@ check(jp.length === 0, `all ${JOURNEYS.length} journeys declare id + title + sur
   `journey declarations are broken: ${jp.join('; ')}`);
 
 const covered = new Set(JOURNEYS.map((j) => j.surface));
-const uncovered = REQUIRED_SURFACES.filter((s) => !covered.has(s));
+const uncovered = coverageProblems(JOURNEYS as Journey[], REQUIRED_SURFACES);
 check(uncovered.length === 0, `every required surface has a journey (${REQUIRED_SURFACES.join(', ')})`,
-  `these surfaces lost their journey: ${uncovered.join(', ')} — the coverage this suite exists for is gone`);
+  uncovered.join('; '));
 check(ALLOWED_SURFACES.length === REQUIRED_SURFACES.length && REQUIRED_SURFACES.every((s) => ALLOWED_SURFACES.includes(s)),
   'ALLOWED_SURFACES matches the required set',
   `ALLOWED_SURFACES drifted from the required set: ${ALLOWED_SURFACES.join(',')} vs ${REQUIRED_SURFACES.join(',')}`);
@@ -296,6 +313,21 @@ check(fingerprintFor('a', 'desktop') === 'journey:a:desktop'
   'the fingerprint is journey:<id>:<viewport> — one incident per journey per viewport, never per run',
   'the fingerprint is no longer per journey+viewport: re-observations would open new incidents every night');
 
+// ── 6b. THE HARNESS NEVER JUDGES ITSELF BY WHAT IT TYPED. EXECUTED. ───────────────────────────────
+// pickCity() used to return true on the city field's own value — a value `input.fill(city)` had
+// just written, so the check could not fail and the missed suggestion-tap it existed to catch sailed
+// through. The product then refused the search exactly as designed (no citySelected ⇒ «الرجاء اختيار
+// مدينة من القائمة.», zero RPCs) and the journey reported «the results screen never settled» — one of
+// the three false alarms that kept the tranche-2 surfaces out of this floor for two days
+// (ops_incident #21). The real function is executed here against the two states MEASURED on
+// production 2026-09-06 (mobile 390, the filter-state flow), not against a description of them.
+check(pickProblems('الرياض', 'الرياض', true).length === 0,
+  'a city the app has CONFIRMED (selected-city-visual rendered) is accepted',
+  'pickCity() now rejects a city the product itself says is selected — every search journey would go UNDETERMINED');
+check(pickProblems('', 'الرياض', true).length > 0,
+  'an empty city field is refused even when a confirmed-city visual is on screen',
+  'pickCity() accepts an empty city field');
+
 // ── 7. The workflow is wired ──────────────────────────────────────────────────────────────────────
 check(existsSync(WORKFLOW), 'guardian-journeys.yml exists', 'guardian-journeys.yml is missing — nothing runs this suite');
 if (existsSync(WORKFLOW)) {
@@ -318,6 +350,18 @@ mutation('a journey loses its surface',
   journeyProblems((JOURNEYS as Journey[]).map((j, i) => (i === 0 ? { ...j, surface: undefined } : j)), ALLOWED_SURFACES));
 mutation('a journey declares a surface no routine owns',
   journeyProblems((JOURNEYS as Journey[]).map((j, i) => (i === 0 ? { ...j, surface: 'vibes' } : j)), ALLOWED_SURFACES));
+// THE FLOOR ITSELF. One mutation per tranche-2 surface, because the way these five were lost was
+// not a typo — it was a considered, commented decision to leave them out, and the next such
+// decision must trip something rather than merely reading well (ops_incident #21).
+for (const surface of ['pagination', 'trending', 'advanced_filter', 'normal_filter', 'voice']) {
+  mutation(`the ${surface} journey disappears from the suite`,
+    coverageProblems((JOURNEYS as Journey[]).filter((j) => j.surface !== surface), REQUIRED_SURFACES));
+}
+// THE EXACT PRODUCTION STATE THAT PRODUCED THE FALSE ALARM: the field holds «الرياض» because the
+// harness typed it, and the app is showing NO confirmed city because the suggestion tap missed. The
+// old text-only check said "picked"; this must say "not picked".
+mutation('a city the app never confirmed, judged only by the text the harness typed into the field',
+  pickProblems('الرياض', 'الرياض', false));
 mutation('an unowned surface is routed', routingProblems(['vibes'], routeMap, slugs));
 mutation('a surface routes to a routine that does not exist', routingProblems(['theme'], { theme: 'routine-9-imaginary' }, slugs));
 mutation('the mobile viewport is dropped', viewportProblems(VIEWPORTS.filter((v) => v.name !== 'mobile')));

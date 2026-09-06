@@ -177,7 +177,7 @@ async function main() {
     for (const viewport of viewports) {
       process.stderr.write(`▶ ${journey.id} [${viewport.name}] … `);
       // A failure never stops the run: the point is to collect EVERYTHING, so one broken surface
-      // does not hide the other seven.
+      // does not hide the other twelve.
       const outcome = await runOne(journey, viewport);
       outcomes.push(outcome);
       const mark = outcome.status === 'PASS' ? 'PASS' : outcome.status === 'FAIL' ? 'FAIL' : 'UNDETERMINED';
