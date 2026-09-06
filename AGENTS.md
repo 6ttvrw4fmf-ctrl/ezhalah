@@ -490,6 +490,35 @@ not closed.
 `supabase/migrations/`, commit, and open a PR — this itself touches `supabase/migrations/`, so per
 the daily/senior routine rules it stays OPEN for review, never self-merged by an autonomous run.
 
+## PLATFORM ACTIVATION IS APPLY-AND-MIRROR IN ONE CHANGE (owner rule, 2026-09-06, permanent)
+
+**A platform-activation migration must land together with every declaration that has to travel with
+it — the migration, `sql/mirrors/liveness_registry.json`, and `scrapers/common/liveness_policies.py`
+— in the SAME change.** Applying first and mirroring later inside a large feature PR is what this
+rule forbids, because the drift gate is GLOBAL and correctly fail-closed: between the apply and the
+mirror, `scripts/safe-deploy.sh` refuses **every** deploy in the repo, for every session, not just
+the one that applied the migration.
+
+How this was earned, measured on 2026-09-06. A 40-candidate platform audit applied roughly two
+migrations per platform, ~40 minutes apart, mirroring them afterwards. Production went 1,031 → 1,035
+live migrations in one window. A P1 user-facing fix (`ops_incident` #131 — Ezhalah telling users
+«ما فيه إعلانات في نطاق السعر هذا» over listings that exist) was merged to `main` and could not
+ship: the deploy was refused twice, and each time the blocking pair was a *different* platform's
+un-mirrored migrations. The audit had to be paused to open a window at all.
+
+**The minimum complete set is three places, not one.** `scripts/verify-liveness-registry-mirror.ts`
+enforces *one liveness registry, three places, no drift*, so mirroring the migration alone does not
+pass and cannot be made to pass by trying harder:
+
+- migration only → `only in SQL: [<platform>|<STRATEGY>|<sla>|<grace>] | only in JSON: []`
+- \+ the JSON mirror → `only in Python: [] | only in JSON: [<platform>|…]`
+- \+ `liveness_policies.py` → green.
+
+This is also why a well-meaning session must **not** split a platform's migrations out on its own:
+supplying the registry declarations for someone else's platform is half-shipping their activation.
+The split belongs to the engineer who applied the migration — which is the same person this rule
+tells to never create the gap in the first place. (`ops_incident` #138.)
+
 # How `npm test` finds its checks (owner-approved, 2026-08-28)
 
 **To add a barrier, create `scripts/verify-my-thing.ts`. That is the whole procedure — do not edit
