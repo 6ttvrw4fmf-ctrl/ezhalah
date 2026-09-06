@@ -1,6 +1,21 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-09-06 (ops_incident #25, routine-11 lifecycle detectors): UNCHANGED. Two of the
+--   migrations that now trip this checker, 20260906041121 and 20260906042602, MENTION the view in
+--   three places and redefine nothing: a join inside ops_lifecycle_orphan_after_delete() that READS
+--   it to find deleted listings still present, its refresh timestamp read out of mon_mv_refresh_log,
+--   and a human-readable `known_cause` string in the alert payload. No CREATE, no DROP, no
+--   regexp_replace over a body. Re-ran md5(pg_get_viewdef('public.listing_native_location_v1'::regclass,
+--   true)) against live production: still 31036a9c8b92fddc5293b700985b869d at 14127 chars, so the body
+--   below is current and only the re-verification date advances.
+--
+--   Worth recording next to the body rather than only in the incident: that new detector found 1,355
+--   permanently deleted listings still IN this view after a refresh that post-dates their delete. The
+--   view definition is not the cause — its `legacy` arm reads listings_arabic_locations, which nothing
+--   cleans when a raw row is deleted (708 of 978 deleted gathern rows were still there). The view is
+--   faithfully rendering a stale upstream table. Do not "fix" it here.
+--
 -- Re-verified 2026-09-04 (migration-mirror recovery): UNCHANGED. The migration that trips this
 --   checker, 20260904161552_dlr_detector_stops_evaluating_the_whole_v2_union.sql, MENTIONS the view
 --   exactly once and only inside a detector's human-readable `why` string ("the precedence in
