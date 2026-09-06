@@ -1,0 +1,44 @@
+# CHECKS INSIDE THE REQUIRED `npm test` THAT CAN REACH THE LIVE ENDPOINT.
+#
+# Routine #10, ops_incident #104, 2026-09-06. `npm test` is the REQUIRED status check on every PR, so
+# its verdict must depend ONLY on the diff. A check that cannot answer without asking production
+# breaks that by construction — measured 2026-09-06, four such checks flipped on UNCHANGED code.
+#
+# Every file that transitively imports scripts/lib/public-supabase.ts and still runs in `npm test`
+# must appear here with its MEASURED verdict. scripts/verify-required-suite-is-hermetic.ts fails on
+# any candidate that is not listed, so a new live-reaching check cannot enter the required suite
+# unnoticed — which is the point: this file exists to stop the class GROWING, not to bless it.
+#
+# Format:  filename | production-dependent | offline-safe  | the measurement
+#
+# HOW TO MEASURE (one command, no production access needed — a blackholed endpoint):
+#   node --experimental-strip-types scripts/<file>.ts >/dev/null 2>&1; echo "normal=$?"
+#   SUPABASE_URL="https://127.0.0.1:9" node --experimental-strip-types scripts/<file>.ts >/dev/null 2>&1; echo "blackhole=$?"
+# Different exit codes ⇒ production-dependent. Same ⇒ offline-safe (it imports the resolver but its
+# verdict does not depend on reaching it — typically a meta-check ABOUT the resolver).
+#
+# THE `production-dependent` LIST MAY ONLY SHRINK. It is a ratchet, exactly like
+# scripts/mutation-proof-grandfathered.txt: the size is pinned in the barrier so adding a name is a
+# reviewed source change, never a quiet append. Shrink it by SPLITTING the check — the hermetic
+# predicate and its mutation proofs stay in `npm test`, the live assertion moves to a workflow home
+# declared in scripts/test-exclusions.txt, and the offline half proves via liveHalfProblems() that
+# the home really invokes it. Three checks were split that way on 2026-09-06; see
+# scripts/verify-af-attribute-views-cover-every-platform.ts for the worked shape.
+#
+# NEVER shrink this list by WEAKENING a check — every one of these fails CLOSED on an unreachable
+# endpoint, which is correct and must stay (AGENTS.md: A FAILED FETCH IS NOT AN EMPTY ANSWER). The
+# problem is never that they are too strict; it is that they are in the wrong job.
+
+# ── production-dependent: still in the required suite, still to be split (SHRINK ONLY) ───────────
+verify-af-compound-predicates.ts        | production-dependent | normal=0 blackhole=1 (2026-09-06). Owner-PERMANENT golden AF contract; live PostgREST differential. Splitting it moves an owner-designated gate off per-PR, which touches routine #5's surface — measured and named here rather than moved unilaterally.
+verify-orphaned-detector-meta-check.ts  | production-dependent | normal=0 blackhole=1 (2026-09-06). Executes mon_detect_orphaned_detectors()'s decision against an injected candidate; the decision lives in the DB, so the live call IS the check — there may be no hermetic half to keep.
+verify-safety-barrier.ts                | production-dependent | normal=0 blackhole=1 (2026-09-06). Owner-rule field-level safety barrier (silent→NULL, never unknown→NO) read from production state; touches routine #3's surface.
+verify-public-anon-key-still-authenticates.ts | production-dependent | normal=0 blackhole=0 by env, BUT its live probe targets the COMMITTED PUBLIC_SUPABASE_URL constant directly rather than the resolved one, so SUPABASE_URL cannot redirect it. Production-dependent by inspection: its unguarded `await fetch` throws (fails closed, loudly) when production is unreachable. NOTE the env-probe blind spot this row records — a check that hardcodes the endpoint is invisible to the blackhole measurement, so read the source before trusting a blackhole=normal result.
+verify-ui-controls-have-predicates.ts   | production-dependent | normal=0, EZHALAH_SUPABASE_URL blackhole=1 (2026-09-06). Reads af_field_registry live, on purpose ("rather than a copy here, so the check can never drift from the contract it is enforcing"), and fails CLOSED in its catch. Found by THIS barrier's module-graph walk, not by the ad-hoc query that preceded it — it reaches the endpoint through a DYNAMIC `await import()`, which a grep for import lines misses. It also reads its own env var (EZHALAH_SUPABASE_URL) with `??` rather than the `||` scripts/lib/public-supabase.ts documents, so an empty workflow secret would be honoured as a URL.
+
+# ── offline-safe: imports the resolver, but its verdict does not depend on reaching production ───
+verify-live-canon-sync.ts               | offline-safe | normal=0 blackhole=0 (2026-09-06)
+verify-live-checks-self-sufficient.ts   | offline-safe | normal=0 blackhole=0 (2026-09-06) — a meta-check ABOUT the resolver's fallback behaviour
+verify-migration-content-parity-wired.ts | offline-safe | normal=0 blackhole=0 (2026-09-06) — asserts wiring, does not call
+verify-migration-parity-class-split.ts  | offline-safe | normal=0 blackhole=0 (2026-09-06) — asserts wiring, does not call
+verify-required-suite-is-hermetic.ts    | offline-safe | this barrier itself. Its module-graph walk reads source TEXT, and its own mutation proofs embed a synthetic module graph whose fixture strings contain a literal `from './lib/public-supabase.ts'` — so it flags itself as a candidate. That is the designed path, not a bug to code around: importing is not calling, the walk finds CANDIDATES, and this file records the measured verdict. Measured normal=blackhole (identical); it opens no socket.

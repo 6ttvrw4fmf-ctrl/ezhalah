@@ -31,7 +31,8 @@
 // their anti-hotlink header is an OWNER decision, never an engineering default.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadRegistry, workflowInvokes } from './lib/testRegistry.ts';
+import { loadRegistry } from './lib/testRegistry.ts';
+import { liveHalfProblems } from './lib/liveHalf.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => {
@@ -78,19 +79,22 @@ check('the probe is cleaned up on unmount (no setState after teardown)',
 // COVERAGE CANNOT BE LOST SILENTLY BY THIS SPLIT. The live half's existence and its execution home
 // are asserted below, EXECUTED against the registry and the real workflow file rather than
 // string-matched — so deleting that file, or quietly unhoming it, turns THIS barrier red.
+// The rule is liveHalfProblems() in scripts/lib/liveHalf.ts — ONE definition shared by every split
+// barrier, and itself mutation-proven in scripts/verify-live-half-homing.ts. It used to be three
+// checks inlined here; once three more barriers were split the same way (ops_incident #104,
+// 2026-09-06) four hand-copies of one rule was the drift risk this routine owns.
 const liveHalf = 'verify-card-photos-render-live.ts';
-check(`the LIVE half still exists on disk (${liveHalf})`,
-  existsSync(join(ROOT, 'scripts', liveHalf)),
-  'the live per-platform render sweep was removed from this file because that file covers it — if it '
-  + 'is gone, this class has no live coverage at all');
-const liveRow = loadRegistry(ROOT).excluded.find((e) => e.name === liveHalf);
-check('the LIVE half is a declared exclusion with a stated home',
-  Boolean(liveRow?.where), `no row for ${liveHalf} in scripts/test-exclusions.txt`);
-check('...and that home ACTUALLY INVOKES it (asked with workflowInvokes, never a bare includes)',
-  Boolean(liveRow) && liveRow!.where.startsWith('.github/')
-    && workflowInvokes(readFileSync(join(ROOT, liveRow!.where), 'utf8'), liveHalf),
-  `${liveRow?.where} does not run ${liveHalf} — a home that names a check without running it is how `
-  + 'two barriers went dark for weeks on 2026-09-03');
+const homing = liveHalfProblems(
+  liveHalf,
+  loadRegistry(ROOT),
+  (name) => existsSync(join(ROOT, 'scripts', name)),
+  (rel) => (existsSync(join(ROOT, rel)) ? readFileSync(join(ROOT, rel), 'utf8') : null),
+);
+check(`the LIVE half is homed in a workflow that actually invokes it (${liveHalf})`,
+  homing.length === 0,
+  homing.join('\n      ')
+  + '\n      the live per-platform render sweep was removed from THIS file because that file covers '
+  + 'it — if it is gone or unhomed, this class has no live coverage at all');
 
 // ── MUTATION PROOF — the renderability predicate, against responses that must be judged UNSAFE ──
 console.log('\n  mutation proof — the same predicate, against non-renderable responses\n');

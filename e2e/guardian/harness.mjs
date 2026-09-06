@@ -341,13 +341,32 @@ export async function pickCity(page, city) {
   const handle = await page.evaluateHandle(optionSrc, city);
   const option = handle.asElement();
   if (!option) return false;
-  await option.scrollIntoViewIfNeeded().catch(() => {});
+  // Scroll the option with the DOM, not Playwright. `scrollIntoViewIfNeeded()` does NOT move a
+  // react-native-web ScrollView — measured, and documented in runSearch() below for the identical
+  // reason. That no-op is the mechanism that made the tap miss in the first place.
+  await option.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => {});
+  await sleep(250);
   await option.click().catch(() => {});
-  const committed = await until(async () => {
-    const v = await input.inputValue().catch(() => '');
-    return v && (v.includes(city) || city.includes(v)) ? v : null;
-  }, 8000);
-  return !!committed;
+
+  // §41.13 CORRECTED (ops_incident #103, 2026-09-06). The old confirmation was
+  // `const committed = await input.inputValue()` — but `input.fill(city)` had ALREADY WRITTEN that
+  // value, so the check passed whether or not the app ever accepted the pick. It confirmed the
+  // harness's own typing. The comment that justified it — «a click that missed leaves the field
+  // empty» — is disproven by production: measured 2026-09-06, 2 of 4 attempts left the field reading
+  // «الرياض» with citySelected NULL, «الرجاء اختيار مدينة من القائمة.» on screen and ZERO RPCs fired.
+  // The harness reported a successful pick, and the run then blamed the product for the silence.
+  //
+  // Confirm with the APP's OWN signal: [data-testid="selected-city-visual"] renders iff citySelected
+  // is set (src/app/index.tsx) — the same state onSearch itself requires. Retry the click once,
+  // because a single missed tap is a harness miss worth recovering from; then FAIL, so the caller
+  // reports a harness miss instead of walking into a search that will be refused.
+  const confirmed = async () => page.waitForSelector('[data-testid="selected-city-visual"]',
+    { timeout: 6000 }).then(() => true).catch(() => false);
+  if (await confirmed()) return true;
+  await option.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => {});
+  await sleep(250);
+  await option.click().catch(() => {});
+  return confirmed();
 }
 
 /** Press «بحث» and wait for the results screen to reach a terminal state. Harness-fails if not. */

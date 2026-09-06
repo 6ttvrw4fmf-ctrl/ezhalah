@@ -173,7 +173,6 @@ verify-gathern-price-display.ts
 verify-global-engineering-policy.ts
 verify-google-one-tap-fedcm-race.ts
 verify-google-one-tap.ts
-verify-guided-counts-carry-monthly-af.ts
 verify-history-instant-restore.ts
 verify-history-restore-sanitizer.ts
 verify-info-modal-header-clearance.ts
