@@ -1918,6 +1918,15 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       source: r.source ?? 'Aqar',
       // Same rule as priceStr above: an unpublished period stays NULL, it never becomes 'annual'.
       rentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
+      // THE NUMBER THE SERVER FILTERED ON, carried rather than reconstructed (2026-09-06, regression
+      // hunter). `price` prints a source-MONTHLY rent at Math.round(price_annual / 12), so ×12-ing
+      // the printed figure recovers price_annual only when it divides by 12 — it is short by up to
+      // 6 SAR otherwise, and 430 of the index's 32,226 monthly rows land there. That is enough to
+      // delete a row the server kept: listing 1143355 (الرياض, price_annual 151,001) prints
+      // 12,583/mo, reconstructs to 150,996, and vanished from a search with a 151,000 yearly floor
+      // the RPC had matched it against. Carrying the real figure removes the rounding step from
+      // every price comparison at once. VERBATIM, like pricePerMeter above.
+      priceAnnual: deal === 'Rent' && typeof r.price_annual === 'number' ? r.price_annual : null,
       // UNKNOWN IS NOT «مؤخراً» (P2, 107,254 active listings — 54.3% of inventory). This used to be
       // `?? 'recently'`, manufacturing a positive FRESHNESS CLAIM out of a date the source never
       // published, one layer above any display guard that could have caught it: ResultCard already
