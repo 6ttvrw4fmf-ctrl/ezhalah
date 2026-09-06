@@ -390,8 +390,16 @@ const G3 = {
 
     // Dismissal must survive client-side navigation, for the session (a RELOAD legitimately brings
     // it back — that is the product's own design and is deliberately not asserted against).
-    const closed = await until(async () => (await dismissAuthInvitation(page)) === 'dismissed' || (await authSurface(page)).invitations === 0, 15000);
-    if (!closed) throw new HarnessError('the auth invitation could not be dismissed');
+    // WHAT MUST STICK IS THE CARD'S DISMISSAL, AND CLOSING THE MODAL IS NOT ONE (incident #118).
+    // The step above opened the centered modal from the sidebar, and closing that only lifts the
+    // `modalOpen` suppression — the card correctly returns, because the dismissal flag was never
+    // written. So dismiss until the invitation is STABLY gone (at most twice: modal, then the card
+    // that takes its place), and judge stickiness on that. Asserting after the modal close filed a
+    // P1 against the product's own documented hand-off.
+    let verdict = await dismissAuthInvitation(page);
+    if (verdict === 'reappeared') verdict = await dismissAuthInvitation(page);
+    if (verdict === 'still-open') throw new HarnessError('the auth invitation could not be dismissed');
+    if (verdict === 'reappeared') bad.push('the auth invitation came back after dismissing both presentations — no dismissal sticks');
     if ((await authSurface(page)).invitations !== 0) bad.push('dismissing the auth invitation did not close it');
 
     await tap(page, 'الوكيل الذكي');
