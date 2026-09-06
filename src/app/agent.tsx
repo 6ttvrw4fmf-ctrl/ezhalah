@@ -58,7 +58,7 @@ import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
 import { BROWSE_BATCH, nextBatchTarget, resultCounts, closingNoteKey } from '@/data/resultCount';
-import { afInterviewOwnsBrowsing } from '@/lib/afBrowsingGate';
+import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRowVisible } from '@/lib/afBrowsingGate';
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
@@ -2020,7 +2020,7 @@ export default function Agent() {
         // ≤ INTERVIEW_STOP_AT — the search is COMPLETE. Every remaining listing is revealed by
         // initialReveal (honestTotal ≤ stopAt ⇒ reveal all fetched — no «عرض المزيد»), the composer
         // is replaced by «محادثة جديدة», and the transcript is saved in that state.
-        if (total != null && total <= INTERVIEW_STOP_AT) setCompleted(true);
+        if (searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
         // ROUNDS CONTINUE AUTOMATICALLY WHILE TRUTHFUL QUESTIONS REMAIN (owner product rule
         // 2026-09-04, supersedes the 2026-08-24 "continuing is a manual tap" wording for a round the
         // user has already opened; the 2026-08-19 "never auto-open on a plain search turn" rule is
@@ -3286,8 +3286,17 @@ export default function Agent() {
                         // withhold the pager from a user with thousands of matches. The predicate is
                         // now exhaustive over the phase union and fails the BUILD if a new phase is
                         // added without a decision. Behaviour today is identical by construction.
-                        const showActionsRow = (hasMore || canNarrowFurther)
-                          && !afInterviewOwnsBrowsing(ageFlow?.phase ?? null);
+                        // ONE terminal signal for the composer lock AND the pager (owner 2026-09-06,
+                        // `final=50`): once the AF round narrows to ≤ INTERVIEW_STOP_AT the chat is
+                        // completed — the composer locks and every match is already revealed, so the
+                        // «عرض المزيد» row must be gone too. `completed` gates it here, alongside the
+                        // existing interview-owns-browsing and has-something-to-offer clauses.
+                        const showActionsRow = resultsActionsRowVisible({
+                          hasMore,
+                          canNarrowFurther,
+                          afPhase: ageFlow?.phase ?? null,
+                          chatCompleted: completed,
+                        });
                         // NEVER PROMISE A BUTTON THAT IS NOT ON SCREEN (2026-09-05, §42 visible output
                         // contract). `moreNoteText` used to be worded from `rc.endKind`/`canNarrowFurther`
                         // alone, while the buttons it names carry TWO further gates — `isLatestResults`
