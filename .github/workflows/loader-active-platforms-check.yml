@@ -48,6 +48,15 @@ jobs:
         if: always()
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-searchable-platforms-are-monitored.ts
 
+      # The home migration 20260830183604 named for this barrier in its own header, six days before
+      # the file existed (ops_incident #50). Same unattended anon read, so it shares this job rather
+      # than earning a workflow of its own. `if: always()` so a red platform check cannot hide a
+      # silence detector that has gone dark — the whole point of Layer 2 is that silence is
+      # OBSERVED, not trusted, and a dark observer reads exactly like a healthy fleet.
+      - name: The routine-Sentry-silence detector runs, and every heartbeat slug is watched
+        if: always()
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-sentry-heartbeat-detector-wired.ts
+
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
       # This job runs unattended: a red run notifies nobody, so it has to reach alert_event to reach
       # a human. One open P1 per workflow file (dedup workflow_failed:loader-active-platforms-check.yml), and the next
