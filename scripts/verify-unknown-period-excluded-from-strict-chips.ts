@@ -53,9 +53,12 @@ const check = (label: string, ok: boolean, detail = '') => {
 // ── HALF 1: EXECUTED. What does the client actually send for each period selection? ──────────────
 //
 // rentPeriodParam() closes over nothing but its argument, so it lifts cleanly.
+// The header carries `export` since 2026-09-06: the count surfaces now derive their period token by
+// CALLING this function instead of re-deriving it by hand, which is what made it public.
+// liftSymbols matches with startsWith and strips the leading `export` itself.
 const { rentPeriodParam } = (await liftSymbols(
   join(root, 'src', 'data', 'remote.ts'),
-  [{ header: 'function rentPeriodParam(' }],
+  [{ header: 'export function rentPeriodParam(' }],
   ['rentPeriodParam'],
   'type SearchQuery = any;\n',
 )) as { rentPeriodParam: (q: unknown) => string | null };
