@@ -50,7 +50,16 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // Four movements landed the same afternoon (+1, -4, +2 across three separate edits) — exactly what
 // a ratchet is for: it records the direction of each change instead of letting one land silently
 // inside another.
-const RATCHET = 28;
+// 28 → 27: eastabha. Its dead rows are STILL SERVED by the source, so a 404 rule would never have
+// fired — the signal is the listing's OWN `slider-property-status` ribbon reading تأجرت or تم البيع
+// (39/41 dead carried one; 0/45 interleaved controls did). A whole-document substring search for
+// the same two words ALSO matched live pages, because the related-listings carousel carries other
+// listings' ribbons in `ribbon-inside`; only the main-gallery element belongs to this listing.
+// 27 → 26: dealapp. It already owned a real DIRECT oracle (scrapers/dealapp/liveness.py) beside an
+// absence-only prune — the second-unevidenced-path shape. The prune now CALLS classify_dealapp, so
+// no dealapp semantics are restated anywhere, and carries an in-run canary because that classifier
+// pairs with a RUN-level trust gate a per-row callback cannot see. It is the largest platform here.
+const RATCHET = 26;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

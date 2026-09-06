@@ -143,7 +143,8 @@ class LivenessProbe:
     def __init__(self, platform: str, signal: Signal,
                  session: Callable[[], Any],
                  url_for: Callable[[str], Optional[str]],
-                 attempts: int = 2, backoff: float = 1.2, timeout: int = 45) -> None:
+                 attempts: int = 2, backoff: float = 1.2, timeout: int = 45,
+                 canary: Optional[Callable[[], tuple[bool, str]]] = None) -> None:
         self.platform = platform
         self.signal = signal
         self.session = session
@@ -151,6 +152,18 @@ class LivenessProbe:
         self.attempts = attempts
         self.backoff = backoff
         self.timeout = timeout
+        # OPTIONAL in-run positive control (LISTING_LIVENESS.md §5.4). Returns (ok, why).
+        #
+        # A per-row oracle cannot see what a RUN looks like, and some sources degrade in a way that
+        # mimics death rather than failure — gathern answered blocking with its own 404 at a
+        # measured 100% false-death rate; dealapp serves listing-less shells to datacenter egress.
+        # An aggregate alive-rate is a lagging signal: gathern inactivated 302 rows on one day and
+        # 106 the next before its collapse was visible. A canary asks the sharper question BEFORE
+        # each removal — is this source still serving real listings to us, right now?
+        #
+        # It gates ONLY removals. An ALIVE reading is never gated, because a degraded environment
+        # cannot manufacture a live page (DELETION_SAFETY.md §2.4).
+        self.canary = canary
 
     def fetch(self, url: str) -> tuple[Optional[int], str, bool]:
         """One DIRECT read of the listing's own URL. Seam: tests replace this, never the law."""
@@ -174,6 +187,12 @@ class LivenessProbe:
                 f"HTTP {status}, but this platform's signal had no opinion about it")
             decided = decide(status, body, path_changed, self.signal)
             if decided is not None:
+                if decided[0] == "gone" and self.canary is not None:
+                    ok, why = self.canary()
+                    if not ok:
+                        # A source that has stopped serving us real listings cannot testify that
+                        # any particular one is gone. Fails CLOSED: no canary answer, no removal.
+                        return "unknown", f"removal withheld — {why} (would have been: {decided[1]})"
                 return decided
             time.sleep(self.backoff * (attempt + 1))
         return "unknown", f"no verdict after {self.attempts} attempts — {last}"
