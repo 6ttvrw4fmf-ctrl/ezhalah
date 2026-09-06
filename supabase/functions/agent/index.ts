@@ -56,7 +56,7 @@ import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWes
 // See decide.ts's header for the full rationale. The model's own `kind` field is read ONLY to
 // decide whether to retry for wrong language; it is never trusted as the final answer again after
 // that — decideAgentTurn() (called from ./turnWiring.ts, below) is the one place that assigns kind.
-import { wantsGuidedInterview, hasUsableLocation } from "./decide.ts";
+import { wantsGuidedInterview, hasUsableLocation, established } from "./decide.ts";
 // The establishedState-construction + decideAgentTurn() call site, extracted so it is Node-importable
 // and unit-testable end-to-end (round 2 fix, "untested wiring / foolable regex") — see its own header.
 import { buildTurnDecision } from "./turnWiring.ts";
@@ -1391,30 +1391,22 @@ Deno.serve(async (req: Request) => {
           if (wantsRegion && !wantsCity) location = `منطقة ${nm}`;
           else if (wantsCity && !wantsRegion) location = nm;
           else if (!wantsCity && !wantsRegion) {
-            // NO `!alreadyAsked` HERE (owner, 2026-09-05): «city or region?» OUTRANKS the
-            // ask-once guard. Everywhere else `alreadyAsked` is right — it stops us repeating a
-            // question the user already heard. For THIS one it silently decided the search scope
-            // instead: a conversation that had asked ANY earlier location question suppressed the
-            // twin question, `locationAmbiguous` came back false, and the ladder searched with
-            // whatever the parser happened to produce. Reproduced in production 2026-09-05 — the
-            // user answered «الرياض» and got منطقة الرياض (10,745 rows across 20 cities) without
-            // ever being asked which one they meant. A fresh «ابغى فيلا للبيع في الرياض» asked
-            // correctly in the same build, which is what made this look like it worked.
+            // A TWIN NAME MEANS THE CITY (owner, 2026-09-06). «الرياض» is both a city and a region,
+            // and we used to ask which — on 8 of the 9 biggest destinations (الرياض، مكة المكرمة،
+            // تبوك، حائل، نجران، الباحة، الجوف، جازان; only جدة and الطائف went straight through),
+            // so nearly every major search paid an extra turn. Owner's ruling, verbatim: «they mean
+            // city».
             //
-            // Guessing is the one thing not allowed here: «الرياض» is a city AND a region, the two
-            // are different searches, and neither reading is safe to assume.
+            // This REPLACES the question, it does not suppress it: the region is still reachable,
+            // just never by accident — «منطقة الرياض» is handled by the wantsRegion branch above and
+            // is unchanged. What is gone is the guess-or-ask fork; there is no guess left to make,
+            // because the product now defines what a bare twin name means.
             //
-            // NOT A LOOP — and this claim has already been wrong once, so read the branches above
-            // before trusting it. The question is CLOSED (it names both options) and every answer
-            // shape it invites now resolves deterministically on the next turn with no model
-            // round-trip: «مدينة X» → wantsCity, «منطقة X» → wantsRegion, and — added 2026-09-05
-            // after a live re-ask loop — a bare «المدينة» / «المنطقة» via bareCity/bareRegion.
-            // The first version of this comment listed only the first two shapes and called the
-            // loop impossible; a user answered with the third and was asked the same thing twice.
-            // Repeating
-            // it only happens when the user's reply is ambiguous AGAIN, which is when asking is the
-            // correct behaviour: the Normal Filter refuses a search with no city for the same reason.
-            ambiguityReply = `«${nm}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${nm} ولا منطقة ${nm} كاملة؟`;
+            // Retiring this question also removes the last way the region_or_city path could loop:
+            // there is no question here to re-ask. (The bare «المدينة»/«المنطقة» answer rule above
+            // stays — the OTHER ambiguity shapes, twin_city and the plain-region question, still
+            // ask, and a one-word reply to those must still be understood.)
+            location = nm;
           }
         } else if (ck === "twin_city") {
           const regions = (Array.isArray(cls?.regions) ? cls!.regions : []) as Array<Record<string, unknown>>;
@@ -1534,7 +1526,18 @@ Deno.serve(async (req: Request) => {
         // A genuine loc_classify ambiguity has a specific, pre-built question; otherwise fall back
         // to the model's own reply text/phrasing (owner-confirmed: the platform enforces THAT this
         // turn is a clarification, never WHAT it asks about).
-        const reply = ambiguityReply ?? noPlaceReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities));
+        // A MISSING-TYPE REFUSAL MUST ASK FOR THE TYPE (owner, 2026-09-06). Same reasoning as the
+        // no-place refusal above: when the PLATFORM is why this turn is a clarification, the platform
+        // supplies the question — the model does not know it was refused and writes as if it were
+        // about to search. Ordered AFTER noPlaceReply so a turn missing both asks for the city first
+        // (a type without a place is still unsearchable).
+        const noTypeReply = !ambiguityReply && !noPlaceReply
+          && hasUsableLocation(wired.establishedState) && !established(wired.establishedState.type)
+          ? (locale === "en"
+              ? "What kind of property are you looking for? (apartment, villa, land, building, office, shop…)"
+              : "وش نوع العقار اللي تدور عليه؟ (شقة، فيلا، أرض، عمارة، مكتب، محل…)")
+          : null;
+        const reply = ambiguityReply ?? noPlaceReply ?? noTypeReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities));
         // THIS QUESTION IS NOT OPTIONAL (owner, 2026-09-05). The client keeps its own ask-ceiling —
         // "asked twice already and we can see some intent, so stop pestering and just search"
         // (src/app/agent.tsx). For an ordinary clarification that is right. For a LOCATION question

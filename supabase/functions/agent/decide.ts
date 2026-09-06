@@ -230,6 +230,19 @@ export function decideAgentTurn(input: DecideInput): DecideResult {
     return { kind: "message", askCount: askCount + 1 };
   }
 
+  // 1d. A LOCATION WITH NO PROPERTY TYPE ASKS FOR THE TYPE (owner, 2026-09-06).
+  // «ابغى عقار في جدة» used to search every type at once — apartments, villas, land and shops in
+  // one list. The owner's rule for the agent is "location + property type ⇒ search", so a location
+  // on its own is one field short and worth exactly one question.
+  //
+  // BOUNDED, unlike the location gate above it, and the difference is deliberate: a missing type
+  // degrades the results, a missing/nationwide location makes them meaningless. So this one respects
+  // the ceiling — a user who will not name a type still gets their search rather than an endless
+  // question. That is also what keeps this from becoming the third ask-loop in this file.
+  if (!established(establishedState.type) && askCount < QUESTION_BUDGET_CEILING) {
+    return { kind: "message", askCount: askCount + 1 };
+  }
+
   // 2. Enough merged signal to mean something → search, unconditionally. THIS is the step that
   // deletes the old HARD RULE #8 self-judged "genuine clarification" escape hatch: once this is
   // true there is no override left anywhere else in the code.

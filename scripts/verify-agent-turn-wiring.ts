@@ -18,8 +18,13 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.error(`FAIL  ${label}${detail ? `\n      ${detail}` : ''}`);
 };
 
+// prevQuery carries an ALREADY-ESTABLISHED property type (owner, 2026-09-06: "location + property
+// type ⇒ search"). Supplied here rather than in each `text`, deliberately: every case below tests
+// PRICE/AF/ask_about grounding, and putting a type word into their texts would change what they
+// test. An earlier turn having established the type is also the realistic shape — the client always
+// sends prevQuery. Cases that specifically test a MISSING type override prevQuery themselves.
 const base: TurnWiringInput = {
-  text: '', out: { type: '', af: {}, amenities: [] }, prevQuery: null,
+  text: '', out: { type: '', af: {}, amenities: [] }, prevQuery: { type: 'Apartment' } as never,
   location: '', regionPin: undefined, districtPin: undefined,
   ambiguityReply: null, askCount: 0, price: '', detPrice: '', detailStr: '',
 };
@@ -35,7 +40,7 @@ console.log('\n(c) THE MANDATORY CASE, executed end-to-end through the REAL WIRI
 
   // Once ask_about SURVIVED into prevQuery (a prior turn), it counts as real signal even before the
   // budget is spent — PR #1382's fix staying fixed, exercised through the wiring this time.
-  const carried = buildTurnDecision({ ...base, text: 'بيت كبير في الرياض', location: 'الرياض', prevQuery: { askAbout: ['size'] }, askCount: 1 });
+  const carried = buildTurnDecision({ ...base, text: 'بيت كبير في الرياض', location: 'الرياض', prevQuery: { type: 'Apartment', askAbout: ['size'] }, askCount: 1 });
   check('(c) wiring: PRIOR-turn ask_about (via prevQuery) counts as signal -> listings',
     carried.decision.kind === 'listings', JSON.stringify(carried.decision));
 }
@@ -96,7 +101,9 @@ console.log('\n(4) establishedState FIELD-NAME BUG — a REAL prevQuery (SearchQ
   // A REAL SearchQuery shape (src/data/search.ts): priceInput/priceMin/priceMax, never `.price`; flat
   // AF keys like ratingMin/bathMin, never a nested `.af`. Nothing established THIS turn.
   const realPrevQuery = {
-    deal: 'Rent', location: '', category: null, type: null, detail: null,
+    // type established on an earlier turn (owner 2026-09-06: location + type ⇒ search); this case
+    // is about an earlier-turn PRICE surviving into hasEnoughToSearch, not about the type.
+    deal: 'Rent', location: '', category: null, type: 'Apartment', detail: null,
     location: 'الرياض', priceInput: '720000', priceBand: null, ratingMin: 9.0, bathMin: 2,
   };
   const r = buildTurnDecision({ ...base, text: 'وش رايك', prevQuery: realPrevQuery, askCount: 0 });
@@ -111,7 +118,7 @@ console.log('\n(4) establishedState FIELD-NAME BUG — a REAL prevQuery (SearchQ
   // Same shape but with only priceMin/priceMax set (the Filter-form pair) — still visible.
   const rangeOnly = buildTurnDecision({
     ...base, text: 'وش رايك',
-    prevQuery: { deal: 'Buy', location: 'الرياض', priceMin: '400000', priceMax: '900000' },
+    prevQuery: { deal: 'Buy', type: 'Apartment', location: 'الرياض', priceMin: '400000', priceMax: '900000' },
   });
   check('(4) priceMin/priceMax (no priceInput) also carries forward', rangeOnly.decision.kind === 'listings');
 }
@@ -154,7 +161,9 @@ console.log('\n(4) establishedState FIELD-NAME BUG — a REAL prevQuery (SearchQ
   // A REAL SearchQuery shape (src/data/search.ts): priceInput/priceMin/priceMax, never `.price`; flat
   // AF keys like ratingMin/bathMin, never a nested `.af`. Nothing established THIS turn.
   const realPrevQuery = {
-    deal: 'Rent', location: '', category: null, type: null, detail: null,
+    // type established on an earlier turn (owner 2026-09-06: location + type ⇒ search); this case
+    // is about an earlier-turn PRICE surviving into hasEnoughToSearch, not about the type.
+    deal: 'Rent', location: '', category: null, type: 'Apartment', detail: null,
     location: 'الرياض', priceInput: '720000', priceBand: null, ratingMin: 9.0, bathMin: 2,
   };
   const r = buildTurnDecision({ ...base, text: 'وش رايك', prevQuery: realPrevQuery, askCount: 0 });
@@ -169,7 +178,7 @@ console.log('\n(4) establishedState FIELD-NAME BUG — a REAL prevQuery (SearchQ
   // Same shape but with only priceMin/priceMax set (the Filter-form pair) — still visible.
   const rangeOnly = buildTurnDecision({
     ...base, text: 'وش رايك',
-    prevQuery: { deal: 'Buy', location: 'الرياض', priceMin: '400000', priceMax: '900000' },
+    prevQuery: { deal: 'Buy', type: 'Apartment', location: 'الرياض', priceMin: '400000', priceMax: '900000' },
   });
   check('(4) priceMin/priceMax (no priceInput) also carries forward', rangeOnly.decision.kind === 'listings');
 }

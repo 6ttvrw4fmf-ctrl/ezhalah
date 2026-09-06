@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { decideAgentTurn, hasUsableLocation, QUESTION_BUDGET_CEILING } from '../supabase/functions/agent/decide.ts';
 
 const root = join(import.meta.dirname, '..');
+// NOTE (2026-09-06): a supported scope must still search — now paired with a type, per "location + type ⇒ search" (owner 2026-09-06)
 let failed = 0;
 const check = (ok: boolean, msg: string, extra = '') => {
   if (ok) console.log(`  PASS  ${msg}`);
@@ -77,15 +78,19 @@ const A_REAL_PLACE = ['الرياض', 'جدة', 'حي الملقا', 'منطقة
 // The whole risk of this rule is over-blocking. Every supported scope must be unaffected.
 {
   for (const [label, st] of [
-    ['city', { location: 'الرياض' }],
+    // A TYPE ON EVERY ROW (owner, 2026-09-06): "location + property type ⇒ search". A location on
+    // its own is now one short question, not a search — pinned by verify-agent-decide-turn (a3).
+    // What THIS block exists to prove is unchanged: the no-place rule must never over-block a
+    // scope that IS supported.
+    ['city', { location: 'الرياض', type: 'Apartment' }],
     ['city + type', { location: 'جدة', type: 'Apartment' }],
-    ['district', { location: 'حي الملقا' }],
-    ['region', { location: 'منطقة الرياض' }],
-    ['city + price', { location: 'الدمام', price: '500000' }],
+    ['district', { location: 'حي الملقا', type: 'Apartment' }],
+    ['region', { location: 'منطقة الرياض', type: 'Apartment' }],
+    ['city + price', { location: 'الدمام', type: 'Apartment', price: '500000' }],
   ] as const) {
     check(decide(st as never) === 'listings', `${label} → listings (supported scope, unaffected)`);
   }
-  check(decide({ location: 'الرياض' }, QUESTION_BUDGET_CEILING) === 'listings',
+  check(decide({ location: 'الرياض', type: 'Apartment' }, QUESTION_BUDGET_CEILING) === 'listings',
     'a real place at the budget ceiling still searches — optional fields never block');
 }
 
@@ -149,7 +154,7 @@ const A_REAL_PLACE = ['الرياض', 'جدة', 'حي الملقا', 'منطقة
       `«${answered}» resolved → listings on the next turn (the loop has an exit)`);
   }
   // …and the exit is a REAL place, never the country sneaking back in through the twin door.
-  check(decide({ location: 'المملكة العربية السعودية' }, 50, false) === 'message',
+  check(decide({ location: 'المملكة العربية السعودية', type: 'Apartment' }, 50, false) === 'message',
     'the twin exit cannot resolve to the country');
 
   // turnWiring must NEVER clear a location into absence again. Absence IS nationwide downstream.

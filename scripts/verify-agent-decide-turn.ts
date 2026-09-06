@@ -30,15 +30,34 @@ const empty = {
 // asserted, now paired with a city. The second loop pins the new half.
 console.log('\n(a) real signal + a real city, askCount=0 -> listings\n');
 for (const [label, state] of [
-  ['location', { ...empty, location: 'الرياض' }],
+  ['location', { ...empty, location: 'الرياض', type: 'Villa' }],
   ['type', { ...empty, location: 'الرياض', type: 'Villa' }],
-  ['price', { ...empty, location: 'الرياض', price: '500000' }],
-  ['detail', { ...empty, location: 'الرياض', detail: '3' }],
-  ['amenities', { ...empty, location: 'الرياض', amenities: ['parking'] }],
-  ['af', { ...empty, location: 'الرياض', af: { bathrooms: 2 } }],
+  ['price', { ...empty, location: 'الرياض', type: 'Villa', price: '500000' }],
+  ['detail', { ...empty, location: 'الرياض', type: 'Villa', detail: '3' }],
+  ['amenities', { ...empty, location: 'الرياض', type: 'Villa', amenities: ['parking'] }],
+  ['af', { ...empty, location: 'الرياض', type: 'Villa', af: { bathrooms: 2 } }],
 ] as const) {
   const r = decideAgentTurn({ rawText: 'شقة', locationAmbiguous: false, establishedState: state, askCount: 0 });
   check(`(a) ${label} + city -> listings`, r.kind === 'listings' && r.askCount === 0, JSON.stringify(r));
+}
+
+// TYPE IS NOW PART OF "enough to search" (owner, 2026-09-06): "location + property type ⇒ search".
+// Block (a) therefore pairs every signal with BOTH, and (a3) below pins the new question.
+console.log('\n(a3) a location with NO property type asks once, then searches anyway\n');
+{
+  const st = { ...empty, location: 'جدة' };
+  check('(a3) location alone -> message (ask which property type)',
+    decideAgentTurn({ rawText: 'ابغى عقار في جدة', locationAmbiguous: false, establishedState: st, askCount: 0 }).kind === 'message');
+  check('(a3) …still asking one below the ceiling',
+    decideAgentTurn({ rawText: 'x', locationAmbiguous: false, establishedState: st, askCount: QUESTION_BUDGET_CEILING - 1 }).kind === 'message');
+  // BOUNDED, unlike the location gate: a missing type degrades results, a missing location makes
+  // them meaningless. A user who will not name a type still gets their search.
+  for (const ask of [QUESTION_BUDGET_CEILING, 50]) {
+    check(`(a3) THE EXIT: at askCount=${ask} it searches anyway (no third ask-loop)`,
+      decideAgentTurn({ rawText: 'x', locationAmbiguous: false, establishedState: st, askCount: ask }).kind === 'listings');
+  }
+  check('(a3) …and a type supplied at any askCount searches immediately',
+    decideAgentTurn({ rawText: 'x', locationAmbiguous: false, establishedState: { ...st, type: 'Apartment' }, askCount: 0 }).kind === 'listings');
 }
 
 console.log('\n(a2) the SAME signal with NO usable location -> message (nationwide is not a scope)\n');
@@ -104,7 +123,7 @@ console.log('\n(d) ask_about=["size"] present, askCount=2 (budget exhausted) -> 
 
   const viaCarried = decideAgentTurn({
     rawText: 'بيت كبير', locationAmbiguous: false,
-    establishedState: { ...empty, location: 'الرياض', priorAskAbout: ['size'] }, askCount: 1,
+    establishedState: { ...empty, location: 'الرياض', type: 'Villa', priorAskAbout: ['size'] }, askCount: 1,
   });
   check('(d) ask_about carried from a PRIOR turn + a city -> listings even before the ceiling',
     viaCarried.kind === 'listings' && viaCarried.askCount === 1, JSON.stringify(viaCarried));
@@ -180,7 +199,7 @@ console.log('\n(g) the interview phrase gate is deterministic, not a trusted mod
   // which a model's own kind="interview" claim could reach it. A non-matching text falls through to
   // the normal ladder regardless of what the model said elsewhere in index.ts (which never reads
   // out.kind again after this function is called — see index.ts's own comment at the import site).
-  const fallthrough = decideAgentTurn({ rawText: 'ابي شقة في جدة', locationAmbiguous: false, establishedState: { ...empty, location: 'جدة' }, askCount: 0 });
+  const fallthrough = decideAgentTurn({ rawText: 'ابي شقة في جدة', locationAmbiguous: false, establishedState: { ...empty, location: 'جدة', type: 'Apartment' }, askCount: 0 });
   check('(g) a non-matching text never falls into interview, regardless of any model claim', fallthrough.kind === 'listings', JSON.stringify(fallthrough));
   check('(g) a non-matching text is correctly NOT flagged by the deterministic gate', wantsGuidedInterview('ابي شقة في جدة') === false);
 }
