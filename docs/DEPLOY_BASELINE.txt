@@ -1,5 +1,12 @@
-737abdee65b09f7344f99036a8158cb4b4530a8c
+3db180271eca9d241c6662360150561a24d12488
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
+# 2026-09-06  3db1802  deployed via .github/workflows/deploy-frontend.yml run 34049139459.
+#   Recorded BY PR again, same reason as 2026-09-04: safe-deploy.sh could neither push to main
+#   nor open a PR (no BASELINE_PR_TOKEN secret), so it refused to advance and failed the run ON
+#   PURPOSE. The deploy itself SUCCEEDED and the alias moved — hydration passed at all five
+#   viewports, and the served bundle went entry-f6f619a0… → entry-dc15a571af666ca6e9e9c161f6527061.js.
+#   Leaving this file on 737abde would have left preflight measuring HEAD against a STALE, weaker
+#   floor, so advancing it restores the guard rather than relaxing it.
 # 2026-09-04  57dd41e  deployed via .github/workflows/deploy-frontend.yml run 33898889593.
 #   Recorded BY PR, not by the deploy: the runner has no git identity, so safe-deploy.sh's
 #   `git commit` failed on «Author identity unknown» and its old else-branch reported that as
