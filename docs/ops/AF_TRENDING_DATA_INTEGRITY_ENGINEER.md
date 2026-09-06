@@ -548,6 +548,49 @@ Things that cost a previous run real time, and are NOT product defects:
     ~3.8 q/s against a measured safe envelope of 1.5 q/s (§40.1), and `apartment_guided_counts_ar` on
     an unfiltered Buy scope took 14–19s, tripping the anon statement timeout (57014) in CI.
 
+20. **THE ~10-SECOND SEARCHING BEAT IS INTENTIONAL PRODUCT BEHAVIOUR, SET BY THE OWNER. IT IS NEVER
+    A DEFECT (owner, 2026-09-06, permanent).** The owner changed it themselves — "I physically
+    changed the search animation/loading beat myself and intentionally made it longer … the ~10
+    second timing is intentional product behavior, not a regression" — and confirmed the correct
+    response was to fix the harness rather than the product. `agent.tsx` `SEARCH_MIN_MS` (10,000) +
+    `LOADER_EXIT_MS` (450) is a floor the owner may raise again at any time.
+
+    **Therefore, binding on every AF and Trending browser journey:** a journey must OBSERVE the
+    actual result arrival / state change, and may NEVER hardcode an assumption derived from the old
+    shorter animation, nor from any duration at all. Concretely — do not sleep a fixed time and then
+    read; do not size a budget to "how long it used to take"; do not treat a beat-length wait as a
+    tolerance to be tuned. Wait for the state, and if it never arrives say so.
+
+    Two distinct defect shapes have now come out of breaking this rule, both on 2026-09-06, and both
+    ACCUSED A CORRECT PRODUCTION (`ops_incident` #124 and #125):
+
+    - **Reading during the beat.** Seven live steps across five checks reported product defects —
+      «§12A is not honest on the live card», «RENT cards deleted by the Buy floor», «the offer gate
+      and the round gate disagree» — because they sampled the screen while the beat still held the
+      previous turn. Every one was false.
+    - **Assuming what is on the screen instead of counting it.** The pagination proof counted every
+      card on the PAGE, subtracted a baseline snapshot captured while the newest turn was still
+      dripping its first page in, and added back a hardcoded `FIRST_PAGE = 10`. That produced a
+      constant +2 on a product sequence that was landing EXACTLY on the owner's 100/200/…/1500
+      boundaries, and then sampled the final click mid-cascade at 1507 of 1600.
+
+    The mechanisms exist; do not invent new ones. `scripts/lib/afJourneyPacing.ts` holds
+    `readSearchBeatMs()` (DERIVES the beat from `agent.tsx`, fails closed), `awaitResultsTurn`,
+    `awaitAfStep` and `settleUntil`. Barriers: `verify-af-live-journeys-outlast-the-search-beat.ts`
+    (nobody types the beat; the helpers observe arrival) and `verify-af-reveal-accounting.ts` (the
+    first page is `initialReveal()`, never a constant; a reveal is counted on the turn that owns it).
+
+21. **THE FIRST PAGE IS NOT A CONSTANT, AND THE BATCH IS A BOUNDARY, NOT AN INCREMENT.** Two product
+    rules that a harness keeps getting wrong, both owner-set and both executable:
+    - `initialReveal()` = `min(max(FIRST_PAGE, distinctPlatformCount), fetched)` — "the first screen
+      is as wide as the market" (owner 2026-09-02). `FIRST_PAGE = 10` is a FLOOR. On a scope matching
+      more than ten platforms the first page is wider, so any arithmetic that adds back 10 is wrong.
+    - `nextBatchTarget(shown, available)` reveals to the NEXT CLEAN 100-BOUNDARY (owner 2026-08-29):
+      "from the initial drip (e.g. 10 shown) the first press completes the first hundred, not
+      10+100=110". So after k presses the turn shows `min(100k, available)` — **independent of how
+      wide the first page was**. That independence is why `BROWSE_BATCH * clicks` is the correct
+      expectation and why 1,509 could never be right: it is not a boundary at all.
+
 ## Hard safety rails (same as every other engineer — non-negotiable)
 
 Never modify data to make a test pass. Never manufacture attributes, turn UNKNOWN into false,
