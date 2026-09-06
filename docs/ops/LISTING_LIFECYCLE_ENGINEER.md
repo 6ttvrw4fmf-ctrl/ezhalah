@@ -337,7 +337,7 @@ forbids as a *death* verdict, and the state machine above describes the intended
 implementation reaches only at the final gate.
 
 This routine's position: **the final gate is not permission to leave the clock unguarded.** §4's
-`deletion_clock_unearned` barrier exists precisely for this, and closing the gap in the predicate
+`deletion_clock_without_evidence` barrier exists precisely for this, and closing the gap in the predicate
 itself (keying eligibility on the source-confirmed deactivation rather than on `last_seen_at`)
 changes deactivation/deletion semantics for every platform — so it is proposed with evidence and
 **blocked to the owner** under §G.2(a), not shipped on this routine's own judgement.
@@ -376,7 +376,7 @@ its **mutation** re-introduces. None of these ten alert kinds currently has a de
 | 4 | `verify-inactive-listing-is-not-counted.ts` (kind `inactive_still_counted`) | `apartment_guided_counts_ar`, `property_age_option_counts_ar`, `district_options_ar` and `loader_active_platforms_ar` all resolve the same scope as the results RPC, `p_tables` included — one resolver, never a second copy. The count equals the cardinality of the returned id set for the same arguments. | A count path keeping its own copy of the scope clause, so a confirmed-dead row is excluded from results but still inflates the count. |
 | 5 | `verify-no-false-resurrection.ts` (kind `false_resurrection`) | A row deactivated on DIRECT source-confirmed evidence is not returned to `active = true` by `auto_recover_false_inactive()`, by a re-seen crawl, by `prune_unseen()`'s reset-on-seen, or by pagination/Back/navigation replaying a cached page. Only DIRECT ALIVE evidence, or a recorded adjudication, may restore it. | Removing `auto_recover_false_inactive()`'s adjudication or sibling-supersession guard; and, on the client leg, a cached results page re-rendering a card whose row is now inactive. |
 | 6 | `verify-unknown-never-becomes-inactive.ts` (kind `unknown_treated_as_dead`) | **Executes** `classify_response()` against every UNKNOWN shape — timeout, 401/402/403/407/408/429, every 5xx, an uninterpretable 200 body, an unresolved redirect — and asserts `UNKNOWN`; then executes `decide()` with `EvidenceKind.ABSENCE` and asserts `action = 'none'`; then asserts no code path under `scrapers/` writes `active = false` or `last_verified_alive_at` outside the contract. | Any one status moved out of `_BLOCKED_OR_THROTTLED`; `decide()` letting ABSENCE strike; a hand-written `last_verified_alive_at` stamp. (`scripts/verify-liveness-contract.ts` and `scripts/verify-liveness-registry-mirror.ts` already hold the static half — this barrier must add the executed half and must not duplicate them.) |
-| 7 | `verify-deletion-clock-is-earned.ts` (kind `deletion_clock_unearned`) | No row is in `DELETION_ELIGIBLE` unless its deactivation carries a DIRECT source-confirmed reason **and** 30 full days have elapsed since that confirmation. A day-29 row is not eligible; a 400-day row deactivated on absence alone is not eligible either. Boundary asserted at 29 / 30 / 31 days. | `min_inactive_days` lowered, the comparison flipped to `<=`, or eligibility keyed on `last_seen_at` with no source-confirmed reason required (§3.3 — the mutation the current predicate would *survive*, which is why this barrier asserts the invariant and not the implementation). |
+| 7 | `verify-deletion-clock-is-earned.ts` (kind `deletion_clock_without_evidence`) | No row is in `DELETION_ELIGIBLE` unless its deactivation carries a DIRECT source-confirmed reason **and** 30 full days have elapsed since that confirmation. A day-29 row is not eligible; a 400-day row deactivated on absence alone is not eligible either. Boundary asserted at 29 / 30 / 31 days. | `min_inactive_days` lowered, the comparison flipped to `<=`, or eligibility keyed on `last_seen_at` with no source-confirmed reason required (§3.3 — the mutation the current predicate would *survive*, which is why this barrier asserts the invariant and not the implementation). |
 | 8 | `verify-confirmed-inactive-30d-rows-are-deleted.ts` (kind `deletion_clock_stalled`) | The other direction: rows that HAVE been source-confirmed inactive for 30+ days on an `enabled` platform do not accumulate unboundedly. Reports the eligible backlog per platform with the reason each run is not draining it (breaker tripped, health gate open, freeze, cap) — so a permanently stuck queue is visible and attributable rather than silent. | A run that reports success while deleting nothing, and a backlog that grows with no named reason. **This barrier never authorises raising a threshold** to make itself green (`LISTING_LIVENESS.md` §7, `DELETION_SAFETY.md` §6). |
 | 9 | `verify-no-orphan-after-delete.ts` (kind `orphan_after_delete`) | After a delete, no `(source_table, listing_id)` survives in `search_listings_ar`, `active_listing_ids_v2`, `listing_native_location_v1`/`v2`, `listing_location_index`, or any AF attribute view — and `purged_listings_archive` holds the archived row with a matching `cleanup_deletion_log` entry. Deletion is complete and consistent, or it did not happen. | Deleting the raw row without propagating, leaving an index row pointing at nothing — the shape `mon_detect_orphaned_search_row` already watches from one side only. |
 | 10 | `verify-no-stale-cross-table-duplicate.ts` (kind `lifecycle_duplicate_stale_copy`) | Where the same source listing exists in more than one table (the residential/commercial URL collision repaired by `20260830140110`, and the `retire_superseded_siblings()` path), a confirmed-dead listing is dead in **every** copy. No superseded sibling remains searchable, and no recovery routine revives one. | Removing the sibling-supersession guard from `auto_recover_false_inactive()`, or repairing only the copy the incident named while its twin stays served. |
@@ -561,14 +561,22 @@ Recorded so the next run does not rediscover them, and does not assume they were
    for a run that touches link §2.3: recover the definition from
    `supabase_migrations.schema_migrations.statements` / `pg_get_functiondef`, mirror it into
    `supabase/migrations/`, and only then write a barrier over it.
-2. **None of routine #11's seven alert kinds has a detector.** `inactive_still_searchable`,
-   `inactive_still_counted`, `false_resurrection`, `unknown_treated_as_dead`, `deletion_clock_*`,
-   `orphan_after_delete` and `lifecycle_*` are routed by `scripts/lib/alertRouting.ts` and named in
-   migration `20260905022312`'s header — but no `mon_raise()` anywhere in `supabase/migrations/`
-   emits any of them. The queue is addressable and currently unfillable. §4 builds them.
-3. **`unknown_treated_as_dead` is described as *"the alert kind that fires when it is broken"* in
-   migration `20260905022312`. It does not fire today.** That is the single highest-value detector
-   in §4 and the one whose absence most directly contradicts §0.
+2. **CLOSED 2026-09-06 (ops_incident #25) — every declared kind now has an emitter.** This item read
+   *"None of routine #11's seven alert kinds has a detector"*: all seven were routed by
+   `scripts/lib/alertRouting.ts` and named in migration `20260905022312`'s header while no
+   `mon_raise()` anywhere emitted one, so the queue was addressable and unfillable. Migration
+   `20260905052403` built four (`inactive_still_searchable`, `inactive_still_counted`,
+   `unknown_treated_as_dead`, `deletion_clock_without_evidence`) and `20260906041121` built the last
+   four (`false_resurrection`, `orphan_after_delete`, `lifecycle_duplicate_stale_copy`,
+   `deletion_clock_stalled`). All eight are detect-only and on the `mon_run_all_detectors` roster.
+   The CLASS is barriered too, in both directions: `mon_detect_declared_kind_without_emitter()`
+   (`20260906041438`) reads `public.ops_declared_alert_kind` and raises on any declared kind nothing
+   can raise, and `scripts/verify-declared-alert-kind-has-an-emitter.ts` fails `npm test` if a kind
+   declared here with the "(kind `<name>`)" convention is missing from that registry. **Adding a kind to
+   the §4 table is therefore now a commitment the suite checks.**
+3. **`unknown_treated_as_dead` fires as of 2026-09-05** (`mon_detect_unknown_treated_as_dead`,
+   migration `20260905052403`), closing the item that recorded it as described in migration
+   `20260905022312` as *"the alert kind that fires when it is broken"* while not firing at all.
 4. **`e2e/guardian/journeys.mjs` declares no `lifecycle` or `inactive_listing` surface.** Existing
    journeys cover `theme`, `chat_persistence`, `auth`, `navigation`, `result_card`,
    `loading_states`, `modal`, `search`. Whether a lifecycle journey belongs there — a deep link to a
