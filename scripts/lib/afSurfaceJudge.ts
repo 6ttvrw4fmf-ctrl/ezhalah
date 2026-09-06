@@ -182,3 +182,31 @@ export function optionWouldRender(count: number, total: number): boolean {
   if (count < MIN_REAL_OPTION_COUNT) return false;
   return total - count >= total * MEANINGFUL_NARROWING_FRACTION || count <= INTERVIEW_STOP_AT;
 }
+
+// ── a verdict must describe ONE state of the index ───────────────────────────────────────────────
+// The witnesses judgeOption() compares are separate reads of `search_listings_ar`, and that table is
+// REBUILT underneath them: `sync_search_listings_ar` (pg_cron jobid 28) at :14 past every hour, the
+// location MV refresh (jobid 17) at :20, against a sweep that reads for ~28 minutes. A comparison
+// that straddles a rebuild is comparing two different databases, and on 2026-09-04 that reported a
+// healthy production as broken — Villa+Farm/Buy @region:1 failed all four of its checks inside the
+// 09:14–09:21 window, and every witness agreed exactly (11,720) when re-read on a quiet index.
+//
+// So a disagreement is reported only when it survives a re-read PROVEN to span no rebuild. This is
+// the product's own R2.5.4/R13.11 rule turned on the harness: our inability to learn something is
+// never a statement about the data. It is not a tolerance and not retry-until-green — the counts are
+// a deterministic function of the index, so a real defect reproduces on every stable read.
+export const UNREADABLE_STAMP = '?@?';
+export type Settled<T> = { state: 'stable'; result: T } | { state: 'moved'; stamp: string };
+
+/**
+ * Run `take` bracketed by index fingerprints. Fails CLOSED in both directions that matter: a stamp
+ * that MOVED and a stamp that could not be READ both yield 'moved' (undecided), never a verdict —
+ * because neither proves the comparison saw one index.
+ */
+export async function settleOnOneIndex<T>(stamp: () => Promise<string>, take: () => Promise<T>): Promise<Settled<T>> {
+  const before = await stamp();
+  const result = await take();
+  const after = await stamp();
+  if (before !== after || before === UNREADABLE_STAMP) return { state: 'moved', stamp: `${before} → ${after}` };
+  return { state: 'stable', result };
+}

@@ -797,12 +797,27 @@ positively (passes today) and negatively (a simulated break fails it).
 | Tripwire | File | Asserts |
 |---|---|---|
 | Taxonomy coverage | `scripts/verify-taxonomy.ts` | every live `search_listings_ar.type_ar` maps to exactly one clean type (except the documented «عمارة»/Building ambiguity resolved by source-table kind); any orphan (unmapped → unreachable) blocks deploy. `--emit-sql` regenerates `sql/known_type_ar.generated.sql` — this is the wire to the novel-type alarm. |
-| Gathern rent-only (§20.8) | `scripts/verify-gathern-rent-only.ts` | 3 layers: (1) DATA — 0 gathern/aqarmonthly rows tagged `deal_ar='بيع'`; (2) RPC — a Buy search pointed at those tables returns 0 (with a Rent-monthly positive control); (3) CODE — `RES_TABLES`/`COM_TABLES` exclude them and `resTables()`/`tablesFor()` only add them under the monthly-rent gate. |
+| Gathern rent-only (§20.8) | `scripts/verify-rent-period-both.ts` | the CODE layer, EXECUTED (not text-matched): it lifts the real `resTables()` and asserts the two monthly-only sources are in scope for `monthly`/`both`/combined **and stay OUT of Buy and of an annual Rent search**. |
 
-**Note:** `scripts/verify-locations.mjs` (the older location tripwire) is currently NOT wired into the
-build — it fails on a pre-existing `PGRST203` overload ambiguity for `location_search_candidates_ar`
-(minimal-param sentinel calls can't resolve since the RPC gained a second signature). Fix belongs to the
-search-RPC workstream; re-wire it into `npm run verify` once the overload is disambiguated.
+**Corrected 2026-09-06 (routine #10).** Until this date the row above named
+`scripts/verify-gathern-rent-only.ts` and promised three layers — DATA (`0 rows tagged
+deal_ar='بيع'`), RPC (a Buy search returns 0) and CODE. **That file has never existed anywhere in the
+tree**, so a reader consulting this table for "is the rent-only rule guarded?" got a confident yes
+from a citation nobody had executed. The DATA layer as written is also no longer expressible:
+`gathern_residential_listings` and `aqarmonthly_residential_listings` carry no `deal_ar` column at
+all, so a row cannot be tagged «بيع» in the first place — the invariant moved from a guarded value to
+a structural impossibility. The CODE layer is genuinely covered, by the file now named. The RPC layer
+is not separately asserted; that is a known gap, stated rather than implied away.
+`scripts/verify-docs-name-real-barriers.ts` (in `npm test`) now fails on any `scripts/` path this or
+any other doc names that is not a real file, so a phantom citation cannot survive a PR again.
+
+**Note:** `scripts/verify-locations.mjs` (the older location tripwire) no longer exists — it was
+removed rather than re-wired, and this note used to describe it as merely "not wired into the build",
+which read as a guard waiting to be switched back on. The location surface is covered by
+`scripts/verify-location-index-covers-every-searchable-platform.ts`,
+`scripts/verify-location-index-source.ts`, and
+`scripts/verify-failed-location-index-is-not-a-load.ts` (which EXECUTES `ensureLocationIndex()`
+against an injected failure, so a failed index load can never be rendered as an empty one).
 
 **Scraper visibility rule (2026-07-06):** a green cron/workflow is **not** proof of data. Runs must fail
 loudly — a scraper that fetched 0 rows when it had URLs exits non-zero and logs per-URL status (fixed for
@@ -928,6 +943,37 @@ migration-drift-guard rule in `AGENTS.md`).
     - **Tier 4, CONTROLLED ROTATION**, is the LAST tie-break, strictly before the pre-existing
       unconditional `(source_table, listing_id)` total-order tiebreaker — so total-order pagination
       (no duplicate/skip across `عرض المزيد` batches, PR #1267) holds regardless of rotation.
+    - **THE INITIAL BATCH IS SIZED BY THE MARKET, NOT BY A CONSTANT** (owner PERMANENT rule,
+      2026-09-02, PR #1688). The first screen after a normal search reveals
+      `min(genuine matches, max(10, distinct platforms in the matching set))` — 10 is a FLOOR, never
+      a cap. Tiers 1–3 above already ordered one row per platform before any platform repeats, but
+      the CLIENT truncated that at a hardcoded 10, so every platform past the tenth was erased from
+      the first screen. Measured on production over SUPPORTED scopes only (a city is required — see
+      `CITY_REQUIRED_MSG`; there is no nationwide scope): «الرياض / كل السكني» lost 8 of 18 matching
+      platforms, «جدة / كل السكني» 7 of 17, «جدة / شقق / إيجار» 5 of 15, «الدمام / كل السكني» 4 of
+      14, «فلل للبيع في الرياض» 3 of 13. A district search («الرياض / حي الملقا», 8 platforms) lost
+      none — below the floor of 10, nothing is truncated.
+      (An earlier revision of this note cited a 33-platform kingdom-wide figure. That came from a
+      direct RPC call with `p_cities := null`, which is NOT a scope any user can reach; it was
+      corrected on 2026-09-04 and the leftover agent path that could still reach it was closed.)
+      - The platform count is **DERIVED from the eligible rows** (`distinctPlatformCount`), never a
+        list, an allowlist, or a number to bump: a new scraper participates the moment it
+        contributes one genuine matching listing, and a disabled or non-matching platform
+        contributes nothing. Adding a platform must never require editing ranking code.
+      - It **cannot weaken MATCH**: it only sizes a PREFIX of the array the RPC already filtered to
+        the eligible set, and stays bounded by rows actually fetched — 7 matches show 7.
+      - It applies to the INITIAL batch of a normal search. Advanced Filter, narrowing, Trending and
+        continuation keep MATCH → DIVERSITY → PHOTO but never widen the eligible universe to
+        reproduce an earlier platform spread; a platform that stopped matching stays gone.
+      - Enforced by `scripts/verify-initial-batch-covers-platforms.ts` (executes the real
+        `initialReveal`/`orderByScope`, reads the SQL half through `rpcReplay`), mutation-proven 13
+        ways including reverting to a fixed 10, hardcoding a platform count, dropping `platform`
+        from the diversity keys in each of the four scopes, and demoting UNKNOWN photo.
+      - **Known boundary, deliberately not changed:** `rankResults()` groups by closeness tier and
+        preserves diversity WITHIN each tier. For broad searches `closenessBonus()` is 0 for every
+        row, so there is one tier and coverage is exact. When the user gave a budget or exact size,
+        tiers form and coverage is best-effort inside them — reordering across tiers would promote a
+        worse-priced listing over a better one, which is a product decision, not a bug fix.
       `hashtext(source_table, listing_id, p_rotation_seed)` — a deterministic Postgres builtin,
       **never `ORDER BY random()`**. `p_rotation_seed` is minted client-side, once per device (not
       per visit — `src/lib/rotationSeed.ts`), combined with a coarse ISO-week bucket so a long-lived
@@ -976,6 +1022,38 @@ migration-drift-guard rule in `AGENTS.md`).
     **Status when recorded: OPEN P1, not yet satisfied** — see §12A's status paragraph for the
     measured gap (7 certified amenity tokens undrawable, a 6-item cap, and four fields visible only
     on Wasalt-style cards).
+
+21. **If a platform serves users, its `platform_registry` row must be the kind the detectors read.**
+    Every per-platform detector — `mon_detect_silent_scraper_death`, `mon_detect_zero_new_stall`,
+    `mon_detect_stale_active_fraction`, `mon_detect_field_integrity`,
+    `mon_detect_stale_no_remediation_path` and the rest — filters on
+    `status = 'active' AND kind = 'source'`. A row with any other status is not "a quieter platform";
+    it is a platform **no detector evaluates at all**. So the invariant is a set relation, not a
+    habit: *every platform with `production_ready` rows in `search_listings_ar` is in that filter.*
+
+    Recorded because it failed silently (senior production run, 2026-09-05). muktamel sat at
+    `status='dormant'` while serving **523 production_ready listings**, with 28 scrape runs in the
+    preceding 7 days — absent from the silent-scraper-death cohort (37 platforms, muktamel not among
+    them). Its capture could have died and stranded those listings with no P0. The dormant status was
+    the un-landed second half of `20260904151723_muktamel_liveness_policy_paused_is_not_unsearchable`,
+    which settled that "paused" is a CADENCE fact and corrected `ops_liveness_registry` — but left
+    this row stale, with a note still claiming "0 rows ever active".
+
+    **Why the existing guard could not see it:** `mon_detect_registry_orphans` had two limbs and the
+    defect fell between them — limb 1 only inspects rows *already* `active`, limb 2 only fires when a
+    scrape_runs label has *no registry row at all*. A row that exists but excludes itself was a blind
+    spot by construction. Limb 3 (`registry_orphan_unmonitored`, migration `20260905061753`) closes
+    it, derived from production's own searchable set rather than any list, so a platform onboarded
+    tomorrow is covered without anyone remembering.
+
+    **The barrier deliberately does not read that detector.** `ops_searchable_platforms_unmonitored()`
+    (`20260905062027`, anon-executable, returns only platform slugs + counts) computes the invariant
+    independently, and `scripts/verify-searchable-platforms-are-monitored.ts` executes it — so the
+    guard survives limb 3 being rewritten or deleted. It treats a failed fetch as UNKNOWN and fails,
+    never as "no unmonitored platforms": an empty result is the PASS state here, which is exactly the
+    shape the "A FAILED FETCH IS NOT AN EMPTY ANSWER" rule exists to stop. Runs in
+    `.github/workflows/loader-active-platforms-check.yml` (live by necessity; excluded from `npm test`
+    for the reason that file states).
 
 ---
 

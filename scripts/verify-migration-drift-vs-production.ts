@@ -43,6 +43,23 @@ const { url: URL_BASE, key: ANON_KEY } = resolvePublicSupabase();
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 const DEDUP_KEY = 'migration_drift';
+const UNAVAILABLE_KEY = 'migration_drift_check_unavailable';
+
+/** Best-effort P1 for "the check itself could not run". Never throws — the exit code is the gate. */
+async function raiseUnavailable(reason: string) {
+  if (!SERVICE_ROLE_KEY) return;
+  try {
+    await callRpc(`${URL_BASE}/rest/v1/rpc/mon_raise`, SERVICE_ROLE_KEY, {
+      p_sev: 'P1',
+      p_kind: UNAVAILABLE_KEY,
+      p_platform: null,
+      p_dedup: UNAVAILABLE_KEY,
+      p_detail: { reason: reason.slice(0, 500), checker: 'verify-migration-drift-vs-production.ts', at: new Date().toISOString() },
+    });
+  } catch (e) {
+    console.warn(`\u26a0 could not raise ${UNAVAILABLE_KEY} (the exit code below is still the gate): ${e}`);
+  }
+}
 
 async function callRpc(url: string, apikey: string, body: unknown, timeoutMs = 20000) {
   const r = await fetch(url, {
@@ -73,8 +90,17 @@ try {
     p_repo_versions,
   });
 } catch (e) {
-  console.warn(`⚠ migration-drift-vs-production SKIPPED (network unavailable: ${e}) — run again with network; CI must not skip.`);
-  process.exit(0);
+  // FAILS CLOSED (2026-09-04). This used to exit 0 on any failed read, which made the barrier a
+  // liar in the exact conditions it exists for: an unreachable DB, a 500 from PostgREST, a dropped
+  // RPC, a rotated key — every one of them printed a warning and reported success, and the
+  // every-15-minutes schedule then looked green while nothing had been checked. "I could not tell"
+  // is not "there is no drift" (SOURCE IS TRUTH: never turn UNKNOWN into No). It raises its own P1
+  // under a SEPARATE dedup key — conflating it with `migration_drift` would claim drift exists when
+  // what we actually know is nothing — and exits 1.
+  await raiseUnavailable(String(e));
+  console.error(`✗ migration-drift-vs-production COULD NOT CHECK (${e}).`);
+  console.error(`  Failing closed: an unchecked production is not a clean production.`);
+  process.exit(1);
 }
 
 // The four drift conditions (owner permanent barrier). #1 missing_in_git and #4 duplicate_overloads
@@ -122,6 +148,11 @@ if (SERVICE_ROLE_KEY) {
         p_dedup: DEDUP_KEY,
       });
     }
+    // The read demonstrably worked, whatever it found — so the "could not check" P1 is over.
+    await callRpc(`${URL_BASE}/rest/v1/rpc/mon_resolve_key`, SERVICE_ROLE_KEY, {
+      p_kind: UNAVAILABLE_KEY,
+      p_dedup: UNAVAILABLE_KEY,
+    });
   } catch (e) {
     console.warn(`⚠ could not update alert_event (non-fatal, exit code is unaffected): ${e}`);
   }

@@ -12,6 +12,21 @@ import { colors, radius, space, font, cardShadow } from '@/theme/tokens';
 // Ezhalah is sifting many listings down to the few that fit — small card-like shapes drift inward
 // toward a centre point and fade as they arrive, calm and restrained, no spinner, no bounce.
 //
+// RESTORED VERBATIM 2026-09-06 (owner, on seeing the replacement live: "remove this design … keep it
+// how it was"). The 2026-08-31 redesign that briefly replaced it — a full-bleed opaque surface with a
+// dynamic «إزهله يدقّق في …» sentence and a card-pipeline gate (PR #1440) — is reverted, and
+// src/lib/afDeepSearchCopy.ts went with it. Two consequences worth stating, because a later reader
+// will find them in the barriers:
+//   • The translucent scrim is back ON PURPOSE. The searching turn behind the card — the platform
+//     roster included — reads through again, which is what the owner asked for in the same breath
+//     ("make sure all the platforms show clearly"). The redesign's opaque backdrop existed to hide
+//     exactly that, and hiding it is no longer wanted.
+//   • The «لقينا N عقار» beat is back, and it is still HONEST: `to` is handed in by agent.tsx from
+//     quotableTotal() — the single arbiter of "the number this search may state", which returns null
+//     (⇒ `done` never flips ⇒ no beat at all) whenever the RPC count would overstate. This component
+//     still cannot compute a total of its own, which is the guarantee
+//     scripts/verify-mining-total-honesty.ts actually protects.
+//
 // TIMING CONTRACT: this component is pure decoration. It never gates the hand-off — the orchestrator
 // (agent.tsx) drives dismissal with plain setTimeout latches (never an animation callback, per
 // src/lib/afterAnimation.ts's rule), and the animation simply loops until unmounted. `done` flips the

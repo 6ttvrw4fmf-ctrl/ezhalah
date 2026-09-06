@@ -4,7 +4,25 @@
 on any divergence** (same rule as `docs/ops/DATA_INTEGRITY_ENGINEER.md` and `docs/ops/
 SEARCH_MATCH_QA_ENGINEER.md`). If the two ever differ, update the routine to match this file.
 
-**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner,
+2026-08-29, **extended 2026-09-04**) — binds this routine too, in FULL and as it stands today, not as
+it stood when this line was first written: fix first / report last (§G.1); the six and only six
+reasons to stop without fixing (§G.2), and **"a human could technically approve this" is not one of
+them (§G.2b)**; automatic cross-routine handoff via `incident_open()` / `incident_handoff()` rather
+than a sentence saying someone should look at it (§G.3); adaptive effort (§G.4); the real 10/10
+standard (§G.5); Sentry first, and your own incident queue read alongside it (§G.6, §G.6b);
+**§G.9 — a bug is CLOSED only when all seven hold: root cause fixed, related variants checked, a
+permanent barrier exists, a MUTATION has been watched to catch recurrence, the full regression suite
+passes, PRODUCTION is verified through the real path a user hits, and no equivalent hidden path
+remains. Anything short of all seven is UNKNOWN with the reason — never "fixed."** §G.10 — every
+report carries BEFORE/AFTER and ends with the mandatory block. §G.11 — tokens are not the
+constraint; optimise for correctness and permanent bug reduction. §G.7 — none of it weakens an
+existing guard.
+
+It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs. This
+enumeration was stale from 2026-09-04 to 2026-09-05: it named only the original sections, so §G.9's
+mutation and production-verification requirements reached this routine by inheritance rather than by
+being stated. They were always binding. Now they are also visible.
 
 ## §0.1 — READ FIRST, EVERY RUN (mandatory)
 
@@ -56,7 +74,8 @@ Contract — a future edit that quietly loosens either fails the build.
 
 On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
 whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
-cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+cause → fix → permanent regression barrier → **mutation proof: re-introduce the defect and WATCH the
+barrier go red, then restore (§G.9.4 — required, not discretionary)** → deploy through the
 sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
 a link to the fix commit/PR**. An issue that you resolve without a barrier is a a violation of this contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
 RUN: N` in your FINAL REPORT.
@@ -469,12 +488,65 @@ Things that cost a previous run real time, and are NOT product defects:
    surest way to end it before the next question can be tested — and the resulting "it didn't
    advance" failure is a correct production, not a defect. Pick the narrowest option leaving **>25**,
    and report NOT EXERCISED when the cohort offers none.
+15. **A CI job log can only be read from the TAIL, so a red step in the middle of a job is invisible**
+   (2026-09-04). The live-check jobs are long chains (`af-truth` is 16 steps) and every step runs
+   behind `if: !cancelled()`, so a failing step's own summary ends up thousands of lines from the
+   end — and `get_job_logs` returns a tail. Three red steps cost most of a run to diagnose this way.
+   What actually works, in order: (a) if the failing check's summary NAMES its failures, a tail of
+   ~120 lines is enough — `verify-af-option-card-truth-live.ts` and `verify-af-live-truth.ts` both do
+   this now, and any new live check must; (b) otherwise **re-run that one check locally against
+   production** (`PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node
+   --experimental-strip-types scripts/verify-<x>.ts`), which is faster than fetching log pages and
+   gives the real assertion; (c) a check that passes locally but fails on the runner is
+   runner-latency, i.e. the §14-below class — not a product defect, and not to be reported as one.
+16. **The searchable index is REBUILT under any sweep longer than about an hour** (2026-09-04).
+   `sync_search_listings_ar` (pg_cron jobid 28) runs at `:14` past every hour and the location MV
+   refresh (jobid 17) at `:20`. A witness captured once and reused across a cohort — the chip in
+   `verify-af-full-surface-differential.ts` was captured per cohort and judged minutes later — is
+   stale by construction, and the resulting failure is a comparison between two databases, not a
+   product defect. `settleOnOneIndex()` in `scripts/lib/afSurfaceJudge.ts` is the answer: bracket a
+   re-read with an index fingerprint and report UNDECIDED when it moved. Never widen a tolerance.
+17. **Never assert on a UI state the journey has not OBSERVED itself reach** (2026-09-04). The AF
+   card renders behind a paid LLM turn measured near 40 s, and its meaning is step-dependent: R8.2.1
+   (Back steps to the previous question) and R8.2.2 (Back on question ONE cancels the round, leaving
+   no card) are different, correct behaviours of the same button. A journey that sleeps a fixed
+   1,200 ms and then clicks «رجوع» is sampling a race, and when it loses, production's CORRECT
+   R8.2.2 is reported as a broken R8.2.1. This class has produced four false accusations
+   (2026-08-24, 2026-09-03, 2026-09-04 ×2), each previously "fixed" by widening a number. It is now
+   pinned in source by `scripts/verify-af-live-journey-polling.ts` (offline, in `npm test`): poll
+   for the state, and report NOT EXERCISED when the precondition is genuinely unreachable.
 5. **Advanced Filter lives in the «الوكيل الذكي» (agent) flow, not the Normal Filter «بحث» flow.**
    Reaching it: send an Arabic request, answer the agent's disambiguation (a city that is also a
    region needs «مدينة …»; «تقصد المدينة كاملة، أو حي معيّن؟» needs «المدينة كاملة»), then click
    «خلّنا نحدد الطلب أكثر». A selected AF option shows a checkmark child at `opacity:1/scale(1)` and a
    bolder label — the option container's own background does NOT change, so a background-colour probe
    reports every option unselected.
+
+18. **A CI-only red on a browser journey is a LOAD question before it is a product question, and the
+    answer is measurable — do not argue it from timings** (2026-09-04). Three AF checks were red in CI
+    and green locally, and the red set kept GROWING between runs. A defect does not spread; load does.
+    Two causes, both proven by controlled experiment rather than inferred:
+    - **Contention.** `verify-af-option-card-truth-live.ts` returns 426 checks / 0 failures run ALONE
+      against production, and fails with the exact CI shapes run beside `verify-af-live-truth.ts`.
+      Serializing the sweeps behind the browser jobs was not enough — run #137 failed both browser
+      jobs with no sweep started, because the two browser jobs were still racing each other. They are
+      serialized now (`af-card-state` `needs: [af-truth]`). Reproduce with the two scripts side by
+      side; `PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`.
+    - **The harness asserted on a state it never observed.** `readCardUntil` returned the last state
+      it happened to see when its budget expired, and callers judged it. One missed Q1→Q2 transition
+      became 45 option-level "failures" comparing Q1's pills against a Q2 oracle (driver_room 13 vs 6,
+      balcony 176 vs 22). Fixed by `readCardSettled` — see `scripts/lib/afJourneyPacing.ts` for the
+      rule and `scripts/verify-af-live-journey-polling.ts` for the barrier that keeps it.
+
+19. **`public.ops_search_load_now()` is the standing answer to "is production fit to be measured right
+    now?"** (2026-09-04, shipped by the search-latency routine). Anon-callable; returns
+    `recent_mean_ms`, `search_qps`, `safe_qps`, `degraded`. The AF journeys now WAIT (bounded) for it
+    to clear before starting, and classify a non-arrival against it: a real red when production was
+    healthy, NOT EXERCISED when it was not — and NOT EXERCISED still fails the journey, so this is
+    never a route to green. Do not re-derive fleet load by hand, and do not raise a timeout to get
+    past a degraded window. Context for scale: on 2026-09-04 fleet search mean rose 773ms → 5,109ms at
+    ~3.8 q/s against a measured safe envelope of 1.5 q/s (§40.1), and `apartment_guided_counts_ar` on
+    an unfiltered Buy scope took 14–19s, tripping the anon statement timeout (57014) in CI.
 
 ## Hard safety rails (same as every other engineer — non-negotiable)
 

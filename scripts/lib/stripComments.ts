@@ -27,3 +27,18 @@ export const stripComments = (s: string): string =>
   s.replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '')
     .replace(/([^:])\/\/.*$/gm, '$1');
+
+// Shell variant of the same rule. The deploy guards are bash, and their barriers grep the script
+// text — so a mutant that guts a check and leaves the original line behind as a `#` comment passes
+// an un-stripped grep. Measured 2026-09-03 while hardening the alias gate: replacing
+// `if ! dtg_bundle_is_authentic "$BUNDLE_BODY" "$ALIAS_BUNDLE"; then` with `if false; then` left the
+// name alive in a nearby comment, and verify-deploy-target-guard.ts stayed GREEN on a deploy gate
+// that no longer verified anything. COUNT the survivors of this strip, never the raw source.
+//
+// SCOPE, honestly stated: whole-line `#` comments, plus trailing comments introduced by at least two
+// spaces before the `#` — the convention every script in scripts/ follows. Deliberately NOT stripped:
+// `${VAR#prefix}`, `$#`, `#!/usr/bin/env bash`, and any `#` with a single preceding space, because
+// over-stripping a shape assertion is only fail-closed when the text really was a comment.
+export const stripShellComments = (s: string): string =>
+  s.replace(/^\s*#.*$/gm, '')
+    .replace(/ {2,}#.*$/gm, '');

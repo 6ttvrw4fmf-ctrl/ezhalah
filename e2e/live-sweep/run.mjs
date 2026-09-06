@@ -8,8 +8,8 @@
 // covers less than the floor is itself a failure — that is the way a rotation system rots.
 //
 //   node e2e/live-sweep/run.mjs
-import { FLOORS, WATCHES, findings, journeys, ledgerPlan, ledgerRecord, note, dbCount, pickCityForDeal, sleep,
-         watchStatus, unobservedWatches, WATCH_OFFLINE_COVER } from './sweep.mjs';
+import { FLOORS, WATCHES, findings, undecideds, journeys, ledgerPlan, ledgerRecord, note, dbCount, pickCityForDeal, sleep,
+         watchStatus, unobservedWatches, WATCH_OFFLINE_COVER, productionVerified } from './sweep.mjs';
 import { normalFilter, trendingCity, trendingDistrict, advancedFilter, zeroResult,
          cardClickBack, tabHistory, typedDistrict, clearAll } from './journeys.mjs';
 import { showMoreJourney } from './showmore.mjs';
@@ -89,7 +89,7 @@ async function main() {
   console.error(`ROTATION → deals:  ${deals.map((d) => d.deal + (d.period ? '/' + d.period : '')).join(', ')}`);
   console.error(`ROTATION → types:  ${types.map((t) => t.label ?? t.group).join(', ')}\n`);
 
-  const done = { normal: 0, af: 0, tCity: 0, tDistrict: 0, mobile: 0, buyRent: 0, monthly: 0, zero: 0, cardBack: 0, showMore: 0 };
+  const done = { normal: 0, af: 0, tCity: 0, tDistrict: 0, mobile: 0, buyRent: 0, monthly: 0, zero: 0, cardBack: 0, showMore: 0, showMoreAf: 0 };
   const citiesTested = new Set(); const regionsTested = new Set(); const typesTested = new Set();
   const run = async (label, fn, tally) => {
     console.error(`▶ ${label}`);
@@ -209,6 +209,15 @@ async function main() {
     () => showMoreJourney({ city: RIYADH, deal: 'إيجار', period: 'سنوي', batches: 3 }),
     () => { done.showMore++; citiesTested.add(RIYADH); });
 
+  // AF-SCOPED PAGINATION (owner PERMANENT, 2026-09-04): "the app's actual Load More UI, under an
+  // active AF state, preserves the exact eligible set — no duplicates, no skips, and the committed
+  // predicate never silently changes mid-browse." Same cohort `advancedFilter` already proves opens a
+  // real AF question (villa/Buy Riyadh) — reused here specifically so this journey commits a REAL
+  // predicate through the real UI, then pages through it.
+  await run('«عرض المزيد» under an active AF predicate → set + predicate both survive',
+    () => showMoreJourney({ city: RIYADH, deal: 'بيع', group: 'الفلل والبيوت', typeLabel: 'فيلا', batches: 2, af: true }),
+    () => { done.showMoreAf++; citiesTested.add(RIYADH); });
+
   await run('clear all', () => clearAll({ city: reachableFor('بيع') }));
 
   // ── 5. THE PERMANENT WATCHES for the 2026-08-23 fixes ─────────────────────────────────────────
@@ -245,6 +254,7 @@ async function main() {
   floor('honest-zero journeys', done.zero, FLOORS.zeroResultJourneys);
   floor('card→back journeys', done.cardBack, FLOORS.cardClickBackJourneys);
   floor('«عرض المزيد» journeys', done.showMore, FLOORS.showMoreJourneys);
+  floor('«عرض المزيد» under active AF journeys', done.showMoreAf, FLOORS.showMoreAfJourneys);
   // A permanent watch that did not actually run is a floor miss, not a pass. §40 says deleting a
   // watch fails the barrier; a watch that silently never executes is deletion at runtime, and it
   // used to leave the run green.
@@ -288,13 +298,22 @@ async function main() {
   line('WATCHES BROWSER-EVALUATED', `${WATCHES.filter((w) => watchStatus(w) === 'pass' || watchStatus(w) === 'fail').length}/${WATCHES.length}`);
   line('WATCHES COVERED OFFLINE', WATCHES.filter((w) => watchStatus(w) === 'offline_barrier').length);
   line('WATCHES NOT EVALUATED AT ALL', unobservedWatches().length);
-  line('PRODUCTION VERIFIED', findings.length === 0 ? 'YES' : 'NO');
+  // A comparison the run COULD NOT MAKE is missing coverage, not a pass (incident #47). It is never
+  // a defect either — an index rebuild between two reads says nothing about the product — so it does
+  // not fail the exit code; it takes away the right to claim the surface was verified, and it is
+  // named in full below so the next run knows what to re-drive.
+  line('UNDECIDED COMPARISONS (index moved under the pair — no verdict)', undecideds.length);
+  line('PRODUCTION VERIFIED', productionVerified(findings, undecideds) ? 'YES' : 'NO');
   line('SEARCH & MATCHING HEALTH', `${health}/10`);
   if (dark.length) {
     console.error('\nPERMANENT WATCHES NOT EVALUATED (recorded `skip`, never `pass`):');
     dark.forEach((w) => console.error(`  ⚠ ${w}`));
   }
   if (floorMisses.length) { console.error('\nCOVERAGE FLOORS MISSED:'); floorMisses.forEach((m) => console.error(`  ✗ ${m}`)); }
+  if (undecideds.length) {
+    console.error('\nUNDECIDED (no verdict in either direction — re-drive these journeys on a quiet index):');
+    undecideds.forEach((u, i) => console.error(`  ${i + 1}. [${u.journey}] ${u.detail}`));
+  }
   if (findings.length) {
     console.error('\nDEFECTS (each must be fixed → barriered → deployed → re-tested, never reported and left):');
     findings.forEach((f, i) => console.error(`  ${i + 1}. [${f.journey}] ${f.layerPair} — ${f.detail}`));
@@ -303,7 +322,7 @@ async function main() {
 
   await ledgerRecord('live_browser_sweep', new Date().toISOString().slice(0, 10),
     findings.length ? 'fail' : 'pass',
-    `journeys=${total} cities=${citiesTested.size} defects=${findings.length} floors_missed=${floorMisses.length}`);
+    `journeys=${total} cities=${citiesTested.size} defects=${findings.length} undecided=${undecideds.length} floors_missed=${floorMisses.length}`);
 
   process.exit(findings.length || floorMisses.length ? 1 : 0);
 }

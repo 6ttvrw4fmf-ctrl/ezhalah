@@ -107,10 +107,20 @@ check('the menu marks العربية active and lists English as disabled',
   /testID="language-ar"/.test(menu) && /testID="language-en"/.test(menu) && /langDisabled/.test(menu));
 
 // ── 6) Logout + deletion kept their real paths ───────────────────────────────────────────────────
-check('logout confirm calls signOut() and lands on the logged-out home',
-  /setTimeout\(\(\) => \{ signOut\(\); router\.replace\('\/'\); \}, 1200\)/.test(menu));
+// CONTRACT CHANGE (ops_incident hunt-2026-09-04:auth:03): the confirm no longer signs the UI out on
+// a TIMER. It awaits the real backend sign-out — the 1.2s beat runs alongside it — and only a
+// confirmed sign-out reaches signOut()/router.replace. The old pin asserted the defect, which is why
+// it never saw it; executed proof lives in verify-signout-failure-is-not-silent.ts.
+const logoutBody = menu.slice(menu.indexOf('const onLogout'), menu.indexOf('const onDeleteAccount'));
+check('logout confirm gates on the BACKEND result, then calls signOut() and lands on the logged-out home',
+  /const \[ok\] = await Promise\.all\(\[signOutBackend\(\)[\s\S]{0,90}?\]\);\s*if \(!ok\) \{/.test(logoutBody)
+  && /signOut\(\);\s*router\.replace\('\/'\);/.test(logoutBody)
+  && logoutBody.indexOf('return;') < logoutBody.indexOf("router.replace('/')"));
+const deleteBody = menu.slice(menu.indexOf('const onDeleteAccount'), menu.indexOf('const [devSessions'));
 check('deletion awaits deleteAccount() and only navigates on confirmed success',
-  /const ok = await deleteAccount\(\);\s*if \(!ok\) \{/.test(menu) && /router\.replace\('\/'\);\s*\}/.test(menu.slice(menu.indexOf('onDeleteAccount'))));
+  /const ok = await deleteAccount\(\);\s*if \(!ok\) \{/.test(menu)
+  && /router\.replace\('\/'\);/.test(deleteBody)
+  && deleteBody.indexOf('return;') < deleteBody.indexOf("router.replace('/')"));
 check('the destructive action lives in the account view, not the menu root',
   menu.indexOf('account-menu-delete"') > menu.indexOf("view === 'account'")
   && menu.slice(menu.indexOf("view === 'root'"), menu.indexOf("view === 'appearance'")).indexOf('account-menu-delete"') === -1);

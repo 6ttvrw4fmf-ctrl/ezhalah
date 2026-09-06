@@ -3,9 +3,43 @@
 import {
   BASE, dbCount, assertChain, withPage, setDeal, setPeriod, pickCity, runSearch, tapByText,
   visibleState, defect, note, num, lastCount, sleep, SETTLED_RE, observeWatch,
+  onOneIndex, judgeAdvertisedVsLanded,
 } from './sweep.mjs';
 
 const enc = encodeURIComponent;
+
+// The district panel's readiness ceiling, and deliberately NOT a number of this harness's own
+// invention. src/data/locations.ts aborts the district_options_ar call at 15 s; a harness that gives
+// up sooner than the product does reports its own impatience as a product defect (§40.7). This is a
+// CEILING, not a wait: the loop below breaks the moment the panel is ready (~0.6-1.5 s warm), so the
+// passing path is faster than the fixed 4.2 s sleep it replaces, and only a genuine failure pays it.
+const DISTRICT_PANEL_BUDGET_MS = 15000;
+
+/** The district-panel scrape, lifted out of the journey so the readiness poll re-runs the EXACT
+ *  same reading rather than a second, subtly different one.
+ *
+ *  Match the trending list's STRUCTURE — «1.» / name / «N إعلان» — not the district's spelling.
+ *  Until 2026-08-24 this tested /^حي /, which is not a property of a district name: 1,082 of the
+ *  index's 3,694 (city, district) pairs — 32,712 production-ready rows — carry no «حي » prefix,
+ *  and whole cities have none at all. بيش renders «الخضراء 1 · 4 إعلان», «الحزم 1», «الصفاء»;
+ *  the harness saw zero rows, skipped, and failed the run on a missed coverage floor while
+ *  production was working perfectly. A barrier that cannot see 16% of the inventory reports its
+ *  own blindness as a defect (§40.7), and silently drops the journey the floor exists to force. */
+const scrapeDistrictRows = () => {
+  const t = document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean);
+  const out = [];
+  for (let i = 0; i < t.length - 2; i++) {
+    // ordinal marker, then the name, then its count line
+    if (/^\d+\.$/.test(t[i]) && /إعلان/.test(t[i + 2]) && !/إعلان/.test(t[i + 1])) out.push([t[i + 1], t[i + 2]]);
+  }
+  // Fallback for a rendering without ordinals: any line immediately followed by a count line.
+  if (!out.length) {
+    for (let i = 0; i < t.length - 1; i++) {
+      if (/إعلان/.test(t[i + 1]) && !/إعلان/.test(t[i]) && t[i].length < 40 && /[؀-ۿ]/.test(t[i])) out.push([t[i], t[i + 1]]);
+    }
+  }
+  return out.slice(0, 6);
+};
 /** The DB-truth filter for a plain city+deal(+period) search, in PostgREST's own operators. */
 export function truthFilter({ city, deal, period, types }) {
   let f = `city_ar=eq.${enc(city)}`;
@@ -42,24 +76,30 @@ export async function trendingCity(plan) {
     await setDeal(page, plan.deal);
     await setPeriod(page, plan.period);
     if (plan.beds) { await page.getByText(plan.beds, { exact: true }).first().click().catch(() => {}); await sleep(900); }
-    await page.locator('[data-testid="city-input"]').click(); await sleep(3800);
-    const rows = await page.evaluate(() => {
-      const t = document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean);
-      const out = [];
-      for (let i = 0; i < t.length - 1; i++) if (/إعلان/.test(t[i + 1]) && t[i].length > 1 && t[i].length < 26 && !/إعلان|بحث|مدينة|حي/.test(t[i])) out.push([t[i], t[i + 1]]);
-      return out.slice(0, 6);
+    // ONE INDEX (incident #47). The chip's number is computed when top_cities_by_deal_ar answers and
+    // the landed number when the search RPC does — 20-50 s apart, across an index that is re-synced
+    // at :14 and refreshed at :20 every hour. Bracket the whole window; a mismatch that straddles a
+    // rebuild is UNDECIDED, never a defect. Everything else in the journey runs exactly as before.
+    const settled = await onOneIndex(async () => {
+      await page.locator('[data-testid="city-input"]').click(); await sleep(3800);
+      const rows = await page.evaluate(() => {
+        const t = document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean);
+        const out = [];
+        for (let i = 0; i < t.length - 1; i++) if (/إعلان/.test(t[i + 1]) && t[i].length > 1 && t[i].length < 26 && !/إعلان|بحث|مدينة|حي/.test(t[i])) out.push([t[i], t[i + 1]]);
+        return out.slice(0, 6);
+      });
+      if (!rows.length) { note(`${name}: no trending city rows rendered — skipped`); return null; }
+      const [cityName, countText] = rows[0];
+      const advertised = num(countText);
+      if (!await pickCity(page, cityName)) { note(`${name}: could not select «${cityName}» — skipped`); return null; }
+      await runSearch(page);
+      return { cityName, advertised, landed: lastCount(await page.evaluate(() => document.body.innerText)) };
     });
-    if (!rows.length) { note(`${name}: no trending city rows rendered — skipped`); return null; }
-    const [cityName, countText] = rows[0];
-    const advertised = num(countText);
-    if (!await pickCity(page, cityName)) { note(`${name}: could not select «${cityName}» — skipped`); return null; }
-    await runSearch(page);
-    const landed = lastCount(await page.evaluate(() => document.body.innerText));
-    if (advertised != null && landed != null && advertised !== landed) {
-      defect(name, 'UI→RENDERED', `trending city «${cityName}» advertised ${advertised}, landed ${landed}`);
-    }
-    return assertChain(`${name}:${cityName}`, {
-      intent: { city: cityName, deal: plan.deal, period: plan.period }, page, requests,
+    const seen = settled.result;
+    if (!seen) return null;
+    judgeAdvertisedVsLanded(name, `trending city «${seen.cityName}»`, seen.advertised, seen.landed, settled);
+    return assertChain(`${name}:${seen.cityName}`, {
+      intent: { city: seen.cityName, deal: plan.deal, period: plan.period }, page, requests,
     });
   });
 }
@@ -74,45 +114,73 @@ export async function trendingDistrict(plan) {
     // A narrowing filter is the point: an unnarrowed district count cannot expose the class of bug
     // this journey exists for (the count that ignores the active filter).
     if (plan.priceMax) { await page.locator('[data-testid="price-max-input"]').fill(String(plan.priceMax)).catch(() => {}); await sleep(1600); }
-    await page.locator('[data-testid="district-input"]').click(); await sleep(4200);
-    // Match the trending list's STRUCTURE — «1.» / name / «N إعلان» — not the district's spelling.
-    // Until 2026-08-24 this tested /^حي /, which is not a property of a district name: 1,082 of the
-    // index's 3,694 (city, district) pairs — 32,712 production-ready rows — carry no «حي » prefix,
-    // and whole cities have none at all. بيش renders «الخضراء 1 · 4 إعلان», «الحزم 1», «الصفاء»;
-    // the harness saw zero rows, skipped, and failed the run on a missed coverage floor while
-    // production was working perfectly. A barrier that cannot see 16% of the inventory reports its
-    // own blindness as a defect (§40.7), and silently drops the journey the floor exists to force.
-    const rows = await page.evaluate(() => {
-      const t = document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean);
-      const out = [];
-      for (let i = 0; i < t.length - 2; i++) {
-        // ordinal marker, then the name, then its count line
-        if (/^\d+\.$/.test(t[i]) && /إعلان/.test(t[i + 2]) && !/إعلان/.test(t[i + 1])) out.push([t[i + 1], t[i + 2]]);
+    // ONE INDEX (incident #47). Same contract as trending-city one level down: the panel's number
+    // comes from district_options_ar and the landed number from the search RPC, tens of seconds
+    // apart. Only judgeAdvertisedVsLanded() may accuse, and only on an index proven not to have
+    // moved between the two reads. The R14.4.2 checks inside are unrelated to the bracket and run
+    // exactly as before — `result` is handed back either way.
+    const settled = await onOneIndex(async () => {
+      // R14.4.2 OBSERVER. Attached BEFORE the click so the panel's own RPC cannot land unseen. It is
+      // what lets an empty panel be told apart from a slow one — see the decision below.
+      const rpc = { returned: false, rows: null, ms: null, status: null };
+      const clickAt = Date.now();
+      page.on('response', async (r) => {
+        if (!r.url().includes('district_options_ar') || rpc.returned) return;
+        rpc.status = r.status();
+        try { const b = await r.json(); rpc.rows = Array.isArray(b) ? b.length : -1; } catch { rpc.rows = -1; }
+        rpc.returned = true; rpc.ms = Date.now() - clickAt;
+      });
+      await page.locator('[data-testid="district-input"]').click();
+      // POLL FOR READINESS; NEVER SLEEP A FIXED AMOUNT AND LOOK ONCE. This was `sleep(4200)` followed
+      // by a single scrape, which is a RACE dressed as a budget: the panel's RPC answers in ~0.6-1.5 s
+      // warm, so 4.2 s usually won — and when it did not (cold plan, or a browser job starved by the
+      // concurrent RPC sweeps, the load defect #1692 fixed), the scrape read a panel that had not
+      // rendered yet. Polling passes as soon as the panel is actually ready, so the normal case gets
+      // FASTER, and the slow case becomes a real reading instead of a coin flip.
+      let rows = [];
+      while (Date.now() - clickAt < DISTRICT_PANEL_BUDGET_MS) {
+        rows = await page.evaluate(scrapeDistrictRows);
+        if (rows.length) break;
+        await sleep(250);
       }
-      // Fallback for a rendering without ordinals: any line immediately followed by a count line.
-      if (!out.length) {
-        for (let i = 0; i < t.length - 1; i++) {
-          if (/إعلان/.test(t[i + 1]) && !/إعلان/.test(t[i]) && t[i].length < 40 && /[؀-ۿ]/.test(t[i])) out.push([t[i], t[i + 1]]);
+      const renderMs = Date.now() - clickAt;
+      // AN EMPTY PANEL IS NOT AUTOMATICALLY A SKIP. The old line noted "no numbered district rows" and
+      // returned null for BOTH of the two cases below, so a panel that never rendered was recorded as
+      // a skip — green, and indistinguishable from a city that genuinely has no districts. That is the
+      // shape R14.4.2 exists to forbid ("the field goes empty and the user loses the surface"), and it
+      // is exactly why the district render bug could fail once, pass on re-run, and never be a defect.
+      // The panel's OWN RPC settles it: what the surface was given is not a guess.
+      if (!rows.length) {
+        if (!rpc.returned) {
+          defect(name, 'R14.4.2', `district panel never rendered: district_options_ar had not answered `
+            + `${renderMs} ms after the field was opened. The user is left with an empty surface.`);
+        } else if (rpc.rows > 0) {
+          defect(name, 'R14.4.2', `district panel rendered NO rows ${renderMs} ms after the field was `
+            + `opened, but district_options_ar answered ${rpc.rows} option(s) in ${rpc.ms} ms `
+            + `(status ${rpc.status}). The data arrived and the surface did not show it.`);
+        } else {
+          note(`${name}: district_options_ar returned ${rpc.rows} options in ${rpc.ms} ms — this scope `
+            + `genuinely has no districts, skipped`);
         }
+        return null;
       }
-      return out.slice(0, 6);
+      const [districtName, countText] = rows[0];
+      const advertised = num(countText);
+      // §41.2: take the ELEMENT, never bare viewport coordinates. The same shape of click in
+      // pickCity() left the mobile «بحث» permanently unclickable and took out the §34 mobile floor
+      // on every «بيع» rotation; this was the only other one left in the harness.
+      const dh = await page.evaluateHandle((d) => [...document.querySelectorAll('div')]
+        .filter((e) => (e.innerText || '').trim().startsWith(d) && (e.innerText || '').length < 60).pop(), districtName);
+      const drow = dh.asElement();
+      if (drow) { await drow.scrollIntoViewIfNeeded().catch(() => {}); await drow.click().catch(() => {}); }
+      await sleep(1400);
+      await runSearch(page);
+      return { districtName, advertised, landed: lastCount(await page.evaluate(() => document.body.innerText)) };
     });
-    if (!rows.length) { note(`${name}: no numbered district rows — skipped`); return null; }
-    const [districtName, countText] = rows[0];
-    const advertised = num(countText);
-    // §41.2: take the ELEMENT, never bare viewport coordinates. The same shape of click in
-    // pickCity() left the mobile «بحث» permanently unclickable and took out the §34 mobile floor
-    // on every «بيع» rotation; this was the only other one left in the harness.
-    const dh = await page.evaluateHandle((d) => [...document.querySelectorAll('div')]
-      .filter((e) => (e.innerText || '').trim().startsWith(d) && (e.innerText || '').length < 60).pop(), districtName);
-    const drow = dh.asElement();
-    if (drow) { await drow.scrollIntoViewIfNeeded().catch(() => {}); await drow.click().catch(() => {}); }
-    await sleep(1400);
-    await runSearch(page);
-    const landed = lastCount(await page.evaluate(() => document.body.innerText));
-    if (advertised != null && landed != null && advertised !== landed) {
-      defect(name, 'UI→RENDERED', `district «${districtName}» advertised ${advertised}, landed ${landed}`);
-    }
+    const seen = settled.result;
+    if (!seen) return null;
+    const { districtName, advertised, landed } = seen;
+    judgeAdvertisedVsLanded(name, `district «${districtName}»`, advertised, landed, settled);
     return assertChain(`${name}:${districtName}`, { intent: { city: plan.city, deal: plan.deal, district: districtName }, page, requests});
   });
 }
@@ -142,6 +210,108 @@ export async function trendingDistrict(plan) {
  * picks up the result cards behind the overlay: a text-based reader on this same screen returned
  * «رقم رخصة الإعلان / 7100249846» and «عمر العقار / 2025» as if they were the question's options.
  */
+// Extracted from advancedFilter (below) 2026-09-04, ZERO behavior change, so
+// afScopedShowMoreJourney (showmore.mjs) can commit a real AF predicate through the exact same UI
+// path instead of a second hand-rolled copy of this ~75-line interaction sequence. Opens the AF
+// entry point on an ALREADY-SEARCHED page, answers the first offered question's first option, then
+// تخطي's the rest of the round so exactly ONE predicate is committed (matching every other AF
+// journey's "one predicate" discipline). Returns null (with a `note`) on every harness/product
+// condition that means "nothing to assert here" — AF not offered, no question card, no options, an
+// unclickable control — exactly as advancedFilter always has. `served` (optional) is cleared at the
+// SAME instant as `requests` — right before the AF-narrowed search's own request fires — so a caller
+// tracking response bodies (showmore.mjs) sees exactly that narrowed search's rows, not whatever the
+// pre-AF (broader) search already served.
+export async function commitOneAfAnswer(page, name, requests, before, served) {
+  // ONE INDEX (incident #47). The chip's promised count is computed when the AF counts RPC answers
+  // and the landed count when the narrowed search does — a minute or more apart on this journey,
+  // across an index re-synced at :14 and refreshed at :20 every hour. The interaction is unchanged;
+  // it is only BRACKETED, so a promised≠landed pair that straddles a rebuild is UNDECIDED rather
+  // than an accusation. A real AF mismatch is deterministic and still fails the first stable read.
+  const settled = await onOneIndex(() => afAnswerRound(page, name, requests, before, served));
+  const seen = settled.result;
+  if (seen) judgeAdvertisedVsLanded(name, `AF chip «${seen.pick.key}»`, seen.promised, seen.landed, settled);
+  return seen;
+}
+
+async function afAnswerRound(page, name, requests, before, served) {
+  const narrow = page.getByText('خلّنا نحدد الطلب أكثر', { exact: false });
+  if (!await narrow.count()) {
+    if (before != null && before > 25) note(`${name}: AF not offered at ${before} results (allowed: needs a useful question)`);
+    return null;
+  }
+  await narrow.first().scrollIntoViewIfNeeded(); await narrow.first().click();
+  await sleep(9500);
+
+  // Everything below reads ONLY inside af-card.
+  const readCard = () => page.evaluate(() => {
+    const card = document.querySelector('[data-testid="af-card"]');
+    if (!card) return null;
+    const txt = (el) => (el?.innerText || '').trim();
+    return {
+      title: txt(card.querySelector('[data-testid="af-question-title"]')) || null,
+      confirm: txt(card.querySelector('[data-testid="af-confirm"]')) || null,
+      hasSkip: !!card.querySelector('[data-testid="af-skip"]'),
+      showResults: /عرض النتائج/.test(txt(card)),
+      options: [...card.querySelectorAll('[data-testid^="af-option-"]')].map((e) => ({
+        key: e.getAttribute('data-testid').replace('af-option-', ''),
+        text: txt(e).replace(/\n+/g, ' '),
+      })),
+    };
+  });
+
+  const first = await readCard();
+  if (!first || !first.title) { note(`${name}: AF opened but no question card rendered — skipped`); return null; }
+  if (!first.options.length) { note(`${name}: question «${first.title}» rendered no options — skipped`); return null; }
+  // The removed control must not come back inside the flow — a live check on R8.3.1.
+  if (first.showResults) {
+    defect(name, 'UI→UI', `«عرض النتائج» is back inside the AF card — the owner removed it 2026-08-28 (af-no-show-results-in-flow)`);
+  }
+
+  const pick = first.options[0];
+  const promised = num((pick.text.match(/([\d,٬]+)\s*$/) || [])[1]);
+  const footBefore = num((first.confirm || '').match(/([\d,٬]+)/)?.[1]);
+  const clicked = await page.locator(`[data-testid="af-option-${pick.key}"]`).first()
+    .click({ timeout: 9000 }).then(() => true).catch(() => false);
+  if (!clicked) { note(`${name}: option «${pick.key}» not clickable — harness, skipped`); return null; }
+  await sleep(3000);
+
+  // R7.1.2 — the Continue button shows the count for the current tentative selection.
+  const afterPick = await readCard();
+  const footAfter = num((afterPick?.confirm || '').match(/([\d,٬]+)/)?.[1]);
+  if (promised != null && footAfter != null) observeWatch('monthly-af-counts-update');
+  if (promised != null && footAfter != null && footAfter !== promised) {
+    defect(name, 'UI→UI', `chip «${pick.key}» promised ${promised} but «متابعة» reads ${footAfter}`
+      + `${footBefore != null ? ` (was ${footBefore})` : ''} (monthly-af-counts-update)`);
+  }
+
+  // Commit this answer, then تخطي the rest of the round so exactly ONE predicate is committed.
+  requests.length = 0;
+  if (served) served.length = 0;
+  const beforeTurns = await page.evaluate(() => [...document.body.innerText.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].length);
+  let advanced = await page.locator('[data-testid="af-confirm"]').first()
+    .click({ timeout: 9000 }).then(() => true).catch(() => false);
+  if (!advanced) { note(`${name}: «متابعة» not clickable — harness, skipped`); return null; }
+  // Bounded skip-out, the same shape verify-af-live-truth.ts uses: AF_ROUND_MAX_QUESTIONS is 4,
+  // so 8 hops cannot loop forever even if a click is swallowed. Break when the card is gone (the
+  // round ended) or when it is open with no تخطي (the intro/mining state has no question to skip).
+  for (let hop = 0; hop < 8; hop++) {
+    await sleep(5000);
+    const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
+    if (!open) break;
+    const skippable = await page.evaluate(() => !!document.querySelector('[data-testid="af-skip"]'));
+    if (!skippable) break;
+    if (!await page.locator('[data-testid="af-skip"]').first().click({ timeout: 9000 }).then(() => true).catch(() => false)) {
+      note(`${name}: «تخطي» not clickable at hop ${hop} — harness`); break;
+    }
+  }
+  await page.waitForFunction((n) => [...document.body.innerText.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].length > n,
+    beforeTurns, { timeout: 50000 }).catch(() => {});
+  await sleep(3500);
+
+  const landed = lastCount(await page.evaluate(() => document.body.innerText));
+  return { title: first.title, pick, promised, landed };
+}
+
 export async function advancedFilter(plan) {
   const name = `af:${plan.city}/${plan.deal}${plan.period ? '/' + plan.period : ''}/${plan.typeLabel ?? 'any'}`;
   return withPage(false, async (page, requests) => {
@@ -155,84 +325,9 @@ export async function advancedFilter(plan) {
     await runSearch(page);
     const before = lastCount(await page.evaluate(() => document.body.innerText));
 
-    const narrow = page.getByText('خلّنا نحدد الطلب أكثر', { exact: false });
-    if (!await narrow.count()) {
-      if (before != null && before > 25) note(`${name}: AF not offered at ${before} results (allowed: needs a useful question)`);
-      return null;
-    }
-    await narrow.first().scrollIntoViewIfNeeded(); await narrow.first().click();
-    await sleep(9500);
-
-    // Everything below reads ONLY inside af-card.
-    const readCard = () => page.evaluate(() => {
-      const card = document.querySelector('[data-testid="af-card"]');
-      if (!card) return null;
-      const txt = (el) => (el?.innerText || '').trim();
-      return {
-        title: txt(card.querySelector('[data-testid="af-question-title"]')) || null,
-        confirm: txt(card.querySelector('[data-testid="af-confirm"]')) || null,
-        hasSkip: !!card.querySelector('[data-testid="af-skip"]'),
-        showResults: /عرض النتائج/.test(txt(card)),
-        options: [...card.querySelectorAll('[data-testid^="af-option-"]')].map((e) => ({
-          key: e.getAttribute('data-testid').replace('af-option-', ''),
-          text: txt(e).replace(/\n+/g, ' '),
-        })),
-      };
-    });
-
-    const first = await readCard();
-    if (!first || !first.title) { note(`${name}: AF opened but no question card rendered — skipped`); return null; }
-    if (!first.options.length) { note(`${name}: question «${first.title}» rendered no options — skipped`); return null; }
-    // The removed control must not come back inside the flow — a live check on R8.3.1.
-    if (first.showResults) {
-      defect(name, 'UI→UI', `«عرض النتائج» is back inside the AF card — the owner removed it 2026-08-28 (af-no-show-results-in-flow)`);
-    }
-
-    const pick = first.options[0];
-    const promised = num((pick.text.match(/([\d,٬]+)\s*$/) || [])[1]);
-    const footBefore = num((first.confirm || '').match(/([\d,٬]+)/)?.[1]);
-    const clicked = await page.locator(`[data-testid="af-option-${pick.key}"]`).first()
-      .click({ timeout: 9000 }).then(() => true).catch(() => false);
-    if (!clicked) { note(`${name}: option «${pick.key}» not clickable — harness, skipped`); return null; }
-    await sleep(3000);
-
-    // R7.1.2 — the Continue button shows the count for the current tentative selection.
-    const afterPick = await readCard();
-    const footAfter = num((afterPick?.confirm || '').match(/([\d,٬]+)/)?.[1]);
-    if (promised != null && footAfter != null) observeWatch('monthly-af-counts-update');
-    if (promised != null && footAfter != null && footAfter !== promised) {
-      defect(name, 'UI→UI', `chip «${pick.key}» promised ${promised} but «متابعة» reads ${footAfter}`
-        + `${footBefore != null ? ` (was ${footBefore})` : ''} (monthly-af-counts-update)`);
-    }
-
-    // Commit this answer, then تخطي the rest of the round so exactly ONE predicate is committed.
-    requests.length = 0;
-    const beforeTurns = await page.evaluate(() => [...document.body.innerText.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].length);
-    let advanced = await page.locator('[data-testid="af-confirm"]').first()
-      .click({ timeout: 9000 }).then(() => true).catch(() => false);
-    if (!advanced) { note(`${name}: «متابعة» not clickable — harness, skipped`); return null; }
-    // Bounded skip-out, the same shape verify-af-live-truth.ts uses: AF_ROUND_MAX_QUESTIONS is 4,
-    // so 8 hops cannot loop forever even if a click is swallowed. Break when the card is gone (the
-    // round ended) or when it is open with no تخطي (the intro/mining state has no question to skip).
-    for (let hop = 0; hop < 8; hop++) {
-      await sleep(5000);
-      const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
-      if (!open) break;
-      const skippable = await page.evaluate(() => !!document.querySelector('[data-testid="af-skip"]'));
-      if (!skippable) break;
-      if (!await page.locator('[data-testid="af-skip"]').first().click({ timeout: 9000 }).then(() => true).catch(() => false)) {
-        note(`${name}: «تخطي» not clickable at hop ${hop} — harness`); break;
-      }
-    }
-    await page.waitForFunction((n) => [...document.body.innerText.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].length > n,
-      beforeTurns, { timeout: 50000 }).catch(() => {});
-    await sleep(3500);
-
-    const landed = lastCount(await page.evaluate(() => document.body.innerText));
-    if (promised != null && landed != null && promised !== landed) {
-      defect(name, 'UI→RENDERED', `AF chip «${pick.key}» promised ${promised}, landed ${landed}`);
-    }
-    return assertChain(`${name}:${first.title}`, { intent: { city: plan.city, deal: plan.deal, period: plan.period }, page, requests });
+    const answer = await commitOneAfAnswer(page, name, requests, before);
+    if (!answer) return null;
+    return assertChain(`${name}:${answer.title}`, { intent: { city: plan.city, deal: plan.deal, period: plan.period }, page, requests });
   });
 }
 

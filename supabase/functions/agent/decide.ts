@@ -97,6 +97,43 @@ export function wantsGuidedInterview(rawText: string): boolean {
   return INTERVIEW_PHRASE_RE.test(String(rawText ?? ""));
 }
 
+/**
+ * A COUNTRY-LEVEL LOCATION IS NOT A LOCATION (owner, 2026-09-04).
+ *
+ * Nationwide / «كل المملكة» was removed from the product: the Normal Filter has always refused a
+ * search with no city («الرجاء اختيار مدينة من القائمة»). The agent had no such rule, so a turn
+ * whose resolved location was «المملكة العربية السعودية» — or nothing at all — still reached
+ * hasEnoughToSearch() through some OTHER signal (a bare type is enough) and searched unscoped.
+ * Reproduced in production 2026-09-04, after the client-side affordance was already removed:
+ *   «ابغى شقة للبيع في كل مدن المملكة» → p_cities/p_districts/p_region_ids all null → 39,055 rows.
+ *
+ * LITERAL MIRROR of COUNTRY_ALIASES + the loose Kingdom test in src/data/regions.ts
+ * (isCountryWideQuery). Kept as a physical copy for the same reason INTERVIEW_PHRASE_RE is: this
+ * file must stay Deno- and plain-Node-importable with zero module-alias resolution, and
+ * regions.ts pulls in the app's module graph. If you change one, change both —
+ * scripts/verify-agent-decide-turn.ts is the tripwire.
+ */
+const COUNTRY_ONLY_RE =
+  /^(the\s+)?(kingdom( of saudi arabia)?|saudi( arabia)?|ksa|المملكة( العربية السعودية)?|السعودية|السعوديه|العربية السعودية|سعودية)$/i;
+
+/** Strips the Arabic "all of / in all of" prefixes that do not change the place being named. */
+function bareLocation(v: unknown): string {
+  return String(v ?? "").trim().replace(/^(في\s+)?(كل|جميع)\s+/i, "").replace(/^في\s+/i, "").trim();
+}
+
+/**
+ * A search needs a REAL place. False when the location is absent, or names the country rather than
+ * a city/region/district — the two cases that produce an unscoped result set.
+ */
+export function hasUsableLocation(state: EstablishedState): boolean {
+  const loc = bareLocation(state.location);
+  if (!loc) return false;
+  if (COUNTRY_ONLY_RE.test(loc)) return false;
+  // «كل مدن المملكة» / «مدن السعودية» and friends: names the Kingdom, not a city.
+  if (/(المملك|السعودي|\bksa\b|\bsaudi\b|\bkingdom\b)/i.test(loc) && !/[،,]/.test(loc)) return false;
+  return true;
+}
+
 /** Hard, code-enforced ceiling on clarifying questions before the first search (owner ruling). */
 export const QUESTION_BUDGET_CEILING = 2;
 
@@ -144,7 +181,65 @@ export function decideAgentTurn(input: DecideInput): DecideResult {
   // (index.ts) is responsible for treating the still-ambiguous location term as ABSENT rather than
   // passing the unresolved token through to the search once the ladder reaches "listings" this way;
   // see index.ts's own comment at its `decideAgentTurn()` call site for that half of the fix.
-  if (locationAmbiguous && askCount < QUESTION_BUDGET_CEILING) {
+  //
+  // THE BOUNDED LOCATION QUESTION OUTRANKS THE BUDGET CEILING (owner, 2026-09-05). The `askCount <
+  // CEILING` bound above is REMOVED, deliberately, and this is the third revision of this line —
+  // read why before restoring it.
+  //   round 1: no bound at all → asked forever (a real bug).
+  //   round 2: bounded by the ceiling → once spent, an unresolved ambiguity fell through to steps
+  //            2/3 and turnWiring cleared the location, whose own comment said it plainly:
+  //            "absent, nationwide, never guessed". That IS the nationwide search, reached from a
+  //            perfectly ordinary user answer: «الرياض» is a twin (city AND region), so answering
+  //            the city question with it produced p_cities=null and 39,015 listings (verified in
+  //            production 2026-09-05, after the no-place gate below had already shipped).
+  //   round 3 (here): unbounded again, but SAFE, because the two rounds differ in what is asked.
+  //
+  // WHY THIS DOES NOT RESTORE ROUND 1'S LOOP. This question is CLOSED, not open: index.ts pairs it
+  // with a pre-built `ambiguityReply` naming both options («مدينة الرياض ولا منطقة الرياض كاملة؟»),
+  // and the client resolves either answer deterministically without another model round-trip
+  // (regionOrCityChoice / twinWholeAreaIsCity / scopedLocation in src/app/agent.tsx). One question,
+  // two named answers, resolved — so `locationAmbiguous` is false on the next turn by construction.
+  // Round 1 looped because nothing consumed the answer; that machinery exists now.
+  //
+  // And the floor under it is absolute: even if an answer somehow never resolved, the worst case is
+  // another question. It can no longer be a nationwide search, because step 1c below refuses to
+  // search without a real place and turnWiring can no longer downgrade an ambiguity into one.
+  if (locationAmbiguous) {
+    return { kind: "message", askCount: askCount + 1 };
+  }
+
+  // 1c. LOCATION IS REQUIRED, NOT OPTIONAL (owner, 2026-09-04). Every step below this line may
+  // decide to SEARCH; none of them may do so without a real place, because the only search that
+  // can be issued without one is the nationwide search the product removed.
+  //
+  // THIS DELIBERATELY NARROWS the 2026-08-30 rule one line down ("search anyway ... broad/nationwide
+  // if that's nothing at all — missing optional information must not block it"). That rule stands
+  // for every OPTIONAL field; location is not one of them. The Normal Filter has always enforced
+  // exactly this and refuses with «الرجاء اختيار مدينة من القائمة»; the agent was the only surface
+  // that did not, which is why a removed scope stayed reachable in production until 2026-09-04.
+  //
+  // Note the consequence, accepted knowingly: a user who never names a city keeps getting the city
+  // question instead of results. That is the same answer the Filter gives, and an honest question is
+  // better than 39,055 listings from cities the user never asked about.
+  // NO EXEMPTION FOR AMBIGUITY — and that is a correction of my own earlier reasoning (2026-09-04),
+  // which exempted it on the belief that the convergence search was "scoped to the ambiguous term".
+  // It was not: turnWiring cleared the location outright. Step 1 above now always asks instead, so
+  // this line is unreachable for an ambiguity — it stays unexempted anyway, so that a future change
+  // to the ladder's ORDER cannot quietly reopen the door.
+  if (!hasUsableLocation(establishedState)) {
+    return { kind: "message", askCount: askCount + 1 };
+  }
+
+  // 1d. A LOCATION WITH NO PROPERTY TYPE ASKS FOR THE TYPE (owner, 2026-09-06).
+  // «ابغى عقار في جدة» used to search every type at once — apartments, villas, land and shops in
+  // one list. The owner's rule for the agent is "location + property type ⇒ search", so a location
+  // on its own is one field short and worth exactly one question.
+  //
+  // BOUNDED, unlike the location gate above it, and the difference is deliberate: a missing type
+  // degrades the results, a missing/nationwide location makes them meaningless. So this one respects
+  // the ceiling — a user who will not name a type still gets their search rather than an endless
+  // question. That is also what keeps this from becoming the third ask-loop in this file.
+  if (!established(establishedState.type) && askCount < QUESTION_BUDGET_CEILING) {
     return { kind: "message", askCount: askCount + 1 };
   }
 
@@ -155,8 +250,8 @@ export function decideAgentTurn(input: DecideInput): DecideResult {
     return { kind: "listings", askCount };
   }
 
-  // 3. Budget exhausted → search anyway with whatever is known, broad/nationwide if that's
-  // nothing at all. "Missing optional information must not block it" (owner, verbatim).
+  // 3. Budget exhausted → search anyway with whatever is known. Location is already guaranteed
+  // usable by step 1c, so "broad" here means a whole city/region — never the whole Kingdom.
   if (askCount >= QUESTION_BUDGET_CEILING) {
     return { kind: "listings", askCount };
   }

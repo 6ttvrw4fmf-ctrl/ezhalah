@@ -89,10 +89,18 @@ check(
 // 5. The approved-baseline advance sits structurally AFTER the bundle-verification block, so a
 //    failure anywhere in it can never reach the advance code (offset check, not just presence — a
 //    paste error could put the advance code earlier while both strings still exist in the file).
-const baselineIdx = sh.indexOf('Recording $LOCAL as the new approved production baseline');
+//    2026-09-04: the advance moved into scripts/record-deploy-baseline.sh (it could only ever be
+//    exercised by deploying production, so the one step nothing had run is the one that broke). The
+//    ORDERING requirement is unchanged and is still measured here — on the invocation, which is what
+//    actually executes, not on a message that has moved house. Comments are stripped first so a
+//    mention in prose cannot satisfy it.
+const shCode = sh.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+const baselineIdx = shCode.search(/^\s*scripts\/record-deploy-baseline\.sh\s+"\$LOCAL"/m);
+const loopIdxCode = shCode.search(/while\s*\[\s*"\$SECONDS"\s*-lt\s*"\$POLL_DEADLINE"\s*\]/);
 check(
   'the approved-baseline advance sits after the bundle-verification block',
-  baselineIdx !== -1 && loopIdx !== -1 && baselineIdx > loopIdx,
+  baselineIdx !== -1 && loopIdxCode !== -1 && baselineIdx > loopIdxCode,
+  `poll loop at ${loopIdxCode}, baseline recorder invoked at ${baselineIdx}`,
 );
 
 // 6. Reporting stays accurate: deploy-frontend.yml's Report step must still derive SHIPPED from the

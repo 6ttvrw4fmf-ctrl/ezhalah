@@ -20,8 +20,11 @@ the numeric specs. So:
      Residence renders the main listing's specs as data-attributes on the map pin:
          data-rooms / data-size / data-bathrooms / data-clean_price
      plus the price text in .price_area, geo in data-cur_lat / data-cur_long. Area / age can also
-     fall back to the Arabic content text. Gallery photos come from the #property_slider_carousel
-     <a class="prettygalery"> hrefs (full-size) + the featured-media source_url.
+     fall back to the Arabic content text. Gallery photos come from the lightbox_property_wrapper
+     carousel block (full gallery) or the property_header_gallery_wrapper 5-image header grid,
+     + the featured-media source_url. (The theme dropped the old #property_slider_carousel /
+     .prettygalery markup — 0 hits on every live page checked 2026-09-05, which is why 172 DB rows
+     sat at exactly 1 image: only featured_media survived.)
 
 DEAL TYPE comes from property_action_category (the clean signal). مزاد (auction) → the whole
 listing is SKIPPED (user decision: NO auctions).
@@ -235,10 +238,10 @@ def _num(s: Optional[str]) -> Optional[int]:
         return None
 
 
-def _price_from_text(s: Optional[str]) -> Optional[int]:
-    """Parse a price from free Arabic text, honouring magnitude words: '400 ألف ريال' → 400000,
-    '1.2 مليون' → 1200000. Plain numbers pass through. Sub-1000 results are treated as parse
-    noise (the bug that stored land prices as 400/100 — the 'ألف' was being dropped)."""
+def _amount_from_text(s: Optional[str], *, floor: int) -> Optional[int]:
+    """Parse an amount from free Arabic text, honouring magnitude words: '400 ألف ريال' → 400000,
+    '1.2 مليون' → 1200000. Plain numbers pass through. Anything under `floor` is discarded as
+    parse noise — see the two callers below for why the floor differs between them."""
     if not s:
         return None
     txt = re.sub(r"<[^>]+>", " ", up.unquote(str(s))).translate(_AR_DIGITS).replace("٬", ",")
@@ -254,13 +257,47 @@ def _price_from_text(s: Optional[str]) -> Optional[int]:
     elif any(w in txt for w in ("ألف", "الف", "آلاف")):
         val *= 1_000
     val = int(val)
-    return val if val >= 1000 else None
+    return val if val >= floor else None
+
+
+def _price_from_text(s: Optional[str]) -> Optional[int]:
+    """A TOTAL price. Sub-1000 results are treated as parse noise (the bug that stored land prices
+    as 400/100 — the 'ألف' was being dropped)."""
+    return _amount_from_text(s, floor=1000)
+
+
+def _rate_from_text(s: Optional[str]) -> Optional[int]:
+    """A PER-METRE rate, which has no business meeting a total price's ≥1000 floor: 300 ر.س/م² is
+    an ordinary land rate, and applying the total's floor here was a live defect (2026-09-06).
+    EA22962 publishes «سعر المتر 300ريال» beside a total of «ر.س2,280,000»; _price_from_text
+    discarded the 300 as noise, so the shape-A branch fell through to shape B and stored the
+    TOTAL as the per-metre rate (2,280,000 ر.س/م²) while marking the row price_is_rate — which
+    retracts the source's published total as well. One source figure lost, one invented, from a
+    floor that belongs to the other caller. Magnitude words still apply, so «3 آلاف للمتر» is
+    3,000; only the floor differs."""
+    return _amount_from_text(s, floor=1)
 
 
 def _attr(name: str, html: str) -> Optional[str]:
     """First value of a data-* attribute, read independently of sibling-attribute order."""
     m = re.search(name + r'="([^"]*)"', html)
     return m.group(1) if m else None
+
+
+def _div_block(html_text: str, class_substr: str) -> Optional[str]:
+    """Depth-balanced slice of the FIRST <div> whose class contains class_substr, up to its own
+    closing </div>. This is the per-listing image binding: the detail page also renders 4
+    property_unit_carousel related-listings blocks whose thumbnails belong to OTHER listings, so
+    any collection wider than the gallery div's own subtree would misattribute photos."""
+    m = re.search(r'<div\b[^>]*class="[^"]*' + re.escape(class_substr) + r'[^"]*"', html_text)
+    if not m:
+        return None
+    depth = 0
+    for t in re.finditer(r"<div\b|</div>", html_text[m.start():]):
+        depth += 1 if t.group(0) != "</div>" else -1
+        if depth == 0:
+            return html_text[m.start():m.start() + t.end()]
+    return None  # unbalanced markup → no block, degrade to fewer images, never wrong ones
 
 
 def fetch_taxonomies(get) -> dict[str, dict[int, str]]:
@@ -376,7 +413,7 @@ def parse_detail(html_text: str) -> dict[str, Any]:
     if qm:
         qual = re.sub(r"<[^>]+>", " ", qm.group(1))
     if re.search(r"(?:لل|ال)\s*متر", disp):
-        qual_rate = _price_from_text(qual) if re.search(r"(?:لل|ال)\s*متر", qual) else None
+        qual_rate = _rate_from_text(qual) if re.search(r"(?:لل|ال)\s*متر", qual) else None
         if qual_rate:
             out["price_per_meter"] = qual_rate            # shape A: price stays the TOTAL
         elif out.get("price"):
@@ -394,14 +431,29 @@ def parse_detail(html_text: str) -> dict[str, Any]:
     g = re.search(r'data-cur_lat="([\d.\-]+)"\s+data-cur_long="([\d.\-]+)"', html_text)
     if g and g.group(1) not in ("", "0"):
         out["lat"], out["lng"] = g.group(1), g.group(2)
-    # gallery from the carousel's full-size hrefs; fall back to any uploads image on the page so a
-    # non-standard gallery markup still yields photos (build_photos filters theme assets + dedupes).
-    cm = re.search(r'id="property_slider_carousel"(.*?)</ol>', html_text, re.S)
-    block = cm.group(1) if cm else html_text
-    hrefs = re.findall(r'<a href="(https://eastabha\.sa/wp-content/uploads/[^"]+?\.(?:jpe?g|png|webp))"[^>]*class="prettygalery"', block, re.I)
-    if not hrefs:
-        hrefs = re.findall(r'https://eastabha\.sa/wp-content/uploads/[^"\'\s]+?\.(?:jpe?g|png|webp)', html_text, re.I)
-    out["gallery"] = hrefs
+    # Gallery (rewritten 2026-09-05, verified live on 4 listings): the theme no longer renders
+    # id="property_slider_carousel" / class="prettygalery" ANYWHERE (0 hits on all 5 pages fetched),
+    # so the old selector contributed nothing and only featured_media survived — the DB's
+    # exactly-1-image signature on 172 rows. Today WP Residence renders the FULL gallery as
+    # carousel-items inside div.lightbox_property_wrapper, plus a 5-image header grid in
+    # div.property_header_gallery_wrapper (the fallback). Both are read via the depth-balanced walk
+    # ONLY — the old whole-page fallback (added 2026-08-09) is deleted: it swept 16-45 uploads URLs
+    # per page including the 4 related-listings property_unit_carousel blocks, i.e. other listings'
+    # photos, so it could only ever misbind. Document order inside the block = the source's own
+    # gallery order (first URL is the card thumbnail). The carousel items carry their URLs in
+    # style="background-image:url(…)" (live 33309, 2026-09-05) — not src/href — so we match the
+    # bare uploads-URL pattern anywhere inside the scoped block, which covers all three shapes.
+    # The header grid follows the lightbox: normally its 5 thumbs are size-variants of bases the
+    # lightbox already carries (deduped-by-base in build_photos), but it is both the fallback when
+    # the lightbox is absent AND the sized-sibling source for a bare lightbox URL (build_photos).
+    urls: list[str] = []
+    for blk in (_div_block(html_text, "lightbox_property_wrapper"),
+                _div_block(html_text, "property_header_gallery_wrapper")):
+        if blk:
+            urls += re.findall(
+                r'https://eastabha\.sa/wp-content/uploads/[^"\'\s)]+?\.(?:jpe?g|png|webp)',
+                blk, re.I)
+    out["gallery"] = urls
     return out
 
 
@@ -419,26 +471,46 @@ def _content_specs(content: str) -> dict[str, Any]:
 
 
 def _is_real_photo(u: str) -> bool:
+    # "artboard" was REMOVED from this blacklist 2026-09-05: this agency's genuine listing photos
+    # are its own designed boards literally named Artboard-*.png (live 33309: all 5 photos; 7154:
+    # 7 of 15) — blacklisting the word zeroed out every listing whose featured image was an
+    # Artboard file, the 12% no-image cohort. "logo" stays: it still excludes the og:image SVG.
     low = u.lower()
-    if any(x in low for x in ("/themes/", "/plugins/", "logo", "placeholder", "icon", "avatar", "artboard")):
+    if any(x in low for x in ("/themes/", "/plugins/", "logo", "placeholder", "icon", "avatar")):
         return False
     return True
 
 
 def _strip_size(u: str) -> str:
-    # turn ...-835x467.jpg into the original (...-scaled or bare). Keep -scaled, drop -WxH.
+    # ...-835x467.jpg → the base (...-scaled or bare). DEDUPE KEY ONLY on this host — never store
+    # the stripped URL: eastabha's size-stripped originals frequently answer HTTP 422 "Invalid
+    # source image" (live 2026-09-05: 4001 5/6 dead, 33309 5/5 dead after strip; the raw
+    # -1110x623 variants all 200). The source's own sized URL is the working one.
     return re.sub(r"-\d{2,4}x\d{2,4}(?=\.(?:jpe?g|png|webp)$)", "", u, flags=re.I)
 
 
 def build_photos(featured_src: Optional[str], gallery: list[str]) -> list[str]:
-    seen: list[str] = []
-    for u in ([featured_src] if featured_src else []) + gallery:
-        if not u or not _is_real_photo(u):
-            continue
-        u = _strip_size(u)
-        if u not in seen:
-            seen.append(u)
-    return seen
+    """Source order kept (featured = the source's own card thumbnail, then the gallery), deduped
+    BY size-stripped base but storing the raw sized URL verbatim (see _strip_size — stripping
+    kills the URL on this host). A bare base with no -WxH suffix can itself be dead at source
+    (33309's first lightbox entry Artboard-1-5.png), so a bare URL is swapped for a sized sibling
+    of the SAME base from the listing's own blocks when one exists; if none exists the bare URL
+    stays as published (some bare originals do serve, e.g. 3348-scaled.png and all of 7154's).
+    Nothing is ever invented — every stored URL appeared on the listing's own page/media record."""
+    pool = [u for u in ([featured_src] if featured_src else []) + gallery if u and _is_real_photo(u)]
+    sized = {}  # base → first sized variant, in document order
+    for u in pool:
+        base = _strip_size(u)
+        if base != u:
+            sized.setdefault(base, u)
+    out: list[str] = []
+    seen: set[str] = set()
+    for u in pool:
+        base = _strip_size(u)
+        if base not in seen:
+            seen.add(base)
+            out.append(sized.get(base, u) if u == base else u)
+    return out
 
 
 def _listing_url(p: dict) -> str:

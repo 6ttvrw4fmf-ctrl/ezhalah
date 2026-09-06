@@ -62,6 +62,7 @@ import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS, AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -214,6 +215,25 @@ const check = (label: string, ok: boolean, detail = '') => {
 const skip = (label: string, reason: string) => {
   console.log(`SKIP  ${label}\n      inconclusive: ${reason}`);
   skips++; skippedLabels.push(label);
+};
+
+// ── A UI STATE THAT NEVER ARRIVED IS NOT A MEASUREMENT ─────────────────────────────────────────
+// Rationale, reproduction and the exact rule: scripts/lib/afJourneyPacing.ts. In one line — this
+// journey used to assert against whatever was on screen when its wait expired, which is how ONE
+// missed transition became 47 "product" failures in CI on 2026-09-04. A non-arrival is now a real
+// red only when production was healthy while we waited; under a production that is degraded BY ITS
+// OWN MEASURE it is NOT EXERCISED — which still fails this run, because `skips` count against the
+// exit code below. Nothing here can turn a real failure green.
+const loadNow = () => readSearchLoad(SUPABASE_URL, H);
+const unobserved = async (label: string, detail: string) => {
+  const l = await loadNow();
+  if (verdictForNonArrival(l) === 'red') {
+    check(label, false, `${detail} · ${describeLoad(l)} — production was NOT degraded, so this is a real failure`);
+    return;
+  }
+  skip(label, `NOT EXERCISED — the awaited state never arrived within ${AGENT_TURN_MS}ms and ${describeLoad(l)}. ` +
+    `Production is outside its own safe envelope, so this run cannot tell a slow product from a busy one. ` +
+    `${detail}`);
 };
 
 const afKeysOn = (body: any): string[] => AF_PREDICATE_KEYS.filter((k) => body?.[k] != null && !(Array.isArray(body[k]) && body[k].length === 0));
@@ -526,16 +546,15 @@ const scrollToBottom = async () => {
   await page.waitForTimeout(1200);
 };
 const readCard = () => page.evaluate(READ_CARD);
-const readCardUntil = async (pred: (s: CardState) => boolean, timeoutMs = 25_000): Promise<CardState> => {
-  const until = Date.now() + timeoutMs;
-  let last = await readCard();
-  while (Date.now() < until) {
-    if (pred(last)) return last;
-    await page.waitForTimeout(350);
-    last = await readCard();
-  }
-  return last;
-};
+/** THE SETTLED READ. `settled:false` means the state was NEVER observed — the returned card is for
+ *  diagnostics only and must not be asserted against (see scripts/lib/afJourneyPacing.ts). The
+ *  budget is a full AGENT TURN because that is literally what is being awaited: the next card is an
+ *  LLM round trip plus a count RPC, not a paint. The old 25s was sized for a render. */
+const readCardSettled = (pred: (s: CardState) => boolean, timeoutMs = AGENT_TURN_MS) =>
+  settleUntil<CardState>(readCard, pred, timeoutMs, (ms) => page.waitForTimeout(ms));
+/** Legacy convenience for reads whose non-arrival is already handled by the caller's own assertion. */
+const readCardUntil = async (pred: (s: CardState) => boolean, timeoutMs = AGENT_TURN_MS): Promise<CardState> =>
+  (await readCardSettled(pred, timeoutMs)).value;
 /** A RESULTS search, selected by SHAPE, never by arrival order: several calls share the RPC name and
  *  complete in any order, so "the newest response" can be a count-style probe or a sibling call.
  *  A results search is page 0 of a real page size; `want` narrows further (e.g. the AF keys it must carry). */
@@ -688,6 +707,18 @@ let second: Search | null = null;
 try {
   console.log(`── scope: ${CITY} · ${GROUP} · ${TYPE} · ${DEAL} · ${MOBILE ? 'MOBILE 390x844' : 'desktop 1440x900'} ──\n`);
 
+  // ── 0. MEASURE THE PRODUCT, NOT THE QUEUE ───────────────────────────────────────────────────
+  // This journey is latency work behind a paid agent turn. Starting it while production is outside
+  // its own safe envelope measures the queue in front of the database, and every fixed wait below
+  // then expires against a card that was simply still coming. Wait (bounded) for production's own
+  // signal to clear before touching it; if it never does, the journey still runs and reports what
+  // it could not observe — it never invents a pass.
+  const startLoad = await paceUntilHealthy(loadNow, (ms) => page.waitForTimeout(ms), PACE_BUDGET_MS, PACE_POLL_MS, (s) => console.log(s));
+  console.log(startLoad.degraded
+    ? `      [pace] STARTING ANYWAY after ${Math.round(PACE_BUDGET_MS / 60000)}min — ${describeLoad(startLoad)}. ` +
+      `Non-arrivals below will be reported NOT EXERCISED rather than as product failures.`
+    : `      [pace] production is inside its envelope — ${describeLoad(startLoad)}`);
+
   // ── 1. the baseline search ──────────────────────────────────────────────────────────────────
   baseline = await runBaselineSearch();
   check('1. the baseline search landed', !!baseline, `${searches.length} search request(s)`);
@@ -728,8 +759,14 @@ try {
   const seenQ: string[] = [];
   let roundEnd: Search | null = null;
   let roundClosed = false;
+  let roundCardNeverArrived = false;
   for (let step = 1; step <= 8; step++) {
-    const st = await readCardUntil((s) => s.hasCard && s.chip != null && s.options.length > 0 && s.options.every((o) => o.count != null));
+    const r = await readCardSettled((s) => s.hasCard && s.chip != null && s.options.length > 0 && s.options.every((o) => o.count != null));
+    const st = r.value;
+    // A card that never finished rendering is not "the round refused to walk". Before this, the
+    // loop broke here and the two round-level assertions below reported a product failure built on
+    // a card nobody ever saw — two of the five CI reds reproduced locally on 2026-09-04.
+    if (!r.settled && step === 1) { roundCardNeverArrived = true; break; }
     if (!st.hasCard) break;
     if (st.q && seenQ.includes(st.q)) { check(`2. the round never re-asks a question (${st.q})`, false); break; }
     if (st.q) seenQ.push(st.q);
@@ -750,19 +787,26 @@ try {
     }
     check(`2.Q${step}: R8.1.2 — Skip leaves the header chip unchanged`, R.chipEquals(nxt.chip, st.chip), `before=${st.chip} after=${nxt.chip}`);
   }
-  check('2. the round walked at least one question', seenQ.length >= 1, `questions: ${seenQ.join(' → ') || '(none)'}`);
-  // A round where NOTHING was committed closes without a search (finishGuided: `!(q &&
-  // ageFlowChangedRef.current)` → the card just closes) — zero predicate, zero re-search, the
-  // baseline turn stays. If production DOES re-search, that search must carry no predicate and the
-  // same total. Either way the newest headline must still be the baseline number.
-  check('2. skipping every question closed the round', roundClosed, 'the card was still open after 8 skips');
-  if (roundEnd) {
-    check('2. R8.1.1 — the all-skip search carries NO predicate', R.noPredicate(roundEnd.body), `AF keys: ${afKeysOn(roundEnd.body).join(', ') || '(none)'}`);
-    check('2. R8.1.2 — the all-skip search total == baseline total', roundEnd.total === baseline.total, `baseline=${baseline.total} after skips=${roundEnd.total}`);
-  } else console.log('      [diag] no search fired after the all-skip round — nothing committed, nothing re-searched');
-  const hsAfterSkips: string[] = await page.evaluate(READ_HEADLINES);
-  check('2. R8.1.2 — after skipping every question the newest headline is still the baseline number',
-    R.chipEquals(headlineNum(hsAfterSkips[hsAfterSkips.length - 1]), baseline.total), `headline=${headlineNum(hsAfterSkips[hsAfterSkips.length - 1])} baseline=${baseline.total}`);
+  if (roundCardNeverArrived) {
+    await unobserved('2. the round walked at least one question',
+      'the first AF card of the round never finished rendering its chip and option counts');
+    await unobserved('2. skipping every question closed the round',
+      'no question was ever presented, so the skip path was never reached');
+  } else {
+    check('2. the round walked at least one question', seenQ.length >= 1, `questions: ${seenQ.join(' → ') || '(none)'}`);
+    // A round where NOTHING was committed closes without a search (finishGuided: `!(q &&
+    // ageFlowChangedRef.current)` → the card just closes) — zero predicate, zero re-search, the
+    // baseline turn stays. If production DOES re-search, that search must carry no predicate and the
+    // same total. Either way the newest headline must still be the baseline number.
+    check('2. skipping every question closed the round', roundClosed, 'the card was still open after 8 skips');
+    if (roundEnd) {
+      check('2. R8.1.1 — the all-skip search carries NO predicate', R.noPredicate(roundEnd.body), `AF keys: ${afKeysOn(roundEnd.body).join(', ') || '(none)'}`);
+      check('2. R8.1.2 — the all-skip search total == baseline total', roundEnd.total === baseline.total, `baseline=${baseline.total} after skips=${roundEnd.total}`);
+    } else console.log('      [diag] no search fired after the all-skip round — nothing committed, nothing re-searched');
+    const hsAfterSkips: string[] = await page.evaluate(READ_HEADLINES);
+    check('2. R8.1.2 — after skipping every question the newest headline is still the baseline number',
+      R.chipEquals(headlineNum(hsAfterSkips[hsAfterSkips.length - 1]), baseline.total), `headline=${headlineNum(hsAfterSkips[hsAfterSkips.length - 1])} baseline=${baseline.total}`);
+  }
 
   // ── 3. fresh load; SELECT the smallest option on the first question; the landed set ──────────
   // Skipped questions are remembered for the session (R8.1.3), so the round above burned its
@@ -838,8 +882,24 @@ try {
   // here — and the DOM is asserted to reveal from that set and nothing else.
   // Snapshot the badge count once the landed turn's first page has finished dripping in: the
   // newest turn already shows min(total, FIRST_PAGE) cards, so "revealed" adds that back.
-  let cardsBefore: number = await page.evaluate(COUNT_CARDS);
-  for (let i = 0; i < 10; i++) { await page.waitForTimeout(700); const n: number = await page.evaluate(COUNT_CARDS); if (n === cardsBefore) break; cardsBefore = n; }
+  // WAIT FOR THE CASCADE TO START, THEN FOR IT TO SETTLE (2026-09-05). The old loop broke the moment
+  // two consecutive samples matched — including 0 == 0, before the reveal had begun. agent.tsx gates
+  // the ENTIRE actions block (Show More included) on `shown < initialReveal(...)`, so sampling during
+  // the cascade sees no cards AND no button, and the loop below would then break on a missing button
+  // and report «no button» against a turn that was still dripping its first page in. A turn with a
+  // non-zero total must eventually render at least one card; waiting for that is not a weakened
+  // assertion, because a button that never arrives still fails — only the race is removed.
+  let cardsBefore = 0;
+  {
+    const until = Date.now() + 30_000;
+    let stable = 0;
+    while (Date.now() < until) {
+      await page.waitForTimeout(700);
+      const n: number = await page.evaluate(COUNT_CARDS);
+      if (n > 0 && n === cardsBefore) { if (++stable >= 2) break; } else { stable = 0; }
+      cardsBefore = n;
+    }
+  }
   const alreadyShown = Math.min(landed.total ?? 0, FIRST_PAGE);
   const armed4 = searches.length;
   let clicks = 0;
@@ -851,8 +911,18 @@ try {
   for (let i = 0; i < MAX_LOAD_MORE_CLICKS; i++) {
     if (networkPageSeen) break;
     await scrollToBottom();
-    const btns = await page.$$('[data-testid="results-load-more"]');
-    const btn = btns[btns.length - 1];
+    // On the FIRST pass, give the button a bounded chance to arrive rather than concluding from one
+    // sample that it is absent — same reason as the cascade wait above. Later passes break at once:
+    // by then the button has been seen, so its disappearance is the real end of the set.
+    let btn = (await page.$$('[data-testid="results-load-more"]')).at(-1);
+    if (!btn && i === 0) {
+      const until = Date.now() + 20_000;
+      while (!btn && Date.now() < until) {
+        await page.waitForTimeout(700);
+        await scrollToBottom();
+        btn = (await page.$$('[data-testid="results-load-more"]')).at(-1);
+      }
+    }
     if (!btn) break;
     const shownBefore: number = await page.evaluate(COUNT_CARDS);
     await btn.click();
@@ -875,8 +945,54 @@ try {
   const pages = searches.slice(armed4).filter((s) => Number(s.body?.p_offset ?? 0) > 0);
   pageBodies = pages.map((p) => p.body);
   unionIds = [...landed.rows, ...pages.flatMap((p) => p.rows)];
+  // WHEN THE BUTTON IS ABSENT, SAY WHAT ELSE WAS ON SCREEN. Without this the failure reads «no
+  // button» and cannot distinguish a real R10.1.1 defect from the owner's 2026-08-21 call that the
+  // whole actions row is hidden while the AF interview overlay is open — the AF card is absolute, so
+  // buttons underneath it are unreachable and hiding them is correct. Two different verdicts, one
+  // indistinguishable message, which is how a barrier ends up accusing a correct production.
+  // ageFlow has FOUR phases and only three of them render `af-card` (the shared Shell used by
+  // loading/intro/asking). MiningTransition — the deep-search beat after the interview ends — carries
+  // NO testID at all, so a probe that looks only for `af-card` reports "overlay closed" while mining
+  // is on screen. That false negative would point the blame straight at the pager instead of at an
+  // interview that never latched back to null, so the mining phase is detected by its own copy —
+  // MiningTransition's «ندور لك على الأقرب لطلبك» headline, its «نراجع … عقار» subline, or the
+  // «لقينا … عقار أقرب لطلبك» found-beat it swaps to on completion. (Between 2026-08-31 and
+  // 2026-09-06 that headline was «إزهله يدقّق في …»; the owner reverted that redesign, so matching
+  // it alone would leave this diagnostic blind to the phase it exists to name.)
+  const absentDiag = clicks > 0 ? '' : await page.evaluate(() => {
+    const q = (s: string) => document.querySelectorAll(s).length;
+    const body = document.body.innerText || '';
+    const mining = /ندور لك على الأقرب لطلبك/.test(body)
+      || /نراجع\s[\d,٠-٩]+\sعقار/.test(body)
+      || /لقينا\s[\d,٠-٩]+\sعقار أقرب لطلبك/.test(body);
+    const shell = q('[data-testid="af-card"]') > 0;
+    // `hasMore` also carries `isLatestResults` — only the NEWEST results turn keeps live actions
+    // (owner 2026-08-24). So a NEWER results turn that renders nothing would silently retire the
+    // pager on the turn the user is actually looking at. Counting the result headlines distinguishes
+    // that from a pager the newest turn simply refused to draw.
+    const heads = [...document.querySelectorAll('*')]
+      .filter((e) => e.children.length === 0 && /لقينا/.test(e.textContent || ''))
+      .map((e) => (e.textContent || '').trim());
+    // THE DISCRIMINATOR. The closing note («عرضت لك أول …») is rendered by the SAME block as the
+    // buttons, and that block bails early on `(m.typing && !doneTyping) || shown < initialReveal(...)`.
+    // So: note ABSENT ⇒ the block returned null and the cause is the reveal gate — the cascade never
+    // reached initialReveal, and «عرض المزيد» is unreachable because it lives inside the very block
+    // the unfinished cascade suppresses. Note PRESENT ⇒ the block rendered and chose not to draw the
+    // button, i.e. hasMore was false, i.e. isLatestResults was false. Two different bugs, and nothing
+    // else on the page tells them apart.
+    const closingNotes = [...document.querySelectorAll('*')]
+      .filter((e) => e.children.length === 0 && /عرضت لك/.test(e.textContent || ''))
+      .map((e) => (e.textContent || '').trim());
+    return ` · cards on screen=${q('[data-testid^="card-listing-"]')}` +
+           ` · af shell (loading|intro|asking) open=${shell}` +
+           ` · af MINING overlay open=${mining}` +
+           ` · load-more elements anywhere=${q('[data-testid="results-load-more"]')}` +
+           ` · af pills=${q('[data-testid^="af-pill-"]')}` +
+           ` · result headlines=${heads.length} [${heads.join(' | ')}]` +
+           ` · CLOSING NOTES=${closingNotes.length} [${closingNotes.join(' | ')}]`;
+  }).catch(() => ' · (diagnostic unavailable)');
   check('4. R10.1.1 — «عرض المزيد» was exercised (the button was there to click)', clicks > 0 || (landed.total ?? 0) <= FIRST_PAGE,
-    clicks ? `${clicks} click(s), ${pages.length} network page(s) fired (p_offset ${pages.map((p) => p.body.p_offset).join(',') || '— buffer served every click'})` : `no button and total=${landed.total} > ${FIRST_PAGE}`);
+    clicks ? `${clicks} click(s), ${pages.length} network page(s) fired (p_offset ${pages.map((p) => p.body.p_offset).join(',') || '— buffer served every click'})` : `no button and total=${landed.total} > ${FIRST_PAGE}${absentDiag}`);
   // THE NETWORK PAGE IS THE POINT. Below the buffer every click is served from page 0 and nothing
   // about "the same predicate on every page" is exercised — so that case is a loud SKIP, not a PASS.
   if (paginationPossible) {
@@ -908,7 +1024,16 @@ try {
   // skipping Q2 answer it too. Q2's pills are computed AFTER Q1's fact (R7.1.1's second half), so
   // that path proves strictly more than the reopen path, not less. Neither path may pass vacuously.
   const pickAndCommit = async (label: string, ctxBody: any, ctxTotal: number | null, skipOut: boolean) => {
-    const card = await readCardUntil((s) => s.hasCard && s.chip != null && s.options.length > 0 && s.options.every((o) => o.count != null));
+    const cr = await readCardSettled((s) => s.hasCard && s.chip != null && s.options.length > 0 && s.options.every((o) => o.count != null));
+    if (!cr.settled) {
+      // The chip is the card's own claim about the eligible total, and it arrives with a count RPC.
+      // Asserting `chip == ctxTotal` against a card whose chip never rendered reports the harness's
+      // impatience as a product defect — CI 2026-09-04 printed exactly that: "chip=null expected=10625".
+      await unobserved(`${label}: R8.1.2/R7.1.2 — header chip == the current eligible total (nothing selected on this card)`,
+        `card=${cr.value.hasCard} question=«${cr.value.q}» chip=${cr.value.chip} options=${cr.value.options.length}`);
+      return null;
+    }
+    const card = cr.value;
     const reads = await proveQuestion(label, card, ctxBody, ctxTotal);
     const el = reads.filter((o) => o.count != null && o.count >= MIN_REAL_OPTION_COUNT && OPTION_COL[o.key]);
     // WHICH OPTION TO CLICK (corrected 2026-09-03). The narrowest option is the sharpest proof, but
@@ -945,8 +1070,18 @@ try {
     if (!skipOut) {
       // Q2 must be proved on Q2's card: wait until the question TITLE changes (rankQuestions is a
       // network round trip), or the proof below would read Q1's card a second time.
-      const nxt = await readCardUntil((s) => s.hasCard && s.q !== card.q && s.chip != null && s.options.length > 0 && s.options.every((o) => o.count != null));
-      check(`${label}: confirming advanced to a DIFFERENT question`, nxt.hasCard && nxt.q !== card.q, `was «${card.q}», now «${nxt.q}»`);
+      const nx = await readCardSettled((s) => s.hasCard && s.q !== card.q && s.chip != null && s.options.length > 0 && s.options.every((o) => o.count != null));
+      if (!nx.settled) {
+        // THE 45-FAILURE BUG. This used to fall through and let the caller prove Q2 against a card
+        // still showing Q1 — every option's pill compared to an oracle that assumed Q1's answer was
+        // committed. Measured in CI 2026-09-04: driver_room pill=13 vs oracle=6, balcony 176 vs 22,
+        // maid_room 40 of 40 "removes=0" — all of them Q1's own numbers. Returning null abandons the
+        // Q2 proof instead of inventing it.
+        await unobserved(`${label}: confirming advanced to a DIFFERENT question`,
+          `still on «${nx.value.q}» after committing «${t.key}» (${t.count})`);
+        return null;
+      }
+      check(`${label}: confirming advanced to a DIFFERENT question`, true, `was «${card.q}», now «${nx.value.q}»`);
       return { req: null, pill: t.count!, pred, armed };
     }
     for (let hop = 0; hop < 8 && searches.length === armed; hop++) {
@@ -984,6 +1119,14 @@ try {
     }
   }
   second = step5?.req ?? null;
+  // `step5 === null` means an earlier step ALREADY reported why the conjunction could not be built
+  // (a card that never rendered, or a commit that never advanced — each already classified against
+  // production's own load signal). Re-reporting it here as "no search landed" would state a second,
+  // wronger reason for one cause, and would turn a NOT EXERCISED into a product failure.
+  if (step5 === null) {
+    skip('5. the conjunction produced a search',
+      'NOT EXERCISED — the second answer was never reached; see the reason reported on the step above');
+  } else
   check('5. the conjunction produced a search', !!second, second ? '' : 'no search landed after the second answer');
   if (second && step5 && prevBody) {
     check('5. the request carries BOTH predicates (the earlier answer AND the new one)', R.carriesBoth(prevBody, second.body),

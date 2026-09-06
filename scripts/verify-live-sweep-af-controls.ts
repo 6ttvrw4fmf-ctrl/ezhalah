@@ -51,9 +51,23 @@ const journeysSrc = read(JOURNEYS);
 const journeys = codeOnly(journeysSrc);
 
 // Isolate the AF journey so an unrelated journey's selectors cannot satisfy these checks.
-const afStart = journeys.indexOf('export async function advancedFilter');
-const afEnd = journeys.indexOf('export async function', afStart + 10);
-const af = afStart >= 0 ? journeys.slice(afStart, afEnd > afStart ? afEnd : undefined) : '';
+//
+// commitOneAfAnswer (extracted 2026-09-04, zero behavior change) carries the entire testID-driving
+// sequence this barrier inspects — advancedFilter itself is now a thin wrapper (search, delegate,
+// assertChain) that showmore.mjs's AF-scoped pagination journey ALSO calls, so the two must keep
+// sharing one real implementation rather than fork into a copy this barrier would not see. Both
+// functions are adjacent in the file with nothing else between them; the span starts at whichever of
+// the two appears first and ends at the next DIFFERENTLY-named export after both, so it stays correct
+// regardless of which one is declared first.
+function afJourneySpan(src: string): string {
+  const a = src.indexOf('export async function commitOneAfAnswer');
+  const b = src.indexOf('export async function advancedFilter');
+  if (a < 0 || b < 0) return '';
+  const start = Math.min(a, b);
+  const end = src.indexOf('export async function', Math.max(a, b) + 10);
+  return src.slice(start, end > start ? end : undefined);
+}
+const af = afJourneySpan(journeys);
 check('the AF journey exists in the live sweep', af.length > 0);
 
 // ── 1. every testID the AF journey drives is one the card actually renders ───────────────────────
@@ -105,9 +119,18 @@ check('…and stops when the card is gone or has no تخطي (intro/mining state
   'an unbounded or unguarded loop hangs the sweep instead of failing it');
 
 // ── 4. the invariant it is all for: promised count == landed count ───────────────────────────────
+// The comparison itself is unchanged; since incident #47 it is made by judgeAdvertisedVsLanded(),
+// which accuses only on an index proven not to have been rebuilt between the two reads (the raw
+// `promised !== landed` could not tell a product defect from a re-sync at :14). Both halves are
+// required here: a judge call that is not BRACKETED reports every mismatch as UNDECIDED, which
+// would be this assertion silently ceasing to exist.
+const oneLine = af.replace(/\s+/g, ' ');
 check('the journey still asserts the chip\'s promised count against the count the user lands on',
-  /promised\s*!==\s*landed/.test(af) || /promised\s*!==\s*landed/.test(af.replace(/\s+/g, ' ')),
+  /judgeAdvertisedVsLanded\([^;]*promised[^;]*landed/.test(oneLine),
   'this is the AF contract invariant (R7.1.1/R7.1.2) the journey exists to check');
+check('…and the pair is bracketed by an index stamp, so a mismatch can still be a DEFECT',
+  /onOneIndex\(/.test(oneLine),
+  'an unbracketed judge call is permanently UNDECIDED — the assertion would be gone, not weakened');
 check('…and asserts the «متابعة» footer moves to the tentative selection (R7.1.2)',
   /footAfter\s*!==\s*promised/.test(af));
 
@@ -137,8 +160,19 @@ const mutations: Mutation[] = [
   },
   {
     name: 'the promised-vs-landed assertion is dropped',
-    apply: (s) => s.replace(/promised !== landed/, 'false'),
-    predicate: (a) => /promised\s*!==\s*landed/.test(a),
+    apply: (s) => s.replace(/seen\.promised, seen\.landed/, 'null, null'),
+    predicate: (a) => /judgeAdvertisedVsLanded\([^;]*promised[^;]*landed/.test(a.replace(/\s+/g, ' ')),
+  },
+  {
+    name: 'the promised-vs-landed judgement is deleted outright',
+    apply: (s) => s.replace(/if \(seen\) judgeAdvertisedVsLanded\([^;]*\);/, ''),
+    predicate: (a) => /judgeAdvertisedVsLanded\([^;]*promised[^;]*landed/.test(a.replace(/\s+/g, ' ')),
+  },
+  {
+    name: 'the judgement is left unbracketed, so it can never accuse',
+    apply: (s) => s.replace(/const settled = await onOneIndex\(\(\) => afAnswerRound\(([^)]*)\)\);/,
+      'const settled = undefined; const seenRound = await afAnswerRound($1);'),
+    predicate: (a) => /onOneIndex\(/.test(a.replace(/\s+/g, ' ')),
   },
   {
     name: 'the footer/tentative-selection assertion is dropped',
@@ -149,9 +183,7 @@ const mutations: Mutation[] = [
 
 for (const m of mutations) {
   const mutated = codeOnly(m.apply(journeysSrc));
-  const s = mutated.indexOf('export async function advancedFilter');
-  const e = mutated.indexOf('export async function', s + 10);
-  const mutatedAf = s >= 0 ? mutated.slice(s, e > s ? e : undefined) : '';
+  const mutatedAf = afJourneySpan(mutated);
   check(`mutation caught — ${m.name}`, !m.predicate(mutatedAf, cardSrc),
     'this check passes on deliberately broken source, so it protects nothing');
 }

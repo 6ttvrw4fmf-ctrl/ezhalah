@@ -434,7 +434,7 @@ check(has(seam, 'scripts/verify-repair-migrations-are-guarded.ts'),
   `(a repair must SHIP a detector; the detector must STILL watch it) would drift apart`);
 
 // ── 9. Structural: the owner-locked roster still names both routines ──────────────────────────
-check(/exactly\s+(FOUR|FIVE|SIX|SEVEN|EIGHT|NINE)\s+separate cloud routines/i.test(routines),
+check(/exactly\s+(FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE)\s+separate cloud routines/i.test(routines),
   'ENGINEER_ROUTINES.md is still owner-locked at an explicit routine count',
   `${ROUTINES} no longer states an explicit owner-locked routine count — duplicate/overlapping ` +
   `engineers are exactly what the owner said not to create`);

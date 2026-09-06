@@ -51,14 +51,16 @@ jobs:
           - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
           - { source: mizlaj,      cmd: "python -m scrapers.mizlaj.run --type all" }
           - { source: aqaratikom,  cmd: "python -m scrapers.aqaratikom.run --type all" }
-          # NOTE: awal is NOT here. RETIRED 2026-07-28 (owner-approved) — awaalun.com lapsed into
-          # a GoDaddy domain-parking page: /wp-json/wp/v2/rtcl_listing and individual /property/
-          # URLs both return HTTP 200 but the body is a 114-133 byte redirect stub to /lander
-          # (window._trfd ap:"parking", NS DOMAINCONTROL.COM) — reachable, serves no listings.
-          # Last real pull 2026-07-26 04:23 (rows_seen=128). Same failure class as alnokhba.
-          # Historical awal rows are KEPT in the DB (51, not deleted) and scrapers/awal/ remains so
-          # existing listings still render. See deprecated_platforms and docs/ARCHITECTURE.md §12.
-          # Do not re-add without confirming the domain serves real listings again.
+          # awal — RE-ADDED 2026-09-04 (owner-instructed), satisfying this line's own precondition:
+          # "Do not re-add without confirming the domain serves real listings again." Confirmed live
+          # 2026-09-04: /wp-json/wp/v2/rtcl_listing returns HTTP 200 with x-wp-total: 128 (the
+          # parking stub is gone), and the SHIPPED scraper parses all 128 into rows with 128
+          # DISTINCT ad_numbers / listing_urls / descriptions — real inventory, no duplication.
+          # Two source facts recorded so neither is mistaken for a bug later: the newest listing is
+          # 2026-02-14 (real but LOW-CHURN, so a run returning the same 128 is healthy), and the
+          # source publishes NO price at all (0/128 in the REST payload AND the detail pages) —
+          # nothing is inferred to fill it, exactly like the 7,534 priceless rows already live.
+          - { source: awal,        cmd: "python -m scrapers.awal.run --type all" }
           - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
           - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
           - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
@@ -121,6 +123,22 @@ jobs:
           - { source: jazwtn,      cmd: "python -m scrapers.jazwtn.run --type all" }
           - { source: therc,       cmd: "python -m scrapers.therc.run --type all" }
           - { source: aouj,        cmd: "python -m scrapers.aouj.run --type all" }
+          # Two GREEN-audited additions (owner-instructed 2026-09-05, from the 40-candidate audit).
+          # Both are WordPress REST sources whose taxonomies resolve live, so their type/city maps
+          # are fetched per run rather than frozen here.
+          #   alta          17 posts; 10 already تم البيع/تم التأجير → stored active=false. Only 1
+          #                 post states a price, so 15 carry NULL — a SOURCE fact, never inferred.
+          #   shmoualshmal   6 posts, all Tabuk. The site publishes NO price at all (it shows
+          #                 «اتصل»), so every price column is NULL by design. See each run.py.
+          - { source: alta,         cmd: "python -m scrapers.alta.run --type all" }
+          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all" }
+          # Two more GREEN-audited additions (owner-instructed 2026-09-06).
+          #   remal   87 posts -> 84 listings. class_list carries city/type/offer; images bind by
+          #           attachment PARENT because the detail page renders OTHER listings' photos.
+          #   amaall  135 posts -> 50 listings, ARABIC ONLY: the site publishes every listing twice
+          #           (68 EN + 67 AR), so taking both languages would double every property.
+          - { source: remal,        cmd: "python -m scrapers.remal.run --type all" }
+          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all" }
           - { source: abralosol,   cmd: "python -m scrapers.abralosol.run --type all" }
           - { source: arkaan,      cmd: "python -m scrapers.arkaan.run --type all" }
           - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }

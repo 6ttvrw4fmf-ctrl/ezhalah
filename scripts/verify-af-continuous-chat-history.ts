@@ -27,7 +27,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildAfSummary } from '../src/lib/afSummary.ts';
 import { deriveGuided, type GuidedStep } from '../src/lib/afSteps.ts';
-import { resultCounts } from '../src/data/resultCount.ts';
+import { resultCounts, closingNoteKey } from '../src/data/resultCount.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -195,8 +195,13 @@ check('the receipt strings are translated with the owner\'s exact wording',
     /listings: \[\.\.\.mm\.result\.listings, \.\.\.add\]/.test(agent)
     && !/setRevealCount\(\(c\) => \(\{ \.\.\.c, \[mid\]: 0 \}\)\)/.test(agent),
     'agent.tsx (loadMore): a page must extend the list and reveal upward from `cur`, never reset the turn to 0');
+  // The key used to be an inline `t(...)` call in agent.tsx and was asserted by matching that line.
+  // Since 2026-09-05 it comes from the pure `closingNoteKey` (src/data/resultCount.ts) — the old
+  // inline wording was blind to `isLatestResults`/`!ageFlow` and promised buttons that were not
+  // rendered. EXECUTE the exhausted case instead of grepping for it; the Arabic half is unchanged.
   check('the exhausted case has an explicit Arabic all-shown message',
-    /t\('I showed you all \{n\} matching listings\.'/.test(agent)
+    closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: false })
+      === 'I showed you all {n} matching listings.'
     && /'I showed you all \{n\} matching listings\.': 'عرضت لك كل النتائج المطابقة \(\{n\} إعلان\)\.'/.test(i18n),
     'agent.tsx / src/i18n.tsx: when nothing is left the user must be told so in Arabic, with the true count');
 }

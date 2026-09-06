@@ -4,7 +4,25 @@
 on any divergence** (same rule as every other engineer's canonical spec). If the two ever differ,
 update the routine to match this file.
 
-**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner,
+2026-08-29, **extended 2026-09-04**) — binds this routine too, in FULL and as it stands today, not as
+it stood when this line was first written: fix first / report last (§G.1); the six and only six
+reasons to stop without fixing (§G.2), and **"a human could technically approve this" is not one of
+them (§G.2b)**; automatic cross-routine handoff via `incident_open()` / `incident_handoff()` rather
+than a sentence saying someone should look at it (§G.3); adaptive effort (§G.4); the real 10/10
+standard (§G.5); Sentry first, and your own incident queue read alongside it (§G.6, §G.6b);
+**§G.9 — a bug is CLOSED only when all seven hold: root cause fixed, related variants checked, a
+permanent barrier exists, a MUTATION has been watched to catch recurrence, the full regression suite
+passes, PRODUCTION is verified through the real path a user hits, and no equivalent hidden path
+remains. Anything short of all seven is UNKNOWN with the reason — never "fixed."** §G.10 — every
+report carries BEFORE/AFTER and ends with the mandatory block. §G.11 — tokens are not the
+constraint; optimise for correctness and permanent bug reduction. §G.7 — none of it weakens an
+existing guard.
+
+It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs. This
+enumeration was stale from 2026-09-04 to 2026-09-05: it named only the original sections, so §G.9's
+mutation and production-verification requirements reached this routine by inheritance rather than by
+being stated. They were always binding. Now they are also visible.
 
 ## §0 — Mandate and standing operating contract
 
@@ -49,7 +67,8 @@ more-timid wording anywhere, including in this file.
 
 On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
 whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
-cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+cause → fix → permanent regression barrier → **mutation proof: re-introduce the defect and WATCH the
+barrier go red, then restore (§G.9.4 — required, not discretionary)** → deploy through the
 sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
 a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
 contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
@@ -481,7 +500,29 @@ Four rules that come from real failures on this exact surface:
 | One full browser journey | ~26 s | §40.2 |
 | **One #6 journey, this routine's own mix** | **~14.4 s** | measured 2026-08-28: `e2e/journeys/run.mjs`, 32 journeys in 460 s against production, Chromium, strictly serial, a fresh browser + context per journey (so launch/teardown is INSIDE the figure, not additional) |
 | Engines installed in the agent image | **Chromium only** | measured 2026-08-28: `/opt/pw-browsers` holds `chromium-1194`, its headless shell and `ffmpeg-1011` — no `webkit-*`, no `firefox-*` |
-| One «بحث» press → search RPCs | **6** `location_search_candidates_ar` calls | measured 2026-08-28: single click → 6, double click → 6 (identical). A double-click oracle must compare against a measured single-click baseline, never against 1 |
+| Engines reachable in CI | **all three** | measured 2026-09-03: `journey-sweep.yml` installs and drives chromium, webkit and firefox on `ubuntu-latest` |
+| One full 84-journey sweep, **WebKit** | **~1,400–1,550 s** | measured 2026-09-03, two full sweeps against production (1547 s, 1396 s) |
+| One full 84-journey sweep, **Firefox** | **~1,740 s** | measured 2026-09-03, one full sweep against production |
+| Firefox mobile emulation | **none** | Gecko rejects `isMobile` at context creation, and the iPhone 13 profile carries it inside its spread too. Firefox mobile is a 375 px viewport with touch — say that, never "iPhone 13" |
+| One press of «بحث», **WebKit** | the same **6** `location_search_candidates_ar` calls | measured 2026-09-03; they can span >10 s, which is why the count must be read on a settling condition and never after a fixed sleep |
+| One «بحث» press → **calls** named `location_search_candidates_ar` | **6** | measured 2026-08-28 and re-measured 2026-09-04 (mobile, 2/2): single click → 6, double click → 6 |
+| …of which **RESULTS searches** | **exactly 1** (`p_limit: 1500`) | the other **5** are `p_limit: 1` per-option COUNT calls — `fetchScopeOptionCounts` and `fetchDistrictEligibleCounts` reuse the same RPC name, one call per VISIBLE option (`src/data/remote.ts:920`, `:965`, results at `:1476`) |
+
+**That split is the whole point, and getting it wrong cost a false verdict.** The number of calls is
+a property of how many options the results screen decided to decorate — it varies with the data and
+with what is on screen. Only the `p_limit != 1` class counts submitted searches. On 2026-09-04
+WebKit mobile captured `single -> 1, double -> 6` and `double-click-search` filed «double-click
+fired the search twice» when **both sides had submitted exactly one search** (1 results call each).
+Classify with `classifySearchRpc()` in `e2e/journeys/harness.mjs`; never count by RPC name alone.
+
+**A form the app will refuse to submit is not a primed form.** `onSearch` returns at
+`if (!citySelected)` with a validation message and **zero requests** (`src/app/index.tsx:712`) —
+the owner's 2026-07-17 spec, "never guess a location". Only a TAPPED suggestion row sets
+`citySelected`, and every keystroke clears it, so the tap is a race. When it loses, «بحث» correctly
+fires nothing; on 2026-09-04 WebKit desktop that was filed as «dead control». `primeSearch` must
+prove the commit via `SELECTED_CITY_MARKER` (`[data-testid="selected-city-visual"]`, rendered iff
+`citySelected` is non-null) and return false — a skip — rather than hand a caller a form that
+cannot search.
 
 **The consequence you must actually apply:** `rankQuestions` fires one `af_eligible_count` **per
 eligible question, concurrently** — so a five-question cohort is already past the concurrency knee
@@ -493,8 +534,9 @@ load.
 
 **NOT ESTABLISHED — do not cite a number for these until one is measured:**
 
-- WebKit and Firefox timings. Every figure above was measured on Chromium, and neither engine is
-  installed in the agent image (see the table), so this cannot be measured here at all today.
+- WebKit and Firefox timings, as a per-journey average. Full sweeps are now measured (see the table
+  above), but a per-journey figure has not been separated out. Both engines are reachable in CI via
+  `.github/workflows/journey-sweep.yml`; neither is installable in the agent container.
 - How many parallel contexts this container tolerates. The ~14.4 s figure above is strictly
   SERIAL; nothing about concurrent journeys has been measured, and PART 11.3's concurrency knee of
   3 is a constraint on the shared production instance regardless.
@@ -507,14 +549,32 @@ load.
 Stated here so no run scores a surface it never touched, and so the gaps are visible as
 infrastructure asks rather than rediscovered each time:
 
-- **WebKit and Firefox are not installed** and PART 11.1 forbids `playwright install`. Every run in
-  this image is Chromium-only, which bounds PART 3 item 6's rotation and PART 5 item 10 outright.
-  This is a COVERAGE LIMIT to report, never a surface to score. `engineAvailable()` in
-  `e2e/journeys/harness.mjs` detects it and the runner prints the limit.
-- **Google One Tap cannot be exercised**: the egress proxy denies CONNECT to `www.google.com` and
-  `android.clients.google.com` (observed as ~600 rejected connections during the 2026-08-28 sweep),
-  so GIS never loads. One Tap's *code* contract stays covered by the static barriers
-  (`verify-google-onetap.ts`, `verify-google-one-tap.ts`); its *behaviour* is unreachable here.
+- **WebKit and Firefox are not installed IN THIS CONTAINER**, and PART 11.1 rightly forbids
+  `playwright install` here. That bounds what one agent session can drive; it does **not** bound the
+  routine. **Resolved 2026-09-03:** the ban is about this image's pinned build, not about CI, where
+  six workflows already run `npx playwright install --with-deps chromium` on a GitHub runner. What
+  was actually missing is that NO workflow ran this sweep at all, so it only ever executed where
+  only Chromium exists — which is why every cross-browser figure this routine had ever reported was
+  Chromium. `.github/workflows/journey-sweep.yml` now runs it once per engine (chromium × webkit ×
+  firefox, both viewports, daily + manual dispatch), and `JOURNEY_ENGINE` selects the engine for
+  every journey at once. A run in this container is still Chromium-only and must say so; the
+  engine evidence comes from that workflow's result, and a report that never read it has no
+  evidence about WebKit or Firefox. `engineAvailable()` fails CLOSED on a missing engine (exit 2)
+  rather than silently substituting Chromium.
+- ~~**Google One Tap cannot be exercised**~~ — **NO LONGER TRUE, measured 2026-09-06.** GIS loads
+  and renders on production from this container: at 375 px, signed out, Chromium, an
+  `<iframe src="https://accounts.google.com/gsi/iframe/select?client_id=…">` is live in the DOM
+  ~9 s after load, `position: fixed`, `z-index: 9999`, box `375×144 at 0,668` — the bottom sheet.
+  Method: enumerate `document.querySelectorAll('iframe')` with each frame's `getBoundingClientRect()`
+  and computed `zIndex/position/pointerEvents`. The 2026-08-28 observation (~600 rejected CONNECTs
+  to `www.google.com`) is stale: the frame is served from `accounts.google.com`, which this egress
+  reaches. What is still NOT exercisable is **completing** a Google sign-in (no credentials, and the
+  consent flow is Google's own UI), so signed-in journeys still seed the session client-side.
+  **This matters beyond One Tap coverage:** that frame is a full-width fixed overlay at
+  `z-index: 9999`, so it is a hit-testing participant on every signed-out mobile page. It is what
+  `tap-targets-meet-44` actually hit on WebKit (`ops_incident` #120) — bottom-docked and harmless on
+  Chromium, over the top controls on WebKit. Any journey judging what owns a point at 375 px must
+  expect it.
 - **Real Google sign-in is unavailable**, so signed-in journeys seed the session client-side (see
   the harness header). That is the real client code path for sidebar/persistence — which is
   purely client-side — but it is NOT evidence about server sync, RLS, or a real token.

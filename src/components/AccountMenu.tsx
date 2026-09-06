@@ -3,6 +3,7 @@ import { ActivityIndicator, I18nManager, Modal, Platform, Pressable, ScrollView,
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { hasLegalDocs } from '@/data/legal';
 import { colors as lightColors, radius } from '@/theme/tokens';
 import { useTheme, type ThemeMode } from '@/theme/theme';
 import { useApp } from '@/store';
@@ -11,7 +12,7 @@ import { useI18n } from '@/i18n';
 import { detectDevice, readDeviceEnv } from '@/lib/deviceInfo';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { pickName, buildSyncedName, scriptOf, initialsOf } from '@/lib/nameSync';
-import { isBackendLive, persistDisplayName } from '@/lib/auth';
+import { isBackendLive, persistDisplayName, signOutBackend } from '@/lib/auth';
 import {
   currentSessionId, lastActiveLabel, listDeviceSessions, revokeDeviceSession,
   signOutOtherDevices, type DeviceSession,
@@ -57,11 +58,14 @@ export default function AccountMenu({
   visible,
   onClose,
   onHelp,
+  onLegal,
 }: {
   visible: boolean;
   onClose: () => void;
   /** Opens the existing Support popup (the sidebar owns the drawer-close choreography). */
   onHelp: () => void;
+  /** Opens the «الشروط والخصوصية» reader (same InfoModal host as Support / About). */
+  onLegal: () => void;
 }) {
   const router = useRouter();
   const { height: winH } = useWindowDimensions();
@@ -82,6 +86,10 @@ export default function AccountMenu({
       if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
       setShown(true);
       setView('root');
+      // Neutral on every open, exactly like the view. A destructive flow that ended — or that was
+      // dismissed mid-flight — must never hand the next open a spinner and a permanently disabled
+      // button (ops_incident hunt-2026-09-04:modal:04).
+      setLoggingOut(false); setDeleting(false); setLogoutError(null); setDeleteError(null);
       enter.value = reduced ? 1 : 0;
       enter.value = withTiming(1, { duration: reduced ? 0 : ENTER_MS, easing: EASE_OUT });
       return;
@@ -143,6 +151,7 @@ export default function AccountMenu({
   const [justSaved, setJustSaved] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const nameChanged = name.trim().length > 0 && name.trim() !== shownName;
   useEffect(() => {
@@ -178,12 +187,30 @@ export default function AccountMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sign out with the same short, intentional loading beat the old modal had, then land on the
-  // logged-out home. Guarded against double taps.
-  const onLogout = () => {
+  // SERVER-FIRST sign-out, for the same reason deletion is server-first: the logged-out UI is never
+  // shown while a valid session is still stored. supabase-js keeps the session in localStorage when
+  // the logout request fails, so the old fire-and-forget version dropped to the guest home over a
+  // live token and the next reload signed the user back in (ops_incident hunt-2026-09-04:auth:03).
+  // The short, intentional loading beat the old modal had is kept — it now runs ALONGSIDE the real
+  // call instead of standing in for it, so a fast network still gets the same deliberate pause.
+  // Guarded against double taps.
+  const onLogout = async () => {
     if (loggingOut) return;
     setLoggingOut(true);
-    setTimeout(() => { signOut(); router.replace('/'); }, 1200);
+    setLogoutError(null);
+    const [ok] = await Promise.all([signOutBackend(), new Promise((r) => setTimeout(r, 1200))]);
+    if (!ok) {
+      setLoggingOut(false);
+      setLogoutError(t("Couldn't sign out this device. Try again."));
+      return;
+    }
+    signOut();
+    router.replace('/');
+    // Land the menu in its neutral state. This component stays MOUNTED while it renders null
+    // (`!user`), so a `loggingOut` left true survives into the next signed-in state as a stuck
+    // confirmation with a dead button.
+    setLoggingOut(false);
+    onClose();
   };
 
   // SERVER-FIRST deletion (PR #725): nothing is destroyed unless the server confirms, and a failure
@@ -203,6 +230,10 @@ export default function AccountMenu({
     // server-confirmed guard; owner 2026-08-28/29) — ONE mechanism, shared with sign-out, so
     // this handler no longer re-stamps 'light' into storage after the store just cleared it.
     router.replace('/');
+    // …and leave the menu neutral, for the same reason onLogout does: the component is still
+    // mounted behind the null render.
+    setDeleting(false);
+    onClose();
   };
 
   // ── «الأجهزة المسجّل عليها الدخول» (owner Phase 2, 2026-08-29) ──────────────────────────────────
@@ -294,11 +325,13 @@ export default function AccountMenu({
       accessibilityRole="menuitem"
       style={({ hovered, pressed }: any) => [s.row, (hovered || pressed) && s.rowHover]}
     >
-      <Ionicons name={icon} size={17} color={danger ? '#d05b4c' : C.ink} />
-      <Text style={[s.rowLabel, danger && s.rowLabelDanger]} numberOfLines={1}>{label}</Text>
-      {value ? <Text style={s.rowValue} numberOfLines={1}>{value}</Text> : null}
-      {selected ? <Ionicons name="checkmark" size={16} color={C.primary} /> : null}
-      {chevron ? <Ionicons name="chevron-back" size={14} color={C.muted} /> : null}
+      {({ hovered, pressed }: any) => { const on = !!(hovered || pressed); return (<>
+        <Ionicons name={icon} size={17} color={on ? C.onFill : danger ? '#d05b4c' : C.ink} />
+        <Text style={[s.rowLabel, danger && s.rowLabelDanger, on && s.rowOn]} numberOfLines={1}>{label}</Text>
+        {value ? <Text style={[s.rowValue, on && s.rowSubOn]} numberOfLines={1}>{value}</Text> : null}
+        {selected ? <Ionicons name="checkmark" size={16} color={on ? C.onFill : C.primary} /> : null}
+        {chevron ? <Ionicons name="chevron-back" size={14} color={on ? C.onFill : C.muted} /> : null}
+      </>); }}
     </Pressable>
   );
 
@@ -330,18 +363,26 @@ export default function AccountMenu({
                 onPress={() => { setEditing(true); go('account', 1); }}
                 style={({ hovered, pressed }: any) => [s.profile, (hovered || pressed) && s.rowHover]}
               >
-                <View style={s.avatar}><Text style={s.avatarText}>{initialsOf(pickName(user, locale))}</Text></View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={s.profileName} numberOfLines={1}>{pickName(user, locale)}</Text>
-                  {!!user.sub && <Text style={s.profileSub} numberOfLines={1}>{user.sub}</Text>}
-                </View>
-                <Ionicons name="create-outline" size={15} color={C.muted} />
+                {({ hovered, pressed }: any) => { const on = !!(hovered || pressed); return (<>
+                  <View style={s.avatar}><Text style={s.avatarText}>{initialsOf(pickName(user, locale))}</Text></View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[s.profileName, on && s.rowOn]} numberOfLines={1}>{pickName(user, locale)}</Text>
+                    {!!user.sub && <Text style={[s.profileSub, on && s.rowSubOn]} numberOfLines={1}>{user.sub}</Text>}
+                  </View>
+                  <Ionicons name="create-outline" size={15} color={on ? C.onFill : C.muted} />
+                </>); }}
               </Pressable>
               <View style={s.hairline} />
               <Row icon="contrast-outline" label={t('Appearance')} value={modeLabel} chevron onPress={() => go('appearance', 1)} testID="account-menu-appearance" />
               <Row icon="globe-outline" label={t('Language')} value="العربية" chevron onPress={() => go('language', 1)} testID="account-menu-language" />
               <Row icon="help-circle-outline" label={t('Help')} onPress={() => { onClose(); onHelp(); }} testID="account-menu-help" />
               <Row icon="person-outline" label={t('Manage account')} chevron onPress={() => { setEditing(false); go('account', 1); }} testID="account-menu-account" />
+              {/* «الشروط والخصوصية» (owner 2026-09-03, text drafted 2026-09-04) — directly above
+                  «تسجيل الخروج». Still gated on hasLegalDocs(): a row that opens an empty reader
+                  would be worse than no row, so the gate stays even now that text exists. */}
+              {hasLegalDocs() && (
+                <Row icon="document-text-outline" label={t('Terms & Privacy')} onPress={() => { onClose(); onLegal(); }} testID="account-menu-legal" />
+              )}
               <View style={s.hairline} />
               <Row icon="log-out-outline" label={t('Log out')} onPress={() => go('signout', 1)} testID="account-menu-signout" />
             </View>
@@ -406,7 +447,7 @@ export default function AccountMenu({
                 testID={view === 'account' ? 'account-popup-close' : view === 'signout' ? 'logout-popup-close' : 'delete-popup-close'}
                 onPress={() => { if (view === 'delete') go('account', -1); else onClose(); }}
                 hitSlop={8}
-                style={({ hovered }: any) => [s.centerClose, hovered && s.rowHover]}
+                style={({ hovered }: any) => [s.centerClose, hovered && s.quietHover]}
               >
                 <Ionicons name="close" size={18} color={C.muted} />
               </Pressable>
@@ -424,7 +465,7 @@ export default function AccountMenu({
                 testID="account-menu-name"
                 onPress={() => { if (!editing) setEditing(true); }}
                 disabled={editing}
-                style={({ hovered }: any) => [s.field, !editing && hovered && s.rowHover]}
+                style={({ hovered }: any) => [s.field, !editing && hovered && s.quietHover]}
               >
                 <View style={s.fieldHead}>
                   <Text style={s.fieldLabel}>{t('Display Name')}</Text>
@@ -505,7 +546,7 @@ export default function AccountMenu({
                             testID="device-signout-current"
                             onPress={() => go('signout', 1)}
                             hitSlop={6}
-                            style={({ hovered }: any) => [s.deviceOutBtn, hovered && s.rowHover]}
+                            style={({ hovered }: any) => [s.deviceOutBtn, hovered && s.quietHover]}
                           >
                             <Text style={s.deviceOutText}>{t('Log out')}</Text>
                           </Pressable>
@@ -562,7 +603,7 @@ export default function AccountMenu({
                               testID="device-signout"
                               onPress={() => { setConfirmSid(s0.session_id); setRevokeErrSid(null); }}
                               hitSlop={6}
-                              style={({ hovered }: any) => [s.deviceOutBtn, hovered && s.rowHover]}
+                              style={({ hovered }: any) => [s.deviceOutBtn, hovered && s.quietHover]}
                             >
                               <Text style={s.deviceOutText}>{t('Log out')}</Text>
                             </Pressable>
@@ -587,7 +628,7 @@ export default function AccountMenu({
                     onPress={onSignOutOthers}
                     disabled={othersBusy}
                     hitSlop={4}
-                    style={({ hovered }: any) => [s.devicesOthers, hovered && s.rowHover]}
+                    style={({ hovered }: any) => [s.devicesOthers, hovered && s.quietHover]}
                   >
                     {othersBusy ? (
                       <ActivityIndicator size="small" color={C.primary} />
@@ -627,6 +668,7 @@ export default function AccountMenu({
                   <Text style={s.confirmBtnText}>{t('Log out')}</Text>
                 )}
               </Pressable>
+              {logoutError ? <Text style={s.deleteError}>{logoutError}</Text> : null}
               <Pressable testID="logout-popup-cancel" style={s.cancelBtn} onPress={onClose} disabled={loggingOut}>
                 <Text style={s.cancelText}>{t('Cancel')}</Text>
               </Pressable>
@@ -758,7 +800,12 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     groupDivider: { height: 1, backgroundColor: dark ? C.line : C.tintLine ?? C.line, marginHorizontal: 12 },
 
     row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10 },
-    rowHover: { backgroundColor: dark ? '#1d2a22' : '#f2f5f2' },
+    // Sidebar rows (this menu is anchored IN the sidebar): the same fill as every sidebar row.
+    rowHover: { backgroundColor: C.hoverRow },
+    rowOn: { color: C.onFill },
+    rowSubOn: { color: 'rgba(255,255,255,0.78)' },
+    // The centered account popup's controls keep a quiet neutral hover — they are not sidebar rows.
+    quietHover: { backgroundColor: dark ? '#1d2a22' : '#f2f5f2' },
     rowLabel: { flex: 1, fontSize: 13.5, fontWeight: '600', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any },
     rowLabelDanger: { color: '#d05b4c' },
     rowValue: { fontSize: 12, color: C.muted, fontWeight: '500' },

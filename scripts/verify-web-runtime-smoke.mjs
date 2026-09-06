@@ -152,6 +152,17 @@ const CLICK_LEAF = (txt) => {
 // guard; they do not break the journey. Anything else uncaught is treated as a crash.
 const BENIGN = /Minified React error #(418|423|425)/;
 
+// The floor a post-search count read must clear before it can be trusted.
+//
+// finishGuided's mining transition holds the OLD (pre-AF) results on screen underneath for a
+// guaranteed minimum beat, so a count read during it is the STALE pre-answer number — and a stale
+// number sits perfectly "stable" across two reads, which is why stability alone is not enough.
+// This floor must therefore exceed the product's own beat: agent.tsx's SEARCH_MIN_MS (10000, the
+// owner's ten seconds for the platform roster, 2026-09-06) + LOADER_EXIT_MS (450) + margin. It was
+// 3000 while the beat was 2200; when the beat became 10s [J] read start=232 final=232 and failed on
+// a harness race, not a product defect. Named once so both journeys move together next time.
+const SEARCH_BEAT_FLOOR_MS = 12000;
+
 const launchOpts = { args: ['--no-sandbox', '--ignore-certificate-errors', '--disable-quic'] };
 if (process.env.PW_CHROMIUM) launchOpts.executablePath = process.env.PW_CHROMIUM;
 // A TLS-terminating egress proxy can reset Chromium's post-quantum ClientHello; pinning max TLS
@@ -586,11 +597,13 @@ try {
   await page.waitForTimeout(4000);
   await tap('إيجار'); await tap('شراء'); await tap('سنوي');
   await pickCity('الرياض');
+  // District suggestion rows render async (same case documented at line 194 for «حي النرجس»),
+  // so the fixed 1600ms wait races the runner. Use the same tapWhenRendered pattern the earlier
+  // journey already uses for identical control — polls up to 8s, taps as soon as the row exists.
   for (const name of ['النرجس', 'الملقا', 'الياسمين', 'الربيع', 'القيروان', 'العارض']) {
     await page.click('input >> nth=1');
     await page.type('input >> nth=1', name, { delay: 40 });
-    await page.waitForTimeout(1600);
-    await tap(`حي ${name}`);
+    await tapWhenRendered(`حي ${name}`);
     await page.waitForTimeout(300);
   }
   await tap('الفلل والبيوت'); await tap('فيلا');
@@ -729,7 +742,7 @@ try {
   // STABLE across two reads a second apart before trusting it.
   let reentrancyFinal = null;
   if (!reentrancyFinalOpen) {
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(SEARCH_BEAT_FLOOR_MS);
     let stableSince = null;
     const until = Date.now() + 45000;
     while (Date.now() < until) {
@@ -771,24 +784,22 @@ try {
   // down to the last — a lone genuinely useful question is still a real, honest narrowing step, not a
   // "tax on attention" to withhold). src/data/advancedFilters.ts pins the threshold value and
   // scripts/verify-af-min-useful-questions-gate.ts pins the source shape, but neither ever drives the
-  // real interview against real data — this does. Factory + Annual Rent + الرياض is a REAL, currently
-  // live cohort with EXACTLY one certified question (src/lib/afCohorts.ts: `Factory: { RentAnnual:
-  // ['street_width'] }`, evidence n=72 nationwide, 10/10 exact against aqar's own structured field) —
-  // chosen because a same-type, same-city scope with Buy ADDED (dealCombined) has ZERO certified
-  // questions (street_width is Buy+RentAnnual certified but not RentMonthly, so the 3-way combined
-  // intersection is empty), giving both boundary cases (0 and 1) real, live coverage in one journey
-  // without inventing synthetic data.
+  // real interview against real data — this does.
+  // FIXTURE (owner product rule 2026-09-04, stop line 25 → 50): Duplex + Buy + الهفوف is a REAL, live
+  // cohort with EXACTLY one certified question (src/lib/afCohorts.ts: `Duplex: { Buy: ['bathrooms'] }`,
+  // source-adjudicated 6/6 against hajerhouses' own «دورات المياه») and a scope ABOVE the new stop
+  // line (measured 2026-09-04: base 231, every bathroom rung 48). The previous fixture,
+  // Factory/RentAnnual/الرياض, is 33 rows — a FINISHED set under the 50 rule, so the interview
+  // correctly no longer opens there. This one also lands ≤ 50 after its single answer (231 → 48),
+  // which is exactly the completion the rule promises — asserted below.
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
-  await tap('تجاري');
-  await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
-  await tap('مصنع'); await page.waitForTimeout(300);
-  await tap('إيجار'); await page.waitForTimeout(300); // add Rent (Buy is on by default)
-  await tap('شراء'); await page.waitForTimeout(300);  // then drop Buy — Rent-only, never combined
-  await pickCity('الرياض');
+  await tap('الفلل والبيوت'); await page.waitForTimeout(300);   // Buy + سكني are the defaults
+  await tap('دوبلكس'); await page.waitForTimeout(300);
+  await pickCity('الهفوف');
   await tap('بحث');
   const jStart = await waitForCount(45000);
-  check('[J] 1-question scope (Factory/RentAnnual/الرياض) lands with a real start count', Number.isFinite(jStart), `start=${jStart}`);
+  check('[J] 1-question scope (Duplex/Buy/الهفوف) lands with a real start count ABOVE the 50 stop line', Number.isFinite(jStart) && jStart > 50, `start=${jStart}`);
 
   let jOpened = false;
   for (let i = 0; i < 6 && !jOpened; i++) {
@@ -799,6 +810,7 @@ try {
   check('[J] Advanced Filter OPENS for a cohort with exactly ONE useful question (the 1-question fix)', jOpened);
 
   let jTitles = [];
+  let jAnswered = null;                 // the option testid actually clicked, or null if none was offered
   if (jOpened) {
     // Same render race Journey I already guards against: af-card can mount a beat before its
     // question TITLE/options actually paint (real network round trip via rankQuestions), and CI's
@@ -807,11 +819,19 @@ try {
     let snap = await afSnapshot();
     for (let r = 0; r < 10 && !snap.title; r++) { await page.waitForTimeout(800); snap = await afSnapshot(); }
     if (snap.title) jTitles.push(snap.title);
-    check('[J] exactly one question is shown (street_width)', jTitles.length === 1, JSON.stringify(jTitles));
+    check('[J] exactly one question is shown (bathrooms)', jTitles.length === 1, JSON.stringify(jTitles));
+    // RECORD WHETHER AN ANSWER ACTUALLY HAPPENED. When the per-question count probes come back
+    // UNDETERMINED, resolveOptions returns ZERO options on purpose — «UNKNOWN must never become NO»
+    // — so there is nothing to click. Journey I already skips for exactly that; this journey used to
+    // click nothing and then assert narrowing anyway, which is a demand the product does not owe:
+    // an unanswered interview MUST leave the count alone. (CI 2026-09-04, start=26 final=26 on
+    // Factory/RentAnnual/الرياض: DB truth for that scope is base 26 → ≥15m 24, ≥25m 8, ≥30m 6, so
+    // no offered option could ever return 26 — the run simply never answered one.)
     if (snap.options.length) {
       await page.locator(`[data-testid="${snap.options[0]}"]:visible`).first().click({ timeout: 8000 });
       await page.waitForTimeout(300);
       await page.locator('[data-testid="af-confirm"]:visible').first().click({ timeout: 8000 });
+      jAnswered = snap.options[0];
     }
     let waited = 0;
     while (waited < 45000) {
@@ -828,7 +848,7 @@ try {
   // the true narrowed count is 39 — a HARNESS race, not a product defect).
   let jFinal = null;
   if (!jFinalOpen) {
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(SEARCH_BEAT_FLOOR_MS);
     let stableSince = null;
     const until = Date.now() + 45000;
     while (Date.now() < until) {
@@ -840,8 +860,52 @@ try {
       await page.waitForTimeout(500);
     }
   }
-  check('[J] the closed interview lands on a genuinely narrowed, non-null result',
-    !jFinalOpen && Number.isFinite(jFinal) && jFinal < jStart, `start=${jStart} final=${jFinal}`);
+  // The narrowing demand applies ONLY when an option was actually answered. This does NOT relax the
+  // rule: if options WERE offered and one was committed, the count must still genuinely narrow, and
+  // that is exactly the regression this journey exists to catch. What it stops doing is failing for
+  // the OPPOSITE of a defect — the product correctly declining to invent options it has no counts for.
+  if (jOpened && !jAnswered) {
+    console.log('SKIP  [J] narrowing assertion — AF offered NO options for this cohort, so nothing '
+      + 'was answered and no narrowing is owed. That is the specified behaviour when the per-question '
+      + 'count probes return UNDETERMINED («UNKNOWN must never become NO»), the same environment/'
+      + 'latency symptom Journey I skips for. A REAL regression looks different: options ARE offered, '
+      + 'one is committed, and the count still does not move — which the check below still enforces.');
+  } else {
+    check('[J] the closed interview lands on a genuinely narrowed, non-null result',
+      !jFinalOpen && Number.isFinite(jFinal) && jFinal < jStart,
+      `answered=${jAnswered ?? '(none)'} start=${jStart} final=${jFinal}`);
+    // THE 50 RULE, END TO END (owner 2026-09-04; rendering restyled 2026-09-05): a round that lands
+    // at ≤ 50 FINISHES the chat — every remaining listing is revealed with no «عرض المزيد», and the
+    // composer LOCKS in place (owner request 2026-09-05: no replacement card): the same box goes
+    // readOnly with the closed-chat placeholder «أُغلقت هذه المحادثة…» pointing at the ☰, and the
+    // send arrow becomes a disabled lock. Asserted only when the landed count really is ≤ 50 (DB
+    // truth today is 48; if inventory grows past 50 the interview is right to keep going and this
+    // block simply does not apply — it never demands a completion the data does not owe).
+    if (Number.isFinite(jFinal) && jFinal <= 50) {
+      const bodyTxt = await body();
+      check('[J] ≤ 50 → no «عرض المزيد» is offered — every remaining listing is already revealed',
+        !bodyTxt.includes('عرض المزيد'), `final=${jFinal}`);
+      const lockedComposer = await page.locator('textarea[readonly][placeholder*="أُغلقت هذه المحادثة"]:visible').count();
+      check('[J] ≤ 50 → the chat is COMPLETED: the composer locks (readOnly + «أُغلقت هذه المحادثة…» placeholder)',
+        lockedComposer === 1, `final=${jFinal} lockedComposer=${lockedComposer}`);
+      const liveComposer = await page.locator('textarea:not([readonly]):visible').count();
+      check('[J] ≤ 50 → no LIVE text input remains (the locked box is the only one)',
+        liveComposer === 0, `liveInputs=${liveComposer}`);
+      // The lock replaces the send arrow only once the card reveal SETTLES — while the ≤50 set is
+      // still dripping in, the button is deliberately the Stop box (tap to freeze the reveal), so
+      // poll rather than sample: 48 cards at the reveal cadence take ~40s on a CI runner.
+      let lockBtn = 0;
+      for (const deadline = Date.now() + 90_000; Date.now() < deadline; ) {
+        lockBtn = await page.locator(`[aria-label*="أُغلقت هذه المحادثة"][aria-disabled="true"]`).count();
+        if (lockBtn >= 1) break;
+        await page.waitForTimeout(1_000);
+      }
+      check('[J] ≤ 50 → once the reveal settles, the send button is a disabled lock carrying the closed-chat label',
+        lockBtn >= 1, `lockBtn=${lockBtn}`);
+    } else if (Number.isFinite(jFinal)) {
+      console.log(`NOTE  [J] landed at ${jFinal} (> 50) — completion assertions not owed; the interview is right to continue`);
+    }
+  }
 
   // Boundary case: the SAME type+city with Buy ALSO selected (dealCombined) has ZERO certified
   // questions (street_width is Buy+RentAnnual certified but not RentMonthly, so the 3-way

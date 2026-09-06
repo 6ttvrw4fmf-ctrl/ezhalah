@@ -3,7 +3,9 @@
 No auth, no token, no rate-limit. Listings are a WordPress custom post type exposed at
 /wp-json/wp/v2/properties (paginated, X-WP-TotalPages header). ~257 listings. Each carries the full
 Saudi REGA ad data under property_meta.advertisement_response (price, area, rooms, plan/land number,
-license, and a clean {region, city, district} location). The featured image is a direct `thumbnail` URL.
+license, and a clean {region, city, district} location). The featured image is a direct `thumbnail` URL;
+the FULL gallery lives behind /wp-json/wp/v2/media?parent=<post id> (the Houzez fave_property_images
+list is not exposed in the properties payload — see fetch_gallery).
 
 Field map (Aqargate property → our schema):
   property_type_text (Arabic)        → property_type (TYPE_MAP_AR) + residential/commercial routing
@@ -12,7 +14,8 @@ Field map (Aqargate property → our schema):
   ad.location.district               → neighborhood
   ad.propertyPrice / landTotalAnnualRent → price_total | price_annual
   ad.propertyArea / numberOfRooms    → area_m2 / bedrooms
-  thumbnail                          → photo_urls (full URL, verified to load)
+  media?parent=<id> attachments      → photo_urls (featured first, then source's ascending-id order;
+                                       `thumbnail` is the fallback when the parent query fails/is empty)
   ad.propertyAge/Face/planNumber/... → additional_info (Age, Facade, Plan/Land number, Street width, Usage)
   link, fave_property_id             → listing_url, ad_number
 
@@ -43,6 +46,7 @@ _PII = {"advertiserId", "advertiserName", "responsibleEmployeeName",
         "responsibleEmployeePhoneNumber", "phoneNumber"}
 
 API = "https://aqargate.com/wp-json/wp/v2/properties"
+MEDIA_API = "https://aqargate.com/wp-json/wp/v2/media"
 HEADERS = {"Accept": "application/json"}
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 PER_PAGE = 100  # WordPress REST cap
@@ -82,6 +86,12 @@ def session() -> cc.Session:
     return s
 
 
+def _oracle_session():
+    """Transport seam for `_verify_gone`. A test replaces this to execute the oracle against
+    injected responses — the decision itself lives in the pure `_gone_verdict`."""
+    return session()
+
+
 def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], int]:
     _throttle()
     for attempt in range(3):
@@ -96,6 +106,137 @@ def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], int]:
         total_pages = int(r.headers.get("X-WP-TotalPages") or 1)
         return (r.json() or []), total_pages
     return [], 0
+
+
+# ── The liveness oracle ─────────────────────────────────────────────────────────────────────────
+# WordPress post statuses that mean "this ad is no longer offered". `expired` is the one Houzez
+# actually uses when a listing lapses (measured 2026-09-06: 7/7 rows this crawl had aged out were
+# `expired` at source, while 7/8 known-live rows were `publish`). The others are WP's own
+# not-publicly-visible states and mean the same thing for our purposes.
+GONE_STATUSES = frozenset({"expired", "draft", "pending", "private", "trash", "future"})
+LIVE_STATUSES = frozenset({"publish"})
+
+
+def _gone_verdict(status: Optional[int], payload: Any, pid: str) -> Optional[tuple[str, str]]:
+    """The oracle's DECISION, separated from its transport so it can be executed exhaustively.
+
+    Pure: no I/O, no session, no clock. Returns a (verdict, reason) pair, or None meaning
+    "no answer yet — the caller may retry". A None from here NEVER means death; the caller turns an
+    exhausted retry budget into 'unknown'.
+
+    `payload` is the parsed JSON body, or None when the body could not be parsed at all.
+    """
+    if status is None:
+        return None                                   # network/timeout → retry, then 'unknown'
+    if status == 404:
+        code = (payload or {}).get("code") if isinstance(payload, dict) else None
+        if code == "rest_post_invalid_id":
+            return "gone", "wp post deleted (404 rest_post_invalid_id)"
+        # A 404 the API does not attribute to the post id is about our read, not the listing.
+        # (LISTING_LIVENESS.md §5.4: gathern expresses BLOCKING as its own 404 — a bare status
+        # code is not automatically a not-found, so the API's own reason has to agree.)
+        return "unknown", f"404 without rest_post_invalid_id (code={code!r})"
+    if status != 200:
+        return None                                   # 401/403/408/429/5xx/3xx → retry, then 'unknown'
+    if not isinstance(payload, dict):
+        return "unknown", "200 with unparseable body"
+    if str(payload.get("id") or "") != pid:
+        return "unknown", f"200 for a different post (asked {pid}, got {payload.get('id')!r})"
+    st = str(payload.get("status") or "").strip().lower()
+    if st in LIVE_STATUSES:
+        return "live", f"wp status={st}"
+    if st in GONE_STATUSES:
+        return "gone", f"wp status={st}"
+    return "unknown", f"unrecognised wp status={st!r}"
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    """DIRECT per-listing liveness oracle for `db.prune_unseen(verify_gone=...)`.
+
+    WHY THIS EXISTS. Until 2026-09-06 this scraper prune'd on crawl ABSENCE alone — its own comment
+    read "we fetched the COMPLETE catalog, so any row not seen this run is gone". That is exactly the
+    inference `docs/ops/LISTING_LIVENESS.md` §1-§3 forbids: absence is `EvidenceKind.ABSENCE`, a
+    candidate signal and never a verdict, because a partial page, a throttled run or a source-side
+    index gap is indistinguishable from a removal. It produced a standing P1
+    `unknown_treated_as_dead` alert (7 rows deactivated in 48h with no source verdict recorded).
+
+    CONTROL-VALIDATED AGAINST THE FAILURE MODE THIS PLATFORM ACTUALLY USES, which is the lesson
+    abeea's oracle paid for (see scrapers/abeea/run.py): aqargate does NOT usually delete a lapsed
+    post — it flips the WordPress `status` from `publish` to `expired`, and the post keeps returning
+    HTTP 200. A naive "200 ⇒ live, 404 ⇒ gone" oracle would therefore call every expired ad ALIVE.
+    It does *sometimes* hard-delete (2/3 struck rows on 2026-09-06 returned 404
+    `rest_post_invalid_id`), so both limbs are real and both are affirmative.
+
+    Measured 2026-09-06 over the whole catalogue: 200 published ids at source vs 143 active rows
+    here; the only 3 active rows absent from the published set were exactly the 3 rows carrying
+    strikes, and all 3 were `expired`/deleted at source. Absence and source truth agreed — but
+    nothing was RECORDING that, which is what made every deactivation unevidenced.
+
+    Verdicts, per the three-valued law — anything that is not an affirmative answer is 'unknown',
+    and 'unknown' holds the strike without deactivating:
+      'live'    — HTTP 200 and the post's own status is `publish`
+      'gone'    — HTTP 200 with a GONE_STATUSES status, or a 404 the API itself attributes to an
+                  invalid post id (the post was deleted)
+      'unknown' — timeout, connection error, 401/403/408/429, any 5xx, an unparseable body, a
+                  status string we do not recognise, or an id mismatch. NEVER death.
+    """
+    pid = (ad_number or "")[2:] if (ad_number or "").upper().startswith("AG") else (ad_number or "")
+    if not pid.isdigit():
+        return "unknown", f"ad_number {ad_number!r} does not carry a numeric WP post id"
+    s = _oracle_session()
+    last = "no attempt made"
+    for attempt in range(2):
+        _throttle()
+        status: Optional[int] = None
+        payload: Any = None
+        try:
+            r = s.get(f"{API}/{pid}", timeout=30)
+            status = r.status_code
+            last = f"HTTP {status}"
+            try:
+                payload = r.json()
+            except Exception:  # noqa: BLE001 — an unreadable body is not an answer
+                payload = None
+        except Exception as e:  # noqa: BLE001 — an unreachable source is never proof of death
+            last = f"{type(e).__name__}: {e}"
+        decided = _gone_verdict(status, payload, pid)
+        if decided is not None:
+            return decided
+        time.sleep(1.2 * (attempt + 1))
+    return "unknown", f"no answer after 2 attempts ({last})"
+
+
+def fetch_gallery(s: cc.Session, post_id: Any, featured_id: Any) -> Optional[list[str]]:
+    """Full gallery for one property via the WP media endpoint. The Houzez gallery
+    (fave_property_images) is NOT in the properties payload, but every gallery photo IS a media
+    attachment whose parent is the property post id — verified live 2026-09-05 on 3 listings
+    (e.g. 57251: `thumbnail` is false yet 34 live attachments; the thumbnail-only path stored it
+    with 0 images and capped every multi-photo gallery to 1). Order = the source's own: ascending
+    attachment id with the featured image first (it is the card thumbnail on the site).
+
+    Returns None — meaning "caller keeps the thumbnail fallback" — on request failure AND on an
+    empty-but-successful parent query: ~27% of listings (live 2026-09-05: 55102, 51336, 52193,
+    53809) upload their media UNATTACHED (post:null), so an empty result is not "no photos" and
+    storing [] there would hide a source-published photo. Genuinely imageless rows (e.g. 53151)
+    still end at [] because their `thumbnail` is false too. Non-image attachments are excluded by
+    mime_type. Cost: one throttled GET per listing (~200 rows × 0.3s ≈ 60s/run, no auth)."""
+    if not post_id:
+        return None
+    _throttle()
+    try:
+        r = s.get(f"{MEDIA_API}?parent={post_id}&per_page=100&orderby=id&order=asc"
+                  "&_fields=id,source_url,mime_type", timeout=30)
+        if r.status_code != 200:
+            return None
+        atts = [a for a in (r.json() or [])
+                if str(a.get("mime_type") or "").startswith("image/")
+                and isinstance(a.get("source_url"), str)]
+    except Exception:
+        return None
+    if not atts:
+        return None
+    atts.sort(key=lambda a: (a.get("id") != featured_id, a.get("id") or 0))
+    return [a["source_url"] for a in atts]
 
 
 def _int(v: Any) -> Optional[int]:
@@ -180,7 +321,7 @@ def _rent_annualize(
     return rent, "annual"
 
 
-def map_listing(p: dict) -> tuple[Optional[dict], str]:
+def map_listing(p: dict, s: Optional[cc.Session] = None) -> tuple[Optional[dict], str]:
     meta = p.get("property_meta") or {}
     ar = meta.get("advertisement_response") or {}
     pid = _text(meta.get("fave_property_id")) or str(p.get("id") or "")
@@ -228,6 +369,9 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         _price_int(rent), has_annual_field=ar.get("landTotalAnnualRent") is not None, title_text=title_text,
     ) if is_rent else (None, None)
     thumb = p.get("thumbnail")
+    # Gallery from the media endpoint; None (fetch failed OR empty parent query) keeps the old
+    # thumbnail fallback so failure degrades to FEWER images, never [] over a live photo.
+    gallery = fetch_gallery(s, p.get("id"), p.get("featured_media")) if s is not None else None
     row = {
         "ad_number": f"AG{pid.replace('AG-', '').replace('AG', '')}",
         "listing_url": p.get("link"),
@@ -267,7 +411,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str]:
         "city": city,
         "neighborhood": loc.get("district") or None,
         "title": (p.get("title") or {}).get("rendered"),
-        "photo_urls": [thumb] if isinstance(thumb, str) and thumb.startswith("http") else [],
+        "photo_urls": gallery if gallery is not None
+                      else ([thumb] if isinstance(thumb, str) and thumb.startswith("http") else []),
         "property_age": _int(ar.get("propertyAge")),
         "rega_location_verified": bool(ar.get("adLicenseNumber")),
         "additional_info": _additional_info(ar),
@@ -300,7 +445,7 @@ def main() -> int:
             if not listings:
                 break
             for p_ in listings:
-                row, cat = map_listing(p_)
+                row, cat = map_listing(p_, s)
                 if not row or not row.get("property_type"):
                     continue
                 if args.type != "all" and cat != args.type:
@@ -317,11 +462,15 @@ def main() -> int:
             return 0
         if res: db.upsert_aqargate_residential_batch(res)
         if com: db.upsert_aqargate_commercial_batch(com)
-        # FULL-REFRESH prune: we fetched the COMPLETE catalog, so any Aqargate row not seen this run
-        # is gone → mark inactive (self-cleaning, replaces a separate liveness job).
+        # FULL-REFRESH prune: we re-read the COMPLETE catalog, so a row not seen this run is a
+        # strong CANDIDATE for removal — never a verdict. Absence is EvidenceKind.ABSENCE
+        # (LISTING_LIVENESS.md §1-§3) and may select which rows to re-probe, nothing more; only
+        # _verify_gone's affirmative per-listing answer may deactivate. Before 2026-09-06 this
+        # pruned on absence alone, which is what raised the standing unknown_treated_as_dead P1.
         pruned = 0
         for tbl, rows_seen in (("aqargate_residential_listings", res), ("aqargate_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Aqargate")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Aqargate",
+                                verify_gone=_verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

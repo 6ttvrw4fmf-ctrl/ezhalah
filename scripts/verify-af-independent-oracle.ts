@@ -22,7 +22,25 @@
 // (the clause's unlocated-countrywide fallback only applies when NO location filter is given), so
 // the two paths are comparing the same population and a difference is always a predicate defect.
 //
-//   node --experimental-strip-types scripts/verify-af-independent-oracle.ts   (wired into `npm test`)
+// WHERE THIS RUNS (2026-09-04). NOT in `npm test`: every assertion here calls production through the
+// committed anon key, so a production hiccup would fail unrelated PRs — the pattern #1486 removed,
+// and the reason PR #1527 moved it out. Its home is now .github/workflows/af-oracle-pr-check.yml,
+// which runs THIS SCRIPT ALONE on every pull_request, on push to main, and on dispatch: 7.8s, no
+// browser, no paid agent message, no secret (so a fork PR runs it too), retried three times so a
+// blip cannot fail someone's unrelated PR while a real disagreement — deterministic — fails all
+// three. It ALSO still runs post-deploy as a step in .github/workflows/af-live-truth-check.yml.
+// So both properties #1527 traded between now hold: the live call is out of the required hermetic
+// suite, AND this check gates a pull request again. It is listed in scripts/test-exclusions.txt and
+// carried as a named departure in verify-test-registry-complete.ts, whose ledger now EXECUTES its
+// own claim (a «NO LOSS» entry must name a home that really has a pull_request trigger).
+// WHAT A PR CAN BREAK HERE, said plainly: the predicate MEANING lives in production's SQL, so this
+// is a live gate, not a source gate — what a PR can change is the hand-written REST expression
+// below, the RPC params sent, or the endpoint in scripts/lib/public-supabase.ts, and any of those
+// going wrong turns this check red before the merge instead of a day later on the cron. The
+// hermetic proofs of the oracle's own logic — verify-af-oracle-filter-translator.ts and
+// verify-af-oracle-soundness.ts — stay in `npm test`.
+//
+//   node --experimental-strip-types scripts/verify-af-independent-oracle.ts
 
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 

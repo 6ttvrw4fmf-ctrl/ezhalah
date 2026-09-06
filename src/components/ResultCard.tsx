@@ -517,7 +517,16 @@ const MIZLAJ_LOGO = require('../../assets/images/mizlaj.jpg');
 const DEALAPP_LOGO = require('../../assets/images/dealapp.jpg');
 const GATHERN_LOGO = require('../../assets/images/gathern.jpg');
 const OCTOBER_LOGO = require('../../assets/images/october.jpg');
+const ARKAAN_LOGO = require('../../assets/images/arkaan.png');
+const ABRALOSOL_LOGO = require('../../assets/images/abralosol.png');
+const THERC_LOGO = require('../../assets/images/therc.png');
+const RAWASIDARK_LOGO = require('../../assets/images/rawasidark.png');
+const AOUJ_LOGO = require('../../assets/images/aouj.png');
 const AQARATIKOM_LOGO = require('../../assets/images/aqaratikom.jpg');
+const REMAL_LOGO = require('../../assets/images/remal.png');
+const AMAALL_LOGO = require('../../assets/images/amaall.png');
+const ALTA_LOGO = require('../../assets/images/alta.png');
+const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
 const AWAL_LOGO = require('../../assets/images/awal.jpg');
 const ALKHAAS_LOGO = require('../../assets/images/alkhaas.jpg');
 const ABEEA_LOGO = require('../../assets/images/abeea.jpg');
@@ -533,6 +542,36 @@ const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.jpg');
 function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (k: string) => string }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => { setIdx(0); }, [photos.join('|')]);
+
+  // ON WEB, expo-image's onError DOES NOT FIRE when the browser BLOCKS the response rather than
+  // failing to fetch it. Verified live 2026-09-06 against sadin.com.sa, whose media replies
+  // `cross-origin-resource-policy: same-origin` — Chrome refuses the embed with
+  // ERR_BLOCKED_BY_RESPONSE.NotSameOrigin. The rendered <img> sat at complete=false,
+  // naturalWidth=0, STILL ON PHOTO #1 after 20s: the onError below never ran, idx never advanced,
+  // the `!uri` placeholder was never reached, and the card showed a 240x200 EMPTY BOX. A listing
+  // with 20 real photos in the database rendered as a blank rectangle, forever.
+  //
+  // A bare `new window.Image()` on the SAME url fires `error` normally, so we do our own probe and
+  // advance idx ourselves. This retires the whole class, not just this host: a CORP-blocked image,
+  // a 404, a deleted CDN object and a hotlink-denied referer all end at the honest placeholder
+  // instead of a blank box. Native keeps expo-image's own onError, which works there.
+  //
+  // The probe costs one extra request per candidate; the browser cache then serves the <img>
+  // render for free, and a URL that loads is never probed twice (idx stops advancing).
+  const key = photos.join('|');
+  useEffect(() => {
+    if (!IS_WEB || typeof window === 'undefined') return;
+    const uri = photos[idx];
+    if (!uri) return;
+    let cancelled = false;
+    const probe = new window.Image();
+    // Only ever advance PAST the url we probed — a stale probe resolving late must not skip a
+    // good photo that a newer render already settled on.
+    probe.onerror = () => { if (!cancelled) setIdx((i) => (i === idx ? i + 1 : i)); };
+    probe.src = uri;
+    return () => { cancelled = true; probe.onerror = null; };
+  }, [key, idx]);
+
   const uri = photos[idx];
   if (!uri) {
     return (
@@ -555,7 +594,18 @@ function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (
 }
 
 function SourceBadge({ source }: { source: string }) {
-  const s = source.toLowerCase();
+  // SPACING IS NOT IDENTITY (production defect, 2026-09-04). Every branch below tests a closed-up
+  // slug, but the DB `source` value is a human brand string that often carries SPACES: production
+  // stores 'Abr Alosol', 'THE RC' and 'Rawasi Dark', so `includes('abralosol' | 'therc' |
+  // 'rawasidark')` all missed and 3,165 live listings fell through to the Aqar fallback below —
+  // Aqar's name, Aqar's logo, and a click-through to sa.aqar.fm on another company's listing. Same
+  // trap that hit 'Al Khaas' and 'Al Nokhba', which were each patched one-off with an extra alias.
+  // Searching BOTH the raw string and a space-stripped copy retires the whole class instead of the
+  // next instance of it: a spaced brand and its slug now match the same branch, and the existing
+  // spaced tokens ('al khaas') keep working because the raw form is still in the haystack. The '|'
+  // separator cannot appear in any token, so nothing can match across the join.
+  const raw = source.toLowerCase();
+  const s = raw + '|' + raw.replace(/\s+/g, '');
   if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('aldarim')) return <Image source={ALDARIM_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('aqargate')) return <Image source={AQARGATE_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -577,6 +627,10 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('mizlaj')) return <Image source={MIZLAJ_LOGO} style={card.hostBadge} contentFit="contain" />;
   // Batch 7 — text-chips until the user supplies logos.
   if (s.includes('aqaratikom')) return <Image source={AQARATIKOM_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('shmou al shmal') || s.includes('shmoualshmal')) return <Image source={SHMOUALSHMAL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('remal')) return <Image source={REMAL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('amaall')) return <Image source={AMAALL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
@@ -592,11 +646,11 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('pulse')) return <Image source={ERAPULSE_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('nowaisiry')) return <Image source={NOWAISIRY_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('october')) return <Image source={OCTOBER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('therc')) return <View style={[card.hostBadge, card.thercBadge]}><Text style={card.badgeText}>الخيار الصحيح</Text></View>;
-  if (s.includes('aouj')) return <View style={[card.hostBadge, card.aoujBadge]}><Text style={card.badgeText}>عوج</Text></View>;
-  if (s.includes('abralosol')) return <View style={[card.hostBadge, card.abralosolBadge]}><Text style={card.badgeText}>عبر الأصول</Text></View>;
-  if (s.includes('arkaan')) return <View style={[card.hostBadge, card.arkaanBadge]}><Text style={card.badgeText}>أركان</Text></View>;
-  if (s.includes('rawasidark')) return <View style={[card.hostBadge, card.rawasidarkBadge]}><Text style={card.badgeText}>رواسي دارك</Text></View>;
+  if (s.includes('therc')) return <Image source={THERC_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('aouj')) return <Image source={AOUJ_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('abralosol')) return <Image source={ABRALOSOL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('arkaan')) return <Image source={ARKAAN_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('rawasidark')) return <Image source={RAWASIDARK_LOGO} style={card.hostBadge} contentFit="contain" />;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -604,7 +658,18 @@ function SourceBadge({ source }: { source: string }) {
 // to src/lib/listingDisplay.ts, owner 2026-08-22, so Read Aloud shares the exact same platform-name
 // mapping instead of a second copy that could drift.)
 function sourceHost(source: string): string {
-  const s = source.toLowerCase();
+  // SPACING IS NOT IDENTITY (production defect, 2026-09-04). Every branch below tests a closed-up
+  // slug, but the DB `source` value is a human brand string that often carries SPACES: production
+  // stores 'Abr Alosol', 'THE RC' and 'Rawasi Dark', so `includes('abralosol' | 'therc' |
+  // 'rawasidark')` all missed and 3,165 live listings fell through to the Aqar fallback below —
+  // Aqar's name, Aqar's logo, and a click-through to sa.aqar.fm on another company's listing. Same
+  // trap that hit 'Al Khaas' and 'Al Nokhba', which were each patched one-off with an extra alias.
+  // Searching BOTH the raw string and a space-stripped copy retires the whole class instead of the
+  // next instance of it: a spaced brand and its slug now match the same branch, and the existing
+  // spaced tokens ('al khaas') keep working because the raw form is still in the haystack. The '|'
+  // separator cannot appear in any token, so nothing can match across the join.
+  const raw = source.toLowerCase();
+  const s = raw + '|' + raw.replace(/\s+/g, '');
   if (s.includes('wasalt')) return 'wasalt.sa';
   if (s.includes('aldarim')) return 'aldarim.sa';
   if (s.includes('aqargate')) return 'aqargate.com';
@@ -627,6 +692,10 @@ function sourceHost(source: string): string {
   // Real Aqaratikom listing_url is always nawait.sa (confirmed live, 0 exceptions) — matches
   // sourceName()'s own 'Nawait' label for the same source string. (found live 2026-07-25.)
   if (s.includes('aqaratikom')) return 'nawait.sa';
+  if (s.includes('shmou al shmal') || s.includes('shmoualshmal')) return 'shmoua-alshmal.com';
+  if (s.includes('remal')) return 'remalre.com';
+  if (s.includes('amaall')) return 'amaall.com';
+  if (s.includes('alta')) return 'alta.com.sa';
   if (s.includes('awal')) return 'awaalun.com';
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/

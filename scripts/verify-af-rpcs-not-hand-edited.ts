@@ -111,6 +111,14 @@ const TEMPLATE_ERA_BASELINE = '20260816000000';
 // recording it, and the mutation suite explicitly proves it turns this file red.
 type Divergence = { why: string; reconciledBy: string | null };
 const KNOWN_DIVERGENCES: Record<string, Divergence> = {
+  '20260904143246_location_search_candidates_ar_distinct_platform_count.sql': {
+    why: 'live 2026-09-04; first attempt at adding distinct_platform_count (a platform-diversity ' +
+      'experiment later superseded by PR #1688\'s client-side distinctPlatformCount()) went straight ' +
+      'at the RPC — a plain DROP + dynamic CREATE, mirroring what production actually ran before the ' +
+      'mistake was caught. Never merged to main in this form; both the column and this hand-edit were ' +
+      'reconciled the same day.',
+    reconciledBy: '20260904143618_af_template_absorbs_distinct_platform_count_and_rebuild.sql',
+  },
   '20260829172433_drop_old_location_search_candidates_ar_overload.sql': {
     why: 'live 2026-08-29; emergency DROP of the stale 41-arg overload after the previous migration\'s CREATE OR REPLACE with a new trailing parameter created a SECOND overload and PGRST203-ed every live caller. Correct as an incident fix, still outside the template path.',
     reconciledBy: '20260830134244_af_template_absorbs_2026_08_29_ranking_so_rebuild_is_a_noop.sql',
@@ -156,7 +164,7 @@ for (const file of files) {
 {
   const expected = Object.keys(KNOWN_DIVERGENCES).sort();
   check('§2 the known-divergence allowlist holds exactly the 2 reviewed entries',
-    expected.length === 2, `allowlist has ${expected.length} entr(ies) — growing it is a deliberate, reviewed act`);
+    expected.length === 3, `allowlist has ${expected.length} entr(ies) — growing it is a deliberate, reviewed act`);
   check('§2 every allowlist entry carries a stated reason',
     expected.every((k) => (KNOWN_DIVERGENCES[k]?.why ?? '').trim().length > 20),
     'an entry with no reason is cover, not a record');

@@ -171,7 +171,11 @@ function looksLikeUninterpretedChange(sql: string, fn: string): boolean {
   // Without this, such a migration has no `definedHere` at all and every tracked RPC it merely
   // MENTIONS — in a comment, or inside a format() string it assembles — is reported uninterpretable.
   // Collect the declared targets so inspect-vs-rewrite can be judged the same way.
-  for (const m of sql.matchAll(/p\.proname\s*=\s*'([a-z0-9_]+)'/gi)) definedHere.push(m[1].toLowerCase());
+  // The alias is optional: `from pg_proc where proname = '...'` (no `p.`) is the same declaration
+  // of target (20260905044047 wrote it that way and was wrongly reported uninterpretable for a
+  // tracked RPC it only MENTIONED in prose). Widening cannot hide a real rewrite: a bare-proname
+  // edit that names a TRACKED function still sets definesTracked and stays flagged.
+  for (const m of sql.matchAll(/(?:\w+\.)?proname\s*=\s*'([a-z0-9_]+)'/gi)) definedHere.push(m[1].toLowerCase());
   const definesTracked = definedHere.includes(fn.toLowerCase());
   if (!definesTracked && definedHere.length > 0) {
     // Guard the loophole: a dynamic rebuild names the target in the EXECUTE string rather than in a

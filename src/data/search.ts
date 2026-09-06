@@ -4,7 +4,7 @@ import type { ProximityIntent } from './proximity';
 import { scoreListingProximity } from './proximity';
 import { cityHasListings, nearbyCityWithListings, cityDisplay } from './locations';
 import { detailFor, priceBandRange } from './taxonomy';
-import { POOLS, LISTED_SEQ, type Listing, type Pools } from './listings';
+import { LISTED_SEQ, type Listing, type Pools } from './listings';
 import { supports } from './platforms';
 // The app's single Arabic folding helper — it documents itself as mirroring the RPC's normalize_ar,
 // so district matching on the client and in the RPC stay one definition. (listingInDistricts)
@@ -585,7 +585,7 @@ const SOURCE_LABELS: Record<string, string> = {
   hajer: 'Hajer Houses Real Estate', sanadak: 'Sanadak', eastabha: 'East Abha Real Estate', aqarcity: 'Aqar City', raghdan: 'Raghdan Real Estate',
   eaqartabuk: 'Eqar Tabuk', satel: 'Satel', sadin: 'Sadin for Real Estate', toor: 'TOOR', mustqr: 'Mustaqarr Real Estate',
   ramzalqasim: 'Ramz Al Qassim Real Estate Investment', fursaghyr: 'Fursa Ghyr Real Estate', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj Real Estate',
-  muktamel: 'Muktamel', aqaratikom: 'Nawait', awal: 'Awal United for Real Estate', alkhaas: 'Al Khaas',
+  muktamel: 'Muktamel', aqaratikom: 'Nawait', awal: 'Awal United for Real Estate', alta: 'Alta Real Estate Services', remal: 'Remal Real Estate', amaall: 'Amaall Real Estate Services', shmoualshmal: 'Shmou Al Shmal Real Estate', alkhaas: 'Al Khaas',
   abeea: 'Abeea Real Estate', jurash: 'Jurash Real Estate', alnokhba: 'Al Nokhba', dealapp: 'Deal App',
   erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry Real Estate', october: '1 October Real Estate', gathern: 'Gathern',
 };
@@ -741,7 +741,7 @@ function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
   // over the whole fetched set and let matchesType decide. (The old keyword→mock-pool buckets only
   // covered a few residential types and would silently drop Shop/Office/Residential Building/etc.)
-  if (q.type || (q.types && q.types.length) || effectiveGroups(q).length) return allRows(pools);
+  if (q.type || (q.types && q.types.length) || effectiveGroups(q).length) return pools.all;
   const t = q.type?.toLowerCase();
   if (t) {
     if (t.includes('villa')) return pools.villa;
@@ -752,8 +752,10 @@ function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // "Rent or Buy" (deal unknown, OR the Filter's شراء+إيجار both selected) with no specific type →
   // draw from BOTH the rent and buy mixes so the results can actually contain each (runSearch then
   // keeps both). Otherwise the rent-only mix would never surface a Buy listing. (bothDeals/
-  // dealCombined correctness.)
-  if (q.bothDeals || q.dealCombined) return [...pools.mixRent, ...pools.mixBuy];
+  // dealCombined correctness.) `all`, NOT [...mixRent, ...mixBuy]: that splice put every Rent row
+  // ahead of every Buy row and destroyed the RPC's platform round-robin (live 2026-09-04 — 21 rentals
+  // from ~10 platforms, 9 Buy-only platforms invisible). See Pools.all in listings.ts.
+  if (q.bothDeals || q.dealCombined) return pools.all;
   if (q.deal === 'Buy') {
     const amount = parseInt((q.priceInput.match(/\d/g) ?? []).join(''), 10);
     if (amount > 50_000 && amount <= 700_000) return pools.budget;
@@ -823,7 +825,33 @@ function priceFilter(q: SearchQuery): ((l: Listing) => boolean) | null {
   }
   if (lo != null || hi != null) {
     const min = lo ?? 0, max = hi ?? Infinity;
-    return (l) => withinValue(l.price, min, max);
+    // MIRROR THE SERVER, ROW BY ROW — the same rule the dealCombined branch above follows, applied to
+    // the branch it left behind. location_search_candidates_ar's single-deal arm reads THIS pair as:
+    //     بيع   → price_total_effective, against the bounds as typed
+    //     إيجار → price_annual, against the bounds ANNUALISED the way rentPeriodParam() labelled the
+    //             search:  price_annual >= p_price_min * (case when p_rent_period='شهري' then 12 else 1 end)
+    // The card prints a source-MONTHLY rent at price_annual÷12 (listingPriceString), so comparing the
+    // DISPLAYED figure against that pair reads TWO different units on one search the moment the
+    // returned set spans both periods — which is precisely what «شهري+سنوي» (rentPeriod 'both') asks
+    // for, and what the annual arm's rent-now-pay-later branch admits as well. Measured live
+    // 2026-09-06 on الرياض/إيجار/كلاهما with a 20,000 floor: the RPC counted 28,626 and this net
+    // deleted 8,651 of them — every monthly card — because 2,500/mo reads as 2,500 against a yearly
+    // 20,000 floor. rentAnnualValue() is the client's reconstruction of price_annual, so comparing on
+    // it IS the server's comparison, not a second opinion about it.
+    // (found 2026-09-06 by the regression hunter re-attacking the 2026-09-02 combined-budget fix at
+    //  its siblings; scripts/verify-combined-deal-budget-split.ts §5.)
+    const rentK = q.rentPeriod === 'monthly' ? 12 : 1;
+    return (l) => {
+      if (l.deal !== 'Rent') return withinValue(l.price, min, max);
+      // bothDeals sends p_deal NULL and NO rent bound — p_price_min_rent/p_price_max_rent are spread
+      // only under dealCombined — so the server leaves every rent row unbounded here. Deleting one
+      // client-side is the exact defect this branch is being repaired for, one deal over. (Latent
+      // today: nothing sets priceMin/priceMax alongside bothDeals — the Filter home deliberately does
+      // not restore bothDeals, searchDefaults.ts — but the pair must not disagree if it ever can.)
+      if (q.bothDeals) return true;
+      const annual = rentAnnualValue(l);
+      return annual >= min * rentK && annual <= max * rentK;
+    };
   }
   if (q.priceBand) {
     const r = priceBandRange(q.priceBand);
@@ -990,16 +1018,6 @@ function matchesType(l: Listing, q: SearchQuery): boolean {
   return (l.macro ?? CLEAN_MACRO[c] ?? 'Residential') === 'Residential';
 }
 
-// Every fetched row, deduped by id. The server fetch already scoped rows to the selected clean type's
-// raw set + tables, so when a type/group is chosen we run matchesType over the WHOLE fetched set
-// rather than a single mock "pool" (which buckets by old raw type and could drop e.g. Shop/Building).
-function allRows(pools: Pools): Listing[] {
-  const seen = new Set<number>();
-  const out: Listing[] = [];
-  for (const arr of Object.values(pools)) for (const l of arr) if (!seen.has(l.id)) { seen.add(l.id); out.push(l); }
-  return out;
-}
-
 // The bedroom counts selected at the filter's category/group level: the multi-select list
 // (`contextBedsList`), else the single `contextBeds` as a 1-element list, else empty. One path
 // covers single + multi everywhere (mirrors effectiveTypes). (multi-select bedrooms.)
@@ -1106,6 +1124,18 @@ const SORT_NOTE: Record<SortKey, string> = {
 // unknown price to 0. Used only for OBJECTIVE sorting — never to judge a listing.
 const priceOf = (l: Listing): number => listingPriceValue(l.price);
 
+// The SAME basis the RPC ordered the whole matched set on. location_search_candidates_ar sorts by
+// `effective_price = coalesce(price_total_effective, price_annual)` BEFORE limit/offset, so a client
+// re-sort that keys on the DISPLAYED figure disagrees with it exactly where the two differ: a
+// source-monthly rent card prints price_annual÷12. On a «شهري+سنوي» set that puts every monthly card
+// ahead of every annual one under «الأرخص أولاً» regardless of the actual rent, and — because the
+// server chose WHICH rows are on this page by its own key — page 2 can then display a cheaper card
+// than page 1, so a paged cheapest-first walk stops being monotonic.
+// Identity everywhere the two bases cannot differ: a Buy row's displayed total already IS the RPC's
+// key, and in a single-period rent set every row scales by the same factor. (found 2026-09-06 with
+// the priceFilter unit seam above — one mechanism, three consumers.)
+const sortPriceOf = (l: Listing): number => (l.deal === 'Rent' ? rentAnnualValue(l) : priceOf(l));
+
 // Ascending/descending by a possibly-NaN value — an unknown value (no price, no area) always sorts to
 // the END regardless of direction, never treated as the cheapest/lowest. (found live 2026-07-25: the
 // old `priceOf(a) - priceOf(b)` coerced "Price on request" to SAR 0, ranking it #1 under "cheapest
@@ -1128,12 +1158,14 @@ function sortListings(list: Listing[], sort: SortKey): Listing[] {
   // that never matches a LISTED_SEQ token — that mismatch made both comparators a permanent no-op
   // against real data before recencyRank existed (found live 2026-07-25).
   const recency = (l: Listing) => l.recencyRank ?? RECENCY[l.listed] ?? 99;
-  const ppm = (l: Listing) => (l.area > 0 ? priceOf(l) / l.area : NaN);
+  // Same basis as the price sorts: a SAR/m²/month figure and a SAR/m²/year figure are not comparable
+  // numbers, and ppm is the one sort the RPC does not compute, so nothing downstream would catch it.
+  const ppm = (l: Listing) => (l.area > 0 ? sortPriceOf(l) / l.area : NaN);
   switch (sort) {
     case 'newest':    out.sort((a, b) => recency(a) - recency(b)); break;
     case 'oldest':    out.sort((a, b) => recency(b) - recency(a)); break;
-    case 'price_asc': out.sort(byValue(priceOf, 1)); break;
-    case 'price_desc':out.sort(byValue(priceOf, -1)); break;
+    case 'price_asc': out.sort(byValue(sortPriceOf, 1)); break;
+    case 'price_desc':out.sort(byValue(sortPriceOf, -1)); break;
     case 'area_asc':  out.sort((a, b) => a.area - b.area); break;
     case 'area_desc': out.sort((a, b) => b.area - a.area); break;
     case 'ppm_asc':   out.sort(byValue(ppm, 1)); break;
@@ -1228,7 +1260,11 @@ function budgetCap(q: SearchQuery): number | null {
 function closenessScore(l: Listing, q: SearchQuery, cap: number | null): number {
   let bonus = 0;
   if (cap && cap > 0) {
-    const v = listingPriceValue(l.price);
+    // budgetCap() states its own unit — "annual basis" for rentPeriod 'both' — so the listing must be
+    // read on that same basis, or a 2,500/mo card scores as comfortably inside a 30,000 yearly cap
+    // while its actual rent IS 30,000. Same mechanism as sortPriceOf above; identity on Buy and on
+    // any single-period rent set. (2026-09-06.)
+    const v = l.deal === 'Rent' ? rentAnnualValue(l) : listingPriceValue(l.price);
     if (!Number.isNaN(v) && v > 0) bonus += 1 - Math.min(1, Math.max(0, v - cap) / cap);
   }
   const target = exactSizeTarget(q);
@@ -1266,7 +1302,11 @@ function diversifyBySource(listings: Listing[]): Listing[] {
 function closenessBonus(l: Listing, q: SearchQuery, cap: number | null): number {
   let bonus = 0;
   if (cap && cap > 0) {
-    const v = listingPriceValue(l.price);
+    // budgetCap() states its own unit — "annual basis" for rentPeriod 'both' — so the listing must be
+    // read on that same basis, or a 2,500/mo card scores as comfortably inside a 30,000 yearly cap
+    // while its actual rent IS 30,000. Same mechanism as sortPriceOf above; identity on Buy and on
+    // any single-period rent set. (2026-09-06.)
+    const v = l.deal === 'Rent' ? rentAnnualValue(l) : listingPriceValue(l.price);
     if (!Number.isNaN(v) && v > 0) bonus += 1 - Math.min(1, Math.max(0, v - cap) / cap);
   }
   const target = exactSizeTarget(q);
@@ -1325,7 +1365,7 @@ function rankResults(listings: Listing[], q: SearchQuery, cap: number | null): L
   return out;
 }
 
-export function runSearch(q: SearchQuery, pools: Pools = POOLS, opts?: { fetchFailed?: boolean }): SearchResult {
+export function runSearch(q: SearchQuery, pools: Pools, opts?: { fetchFailed?: boolean }): SearchResult {
   let eligible = pickPool(q, pools)
     // bothDeals (agent searched without knowing rent/buy) or dealCombined (Filter شراء+إيجار both
     // selected) → show BOTH; otherwise filter to the single selected deal. supports() checks the

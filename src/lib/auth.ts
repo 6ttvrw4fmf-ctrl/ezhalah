@@ -121,13 +121,23 @@ export async function getCurrentUser(
  *
  * The two deliberate multi-session paths stay explicit and are unaffected: `scope: 'others'`
  * (devices.ts → signOutOtherDevices) and the per-session DELETE in the `devices` edge function.
+ *
+ * Returns whether the session on THIS device actually ended, so the UI can tell the truth instead of
+ * reporting success on a failed logout. This is not defensive plumbing: when the logout request
+ * fails for any reason other than an already-dead token (supabase-js forgives 401/403/404 and clears
+ * anyway), gotrue-js returns `{ error }` and LEAVES THE SESSION IN STORAGE — still valid, still
+ * auto-refreshing. The previous body returned void and swallowed that error, so the app dropped to
+ * the guest UI while the `sb-*` token sat untouched in localStorage and the next reload signed the
+ * user straight back in (ops_incident hunt-2026-09-04:auth:03). No backend configured (preview) is
+ * `true`: there is no stored session to end.
  */
-export async function signOutBackend(): Promise<void> {
-  if (!supabase) return;
+export async function signOutBackend(): Promise<boolean> {
+  if (!supabase) return true;
   try {
-    await supabase.auth.signOut({ scope: 'local' });
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
+    return !error;
   } catch {
-    /* ignore */
+    return false;
   }
 }
 

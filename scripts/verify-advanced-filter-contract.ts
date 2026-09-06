@@ -44,7 +44,7 @@ check('the pool contains all five questions and rankQuestions re-ranks it contex
   // INTERVIEW_STOP_AT/MIN_TOTAL_TO_SHOW moved to afRanking.ts (2026-08-22, pure-module extraction);
   // advancedFilters.ts still re-exports them (checked separately below) so every existing importer
   // is unaffected.
-  && /INTERVIEW_STOP_AT = 25/.test(rankingSrc)
+  && /INTERVIEW_STOP_AT = 50/.test(rankingSrc)   // owner product rule 2026-09-04 (was 25)
   && /MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT \+ 1/.test(rankingSrc)
   && /INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW/.test(advSrc));
 // MECHANISM CHANGE (owner 2026-08-22, «رجوع»): asked-tracking is no longer an incremental
@@ -78,7 +78,7 @@ check('installments is ask-first via a TIER applied in the sort, never by bypass
 // pure implementation OR in advancedFilters.ts's thin wrapper.
 check('scoreQuestion gates on scope size and the shared narrowing predicate, not selectivity',
   /if \(N < MIN_TOTAL_TO_SHOW\) return null;/.test(rankingSrc)
-  && /const narrowing = result\.options\.filter\(\(o\) => optionNarrowsMeaningfully\(o\.count, N\)\);/.test(rankingSrc)
+  && /const narrowing = result\.options\.filter\(\(o\) => o\.count != null && optionNarrowsMeaningfully\(o\.count, N\)\);/.test(rankingSrc)   // an UNKNOWN count is skipped, never scored (2026-09-04)
   && /if \(narrowing\.length < minOptionsFor\(selection\)\) return null;/.test(rankingSrc)
   && !/Math\.max\(15, Math\.ceil\(0\.08 \* N\)\)/.test(rankingSrc)
   && !/o\.count <= 0\.9 \* N/.test(rankingSrc)
@@ -323,20 +323,29 @@ check('the result-intro count comes from matchTotal via quotableTotal(), never a
     /priceIsAnnual \|\| hasClientOnlyNarrowing\(r\.query\)\)\) return null/.test(fn));
 }
 
-// ── Mining transition (owner 2026-08-16 §9) ─────────────────────────────────────────────────────
-// The «digging through the market» beat is DECORATION: its dismissal is driven by plain setTimeout
-// latches in finishGuided (never an animation callback — src/lib/afterAnimation.ts's rule), it uses
-// the REAL from/to counts, and a hard failsafe dismisses it even if the search turn dies.
+// ── The «digging» transition (owner 2026-08-16 §9; briefly redesigned 2026-08-31, RESTORED by the
+//    owner 2026-09-06: "remove this design … keep it how it was") ─────────────────────────────────
+// The beat is DECORATION: its dismissal is driven by plain setTimeout latches in finishGuided (never
+// an animation callback — src/lib/afterAnimation.ts's rule) and a hard failsafe dismisses it even if
+// the search turn dies. It speaks the searching line, the honest from-count, and — once the search
+// lands — the «لقينا N عقار أقرب لطلبك» beat, whose number is quotableTotal()'s output handed in as
+// `to` (see verify-mining-total-honesty.ts for the honesty half). Reduced motion drops the drift.
 const miningSrc = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
-check('mining dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
+check('deep-search dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
   /phase: 'mining'/.test(agentSrc)
   && /timers\.push\(setTimeout\(/.test(agentSrc)
   && /15000/.test(agentSrc)
   && !/\.start\(\s*\(/.test(miningSrc));
-check('mining shows real numbers and respects reduced motion',
+check('the transition speaks the searching line + the honest from-count, and respects reduced motion',
   /Going through \{count\} properties/.test(miningSrc)
-  && /We found \{count\} properties closest to your request/.test(miningSrc)
+  && /Finding the closest match for you/.test(miningSrc)
   && /useReducedMotion/.test(miningSrc));
+check('the completion beat is held long enough to be read (the 450ms direct hand-off was for a card that said nothing)',
+  /wait \+ 1100/.test(agentSrc),
+  'a copy swap the user cannot finish reading is the same as no copy at all');
+check('the results pills are fed by the deduped facet set (one label per committed answer)',
+  /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
+  && /facets: dedupedFacets,/.test(agentSrc));
 
 // ── Results summary + removable pills (owner 2026-08-16 §10) ────────────────────────────────────
 // Removal is PURE recomputation — rebuild from the interview's baseQ by re-applying the remaining

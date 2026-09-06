@@ -19,19 +19,39 @@
 //      cannot become a graveyard, and cannot quietly retire a check by naming nowhere.
 //   3. THE RUNNER IS THE ONLY ENTRY POINT. package.json's "test" must invoke the runner and must NOT
 //      regrow an inline chain, or the hotspot comes straight back.
+//   4. THE FLOOR MAY ONLY MOVE THROUGH A NAMED DEPARTURE. The floor is not a number typed here — it
+//      is 200 minus BASELINE_DEPARTURES below, and every entry states the script, the PR, its new
+//      home, and whether per-PR coverage was LOST. Lowering the floor without adding an entry fails
+//      this file, and every run PRINTS the departures so the trade is never tribal knowledge.
+//
+// THE DISCLOSURE RULE (added 2026-09-03, after a review of PR #1527). A PR that lowers the floor
+// MUST say so in its BODY, naming the moved script and its new home. #1527 moved
+// verify-af-independent-oracle.ts out of the required `npm test` into af-live-truth-check.yml and
+// took the floor 200 → 199; the diff was correct and the justification was sound, but the PR body
+// never mentioned it, so the one fact a reviewer most needed — "a check stopped running on PRs" —
+// was reachable only by diffing three files. The list below is where that fact now lives.
 //
 //   node --experimental-strip-types scripts/verify-test-registry-complete.ts   (in `npm test`)
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadRegistry, argvFor } from './lib/testRegistry.ts';
+import { loadRegistry, argvFor, workflowInvokes } from './lib/testRegistry.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
 
 let failures = 0;
+// `detail` explains a FAILURE, so it is printed only on one. Until 2026-09-06 it was appended
+// unconditionally, and this file's four MUTATION lines — whose names read «catches an exclusion
+// naming a workflow that EXISTS but never invokes it» with detail «the mutant survived — the home
+// check is blind» — printed that detail next to a green ✓ on every healthy run. On the one barrier
+// whose job is to stop checks going dark, the output said the home check was blind while asserting
+// it was not (routine-9 red team, ops_incident #42). Sibling barriers already suppress detail on
+// pass (verify-rent-scrapers-annualise.ts). A tick and the words beside it must never disagree.
+export const renderLine = (name: string, cond: boolean, detail = '') =>
+  `  ${cond ? '✓' : '❌'} ${name}${cond || !detail ? '' : ` — ${detail}`}`;
 const check = (name: string, cond: boolean, detail = '') => {
-  console.log(`  ${cond ? '✓' : '❌'} ${name}${detail ? ` — ${detail}` : ''}`);
+  console.log(renderLine(name, cond, detail));
   if (!cond) failures++;
 };
 
@@ -42,11 +62,71 @@ const { run, excluded, baseline } = loadRegistry(root);
 const runSet = new Set(run);
 
 // ── 1. THE BASELINE FLOOR ────────────────────────────────────────────────────────────────────────
-// 199, not 200, since 2026-09-02: verify-af-independent-oracle.ts left the baseline DELIBERATELY —
-// it is a live production call (committed anon key) that gated every PR through the required
-// `npm test`, the exact pattern #1486 removed for the trending live half. It now runs in
-// .github/workflows/af-live-truth-check.yml (see scripts/test-exclusions.txt). Nothing else moved.
-check('the zero-loss baseline is present and substantial', baseline.length >= 199, `${baseline.length} entries`);
+// The floor started at 200 (the checks the old `&&` chain ran). It moves ONLY by naming a departure
+// here, and the run prints them — so "why is the floor 199?" is answered by running the barrier,
+// not by archaeology through three files and a merge commit.
+const ORIGINAL_FLOOR = 200;
+const BASELINE_DEPARTURES = [
+  {
+    script: 'verify-af-independent-oracle.ts',
+    pr: '#1527',
+    date: '2026-09-02',
+    home: '.github/workflows/af-oracle-pr-check.yml',
+    why: 'wholly live: 9 hand-written PostgREST predicates + the UNKNOWN partition against production '
+      + 'through the committed anon key, inside the REQUIRED npm test — the pattern #1486 removed. Unlike '
+      + '#1486 there was no offline half to split off and leave behind, so the whole file moved.',
+    // Say the cost plainly. A relocation with a real home is not a loss; leaving PRs uncovered is.
+    // 2026-09-04: the cost is PAID BACK, not re-narrated. #1527 left the oracle in
+    // af-live-truth-check.yml, which has no pull_request trigger, so for two days it gated nothing
+    // at review time — recorded here as PARTIAL LOSS. af-oracle-pr-check.yml now runs this one
+    // script (7.8s, no browser, no agent message, no secret) on every pull_request, as its own
+    // status check outside `npm test`. Both of #1527's properties hold at once: the live call is
+    // still not in the required hermetic suite, AND the oracle gates a PR. The floor stays 199
+    // because the script is still not RUN BY `npm test` — which is what the baseline measures.
+    perPrCoverage: 'NO LOSS — .github/workflows/af-oracle-pr-check.yml runs it on every pull_request (and on '
+      + 'push to main, and on dispatch) as its own required status check, retried 3x so a production hiccup '
+      + 'cannot fail an unrelated PR. It ALSO still runs post-deploy in af-live-truth-check.yml. Its hermetic '
+      + 'siblings verify-af-oracle-filter-translator.ts and verify-af-oracle-soundness.ts stay in npm test, so '
+      + 'the oracle LOGIC is gated there and its live AGREEMENT with production is gated here.',
+  },
+];
+const BASELINE_FLOOR = ORIGINAL_FLOOR - BASELINE_DEPARTURES.length;
+console.log(`\n  Baseline floor ${BASELINE_FLOOR} = ${ORIGINAL_FLOOR} original − ${BASELINE_DEPARTURES.length} named departure(s):`);
+for (const d of BASELINE_DEPARTURES) {
+  console.log(`    • ${d.script} — left in ${d.pr} (${d.date}) → ${d.home}`);
+  console.log(`      why:  ${d.why}`);
+  console.log(`      cost: ${d.perPrCoverage}`);
+}
+console.log('');
+check('the zero-loss baseline is present and substantial', baseline.length >= BASELINE_FLOOR, `${baseline.length} entries`);
+// The ledger must describe reality, not intent: a departed script is really gone from the baseline,
+// really excluded, and really has the home the entry claims. Otherwise the floor could be lowered by
+// writing a paragraph. (Every exclusion's home is separately proven to EXIST in §2 below.)
+for (const d of BASELINE_DEPARTURES) {
+  check(`departure is out of the baseline: ${d.script}`, !baseline.includes(d.script),
+    baseline.includes(d.script) ? 'still in the baseline — raise the floor back instead of listing it here' : '');
+  const ex = excluded.find((e) => e.name === d.script);
+  check(`departure is a stated exclusion with the home this ledger claims: ${d.script}`,
+    !!ex && ex.where === d.home, ex ? `exclusions say ${ex.where}` : 'not in test-exclusions.txt');
+  check(`departure states whether per-PR coverage was lost: ${d.script}`,
+    /LOSS|NO LOSS/.test(d.perPrCoverage), d.perPrCoverage.slice(0, 60));
+}
+// A LEDGER LINE IS A CLAIM; EXECUTE IT. «NO LOSS» is only true if the home this entry names really
+// is triggered by pull_request and really invokes the script. That is the exact property #1527 lost
+// in silence — the entry could have claimed anything and nothing in the repo would have disagreed.
+for (const d of BASELINE_DEPARTURES) {
+  const homeSrc = existsSync(join(root, d.home)) ? read(d.home) : '';
+  // Strip comments at the READER: this repo documents heavily inside workflows, and «pull_request»
+  // appears in prose in several of them.
+  const code = homeSrc.split('\n').filter((l) => !/^\s*#/.test(l)).map((l) => l.replace(/\s#.*$/, '')).join('\n');
+  const onPullRequest = /^\s+pull_request:/m.test(code);
+  const claimsNoLoss = /NO LOSS/.test(d.perPrCoverage);
+  check(`per-PR claim matches the home's actual triggers: ${d.script}`, claimsNoLoss === onPullRequest,
+    `${d.perPrCoverage.slice(0, 11)}… but ${d.home} ${onPullRequest ? 'HAS' : 'has NO'} pull_request trigger`);
+  check(`the home actually invokes it (not just names it in a comment): ${d.script}`,
+    workflowInvokes(homeSrc, d.script), d.home);
+}
+
 const missing = baseline.filter((b) => !runSet.has(b));
 check('EVERY baseline check is still discovered and run (no test silently disappeared)',
   missing.length === 0,
@@ -65,11 +145,25 @@ for (const e of excluded) {
   check(`exclusion states a reason: ${e.name}`, e.reason.length >= 15, e.reason || '(empty)');
   // "where it runs instead" must be a workflow that exists, an npm script that exists, or an
   // explicit admission that nothing schedules it — never a comforting blank.
-  const wf = e.where.startsWith('.github/') && existsSync(join(root, e.where));
-  const npmScript = e.where.startsWith('npm run ')
-    && Object.keys(JSON.parse(read('package.json')).scripts ?? {}).includes(e.where.replace('npm run ', '').trim());
+  //
+  // THE HOME MUST INVOKE THE SCRIPT, NOT MERELY EXIST (hardened 2026-09-04 by routine #10).
+  // This asked `existsSync(home)` for a workflow and `scripts[name] !== undefined` for an npm script
+  // — both of which a row can satisfy while naming a place the check never actually runs. That is
+  // the shortcut BARRIER_ENGINEER.md §PART 4.7 names by incident: on 2026-09-03 a bare existence/
+  // includes test left two checks named only by a workflow COMMENT saying they were deliberately NOT
+  // run there, and neither had executed anywhere for weeks. The departures check above was already
+  // asking `workflowInvokes()`; the exclusions loop — the bigger list, 39 rows against 4 — was not.
+  // Measured before hardening: all 32 workflow-homed rows genuinely invoke their script and all 3
+  // npm-script homes genuinely name their file, so this closes the hole without excusing one.
+  const wf = e.where.startsWith('.github/') && existsSync(join(root, e.where))
+    && workflowInvokes(read(e.where), e.name);
+  const npmCmd = e.where.startsWith('npm run ')
+    ? (JSON.parse(read('package.json')).scripts ?? {})[e.where.replace('npm run ', '').trim()]
+    : undefined;
+  const npmScript = typeof npmCmd === 'string' && npmCmd.includes(e.name);
   const manual = /^manual/i.test(e.where);
-  check(`exclusion names a home that exists: ${e.name}`, wf || npmScript || manual, e.where || '(nowhere)');
+  check(`exclusion names a home that RUNS it: ${e.name}`, wf || npmScript || manual,
+    `${e.where || '(nowhere)'} — the home must actually invoke ${e.name}, not merely exist`);
 }
 // An exclusion must never cover a check the baseline says must run — that is the contradiction that
 // would let someone retire a guaranteed test by adding one line.
@@ -129,6 +223,47 @@ check('no check proves its own wiring by string-matching package.json (it must a
 check('.ts checks are invoked with type stripping', argvFor('verify-x.ts').includes('--experimental-strip-types'));
 check('.mjs checks are invoked without it', !argvFor('verify-x.mjs').includes('--experimental-strip-types'));
 check('the run order is deterministic (sorted)', run.join(',') === [...run].sort().join(','));
+
+// ── mutation proofs for the exclusion-home rule (added 2026-09-04 by routine #10) ────────────────
+// Re-applied to a REAL workflow and a REAL npm script, with the invocation removed.
+{
+  const mustCatch = (label: string, caught: boolean) =>
+    check(`MUTATION catches ${label}`, caught, 'the mutant survived — the home check is blind');
+
+  const sample = excluded.find((e) => e.where.startsWith('.github/'));
+  check('there is a workflow-homed exclusion to prove the rule against', !!sample);
+  if (sample) {
+    const wfSrc = read(sample.where);
+    mustCatch(`an exclusion naming a workflow that EXISTS but never invokes it (${sample.name})`,
+      workflowInvokes(wfSrc, sample.name)
+      && !workflowInvokes(wfSrc.replaceAll(sample.name, 'verify-something-else.ts'), sample.name));
+    mustCatch('a home naming the script only inside a YAML COMMENT (the 2026-09-03 incident)',
+      !workflowInvokes(`jobs:\n  x:\n    steps:\n      # ${sample.name} is deliberately not run here\n      - run: echo hi\n`,
+        sample.name));
+    mustCatch(`…while the real home is still accepted, not vacuously red (${sample.where})`,
+      workflowInvokes(wfSrc, sample.name));
+  }
+
+  // The reporting contract itself (ops_incident #42, repaired 2026-09-06). `detail` describes a
+  // FAILURE; printing it next to a ✓ made every healthy run of THIS file — the one barrier whose job
+  // is to stop checks going dark — announce «the mutant survived — the home check is blind» four
+  // times while asserting the opposite. Both directions are proven, because suppressing detail
+  // ALWAYS would destroy the failure message instead of fixing the pass line.
+  mustCatch('a passing line printing the words that describe its own failure',
+    !renderLine('MUTATION catches a blind home', true, 'the mutant survived — the home check is blind')
+      .includes('the mutant survived'));
+  mustCatch('…while a FAILING line still carries its detail (detail is not suppressed outright)',
+    renderLine('MUTATION catches a blind home', false, 'the mutant survived — the home check is blind')
+      .includes('the mutant survived — the home check is blind'));
+
+  const npmRow = excluded.find((e) => e.where.startsWith('npm run '));
+  if (npmRow) {
+    const cmd = (JSON.parse(read('package.json')).scripts ?? {})[npmRow.where.replace('npm run ', '').trim()];
+    mustCatch(`an npm-script home that exists but runs a DIFFERENT file (${npmRow.name})`,
+      typeof cmd === 'string' && cmd.includes(npmRow.name)
+      && !cmd.replace(npmRow.name, 'verify-something-else.ts').includes(npmRow.name));
+  }
+}
 
 console.log(`\n  ${run.length} run · ${excluded.length} excluded · ${baseline.length} baseline floor`);
 console.log(failures === 0

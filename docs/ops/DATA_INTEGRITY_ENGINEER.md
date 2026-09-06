@@ -4,10 +4,32 @@
 > (`trig_01Tr6Rb6XPggFXqCf3EKG62y`, daily 05:00 Arizona / 12:00 UTC) carries this text; **this file is the source of
 > truth** — if the routine prompt and this file ever differ, update the routine to match this file.
 > This is a SEPARATE routine from the 🎖️ Daily Senior Production Engineer (which keeps its own
-> original scope, daily 04:30 Arizona / 11:30 UTC): **Advanced Filter is out of scope for this routine** — it
-> belongs to the senior. See `docs/ops/ENGINEER_ROUTINES.md` for the three-engineer contract.
+> original scope, daily 04:30 Arizona / 11:30 UTC): **Advanced Filter is out of scope for this
+> routine** — it belongs to **routine #5 (🎯 Senior Advanced Filter + Trending)**, which took it on
+> 2026-08-23. This sentence said "the senior" (#2) until 2026-09-04; `AF_TRENDING_DATA_INTEGRITY_
+> ENGINEER.md` had claimed the correction was made the day #5 was created, but it was never applied
+> here, so a run reading its own canonical spec routed AF findings to the wrong engineer for twelve
+> days. See `docs/ops/ENGINEER_ROUTINES.md` for the seven-engineer contract.
 
-**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner,
+2026-08-29, **extended 2026-09-04**) — binds this routine too, in FULL and as it stands today, not as
+it stood when this line was first written: fix first / report last (§G.1); the six and only six
+reasons to stop without fixing (§G.2), and **"a human could technically approve this" is not one of
+them (§G.2b)**; automatic cross-routine handoff via `incident_open()` / `incident_handoff()` rather
+than a sentence saying someone should look at it (§G.3); adaptive effort (§G.4); the real 10/10
+standard (§G.5); Sentry first, and your own incident queue read alongside it (§G.6, §G.6b);
+**§G.9 — a bug is CLOSED only when all seven hold: root cause fixed, related variants checked, a
+permanent barrier exists, a MUTATION has been watched to catch recurrence, the full regression suite
+passes, PRODUCTION is verified through the real path a user hits, and no equivalent hidden path
+remains. Anything short of all seven is UNKNOWN with the reason — never "fixed."** §G.10 — every
+report carries BEFORE/AFTER and ends with the mandatory block. §G.11 — tokens are not the
+constraint; optimise for correctness and permanent bug reduction. §G.7 — none of it weakens an
+existing guard.
+
+It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs. This
+enumeration was stale from 2026-09-04 to 2026-09-05: it named only the original sections, so §G.9's
+mutation and production-verification requirements reached this routine by inheritance rather than by
+being stated. They were always binding. Now they are also visible.
 
 ## §0. Standing operating contract (owner-granted, 2026-08-12 — permanent)
 
@@ -89,7 +111,7 @@ manufactured 10/10 obtained by deleting uncertain listings.
 
 ---
 
-Ignore Advanced Filter for this routine.
+Ignore Advanced Filter for this routine — it belongs to routine #5, not to #2.
 
 Your job is to verify everything Ezhalah scrapes from every active platform, from source all the
 way to the normal searchable inventory.
@@ -110,11 +132,41 @@ total sits inside the «سعر المتر» slot — **kept**. Of 31 rows that a
 shape `area = price`, exactly **1** was ours. A repair that cannot name the mechanism Ezhalah used
 to create the wrong value is not a repair; it is data loss with good intentions.
 
+## §M — MUTATION PROOF IS REQUIRED, NOT DISCRETIONARY (owner, 2026-09-05)
+
+This spec used to say a barrier should be "mutation-proven **where meaningful**". That phrase is
+deleted and must not come back. It let the single most load-bearing step in §G.9 be skipped by
+judgement, and judgement is exactly what fails here: the barriers this repo has found sitting green
+over a live defect were all written by someone who believed the check was obviously correct.
+Measured on 2026-09-04: all five defects of that day had a barrier over the exact line, and two of
+those barriers pinned the defective line as CORRECT. On 2026-09-05 routine #10 planted six mutants
+in this suite and all six survived a fully green run.
+
+**The rule.** Every correctness fix carries a mutation proof: the defect is RE-INTRODUCED, the
+barrier is WATCHED to go red, and the tree is restored. Not reasoned about — executed and observed.
+A barrier nobody has seen fail is a comment that runs.
+
+**The only way out is one of §G.2's six documented stop reasons genuinely making it impossible** —
+and then the report says **UNKNOWN** with which of the six applies and why, never "fixed". Two
+honest cases, both narrow:
+
+- The check is a LIVE production read with no pure predicate a synthetic mutant could be fed. Then
+  the proof is the apply itself — RED before the change, GREEN after — and that red→green must be
+  recorded in the PR body. `scripts/verify-detector-total-matches-its-breakdown-live.ts` was proven
+  exactly that way on 2026-09-05 (red 05:32Z, green 05:53Z).
+- The barrier genuinely cannot fail in any meaningful way. Be sceptical of yourself here: this is
+  the escape hatch that gets abused, and `scripts/verify-new-barriers-are-mutation-proven.ts`
+  requires a written reason and rejects a proof whose expression is a bare literal.
+
+"Weird does not mean wrong" (§0) governs whether to REPAIR data. It never governs whether to prove
+a barrier. Those are different questions and this section settles the second one.
+
 ## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
 
 On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
 whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
-cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+cause → fix → permanent regression barrier → **mutation proof: re-introduce the defect and WATCH the
+barrier go red, then restore** → deploy through the
 sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
 a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
 contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
@@ -985,6 +1037,117 @@ to a recorded source probe — the `ops_price_source_verified` / `ops_deleted_bu
 pattern — so the detector keeps discriminating and only an adjudicated, evidence-carrying platform is
 exempt. Also an owner call: whether a listing whose source no longer publishes a price should keep
 being served at all. Neither was decided autonomously.
+
+## 30. A fixed scraper, a green barrier, and 130 listings still priced at one twelfth (settled 2026-09-05, incident #38)
+
+**§21 said a code fix needs a paired data retraction. This is the first time the missing half was
+caught by a barrier written for the code half — and the barrier was green the whole time.**
+
+muktamel's `run.py` did `price_annual = price` for both rent periods. `price_annual` is a YEARLY
+column and `src/data/listings.ts` divides it by 12 for a monthly row, so all 130 monthly listings
+(113 residential + 17 commercial) were advertised at one twelfth of their rent — a 2,500/month
+apartment shown as «ر.س 208», a 75,000/month showroom as 6,250. The scraper was fixed the same day
+(commit `4c06c07`, now calling `normalize.annualize_rent`) and `scripts/verify-rent-scrapers-
+annualise.ts` went green **while every wrong row was still being served**. `gh-muktamel-weekly`
+(cron jobid 14) is `active=false`, so no future crawl would ever have corrected them.
+
+**The evidence that made this a repair rather than a reprice.** muktamel publishes one figure
+(`offer.price`) plus its own period flag (`offer.isRentPerYear`), and we archive that flag per row
+in `additional_info.is_rent_per_year`. It reads **false on 130 of 130** rows. The old code applied
+no transform, so the stored `price_annual` **is** `offer.price` verbatim. ×12 is therefore Ezhalah's
+own unit contract applied to the source's own declared period — exactly what the fixed scraper now
+emits. Nothing was estimated. `ops_rent_annualisation_repair` records `price_before` per row, so the
+source's published figure stays recoverable and the repair is reversible.
+
+Two independent confirmations that no row had already been annualised (which would have made ×12 a
+doubling): every monthly row's last scrape is **2026-09-03 18:54**, before the fix; and only 2 of
+113 were divisible by 12, where an annualised cohort would be 113 of 113.
+
+**The barrier had to read DATA, not code.** `mon_detect_unannualised_rent_cohort()` (P1,
+roster-wired, ~40 ms) flags a platform whose **median** monthly row implies < 500 SAR/month over
+≥ 20 rows. It is cohort-level *by design*: a per-listing floor is a magnitude heuristic and would
+fire on source-backed rows — wasalt's cheapest monthly row implies 1 SAR/month, dealapp's 100, and
+both must be preserved exactly (§8). What no market produces is a whole platform whose **median**
+sits there. Measured medians, SAR/month: muktamel 188 (the defect) · sanadak 1,500 · aqarcity 1,900 ·
+mustqr 2,500 · dealapp 2,500 · wasalt 2,800 · gathern 6,960 · aqarmonthly 10,800. The floor sits 3×
+below the lowest legitimate platform and 2.7× above the defect, so it discriminates. Both directions
+proven live: raised exactly 1 key on the pre-repair index, resolved on the post-repair index,
+`insta_resolves = 0`.
+
+**The rule this pins, and it generalises past rent:** *when you remove a fabrication or a unit error
+from a scraper, ask in the same breath which rows the old code already wrote and whether anything
+will ever re-visit them.* A disabled cron turns "the next crawl will fix it" into "nothing ever
+will" — and a code-shape barrier goes green at the moment the data is still wrong, which is the
+worst possible time for a green light.
+
+## 31. STRICT PERIODS, HONEST UNKNOWN — the owner's rule of 2026-09-05, and why a monitor kept calling it a bug
+
+**Owner rule, verbatim in intent. Do not re-litigate it and do not restore any fallback.**
+
+> Keep the strict period behavior. If the source does not truthfully establish the rent period, keep
+> `rent_period = NULL`. A NULL/UNKNOWN-period rental may remain searchable when the user applies no
+> period filter, but it must not appear under **شهري**, **سنوي**, or **كلاهما**. Do not restore any
+> fallback and do not infer the period from price, description tokens, or neighboring listings.
+
+This supersedes §22.1's product fallback, which the owner retired on 2026-09-03
+(`20260903175817_unknown_rent_period_stays_unknown_never_defaults_to_annual`). §22's original
+position — source truth stays NULL — is now the whole rule at *every* layer, not just the raw tables.
+
+**The search behaviour was already correct, and was verified before anything was changed.** Proven
+on production through the anon RPC with a positive control, which is the half that makes it evidence
+rather than assertion: raghdan (all 130 rent rows NULL) returns **شهري 0 · سنوي 0 · كلاهما 0 ·
+no-filter 130**; eastabha (mixed) returns **شهري 25 · سنوي 21 · كلاهما 46 · no-filter 83** — كلاهما
+is *exactly* 25+21, and no-filter is exactly 46+37 UNKNOWN. `كلاهما` is a real token, never `null`
+(`rentPeriodParam` in `src/data/remote.ts`); `null` means "apply no period filter" and would sweep
+every UNKNOWN row into a chip the user reads as strict. **No `src/` change and no deploy were needed.**
+
+**What WAS broken was the monitor, and it had been red for two days describing correct behaviour.**
+`mon_searchability_now.pct_period_searchable` divided rows-reachable-by-chip by *all* rent apartments
+held (minus `ops_rent_period_source_limited`, a table with **0 rows** that has never had any). Every
+honest UNKNOWN therefore sat in the denominator. When the fallback was retired those rows reverted to
+their truthful NULL and seven platforms went ~100% → 0% overnight — raghdan 0/72, eaqartabuk 4/85,
+alkhaas 0/10, mizlaj 0/5, hajer 0/3, jurash 0/1, sadin 0/1 — raising seven P1 SEARCHABILITY_COLLAPSE
+alerts. And because `mon_raise()` dedups on an open key, while those seven sat open **a real collapse
+on those platforms could not raise at all** (§23a/§25a). All nine alerts (7 P1 + 2 P2) resolved.
+
+**The fix is the denominator, and it is era-proof by construction:** *of the listings whose period
+the source DID establish, how many are reachable?* An UNKNOWN row now leaves the numerator **and** the
+denominator together, so it cannot move the metric in either direction — no future decision about
+UNKNOWN handling can make this detector lie again. Recomputed against the live 14-day history, every
+platform's baseline matches its current value (aqar 100→100, gathern 100→100, wasalt 100→99.9,
+eastabha 96.2→97.1, abeea 87.1→87.1, erapulse 66.7→66.7); the seven honest-UNKNOWN platforms read the
+new verdict `OK_NO_SOURCE_ESTABLISHED_PERIOD` — *nothing to measure*, stated as its own outcome so a
+reader can tell it from *measured and fine*.
+
+**Two traps this run hit, both worth keeping:**
+
+1. **A statistical coverage limb would have re-created the same false alerts.** The obvious way to
+   keep the protection the new denominator gives up is "alert if the share of rows carrying a period
+   collapses". Measured before shipping: those seven platforms' 14-day baseline coverage is **100%**,
+   *because the retired fallback was filling it in* — so that limb fires on exactly the same seven.
+   The baseline straddles a deliberate product change. Replaced with an **evidence** limb that no
+   product decision can fool: `mon_detect_source_proven_period_unreachable()` (P1, roster-wired) fires
+   only where `ops_rent_period_source_probe` records a **live observation that the source publishes a
+   period** while we serve the row as NULL — a period we LOST, never one the source withheld. Honest
+   UNKNOWN has no such probe and can never trip it. Mirror of
+   `mon_detect_rent_period_contradicts_probe()` (which catches us *inventing* a period); together they
+   pin both directions of PERIOD = SOURCE. Reads **0** — a standing 0 is the healthy reading (§24c).
+2. **Adding a healthy verdict nearly created a permanently-red alert.** The collapse detector raised on
+   `verdict <> 'OK'` and self-healed on `verdict = 'OK'` — two phrasings of one question, which agree
+   only while `'OK'` is the single healthy value. `OK_NO_SOURCE_ESTABLISHED_PERIOD` is `<> 'OK'` (so it
+   would raise) and not `= 'OK'` (so it could never clear). Fixed structurally per §25a — live keys
+   derived from the raising cohort and handed to `mon_resolve_stale_keys()`, one predicate,
+   `verdict NOT LIKE 'OK%'` written once, so a future `OK_SOMETHING` inherits the right behaviour.
+
+**Barriers:** `scripts/verify-unknown-period-excluded-from-strict-chips.ts` (in `npm test`) **executes**
+the real `rentPeriodParam` through `liftSymbols` — a regex proves a shape, only a call proves a
+behaviour — and mutation-proves the SQL predicates. The detector's own proof is executed against live
+objects in `20260905183836`: inject a synthetic probe → raises exactly that key → retract → clears;
+raised 18:37:31.837, resolved 18:37:50.035, held open 18.2 s, `insta_resolves = 0`. No listing row is
+touched at any point, so no period is fabricated even transiently. **Note the assertion deliberately
+omitted there:** inside one transaction Postgres freezes `now()`, so a raise-then-resolve *necessarily*
+shares a timestamp; the insta-resolve check is only meaningful across transactions, and asserting it
+in-migration fails on a transaction artifact (it did, and the migration was rolled back).
 
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the

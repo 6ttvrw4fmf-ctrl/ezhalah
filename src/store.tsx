@@ -83,7 +83,10 @@ type AppState = {
   // Fetch a transcript this device no longer holds locally (pruned cache / fresh sign-in) from the
   // server, validate it, and attach it to the entry. Resolves to the transcript or null.
   hydrateTranscript: (id: string) => Promise<PersistedChat | null>;
-  loadMoreListings: (q: SearchQuery, offset: number) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean }>;
+  // `failed` = the backend page errored. Nothing advanced: `nextOffset` and `hasMore` come back
+  // exactly as they went in, so the caller re-offers «عرض المزيد» on the same page instead of
+  // recording a failure as "that was the last page".
+  loadMoreListings: (q: SearchQuery, offset: number) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
   dataSource: DataSource;
   // Auth. SEARCH IS FREE, ALWAYS (owner rule 2026-08-15, retiring the PRD §9 gate): a guest can run
   // unlimited searches; sign-in only adds persistence (saved history/language). The old `gated`
@@ -144,8 +147,8 @@ type AppState = {
   setActiveChat: (id: string | null) => void;
   // Support / About Us are shown as in-app popups (centered dialog over a dimmed page) rather than
   // full-screen routes, so they open from the drawer without navigating away.
-  modal: 'support' | 'about' | null;
-  openModal: (m: 'support' | 'about') => void;
+  modal: 'support' | 'about' | 'legal' | 'privacy' | null;
+  openModal: (m: 'support' | 'about' | 'legal' | 'privacy') => void;
   closeModal: () => void;
   // Sign-in popup (owner 2026-08-15): a true in-place overlay, same pattern as modal/openModal/
   // closeModal above — never a route, so the screen underneath (the Filter page, wherever the user
@@ -205,6 +208,40 @@ const chatMetaOf = (it: HistoryItem): ChatMeta => {
   return meta as ChatMeta;
 };
 
+// WHAT THE SERVER ALREADY HOLDS, as a comparable string. Key order is normalised (recursively, and
+// `undefined` members dropped exactly as JSON.stringify would) because the baseline side of the
+// comparison came back through Postgres `jsonb`, which reorders object keys — so the same content
+// must compare equal no matter which side produced it.
+const canonicalJson = (v: unknown): string => {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v) ?? 'null';
+};
+
+// THE PUSH DIFF IS ON CONTENT, NEVER ON A CLOCK (defect hunt-2026-09-04:chat_persistence:01).
+// This used to compare `Math.max(it.ts, it.tRev ?? 0)` against the same stamp taken from the server
+// row — an ACTIVITY stamp. Favourite, rename and manual drag-order deliberately move NEITHER `ts`
+// («when this search ran» — a rename must not resort the sidebar) nor `tRev` (the transcript's own
+// revision), so the stamp never advanced, every one of those edits was diffed as "already synced",
+// and `upsertChat` was never called: the owner contract below promises the sidebar the user built by
+// hand survives a new browser, and only the transcript actually did. Comparing the BYTES WE WOULD
+// SEND makes that structural instead of a promise — any field of the meta, including the next one
+// added, is synced by construction, and nothing needs its own timestamp to be noticed.
+const syncKeyOf = (it: HistoryItem): string => canonicalJson(chatMetaOf(it));
+const chatNeedsPush = (it: HistoryItem, base: Map<string, string>): boolean => base.get(it.id) !== syncKeyOf(it);
+
+// …but a meta-only edit must NEVER carry a STALE transcript up with it. `txStale` means "the server
+// reports newer activity than this device's cached copy" (src/lib/chatMerge.ts), and pushing that
+// copy would overwrite the newer conversation permanently — the exact silent history loss chatMerge
+// exists to prevent. `undefined` leaves the server's stored transcript untouched (chatSync.upsertChat),
+// so starring a chat whose transcript this device hasn't caught up on syncs the star and nothing else.
+const pushableTranscript = (it: HistoryItem): PersistedChat | undefined =>
+  (it as { txStale?: boolean }).txStale ? undefined : it.transcript;
+
 // Erase storage keys SYNCHRONOUSLY on web. AsyncStorage's own removal resolves a tick later, and
 // both sign-out and delete-account are followed by a navigation ~1.2s later (settings.tsx) — a
 // reload landing in that gap used to re-hydrate history the user had just deleted. This mirrors the
@@ -245,7 +282,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const historyRef = useRef<HistoryItem[]>([]);
   useEffect(() => { historyRef.current = history; }, [history]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [modal, setModal] = useState<'support' | 'about' | null>(null);
+  const [modal, setModal] = useState<'support' | 'about' | 'legal' | 'privacy' | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [pendingMessage, setPendingMessageState] = useState<string | null>(null);
   // `null` while the saved flag is still being read from storage; the intro stays hidden until then.
@@ -413,6 +450,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(key, json).catch(() => {});
   }, [history, user]);
 
+  // ── ANOTHER TAB IS THE SAME ACCOUNT, NOT A DIFFERENT DEVICE ───────────────────────────────────
+  // The effect above writes the ENTIRE array on every mutation, and until this listener existed
+  // nothing anywhere subscribed to `storage`. Two tabs on one browser therefore held two forks of
+  // one list, and whichever mutated LAST overwrote the other's work wholesale.
+  //
+  // MEASURED, not theorised — 2/2 in fresh browsers against production (2026-09-04): both tabs
+  // load [h1,h2,h3]; tab B deletes h3 through the «حذف نهائي» gate, disk becomes [h1,h2]; tab A —
+  // which never learned about it — favourites an unrelated chat, and its whole-array write puts
+  // [h1,h2,h3] back. **A confirmed deletion silently returns**, and the same shape loses a chat
+  // created in the other tab. Having two tabs open is the ordinary case, not an exotic one.
+  //
+  // ADOPTING THE INCOMING LIST IS SAFE HERE, and that is a property of this store rather than a
+  // general truth about storage events: our own writes are SYNCHRONOUS (the effect above exists
+  // precisely so a refresh right after a star/delete cannot lose the change), so at the instant a
+  // foreign event arrives our in-memory state is exactly what we last put on disk. There is no
+  // local-only edit for adoption to discard. This is the server sync's "two writers, one list"
+  // problem with the easy half of it: same device, same storage, so the disk IS the shared truth
+  // and no per-entry precedence is needed to decide a winner.
+  //
+  // Two guards, both load-bearing:
+  //   · Compare against OUR OWN serialization first. `storage` never fires in the writing tab, but
+  //     adopting always re-runs the persist effect above, which writes the identical JSON back and
+  //     fires an event at the other tab — an endless ping-pong of no-op writes without this. Equal
+  //     serialization ⇒ the disk view already agrees ⇒ do nothing, and the loop dies at hop one.
+  //   · A REMOVAL (`newValue === null`) is deliberately ignored. That is sign-out / delete-account
+  //     clearing the key, which has its own sequenced teardown; reacting to it here would reach
+  //     into auth architecture rather than fix a persistence clobber.
+  //
+  // FEATURE-DETECTED, NOT PLATFORM-ASSUMED. Every other storage path in this file guards with
+  // `typeof localStorage !== 'undefined'` and pairs it with AsyncStorage, because this store mounts
+  // on native too — and these two lines are the first `window.` in the whole file. React Native
+  // defines a `window`, so `typeof window === 'undefined'` alone would NOT have kept us out of it;
+  // what varies is whether `addEventListener` is there. Detect the method, not the platform.
+  useEffect(() => {
+    if (!user || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+    const key = historyKey(user.sub);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== key || e.newValue == null) return;
+      let incoming: HistoryItem[];
+      try {
+        const parsed = JSON.parse(e.newValue);
+        if (!Array.isArray(parsed)) return;            // malformed: ignore, never crash the list
+        incoming = parsed as HistoryItem[];
+      } catch { return; }
+      if (serializeHistoryForDisk(historyRef.current) === e.newValue) return; // already agreed
+      setHistory(incoming.map((h) => ({ ...h, query: migrateGroups({ ...h.query }) })));
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [user]);
+
   // ── SERVER SYNC (owner 2026-08-25 — conversations survive a new browser and logging back in) ──
   // Pull: after the local restore for a signed-in account, fetch the server's chat metas and merge
   // by id — the newer side (per-entry activity stamp) wins; server-only chats appear, local-only
@@ -441,21 +529,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return [...byId.values()].sort((a, b) => (b.order ?? b.ts) - (a.order ?? a.ts)).slice(0, 50);
       });
       // Baseline AFTER the merge lands so the first push diff is against what the server now holds.
-      syncBaselineRef.current = new Map(rows.map((r) => {
-        const m = r.meta as unknown as HistoryItem;
-        return [r.id, Math.max(m.ts ?? 0, m.tRev ?? 0)];
-      }));
+      syncBaselineRef.current = new Map(rows.map((r) =>
+        [r.id, syncKeyOf({ ...r.meta, id: r.id } as unknown as HistoryItem)] as const));
       syncReadyRef.current = key;
     }).catch(() => { /* offline → local-only session; next sign-in retries */ });
   }, [authChecked, user]);
 
-  // Push: debounced write-through. Diffs against the last known server state (per-entry activity
-  // stamp) and upserts only changed chats — meta always, transcript only when this device holds one
-  // whose tRev moved (never nulling a server transcript a pruned local cache no longer has).
+  // Push: debounced write-through. Diffs against the last known server state (the exact meta bytes
+  // it confirmed — see syncKeyOf) and upserts only chats whose content actually differs: meta
+  // always, transcript only when this device holds one it can trust (never nulling a server
+  // transcript a pruned local cache no longer has, never overwriting a newer one with a stale copy).
   // Deletions propagate ONLY for ids the server was known to hold (the baseline), so a not-yet-
   // merged local list can never mass-delete the account's server history. Fire-and-forget with the
   // baseline updated per row on success; a failed write simply retries on the next change.
-  const syncBaselineRef = useRef<Map<string, number>>(new Map());
+  const syncBaselineRef = useRef<Map<string, string>>(new Map());
   const syncReadyRef = useRef<string | null>(null);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -468,9 +555,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const seen = new Set<string>();
       for (const it of items) {
         seen.add(it.id);
-        const stamp = Math.max(it.ts, it.tRev ?? 0);
-        if ((base.get(it.id) ?? -1) >= stamp) continue;
-        void upsertChat(it.id, chatMetaOf(it), it.transcript).then((ok) => { if (ok) base.set(it.id, stamp); });
+        if (!chatNeedsPush(it, base)) continue;
+        const key = syncKeyOf(it);
+        void upsertChat(it.id, chatMetaOf(it), pushableTranscript(it)).then((ok) => { if (ok) base.set(it.id, key); });
       }
       const gone = [...base.keys()].filter((id) => !seen.has(id));
       if (gone.length) void deleteChats(gone).then((ok) => { if (ok) for (const id of gone) base.delete(id); });
@@ -835,7 +922,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadMoreListings: async (q: SearchQuery, offset: number) => {
         const PAGE_MORE = 500;
         const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE });
-        const r = runSearch(q, buildPools(rows ?? []));
+        // A FAILED PAGE IS NOT PROGRESS (defect hunt-2026-09-04:pagination:06). `rows === null` is
+        // this fetch's backend-error signal — the SAME one page 0 hands runSearch as `fetchFailed`
+        // rather than a second invention. It used to be swallowed by `rows ?? []`, which made an
+        // errored page identical to a genuinely empty one: the cursor jumped forward by `cand` (0 on
+        // failure, so 500 real matches could be skipped) and `hasMore` went false, retiring
+        // «عرض المزيد» forever and letting the closing line claim every match had been shown. So
+        // record NOTHING: the cursor and hasMore come back exactly as they went in, the button stays,
+        // and the next tap retries this same page. (A genuinely empty page is still hasMore:false —
+        // an honest end — which is what keeps the two cases distinguishable.)
+        if (rows === null) return { listings: [], nextOffset: offset, hasMore: true, failed: true };
+        const r = runSearch(q, buildPools(rows));
         return { listings: r.listings, nextOffset: offset + cand, hasMore: cand >= PAGE_MORE };
       },
       trackOpen: (listing) => {

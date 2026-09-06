@@ -106,7 +106,10 @@ check('9a. every shipped example is Arabic-only (no Latin letters)', list.length
 check('9b. the greeting is Arabic-only', !/[A-Za-z]/.test(GREETING));
 check(
   '9c. the placeholder swap keeps the Arabic static placeholder for the interacted state, and the a11y label has an Arabic dictionary entry',
-  /placeholder=\{showIntroExamples \? '' : t\("Type the property you're looking for in Saudi Arabia\.\.\."\)\}/.test(agent) &&
+  // The expression gained an outer `completed ?` branch on 2026-09-05 (the locked composer explains
+  // itself via the placeholder). The contract THIS check protects is unchanged and still asserted:
+  // in a live chat, the interacted state must fall back to the familiar Arabic static placeholder.
+  /\(showIntroExamples \? '' : t\("Type the property you're looking for in Saudi Arabia\.\.\."\)\)/.test(agent) &&
     /'Describe the property you are looking for': 'اكتب وصف العقار اللي تبحث عنه'/.test(i18n),
 );
 

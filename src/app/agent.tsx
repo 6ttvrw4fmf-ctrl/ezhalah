@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
+import { TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
@@ -24,6 +25,7 @@ import VoiceWaveform from '@/components/VoiceWaveform';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure } from '@/lib/initialReveal';
+import { distinctPlatformCount } from '@/lib/platformDiversity';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
@@ -55,9 +57,12 @@ import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
-import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '@/data/resultCount';
+import { BROWSE_BATCH, nextBatchTarget, resultCounts, closingNoteKey } from '@/data/resultCount';
+import { afInterviewOwnsBrowsing } from '@/lib/afBrowsingGate';
+import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
+import { screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
@@ -200,11 +205,13 @@ const resultDone = (locale: Locale): string => {
 // the same random pick maps to the same translated slogan in either language. (user-reported:
 // "I sent in English but the slogan came back Arabic — see, didn't get translated.")
 // DETERMINISTIC location-certainty backstop (does NOT depend on the model). Returns an Arabic clarification
-// question when the parsed query's location is not confident enough to search — (a) no location at all and
-// the user did not ask Kingdom-wide, or (b) a bare district that exists in SEVERAL cities with no city given.
+// question when the parsed query's location is not confident enough to search — (a) no location at all
+// (INCLUDING a Kingdom-wide request: nationwide is not a supported scope, so it asks like any other
+// missing city), or (b) a bare district that exists in SEVERAL cities with no city given.
 // Else null (search). The app's resolver knows the ambiguity even when Gemini decides to search anyway.
 // (user: ask when unsure — «ابي بيت» must ask «في أي مدينة؟», «حي البلد» must ask which city.)
-const KINGDOM_WIDE = /السعودي|المملك|كل المدن|كل المملك|كل مدن|في كل مكان|بأي مكان|أي مكان|اي مكان|everywhere|kingdom|\bsaudi\b/i;
+// KINGDOM_WIDE was deleted 2026-09-04: nationwide is not a supported search scope, and a live
+// regex kept around "just in case" is how a removed scope gets re-wired by accident.
 // The user signalling they already want the WHOLE region/city — so we should NOT ask to narrow, just
 // search it all. (user: "if the user wants a broad search, that is fine — search the whole region/city.")
 const WHOLE_AREA = /كامل|كاملة|بالكامل|كلها|كل المدين|كل المنطق|المدينة كلها|المنطقة كلها|كل الأحياء|أي حي|اي حي|\bwhole\b|\bentire\b|all of/i;
@@ -244,7 +251,13 @@ function regionOrCityTwin(loc: string | undefined): string | null {
 function locationClarification(q: SearchQuery, userText: string): string | null {
   const loc = (q.location ?? '').trim();
   if (!loc) {
-    if (KINGDOM_WIDE.test(userText)) return null; // user explicitly wants the whole Kingdom
+    // NATIONWIDE IS NOT A SUPPORTED SCOPE (owner, 2026-09-04). A Kingdom-wide phrase used to skip
+    // this question and run an UNSCOPED search — reproduced in production before this change:
+    // «ابغى شقة للبيع في كل مدن المملكة» sent p_cities/p_districts/p_region_ids all null, returned
+    // 39,042 listings across every city, and printed «المدينة: المملكة العربية السعودية». The Filter
+    // has always refused a search with no city («الرجاء اختيار مدينة من القائمة»); this 2026-06-24
+    // backstop simply never caught up. Falling through to the city ask below is the aligned
+    // behaviour — the SAME question the agent already asks, no new wording invented.
     // SMART, conversational city ask for a proximity/landmark search with no city: echo the user's OWN
     // phrase instead of a generic question — «قريب من الافنيوز» → «في أي مدينة تبحث عن عقار قريب من
     // الافنيوز؟». Feels like a continuation; never invents a city. On their answer the search resumes with
@@ -253,10 +266,11 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
       .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
       .filter(Boolean);
     if (prox.length) return `في أي مدينة تبحث عن عقار ${prox.join(' و')}؟`;
-    return 'في أي مدينة تبحث؟ (وإذا تبي كل المملكة قل لي «كل مدن المملكة»)';
+    return 'في أي مدينة تبحث؟';
   }
-  // The user explicitly asked for the whole area (or the whole Kingdom) — honour it, don't ask to narrow.
-  if (WHOLE_AREA.test(userText) || KINGDOM_WIDE.test(userText)) return null;
+  // The user asked for the whole CITY or REGION — honour it, don't ask to narrow. Kingdom-wide is
+  // deliberately NOT in this test any more: «الرياض كاملة» is a supported scope, «كل المملكة» is not.
+  if (WHOLE_AREA.test(userText)) return null;
   const lm = resolveLocation(loc, 'ar');
   // The user NAMED the scope in THIS message — «مدينة الرياض» / «منطقة الرياض» — either answering the
   // region-vs-city question below or saying it up front. That word IS the answer, and send() has
@@ -356,10 +370,18 @@ const SEARCH_MS = 600;
 // highlight wave — starts the INSTANT Search is pressed and runs through the whole real search;
 // results show the moment they're ready, no artificial holds beyond this floor). SEARCH_MIN_MS is
 // the MINIMUM visible searching-beat, counted from when the loader appears: it overlaps the bubble
-// typing + network wait and never adds once consumed. It MUST cover the full pill reveal —
-// 32 pills × 60ms stagger + 260ms fade = last pill fully landed at ~2120ms — otherwise a fast query
-// cuts the roster tail and breaks the "COMPLETE roster, never flashed away" rule (review finding).
-const SEARCH_MIN_MS = 2200;
+// typing + network wait and never adds once consumed.
+//
+// TEN SECONDS (owner, 2026-09-06): "let the user wait 10 seconds … and make sure all the platforms
+// in the animation show clearly, cuz doing it quick will make them lost." The platform roster is the
+// product's primary trust signal — it is the moment the user learns Ezhalah searches the WHOLE Saudi
+// market — and at the old 2.2s floor the pills landed and were gone before any of them could be
+// read. The floor must therefore cover the full reveal AND at least one complete highlight sweep, so
+// every platform is individually lit at least once before the loader may exit:
+//     reveal (LOADER_REVEAL_MS ≈ 2.2s) + one sweep (LOADER_SWEEP_MS = 7.6s) = 9.8s ≤ 10s.
+// scripts/verify-search-loader-shows-every-platform.ts executes that arithmetic against the shipped
+// constants, so the two files cannot drift apart silently.
+const SEARCH_MIN_MS = 10000;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
 // fade-out this long — the strip glides away into the results state instead of vanishing in a frame.
 const LOADER_EXIT_MS = 450;
@@ -550,7 +572,7 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript, newChat } = useApp();
+  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
   // which counts the `setQuery(` calls in this file precisely so a second, unsanitized writer cannot
@@ -616,30 +638,15 @@ export default function Agent() {
     node.addEventListener('keydown', onKeyDown);
     return () => node.removeEventListener('keydown', onKeyDown);
   }, []);
-  // ── Mobile-web keyboard tracking (ChatGPT-style) ──────────────────────────────────────────────
-  // On mobile WEB, KeyboardAvoidingView is a no-op (its `behavior` is undefined off iOS-native), so
-  // when the on-screen keyboard opens the LAYOUT viewport is unchanged and the composer ends up
-  // hidden BEHIND the keyboard. The VISUAL viewport does shrink — track it and lift the composer by
-  // exactly the keyboard height, with NO hardcoded numbers. iPhone Safari + Android Chrome both fire
-  // these events continuously as the keyboard animates, so the composer follows it smoothly. Native
-  // apps keep their own KeyboardAvoidingView behavior, so this stays 0 there.
-  const [kbInset, setKbInset] = useState(0);
-  useEffect(() => {
-    if (!IS_WEB || typeof window === 'undefined' || !window.visualViewport) return;
-    const vv = window.visualViewport;
-    let raf = 0;
-    const update = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        // keyboard height = the slice of the layout viewport the visual viewport no longer covers
-        setKbInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
-      });
-    };
-    vv.addEventListener('resize', update);
-    vv.addEventListener('scroll', update);
-    update();
-    return () => { cancelAnimationFrame(raf); vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
-  }, []);
+  // ── Mobile-web keyboard: handled ONCE, at the root ────────────────────────────────────────────
+  // This screen used to track visualViewport itself and pad the column by the keyboard height. That
+  // fixed the composer and nothing else: iOS ALSO scrolls the layout viewport, so the conversation
+  // above still slid out of view (owner, 2026-09-05: "i basically lose the conversation above it").
+  // lib/visualViewportFrame.ts now pins the app root to the visible window, which lifts the composer
+  // as a side effect of ordinary layout. Keeping the old padding on top of it lifted the composer
+  // TWICE — measured live as a 259px gap where 73px was correct. So the screen contributes zero and
+  // says so through the shared helper, rather than by deleting the line and leaving a mystery.
+  const kbInset = screenKeyboardInset();
   const [busy, setBusy] = useState(false);
   // True once the user hit Stop mid-display: freezes the cards already shown and hides the "more
   // precise" CTA on the stopped results. Reset on every new turn. (user request.)
@@ -846,7 +853,10 @@ export default function Agent() {
   // delay also clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s), so the
   // first move already reads the settled height of the thing being landed on.
   const LAND_PASSES_MS = [1400, 3200];
-  const FIRST_PAGE = 10; // show the first 10; «عرض المزيد» pages the rest of the matched set. (owner 2026-07-08.)
+  // Beat between a round's count landing and the NEXT round's card opening (owner 2026-09-04): long
+  // enough to read «لقينا N عقار أقرب لطلبك», short enough that the interview reads as one flow.
+  const AF_NEXT_ROUND_DELAY_MS = 900;
+  const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
   // INTERVIEW_STOP_AT (25): the same line at which Advanced Filter stops narrowing (R11.1) and the set
@@ -857,7 +867,7 @@ export default function Agent() {
   // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
   // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
   const initialReveal = (r: SearchResult | undefined | null): number =>
-    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT });
+    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings) });
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
@@ -877,8 +887,10 @@ export default function Agent() {
     // the intro's «عرض النتائج» link was removed by the owner 2026-08-28, same day as the footer's.
     | { phase: 'intro'; total: number | null }
     | { phase: 'asking'; stepIndex: number; question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; initialKeys: string[]; progressCur: number; progressTotal: number }
-    // The «digging through the market» beat (owner 2026-08-16): shown once after the interview
-    // finishes while the final search runs behind it. Dismissal is driven by plain setTimeout
+    // The «digging through the market» beat (owner 2026-08-16, RESTORED 2026-09-06 after the owner
+    // rejected the 2026-08-31 pipeline redesign): shown once after the interview finishes while the
+    // final search runs behind it. Carries only the two counts it may speak — both handed in from
+    // quotableTotal(), never computed in the overlay. Dismissal is driven by plain setTimeout
     // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
     | { phase: 'mining'; from: number | null; to: number | null }
     | null
@@ -937,10 +949,18 @@ export default function Agent() {
   // summary. The turn trades its action buttons for a read-only receipt — it is history now, and only
   // the newest result turn carries live actions.
   const [afReceipt, setAfReceipt] = useState<Record<string, string>>({});
-  // COMPLETED SEARCH (owner 2026-08-30). Set ONLY by the canonical AF stop conditions — R11.1 (the
-  // post-round honest total ≤ INTERVIEW_STOP_AT) and R11.2 (the offer probe finds no useful question
-  // left after a committed round). Never by a plain first search, never by a count alone: a fresh
-  // 20-result search with no AF round is not "finished", it is a search the user may still refine.
+  // COMPLETED SEARCH (owner 2026-08-30). Set ONLY by R11.1 — the post-round honest total lands at or
+  // below INTERVIEW_STOP_AT. Never by a plain first search, never by a count alone: a fresh 20-result
+  // search with no AF round is not "finished", it is a search the user may still refine.
+  //
+  // R11.2 (the offer probe finds no useful question left after a committed round) does NOT set this,
+  // and must not — corrected 2026-09-05, when the owner settled the browsing question. This comment
+  // used to name R11.2 as a second trigger; the code has only ever had one, and the owner's ruling is
+  // that the one is right: «once the Advanced Filter interview is actually finished, normal
+  // browsing/pagination can resume if needed». A round that runs out of questions with 3,000 matches
+  // still on the table has finished INTERVIEWING, not searching — the user must be free to keep
+  // browsing. Only the small-result threshold ends the flow, which is R11.1 exactly.
+  // Pinned by scripts/verify-af-interview-owns-browsing.ts.
   // Persisted with the transcript so Back / saved chats reopen READ-ONLY, never with a live composer.
   const [completed, setCompleted] = useState(false);
   // Whether a results turn still has a question worth asking — resolved by a REAL probe (below),
@@ -1355,7 +1375,25 @@ export default function Agent() {
     if (!m.result.hasMore || !q || loadingMore[mid]) return;
     setLoadingMore((s) => ({ ...s, [mid]: true }));
     try {
-      const { listings: more, nextOffset, hasMore } = await loadMoreListings(q, m.result.pageOffset ?? 0);
+      const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, m.result.pageOffset ?? 0);
+      // A FAILED PAGE IS NOT AN EMPTY PAGE (AGENTS.md permanent rule, 2026-09-04; incident #33).
+      // store.tsx already refuses to treat a backend error as progress — the cursor and `hasMore`
+      // come back exactly as they went in, so the pager is correctly re-offered. But nothing here
+      // READ `failed`, and every downstream value then made the failure indistinguishable from
+      // success: `more` is [], so `add` is [], so `mergedLen === fetched`, so `nextBatchTarget`
+      // returns `cur` and `cascadeIn(cur, cur)` is a no-op. The user taps «عرض المزيد», the spinner
+      // runs, ZERO cards appear, no error is shown, and the button stays — a silent dead tap, which
+      // is a failed fetch rendered to the user as a successful nothing.
+      //
+      // So say it. Same wording and same posture page 0 already uses for its own fetch failure
+      // (`fetchFailed` → runSearch's retry suggestion, src/data/search.ts): tell the user to try
+      // again rather than implying there was nothing more to show. Nothing is merged and the cursor
+      // is untouched, so the next tap retries this exact page.
+      if (failed) {
+        setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
+          text: t('Loading listings — please try again in a few seconds.') }]);
+        return;
+      }
       // De-dup against the CLOSURE copy (same data the message holds) so the cascade target is exact.
       const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
       const add = more.filter((l) => !seen.has(`${l.source}:${l.id}`));
@@ -1522,17 +1560,31 @@ export default function Agent() {
     saveTranscript(p.id, p.t);
   };
   useEffect(() => {
-    if (busy) return;
     const id = chatIdRef.current;
     if (!id) return;
     const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed });
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
+    // STASH FIRST, EVEN MID-TURN. This assignment used to sit BELOW an `if (busy) return`, so during
+    // a turn there was nothing staged — and every abandon path calls flushPendingCapture(), which can
+    // only write what was staged. Leaving a chat while its search was still running therefore saved
+    // NOTHING for that turn, and reopening it found no transcript and RE-RAN THE SEARCH, loader and
+    // all (owner, 2026-09-05: "these are saved already, why the fuck does the search happen again").
+    // Measured on the owner's own account: of 10 chats, 1 had no transcript at all and 3 had a
+    // 284–1052 byte stub against 14–23KB for healthy ones — the turn was lost exactly this way.
+    // Staging mid-turn is SAFE because serializeChat drops `status` (in-flight) messages outright, so
+    // a flush during a search can never persist a frozen «جاري البحث» bubble — the very thing the
+    // busy guard was protecting against. The guard stays for the debounced WRITE below, which is what
+    // it was actually needed for: not writing once per revealed card while a turn drips in.
     pendingCaptureRef.current = { id, t, j };
+    if (busy) return;
     const timer = setTimeout(() => { pendingCaptureRef.current = null; lastCapturedRef.current = j; saveTranscript(id, t); }, 600);
     return () => clearTimeout(timer);
-  }, [busy, msgs, revealCount, afReceipt, guidedPills]);
+    // `completed` was missing from these deps: a chat that ENDED (Advanced Filter narrowed it to the
+    // final set) could keep a transcript that never recorded the ending, so it reopened with a live
+    // composer on a finished search.
+  }, [busy, msgs, revealCount, afReceipt, guidedPills, completed]);
   // A refresh/close inside the debounce window must not lose the last settled state either.
   // saveTranscript writes localStorage synchronously up front (store.tsx), so this flush lands on
   // disk even during unload. pagehide, not beforeunload: it also covers bfcache navigations.
@@ -1555,6 +1607,40 @@ export default function Agent() {
   // It probes with the SAME rankQuestions call and the SAME carried asked-set the round itself will
   // use, so the offer and the round can never disagree. This is PASSIVE: it renders a button and
   // nothing else — it never opens the overlay. The interview stays a manual tap (owner 2026-08-19).
+  const noMoreSaidRef = useRef<Record<string, true>>({});
+  // ONE ASSESSMENT, TWO CALLERS (owner 2026-09-04). Walks the scope tiers exactly as presentGuided
+  // does, then ranks the advanced pool with the SAME carried asked-set the round will use, so the
+  // offer button, the automatic round continuation and the round itself can never disagree.
+  //   'yes'     a truthful, certified, unasked question exists for this scope → a round can follow
+  //   'no'      MEASURED: nothing certified remains that narrows (never invented — R5 exhaustion)
+  //   'unknown' a count could not be determined even after one bounded retry — no verdict earned
+  const assessNarrowing = async (q0: SearchQuery, asked: Iterable<string>): Promise<'yes' | 'no' | 'unknown'> => {
+    let scoped = q0;
+    const seen = new Set<string>(asked);
+    for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
+      let res: AdvancedQuestionResult | null = null;
+      try { res = await scopeQuestionFor(tier).resolveOptions(scoped); } catch { res = null; }
+      // UNKNOWN MUST NOT HARDEN INTO NO. A turn showing more than INTERVIEW_STOP_AT matches cannot
+      // truthfully have an empty scope, so a failed/timed-out tier count is not a fact.
+      if (!res || res.probeFailed) return 'unknown';
+      if (res.options.length > 1) return 'yes';              // a real scope question follows
+      seen.add(tier);                                        // resolved (auto-commit or open skip) —
+      if (res.options.length === 1)                          // never re-asked, same as the walk
+        scoped = scopeQuestionFor(tier).apply(scoped, [res.options[0].key]);
+    }
+    // An empty POOL is certain — no RPC was even issued — and is the common "nothing left" case.
+    if (!eligibleQuestions(scoped).some((qq) => !seen.has(qq.id))) return 'no';
+    // Bounded single retry on an undetermined batch (never a poll), per src/lib/afProbe.ts.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let ranked: Awaited<ReturnType<typeof rankQuestions>> | null = null;
+      try { ranked = await rankQuestions(scoped, seen); } catch { ranked = null; }
+      if (ranked && ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options))) return 'yes';
+      if (ranked && !ranked.probeFailed) return 'no';         // every probe ANSWERED: nothing narrows
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 2500));
+    }
+    return 'unknown';
+  };
+
   const afProbedRef = useRef<Record<string, true>>({});
   useEffect(() => {
     const m = lastResultsMsg;
@@ -1566,66 +1652,19 @@ export default function Agent() {
     const probeKey = `${m.id}|${[...asked].sort().join(',')}`;               // a later carry re-probes
     if (afProbedRef.current[probeKey]) return;
     afProbedRef.current[probeKey] = true;
-    // An unresolved CATEGORY→GROUP→TYPE tier is itself a real narrowing step, and it is what unlocks
-    // the advanced pool at all (afPlan.ts) — ranking that pool now would score it against a scope the
-    // user has not picked yet and come back empty by construction. ASK THE SAME QUESTION THE WALK
-    // ASKS (review 2026-08-25): nextScopeTier, not `unresolvedScopeTiers(q).length`. A tier the user
-    // SKIPPED stays unresolved forever while being permanently un-re-askable, so the raw-length test
-    // promised a round whose scope walk falls straight through — a button that opened and closed.
-    // …AND WALK THAT TIER, DON'T ASSUME IT (fix 2026-08-25). `nextScopeTier` returning a tier used to
-    // short-circuit straight to `true`, which is not the same question the walk asks: presentGuided
-    // AUTO-COMMITS a tier that resolves to ≤1 option (one option is not a choice — it is the scope the
-    // user already has) and moves DOWN, so a tier existing proves nothing about a round following it.
-    // REPRODUCED live 2026-08-25 — الطائف / إيجار / شهري / «الاستراحات والريف», 43 matches: the group's
-    // five member types have exactly ONE populated here (شاليه), the type tier auto-committed it, and
-    // Chalet certifies no monthly cohort, so the round asked ZERO questions and closed. The user tapped
-    // «خلّنا نحدد الطلب أكثر», was never asked anything, and got a duplicate 43-result turn plus a
-    // receipt reading «اختياراتك: شاليه» — a choice they never made.
-    //
-    // So the probe now walks the tiers exactly as presentGuided does — resolve, auto-commit a ≤1-option
-    // tier onto a LOCAL copy of the query, move on — and only offers when it finds a tier that is a real
-    // question, or when the RESOLVED scope's advanced pool has something to ask. Cost is bounded and is
-    // the same work the tap itself would do a moment later: at most two tier resolutions per turn, and
-    // the common case (a tier with a real choice) exits after the first one. Still ONE probe per turn,
-    // still passive — it renders a button and never opens the overlay (owner 2026-08-19).
-    void (async () => {
-      const offer = (ok: boolean) => {
-        setAfCanNarrow((c) => ({ ...c, [m.id]: ok }));
-        // R11.2: an AF round was committed (afCarryRef) and NO remaining question can narrow — done.
-        if (!ok && afCarryRef.current) setCompleted(true);
-      };
-      let scoped = q;
-      const seen = new Set<string>(asked);
-      for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
-        let res: AdvancedQuestionResult | null = null;
-        try { res = await scopeQuestionFor(tier).resolveOptions(scoped); } catch { res = null; }
-        // UNKNOWN MUST NOT HARDEN INTO NO. A turn showing more than INTERVIEW_STOP_AT matches cannot
-        // truthfully have an empty scope, so `total === 0` here is a failed/timed-out count RPC, not a
-        // fact — keep offering, exactly as this line did before the fix. Only a MEASURED tier may hide
-        // the button.
-        if (!res || res.total === 0) { offer(true); return; }
-        if (res.options.length > 1) { offer(true); return; }   // a real scope question follows the tap
-        seen.add(tier);                                        // resolved (auto-commit or open skip) —
-        if (res.options.length === 1)                          // never re-asked, same as the walk
-          scoped = scopeQuestionFor(tier).apply(scoped, [res.options[0].key]);
+    // PASSIVE: renders the «تحديد أكثر» button and nothing else. Automatic continuation of an
+    // interview the user already opened lives in finishGuided (owner 2026-09-04) — this effect
+    // never opens the overlay on a plain search turn (owner 2026-08-19 stands).
+    void assessNarrowing(q, asked).then((verdict) => {
+      setAfCanNarrow((c) => ({ ...c, [m.id]: verdict === 'yes' }));
+      // A MEASURED "nothing left" after an AF round is said out loud, not silently swallowed
+      // (owner 2026-09-04): the chat stays open — the user may still refine by typing — and the
+      // results shown are the genuine set. ≤ INTERVIEW_STOP_AT is handled in finishGuided.
+      if (verdict === 'no' && afCarryRef.current && !noMoreSaidRef.current[m.id]) {
+        noMoreSaidRef.current[m.id] = true;
+        setMsgs((mm) => [...mm, { id: uid(), role: 'agent', text: t('No further truthful narrowing question exists for this scope — these are all the genuine matches.'), typing: true }]);
       }
-      // UNKNOWN MUST NOT HARDEN INTO NO (permanent fleet rule). A count RPC that times out resolves to
-      // an EMPTY option set (remote.ts withTimeout → null → `{ options: [], total: 0 }`), which
-      // scoreQuestion then drops — so a 4s blip is indistinguishable from an honest "nothing narrows",
-      // and caching that verdict hid «تحديد أكثر» on this turn for the rest of the chat. An empty rank
-      // while questions REMAIN eligible is therefore treated as unknown and re-probed exactly once
-      // (bounded: never a poll). An empty POOL is certain — no RPC was even issued — and settles first
-      // pass, which is the common "nothing left to ask" case, so this costs nothing there.
-      const poolLeft = eligibleQuestions(scoped).filter((qq) => !seen.has(qq.id)).length;
-      const probe = (attempt: number) => void rankQuestions(scoped, seen)
-        .then((ranked) => {
-          const ok = ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options));
-          if (!ok && !ranked.length && poolLeft && attempt === 0) { setTimeout(() => probe(1), 2500); return; }
-          offer(ok);
-        })
-        .catch(() => { if (attempt === 0) setTimeout(() => probe(1), 2500); });   // stays unknown ⇒ hidden
-      probe(0);
-    })();
+    });
   }, [lastResultsMsg, guidedPills]);
 
   // Run a refine answer (tapped chip OR typed reply): echo `label` as the user's bubble, merge the one
@@ -1741,9 +1780,16 @@ export default function Agent() {
         try { fresh = await st.question.resolveOptions(q0); } catch { fresh = null; }
         if (ageFlowTokenRef.current !== token) return;
       }
-      const options = fresh?.options.length ? fresh.options : st.options;
-      const unknownCount = fresh?.options.length ? fresh.unknownCount : st.unknownCount;
-      const total = fresh?.options.length ? fresh.total : st.total;
+      // Prefer the FRESH resolution whenever the probe ANSWERED (owner 2026-09-04, stale-state fix):
+      // the recorded options were resolved for the scope this step was FIRST shown in; after an
+      // earlier answer changed, an honest result for the CURRENT scope — even an empty one — must
+      // replace them, never be papered over by the old list. Only a probe that FAILED (threw, or
+      // reported probeFailed) keeps what we had, and a scope tier can no longer fail into an empty
+      // list at all (UNKNOWN options are kept without a number — scopeOptionsFromCounts).
+      const answered = !!fresh && !fresh.probeFailed;
+      const options = answered ? fresh!.options : st.options;
+      const unknownCount = answered ? fresh!.unknownCount : st.unknownCount;
+      const total = answered ? fresh!.total : st.total;
       ageFlowStepsRef.current = steps.map((x, i) => (i === stepIndex ? { ...x, options, unknownCount, total } : x));
       ageFlowTotalRef.current = total;
       setAgeFlow({
@@ -1932,10 +1978,6 @@ export default function Agent() {
     const q = ageFlowQueryRef.current;
     if (!(q && ageFlowChangedRef.current)) { setAgeFlow(null); return; }
     const startedAt = Date.now();
-    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current, to: null });
-    const timers = miningTimersRef.current;
-    const stillMining = () => ageFlowTokenRef.current === token;
-    timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
     // CUMULATIVE, ANCHORED TO THE TRUE PRE-AF ORIGIN (owner 2026-08-24). `ageFlowBaseQRef` stays the
     // ROUND's own start — deriveGuided rebuilds this round's query from it, and anchoring it to the
     // origin instead would silently drop the earlier rounds' predicates. The PILLS anchor one level
@@ -1943,13 +1985,21 @@ export default function Agent() {
     // an answer given in round 1 is still visible and removable after round 2 and removing it rebuilds
     // from the origin through everything that survived.
     const carry = afCarryRef.current;
+    // Deduped across rounds (owner audit, 2026-08-27), not a raw concatenation — a carried round's
+    // facet and this round's facet can never both be kept if they resolve to the same displayed
+    // label, whatever question id produced either one. It feeds the results pills (guided.facets).
+    // (Until 2026-09-06 it also fed the deep-search overlay's sentence + chips; that redesign is
+    // reverted, and the restored card speaks no selections — but the dedupe rule is the PILLS' own
+    // and is unaffected.)
+    const dedupedFacets = dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]);
+    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current, to: null });
+    const timers = miningTimersRef.current;
+    const stillMining = () => ageFlowTokenRef.current === token;
+    timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
     const guided = ageFlowBaseQRef.current
       ? {
           baseQ: carry?.originQ ?? ageFlowBaseQRef.current,
-          // Deduped across rounds (owner audit, 2026-08-27), not a raw concatenation — a carried
-          // round's facet and this round's facet can never both be kept if they resolve to the same
-          // displayed label, whatever question id produced either one.
-          facets: dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]),
+          facets: dedupedFacets,
           asked: [...ageFlowAskedRef.current],   // already unioned with the carry by syncGuidedFromSteps
         }
       : undefined;
@@ -1962,13 +2012,42 @@ export default function Agent() {
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
-        // R11.1: the round narrowed the set to its FINAL size — the search is complete.
+        // R11.1 (owner product rule 2026-09-04, threshold 25 → 50): the round narrowed the set to
+        // ≤ INTERVIEW_STOP_AT — the search is COMPLETE. Every remaining listing is revealed by
+        // initialReveal (honestTotal ≤ stopAt ⇒ reveal all fetched — no «عرض المزيد»), the composer
+        // is replaced by «محادثة جديدة», and the transcript is saved in that state.
         if (total != null && total <= INTERVIEW_STOP_AT) setCompleted(true);
+        // ROUNDS CONTINUE AUTOMATICALLY WHILE TRUTHFUL QUESTIONS REMAIN (owner product rule
+        // 2026-09-04, supersedes the 2026-08-24 "continuing is a manual tap" wording for a round the
+        // user has already opened; the 2026-08-19 "never auto-open on a plain search turn" rule is
+        // untouched — this only continues an interview the user started). After the count lands,
+        // the SAME assessment the offer button uses decides: 'yes' → the next round opens on the
+        // narrowed cohort with every answered AND skipped question carried (never re-asked; Back and
+        // pill-removal keep working through the same carry); 'no' → the offer effect says so and
+        // shows the genuine results; 'unknown' → the button stays, nothing is asserted.
+        const continueQ = q; const continueGuided = guided;
+        if (total != null && total > INTERVIEW_STOP_AT && continueGuided && msgId) {
+          void assessNarrowing(continueQ, continueGuided.asked).then((verdict) => {
+            if (!stillMining() || verdict !== 'yes') return;
+            timers.push(setTimeout(() => {
+              if (ageFlowTokenRef.current !== token) return;
+              afCarryRef.current = { msgId, originQ: continueGuided.baseQ, facets: continueGuided.facets, asked: continueGuided.asked };
+              void startAgeFlow(continueQ);
+            }, Math.max(0, 1400 - (Date.now() - startedAt)) + 1100 + AF_NEXT_ROUND_DELAY_MS));
+          });
+        }
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
         timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
+        // RESTORED 2026-09-06 (owner rejected the 2026-08-31 direct hand-off along with the redesign
+        // it belonged to): `to` landing swaps the card's copy to the «لقينا N عقار أقرب لطلبك» beat,
+        // and the overlay then holds ~1.1s so that sentence is actually readable before the results
+        // are revealed. A 450ms seal was right for a card that said nothing on completion; it is too
+        // short to read a sentence.
+        timers.push(setTimeout(() => {
+          if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
+        }, wait + 1100));
         timers.push(setTimeout(() => {
           if (!stillMining()) return;
-          setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
           // LAND ON THE NEW TURN (owner 2026-08-24): the old cards stay exactly where they are, and the
           // thread eases down so the user reads their selection receipt → the new count → the new
           // cards. Never a jump to the bottom.
@@ -2382,7 +2461,7 @@ export default function Agent() {
       // proximity search the city is the highest-value missing piece, and we never invent one. On the
       // user's answer the search resumes with city + the same proximity (re-parsed across the attempt).
       const proxAll = parseProximity(attemptText);
-      if (proxAll.length && !combined.location && !KINGDOM_WIDE.test(attemptText) && askCountRef.current < 2) {
+      if (proxAll.length && !combined.location && askCountRef.current < 2) {
         const phrase = proxAll
           .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
           .filter(Boolean)
@@ -2398,7 +2477,16 @@ export default function Agent() {
         // a usable detail (a type, a city, a size, a budget) and we've asked twice, stop pestering and
         // just search with whatever we have. (user request: max 2 asks → skip → scrape.)
         const hasIntent = !!(combined.type || combined.location || combined.detail || combined.priceInput);
-        if (hasIntent && askCountRef.current >= 2) {
+        // A LOCATION QUESTION OUTRANKS THIS CEILING (owner, 2026-09-05). The rule below — "asked
+        // twice and we can see some intent, so stop pestering and just search" — is right for an
+        // ordinary clarification. It is wrong for the one question whose answer DEFINES the search
+        // scope: skipping it does not save the user a question, it picks a scope for them.
+        // Measured in production: the edge asked «تقصد مدينة الرياض ولا منطقة الرياض كاملة؟» and
+        // this branch discarded it and searched منطقة الرياض — 10,932 rows across 20 cities — for a
+        // user who had said only «الرياض». The flag is the EDGE's verdict (it owns the classifier),
+        // never re-derived here, so the two surfaces cannot drift.
+        const mustAnswer = turn.kind === 'message' && turn.locationQuestion === true;
+        if (hasIntent && askCountRef.current >= 2 && !mustAnswer) {
           askCountRef.current = 0;
           saidRef.current = [];
           beginSearching(statusId, combined); // loader + min-beat overlap the fetch (like filter/refine)
@@ -2832,7 +2920,15 @@ export default function Agent() {
         {/* Mobile only: a plain hamburger that opens the existing sidebar — same clean style as the
             home screen's. On desktop the sidebar is docked, so just a small spacer. No eagle here. */}
         {!docked ? (
-          <Pressable style={s.hamb} hitSlop={8} onPress={() => setSidebarOpen(true)}>
+          <Pressable
+            style={s.hamb}
+            hitSlop={8}
+            // hitSlop is a NO-OP on react-native-web; the 44px floor comes from
+            // TAP_TARGET_CSS via this marker (ops_incident #17).
+            // @ts-expect-error web-only DOM props on the RNW host node
+            dataSet={{ ...TAP44 }}
+            onPress={() => setSidebarOpen(true)}
+          >
             <Ionicons name="menu" size={22} color={colors.ink} />
           </Pressable>
         ) : (
@@ -2846,7 +2942,13 @@ export default function Agent() {
         <View style={{ flex: 1 }} />
         {/* Logged-out sign-in (mobile only — desktop has the docked sidebar CTA). Owner 2026-08-19. */}
         {!user && !docked && (
-          <Pressable style={s.topSignIn} onPress={openAuth} hitSlop={6}>
+          <Pressable
+            style={s.topSignIn}
+            onPress={openAuth}
+            hitSlop={6}
+            // @ts-expect-error web-only DOM props on the RNW host node
+            dataSet={{ ...TAP44 }}
+          >
             <Ionicons name="person-outline" size={15} color="#fff" />
             <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
           </Pressable>
@@ -2881,9 +2983,9 @@ export default function Agent() {
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
 
       <KeyboardAvoidingView
-        // iOS-native does its own lifting. On mobile WEB this is a no-op, so we lift the whole column
-        // by the REAL keyboard height (kbInset, from visualViewport): the composer lands just above the
-        // keyboard and the scroll area shrinks — exactly the ChatGPT-mobile feel. (owner 2026-08-19)
+        // iOS-NATIVE does its own lifting and still needs this. On WEB the root is pinned to the
+        // visible window (lib/visualViewportFrame.ts), so the column already ends above the keyboard
+        // and kbInset is 0 — the style below therefore adds nothing on web, deliberately.
         style={[{ flex: 1 }, IS_WEB && kbInset > 0 ? { paddingBottom: kbInset } : null]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.top + 52}
@@ -3112,7 +3214,24 @@ export default function Agent() {
                         // min(FIRST_PAGE, fetched): a search with <10 matches still gets its closing message.
                         // ALSO gates FeedbackRow/Read Aloud below (merged into one block, owner 2026-08-23 — the
                         // spoken closing note must reuse this SAME computed text, never re-derive it separately).
-                        if ((m.typing && !doneTyping[m.id]) || shown < initialReveal(m.result)) return null;
+                        //
+                        // A HALTED CASCADE MUST NOT STRAND THE USER (ops_incident #66, 2026-09-05). The second
+                        // clause used to be a bare `shown < initialReveal(m.result)`, which waits for a cascade
+                        // that is not guaranteed to arrive: dripRange()'s ownership guard stops a drip SILENTLY
+                        // when a newer turn takes the shared active-ref, and its own comment offers «عرض المزيد»
+                        // as the way back — a control rendered INSIDE this very block. Measured on production:
+                        // after one AF answer the 6,723-match turn rendered NO closing note at all (the block
+                        // returned null) while the older 11,161 turn still showed its own, and
+                        // `[data-testid="results-load-more"]` matched zero elements anywhere. 20 cards, no way
+                        // to reach the other 6,703. The decision now lives in one pure, exhaustively-tested
+                        // predicate that withholds only while THIS turn's cascade is genuinely still running.
+                        if (!resultsRowIsReady({
+                          introStillTyping: !!(m.typing && !doneTyping[m.id]),
+                          shown,
+                          initialReveal: initialReveal(m.result),
+                          cascadeStarted: !!dripStartedRef.current[m.id],
+                          cascadeRunningForThisTurn: revealing && revealActiveRef.current?.id === m.id,
+                        })) return null;
                         // BROWSE-CONTINUATION RULE (owner 2026-08-29, supersedes the 2026-08-20 cap) — the
                         // "load more" gate and the closing count come from ONE pure function
                         // (src/data/resultCount.ts), so they can never disagree and one test locks them. The
@@ -3153,23 +3272,52 @@ export default function Agent() {
                         // was falsely lighting every visible «عرض المزيد»).
                         const fetching = !!loadingMore[m.id];
                         const cascading = revealing && revealActiveRef.current?.id === m.id;
-                        const moreNoteText = rc.endKind === 'more'
-                          ? (quoteTotal
-                              // Trusted total + more remain: BOTH honest numbers, and the door stays open.
-                              ? (canNarrowFurther
-                                  ? t('I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?', { shown: rc.endShown.toLocaleString('en-US'), total: rc.endTotal.toLocaleString('en-US') })
-                                  : t('I showed you the first {shown} of {total} matching listings. Want me to show more?', { shown: rc.endShown.toLocaleString('en-US'), total: rc.endTotal.toLocaleString('en-US') }))
-                              // Narrowed search (total not quotable): word it from what's on screen only.
-                              : (canNarrowFurther
-                                  ? t('I showed you the first {n} listings. Want me to show more, or help you find more precise ones?', { n: rc.endShown.toLocaleString('en-US') })
-                                  : t('I showed you the first {n} listings. Want me to show more?', { n: rc.endShown.toLocaleString('en-US') })))
-                          // Everything matching is on screen — state the real matched count.
-                          : (canNarrowFurther
-                              ? t('I showed you all {n} matching listings. Want help finding more precise ones?', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') })
-                              : t('I showed you all {n} matching listings.', { n: (clientNarrowed ? rc.endShown : rc.endTotal).toLocaleString('en-US') }));
                         // HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21) — see the comment on the
                         // buttons row below; the SAME gate decides whether Read Aloud may mention them too.
-                        const showActionsRow = (hasMore || canNarrowFurther) && !ageFlow;
+                        // THE AF INTERVIEW OWNS BROWSING ONLY WHILE IT STILL HAS SOMETHING TO ASK
+                        // (owner rule 2026-09-05 — see src/lib/afBrowsingGate.ts for the four clauses).
+                        // Was a bare `!ageFlow`, which satisfied the rule for every phase that exists
+                        // today but only by accident: nothing tied the gate to question availability,
+                        // so a phase added later — or an interview left open in a dead state — would
+                        // withhold the pager from a user with thousands of matches. The predicate is
+                        // now exhaustive over the phase union and fails the BUILD if a new phase is
+                        // added without a decision. Behaviour today is identical by construction.
+                        const showActionsRow = (hasMore || canNarrowFurther)
+                          && !afInterviewOwnsBrowsing(ageFlow?.phase ?? null);
+                        // NEVER PROMISE A BUTTON THAT IS NOT ON SCREEN (2026-09-05, §42 visible output
+                        // contract). `moreNoteText` used to be worded from `rc.endKind`/`canNarrowFurther`
+                        // alone, while the buttons it names carry TWO further gates — `isLatestResults`
+                        // (folded into `hasMore`) and `!ageFlow`. Whenever either was false the user read
+                        // «تبي أعرض لك المزيد؟» under a results block with no button to tap.
+                        //
+                        // Measured in production 2026-09-05, الرياض/بيع/فيلا: after committing one Advanced
+                        // Filter answer the page held TWO visible closing lines — «عرضت لك أول 13 من أصل
+                        // 11,254 … تبي أعرض لك المزيد؟» and «عرضت لك أول 10 من أصل 5,970 … تبي أعرض لك
+                        // المزيد، أو أساعدك توصل لنتائج أدق؟» — and `document.querySelectorAll(
+                        // '[data-testid="results-load-more"]').length === 0`. Both counts were exactly right
+                        // (11,254 = the villa search, 5,970 = the same + p_street_width_min 20); only the
+                        // OFFER was false. It needs no Advanced Filter to reproduce either: any second search
+                        // leaves the earlier turn quoting an offer that `isLatestResults` has already retired.
+                        //
+                        // So the wording is derived from what is ACTUALLY RENDERED — the same two values the
+                        // Pressables are gated on. `readAloudClosingNote` below has always done this (it
+                        // refuses to speak an action that is not on screen); the visible text now matches it.
+                        // The COUNTS are untouched and still state the true totals: only the question is
+                        // dropped, never a number. This does not decide whether «عرض المزيد» should be
+                        // available during an open AF interview — that is the owner's 2026-08-21 call and is
+                        // left exactly as it is.
+                        const offersMore = hasMore && showActionsRow;
+                        const offersNarrow = canNarrowFurther && showActionsRow;
+                        // The KEY comes from the pure module that already owns the counts, so the gate and
+                        // the sentence can never disagree and one exhaustive test locks both.
+                        const moreNoteText = t(
+                          closingNoteKey({ endKind: rc.endKind, quoteTotal, offersMore, offersNarrow }),
+                          {
+                            shown: rc.endShown.toLocaleString('en-US'),
+                            total: rc.endTotal.toLocaleString('en-US'),
+                            n: (rc.endKind === 'more' ? rc.endShown : (clientNarrowed ? rc.endShown : rc.endTotal)).toLocaleString('en-US'),
+                          },
+                        );
                         // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the
                         // button also") — names the SAME button label(s) actually rendered below, in the same
                         // order, so it can never mention an action that isn't on screen to tap.
@@ -3306,30 +3454,13 @@ export default function Agent() {
             bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
         {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
             insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
-        {/* COMPLETED SEARCH (owner 2026-08-30): Advanced Filter reached the final set (R11.1) or no useful
-            question remained (R11.2). The conversation is DONE — the composer (and the mic that lives inside it)
-            is replaced by one clear action. The saved transcript stays readable; Back / reopen restore this
-            same state from `completed` rather than resurrecting a live composer. */}
-        {completed ? (
-          <View style={[s.completedWrap, { paddingBottom: insets.bottom + 12 }]}>
-            <View style={[s.col, s.completedBar]}>
-              <View style={s.completedTxWrap}>
-                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
-                <Text style={s.completedTx}>{t('Search complete')}</Text>
-              </View>
-              <Text style={s.completedSub}>{t('Start a new chat to search again')}</Text>
-              <Pressable
-                onPress={() => { newChat(); router.replace({ pathname: '/', params: { fresh: String(Date.now()) } }); }}
-                accessibilityRole="button"
-                accessibilityLabel={t('New Chat')}
-                style={({ pressed, hovered }: any) => [s.newChatBtn, (pressed || hovered) && s.newChatBtnOn]}
-              >
-                <Ionicons name="add" size={18} color={colors.onFill} />
-                <Text style={s.newChatTx}>{t('New Chat')}</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : (
+        {/* COMPLETED SEARCH (owner 2026-08-30, composer restored 2026-09-05): Advanced Filter reached
+            the final set (R11.1) or no useful question remained (R11.2). The conversation is DONE, but
+            the composer keeps its normal look — no separate replacement card. The input goes inert
+            with an explanatory placeholder, the mic disappears, and the send arrow becomes a lock
+            (see the `completed` branches below). The real "start over" action is the hamburger, top
+            left, not a button inside the composer. The saved transcript stays readable; Back / reopen
+            restore this same state from `completed`. */}
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
@@ -3356,13 +3487,16 @@ export default function Agent() {
                 // While the rotating examples occupy the placeholder slot, the input's own static
                 // placeholder yields (empty string) so the two never overlap; the moment the
                 // rotation stops (any interaction) the familiar static placeholder returns.
-                placeholder={showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia...")}
+                // COMPLETED (owner request 2026-09-05): the box stays, it just goes inert — the
+                // placeholder explains why instead of inviting a message that can never send.
+                placeholder={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : (showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia..."))}
                 placeholderTextColor={colors.muted}
                 selectionColor={colors.primary}
+                editable={!completed}
                 // Stable Arabic label (owner brief §11): a screen reader always hears this one
                 // sentence for the field — never the rotating examples (those are aria-hidden).
                 accessibilityLabel={t('Describe the property you are looking for')}
-                value={typed}
+                value={completed ? '' : typed}
                 onChangeText={(v: string) => { setIntroInteracted(true); setTyped(v); if (!v) setInputH(COMPOSER_MIN_H); }}
                 // Grows only as text wraps, capped at COMPOSER_MAX_H (then scrolls internally); the
                 // TARGET comes from RN's own line metrics (native + web), the MOTION from INPUT_EASE.
@@ -3392,7 +3526,14 @@ export default function Agent() {
               {busy || revealing ? (
                 // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
                 // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
-                <Pressable onPress={stop} style={s.stopBtn} hitSlop={8} accessibilityLabel={t('Stop')}>
+                <Pressable
+                  onPress={stop}
+                  style={s.stopBtn}
+                  hitSlop={8}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  accessibilityLabel={t('Stop')}
+                >
                   <Ionicons name="stop" size={15} color="#fff" />
                 </Pressable>
               ) : (
@@ -3407,30 +3548,37 @@ export default function Agent() {
                       evidence trail). Showing a mic that can only ever flash a failure toast and
                       revert reads as broken — but hiding a mic the runtime genuinely supports, on a
                       guess about the browser's name, is the same mistake in the other direction. */}
-                  {isVoiceInputSupported() ? (
+                  {isVoiceInputSupported() && !completed ? (
                   <Pressable
                     testID="voice-mic"
                     onPress={() => { void startVoice(); }}
                     hitSlop={8}
+                    // @ts-expect-error web-only DOM props on the RNW host node
+                    dataSet={{ ...TAP44 }}
                     accessibilityLabel={t('Voice input')}
                     style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed]}
                   >
                     <Ionicons name="mic-outline" size={19} color={colors.body} />
                   </Pressable>
                   ) : null}
+                  {/* COMPLETED (owner request 2026-09-05): the send arrow becomes a lock — same
+                      composer, same button, no separate card. It never fires (the real "start
+                      over" action is the hamburger, top left), so it always renders disabled. */}
                   <Pressable
                     onPress={() => send()}
-                    disabled={!typed.trim()}
+                    disabled={completed || !typed.trim()}
                     onPressIn={() => sendSpring(0.9)}
                     onPressOut={() => sendSpring(1)}
                     onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
                     onHoverOut={() => { setSendHover(false); sendSpring(1); }}
                     hitSlop={6}
-                    accessibilityLabel={t('Search')}
-                    style={!typed.trim() ? s.sendDisabled : undefined}
+                    // @ts-expect-error web-only DOM props on the RNW host node
+                    dataSet={{ ...TAP44 }}
+                    accessibilityLabel={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : t('Search')}
+                    style={completed || !typed.trim() ? s.sendDisabled : undefined}
                   >
-                    <Animated.View style={[s.sendBtn, sendHover && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
-                      <Ionicons name="arrow-up" size={17} color="#fff" />
+                    <Animated.View style={[s.sendBtn, sendHover && !completed && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
+                      <Ionicons name={completed ? 'lock-closed' : 'arrow-up'} size={completed ? 15 : 17} color="#fff" />
                     </Animated.View>
                   </Pressable>
                 </>
@@ -3453,6 +3601,8 @@ export default function Agent() {
                   testID="voice-cancel"
                   onPress={cancelVoice}
                   hitSlop={8}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Cancel recording')}
                   style={({ pressed }: any) => [s.voiceRoundBtn, pressed && s.micBtnPressed]}
                 >
@@ -3469,6 +3619,8 @@ export default function Agent() {
                   testID="voice-stop"
                   onPress={stopVoice}
                   hitSlop={8}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Stop recording')}
                   style={({ pressed }: any) => [s.voiceRoundBtn, pressed && s.micBtnPressed]}
                 >
@@ -3480,6 +3632,8 @@ export default function Agent() {
                   onPressIn={() => sendSpring(0.9)}
                   onPressOut={() => sendSpring(1)}
                   hitSlop={6}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Send')}
                 >
                   <Animated.View style={[s.sendBtn, { transform: [{ scale: sendScale }] }]}>
@@ -3493,7 +3647,6 @@ export default function Agent() {
             </Text>
           </View>
         </View>
-        )}
       </KeyboardAvoidingView>
 
       {/* ChatGPT-style feedback toast — floats top-center ABOVE the conversation (below the header),
@@ -3736,15 +3889,6 @@ const s = StyleSheet.create({
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
-  // Completed-search bar (owner 2026-08-30) — replaces the composer once AF reaches the final set.
-  completedWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
-  completedBar: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 22, paddingVertical: 16, paddingHorizontal: 18, alignItems: 'center', gap: 6, ...cardShadow },
-  completedTxWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  completedTx: { fontSize: 15, fontWeight: '800', color: colors.ink },
-  completedSub: { fontSize: 12.5, color: colors.muted, textAlign: 'center' },
-  newChatBtn: { marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.selFill, paddingVertical: 11, paddingHorizontal: 22, borderRadius: 999 },
-  newChatBtnOn: { backgroundColor: colors.dark },
-  newChatTx: { fontSize: 14, fontWeight: '800', color: colors.onFill },
   // The send/stop button is pinned to the PHYSICAL right (right:4) and never mirrors — it stays on the
   // right in Arabic too, so paddingRight leaves room for it regardless of text direction. (user request.)
   // Inline row (no absolute button): input flexes, the send/stop button sits at the end, vertically

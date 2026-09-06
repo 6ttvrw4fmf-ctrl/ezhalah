@@ -63,3 +63,26 @@ jobs:
             --shards 8 --shard ${{ matrix.shard }} \
             ${{ inputs.only_struck && '--only-struck' || '' }} \
             ${{ inputs.report_only && '--report-only' || '' }}
+
+  # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────────
+  # Its OWN job, not a step in the matrix: with a matrix, a per-leg step would let a green shard
+  # resolve the alert a red sibling had just raised. `needs` collapses every leg into one verdict,
+  # so this workflow raises and heals exactly once per run. A skipped need (a downstream job the
+  # failure gated off) is not itself a failure — the failing leg already reports one.
+  alert:
+    needs: [liveness]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bridge this run's result to alert_event
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind ingestion_check_failed
+          --workflow wasalt-liveness.yml
+          --status ${{ contains(needs.*.result, 'failure') && 'failure' || (contains(needs.*.result, 'cancelled') && 'cancelled' || 'success') }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -205,9 +205,13 @@ function OptionRow({ option, selected, selection, first, onPress }: {
           </View>
           <Text style={[s.label, selected && s.labelOn]} numberOfLines={1}>{option.label}</Text>
         </View>
-        <View style={s.countPill}>
-          <Text style={s.countText}>{grouped(option.count)}</Text>
-        </View>
+        {/* UNKNOWN IS NOT NO (owner 2026-09-04): a count the backend could not determine (null) shows
+            NO number — never 0, and the option is never hidden. See AdvancedOption.count. */}
+        {option.count != null ? (
+          <View style={s.countPill}>
+            <Text style={s.countText}>{grouped(option.count)}</Text>
+          </View>
+        ) : null}
       </Pressable>
     </Reanimated.View>
   );
@@ -236,15 +240,26 @@ export default function AdvancedQuestionCard({
   // Question-transition: the body fades/rises in whenever the QUESTION changes (keyed on titleKey) —
   // no hard cuts between steps. Decoration only; reduced motion renders instantly.
   const enter = useSharedValue(reduced ? 1 : 0);
+  // THE CARD'S SELECTION MUST REFLECT THE CURRENT QUESTION ONLY (owner 2026-09-04, stale-state fix).
+  // This reset used to key on `titleKey` alone, so two consecutive questions with the SAME title —
+  // the type tier re-presented after the user went Back and switched GROUP («أي نوع عقار تحديداً؟»
+  // for villas, then for apartments) — kept the previous selection: a key that is not on the new
+  // card lingered in `sel`, the header priced a phantom pick, and «متابعة» committed a type the user
+  // never chose in this scope. Keyed on the option set and the restored answer as well, so any change
+  // of question identity resets the selection to exactly what this card shows.
+  const optionKeySig = dedupedOptions.map((o) => o.key).join('|');
+  const initialSig = (initialKeys ?? []).join('|');
   useEffect(() => {
     // Restore the answer recorded for THIS question (owner 2026-08-22: Back must bring the previous
     // selection back with the question, not an empty card). A never-answered question passes none.
-    setSel(initialKeys ?? []);
+    // Only keys that exist on THIS card can be restored — a stale key can never be re-priced.
+    const onCard = new Set(dedupedOptions.map((o) => o.key));
+    setSel((initialKeys ?? []).filter((k) => onCard.has(k)));
     lastTapRef.current = null;
     enter.value = reduced ? 1 : 0;
     enter.value = withTiming(1, { duration: 240, easing: Easing.bezier(0.22, 1, 0.36, 1) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [titleKey]);
+  }, [titleKey, optionKeySig, initialSig]);
   const enterA = useAnimatedStyle(() => ({ opacity: enter.value, transform: [{ translateY: (1 - enter.value) * 8 }] }));
 
   // Animated progress fill — subtle, shared by every question so single/multi never differ.

@@ -18,7 +18,9 @@ import { openAfOffer } from './lib/afOfferLive.ts';
 // rendered" on the same slow afternoon against a production that was fine (each passed locally on
 // the same bundle). A budget set by a good day is not a budget; 60s is set by the worst turn
 // actually measured, and still fails in bounded time.
-const AGENT_TURN_MS = 60_000;
+// ONE definition of that budget, shared with the sibling journeys (2026-09-04) — a constant that
+// exists three times drifts three ways, and this one is load-bearing in all three.
+import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad } from './lib/afJourneyPacing.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
@@ -55,6 +57,14 @@ const check = (label, ok, detail = '') => {
   REPORT.push({ label, ok, detail });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
   if (!ok) failures++;
+};
+// A rule this run could not reach is NOT a rule this run proved. It is printed and counted on its
+// own, never folded into the passes — absence of a test is not evidence of correctness
+// (AF_TRENDING_DATA_INTEGRITY_ENGINEER.md PART 7, "never fake green").
+const notExercised = [];
+const unexercised = (label, why) => {
+  notExercised.push(`${label}: ${why}`);
+  console.log(`NOT EXERCISED  ${label}\n      ${why}`);
 };
 
 // Launch options are ENV-DRIVEN and default to exactly what they were, so CI (which runs
@@ -320,7 +330,18 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       }
       return last;
     };
-    let st = await readCardUntil((s) => s.hasCard && s.chip != null);
+    // ONE BUDGET, NOT TWO (2026-09-05). This first read used the 9s default while every sibling
+    // read below already waits AGENT_TURN_MS — yet THIS is the read that must survive the AF round's
+    // opening probe (rankQuestions + a count RPC per candidate question), the slowest transition in
+    // the journey. Under production load it exceeds 9s, and the failure did not look like a timeout:
+    // the card read back {hasCard:false,q:null,chip:null} and the journey reported "AF card opened on
+    // a real question" as FALSE — an app defect that was not there.
+    // PROVEN, not guessed: run 33939914275 reported hasCard=false for Rent-Monthly/Apartment/الرياض;
+    // driving the identical journey by hand against the same production build opened the card on
+    // «كم التقييم اللي تفضله؟» with chip 9,130 and options 9.5+/9.0+/9.0_rc10 — byte-identical to the
+    // last GREEN run (33922383826: q="كم التقييم اللي تفضله؟", chip=9130, afterSelect=4945).
+    // Waiting longer cannot hide a regression: a card that never opens still fails, just honestly.
+    let st = await readCardUntil((s) => s.hasCard && s.chip != null, AGENT_TURN_MS);
     check(`${name}: AF card opened on a real question`, st.hasCard && !!st.q, JSON.stringify(st));
     const baselineChip = st.chip;
 
@@ -356,16 +377,30 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     if (answerAmenityIndex != null) {
       const opts = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
       const testid = opts[answerAmenityIndex];
+      // NEVER CLICK A SELECTOR BUILT FROM undefined. When the card did not render, `opts` is empty
+      // and this became page.click('[data-testid="undefined"]') — a 30s Playwright timeout that then
+      // failed a SECOND check ("journey completed without throwing") with a stack trace, burying the
+      // real cause. Fail on the real fact instead. (Same guard as the backAndChange branch below.)
+      if (!testid) {
+        check(`${name}: an option was available to answer`, false,
+          `the card rendered no [data-testid^="af-option-"] to click (opts=${opts.length}) — refusing to click a selector built from undefined`);
+        await ctx.close(); return;
+      }
       await page.click(`[data-testid="${testid}"]`);
     } else {
       const opts = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
+      if (!opts[0]) {
+        check(`${name}: an option was available to answer`, false,
+          `the card rendered no [data-testid^="af-option-"] to click (opts=${opts.length}) — refusing to click a selector built from undefined`);
+        await ctx.close(); return;
+      }
       await page.click(`[data-testid="${opts[0]}"]`); // first option — deterministic, whatever the question is
     }
     // `s.chip !== baselineChip` alone is satisfied BY the pending window's null (fix 2026-08-26), so
     // this captured a blank as "the answer's count" — which both passed this check for the wrong
     // reason and then poisoned the Back comparison below with `expected=null`. Demand a resolved
     // number; the assertion itself is unchanged and now cannot pass on a chip that never resolves.
-    const afterSelect = await readCardUntil((s) => s.chip != null && s.chip !== baselineChip);
+    const afterSelect = await readCardUntil((s) => s.chip != null && s.chip !== baselineChip, AGENT_TURN_MS);
     check(`${name}: count changed after selecting an answer`, afterSelect.chip != null && afterSelect.chip !== baselineChip, `base=${baselineChip} afterSelect=${afterSelect.chip}`);
     // THE CARD'S NUMBER IS THE COUNT RPC's cnt_selected (added 2026-09-02). lastCountResp had been
     // captured since 2026-08-24 and never READ — the chip was compared only with itself (changed,
@@ -386,9 +421,44 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // a final search that never fires still leaves lastSearchBody null and still fails.
     lastSearchBody = null; lastSearchResp = null;
     await page.click('[data-testid="af-confirm"]');
-    await page.waitForTimeout(1200);
+    // WAIT FOR THE REQUEST, NOT FOR A GUESS (2026-09-05). The confirm fires the final search; this
+    // was a fixed 1,200 ms sleep, so on a slow turn the journey read lastSearchBody while it was
+    // still null and reported "final search request was captured: null" — indistinguishable, in the
+    // log, from a search that never fired. Three journeys failed that way in run 33939914275
+    // (Jeddah/bathrooms, SKIP, BACK) while the app was fine. Poll for the real thing instead: this
+    // is STRICTLY stronger than the sleep it replaces — a search that genuinely never fires still
+    // leaves it null and still fails, it just no longer fails when the search was merely slow.
+    {
+      const until = Date.now() + AGENT_TURN_MS;
+      while (Date.now() < until && lastSearchBody === null) await page.waitForTimeout(250);
+      await page.waitForTimeout(600);   // let the count/render settle once the body has landed
+    }
 
     if (backAndChange) {
+      // WHICH RULE A BACK CLICK MEANS IS DECIDED BY THE STEP THE CARD IS ON, so this journey must
+      // PROVE the round advanced before it clicks (2026-09-04). R8.2.1 — Back steps to the previous
+      // question and restores its answer — and R8.2.2 — Back on question ONE cancels the round
+      // outright, leaving no card at all — are different, correct behaviours of the same button. The
+      // 1,200 ms fixed wait after the confirm above does not establish which one is armed: the
+      // advance renders when the confirm's count round-trip lands, and on the 10,625-row Riyadh
+      // apartment scope that is sometimes over that budget. A Back that arrives first is handled by
+      // production as R8.2.2 — correctly — and this journey then reports the resulting empty card as
+      // a broken R8.2.1.
+      //
+      // That is exactly what happened on 2026-09-04 (run 33855677911 and again locally): «Back
+      // restores the previous question — expected=وش المميزات المهمة لك؟ got=null», three checks
+      // red, against a production that a hand-driven browser on the SAME deployed bundle showed
+      // restoring the question, its 2,415 count and all 12 options within 2.5 s. Every other
+      // interaction in this file already polls for the state it acts on; this was the last fixed
+      // sleep standing in front of a state-dependent click.
+      const advanced = await readCardUntil((s) => s.hasCard && s.q != null && s.q !== st.q, AGENT_TURN_MS);
+      if (!(advanced.hasCard && advanced.q && advanced.q !== st.q)) {
+        // The round ended at the confirm (one useful question) — R8.2.1 has no earlier step to
+        // restore, so it cannot be exercised here. Say so; never assert it, and never call it green.
+        unexercised(`${name}: Back restores the previous question (R8.2.1)`,
+          `the round did not advance to a second question within ${AGENT_TURN_MS}ms (card=${advanced.hasCard} q=${advanced.q}) — a Back here is R8.2.2 (cancel the round), a different rule`);
+        await ctx.close(); return;
+      }
       await page.click('[data-testid="af-back"]');
       // 25s for the same reason Skip needs it: Back re-shows an EARLIER question, so its chip has to
       // be refilled with that step's number rather than arriving with a fresh narrowing, and on a
@@ -414,7 +484,7 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       if (!opts2.length) { await ctx.close(); return; }
       const otherIdx = opts2.length > 1 ? 1 : 0;
       await page.click(`[data-testid="${opts2[otherIdx]}"]`);
-      const changed = await readCardUntil((s) => s.chip != null && s.chip !== afterSelect.chip);
+      const changed = await readCardUntil((s) => s.chip != null && s.chip !== afterSelect.chip, AGENT_TURN_MS);
       check(`${name}: changing the answer recomputes the count`, changed.chip !== afterSelect.chip || opts2.length === 1, `after1st=${afterSelect.chip} afterChange=${changed.chip}`);
       lastSearchBody = null; lastSearchResp = null;   // re-arm: this confirm is now the committing one
       await page.click('[data-testid="af-confirm"]');
@@ -477,6 +547,20 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
   }
 }
 
+// ── MEASURE THE PRODUCT, NOT THE QUEUE ─────────────────────────────────────────────────────────
+// Nine journeys of paid agent turns. Starting them while production is outside its own safe
+// envelope measures the queue in front of the database — every wait below then expires against a
+// card that was simply still coming. Wait (bounded) for production's own signal, then measure. If
+// it never clears we still run and still report honestly; we never invent a pass. Rationale and
+// the reproduction: scripts/lib/afJourneyPacing.ts.
+{
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const l = await paceUntilHealthy(() => readSearchLoad(REST_URL, H), sleep, PACE_BUDGET_MS, PACE_POLL_MS, (s) => console.log(s));
+  console.log(l.degraded
+    ? `[pace] STARTING ANYWAY after ${Math.round(PACE_BUDGET_MS / 60000)}min — ${describeLoad(l)}`
+    : `[pace] production is inside its envelope — ${describeLoad(l)}`);
+}
+
 // ── the required coverage matrix ───────────────────────────────────────────────────────────────
 await runJourney('Residential/Buy/Apartment/Riyadh — bathrooms', {
   deal: [], category: null, city: 'الرياض', group: 'الشقق والسكن المشترك', type: 'شقة', answerBathrooms: null,
@@ -514,5 +598,14 @@ await runJourney('Residential/Buy/Apartment/Riyadh — BACK/change-answer case',
 });
 
 await browser.close();
-console.log(`\n${failures === 0 ? '✓ AF backend truth audit — all checks passed' : `✗ ${failures} check(s) FAILED`}`);
+if (notExercised.length) console.log(`\n${notExercised.length} rule(s) NOT EXERCISED this run (not proved, not counted as passes):\n  ${notExercised.join('\n  ')}`);
+// NAME the failures in the closing summary, do not merely count them. Every FAIL is already printed
+// inline, but this file is step 6 of a 16-step CI job whose later steps keep running, so the inline
+// lines end up thousands of lines from the end of the log — and the tooling an agent has for reading
+// a job log reads the TAIL. On 2026-09-04 that turned a red step into an unreadable one: the check
+// passed locally, twice, against the same production bundle, and the CI cause could not be seen at
+// all. A summary that names its failures is legible from the tail whatever ran afterwards.
+console.log(`\n${failures === 0
+  ? '✓ AF backend truth audit — all checks passed'
+  : `✗ ${failures} check(s) FAILED:\n` + REPORT.filter((r) => !r.ok).map((r) => `    • ${r.label}${r.detail ? `\n      ${r.detail}` : ''}`).join('\n')}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -1,4 +1,6 @@
-// Which of the seven daily engineer routines owns an alert, by alert KIND.
+// Which of the ELEVEN daily engineer routines owns an alert, by alert KIND.
+// (Seven surface owners, plus four added 2026-09-04 whose object is a gap, a layer disagreement,
+// the verification apparatus, or a listing lifecycle — see ROUTINES below.)
 //
 // WHY THIS FILE EXISTS. Delivery was fixed on 2026-08-26 (alert-dispatch.yml files one GitHub
 // issue per dedup_key). Delivery is not the same as OWNERSHIP: measured 2026-08-28, 55 open
@@ -10,7 +12,7 @@
 // alert_event did not. This is that same routing, for the other queue, and it deliberately reuses
 // SENTRY_ROUTING's two load-bearing conventions rather than inventing a second scheme:
 //   * routine #2 (🎖️ Senior Production) is the STANDING TRIAGE ROUTER for anything ambiguous;
-//   * one owner per item, so seven engineers do not work the same incident.
+//   * one owner per item, so eleven engineers do not work the same incident.
 //
 // THIS FILE IS EXECUTED BY THE WORKFLOW, NOT MIRRORED BY IT. alert-dispatch.yml checks the repo
 // out and calls routineForKind() directly. That is the whole reason there is no drift barrier
@@ -25,7 +27,7 @@
 // new detectors add more every week, so an exhaustive kind list would rot into that hole within
 // days. Patterns + a mandatory fallback is what keeps it total.
 
-/** The seven daily routines, keyed by their number in docs/ops/ENGINEER_ROUTINES.md. */
+/** The eleven daily routines, keyed by their number in docs/ops/ENGINEER_ROUTINES.md. */
 export const ROUTINES = {
   1: { label: 'routine-1-scraping', name: '⚡ Junior Scraping' },
   2: { label: 'routine-2-production', name: '🎖️ Senior Production' },
@@ -34,6 +36,14 @@ export const ROUTINES = {
   5: { label: 'routine-5-af-trending', name: '🎯 Advanced Filter + Trending' },
   6: { label: 'routine-6-journey', name: '👣 Journey & Persistence' },
   7: { label: 'routine-7-seam', name: '🧵 Systems Seam' },
+  // ── Added 2026-09-04 (owner). Four routines whose object is DIFFERENT from the seven above, not
+  // whose topic is narrower — that is what keeps ownership non-overlapping. #1-#7 own SURFACES;
+  // these own, in order: the gaps BETWEEN surfaces, the AGREEMENT between layers on production, the
+  // VERIFICATION APPARATUS itself, and the LIFECYCLE of a listing after its source drops it.
+  8: { label: 'routine-8-regression-hunter', name: '🔴 Regression Hunter' },
+  9: { label: 'routine-9-red-team', name: '🔬 Production Red Team' },
+  10: { label: 'routine-10-barrier', name: '🧱 Bug Prevention & Barrier' },
+  11: { label: 'routine-11-lifecycle', name: '♻️ Listing Lifecycle' },
 } as const;
 
 export type RoutineNumber = keyof typeof ROUTINES;
@@ -58,6 +68,14 @@ export const FALLBACK_ROUTINE: RoutineNumber = 2;
 export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp }> = [
   // 7 🧵 Systems Seam — cron→detector→alert, migration→mirror→prod, RLS, monitoring's own plumbing.
   { routine: 7, test: /^(alert_delivery|alert_acknowledgment|alert_dispatch)/ },
+  // alert_queue_unworked / incident_stalled (2026-09-04) — the incident loop watching ITSELF.
+  // The first says nobody is acknowledging the alert queue at all (measured: 1,014 alerts raised
+  // all-time, 2 ever acknowledged, 106 open with the oldest at 24 days). The second says a specific
+  // routine's incident queue has stopped moving, and names it in the alert detail. Both belong to
+  // this routine because both are failures of the alert→delivery→acknowledgement seam it already
+  // owns — and routing them to the #2 fallback would have been the joke version: an alert about
+  // nobody reading alerts, filed to the busiest triage queue.
+  { routine: 7, test: /^(alert_queue_unworked|incident_stalled)$/ },
   { routine: 7, test: /^(cron_|migration_drift|sql_mirror_drift|deploy_lock_misuse)/ },
   { routine: 7, test: /^(detector_|orphaned_detector|unresolvable_|monitoring_watchdog)/ },
   { routine: 7, test: /^(registry_orphans|repair_guarantee|loc_rel_|rls_)/ },
@@ -68,6 +86,14 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // Explicitly routed rather than left to the #2 fallback, so a cost alert arrives with an owner.
   { routine: 7, test: /^ai_cost_health$/ },
   { routine: 7, test: /^search_index_diverges_from_sync_source$/ },
+  // The `*_check_failed` family (2026-09-04) — a SCHEDULED WORKFLOW ITSELF went red. Raised by
+  // scripts/ops/raise-workflow-alert.mjs, one open alert per workflow file, self-healing on the
+  // next green run. Before it, 17 scheduled workflows could fail and alert nobody (issue #1349:
+  // ui-parity red five nights, zero alerts). Each kind is routed to the routine that owns the
+  // SURFACE the dead check was watching, per this file's rule that ownership follows the surface —
+  // so the engineer who would have received the finding also receives the fact that the finder
+  // stopped working. `seam_check_failed` is the deploy/certification plumbing this routine owns.
+  { routine: 7, test: /^seam_check_failed$/ },
   // p0_delivery_sla — the 5-minute P0 delivery SLO and its dedicated fast lane (2026-08-30). This
   // routine owns that mechanism end to end, yet the kind matched no rule and fell through to the
   // #2 fallback: the alert saying "a P0 did not reach a human in time" was itself being filed to
@@ -78,12 +104,17 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 7, test: /^p0_delivery/ },
 
   // 5 🎯 Advanced Filter + Trending — before #3/#4, whose patterns overlap AF field names.
+  // `af_live_check_failed` (the workflow-failure family above) needs no rule of its own: `^af_`
+  // already claims it, and adding a redundant pattern would be a second statement of the same fact.
+  // scripts/verify-scheduled-checks-alert-on-failure.ts EXECUTES routineForKind() on that kind, so
+  // narrowing `^af_` later cannot silently drop it onto the #2 fallback.
   { routine: 5, test: /^(af_|monthly_af|trending_)/ },
 
   // 4 🧪 Search & Matching QA — the served search surface, matching, diversity, card handoff.
   { routine: 4, test: /^(search_gate_leak|searchability_collapse|filter_barrier_leak)$/ },
   { routine: 4, test: /^(filter_default_suppresses_inventory|unsortable_served_listing)$/ },
   { routine: 4, test: /^(unlocated_search_contract|ranking_|diversity|card_)/ },
+  { routine: 4, test: /^search_live_check_failed$/ },
 
   // 1 ⚡ Junior Scraping — the capture layer: runs, sources, proxies, per-platform fetch health.
   { routine: 1, test: /^(silent_scraper_death|silent_partial_success|zero_new_stall)$/ },
@@ -92,9 +123,40 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 1, test: /^(wasalt_enrich|summary_only_capture|unattributable_platform_runs)/ },
   { routine: 1, test: /^(liveness_cap_degraded|source_limited_contradicted|unprobed_source_waiver)/ },
   { routine: 1, test: /^gathern_liveness/ },
+  { routine: 1, test: /^ingestion_check_failed$/ },
 
   // 6 👣 Journey & Persistence — chat/session/auth state, never matching itself.
   { routine: 6, test: /^(transcript_|filter_state_lost|chat_|session_|auth|sidebar)/ },
+  { routine: 6, test: /^journey_live_check_failed$/ },
+
+  // 11 ♻️ Listing Lifecycle — what happens to a listing AFTER its source confirms it is gone.
+  // Deliberately narrow and deliberately BEFORE #3: #3 owns the field truth of a listing that is
+  // alive, #1 owns whether the crawl ran at all, and this owns the inactive→30-day-delete chain and
+  // every way a dead listing can still be seen, counted, or resurrected. `unknown_treated_as_dead`
+  // is the safety rule that matters most: UNKNOWN is not DEAD.
+  { routine: 11, test: /^(inactive_still_searchable|inactive_still_counted|false_resurrection)$/ },
+  { routine: 11, test: /^(unknown_treated_as_dead|deletion_clock_|orphan_after_delete)/ },
+  { routine: 11, test: /^lifecycle_/ },
+
+  // 10 🧱 Bug Prevention & Barrier — the VERIFICATION APPARATUS, never the product. A barrier that
+  // asserts the bug, a check with no mutation proof, a test that passes while production is wrong.
+  { routine: 10, test: /^(barrier_|mutation_|blind_guard|green_while_broken|test_infra_)/ },
+
+  // 2 🎖️ Senior Production — an ALERT that misdescribes its own subject. Written explicitly even
+  // though #2 is the fallback and this kind would reach it anyway: ALERT_ROUTING.md's own drift
+  // signal is the fallback column growing, so a kind whose owner is actually known must say so
+  // rather than arrive as one more unclaimed thing. Raised by mon_detect_alert_subject_fk()
+  // (migration 20260906062217) when a payload's foreign key resolves to a different listing than
+  // the alert is about — operational-logging correctness, which is #2's §23 surface, and NOT the
+  // deleted_but_source_live finding itself, which stays #3's below.
+  { routine: 2, test: /^alert_payload_/ },
+
+  // 9 🔬 Production Red Team — DISAGREEMENT between layers on production: action vs request vs RPC
+  // params vs DB truth vs displayed count vs returned ids vs card evidence.
+  { routine: 9, test: /^(layer_disagreement|count_vs_set|displayed_vs_truth|prod_differential)/ },
+
+  // 8 🔴 Regression Hunter — the GAPS BETWEEN owned surfaces, and fixes that did not hold.
+  { routine: 8, test: /^(cross_surface_|regression_survived|incomplete_fix|seam_between_owners)/ },
 
   // 3 🛡️ Data Integrity — source-truth on listing fields. Broadest; must stay last.
   { routine: 3, test: /price|district|amenity|^rent_period|^manufactured_rent_period/ },
@@ -107,6 +169,7 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 3, test: /^(phasea_offregion_pick|discarded_location_resolution|aqar)/ },
   { routine: 3, test: /^(commercial_|index_label_unrepairable|refresh_coverage|orphaned_search_row)/ },
   { routine: 3, test: /^search_index_freshness$/ },
+  { routine: 3, test: /^data_live_check_failed$/ },
 ];
 
 /** Every routine label, for `gh label create`. */

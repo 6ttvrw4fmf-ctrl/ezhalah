@@ -146,12 +146,12 @@ check('…but the lopsided one is still INCLUDED, not dropped — selectivity ne
     [100, 8, true, 'SMALL SLICE: 8% share is a 92% CUT — the 2026-08-22 protection'],
     [1874, 60, true, 'the owner’s own 2026-08-22 repro: 3.2% share, 96.8% cut'],
     [1874, 1820, false, '97.1% share, 2.9% cut — the gym at scale'],
-    [30, 27, true, '0.9×30 = 27 exactly; an exact 10% cut must not fall to float rounding'],
-    [30, 28, false, '6.7% cut'],
-    [26, 25, true, `only 3.8% removed, but it LANDS at ≤${INTERVIEW_STOP_AT} — the escape clause`],
-    [26, 26, false, 'no-op even at the smallest askable scope'],
+    [60, 54, true, '0.9×60 = 54 exactly; an exact 10% cut must not fall to float rounding'],
+    [60, 56, false, '6.7% cut'],
+    [51, 50, true, `only 2% removed, but it LANDS at ≤${INTERVIEW_STOP_AT} — the escape clause (owner 2026-09-04: 50)`],
+    [51, 51, false, 'no-op even at the smallest askable scope'],
     [10000, 10000, false, 'k === N is rejected at every scale, not just small ones'],
-    [10000, 25, true, 'the escape clause has no upper bound on N'],
+    [10000, 50, true, 'the escape clause has no upper bound on N'],
   ];
   let bad = 0; let firstBad = '';
   for (const [N_, k, expect, why] of cases) {

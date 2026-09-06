@@ -25,6 +25,7 @@ import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'r
 import { useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, cardShadow, font, radius } from '@/theme/tokens';
+import { TAP44 } from '@/theme/palette';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -116,6 +117,12 @@ export default function ModeSwitch({
         style={s.seg}
         onPress={() => press('filter')}
         hitSlop={6}
+        // These two tabs TOUCH (gapX = 0, measured on production), which is exactly why
+        // TAP_TARGET_CSS uses min-width rather than width: at 106px wide the horizontal floor is
+        // inert here and only the short 36px axis grows, so neither tab can take the other's
+        // edge presses (ops_incident #17).
+        // @ts-expect-error web-only DOM props on the RNW host node
+        dataSet={{ ...TAP44 }}
         accessibilityRole="tab"
         accessibilityState={{ selected: active === 'filter' }}
         accessibilityLabel={t('Filter')}
@@ -130,6 +137,8 @@ export default function ModeSwitch({
         style={s.seg}
         onPress={() => press('agent')}
         hitSlop={6}
+        // @ts-expect-error web-only DOM props on the RNW host node
+        dataSet={{ ...TAP44 }}
         accessibilityRole="tab"
         accessibilityState={{ selected: aiSteady }}
         accessibilityLabel={t('Smart Assistant')}

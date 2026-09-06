@@ -29,12 +29,14 @@
 import { join } from 'node:path';
 import { npmTestRuns } from './lib/testRegistry.ts';
 import { readFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { buildRepoMigrationVersions } from './build-repo-migration-versions.cjs';
 
 const CHECK_SCRIPT = 'scripts/verify-migration-drift-vs-production.ts';
 const SHARED_PARSER = 'scripts/build-repo-migration-versions.cjs';
 const WORKFLOW = '.github/workflows/migration-drift-guard.yml';
 const SAFE_DEPLOY = 'scripts/safe-deploy.sh';
+const DRIFT_GATE = 'scripts/schema-drift-gate.sh';
 const PACKAGE_JSON = 'package.json';
 const ROOT = join(import.meta.dirname, '..');
 const DRIFT_MODULE = 'scripts/lib/migrationDrift.ts';
@@ -106,10 +108,26 @@ check(/SUPABASE_SERVICE_ROLE_KEY/.test(wf),
 //    about what counts as "in git" (exactly the class of bug the shared file's own header warns
 //    about — see build-repo-migration-versions.cjs).
 const deploySh = existsSync(SAFE_DEPLOY) ? readFileSync(SAFE_DEPLOY, 'utf8') : '';
-check(deploySh.includes('build-repo-migration-versions'),
-  'safe-deploy.sh sources the shared migration-versions parser',
-  `${SAFE_DEPLOY} no longer references ${SHARED_PARSER} — check whether it re-inlined its own ` +
+// The deploy-time gate was EXTRACTED into scripts/schema-drift-gate.sh on 2026-09-05 (incident
+// #61) so it could be called twice — once BEFORE the production deploy step, to prevent a drifted
+// deploy, and
+// once after to guard the baseline advance. The intent of this check is unchanged: exactly ONE
+// implementation of "what migrations does the repo claim", shared with the continuous checker.
+// It therefore follows the extraction rather than demanding the string stay in safe-deploy.sh —
+// and it separately asserts safe-deploy still INVOKES the gate, so the indirection cannot become
+// a way for the gate to go missing entirely.
+const gateSh = existsSync(DRIFT_GATE) ? readFileSync(DRIFT_GATE, 'utf8') : '';
+check(gateSh.includes('build-repo-migration-versions'),
+  'the deploy-time drift gate sources the shared migration-versions parser',
+  `${DRIFT_GATE} no longer references ${SHARED_PARSER} — check whether it re-inlined its own ` +
   `copy of the filename-parsing logic, which can silently diverge from the continuous checker`);
+check(deploySh.includes('schema-drift-gate.sh pre') && deploySh.includes('schema-drift-gate.sh post'),
+  'safe-deploy.sh still invokes the drift gate on BOTH sides of the deploy',
+  `${SAFE_DEPLOY} must call ${DRIFT_GATE} with phase "pre" (prevents a drifted deploy) AND "post" ` +
+  `(guards the baseline advance and catches a mid-deploy race) — see incident #61`);
+check(!deploySh.includes('build-repo-migration-versions'),
+  'safe-deploy.sh does NOT keep a second copy of the gate inline',
+  `${SAFE_DEPLOY} still builds the migration-versions list itself — the gate must live only in ${DRIFT_GATE}`);
 const checkScript = existsSync(CHECK_SCRIPT) ? readFileSync(CHECK_SCRIPT, 'utf8') : '';
 check(checkScript.includes('build-repo-migration-versions'),
   'verify-migration-drift-vs-production.ts sources the shared migration-versions parser',
@@ -156,6 +174,33 @@ check(npmTestRuns(ROOT, PURE_TEST.replace(/\.ts$/, '')),
   'npm test runs the offline mirror-integrity test',
   `package.json's "test" script no longer runs ${PURE_TEST} — the four-condition detection logic ` +
   `(and its mutation proof) would go unchecked on PRs`);
+
+// 6. FAIL CLOSED — EXECUTED, not read (2026-09-04).
+//    Until today both live checkers caught `fetch` and `process.exit(0)`. Every 15 minutes the
+//    workflow could fail to reach production and still go green: the barrier's whole promise
+//    ("detect immediately") quietly depended on the network never hiccuping. Asserting the fix by
+//    grepping for the absence of `exit(0)` would be a comment-shaped check; instead this RUNS each
+//    real script pointed at a closed port and requires a non-zero exit. A future refactor that
+//    reintroduces the skip-and-pass posture turns this red.
+const UNREACHABLE = 'http://127.0.0.1:1';
+for (const live of [CHECK_SCRIPT, 'scripts/verify-migration-content-parity.ts']) {
+  const env = { ...process.env, SUPABASE_URL: UNREACHABLE, EXPO_PUBLIC_SUPABASE_URL: UNREACHABLE };
+  delete env.SUPABASE_SERVICE_ROLE_KEY; // no alert side-effect, and nothing to write to anyway
+  const run = spawnSync(
+    process.execPath,
+    ['--experimental-strip-types', '--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', live],
+    { cwd: ROOT, env, encoding: 'utf8', timeout: 60000 },
+  );
+  const said = `${run.stdout ?? ''}${run.stderr ?? ''}`;
+  check(run.status === 1,
+    `${live} FAILS CLOSED when it cannot read production (exit ${run.status})`,
+    `${live} exited ${run.status} with production unreachable — a check that could not run must ` +
+    `never report success. "I could not tell" is not "there is no drift".`);
+  check(/COULD NOT CHECK/.test(said),
+    `${live} says COULD NOT CHECK, distinctly from a real drift finding`,
+    `${live} did not print COULD NOT CHECK — an unreadable production must be distinguishable ` +
+    `from a clean one AND from a drifted one. Got: ${said.slice(0, 300)}`);
+}
 
 console.log('migration-drift-guard-wired: the continuous drift barrier must stay actually connected\n');
 for (const o of ok) console.log(`  ✓ ${o}`);

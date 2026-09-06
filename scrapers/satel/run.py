@@ -7,7 +7,12 @@ rule. No auth, no proxy, cloud-friendly (open JSON API on apiv2.satel.sa).
 API (no auth, no key):
   GET https://apiv2.satel.sa/categories/all                     → taxonomy (Residential/Commercial)
   GET https://apiv2.satel.sa/property/filter?ver=2&limit=1000   → {data:[...], totalCount}
-       (the list item IS the full record — there's no richer detail endpoint we need.)
+       (list items carry the full FIELD record but a TRUNCATED imageList — just the featured
+        image: 1 entry for 225 of 226 live listings, 2026-09-05.)
+  GET https://apiv2.satel.sa/property/p/v2/<propertyNumber>?version=2 → one property, with the
+       FULL gallery (live-verified 2026-09-05: C0055 → 32 images, C0094 → 19). No auth. This is
+       where photo_urls must come from; the old "no richer detail endpoint" assumption was the
+       root cause of every Satel row storing exactly one photo.
 
 Field map (Satel item → our schema):
   propertyNumber               → listing_url  https://listings.satel.sa/property/<propertyNumber>
@@ -19,7 +24,8 @@ Field map (Satel item → our schema):
   price + priceGroup           → annual rent | monthly rent (rent_period) | Buy total (onetime)
   floorArea (sqm)              → area_m2 ; beds/baths → bedrooms/bathrooms
   address.{cityEn/Ar, subCityEn/Ar(district), postalCode, lat, lng} → city/region/neighborhood + geo
-  featuredImage / imageList[]  → photo_urls (filepath = public unsigned Spaces URL)
+  imageList[] (DETAIL endpoint) / featuredImage → photo_urls (filepath = public unsigned Spaces
+                                 URL; imgOrder = source gallery order, first = card thumbnail)
   furnishing/kitchen/acType/parking*/status/createdAt/title* → additional_info
   status "Rented out"          → active=false + post-upsert missing_count=3 pin (leased units
                                  stay in the API feed forever, so the seen-based prune can never
@@ -71,6 +77,7 @@ AD_PREFIX = "ST"
 BASE = "https://apiv2.satel.sa"
 LISTING_BASE = "https://listings.satel.sa/property"
 FILTER_URL = f"{BASE}/property/filter?ver=2&limit=1000"
+DETAIL_URL = f"{BASE}/property/p/v2/{{pnum}}?version=2"
 CATEGORIES_URL = f"{BASE}/categories/all"
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
@@ -161,12 +168,44 @@ def fetch_all(s: cc.Session) -> tuple[list[dict], int]:
     return [], 0
 
 
+def _fetch_detail(s: cc.Session, pnum: str) -> Optional[dict]:
+    """One property from the DETAIL endpoint — the only place the full gallery exists (the filter
+    list truncates imageList to the featured image; 225/226 live listings had exactly 1 entry,
+    2026-09-05). Returns None on any failure — the caller keeps the featured-image fallback, so
+    a bad fetch degrades to FEWER images, never a wrong one.
+
+    Per-listing binding: we only trust a record that echoes OUR propertyNumber back (verified the
+    endpoint does: C0055/C0094, 2026-09-05). Detail JSON carries no Similar-listings block and we
+    never touch listings.satel.sa page HTML — the slug-decoy behavior documented at listing_url
+    (map_listing) makes that HTML untrustworthy for anything, images included."""
+    _throttle()
+    for attempt in range(3):
+        try:
+            r = s.get(DETAIL_URL.format(pnum=pnum), timeout=60)
+        except Exception:
+            time.sleep(2 * (attempt + 1)); continue
+        if r.status_code != 200:
+            time.sleep(2 * (attempt + 1)); continue
+        j = r.json()
+        # live response is the bare property dict; tolerate a {"data": {...}} wrapper like fetch_all.
+        d = j.get("data") if isinstance(j, dict) and isinstance(j.get("data"), dict) else j
+        if isinstance(d, dict) and (d.get("propertyNumber") or "").strip() == pnum:
+            return d
+        return None  # 200 but not our listing — never bind someone else's gallery
+    return None
+
+
 def _photo_urls(p: dict) -> list[str]:
     """Full-size public Spaces URLs. Use `filepath` (unsigned, no AWS query string), NOT
-    `fileAccessPath` (presigned + expiring). Dedupe, keep order, drop empties."""
+    `fileAccessPath` (presigned + expiring). Dedupe, keep source gallery order, drop empties."""
     urls: list[str] = []
     seen: set[str] = set()
     imgs = p.get("imageList") or []
+    # Pin the SOURCE's gallery order via imgOrder (first = card thumbnail). The detail endpoint
+    # already returns entries sorted (C0055/C0094 spot-check 2026-09-05, and imageList[0].filepath
+    # equals the featured image the list endpoint serves) — sorting just makes that a guarantee.
+    # sorted() is stable, so entries without imgOrder keep their API order.
+    imgs = sorted(imgs, key=lambda i: (i.get("imgOrder") if isinstance(i, dict) else None) or 0)
     if not imgs:
         fi = p.get("featuredImage")
         if isinstance(fi, dict):
@@ -427,6 +466,15 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            # Full gallery lives ONLY on the detail endpoint (list imageList = featured image
+            # only). Active listings get one extra throttled GET (~226/run, no auth, no proxy);
+            # rented-out units keep the featured image without the extra call. On any detail
+            # failure/empty gallery the featured image stays — never blank an existing photo.
+            pnum = (p.get("propertyNumber") or "").strip()
+            if not gone and pnum:
+                d = _fetch_detail(s, pnum)
+                if d:
+                    row["photo_urls"] = _photo_urls(d) or row["photo_urls"]
             (com if cat == "commercial" else res).append(row)
             if gone:
                 gone_ct += 1

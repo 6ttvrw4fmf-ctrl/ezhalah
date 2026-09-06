@@ -20,6 +20,7 @@
 import type { SearchQuery } from '@/data/search';
 import { cohortAllows, partitionRequestedAmenities } from './afCohorts.ts';
 import { applyAfIntents, AF_INTENTS, GENERIC_INTENT_IDS } from './afIntents.ts';
+import { RNPL_TOKENS } from './searchDefaults.ts';
 
 /** Only the fields certification reads. Structural, so this module never imports the agent. */
 export type CertifiableBackendQuery = {
@@ -29,7 +30,7 @@ export type CertifiableBackendQuery = {
 };
 
 /** RNPL writes into q.amenities but owns its own cohort gate, so the generic sweep must skip it. */
-const isRnpl = (t: string) => t === 'rnpl' || t === 'rent_now_pay_later';
+export const isRnpl = (t: string) => RNPL_TOKENS.includes(t);
 
 export function certifyAfOnMergedState(
   merged: SearchQuery,

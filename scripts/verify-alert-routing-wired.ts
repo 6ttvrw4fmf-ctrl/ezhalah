@@ -46,7 +46,7 @@ const HOSTILE = [
   ' leading_space',
 ];
 check(
-  'routeForKind is total — every hostile input returns one of the seven routines',
+  'routeForKind is total — every hostile input returns one of the eleven routines',
   HOSTILE.every((k) => {
     const r = routineForKind(k);
     return Number.isInteger(r) && r >= 1 && r <= 7 && ROUTINES[r] !== undefined;
@@ -57,10 +57,16 @@ check(
   HOSTILE.every((k) => typeof labelForKind(k) === 'string' && labelForKind(k).startsWith('routine-')),
 );
 
-// ── 2. Seven routines, distinct labels, all published ──────────────────────────────────────────
+// ── 2. Eleven routines, distinct labels, all published ─────────────────────────────────────────
+// Seven surface owners plus four added 2026-09-04 (owner) whose object is a gap, a layer
+// disagreement, the verification apparatus, or a listing lifecycle. The count is pinned as a
+// CONTIGUOUS RANGE rather than a literal list, so adding a routine is one edit here and a gap in
+// the numbering (a routine deleted without renumbering) still fails.
 const nums = Object.keys(ROUTINES).map(Number).sort((a, b) => a - b);
-check('exactly seven routines, numbered 1..7', JSON.stringify(nums) === JSON.stringify([1, 2, 3, 4, 5, 6, 7]));
-check('every routine label is distinct', new Set(ALERT_ROUTINE_LABELS).size === 7);
+const EXPECTED_ROUTINES = 11;
+check(`exactly ${EXPECTED_ROUTINES} routines, contiguously numbered 1..${EXPECTED_ROUTINES}`,
+  JSON.stringify(nums) === JSON.stringify(Array.from({ length: EXPECTED_ROUTINES }, (_, i) => i + 1)));
+check('every routine label is distinct', new Set(ALERT_ROUTINE_LABELS).size === EXPECTED_ROUTINES);
 check('every routine label is `routine-<n>-…`', nums.every((n) => ROUTINES[n as 1].label.startsWith(`routine-${n}-`)));
 check(
   'ALERT_ROUTINE_LABELS lists every routine (the workflow creates labels from it — a missing one makes `gh issue edit --add-label` fail and leaves the issue unowned)',
@@ -129,6 +135,6 @@ check('doc explains that assignment is what writes acknowledged_at', /acknowledg
 console.log(
   failed
     ? `\n✗ ${failed} check(s) FAILED — an alert could be delivered to nobody`
-    : '\n✓ Alert routing wired: mapping is total, seven distinct owners, fallback is a real routine, and the workflow executes the mapping rather than mirroring it',
+    : '\n✓ Alert routing wired: mapping is total, eleven distinct owners, fallback is a real routine, and the workflow executes the mapping rather than mirroring it',
 );
 process.exit(failed ? 1 : 0);

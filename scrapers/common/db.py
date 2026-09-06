@@ -1194,6 +1194,38 @@ def upsert_aouj_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("aouj_commercial_listings", rows)
 
 
+def upsert_remal_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("remal_residential_listings", rows)
+
+
+def upsert_remal_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("remal_commercial_listings", rows)
+
+
+def upsert_amaall_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("amaall_residential_listings", rows)
+
+
+def upsert_amaall_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("amaall_commercial_listings", rows)
+
+
+def upsert_alta_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alta_residential_listings", rows)
+
+
+def upsert_alta_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alta_commercial_listings", rows)
+
+
+def upsert_shmoualshmal_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("shmoualshmal_residential_listings", rows)
+
+
+def upsert_shmoualshmal_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("shmoualshmal_commercial_listings", rows)
+
+
 def upsert_abralosol_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("abralosol_residential_listings", rows)
 

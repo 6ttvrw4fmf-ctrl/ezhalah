@@ -194,9 +194,14 @@ const sbCode = sb.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 // 2026-08-24: the dblclick binding moved into bindRowHost, where it is COORDINATED with the
 // press-hold-drag reorder gesture (a double-click mid-hold must not rename, and a hold must not
 // open) — see scripts/verify-sidebar-reorder.ts for that side of the contract.
+// 2026-09-05 (ops_incident #20): the handler gained its target filter, so a double-click that
+// STARTS on ⋯ (or any control marked data-nodrag) no longer renames — opening and closing that
+// menu is two clicks on this same host, and the row was dropping into rename mode. TWO barriers
+// pinned this one line by exact text, this one and verify-sidebar-reorder.ts, and both had to move
+// with the fix; both passed for the whole time the defect was live, which is the point.
 check('B12. double-click enters rename mode',
   /addEventListener\('dblclick'/.test(sbCode)
-  && /const dbl = \(\) => \{ if \(!dragRef\.current\?\.active\) beginRename\(c\); \};/.test(sbCode)
+  && /const dbl = \(e: any\) => \{ if \(!dragRef\.current\?\.active && !startsOnControl\(e\?\.target\)\) beginRename\(c\); \};/.test(sbCode)
   && /ref=\{bindRowHost\(/.test(sbCode));
 check('B12.1 double-click is not left as an un-forwarded react-native-web prop',
   !/onDoubleClick=?[:{]/.test(sbCode));

@@ -57,40 +57,35 @@ comment on table public.ops_liveness_registry is
   'sql/mirrors/liveness_registry.json, never this table by hand.';
 
 insert into public.ops_liveness_registry (platform, strategy, sla_hours, grace) values
-  ('abeea','CRAWL_PRESENCE_ONLY',168,3),
-  ('abralosol','CRAWL_PRESENCE_ONLY',168,3),
-  ('aldarim','CRAWL_PRESENCE_ONLY',168,3),
-  ('alhoshan','CRAWL_PRESENCE_ONLY',168,3),
-  ('alkhaas','CRAWL_PRESENCE_ONLY',168,3),
-  ('aouj','CRAWL_PRESENCE_ONLY',168,3),
-  ('aqar','DIRECT_REVISIT',48,3),
-  ('aqaratikom','CRAWL_PRESENCE_ONLY',168,3),
-  ('aqarcity','CRAWL_PRESENCE_ONLY',168,3),
-  ('aqargate','CRAWL_PRESENCE_ONLY',168,3),
-  ('aqarmonthly','CRAWL_PRESENCE_ONLY',168,3),
-  ('arkaan','CRAWL_PRESENCE_ONLY',168,3),
-  ('dealapp','CANDIDATE_PLUS_DIRECT',96,3),
-  ('eaqartabuk','CRAWL_PRESENCE_ONLY',168,3),
-  ('eastabha','CRAWL_PRESENCE_ONLY',168,3),
-  ('erapulse','CRAWL_PRESENCE_ONLY',168,3),
-  ('fursaghyr','CRAWL_PRESENCE_ONLY',168,3),
-  ('gathern','DIRECT_REVISIT',96,3),
-  ('hajer','CRAWL_PRESENCE_ONLY',168,3),
-  ('jazwtn','CRAWL_PRESENCE_ONLY',168,3),
-  ('jurash','CRAWL_PRESENCE_ONLY',168,3),
-  ('mizlaj','CRAWL_PRESENCE_ONLY',168,3),
-  ('mustqr','CRAWL_PRESENCE_ONLY',168,3),
-  ('nowaisiry','CRAWL_PRESENCE_ONLY',168,3),
-  ('october','CRAWL_PRESENCE_ONLY',168,3),
-  ('raghdan','CRAWL_PRESENCE_ONLY',168,3),
-  ('ramzalqasim','CRAWL_PRESENCE_ONLY',168,3),
-  ('rawasidark','CRAWL_PRESENCE_ONLY',168,3),
-  ('sadin','CRAWL_PRESENCE_ONLY',168,3),
-  ('sanadak','CRAWL_PRESENCE_ONLY',168,3),
-  ('satel','CRAWL_PRESENCE_ONLY',168,3),
-  ('souq24','CRAWL_PRESENCE_ONLY',168,3),
-  ('therc','CRAWL_PRESENCE_ONLY',168,3),
-  ('wasalt','DIRECT_REVISIT',96,3)
+    ('abeea','CRAWL_PRESENCE_ONLY',168,3),
+    ('aldarim','CRAWL_PRESENCE_ONLY',168,3),
+    ('alhoshan','CRAWL_PRESENCE_ONLY',168,3),
+    ('alkhaas','CRAWL_PRESENCE_ONLY',168,3),
+    ('aqar','DIRECT_REVISIT',48,3),
+    ('aqaratikom','CRAWL_PRESENCE_ONLY',168,3),
+    ('aqarcity','CRAWL_PRESENCE_ONLY',168,3),
+    ('aqargate','CRAWL_PRESENCE_ONLY',168,3),
+    ('aqarmonthly','CRAWL_PRESENCE_ONLY',168,3),
+    ('dealapp','CANDIDATE_PLUS_DIRECT',96,3),
+    ('eaqartabuk','CRAWL_PRESENCE_ONLY',168,3),
+    ('eastabha','CRAWL_PRESENCE_ONLY',168,3),
+    ('erapulse','CRAWL_PRESENCE_ONLY',168,3),
+    ('fursaghyr','CRAWL_PRESENCE_ONLY',168,3),
+    ('gathern','DIRECT_REVISIT',96,3),
+    ('hajer','CRAWL_PRESENCE_ONLY',168,3),
+    ('jazwtn','CRAWL_PRESENCE_ONLY',168,3),
+    ('jurash','CRAWL_PRESENCE_ONLY',168,3),
+    ('mizlaj','CRAWL_PRESENCE_ONLY',168,3),
+    ('mustqr','CRAWL_PRESENCE_ONLY',168,3),
+    ('nowaisiry','CRAWL_PRESENCE_ONLY',168,3),
+    ('october','CRAWL_PRESENCE_ONLY',168,3),
+    ('raghdan','CRAWL_PRESENCE_ONLY',168,3),
+    ('ramzalqasim','CRAWL_PRESENCE_ONLY',168,3),
+    ('sadin','CRAWL_PRESENCE_ONLY',168,3),
+    ('sanadak','CRAWL_PRESENCE_ONLY',168,3),
+    ('satel','CRAWL_PRESENCE_ONLY',168,3),
+    ('souq24','CRAWL_PRESENCE_ONLY',168,3),
+    ('wasalt','DIRECT_REVISIT',96,3)
 on conflict (platform) do update
   set strategy = excluded.strategy, sla_hours = excluded.sla_hours,
       grace = excluded.grace, updated_at = now();
@@ -98,7 +93,7 @@ on conflict (platform) do update
 -- A platform that leaves the Python registry must leave this table too, or the dashboard keeps
 -- reporting on inventory nobody verifies any more.
 delete from public.ops_liveness_registry
- where platform not in ('abeea','abralosol','aldarim','alhoshan','alkhaas','aouj','aqar','aqaratikom','aqarcity','aqargate','aqarmonthly','arkaan','dealapp','eaqartabuk','eastabha','erapulse','fursaghyr','gathern','hajer','jazwtn','jurash','mizlaj','mustqr','nowaisiry','october','raghdan','ramzalqasim','rawasidark','sadin','sanadak','satel','souq24','therc','wasalt');
+ where platform not in ('abeea', 'aldarim', 'alhoshan', 'alkhaas', 'aqar', 'aqaratikom', 'aqarcity', 'aqargate', 'aqarmonthly', 'dealapp', 'eaqartabuk', 'eastabha', 'erapulse', 'fursaghyr', 'gathern', 'hajer', 'jazwtn', 'jurash', 'mizlaj', 'mustqr', 'nowaisiry', 'october', 'raghdan', 'ramzalqasim', 'sadin', 'sanadak', 'satel', 'souq24', 'wasalt');
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. THE HOURLY CENSUS

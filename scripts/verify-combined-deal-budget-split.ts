@@ -50,7 +50,10 @@ const lifted = await liftSymbols(
     { header: 'function rentAnnualValue(' },
     { header: 'function priceFilter(' },
   ],
-  ['priceFilter'],
+  // withinValue/rentAnnualValue are exported too so §5's mutation can rebuild the PRE-FIX predicate
+  // out of the REAL arithmetic rather than a retyped copy of it — a mutant made of a copy proves
+  // nothing about the shipped code it claims to mutate.
+  ['priceFilter', 'withinValue', 'rentAnnualValue'],
   [
     'type SearchQuery = any; type Listing = any;',
     'const priceBandRange = (_b: string) => null;',
@@ -58,6 +61,8 @@ const lifted = await liftSymbols(
   ].join('\n'),
 );
 const priceFilter = lifted.priceFilter as (q: unknown) => ((l: unknown) => boolean) | null;
+const withinValue = lifted.withinValue as (price: string, min: number, max: number) => boolean;
+const rentAnnualValue = lifted.rentAnnualValue as (l: { price: string; rentPeriod: string | null }) => number;
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -162,14 +167,14 @@ eq('Buy min alone (≥500k) drops only the cheap BUY row',
 console.log('\n── single-deal semantics unchanged ──');
 eq('Buy-only: one pair, read as the Buy budget against the displayed total',
   kept({ dealCombined: false, deal: 'Buy', priceMin: '500000', priceMax: '2000000' }), [9001]);
-eq('Rent-only: the SAME pair is the Rent budget, read in the DISPLAYED unit (no ×12 here)',
+eq('Rent-only: the SAME pair is the Rent budget, on the ANNUAL basis the RPC compares',
   kept({ dealCombined: false, deal: 'Rent', rentPeriod: 'annual',
     priceMin: '20000', priceMax: '60000' }),
-  [9004, 9006]);
-// 9005 (4,000/mo) is correctly absent above: under Rent-only/annual the pair is the ANNUAL budget and
-// the card shows 4,000, so it reads as below the 20,000 floor. That is pre-existing behaviour and the
-// period pool filter, not this predicate, is what keeps a /mo row out of an annual search — pinned
-// only so the combined fix cannot quietly change it.
+  [9004, 9005, 9006]);
+// 9005 (4,000/mo = 48,000/yr) is now KEPT, and this line used to assert the opposite. See §5: the
+// claim that justified excluding it — "the period pool filter, not this predicate, is what keeps a
+// /mo row out of an annual search" — is false on two of the three periods, and the assertion was
+// pinning the defect as correct on the one it was written for.
 
 // ── 4. the fix mirrors the SERVER, and says which side of the row decides ─────────────────────────
 console.log('\n── provenance ──');
@@ -185,8 +190,103 @@ check('the predicate branches on the ROW\'s deal, exactly as the RPC branches on
 check('noResultsSuggestion relaxes the rent budget alongside the Buy one',
   /countWith\(\{ priceInput: '', priceMin: null, priceMax: null, priceMinRent: null, priceMaxRent: null \}\)/.test(src));
 
+// ── 5. THE SIBLING THE 2026-09-02 FIX LEFT BEHIND — one bound, two units ──────────────────────────
+//
+// Found 2026-09-06 by the regression hunter re-attacking the CLASS behind §1 rather than its
+// instance. The class in one sentence: *the client net compared the DISPLAYED figure against a bound
+// the server had already interpreted in a different unit.* §1 fixed that for dealCombined by
+// introducing rentAnnualValue() — and used it in that branch ONLY. Every sibling branch kept
+// `withinValue(l.price, …)`, which is the same mistake one deal over.
+//
+// It matters because the displayed unit is not constant across a rent result set:
+// listingPriceString() prints a source-MONTHLY rent at price_annual÷12 and everything else at
+// price_annual. The server never has that problem — location_search_candidates_ar compares
+// price_annual for every rent row, ×12-ing the BOUND (not the row) and only when
+// p_rent_period='شهري'. So the two layers agree exactly while a search holds one period and disagree
+// by 12× the moment it holds both. Two live ways in, both single-deal Rent:
+//
+//   • rentPeriod 'both'   → p_rent_period='كلاهما': monthly AND annual rows, one annual bound.
+//   • rentPeriod 'annual' → p_rent_period='سنوي' ALSO admits a rent_period_ar='شهري' row when
+//                           rent_now_pay_later is true — that row still renders at ÷12.
+//
+// Measured on production 2026-09-06, الرياض / إيجار / كلاهما with a 20,000 floor: the RPC matched
+// 28,626 rows — the number the headline quotes — and this net deleted 8,651 of them, every monthly
+// card in the set, because 2,500/mo reads as 2,500 against a yearly 20,000 floor. Silent, exactly as
+// in §1: the count comes from the RPC and hasClientOnlyNarrowing() does not declare this narrower.
+console.log('\n── one bound, one unit: a mixed-period rent search ──');
+const RENT_BOTH = { dealCombined: false, deal: 'Rent', rentPeriod: 'both' };
+eq('«شهري+سنوي» 20k–60k keeps the monthly card whose ANNUAL rent is inside the budget',
+  kept({ ...RENT_BOTH, priceMin: '20000', priceMax: '60000' }), [9004, 9005, 9006]);
+// A floor with no ceiling — the exact shape measured on production. The Buy fixture rows survive it
+// because this predicate stays deal-agnostic in single-deal mode (§3): runSearch has already narrowed
+// the pool to Rent before it runs, so what is asserted here is the RENT half.
+eq('a floor alone (≥20k) does not delete every monthly card in a both-periods search',
+  kept({ ...RENT_BOTH, priceMin: '20000' }), [9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008]);
+// The ceiling direction must stay just as tight: reading a /mo figure as if it were annual would
+// ADMIT a row the server rejected, which is the same defect pointing the other way.
+eq('a ceiling alone (≤60k) still excludes 9,000/mo — 108,000/yr is over the budget',
+  kept({ ...RENT_BOTH, priceMax: '60000' }), [9004, 9005, 9006]);
+
+// MONTHLY: the bound is the monthly one and the RPC ×12s it, so ×12-ing both sides is a no-op and
+// this path must be bit-identical to before. Asserted over the rows a monthly search can actually
+// contain (the RPC's period predicate never hands it an annual row).
+console.log('\n── a monthly search is unchanged: ×12 on both sides cancels ──');
+const monthlyKept = new Set(kept({ dealCombined: false, deal: 'Rent', rentPeriod: 'monthly',
+  priceMin: '2000', priceMax: '6000' }));
+check('4,000/mo is inside a 2,000–6,000 monthly budget', monthlyKept.has(9005));
+check('9,000/mo is outside it', !monthlyKept.has(9008));
+check('an unreadable price is still not provable in-budget', !monthlyKept.has(9009));
+
+// ── MUTATION PROOF ────────────────────────────────────────────────────────────────────────────────
+// EXECUTED, not grepped. The mutant is the pre-2026-09-06 predicate rebuilt from the REAL lifted
+// withinValue — the one line this repair replaced — and it is run over the same fixture. A barrier
+// for this class has to execute: every one of the 2026-09-04 defects had a source-TEXT tripwire over
+// the exact line, and two of them pinned the defective line as correct. So did §3 of this file.
+console.log('\n── mutation ──');
+const PRE_FIX = (min: number, max: number) => (l: { price: string }) => withinValue(l.price, min, max);
+const survivesMutant = (over: Record<string, unknown>, min: number, max: number, id: number) => {
+  const shipped = priceFilter({ ...BASE, ...over });
+  const row = ROWS.find((l) => l.id === id)!;
+  return { shipped: shipped ? shipped(row) : true, mutant: PRE_FIX(min, max)(row) };
+};
+const bothM = survivesMutant({ ...RENT_BOTH, priceMin: '20000', priceMax: '60000' }, 20000, 60000, 9005);
+check('(mutation) the displayed-unit comparison DELETES the 4,000/mo card the RPC counted',
+  bothM.mutant === false && bothM.shipped === true,
+  `MUTANT SURVIVED — mutant kept=${bothM.mutant}, shipped kept=${bothM.shipped}; if both agree, this file cannot see the defect it was extended for`);
+const annualM = survivesMutant({ dealCombined: false, deal: 'Rent', rentPeriod: 'annual',
+  priceMin: '20000', priceMax: '60000' }, 20000, 60000, 9005);
+check('(mutation) …and does the same on the annual path, where rent-now-pay-later admits /mo rows',
+  annualM.mutant === false && annualM.shipped === true,
+  `MUTANT SURVIVED — mutant kept=${annualM.mutant}, shipped kept=${annualM.shipped}`);
+// The repair must be SURGICAL: on a monthly search and on Buy, mutant and shipped must agree, or the
+// fix has quietly changed a path it had no business touching.
+for (const [what, over, min, max, id] of [
+  ['a monthly search, in-budget row', { dealCombined: false, deal: 'Rent', rentPeriod: 'monthly', priceMin: '2000', priceMax: '6000' }, 2000, 6000, 9005],
+  ['a monthly search, over-budget row', { dealCombined: false, deal: 'Rent', rentPeriod: 'monthly', priceMin: '2000', priceMax: '6000' }, 2000, 6000, 9008],
+  ['Buy-only, in-budget row', { dealCombined: false, deal: 'Buy', priceMin: '500000', priceMax: '2000000' }, 500000, 2000000, 9001],
+  ['Buy-only, below the floor', { dealCombined: false, deal: 'Buy', priceMin: '500000', priceMax: '2000000' }, 500000, 2000000, 9002],
+] as const) {
+  const r = survivesMutant(over as Record<string, unknown>, min as number, max as number, id as number);
+  check(`(mutation) the repair is inert on ${what} — mutant and shipped agree`, r.mutant === r.shipped,
+    `the fix changed a path it must not touch: mutant=${r.mutant}, shipped=${r.shipped}`);
+}
+// rentAnnualValue is the client's reconstruction of price_annual — the whole repair rests on it, so
+// pin it directly rather than only through the predicate.
+check('rentAnnualValue reads a /mo card back to its annual basis', rentAnnualValue({ price: 'SAR 4,000/mo', rentPeriod: 'monthly' }) === 48000);
+check('…and leaves an annual card alone', rentAnnualValue({ price: 'SAR 55,000/yr', rentPeriod: 'annual' }) === 55000);
+check('…and never guesses a period the source did not publish',
+  rentAnnualValue({ price: 'SAR 30,000', rentPeriod: null }) === 30000);
+
+// ── 6. the shipped branch mirrors the SERVER's own annualisation ──────────────────────────────────
+check('the single-deal range branch compares a rent row on its ANNUAL basis',
+  /const rentK = q\.rentPeriod === 'monthly' \? 12 : 1;/.test(src)
+  && /annual >= min \* rentK && annual <= max \* rentK/.test(src),
+  'the client must ×12 the BOUND exactly where p_rent_period=\'شهري\' makes the RPC ×12 it');
+check('bothDeals leaves a rent row unbounded, as the RPC does when no rent pair is sent',
+  /if \(q\.bothDeals\) return true;/.test(src));
+
 if (failed) {
   console.error(`\n✗ ${failed} check(s) FAILED — the combined Buy+Rent budgets are not split by deal`);
   process.exit(1);
 }
-console.log('\nOK — each combined-mode budget binds only its own deal, and single-deal search is unchanged');
+console.log('\nOK — each budget binds only its own deal, on the unit the RPC compares, and a monthly search is unchanged');

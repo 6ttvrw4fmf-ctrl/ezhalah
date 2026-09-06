@@ -42,6 +42,12 @@ import { liftSymbols } from './lib/liftSymbols.ts';
 import { AF_EVIDENCE, afActive, type AfCanon } from '../src/lib/afEvidence.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+// ONE BUDGET FOR "WAIT FOR THE AGENT'S NEXT TURN" — the same constant, for the same reason, as
+// verify-af-live-truth.ts: every wait on an AF card is behind a paid LLM turn whose latency is
+// variable and has been measured near 40s on a slow afternoon. 60s is set by the worst turn actually
+// observed, not by a good day, and still fails in bounded time.
+const AGENT_TURN_MS = 60_000;
 const BASE = 'https://ezhalah-app.vercel.app';
 
 const CITY = process.env.AF_EV_CITY || 'الرياض';
@@ -184,12 +190,34 @@ async function main() {
   // Answer EVERY question the round offers, not just the first: each answered facet is one more
   // active question the card must account for, so answering widely is what makes the comparison
   // below bite on more than a single chip. R11 ends the round on its own; the loop just follows it.
+  // POLL FOR THE OPTIONS; NEVER READ THEM ONCE AFTER A FIXED SLEEP (2026-09-04). The card element
+  // mounts as soon as the round opens, but its options render only when the agent's turn resolves —
+  // a paid LLM round-trip whose latency is variable and has been measured at ~40s (see the same
+  // lesson recorded in verify-af-live-truth.ts's AGENT_TURN_MS comment). A single read after 2,500 ms
+  // therefore saw an empty option list on a perfectly healthy card, broke the loop at step 0, and the
+  // run reported «no AF predicate was committed — §12A could not be exercised» — a harness timeout
+  // dressed as an unprovable product rule (run 33855677911, desktop الرياض/شقة, while the mobile
+  // جدة/فيلا scope in the same run confirmed four questions on the same build).
+  //
+  // An empty list is only meaningful once the card has had the agent's full budget to fill it. This
+  // returns the instant options appear, so a fast round is not slowed down, and still terminates.
+  const optionsWhenRendered = async (budgetMs = AGENT_TURN_MS): Promise<string[]> => {
+    const until = Date.now() + budgetMs;
+    for (;;) {
+      const opts: string[] = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid') || ''));
+      if (opts.length) return opts;
+      if (!(await page.$('[data-testid="af-card"]'))) return [];   // the round ended — nothing left to answer
+      if (Date.now() >= until) return [];
+      await page.waitForTimeout(500);
+    }
+  };
+
   let answered = 0;
   for (let step = 0; step < 12; step++) {
-    const opts: string[] = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid') || ''));
+    const opts = await optionsWhenRendered();
     if (!opts.length) {
-      console.log(`      [diag] round ${step}: no af-option rendered (af-card ${await page.$('[data-testid="af-card"]') ? 'present' : 'gone'})`);
+      console.log(`      [diag] round ${step}: no af-option rendered within ${AGENT_TURN_MS}ms (af-card ${await page.$('[data-testid="af-card"]') ? 'present' : 'gone'})`);
       break;
     }
     await page.click(`[data-testid="${opts[0]}"]`).catch(() => {});

@@ -55,3 +55,17 @@ export function atLeast({ mounted, isWeb, width, min }: ViewportGate): boolean {
   if (!isWeb) return false;
   return width >= min;
 }
+
+// «من نحن» composition (owner 2026-09-03): at/above this width the portrait artwork box sits BESIDE
+// the intro column; below it the story stacks with the art box centered. Lives here — never inline
+// in a component — so SSR (width 0) and the client agree through useAtLeast().
+export const ABOUT_ART_BREAKPOINT = 640;
+
+// Share pill label (owner 2026-09-05, PR #1893): at/above this width the «مشاركة» label renders
+// beside the icon; below it the button drops back to the 46px icon-only circle (keeping its
+// accessible name). #1893 originally compared useWindowDimensions().width inline — the renamed
+// destructure (`shareBarWidth`) slipped past the fleet scan's `\bwidth` pattern, and the label's
+// Text node existed on every ≥380px client while the served HTML (width 0) had none: React #418 on
+// every deploy's post-deploy hydration gate from 2026-09-05 21:33Z onward. Routed through
+// useAtLeast() like every other width-gated flag; the scan now also catches renamed width reads.
+export const SHARE_LABEL_BREAKPOINT = 380;

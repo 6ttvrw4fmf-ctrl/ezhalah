@@ -102,8 +102,10 @@ for (const f of pyFiles) {
 // exception itself is unchanged across all seven shifts — still the one
 // `price = _extract_price(desc_raw)` call in the file, re-verified against the commit before
 // re-pinning. If this fails, confirm the line still holds the SAME call before re-pinning; do not
-// re-pin a different call site to make the check pass.
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:599']);
+// re-pin a different call site to make the check pass. 599 -> 629 on 2026-09-05 when the
+// image-capture fix added the pid-anchored gallery pass to _photos() (33 lines above the call);
+// re-verified: still the file's ONLY _extract_price(desc_raw) call, eighth shift, same exception.
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:629']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);

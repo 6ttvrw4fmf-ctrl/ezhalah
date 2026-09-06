@@ -21,6 +21,16 @@ import { groupsMembers, groupsOf, pruneTypesToGroups } from '../data/propertyTyp
 // Filter home renders as its own group/type rows and already ride the allowlist below. Clearing them
 // with the AF would widen a specific property type back out to its group — the one direction the
 // owner's rule forbids outright.
+// The RNPL amenity token and its alias, in ONE place. The certification gate (afCertify.isRnpl),
+// the intent clear/keep logic (afIntents), and the card-evidence registry (afEvidence) all consume
+// this — so a search narrowed by EITHER spelling filters, certifies, clears AND renders its «يقبل
+// التقسيط» chip identically. Before this was shared, the gate accepted 'rent_now_pay_later' while the
+// evidence registry matched only 'rnpl', so a search narrowed by the alias filtered correctly yet
+// showed NO card evidence for it — an R12A.1 hole (a committed AF predicate invisible on the card).
+// verify-af-card-evidence.ts pins registry ⇔ gate over this set. Typed readonly string[] so callers'
+// `.includes(someString)` type-checks.
+export const RNPL_TOKENS: readonly string[] = ['rnpl', 'rent_now_pay_later'];
+
 export const AF_PREDICATE_FIELDS = [
   'ageMin', 'ageMax', 'isNewConstruction', 'amenities', 'bathMin',
   'ratingMin', 'reviewsMin', 'unitSubtypes', 'furnishedPref', 'streetWidthMin', 'directions',

@@ -22,6 +22,7 @@
 // is NEVER guessed — it is rejected and the caller asks. UNKNOWN stays UNKNOWN; missing data never
 // becomes No/false/0.
 import type { SearchQuery } from '@/data/search';
+import { RNPL_TOKENS } from './searchDefaults.ts';
 import { cohortAllows } from './afCohorts.ts';
 
 export type AfIntentId =
@@ -163,8 +164,8 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
     apply: (q, key) => ({ ...q, amenities: [...new Set([...(q.amenities ?? []), key])] }),
     // RNPL lives in q.amenities but owns its own gate, so it clears ONLY its own token — the generic
     // amenity sweep must not take it, and it must not take theirs.
-    clear: (q) => (q.amenities?.some((t) => t === 'rnpl' || t === 'rent_now_pay_later')
-      ? { ...q, amenities: q.amenities.filter((t) => t !== 'rnpl' && t !== 'rent_now_pay_later') } : q),
+    clear: (q) => (q.amenities?.some((t) => RNPL_TOKENS.includes(t))
+      ? { ...q, amenities: q.amenities.filter((t) => !RNPL_TOKENS.includes(t)) } : q),
   },
   unit_subtype: {
     id: 'unit_subtype',
@@ -191,7 +192,7 @@ export const AF_INTENTS: Record<AfIntentId, AfIntent> = {
     // Per-token, and deliberately NOT "drop every token": rnpl carries its own certification, so the
     // generic sweep hands it to the rnpl entry above rather than deciding for it.
     clear: (q) => {
-      const keep = (q.amenities ?? []).filter((t) => t === 'rnpl' || t === 'rent_now_pay_later');
+      const keep = (q.amenities ?? []).filter((t) => RNPL_TOKENS.includes(t));
       return keep.length === (q.amenities?.length ?? 0) ? q : { ...q, amenities: keep.length ? keep : null };
     },
   },

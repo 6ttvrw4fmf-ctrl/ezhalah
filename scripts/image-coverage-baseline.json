@@ -1,0 +1,212 @@
+{
+  "_readme": [
+    "IMAGE-COVERAGE BASELINE — read by scripts/verify-image-coverage-ratchet.ts.",
+    "floor_pct: the barrier FAILS if a platform's live coverage drops below this.",
+    "A platform ABSENT from this file fails the barrier outright: onboarding a platform now",
+    "REQUIRES declaring its expected image coverage here (or imageless_at_source with a reason).",
+    "Raise floors when a fix lands; never lower one to clear a red — a drop is an incident.",
+    "today_pct/active_rows are informational, captured 2026-09-05."
+  ],
+  "platforms": {
+    "mustqr": {
+      "floor_pct": 27,
+      "today_pct": 30.7,
+      "active_rows": 1204
+    },
+    "souq24": {
+      "floor_pct": 28,
+      "today_pct": 31.8,
+      "active_rows": 44
+    },
+    "abralosol": {
+      "floor_pct": 40,
+      "today_pct": 43.2,
+      "active_rows": 2667
+    },
+    "hajer": {
+      "floor_pct": 57,
+      "today_pct": 60.5,
+      "active_rows": 119
+    },
+    "fursaghyr": {
+      "floor_pct": 63,
+      "today_pct": 66.7,
+      "active_rows": 18
+    },
+    "rawasidark": {
+      "floor_pct": 67,
+      "today_pct": 70.3,
+      "active_rows": 101
+    },
+    "alhoshan": {
+      "floor_pct": 68,
+      "today_pct": 71,
+      "active_rows": 31
+    },
+    "therc": {
+      "floor_pct": 74,
+      "today_pct": 77.3,
+      "active_rows": 397
+    },
+    "sadin": {
+      "floor_pct": 84,
+      "today_pct": 87.1,
+      "active_rows": 85
+    },
+    "eastabha": {
+      "floor_pct": 85,
+      "today_pct": 88.2,
+      "active_rows": 195
+    },
+    "raghdan": {
+      "floor_pct": 88,
+      "today_pct": 91.9,
+      "active_rows": 405
+    },
+    "dealapp": {
+      "floor_pct": 89,
+      "today_pct": 92.8,
+      "active_rows": 16049
+    },
+    "wasalt": {
+      "floor_pct": 90,
+      "today_pct": 93.3,
+      "active_rows": 51500
+    },
+    "awal": {
+      "floor_pct": 93,
+      "today_pct": 96.1,
+      "active_rows": 51
+    },
+    "eaqartabuk": {
+      "floor_pct": 93,
+      "today_pct": 96.2,
+      "active_rows": 554
+    },
+    "alkhaas": {
+      "floor_pct": 93,
+      "today_pct": 96.7,
+      "active_rows": 209
+    },
+    "erapulse": {
+      "floor_pct": 95,
+      "today_pct": 98.4,
+      "active_rows": 61
+    },
+    "aqargate": {
+      "floor_pct": 95,
+      "today_pct": 98.5,
+      "active_rows": 204
+    },
+    "aqarmonthly": {
+      "floor_pct": 96,
+      "today_pct": 99,
+      "active_rows": 1762
+    },
+    "aqarcity": {
+      "floor_pct": 96,
+      "today_pct": 99.6,
+      "active_rows": 1784
+    },
+    "aqar": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 90584
+    },
+    "gathern": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 29249
+    },
+    "muktamel": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 3924
+    },
+    "arkaan": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 1265
+    },
+    "sanadak": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 1087
+    },
+    "aldarim": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 175
+    },
+    "abeea": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 163
+    },
+    "ramzalqasim": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 154
+    },
+    "aqaratikom": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 136
+    },
+    "jazwtn": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 108
+    },
+    "satel": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 94
+    },
+    "aouj": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 70
+    },
+    "mizlaj": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 27
+    },
+    "nowaisiry": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 20
+    },
+    "october": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 12
+    },
+    "jurash": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 11
+    },
+    "alta": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 7
+    },
+    "shmoualshmal": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 6
+    },
+    "remal": {
+      "floor_pct": 89,
+      "today_pct": 91.7,
+      "active_rows": 84
+    },
+    "amaall": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 36
+    }
+  }
+}

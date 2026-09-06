@@ -87,6 +87,10 @@ export const FLOORS = {
   zeroResultJourneys: 1,
   cardClickBackJourneys: 1,
   showMoreJourneys: 1,
+  // owner PERMANENT, 2026-09-04: AF-scoped pagination — «عرض المزيد» under an active AF predicate
+  // must preserve the exact eligible set and the committed predicate, same floor discipline as every
+  // other daily-required journey.
+  showMoreAfJourneys: 1,
 };
 
 // ── THE PERMANENT WATCHES — one per defect fixed on 2026-08-23. These are not generic checks; each
@@ -310,11 +314,130 @@ const ledgerRecord = async (dimension, key, result, notes) => {
 // ── findings ─────────────────────────────────────────────────────────────────────────────────────
 const findings = [];
 const journeys = [];
-const defect = (journey, layerPair, detail) => {
+
+// `UI→RENDERED` is RESERVED for judgeAdvertisedVsLanded() below, and defect() enforces that with a
+// module-private token no caller outside this file can forge. See the block after it for why: every
+// comparison wearing this layer pair reads the index TWICE, seconds to a minute apart, and is unsound
+// without an index bracket. A future journey that hand-rolls the comparison crashes the sweep loudly
+// instead of quietly reporting an index rebuild as a product defect.
+const UI_RENDERED = 'UI→RENDERED';
+const JUDGED = Symbol('bracketed by onOneIndex');
+const defect = (journey, layerPair, detail, judged) => {
+  if (layerPair === UI_RENDERED && judged !== JUDGED) {
+    throw new Error(`HARNESS: «${UI_RENDERED}» is reserved for judgeAdvertisedVsLanded() — an `
+      + `advertised-vs-landed comparison must be bracketed by onOneIndex() before it may accuse `
+      + `production (see e2e/live-sweep/sweep.mjs, incident #47). Offending call: [${journey}] ${detail}`);
+  }
   findings.push({ journey, layerPair, detail });
   console.error(`  ✗ DEFECT [${journey}] ${layerPair}: ${detail}`);
 };
 const note = (msg) => console.error(`    ${msg}`);
+
+// ── A COUNT COMPARISON MUST DESCRIBE ONE STATE OF THE INDEX ──────────────────────────────────────
+// WHY (incident #47, 2026-09-05). The Trending city chip for «الرياض» advertised 35,900 and the
+// click-through search landed on 35,907 — reproduced twice, at 08:18 UTC. Neither number was wrong.
+// The chip and the landed headline are SEPARATE reads of `search_listings_ar`, and that table is
+// rebuilt underneath them: `sync-search-listings-ar` (pg_cron jobid 28) at :14 past every hour and
+// the location MV refresh (jobid 17) at :20, against a journey whose chip→landed window is 20-50 s.
+// Adjudicated at the RPC level 8/8 across الرياض/جدة/الدمام/مكة المكرمة × بيع/إيجار with the index
+// bracketed either side: chip == click EXACTLY on every one (ops_incident #47 root_cause). Re-checked
+// independently while writing this, inside ONE transaction snapshot — the strictest bracket there is:
+// top_cities_by_deal_ar vs location_search_candidates_ar agreed exactly on الرياض/بيع (36,369) and
+// جدة/إيجار (13,212) over an index of 202,729 production-ready rows.
+//
+// So the COMPARISON was unsound, not the product. This is the same rule the product itself obeys
+// under R2.5.4/R13.11 — our own inability to learn something is never a statement about the data —
+// and the same mechanism `settleOnOneIndex()` in scripts/lib/afSurfaceJudge.ts already applies to the
+// offline differential. It is NOT a tolerance and NOT retry-until-green: the counts are a
+// deterministic function of the index, so a real defect reproduces on every stable read and is still
+// reported the FIRST time it survives one. An UNDECIDED is counted, named and printed — never folded
+// into a pass (run.mjs prints it and drops PRODUCTION VERIFIED to NO).
+export const UNREADABLE_STAMP = '?@?@?';
+
+/**
+ * A cheap exact fingerprint of the SEARCHABLE index, taken in the same frame both surfaces count in
+ * (`production_ready`): how many rows it holds, its newest arrival, and its newest source write.
+ *
+ * ANY half being unreadable yields UNREADABLE_STAMP, which onOneIndex() treats as "moved" — a stamp
+ * we could not read never certifies that a comparison saw one index. Two parallel requests; measured
+ * 1.9 s per stamp from this repo against production, so ~4 s added to a journey that runs 30-70 s,
+ * and it returned a READABLE stamp whose row count matched the database exactly (202,729) — worth
+ * checking again if it ever starts reading UNREADABLE, because that would abstain from every
+ * comparison rather than make a wrong one.
+ *
+ * KNOWN CEILING, stated rather than hidden: a rebuild that leaves the row count, the newest
+ * first_seen_at AND the newest last_updated all identical while MOVING a row between cities is not
+ * detected. That is strictly better than today's no-bracket-at-all, and the residual is far smaller
+ * than the window it closes — jobid 28 is a full re-sync, which moves the count.
+ */
+async function indexStamp() {
+  const head = async (col, withCount) => {
+    try {
+      const r = await fetch(`${SUPA}/rest/v1/search_listings_ar?select=${col}&production_ready=is.true`
+        + `&order=${col}.desc.nullslast&limit=1`,
+        { headers: withCount ? { ...H, Prefer: 'count=exact' } : H, signal: AbortSignal.timeout(30000) });
+      const rows = await r.json();
+      const n = (r.headers.get('content-range') || '').split('/')[1] || '?';
+      return [n, Array.isArray(rows) && rows.length && rows[0][col] != null ? String(rows[0][col]) : '?'];
+    } catch { return ['?', '?']; }
+  };
+  const [[count, arrived], [, written]] = await Promise.all([head('first_seen_at', true), head('last_updated', false)]);
+  return count === '?' || arrived === '?' || written === '?' ? UNREADABLE_STAMP : `${count}@${arrived}@${written}`;
+}
+
+/**
+ * Run `take` bracketed by index fingerprints. `stable` is true ONLY when the two stamps agree AND
+ * were readable — fails CLOSED in both directions that matter, exactly as settleOnOneIndex() does.
+ *
+ * Unlike settleOnOneIndex() this still hands back `result` when the index moved, because a browser
+ * journey's other five layers (INTENT→UI, UI→REQUEST, RPC→DB, …) have nothing to do with the index
+ * bracket and must still run. What consumes `stable` is judgeAdvertisedVsLanded(), and defect()
+ * refuses the `UI→RENDERED` layer pair to anything else — so "caller remembered to check" is not
+ * the safety mechanism here.
+ */
+export async function onOneIndex(take, stamp = indexStamp) {
+  const before = await stamp();
+  const result = await take();
+  const after = await stamp();
+  return { stable: before === after && before !== UNREADABLE_STAMP, stamp: `${before} → ${after}`, result };
+}
+
+const undecideds = [];
+/** A comparison we could not make. Loud, counted, and never a pass. */
+const undecide = (journey, detail) => {
+  undecideds.push({ journey, detail });
+  console.error(`  ~ UNDECIDED [${journey}] ${detail}`);
+};
+
+/**
+ * «A surface advertised N, the user landed on M» — the ONLY place that may emit `UI→RENDERED`.
+ *
+ *   equal, or either side unknown  → nothing to report
+ *   different on a PROVEN-STABLE index → DEFECT, exactly as before (this is the direction that must
+ *                                        never weaken: a real mismatch still accuses production)
+ *   different, index moved / unreadable / no bracket at all → UNDECIDED, never a verdict
+ */
+export function judgeAdvertisedVsLanded(journey, what, advertised, landed, settled) {
+  if (advertised == null || landed == null) return 'unknown';
+  if (advertised === landed) return 'agree';
+  if (!settled || !settled.stable) {
+    undecide(journey, `${what} advertised ${advertised}, landed ${landed} — the two reads `
+      + `${settled ? `straddle an index rebuild (${settled.stamp})` : 'were taken with NO index bracket (harness)'}`
+      + `, so the pair may describe two different databases: no verdict`);
+    return 'undecided';
+  }
+  defect(journey, UI_RENDERED, `${what} advertised ${advertised}, landed ${landed}`, JUDGED);
+  return 'defect';
+}
+
+/**
+ * «PRODUCTION VERIFIED» is a claim about what this run PROVED, not about what it failed to disprove.
+ * A comparison it could not make is missing coverage — the same reading
+ * `verify-af-full-surface-differential.ts` gives an unsettled differential ("this run did not certify
+ * the surface"). Lives here, exported and executable, so the barrier tests the real decision instead
+ * of a copy of it, and so no run can quietly print YES over an undecided comparison.
+ */
+export const productionVerified = (foundDefects, couldNotDecide) => foundDefects.length === 0 && couldNotDecide.length === 0;
 
 // ── WATCH OBSERVATION — a watch is green only with POSITIVE evidence it ran (2026-08-31) ─────────
 // The ledger used to derive a watch's result as `findings.some(...) ? 'fail' : 'pass'`, i.e. it read
@@ -903,5 +1026,5 @@ async function withPage(mobile, fn) {
 }
 
 export { BASE, dbCount, rpcTotal, assertChain, dbFilterFromRequest, cityCatalog, cityLookupKey, withPage, setDeal, setPeriod, pickCity, runSearch,
-         visibleState, ledgerPlan, ledgerRecord, findings, journeys, defect, note, num, lastCount, sleep,
+         visibleState, ledgerPlan, ledgerRecord, findings, journeys, undecideds, defect, note, num, lastCount, sleep,
          observeWatch, watchStatus, unobservedWatches, WATCH_OFFLINE_COVER };

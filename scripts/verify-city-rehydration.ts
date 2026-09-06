@@ -28,6 +28,40 @@ const check = (label: string, ok: boolean) => {
 
 const home = readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
 
+// ── WHY THIS FILE READS CONDITIONS, NOT SUBSTRINGS (repaired 2026-09-04 by routine #10) ──────────
+//
+// Every check here was `home.includes('<a fragment of a condition>')`. A substring survives its own
+// negation: the never-guess rule lives in `if (match.length === 1)`, and widening that line to
+// `if (match.length === 1 || match.length > 1)` DELETES the rule — the app would then rehydrate a
+// guessed city from an ambiguous pool, which is the defect this guard exists for — while
+// `home.includes('match.length === 1')` stays true, because the original text is still in there.
+// Watched: that exact mutant was applied to the real src/app/index.tsx and all four greps stayed
+// green. `.includes()` cannot distinguish "the rule is intact" from "the rule is intact AND
+// something was bolted onto it", and every boolean defect in this class is an OR bolted on.
+//
+// So the vulnerable ones now read the WHOLE condition and compare it, instead of hunting for a
+// fragment inside it. This is still a source check — the rehydration logic lives inside a React
+// effect in a 200KB screen component and cannot be lifted — but an exact condition is falsifiable in
+// a way a substring is not.
+
+/** The full parenthesised condition of the `if` whose text contains `needle`, or null. */
+export function conditionOf(src: string, needle: string): string | null {
+  const at = src.indexOf(needle);
+  if (at < 0) return null;
+  const open = src.lastIndexOf('if (', at);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open + 3; i < src.length; i++) {
+    if (src[i] === '(') depth++;
+    else if (src[i] === ')' && --depth === 0) return src.slice(open + 4, i).trim();
+  }
+  return null;
+}
+
+/** True when `expr` is EXACTLY the guard, with nothing disjoined onto it. */
+export const isExactly = (expr: string | null, want: string) =>
+  expr !== null && expr.replace(/\s+/g, ' ').trim() === want;
+
 // ── 1. rehydration exists, in the right effect, correctly gated ──
 check('ensureCityFieldIndex .then receives the pool (rehydration source)',
   home.includes('ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then((pool)'));
@@ -41,19 +75,61 @@ check('with a surviving resolution, candidate must round-trip resolveCitySelecti
   home.includes('r.city === lm!.city && r.region === lm!.region'));
 check('without it (URL round-trip drops locationMatch), only an EXACT unique catalog-label match restores',
   home.includes('pool.filter((o) => o.cityAr === query.location)') && home.includes('(!lm && !!query.location)'));
-check('ambiguous (0 or 2+) candidates rehydrate nothing',
-  home.includes('match.length === 1'));
+// THE NEVER-GUESS RULE. Read as a whole condition: `|| match.length > 1` bolted on would keep a
+// substring check green while inverting the rule.
+const guard = conditionOf(home, 'match.length === 1');
+check('ambiguous (0 or 2+) candidates rehydrate nothing — and the guard is EXACTLY that, ' +
+  `with nothing disjoined onto it (found: ${JSON.stringify(guard)})`,
+  isExactly(guard, 'match.length === 1'));
 
 // ── 3. a live pick is never clobbered ──
 check('setCitySelected uses functional prev ?? candidate update',
   home.includes('setCitySelected((prev) => prev ?? match[0])'));
 
 // ── invariants that must NOT regress while fixing this ──
-check('onSearch still blocks when citySelected is null (validation itself unchanged)',
-  home.includes('if (!citySelected) {') && home.includes('setLocMsg(CITY_REQUIRED_MSG)'));
+// The validation gate, read the same way: `if (!citySelected || __DEV__)` would keep the substring.
+const gate = conditionOf(home, '!citySelected) {');
+check('onSearch still blocks when citySelected is null, on that condition ALONE ' +
+  `(found: ${JSON.stringify(gate)})`,
+  isExactly(gate, '!citySelected') && home.includes('setLocMsg(CITY_REQUIRED_MSG)'));
 check('onChangeText still clears citySelected on every keystroke (stale pick never reused)',
   /onChangeText=\{\(v\) => \{[\s\S]{0,400}?setCitySelected\(null\)/.test(home));
 
+// ── mutation proofs: the mutants are applied to the REAL src/app/index.tsx, then re-read ─────────
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${label}`); return; }
+  mutFail++;
+  console.error(`FAIL  (mutation) BLIND to ${label}`);
+};
+
+// THE MUTANT THAT PROVED THIS GUARD BLIND. Every `home.includes(...)` in this file survived it.
+const guessing = home.replace('match.length === 1', 'match.length === 1 || match.length > 1');
+mustCatch('the never-guess rule widened to rehydrate an AMBIGUOUS pool (2+ candidates) — the exact ' +
+  'mutant all four original substring checks stayed green on',
+  guessing !== home
+  && home.includes('match.length === 1') && guessing.includes('match.length === 1') // the substring survives…
+  && !isExactly(conditionOf(guessing, 'match.length === 1'), 'match.length === 1')); // …the condition does not
+
+const laxGate = home.replace('if (!citySelected) {', 'if (!citySelected && false) {');
+mustCatch('the city-required validation neutralised by an extra conjunct',
+  laxGate !== home && !isExactly(conditionOf(laxGate, '!citySelected) {'), '!citySelected'));
+
+mustCatch('the never-guess guard being deleted outright',
+  conditionOf(home.replace('if (match.length === 1) {', 'if (true) {'), 'match.length === 1') === null);
+
+mustCatch('the shipped code as it actually stands is NOT flagged (neither check is vacuously red)',
+  isExactly(conditionOf(home, 'match.length === 1'), 'match.length === 1')
+  && isExactly(conditionOf(home, '!citySelected) {'), '!citySelected'));
+
+mustCatch('a condition the reader cannot locate reads as MISSING, never as healthy',
+  conditionOf(home, 'a needle that is not in this file at all') === null
+  && !isExactly(null, 'anything'));
+
+if (mutFail) {
+  console.error(`\n${mutFail} guard(s) are BLIND to their own defect`);
+  process.exit(1);
+}
 if (failed) {
   console.error(`\n${failed} check(s) FAILED`);
   process.exit(1);

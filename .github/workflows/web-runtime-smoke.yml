@@ -41,6 +41,16 @@ on:
       - 'package-lock.json'
       - 'scripts/verify-web-runtime-smoke.mjs'
   workflow_dispatch:
+  # SCHEDULED 2026-09-04. This is the richest browser suite in the repo — journeys A-J0 over both
+  # viewports, ~52 product assertions — and it had no schedule at all: it ran only on a PR or push
+  # that touched src/**. So a regression that arrives any OTHER way (a dependency bump, an Expo or
+  # react-native-web change, a Supabase RPC contract shift, a data shape the journeys did not expect)
+  # was invisible to it until someone happened to edit src/. The 74-agent coverage audit
+  # (wf_01c03538-2c0) called this out as free coverage, and it is: the runner already exists, the
+  # build already works, nothing new had to be written. 04:10 UTC sits clear of guardian-journeys
+  # (05:40) and ui-parity (05:10) so the browser jobs do not contend for the runner.
+  schedule:
+    - cron: '10 4 * * *'
 
 concurrency:
   group: web-runtime-smoke-${{ github.ref }}
@@ -90,3 +100,17 @@ jobs:
 
       - name: Drive the built app in a real browser
         run: node scripts/verify-web-runtime-smoke.mjs
+
+      # Now that this runs unattended on a schedule, a red run has to reach a human. One open P1 per
+      # workflow file, self-healing on the next green run. `always()` so a failing run still gets here.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind journey_live_check_failed
+          --workflow web-runtime-smoke.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

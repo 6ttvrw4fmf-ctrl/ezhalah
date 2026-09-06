@@ -35,7 +35,16 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 // Absent today. Present the moment the owner adds it — see THE HONEST BOUNDARY above.
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
-const SUPPORT_INBOX = "support@ezhalah.com";
+// WHERE THE MAIL GOES. Configurable, because the address that RECEIVES support mail and the address
+// printed on the Support screen are two different decisions. Until ezhalah.com is verified with a
+// mail provider there is no mailbox at support@ezhalah.com to deliver to, so the owner points this
+// at an inbox they already read; the day the real mailbox exists, the secret changes and no code
+// does. The DEFAULT is deliberately the real support address, never an empty string: a missing or
+// misspelled secret must fall back to the address the product promises, not silently send a user's
+// support request to nobody.
+const SUPPORT_INBOX = Deno.env.get("SUPPORT_INBOX") || "support@ezhalah.com";
+// The FROM address must belong to a domain the provider has verified. Before that verification,
+// Resend only accepts its own onboarding sender — which is why this is a secret too, not a constant.
 const MAIL_FROM = Deno.env.get("SUPPORT_MAIL_FROM") ?? "Ezhalah <support@ezhalah.com>";
 
 const CORS = {

@@ -174,13 +174,27 @@ check('WIRING the card is mounted exactly once, AFTER the Stack (its phone <inpu
 check('WIRING the card drags via the shared machinery with its own position memory',
   signInCard.includes('attachCardDrag(node, grip, {') && signInCard.includes('SIGNIN_CARD_POS_KEY')
   && signInCard.includes('signInCardDefaultPos(innerWidth, innerHeight)'));
-check('WIRING the modal drags via the SAME shared machinery (owner-loved, kept)',
-  authModal.includes('attachCardDrag(node, grip, {') && authModal.includes('AUTH_POPUP_POS_KEY'));
+// Owner 2026-09-03: the centered modal starts PERFECTLY CENTERED on every open — dragging only
+// changes its position after the user moves it, and only for that open. So: no posKey (the small
+// card keeps its own memory above).
+check('WIRING the modal drags via the SAME shared machinery (owner-loved, kept) with NO position memory',
+  authModal.includes('attachCardDrag(node, grip, {') && !/posKey:/.test(authModal)
+  && authModal.includes('clamp: clampOffsetOnScreen(node)'));
 check('WIRING card clamps through clampAuthPopupOffset (absolute mode)',
   signInCard.includes('clampAuthPopupOffset('));
 check('WIRING testIDs: signin-card / signin-card-drag-handle; the close X is the shared auth-popup-close',
   signInCard.includes("testid: 'signin-card'") && signInCard.includes("testid: 'signin-card-drag-handle'")
   && authModal.includes("testid: 'auth-popup-close'"));
+// Owner 2026-09-03: the CENTERED modal has no × on its main step (a press on the ground closes it);
+// the compact card keeps its × (its dismissal) and the preview-only inner steps keep the back chevron.
+check('the centered modal renders NO × on its main step; the compact card and inner steps keep theirs',
+  authModal.includes("{(cp || step !== 'main') && (") && authModal.includes('onPress={() => backRef.current()}'));
+check('NO email (or any) text input on the sign-in surfaces — Google and Apple only (owner 2026-09-03)',
+  !/<TextInput/.test(authModal) && !/TextInput/.test(authModal.slice(0, authModal.indexOf('export default')))
+  && authModal.includes("t('Continue with Google')") && authModal.includes("t('Continue with Apple')"));
+check('the agreement sentence links to the legal reader ONLY when real legal text exists (never a link to nothing)',
+  authModal.includes('const legalLive = hasLegalDocs();') && /legalLive \? \(/.test(authModal)
+  && authModal.includes("onPress={() => openModal('legal')}"));
 check('WIRING themed from birth: the card paints with var(--ez-*) token roles, no hardcoded surface hexes',
   signInCard.includes('colors.surface') && signInCard.includes('colors.fieldLine')
   && !/backgroundColor:\s*'#/.test(signInCard));
@@ -232,8 +246,8 @@ check('WIRING position memory is the ONLY persistence (sessionStorage key for po
 }
 
 // ── 8. MODAL PRESERVED — mobile responsive cap, desktop wide, on-demand only ─────────────────────
-check('modal keeps the mobile 400 cap and the desktop 470 width', authModal.includes('maxWidth: 400')
-  && authModal.includes('popWrapWide: { maxWidth: 470 }'));
+check('modal keeps the mobile 400 cap and the desktop 500 width (owner 2026-09-03)', authModal.includes('maxWidth: 400')
+  && authModal.includes('popWrapWide: { maxWidth: 500 }'));
 check('modal drag still gated by canDragAuthPopup', authModal.includes("canDragAuthPopup({ isWeb: Platform.OS === 'web', docked })"));
 
 // ═══ THE AUTH EPOCH (#1214) — retargeted to the card's in-memory flag ════════════════════════════

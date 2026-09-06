@@ -56,7 +56,7 @@ import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWes
 // See decide.ts's header for the full rationale. The model's own `kind` field is read ONLY to
 // decide whether to retry for wrong language; it is never trusted as the final answer again after
 // that — decideAgentTurn() (called from ./turnWiring.ts, below) is the one place that assigns kind.
-import { wantsGuidedInterview } from "./decide.ts";
+import { wantsGuidedInterview, hasUsableLocation, hasEnoughToSearch, established } from "./decide.ts";
 // The establishedState-construction + decideAgentTurn() call site, extracted so it is Node-importable
 // and unit-testable end-to-end (round 2 fix, "untested wiring / foolable regex") — see its own header.
 import { buildTurnDecision } from "./turnWiring.ts";
@@ -1362,8 +1362,25 @@ Deno.serve(async (req: Request) => {
           // (Madinah) contains «مدينة», «المنطقة الشرقية» (Eastern Province) contains «منطقة»; the
           // lookaround correctly excludes both since the preceding character there is a letter (from
           // «ال»), not a boundary.
-          const wantsCity = /(?<![\p{L}\p{N}])مدينة(?![\p{L}\p{N}])/u.test(text);
-          const wantsRegion = /(?<![\p{L}\p{N}])منطقة(?![\p{L}\p{N}])/u.test(text);
+          // A BARE ANSWER TO OUR OWN QUESTION (owner screenshot, 2026-09-05).
+          // The lookarounds below deliberately reject «ال»-fused forms so «المدينة المنورة» and
+          // «المنطقة الشرقية» are never read as scope words. That is right for a sentence and wrong
+          // for a ONE-WORD REPLY: asked «تقصد مدينة الرياض ولا منطقة الرياض كاملة؟» the user answered
+          // «المدينة» — neither branch fired, and the identical question came straight back. That is
+          // the loop the comment further down claimed was impossible; the claim was mine and it was
+          // wrong, because it only considered the «مدينة X» phrasing and not the bare one.
+          //
+          // Doubly constrained, so it cannot eat a real place: the WHOLE reply must be that single
+          // word (so «المدينة المنورة» — two words — can never match), AND we must actually have
+          // asked (alreadyAsked). Outside those two conditions a lone «المدينة» could genuinely mean
+          // Madinah, and this does not fire.
+          const bareCity = alreadyAsked && /^[\s\p{P}]*(?:ال)?مدين[ةه][\s\p{P}]*$/u.test(text);
+          const bareRegion = alreadyAsked && /^[\s\p{P}]*(?:ال)?منطق[ةه][\s\p{P}]*$/u.test(text);
+          // «مدنية» is «مدينة» with ي/ن transposed — the typo in the same screenshot
+          // («ابي شقة ... في مدنية الرياض»), which named the city explicitly and was asked anyway.
+          // Only the un-prefixed form: «المدنية» (the civil) is excluded by the lookbehind already.
+          const wantsCity = bareCity || /(?<![\p{L}\p{N}])(?:مدينة|مدنية)(?![\p{L}\p{N}])/u.test(text);
+          const wantsRegion = bareRegion || /(?<![\p{L}\p{N}])منطقة(?![\p{L}\p{N}])/u.test(text);
           // regionPin's contract (see its declaration above) is "pin a TWIN CITY to one region" — it
           // was never meant for "search the whole region" and resolveSearchScope() has no way to tell
           // the two apart (found live 2026-07-25: reusing it here silently narrowed a whole-region
@@ -1373,8 +1390,23 @@ Deno.serve(async (req: Request) => {
           // function); a bare city name resolves as an exact single city. Never touch regionPin here.
           if (wantsRegion && !wantsCity) location = `منطقة ${nm}`;
           else if (wantsCity && !wantsRegion) location = nm;
-          else if (!wantsCity && !wantsRegion && !alreadyAsked) {
-            ambiguityReply = `«${nm}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${nm} ولا منطقة ${nm} كاملة؟`;
+          else if (!wantsCity && !wantsRegion) {
+            // A TWIN NAME MEANS THE CITY (owner, 2026-09-06). «الرياض» is both a city and a region,
+            // and we used to ask which — on 8 of the 9 biggest destinations (الرياض، مكة المكرمة،
+            // تبوك، حائل، نجران، الباحة، الجوف، جازان; only جدة and الطائف went straight through),
+            // so nearly every major search paid an extra turn. Owner's ruling, verbatim: «they mean
+            // city».
+            //
+            // This REPLACES the question, it does not suppress it: the region is still reachable,
+            // just never by accident — «منطقة الرياض» is handled by the wantsRegion branch above and
+            // is unchanged. What is gone is the guess-or-ask fork; there is no guess left to make,
+            // because the product now defines what a bare twin name means.
+            //
+            // Retiring this question also removes the last way the region_or_city path could loop:
+            // there is no question here to re-ask. (The bare «المدينة»/«المنطقة» answer rule above
+            // stays — the OTHER ambiguity shapes, twin_city and the plain-region question, still
+            // ask, and a one-word reply to those must still be understood.)
+            location = nm;
           }
         } else if (ck === "twin_city") {
           const regions = (Array.isArray(cls?.regions) ? cls!.regions : []) as Array<Record<string, unknown>>;
@@ -1477,11 +1509,68 @@ Deno.serve(async (req: Request) => {
       }
 
       if (decision.kind === "message") {
+        // A NO-PLACE REFUSAL MUST ASK FOR THE CITY (owner, 2026-09-04). Same shape as ambiguityReply
+        // directly below: when the PLATFORM is the reason this turn is a clarification, the platform
+        // supplies the question — the model does not know it was refused and writes as if it were
+        // about to search. Verified live on 2026-09-05 with the ladder fix already deployed:
+        // «ابغى شقة للبيع في كل مدن المملكة» correctly issued ZERO searches, but the reply still read
+        // «أبشر، بدور لك على شقق للبيع في كل مدن المملكة» — a promise to search the Kingdom, followed
+        // by nothing, and no city ever requested. Refusing silently is its own kind of lying.
+        //
+        // Deliberately narrower than the general rule one line down ("the platform enforces THAT this
+        // turn is a clarification, never WHAT it asks about"): here the platform genuinely does know
+        // what is missing, exactly as it does for a loc_classify ambiguity.
+        // NO SEARCH INTENT AT ALL → SAY WHAT EZHALAH IS, ONCE (owner, 2026-09-06).
+        // «مرحبا», «وش هي إزهله؟», «كيف حالك؟» and «وش تقدر تسوي؟» all used to be answered with
+        // «في أي مدينة تبحث؟» — a city demand aimed at someone who never asked to search, and which
+        // never says what this app is. Measured against production 2026-09-06: all five off-topic
+        // probes returned exactly that.
+        //
+        // The owner's brief, verbatim: «your job is just to understand what the user want and give
+        // it to him» — so this is ONE line that orients and hands the turn straight back. It is not
+        // a conversation opener and there is no follow-up chat behind it.
+        //
+        // The test is deterministic and reuses the ladder's own predicate: nothing established at
+        // all (no type, no place, no budget, no beds, no AF) means the user has not started a
+        // search. The moment ANY of those is present — «ابغى شقة» — this yields to the city
+        // question below, which is the right answer for a real search that is only missing a place.
+        const noIntentReply = !ambiguityReply && !hasEnoughToSearch(wired.establishedState)
+          ? (locale === "en"
+              ? "I'm Ezhalah — I find real estate across Saudi Arabia from every platform. Tell me what you're looking for."
+              : "أنا إزهله — أدور لك عقارات في السعودية من كل المنصات. قلّي وش تدور عليه؟")
+          : null;
+        const noPlaceReply = !ambiguityReply && !noIntentReply && !hasUsableLocation(wired.establishedState)
+          ? (locale === "en" ? "Which city are you searching in?" : "في أي مدينة تبحث؟")
+          : null;
         // A genuine loc_classify ambiguity has a specific, pre-built question; otherwise fall back
         // to the model's own reply text/phrasing (owner-confirmed: the platform enforces THAT this
         // turn is a clarification, never WHAT it asks about).
-        const reply = ambiguityReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities));
-        return json({ kind: "message", reply, query: understoodState(), askCount: decision.askCount });
+        // A MISSING-TYPE REFUSAL MUST ASK FOR THE TYPE (owner, 2026-09-06). Same reasoning as the
+        // no-place refusal above: when the PLATFORM is why this turn is a clarification, the platform
+        // supplies the question — the model does not know it was refused and writes as if it were
+        // about to search. Ordered AFTER noPlaceReply so a turn missing both asks for the city first
+        // (a type without a place is still unsearchable).
+        const noTypeReply = !ambiguityReply && !noPlaceReply
+          && hasUsableLocation(wired.establishedState) && !established(wired.establishedState.type)
+          ? (locale === "en"
+              ? "What kind of property are you looking for? (apartment, villa, land, building, office, shop…)"
+              : "وش نوع العقار اللي تدور عليه؟ (شقة، فيلا، أرض، عمارة، مكتب، محل…)")
+          : null;
+        const reply = ambiguityReply ?? noIntentReply ?? noPlaceReply ?? noTypeReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities));
+        // THIS QUESTION IS NOT OPTIONAL (owner, 2026-09-05). The client keeps its own ask-ceiling —
+        // "asked twice already and we can see some intent, so stop pestering and just search"
+        // (src/app/agent.tsx). For an ordinary clarification that is right. For a LOCATION question
+        // it silently chose the user's search scope: it discarded this reply and searched whatever
+        // the parser had produced. Measured in production 2026-09-05 — the edge returned
+        // ««الرياض» اسم مدينة واسم منطقة… تقصد مدينة الرياض ولا منطقة الرياض كاملة؟» and the client
+        // never showed it, searching منطقة الرياض (10,932 rows across 20 cities) instead.
+        //
+        // So the DECISION AUTHORITY says so explicitly rather than the client re-deriving it: this
+        // flag is set only for the two location questions (an unresolved ambiguity, or no usable
+        // place at all), and the client's ceiling must not fire when it is true. Everything else is
+        // still subject to the ceiling exactly as before.
+        const locationQuestion = !!(ambiguityReply ?? noPlaceReply);
+        return json({ kind: "message", reply, locationQuestion, query: understoodState(), askCount: decision.askCount });
       }
 
       // decision.kind === "listings"

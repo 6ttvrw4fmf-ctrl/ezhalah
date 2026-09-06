@@ -27,3 +27,19 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/check_placeholder_locations.py
+
+      # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
+      # This job runs unattended: a red run notifies nobody, so it has to reach alert_event to reach
+      # a human. One open P1 per workflow file (dedup workflow_failed:location-placeholder-monitor.yml), and the next
+      # green run resolves it. `always()` so a failing run still gets here.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind data_live_check_failed
+          --workflow location-placeholder-monitor.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

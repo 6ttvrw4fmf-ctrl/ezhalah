@@ -34,7 +34,13 @@ check('region_or_city branch found in the source', regionOrCityBlock.length > 0)
 // Checks the actual CODE form (an assignment feeding .test(text)), not the explanatory comment above
 // it, which deliberately quotes the old pattern to document why the fix was needed.
 check('the old ASCII-\\b Arabic pattern is GONE as executable code (would never match Arabic — the original bug)', !/=\s*\/\\bمدينة\\b\/\.test/.test(regionOrCityBlock) && !/=\s*\/\\bمنطقة\\b\/\.test/.test(regionOrCityBlock));
-check('wantsCity uses the Unicode-aware boundary pattern', /\(\?<!\[\\p\{L\}\\p\{N\}\]\)مدينة\(\?!\[\\p\{L\}\\p\{N\}\]\)\/u/.test(regionOrCityBlock));
+// The city word gained an alternation on 2026-09-05 — «مدنية», the ي/ن transposition typo, which a
+// real user hit («...في مدنية الرياض» named the city and was asked anyway). What this check exists
+// to pin is the UNICODE-AWARE LOOKAROUNDS, not the exact literal inside them, so it now allows the
+// alternation while still requiring the lookarounds on both sides.
+check('wantsCity uses the Unicode-aware boundary pattern (alternation inside is fine)',
+  regionOrCityBlock.includes('(?<![\\p{L}\\p{N}])') && regionOrCityBlock.includes('(?![\\p{L}\\p{N}])')
+  && /\(\?<!\[\\p\{L\}\\p\{N\}\]\)[^\n]*مدينة[^\n]*\(\?!\[\\p\{L\}\\p\{N\}\]\)/.test(regionOrCityBlock));
 check('wantsRegion uses the Unicode-aware boundary pattern', /\(\?<!\[\\p\{L\}\\p\{N\}\]\)منطقة\(\?!\[\\p\{L\}\\p\{N\}\]\)\/u/.test(regionOrCityBlock));
 check('regionPin is NEVER assigned inside region_or_city anymore (its contract is twin_city-only; reusing it here was the second, coupled defect)', !/regionPin\s*=/.test(regionOrCityBlock));
 check('the wantsRegion branch sets `location` to the region form instead', /if \(wantsRegion && !wantsCity\) location = `منطقة \$\{nm\}`;/.test(regionOrCityBlock));

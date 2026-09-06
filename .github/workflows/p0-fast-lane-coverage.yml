@@ -1,0 +1,90 @@
+# EVERY P0-CAPABLE DETECTOR MUST BE ON THE FAST LANE — CHECKED CONTINUOUSLY, NOT JUST AT REVIEW.
+#
+# mon_run_p0_detectors()'s own body has always claimed this roster "is machine-checked against
+# reality by scripts/verify-p0-fast-lane-detection.ts". That script did not exist until 2026-09-05 —
+# it was a KNOWN_GAPS entry in verify-ops-remediation-scripts-exist.ts — and in its absence two
+# P0-capable detectors (mon_detect_alert_queue_unworked, mon_detect_stalled_incident) drifted onto
+# the slow twice-hourly sweep, where a P0 they raise is charged the whole sweep runtime (avg 241s,
+# max 731s over 24h) against a 300s delivery SLO. This workflow is that missing machine check.
+#
+# THE SCHEDULE IS THE LOAD-BEARING TRIGGER, not the PR one. This invariant breaks when somebody
+# APPLIES A MIGRATION that adds a P0-capable detector — which can happen with no pull request at all,
+# exactly like the migration drift guard it is modelled on. `pull_request` catches the case where the
+# roster is edited in the repo; `schedule` catches the far more common case where production moves on
+# its own.
+#
+# NOT IN THE REQUIRED `npm test`, deliberately, for the reason AGENTS.md gives for the drift guard:
+# that suite is a required status check on every PR, and a live production call there turns a
+# momentary outage into a red X on somebody's unrelated change. scripts/test-exclusions.txt records
+# this file as its home, and verify-test-registry-complete.ts fails if that row ever names nowhere.
+#
+# THE CHECK ITSELF NEEDS NO SECRETS, so it runs identically on a fork PR. The script reads the
+# committed anon key via scripts/lib/public-supabase.ts (it ships in every visitor's bundle; it is
+# not a credential) and the RPC is anon-executable by design. `pull_request`, never
+# `pull_request_target` — fork code runs with no secrets and a read-only token. The one step that
+# does need secrets is the alert bridge at the end, which runs under a bare `always()` like every
+# other bridged workflow here (see its own comment for why it is not conditioned on the event).
+#
+# RETRIED 3x INSIDE THE SCRIPT. A transient 5xx passes on attempt 2 or 3; a detector genuinely off
+# the lane is deterministic and fails all three. Retrying cannot mask what it re-measures every time.
+# An unreadable answer is a FAILURE there, never a pass — an empty result is what healthy looks like
+# for this check, so an outage must never be allowed to imitate it.
+name: P0 fast-lane coverage (live)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+      - 'scripts/verify-p0-fast-lane-detection.ts'
+      - '.github/workflows/p0-fast-lane-coverage.yml'
+  schedule:
+    - cron: '8,38 * * * *'   # off :00, off the :29/:59 sweep, and off the fast lane's own slots
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-fast-lane-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Every P0-capable detector is on the fast lane
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      # No `npm ci`: the script imports nothing outside node builtins and scripts/lib/public-supabase.ts.
+      - name: No P0-capable detector is stranded on the slow sweep
+        run: |
+          node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+            scripts/verify-p0-fast-lane-detection.ts
+
+      # An unattended workflow that fails silently notifies nobody (issue #1349), and a scheduled
+      # guard nobody hears from is the dark-detector shape again. seam_check_failed is this
+      # routine's kind, and 20260905110220 registered it in ops_alert_kind_external_resolver — so a
+      # green run here calls mon_resolve_key on the same dedup key and the alert self-heals.
+      #
+      # `always()` bare, exactly as ui-parity.yml and the other 21 bridged workflows do it. A first
+      # draft used `always() && github.event_name != 'pull_request'` to spare fork PRs the secrets
+      # this step needs — but verify-scheduled-checks-alert-on-failure.ts rejects that, and it is
+      # right to: it must be able to prove the bridge is reachable on a FAILING run, and a compound
+      # condition it cannot parse is indistinguishable from one that quietly never fires on red.
+      # Conforming to the one pattern is worth more than the fork nicety, which is theoretical here.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind seam_check_failed
+          --workflow p0-fast-lane-coverage.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

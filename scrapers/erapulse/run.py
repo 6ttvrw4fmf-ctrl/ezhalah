@@ -8,8 +8,11 @@ owned + FAL-licensed → passes the Saudi-only rule. No auth, no proxy, cloud-fr
 Data path (auth-free JSON, same-origin XHR the SPA itself makes):
   LIST  GET https://api.erapulse.sa/api/v1/properties?page=N&limit=50
         → {success, data:[property…], pagination:{total,page,limit,totalPages,hasNext,hasPrev}}.
-  The list item IS already the full record — the detail endpoint /properties/{id} adds only
-  features/statistics, nothing we store. So we page the list to hasNext=false and never fetch detail.
+  The list item is the full record EXCEPT images: the list truncates `images` to the single main_*
+  cover (verified 2026-09-05: 61/63 list items carried exactly 1 image, while
+  DETAIL GET /api/v1/properties/{id} returned the full gallery — 5 for REF-MSRYGJQV-RFQYH, cover
+  first). So we page the list to hasNext=false, then fetch detail per KEPT row for its gallery
+  (~63 rows × MIN_INTERVAL is trivial); a failed detail fetch keeps the list cover.
 
 Each property (English enums, already-normalized fields):
   id (cuid), refNumber ("REF-…"), slug, urlPath, title, description,
@@ -30,6 +33,8 @@ LOCATION: parsed out of the free-text `location` — "مدينة <X>" → city, 
 ⛔⛔ PDPL ABSOLUTE — the API EXPOSES advertiser PII we MUST NEVER persist:
   • metadata.contactInfo.{contactName, contactPhone, whatsappNumber, contactEmail} → NEVER read.
   • user.name ("زائر (Guest)") / userId / moderatedBy → NEVER stored.
+  • DETAIL payload exposes contactName/contactPhone/contactEmail/whatsappNumber at TOP level →
+    fetch_detail_images() reads ONLY `images` out of it, nothing else, ever.
   We also REDACT any 05x / +9665 / 9200 / 920 / wa.me / واتساب phone from title + description and
   TRUNCATE the description at any broker/contact marker. Registered company names are allowed.
 
@@ -288,6 +293,28 @@ def _photos(p: dict) -> list[str]:
     return out[:25]
 
 
+def fetch_detail_images(s: cc.Session, pid: Any) -> Optional[list]:
+    """The full gallery lives ONLY on the detail endpoint — the list truncates `images` to the
+    single main_* cover (verified live 2026-09-05: 61/63 list items had exactly 1 image; detail
+    for REF-MSRYGJQV-RFQYH returned 5, cover first, images[0] == the list's cover). Addressed by
+    the property's own cuid id, so binding is exact — no related-listings contamination.
+    ⛔ PDPL: the detail payload ALSO exposes contactName/contactPhone/contactEmail/whatsappNumber
+    at top level — read ONLY `images`, never anything else.
+    Returns None on any fetch/shape failure so the caller keeps the list cover (failure degrades
+    to FEWER images, never a wrong one)."""
+    if not pid:
+        return None
+    _throttle()
+    try:
+        r = s.get(f"{LIST_URL}/{pid}", timeout=30)
+        if r.status_code != 200:
+            return None
+        imgs = (r.json().get("data") or {}).get("images")
+        return imgs if isinstance(imgs, list) else None
+    except Exception:
+        return None
+
+
 # ── Mapping ────────────────────────────────────────────────────────────────────
 def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Optional[dict], str]:
     ref = p.get("refNumber") or p.get("id")
@@ -509,6 +536,13 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            # Full gallery from detail, for KEPT rows only — the list gave map_listing just the
+            # cover. Same _photos() (prefixing/BAD-guards/dedupe/order/25-cap); empty or failed
+            # detail keeps the list cover so a source-published photo is never lost, and a
+            # source with 0 images stays imageless — never substituted.
+            imgs = fetch_detail_images(s, p.get("id"))
+            if imgs:
+                row["photo_urls"] = _photos({"images": imgs}) or row["photo_urls"]
             (com if cat == "commercial" else res).append(row)
             seen += 1
             if args.limit and seen >= args.limit:

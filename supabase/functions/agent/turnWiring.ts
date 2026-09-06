@@ -132,22 +132,28 @@ export function buildTurnDecision(input: TurnWiringInput): TurnWiringResult {
     priorAskAbout: Array.isArray(prevQuery?.askAbout) ? prevQuery!.askAbout as string[] : null,
   };
 
-  const decision = decideAgentTurn({
+  let decision = decideAgentTurn({
     rawText: text,
     locationAmbiguous: ambiguityReply !== null,
     establishedState,
     askCount,
   });
 
-  // UNBOUNDED LOCATION-AMBIGUITY LOOP (round 2 fix, other half). decide.ts's step 1 now only wins
-  // while the question budget remains; once spent, an ambiguity that is STILL unresolved
-  // (ambiguityReply !== null) can reach kind="listings" via steps 2 or 3. `location` at this point is
-  // still the UNRESOLVED ambiguous term — searching it as-is would silently commit to whichever
-  // region/city/district it happens to match. Clear it instead: absent, nationwide, never guessed.
+  // FAIL CLOSED — an unresolved ambiguity may never become a search (owner, 2026-09-05).
+  //
+  // This block used to CLEAR the location here, and its own comment named the consequence exactly:
+  // "absent, nationwide, never guessed". Absent is precisely what the results RPC reads as the whole
+  // Kingdom, so the round-2 loop fix was closing one bug by opening another — reached by a completely
+  // ordinary answer, since «الرياض» is a twin (city AND region). Measured in production 2026-09-05:
+  // p_cities/p_districts/p_region_ids all null, 39,015 listings, top result in جدة.
+  //
+  // decide.ts step 1 now asks the twin question instead of ever reaching "listings" with an
+  // unresolved ambiguity, so this should be unreachable. It stays as a GUARD rather than an
+  // assertion because unreachable-by-construction is a claim about today's ladder: if a future
+  // reordering makes it reachable again, the turn degrades into one more question — never into a
+  // nationwide search. Clearing the location is exactly what must NOT happen, so it no longer does.
   if (decision.kind === "listings" && ambiguityReply !== null) {
-    location = "";
-    regionPin = undefined;
-    districtPin = undefined;
+    decision = { kind: "message", askCount: decision.askCount + 1 };
   }
 
   return { establishedState, decision, location, regionPin, districtPin };

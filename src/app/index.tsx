@@ -5,10 +5,13 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useThemePalette } from '@/lib/appearance';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
+import { TAP44 } from '@/theme/palette';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
 import { OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
@@ -756,10 +759,27 @@ export default function Home() {
       districtLabel: districtsSelected.length === 0 ? undefined
         : districtsSelected.length === 1 ? districtsSelected[0].districtAr
         : `${districtsSelected.slice(0, -1).map((d) => d.districtAr).join('، ')} و${districtsSelected[districtsSelected.length - 1].districtAr}`,
-      // Live count at the current deal/category scope — for multi-select the SUM of the picked
-      // districts' counts (folds are disjoint, so the sum IS the union size at that scope) — so the
-      // 0-results path can still tell an EMPTY area ("widen area") from a type mismatch ("widen type").
-      districtListingCount: districtsSelected.length
+      // Live count for the picked districts — for multi-select the SUM (folds are disjoint, so the
+      // sum IS the union size at that scope) — so the 0-results path can tell an EMPTY area
+      // ("widen area") from a type mismatch ("widen type").
+      //
+      // ONLY SENT WHEN IT IS ACTUALLY CATEGORY-SCOPED (2026-09-05, ops_incident #16). The consumer
+      // in src/data/search.ts branches on the DOCUMENTED meaning — "the district's own count at the
+      // deal/category scope" — and that is the only meaning that can separate the two cases: a count
+      // over ALL types is what tells you the area has listings but not YOURS. Since the district
+      // picker became type-scoped (`p_types` in ensureDistrictOptions, sharpened again by the
+      // 2026-09-03 af_eligibility_clause migration) these counts are per-TYPE, which INVERTS both
+      // branches: a حي full of villas with zero apartments reports 0 and is diagnosed as an empty
+      // AREA, so the user is offered a wider area when the area was never the problem — and after a
+      // «تصفية» round-trip the same search can answer differently depending on whether a نوع was
+      // selected yet.
+      //
+      // The picker's own counts must STAY type-scoped — that is what the user is choosing between,
+      // and it is what makes the number beside each حي true. So the diagnosis simply declines to
+      // speak when it has no category-scoped number to speak from: `undefined` makes
+      // noResultsSuggestion fall through to its generic probes, which re-count against the real pool
+      // and are correct in both cases. A message we cannot ground is worse than the general one.
+      districtListingCount: districtsSelected.length && !(cohortTypes && cohortTypes.length)
         ? districtsSelected.reduce((sum, d) => sum + d.listingCount, 0)
         : undefined,
     };
@@ -823,6 +843,12 @@ export default function Home() {
     const shared = await shareNative();
     if (!shared) setShareOpen(true);
   };
+  // Below this the top bar carries the logo, a sign-in pill and this button; the label is the first
+  // thing that has to give, not the button. Through useAtLeast(), never an inline width compare:
+  // the inline read (`shareBarWidth >= 380`) rendered the label on every ≥380px client while the
+  // served HTML (width 0) had none — React #418 on every desktop/tablet visit, and every production
+  // deploy failed the post-deploy hydration gate from 2026-09-05 21:33Z until this line.
+  const shareLabelled = useAtLeast(SHARE_LABEL_BREAKPOINT);
 
   const detail = query.type ? detailFor(query.type) : null;
   // Context-level detail: shown at category/group level when no specific type is selected.
@@ -942,11 +968,18 @@ export default function Home() {
     opacity: v,
     transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [lift, 0] }) }],
   });
+  // Scale pinned at 1 on WEB (iOS focus-zoom, 2026-09-05): this card holds the city/district and
+  // budget/area TextInputs, and iOS Safari decides zoom-on-focus from the EFFECTIVE text size at
+  // focus time. The 0.965-scale entrance renders the 16px inputs at 15.44px for the whole entrance
+  // window — which replays on EVERY return to this screen (useFocusEffect → playEntrance) — and the
+  // first thing a user does here is tap the city field, inside that window. Safari zoomed and never
+  // zoomed back. Fade + lift keep the entrance; only the scale had to go on web.
+  // verify-input-font-no-ios-zoom.ts §3 pins this.
   const entranceStyle = {
     opacity: entrance,
     transform: [
       { translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [22, 0] }) },
-      { scale: entrance.interpolate({ inputRange: [0, 1], outputRange: [0.965, 1] }) },
+      { scale: Platform.OS === 'web' ? 1 : entrance.interpolate({ inputRange: [0, 1], outputRange: [0.965, 1] }) },
     ],
   };
   const heroOpacity = heroAnim.interpolate({
@@ -985,7 +1018,15 @@ export default function Home() {
           <View ref={setLtr} style={s.top}>
             {!docked ? (
               <View style={s.topLeft}>
-                <Pressable style={s.hamb} hitSlop={8} onPress={() => setSidebarOpen(true)}>
+                <Pressable
+                  style={s.hamb}
+                  hitSlop={8}
+                  // hitSlop is a NO-OP on react-native-web; the 44px floor comes from
+                  // TAP_TARGET_CSS via this marker (ops_incident #17).
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  onPress={() => setSidebarOpen(true)}
+                >
                   <Ionicons name="menu" size={22} color={colors.ink} />
                 </Pressable>
                 <Text ref={noTranslateRef} style={s.topBrand}>{t('Ezhalah')}</Text>
@@ -996,20 +1037,39 @@ export default function Home() {
                   On desktop the docked sidebar already shows it; on mobile the sidebar is a drawer,
                   so without this the sign-in CTA is invisible until the hamburger is tapped. */}
               {!user && !docked && (
-                <Pressable style={s.topSignIn} onPress={openAuth} hitSlop={6}>
+                <Pressable
+                  style={s.topSignIn}
+                  onPress={openAuth}
+                  hitSlop={6}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                >
                   <Ionicons name="person-outline" size={15} color="#fff" />
                   <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
                 </Pressable>
               )}
+              {/* Share — a labelled pill, not a bare glyph (owner 2026-09-05). An unlabelled icon in a
+                  corner reads as decoration; «مشاركة» beside it states the action, which is what every
+                  major platform does with the one control it wants people to use. The label is hidden
+                  on very narrow screens where the top bar has no room for it, and the icon-only form
+                  keeps its accessibilityLabel so the action is never nameless. */}
               <Pressable
-                style={({ pressed }) => [s.shareBtn, pressed && s.shareBtnPressed]}
+                style={({ pressed, hovered }: any) => [
+                  s.shareBtn,
+                  shareLabelled && s.shareBtnWide,
+                  hovered && s.shareBtnHover,
+                  pressed && s.shareBtnPressed,
+                ]}
                 hitSlop={8}
                 onPress={onShare}
                 onPressIn={() => shareSpring(0.94)}
                 onPressOut={() => shareSpring(1)}
+                accessibilityRole="button"
+                accessibilityLabel={t('Share')}
               >
-                <RNAnimated.View style={{ transform: [{ scale: shareScale }] }}>
-                  <Ionicons name="share-outline" size={19} color={colors.chipIcon} />
+                <RNAnimated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
+                  <Ionicons name="share-social-outline" size={17} color={colors.primary} />
+                  {shareLabelled ? <Text style={s.shareBtnText}>{t('Share')}</Text> : null}
                 </RNAnimated.View>
               </Pressable>
             </View>
@@ -1918,7 +1978,11 @@ const s = StyleSheet.create({
   // Redesigned to match the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius,
   // soft green-tinted lift) so the pill + share read as one control cluster (owner redesign 2026-07-24 r2).
   shareBtn: {
-    width: 46,
+    // minWidth, NOT width: the labelled variant has to grow sideways, and a fixed `width` cannot be
+    // released by a later style — React Native Web drops `width: undefined` on merge instead of
+    // overriding, which pinned the pill at 46px and let «مشاركة» spill outside its own background.
+    minWidth: 46,
+    paddingHorizontal: 0,
     height: 46,
     borderRadius: radius.pill,
     alignItems: 'center',
@@ -1932,7 +1996,13 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 2,
   },
-  shareBtnPressed: { opacity: 0.85 },
+  shareBtnPressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
+  // Labelled form: a pill that grows sideways from the same 46px circle, so the two states share a
+  // height and the bar never reflows vertically when the label drops at narrow widths.
+  shareBtnWide: { paddingHorizontal: 15 },
+  shareInner: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  shareBtnText: { fontSize: 13.5, fontWeight: '700', color: colors.primary, includeFontPadding: false },
+  shareBtnHover: { backgroundColor: colors.tintFill, borderColor: colors.primary },
   // Top-bar sign-in (mobile, logged-out only — owner 2026-08-19). Compact pill matching the sidebar's
   // CTA green so the action is unmistakable. On desktop the docked sidebar already shows it.
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },

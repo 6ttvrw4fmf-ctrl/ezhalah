@@ -667,6 +667,16 @@ const AR: Record<string, string> = {
   'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد، أو أساعدك توصل لنتائج أدق؟',
   'I showed you the first {n} listings. Want me to show more?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟',
   'I showed you all {n} matching listings.': 'عرضت لك كل النتائج المطابقة ({n} إعلان).',
+  // NO-OFFER variants (2026-09-05): the same honest counts, with NO invitation, for the states where
+  // the actions row is not rendered — an older results turn that is no longer the latest, or an open
+  // Advanced Filter interview (the `!ageFlow` gate, owner 2026-08-21). The counts are unchanged and
+  // still true; only the question is dropped, because there is no button on screen to answer it with.
+  'I showed you the first {shown} of {total} matching listings.': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق.',
+  'I showed you the first {n} listings.': 'عرضت لك أول {n} إعلانات.',
+  // …and the narrow-only pair: «عرض المزيد» is not rendered but «خلّنا نحدد الطلب أكثر» is, so the
+  // sentence invites exactly the one button that exists.
+  'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أساعدك توصل لنتائج أدق؟',
+  'I showed you the first {n} listings. Want help finding more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أساعدك توصل لنتائج أدق؟',
   // CAPPED variants (owner 2026-08-20): when MORE than the browse cap actually match, the truth has two
   // numbers — the real match total AND the capped number shown. Never imply that only {shown} matched.
   'We found {total} listings matching your search, and showed you {shown}. Want help finding more precise ones?': 'لقينا {total} إعلان يطابق طلبك، وعرضنا لك {shown} منها. تبي أساعدك نلقى نتائج أدق؟',
@@ -873,6 +883,10 @@ const AR: Record<string, string> = {
   'Muktamel':                          'مكتمل',
   'Nawait':                            'نويت', // corrected 2026-07-15: was 'Aqaratikom'/'عقاراتكم' — the scraper's target (aqaratikom.com → backend nawait.sa, see scrapers/aqaratikom/run.py) now self-brands as نويت/Nawait on its live site; internal name/table keys ('Aqaratikom') are unchanged, only this display label
   'Awal Real Estate':                  'أوال العقارية',
+  'Remal Real Estate':                 'رمال العقارية',            // official (remalre.com header logo)
+  'Amaall Real Estate Services':       'آمال للخدمات العقارية',    // official (amaall.com)
+  'Alta Real Estate Services':         'ألتا للخدمات العقارية',   // official (alta.com.sa header)
+  'Shmou Al Shmal Real Estate':        'شموع الشمال العقارية',    // official (shmoua-alshmal.com header)
   'Awal United for Real Estate':       'أوال المتحدة العقارية', // official (their X @awaalun: «مؤسسة أوال المتحدة العقارية»)
   'Al Khaas':                          'الخاص للاستثمار العقاري',
   'Abeea Real Estate':                 'ابيعا العقارية',
@@ -996,7 +1010,9 @@ const AR: Record<string, string> = {
   // Auth hero — new title + subtitle (user-supplied Arabic; English mirrors it without naming
   // platforms, per the platform-confidentiality rule). The title carries the brand "Ezhalah".
   'Looking for a property? Ezhalah.': 'تدور على عقار؟ إزهله.',
-  'Sign in or create your account': 'سجّل الدخول أو أنشئ حسابك',
+  // Sign-in popup heading + support line (owner 2026-09-03: simple, natural Arabic).
+  'Sign in or create your free account': 'سجّل دخولك أو أنشئ حسابك مجاناً',
+  'Sign in to unlock more of Ezhalah.': 'احفظ بحثك واحصل على المزيد',
   'More than 25 Saudi property platforms — in one place.': 'أكثر من ٢٥ منصة عقارية سعودية — في مكان واحد.',
   'Ezhalah brings property listings from the various Saudi real-estate platforms together in one place.':
     'إزهله تجمع العقارات المعروضة من مختلف منصات العقار السعودية في مكان واحد.',
@@ -1006,7 +1022,8 @@ const AR: Record<string, string> = {
   'Saudi mobile numbers start with 5': 'أرقام الجوال السعودية تبدأ بالرقم 5',
   'Enter 9 digits': 'أدخل 9 أرقام',
   'Continue': 'متابعة',
-  "By continuing you agree to Ezhalah's Terms & Privacy Policy.": 'بالمتابعة فإنك توافق على شروط إزهله وسياسة الخصوصية.',
+  // The privacy sentence is composed: this lead + the «سياسة الخصوصية» link ('Privacy Policy' below).
+  'By continuing, you agree to our': 'بالمتابعة، أنت توافق على',
   // Country names + dial-prefix hints (phone picker)
   'United Arab Emirates': 'الإمارات العربية المتحدة',
   'Qatar': 'قطر',
@@ -1029,6 +1046,7 @@ const AR: Record<string, string> = {
   'Sign in to': 'تسجيل الدخول إلى',
   'with your Apple Account': 'باستخدام حساب Apple الخاص بك',
   'Hide My Email': 'إخفاء بريدي الإلكتروني',
+  'Share': 'مشاركة',
   'Share My Email': 'مشاركة بريدي الإلكتروني',
   "Ezhalah won't see your address": 'لن تطّلع إزهله على عنوانك',
   // Apple Face ID
@@ -1083,12 +1101,21 @@ const AR: Record<string, string> = {
     'أرسلت عدة رسائل خلال وقت قصير. انتظر ساعة تقريباً قبل إرسال رسالة جديدة.',
   'Terms of Service': 'شروط الخدمة',
   'Privacy Policy': 'سياسة الخصوصية',
+  // «الشروط والخصوصية» reader (owner 2026-09-03): the account-menu row + its two tabs.
+  'Terms & Privacy': 'الشروط والخصوصية',
+  'Terms of Use': 'شروط الاستخدام',
   'Ezhalah v{version}': 'إزهله الإصدار {version}',
 
   // Drawer / sidebar
   'New Chat': 'محادثة جديدة',
   'Search complete': 'اكتمل البحث',
+  'No further truthful narrowing question exists for this scope — these are all the genuine matches.': 'ما فيه سؤال إضافي موثوق يضيّق هذا النطاق أكثر — هذي كل النتائج المطابقة فعلاً.',
   'Start a new chat to search again': 'ابدأ محادثة جديدة للبحث من جديد',
+  // Completed-search composer (owner request 2026-09-05): the composer keeps its normal look —
+  // no separate card — the input goes inert with this as its placeholder, and the send arrow
+  // becomes a lock. The real action is the hamburger, always physically top-left (topBar is
+  // LTR-pinned) regardless of locale.
+  'This chat is closed — tap ☰ at the top to start a new search': 'أُغلقت هذه المحادثة — اضغط ☰ أعلى الصفحة لبدء بحث جديد',
   // Sidebar chat search (owner 2026-08-24): ChatGPT-style in-sidebar search, Arabic-first. The
   // empty state + hint are deliberately calm Saudi copy — never an English "No results".
   'Search chats': 'البحث في المحادثات',
@@ -1276,8 +1303,10 @@ const AR: Record<string, string> = {
   '1 week': 'أسبوع واحد',
 
   // Share sheet
+  // Owner wording 2026-09-05 — the SAME sentence as og:description, so the card we draw in-app and
+  // the card WhatsApp draws from the page say the same thing. «في المملكة» says where.
   'One place to explore all listings and more in seconds. Try now.':
-    'مكان واحد لاستكشاف جميع الإعلانات والمزيد في ثواني. جرّب الآن.',
+    'مكان واحد لاستكشاف كل إعلانات العقارات في المملكة في ثواني. جرّبها الآن.',
   'Copy Link': 'نسخ الرابط',
   'Copied!': 'تم النسخ!',
   'Messages': 'الرسائل',

@@ -11,6 +11,7 @@ import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { decodeEntities } from '@/lib/htmlEntities';
+import { photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
@@ -558,7 +559,7 @@ export function searchTableScope(q: SearchQuery): SearchTableScope | null {
   const resMisfileTypes = isBroadResidential
     ? RESIDENTIAL_TYPE_AR_COM
     : (selectedTypeAr ? selectedTypeAr.filter((t) => RESIDENTIAL_TYPE_AR_COM.includes(t)) : []);
-  const resScopeBTables = platformScope(COM_TABLES.filter((t) => !mainTables.includes(t)));
+  const resScopeBTables = platformScope(comTables(q).filter((t) => !mainTables.includes(t)));
   const attachResScopeB = q.category === 'Residential' && !isBroadCommercial
     && resMisfileTypes.length > 0 && resScopeBTables.length > 0;
 
@@ -594,7 +595,15 @@ export function searchTableScope(q: SearchQuery): SearchTableScope | null {
   return { p_tables: mainTables, ...scopeB, isBroadCommercial };
 }
 
-export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null> {
+// UNKNOWN IS NOT AN HONEST ZERO (P2, found 2026-09-04). `null` from here means the location genuinely
+// resolves to nothing, and every caller renders that as an empty result set — the "no listings here,
+// try broadening your search" screen. The resolve_district_cities failure branch below used to return
+// that SAME null, so a backend outage was drawn as a truthful-looking verdict about the user's search.
+// It now returns PROBE_FAILED — the sentinel this file already uses for AF counts (src/lib/afProbe.ts,
+// «couldn't determine because the backend failed» ≠ «the source answered: nothing») — so the caller can
+// surface the retry posture it already has for a failed page-0 search. Callers must check
+// isProbeFailure() BEFORE `!scope`; TypeScript enforces it, since ProbeFailed is truthy.
+export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | null | ProbeFailed> {
   const tableScope = searchTableScope(q);
   if (!tableScope) return null;
 
@@ -632,11 +641,18 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
       inFlightDistrictCities,
       JSON.stringify(q.districts),
       async () => {
-        const r = await supabase!.rpc('resolve_district_cities', { p_districts: q.districts });
+        // bounded() — the same timeout discipline every other data-layer call in this file already
+        // has (RC-A 2026-07-13). This was the ONE RPC still issued bare: supabase-js sets no request
+        // timeout, so a stalled response never settled, this await never returned, and the «إزهله
+        // يبحث» loader spun forever with no recovery. bounded() aborts at RPC_TIMEOUT_MS and shapes
+        // the timeout exactly like a backend error, which the PROBE_FAILED branch below then reports.
+        const r = await bounded(supabase!.rpc('resolve_district_cities', { p_districts: q.districts }));
         return { data: r.data as { city_ar: string; match_count: number }[] | null, error: r.error };
       },
     );
-    if (districtCitiesError) return null;        // RPC failure ≠ genuine zero matches — give up, don't fall through unrestricted
+    // RPC failure/timeout ≠ genuine zero matches. NOT null — see this function's header: null is the
+    // honest zero every caller renders as an empty result set.
+    if (districtCitiesError) return PROBE_FAILED;
     const dcRows = (districtCities as { city_ar: string; match_count: number }[] | null) ?? [];
     if (dcRows.length === 1) {
       cities = [dcRows[0].city_ar];
@@ -744,6 +760,7 @@ const inFlightAgeCounts = new Map<string, Promise<AgeOptionCounts | null>>();
 export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeOptionCounts | null | ProbeFailed> {
   if (!supabase) return null;
   const scope = await resolveSearchScope(q);
+  if (isProbeFailure(scope)) return PROBE_FAILED;   // scope resolution failed = never learned the answer
   if (!scope) {
     return { cnt_new: 0, cnt_1_2: 0, cnt_3_5: 0, cnt_6_9: 0, cnt_10p: 0, cnt_unknown: 0, cnt_total: 0, platform_breakdown: null };
   }
@@ -836,6 +853,7 @@ const inFlightGuidedCounts = new Map<string, Promise<GuidedCounts | null>>();
 export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<GuidedCounts | null | ProbeFailed> {
   if (!supabase) return null;
   const scope = await resolveSearchScope(q);
+  if (isProbeFailure(scope)) return PROBE_FAILED;   // scope resolution failed = never learned the answer
   if (!scope) return null;
   const { isBroadCommercial, ...scopeParams } = scope;
   return dedupeInFlight(inFlightGuidedCounts, JSON.stringify(q), async () => {
@@ -909,12 +927,28 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
 // type total.
 export async function fetchScopeOptionCounts(
   candidates: { key: string; query: SearchQuery }[],
-): Promise<Record<string, number> | null> {
+): Promise<Record<string, number | null> | null> {
   if (!supabase || !candidates.length) return null;
-  const out: Record<string, number> = {};
-  await Promise.all(candidates.map(async ({ key, query }) => {
+  // UNKNOWN IS NOT NO — for SCOPE options too (owner rule 2026-09-04). This used to `return` on a
+  // timeout/error, leaving the key ABSENT, and scopeQuestionOptions() then dropped the option from the
+  // card as if the taxonomy branch did not exist. Reproduced live 2026-09-04 (Riyadh / Buy / apartments
+  // group, 21,892): the two largest types — شقة ~10.6k and دور ~9.7k — are the two SLOWEST counts, so
+  // under load they were the ones that vanished while غرفة=1 and عمارة سكنية=1,554 stayed; the user's
+  // real answer was not on the card, they continued, the type stayed unresolved, the cohort
+  // intersection was empty, and the interview dumped the whole group. Now: every candidate that fails
+  // is retried ONCE (bounded, never a poll), and anything still undetermined is returned as `null` —
+  // a real option with no number — never omitted and never 0.
+  // Inside this function a FAILED probe is the repo's PROBE_FAILED sentinel — the same word every
+  // AF count fetcher uses — so "never learned" can never share a value with "the source answered".
+  // Only at the boundary is it translated to `null` for the pure builder (scopeOptionsFromCounts),
+  // whose contract is: number = measured, null = UNKNOWN (no number on the card), absent = UNKNOWN.
+  const raw: Record<string, number | ProbeFailed> = {};
+  const probe = async ({ key, query }: { key: string; query: SearchQuery }): Promise<number | ProbeFailed> => {
     const scope = await resolveSearchScope(query);
-    if (!scope) return;                            // unresolvable scope → absent key, never a fake 0
+    // `!scope` is an unresolvable scope; isProbeFailure() is resolveSearchScope's own RPC failing.
+    // Both are "never learned" — and the sentinel is a truthy object, so `!scope` alone would let it
+    // through to be spread as scope params below.
+    if (isProbeFailure(scope) || !scope) return PROBE_FAILED;
     const { isBroadCommercial, ...scopeParams } = scope;
     const result = await withTimeout(
       supabase!.rpc('location_search_candidates_ar', {
@@ -929,13 +963,18 @@ export async function fetchScopeOptionCounts(
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
-    if ('timedOut' in result) return;              // absent key → the option is dropped, never shown as 0
+    if ('timedOut' in result) return PROBE_FAILED; // never learned — the caller retries once
     const { data, error } = result;
-    if (error) return;
-    out[key] = data && (data as { total_count: number }[]).length
+    if (error) return PROBE_FAILED;                // transport/DB error = never learned the answer
+    return data && (data as { total_count: number }[]).length
       ? Number((data as { total_count: number }[])[0].total_count) || 0
       : 0;                                         // empty result set = an honest zero
-  }));
+  };
+  await Promise.all(candidates.map(async (c) => { raw[c.key] = await probe(c); }));
+  const failed = candidates.filter((c) => isProbeFailure(raw[c.key]));
+  if (failed.length) await Promise.all(failed.map(async (c) => { raw[c.key] = await probe(c); }));
+  const out: Record<string, number | null> = {};
+  for (const c of candidates) out[c.key] = isProbeFailure(raw[c.key]) ? null : (raw[c.key] as number);
   return out;
 }
 
@@ -944,8 +983,10 @@ export async function fetchDistrictEligibleCounts(
   options: { districtAr: string; matchValues: string[] }[],
 ): Promise<Record<string, number> | null> {
   if (!supabase || !options.length) return null;
+  // null is this helper's own "no honest number available" value — index.tsx prints no count for a
+  // null result rather than a 0 — so a failed scope collapses into it legitimately (see the caller).
   const scope = await resolveSearchScope(q);
-  if (!scope) return null;
+  if (isProbeFailure(scope) || !scope) return null;
   const { isBroadCommercial, ...scopeParams } = scope;
   const base = {
     ...scopeParams,
@@ -1103,12 +1144,38 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
   return out.length ? out : null;
 }
 
-// Every platform's residential / commercial table. A clean type's CleanQuery.kinds says which kind(s)
-// to read — and because macro_category is decoupled from the physical table (Commercial Land lives in
-// RESIDENTIAL tables, etc.), cross-table types ('both' kinds) read both and the client filters by the
-// normalized macro. Gathern + Aqar Monthly are monthly-only RESIDENTIAL sources (no commercial table).
-const RES_TABLES = ['aqar_residential_listings', 'wasalt_residential_listings', 'aldarim_residential_listings', 'aqargate_residential_listings', 'alhoshan_residential_listings', 'hajer_residential_listings', 'sanadak_residential_listings', 'eastabha_residential_listings', 'aqarcity_residential_listings', 'raghdan_residential_listings', 'eaqartabuk_residential_listings', 'satel_residential_listings', 'sadin_residential_listings', 'toor_residential_listings', 'mustqr_residential_listings', 'ramzalqasim_residential_listings', 'fursaghyr_residential_listings', 'jazwtn_residential_listings', 'mizlaj_residential_listings', 'muktamel_residential_listings', 'aqaratikom_residential_listings', 'awal_residential_listings', 'alkhaas_residential_listings', 'abeea_residential_listings', 'jurash_residential_listings', 'alnokhba_residential_listings', 'dealapp_residential_listings', 'erapulse_residential_listings', 'nowaisiry_residential_listings', 'october_residential_listings', 'souq24_residential_listings', 'therc_residential_listings', 'aouj_residential_listings', 'abralosol_residential_listings', 'arkaan_residential_listings', 'rawasidark_residential_listings'];
-const COM_TABLES = ['aqar_commercial_listings', 'wasalt_commercial_listings', 'aldarim_commercial_listings', 'aqargate_commercial_listings', 'alhoshan_commercial_listings', 'hajer_commercial_listings', 'sanadak_commercial_listings', 'eastabha_commercial_listings', 'aqarcity_commercial_listings', 'raghdan_commercial_listings', 'eaqartabuk_commercial_listings', 'satel_commercial_listings', 'sadin_commercial_listings', 'toor_commercial_listings', 'mustqr_commercial_listings', 'ramzalqasim_commercial_listings', 'fursaghyr_commercial_listings', 'jazwtn_commercial_listings', 'mizlaj_commercial_listings', 'muktamel_commercial_listings', 'aqaratikom_commercial_listings', 'awal_commercial_listings', 'alkhaas_commercial_listings', 'abeea_commercial_listings', 'jurash_commercial_listings', 'alnokhba_commercial_listings', 'dealapp_commercial_listings', 'erapulse_commercial_listings', 'nowaisiry_commercial_listings', 'october_commercial_listings', 'souq24_commercial_listings', 'therc_commercial_listings', 'aouj_commercial_listings', 'abralosol_commercial_listings', 'arkaan_commercial_listings', 'rawasidark_commercial_listings'];
+// THE SEARCHABLE-PLATFORM INVENTORY — the ONE list, and the only hand-free one.
+//
+// GENERATED. Regenerate with:
+//   node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/gen-searchable-tables.ts
+// It reads production's own answer to "which tables are production-searchable" and rewrites the
+// single line below. Do not hand-edit it; scripts/verify-searchable-scope-matches-inventory.ts
+// EXECUTES the derivation underneath and fails against the live inventory in both directions.
+//
+// WHY GENERATED-AND-COMMITTED rather than fetched at runtime. p_tables is on the hot path of every
+// search; a runtime fetch would add a round trip before the first result and, worse, would have to
+// decide what to do when it fails — and every safe answer to that is either "search nothing" or
+// "silently fall back to a stale list", i.e. this bug again. A committed list costs nothing at
+// runtime and moves the freshness question to a barrier that can fail loudly instead.
+//
+// IT IS A JOIN OF TWO PRODUCTION FACTS, and neither alone is the answer:
+//   · the union arms of active_listing_ids_v2 — "this table CAN reach the search index";
+//   · platform_registry.status <> 'retired'   — "this source is MEANT to be searched".
+// Measured 2026-09-03: 77 arms == 77 physical *_listings tables; 4 platforms are retired (deal,
+// toor, awal, alnokhba — 0 production_ready rows between them, and platform_registry's note on
+// `deal` says in so many words "excluded from search"), leaving 69. `dormant` is NOT excluded: a
+// dormant scraper is a paused CRAWL, not withdrawn inventory — muktamel is dormant and has 523 live
+// searchable rows.
+//
+// NOT `select distinct source_table from search_listings_ar`. That answers "which tables have rows
+// RIGHT NOW" (62 of the 77), so a platform whose active rows momentarily hit zero would drop out of
+// the inventory and then silently fail to come back. The arms answer "which tables CAN be searched",
+// which is the question the client is actually asking.
+//
+// A retired platform that starts serving rows again does NOT quietly disappear: the live barrier's
+// MISSING direction reads production's own live platform list, so it goes red and names the table.
+// GENERATED — do not edit by hand.
+const SEARCHABLE_TABLES = ['abeea_commercial_listings', 'abeea_residential_listings', 'abralosol_commercial_listings', 'abralosol_residential_listings', 'aldarim_commercial_listings', 'aldarim_residential_listings', 'alhoshan_commercial_listings', 'alhoshan_residential_listings', 'alkhaas_commercial_listings', 'alkhaas_residential_listings', 'alta_commercial_listings', 'alta_residential_listings', 'amaall_commercial_listings', 'amaall_residential_listings', 'aouj_commercial_listings', 'aouj_residential_listings', 'aqar_commercial_listings', 'aqar_residential_listings', 'aqaratikom_commercial_listings', 'aqaratikom_residential_listings', 'aqarcity_commercial_listings', 'aqarcity_residential_listings', 'aqargate_commercial_listings', 'aqargate_residential_listings', 'aqarmonthly_residential_listings', 'arkaan_commercial_listings', 'arkaan_residential_listings', 'awal_commercial_listings', 'awal_residential_listings', 'dealapp_commercial_listings', 'dealapp_residential_listings', 'eaqartabuk_commercial_listings', 'eaqartabuk_residential_listings', 'eastabha_commercial_listings', 'eastabha_residential_listings', 'erapulse_commercial_listings', 'erapulse_residential_listings', 'fursaghyr_commercial_listings', 'fursaghyr_residential_listings', 'gathern_commercial_listings', 'gathern_residential_listings', 'hajer_commercial_listings', 'hajer_residential_listings', 'jazwtn_commercial_listings', 'jazwtn_residential_listings', 'jurash_commercial_listings', 'jurash_residential_listings', 'mizlaj_commercial_listings', 'mizlaj_residential_listings', 'muktamel_commercial_listings', 'muktamel_residential_listings', 'mustqr_commercial_listings', 'mustqr_residential_listings', 'nowaisiry_commercial_listings', 'nowaisiry_residential_listings', 'october_commercial_listings', 'october_residential_listings', 'raghdan_commercial_listings', 'raghdan_residential_listings', 'ramzalqasim_commercial_listings', 'ramzalqasim_residential_listings', 'rawasidark_commercial_listings', 'rawasidark_residential_listings', 'remal_commercial_listings', 'remal_residential_listings', 'sadin_commercial_listings', 'sadin_residential_listings', 'sanadak_commercial_listings', 'sanadak_residential_listings', 'satel_commercial_listings', 'satel_residential_listings', 'shmoualshmal_commercial_listings', 'shmoualshmal_residential_listings', 'souq24_commercial_listings', 'souq24_residential_listings', 'therc_commercial_listings', 'therc_residential_listings', 'wasalt_commercial_listings', 'wasalt_residential_listings'];
 
 // Gathern + Aqar Monthly are MONTHLY-ONLY sources: every listing is a monthly rental. On a monthly
 // search we therefore include ALL their rows — even ones whose raw rent_period is null — because the
@@ -1116,16 +1183,59 @@ const COM_TABLES = ['aqar_commercial_listings', 'wasalt_commercial_listings', 'a
 // location_search_candidates_ar backend fix.) [[gathern-source]] [[monthly-rent]]
 const MONTHLY_ONLY_TABLE = /^(gathern|aqarmonthly)_/;
 
-function resTables(q: SearchQuery): string[] {
-  // Gathern + Aqar Monthly on any search whose period scope INCLUDES monthly (see [[gathern-source]]).
-  // 'both' must list them too — they are the two monthly-only sources, so omitting them would let a
-  // "monthly AND annual" search silently return an annual-only pool. (owner feature 2026-08-14.)
-  // dealCombined (2026-08-20) ALWAYS wants monthly — combined mode's Rent side has no period selector
-  // and accepts Monthly unconditionally, so these two monthly-only sources must always be reachable.
+// The two kinds, DERIVED. A clean type's CleanQuery.kinds says which kind(s) to read — and because
+// macro_category is decoupled from the physical table (Commercial Land lives in RESIDENTIAL tables,
+// etc.), cross-table types ('both' kinds) read both and the client filters by the normalized macro.
+//
+// These were two hand-maintained 31-entry literals until 2026-09-03. Five platforms were activated in
+// production and joined neither, so 4,314 production_ready rows were returnable by no search while
+// Trending — called without p_tables — counted them anyway. Two lists is one list too many: they are
+// now a partition of SEARCHABLE_TABLES by table-name suffix, so a platform cannot enter the inventory
+// and miss a scope.
+const RES_TABLES = SEARCHABLE_TABLES.filter((t) => t.endsWith('_residential_listings') && !MONTHLY_ONLY_TABLE.test(t));
+const COM_TABLES = SEARCHABLE_TABLES.filter((t) => t.endsWith('_commercial_listings') && !MONTHLY_ONLY_TABLE.test(t));
+
+// The DEEP-LINK RESOLVER's scope — the same one inventory, ordered for latency only.
+//
+// fetchListingById() carried its OWN 73-entry literal until 2026-09-04: the third hand-maintained
+// copy of "the platforms Ezhalah searches", and it had already drifted. It was MISSING
+// aqarmonthly_residential_listings (1,731 production_ready rows, reachable through any monthly
+// search) and gathern_commercial_listings, and it still probed six RETIRED tables (toor, awal,
+// alnokhba × res+com). A deep link or a restored session pointing at an aqarmonthly listing
+// therefore resolved to NULL — the listing was findable in search and unopenable by id.
+//
+// Ids are unique across every table (one shared sequence), so ORDER is a latency choice, nothing
+// more: residential first because those tables are far larger, so the loop below usually stops early.
+const DEEPLINK_TABLES = [
+  ...SEARCHABLE_TABLES.filter((t) => t.endsWith('_residential_listings')),
+  ...SEARCHABLE_TABLES.filter((t) => t.endsWith('_commercial_listings')),
+];
+
+// The monthly-only sources are held OUT of the two base lists above and folded back in here, only
+// when the search's period scope includes monthly. That conditional is the product rule, not an
+// optimisation: [[gathern-source]] is rent-only and monthly-only, so it must never appear in a Buy
+// result (CLAUDE.md hard requirement) nor in an ANNUAL rent result.
+//
+// 'both' must list them too — they are the two monthly-only sources, so omitting them would let a
+// "monthly AND annual" search silently return an annual-only pool. (owner feature 2026-08-14.)
+// dealCombined (2026-08-20) ALWAYS wants monthly — combined mode's Rent side has no period selector
+// and accepts Monthly unconditionally, so these two monthly-only sources must always be reachable.
+//
+// Generic over MONTHLY_ONLY_TABLE rather than naming the two residential tables literally, so a
+// monthly-only source that also has a commercial table (gathern does) is reachable in the same one
+// mode instead of being permanently invisible — the very hole this whole change closes.
+function monthlyInScope(q: SearchQuery): boolean {
   const wantsMonthly = q.dealCombined || q.rentPeriod === 'monthly' || q.rentPeriod === 'both';
-  return ((q.deal === 'Rent' || q.dealCombined) && wantsMonthly)
-    ? [...RES_TABLES, 'gathern_residential_listings', 'aqarmonthly_residential_listings']
-    : RES_TABLES;
+  return Boolean((q.deal === 'Rent' || q.dealCombined) && wantsMonthly);
+}
+function monthlyOnly(suffix: string): string[] {
+  return SEARCHABLE_TABLES.filter((t) => t.endsWith(suffix) && MONTHLY_ONLY_TABLE.test(t));
+}
+function resTables(q: SearchQuery): string[] {
+  return monthlyInScope(q) ? [...RES_TABLES, ...monthlyOnly('_residential_listings')] : RES_TABLES;
+}
+function comTables(q: SearchQuery): string[] {
+  return monthlyInScope(q) ? [...COM_TABLES, ...monthlyOnly('_commercial_listings')] : COM_TABLES;
 }
 
 // Arabic rent-period token for the search RPC. Only a single-deal Rent search with a period chosen sends
@@ -1216,7 +1326,7 @@ function tablesFor(q: SearchQuery): string[] {
   const kinds = kindsFor(q);
   let tables: string[] = [];
   if (kinds.includes('res')) tables.push(...resTables(q));
-  if (kinds.includes('com')) tables.push(...COM_TABLES);
+  if (kinds.includes('com')) tables.push(...comTables(q));
   // EXTRA tables: a clean type may name specific extra tables to scan (a type misfiled into the other
   // kind's table on one platform, e.g. مكاتب مشتركة → Office but sitting in dealapp_residential). Adds
   // just that table so the row is reachable via its filter, without widening kinds for every platform.
@@ -1427,6 +1537,11 @@ export async function fetchListingsForQuery(
   if (signal?.aborted) return { listings: null, pageCandidates, pageTotal }; // Stop pressed before any network call started
   // Location/table/region scope — shared with the advanced-filter option-count RPCs (resolveSearchScope).
   const scope = await resolveSearchScope(q);
+  // THE USER-VISIBLE HALF OF THE FIX. `listings: []` is the honest-zero screen ("no listings here,
+  // try broadening"); `listings: null` is the retryable-error posture this function already uses for
+  // every backend failure (store.tsx passes it to runSearch as fetchFailed). A scope that FAILED must
+  // take the second path — it is our outage, not a fact about their search.
+  if (isProbeFailure(scope)) return { listings: null, pageCandidates, pageTotal };
   if (!scope) return { listings: [], pageCandidates, pageTotal };
   const { isBroadCommercial, ...scopeParams } = scope;
 
@@ -1671,49 +1786,21 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   const hit = LISTING_CACHE.get(id);
   if (hit) return hit;
   if (!supabase) return null;
-  // All four tables share one id sequence, so an id is unique across them. Try residential first
-  // (far larger), then commercial; try Aqar before Wasalt only because Aqar is bigger.
-  for (const table of [
-    'aqar_residential_listings', 'aqar_commercial_listings',
-    'wasalt_residential_listings', 'wasalt_commercial_listings',
-    'gathern_residential_listings',
-    'aldarim_residential_listings', 'aldarim_commercial_listings',
-    'aqargate_residential_listings', 'aqargate_commercial_listings',
-    'alhoshan_residential_listings', 'alhoshan_commercial_listings',
-    'hajer_residential_listings', 'hajer_commercial_listings',
-    'sanadak_residential_listings', 'sanadak_commercial_listings',
-    'eastabha_residential_listings', 'eastabha_commercial_listings',
-    'aqarcity_residential_listings', 'aqarcity_commercial_listings',
-    'raghdan_residential_listings', 'raghdan_commercial_listings',
-    'eaqartabuk_residential_listings', 'eaqartabuk_commercial_listings',
-    'satel_residential_listings', 'satel_commercial_listings',
-    'sadin_residential_listings', 'sadin_commercial_listings',
-    'toor_residential_listings', 'toor_commercial_listings',
-    'mustqr_residential_listings', 'mustqr_commercial_listings',
-    'ramzalqasim_residential_listings', 'ramzalqasim_commercial_listings',
-    'fursaghyr_residential_listings', 'fursaghyr_commercial_listings',
-    'jazwtn_residential_listings', 'jazwtn_commercial_listings',
-    'mizlaj_residential_listings', 'mizlaj_commercial_listings',
-    'muktamel_residential_listings', 'muktamel_commercial_listings',
-    'aqaratikom_residential_listings', 'aqaratikom_commercial_listings',
-    'awal_residential_listings', 'awal_commercial_listings',
-    'alkhaas_residential_listings', 'alkhaas_commercial_listings',
-    'abeea_residential_listings', 'abeea_commercial_listings',
-    'jurash_residential_listings', 'jurash_commercial_listings',
-    'alnokhba_residential_listings', 'alnokhba_commercial_listings',
-    'dealapp_residential_listings', 'dealapp_commercial_listings',
-    
-    'erapulse_residential_listings', 'erapulse_commercial_listings',
-    'nowaisiry_residential_listings', 'nowaisiry_commercial_listings',
-    'october_residential_listings', 'october_commercial_listings',
-    'souq24_residential_listings', 'souq24_commercial_listings',
-    'therc_residential_listings', 'therc_commercial_listings',
-    'aouj_residential_listings', 'aouj_commercial_listings',
-    'abralosol_residential_listings', 'abralosol_commercial_listings',
-    'arkaan_residential_listings', 'arkaan_commercial_listings',
-    'rawasidark_residential_listings', 'rawasidark_commercial_listings',
-  ]) {
-    const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).limit(1);
+  // ONE inventory — see DEEPLINK_TABLES. Never re-list the tables here: this loop is the surface a
+  // deep link and a restored session both land on, and a private copy of the fleet is how it came to
+  // miss aqarmonthly (a live, monthly-searchable platform) while still probing three retired ones.
+  for (const table of DEEPLINK_TABLES) {
+    // `.eq('active', true)` — A DEEP LINK IS A SEARCH SURFACE (P1, incident #34, found by routine #11's
+    // first run). Every other surface — results, AF, Trending, counts, pagination — resolves through
+    // active_listing_ids_v2, whose arms are all `WHERE active IS TRUE`. This one path read the raw
+    // table with no predicate at all, and LIST_SELECT does not even fetch the `active` column, so the
+    // client could not have noticed. 68,788 rows are active=false fleet-wide and every one of them
+    // rendered as a live card here: a shared or bookmarked link to a delisted property showed it as
+    // if it were still on the market, permanently — the search stack heals in ~50 minutes, this never
+    // did, and on the 60 tables with no retention policy there is no hard delete to eventually end it.
+    // Proven with the production ANON key, not privileged SQL: ids 585260 / 629782 / 4744698 each
+    // returned a full card payload carrying "active": false.
+    const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).eq('active', true).limit(1);
     if (error || !data || !data.length) continue;
     const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');
     if (row) { LISTING_CACHE.set(row.id, row); return row; }
@@ -1779,7 +1866,11 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // index 0. Confirmed live 2026-07-26: ~6.7% of active aqar_residential_listings had this
     // as their displayed photo; 0 occurrences on any other platform.
     const realPhotoUrls = Array.isArray(r.photo_urls)
-      ? r.photo_urls.filter((u: unknown) => typeof u === 'string' && !u.includes('/props/villa-default.png'))
+      ? r.photo_urls
+          .filter((u: unknown): u is string => typeof u === 'string' && !u.includes('/props/villa-default.png'))
+          // CANONICAL DISPLAY URL — routes CORP-blocked hosts (Sadin) through the same-origin proxy so
+          // the browser can actually render them; a no-op for every other host. See src/lib/photoUrl.ts.
+          .map((u: string) => photoDisplayUrl(u))
       : [];
     const photo = realPhotoUrls.length > 0 ? realPhotoUrls[0] : '';
     // Raw additional_info as a plain object (Gathern/new-platform shape). Aqar leaves it null; Wasalt/
@@ -1819,7 +1910,15 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       source: r.source ?? 'Aqar',
       // Same rule as priceStr above: an unpublished period stays NULL, it never becomes 'annual'.
       rentPeriod: deal === 'Rent' ? (r.rent_period ?? null) : null,
-      listed: r.date_added ?? 'recently',
+      // UNKNOWN IS NOT «مؤخراً» (P2, 107,254 active listings — 54.3% of inventory). This used to be
+      // `?? 'recently'`, manufacturing a positive FRESHNESS CLAIM out of a date the source never
+      // published, one layer above any display guard that could have caught it: ResultCard already
+      // renders no date chip for an empty value, but cleanDate() maps the 'recently' sentinel to
+      // «أضيف مؤخراً», so the invention was indistinguishable from a source that really did say it.
+      // '' (not undefined) keeps `listed: string` intact, and the RECENCY lookup in search.ts misses
+      // on '' exactly as it already misses on every real scraped date — so ordering is untouched.
+      // A source that genuinely publishes «مؤخراً» still shows it; only the fabrication is gone.
+      listed: r.date_added ?? '',
       photo,
       source_url: r.listing_url,
       // Rich extras for the new card design — all optional, fall back to safe defaults.

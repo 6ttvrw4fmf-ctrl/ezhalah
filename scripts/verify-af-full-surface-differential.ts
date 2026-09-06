@@ -69,7 +69,7 @@ import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import {
   judgeOption, judgeUnion, judgeIntersection, judgeZero, judgeUnknownCaption, boundaryReport,
-  optionWouldRender, type Pred, type Row,
+  optionWouldRender, settleOnOneIndex, UNREADABLE_STAMP, type Pred, type Row,
 } from './lib/afSurfaceJudge.ts';
 
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
@@ -90,6 +90,9 @@ const M = {
   unknownCaptions: 0, boundariesExercised: 0, boundariesUnexercised: 0,
   missing: 0, extra: 0, dupes: 0, countMismatch: 0, nullLeaks: 0, rowViolations: 0, renderGateViolations: 0,
   basePurity: 0,
+  // A comparison that straddled an index rebuild: settled on a stable re-read (reconciled) or not
+  // settled at all (undecided). Neither is ever a silent pass — both are printed in the summary.
+  reconciled: 0, undecided: 0,
 };
 
 // ── env ──────────────────────────────────────────────────────────────────────────────────────────
@@ -294,6 +297,53 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   try { return await fn(); } finally { inFlight--; waiters.shift()?.(); }
 }
 
+// ── the index MOVES UNDER this check, and a verdict must describe ONE state of it ────────────────
+// `search_listings_ar` is rebuilt while this job is reading it: `sync_search_listings_ar` (pg_cron
+// jobid 28) runs at :14 past every hour and the location MV refresh (jobid 17) at :20, against a job
+// that reads for ~28 minutes. Every witness compared here is a SEPARATE read — the chip from a count
+// RPC, the search `total_count`, the paged id set, the independent PostgREST oracle — and the chip in
+// particular is captured ONCE per cohort and then reused for every option in it, so it can be many
+// minutes older than the reads it is judged against. A verdict that straddles a rebuild is comparing
+// two different databases.
+//
+// Measured 2026-09-04 (run 33855677911): Villa+Farm/Buy @region:1 failed on ALL FOUR of its checks,
+// the no-AF baseline included, in the 09:14–09:21 window that holds both cron jobs. Re-read on a
+// quiet index every witness agreed exactly — chip 11,720 = search total 11,720 = 11,720 paged ids =
+// 11,720 oracle rows, with 0 missing, 0 extra, 0 duplicates. Production was right the whole time; the
+// harness accused it of a count defect it does not have.
+//
+// So this file now obeys the rule the PRODUCT obeys under R2.5.4/R13.11: our own inability to learn
+// something is never a statement about the data. A disagreement is reported only when it survives a
+// re-read that PROVABLY spans no rebuild. One that cannot be settled is UNDECIDED — counted, named
+// and printed, never folded into a pass. This is not a tolerance and not a retry-until-green: the
+// counts are a deterministic function of the index, so a real defect reproduces on every stable read
+// and is still reported the first time it survives one.
+const undecided: string[] = [];
+const undecide = (label: string, why: string) => { undecided.push(`${label}: ${why}`); console.log(`UNDECIDED  ${label} — ${why}`); };
+
+/**
+ * A cheap exact fingerprint of the searchable index: how many rows it holds, and its newest write.
+ * Either half being unreadable yields UNREADABLE_STAMP, which settleOnOneIndex treats as "moved" —
+ * a stamp we could not read never certifies that a comparison saw one index.
+ */
+async function indexStamp(): Promise<string> {
+  const [count, newest] = await Promise.all([
+    fetch(`${REST}/rest/v1/search_listings_ar?select=listing_id`, { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } })
+      .then((r) => (r.headers.get('content-range') || '').split('/')[1] || '?').catch(() => '?'),
+    rest('search_listings_ar?select=last_updated&order=last_updated.desc.nullslast&limit=1')
+      .then((r: any) => r?.[0]?.last_updated ?? '?').catch(() => '?'),
+  ]);
+  return count === '?' && newest === '?' ? UNREADABLE_STAMP : `${count}@${newest}`;
+}
+const onOneIndex = <T>(take: () => Promise<T>) => settleOnOneIndex(indexStamp, take);
+
+/** Re-read an option's own chip from the count RPC that produced it, NOW rather than minutes ago. */
+async function chipNow(base: Record<string, unknown>, opt: Opt): Promise<number | null> {
+  if (!opt.col || !opt.countRpc) return null;
+  const row = (await rpc(opt.countRpc === 'age' ? 'property_age_option_counts_ar' : 'apartment_guided_counts_ar', countBody(base, {})))?.[0];
+  return row ? Number(row[opt.col]) : null;
+}
+
 /** One option, five witnesses, one verdict. Returns the RPC id set so combos can do set algebra. */
 async function verifyOption(label: string, base: Record<string, unknown>, opt: Opt, chip: number | null, applied: boolean, total: number | null)
   : Promise<{ ids: string[]; total: number } | null> {
@@ -306,7 +356,33 @@ async function verifyOption(label: string, base: Record<string, unknown>, opt: O
         applied ? rpc('af_eligible_count', countBody(base, opt.params)) : Promise.resolve(null),
       ]);
       if (o.unhandled.length) { skip(label, `oracle declined: ${o.unhandled[0].slice(0, 100)}`); return null; }
-      const v = judgeOption({ label, chip, applied: a == null ? null : Number(a), rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: opt.pred });
+      let v = judgeOption({ label, chip, applied: a == null ? null : Number(a), rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids, oracleRows: o.rows, pred: opt.pred });
+
+      // A disagreement is only this product's if it survives a re-read taken on ONE index state —
+      // chip included, since the chip handed in above may be many minutes old (see `indexStamp`).
+      if (!v.ok) {
+        const again = await onOneIndex(async () => {
+          const [c2, r2, o2, a2] = await Promise.all([
+            chip == null ? Promise.resolve(null) : chipNow(base, opt),
+            rpcIds(body),
+            oracle(body, strictColsOf(opt.pred)),
+            applied ? rpc('af_eligible_count', countBody(base, opt.params)) : Promise.resolve(null),
+          ]);
+          if (o2.unhandled.length) return null;
+          return judgeOption({ label, chip: c2, applied: a2 == null ? null : Number(a2), rpcTotal: r2.total, rpcIds: r2.ids, oracleIds: o2.ids, oracleRows: o2.rows, pred: opt.pred });
+        });
+        if (again.state === 'moved') {
+          undecide(label, `the searchable index was rebuilt under the read (${again.stamp}) — no verdict, in either direction`);
+          M.undecided++; return null;
+        }
+        if (again.result === null) { skip(label, 'oracle declined on the re-read'); return null; }
+        if (again.result.ok) {
+          M.reconciled++;
+          info(`${label}: disagreed on the first read and agreed on a re-read proven to span no index rebuild — the first read straddled one`);
+        }
+        v = again.result;
+      }
+
       M.missing += v.missing.length; M.extra += v.extra.length; M.dupes += v.dupes; M.nullLeaks += v.nullLeaks; M.rowViolations += v.rowViolations;
       if (v.reasons.some((x) => x.includes('≠'))) M.countMismatch++;
       if (chip === 0 || r.total === 0) {
@@ -527,10 +603,29 @@ if (!SKIP_MULTI) {
       if (!total) { info(`${tag}: empty in this scope`); continue; }
       // baseline union purity: the pair's set must be exactly the union of the two types' sets
       await withSlot(async () => {
-        const [r, o] = await Promise.all([rpcIds(searchBody(base, {})), oracle(searchBody(base, {}))]);
-        if (o.unhandled.length) { skip(`${tag} · baseline`, o.unhandled[0]); return; }
-        const v = judgeOption({ label: 'mt-base', chip: total, applied: null, rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids });
-        if (!v.ok) fail(`${tag} · baseline (type union, no AF)`, v.reasons.join(' | ')); else pass(`${tag} · baseline (type union, no AF)`, `${r.total}`);
+        const label = `${tag} · baseline (type union, no AF)`;
+        const take = async (chipNow: number | null) => {
+          const [r, o] = await Promise.all([rpcIds(searchBody(base, {})), oracle(searchBody(base, {}))]);
+          if (o.unhandled.length) return null;
+          return judgeOption({ label: 'mt-base', chip: chipNow, applied: null, rpcTotal: r.total, rpcIds: r.ids, oracleIds: o.ids });
+        };
+        let v = await take(total);
+        if (v === null) { skip(label, 'oracle declined'); return; }
+        // Same rule as verifyOption: `total` above came from a count RPC read before this pair's
+        // options were walked, so re-read it with the rest on one proven-stable index before accusing.
+        if (!v.ok) {
+          const again = await onOneIndex(async () => {
+            const g = (await rpc('apartment_guided_counts_ar', countBody(base, {})))?.[0] ?? null;
+            return take(g ? Number(g.cnt_total_base) : null);
+          });
+          if (again.state === 'moved') { undecide(label, `the searchable index was rebuilt under the read (${again.stamp}) — no verdict`); M.undecided++; return; }
+          if (again.result === null) { skip(label, 'oracle declined on the re-read'); return; }
+          if (again.result.ok) { M.reconciled++; info(`${label}: agreed on a re-read proven to span no index rebuild`); }
+          v = again.result;
+        }
+        M.missing += v.missing.length; M.extra += v.extra.length; M.dupes += v.dupes;
+        if (v.reasons.some((x) => x.includes('≠'))) M.countMismatch++;
+        if (!v.ok) fail(label, v.reasons.join(' | ')); else pass(label, `${v.counts.rpcTotal}`);
       });
       const jobs: Promise<void>[] = [];
       for (const qid of qids) {
@@ -602,8 +697,20 @@ UNKNOWN CAPTIONS VERIFIED:        ${M.unknownCaptions}
 BOUNDARIES EXERCISED/UNEXERCISED: ${M.boundariesExercised}/${M.boundariesUnexercised}
 MISSING: ${M.missing}   EXTRA: ${M.extra}   DUPLICATES: ${M.dupes}   COUNT MISMATCHES: ${M.countMismatch}
 NULL→VALUE LEAKS: ${M.nullLeaks}   ROW VIOLATIONS: ${M.rowViolations}
+RECONCILED ACROSS AN INDEX REBUILD: ${M.reconciled}   UNDECIDED (index moved, no verdict): ${M.undecided}${undecided.length ? '\n  ' + undecided.slice(0, 10).join('\n  ') : ''}
 ORACLE REFUSALS (SKIP): ${skipped.length}${skipped.length ? '\n  ' + skipped.slice(0, 10).join('\n  ') : ''}
 `);
+
+// An UNDECIDED comparison is missing coverage, not a pass — so a run that could not certify a
+// meaningful share of the surface must be loud rather than green. The index is rebuilt for ~2 of this
+// job's ~28 minutes, and a straddled comparison is re-taken in seconds, so undecided should be rare;
+// crossing the floor means the re-takes are straddling too, and the run proved little.
+const attempted = M.options + M.predicateOnly;
+const undecidedFloor = Math.max(5, Math.round(attempted * 0.01));
+if (M.undecided > undecidedFloor) {
+  fail('index stability', `${M.undecided} comparison(s) could not be settled on one index state (floor ${undecidedFloor} of ${attempted} attempted) — this run did not certify the surface`);
+}
+
 console.log(failures
   ? `✗ verify-af-full-surface-differential: ${failures} failure(s):\n` + failedLabels.map((l) => `    • ${l}`).join('\n') + '\n'
   : '✅ verify-af-full-surface-differential: every certified option shows DB truth and clicks to exactly that set\n');

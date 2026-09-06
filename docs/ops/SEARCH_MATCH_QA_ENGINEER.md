@@ -21,13 +21,32 @@ The daily question:
 على العقار، هل يوصل لنفس العقار الصحيح؟» — If not, because of a fixable Ezhalah-side bug: fix it.
 Do not ask first.
 
-**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner, 2026-08-29) — binds this routine too: fix first / report last, the six and only six reasons to stop without fixing, automatic cross-routine handoff, adaptive effort, the real 10/10 standard, and Sentry first. It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs.
+**Global policy:** `docs/ops/ENGINEER_ROUTINES.md` §G — the GLOBAL ENGINEERING POLICY (owner,
+2026-08-29, **extended 2026-09-04**) — binds this routine too, in FULL and as it stands today, not as
+it stood when this line was first written: fix first / report last (§G.1); the six and only six
+reasons to stop without fixing (§G.2), and **"a human could technically approve this" is not one of
+them (§G.2b)**; automatic cross-routine handoff via `incident_open()` / `incident_handoff()` rather
+than a sentence saying someone should look at it (§G.3); adaptive effort (§G.4); the real 10/10
+standard (§G.5); Sentry first, and your own incident queue read alongside it (§G.6, §G.6b);
+**§G.9 — a bug is CLOSED only when all seven hold: root cause fixed, related variants checked, a
+permanent barrier exists, a MUTATION has been watched to catch recurrence, the full regression suite
+passes, PRODUCTION is verified through the real path a user hits, and no equivalent hidden path
+remains. Anything short of all seven is UNKNOWN with the reason — never "fixed."** §G.10 — every
+report carries BEFORE/AFTER and ends with the mandatory block. §G.11 — tokens are not the
+constraint; optimise for correctness and permanent bug reduction. §G.7 — none of it weakens an
+existing guard.
+
+It ADDS to this spec and weakens nothing in it; where this file is stricter, this file governs. This
+enumeration was stale from 2026-09-04 to 2026-09-05: it named only the original sections, so §G.9's
+mutation and production-verification requirements reached this routine by inheritance rather than by
+being stated. They were always binding. Now they are also visible.
 
 ## §S — SENTRY (mandatory every run, owner rule 2026-08-28)
 
 On every run, read your scoped Sentry issue queue per `docs/ops/SENTRY_ROUTING.md` — the issues
 whose top-frame path matches YOUR ownership row in that table's §2. For each one: reproduce → root
-cause → fix → permanent regression barrier (mutation-proven where meaningful) → deploy through the
+cause → fix → permanent regression barrier → **mutation proof: re-introduce the defect and WATCH the
+barrier go red, then restore (§G.9.4 — required, not discretionary)** → deploy through the
 sanctioned gate if the change requires it → verify on production → **resolve the Sentry issue with
 a link to the fix commit/PR**. An issue that you resolve without a barrier is a violation of this
 contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
@@ -758,6 +777,38 @@ appears broken.
     This is §40.7 in its purest form again — the same shape as traps 15, 16 and 17: **when the probe
     and the product disagree by the whole result set, suspect the probe's ability to express the
     question before you suspect the product's ability to answer it.**
+
+19. **The results screen is a CHAT, so "the closing line" is not a single thing — read it the SAME
+    way you read the headline** (hit 2026-09-05, on every AF-scoped pagination run since the journey
+    landed on 2026-09-04). `e2e/live-sweep/showmore.mjs` read the closing line with `.match()` — the
+    **FIRST** «من أصل|لقينا N إعلان» in the whole document — while `visibleState.headline` is
+    `[...matchAll].pop()`, the **LAST**. Every earlier search's closing line stays in the transcript,
+    so the two readings land on DIFFERENT MESSAGES the moment a journey searches twice — which the
+    AF-scoped journey does by construction (the plain search, then the AF-narrowed one). Measured on
+    الرياض/بيع/فيلا: the document held `["11,254","5,970"]`, the harness compared 11,254 against a
+    headline of 5,970 and reported «closing message quotes 11,254 but the search found 5,970».
+    Production was exactly right on BOTH: 11,254 is the villa search's own total and 5,970 the same
+    search plus `p_street_width_min: 20`, each confirmed against the RPC. Fixed by reading last-first
+    on both sides; pinned, with an executed mutation proof that the old first-match reading really
+    disagrees, by `scripts/verify-live-sweep-coverage-contract.ts` §1b.
+
+    **But the SAME journey's PAGER-MISSING finding on that run was REAL, and telling them apart is
+    the whole skill.** The Advanced Filter interview deliberately hides the entire actions row while
+    it is open (`showActionsRow = (hasMore || canNarrowFurther) && !ageFlow`, owner 2026-08-21: the
+    AF card is an absolute overlay and buttons underneath it are unreachable), so a missing pager
+    THERE is intended. What was NOT intended is that the closing line kept promising it:
+    «عرضت لك أول 10 من أصل 5,970 إعلان مطابق. تبي أعرض لك المزيد، أو أساعدك توصل لنتائج أدق؟» with
+    `document.querySelectorAll('[data-testid="results-load-more"]').length === 0`. Two rendered,
+    visible sentences offering buttons that were not on the page. It needs no Advanced Filter to
+    reproduce the class: `isLatestResults` retires the actions row on every superseded turn, and the
+    wording never saw that gate either. Fixed by deriving the sentence from the same booleans the
+    Pressables are gated on (`closingNoteKey`, `src/data/resultCount.ts`), and pinned exhaustively
+    over all 16 states by `scripts/verify-closing-note-never-promises-a-missing-button.ts`.
+
+    The general lesson, and it cuts BOTH ways from traps 15–18: when an oracle and the product
+    disagree, suspect the oracle first — but *finish* the diagnosis. One run here produced one false
+    defect and one real one from the same journey, and stopping at "the harness was wrong" would have
+    shipped the real one straight past.
 
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 

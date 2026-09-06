@@ -64,6 +64,21 @@ console.log('\nRNPL/Monthly guard — asserted against the REPLAYED final state 
 // confirmed not to touch the RNPL/Monthly predicates. Remove an entry the moment its migration is
 // superseded by an explicit definition.
 const AUDITED_UNINTERPRETABLE = new Map<string, string>([
+  ['20260904143246_location_search_candidates_ar_distinct_platform_count.sql',
+   'audited 2026-09-04 (mine, read line by line): a platform-diversity experiment (distinct_platform_' +
+   'count as a new OUT column) later superseded by PR #1688\'s client-side distinctPlatformCount() ' +
+   'and fully reverted by 20260904150500 — kept as history per the migration-mirror rule. Adding an ' +
+   'OUT column changes the anonymous RETURNS TABLE row type, which CREATE OR REPLACE refuses (42P13, ' +
+   'confirmed live) — so this is DROP FUNCTION <exact old signature> followed by EXECUTE of a body ' +
+   'built from pg_get_functiondef() at apply time via seven anchor-count-guarded inline replace() ' +
+   'calls, all inside one atomic DO block. Uninterpretable to the replayer for two independent ' +
+   'reasons: the `drop function public.location_search_candidates_ar(` statement matches its ' +
+   'dropsOrAlters short-circuit outright, and separately the replace() calls pass literal strings ' +
+   'directly rather than through declared `NAME text := \'literal\'` variables, so extractPatches\' ' +
+   'idiom (a)/(b) cannot resolve them either. VERIFIED BY GREP: ZERO payment_monthly, ZERO ' +
+   'rent_now_pay_later/rnpl/RNPL, ZERO literal CREATE FUNCTION / CREATE OR REPLACE FUNCTION text (the ' +
+   'CREATE keyword only appears inside the dynamically-built new_body string). Every anchor it ' +
+   'touches names output columns or the FROM clause of the final SELECT — none is a WHERE predicate.'],
   ['20260903230551_buy_price_predicate_uses_price_total_effective_everywhere.sql',
    'audited 2026-09-03 (mine, read line by line): points the BUY budget comparison at the new ' +
    'generated column search_listings_ar.price_total_effective in four RPCs, so the Filter, the ' +
@@ -105,6 +120,25 @@ const AUDITED_UNINTERPRETABLE = new Map<string, string>([
    'predicate and reintroduce exactly the drift this guard exists to catch. The RNPL/Monthly ' +
    'predicates therefore reach the new function ONLY through that canonical clause, unchanged, and ' +
    'mon_detect_af_count_surfaces_carry_af asserts the byte-identity live every sweep.'],
+  ['20260905045146_top_cities_category_check_must_verify_the_table_too.sql',
+   'audited 2026-09-05 (mine, read line by line): fixes top_cities_by_deal_ar\'s p_category exists-' +
+   'clause, which admitted a row into a category cohort on known_type_ar.macro alone — never ' +
+   'checking the row\'s own source_table suffix unless macro=\'both\' — so a شقة-typed row sitting ' +
+   'in a _commercial_listings table (dealapp_commercial_listings#693812) leaked into a Residential ' +
+   'count (Trending 556 vs. the real 555, confirmed against location_search_candidates_ar scoped ' +
+   'the way the client scopes it, and an independent oracle, both agreeing exactly). Needle-edits ' +
+   'top_cities_by_deal_ar from its LIVE body (pg_get_functiondef) and RAISEs unless the old clause ' +
+   'occurs EXACTLY once — it cannot silently rewrite anything else, and the migration re-verifies ' +
+   'itself against the live function post-apply (the target scope must equal 555; four unrelated ' +
+   'control scopes, including a Commercial one, must be byte-identical to their pre-fix values). ' +
+   'VERIFIED BY GREP: ZERO occurrences of payment_monthly, ZERO of rent_now_pay_later/rnpl/RNPL, and ' +
+   'ZERO literal CREATE FUNCTION / CREATE OR REPLACE FUNCTION statements targeting any of the three ' +
+   'tracked readers. Its four occurrences of location_search_candidates_ar / apartment_guided_' +
+   'counts_ar / property_age_option_counts_ar are all PROSE — one explaining which RPCs ARE ' +
+   'templated (to establish why top_cities_by_deal_ar, listed separately, is NOT), the other three ' +
+   'comparing this fix\'s table-suffix logic to how location_search_candidates_ar already scopes by ' +
+   'p_tables/p_tables2. None of the three tracked readers is defined, dropped, altered, or patched ' +
+   'by this file — only top_cities_by_deal_ar, which is not on the READERS list.'],
   ['20260903175817_unknown_rent_period_stays_unknown_never_defaults_to_annual.sql',
    'audited 2026-09-03 (mine): fixes sync_search_listings_ar so a rental whose SOURCE publishes no '
    + 'period is indexed as NULL instead of being defaulted to سنوي. It needle-edits from the LIVE '

@@ -76,6 +76,30 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260830140831_res_com_collision_repair_regression_detector.sql, '
     + 'which ships + rosters + mutation-proves mon_detect_res_com_collision_repair_regression() — a '
     + 'detector that watches THIS repair (the adjudication ledger it wrote), not just its class',
+  // Fourth instance of the two-migrations-minutes-apart shape, and the first one this barrier could
+  // only ever have seen AFTER the mirror was repaired: all six of the 2026-09-05 migrations were
+  // applied to production and never committed, so while the drift was open this file did not exist
+  // in git and the barrier could not weigh it at all. That is the drift-blinds-barriers shape in
+  // miniature — the check was green because the evidence was missing, not because the rule held.
+  //
+  // The repair (incident #38) re-annualises 130 muktamel rent rows whose scraper stored the RAW
+  // monthly figure in the yearly price_annual column, so the app's /12 rendered them at a twelfth of
+  // the advertised rent. Its detector lands 3 minutes later in 20260905071148, so the repair file
+  // itself never reaches a mon_detect_* in executed SQL.
+  //
+  // Same reasoning as the first two waivers: the detector watches a CLASS (a whole platform's
+  // monthly-rent cohort sitting below a 500 SAR/month median), so it cannot by itself tell whether
+  // this particular repair still holds — which is why the companion RE-ASSERTS it. Re-assertion
+  // matters more here than in any prior case: gh-muktamel-weekly (cron jobid 14) is active=false, so
+  // no future crawl will ever re-correct these rows, and the ledger's price_before/price_after are
+  // the only record of what the source actually published. Open the two companions to check this
+  // reason rather than taking it on trust.
+  '20260905070828_repair_muktamel_raw_monthly_rent_stored_in_price_annual.sql':
+    'watched by its companions 20260905071148_barrier_a_whole_platform_monthly_rent_cohort_that_was_'
+    + 'never_annualised.sql, which ships + rosters mon_detect_unannualised_rent_cohort(), and '
+    + '20260905072446_rent_annualisation_repair_reasserts_itself_and_runs_its_watching_detector.sql, '
+    + 'which re-asserts the same UPDATE idempotently from the ops_rent_annualisation_repair ledger '
+    + 'and runs that detector',
   // A different shape from the three above: this one is NOT A REPAIR AT ALL. Its statement is
   // `update search_listings_ar set city_id = city_id where city_id in (3677, 12)` — a self
   // assignment. It writes each row's existing value back over itself and therefore cannot change,
@@ -90,6 +114,19 @@ const WAIVED: Record<string, string> = {
     'not a repair — the UPDATE is a self-assignment (city_id = city_id) that exists solely to fire '
     + 'the set_match_city_ids trigger; it writes each row its own existing value, so no listing '
     + 'data changes and there is no repaired state to decay',
+  // Recovered 2026-09-06 (mirroring 18 migrations that blocked the remal/amaall launch deploy —
+  // live in production, never committed). ops_incident #78: wasalt_placeholder_price_is_never_
+  // stored() is a STANDING TRIGGER (CREATE OR REPLACE FUNCTION ... RETURNS TRIGGER), not an ad-hoc
+  // UPDATE — it corrects every future write on the way in, so there is no one-time repaired state
+  // that can silently decay. The migration's own header calls it "prevention layered on top of"
+  // mon_detect_placeholder_price_stored (20260906043755, ops_incident #63), which already reads
+  // every stored row against its archived source payload twice an hour and would report within 30
+  // minutes if this trigger were ever dropped — the detector this classifier is looking for exists,
+  // it simply predates this migration by one file rather than following it.
+  '20260906045735_a_merged_scraper_fix_does_not_bind_a_running_job.sql':
+    'a standing trigger (prevention), not a backfill — watched by mon_detect_placeholder_price_'
+    + 'stored (20260906043755, ops_incident #63), which the migration\'s own header names as the '
+    + 'detection layer this trigger sits in front of',
 };
 
 // Enforcement starts here — the day this rule landed.

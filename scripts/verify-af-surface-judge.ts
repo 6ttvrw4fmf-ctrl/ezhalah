@@ -11,7 +11,8 @@
 
 import {
   judgeOption, judgeUnion, judgeIntersection, judgeZero, judgeUnknownCaption, boundaryReport,
-  rowSatisfies, strictCols, optionWouldRender, type Pred, type OptionEvidence,
+  rowSatisfies, strictCols, optionWouldRender, settleOnOneIndex, UNREADABLE_STAMP,
+  type Pred, type OptionEvidence,
 } from './lib/afSurfaceJudge.ts';
 
 let failures = 0;
@@ -96,6 +97,48 @@ mustReject('a row check that covered fewer rows than the set it judged', judgeOp
   check('render gate: below the 5-listing floor never renders', !optionWouldRender(4, 1000) && optionWouldRender(5, 1000));
   check('render gate: an option that removes < 10% and leaves > 25 does not render (I: 47 of 50)', !optionWouldRender(47, 50) && optionWouldRender(45, 50));
   check('render gate: an option that reaches ≤ 25 renders regardless of the 10% rule (H: 26 → 25)', optionWouldRender(25, 26));
+}
+
+// ── a verdict must describe ONE state of the index ───────────────────────────────────────────────
+// settleOnOneIndex() is what stops the live sweep reporting an index rebuild as a product defect
+// (2026-09-04: Villa+Farm/Buy @region:1 failed all four of its checks inside the 09:14–09:21 window
+// that holds sync_search_listings_ar and the location MV refresh, while every witness agreed exactly
+// — 11,720 — on a quiet index). It must gate in BOTH directions: excuse nothing while the index
+// holds still, and certify nothing while it does not.
+{
+  // A stamp source that answers from a script, so "the index moved" is a fact of the test, not luck.
+  const stamps = (...seq: string[]) => { let i = 0; return async () => seq[Math.min(i++, seq.length - 1)]; };
+  let takes = 0;
+  const take = async <T>(v: T) => { takes++; return v; };
+
+  const held = await settleOnOneIndex(stamps('100@t1', '100@t1'), () => take('verdict'));
+  check('a comparison taken while the index held still is SETTLED, and its result is passed through',
+    held.state === 'stable' && held.state === 'stable' && held.result === 'verdict');
+
+  takes = 0;
+  const moved = await settleOnOneIndex(stamps('100@t1', '101@t2'), () => take('verdict'));
+  check('MUTATION — a comparison that straddled a rebuild yields NO verdict in either direction',
+    moved.state === 'moved', `state=${moved.state}`);
+  check('a straddled comparison still ran its take exactly once (it is undecided, not skipped blind)', takes === 1);
+
+  const rowCountSame = await settleOnOneIndex(stamps('100@t1', '100@t2'), () => take('verdict'));
+  check('MUTATION — a rebuild that leaves the ROW COUNT unchanged is still caught (the newest write moved)',
+    rowCountSame.state === 'moved');
+
+  const newestSame = await settleOnOneIndex(stamps('100@t1', '99@t1'), () => take('verdict'));
+  check('MUTATION — a rebuild that leaves the NEWEST WRITE unchanged is still caught (the row count moved)',
+    newestSame.state === 'moved');
+
+  const blind = await settleOnOneIndex(stamps(UNREADABLE_STAMP, UNREADABLE_STAMP), () => take('verdict'));
+  check('FAIL-CLOSED — an unreadable stamp is UNDECIDED, never a certified comparison',
+    blind.state === 'moved', 'two equal unreadable stamps must not be mistaken for a stable index');
+
+  // The whole point: settling must not launder a real disagreement into a pass.
+  const realDefect = await settleOnOneIndex(stamps('100@t1', '100@t1'),
+    async () => judgeOption({ ...good, chip: 4 }));
+  check('a REAL disagreement on a stable index still reaches the caller as a red verdict',
+    realDefect.state === 'stable' && !realDefect.result.ok
+    && realDefect.result.reasons.some((r) => r.includes('chip 4')), 'settling must never excuse a defect');
 }
 
 console.log(failures ? `\n✗ ${failures} check(s) FAILED\n` : '\n✓ the AF surface judge rejects every single-fault corruption of a correct case\n');

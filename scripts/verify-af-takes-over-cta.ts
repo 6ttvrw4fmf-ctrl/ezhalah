@@ -40,7 +40,7 @@ console.log('\nAdvanced Filter takes over the CTA space\n');
 // decide whether it may mention the buttons) — same gate, same semantics, just named. Accept either
 // shape: the definition carrying the exact boolean expression, and the JSX still branching on it.
 check('the pre-AF CTA row is hidden while the AF flow is open',
-  /const showActionsRow = \(hasMore \|\| canNarrowFurther\) && !ageFlow;/.test(code)
+  /const showActionsRow = \(hasMore \|\| canNarrowFurther\)\s*\n\s*&& !afInterviewOwnsBrowsing\(ageFlow\?\.phase \?\? null\);/.test(code)
   && /\{showActionsRow \? \(/.test(code),
   'without `&& !ageFlow` in the gate (or a branch that no longer uses it) the two buttons keep rendering underneath the AF overlay');
 

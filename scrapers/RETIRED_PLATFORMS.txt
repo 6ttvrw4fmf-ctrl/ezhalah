@@ -36,8 +36,18 @@
 #             KEPT ACTIVE and user-visible; the sitemap held 138 URLs with newest lastmod
 #             2026-07-13, so nothing new was being missed at retirement. Un-retiring requires a
 #             non-runner egress IP (residential proxy), not just re-adding the matrix line.
+# awal      — UN-RETIRED 2026-09-04 (owner-instructed). WAS retired 2026-07-28: awaalun.com had
+#             lapsed to a GoDaddy parking page serving 133-byte redirect stubs. RE-PROBED
+#             2026-09-04 from a clean egress: the site is BACK and serving real inventory —
+#             /wp-json/wp/v2/rtcl_listing returns HTTP 200 with x-wp-total: 128, and the
+#             shipped scraper parses all 128 into rows with 128 DISTINCT ad_numbers, 128
+#             distinct listing_urls and 128 distinct descriptions (no duplication). Newest
+#             listing is 2026-02-14, so the inventory is real but STALE — recorded here so
+#             nobody reads its low churn as a broken crawl. The source publishes NO prices
+#             (0/128 in both the REST payload and the detail pages, verified live); that is a
+#             SOURCE fact, not a parse gap, and is consistent with the 7,534 priceless rows
+#             (3.83%) already live from other platforms. Nothing is inferred to fill it.
 toor
 alnokhba
 muktamel
 deal
-awal  # domain parked + link-rot inactivated 2026-07-28 (PR#252/#255); 0 active rows

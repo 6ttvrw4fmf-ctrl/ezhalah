@@ -31,17 +31,40 @@ DIRECT_REVISIT = "DIRECT_REVISIT"
 CANDIDATE_PLUS_DIRECT = "CANDIDATE_PLUS_DIRECT"
 CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 
-# REGISTERED IS NOT THE SAME AS SEARCHABLE (2026-09-03). abralosol, aouj, arkaan, rawasidark and
-# therc have 4,314 production_ready rows live in search_listings_ar and rows in
+# REGISTERED IS NOT THE SAME AS SEARCHABLE (2026-09-03, corrected 2026-09-04). abralosol, aouj,
+# arkaan, rawasidark and therc have 4,314 production_ready rows live in search_listings_ar and rows in
 # ops_liveness_registry (migration 20260903042707), so MONITORING must know their strategy — a live
-# row nothing grades is exactly the blind spot this registry exists to remove. They are deliberately
-# NOT in the client's RES_TABLES/COM_TABLES and no search can return them yet: district
-# canonicalization, af_platform_mapping and a SOURCE_TOKENS entry are still missing per platform.
-# Their unreachability is declared and counted by scripts/verify-every-live-table-is-searchable.ts.
+# row nothing grades is exactly the blind spot this registry exists to remove.
+#
+# They ARE searchable now: PR #1548 added all ten tables to the client lists, and the searchable
+# inventory is no longer a hand-kept list at all — src/data/remote.ts's SEARCHABLE_TABLES is generated
+# from production's own union arms (scripts/gen-searchable-tables.ts). The join between "live in the
+# database" and "reachable by a real search" is asserted, in both directions, by
+# scripts/verify-searchable-scope-matches-inventory.ts, which superseded
+# verify-every-live-table-is-searchable.ts and its acknowledged-debt list.
 #
 # Platforms that exist in scrapers/ but are NOT production-searchable, so they need no policy.
 # Kept in sync with scrapers/RETIRED_PLATFORMS.txt + the paused/gated ones.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "muktamel", "awal", "deal", "common"})
+# muktamel LEFT this set on 2026-09-04 (migration
+# 20260904151723_muktamel_liveness_policy_paused_is_not_unsearchable): "paused" was a CADENCE fact —
+# its two tables never left the client scope, and a gated run put 523 production_ready rows into
+# search_listings_ar with 0 ever verified alive and no grace contract. Production re-seeded the
+# registry with it at CRAWL_PRESENCE_ONLY/3/168; this mirror follows production, it does not vote.
+# awal LEFT this set on 2026-09-04 (migration 20260905023206_awal_un_retired_source_serves_real_listings_again):
+# awaalun.com no longer serves the 2026-07-28 parking-page stub — x-wp-total 128, 128 distinct
+# ad_numbers parsed by the unchanged shipped scraper. Registered at CRAWL_PRESENCE_ONLY/168/3 below.
+# alta and shmoualshmal JOIN this set on 2026-09-05 (owner-instructed, from the 40-candidate audit).
+# CRAWL_PRESENCE_ONLY is the honest tier for both: each is a small WordPress REST catalogue re-read
+# in full every run, with no per-listing revisit endpoint, so absence is a strong hint and never
+# proof. alta additionally publishes an explicit property_status (تم البيع / تم التأجير / غير متاح)
+# which its scraper reads directly — that is SOURCE-STATED removal, a stronger signal than crawl
+# absence, and it deactivates through the scraper, never through this monitoring tier.
+# remal and amaall JOIN this set on 2026-09-06 (owner-instructed, continuing the 40-candidate
+# audit). CRAWL_PRESENCE_ONLY is the honest tier for both: small WordPress catalogues re-read in
+# full each run with no per-listing revisit endpoint. amaall additionally publishes an explicit
+# property_status (تم البيع / تم التأجير / تم التأجير بالكامل) which its scraper reads directly —
+# that is SOURCE-STATED removal and deactivates through the scraper, never through this tier.
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common"})
 
 
 class _P(dict):
@@ -97,6 +120,33 @@ POLICIES: dict[str, _P] = {
         "see docs/ops/LISTING_LIVENESS.md §5.1-5.2.",
     ),
     # ── Tier 3: known gaps — recorded honestly so monitoring can see them ───────────────────────
+    # aqargate is spelled out rather than left in the comprehension below, because the
+    # comprehension's shared death_signals string ("none (absence from the crawl only)") stopped
+    # being true for it on 2026-09-06: its prune now requires an affirmative per-listing answer.
+    # The TIER is deliberately unchanged, and that is the honest reading, not a downgrade:
+    # CANDIDATE_PLUS_DIRECT is what the DEACTIVATION PATH now does, but the tier and its SLA measure
+    # whether the POPULATION carries recent affirmative verification — and it still does not, because
+    # prune_unseen() probes only the handful of rows already at grace and never stamps
+    # last_verified_alive_at. Relabelling it tier 2 today would claim coverage nothing measures and
+    # would raise a guaranteed P1 liveness_verification_sla from 2026-09-13 (floor 50%, actual ~0%),
+    # which LISTING_LIVENESS.md §7 forbids answering with a label change. Promoting it is earned by
+    # adding a sweep that verifies the population, not by editing this string.
+    "aqargate": _P(
+        _pol("aqargate", 3, 168), CRAWL_PRESENCE_ONLY,
+        "wp-json post status: `expired` (and draft/pending/private/trash/future), or a 404 the API "
+        "itself attributes to rest_post_invalid_id (post deleted). A 404 WITHOUT that code, any "
+        "401/403/408/429/5xx, an unparseable body, an id mismatch and an unrecognised status are all "
+        "UNKNOWN and hold the strike without deactivating.",
+        "Absence from the full-catalogue crawl now only SELECTS candidates; scrapers/aqargate/run.py"
+        "::_verify_gone gives each at-grace row a DIRECT confirm before prune_unseen may deactivate "
+        "it. Control-validated 2026-09-06 against the failure mode this platform actually uses: "
+        "aqargate usually does NOT delete a lapsed post, it flips wp status publish -> expired and "
+        "keeps serving HTTP 200, so a naive 200⇒live oracle would have called every expired ad "
+        "alive. Measured that day: 7/7 rows aged out were `expired`, 8/8 healthy rows `publish`, and "
+        "the only 3 active rows absent from the source's 200-id published set were exactly the 3 "
+        "carrying strikes (1 expired, 2 hard-deleted). Population coverage is still 0% — see the "
+        "tier note above.",
+    ),
     **{
         p: _P(_pol(p, 3, 168), CRAWL_PRESENCE_ONLY,
               "none (absence from the crawl only)",
@@ -104,10 +154,12 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "aouj", "aqaratikom",
-            "aqarcity", "aqargate", "aqarmonthly", "arkaan", "eaqartabuk", "eastabha", "erapulse",
-            "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "mustqr", "nowaisiry", "october",
-            "raghdan", "ramzalqasim", "rawasidark", "sadin", "sanadak", "satel", "souq24", "therc",
+            "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "alta", "amaall", "aouj", "aqaratikom",
+            "aqarcity", "aqarmonthly", "arkaan", "awal", "eaqartabuk", "eastabha", "erapulse",
+            "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry",
+            "october",
+            "raghdan", "ramzalqasim", "rawasidark", "remal", "sadin", "sanadak", "satel",
+            "shmoualshmal", "souq24", "therc",
         )
     },
 }
