@@ -87,8 +87,15 @@ const INTERVIEW_STOP_AT = 25;             // R5.1.1 / R11.1
 // option with MORE than PAGE0_BUFFER rows, and up to ceil(1500/100) + 1 clicks to reach the seam.
 const PAGE0_BUFFER = 1500;
 const MAX_LOAD_MORE_CLICKS = 25;
-const FIRST_PAGE = 10;                    // cards shown before any «عرض المزيد»
+// A FLOOR, never the first page itself: initialReveal() widens it to the number of matching
+// platforms (owner 2026-09-02). Nothing here may treat it as "the number of cards before the first
+// «عرض المزيد»" — that assumption is half of ops_incident #125.
+const FIRST_PAGE = 10;
 const BROWSE_BATCH = 100;                 // each «عرض المزيد» reveals to the next 100-boundary
+// How long one «عرض المزيد» may take to settle. The click that spends the page-0 buffer is a real
+// backend round trip plus a ~100-card cascade, so it is budgeted as a backend turn rather than a
+// paint — the shared constant, not a number typed here (owner rule 2026-09-06).
+const REVEAL_SETTLE_MS = AGENT_TURN_MS;
 const ID_CAP = 30000;
 
 const AF_PREDICATE_KEYS = [
@@ -377,6 +384,43 @@ const READ_CARD = () => {
   return { hasCard: true, q, chip: Number.isFinite(chip as number) ? chip : null, options, unknown, hasSkip: !!card.querySelector('[data-testid="af-skip"]') };
 };
 type CardState = ReturnType<typeof READ_CARD>;
+
+/**
+ * The listing ids rendered on the NEWEST results turn, in document order.
+ *
+ * WHY NOT A DELTA (ops_incident #125, 2026-09-06). The pagination proof used to count every card on
+ * the PAGE and subtract a baseline snapshot, adding back a hardcoded FIRST_PAGE for the newest
+ * turn's first page. Both halves were wrong, and together they accused a correct production:
+ *
+ *   · the baseline was captured while the newest turn was still DRIPPING its first page in, so it
+ *     recorded 8 cards for a turn whose first page is ≥10 — a constant +2 on every later reading.
+ *     Measured live: 102, 202, 302 … 1502, against a product sequence of 100, 200, 300 … 1500 that
+ *     is EXACTLY the owner's 2026-08-29 boundary rule.
+ *   · FIRST_PAGE is not the first page. initialReveal() is
+ *     min(max(FIRST_PAGE, distinctPlatformCount), fetched) — the owner's 2026-09-02 "the first
+ *     screen is as wide as the market" rule — so assuming 10 is wrong on any scope that matches
+ *     more than ten platforms, which is most of them.
+ *
+ * Turns are delimited by their headline («لقينا N إعلان …»), so everything after the LAST headline
+ * belongs to the newest turn. Scoping the count removes the baseline, the first-page assumption and
+ * the previous-turn cards in one move: the returned length IS the newest turn's reveal, and the ids
+ * let the run prove the user sees the fetched set exactly — in order, once each.
+ */
+const READ_TURN_CARDS = () => {
+  let last: Element | null = null;
+  document.querySelectorAll('div,span,p').forEach((e: any) => {
+    if (e.children.length) return;
+    if (/لقينا\s*[\d,٠-٩۰-۹]+\s*(إعلان|عقار)/.test((e.innerText || '').trim())) last = e;
+  });
+  const head = last as Element | null;
+  const cards = [...document.querySelectorAll('[data-testid^="card-listing-"]')];
+  const mine = head
+    ? cards.filter((c) => (head.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0)
+    : cards;
+  return mine
+    .map((c) => Number(/^card-listing-(\d+)$/.exec(c.getAttribute('data-testid') || '')?.[1]))
+    .filter((n) => Number.isFinite(n));
+};
 
 /** Rendered result cards on the whole page — counted by their «#N» rank badge. Earlier turns are
  *  static, so a DELTA against a snapshot is the count on the newest turn. */
@@ -889,22 +933,12 @@ try {
   // and report «no button» against a turn that was still dripping its first page in. A turn with a
   // non-zero total must eventually render at least one card; waiting for that is not a weakened
   // assertion, because a button that never arrives still fails — only the race is removed.
-  let cardsBefore = 0;
-  {
-    const until = Date.now() + 30_000;
-    let stable = 0;
-    while (Date.now() < until) {
-      await page.waitForTimeout(700);
-      const n: number = await page.evaluate(COUNT_CARDS);
-      if (n > 0 && n === cardsBefore) { if (++stable >= 2) break; } else { stable = 0; }
-      cardsBefore = n;
-    }
-  }
-  const alreadyShown = Math.min(landed.total ?? 0, FIRST_PAGE);
   const armed4 = searches.length;
   let clicks = 0;
   let revealed = 0;
   let lastRevealCheckOk = true;
+  const settleFailures: string[] = [];
+  const revealSnapshots: number[][] = [];
   // Click until a NETWORK page (p_offset > 0) has fired — that is the only click that proves R10.1.1
   // — or until the button is gone / the cap is hit. Past the seam one more click is enough.
   let networkPageSeen = false;
@@ -924,19 +958,33 @@ try {
       }
     }
     if (!btn) break;
-    const shownBefore: number = await page.evaluate(COUNT_CARDS);
+    const shownBefore: number = (await page.evaluate(READ_TURN_CARDS)).length;
     await btn.click();
     clicks++;
-    const until = Date.now() + 15_000;
+    // OBSERVE THE REVEAL SETTLING; NEVER SAMPLE A MOVING CASCADE (owner rule, 2026-09-06: the
+    // ten-second searching beat is INTENTIONAL product behaviour, so an AF/Trending journey observes
+    // the real arrival and never assumes a duration). The click that spends the page-0 buffer fires
+    // a NETWORK page and then drips ~100 more cards in; the old fixed 15s budget expired inside that
+    // cascade and read 1507 of a target 1600 — the second half of ops_incident #125.
+    //
+    // The wait is QUIESCENCE (grew, then stopped moving, with the button idle), never "reached the
+    // number I am about to assert" — waiting for the boundary would hide a genuine under-reveal by
+    // turning it into a timeout. A cascade that never settles FAILS below with what it reached.
     let shown = shownBefore;
-    while (Date.now() < until) {
-      await page.waitForTimeout(600);
-      const now: number = await page.evaluate(COUNT_CARDS);
-      const stillBusy = await page.evaluate(() => { const b = document.querySelector('[data-testid="results-load-more"]') as any; return !!b && (b.getAttribute('aria-disabled') === 'true' || b.disabled === true); });
-      if (now > shownBefore && now === shown && !stillBusy) break;
-      shown = now;
-    }
-    revealed = shown - cardsBefore + alreadyShown;
+    const settled = await settleUntil(
+      async () => {
+        const ids: number[] = await page.evaluate(READ_TURN_CARDS);
+        const n = ids.length;
+        const busy = await page.evaluate(() => { const b = document.querySelector('[data-testid="results-load-more"]') as any; return !!b && (b.getAttribute('aria-disabled') === 'true' || b.disabled === true); });
+        const quiet = n > shownBefore && n === shown && !busy;
+        shown = n;
+        return { n, ids, quiet };
+      },
+      (v) => v.quiet,
+      REVEAL_SETTLE_MS, (ms) => page.waitForTimeout(ms), 700);
+    revealed = settled.value.n;
+    revealSnapshots.push(settled.value.ids);
+    if (!settled.settled) settleFailures.push(`click ${clicks} never settled (reached ${revealed})`);
     const expected = Math.min(landed.total ?? 0, BROWSE_BATCH * clicks);
     lastRevealCheckOk = lastRevealCheckOk && revealed === expected;
     networkPageSeen = searches.slice(armed4).some((s) => Number(s.body?.p_offset ?? 0) > 0);
@@ -1004,8 +1052,60 @@ try {
       [...SCOPE_ALL_KEYS, ...AF_PREDICATE_KEYS].filter((k) => JN(landed!.body[k]) !== JN(pb[k])).map((k) => `${k}: ${J(landed!.body[k])} → ${J(pb[k])}`).join(' · ') || 'identical');
   }
   if (clicks > 0) {
+    // A cascade that never came to rest is never folded into a pass: the number below would be a
+    // sample of something still moving, which is exactly how #125 was written.
+    check('4. R10.1.1 — every «عرض المزيد» came to rest before it was judged', settleFailures.length === 0,
+      settleFailures.join(' · ') || `${clicks} click(s) all settled within ${REVEAL_SETTLE_MS}ms`);
     check('4. R10.1.1 — every click revealed exactly to the next 100-boundary (or the end of the set)', lastRevealCheckOk && revealed === Math.min(landed.total ?? 0, BROWSE_BATCH * clicks),
       `revealed=${revealed} total=${landed.total} clicks=${clicks}`);
+  }
+
+  // ── THE VISIBLE SET IS THE FETCHED SET, EXACTLY (owner checklist, 2026-09-06) ──────────────────
+  // The count agreeing is not the same as the user seeing the right listings. These read the ids the
+  // browser actually rendered on the newest turn and hold them to the rows the backend actually
+  // returned, in order — so a duplicate, a skipped row, a missing row, or a stale card left over
+  // from an earlier turn is a named failure rather than a number that happens to add up.
+  const turnIds: number[] = clicks > 0 ? await page.evaluate(READ_TURN_CARDS) : [];
+  if (turnIds.length) {
+    const dupes = turnIds.filter((id, i) => turnIds.indexOf(id) !== i);
+    check('4. R10.1.1 — no listing is revealed twice on the newest turn',
+      dupes.length === 0, dupes.length ? `${dupes.length} duplicate(s), sample ${[...new Set(dupes)].slice(0, 3).join(',')}` : `${turnIds.length} card(s), all distinct`);
+
+    // NO STALE, NOTHING INVENTED — a SET relation, deliberately not an ordering one.
+    // A first draft of this check asserted the visible cards were the first N of the RPC's row
+    // order and failed with «first divergence at index 0 · missing 53 · stale 0». That was the
+    // CHECK being wrong, not production: AGENTS.md's MATCH-FIRST rule says a post-match stage may
+    // REORDER the matched set and show a PAGE of it — platform diversity does exactly that — and
+    // forbids only ADDING. `listings` is already the client's diversity-ordered array, so DOM order
+    // and RPC candidate order legitimately differ, and 53 rows pulled forward from beyond position
+    // 1,600 is that rule working. `stale = 0` was the half that actually mattered, and it held.
+    const fetchedIds = new Set(unionIds.map((k) => Number(String(k).split(':')[1])));
+    const stale = turnIds.filter((id) => !fetchedIds.has(id));
+    check('4. R10.1.1 — every revealed card came from the fetched set (nothing invented, no stale transcript card)',
+      stale.length === 0,
+      stale.length ? `${stale.length} visible id(s) the backend never returned, sample ${stale.slice(0, 3).join(',')}`
+                   : `${turnIds.length} visible ⊆ ${fetchedIds.size} fetched`);
+
+    // MONOTONE PAGING — the invariant an ordering check was reaching for, expressed so that a
+    // legitimate reorder passes and a real defect cannot. «عرض المزيد» reveals MORE of the same
+    // list; it must never drop a card the user has already scrolled past. A re-shuffle on load-more
+    // that silently retires an earlier row would be invisible to every count-based assertion above.
+    const dropped = revealSnapshots.flatMap((cur, i) =>
+      i === 0 ? [] : revealSnapshots[i - 1].filter((id) => !cur.includes(id)).map((id) => `click ${i + 1} dropped ${id}`));
+    check('4. R10.1.1 — no click ever drops a card an earlier click had already revealed',
+      dropped.length === 0,
+      dropped.length ? `${dropped.length} drop(s), sample ${dropped.slice(0, 3).join(' · ')}`
+                     : `${revealSnapshots.length} snapshot(s), each a superset of the last`);
+
+    if (landedOracleIds) {
+      const ineligible = turnIds.filter((id) => ![...landedOracleIds!].some((k) => Number(String(k).split(':')[1]) === id));
+      check('4. R10.1.1 — every card the user can SEE satisfies the predicate (DOM ⊆ independent DB oracle)',
+        ineligible.length === 0,
+        ineligible.length ? `${ineligible.length} visible card(s) outside the oracle, sample ${ineligible.slice(0, 3).join(',')}` : `${turnIds.length} visible ⊆ ${landedOracleIds.size} eligible`);
+    }
+  } else if (clicks > 0) {
+    check('4. R10.1.1 — the newest turn\'s rendered ids could be read', false,
+      'READ_TURN_CARDS returned nothing after a successful pagination walk — the turn-scoping selector has drifted');
   }
   check('4. R10.1.1 — the cards the user can reach never exceed what was fetched', revealed <= unionIds.length, `revealed=${revealed} fetched=${unionIds.length}`);
   check('4. R10.1.1 — no card repeats across pages (union of every fetched page has no duplicate ID)', R.noDuplicates(unionIds), `${unionIds.length} row(s), ${new Set(unionIds).size} distinct`);
