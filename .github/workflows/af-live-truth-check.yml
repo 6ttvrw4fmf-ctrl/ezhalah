@@ -151,6 +151,8 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-property-type-differential.ts
+      - name: Every active platform's DB photo actually renders on the card (CORP/redirect)
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-card-photos-render-live.ts
 
       # The LIVE half of verify-trending-carries-full-filter-state.ts (split out 2026-09-02). Its
       # SOURCE half is offline and stays in `npm test`; these checks call top_cities_by_deal_ar and
