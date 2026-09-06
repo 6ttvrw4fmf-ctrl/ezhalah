@@ -20,6 +20,7 @@ import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
 import SignInCard from '@/components/SignInCard';
 import GoogleOneTap from '@/components/GoogleOneTap';
+import CookieConsent from '@/components/CookieConsent';
 import IntroVideo from '@/components/IntroVideo';
 
 // RC-A (hardening 2026-07-13): last-resort net. Nothing in the app caught unhandled promise
@@ -143,6 +144,8 @@ function Shell() {
           is active (owner 2026-08-15), never a route the user navigates to. Since the 2026-08-29
           revision it opens ONLY via explicit sign-in controls (openAuth) — it never auto-raises. */}
       <AuthModal />
+      {/* Cookie consent — bottom-corner card, once per signed-out web visitor (owner 2026-09-06). */}
+      <CookieConsent />
       {/* First-run cinematic intro — overlays everything; shows once for new logged-out visitors. */}
       <IntroVideo />
     </View>
