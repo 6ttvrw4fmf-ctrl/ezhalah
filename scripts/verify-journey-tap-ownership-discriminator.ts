@@ -58,9 +58,27 @@ console.log('§1 the three answers a probed point can give');
 {
   // Hit something real, but it is inside no control — also not a capture, and a different story
   // from a null: the engine resolved the point, it just did not land in a control.
-  const r = classifyTapOwnership({ top: { hitNull: false, hitTag: 'span', ownerLabel: null } });
+  const r = classifyTapOwnership({ top: { hitNull: false, hitTag: '<span> 10x10 at 0,0 z=auto pos=static pointer-events=auto', ownerLabel: null } });
   check('a point landing on a NON-CONTROL element is blind, and says what it landed on',
-    Object.keys(r.stolen).length === 0 && r.blind.top === 'the hit test landed on <span>, which is inside no control');
+    Object.keys(r.stolen).length === 0
+      && r.blind.top === 'the hit test landed on <span> 10x10 at 0,0 z=auto pos=static pointer-events=auto, which is inside no control');
+}
+{
+  // THE MEASURED CASE (#120, WebKit sweep 2026-09-06): the point resolved to a THIRD-PARTY
+  // OVERLAY, not to app furniture and not to nothing. Naming it — and its box — is what turned
+  // «resolves to nothing» into a diagnosis, so the descriptor must survive into the message
+  // intact: an overlay's identity, geometry and z-index are the finding.
+  const GIS = '<iframe src=https://accounts.google.com/gsi/iframe/select> 375x144 at 0,668 z=9999 pos=fixed pointer-events=auto';
+  const r = classifyTapOwnership({ centre: { hitNull: false, hitTag: GIS, ownerLabel: null } });
+  check('an overlaying third-party frame is reported with its src, box and z-index, not as «nothing»',
+    r.blind.centre === `the hit test landed on ${GIS}, which is inside no control`
+      && r.blind.centre.includes('accounts.google.com') && r.blind.centre.includes('z=9999'));
+}
+{
+  // A descriptor the page could not build must not silently become an empty message.
+  const r = classifyTapOwnership({ left: { hitNull: false, hitTag: null, ownerLabel: null } });
+  check('an undescribable hit still reports a blind point rather than an empty string',
+    r.blind.left === 'the hit test landed on an element it could not describe, which is inside no control');
 }
 {
   // Mixed: the two must not contaminate each other.
@@ -172,6 +190,9 @@ console.log('\n§3 the journey uses the classifier and reports what it measured'
     /rect\(x,y,w,h\)=\$\{JSON\.stringify\(c\.rect\)\} viewport=\$\{JSON\.stringify\(vp\)\}/.test(runner));
   check('the probe still reports raw facts (hitNull / ownerLabel), so the verdict stays in one place',
     runner.includes('hitNull: !hit') && runner.includes('ownerLabel: o ?'));
+  check('the probe NAMES and MEASURES what it hit (src, box, z-index) — the half that ended #120\'s diagnosis',
+    runner.includes('hitTag: hit ? desc(hit) : null')
+      && /src=.*String\(el\.src\)/.test(runner) && runner.includes("' z=' + cs.zIndex"));
   check('this barrier runs in npm test', npmTestRuns(ROOT, 'verify-journey-tap-ownership-discriminator'));
 }
 
