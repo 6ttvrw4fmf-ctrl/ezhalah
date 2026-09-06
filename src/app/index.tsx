@@ -232,7 +232,24 @@ export default function Home() {
   // bothDeals from every write into this store; parity that depends on an unrelated guard is not
   // parity. Call the results RPC's own derivation instead, so the two cannot diverge at all.
   // (scripts/verify-rent-period-token-has-one-derivation.ts)
-  const rentPeriodTok: string | null = rentPeriodParam(query);
+  //
+  // ONE DERIVATION OVER ONE INPUT (2026-09-06, red team — the half the line above was missing).
+  // Sharing the FUNCTION is only half of parity; the two paths must also feed it the SAME query.
+  // The ternary this replaced read the NORMALIZED local `rentPeriod` (validRentPeriod(…) ?? 'annual'),
+  // while rentPeriodParam(query) reads `query.rentPeriod` RAW — and the store holds `undefined` there
+  // for every Rent search until the user taps a period button, because HOME_DEFAULT_QUERY/
+  // sanitizeForFilterRestore leave it unset, tapping «إيجار» never sets it, and tapping «سنوي» is a
+  // documented no-op against the same 'annual' default. So the DEFAULT Rent search sent null (no
+  // period filter, unpublished-period rows swept in) from the count surfaces while buildFilterBaseQuery
+  // below defaulted to 'annual' and the results RPC sent 'سنوي' — the advertised count describing a
+  // BROADER set than the search returns, the same Trending-vs-results scope class in the opposite
+  // direction, on the one state every Rent search starts in. The screen shows «سنوي» selected there,
+  // so the UI and the search were right and the counts dissented.
+  // Normalise ONCE, here, and let both the count token and buildFilterBaseQuery read that one object,
+  // so a query the counts describe and a query the search runs cannot differ by construction.
+  // (scripts/verify-count-and-search-share-one-query.ts)
+  const queryForPeriod: SearchQuery = effDeal === 'Rent' ? { ...query, rentPeriod } : query;
+  const rentPeriodTok: string | null = rentPeriodParam(queryForPeriod);
   // COUNT-SCOPE PARITY (findings 2026-08-13, R1): every City/District pool call is scoped to the
   // category the results RPC will ACTUALLY search — the picked category, else the same implied
   // default remote.ts applies to a category-less search (imported, never a duplicated literal).
@@ -590,12 +607,18 @@ export default function Home() {
     if (!citySelected) return null;
     const lm = resolveCitySelection(citySelected);
     return {
-      ...query,
+      // THE SAME OBJECT THE COUNT TOKEN WAS DERIVED FROM (2026-09-06, red team). This used to
+      // re-apply its own `query.rentPeriod ?? 'annual'` default here, a SECOND normalisation beside
+      // the one at the top of this component — so the count surfaces and the search could still be
+      // handed different periods even after they started sharing rentPeriodParam(). queryForPeriod
+      // is that one normalisation; reading it here makes "the number beside a district = what
+      // selecting it returns" true by construction on the period axis rather than by two
+      // expressions happening to agree. It also folds an unrecognised stored value to the default
+      // exactly once, where the old `?? 'annual'` passed it straight through to the RPC.
+      // (scripts/verify-count-and-search-share-one-query.ts)
+      ...queryForPeriod,
       location: lm.label,
       locationMatch: lm,
-      // effDeal reads null under combined mode, so this correctly skips the 'annual' default there too
-      // (harmless either way — remote.ts's rentPeriodParam forces null whenever dealCombined is set).
-      rentPeriod: effDeal === 'Rent' ? (query.rentPeriod ?? 'annual') : query.rentPeriod,
     } as SearchQuery;
   };
 

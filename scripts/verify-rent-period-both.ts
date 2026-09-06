@@ -160,7 +160,14 @@ check("both toggle buttons route through togglePeriodButton (one canonical trans
 // proven both ways) lives in scripts/verify-rent-period-token-has-one-derivation.ts.
 check("city/district pools use the SAME 'شهري'/'سنوي'/'كلاهما' token as the results RPC, never a bare boolean",
   /import \{[^}]*\brentPeriodParam\b[^}]*\} from '@\/data\/remote'/.test(index)
-  && /const rentPeriodTok: string \| null = rentPeriodParam\(query\);/.test(index)
+  // 2026-09-06 (production red team): this half used to pin the literal argument `(query)`. That
+  // argument was itself the next defect — `query.rentPeriod` is undefined for every fresh Rent
+  // search, so the count path sent null while the search defaulted to 'annual' and sent 'سنوي'. So
+  // this line, one commit after being rewritten to stop asserting the OLD defect, asserted the NEW
+  // one, and would have gone red on its repair. The invariant is the CALL, not the argument's name;
+  // WHICH input both paths must share is proven by execution in
+  // scripts/verify-count-and-search-share-one-query.ts.
+  && /const rentPeriodTok: string \| null = rentPeriodParam\([A-Za-z_$][\w$.]*\);/.test(index)
   && !/rentPeriod\s*===\s*'(?:monthly|annual|both)'\s*\?\s*'(?:شهري|سنوي|كلاهما)'/.test(index),
   "a combined search must send the EXACT كلاهما token to Trending too — null would wrongly include "
   + "unpublished-period rows (docs/ARCHITECTURE.md §17). The count path must take that token from "
