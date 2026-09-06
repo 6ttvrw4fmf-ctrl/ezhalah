@@ -70,7 +70,28 @@ const PLATFORM_TABLES = [
   'fursaghyr', 'alta', 'shmoualshmal',
 ];
 
-type Verdict = { platform: string; url: string; status: number; ctype: string; corp: string; renderable: boolean; why: string };
+// THREE-VALUED, not two (2026-09-06, routine #10). `renderable: null` is UNKNOWN — we did not get
+// the HOST's answer, so we have no verdict about the host.
+//
+// WHY: on this run, five platforms (satel, erapulse, alhoshan, alta, shmoualshmal) came back
+// «HTTP 403» and were reported as «a card can show a photo-less blank box», with advice to route
+// them through the same-origin proxy. Every one of those 403s was produced by the RUNNER's own
+// egress policy — `x-deny-reason: host_not_allowed`, a header no image host sends — and the photos
+// are fine. That is AGENTS.md's «A FAILED FETCH IS NOT AN EMPTY ANSWER» committed in the
+// verification layer: a request that never reached the origin, rendered as a confident negative
+// about the origin. The old `catch` had the same shape, scoring a transport failure as
+// `renderable: false`.
+//
+// This does NOT soften the check. A 403 the HOST sends (hotlink protection) carries no deny-reason
+// and still FAILS, which is the negative control proven below. Only «we never got an answer» became
+// UNKNOWN, and UNKNOWN is not allowed to read as health either: if nothing could be judged, the
+// check fails.
+type Judgement = boolean | null;
+type Verdict = { platform: string; url: string; status: number; ctype: string; corp: string; renderable: Judgement; why: string };
+
+/** A response the local egress layer produced instead of the origin — never the host's verdict. */
+export const isEgressDenial = (h: { get(name: string): string | null }): boolean =>
+  Boolean(h.get('x-deny-reason'));
 
 // THE PRODUCTION ORIGIN, because a same-origin display url (the Sadin proxy path `/_img/sadin/*`)
 // only resolves against the deployed app — that Vercel rewrite is what makes it renderable at all.
@@ -85,6 +106,11 @@ const judge = async (platform: string, storedUrl: string): Promise<Verdict> => {
   try {
     // GET, not HEAD: some hosts answer HEAD differently from the GET a browser actually issues.
     const r = await fetch(imgUrl, { method: 'GET', redirect: 'follow' });
+    if (isEgressDenial(r.headers)) {
+      return { platform, url: imgUrl, status: r.status, ctype: '', corp: '', renderable: null,
+        why: `UNKNOWN: this run's own network refused the request (HTTP ${r.status}, `
+          + `x-deny-reason: ${r.headers.get('x-deny-reason')}) — the host never answered, so there is no verdict about it` };
+    }
     const ctype = (r.headers.get('content-type') || '').toLowerCase();
     const corp = (r.headers.get('cross-origin-resource-policy') || '').toLowerCase();
     const okStatus = r.status === 200;
@@ -102,7 +128,10 @@ const judge = async (platform: string, storedUrl: string): Promise<Verdict> => {
       : '';
     return { platform, url: imgUrl, status: r.status, ctype, corp, renderable: okStatus && okType && okCorp, why };
   } catch (e) {
-    return { platform, url: imgUrl, status: 0, ctype: '', corp: '', renderable: false, why: `fetch failed: ${String(e).slice(0, 70)}` };
+    // No response at all — DNS, TLS, a dropped connection. That is not the host saying "no";
+    // silent → UNKNOWN, never unknown → NO.
+    return { platform, url: imgUrl, status: 0, ctype: '', corp: '', renderable: null,
+      why: `UNKNOWN: no response — ${String(e).slice(0, 70)}` };
   }
 };
 
@@ -125,10 +154,24 @@ check('the live sample actually reached production (this check cannot pass by fi
 
 if (rows.length) {
   const verdicts = await Promise.all(rows.map((r) => judge(r.platform, r.url)));
-  const blocked = verdicts.filter((v) => !v.renderable);
+  const blocked = verdicts.filter((v) => v.renderable === false);
+  const unknown = verdicts.filter((v) => v.renderable === null);
+  const judged = verdicts.filter((v) => v.renderable === true);
 
   for (const v of verdicts) {
-    console.log(`   ${v.renderable ? '✓' : '✗'} ${v.platform.padEnd(14)} ${v.renderable ? 'renderable' : v.why}`);
+    const mark = v.renderable === true ? '✓' : v.renderable === false ? '✗' : '?';
+    console.log(`   ${mark} ${v.platform.padEnd(14)} ${v.renderable === true ? 'renderable' : v.why}`);
+  }
+
+  // UNKNOWN must not read as health either. If nothing could be judged, this check has proven
+  // nothing and says so — the same fail-closed rule the sampling floor above already applies.
+  check('at least one platform\'s photo was actually JUDGED (an all-UNKNOWN sweep proves nothing)',
+    judged.length + blocked.length > 0,
+    `all ${verdicts.length} sample(s) came back UNKNOWN — no host answered, so this run cannot speak `
+    + 'to renderability at all. Check this runner\'s egress policy before reading anything into it.');
+  if (unknown.length) {
+    console.log(`\n   ${unknown.length} platform(s) UNKNOWN (no host answer) — reported, not counted as broken:\n`
+      + unknown.map((u) => `     ${u.platform}: ${u.why}`).join('\n'));
   }
 
   // NO ALLOWLIST. There was one for Sadin while its CORP block had no answer; the same-origin
@@ -192,6 +235,19 @@ mustCatch('CORP same-origin is ALLOWED when the url is served same-origin (the p
   renderable(200, 'image/png', 'same-origin', true) === true);
 mustCatch('...but the identical response is still refused cross-origin',
   renderable(200, 'image/png', 'same-origin', false) === false);
+
+// ── THE UNKNOWN DISCRIMINATOR — proven in BOTH directions, because turning a red into an UNKNOWN is
+// only legitimate if the red it removes was never the host's answer. The host's own refusal must
+// still fail, and it does.
+const hdrs = (o: Record<string, string>) => ({ get: (n: string) => o[n.toLowerCase()] ?? null });
+mustCatch('THE 2026-09-06 FALSE RED: the runner\'s own egress denial is UNKNOWN, not «the host blocks it»',
+  isEgressDenial(hdrs({ 'x-deny-reason': 'host_not_allowed' })) === true);
+mustCatch('a HOST-sent 403 (hotlink protection) is NOT excused as an egress denial — it still fails',
+  isEgressDenial(hdrs({ 'content-type': 'text/html', server: 'nginx' })) === false
+  && renderable(403, 'text/html', '') === false);
+mustCatch('a perfectly healthy image response is not mistaken for an egress denial (not vacuously UNKNOWN)',
+  isEgressDenial(hdrs({ 'content-type': 'image/jpeg' })) === false
+  && renderable(200, 'image/jpeg', '') === true);
 
 if (mutFail > 0) failed += mutFail;
 

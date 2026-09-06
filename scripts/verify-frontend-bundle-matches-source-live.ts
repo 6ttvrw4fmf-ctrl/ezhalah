@@ -10,56 +10,59 @@
 // gate) only run DURING a deploy and by construction pass once one happens — neither one notices that
 // NO deploy happened for days despite main moving.
 //
-// ─────────────────────────────────────────────────────────────────────────────────────────────────
-// WHY IT WAS REWRITTEN (ops_incident #41, routine #9 red team, found 2026-09-05, repaired 2026-09-06)
+// WHAT THIS CHECKS, and why it must run on a SCHEDULE, not just post-deploy: this compares the LIVE
+// production bundle (whatever users are being served right now, deployed or not) against a FRESH
+// checkout of current main, independent of whether a deploy is in flight. It uses the real
+// src/lib/afCohorts.ts — both by EXECUTING certifiedAmenityKeys() and by LIFTING the actual source
+// array literals — never a hand-copied duplicate of the token list.
 //
-// The first version built its needle by EXECUTING `certifiedAmenityKeys(Apartment, RentAnnual)` and
-// then searching the bundle for that 16-token result joined as one comma-separated literal. **That
-// literal cannot exist in any artifact, ever.** certifiedAmenityKeys() declares a 15-element literal
-// and appends the 16th at RUNTIME (`if (cohortAllows(q,'furnished')) base.push('furnished')`), so the
-// joined return value is not a literal in the SOURCE FILE either — no build could satisfy it.
+// ── 2026-09-06, routine #10: THIS BARRIER WAS RED FOR AN IMPOSSIBLE REASON, AND HAD TO BE ─────────
+// The first version asked whether the LIVE bundle contained
+//   certifiedAmenityKeys(Apartment, RentAnnual)   ← 16 tokens
+// comma-joined as ONE literal sequence. That sequence cannot exist in ANY artifact, ever, including
+// a bundle built from the same commit: afCohorts.ts emits a 15-element literal array
+// (RESIDENTIAL_AMENITY_BASE) and appends the 16th at RUNTIME —
+//   `if (cohortAllows(q, 'furnished')) base.push('furnished');`   (src/lib/afCohorts.ts)
+// — so `certifiedAmenityKeys()`'s RETURN VALUE is never a compiled literal. The needle is absent from
+// the SOURCE FILE too; no deploy could ever satisfy it. Verified against the served bundle on
+// 2026-09-06 (entry-b6a5fac1bee322bd959025f1f87bf03a.js): it carries the identical logic, minified —
+//   `const y=['kitchen',…,'separate_water_meter'],_=['car_entrance','sanitation'];
+//    function h(t){…const u=[...y];return n.every(t=>'Villa'===t)&&u.push(..._),
+//    c(t,'furnished')&&u.push('furnished'),u}`
+// Production was CORRECT and current the entire time. The check had failed 12/12 scheduled runs since
+// 2026-09-02, across three production deploys, so the ONE detector for «the served bundle is behind
+// main» could no longer distinguish real drift from its own defect — a standing red is a detector
+// that has stopped detecting (ops_incident #41).
 //
-// Consequence, measured: the workflow failed 15/15 scheduled runs from 2026-09-02 onward, across
-// four production deploys, while production was CORRECT the whole time. Verified by a third,
-// independent reading of the served bundle entry-dcecc3c9af74754697a3c663cd8bee8d.js, which carries
-// `['kitchen','parking',…,'separate_water_meter']` verbatim, `['car_entrance','sanitation']`
-// verbatim, and `u.push('furnished')`. So the ONE detector for "the served bundle is behind main"
-// could no longer distinguish a real drift from its own defect — a standing red, which is the same
-// wound as a dark detector.
+// THE REPAIR — assert what a compiler can actually emit, without weakening what is caught:
+//   * a token list the source emits as an ARRAY LITERAL must ship as that exact contiguous, ordered
+//     literal run (this is the incident: 8 tokens appended to RESIDENTIAL_AMENITY_BASE and not
+//     deployed makes the joined run absent → RED);
+//   * a token the source APPENDS AT RUNTIME must ship as its actual `.push('token')` CALL SITE — a
+//     strictly stronger assertion than "the word appears somewhere", which would be satisfied by any
+//     of the 24 unrelated `'furnished'` occurrences already in the bundle;
+//   * and every certified token must appear as a string literal at all.
+// The literal groups are LIFTED out of the real afCohorts.ts (scripts/lib/liftSymbols.ts), so a token
+// added to either array is picked up automatically and there is no second copy to drift.
 //
-// THE REPAIR, and why it is a STRENGTHENING and not a loosening:
-//   • the needles are now the LITERAL ARRAYS the module declares, imported BY IDENTITY from
-//     src/lib/afCohorts.ts — never re-typed here, so they cannot drift from the declaration;
-//   • the villa leg was `every token appears SOMEWHERE in the bundle`, which several unrelated
-//     occurrences would satisfy; it is now the same exact ORDERED-SEQUENCE assertion as the base
-//     list — strictly stronger than what it replaces;
-//   • the runtime-appended tokens are asserted as the runtime APPEND (`push('<token>')`), not as a
-//     bare substring — 'furnished' appears in the bundle for a dozen unrelated reasons;
-//   • and a MODEL check pins this file's model of the function against the function itself: if
-//     certifiedAmenityKeys() ever grows another runtime append, the model assertion fails LOUDLY and
-//     names the new token, instead of the bundle assertion quietly checking the wrong needle again.
-//     That is the specific guard against a repeat of #41.
-//
-// Every predicate below is a PURE function over (bundle text, tokens) and is mutation-proven at the
-// bottom against synthetic bundles — including against the #41 needle itself, which must be
-// rejected. A barrier nobody has watched fail is a comment that runs.
-// ─────────────────────────────────────────────────────────────────────────────────────────────────
-//
-// SCOPE (deliberately): this covers the amenity certification — the exact shape that actually
-// drifted. Doing the equivalent for the much larger COHORT_QUESTIONS nested object against a
-// *minified* bundle would mean pattern-matching a big object literal through an unspecified
-// minifier layout — fragile by construction, and worse than not having the check (a false sense of
-// coverage). The robust way to cover COHORT_QUESTIONS the same way — e.g. baking a build-time
-// content hash of it into the bundle that this script recomputes from source and compares — is
-// flagged as a follow-up, not implemented here.
+// SCOPE (deliberately): this covers the amenity token vocabulary — the exact shape that drifted.
+// Doing the equivalent for the much larger COHORT_QUESTIONS nested object against a *minified*
+// bundle would mean pattern-matching a big object literal through an unspecified minifier layout —
+// fragile by construction, and worse than not having the check (a false sense of coverage). The
+// robust way to cover COHORT_QUESTIONS the same way — e.g. baking a build-time content hash of it
+// into the bundle that this script recomputes from source and compares — is flagged as a follow-up,
+// not implemented here.
 //
 //   node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
 //     scripts/verify-frontend-bundle-matches-source-live.ts
 
-import { RESIDENTIAL_AMENITY_BASE, VILLA_ONLY_AMENITIES, certifiedAmenityKeys } from '../src/lib/afCohorts.ts';
+import { join } from 'node:path';
+import { certifiedAmenityKeys } from '../src/lib/afCohorts.ts';
 import type { SearchQuery } from '../src/data/search.ts';
+import { liftSymbols } from './lib/liftSymbols.ts';
 
 const PROD = 'https://ezhalah-app.vercel.app';
+const root = join(import.meta.dirname, '..');
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -67,63 +70,150 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${!ok && detail ? `\n      ${detail}` : ''}`);
 };
 
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${label}`); return; }
+  mutFail++;
+  console.error(`FAIL  (mutation) BLIND to ${label}`);
+};
+
+// ── THE PREDICATE, PURE ───────────────────────────────────────────────────────────────────────────
+// Pure and exported so the mutation proofs below can hand it a bundle that is genuinely behind the
+// source, instead of describing what would happen if one were.
+
+export type LiteralGroup = { name: string; tokens: readonly string[] };
+export type Cohort = { label: string; certified: readonly string[] };
+
+/** A minifier keeps string literals verbatim (quote char aside) and never reorders array elements. */
+const orderedRun = (bundle: string, tokens: readonly string[]): boolean =>
+  bundle.includes(tokens.map((t) => `'${t}'`).join(',')) ||
+  bundle.includes(tokens.map((t) => `"${t}"`).join(','));
+
+const quotedAnywhere = (bundle: string, t: string): boolean =>
+  bundle.includes(`'${t}'`) || bundle.includes(`"${t}"`);
+
+/** The compiled form of `base.push('furnished')` survives minification as `<v>.push('furnished')`. */
+const pushedAtRuntime = (bundle: string, t: string): boolean =>
+  bundle.includes(`.push('${t}')`) || bundle.includes(`.push("${t}")`);
+
+/**
+ * Every way the live bundle can be BEHIND the source it was built from, as a list of problems.
+ * Empty ⇒ the served bundle carries current main's amenity certification.
+ */
+export function bundleParityProblems(
+  bundle: string, groups: readonly LiteralGroup[], cohorts: readonly Cohort[],
+): string[] {
+  const problems: string[] = [];
+
+  // Vacuity floor FIRST: a lift that produced nothing, or a cohort that certified nothing, must read
+  // as a broken check — never as "no problems found". An empty input passing is exactly how a guard
+  // stops guarding.
+  if (groups.length === 0) problems.push('no source literal groups were lifted — the check has nothing to compare');
+  for (const g of groups) {
+    if (g.tokens.length < 2) problems.push(`literal group ${g.name} lifted ${g.tokens.length} token(s) — the lift is broken, not the bundle`);
+  }
+  if (cohorts.length === 0) problems.push('no cohorts were evaluated');
+  for (const c of cohorts) {
+    if (c.certified.length === 0) problems.push(`cohort ${c.label} certified nothing — certifiedAmenityKeys() is not returning a vocabulary`);
+  }
+
+  const inSomeGroup = new Set(groups.flatMap((g) => [...g.tokens]));
+
+  // 1. The incident's exact shape: a source ARRAY LITERAL must ship as that contiguous ordered run.
+  //    Appending a token to RESIDENTIAL_AMENITY_BASE and not deploying makes this absent.
+  for (const g of groups) {
+    if (g.tokens.length >= 2 && !orderedRun(bundle, g.tokens)) {
+      problems.push(
+        `${g.name} = ${JSON.stringify(g.tokens)} is not present in the live bundle as one ordered literal run — ` +
+        'main has moved ahead of what users are served (or the array was reordered). Run deploy-frontend.yml.');
+    }
+  }
+
+  // 2. Tokens the source appends at RUNTIME are not in any literal run by construction; assert the
+  //    CALL SITE shipped, which a stray unrelated occurrence of the same word cannot satisfy.
+  for (const c of cohorts) {
+    for (const t of c.certified) {
+      if (inSomeGroup.has(t)) continue;
+      if (!pushedAtRuntime(bundle, t)) {
+        problems.push(
+          `${c.label} certifies '${t}', which no lifted literal group contains, and the live bundle has no ` +
+          `.push('${t}') call site — the runtime append that adds it has not shipped.`);
+      }
+    }
+    // 3. Belt and braces: every certified token exists in the bundle as a string at all.
+    for (const t of c.certified) {
+      if (!quotedAnywhere(bundle, t)) problems.push(`${c.label} certifies '${t}', absent from the live bundle entirely`);
+    }
+  }
+  return problems;
+}
+
+// ── MUTATION PROOFS — run BEFORE the network, so a repaired predicate is proven even on a bad day ──
+const BASE = ['kitchen', 'parking', 'elevator', 'ac'] as const;
+const VILLA = ['car_entrance', 'sanitation'] as const;
+const HEALTHY_BUNDLE =
+  `const y=['kitchen','parking','elevator','ac'],_=['car_entrance','sanitation'];` +
+  `function h(t){const u=[...y];return n.every(t=>'Villa'===t)&&u.push(..._),c(t,'furnished')&&u.push('furnished'),u}`;
+const G = [{ name: 'RESIDENTIAL_AMENITY_BASE', tokens: BASE }, { name: 'VILLA_ONLY_AMENITIES', tokens: VILLA }];
+const COH = [{ label: 'Apartment/RentAnnual', certified: [...BASE, 'furnished'] }];
+
+mustCatch('THE INCIDENT: a token certified in main but never deployed (the literal run is now absent)',
+  bundleParityProblems(HEALTHY_BUNDLE,
+    [{ name: 'RESIDENTIAL_AMENITY_BASE', tokens: [...BASE, 'sauna'] }, G[1]],
+    [{ label: 'Apartment/RentAnnual', certified: [...BASE, 'sauna', 'furnished'] }]).length > 0);
+
+mustCatch('a source array REORDERED in main but not deployed (same tokens, different order)',
+  bundleParityProblems(HEALTHY_BUNDLE,
+    [{ name: 'RESIDENTIAL_AMENITY_BASE', tokens: ['parking', 'kitchen', 'elevator', 'ac'] }, G[1]], COH).length > 0);
+
+mustCatch('a RUNTIME-APPENDED token whose push() call site never shipped, even though the word appears elsewhere',
+  bundleParityProblems(
+    `const y=['kitchen','parking','elevator','ac'],_=['car_entrance','sanitation'];const label='furnished';`,
+    G, COH).length > 0);
+
+mustCatch('the villa-only literal group failing to ship',
+  bundleParityProblems(`const y=['kitchen','parking','elevator','ac'];c(t,'furnished')&&u.push('furnished')`,
+    G, COH).length > 0);
+
+mustCatch('a lift that produced NOTHING reading as «no problems found» (an empty check is a broken check)',
+  bundleParityProblems(HEALTHY_BUNDLE, [], COH).length > 0);
+
+mustCatch('a lift that produced a truncated one-token group',
+  bundleParityProblems(HEALTHY_BUNDLE, [{ name: 'RESIDENTIAL_AMENITY_BASE', tokens: ['kitchen'] }], COH).length > 0);
+
+mustCatch('certifiedAmenityKeys() returning an empty vocabulary',
+  bundleParityProblems(HEALTHY_BUNDLE, G, [{ label: 'Apartment/RentAnnual', certified: [] }]).length > 0);
+
+mustCatch('…while a bundle that genuinely MATCHES its source is NOT flagged (the predicate is not vacuously red)',
+  bundleParityProblems(HEALTHY_BUNDLE, G, COH).length === 0);
+
+// ── THE LIVE CHECK ────────────────────────────────────────────────────────────────────────────────
 async function fetchText(url: string, label: string): Promise<string> {
   const res = await fetch(url, { headers: { 'user-agent': 'ezhalah-live-parity-check' } });
   if (!res.ok) throw new Error(`${label}: HTTP ${res.status} fetching ${url}`);
   return res.text();
 }
 
-// ── THE PURE PREDICATES (mutation-proven at the bottom) ─────────────────────────────────────────
-//
-// A minifier keeps string literals verbatim (quote char aside) and never reorders array elements —
-// so a SOURCE-DECLARED array, joined as it appears in a compiled array literal, is a reliable
-// literal substring regardless of surrounding minification. Both quote styles are checked since the
-// bundler in use today happens to emit single quotes. This is only ever applied to an array that IS
-// a literal in the source; applying it to a value the code BUILDS is exactly defect #41.
-export function containsOrderedArray(bundle: string, tokens: readonly string[]): boolean {
-  if (!tokens.length) return false;   // an empty needle would match everything — never a pass
-  return bundle.includes(tokens.map((t) => `'${t}'`).join(','))
-      || bundle.includes(tokens.map((t) => `"${t}"`).join(','));
-}
-
-// A token the function APPENDS at runtime is never part of a literal array, so its presence must be
-// read from the append itself. `.push` is a property of Array and cannot be renamed by a minifier;
-// the argument is a string literal and survives verbatim. A bare `bundle.includes('furnished')`
-// would be satisfied by any of the dozen unrelated occurrences of that word.
-export function containsRuntimeAppend(bundle: string, token: string): boolean {
-  return bundle.includes(`push('${token}')`) || bundle.includes(`push("${token}")`);
-}
-
 const Q = (over: Record<string, unknown>) =>
   ({ deal: 'Rent', location: '', category: 'Residential', type: null, detail: null,
      priceInput: '', priceBand: null, rentPeriod: 'annual', ...over }) as unknown as SearchQuery;
 
-// ── 1. THE MODEL CHECK — this file's understanding of the function, against the function ─────────
-// If certifiedAmenityKeys() ever appends another token at runtime, or reorders its literals, THIS
-// fails and names the difference — so the bundle needles below can never again be silently wrong.
-const RUNTIME_APPENDED = ['furnished'] as const;
-const apartment = certifiedAmenityKeys(Q({ type: 'Apartment' }));
-const villa = certifiedAmenityKeys(Q({ type: 'Villa' }));
-const modelApartment = [...RESIDENTIAL_AMENITY_BASE, ...RUNTIME_APPENDED];
-const modelVilla = [...RESIDENTIAL_AMENITY_BASE, ...VILLA_ONLY_AMENITIES, ...RUNTIME_APPENDED];
+// The REAL source arrays, lifted — not a copy pinned into this file. A token added to either one is
+// picked up on the next run with no edit here.
+const lifted = await liftSymbols(
+  join(root, 'src', 'lib', 'afCohorts.ts'),
+  [{ header: 'const RESIDENTIAL_AMENITY_BASE = [', endsWith: /^\] as const;$/ },
+   { header: 'const VILLA_ONLY_AMENITIES = [', endsWith: /\] as const;$/ }],
+  ['RESIDENTIAL_AMENITY_BASE', 'VILLA_ONLY_AMENITIES'],
+);
+const groups: LiteralGroup[] = [
+  { name: 'RESIDENTIAL_AMENITY_BASE', tokens: lifted.RESIDENTIAL_AMENITY_BASE as string[] },
+  { name: 'VILLA_ONLY_AMENITIES', tokens: lifted.VILLA_ONLY_AMENITIES as string[] },
+];
 
-check('MODEL: certifiedAmenityKeys(Apartment,RentAnnual) == RESIDENTIAL_AMENITY_BASE + the runtime appends',
-  JSON.stringify(apartment) === JSON.stringify(modelApartment),
-  `function=${JSON.stringify(apartment)}\n      model=${JSON.stringify(modelApartment)}\n      ` +
-  'afCohorts.ts changed shape: update RUNTIME_APPENDED (and the bundle needles) in this file.');
-check('MODEL: certifiedAmenityKeys(Villa,RentAnnual) == base + VILLA_ONLY_AMENITIES + the runtime appends',
-  JSON.stringify(villa) === JSON.stringify(modelVilla),
-  `function=${JSON.stringify(villa)}\n      model=${JSON.stringify(modelVilla)}`);
-check(`sanity floor: the certified base is still ${RESIDENTIAL_AMENITY_BASE.length} tokens (>= 15)`,
-  RESIDENTIAL_AMENITY_BASE.length >= 15, `got ${JSON.stringify(RESIDENTIAL_AMENITY_BASE)} — afCohorts.ts may have shrunk`);
-check(`sanity floor: villa still adds ${VILLA_ONLY_AMENITIES.length} villa-only token(s) (>= 2)`,
-  VILLA_ONLY_AMENITIES.length >= 2, `got ${JSON.stringify(VILLA_ONLY_AMENITIES)}`);
-
-// ── 2. THE LIVE BUNDLE ───────────────────────────────────────────────────────────────────────────
 const html = await fetchText(`${PROD}/`, 'production HTML');
 const entryMatch = /\/_expo\/static\/js\/web\/entry-[a-f0-9]+\.js/.exec(html);
-check('production HTML references an Expo web entry bundle', !!entryMatch,
-  'the app may have moved off Expo web — update this script\'s bundle discovery');
+check('production HTML references an Expo web entry bundle', !!entryMatch, 'the app may have moved off Expo web — update this script\'s bundle discovery');
 if (!entryMatch) {
   console.error(`\n✗ ${++failed} check(s) FAILED — cannot locate the live bundle to check`);
   process.exit(1);
@@ -133,59 +223,38 @@ const bundle = await fetchText(`${PROD}${entryMatch[0]}`, 'live entry bundle');
 check('fetched a non-trivial bundle (sanity floor, catches an empty/error response passing as 200)',
   bundle.length > 500_000, `got ${bundle.length} bytes`);
 
-const BEHIND = 'main has moved ahead of what users are actually served. Run deploy-frontend.yml.';
-check('the LIVE bundle carries current main\'s certified amenity base, in order',
-  containsOrderedArray(bundle, RESIDENTIAL_AMENITY_BASE),
-  `main certifies ${JSON.stringify(RESIDENTIAL_AMENITY_BASE)} but the deployed bundle does not contain this ` +
-  `exact ordered sequence — ${BEHIND}`);
-check('the LIVE bundle carries the villa-only amenity tokens, in order',
-  containsOrderedArray(bundle, VILLA_ONLY_AMENITIES),
-  `main certifies villa-only ${JSON.stringify(VILLA_ONLY_AMENITIES)} as an ordered pair, absent from the ` +
-  `deployed bundle — ${BEHIND}`);
-for (const token of RUNTIME_APPENDED) {
-  check(`the LIVE bundle still appends the runtime-only token '${token}'`,
-    containsRuntimeAppend(bundle, token),
-    `certifiedAmenityKeys() appends '${token}' at runtime and the deployed bundle has no such append — ${BEHIND}`);
-}
+const apartmentAnnual = certifiedAmenityKeys(Q({ type: 'Apartment' }));
+const villaAnnual = certifiedAmenityKeys(Q({ type: 'Villa' }));
+check(`current main's certifiedAmenityKeys(Apartment, RentAnnual) returns ${apartmentAnnual.length} tokens (sanity floor)`,
+  apartmentAnnual.length >= 15, `got ${JSON.stringify(apartmentAnnual)} — afCohorts.ts may have shrunk`);
+check(`current main's certifiedAmenityKeys(Villa, RentAnnual) adds ${villaAnnual.filter((t) => !apartmentAnnual.includes(t)).length} villa-only token(s) (sanity floor)`,
+  villaAnnual.filter((t) => !apartmentAnnual.includes(t)).length >= 2,
+  `got ${JSON.stringify(villaAnnual.filter((t) => !apartmentAnnual.includes(t)))}`);
 
-// ── MUTATION PROOFS — the predicates are watched to FAIL, then to pass ───────────────────────────
-let mutFail = 0;
-const mustCatch = (label: string, caught: boolean) => {
-  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
-  mutFail++;
-  console.error(`  FAIL  BLIND to: ${label}`);
-};
-console.log('\nMutation proofs\n');
+const cohorts: Cohort[] = [
+  { label: 'Apartment/RentAnnual', certified: apartmentAnnual },
+  { label: 'Villa/RentAnnual', certified: villaAnnual },
+];
+const problems = bundleParityProblems(bundle, groups, cohorts);
+check('the LIVE bundle carries current main\'s amenity certification (literal runs shipped, runtime appends shipped)',
+  problems.length === 0, problems.join('\n      '));
 
-const asLiteral = (t: readonly string[]) => `[${t.map((x) => `'${x}'`).join(',')}]`;
-// A synthetic "served bundle" built the way the real bundler builds one: the literals verbatim, the
-// runtime append as an append. Everything below mutates THIS and watches the predicate.
-const fakeBundle = `var q=${asLiteral(RESIDENTIAL_AMENITY_BASE)},w=${asLiteral(VILLA_ONLY_AMENITIES)};`
-  + `function c(t){var u=[...q];t&&u.push(...w);d(t,'furnished')&&u.push('furnished');return u}`;
+// The strongest proof available, and it uses PRODUCTION's own bytes rather than a fixture this file
+// invented: take the real served bundle and the real lifted arrays, add ONE token to main's side, and
+// assert the predicate turns red. If this ever passes silently, the check above means nothing.
+// Stated DIFFERENTIALLY, so it is a real proof whether or not production is currently in drift: the
+// probe token must ADD problems that the real arrays do not produce. An "is clean" control here would
+// print «BLIND» on a run where production has genuinely drifted — output that says the opposite of
+// what is true, which is its own defect class (ops_incident #42). Non-vacuity is already proven above
+// against a synthetic healthy bundle.
+mustCatch('THE INCIDENT, against the REAL served bundle: one extra token certified in main and not deployed',
+  bundleParityProblems(bundle,
+    [{ name: groups[0].name, tokens: [...groups[0].tokens, 'undeployed_probe_token'] }, groups[1]],
+    cohorts.map((c) => ({ ...c, certified: [...c.certified, 'undeployed_probe_token'] })),
+  ).length > problems.length);
 
-mustCatch('a bundle BEHIND main — the newest certified token missing from the base sequence (the real drift class)',
-  !containsOrderedArray(fakeBundle.replace(`,'separate_water_meter'`, ''), RESIDENTIAL_AMENITY_BASE));
-mustCatch('a bundle whose base list is REORDERED (same tokens, different certification)',
-  !containsOrderedArray(fakeBundle, [...RESIDENTIAL_AMENITY_BASE].reverse()));
-mustCatch('a bundle missing the villa-only pair — the leg that used to pass on scattered occurrences',
-  !containsOrderedArray(fakeBundle.replace(asLiteral(VILLA_ONLY_AMENITIES), `['sanitation']`), VILLA_ONLY_AMENITIES));
-mustCatch('villa tokens present but NOT as the ordered pair (what the old per-token leg accepted)',
-  !containsOrderedArray(`var a=['car_entrance','x'],b=['y','sanitation'];`, VILLA_ONLY_AMENITIES));
-mustCatch('a bundle that dropped the runtime append while the word still occurs elsewhere',
-  !containsRuntimeAppend(`var k='furnished';label('furnished');`, 'furnished'));
-mustCatch('DEFECT #41 ITSELF: the executed RETURN value is not a literal any build can contain',
-  !containsOrderedArray(fakeBundle, certifiedAmenityKeys(Q({ type: 'Apartment' }))));
-mustCatch('an empty needle is never a pass (a vacuous match would green a bundle with nothing in it)',
-  !containsOrderedArray(fakeBundle, []));
-// …and the other direction: a predicate that is vacuously red proves as little as one that is
-// vacuously green. The REAL, correctly-built bundle shape must still PASS all three.
-mustCatch('…while a correctly-built bundle still PASSES all three assertions (none is vacuously red)',
-  containsOrderedArray(fakeBundle, RESIDENTIAL_AMENITY_BASE)
-  && containsOrderedArray(fakeBundle, VILLA_ONLY_AMENITIES)
-  && RUNTIME_APPENDED.every((t) => containsRuntimeAppend(fakeBundle, t)));
-
-const ok = failed === 0 && mutFail === 0;
-console.log(ok
+if (mutFail > 0) console.error(`\n✗ ${mutFail} mutation proof(s) FAILED — this barrier can no longer be trusted`);
+console.log(failed === 0 && mutFail === 0
   ? '\n✓ the live bundle\'s compiled amenity certification matches current main — no undeployed drift'
-  : `\n✗ ${failed} check(s) failed, ${mutFail} mutation(s) survived`);
-process.exit(ok ? 0 : 1);
+  : `\n✗ ${failed + mutFail} check(s) FAILED — the live frontend has drifted behind main. See .github/workflows/deploy-frontend.yml to ship it.`);
+process.exit(failed === 0 && mutFail === 0 ? 0 : 1);

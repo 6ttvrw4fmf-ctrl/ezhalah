@@ -302,7 +302,6 @@ verify-sweep-abort-excludes-in-flight-run.ts
 verify-sweep-city-deal-availability.ts
 verify-sync-change-detection-canonical-labels.ts
 verify-taxonomy.ts
-verify-test-registry-complete.ts
 verify-theme-contract.ts
 verify-topbar-signin.ts
 verify-transcript-integrity.ts

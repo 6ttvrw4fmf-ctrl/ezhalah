@@ -41,8 +41,17 @@ const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
 
 let failures = 0;
+// `detail` explains a FAILURE, so it is printed only on one. Until 2026-09-06 it was appended
+// unconditionally, and this file's four MUTATION lines — whose names read «catches an exclusion
+// naming a workflow that EXISTS but never invokes it» with detail «the mutant survived — the home
+// check is blind» — printed that detail next to a green ✓ on every healthy run. On the one barrier
+// whose job is to stop checks going dark, the output said the home check was blind while asserting
+// it was not (routine-9 red team, ops_incident #42). Sibling barriers already suppress detail on
+// pass (verify-rent-scrapers-annualise.ts). A tick and the words beside it must never disagree.
+export const renderLine = (name: string, cond: boolean, detail = '') =>
+  `  ${cond ? '✓' : '❌'} ${name}${cond || !detail ? '' : ` — ${detail}`}`;
 const check = (name: string, cond: boolean, detail = '') => {
-  console.log(`  ${cond ? '✓' : '❌'} ${name}${detail ? ` — ${detail}` : ''}`);
+  console.log(renderLine(name, cond, detail));
   if (!cond) failures++;
 };
 
@@ -234,6 +243,18 @@ check('the run order is deterministic (sorted)', run.join(',') === [...run].sort
     mustCatch(`…while the real home is still accepted, not vacuously red (${sample.where})`,
       workflowInvokes(wfSrc, sample.name));
   }
+
+  // The reporting contract itself (ops_incident #42, repaired 2026-09-06). `detail` describes a
+  // FAILURE; printing it next to a ✓ made every healthy run of THIS file — the one barrier whose job
+  // is to stop checks going dark — announce «the mutant survived — the home check is blind» four
+  // times while asserting the opposite. Both directions are proven, because suppressing detail
+  // ALWAYS would destroy the failure message instead of fixing the pass line.
+  mustCatch('a passing line printing the words that describe its own failure',
+    !renderLine('MUTATION catches a blind home', true, 'the mutant survived — the home check is blind')
+      .includes('the mutant survived'));
+  mustCatch('…while a FAILING line still carries its detail (detail is not suppressed outright)',
+    renderLine('MUTATION catches a blind home', false, 'the mutant survived — the home check is blind')
+      .includes('the mutant survived — the home check is blind'));
 
   const npmRow = excluded.find((e) => e.where.startsWith('npm run '));
   if (npmRow) {

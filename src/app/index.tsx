@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -10,6 +10,8 @@ import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_I
 import HeroBackground from '@/components/HeroBackground';
 import { OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
@@ -99,7 +101,6 @@ const AREA_HINT: RangeHintCfg = {
 // plain Node test can execute them — imported above).
 
 export default function Home() {
-  const { width: shareBarWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, locale, isRTL } = useI18n();
@@ -843,8 +844,11 @@ export default function Home() {
     if (!shared) setShareOpen(true);
   };
   // Below this the top bar carries the logo, a sign-in pill and this button; the label is the first
-  // thing that has to give, not the button.
-  const shareLabelled = shareBarWidth >= 380;
+  // thing that has to give, not the button. Through useAtLeast(), never an inline width compare:
+  // the inline read (`shareBarWidth >= 380`) rendered the label on every ≥380px client while the
+  // served HTML (width 0) had none — React #418 on every desktop/tablet visit, and every production
+  // deploy failed the post-deploy hydration gate from 2026-09-05 21:33Z until this line.
+  const shareLabelled = useAtLeast(SHARE_LABEL_BREAKPOINT);
 
   const detail = query.type ? detailFor(query.type) : null;
   // Context-level detail: shown at category/group level when no specific type is selected.
