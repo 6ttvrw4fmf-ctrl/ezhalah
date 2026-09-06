@@ -11,7 +11,7 @@
 // age-and-strike deleter removed, 10,617 left no source key at all and are permanently unknowable.
 //
 // On 2026-09-06, 31 production-searchable platforms were in this state and nothing counted them.
-// aqargate was fixed that day (scrapers/aqargate/run.py::_verify_gone); the other 30 are real, and
+// aqargate, raghdan and sanadak were fixed that day; the other 28 are real, and
 // the danger is not that they exist — it is that they were INVISIBLE, and that a NEW platform could
 // join them by writing one more `prune_unseen(...)` call nobody would ever notice.
 //
@@ -35,7 +35,7 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 
 // The ledger's size on the day the ratchet was installed. It may FALL as platforms gain oracles.
 // Raising it is a deliberate, reviewed edit and means a platform started deactivating on absence.
-const RATCHET = 31;
+const RATCHET = 29;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

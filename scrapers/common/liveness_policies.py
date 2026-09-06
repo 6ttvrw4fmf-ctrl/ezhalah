@@ -142,6 +142,42 @@ POLICIES: dict[str, _P] = {
         "carrying strikes (1 expired, 2 hard-deleted). Population coverage is still 0% — see the "
         "tier note above.",
     ),
+    # raghdan and sanadak are spelled out for the same reason as aqargate above: the shared
+    # death_signals string below stopped being true for them on 2026-09-06. Tier, sla and grace are
+    # unchanged and deliberately so — the DEACTIVATION PATH is now candidate+direct, but the tier
+    # measures whether the POPULATION carries recent verification, and prune_unseen() still probes
+    # only rows already at grace and never stamps last_verified_alive_at.
+    "raghdan": _P(
+        _pol("raghdan", 3, 168), CRAWL_PRESENCE_ONLY,
+        "HTTP 404/410 on the listing's own URL, and ONLY while this run's in-run canary control "
+        "has verified known-live listings alive. A 200 without a JSON-LD RealEstateListing block, "
+        "any 401/403/408/429/5xx, an unresolved redirect and a transport failure are all UNKNOWN "
+        "and hold the strike without deactivating.",
+        "Control-validated 2026-09-06 against the test that separates a not-found from a refusal — "
+        "a BOGUS id that never existed. 8/8 known-active returned 200 with JSON-LD "
+        "RealEstateListing (~134-155KB); 5/5 rows we had aged out AND 3/3 bogus ids returned an "
+        "identical ~39.1KB 404 with a bare brand title. A never-existed id and a removed listing "
+        "are answered the same way while real listings are answered differently in the same "
+        "minute. The canary gate re-establishes that on EVERY run, so if raghdan ever answers the "
+        "way gathern did (LISTING_LIVENESS.md §5.4, blocking expressed as 404, 100% false-death "
+        "rate) the deaths stop instead of landing.",
+    ),
+    "sanadak": _P(
+        _pol("sanadak", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the page's OWN RSC listing object with isPublished=false (affirmative, ungated); or a "
+        "COMPLETELY rendered shell containing no listing objects at all, and then only while this "
+        "run's canary control has passed. A truncated shell, a payload carrying only other "
+        "listings' carousel cards, an unrecognised isPublished value, any non-200 and any "
+        "transport failure are UNKNOWN and hold the strike.",
+        "The hardest of the five, because sanadak states NOTHING: measured 2026-09-06, a removed "
+        "listing and a bogus id both return HTTP 200 with a ~70-80KB payload carrying no listing "
+        "object and no error message anywhere, against ~258-272KB and 7 candidate objects for a "
+        "live one. Absence of content is also what a backend blip or a truncated stream produce, "
+        "so death needs TWO independent facts: the shell rendered completely (the footer's "
+        "commercial-register number is present) AND the in-run canary control passed. A payload "
+        "holding only OTHER listings' cards is an unobserved shape and stays UNKNOWN rather than "
+        "being resolved by assumption.",
+    ),
     **{
         p: _P(_pol(p, 3, 168), CRAWL_PRESENCE_ONLY,
               "none (absence from the crawl only)",
@@ -153,7 +189,7 @@ POLICIES: dict[str, _P] = {
             "aqarcity", "aqarmonthly", "arkaan", "awal", "eaqartabuk", "eastabha", "erapulse",
             "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry",
             "october",
-            "raghdan", "ramzalqasim", "rawasidark", "sadin", "sanadak", "satel", "shmoualshmal",
+            "ramzalqasim", "rawasidark", "sadin", "satel", "shmoualshmal",
             "souq24", "therc",
         )
     },

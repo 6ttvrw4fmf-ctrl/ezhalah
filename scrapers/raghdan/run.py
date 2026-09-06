@@ -71,6 +71,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.liveness_canary import InRunCanary  # noqa: E402
 
 BASE = "https://raghdan.sa"
 SITEMAP = f"{BASE}/sitemap.xml"
@@ -368,6 +369,94 @@ def fetch_one(url: str) -> Optional[tuple[str, str]]:
             return None
         time.sleep(1.0 * (attempt + 1))
     return None
+
+
+# ── The liveness oracle ─────────────────────────────────────────────────────────────────────────
+# A live raghdan detail page embeds a JSON-LD RealEstateListing block; the not-found page does not.
+# That is the alive marker, and it is stronger than the <title> because it is the same structure
+# map_listing() already parses — so oracle and parser cannot disagree about what "a listing page"
+# means (the divergence that made abeea's first oracle wrong).
+_ALIVE_MARKER = '"RealEstateListing"'
+
+
+def _oracle_url(ad_number: str) -> Optional[str]:
+    """ad_number is 'RG' + the page's own id (a Firebase push-id or a numeric REGA id)."""
+    if not ad_number or not ad_number.upper().startswith("RG"):
+        return None
+    pid = ad_number[2:]
+    return f"{BASE}/ar/property/{pid}/" if pid else None
+
+
+def _probe_raghdan(ad_number: str) -> tuple[Optional[int], str]:
+    """One DIRECT fetch of this listing's own URL. Returns (status, body); status None = no answer."""
+    url = _oracle_url(ad_number)
+    if url is None:
+        return None, ""
+    s = _session()
+    for attempt in range(2):
+        try:
+            r = s.get(url, timeout=45, allow_redirects=True)
+        except Exception:  # noqa: BLE001 — unreachable is never proof of death
+            time.sleep(1.2 * (attempt + 1))
+            continue
+        if r.status_code in (429, 500, 502, 503, 504):
+            time.sleep(2.0 * (attempt + 1))
+            continue
+        return r.status_code, r.text
+    return None, ""
+
+
+def _raghdan_is_alive(ad_number: str) -> bool:
+    """Affirmative-life predicate for the in-run canary control. False for anything unconfirmed."""
+    status, body = _probe_raghdan(ad_number)
+    return status == 200 and _ALIVE_MARKER in body
+
+
+def raghdan_verdict(status: Optional[int], body: str, *, canary_ok: bool) -> tuple[str, str]:
+    """The oracle's DECISION, pure so it can be executed exhaustively by a barrier.
+
+    CONTROL-VALIDATED 2026-09-06 against the live source, including the test that matters most —
+    a BOGUS id that never existed:
+
+        8/8 known-active   -> 200, ~134-155KB, JSON-LD RealEstateListing present
+        5/5 rows we killed -> 404, ~39.1KB, no JSON-LD, bare brand <title>
+        3/3 bogus ids      -> 404, ~39.1KB, IDENTICAL shape to the killed rows
+
+    That last line is the proof that raghdan's 404 is a genuine not-found rather than a refusal:
+    a never-existed id and a removed listing are answered the same way, while real listings are
+    answered differently in the same minute. Without it, "404 means gone" would be an assumption —
+    and LISTING_LIVENESS.md §5.4 measured gathern expressing BLOCKING as its own 404, a 100%
+    false-death rate, which is exactly what the canary gate below exists to catch.
+    """
+    if status is None:
+        return "unknown", "no answer from the source (transport/5xx after retries)"
+    if status == 200:
+        if _ALIVE_MARKER in body:
+            return "live", "200 with JSON-LD RealEstateListing"
+        # A 200 we cannot recognise is an unreadable answer, not a healthy page and not a death.
+        return "unknown", "200 without a RealEstateListing block (unrecognised page)"
+    if status in (404, 410):
+        if not canary_ok:
+            # The environment has not proved itself this run, so this 404 may be about US.
+            return "unknown", "404 but the in-run canary control did not pass — not believed"
+        return "gone", f"source returned {status} while known-live canaries verified alive"
+    # 401/403/408/429 and anything else: about our read, never about the listing.
+    return "unknown", f"HTTP {status} is about our read, not the listing"
+
+
+def _make_verify_gone(canary):
+    """Bind the oracle to this run's canary control (see scrapers/common/liveness_canary.py)."""
+    def _verify_gone(ad_number: str) -> tuple[str, str]:
+        status, body = _probe_raghdan(ad_number)
+        # Evaluate the control ONLY when we are about to conclude death — a live or unknown answer
+        # needs no control, and probing canaries for every row would triple the run's fetches.
+        needs_control = status in (404, 410)
+        ok = canary.ok() if needs_control else True
+        verdict, why = raghdan_verdict(status, body, canary_ok=ok)
+        if needs_control and not ok:
+            why = f"{why} [{canary.reason()}]"
+        return verdict, why
+    return _verify_gone
 
 
 # ── Parsing ────────────────────────────────────────────────────────────────────
@@ -833,11 +922,19 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:80])
             return 0
 
-        # Full run: prune listings that were active before but weren't seen this crawl.
+        # Full run: absence from this crawl SELECTS candidates to re-probe — it never decides.
+        # Absence is EvidenceKind.ABSENCE (LISTING_LIVENESS.md §1-§3); only _verify_gone's
+        # affirmative per-listing answer may deactivate, and only when this run's canary control
+        # has proved the source is answering us honestly.
+        canary = InRunCanary(_raghdan_is_alive, label="raghdan")
+        canary.offer(r["ad_number"] for r in res)
+        canary.offer(r["ad_number"] for r in com)
+        verify_gone = _make_verify_gone(canary)
         pruned = 0
         for tbl, rows_seen in (("raghdan_residential_listings", res),
                                ("raghdan_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Raghdan")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Raghdan",
+                                verify_gone=verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
