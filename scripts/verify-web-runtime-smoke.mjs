@@ -163,7 +163,21 @@ const BENIGN = /Minified React error #(418|423|425)/;
 // a harness race, not a product defect. Named once so both journeys move together next time.
 const SEARCH_BEAT_FLOOR_MS = 12000;
 
-const launchOpts = { args: ['--no-sandbox', '--ignore-certificate-errors', '--disable-quic'] };
+// ANTI-THROTTLING TRIO (found live 2026-09-06): headless Chromium applies its background-tab timer
+// heuristics even to its one and only page — no real compositor is consuming frames, so Chrome's
+// intensive-throttling logic can treat an hours-old, animation-driving page as "backgrounded" and
+// clamp its setTimeout cadence toward once-a-minute. src/app/agent.tsx's card-reveal cascade
+// (dripRange) is exactly that shape: a chain of setTimeout(tick, REVEAL_STEP_MS) calls, one per
+// card. Measured: journey [J]'s «عرض المزيد» settle-poll failed CI at a 90s budget, then AGAIN at
+// 180s with zero progress — widening made no difference, which throttling explains and a genuine
+// slow-but-progressing cascade would not — while an isolated LOCAL repro (headed-equivalent,
+// focused tab, never throttled) of the identical journey settled cleanly in well under 30s. These
+// three flags are the standard, documented fix for this exact class of headless-CI symptom.
+const launchOpts = { args: [
+  '--no-sandbox', '--ignore-certificate-errors', '--disable-quic',
+  '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding',
+] };
 if (process.env.PW_CHROMIUM) launchOpts.executablePath = process.env.PW_CHROMIUM;
 // A TLS-terminating egress proxy can reset Chromium's post-quantum ClientHello; pinning max TLS
 // keeps the browser usable behind one. Harmless when no proxy is configured.
@@ -889,23 +903,25 @@ try {
       // in. Poll for it to disappear rather than sampling once (found live 2026-09-06: this exact
       // single-shot read failed CI while the sibling lockBtn poll a few lines below passed).
       //
-      // 90s STILL WASN'T ENOUGH (found live 2026-09-06, same day): a first attempt at this poll
-      // used a 90s budget and still timed out on CI twice in a row. Investigated end-to-end before
-      // widening blindly: the totals math (src/data/resultCount.ts) is provably correct once
-      // shown===fetched, and a local, isolated repro of this exact journey (real browser, real
-      // interview answer, real narrowed 49-of-238 result) settled cleanly with NO stall — «عرض
-      // المزيد» never got stuck, it just took real wall-clock time for the ~50-card drip
-      // (REVEAL_STEP_MS=130 in src/app/agent.tsx, but each step is a full React re-render, not a
-      // bare timer). Cross-journey contamination from Journey I (a much larger الرياض/فيلا scope
-      // immediately before this one) was ruled out too: Journey J does a full `page.goto()` before
-      // it starts, which remounts the whole app and drops every ref Journey I could have left
-      // dirty. That leaves plain CI-runner slowness under load as the only remaining explanation —
-      // exactly the class of flake already documented and fixed the same way a few hundred lines
-      // up for Journey I's own AF-open poll ("Failures duly clustered ACROSS BRANCHES... a harness
-      // bug and not non-determinism in the product... 4x headroom on an idle backend, none on a
-      // busy one"). Same fix here: more margin, not a product change chased on an unreproduced race.
+      // WIDENING THE BUDGET DID NOT HELP (found live 2026-09-06, same day): 90s failed, then 180s
+      // failed too with ZERO progress — a genuinely slow-but-completing cascade would have closed
+      // at least some of that gap; this did not move at all. Investigated end-to-end before
+      // touching a timeout a second time: the totals math (src/data/resultCount.ts) is provably
+      // correct once shown===fetched; a local, isolated repro of this exact journey (real browser,
+      // real interview answer, real narrowed 49-of-238 result) settled cleanly in well under 30s
+      // with NO stall; cross-journey contamination from Journey I was ruled out (Journey J does a
+      // full page.goto() before it starts, remounting the app and dropping any ref Journey I could
+      // have left dirty). The actual cause: this file's own `launchOpts` (a few hundred lines up)
+      // launched headless Chromium with none of the three flags that disable its background-tab
+      // timer throttling — Chrome applies that heuristic even to a page's OWN sole tab in headless
+      // mode (no compositor is consuming real frames), clamping a chained setTimeout cascade
+      // (agent.tsx's dripRange, one setTimeout per card) toward a near-standstill the longer the
+      // page has been open — which is exactly why widening the wait changed nothing and why a
+      // focused, headed-equivalent local run never showed it. Fixed at the source (the launch
+      // flags); this poll's budget is back to a sane margin over the documented ~40s cadence, not
+      // inflated to paper over a throttled clock.
       let stillOffered = true;
-      for (const deadline = Date.now() + 180_000; Date.now() < deadline; ) {
+      for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
         stillOffered = (await body()).includes('عرض المزيد');
         if (!stillOffered) break;
         await page.waitForTimeout(1_000);
