@@ -50,7 +50,12 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // Four movements landed the same afternoon (+1, -4, +2 across three separate edits) — exactly what
 // a ratchet is for: it records the direction of each change instead of letting one land silently
 // inside another.
-const RATCHET = 28;
+// 28 → 27: eastabha. Its dead rows are STILL SERVED by the source, so a 404 rule would never have
+// fired — the signal is the listing's OWN `slider-property-status` ribbon reading تأجرت or تم البيع
+// (39/41 dead carried one; 0/45 interleaved controls did). A whole-document substring search for
+// the same two words ALSO matched live pages, because the related-listings carousel carries other
+// listings' ribbons in `ribbon-inside`; only the main-gallery element belongs to this listing.
+const RATCHET = 27;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

@@ -59,7 +59,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, http, normalize  # noqa: E402
+from scrapers.common import db, http, http_liveness, normalize  # noqa: E402
 
 BASE = "https://eastabha.sa"
 LIST_API = f"{BASE}/wp-json/wp/v2/estate_property"
@@ -205,6 +205,66 @@ ACTION_AUCTION = ("مزاد",)
 # value we haven't confirmed means off-market). NOTE: auction statuses ("مزاد …") are DELIBERATELY
 # not gated — the owner has not approved hiding auctions by status.
 GONE_STATUS_AR = ("تأجرت", "تم البيع")
+
+# ── Liveness oracle for prune_unseen ────────────────────────────────────────────────────────────
+# This scraper ALREADY deactivates on affirmative source evidence: `property_status` from the REST
+# API, gated on GONE_STATUS_AR above, pinned by `_pin_sold_inactive`. That path is evidenced and is
+# not what this oracle is for.
+#
+# The gap is the OTHER path. `db.prune_unseen()` ages out a row that missed three crawls, and until
+# 2026-09-06 it did so on crawl ABSENCE alone — with no answer from the source — which
+# docs/ops/LISTING_LIVENESS.md §1–§3 forbids. A listing that drops out of the API listing for a
+# throttled run, or a partial page, is indistinguishable from one that was removed.
+#
+# MEASURED 2026-09-06, every inactive row plus interleaved known-active controls, reading the
+# listing's OWN status ribbon from its page:
+#   dead      39/41 carried a terminal ribbon (تأجرت 32, تم البيع 7); the other 2 carried NO ribbon
+#             at all and are held UNKNOWN, which is correct
+#   controls  0/45 carried a terminal ribbon — they carry category and promo labels only
+#             (فيلا للبيع, عرض جديد, نشيط, عرض ساخن …)
+#
+# THE TRAP, and why this reads a POSITION and not a substring. The page embeds a related-listings
+# carousel whose cards carry their own status ribbons in `ribbon-inside`. A whole-document search
+# for «تم البيع» therefore hits LIVE pages too — measured: 1 of 4 live pages matched that way, and
+# every one of those matches belonged to a DIFFERENT listing in the carousel. Only
+# `slider-property-status`, the ribbon in the main gallery, belongs to THIS listing. Reading the
+# document instead of the element is the aqar «مغلق» mistake in a new costume.
+#
+# The vocabulary is deliberately NOT duplicated: GONE_STATUS_AR above is the single definition of
+# what "gone" means on this platform, shared with the API path, so the two can never drift apart.
+_OWN_STATUS_RE = re.compile(r'class="slider-property-status[^"]*"[^>]*>([^<]{1,40})</div>')
+
+
+def _oracle_session():
+    """Transport seam for the probe. Tests replace this; the shared law is never replaced."""
+    class _S:
+        @staticmethod
+        def get(url, timeout=None, allow_redirects=None):
+            return http.get(url, timeout=timeout or 45)
+    return _S()
+
+
+def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+    """eastabha's OWN measured signal. `None` means "no opinion" — never "probably gone"."""
+    if path_changed:
+        return None                      # an unresolved redirect: we do not know where we landed
+    if status in (404, 410):
+        return "gone"
+    if status != 200:
+        return None
+    own = [s.strip() for s in _OWN_STATUS_RE.findall(body or "")]
+    if any(s in GONE_STATUS_AR for s in own):
+        return "gone"                    # THIS listing's own ribbon says sold/rented
+    return None                          # a category label is not proof of life; hold at UNKNOWN
+
+
+_probe = http_liveness.LivenessProbe(
+    platform="eastabha",
+    signal=_signal,
+    session=_oracle_session,
+    url_for=http_liveness.stored_listing_url(
+        ("eastabha_residential_listings", "eastabha_commercial_listings")),
+)
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 _PHONE_RE = re.compile(r"(?:\+?9665\d{8}|05\d{8}|\b966\s?5\d{8}\b|wa\.me/\S+|واتس\S*\s*[\d٠-٩]{6,})")
@@ -763,7 +823,8 @@ def main() -> int:
             # prune_unseen never touches them (it only reads active=true rows and only updates ids
             # ABSENT from the seen set), so passing their ad_numbers in rows_seen is harmless.
             for tbl, rows_seen in (("eastabha_residential_listings", res), ("eastabha_commercial_listings", com)):
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Eastabha")
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Eastabha",
+                                    verify_gone=_probe.verify_gone)
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:

@@ -24,6 +24,7 @@ Run: python -m pytest scrapers/common/tests/test_sold_pin_coverage.py -v
 """
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -53,6 +54,36 @@ def _src(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _call_lines(src: str, name: str) -> "tuple[list[int], list[int], list[int]]":
+    """Line numbers of the REAL call sites, read from the syntax tree.
+
+    Deliberately not `src.find("db.prune_unseen")`. On 2026-09-06 eastabha gained an oracle whose
+    explanatory comment names `db.prune_unseen()` — accurately — near the top of the file, and the
+    text search matched that PROSE at offset 13,320 while the real call sat at 44,094. The test
+    failed on a file whose ordering was perfectly correct.
+
+    That is the source-TEXT trap AGENTS.md warns about, in its less famous direction: a text check
+    can fail on correct code as easily as it can pass on broken code, and both cost the same trust.
+    A docstring, a comment, or a string literal is not a call site; only a Call node is.
+    """
+    tree = ast.parse(src)
+    pin: list[int] = []
+    upsert: list[int] = []
+    prune: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if isinstance(f, ast.Name) and f.id == "_pin_sold_inactive":
+            pin.append(node.lineno)
+        elif isinstance(f, ast.Attribute):
+            if f.attr.startswith("upsert_"):
+                upsert.append(node.lineno)
+            elif f.attr == "prune_unseen":
+                prune.append(node.lineno)
+    return sorted(pin), sorted(upsert), sorted(prune)
+
+
 def test_every_covered_scraper_defines_the_canonical_pin_helper():
     for name in PIN_COVERED:
         src = _src(name)
@@ -73,26 +104,61 @@ def test_every_covered_scraper_defines_the_canonical_pin_helper():
 
 def test_every_covered_scraper_calls_the_pin_after_upsert_before_prune():
     for name in PIN_COVERED:
-        src = _src(name)
-        calls = [m.start() for m in CALL_RE.finditer(src)]
-        assert calls, (
+        pin, upsert, prune = _call_lines(_src(name), name)
+        assert pin, (
             f"scrapers/{name}/run.py defines _pin_sold_inactive() but never calls it — a "
             "defined-but-unused pin protects nothing; main() must pin gone rows post-upsert"
         )
-        first_upsert = src.find("db.upsert_")
-        assert first_upsert != -1, f"scrapers/{name}/run.py: no db.upsert_* call found?"
-        assert calls[0] > first_upsert, (
+        assert upsert, f"scrapers/{name}/run.py: no db.upsert_* call found?"
+        assert pin[0] > upsert[0], (
             f"scrapers/{name}/run.py: _pin_sold_inactive() is called before the first upsert — "
             "the upsert resets missing_count=0, so a pre-upsert pin is immediately wiped out; "
             "the pin must run AFTER the batch upserts"
         )
-        first_prune = src.find("db.prune_unseen")
-        if first_prune != -1:
-            assert calls[0] < first_prune, (
+        if prune:
+            assert pin[0] < prune[0], (
                 f"scrapers/{name}/run.py: _pin_sold_inactive() runs after prune_unseen() — gone "
                 "rows must already be active=false when prune scans active rows, or they get "
                 "double-processed as ordinary misses"
             )
+
+
+def test_the_ordering_check_reads_calls_not_prose():
+    """The ordering test above must not be fooled by a COMMENT that names the functions.
+
+    Watched to happen 2026-09-06: eastabha's new oracle comment mentions `db.prune_unseen()`
+    accurately, near the top of the file, and the previous text-search version failed on a file
+    whose ordering was correct. This pins the repair so the trap cannot come back.
+    """
+    good = (
+        "def _pin_sold_inactive(x):\n    pass\n"
+        "def main():\n"
+        "    # this comment mentions db.prune_unseen() and _pin_sold_inactive() early on\n"
+        '    """…and so does this docstring: db.prune_unseen()."""\n'
+        "    db.upsert_rows(x)\n"
+        "    _pin_sold_inactive(y)\n"
+        "    db.prune_unseen(t, s)\n"
+    )
+    pin, upsert, prune = _call_lines(good, "synthetic")
+    assert pin and upsert and prune, "the AST reader found no real call sites"
+    assert upsert[0] < pin[0] < prune[0], (
+        "prose naming these functions was counted as a call site — the reader is reading text, "
+        "not the syntax tree"
+    )
+
+    # …and it must still CATCH the real defect it exists for: a pin that runs after the prune.
+    bad = (
+        "def _pin_sold_inactive(x):\n    pass\n"
+        "def main():\n"
+        "    db.upsert_rows(x)\n"
+        "    db.prune_unseen(t, s)\n"
+        "    _pin_sold_inactive(y)\n"
+    )
+    pin, upsert, prune = _call_lines(bad, "synthetic")
+    assert not (pin[0] < prune[0]), (
+        "the reader failed to see a pin that genuinely runs after the prune — it would pass the "
+        "very defect this module exists to prevent"
+    )
 
 
 def test_covered_scrapers_collect_sold_ids_for_both_tables():
