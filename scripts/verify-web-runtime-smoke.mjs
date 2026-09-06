@@ -880,8 +880,16 @@ try {
       const liveComposer = await page.locator('textarea:not([readonly]):visible').count();
       check('[J] ≤ 50 → no LIVE text input remains (the locked box is the only one)',
         liveComposer === 0, `liveInputs=${liveComposer}`);
-      const lockBtn = await page.locator(`[aria-label*="أُغلقت هذه المحادثة"][aria-disabled="true"]`).count();
-      check('[J] ≤ 50 → the send button is a disabled lock carrying the closed-chat label',
+      // The lock replaces the send arrow only once the card reveal SETTLES — while the ≤50 set is
+      // still dripping in, the button is deliberately the Stop box (tap to freeze the reveal), so
+      // poll rather than sample: 48 cards at the reveal cadence take ~40s on a CI runner.
+      let lockBtn = 0;
+      for (const deadline = Date.now() + 90_000; Date.now() < deadline; ) {
+        lockBtn = await page.locator(`[aria-label*="أُغلقت هذه المحادثة"][aria-disabled="true"]`).count();
+        if (lockBtn >= 1) break;
+        await page.waitForTimeout(1_000);
+      }
+      check('[J] ≤ 50 → once the reveal settles, the send button is a disabled lock carrying the closed-chat label',
         lockBtn >= 1, `lockBtn=${lockBtn}`);
     } else if (Number.isFinite(jFinal)) {
       console.log(`NOTE  [J] landed at ${jFinal} (> 50) — completion assertions not owed; the interview is right to continue`);
