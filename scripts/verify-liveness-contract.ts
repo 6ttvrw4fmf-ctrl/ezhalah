@@ -20,6 +20,7 @@
 // where pytest is installed. THIS file keeps the pure-JS half and — critically — asserts that the
 // mutation proof still exists and still covers every protection, so it cannot be quietly deleted
 // to make something green.
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -64,14 +65,25 @@ const RULES: Array<[string, RegExp]> = [
 for (const [name, re] of RULES) check(name, re.test(contract));
 
 // ── Part 2: registry completeness — no production platform without a declared strategy ─────────
-const declared = new Set([...policiesSrc.matchAll(/"([a-z0-9_]+)":\s*_P\(/g)].map((m) => m[1]));
-for (const m of policiesSrc.matchAll(/for p in \(([\s\S]*?)\)\n/g)) {
-  for (const q of m[1].matchAll(/"([a-z0-9_]+)"/g)) declared.add(q[1]);
-}
-const exempt = new Set(
-  [...(/NOT_PRODUCTION_SEARCHABLE = frozenset\(\{([\s\S]*?)\}\)/.exec(policiesSrc)?.[1] ?? '')
-    .matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]),
-);
+// READ BY EXECUTION, NOT BY REGEX. This used to scrape the registry's SOURCE for `"name": _P(`
+// and for a `for p in (…)` comprehension. That made the barrier a hostage to how the file happens
+// to be written, and on 2026-09-06 it went RED against a perfectly correct registry: a second
+// comprehension written `for p, sig in (…)` — added so ten oracle-guarded platforms could each
+// carry their real death_signals instead of a shared, by-then-false one — matched neither pattern,
+// so ten registered platforms read as UNREGISTERED. A false red on a liveness barrier is not a
+// harmless inconvenience: it blocks every unrelated PR and teaches people to skip the check.
+//
+// It is also the same mistake in the other direction as the one AGENTS.md keeps recording — a
+// barrier that reads TEXT rather than the thing it is judging. `POLICIES` is a dict; ask it.
+const registry = JSON.parse(execFileSync('python3', ['-c', String.raw`
+import json, os, sys
+sys.path.insert(0, os.getcwd())
+from scrapers.common import liveness_policies as LP
+print(json.dumps({"declared": sorted(LP.POLICIES), "exempt": sorted(LP.NOT_PRODUCTION_SEARCHABLE)}))
+`], { cwd: ROOT, encoding: 'utf8' }).trim().split('\n').pop() as string) as
+  { declared: string[]; exempt: string[] };
+const declared = new Set(registry.declared);
+const exempt = new Set(registry.exempt);
 const scraperDirs = readdirSync(join(ROOT, 'scrapers'), { withFileTypes: true })
   // `.` prefix excludes local, gitignored tooling directories (`scrapers/.venv` is in
   // scrapers/.gitignore). Those are never a platform — no platform name can start with a dot — so

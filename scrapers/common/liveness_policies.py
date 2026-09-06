@@ -155,6 +155,47 @@ POLICIES: dict[str, _P] = {
         "carrying strikes (1 expired, 2 hard-deleted). Population coverage is still 0% — see the "
         "tier note above.",
     ),
+    # ── Tier 3a: the deactivation path IS direct, but the population is still unverified ─────────
+    # Same reasoning as aqargate immediately above, applied to every other platform whose prune
+    # gained an oracle. These are NOT relabelled tier 2: CANDIDATE_PLUS_DIRECT would be a claim
+    # about POPULATION coverage, and prune_unseen() probes only the handful of rows already at
+    # grace and never stamps last_verified_alive_at — so the SLA these rows are graded against is
+    # still unmet and saying otherwise would answer a real gap with a label change
+    # (LISTING_LIVENESS.md §7). What HAS changed is the death_signals string, which is why they are
+    # pulled out of the comprehension below: "none (absence from the crawl only)" became FALSE for
+    # each of them the day its oracle shipped, and a registry that misdescribes its own evidence is
+    # the same failure as a dark detector reading as a clean bill of health.
+    **{
+        p: _P(_pol(p, 3, 168), CRAWL_PRESENCE_ONLY, sig,
+              "Absence from the crawl now only SELECTS candidates: scrapers/" + p + "/run.py hands "
+              "prune_unseen a verify_gone oracle, so a row at grace gets a DIRECT re-fetch of its "
+              "own URL and an affirmative answer before it may be deactivated. Every oracle here "
+              "was control-validated against interleaved known-alive rows, and every UNKNOWN shape "
+              "(no answer, 401/403/407/408/429, 5xx, empty body, unresolved redirect) holds the "
+              "strike without deactivating. TIER UNCHANGED and that is honest: the population still "
+              "carries no recent affirmative verification, so these rows are reported as unverified "
+              "— never as verified-alive.")
+        for p, sig in (
+            ("abeea", "the listing's own page answering with an affirmative removal; a 200 we cannot "
+                      "recognise is UNKNOWN (9 rows were once wrongly restored by a 200-means-alive rule)"),
+            ("aqarcity", "the «الإعلان منتهي» expiry banner on the listing's own page, plus 404/410"),
+            ("eastabha", "this listing's OWN slider-property-status ribbon reading تأجرت / تم البيع "
+                         "(the related-listings carousel's ribbons are explicitly not read), plus 404/410"),
+            ("hajer", "this listing's OWN property-status-badge reading status-sold / status-rented, "
+                      "read as a class attribute with <style> stripped first — the site ships the "
+                      "Arabic status words in its CSS palette on every page, live ones included. "
+                      "status-available is read as PROOF OF LIFE and resets the strike counter. NO "
+                      "404 limb: unmeasured here, and an edited WordPress slug 404s a live listing"),
+            ("jazwtn", "404/410 on the listing's own URL (29/31 dead rows, 0/40 controls)"),
+            ("mizlaj", "404/410 on the listing's own URL"),
+            ("nowaisiry", "404/410 on the listing's own URL"),
+            ("raghdan", "404 with no listing payload; a 200 carrying RealEstateListing schema is alive"),
+            ("sanadak", "a SOFT-404 identified by the listing object for THIS url being absent — the "
+                        "row's own stored listing_url is used, because 39 of 1,724 rows store another "
+                        "listing's URL. Removals are additionally gated by an in-run canary"),
+            ("souq24", "a redirect OFF this ad's own path (14/14 dead rows, 0/40 controls), plus 404/410"),
+        )
+    },
     **{
         p: _P(_pol(p, 3, 168), CRAWL_PRESENCE_ONLY,
               "none (absence from the crawl only)",
@@ -162,12 +203,12 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abeea", "abralosol", "abwbna", "aldarim", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "aouj", "aqaratikom",
-            "aqarcity", "aqarmonthly", "arkaan", "awal", "bahadhabab", "eaqartabuk", "eastabha", "erapulse",
-            "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry",
+            "abralosol", "abwbna", "aldarim", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "aouj", "aqaratikom",
+            "aqarmonthly", "arkaan", "awal", "bahadhabab", "eaqartabuk", "erapulse",
+            "fursaghyr", "jurash", "muktamel", "mustqr",
             "october",
-            "raghdan", "ramzalqasim", "rawasidark", "remal", "sadin", "sanadak", "satel",
-            "shmoualshmal", "souq24", "therc",
+            "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
+            "shmoualshmal", "therc",
         )
     },
 }

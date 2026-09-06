@@ -38,7 +38,7 @@ import scrapers.common.http_liveness as L
 
 MUT = os.environ.get("MUTATE")
 
-PLATFORMS = ["jazwtn", "mizlaj", "nowaisiry", "souq24", "eastabha", "dealapp"]
+PLATFORMS = ["jazwtn", "mizlaj", "nowaisiry", "souq24", "eastabha", "dealapp", "hajer"]
 out = {}
 SIGNALS = {}
 for name in PLATFORMS:
@@ -144,6 +144,34 @@ out["eastabha"]["carousel_only"]       = ea_d(200, CAROUSEL)
 out["eastabha"]["carousel_plus_live"]  = ea_d(200, OWN_CATEGORY + CAROUSEL)
 out["eastabha"]["vocab_is_shared"]     = list(ea.GONE_STATUS_AR)
 
+# hajer: the listing's OWN badge must decide, and the CSS palette on every page must not.
+# hajerhouses.com ships a "مباع - Red" comment beside a .status-sold rule inside <style> on EVERY
+# page, live ones included, so a whole-document substring search calls 100% of the site sold. NOTE
+# for the editor: this whole harness is a String.raw template literal — a backtick here would end it
+# mid-Python and the file would fail to parse. Both defences are
+# executed here: the class-ATTRIBUTE anchor (CSS selectors are not class attributes) and the <style>
+# strip (an attribute selector inside CSS would defeat the anchor alone).
+import scrapers.hajer.run as hj
+HJ_CSS   = ('<style>/* مباع - Red */ .rem-style-2.rem-property-box .status-sold '
+            '{ background: #dc3545 !important; } /* مؤجرة */ .status-rented { background: #6c757d }</style>')
+HJ_SEL   = '<style>span[class="property-status-badge status-sold"]{color:red}</style>'
+HJ_SOLD  = '<span class="property-status-badge status-sold">مباع</span>'
+HJ_RENT  = '<span class="property-status-badge status-rented">مؤجرة</span>'
+HJ_AVAIL = '<span class="property-status-badge status-available">متاح</span>'
+HJ_RESV  = '<span class="property-status-badge status-reserved">محجوز</span>'
+def hj_d(status, body, moved=False):
+    # SIGNALS["hajer"], not hj._signal: under MUTATE the mutant lives in SIGNALS, and reading the
+    # pristine module attribute here would make every hajer mutation survive by construction.
+    r = L.decide(status, body, moved, SIGNALS["hajer"])
+    return None if r is None else r[0]
+out["hajer"]["own_sold"]        = hj_d(200, HJ_CSS + HJ_SOLD + BODY)
+out["hajer"]["own_rented"]      = hj_d(200, HJ_CSS + HJ_RENT + BODY)
+out["hajer"]["own_available"]   = hj_d(200, HJ_CSS + HJ_AVAIL + BODY)
+out["hajer"]["css_palette_only"] = hj_d(200, HJ_CSS + BODY)
+out["hajer"]["style_attr_selector_beside_live"] = hj_d(200, HJ_SEL + HJ_AVAIL + BODY)
+out["hajer"]["no_badge_at_all"] = hj_d(200, BODY)
+out["hajer"]["reserved"]        = hj_d(200, HJ_CSS + HJ_RESV + BODY)
+
 # souq24's id parser: strict, because a loose one probes another platform's page.
 import scrapers.souq24.run as sq
 out["souq24"]["pid_ok"] = sq._pid_of("SQ24-1278")
@@ -169,7 +197,7 @@ const run = (mutate?: [string, string, string]): Result => {
   return JSON.parse(out.trim().split('\n').pop() as string) as Result;
 };
 
-const PLATFORMS = ['jazwtn', 'mizlaj', 'nowaisiry', 'souq24', 'eastabha', 'dealapp'] as const;
+const PLATFORMS = ['jazwtn', 'mizlaj', 'nowaisiry', 'souq24', 'eastabha', 'dealapp', 'hajer'] as const;
 
 // What each platform was MEASURED to do. Changing a row here is changing a claim about a source,
 // which needs a fresh measurement — not a convenient edit.
@@ -185,6 +213,12 @@ const MEASURED: Record<string, { gone: string[]; notGone: string[] }> = {
   eastabha: { gone: ['gone_404', 'gone_410'], notGone: ['redirect_200', 'redirect_404', 'plain_200'] },
   // classify_dealapp's own limbs: 404/410 dead, a redirect off the ad path dead, a shell UNKNOWN.
   dealapp: { gone: ['gone_404', 'gone_410'], notGone: ['plain_200'] },
+  // hajer is the one platform here with NO status-code removal limb, and that is the measurement,
+  // not an omission: all 65 probes (5 dead + 60 controls) answered 200, so its 404 behaviour is
+  // UNMEASURED. It is also the limb most likely to be wrong on this source — these are WordPress
+  // permalinks with Arabic slugs, and an edited slug 404s a URL whose listing is perfectly alive.
+  // Its entire removal signal is the own-badge check asserted below.
+  hajer: { gone: [], notGone: ['gone_404', 'gone_410', 'redirect_200', 'redirect_404', 'plain_200'] },
 };
 
 const holds = (r: Result): string[] => {
@@ -210,6 +244,17 @@ const holds = (r: Result): string[] => {
     if (ea.own_category_only !== 'gone') h.push('eastabha:category-not-a-removal');
     if (ea.carousel_only !== 'gone') h.push('eastabha:carousel-not-mine');
     if (ea.carousel_plus_live !== 'gone') h.push('eastabha:carousel-beside-live-not-mine');
+  }
+  const hj = r.hajer as unknown as Record<string, unknown> | undefined;
+  if (hj) {
+    if (hj.own_sold === 'gone') h.push('hajer:own-sold');
+    if (hj.own_rented === 'gone') h.push('hajer:own-rented');
+    if (hj.own_available === 'live') h.push('hajer:own-available-is-life');
+    if (hj.css_palette_only !== 'gone') h.push('hajer:css-palette-not-a-removal');
+    if (hj.css_palette_only !== 'live') h.push('hajer:css-palette-not-a-verification');
+    if (hj.style_attr_selector_beside_live !== 'gone') h.push('hajer:style-stripped-before-reading');
+    if (hj.no_badge_at_all !== 'gone') h.push('hajer:no-badge-not-a-removal');
+    if (hj.reserved !== 'gone' && hj.reserved !== 'live') h.push('hajer:reserved-unmeasured-no-opinion');
   }
   return h;
 };
@@ -282,6 +327,30 @@ check(da.has_canary === true,
   'dealapp: the probe carries an in-run canary (its run-level trust gate, made per-row)',
   'environment_is_trustworthy() asks a RUN-level question a verify_gone callback cannot see');
 
+// hajer: the own badge decides; the site-wide CSS palette decides nothing, in EITHER direction.
+const hj = base.hajer as unknown as Record<string, unknown>;
+check(hj.own_sold === 'gone', 'hajer: this listing OWN badge reading status-sold IS a removal');
+check(hj.own_rented === 'gone', 'hajer: this listing OWN badge reading status-rented IS a removal');
+check(hj.own_available === 'live',
+  'hajer: this listing OWN badge reading status-available is PROOF OF LIFE',
+  'this is the limb that resets the strike counter — without it HJ1512 (deactivated 2026-07-31 on ' +
+  'absence alone while the source served «متاح») would simply be re-deactivated on the next crawl');
+check(hj.css_palette_only !== 'gone',
+  'hajer: the site-wide CSS status palette is not a removal',
+  '`/* مباع - Red */ .status-sold {…}` ships inside <style> on EVERY page including live ones, so ' +
+  'a whole-document substring search calls 100% of this source sold');
+check(hj.css_palette_only !== 'live',
+  'hajer: …and it is not a verification either — a stylesheet cannot prove a listing is offered');
+check(hj.style_attr_selector_beside_live !== 'gone',
+  'hajer: a status class inside a <style> ATTRIBUTE SELECTOR cannot kill a listing whose own badge says متاح',
+  'the class-attribute anchor alone does not stop this shape; the <style> strip is what does');
+check(hj.no_badge_at_all !== 'gone',
+  'hajer: no badge at all is UNKNOWN, not a removal',
+  '53 of 60 known-ALIVE controls carried no badge — reading that as death would empty the platform');
+check(hj.reserved !== 'gone' && hj.reserved !== 'live',
+  'hajer: status-reserved (محجوز) gets NO opinion — zero rows in either cohort carried it',
+  'the crawl path treats محجوز as gone; having no opinion can never contradict it, guessing can');
+
 check(base.souq24.pid_ok === 1278, 'souq24: SQ24-1278 parses to its pid', String(base.souq24.pid_ok));
 check((base.souq24.pid_bad ?? []).every((x) => x === null),
   'souq24: every malformed ad_number yields no pid rather than a guessed one',
@@ -308,6 +377,7 @@ const CALL_EVERYTHING_GONE: Record<string, [string, string]> = {
   eastabha: ['    if path_changed:', '    if True:\n        return "gone"\n    if path_changed:'],
   dealapp: ['    adid = getattr(_ORACLE_ADID, "adid", None)',
             '    return "gone"\n    adid = getattr(_ORACLE_ADID, "adid", None)'],
+  hajer: ['    if path_changed:', '    if True:\n        return "gone"\n    if path_changed:'],
 };
 for (const p of PLATFORMS) {
   const [find, repl] = CALL_EVERYTHING_GONE[p];
@@ -337,6 +407,32 @@ mustCatch('dealapp treating a listing-less shell as a removal',
 // …and the inverse: a platform adopting souq24's redirect rule without measuring it.
 mustCatch('jazwtn adopting a redirect-means-gone rule it never measured',
   ['jazwtn', '    if path_changed:\n        return None', '    if path_changed:\n        return "gone"']);
+
+// hajer reading the whole document instead of its own element — the CSS-palette trap, restored in
+// the exact shape a substring search produces. This is the mutation that matters most here: the
+// palette ships on EVERY page, so this defect deactivates the entire platform on its first sweep.
+mustCatch('hajer reading the site-wide CSS palette as this listing status',
+  ['hajer', '    badges = _OWN_BADGE_RE.findall(_STYLE_RE.sub("", body or ""))',
+   '    badges = ["sold"] if "مباع" in (body or "") else []']);
+// …and the narrower version: keeping the class-attribute anchor but dropping the <style> strip.
+mustCatch('hajer dropping the <style> strip, so a CSS attribute selector kills a live listing',
+  ['hajer', '_STYLE_RE.sub("", body or "")', '(body or "")']);
+// hajer losing the badge that IS its only removal signal: dead inventory stays searchable forever.
+mustCatch('hajer losing the sold/rented badge that IS its only removal signal',
+  ['hajer', '    if any(b in _GONE_BADGE for b in badges):', '    if False:']);
+// hajer losing its PROOF OF LIFE limb — the half that actually protects HJ1512's successors, since
+// without a strike reset an absent-but-alive row is deactivated again on the very next crawl.
+mustCatch('hajer losing the available badge that resets the strike counter',
+  ['hajer', '    if any(b in _ALIVE_BADGE for b in badges):', '    if False:']);
+// hajer adopting the 404 rule its 65 measured probes never observed (see MEASURED.hajer).
+mustCatch('hajer adopting a 404-means-gone rule it never measured',
+  ['hajer', '    if status != 200:\n        return None',
+   '    if status in (404, 410):\n        return "gone"\n    if status != 200:\n        return None']);
+// hajer inverting its own vocabulary — «متاح» is the badge on a listing that is still offered, and
+// 7 of 60 known-ALIVE controls carried exactly it.
+mustCatch('hajer treating an available badge as a removal',
+  ['hajer', '    if any(b in _GONE_BADGE for b in badges):',
+   '    if any(b in _GONE_BADGE + _ALIVE_BADGE for b in badges):']);
 
 console.log(failed === 0
   ? '\n✅ verify-absence-oracles-are-measured: every signal says only what its source was measured to say.'
