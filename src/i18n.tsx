@@ -1109,6 +1109,11 @@ const AR: Record<string, string> = {
   'Search complete': 'اكتمل البحث',
   'No further truthful narrowing question exists for this scope — these are all the genuine matches.': 'ما فيه سؤال إضافي موثوق يضيّق هذا النطاق أكثر — هذي كل النتائج المطابقة فعلاً.',
   'Start a new chat to search again': 'ابدأ محادثة جديدة للبحث من جديد',
+  // Completed-search composer (owner request 2026-09-05): the composer keeps its normal look —
+  // no separate card — the input goes inert with this as its placeholder, and the send arrow
+  // becomes a lock. The real action is the hamburger, always physically top-left (topBar is
+  // LTR-pinned) regardless of locale.
+  'This chat is closed — tap ☰ at the top to start a new search': 'أُغلقت هذه المحادثة — اضغط ☰ أعلى الصفحة لبدء بحث جديد',
   // Sidebar chat search (owner 2026-08-24): ChatGPT-style in-sidebar search, Arabic-first. The
   // empty state + hint are deliberately calm Saudi copy — never an English "No results".
   'Search chats': 'البحث في المحادثات',

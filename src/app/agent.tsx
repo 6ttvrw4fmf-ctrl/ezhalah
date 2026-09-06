@@ -564,7 +564,7 @@ export default function Agent() {
     fresh?: string;
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
-  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript, newChat } = useApp();
+  const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
   // which counts the `setQuery(` calls in this file precisely so a second, unsanitized writer cannot
@@ -3433,30 +3433,13 @@ export default function Agent() {
             bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
         {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
             insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
-        {/* COMPLETED SEARCH (owner 2026-08-30): Advanced Filter reached the final set (R11.1) or no useful
-            question remained (R11.2). The conversation is DONE — the composer (and the mic that lives inside it)
-            is replaced by one clear action. The saved transcript stays readable; Back / reopen restore this
-            same state from `completed` rather than resurrecting a live composer. */}
-        {completed ? (
-          <View style={[s.completedWrap, { paddingBottom: insets.bottom + 12 }]}>
-            <View style={[s.col, s.completedBar]}>
-              <View style={s.completedTxWrap}>
-                <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
-                <Text style={s.completedTx}>{t('Search complete')}</Text>
-              </View>
-              <Text style={s.completedSub}>{t('Start a new chat to search again')}</Text>
-              <Pressable
-                onPress={() => { newChat(); router.replace({ pathname: '/', params: { fresh: String(Date.now()) } }); }}
-                accessibilityRole="button"
-                accessibilityLabel={t('New Chat')}
-                style={({ pressed, hovered }: any) => [s.newChatBtn, (pressed || hovered) && s.newChatBtnOn]}
-              >
-                <Ionicons name="add" size={18} color={colors.onFill} />
-                <Text style={s.newChatTx}>{t('New Chat')}</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : (
+        {/* COMPLETED SEARCH (owner 2026-08-30, composer restored 2026-09-05): Advanced Filter reached
+            the final set (R11.1) or no useful question remained (R11.2). The conversation is DONE, but
+            the composer keeps its normal look — no separate replacement card. The input goes inert
+            with an explanatory placeholder, the mic disappears, and the send arrow becomes a lock
+            (see the `completed` branches below). The real "start over" action is the hamburger, top
+            left, not a button inside the composer. The saved transcript stays readable; Back / reopen
+            restore this same state from `completed`. */}
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
@@ -3483,13 +3466,16 @@ export default function Agent() {
                 // While the rotating examples occupy the placeholder slot, the input's own static
                 // placeholder yields (empty string) so the two never overlap; the moment the
                 // rotation stops (any interaction) the familiar static placeholder returns.
-                placeholder={showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia...")}
+                // COMPLETED (owner request 2026-09-05): the box stays, it just goes inert — the
+                // placeholder explains why instead of inviting a message that can never send.
+                placeholder={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : (showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia..."))}
                 placeholderTextColor={colors.muted}
                 selectionColor={colors.primary}
+                editable={!completed}
                 // Stable Arabic label (owner brief §11): a screen reader always hears this one
                 // sentence for the field — never the rotating examples (those are aria-hidden).
                 accessibilityLabel={t('Describe the property you are looking for')}
-                value={typed}
+                value={completed ? '' : typed}
                 onChangeText={(v: string) => { setIntroInteracted(true); setTyped(v); if (!v) setInputH(COMPOSER_MIN_H); }}
                 // Grows only as text wraps, capped at COMPOSER_MAX_H (then scrolls internally); the
                 // TARGET comes from RN's own line metrics (native + web), the MOTION from INPUT_EASE.
@@ -3541,7 +3527,7 @@ export default function Agent() {
                       evidence trail). Showing a mic that can only ever flash a failure toast and
                       revert reads as broken — but hiding a mic the runtime genuinely supports, on a
                       guess about the browser's name, is the same mistake in the other direction. */}
-                  {isVoiceInputSupported() ? (
+                  {isVoiceInputSupported() && !completed ? (
                   <Pressable
                     testID="voice-mic"
                     onPress={() => { void startVoice(); }}
@@ -3554,9 +3540,12 @@ export default function Agent() {
                     <Ionicons name="mic-outline" size={19} color={colors.body} />
                   </Pressable>
                   ) : null}
+                  {/* COMPLETED (owner request 2026-09-05): the send arrow becomes a lock — same
+                      composer, same button, no separate card. It never fires (the real "start
+                      over" action is the hamburger, top left), so it always renders disabled. */}
                   <Pressable
                     onPress={() => send()}
-                    disabled={!typed.trim()}
+                    disabled={completed || !typed.trim()}
                     onPressIn={() => sendSpring(0.9)}
                     onPressOut={() => sendSpring(1)}
                     onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
@@ -3564,11 +3553,11 @@ export default function Agent() {
                     hitSlop={6}
                     // @ts-expect-error web-only DOM props on the RNW host node
                     dataSet={{ ...TAP44 }}
-                    accessibilityLabel={t('Search')}
-                    style={!typed.trim() ? s.sendDisabled : undefined}
+                    accessibilityLabel={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : t('Search')}
+                    style={completed || !typed.trim() ? s.sendDisabled : undefined}
                   >
-                    <Animated.View style={[s.sendBtn, sendHover && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
-                      <Ionicons name="arrow-up" size={17} color="#fff" />
+                    <Animated.View style={[s.sendBtn, sendHover && !completed && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
+                      <Ionicons name={completed ? 'lock-closed' : 'arrow-up'} size={completed ? 15 : 17} color="#fff" />
                     </Animated.View>
                   </Pressable>
                 </>
@@ -3637,7 +3626,6 @@ export default function Agent() {
             </Text>
           </View>
         </View>
-        )}
       </KeyboardAvoidingView>
 
       {/* ChatGPT-style feedback toast — floats top-center ABOVE the conversation (below the header),
@@ -3880,15 +3868,6 @@ const s = StyleSheet.create({
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
-  // Completed-search bar (owner 2026-08-30) — replaces the composer once AF reaches the final set.
-  completedWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
-  completedBar: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 22, paddingVertical: 16, paddingHorizontal: 18, alignItems: 'center', gap: 6, ...cardShadow },
-  completedTxWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  completedTx: { fontSize: 15, fontWeight: '800', color: colors.ink },
-  completedSub: { fontSize: 12.5, color: colors.muted, textAlign: 'center' },
-  newChatBtn: { marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.selFill, paddingVertical: 11, paddingHorizontal: 22, borderRadius: 999 },
-  newChatBtnOn: { backgroundColor: colors.dark },
-  newChatTx: { fontSize: 14, fontWeight: '800', color: colors.onFill },
   // The send/stop button is pinned to the PHYSICAL right (right:4) and never mirrors — it stays on the
   // right in Arabic too, so paddingRight leaves room for it regardless of text direction. (user request.)
   // Inline row (no absolute button): input flexes, the send/stop button sits at the end, vertically

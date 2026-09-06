@@ -1,9 +1,14 @@
-// COMPLETED SEARCH — END THE CHAT CLEANLY (owner 2026-08-30). Auto-discovered barrier.
+// COMPLETED SEARCH — END THE CHAT CLEANLY (owner 2026-08-30; composer restored 2026-09-05). Auto-
+// discovered barrier.
 //
 // When Advanced Filter has narrowed the search to its FINAL set (R11.1: honest total ≤
-// INTERVIEW_STOP_AT) or no useful question remains (R11.2), the conversation is done: the composer
-// (and the mic inside it) is replaced by «محادثة جديدة»; the transcript stays readable; Back / saved
-// chats / persistence must reopen READ-ONLY, never resurrect a live composer.
+// INTERVIEW_STOP_AT) or no useful question remains (R11.2), the conversation is done. ORIGINALLY
+// (2026-08-30) the composer was REPLACED by a separate "Search complete" card. Per owner request
+// 2026-09-05, the composer keeps its normal look instead: the SAME box, made inert, with an
+// explanatory placeholder; the mic disappears; the send arrow becomes a lock. There is no card and
+// no in-composer "New Chat" button any more — the real "start over" action is the hamburger, top
+// left. The transcript stays readable; Back / saved chats / persistence must reopen with the
+// composer locked, never a live one.
 //
 // `completed` is set ONLY by the two canonical AF stop conditions. A plain first search with 20
 // results and no AF round is not "finished" — pinned below by counting setCompleted(true) sites.
@@ -50,28 +55,48 @@ check("...and that verdict path still records afCanNarrow first (the «تحدي�
 check("the spoken line is said at most ONCE per results turn (noMoreSaidRef guard)",
   /noMoreSaidRef\.current\[m\.id\] = true;/.test(agent));
 
-console.log("\n── the composer is REPLACED, not merely hidden; the mic goes with it ──");
-const wrapIdx = agent.indexOf("{completed ? (");
+console.log("\n── the composer is the SAME box, made inert — not a separate card ──");
 const compIdx = agent.indexOf("<View style={[s.composerWrap");
-check("the composer block is inside the completed-false branch", wrapIdx > -1 && compIdx > wrapIdx && agent.indexOf(") : (", wrapIdx) < compIdx);
-check("the mic lives inside the composer block, so a completed chat has no dead mic control",
-  agent.indexOf('testID="voice-mic"') > compIdx);
-check("the bar offers exactly one action — New Chat — via the store reset AND the Sidebar's own navigation",
-  /onPress=\{\(\) => \{ newChat\(\); router\.replace\(\{ pathname: '\/', params: \{ fresh: String\(Date\.now\(\)\) \} \}\); \}\}/.test(agent));
-check("newChat is taken from the store (no second reset implementation)", /hydrateTranscript, newChat \} = useApp\(\);/.test(agent));
-check("the bar says the search is complete and points to a new chat",
-  /t\('Search complete'\)/.test(agent) && /t\('Start a new chat to search again'\)/.test(agent) && /t\('New Chat'\)/.test(agent));
+check("the composer block is unconditional — no ternary swaps in a different card for `completed`",
+  compIdx > -1 && !/\{completed \? \(/.test(agent));
+check("the input goes non-editable when completed", /editable=\{!completed\}/.test(agent));
+check("the input's value is cleared when completed (nothing typed can look sendable)",
+  /value=\{completed \? '' : typed\}/.test(agent));
+check("the placeholder explains the closed state instead of inviting a message",
+  /placeholder=\{completed \? t\('This chat is closed — tap ☰ at the top to start a new search'\)/.test(agent));
+check("the mic disappears when completed (no dead mic control on a locked composer)",
+  /isVoiceInputSupported\(\) && !completed \?/.test(agent));
+check("the send button is disabled once completed, regardless of typed text",
+  /disabled=\{completed \|\| !typed\.trim\(\)\}/.test(agent));
+check("the send icon becomes a lock when completed, an arrow otherwise",
+  /name=\{completed \? 'lock-closed' : 'arrow-up'\}/.test(agent));
+check("no separate replacement card, New Chat button, or their styles remain",
+  !/completedWrap|completedBar|completedTxWrap|completedSub|newChatBtn|newChatTx/.test(agent));
+
+console.log("\n── mutation proof — the barrier must actually catch a regression ──");
+{
+  // Simulate the OLD replacement-card shape reappearing: a ternary swaps in a different branch.
+  // The real check's own condition, re-run against the mutant, must flip from PASS to FAIL.
+  const isUnconditional = (src: string) => compIdx > -1 && !/\{completed \? \(/.test(src);
+  const regressed = "{completed ? (<View />) : (" + agent;
+  check("MUTATION: reintroducing a completed-ternary around the composer is caught",
+    isUnconditional(agent) === true && isUnconditional(regressed) === false);
+}
+{
+  // Simulate someone forgetting to disable the send button while locking the icon to a lock.
+  const regressed = agent.replace("disabled={completed || !typed.trim()}", "disabled={!typed.trim()}");
+  check("MUTATION: dropping `completed` from the send button's disabled condition is caught",
+    !/disabled=\{completed \|\| !typed\.trim\(\)\}/.test(regressed));
+}
 
 console.log("\n── Back / reopen / New Chat ──");
 check("restore reinstates completed from the transcript", /setCompleted\(restored\.completed === true\);/.test(agent));
 check("New Chat (fresh) clears it", /setCompleted\(false\);/.test(agent));
 check("the capture persists it", /serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed \}\)/.test(agent));
 
-console.log("\n── styling contract ──");
-const styles = agent.slice(agent.indexOf("completedWrap:"), agent.indexOf("newChatTx:") + 120);
-check("new styles use palette tokens only (no hex)", !/#[0-9a-fA-F]{6}/.test(styles));
-check("both i18n keys have Arabic entries",
-  /'Search complete': 'اكتمل البحث'/.test(i18n) && /'Start a new chat to search again': '/.test(i18n));
+console.log("\n── i18n contract ──");
+check("the closed-composer placeholder has an Arabic entry",
+  /'This chat is closed — tap ☰ at the top to start a new search': 'أُغلقت هذه المحادثة/.test(i18n));
 
 if (failed) { console.error(`\n✗ ${failed} check(s) FAILED`); process.exit(1); }
-console.log("\nOK — a completed search ends the chat cleanly, persists, and never resurrects a live composer");
+console.log("\nOK — a completed search locks the SAME composer (inert input, no mic, lock icon), persists, and never resurrects a live one");
