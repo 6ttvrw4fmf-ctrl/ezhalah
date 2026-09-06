@@ -42,7 +42,26 @@ const ROOT = join(import.meta.dirname, '..');
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {
-  console.log(`  ${ok ? '✓' : '✗'} ${what}${ok || !detail ? '' : ` — ${detail}`}`);
+  // Deliberately string concatenation, not a template literal — as is every assertion message in
+  // this file, and it is not a style preference.
+  //
+  // scripts/verify-new-barriers-are-mutation-proven.ts decides whether a barrier carries a mutation
+  // proof by stripping quoted spans and searching the remainder for `mustCatch(`. It strips in
+  // THREE INDEPENDENT GLOBAL PASSES — comments, then '…', then "…", then `…` — instead of one
+  // left-to-right pass that respects whichever quote opened first. So a quote character inside a
+  // span of a different kind desynchronises the later passes, and the tail of the file is consumed
+  // as if it were one long string. Watched here, twice: a Python `"""docstring"""` inside this
+  // file's `String.raw` harness made the double-quote pass eat the harness's own closing backtick,
+  // and template literals in the messages below then paired with the wrong partners. Either way
+  // every `mustCatch(` call vanished and this file — which carries nine executed proofs — read as
+  // UNPROVEN.
+  //
+  // It fails in the SAFE direction (a proven barrier is accused; an unproven one is never excused),
+  // so it is a nuisance rather than a hazard. Routed to routine #10 as ops_incident #132 with the
+  // repro and the one-pass fix. Until that lands, this file keeps exactly two backticks — the
+  // harness delimiters — so there is nothing for the reader to mis-pair.
+  const suffix = ok || !detail ? '' : ' — ' + detail;
+  console.log('  ' + (ok ? '✓' : '✗') + ' ' + what + suffix);
   if (!ok) failed++;
 };
 
@@ -67,15 +86,15 @@ if mut:
 
 AD  = "SN7200987921"
 URL = "https://sanadak.sa/property-details/شقة-للبيع-في-أبها-الروابي-6-غرفة-7200987921"
-# A DIFFERENT listing's URL — the 2.3% of rows whose stored URL is not their own.
+# The URL of a DIFFERENT listing — the 2.3% of rows whose stored URL is not their own.
 OTHER_URL = "https://sanadak.sa/property-details/مبنى-للإيجار-في-الرياض-الرمال-7200885815"
 
-# The two real body shapes. LIVE carries this ad's own advertisementNumber in the flight stream,
+# The two real body shapes. LIVE carries the advertisementNumber of THIS ad in the flight stream,
 # which is what run._extract_obj_for_url() resolves; the shell carries neither it nor a title.
 LIVE_BODY = ('<html><head><title>شقة للبيع في أبها الروابي 6 غرفة</title></head><body>'
              'self.__next_f.push([1,"{\"advertisementNumber\":\"7200987921\",\"price\":900000}"])'
              + "x" * 600000 + '</body></html>')
-# Another listing's page, rendered in full — a title, but not OUR ad number.
+# The page of another listing, rendered in full — a title, but not OUR ad number.
 OTHER_BODY = ('<html><head><title>مبنى للإيجار في الرياض الرمال</title></head><body>'
               'self.__next_f.push([1,"{\"advertisementNumber\":\"7200885815\",\"price\":10}"])'
               + "x" * 600000 + '</body></html>')
@@ -117,10 +136,16 @@ table = {
 # ── The whole function, executed against an injected transport: no network, no clock ────────────
 import time; time.sleep = lambda *_a, **_k: None
 
+# seq: a list of (status, body) pairs or Exceptions, consumed by _oracle_fetch in order. The canary
+# probe draws from the SAME sequence, so a run whose source is shelling out is modelled exactly as
+# production would see it.
+#
+# NOTE, deliberately a # comment and not a docstring: verify-new-barriers-are-mutation-proven.ts
+# scans code with three independent quote-stripping passes, and a Python triple-quoted string inside
+# this template makes its double-quote pass swallow the template's own closing backtick — which ate
+# every mutation proof below and read this file as UNPROVEN. Routed to routine #10 as ops_incident
+# #131; it fails in the safe direction, so it is a nuisance rather than a hazard.
 def wire(seq, canaries=(URL,), ad=AD, url=URL):
-    """seq: list of (status, body) or Exception, consumed by _oracle_fetch in order.
-    The canary probe consumes from the SAME sequence, so a run whose source is shelling out is
-    modelled exactly as production would see it."""
     box = list(seq)
     def fetch(u):
         if not box:
@@ -203,9 +228,9 @@ const STRICT_UNKNOWN = ['200_other_listing', 'url_is_another_ad', 'url_is_anothe
 const lawHolds = (r: Result): string[] => {
   const t = r.table ?? {};
   const held: string[] = [];
-  for (const k of UNKNOWN_SHAPES) if (t[k] !== 'gone') held.push(`unknown:${k}`);
-  for (const k of GONE_SHAPES) if (t[k] === 'gone') held.push(`gone:${k}`);
-  for (const k of STRICT_UNKNOWN) if (t[k] === 'unknown') held.push(`strict:${k}`);
+  for (const k of UNKNOWN_SHAPES) if (t[k] !== 'gone') held.push('unknown:' + k);
+  for (const k of GONE_SHAPES) if (t[k] === 'gone') held.push('gone:' + k);
+  for (const k of STRICT_UNKNOWN) if (t[k] === 'unknown') held.push('strict:' + k);
   if (t['200_own_listing'] === 'live') held.push('live:200_own_listing');
   return held;
 };
@@ -215,26 +240,29 @@ const base = runHarness();
 check(!base.error, 'the shipped oracle imports and runs', base.error ?? '');
 
 for (const k of UNKNOWN_SHAPES) {
-  check(base.table?.[k] !== 'gone', `${k} is NOT death`,
-    `_gone_verdict returned ${JSON.stringify(base.table?.[k])} — an UNKNOWN read must never deactivate`);
+  check(base.table?.[k] !== 'gone', k + ' is NOT death',
+    '_gone_verdict returned ' + JSON.stringify(base.table?.[k]) +
+    ' — an UNKNOWN read must never deactivate');
 }
 for (const k of GONE_SHAPES) {
-  check(base.table?.[k] === 'gone', `${k} IS an affirmative source removal`,
-    `returned ${JSON.stringify(base.table?.[k])} — this platform's real death signal is the 200 ` +
+  check(base.table?.[k] === 'gone', k + ' IS an affirmative source removal',
+    'returned ' + JSON.stringify(base.table?.[k]) + ' — the real death signal here is the 200 ' +
     'app shell; if it stops killing, removed inventory stays searchable forever');
 }
 for (const k of STRICT_UNKNOWN) {
   check(base.table?.[k] === 'unknown',
-    `${k} is UNKNOWN, not a verdict about this listing`,
-    `returned ${JSON.stringify(base.table?.[k])} — 39 of 1,724 rows store another listing's URL; ` +
-    "reading that page as 'live' resurrects a row on someone else's evidence");
+    k + ' is UNKNOWN, not a verdict about this listing',
+    'returned ' + JSON.stringify(base.table?.[k]) +
+    ' — 39 of 1,724 rows store the URL of a different listing; ' +
+    'reading that page as LIVE resurrects a row on evidence about a different listing');
 }
 check(base.table?.['200_own_listing'] === 'live',
   '200 whose flight stream carries THIS ad number is ALIVE (the self-heal limb)');
 
 for (const k of ['blocked_twice', 'timeout_twice', '5xx_twice']) {
-  check(base.wired?.[k] === 'unknown', `_verify_gone: ${k} exhausts its retries as 'unknown'`,
-    `returned ${JSON.stringify(base.wired?.[k])} — a source we could not reach is not a dead listing`);
+  check(base.wired?.[k] === 'unknown', '_verify_gone: ' + k + ' exhausts its retries as UNKNOWN',
+    'returned ' + JSON.stringify(base.wired?.[k]) +
+    ' — a source we could not reach is not a dead listing');
 }
 check(base.wired?.transient_then_live === 'live',
   "_verify_gone: a transient 5xx followed by a live read is 'live' (retries work)");
@@ -248,7 +276,7 @@ check(base.wired?.no_url === 'unknown',
 // ── The §5.4 in-run positive control ──────────────────────────────────────────────────────────
 check(base.wired?.removed_canary_shell === 'unknown',
   'a removal is WITHHELD when the canary also shells out (the source is serving shells, not empty)',
-  `returned ${JSON.stringify(base.wired?.removed_canary_shell)} — this is the dealapp failure mode ` +
+  'returned ' + JSON.stringify(base.wired?.removed_canary_shell) + ' — this is the dealapp failure mode ' +
   '(LISTING_LIVENESS.md §5.1) and on this platform it would deactivate the entire probed cohort');
 check(base.wired?.removed_canary_500 === 'unknown',
   'a removal is WITHHELD when the canary cannot be reached at all');
@@ -264,8 +292,8 @@ check(sites.length > 0, 'the module still calls prune_unseen (the path this barr
   'no prune_unseen call found in the syntax tree — this barrier would pass vacuously');
 const unwired = sites.filter((s) => s.verify_gone !== '_verify_gone');
 check(unwired.length === 0,
-  `EVERY prune_unseen call site on this platform carries the oracle (${sites.length} found)`,
-  `line(s) ${unwired.map((s) => s.line).join(', ')} prune WITHOUT verify_gone=_verify_gone`);
+  'EVERY prune_unseen call site on this platform carries the oracle (' + sites.length + ' found)',
+  'line(s) ' + unwired.map((s) => s.line).join(', ') + ' prune WITHOUT verify_gone=_verify_gone');
 check((base.canary_calls ?? []).length > 0,
   'the run arms the canary before pruning (an unarmed gate withholds every removal)',
   'set_liveness_canaries() is never called, so the oracle could not deactivate anything at all');
@@ -276,9 +304,9 @@ check((base.canary_calls ?? []).length > 0,
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 const mustCatch = (what: string, mutate: [string, string]) => {
   const r = runHarness(mutate);
-  if (r.error) { check(false, `(mutation) ${what}`, r.error); return; }
+  if (r.error) { check(false, '(mutation) ' + what, r.error); return; }
   const held = lawHolds(r);
-  check(held.length < TOTAL, `(mutation) catches ${what}`,
+  check(held.length < TOTAL, '(mutation) catches ' + what,
     'MUTANT SURVIVED — every assertion above still passed with the defect present, so this barrier ' +
     'is asserting the bug rather than the rule');
 };
@@ -289,7 +317,7 @@ mustCatch('a blocked/throttled read being treated as death',
 mustCatch('a network error resolving to a verdict instead of a retry',
   ['if status is None:\n        return None', 'if status is None:\n        return "gone", "mutant"']);
 // The identity guard, both halves — this is the false-resurrection direction.
-mustCatch("another listing's URL being probed as if it were this row's",
+mustCatch('the URL of a different listing being probed as if it belonged to this row',
   ['if _url_ad_number(url or "") != sid:', 'if False:']);
 mustCatch('a page that rendered a different listing being resolved instead of held',
   ['return "unknown", f"200 rendered a page we could not resolve to {sid} ({len(body)} bytes)"',
@@ -308,5 +336,5 @@ mustCatch('the live limb no longer certifying a served listing',
 
 console.log(failed === 0
   ? '\n✅ verify-sanadak-absence-cannot-deactivate: absence selects candidates; only the source kills.'
-  : `\n❌ verify-sanadak-absence-cannot-deactivate: ${failed} check(s) failed.`);
+  : '\n❌ verify-sanadak-absence-cannot-deactivate: ' + failed + ' check(s) failed.');
 process.exit(failed === 0 ? 0 : 1);
