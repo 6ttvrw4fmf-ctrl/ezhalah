@@ -64,8 +64,15 @@ for (const f of ["rentPeriod", "type", "location", "priceInput", "priceIsAnnual"
 }
 check("NOT a real field: the phantom 'price' key was removed from STICKY_FIELDS",
   !(STICKY_FIELDS as readonly string[]).includes("price"));
-// Per-utterance intents describe THIS request, not a standing constraint.
-for (const f of ["sort", "count", "keywords"]) {
+// 'sort' MOVED TO STICKY, 2026-09-06 (owner). It sat here on the reasoning that a per-utterance
+// intent "describes THIS request, not a standing constraint" — true of count and keywords, and the
+// owner has overruled it for ordering: a vague adjective («رخيصة» → cheapest first) "sticks until
+// they change it", the same contract every other stated field has. Left per-utterance, a follow-up
+// that only narrowed the district silently dropped the order the user asked for a turn earlier.
+check("sticky: sort — a stated ordering survives the next turn (owner 2026-09-06)",
+  (STICKY_FIELDS as readonly string[]).includes("sort"));
+// count/keywords keep the original rule: they really do describe one request.
+for (const f of ["count", "keywords"]) {
   check(`NOT sticky (per-utterance): ${f}`, !(STICKY_FIELDS as readonly string[]).includes(f));
 }
 
