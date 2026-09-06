@@ -10,6 +10,7 @@
 import { emptyQuery, digitsOnly, grouped, type SearchQuery } from './search';
 // The text-preserving latinizer. NOT './search' — that one keeps only the digits (see digitsOnly).
 import { toLatinDigits } from '@/lib/inputHygiene';
+import { vagueOrdering } from '@/lib/vagueOrdering';
 import { parseProximity, proximityKeywords, type ProximityIntent } from './proximity';
 import { type Category } from './taxonomy';
 import { t, getLocale } from '@/i18n';
@@ -660,6 +661,19 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   lastRejectedFilters = [];
 
   lastVagueIntents = Array.isArray(b.askAbout) ? [...new Set(b.askAbout)] : [];
+
+  // A VAGUE ADJECTIVE SETS THE ORDERING (owner, 2026-09-06). «رخيصة» → cheapest first, «كبيرة» →
+  // largest first BY AREA (never by rooms — owner: «never judge big by bedrooms or toilet»). It
+  // filters nothing: every genuine match stays eligible and only the order changes.
+  //
+  // Read from the USER'S OWN TEXT, not from the model's askAbout: askAbout says WHICH attribute was
+  // vague ('size') but never which direction, so «كبيرة» and «صغيرة» are indistinguishable there.
+  // Deterministic, free, and cannot drift from what the model happened to infer this turn.
+  //
+  // Only when the user has not chosen a sort themselves — an explicit control always outranks a word.
+  const ordering = vagueOrdering(userText);
+  if (ordering && !q.sort) q.sort = ordering;
+
   return q;
 }
 
