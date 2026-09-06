@@ -21,7 +21,7 @@
 //
 //   node --experimental-strip-types scripts/verify-af-deep-search-transition.ts   (auto-discovered by npm test)
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -53,8 +53,18 @@ const pipelineGone = (src: string) => {
 };
 check('no dynamic-sentence builder and no card-pipeline/gate remain in the transition',
   pipelineGone(mining));
-check('the sentence builder module itself is gone (nothing can import it back by accident)',
-  !existsSync(join(root, 'src/lib/afDeepSearchCopy.ts')));
+// The module is RETAINED on disk, not deleted: scripts/preflight-verify.sh refuses any deploy that
+// drops a shipped src/ file present in the approved baseline (the 2026-07-09 UI-loss guard, no
+// allowlist by design), so deleting it blocked production entirely (run 34017999312). Existence is
+// therefore not the property to assert — REACHABILITY is. Nothing in src/ may import it, which is
+// what would actually bring the retired sentence back on screen.
+const importers = readdirSync(join(root, 'src'), { recursive: true, encoding: 'utf8' })
+  .filter((f) => /\.tsx?$/.test(f))
+  .filter((f) => f !== 'lib/afDeepSearchCopy.ts')   // the module itself DEFINES the symbol
+  .filter((f) => /afDeepSearchCopy|deepSearchLine/.test(
+    strip(readFileSync(join(root, 'src', f), 'utf8'))));
+check('no src/ module imports the retired sentence builder (it is unreachable, not merely unused)',
+  importers.length === 0, `importers: ${importers.join(', ')}`);
 check('the overlay no longer takes the redesign-only props (agent.tsx passes just the two counts)',
   /<MiningTransition from=\{ageFlow\.from\} to=\{ageFlow\.to\} \/>/.test(agent)
   && !/labels=\{ageFlow\.labels\}|type=\{ageFlow\.type\}/.test(agent));
