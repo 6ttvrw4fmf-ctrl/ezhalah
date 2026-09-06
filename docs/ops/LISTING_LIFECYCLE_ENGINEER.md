@@ -397,8 +397,46 @@ alone unless the caller supplies a `verify_gone` oracle. `ops_incident` #84 trac
 |---|---|---|---|
 | abeea, aqarcity | pre-existing | — | — |
 | aqargate | WP post status (`expired`/deleted) | `verify-aqargate-absence-cannot-deactivate.ts` | 31 (2026-09-06) |
-| **raghdan** | 404 + no `RealEstateListing` payload vs 200 + payload | `verify-raghdan-absence-cannot-deactivate.ts` | 31 → 30 |
-| **sanadak** | SOFT-404: 200 app shell (no SSR title, no listing object) vs 200 resolving THIS `advertisementNumber` | `verify-sanadak-absence-cannot-deactivate.ts` | 30 → **29** |
+| raghdan | 404 + no `RealEstateListing` payload vs 200 + payload | `verify-raghdan-absence-cannot-deactivate.ts` | 31 → 30 |
+| sanadak | SOFT-404: 200 app shell (no SSR title, no listing object) vs 200 resolving THIS `advertisementNumber` | `verify-sanadak-absence-cannot-deactivate.ts` | 30 → 29 |
+| **jazwtn** | 404 (29/31 dead; 40/40 controls 200) | shared law + `verify-absence-oracles-are-measured.ts` | — |
+| **mizlaj** | 404 (4/4 dead; 24/24 controls 200) | same | — |
+| **nowaisiry** | 404 (5/5 dead; 11/11 controls 200) | same | — |
+| **souq24** | **REDIRECT off the listing path** (14/14 dead; 40/40 controls no redirect) | same | 30 → **26** (abwbna onboarded +1 the same day) |
+
+**The law now lives in one place: `scrapers/common/http_liveness.py`.** After four platforms it was
+clear that a scraper carries two different kinds of thing, and only one of them is per-platform:
+
+- the **signal** is a claim about a source and must be MEASURED;
+- the **law** is universal — a 403 is not a death on any platform, ever.
+
+`decide()` applies a platform's signal UNDER the law and a caller cannot relax it: whatever a signal
+says, a 401/402/403/407/408/429, any 5xx, a network error or an empty body can never become a death,
+and an ALIVE claim on an unreadable response certifies nothing. N private copies of that law would be
+N chances to weaken it, and a weakened copy looks exactly like a correct one until it deletes
+something. `scripts/verify-http-liveness-law.ts` executes it against a platform signal that calls
+EVERYTHING dead — if the law holds when the platform is maximally wrong, it holds.
+
+Writing it down caught a real bug in it before any platform depended on it: `decide()` resolved an
+unbelievable read to UNKNOWN on the FIRST attempt instead of retrying, so one dropped connection
+ended a probe without using its second attempt. Safe, but it cost the oracle its coverage — every
+transient blip became a permanent UNKNOWN for that row. An unbelievable read is now a retry, and
+only an exhausted budget is UNKNOWN, carrying the law's own reason so the evidence row still says
+WHY.
+
+### §4.2 — What the rest of the ledger actually is (surveyed 2026-09-06)
+
+Every remaining platform was probed read-only, dead cohort against interleaved live controls, and
+`scrapers/absence-only-prune.txt` now carries the measurement per row. The residue is not one
+problem but five, and they need different things:
+
+| class | platforms | what it needs |
+|---|---|---|
+| **Egress blocked from a cloud routine** | awal, muktamel, sadin, therc, abralosol, aouj, arkaan, rawasidark | The gateway denies these hosts (`403 CONNECT`). This is UNKNOWN **about our read**, never about the platform — control validation has to run from an egress that can reach them, which their own CI can. |
+| **No signal on the listing page** | aqaratikom (5,795-byte shell), mustqr (18,310-byte shell) | Dead and live are byte-identical. mustqr's real oracle is the per-id API its scraper already reads; aqaratikom needs its API investigated. |
+| **Dead rows are STILL SERVED** | eastabha, hajer, satel (131 inactive!), fursaghyr | Their deactivated rows answer 200 with real per-listing titles. Either the source keeps pages up after delisting — in which case the oracle needs a body-level sold/rented marker, the aqar «مغلق» shape — or those deactivations were false and these are restore candidates. **A 404 rule here would never fire.** Unanswered. |
+| **No dead cohort at all** | aldarim, abwbna, alhoshan, alkhaas, aqarmonthly, erapulse, jurash, october | These have never deactivated a listing, so a death limb cannot be control-validated: there has been no death to validate against. The prune is unguarded but has never fired. |
+| **A real oracle exists, beside an unevidenced prune** | dealapp, gathern | Both have genuine DIRECT sweeps (`dealapp/liveness.py` with `classify_dealapp` + `environment_is_trustworthy`; `gathern/liveness.py` with `probe`/`classify` and a canary system) AND an absence-only prune in `run.py`. The fix is to route the prune through the oracle that already exists — inventing nothing. **gathern demands the most care of anything in this table**: §5.4 measured it answering blocking with its own 404 at a 100% false-death rate from datacenter egress, and it is one of the four delete-ENABLED platforms. Any wiring there must go through its canary gate, not through `looks_dead()` alone. |
 
 Three lessons from the 2026-09-06 pair, recorded so they are not paid for twice:
 
