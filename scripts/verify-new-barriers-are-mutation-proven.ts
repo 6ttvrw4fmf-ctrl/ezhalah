@@ -51,7 +51,15 @@ const PROOF_CALL = /\b(?:mustCatch|mutation|mustFail|mutantCaught)\s*\(/g;
 // grandfather list. This is a FALSE RED, and a false red on the apparatus is dangerous in its own
 // way: the obvious way to clear it is to weaken the real proof until the regex stops complaining.
 // The reader now walks the call's balanced argument list and strips NESTED groups before asking
-// whether the second argument is the bare literal `true`.
+// whether the second argument is a bare boolean literal.
+//
+// EITHER LITERAL, NOT JUST `true` (widened 2026-09-06 by routine #10). Seven barriers define their
+// own `mustCatch` with INVERTED polarity — `check(label, invariantHeldOnBrokenInput === false)` —
+// and under that convention the unconditional pass is `mustCatch('…', false)`, which the old reader
+// waved through as a proof. Asking about `true` alone was asking about one house style. A second
+// argument that is a bare boolean literal cannot fail under EITHER convention, so both are refused.
+// Verified before widening: no proof anywhere in the tree currently passes a bare `false`, so this
+// is a ratchet tightening with no existing case to accommodate — never a threshold moved to fit.
 export function fakeProofArgs(src: string): string[] {
   const out: string[] = [];
   for (const m of src.matchAll(PROOF_CALL)) {
@@ -62,11 +70,37 @@ export function fakeProofArgs(src: string): string[] {
       else if (src[i] === ')' && --depth === 0) { end = i; break; }
     }
     if (end < 0) continue;
-    // Flatten nested calls so only the OUTER argument list is considered.
-    let args = src.slice(m.index! + m[0].length, end);
+    // Blank string bodies FIRST — a comma or an unbalanced paren inside a label must not look like
+    // structure — then flatten nested groups so only the OUTER argument list is considered.
+    //
+    // THE PLACEHOLDER MUST CONTAIN NO PARENTHESES (repaired 2026-09-06). The original collapsed
+    // `(…)` to `()`, which still contains parens, so `run(a, mutantOf(b, c))` flattened to
+    // `run(a, mutantOf())` and STOPPED: the outer group could never match `\([^()]*\)` again. The
+    // tail-only reader never noticed, but as soon as this asked about every top-level argument, the
+    // `true` inside an un-flattened `run('', true, …)` read as a top-level one and condemned two of
+    // the strongest proofs in the tree. Collapsing to a paren-free token terminates properly.
+    let args = src.slice(m.index! + m[0].length, end)
+      .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
+      .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+      .replace(/`(?:[^`\\]|\\.)*`/g, '``');
     let prev: string;
-    do { prev = args; args = args.replace(/\([^()]*\)/g, '()'); } while (args !== prev);
-    if (/,\s*true\s*$/.test(args)) out.push(`${m[0]}…${args.trim()})`);
+    do {
+      prev = args;
+      args = args.replace(/\([^()]*\)/g, '¤').replace(/\[[^[\]]*\]/g, '¤').replace(/\{[^{}]*\}/g, '¤');
+    } while (args !== prev);
+    // A bare boolean argument is an unconditional PROOF CONDITION unless the call takes a CALLBACK,
+    // in which case the boolean is a polarity flag on a proof that does its work in that callback.
+    // verify-card-never-invents-a-date.ts defines mustCatch(what, mutate, expectPass) and passes
+    // `false` as exactly such a flag on proofs that mutate the REAL file and re-execute it — the
+    // strongest kind in the tree. Widening to `false` without this clause flagged all three of them,
+    // which is the false red this reader was repaired for once already (see the header): the obvious
+    // way to clear a false red is to weaken the real proof until the regex stops complaining. The
+    // old `(…, realCall(), true)` shape — no callback anywhere — is still refused, unchanged.
+    const parts = args.split(',').slice(1);
+    const takesCallback = parts.some((p) => p.includes('=>') || /\bfunction\b/.test(p));
+    if (!takesCallback && parts.some((p) => /^\s*(?:true|false)\s*$/.test(p))) {
+      out.push(`${m[0]}…${args.trim()})`);
+    }
   }
   return out;
 }
@@ -174,6 +208,18 @@ mustCatch('a barrier whose only "proof" is prose',
 mustCatch('a proof that passes a literal true and can never fail',
   FAKE_PROOF("mustCatch('the thing coming back', true);"));
 // …and the false red it used to produce: a REAL differential proof whose mutant takes a boolean.
+mustCatch('a proof that passes a literal false — unconditional under the INVERTED mustCatch convention seven barriers use',
+  FAKE_PROOF("mustCatch('the helper leaves it cross-origin', false);"));
+mustCatch('a genuine proof containing a nested `(…, false)` NOT being mistaken for an unconditional one',
+  !FAKE_PROOF("mustCatch('a healthy platform fails the gate', majorityRender(3, false) === false && x);"));
+mustCatch('a boolean buried TWO groups deep NOT surfacing as a top-level argument (the real shape that broke the flattener: run(…, true, mutantOf(…)))',
+  !FAKE_PROOF("mustCatch('a completed sign-out that latches',\n  !neutralAndClosed(await run('onLogout', true, mutantOf(src, 'a'))), 'setLoggingOut');"));
+mustCatch('a THREE-argument proof whose last argument is a polarity FLAG, not the condition, NOT being flagged',
+  !FAKE_PROOF("await mustCatch('the fabrication returning verbatim', (s) => s.replace(/a/, 'b'), false);"));
+mustCatch('…while a genuine two-argument proof whose condition ends in `=== false` is NOT flagged either',
+  !FAKE_PROOF("mustCatch('a healthy platform fails the majority gate', majorityRender(3, 4) === false);"));
+mustCatch('…and a label containing a comma cannot split the argument list into a false extra argument',
+  FAKE_PROOF("mustCatch('a, b, and c all break', false);"));
 mustCatch('a genuine proof containing a nested `(…, true)` NOT being mistaken for an unconditional one',
   !FAKE_PROOF("mustCatch('collapsing unknown', collapsed(0, true) !== probeVerdict(0, true));"));
 mustCatch('…and a fake proof is still refused when the literal sits on its own line after a real call',
