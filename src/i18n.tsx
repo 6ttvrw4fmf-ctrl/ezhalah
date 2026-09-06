@@ -883,6 +883,8 @@ const AR: Record<string, string> = {
   'Muktamel':                          'مكتمل',
   'Nawait':                            'نويت', // corrected 2026-07-15: was 'Aqaratikom'/'عقاراتكم' — the scraper's target (aqaratikom.com → backend nawait.sa, see scrapers/aqaratikom/run.py) now self-brands as نويت/Nawait on its live site; internal name/table keys ('Aqaratikom') are unchanged, only this display label
   'Awal Real Estate':                  'أوال العقارية',
+  'Remal Real Estate':                 'رمال العقارية',            // official (remalre.com header logo)
+  'Amaall Real Estate Services':       'آمال للخدمات العقارية',    // official (amaall.com)
   'Alta Real Estate Services':         'ألتا للخدمات العقارية',   // official (alta.com.sa header)
   'Shmou Al Shmal Real Estate':        'شموع الشمال العقارية',    // official (shmoua-alshmal.com header)
   'Awal United for Real Estate':       'أوال المتحدة العقارية', // official (their X @awaalun: «مؤسسة أوال المتحدة العقارية»)
