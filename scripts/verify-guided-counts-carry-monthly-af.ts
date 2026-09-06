@@ -22,16 +22,22 @@
 // WHAT THIS BARRIER ASSERTS
 //   A. SOURCE (hermetic) — the two count-RPC call sites carry every advanced param, either by
 //      spreading rpcAdvancedFilterParams(q) or by naming each one. Catches the omission itself.
-//   B. LIVE — the params still BITE server-side, and the guided-count row equals what Search returns:
-//        cnt_selected(rating)        == search total(rating)        and != base   (it narrows)
-//        cnt_sub_studio(rating)      == search total(rating+studio)               (option promise)
-//      A source check alone would stay green if the RPC quietly stopped honouring a param.
+//   B. LIVE — SPLIT OUT on 2026-09-06 into verify-guided-counts-carry-monthly-af-live.ts (routine
+//      #10, ops_incident #104). A source check alone would stay green if the RPC quietly stopped
+//      honouring a param, so that half must exist — but it can only answer by asking production,
+//      and `npm test` is the REQUIRED status check on every PR, whose verdict must depend only on
+//      the diff. Four checks in that suite were measured flipping on UNCHANGED code on 2026-09-06.
+//      NO per-PR coverage was lost: A is the half that catches the defect IN A DIFF (the hand-copied
+//      param list drifting away from rpcAdvancedFilterParams), and it is now mutation-proven below
+//      rather than merely present. B runs on af-live-truth-check.yml — daily, and immediately after
+//      every production deploy — and this file asserts, by EXECUTION, that the home really invokes it.
 //
 //   node --experimental-strip-types scripts/verify-guided-counts-carry-monthly-af.ts   (wired into `npm test`)
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { loadRegistry } from './lib/testRegistry.ts';
+import { liveHalfProblems } from './lib/liveHalf.ts';
 
 const root = join(import.meta.dirname, '..');
 // Comments are stripped before any source check below: the call site this guards is documented with
@@ -76,6 +82,17 @@ const ADVANCED_PARAMS = [
   'p_rating_min', 'p_reviews_min', 'p_unit_subtypes',
 ];
 
+// THE PREDICATE, as a pure function so the mutation proof below exercises the REAL rule rather than
+// a copy of it. Spreading the shared helper carries the whole set; naming each param carries it too.
+// Anything else is the hand-copied list that drifted — which is the defect.
+export const spreadsHelper = (args: string) =>
+  /\.\.\.(?:ageAgnostic\()?rpcAdvancedFilterParams\(q\)\)?/.test(args);
+
+export function missingParams(args: string, helper: string, params: string[]): string[] {
+  const effective = spreadsHelper(args) ? args + helper : args;
+  return params.filter((p) => !effective.includes(p));
+}
+
 for (const fn of ['apartment_guided_counts_ar', 'property_age_option_counts_ar']) {
   const args = rpcArgs(fn);
   check(`${fn} call site found in src/data/remote.ts`, !!args);
@@ -91,70 +108,66 @@ for (const fn of ['apartment_guided_counts_ar', 'property_age_option_counts_ar']
   // instead" — which the code now does; only the recogniser was behind.
   // verify-property-age-counts-amenities-param.ts pins the wrapper's exact deletion list, so it can
   // never widen into the drift this check exists to catch.
-  const viaHelper = /\.\.\.(?:ageAgnostic\()?rpcAdvancedFilterParams\(q\)\)?/.test(args);
-  const effective = viaHelper ? args + helperBody : args;
+  const viaHelper = spreadsHelper(args);
   for (const p of ADVANCED_PARAMS) {
-    check(`    ${fn} carries ${p}`, effective.includes(p),
+    check(`    ${fn} carries ${p}`, missingParams(args, helperBody, [p]).length === 0,
       viaHelper ? 'spread of rpcAdvancedFilterParams(q) no longer carries it'
                 : `hand-listed params at this call site omit ${p} — spread ...rpcAdvancedFilterParams(q) instead`);
   }
 }
 
-// ── B. LIVE ──────────────────────────────────────────────────────────────────────────────────────
-// الرياض / إيجار / شهري / شقة — the cohort the defect was found in, and the only scope with enough
-// rated Gathern inventory for a rating answer to mean anything.
-const { url: URL_BASE, key: KEY } = resolvePublicSupabase(process.env);
-const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
-const SCOPE = {
-  p_deal: 'إيجار', p_rent_period: 'شهري', p_cities: ['الرياض'], p_region_ids: [1],
-  p_category: 'Residential', p_types: ['شقة', 'مبنى شقق مخدومة', 'ملحق علوي'],
+
+// ── THE LIVE HALF (B) MUST STILL RUN SOMEWHERE ──────────────────────────────────────────────────
+// A split must not be able to decay into a deletion: "moved to a workflow" and "quietly removed"
+// look identical from inside the suite unless something asserts otherwise. liveHalfProblems() is
+// EXECUTED against the real registry and the real workflow file — never a string match, the shape
+// that left two checks homed only by a workflow COMMENT for weeks on 2026-09-03.
+const LIVE = 'verify-guided-counts-carry-monthly-af-live.ts';
+const ROOT = root;
+const homing = liveHalfProblems(
+  LIVE,
+  loadRegistry(ROOT),
+  (name) => existsSync(join(ROOT, 'scripts', name)),
+  (rel) => (existsSync(join(ROOT, rel)) ? readFileSync(join(ROOT, rel), 'utf8') : null),
+);
+check(`the LIVE half is homed in a workflow that actually invokes it (${LIVE})`,
+  homing.length === 0, homing.join('\n      '));
+
+// ── MUTATION PROOF — the real predicate, against call sites that must be caught ─────────────────
+console.log('\n  mutation proof — missingParams(), against drifted call sites\n');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++; console.error(`  FAIL  BLIND to: ${label}`);
 };
-const RATING = { p_rating_min: 9.5 };
-const STUDIO = { p_unit_subtypes: ['استديو'] };
+const HELPER = 'p_amenities, p_bath_min, p_furnished, p_street_width_min, p_directions, p_rating_min, p_reviews_min, p_unit_subtypes';
 
-async function rpc(fn: string, extra: Record<string, unknown>): Promise<any> {
-  const r = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, {
-    method: 'POST', headers: H, body: JSON.stringify({ ...SCOPE, ...extra }),
-  });
-  return r.json();
-}
-const guided = async (extra: Record<string, unknown>) => (await rpc('apartment_guided_counts_ar', extra))?.[0] ?? null;
-const searchTotal = async (extra: Record<string, unknown>) => {
-  const j = await rpc('location_search_candidates_ar', { ...extra, p_per_platform: null, p_limit: 1, p_offset: 0 });
-  return Array.isArray(j) ? (j.length ? Number(j[0].total_count) : 0) : null;
-};
+// M-1: EXACTLY the 2026-08-23 defect — a hand-listed call site missing the three Monthly params.
+mustCatch('THE 2026-08-23 SHAPE: a hand-copied list missing p_rating_min/p_reviews_min/p_unit_subtypes',
+  missingParams('{ p_amenities, p_bath_min, p_furnished, p_street_width_min, p_directions }', HELPER,
+    ADVANCED_PARAMS).length === 3);
+// M-2: a single dropped param is still the defect — the list drifts one entry at a time.
+mustCatch('a hand-copied list missing exactly ONE advanced param',
+  missingParams('{ p_amenities, p_bath_min, p_furnished, p_street_width_min, p_directions, p_rating_min, p_reviews_min }',
+    HELPER, ADVANCED_PARAMS).join() === 'p_unit_subtypes');
+// M-3: THE REGRESSION THAT WOULD FAKE A PASS — the spread is still written, but the shared helper
+// itself stopped carrying a param. The `viaHelper ? args + helper` branch exists precisely so the
+// helper's own contents are checked; without it, the spread would launder any omission.
+mustCatch('the spread is present but rpcAdvancedFilterParams() itself dropped a param',
+  missingParams('{ ...rpcAdvancedFilterParams(q) }', 'p_amenities, p_bath_min', ADVANCED_PARAMS).length > 0);
+// M-4: the ageAgnostic() wrapper must still count as the spread — a recogniser that stops seeing it
+// would report a false failure on correct code, which is how a barrier gets ignored.
+mustCatch('the ageAgnostic(rpcAdvancedFilterParams(q)) wrapper still counts as the spread',
+  spreadsHelper('{ ...ageAgnostic(rpcAdvancedFilterParams(q)) }') === true);
+// The negative controls — a predicate red for everything is as useless as one green for everything.
+mustCatch('a call site that spreads the complete helper is NOT reported as broken',
+  missingParams('{ ...rpcAdvancedFilterParams(q) }', HELPER, ADVANCED_PARAMS).length === 0);
+mustCatch('a call site that names every param explicitly is NOT reported as broken',
+  missingParams(`{ ${HELPER} }`, '', ADVANCED_PARAMS).length === 0);
 
-const [gBase, gRating, tBase, tRating, tRatingStudio] = await Promise.all([
-  guided({}), guided(RATING), searchTotal({}), searchTotal(RATING), searchTotal({ ...RATING, ...STUDIO }),
-]);
-
-check('live: the guided-count RPC answered', !!gBase && !!gRating,
-  `base=${JSON.stringify(gBase)?.slice(0, 120)} rating=${JSON.stringify(gRating)?.slice(0, 120)}`);
-
-if (gBase && gRating) {
-  // The test must be able to bite: if a rating answer no longer narrows this scope, agreement below
-  // proves nothing. (Same reasoning as verify-af-independent-oracle's "can bite" assertion.)
-  check('live: p_rating_min actually narrows this scope (the check can bite)',
-    Number(gBase.cnt_selected) > Number(gRating.cnt_selected),
-    `base cnt_selected=${gBase.cnt_selected} rating cnt_selected=${gRating.cnt_selected}`);
-
-  check('live: cnt_selected(base) == search total(base)',
-    Number(gBase.cnt_selected) === tBase, `${gBase.cnt_selected} vs ${tBase}`);
-
-  // THE DEFECT, server-side half: the footer/header number under a rating answer.
-  check('live: cnt_selected(rating) == search total(rating)',
-    Number(gRating.cnt_selected) === tRating, `${gRating.cnt_selected} vs ${tRating}`);
-
-  // THE DEFECT, option-count half: the next question's «استديو» pill must promise what picking it
-  // returns WITH the rating answer still applied — 2,361, not the un-narrowed 3,719.
-  check('live: cnt_sub_studio(rating) == search total(rating + استديو)',
-    Number(gRating.cnt_sub_studio) === tRatingStudio, `${gRating.cnt_sub_studio} vs ${tRatingStudio}`);
-  check('live: the استديو option count really is narrowed by the rating answer',
-    Number(gRating.cnt_sub_studio) < Number(gBase.cnt_sub_studio),
-    `rating=${gRating.cnt_sub_studio} base=${gBase.cnt_sub_studio}`);
-}
+if (mutFail > 0) failures += mutFail;
 
 console.log(failures === 0
-  ? '\n✓ verify-guided-counts-carry-monthly-af: all checks passed.'
+  ? '\n✓ verify-guided-counts-carry-monthly-af: the source contract holds, and its live half still runs.'
   : `\n❌ verify-guided-counts-carry-monthly-af: ${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

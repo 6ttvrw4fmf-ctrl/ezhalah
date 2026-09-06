@@ -334,7 +334,22 @@ assert(/const districtNarrowingSig = JSON\.stringify\(\[query\./.test(indexTsx),
 // omission. Iterating the one list is what makes the fix above load-bearing for every future field.
 assert(/districtNarrowingSig[\s\S]{0,900}\.\.\.AF_PREDICATE_FIELDS\.map\(\(f\) => query\[f\]\)/.test(indexTsx),
   'the district signature ITERATES AF_PREDICATE_FIELDS instead of re-typing the AF fields');
-assert(/const buildFilterBaseQuery[\s\S]{0,400}\.\.\.query,/.test(indexTsx), '«بحث» is built from the reconciled query');
+// «بحث» is built from the RECONCILED query — never the raw store.
+// 2026-09-06 (production red team): this used to pin the literal `...query,`. That made the check a
+// source-text tripwire on ONE spelling: it went red when buildFilterBaseQuery started spreading
+// `queryForPeriod` — an object DERIVED from `query`, so the invariant held perfectly — while it would
+// have stayed green for any future `...query` spread that had since been corrupted upstream. Follow
+// the NAME to its definition instead: whatever is spread must trace back to the reconciled `query`
+// and must not be the raw `storeQuery`. That is the fact this line was always about.
+const spreadIn = indexTsx.match(/const buildFilterBaseQuery[\s\S]{0,1600}?\.\.\.(\w+),/);
+assert(!!spreadIn, '«بحث» spreads a query object at all');
+const spreadName = spreadIn![1];
+assert(spreadName === 'query'
+  || new RegExp(`const ${spreadName}\\b[^=\\n]*=[^;\\n]*\\bquery\\b`).test(indexTsx),
+  `«بحث» is built from the reconciled query (spreads «${spreadName}», which must derive from «query»)`);
+assert(spreadName === 'query'
+  || !new RegExp(`const ${spreadName}\\b[^=\\n]*=[^;\\n]*\\bstoreQuery\\b`).test(indexTsx),
+  `«بحث» must NOT be built from the raw store («${spreadName}» derives from storeQuery)`);
 // THE CHIP ROW MAPS THE FACET LIST ITSELF, so the index it renders is the index withoutFacet() takes.
 // It used to map with a `null` hole for scope facets, and the obvious tidy-up — filter first, then
 // map — silently re-indexed: tapping the «×» on «جديد» deleted a DIFFERENT facet while the chip and

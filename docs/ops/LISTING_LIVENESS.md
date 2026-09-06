@@ -299,8 +299,17 @@ Three consequences worth carrying forward:
    reading stays trustworthy even in a degraded run (same posture as `DELETION_SAFETY.md` §2.4).
 3. **An aggregate rate is a lagging signal.** The sharper instrument for a source like this is an
    in-run positive control: probe a handful of known-alive canaries; if the canaries 404, the run is
-   blocked, whatever the rest of the batch says. Not yet built — recorded here so it is not
-   rediscovered from scratch.
+   blocked, whatever the rest of the batch says.
+
+   **Built 2026-09-06, on sanadak, where it matters most.** `scrapers/sanadak/run.py::
+   set_liveness_canaries()` arms the oracle with listings THAT SAME RUN already fetched and parsed;
+   `_canary_ok()` re-probes one before ANY 'gone' verdict is issued, and the verdict degrades to
+   'unknown' — with the reason recorded — if the canary no longer renders its own listing. It fails
+   CLOSED: no canary supplied means no removal at all. sanadak needs it more than gathern did,
+   because on that platform "gone" IS an HTTP 200 app shell, so a source that started serving shells
+   to our egress the way dealapp does (§5.1) would otherwise deactivate every probed row. Asserted
+   and mutation-proven in `scripts/verify-sanadak-absence-cannot-deactivate.ts`
+   (`removed_canary_shell`, `removed_canary_500`, `removed_no_canary`).
 
 `mon_detect_liveness_oracle_untrustworthy()` (migration `20260903162156`) makes the degraded state
 visible, as a regression against each table's own 2–14d baseline rather than an absolute — which is

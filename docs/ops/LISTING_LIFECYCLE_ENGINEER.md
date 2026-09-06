@@ -243,8 +243,12 @@ inside a count is exactly the failure this routine names `inactive_still_counted
 | Cleanup entrypoints | `platform-cleanup.yml` (dispatch), `aqar-cleanup.yml` (pg_cron `gh-aqar-cleanup`, `0 2 * * 0`), `wasalt-cleanup.yml` (`gh-wasalt-cleanup`, `30 2 * * 0`), `gathern-cleanup.yml`, `aqarcity-cleanup.yml` |
 | Retired paths register | `ops_retired_deletion_path` |
 
-**`enabled = true` for two platforms only** (aqarcity, gathern). Everything else is
-soft-inactivation only. Turning a platform on is a retention-policy change — RED #4, owner decision.
+**`enabled = true` for FOUR platforms** — `aqar`, `aqarcity`, `gathern`, `wasalt`, all at
+`min_inactive_days = 30`, `min_missing_count = 3`, `require_source_recheck = true` (re-read from
+`platform_retention_policy` on 2026-09-06; this file said "two only, aqarcity + gathern" until then,
+which was already wrong when it was written — read the table, do not quote this line). Everything
+else is soft-inactivation only, which is why a false deactivation on e.g. raghdan or sanadak cannot
+reach a delete. Turning a platform on is a retention-policy change — RED #4, owner decision.
 
 ### §2.6 The detectors that already watch parts of this chain
 
@@ -380,6 +384,37 @@ its **mutation** re-introduces. None of these ten alert kinds currently has a de
 | 8 | `verify-confirmed-inactive-30d-rows-are-deleted.ts` (kind `deletion_clock_stalled`) | The other direction: rows that HAVE been source-confirmed inactive for 30+ days on an `enabled` platform do not accumulate unboundedly. Reports the eligible backlog per platform with the reason each run is not draining it (breaker tripped, health gate open, freeze, cap) — so a permanently stuck queue is visible and attributable rather than silent. | A run that reports success while deleting nothing, and a backlog that grows with no named reason. **This barrier never authorises raising a threshold** to make itself green (`LISTING_LIVENESS.md` §7, `DELETION_SAFETY.md` §6). |
 | 9 | `verify-no-orphan-after-delete.ts` (kind `orphan_after_delete`) | After a delete, no `(source_table, listing_id)` survives in `search_listings_ar`, `active_listing_ids_v2`, `listing_native_location_v1`/`v2`, `listing_location_index`, or any AF attribute view — and `purged_listings_archive` holds the archived row with a matching `cleanup_deletion_log` entry. Deletion is complete and consistent, or it did not happen. | Deleting the raw row without propagating, leaving an index row pointing at nothing — the shape `mon_detect_orphaned_search_row` already watches from one side only. |
 | 10 | `verify-no-stale-cross-table-duplicate.ts` (kind `lifecycle_duplicate_stale_copy`) | Where the same source listing exists in more than one table (the residential/commercial URL collision repaired by `20260830140110`, and the `retire_superseded_siblings()` path), a confirmed-dead listing is dead in **every** copy. No superseded sibling remains searchable, and no recovery routine revives one. | Removing the sibling-supersession guard from `auto_recover_false_inactive()`, or repairing only the copy the incident named while its twin stays served. |
+
+### §4.1 — The absence-only prune, platform by platform (the class barrier 6 protects)
+
+Barrier 6 asserts that the CONTRACT never turns an UNKNOWN into a death. It cannot assert that a
+scraper ASKED the contract, and 34 of them did not: `db.prune_unseen()` deactivates on crawl absence
+alone unless the caller supplies a `verify_gone` oracle. `ops_incident` #84 tracks that class;
+`scrapers/absence-only-prune.txt` counts it under a shrink-only ratchet enforced by
+`scripts/verify-prune-without-oracle-is-declared.ts`.
+
+| platform | oracle | barrier | ratchet |
+|---|---|---|---|
+| abeea, aqarcity | pre-existing | — | — |
+| aqargate | WP post status (`expired`/deleted) | `verify-aqargate-absence-cannot-deactivate.ts` | 31 (2026-09-06) |
+| **raghdan** | 404 + no `RealEstateListing` payload vs 200 + payload | `verify-raghdan-absence-cannot-deactivate.ts` | 31 → 30 |
+| **sanadak** | SOFT-404: 200 app shell (no SSR title, no listing object) vs 200 resolving THIS `advertisementNumber` | `verify-sanadak-absence-cannot-deactivate.ts` | 30 → **29** |
+
+Three lessons from the 2026-09-06 pair, recorded so they are not paid for twice:
+
+1. **Control-validate the oracle against real rows before wiring it, and interleave the controls.**
+   raghdan: 187/187 already-deactivated rows answered 404, 37/40 known-active controls answered 200
+   with a payload. sanadak: 140/143 and 77/80. Interleaving is what makes a mid-run block visible in
+   BOTH cohorts instead of reading as a dead cohort.
+2. **A stored `listing_url` is not automatically THIS listing's URL.** 39 of 1,724 sanadak rows
+   store another listing's page; three of them answered 'live' and a URL-trusting oracle would have
+   performed three false RESURRECTIONS on someone else's evidence. Check identity twice — the URL's
+   own id, and the fetched page's. (Routed to routine #3 as `ops_incident` #130.)
+3. **A platform whose "gone" IS an HTTP 200 needs `LISTING_LIVENESS.md` §5.4's in-run positive
+   control**, and sanadak now has the first one: `set_liveness_canaries()` arms the oracle with
+   listings THIS run already fetched, and no 'gone' verdict is issued at all unless a canary still
+   renders its own listing. It fails CLOSED — no canary means no removal — so the dealapp
+   shell-degradation mode (§5.1) produces zero deactivations instead of the whole cohort.
 
 Two standing rules over all ten:
 
