@@ -70,6 +70,13 @@ jobs:
         if: always()
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-location-index-covers-every-searchable-platform-live.ts
 
+      - name: Every searchable platform is visible to the image-coverage monitor
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-active-platform-image-coverage-not-blind.ts
+
       - name: Image coverage holds its floors and no platform is live undeclared
         if: always()
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-image-coverage-ratchet-live.ts
