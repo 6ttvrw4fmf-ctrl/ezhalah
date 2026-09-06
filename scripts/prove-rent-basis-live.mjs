@@ -134,27 +134,39 @@ console.log(`\n  advertised total ${advertised?.toLocaleString()} · walked ${un
 // ── BROWSER PROOF — (b), (c), (d) and (a) end-to-end on the SERVED bundle ─────────────────────────
 if (process.argv.includes('--browser')) {
   console.log(`── BROWSER PROOF — ${ORIGIN} ──\n`);
-  const { chromium } = await import('@playwright/test');
-  const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  const tap = async (label) => {
-    await page.getByText(label, { exact: true }).first().click();
-    await page.waitForTimeout(800);
-  };
-  try {
-    await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForTimeout(6000);
+  // REUSE THE REPO'S OWN HARNESS rather than hand-rolling a second set of taps. The first version of
+  // this block did hand-roll them and failed on its very first dispatch (run 34012764978) with
+  // `waiting for getByText('شهري')` — because ONE «إيجار» tap leaves the Filter in dealCombined
+  // (بيع+إيجار), and index.tsx hides the period boxes entirely in that mode
+  // (`query.deal === 'Rent' && !query.dealCombined`). setDeal() already encodes that two-tap
+  // sequence, pickCity() asserts the city actually COMMITTED rather than trusting the click, and
+  // runSearch() scrolls «بحث» into view because on a narrow viewport it sits below the fold. Every
+  // one of those is a lesson this harness already paid for.
+  const { withPage, setDeal, pickCity, runSearch, tapByText, sleep } =
+    await import('../e2e/live-sweep/sweep.mjs');
 
-    await tap('إيجار');            // Rent
-    await tap('شهري');             // add Monthly to the default Yearly → rentPeriod 'both'
-    // The period toggle CLEARS any bound whose unit just changed, so the budget is typed after it.
+  await withPage(false, async (page, requests) => {
+    await setDeal(page, 'إيجار');        // Rent ONLY — two taps; combined would hide the period boxes
+    await tapByText(page, 'شهري');       // ADD Monthly to the default Yearly → rentPeriod 'both'.
+    await sleep(900);                    // (setPeriod() would then untick Yearly, giving monthly-only)
+
+    // The period toggle deliberately CLEARS any bound whose unit just changed, so the budget is typed
+    // AFTER the period is settled — typing it first would silently discard it.
     await page.locator('[data-testid="price-min-input"]').fill(String(FLOOR));
-    await page.waitForTimeout(1200);
-    await page.locator('input').first().fill(CITY);
-    await page.waitForTimeout(1500);
-    await tap(CITY);
-    await tap('بحث');
-    await page.waitForTimeout(9000);
+    await sleep(1200);
+
+    const committed = await pickCity(page, CITY);
+    check('the browser journey actually reached the search it claims to prove',
+      committed, `the city «${CITY}» never committed — this run proves nothing, it is not a pass`);
+    await runSearch(page);
+    await sleep(9000);
+
+    // INTENDED STATE = SERIALIZED REQUEST STATE. The request the page really sent must carry both
+    // predicates; if it does not, any card assertion below is measuring a different search.
+    const sent = requests[requests.length - 1] || {};
+    check('the served page sent the search it was asked for (كلاهما + the floor)',
+      sent.p_rent_period === 'كلاهما' && Number(sent.p_price_min) === FLOOR,
+      `last request carried p_rent_period=${JSON.stringify(sent.p_rent_period)}, p_price_min=${JSON.stringify(sent.p_price_min)}`);
 
     const text = await page.locator('body').innerText();
     const m = text.match(/لقينا\s*([\d,٠-٩]+)/);
@@ -185,10 +197,16 @@ if (process.argv.includes('--browser')) {
       violations.length === 0,
       `${violations.length} card(s) below the floor once annualised, e.g. ${violations.slice(0, 3).map((v) => v.p).join(' | ')}`);
 
+    // A sweep that rendered nothing must never read as "no violations found". Same rule as the
+    // server half: absence of evidence is not evidence, and a silent zero is the failure mode this
+    // repo keeps paying for.
+    check('cards were actually rendered and judged (an empty screen proves nothing)',
+      prices.length > 0,
+      'zero priced cards on the page — the journey did not reach a result set, so (b), (c) and (d) '
+      + 'above are vacuous rather than passing');
+
     console.log(`\n  rendered ${prices.length} priced cards · ${monthly.length} monthly · ${annual.length} annual\n`);
-  } finally {
-    await browser.close();
-  }
+  });
 } else {
   console.log('── BROWSER PROOF SKIPPED (pass --browser) ──');
   console.log('   (b), (c) and the end-to-end half of (a) and (d) are NOT proven by this run.');
