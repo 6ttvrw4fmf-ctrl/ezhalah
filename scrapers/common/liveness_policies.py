@@ -69,6 +69,9 @@ CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 # sources above: abwbna is a full-refresh crawl of the SAME Nuzul SaaS platform aldarim already
 # runs (a different tenant, same public JSON API) — every run reads the COMPLETE current inventory
 # and prunes anything not seen, exactly aldarim's own registered tier. See scrapers/abwbna/run.py.
+# bahadhabab and alobid JOIN this set on 2026-09-06 alongside abwbna — the third and fourth Nuzul
+# SaaS tenants found the same way (a full-refresh crawl of the SAME platform aldarim already runs,
+# a different tenant, same public JSON API). Same tier as aldarim/abwbna for the same reason.
 NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common"})
 
 
@@ -159,8 +162,8 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abeea", "abralosol", "abwbna", "aldarim", "alhoshan", "alkhaas", "alta", "amaall", "aouj", "aqaratikom",
-            "aqarcity", "aqarmonthly", "arkaan", "awal", "eaqartabuk", "eastabha", "erapulse",
+            "abeea", "abralosol", "abwbna", "aldarim", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "aouj", "aqaratikom",
+            "aqarcity", "aqarmonthly", "arkaan", "awal", "bahadhabab", "eaqartabuk", "eastabha", "erapulse",
             "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry",
             "october",
             "raghdan", "ramzalqasim", "rawasidark", "remal", "sadin", "sanadak", "satel",

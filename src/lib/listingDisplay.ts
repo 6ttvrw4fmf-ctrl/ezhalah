@@ -77,6 +77,8 @@ export function sourceName(source: string): string {
   // name.toLowerCase() with NO space-stripping, so a slug-only token reads to it as unclaimed and
   // the card falls to the Aqar branch.
   if (s.includes('shmou al shmal') || s.includes('shmoualshmal')) return 'Shmou Al Shmal Real Estate';
+  if (s.includes('bahadhabab')) return 'Bahadhabab Real Estate';
+  if (s.includes('alobid')) return 'Alobid Office Real Estate';
   if (s.includes('abwbna')) return 'Abwbna Real Estate';
   if (s.includes('remal')) return 'Remal Real Estate';
   if (s.includes('amaall')) return 'Amaall Real Estate Services';

@@ -143,6 +143,12 @@ jobs:
           # aldarim already scrapes (same S3 bucket family, same public JSON API shape). Full crawl +
           # prune, same as aldarim — not a --type flag scraper.
           - { source: abwbna,       cmd: "python -m scrapers.abwbna.run --pages 50" }
+          # bahadhabab + alobid (owner-instructed 2026-09-06): third and fourth Nuzul SaaS tenants
+          # found the same way — full crawl + prune, same as aldarim/abwbna, not a --type flag scraper.
+          # bahadhabab: city is a hardcoded owner-confirmed business fact (single-region brokerage in
+          # الباحة) — see scrapers/bahadhabab/run.py's module docstring.
+          - { source: bahadhabab,   cmd: "python -m scrapers.bahadhabab.run --pages 50" }
+          - { source: alobid,       cmd: "python -m scrapers.alobid.run --pages 50" }
           - { source: abralosol,   cmd: "python -m scrapers.abralosol.run --type all" }
           - { source: arkaan,      cmd: "python -m scrapers.arkaan.run --type all" }
           - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }
