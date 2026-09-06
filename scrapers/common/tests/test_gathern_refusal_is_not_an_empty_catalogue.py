@@ -228,3 +228,76 @@ def test_a_genuinely_malformed_400_still_fails_FAST_and_is_reported(monkeypatch)
     assert (items, status) == ([], "http_400"), status
     assert s.calls == 1, s.calls                        # one attempt, no ladder
     assert len(g._REJECTS) == 1                         # and it IS captured for diagnosis
+
+
+# ── STOPPING EARLY IS THE SAME BUG WHOEVER STOPS US (incident #76, 2026-09-05) ──────────────────
+# Everything above pins the case where the SOURCE declines. One path was left where WE stop and the
+# run still reports a finished city — the 400-page hard cap — which is the identical "a truncated
+# crawl reads as a smaller healthy one" shape with the identical consequence:
+# mon_detect_gathern_city_coverage_gap reads `city_incomplete=` straight out of scrape_runs.notes,
+# so a truncation the crawl never records is a truncation the detector can never raise.
+#
+# The last two tests pin a property the loop currently HAS and must not lose. They are not a bug
+# report: the same investigation first read the `continue` below as re-scanning the previous page's
+# cards, and the mutation sweep proved that reading wrong (the tuple unpack rebinds `items` to []).
+# They stay because the property is easy to break by refactor and nothing else asserts it.
+
+
+def test_the_page_cap_marks_the_city_incomplete_not_finished(monkeypatch):
+    """FAILS on the pre-fix code, which fell out of the loop with `truncated` still False.
+
+    Measured live: on 2026-08-31 shard 9 stopped Jeddah at `pagesRead=400 kept=3888` against
+    `monthlyTotalMeta=6281` — the source was still serving — and the run recorded
+    `city_ok=… city_incomplete=0` with ok=true.
+    """
+    _fast(monkeypatch)
+    s = _Session([_page([1, 2])])                  # an endless supply of full pages
+    rows, _, _, outcomes = g.crawl(s, [{"id": 1, "name_en": "Jeddah"}], "a", "b",
+                                   max_pages=3, verbose=False)
+    assert outcomes.get("incomplete") == 1, outcomes
+    assert outcomes.get("ok", 0) == 0, outcomes
+    assert outcomes.get("reason:hard_cap") == 1, outcomes
+    assert len(rows) == 2                          # what it DID capture is still kept
+
+
+def test_a_city_that_fits_inside_the_cap_is_still_complete(monkeypatch):
+    """The fix must not turn every capped run into a false alarm — prove the other direction."""
+    _fast(monkeypatch)
+    empty = _Resp(200, {"items": [], "_meta": {}})
+    s = _Session([_page([1, 2]), empty, empty])
+    _, _, _, outcomes = g.crawl(s, [{"id": 1, "name_en": "Riyadh"}], "a", "b",
+                                max_pages=50, verbose=False)
+    assert outcomes.get("ok") == 1, outcomes
+    assert outcomes.get("incomplete", 0) == 0, outcomes
+    assert "reason:hard_cap" not in outcomes, outcomes
+
+
+def test_a_single_empty_page_does_not_re_scan_the_page_before_it(monkeypatch):
+    """`scanned` becomes scrape_runs.rows_seen — the number every crawl-health check reads.
+
+    Two real cards are served here, so two must be counted. The `continue` after one empty page
+    re-enters `for it in items`, and this holds only because the tuple unpack already rebound
+    `items` to []. Mutation that turns it red: `fetched, _, status = fetch_page(...)` followed by
+    `items = fetched or items` — the plausible "don't lose the page we already have" refactor,
+    which reports four.
+    """
+    _fast(monkeypatch)
+    empty = _Resp(200, {"items": [], "_meta": {}})
+    s = _Session([_page([1, 2]), empty, empty])
+    rows, scanned, _, _ = g.crawl(s, [{"id": 1, "name_en": "Riyadh"}], "a", "b", verbose=False)
+    assert scanned == 2, scanned
+    assert len(rows) == 2
+
+
+def test_an_interior_empty_page_is_survived_without_inflating_the_count(monkeypatch):
+    """gathern really does serve holes: Riyadh page 200 of a 224-page catalogue returned zero items
+    on 20/20 probes while pages 190-199 and 201-240 each returned 12 (measured 2026-09-05, incident
+    #76). Paging must continue past one hole, and each card after it must be counted once."""
+    _fast(monkeypatch)
+    empty = _Resp(200, {"items": [], "_meta": {}})
+    s = _Session([_page([1, 2]), empty, _page([3, 4]), empty, empty])
+    rows, scanned, _, outcomes = g.crawl(s, [{"id": 1, "name_en": "Riyadh"}], "a", "b",
+                                         verbose=False)
+    assert scanned == 4, scanned
+    assert sorted(rows) == ["GA1", "GA2", "GA3", "GA4"], sorted(rows)
+    assert outcomes.get("ok") == 1, outcomes

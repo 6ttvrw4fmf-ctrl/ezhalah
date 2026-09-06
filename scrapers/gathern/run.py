@@ -22,6 +22,38 @@ pool (crawl() below), so a unit that falls out of the pool never gets its scrape
 cron/prune-architecture question (already flagged in .github/workflows/gathern-sync.yml's own header
 comment as a follow-up), not a fix to the price-extraction logic below.
 
+2026-09-05, INCIDENT #76 — «only 9.7% of 29,249 active gathern rows were re-seen in 72h». MEASURED,
+and it is NOT a narrowed crawl. Across all 134 cities that returned content in run 33945171820,
+`pagesRead` ran PAST the arithmetic end of the source's own declared catalogue in every single case
+(941 pages read against ~887 the declared totals imply) — no city stopped early, none failed, none
+was truncated. What changed is the SOURCE's monthly-available pool, and by a lot:
+
+    city      2026-08-31 monthlyTotalMeta   2026-09-05 monthlyTotalMeta
+    Riyadh    13,388                        2,654
+    Jeddah     6,281                          549
+    Abha       1,906                          358
+
+Fleet-wide the source declared 6,621 cards on 2026-09-05 and the crawl kept 2,737 distinct monthly
+residential units from them; on 2026-08-31 the same crawl kept 15,015. The residential share of a
+city's cards varies enormously by city (Al Muzahimiyah: 64 declared, 0 residential — all leisure),
+so a low kept/totalCount ratio is composition, not loss.
+
+The 26,407 rows that fall outside that pool are UNKNOWN, never dead — `has_available=true` asks
+whether a unit is bookable for the NEXT 30 days, so a booked unit legitimately vanishes from the
+enumeration. docs/ops/LISTING_LIVENESS.md §1/§3: absence from our own crawl is a candidate signal
+and never a verdict. What to do about rows the pool no longer contains is routine-11's question
+(`ops_platform_liveness_coverage` already reports gathern at 96.4% never-verified); it is not a
+reason to prune, and prune_unseen's 0.80 coverage floor declines to prune at 9.7% anyway.
+
+One real crawl-health defect DID come out of that measurement, and it is fixed in crawl() below:
+the 400-page hard cap recorded a truncated city as `ok`. It fired live on 2026-08-31 (shard 9 stopped
+Jeddah at pagesRead=400 against monthlyTotalMeta=6281) and `mon_detect_gathern_city_coverage_gap`
+— which reads `city_incomplete=` out of scrape_runs.notes — could not raise, because the crawl never
+told it. NOTE FOR THE NEXT PEAK SEASON: 400 pages ≈ 4,800 cards, and August's Jeddah alone needed
+~524; the cap will now SAY so instead of reporting a clean short run. Raising it is a rate-limit
+decision, not a free one — gathern hard-throttles a single IP after a few hundred sequential pages
+(reproduced 2026-09-05), which is why the crawl is sharded 12 ways in the first place.
+
 ──────────────────────────────────────────────────────────────────────────────────────────────
 THE REAL MONTHLY PRICE (the whole point of this file) — Option A, list-API-with-monthly-params:
 ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -805,6 +837,17 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
             if limit and len(rows_by_ad) >= limit:
                 break
             if page >= hard_cap:
+                # THE CAP IS A RUNAWAY GUARD, NOT AN END OF CATALOGUE. Falling out here means the
+                # source still had pages to give and we stopped asking, so the city is TRUNCATED —
+                # exactly the state the `status != "empty"` branch below already refuses to present
+                # as finished. Recording it as `ok` is what let 2026-08-31's shard 9 stop Jeddah at
+                # `pagesRead=400` against `monthlyTotalMeta=6281` and report
+                # `city_ok=… city_incomplete=0` with ok=true; mon_detect_gathern_city_coverage_gap
+                # reads that exact `city_incomplete=` counter out of scrape_runs.notes, so the
+                # detector stayed silent about a truncation it was never told about.
+                incomplete_cities.append(f"{name}:p{page}:hard_cap")
+                outcomes["reason:hard_cap"] = outcomes.get("reason:hard_cap", 0) + 1
+                truncated = True
                 break
             page += 1
             items, _, status = fetch_page(s, cid, page, ci, co)
@@ -820,6 +863,14 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
                 empties += 1
                 if empties >= 2:
                     break  # two empty pages in a row → real end of this city's monthly catalog
+                # `items` is already [] here — the unpack above rebound it — so re-entering the scan
+                # loop costs nothing and ONE hole in the source's pagination is survived. That is
+                # load-bearing rather than incidental: gathern really does serve holes (Riyadh page
+                # 200 of a 224-page catalogue answered zero items on 20/20 probes, 2026-09-05), and
+                # any refactor that kept the previous page's cards alive here would re-scan them
+                # into `scanned` — i.e. into scrape_runs.rows_seen, the number every crawl-health
+                # check reads. Pinned by
+                # test_a_single_empty_page_does_not_re_scan_the_page_before_it.
                 continue
             empties = 0
         outcomes["incomplete" if truncated else "ok"] = \
