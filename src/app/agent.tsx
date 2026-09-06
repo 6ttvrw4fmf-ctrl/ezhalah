@@ -378,10 +378,14 @@ const SEARCH_MS = 600;
 // market — and at the old 2.2s floor the pills landed and were gone before any of them could be
 // read. The floor must therefore cover the full reveal AND at least one complete highlight sweep, so
 // every platform is individually lit at least once before the loader may exit:
-//     reveal (LOADER_REVEAL_MS ≈ 2.2s) + one sweep (LOADER_SWEEP_MS = 7.6s) = 9.8s ≤ 10s.
+//     reveal (LOADER_REVEAL_MS) + one sweep (LOADER_SWEEP_MS = 7.4s) ≤ floor.
 // scripts/verify-search-loader-shows-every-platform.ts executes that arithmetic against the shipped
 // constants, so the two files cannot drift apart silently.
-const SEARCH_MIN_MS = 10000;
+//
+// 10,000 → 10,600ms later the same day: MAX_ROSTER (searchLoaderTiming.ts) was raised 40→50 with
+// headroom for the platforms still queued in the 40-candidate audit, which raises LOADER_REVEAL_MS
+// to 3,200ms; the floor follows so REVEAL + SWEEP (3,200 + 7,400 = 10,600) still lands inside it.
+const SEARCH_MIN_MS = 10600;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
 // fade-out this long — the strip glides away into the results state instead of vanishing in a frame.
 const LOADER_EXIT_MS = 450;
