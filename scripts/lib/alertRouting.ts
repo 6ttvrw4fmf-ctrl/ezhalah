@@ -84,6 +84,14 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // #2 fallback would have received an alert about its own two hourly safety backstops going dark.
   { routine: 7, test: /^gh_dispatch/ },
   { routine: 7, test: /^(detector_|orphaned_detector|unresolvable_|monitoring_watchdog)/ },
+  // declared_kind_without_emitter (2026-09-06, ops_incident #25) — a kind an engineer spec declares
+  // and this file routes, that no function in the database can raise. It is the mirror of
+  // `detector_cannot_raise` above: that one walks from the detector and asks whether it can speak,
+  // this one walks from the DECLARATION and asks whether anything speaks it. Same owner, because it
+  // is the same seam — a finding with a route and no source. Routed explicitly rather than left to
+  // the #2 fallback: an alert saying "this queue can never be filled" arriving in the busiest triage
+  // queue is the joke version, exactly as this file's header warns.
+  { routine: 7, test: /^declared_kind_without_emitter$/ },
   { routine: 7, test: /^(registry_orphans|repair_guarantee|loc_rel_|rls_)/ },
   { routine: 7, test: /^(stale_no_remediation_path|frontend_runtime_gate_missing)$/ },
   // ai_cost_health — the DeepSeek spend/cache/model-tier monitors (2026-08-29). Seam work: it is
