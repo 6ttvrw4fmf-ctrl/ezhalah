@@ -117,12 +117,14 @@ export default function CookieConsent() {
 }
 
 const st = StyleSheet.create({
-  // zIndex 45 — above page content and the SignInCard (40), below the Sidebar drawer (50) and every
-  // real overlay (ShareSheet 60, InfoModal 70, AuthModal 200). A consent card must not cover a modal.
+  // zIndex 38 — below the draggable SignInCard (40), so the movable sign-in card always sits ABOVE
+  // this fixed consent card when they share the bottom-right corner (owner 2026-09-06). Still above
+  // page content; below the Sidebar drawer (50) and every real overlay (ShareSheet 60, InfoModal 70,
+  // AuthModal 200). A consent card must never cover a modal.
   host: {
     bottom: 20,
     width: 280,
-    zIndex: 45,
+    zIndex: 38,
     backgroundColor: colors.surface,
     borderRadius: radius.card,
     borderWidth: 1,
