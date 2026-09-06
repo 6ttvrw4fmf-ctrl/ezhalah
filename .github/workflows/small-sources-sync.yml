@@ -149,6 +149,10 @@ jobs:
           # الباحة) — see scrapers/bahadhabab/run.py's module docstring.
           - { source: bahadhabab,   cmd: "python -m scrapers.bahadhabab.run --pages 50" }
           - { source: alobid,       cmd: "python -m scrapers.alobid.run --pages 50" }
+          # azdad (corrected 40-candidate-audit link, 2026-09-06): own Next.js + Supabase stack, not
+          # a Nuzul/Wasalt clone. The whole catalogue (25 listings) fits in one request — no
+          # --pages/--type flag, run.py fetches everything and prunes on absence every run.
+          - { source: azdad,        cmd: "python -m scrapers.azdad.run" }
           - { source: abralosol,   cmd: "python -m scrapers.abralosol.run --type all" }
           - { source: arkaan,      cmd: "python -m scrapers.arkaan.run --type all" }
           - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }

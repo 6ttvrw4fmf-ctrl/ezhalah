@@ -1218,6 +1218,14 @@ def upsert_abwbna_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("abwbna_commercial_listings", rows)
 
 
+def upsert_azdad_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("azdad_residential_listings", rows)
+
+
+def upsert_azdad_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("azdad_commercial_listings", rows)
+
+
 def upsert_remal_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("remal_residential_listings", rows)
 
