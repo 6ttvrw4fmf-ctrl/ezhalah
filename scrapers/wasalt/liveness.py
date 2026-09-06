@@ -252,6 +252,93 @@ def _flush_detail(rows: list[dict]) -> None:
         except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
             print(f"⚠ detail-log insert failed (non-fatal, {len(rows[i:i + 500])} rows): "
                   f"{str(exc)[:160]}", flush=True)
+    _mirror_probe_evidence(rows)
+
+
+# Verdict vocabulary translation. `check_hybrid` speaks live/dead/failed; the fleet-wide ledger
+# speaks the three-valued contract. 'failed' is UNKNOWN — never GONE (LISTING_LIVENESS.md §1).
+_LEDGER_VERDICT = {"dead": "GONE", "live": "LIVE", "failed": "UNKNOWN"}
+
+
+def _mirror_probe_evidence(rows: list[dict]) -> None:
+    """Mirror each decision into the FLEET-WIDE ledger, `ops_stale_inactivation_probe`.
+
+    WHY THIS EXISTS (2026-09-06). wasalt already recorded per-row evidence — but only in its own
+    private `wasalt_liveness_pilot_detail`, which nothing outside this file reads. Measured that
+    day: 678 of 678 rows wasalt deactivated had a same-day DIRECT `dead` verdict sitting in that
+    private table, while `ops_stale_inactivation_probe` held ZERO wasalt rows ALL-TIME and
+    `mon_detect_deletion_clock_without_evidence` was reporting 7,559 wasalt rows as having
+    "NOTHING in the database recording a source verdict".
+
+    Both statements were true at once, and that is the defect: the kills were evidenced, the
+    evidence was invisible. An audit that cannot see the evidence has to re-probe the source to
+    answer "was that kill correct?" — and wasalt needs the Saudi residential proxy, so from any
+    other egress the honest answer was "unknown". Evidence nobody can reach is not far from
+    evidence that does not exist; this is the same shape as a dark detector reading as a clean bill
+    of health, one layer down.
+
+    Writing the canonical row makes every wasalt inactivation auditable in SQL, from anywhere, with
+    no proxy — which is the whole point. It is shaped to what the detector actually reads
+    (`source_table` + `ad_number` + `verdict='GONE'` + `probed_at >= deactivated_at - 1 hour`), not
+    to what looks reasonable: a mirror the detector cannot match would be pure theatre.
+
+    FORWARD-ONLY, DELIBERATELY. This writes at probe time, for rows probed on this run. It does not
+    and must not backfill the existing backlog: stamping today's verdict onto a July deactivation
+    would make a kill that was unverifiable AT THE TIME look verified, which is precisely the
+    anti-pattern `liveness_contract.verification_patch` exists to prevent for
+    `last_verified_alive_at`. Those rows go green by being RE-VERIFIED, never by being re-labelled.
+
+    Best-effort, like its caller: monitoring must never fail the lifecycle it observes."""
+    if not rows:
+        return
+    by_tbl: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        if r.get("tbl") and r.get("listing_id") is not None:
+            by_tbl[r["tbl"]].append(r)
+
+    for tbl, group in by_tbl.items():
+        ids = [r["listing_id"] for r in group]
+        # The confirm step carries only listing_id; the ledger is keyed on ad_number because that is
+        # what the detector joins on. Resolve it rather than inventing one — a probe row under the
+        # wrong key is worse than no probe row, since it reads as evidence for another listing.
+        ident: dict[int, dict] = {}
+        try:
+            for i in range(0, len(ids), 200):
+                res = db._execute(
+                    db.sb().table(tbl).select("id, ad_number, listing_url").in_("id", ids[i:i + 200]),
+                    what=f"{tbl}.probe_ident")
+                for row in (getattr(res, "data", None) or []):
+                    ident[row["id"]] = row
+        except Exception as exc:  # noqa: BLE001
+            print(f"⚠ probe-ledger identity lookup failed for {tbl} (non-fatal): {str(exc)[:160]}",
+                  flush=True)
+            continue
+
+        payload = []
+        for r in group:
+            who = ident.get(r["listing_id"])
+            if not who or not who.get("ad_number"):
+                continue          # cannot key it → write nothing rather than something unjoinable
+            payload.append({
+                "source_table": tbl,
+                "listing_id": r["listing_id"],
+                "ad_number": who["ad_number"],
+                "listing_url": who.get("listing_url") or "",
+                "http_status": r.get("get_status") if r.get("get_status") is not None else r.get("head_status"),
+                "body_bytes": r.get("nbytes"),
+                "verdict": _LEDGER_VERDICT.get(r.get("get_verdict"), "UNKNOWN"),
+                "oracle": "wasalt.liveness.check_hybrid",
+                "note": (f"head={r.get('head_status')} get={r.get('get_status')} "
+                         f"verdict={r.get('get_verdict')} "
+                         f"property_details={r.get('has_property_details')}")[:300],
+            })
+        for i in range(0, len(payload), 200):
+            try:
+                db._execute(db.sb().table("ops_stale_inactivation_probe").insert(payload[i:i + 200]),
+                            what="ops_stale_inactivation_probe.insert")
+            except Exception as exc:  # noqa: BLE001 — the ledger must never break the sweep
+                print(f"⚠ probe-ledger insert failed (non-fatal, {len(payload[i:i + 200])} rows): "
+                      f"{str(exc)[:160]}", flush=True)
 
 
 def _flush_alive(tbl: str, ids: list[int], now_iso: str) -> None:
