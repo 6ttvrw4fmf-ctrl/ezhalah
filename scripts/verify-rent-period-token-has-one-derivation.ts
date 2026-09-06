@@ -128,8 +128,21 @@ check('remote.ts EXPORTS the one derivation (re-privatising it would force a sec
   /^export function rentPeriodParam\(q: SearchQuery\): string \| null \{$/m.test(remoteSrc));
 check('index.tsx imports it from remote.ts',
   /import \{[^}]*\brentPeriodParam\b[^}]*\} from '@\/data\/remote'/.test(indexSrc));
-check('index.tsx derives the count-surface token BY CALLING it',
-  /const rentPeriodTok: string \| null = rentPeriodParam\(query\);/.test(indexSrc));
+// WHAT THIS CHECK USED TO ASSERT, and why it was changed (2026-09-06, production red team).
+// It matched the literal `= rentPeriodParam(query);` — pinning ONE ARGUMENT NAME as correct. That
+// argument was the defect: `query` is the raw store object, whose `rentPeriod` is undefined for every
+// fresh Rent search, so the count surfaces sent null while buildFilterBaseQuery defaulted to 'annual'
+// and the search sent 'سنوي'. This check would have gone RED on the repair that fixes it, while
+// staying GREEN for the whole time the two could disagree — PART 3.3 shape 2 of
+// docs/ops/PRODUCTION_RED_TEAM_ENGINEER.md ("it asserts the defect"), the shape recorded there under
+// verify-chat-persistence.ts:117. It now states the invariant it was always about: the token comes
+// from the shared derivation and is not re-derived locally, whatever the input expression is NAMED.
+// WHICH input is correct is a different invariant, owned by
+// scripts/verify-count-and-search-share-one-query.ts — that file executes both paths and compares
+// values, where this one owns the function. Neither subsumes the other.
+check('index.tsx derives the count-surface token BY CALLING it (any input expression, never a local re-derivation)',
+  /const rentPeriodTok: string \| null = rentPeriodParam\([A-Za-z_$][\w$.]*\);/.test(indexSrc),
+  'the count token is no longer a plain call to the shared derivation — a second derivation is back');
 // DISCOVERY, not a checklist: any surviving hand-written mapping from a period word to an Arabic
 // token in index.tsx is a second derivation, whatever it is called. The period BUTTONS' own labels
 // are plain literals in JSX and never sit next to a 'monthly'/'both' comparison, so they do not trip.
