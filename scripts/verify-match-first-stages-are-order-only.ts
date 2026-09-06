@@ -130,6 +130,12 @@ const CITY_TO_REGION: Record<string, string> = {};
 const listingPriceValue = (p: any) => Number(p) || 0;
 const exactSizeTarget = (_q: any) => null;
 const priceOf = (l: any) => l.priceValue ?? 0;
+// The sort/ranking key and the annual-rent reconstruction it is built from (2026-09-06). Shimmed for
+// the same reason priceOf and byValue are: this file's object is the SET relation
+// ids(S(input)) ⊆ ids(input), which no price key can change. Their real semantics are executed by
+// scripts/verify-rent-price-basis-is-the-rpc-basis.ts.
+const rentAnnualValue = (l: any) => l.priceValue ?? 0;
+const sortPriceOf = (l: any) => priceOf(l);
 const ppm = (l: any) => l.ppm ?? 0;
 const recency = (l: any) => l.rec ?? 0;
 const byValue = (f: (l: any) => number, dir: number) => (a: any, b: any) => (f(a) - f(b)) * dir;
