@@ -717,6 +717,44 @@ next sync. Repairs before this rule that appeared to hold (`20260811133417`, `20
 served index must agree with the relation the sync builds it from, so a repair that is about to
 revert is reported as a revert rather than rediscovered by hand.
 
+## "The cron job succeeded" is NOT "the sync wrote" (permanent, 2026-09-06, ops_incident #37)
+
+**A `cron.job_run_details` row with `status='succeeded'` is evidence that nothing raised. It is not
+evidence that any write happened.** Do not build a conclusion on it, and do not accept one that is.
+
+`sync_search_listings_ar()` — and `refresh_rnpl_flags()`, `sync_payment_monthly()`,
+`sync_gathern_native_attrs()`, all four behind `search_index_writer_lock()` — begins with
+`if not public.search_index_writer_lock() then return; end if;`. That path is silent: zero rows, a
+NOTICE nobody reads. pg_cron job 28 runs seven statements, so `return_message` reflects the last one
+and the sync's own `(upserted, deleted)` is discarded every run. A pass that upserted 200,000 rows
+and a pass that took no lock and wrote nothing are recorded identically.
+
+Incident #37 rested its whole investigation on that non-evidence — "jobid 28 has run and SUCCEEDED
+hourly ~24 times" — and could not establish a mechanism for 1,562 stale prices, because the evidence
+that would have decided it was never recorded. Both monitors of the surface read the same thing:
+`search_index_freshness()` and `price_fidelity()` each derived `last_successful_sync_at` /
+`sync_recent` / `lag_minutes` from the scheduler, so `mon_detect_search_index_freshness()`'s P1 arm
+at `lag_minutes > 360` could not fire however long the writer had actually been idle.
+
+Since 2026-09-06 the writer records itself instead:
+
+- `mon_mv_refresh_log('search_listings_ar_sync_pass')` is written by `sync_search_listings_ar()`
+  **past the lock gate**, so only a pass that reached the upsert can leave evidence, and it carries
+  `upserted`/`deleted`. It is registered in `mon_refresh_targets` (warn 180m / crit 360m), so
+  `mon_detect_stale_refresh()` — already on the twice-hourly roster — escalates a writer that stops
+  writing. The object name is deliberately **not** a relation name: that detector falls back to
+  `pg_stat_user_tables.last_analyze` when the log row is missing, and autovacuum would have made a
+  missing record read as healthy.
+- `mon_mv_refresh_log('search_index_writer_lock_refused')` counts refusals across all four callers,
+  so "was the writer being locked out?" is one SELECT rather than a hypothesis. It is best-effort
+  (swallowed on failure) because the lock is EXECUTE-granted to `anon`; the positive record is not.
+- `search_index_freshness()` and `price_fidelity()` now read that record, and their payloads carry a
+  `sync_evidence` key naming it.
+
+The general rule this is an instance of: **a scheduler's exit status is never a substitute for a
+writer's own record.** If you find yourself proving that work happened by pointing at the thing that
+merely started it, you have not proved it.
+
 ## Boundary rules (permanent)
 
 - Junior detects & escalates; it never deep-audits. Senior owns AI Agent + broad infra (Advanced
