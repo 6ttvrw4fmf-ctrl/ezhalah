@@ -77,7 +77,21 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // nobody reading alerts, filed to the busiest triage queue.
   { routine: 7, test: /^(alert_queue_unworked|incident_stalled)$/ },
   { routine: 7, test: /^(cron_|migration_drift|sql_mirror_drift|deploy_lock_misuse)/ },
+  // gh_dispatch_* (2026-09-05, ops_incident #74) — the pg_cron → GitHub workflow_dispatch seam.
+  // public.trigger_gh_workflow() is the only path from cron to a workflow_dispatch-only workflow,
+  // and it used to return quietly when the PAT was absent, so 21 active jobs could stop running
+  // while every cron run recorded succeeded. This routine owns cron→workflow plumbing, and the
+  // #2 fallback would have received an alert about its own two hourly safety backstops going dark.
+  { routine: 7, test: /^gh_dispatch/ },
   { routine: 7, test: /^(detector_|orphaned_detector|unresolvable_|monitoring_watchdog)/ },
+  // declared_kind_without_emitter (2026-09-06, ops_incident #25) — a kind an engineer spec declares
+  // and this file routes, that no function in the database can raise. It is the mirror of
+  // `detector_cannot_raise` above: that one walks from the detector and asks whether it can speak,
+  // this one walks from the DECLARATION and asks whether anything speaks it. Same owner, because it
+  // is the same seam — a finding with a route and no source. Routed explicitly rather than left to
+  // the #2 fallback: an alert saying "this queue can never be filled" arriving in the busiest triage
+  // queue is the joke version, exactly as this file's header warns.
+  { routine: 7, test: /^declared_kind_without_emitter$/ },
   { routine: 7, test: /^(registry_orphans|repair_guarantee|loc_rel_|rls_)/ },
   { routine: 7, test: /^(stale_no_remediation_path|frontend_runtime_gate_missing)$/ },
   // ai_cost_health — the DeepSeek spend/cache/model-tier monitors (2026-08-29). Seam work: it is
@@ -152,6 +166,10 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // 3 🛡️ Data Integrity — source-truth on listing fields. Broadest; must stay last.
   { routine: 3, test: /price|district|amenity|^rent_period|^manufactured_rent_period/ },
   { routine: 3, test: /^(field_integrity|city_|region_label|english_|type_|v2_discards)/ },
+  // Incident #45. A served area that no longer matches the source text the row carries — including
+  // a source-published 0 that someone "repaired" to NULL. Named explicitly because the broad
+  // routine-3 patterns above are about price/district/amenity and would drop this on the fallback.
+  { routine: 3, test: /^area_contradicts_capture$/ },
   { routine: 3, test: /^(deletion_spike|mass_inactivation|unverified_inactivation|inactivation)/ },
   { routine: 3, test: /^(stale_|quarantine_growth|prune_|cleanup_evidence_gap)/ },
   { routine: 3, test: /^(served_after_source_gone|deleted_but_source_live|unledgered_hard_delete)/ },

@@ -8,8 +8,8 @@
 // covers less than the floor is itself a failure — that is the way a rotation system rots.
 //
 //   node e2e/live-sweep/run.mjs
-import { FLOORS, WATCHES, findings, journeys, ledgerPlan, ledgerRecord, note, dbCount, pickCityForDeal, sleep,
-         watchStatus, unobservedWatches, WATCH_OFFLINE_COVER } from './sweep.mjs';
+import { FLOORS, WATCHES, findings, undecideds, journeys, ledgerPlan, ledgerRecord, note, dbCount, pickCityForDeal, sleep,
+         watchStatus, unobservedWatches, WATCH_OFFLINE_COVER, productionVerified } from './sweep.mjs';
 import { normalFilter, trendingCity, trendingDistrict, advancedFilter, zeroResult,
          cardClickBack, tabHistory, typedDistrict, clearAll } from './journeys.mjs';
 import { showMoreJourney } from './showmore.mjs';
@@ -298,13 +298,22 @@ async function main() {
   line('WATCHES BROWSER-EVALUATED', `${WATCHES.filter((w) => watchStatus(w) === 'pass' || watchStatus(w) === 'fail').length}/${WATCHES.length}`);
   line('WATCHES COVERED OFFLINE', WATCHES.filter((w) => watchStatus(w) === 'offline_barrier').length);
   line('WATCHES NOT EVALUATED AT ALL', unobservedWatches().length);
-  line('PRODUCTION VERIFIED', findings.length === 0 ? 'YES' : 'NO');
+  // A comparison the run COULD NOT MAKE is missing coverage, not a pass (incident #47). It is never
+  // a defect either — an index rebuild between two reads says nothing about the product — so it does
+  // not fail the exit code; it takes away the right to claim the surface was verified, and it is
+  // named in full below so the next run knows what to re-drive.
+  line('UNDECIDED COMPARISONS (index moved under the pair — no verdict)', undecideds.length);
+  line('PRODUCTION VERIFIED', productionVerified(findings, undecideds) ? 'YES' : 'NO');
   line('SEARCH & MATCHING HEALTH', `${health}/10`);
   if (dark.length) {
     console.error('\nPERMANENT WATCHES NOT EVALUATED (recorded `skip`, never `pass`):');
     dark.forEach((w) => console.error(`  ⚠ ${w}`));
   }
   if (floorMisses.length) { console.error('\nCOVERAGE FLOORS MISSED:'); floorMisses.forEach((m) => console.error(`  ✗ ${m}`)); }
+  if (undecideds.length) {
+    console.error('\nUNDECIDED (no verdict in either direction — re-drive these journeys on a quiet index):');
+    undecideds.forEach((u, i) => console.error(`  ${i + 1}. [${u.journey}] ${u.detail}`));
+  }
   if (findings.length) {
     console.error('\nDEFECTS (each must be fixed → barriered → deployed → re-tested, never reported and left):');
     findings.forEach((f, i) => console.error(`  ${i + 1}. [${f.journey}] ${f.layerPair} — ${f.detail}`));
@@ -313,7 +322,7 @@ async function main() {
 
   await ledgerRecord('live_browser_sweep', new Date().toISOString().slice(0, 10),
     findings.length ? 'fail' : 'pass',
-    `journeys=${total} cities=${citiesTested.size} defects=${findings.length} floors_missed=${floorMisses.length}`);
+    `journeys=${total} cities=${citiesTested.size} defects=${findings.length} undecided=${undecideds.length} floors_missed=${floorMisses.length}`);
 
   process.exit(findings.length || floorMisses.length ? 1 : 0);
 }

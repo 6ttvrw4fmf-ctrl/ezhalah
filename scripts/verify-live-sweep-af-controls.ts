@@ -119,9 +119,18 @@ check('…and stops when the card is gone or has no تخطي (intro/mining state
   'an unbounded or unguarded loop hangs the sweep instead of failing it');
 
 // ── 4. the invariant it is all for: promised count == landed count ───────────────────────────────
+// The comparison itself is unchanged; since incident #47 it is made by judgeAdvertisedVsLanded(),
+// which accuses only on an index proven not to have been rebuilt between the two reads (the raw
+// `promised !== landed` could not tell a product defect from a re-sync at :14). Both halves are
+// required here: a judge call that is not BRACKETED reports every mismatch as UNDECIDED, which
+// would be this assertion silently ceasing to exist.
+const oneLine = af.replace(/\s+/g, ' ');
 check('the journey still asserts the chip\'s promised count against the count the user lands on',
-  /promised\s*!==\s*landed/.test(af) || /promised\s*!==\s*landed/.test(af.replace(/\s+/g, ' ')),
+  /judgeAdvertisedVsLanded\([^;]*promised[^;]*landed/.test(oneLine),
   'this is the AF contract invariant (R7.1.1/R7.1.2) the journey exists to check');
+check('…and the pair is bracketed by an index stamp, so a mismatch can still be a DEFECT',
+  /onOneIndex\(/.test(oneLine),
+  'an unbracketed judge call is permanently UNDECIDED — the assertion would be gone, not weakened');
 check('…and asserts the «متابعة» footer moves to the tentative selection (R7.1.2)',
   /footAfter\s*!==\s*promised/.test(af));
 
@@ -151,8 +160,19 @@ const mutations: Mutation[] = [
   },
   {
     name: 'the promised-vs-landed assertion is dropped',
-    apply: (s) => s.replace(/promised !== landed/, 'false'),
-    predicate: (a) => /promised\s*!==\s*landed/.test(a),
+    apply: (s) => s.replace(/seen\.promised, seen\.landed/, 'null, null'),
+    predicate: (a) => /judgeAdvertisedVsLanded\([^;]*promised[^;]*landed/.test(a.replace(/\s+/g, ' ')),
+  },
+  {
+    name: 'the promised-vs-landed judgement is deleted outright',
+    apply: (s) => s.replace(/if \(seen\) judgeAdvertisedVsLanded\([^;]*\);/, ''),
+    predicate: (a) => /judgeAdvertisedVsLanded\([^;]*promised[^;]*landed/.test(a.replace(/\s+/g, ' ')),
+  },
+  {
+    name: 'the judgement is left unbracketed, so it can never accuse',
+    apply: (s) => s.replace(/const settled = await onOneIndex\(\(\) => afAnswerRound\(([^)]*)\)\);/,
+      'const settled = undefined; const seenRound = await afAnswerRound($1);'),
+    predicate: (a) => /onOneIndex\(/.test(a.replace(/\s+/g, ' ')),
   },
   {
     name: 'the footer/tentative-selection assertion is dropped',
