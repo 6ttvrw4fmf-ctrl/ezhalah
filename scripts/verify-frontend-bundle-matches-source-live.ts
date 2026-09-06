@@ -198,6 +198,30 @@ mustCatch('a RUNTIME-APPENDED token whose push() call site never shipped, even t
     `const y=['kitchen','parking','elevator','ac'],_=['car_entrance','sanitation'];const label='furnished';`,
     G, COH).length > 0);
 
+// THE WINDOW MUST ACTUALLY BOUND SOMETHING (2026-09-06, routine #10). Every proof above passes for
+// ANY value of APPEND_REGION, including one large enough to span the whole bundle — at which point
+// this leg silently reverts to the whole-bundle search ops_incident #89 is about, and afCertify's
+// `.push('furnished')` 4,907 chars away satisfies it again with the suite still green. A threshold
+// nobody has watched bite can be widened back to nothing in a one-character diff.
+//
+// THE DISTANCES BELOW ARE LITERALS ON PURPOSE. The first version of this guard wrote
+// `'x'.repeat(APPEND_REGION + 500)` — so raising the constant widened the test input with it, and
+// the proof could never fail. Watched: with APPEND_REGION set to 10_000_000 the mutant SURVIVED and
+// this line stayed green. That is "a proof that supplies its own input proves nothing", committed
+// inside the proof written to catch exactly that. A proof of a threshold must state a distance the
+// threshold does not get to choose.
+//
+// FAR_APART (20,000) is four times the measured distance to the real impostor and two orders of
+// magnitude past the measured 195-char append offset, so it is red only if the window has been
+// widened somewhere it has no business reaching.
+const FAR_APART = 20_000;
+const NEAR = 200;
+const arrays = `const y=['kitchen','parking','elevator','ac'],_=['car_entrance','sanitation'];`;
+mustCatch(`an append ${FAR_APART} chars from its array being accepted (the window is a real distance, not an unbounded search)`,
+  bundleParityProblems(`${arrays}${'x'.repeat(FAR_APART)}u.push('furnished')`, G, COH).length > 0);
+mustCatch(`…while the identical append ${NEAR} chars away is still accepted (not vacuously red)`,
+  bundleParityProblems(`${arrays}${'x'.repeat(NEAR)}u.push('furnished')`, G, COH).length === 0);
+
 mustCatch('the villa-only literal group failing to ship',
   bundleParityProblems(`const y=['kitchen','parking','elevator','ac'];c(t,'furnished')&&u.push('furnished')`,
     G, COH).length > 0);
