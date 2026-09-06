@@ -863,19 +863,26 @@ try {
     check('[J] the closed interview lands on a genuinely narrowed, non-null result',
       !jFinalOpen && Number.isFinite(jFinal) && jFinal < jStart,
       `answered=${jAnswered ?? '(none)'} start=${jStart} final=${jFinal}`);
-    // THE 50 RULE, END TO END (owner 2026-09-04): a round that lands at ≤ 50 FINISHES the chat — every
-    // remaining listing is revealed with no «عرض المزيد», and the composer is replaced by «اكتمل
-    // البحث» + «محادثة جديدة». Asserted only when the landed count really is ≤ 50 (DB truth today is
-    // 48; if inventory grows past 50 the interview is right to keep going and this block simply
-    // does not apply — it never demands a completion the data does not owe).
+    // THE 50 RULE, END TO END (owner 2026-09-04; rendering restyled 2026-09-05): a round that lands
+    // at ≤ 50 FINISHES the chat — every remaining listing is revealed with no «عرض المزيد», and the
+    // composer LOCKS in place (owner request 2026-09-05: no replacement card): the same box goes
+    // readOnly with the closed-chat placeholder «أُغلقت هذه المحادثة…» pointing at the ☰, and the
+    // send arrow becomes a disabled lock. Asserted only when the landed count really is ≤ 50 (DB
+    // truth today is 48; if inventory grows past 50 the interview is right to keep going and this
+    // block simply does not apply — it never demands a completion the data does not owe).
     if (Number.isFinite(jFinal) && jFinal <= 50) {
       const bodyTxt = await body();
-      check('[J] ≤ 50 → the chat is COMPLETED: «اكتمل البحث» + «محادثة جديدة» replace the composer',
-        bodyTxt.includes('اكتمل البحث') && bodyTxt.includes('محادثة جديدة'), `final=${jFinal}`);
       check('[J] ≤ 50 → no «عرض المزيد» is offered — every remaining listing is already revealed',
         !bodyTxt.includes('عرض المزيد'), `final=${jFinal}`);
-      const composerLive = await page.locator('[placeholder]:visible').count();
-      check('[J] ≤ 50 → the message composer is gone (no live text input)', composerLive === 0, `inputs=${composerLive}`);
+      const lockedComposer = await page.locator('textarea[readonly][placeholder*="أُغلقت هذه المحادثة"]:visible').count();
+      check('[J] ≤ 50 → the chat is COMPLETED: the composer locks (readOnly + «أُغلقت هذه المحادثة…» placeholder)',
+        lockedComposer === 1, `final=${jFinal} lockedComposer=${lockedComposer}`);
+      const liveComposer = await page.locator('textarea:not([readonly]):visible').count();
+      check('[J] ≤ 50 → no LIVE text input remains (the locked box is the only one)',
+        liveComposer === 0, `liveInputs=${liveComposer}`);
+      const lockBtn = await page.locator(`[aria-label*="أُغلقت هذه المحادثة"][aria-disabled="true"]`).count();
+      check('[J] ≤ 50 → the send button is a disabled lock carrying the closed-chat label',
+        lockBtn >= 1, `lockBtn=${lockBtn}`);
     } else if (Number.isFinite(jFinal)) {
       console.log(`NOTE  [J] landed at ${jFinal} (> 50) — completion assertions not owed; the interview is right to continue`);
     }
