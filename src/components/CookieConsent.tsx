@@ -88,7 +88,7 @@ export default function CookieConsent() {
       ]}
     >
       <View style={[st.headRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-        <Image source={require('../../assets/images/cookies.jpg')} style={st.icon} contentFit="cover" />
+        <Image source={require('../../assets/images/cookies-green.png')} style={st.icon} contentFit="contain" />
         <Text style={[st.title, { textAlign }]}>{c.title}</Text>
       </View>
 
@@ -121,7 +121,7 @@ const st = StyleSheet.create({
   // real overlay (ShareSheet 60, InfoModal 70, AuthModal 200). A consent card must not cover a modal.
   host: {
     bottom: 20,
-    width: 360,
+    width: 280,
     zIndex: 45,
     backgroundColor: colors.surface,
     borderRadius: radius.card,
@@ -131,7 +131,7 @@ const st = StyleSheet.create({
     paddingVertical: 18,
   },
   headRow: { alignItems: 'center', gap: 8 },
-  icon: { width: 24, height: 24, borderRadius: 6 },
+  icon: { height: 20, aspectRatio: 1.303 }, // "cookies" wordmark, green + transparent (blends, no box)
   title: { flex: 1, fontFamily: font.family.semibold, fontSize: 15, color: colors.ink },
   body: { marginTop: 10, fontFamily: font.family.regular, fontSize: 12.5, lineHeight: 19, color: colors.muted },
   btnRow: { marginTop: 16, gap: 8, justifyContent: 'flex-end' },
