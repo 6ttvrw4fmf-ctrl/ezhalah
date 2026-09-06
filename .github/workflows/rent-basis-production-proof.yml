@@ -1,0 +1,61 @@
+# THE POST-DEPLOY PROOF FOR ops_incident #82 — RUNNABLE, not "manual" in name only.
+#
+# WHY THIS FILE EXISTS. scripts/prove-rent-basis-live.mjs has two halves. The server oracle runs
+# anywhere. The BROWSER half — which is the half that actually proves the shipped client net stopped
+# deleting monthly cards — needs a real browser against the SERVED bundle, and a cloud agent
+# container cannot provide one: Chromium through that egress proxy dies with ERR_CONNECTION_RESET
+# while curl and fetch to the same origin return 200. Recording the browser half as "run it by hand"
+# would have named a home the owning routine cannot reach, which is the same defect as an exclusion
+# naming nowhere (scripts/verify-test-registry-complete.ts refuses those for exactly this reason).
+#
+# So: workflow_dispatch. The routine that owns #82 triggers this after the deploy lands and reads a
+# real verdict, instead of closing the incident on a green unit test.
+#
+# DELIBERATELY NOT ON pull_request OR push. It drives production in a real browser, and
+# ops_incident #81 is open precisely because a live, third-party-dependent check was wired into the
+# required per-PR suite and turned unrelated PRs red. This runs when someone asks for it, never as a
+# gate on someone else's work.
+#
+# NO SECRETS. scripts/lib/public-supabase.ts carries the anon key as a committed constant (it ships
+# in every visitor's bundle; it is not a credential) and the app origin is public. Nothing here
+# deploys, promotes, aliases or writes anything — it reads production and reports.
+name: Rent price-basis production proof (#82)
+
+on:
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: "Origin to prove against (must be the canonical production URL)"
+        required: false
+        default: "https://ezhalah-app.vercel.app"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rent-basis-production-proof
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    name: Rent «شهري»+«سنوي» reads the RPC's own price basis, on the served bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      # No retry loop here, unlike af-oracle-pr-check.yml. That job is a PR gate, where a production
+      # hiccup must not fail someone's unrelated work. This one is a PROOF someone asked for: a
+      # flaky-looking failure is information the operator needs to see, not noise to be smoothed
+      # away, and the script already fails loudly rather than treating an unreachable origin as an
+      # empty result.
+      - name: Prove all five criteria on the served bundle
+        env:
+          EZHALAH_ORIGIN: ${{ inputs.origin }}
+        run: node scripts/prove-rent-basis-live.mjs --browser
