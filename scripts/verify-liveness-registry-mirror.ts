@@ -18,6 +18,7 @@
 //   liveness_policies.py  ==  sql/mirrors/liveness_registry.json  ==  the migration's seed
 //
 // so a change in any one of them fails at PR time, in a suite with no database and no Python.
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { npmTestRuns } from './lib/testRegistry.ts';
@@ -48,45 +49,52 @@ console.log('verify-liveness-registry-mirror: one liveness registry, three place
 // 1. The Python registry — the source of truth every other copy is derived from.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 const py = readFileSync(PY, 'utf8');
+
+// READ BY EXECUTION, NOT BY REGEX (2026-09-06). This block used to parse liveness_policies.py with
+// two regexes: one for the written-out tier-1/2 entries, one for THE single `for p in (…)`
+// comprehension. It carried a loud "every _P(...) entry was parsed" guard precisely because that
+// shape-dependence was known to be fragile — and the guard did its job the day a SECOND
+// comprehension appeared (`for p, sig in (…)`, added so ten oracle-guarded platforms could each
+// carry their real death_signals instead of a shared string that had become false). But doing its
+// job meant a RED build on a correct registry, blocking every unrelated PR, and the "fix" it
+// invited was to bolt on a third regex and wait for the fourth shape.
+//
+// A registry is a dict. Ask it. Execution cannot miss an entry, cannot be fooled by a comment or a
+// docstring, and cannot go stale when someone reformats the file — so the guard below becomes an
+// identity (rows == len(POLICIES)) rather than a bet on a parser.
 const fromPython: Row[] = [];
+const pyRows = JSON.parse(execFileSync('python3', ['-c', String.raw`
+import json, os, sys
+sys.path.insert(0, os.getcwd())
+from scrapers.common import liveness_policies as LP
+print(json.dumps({
+    "total": len(LP.POLICIES),
+    "rows": [{"key": k,
+              "policy_platform": r["policy"].platform,
+              "strategy": r["strategy"],
+              "grace": r["policy"].grace,
+              "sla_hours": r["policy"].max_verification_age_hours}
+             for k, r in LP.POLICIES.items()],
+}))
+`], { cwd: ROOT, encoding: 'utf8' }).trim().split('\n').pop() as string) as {
+  total: number;
+  rows: Array<{ key: string; policy_platform: string; strategy: string; grace: number; sla_hours: number }>;
+};
 
-// Tier 1 and 2 are written out one platform at a time:
-//     "aqar": _P(_pol("aqar", 3, 48), DIRECT_REVISIT, "...
-for (const m of py.matchAll(
-  /"(\w+)":\s*_P\(\s*_pol\("(\w+)",\s*(\d+),\s*(\d+)\),\s*(DIRECT_REVISIT|CANDIDATE_PLUS_DIRECT|CRAWL_PRESENCE_ONLY)/g,
-)) {
-  const [, name, polName, grace, sla, strategy] = m;
-  check(`tier-1/2 entry ${name} names itself consistently`, name === polName,
-    `dict key "${name}" vs _pol("${polName}") — a mismatch here silently registers the wrong ` +
-    'platform under the wrong policy');
-  fromPython.push({ platform: name, strategy, sla_hours: Number(sla), grace: Number(grace) });
+for (const r of pyRows.rows) {
+  check(`entry ${r.key} names itself consistently`, r.key === r.policy_platform,
+    `dict key "${r.key}" vs LivenessPolicy(platform="${r.policy_platform}") — a mismatch here ` +
+    'silently registers the wrong platform under the wrong policy');
+  fromPython.push({ platform: r.key, strategy: r.strategy, sla_hours: r.sla_hours, grace: r.grace });
 }
 
-// Tier 3 is one comprehension over a tuple of names:
-//     **{ p: _P(_pol(p, 3, 168), CRAWL_PRESENCE_ONLY, ...) for p in ("abeea", "aldarim", ...) }
-const tier3 = py.match(
-  /_P\(_pol\(p,\s*(\d+),\s*(\d+)\),\s*(CRAWL_PRESENCE_ONLY)[\s\S]*?for p in \(([\s\S]*?)\)\s*\}/,
-);
-check('the CRAWL_PRESENCE_ONLY comprehension is present and parseable', Boolean(tier3),
-  tier3 ? '' : 'the tier-3 block in liveness_policies.py no longer matches the shape this check ' +
-  'parses. Do not delete this check — update it, or the known-gap platforms stop being verified ' +
-  'against the SQL registry at all.');
-if (tier3) {
-  const [, grace, sla, strategy, names] = tier3;
-  for (const m of names.matchAll(/"(\w+)"/g)) {
-    fromPython.push({ platform: m[1], strategy, sla_hours: Number(sla), grace: Number(grace) });
-  }
-}
-
-// A shape this parser cannot read must fail loudly rather than silently register fewer platforms.
-// Every `_P(...)` CALL in the file is either one tier-1/2 entry or the single tier-3
-// comprehension; `class _P(dict)` is the type itself and is not a registry entry.
-const pCalls = (py.match(/(?<!class )_P\(/g) ?? []).length;
-const tier12 = (py.match(/"\w+":\s*_P\(/g) ?? []).length;
-const expectedPCalls = tier12 + (tier3 ? 1 : 0);
-check('every _P(...) registry entry was parsed', pCalls === expectedPCalls,
-  `${pCalls} _P( calls in the file, ${expectedPCalls} attributed (${tier12} tier-1/2 + ` +
-  `${tier3 ? 1 : 0} comprehension). An unparsed entry would be a platform this barrier cannot see.`);
+check('every registry entry was read', fromPython.length === pyRows.total,
+  `${fromPython.length} rows read, ${pyRows.total} keys in POLICIES — an unread entry would be a ` +
+  'platform this barrier cannot see');
+check('every strategy is one of the three declared tiers',
+  fromPython.every((r) => ['DIRECT_REVISIT', 'CANDIDATE_PLUS_DIRECT', 'CRAWL_PRESENCE_ONLY'].includes(r.strategy)),
+  fromPython.filter((r) => !['DIRECT_REVISIT', 'CANDIDATE_PLUS_DIRECT', 'CRAWL_PRESENCE_ONLY'].includes(r.strategy))
+    .map((r) => `${r.platform}=${r.strategy}`).join(', '));
 check('the Python registry is non-empty', fromPython.length > 0, `${fromPython.length} platforms`);
 
 const dupes = fromPython.map((r) => r.platform)

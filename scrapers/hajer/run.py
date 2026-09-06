@@ -23,6 +23,12 @@ Field map (REM single-field label → our schema):
                               nightly auto_recover_false_inactive() sweep from resurrecting it)
   واجهة / عمر / عرض الشارع / خدمات الحي → additional_info
 
+Liveness: two independent paths, both DIRECT. The crawl path above reads الحالة off the listing's
+own page and pins sold/rented rows inactive the same crawl. The prune path re-fetches the listing's
+own URL and reads its own status badge — see the oracle block below. Until 2026-09-06 the prune path
+had no oracle at all and deactivated on crawl ABSENCE alone, which killed HJ1512 while the source
+was still serving it.
+
 Usage:  python -m scrapers.hajer.run [--limit-test] [--type residential|commercial|all]
 """
 from __future__ import annotations
@@ -42,7 +48,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize
+from scrapers.common import db, http_liveness, normalize
 from scrapers.common.arabic_location import to_catalog
 
 BASE = "https://hajerhouses.com"
@@ -75,6 +81,92 @@ CITY_MAP_AR = {
     "الدمام": "Dammam", "الخبر": "Khobar", "القطيف": "Qatif", "الجبيل": "Jubail",
     "الرياض": "Riyadh", "جدة": "Jeddah", "مكة": "Mecca", "المدينة": "Medina",
 }
+
+# ── Liveness oracle for prune_unseen ────────────────────────────────────────────────────────────
+# This scraper ALREADY deactivates on affirmative source evidence: the الحالة field read out of the
+# listing's own page during the crawl, gated on GONE_STATUS above and pinned by _pin_sold_inactive.
+# That path is evidenced and is not what this oracle is for.
+#
+# The gap is the OTHER path. `db.prune_unseen()` ages out a row that missed three crawls, and until
+# 2026-09-06 it did so on crawl ABSENCE alone — no answer from the source at all — which
+# docs/ops/LISTING_LIVENESS.md §1–§3 forbids. It was not hypothetical here: HJ1512 was deactivated
+# on 2026-07-31 with missing_count=3 and last_verified_alive_at=NULL while hajerhouses.com was, and
+# still is, serving that listing with its own «متاح» badge. Restored 2026-09-06 by direct read.
+#
+# MEASURED 2026-09-06 — every inactive row (5) plus 60 interleaved known-active controls, reading
+# the listing's OWN status badge:
+#   dead      3/5 carried a terminal badge (مؤجرة 2, مباع 1); 1 carried «متاح» (HJ1512, the false
+#             deactivation above) and 1 carried no badge at all and is held UNKNOWN, correctly
+#   controls  0/60 carried a terminal badge; 7/60 carried «متاح», 53/60 carried no badge
+# Every one of the 65 fetches answered HTTP 200.
+#
+# THE TRAP, and why this strips <style> first. hajerhouses.com ships its status palette as CSS with
+# Arabic colour comments — `/* مباع - Red */ .rem-style-2 … .status-sold { background:#dc3545 }` —
+# on EVERY page, live ones included. A whole-document substring search for «مباع» therefore matches
+# 100% of pages. Reading the document instead of the element is the aqar «مغلق» mistake in a new
+# costume. The badge is read as a POSITION: a `class="property-status-badge status-…"` attribute,
+# which CSS cannot produce. Across all 65 pages no page carried more than one such badge, and the
+# one it carries sits inside that listing's own `post-<id>` wrapper.
+#
+# NO 404 LIMB, DELIBERATELY. Zero of the 65 probes returned 404, so this platform's 404 behaviour is
+# UNMEASURED and stays that way — «do not guess source semantics». It is also the limb most likely
+# to be wrong here specifically: these are WordPress permalinks carrying an Arabic slug, and an
+# edited slug 404s the URL we stored while the listing is perfectly alive. Absent a measurement that
+# separates that case from a deletion, a 404 stays UNKNOWN and the row is simply never confirmed
+# gone — dead inventory lingering is the safe direction, live inventory deleted is not.
+#
+# NO CANARY. §5.4's in-run positive control exists for sources that answer a degraded run with
+# something that MIMICS death — gathern's own 404, dealapp's listing-less SPA shell. hajer serves
+# fully-rendered HTML and the gone limb fires only on an affirmative Arabic status string inside a
+# specific class attribute; no observed failure mode manufactures that. If one is ever measured,
+# pass `canary=` to the probe below — the hook is already there.
+_STYLE_RE = re.compile(r"<style[^>]*>.*?</style>", re.S)
+_OWN_BADGE_RE = re.compile(r'class="property-status-badge status-([a-z-]+)"')
+# Terminal badge classes. «محجوز» (status-reserved) is deliberately absent: GONE_STATUS above treats
+# it as gone on the crawl path, but zero rows in either cohort carried it, so the oracle has no
+# opinion rather than an unmeasured one. Having no opinion can never contradict the crawl path.
+_GONE_BADGE = ("sold", "rented")
+_ALIVE_BADGE = ("available",)
+
+
+_oracle_sess: Any = None
+
+
+def _oracle_session():
+    """Transport seam for the probe. Tests replace this; the shared law is never replaced.
+
+    Reuses ONE impersonating session across the whole sweep (hajerhouses.com is behind the same
+    fingerprint check the crawl already satisfies) and honours the crawler's own rate limit, so the
+    probe cannot be the thing that gets us blocked — which would read as a wave of UNKNOWNs.
+    """
+    global _oracle_sess
+    if _oracle_sess is None:
+        _oracle_sess = session()
+    _throttle()
+    return _oracle_sess
+
+
+def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+    """hajer's OWN measured signal. `None` means "no opinion" — never "probably gone"."""
+    if path_changed:
+        return None                      # an unresolved redirect: we do not know where we landed
+    if status != 200:
+        return None                      # incl. 404: unmeasured on this platform (see above)
+    badges = _OWN_BADGE_RE.findall(_STYLE_RE.sub("", body or ""))
+    if any(b in _GONE_BADGE for b in badges):
+        return "gone"                    # THIS listing's own badge says sold/rented
+    if any(b in _ALIVE_BADGE for b in badges):
+        return "live"                    # THIS listing's own badge says available
+    return None                          # no badge at all — the common case; hold at UNKNOWN
+
+
+_probe = http_liveness.LivenessProbe(
+    platform="hajer",
+    signal=_signal,
+    session=_oracle_session,
+    url_for=http_liveness.stored_listing_url(
+        ("hajer_residential_listings", "hajer_commercial_listings")),
+)
 
 _last = 0.0
 
@@ -386,9 +478,12 @@ def main() -> int:
             _pin_sold_inactive("hajer_commercial_listings", sold_com)
         # Gone rows are already active=false + missing_count=3 by now; prune_unseen never touches
         # them (it only reads active=true rows), so their absence from the seen set is harmless.
+        # verify_gone makes the OTHER path direct too: a row missing from this crawl is re-fetched
+        # at its own URL and only its own badge may retire it. Absence alone no longer decides.
         pruned = 0
         for tbl, rows_seen in (("hajer_residential_listings", res), ("hajer_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Hajer")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Hajer",
+                                verify_gone=_probe.verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
