@@ -62,7 +62,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, http_liveness, normalize  # noqa: E402
+from scrapers.dealapp import liveness as dealapp_liveness  # noqa: E402
 
 SOURCE = "Deal App"
 BASE = "https://dealapp.sa"
@@ -146,6 +147,110 @@ def _session() -> cc.Session:
 
 def session() -> cc.Session:
     return cc.Session(impersonate="chrome124")
+
+
+# ── Liveness oracle for prune_unseen ────────────────────────────────────────────────────────────
+# This platform ALREADY owns a real DIRECT oracle — scrapers/dealapp/liveness.py, with an id-scoped
+# schema check, the source's own availability markers, and a run-level trust gate. It runs as a
+# separate sweep (liveness_run.py). What it did NOT cover is the prune in THIS file, which until
+# 2026-09-06 aged rows out on crawl ABSENCE alone: a second, unevidenced deactivation path running
+# beside the good one (docs/ops/LISTING_LIFECYCLE_ENGINEER.md §4.2, ops_incident #84).
+#
+# So this invents NO new source semantics. It calls `classify_dealapp` — the same pure classifier
+# the sweep uses, already mutation-tested — so the two paths cannot disagree about what dealapp's
+# answers mean. The one thing that had to be rebuilt is the trust gate: `environment_is_trustworthy`
+# asks a RUN-LEVEL question (did this run positively verify ≥20% of ≥25 probes?), and a
+# `verify_gone` callback only ever sees one row. The per-row equivalent is a canary.
+#
+# WHY THE CANARY IS NOT OPTIONAL HERE. dealapp serves datacenter egress a listing-less shell for
+# 78–88% of ids (LISTING_LIVENESS.md §5.1), and `classify_dealapp` correctly calls a shell UNKNOWN.
+# The residual risk is the 404 branch: across 600 probes on two egress paths dealapp produced ZERO
+# dead verdicts, so a 404 is meaningful *today* precisely because it essentially never happens —
+# which is also the condition under which a change in that behaviour would be catastrophic and
+# unnoticed. The canary makes a shelled environment produce zero deactivations instead of many, on
+# the largest platform in the ledger.
+_ORACLE_ADID = threading.local()
+
+
+def _oracle_session() -> cc.Session:
+    """Transport seam for the probe. Tests replace this; the shared law is never replaced."""
+    return _session()
+
+
+def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+    """dealapp's OWN classifier, reused verbatim. Nothing about the law is decided here."""
+    adid = getattr(_ORACLE_ADID, "adid", None)
+    if not adid:
+        return None                      # no id to scope the schema check to → no opinion
+    url = f"{BASE}/ar/ad-details/{adid}"
+    verdict = dealapp_liveness.classify_dealapp(
+        status, body=body or "", adid=adid,
+        requested_url=url,
+        # `path_changed` is the same fact classify_dealapp reads out of final vs requested URL.
+        final_url="https://moved.example/elsewhere" if path_changed else url)
+    if verdict == dealapp_liveness.DEAD:
+        return "gone"
+    if verdict == dealapp_liveness.ALIVE:
+        return "live"
+    return None
+
+
+def _canary_ok() -> tuple[bool, str]:
+    """Is dealapp still serving US real listings right now? Memoised per run, fails CLOSED.
+
+    The canaries are ads THIS run already fetched and parsed, so "real listing" means the same
+    thing here as it does in the capture path: `listing_schema_present` for that ad's own id.
+    """
+    with _CANARY_LOCK:
+        if _canary["verdict"] is not None:
+            return _canary["verdict"], _canary["reason"]
+        ids = list(_canary["adids"])
+    ok, reason = False, "no canary was supplied, so no removal can be believed"
+    for adid in ids:
+        try:
+            r = _oracle_session().get(f"{BASE}/ar/ad-details/{adid}", timeout=45,
+                                      allow_redirects=True)
+            if r.status_code == 200 and dealapp_liveness.listing_schema_present(r.text, adid):
+                ok, reason = True, f"canary {adid} still renders its own listing schema"
+                break
+            reason = f"canary {adid} did not render its own listing schema (HTTP {r.status_code})"
+        except Exception as e:  # noqa: BLE001 — an unreachable canary is not permission to delete
+            reason = f"canary {adid} could not be reached ({type(e).__name__})"
+    with _CANARY_LOCK:
+        _canary["verdict"], _canary["reason"] = ok, reason
+    return ok, reason
+
+
+_CANARY_LOCK = threading.Lock()
+_canary: dict[str, Any] = {"adids": [], "verdict": None, "reason": "not evaluated"}
+
+
+def set_liveness_canaries(adids) -> None:
+    """Arm the oracle with ad ids THIS run already fetched and parsed successfully."""
+    with _CANARY_LOCK:
+        _canary["adids"] = [a for a in (adids or []) if a][:3]
+        _canary["verdict"] = None
+        _canary["reason"] = "not evaluated"
+
+
+class _DealappProbe(http_liveness.LivenessProbe):
+    def verify_gone(self, ad_number: str):
+        raw = (ad_number or "").strip()
+        _ORACLE_ADID.adid = raw[2:] if raw.upper().startswith("DA") and raw[2:].isdigit() else None
+        try:
+            return super().verify_gone(ad_number)
+        finally:
+            _ORACLE_ADID.adid = None
+
+
+_probe = _DealappProbe(
+    platform="dealapp",
+    signal=_signal,
+    session=_oracle_session,
+    url_for=http_liveness.stored_listing_url(
+        ("dealapp_residential_listings", "dealapp_commercial_listings")),
+    canary=_canary_ok,
+)
 
 
 def _int(v: Any) -> Optional[int]:
@@ -1032,13 +1137,20 @@ def main() -> int:
         # Sold rows were already upserted with active=False + pinned missing_count=3 above;
         # prune_unseen never touches them (it only reads active=true rows and only updates ids
         # missing from the seen set), so passing their ad_numbers here is harmless.
+        # Absence selects WHICH rows to re-probe; only classify_dealapp's affirmative answer on the
+        # ad's own URL may deactivate one, and only while an in-run canary proves dealapp is still
+        # serving us real listings (see the oracle above). The canaries are ads this run already
+        # parsed, so a shelled environment yields zero removals rather than many.
+        set_liveness_canaries([(r["ad_number"] or "")[2:] for r in (res + com)[:3]])
         pruned = 0
         for tbl, rows_seen in (("dealapp_residential_listings", res),
                                ("dealapp_commercial_listings", com)):
             seen_set = {r["ad_number"] for r in rows_seen}
-            n = (db.prune_unseen(tbl, seen_set, source=SOURCE,
+            n = (db.prune_unseen(tbl, seen_set, source=SOURCE, verify_gone=_probe.verify_gone,
                                  shards=args.shards, shard=args.shard)
-                 if args.shards > 1 else db.prune_unseen(tbl, seen_set, source=SOURCE))
+                 if args.shards > 1
+                 else db.prune_unseen(tbl, seen_set, source=SOURCE,
+                                      verify_gone=_probe.verify_gone))
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
