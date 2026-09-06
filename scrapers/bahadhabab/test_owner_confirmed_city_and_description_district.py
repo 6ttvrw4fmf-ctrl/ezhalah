@@ -67,5 +67,33 @@ assert row["neighborhood"] == "المثلث"
 row, _ = _post(desc="أرض سكنية للبيع\n\nالمدينة: مخطط الأشتاء\nالمحافظة: بيده - الباحة")
 assert row["neighborhood"] is None
 
-print("ok: bahadhabab's city is the owner's stated business fact (unconditional), and district is "
-      "read only from the source's own حي: line, with the redundant city suffix stripped")
+# ── 3. RENT ads' «الموقع:» label — owner-flagged 2026-09-06, measured live on 71 real rows ─────
+# a bare village/quarter name, no landmark, no city suffix
+row, _ = _post(desc="شقة للايجار\n\nالموقع: الجادية\nمن 5غرفة ومطبخ")
+assert row["neighborhood"] == "الجادية"
+# village name + trailing city repeat, same suffix rule as الحي:
+row, _ = _post(desc="شقة للايجار\n\nالموقع: الحمده - الباحه\nالايجار السنوي 24 الف")
+assert row["neighborhood"] == "الحمده"
+# value itself restates «حي» — stripped so the stored name matches every other platform's shape
+row, _ = _post(desc="دور للايجار\n\nالموقع: حي الباهر - الباحة\nقريب من الأسواق")
+assert row["neighborhood"] == "الباهر"
+# a landmark connector trailing the real place name is cut, never kept as part of the district
+row, _ = _post(desc="دور للايجار مؤثث\n\nمؤثث بالكامل بقرية الجاديه\nالموقع: حي بنى فروه خلف الخطوط السعودية")
+assert row["neighborhood"] == "بنى فروه"
+row, _ = _post(desc="شقة للايجار\n\nالموقع: رغدان قريب من الشارع العام\nالايجار الشهري 1500")
+assert row["neighborhood"] == "رغدان"
+# a value that is ENTIRELY a landmark clause (nothing real before the connector) is honest None —
+# never stores the landmark itself as if it were a district
+row, _ = _post(desc="شقة للايجار\n\nالموقع: مقابل الأحوال المدنية\nالايجار الشهري 1200")
+assert row["neighborhood"] is None
+# an inline parenthetical «(حي …)» mention, not on its own labelled line, is read the same way —
+# the exact live case that flagged this gap (owner screenshot, 2026-09-06)
+row, _ = _post(desc="دور للايجار مؤثث بالكامل\nمؤثث بالكامل بقرية الجاديه ( حي الضباب )\nبالقرب من مستشفى الملك فهد")
+assert row["neighborhood"] == "الضباب"
+# «الحي:» still wins over «الموقع:» when a row somehow carries both (priority order, untouched)
+row, _ = _post(desc="أرض للبيع\n\nالحي: النسيم\nالموقع: مكان آخر تماما")
+assert row["neighborhood"] == "النسيم"
+
+print("ok: bahadhabab's city is the owner's stated business fact (unconditional); district is read "
+      "from الحي:, then RENT's own الموقع: label, then an inline (حي …) mention — landmark prose and "
+      "the redundant city/حي wording stripped, never invented, and a pure-landmark value is honest None")

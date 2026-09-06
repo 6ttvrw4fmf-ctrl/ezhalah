@@ -24,7 +24,17 @@ DISTRICT IS DIFFERENT: it is read from the source's OWN TEXT where the source st
 (e.g. "الحي: النسيم - الحماد" / "المدينة: الباحه"), and the district value is extracted from
 THAT — a literal source statement, not a guess. Where the line reads "<district> - الباحة" the
 trailing city repeat is stripped (it is the SAME fact as the hardcoded city, not new district
-information). The other 59 rows have no such line and neighborhood stays NULL, never invented.
+information).
+
+OWNER-FLAGGED 2026-09-06: «الحي:» is a SELL-listing habit — RENT listings almost never use it
+(measured live: 41/42 rent rows on one page instead hand-type «الموقع: <text>», e.g. "الموقع: حي
+بنى فروه خلف الخطوط السعودية"). Read the same way, in priority order: a labelled «الحي:» line,
+then a labelled «الموقع:» line, then an inline parenthetical «(حي …)» mention anywhere in the
+free text (e.g. "بقرية الجاديه ( حي الضباب )"). All three strip the same closed set of landmark
+connectors ("خلف", "بجوار", "قرب", "مقابل", …) that locate the property RELATIVE to a place but
+are never part of the place name — a value that is ENTIRELY a landmark clause (e.g. "مقابل
+الأحوال المدنية") correctly collapses to no signal rather than storing the landmark as a district.
+Rows with none of these three shapes have neighborhood stay NULL, never invented.
 """
 from __future__ import annotations
 
@@ -80,16 +90,58 @@ _DISTRICT_LABEL_RE = re.compile(r"(?:^|\n)\s*(?:ال)?حي\s*[:：]\s*([^\n]+)")
 # that is the SAME fact as OWNER_CITY_AR, not additional district information, so it is stripped.
 _DISTRICT_CITY_SUFFIX_RE = re.compile(r"\s*[-–]\s*البا?ح[ةه]\s*$")
 
+# RENT ads almost never use «الحي:» — owner-flagged 2026-09-06, measured live: of 71 sampled rows,
+# 12 sell listings carry «الحي:» but RENT listings instead hand-type «الموقع: <text>» (41/42 rent
+# rows on one page). Same free-text tier of confidence (the advertiser stating a real place), just
+# a different label. Two shapes: «الموقع: حي <name> …» (the حي IS the district) and «الموقع:
+# <village/quarter name> …» (the whole clause is the location) — both often trail landmark prose
+# ("خلف …", "بجوار …") that is never part of the place name and must be cut, not guessed past.
+_LOCATION_LABEL_RE = re.compile(r"(?:^|\n)\s*الموقع\s*[:：]\s*([^\n]+)")
+# A «حي <name>» mention can also appear inline, in parentheses, anywhere in the free text (not on
+# its own labelled line) — e.g. "بقرية الجاديه ( حي الضباب )" — same literal source statement.
+_PAREN_DISTRICT_RE = re.compile(r"\(\s*(?:ال)?حي\s+([^()]+?)\s*\)")
+# A small, closed set of landmark-connector words the advertiser uses to locate the property
+# RELATIVE to a place, never part of the place name itself (e.g. "بنى فروه خلف الخطوط السعودية" —
+# the district is "بنى فروه", "خلف الخطوط السعودية" is a landmark). Cut there, never past it — a
+# value with NOTHING before the connector (e.g. "مقابل الأحوال المدنية") correctly collapses to "".
+_LANDMARK_CUT_RE = re.compile(
+    r"(?:^|\s+)(?:خلف|بالقرب من|قريب من|قرب|بجوار|مجاور|امام|أمام|مقابل)\b.*$")
+# «الموقع:»/paren values sometimes restate the «حي» word itself (e.g. "حي الباهر - الباحة") — strip
+# it so the stored name matches how every other platform's own district_ar is shaped (bare name,
+# no «حي» prefix — see abwbna/alobid's own district_ar column).
+_LEADING_HAY_RE = re.compile(r"^(?:ال)?حي\s+")
+
+
+def _clean_location_value(raw: str) -> Optional[str]:
+    v = _LANDMARK_CUT_RE.sub("", raw.strip()).strip()
+    v = _DISTRICT_CITY_SUFFIX_RE.sub("", v).strip()
+    v = _LEADING_HAY_RE.sub("", v).strip()
+    return v or None
+
 
 def _district_from_description(desc: Optional[str]) -> Optional[str]:
-    """The source's own «الحي: …» line, or None — never invented when the line is absent."""
+    """The source's own district-equivalent free text, or None — never invented when absent.
+
+    Tries, in order: a labelled «الحي:» line, a labelled «الموقع:» line, then an inline
+    parenthetical «(حي …)» mention — the first of these the source actually wrote wins."""
     if not desc:
         return None
     m = _DISTRICT_LABEL_RE.search(desc)
-    if not m:
-        return None
-    d = _DISTRICT_CITY_SUFFIX_RE.sub("", m.group(1).strip()).strip()
-    return d or None
+    if m:
+        d = _clean_location_value(m.group(1))
+        if d:
+            return d
+    m = _LOCATION_LABEL_RE.search(desc)
+    if m:
+        d = _clean_location_value(m.group(1))
+        if d:
+            return d
+    m = _PAREN_DISTRICT_RE.search(desc)
+    if m:
+        d = _clean_location_value(m.group(1))
+        if d:
+            return d
+    return None
 
 
 def _city(v) -> Optional[str]:
