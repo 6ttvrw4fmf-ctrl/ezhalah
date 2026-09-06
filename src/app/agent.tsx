@@ -62,6 +62,7 @@ import { afInterviewOwnsBrowsing } from '@/lib/afBrowsingGate';
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
+import { screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
@@ -629,30 +630,15 @@ export default function Agent() {
     node.addEventListener('keydown', onKeyDown);
     return () => node.removeEventListener('keydown', onKeyDown);
   }, []);
-  // ── Mobile-web keyboard tracking (ChatGPT-style) ──────────────────────────────────────────────
-  // On mobile WEB, KeyboardAvoidingView is a no-op (its `behavior` is undefined off iOS-native), so
-  // when the on-screen keyboard opens the LAYOUT viewport is unchanged and the composer ends up
-  // hidden BEHIND the keyboard. The VISUAL viewport does shrink — track it and lift the composer by
-  // exactly the keyboard height, with NO hardcoded numbers. iPhone Safari + Android Chrome both fire
-  // these events continuously as the keyboard animates, so the composer follows it smoothly. Native
-  // apps keep their own KeyboardAvoidingView behavior, so this stays 0 there.
-  const [kbInset, setKbInset] = useState(0);
-  useEffect(() => {
-    if (!IS_WEB || typeof window === 'undefined' || !window.visualViewport) return;
-    const vv = window.visualViewport;
-    let raf = 0;
-    const update = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        // keyboard height = the slice of the layout viewport the visual viewport no longer covers
-        setKbInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
-      });
-    };
-    vv.addEventListener('resize', update);
-    vv.addEventListener('scroll', update);
-    update();
-    return () => { cancelAnimationFrame(raf); vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
-  }, []);
+  // ── Mobile-web keyboard: handled ONCE, at the root ────────────────────────────────────────────
+  // This screen used to track visualViewport itself and pad the column by the keyboard height. That
+  // fixed the composer and nothing else: iOS ALSO scrolls the layout viewport, so the conversation
+  // above still slid out of view (owner, 2026-09-05: "i basically lose the conversation above it").
+  // lib/visualViewportFrame.ts now pins the app root to the visible window, which lifts the composer
+  // as a side effect of ordinary layout. Keeping the old padding on top of it lifted the composer
+  // TWICE — measured live as a 259px gap where 73px was correct. So the screen contributes zero and
+  // says so through the shared helper, rather than by deleting the line and leaving a mystery.
+  const kbInset = screenKeyboardInset();
   const [busy, setBusy] = useState(false);
   // True once the user hit Stop mid-display: freezes the cards already shown and hides the "more
   // precise" CTA on the stopped results. Reset on every new turn. (user request.)
@@ -2976,9 +2962,9 @@ export default function Agent() {
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
 
       <KeyboardAvoidingView
-        // iOS-native does its own lifting. On mobile WEB this is a no-op, so we lift the whole column
-        // by the REAL keyboard height (kbInset, from visualViewport): the composer lands just above the
-        // keyboard and the scroll area shrinks — exactly the ChatGPT-mobile feel. (owner 2026-08-19)
+        // iOS-NATIVE does its own lifting and still needs this. On WEB the root is pinned to the
+        // visible window (lib/visualViewportFrame.ts), so the column already ends above the keyboard
+        // and kbInset is 0 — the style below therefore adds nothing on web, deliberately.
         style={[{ flex: 1 }, IS_WEB && kbInset > 0 ? { paddingBottom: kbInset } : null]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.top + 52}
