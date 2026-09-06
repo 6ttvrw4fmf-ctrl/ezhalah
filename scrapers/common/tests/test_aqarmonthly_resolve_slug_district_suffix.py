@@ -232,3 +232,74 @@ def test_resolve_leaves_a_genuinely_unknown_location_unknown(monkeypatch):
     monkeypatch.setattr(al, "_REGION_NORM", {})
     r = al.resolve("مدينة لا توجد في الكتالوج")
     assert (r["city_id"], r["region_id"], r["confidence"]) == (None, None, "unresolved")
+
+
+# ── incident #53 — an UNRESOLVED CITY is not an UNRESOLVED DISTRICT ─────────────────────────────
+#
+# Four aqarmonthly rows sat in production for 13 days with the city name still glued onto
+# district_ar («حي الامير نايف المجمعة»), and the P2 detector aqarmonthly_district_city_suffix
+# could not clear. Cause: resolve_slug() conflated two DIFFERENT facts. «المجمعة» is a same-name
+# catalog twin, so the city PICK failed — and because the pick failed, strip_city_suffix() was
+# never called at all and the district kept the glued city. WHICH city this is stays unknowable
+# (four twins, no region scope, never guess); WHETHER the trailing tokens spell a city NAME is
+# answered by the catalog either way.
+#
+# The expected district below is NOT inferred by these tests — it is the district segment of
+# aqarmonthly's OWN comma-delimited `address` field, which delimits exactly what the slug does not.
+
+# Copied verbatim from production loc_catalog_city (2026-09-06) — the real twin sets, not a
+# convenient invention: a fixture that supplies its own easy input proves nothing.
+_TWIN_CITY = {
+    "المجمعه": [(24, 1), (1343, 2), (1494, 6), (1761, 6)],
+    "القري": [(474, 3), (1173, 2), (1400, 12), (1465, 12)],
+}
+_TWIN_CID_AR = {24: "المجمعة", 1343: "المجمعة", 1494: "المجمعة", 1761: "المجمعة",
+                474: "القري", 1173: "القرى", 1400: "القري", 1465: "القرى"}
+
+
+@pytest.fixture
+def twin_catalog(monkeypatch):
+    monkeypatch.setattr(al, "_CITY", dict(_TWIN_CITY))
+    monkeypatch.setattr(al, "_CID_AR", dict(_TWIN_CID_AR))
+    monkeypatch.setattr(al, "_REGION_NORM", {})
+    yield
+
+
+@pytest.mark.parametrize("uri,source_address_district", [
+    # source_capture->>'uri'                                        district segment of ->>'address'
+    ("شارع-بديل-ابن-ورقاء-ابن-عبدالعزى-حي-الامير-نايف-المجمعة-المجمعة-5797229", "حي الامير نايف"),   # 762041
+    ("طريق-الامير-سلطان-حي-الملك-عبدالعزيز-المجمعة-المجمعة-5252666", "حي الملك عبدالعزيز"),          # 762272
+    ("شارع-ابن-المطوق-حي-المجد-القرى-القري-5840211", "حي المجد"),                                    # 762483
+    ("شارع-الجزائر-حي-الاندلس-المجمعة-المجمعة-5174945", "حي الاندلس"),                               # 1097370
+])
+def test_twin_city_leaves_the_city_null_but_still_unglues_the_district(
+    twin_catalog, uri, source_address_district,
+):
+    r = al.resolve_slug(uri)
+    assert r["city_id"] is None and r["city_ar"] is None, "a same-name twin must never be guessed"
+    assert r["confidence"] == "unresolved"
+    assert r["district_ar"] == source_address_district, (
+        "the city stayed glued to the district because the city pick failed — "
+        "an unresolved CITY is not an unresolved DISTRICT (incident #53)"
+    )
+
+
+def test_unresolved_path_keeps_the_two_token_floor(twin_catalog):
+    """The floor that stops a real short district being hollowed out applies on this path too:
+    «حي المجمعة» is two tokens, so nothing is removed even though the tail IS a catalog name."""
+    r = al.resolve_slug("حي-المجمعة-9999")
+    assert r["city_id"] is None
+    assert r["district_ar"] == "حي المجمعة"
+
+
+def test_unresolved_path_never_invents_a_region_either(twin_catalog):
+    r = al.resolve_slug("شارع-الجزائر-حي-الاندلس-المجمعة-المجمعة-5174945")
+    assert r["region_id"] is None, "four twins span regions 1/2/6 — picking one would fabricate"
+
+
+def test_no_catalog_name_in_the_slug_leaves_the_district_exactly_as_published():
+    """The un-gluing is driven by the CATALOG, never by 'the last word looks like a place'. With no
+    catalog match anywhere in the slug there is nothing to strip and the district is untouched."""
+    r = al.resolve_slug("شارع-بدون-مدينة-معروفة-حي-المروج-9999")
+    assert r["city_ar"] is None and r["confidence"] == "unresolved"
+    assert r["district_ar"] == "حي المروج"
