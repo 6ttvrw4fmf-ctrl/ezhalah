@@ -548,6 +548,43 @@ The runner fails closed three ways: a non-zero child fails the run; a **signal-k
 failure. `npm run test:list` prints the resolved run order; `npm run test:all` runs every check
 instead of stopping at the first failure.
 
+### The required suite is HERMETIC — its verdict depends only on the diff (2026-09-06, routine #10)
+
+**A check that cannot answer without reaching production must not sit in `npm test`.** `npm test` is
+the REQUIRED status check on every PR, so a check whose verdict is decided by production's state — or
+by a stopwatch on a slow RPC — fails *unrelated* diffs. Measured on 2026-09-06, four such checks were
+observed flipping on UNCHANGED code: one went RED, GREEN on an immediate re-run, then RED again on a
+single commit (its assertion was literally «the coverage RPC could be reached», against an RPC costing
+9,803 ms / 9,930 shared buffers for 40 rows); another went red because a platform went live between two
+runs; another went red on a `chore(deploy)` commit touching no code. Between them they blocked or
+delayed every merge attempted that day, across three PRs.
+
+**This is never a reason to weaken a check.** All of them fail CLOSED on an unreachable endpoint,
+which is correct and must stay (**A FAILED FETCH IS NOT AN EMPTY ANSWER**). The defect is PLACEMENT.
+The repair is to SPLIT:
+
+- the **hermetic half** — the predicate and its mutation proofs — stays in `npm test`;
+- the **live half** moves to a workflow home declared in `scripts/test-exclusions.txt`, the same
+  precedent this file already pins for `verify-migration-drift-vs-production.ts`;
+- **both halves import the SAME predicate** from a shared lib, so the offline proof is a statement
+  about the code that actually decides production's verdict, not about a copy of it;
+- the offline half calls `liveHalfProblems()` (`scripts/lib/liveHalf.ts`) to assert, BY EXECUTION,
+  that the declared home really invokes the live half — so a split cannot decay into a deletion.
+
+Worked examples: `scripts/verify-af-attribute-views-cover-every-platform.ts` and
+`scripts/verify-guided-counts-carry-monthly-af.ts`.
+
+**The class cannot grow.** `scripts/verify-required-suite-is-hermetic.ts` (in `npm test`) walks the
+MODULE GRAPH — not the source text — and fails on any check in the run set that transitively reaches
+`scripts/lib/public-supabase.ts` without a declared, measured row in
+`scripts/live-reaching-required-checks.txt`. Importing is not calling, so the graph finds CANDIDATES
+and that file records each one's measured verdict; the `production-dependent` set is a SHRINK-ONLY
+ratchet pinned by `PRODUCTION_DEPENDENT_CEILING`. Measure with the one command the file documents —
+and read the source too, because a check that hardcodes the endpoint constant is invisible to an env
+blackhole. `scripts/verify-live-half-homing.ts` mutation-proves the homing rule itself and discovers
+every `verify-X.ts` / `verify-X-live.ts` pair by shape, so a pair created tomorrow is covered without
+anyone registering it.
+
 ## SINGLE-WRITER RULE — `supabase/functions/agent/index.ts`
 
 **Only one active session may MODIFY the AI agent edge function at a time.** Other sessions may

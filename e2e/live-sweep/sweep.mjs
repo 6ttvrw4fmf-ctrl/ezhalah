@@ -506,15 +506,6 @@ const CITY_OPTION_TIMEOUT_MS = 12000;
 async function pickCity(page, city) {
   const input = page.locator('[data-testid="city-input"]');
   await input.click(); await input.fill(city);
-  const optionAt = (c) => {
-    const el = [...document.querySelectorAll('div')].filter((e) => {
-      const t = (e.innerText || '').trim();
-      return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
-    }).pop();
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  };
   const appeared = await page.waitForFunction(
     (c) => {
       const el = [...document.querySelectorAll('div')].filter((e) => {
@@ -535,16 +526,32 @@ async function pickCity(page, city) {
   }).pop(), city);
   const option = handle.asElement();
   if (!option) return false;
-  await option.scrollIntoViewIfNeeded().catch(() => {});
-  await option.click().catch(async () => {
-    const hit = await page.evaluate(optionAt, city);        // last-resort fallback, still recorded
-    if (hit) await page.mouse.click(hit.x, hit.y);
-  });
-  await sleep(1300);
-  // The commit is the assertion, not the click (§41.13): a click that missed leaves the field empty
-  // and the search would later be REFUSED, which reads as a broken product instead of a harness miss.
-  const committed = await input.inputValue().catch(() => '');
-  return !!committed && (committed.includes(city) || city.includes(committed));
+  // Scroll the option with the DOM, not Playwright. `scrollIntoViewIfNeeded()` does NOT move a
+  // react-native-web ScrollView — measured, and documented in runSearch() below for the identical
+  // reason. That no-op is the mechanism that made the tap miss in the first place.
+  await option.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => {});
+  await sleep(250);
+  await option.click().catch(() => {});
+
+  // §41.13 CORRECTED (ops_incident #103, 2026-09-06). The old confirmation was
+  // `const committed = await input.inputValue()` — but `input.fill(city)` had ALREADY WRITTEN that
+  // value, so the check passed whether or not the app ever accepted the pick. It confirmed the
+  // harness's own typing. The comment that justified it — «a click that missed leaves the field
+  // empty» — is disproven by production: measured 2026-09-06, 2 of 4 attempts left the field reading
+  // «الرياض» with citySelected NULL, «الرجاء اختيار مدينة من القائمة.» on screen and ZERO RPCs fired.
+  // The harness reported a successful pick, and the run then blamed the product for the silence.
+  //
+  // Confirm with the APP's OWN signal: [data-testid="selected-city-visual"] renders iff citySelected
+  // is set (src/app/index.tsx) — the same state onSearch itself requires. Retry the click once,
+  // because a single missed tap is a harness miss worth recovering from; then FAIL, so the caller
+  // reports a harness miss instead of walking into a search that will be refused.
+  const confirmed = async () => page.waitForSelector('[data-testid="selected-city-visual"]',
+    { timeout: 6000 }).then(() => true).catch(() => false);
+  if (await confirmed()) return true;
+  await option.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => {});
+  await sleep(250);
+  await option.click().catch(() => {});
+  return confirmed();
 }
 // ── WHEN HAS A SEARCH SETTLED? ───────────────────────────────────────────────────────────────────
 // Every terminal state the results screen can reach, as ONE predicate shared by every journey.
