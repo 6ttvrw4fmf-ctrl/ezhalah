@@ -37,8 +37,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # DID THE TRIGGERING DEPLOY ACTUALLY SHIP? (ops_incident #75, 2026-09-06)
+  #
+  # Every job below used to be gated on `github.event.workflow_run.conclusion == 'success'`. The
+  # deploy workflow structurally NEVER concludes success — ops_incident #30 (the baseline recorder
+  # can neither push to main nor open its PR) and a pre-existing React #418 hydration gate each
+  # turn a perfectly good deploy red. So the condition was never true, all five jobs were SKIPPED
+  # on every single deploy, and the post-deploy verification this workflow calls "the run that
+  # actually matters" had not executed once. Runs #186-#195 were all skipped-and-red.
+  #
+  # `conclusion` answers "did every step pass". The question is "is there a new bundle live", and
+  # safe-deploy.sh already answers that in its log when it aliases. Predicate + the false positive
+  # it avoids: scripts/lib/deployShipped.ts. Proven both directions against the two real runs by
+  # scripts/verify-af-live-truth-gate-reads-shipped-not-conclusion.ts.
+  #
+  # Cost is unchanged by design: one live run per SHIPPED deploy, which is what the 2026-08-29
+  # owner ruling budgeted for. A refused deploy now runs nothing instead of the previous nothing.
+  gate:
+    name: Did the triggering deploy actually ship a bundle?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      shipped: ${{ steps.decide.outputs.shipped }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: decide
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GATE_EVENT_NAME: ${{ github.event_name }}
+          GATE_DEPLOY_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/af-live-truth-deploy-gate.ts
+
   af-truth:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: [gate]
+    if: needs.gate.outputs.shipped == 'yes'
     name: AF UI count = count RPC = result RPC = independent DB truth
     runs-on: ubuntu-latest
     # RE-MEASURED 2026-09-04, because the old note was already wrong. It read "16m44s of work plus
@@ -312,8 +347,8 @@ jobs:
   # lesson about a guard that skips exactly what it exists to protect. These must run whatever the
   # browser jobs concluded; attendance still requires all five to have concluded success.
   af-surface-region:
-    needs: [af-truth, af-card-state]
-    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    needs: [gate, af-truth, af-card-state]
+    if: always() && needs.gate.outputs.shipped == 'yes'
     name: Every certified AF option shows DB truth and clicks to exactly that set (region)
     runs-on: ubuntu-latest
     # THE TWO SWEEPS GET A JOB EACH (2026-09-03). They are independent scopes and each is an
@@ -350,8 +385,8 @@ jobs:
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-full-surface-differential.ts
 
   af-surface-city:
-    needs: [af-truth, af-card-state]
-    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    needs: [gate, af-truth, af-card-state]
+    if: always() && needs.gate.outputs.shipped == 'yes'
     name: …and the same option surface inside a CITY scope (جدة), single-type stages
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -393,8 +428,8 @@ jobs:
     # `if: always()` for the same reason as the sweeps below: a plain `needs:` SKIPS a dependent when
     # its dependency fails, and a skipped browser job is lost coverage on the surface it exists to
     # protect. Attendance still requires all five jobs to have concluded success.
-    needs: [af-truth]
-    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    needs: [gate, af-truth]
+    if: always() && needs.gate.outputs.shipped == 'yes'
     name: The rendered card, the removed pill and the scope change all tell one truth
     runs-on: ubuntu-latest
     # 45 → 60 on 2026-09-03: two more browser journeys (the §12A card-evidence pair) live here now.
@@ -488,8 +523,8 @@ jobs:
   # options / tens of thousands of rows, so it runs as its OWN job in parallel with the browser
   # journeys rather than inside their 30-minute budget. Offline twin: scripts/verify-af-matrix-truth.ts.
   af-matrix:
-    needs: [af-truth, af-card-state]
-    if: always() && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    needs: [gate, af-truth, af-card-state]
+    if: always() && needs.gate.outputs.shipped == 'yes'
     name: Every certified AF option shows, sends, applies, returns and carries one truth
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -522,8 +557,12 @@ jobs:
     name: Every AF/Trending live job actually ran and passed
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: always()
-    needs: [af-truth, af-surface-region, af-surface-city, af-card-state, af-matrix]
+    # Only attends a run that had something to verify. When the gate says nothing shipped, the
+    # five jobs above do not run and there is no attendance to take — reporting five skips as a
+    # DARK BARRIER there would be a false alarm on every refused deploy. This is NOT leniency:
+    # whenever the gate says a bundle IS live, this job runs and every skip/cancel still fails.
+    if: always() && needs.gate.outputs.shipped == 'yes'
+    needs: [gate, af-truth, af-surface-region, af-surface-city, af-card-state, af-matrix]
     steps:
       # The bridge step below runs a script from the repo, so this job needs a checkout of its own —
       # it previously had none, because asserting over `needs` requires nothing on disk.
