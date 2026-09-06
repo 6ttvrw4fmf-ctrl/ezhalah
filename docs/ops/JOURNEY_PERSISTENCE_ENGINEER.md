@@ -561,10 +561,20 @@ infrastructure asks rather than rediscovered each time:
   engine evidence comes from that workflow's result, and a report that never read it has no
   evidence about WebKit or Firefox. `engineAvailable()` fails CLOSED on a missing engine (exit 2)
   rather than silently substituting Chromium.
-- **Google One Tap cannot be exercised**: the egress proxy denies CONNECT to `www.google.com` and
-  `android.clients.google.com` (observed as ~600 rejected connections during the 2026-08-28 sweep),
-  so GIS never loads. One Tap's *code* contract stays covered by the static barriers
-  (`verify-google-onetap.ts`, `verify-google-one-tap.ts`); its *behaviour* is unreachable here.
+- ~~**Google One Tap cannot be exercised**~~ — **NO LONGER TRUE, measured 2026-09-06.** GIS loads
+  and renders on production from this container: at 375 px, signed out, Chromium, an
+  `<iframe src="https://accounts.google.com/gsi/iframe/select?client_id=…">` is live in the DOM
+  ~9 s after load, `position: fixed`, `z-index: 9999`, box `375×144 at 0,668` — the bottom sheet.
+  Method: enumerate `document.querySelectorAll('iframe')` with each frame's `getBoundingClientRect()`
+  and computed `zIndex/position/pointerEvents`. The 2026-08-28 observation (~600 rejected CONNECTs
+  to `www.google.com`) is stale: the frame is served from `accounts.google.com`, which this egress
+  reaches. What is still NOT exercisable is **completing** a Google sign-in (no credentials, and the
+  consent flow is Google's own UI), so signed-in journeys still seed the session client-side.
+  **This matters beyond One Tap coverage:** that frame is a full-width fixed overlay at
+  `z-index: 9999`, so it is a hit-testing participant on every signed-out mobile page. It is what
+  `tap-targets-meet-44` actually hit on WebKit (`ops_incident` #120) — bottom-docked and harmless on
+  Chromium, over the top controls on WebKit. Any journey judging what owns a point at 375 px must
+  expect it.
 - **Real Google sign-in is unavailable**, so signed-in journeys seed the session client-side (see
   the harness header). That is the real client code path for sidebar/persistence — which is
   purely client-side — but it is NOT evidence about server sync, RLS, or a real token.

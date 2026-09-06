@@ -835,7 +835,7 @@ export function classifyTapOwnership(pts) {
   for (const [k, p] of Object.entries(pts || {})) {
     if (p && p.ownerLabel) stolen[k] = p.ownerLabel;
     else if (p && p.hitNull) blind[k] = 'the hit test returned no element at all';
-    else blind[k] = `the hit test landed on <${(p && p.hitTag) || '?'}>, which is inside no control`;
+    else blind[k] = `the hit test landed on ${(p && p.hitTag) || 'an element it could not describe'}, which is inside no control`;
   }
   return { stolen, blind };
 }

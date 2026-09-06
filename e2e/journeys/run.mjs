@@ -813,9 +813,26 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
           const hit = document.elementFromPoint(x, y);
           const o = hit ? outer(hit) : null;
           if (o === e) continue;
+          // NAME WHAT IS ACTUALLY THERE. «an element inside no control» is where the diagnosis
+          // stopped last run; the identity and geometry of that element is what ends it — a
+          // third-party overlay (a GIS One Tap frame, an analytics widget) is a completely
+          // different finding from the app's own furniture, and only its box says whether it is
+          // over this control by design or by accident.
+          const desc = (el) => {
+            const b = el.getBoundingClientRect(), cs = getComputedStyle(el);
+            const id = el.id ? '#' + el.id : '';
+            const cn = typeof el.className === 'string' && el.className.trim()
+              ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+            let src = '';
+            try { if (el.src) src = ' src=' + String(el.src).slice(0, 70); } catch (err) { src = ' src=?'; }
+            return '<' + el.tagName.toLowerCase() + id + cn + src + '> '
+              + Math.round(b.width) + 'x' + Math.round(b.height)
+              + ' at ' + Math.round(b.x) + ',' + Math.round(b.y)
+              + ' z=' + cs.zIndex + ' pos=' + cs.position + ' pointer-events=' + cs.pointerEvents;
+          };
           own[k] = {
             hitNull: !hit,
-            hitTag: hit ? hit.tagName.toLowerCase() : null,
+            hitTag: hit ? desc(hit) : null,
             ownerLabel: o ? (o.getAttribute('aria-label') || o.dataset.testid || 'another control') : null,
             at: [Math.round(x), Math.round(y)],
           };
