@@ -54,7 +54,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize as N  # noqa: E402
+from scrapers.common import db, http_liveness, normalize as N  # noqa: E402
 
 BASE = "https://alnowaisiry.com"
 LIST_API = f"{BASE}/wp-json/wp/v2/lands"
@@ -156,6 +156,50 @@ def session() -> cc.Session:
         "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
     })
     return s
+
+
+# ── Liveness oracle ────────────────────────────────────────────────────────
+# Until 2026-09-06 this scraper called db.prune_unseen() with NO oracle, so three missed crawls
+# deactivated a listing on crawl ABSENCE alone — the inference docs/ops/LISTING_LIVENESS.md §1–§3
+# forbids, because a throttled run or a source-side index gap is indistinguishable from a removal.
+#
+# MEASURED 2026-09-06 over EVERY inactive row plus interleaved known-active controls (interleaved so
+# a mid-run block shows in BOTH cohorts instead of reading as a dead cohort — the failure that made
+# 3,273 wasalt rows look dead in §5.3):
+#   dead      5/5 already-inactive rows → HTTP 404 (~108 KB, one shared title)
+#   controls  11/11 known-active rows → HTTP 200 with 11 distinct per-listing titles
+#
+# NO LIVE LIMB, deliberately. `map_listing` here consumes an already-parsed API dict, not
+# the detail page's HTML, so there is no pure way to certify a page as THIS listing from
+# the probe's body. Rather than invent a marker, the oracle states only the removal signal
+# it measured. Consequence, stated plainly: a row that keeps answering 200 is held at
+# UNKNOWN and never deactivated — safe, and never self-healed either.
+#
+# The three-valued LAW is not restated here. `scrapers/common/http_liveness.decide()` owns it and
+# cannot be relaxed from this file: whatever `_signal` says, a 401/403/407/408/429, any 5xx, a
+# network error or an empty body can never become a death.
+def _oracle_session() -> cc.Session:
+    """Transport seam for the probe. Tests replace this; the law is never replaced."""
+    return session()
+
+
+def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+    """nowaisiry's OWN measured signal, and nothing else. `None` means "no opinion" — never
+    "probably gone"."""
+    if path_changed:
+        return None                      # an unresolved redirect: we do not know where we landed
+    if status in (404, 410):
+        return "gone"
+    return None
+
+
+_probe = http_liveness.LivenessProbe(
+    platform="nowaisiry",
+    signal=_signal,
+    session=_oracle_session,
+    url_for=http_liveness.stored_listing_url(("nowaisiry_residential_listings", "nowaisiry_commercial_listings")),
+)
+
 
 
 def _clean(s: str) -> str:
@@ -450,7 +494,8 @@ def main() -> int:
         pruned = 0
         for tbl, rows_seen in (("nowaisiry_residential_listings", res),
                                ("nowaisiry_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,
+                                verify_gone=_probe.verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

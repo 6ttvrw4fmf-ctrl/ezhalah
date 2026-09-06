@@ -29,32 +29,28 @@
 #
 # format:  platform | probe status (as last measured) | note
 #
-abralosol      | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven (LISTING_LIFECYCLE_ENGINEER.md §8.6)
-aldarim        | UNPROBED                    |
-alhoshan       | UNPROBED                    |
-alkhaas        | UNPROBED                    |
-aouj           | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven
-aqaratikom     | UNPROBED                    |
-aqarmonthly    | UNPROBED                    |
-arkaan         | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven
-awal           | UNPROBED                    | un-retired 2026-09-04; source serves real listings again
+abralosol      | EGRESS BLOCKED                  | 2026-09-06: gateway denies abralosol.com (403 CONNECT). UNKNOWN about our read. Activated 2026-09-03; no inactive rows yet.
+aldarim        | NO DEAD COHORT                  | 2026-09-06: this platform has never deactivated a listing, so its removal signal cannot be control-validated — there is nothing to validate against. Live controls: 12/12 HTTP 200, 12 distinct titles. Its prune is unguarded but has never fired.
+alhoshan       | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 12/12 HTTP 200 (all redirect, consistently). Nothing to validate a death limb against.
+alkhaas        | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 12/12 HTTP 200, 12 distinct titles.
+aouj           | EGRESS BLOCKED                  | 2026-09-06: gateway denies aoujestates.com (403 CONNECT). UNKNOWN about our read. Activated 2026-09-03; no inactive rows yet.
+aqaratikom     | NO SIGNAL ON THE LISTING URL     | 2026-09-06 measured: dead and live are the SAME byte-identical 5,795-byte SPA shell with one shared title (12 dead + 12 live probed). The detail page cannot discriminate at all. An oracle must come from its API, not this page — unmeasured, so unwired.
+aqarmonthly    | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 12/12 HTTP 200 (all redirect, consistently).
+arkaan         | EGRESS BLOCKED                  | 2026-09-06: gateway denies arkaanalaqar.com (403 CONNECT). UNKNOWN about our read. Activated 2026-09-03.
+awal           | EGRESS BLOCKED                  | 2026-09-06: gateway denies awaalun.com (403 CONNECT). UNKNOWN about our read.
 dealapp        | ORACLE EXISTS, NOT WIRED HERE | scrapers/dealapp/liveness_run.py is a real DIRECT sweep, but run.py's own prune still ages rows out on absence — a second, unevidenced deactivation path beside the good one
-eaqartabuk     | UNPROBED                    |
-eastabha       | UNPROBED                    |
-erapulse       | UNPROBED                    |
-fursaghyr      | UNPROBED                    |
+eaqartabuk     | MIXED                           | 2026-09-06: of 3 inactive rows, 2 answered 404 and 1 answered HTTP 200 with a real title; 12/12 controls answered 200. Small cohort; the one live-looking row is a restore candidate once the body question is settled.
+eastabha       | DEAD ROWS STILL SERVED          | 2026-09-06: ALL 12 probed inactive rows answered HTTP 200 with distinct per-listing titles, same as the 12 live controls. Either the source keeps pages up after delisting (needs a status marker inside the body — NOT measured) or these deactivations were false. Do not wire a 404 rule here; it would never fire. Investigate the body for a sold/rented marker.
+erapulse       | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 12/12 HTTP 200 (all redirect, consistently).
+fursaghyr      | MIXED                           | 2026-09-06: of 8 inactive rows, 2 answered 404 and 6 answered HTTP 200 with real titles; 12/12 controls answered 200. A 404 rule would be sound but would fire on only a quarter of them, and the other six need the eastabha question answered first.
 gathern        | ORACLE EXISTS, NOT WIRED HERE | tier-1 DIRECT_REVISIT via scrapers/gathern/liveness.py, yet run.py prunes on absence at two call sites — same second-path problem as dealapp
-hajer          | UNPROBED                    |
-jazwtn         | UNPROBED                    |
-jurash         | UNPROBED                    |
-mizlaj         | UNPROBED                    |
-muktamel       | UNPROBED                    | sharded prune
-mustqr         | ORACLE AVAILABLE            | 2026-09-06: the listing URL is a byte-identical SPA shell for every id (no signal), but run.py already reads a per-id Supabase REST endpoint carrying `status` — a discriminating oracle exists and is unwired. Could not be control-validated from the cloud sandbox: its API host is denied by that egress (403 CONNECT), which is UNKNOWN about our read, not about the platform.
-nowaisiry      | UNPROBED                    |
-october        | UNPROBED                    |
-ramzalqasim    | UNPROBED                    |
-rawasidark     | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven
-sadin          | UNPROBED                    | 2026-09-06: listing URL 308-redirects to the apex, which did not answer from the cloud sandbox's egress. UNKNOWN about our read — NOT evidence the platform lacks a signal.
-satel          | UNPROBED                    |
-souq24         | UNPROBED                    |
-therc          | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven
+hajer          | DEAD ROWS STILL SERVED          | 2026-09-06: all 5 inactive rows answered HTTP 200 with distinct titles, as did 12/12 controls. Same open question as eastabha.
+jurash         | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 11/11 HTTP 200 (all redirect, consistently).
+muktamel       | EGRESS BLOCKED                  | 2026-09-06: gateway denies www.muktamel.com (403 CONNECT). UNKNOWN about our read. Also uses a sharded prune.
+mustqr         | ORACLE AVAILABLE, EGRESS BLOCKED | 2026-09-06 re-measured: the listing page is a byte-identical 18,310-byte SPA shell for dead and live alike (12+12), confirming there is no page signal. run.py already reads a per-id Supabase REST endpoint carrying `status` — a real oracle exists and is unwired. Its API host is denied by this sandbox egress (403 CONNECT at the gateway), so it CANNOT be control-validated from a cloud routine. UNKNOWN about our read, never about the platform.
+october        | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 12/12 HTTP 200, 12 distinct titles.
+ramzalqasim    | AMBIGUOUS                       | 2026-09-06: of 12 inactive rows, 2 answered 404 and 10 answered 200 — but the LIVE controls share a single title across all 12, so the title discriminates nothing and the 200s cannot be read either way from the surface. Needs a body-level marker before anything is wired.
+rawasidark     | EGRESS BLOCKED                  | 2026-09-06: gateway denies www.rawasi-dark.com (403 CONNECT). UNKNOWN about our read. Activated 2026-09-03; no inactive rows yet.
+sadin          | EGRESS BLOCKED                  | 2026-09-06: every probe failed with `Tunnel connection failed: 403 Forbidden` — this sandbox network policy denies the host at the gateway. UNKNOWN about OUR READ, not evidence the platform lacks a signal. Needs control validation from an egress that can reach it (its own CI runs can).
+satel          | DEAD ROWS STILL SERVED          | 2026-09-06: 12/12 inactive rows answered HTTP 200 with distinct titles, as did 12/12 controls. 131 inactive rows on this platform — the largest such cohort found. Same open question as eastabha.
+therc          | EGRESS BLOCKED                  | 2026-09-06: gateway denies therc.aqar.digital (403 CONNECT). UNKNOWN about our read. Activated 2026-09-03; lifecycle never instance-proven. Has NO inactive rows yet.
