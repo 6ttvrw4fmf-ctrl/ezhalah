@@ -114,6 +114,29 @@ const WAIVED: Record<string, string> = {
     'not a repair — the UPDATE is a self-assignment (city_id = city_id) that exists solely to fire '
     + 'the set_match_city_ids trigger; it writes each row its own existing value, so no listing '
     + 'data changes and there is no repaired state to decay',
+  // Second instance of the not-a-repair-at-all shape, and the reason the classifier cannot tell on
+  // its own: this migration installs a write-time GUARD (ops_incident #78 — a wasalt job dispatched
+  // on a pre-fix checkout kept writing the 1x12 form-default price for 4h26m after the fix merged),
+  // and its UPDATEs exist only to PROVE that guard refuses the defect. Each one is immediately read
+  // back, and the same do-block raises unless all three fixtures are at their pre-proof values when
+  // it ends: 9501191 back at 50000/annual, 2071894 back at NULL/NULL, and the both-real control
+  // 9330045 explicitly restored before its assertion runs. Net listing-data change: none, asserted
+  // rather than claimed — so there is no repaired state for a detector to watch decay.
+  //
+  // The other half of the waiver rule holds too: the rows those UPDATEs touch ARE watched, by
+  // mon_detect_placeholder_price_stored() (shipped 20260906043755, rostered into
+  // mon_run_all_detectors, twice an hour), which reads every stored wasalt price against that row's
+  // own archived payload. That detector is deliberately named only in this migration's comments,
+  // which is why isGuarded() does not see it — correctly, per this file's own rule that a detector
+  // named in a comment does not count.
+  //
+  // Verify by reading the do-block: if any UPDATE in it ever stops being restored and asserted,
+  // this waiver is wrong and must be replaced by a detector.
+  '20260906045735_a_merged_scraper_fix_does_not_bind_a_running_job.sql':
+    'not a repair — every UPDATE is a mutation proof of the write guard the migration installs, each '
+    + 'is read back and restored, and the same do-block raises unless all three fixtures end at '
+    + 'their pre-proof values, so no listing data changes and no repaired state exists to decay; the '
+    + 'rows are separately watched by mon_detect_placeholder_price_stored (20260906043755)',
 };
 
 // Enforcement starts here — the day this rule landed.
