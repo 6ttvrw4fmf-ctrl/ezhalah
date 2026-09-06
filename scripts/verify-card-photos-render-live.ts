@@ -39,6 +39,23 @@ function corpBlocksCrossOrigin(corpHeader: string): boolean {
 // like Sadin's sinks all of them; one corrupt url on one listing does not).
 const majorityRender = (rendered: number, total: number): boolean => total > 0 && rendered * 2 >= total;
 
+// ── UNKNOWN IS NOT A BLOCK (2026-09-06, routine #10, ops_incident #81) ───────────────────────────
+// This check asks third-party image hosts a question. When the answer never arrives — the request
+// threw, or the RUNNER's own egress layer refused it — we have learned nothing about the host, and
+// scoring that as "the browser would block this photo" is a failed fetch rendered as a confident
+// negative (AGENTS.md: A FAILED FETCH IS NOT AN EMPTY ANSWER), in the verification layer.
+// Measured: CI run 34005883286 on a no-op baseline commit failed with `eastabha: fetch failed;
+// alta: fetch failed; shmoualshmal: fetch failed`, and from an agent container five platforms answer
+// HTTP 403 carrying `x-deny-reason: host_not_allowed` — a header no image host sends.
+// A reason starting with this prefix is NOT counted as a render failure. It is also not counted as
+// health: a platform with nothing judged is UNKNOWN, and a sweep that judged nothing FAILS.
+const UNKNOWN = 'UNKNOWN: ';
+export const isUnknownVerdict = (reason: string | null): boolean =>
+  typeof reason === 'string' && reason.startsWith(UNKNOWN);
+/** A response the local egress layer produced instead of the origin — never the host's answer. */
+export const isEgressDenial = (h: { get(name: string): string | null }): boolean =>
+  Boolean(h.get('x-deny-reason'));
+
 // The active, production-searchable platforms — production's own answer.
 const rpc = await fetch(`${REST}/rpc/loader_active_platforms_ar`, {
   method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: '{}',
@@ -77,7 +94,11 @@ async function whyBlocked(url: string): Promise<string | null> {
         method: 'GET', redirect: 'manual',
         headers: { 'User-Agent': UA, Origin: PROD_ORIGIN, 'Sec-Fetch-Dest': 'image', 'Sec-Fetch-Mode': 'no-cors' },
       });
-    } catch (e) { return `fetch threw (${String((e as Error).message).slice(0, 60)})`; }
+    } catch (e) { return `${UNKNOWN}no response — fetch threw (${String((e as Error).message).slice(0, 60)})`; }
+    if (isEgressDenial(r.headers)) {
+      return `${UNKNOWN}this run's own network refused the request (HTTP ${r.status}, `
+        + `x-deny-reason: ${r.headers.get('x-deny-reason')}) — the host never answered`;
+    }
     // CORP is checked on EVERY response in the chain for a cross-origin request.
     const corp = (r.headers.get('cross-origin-resource-policy') || '').toLowerCase().trim();
     if (corpBlocksCrossOrigin(corp)) return `CORP:${corp} at hop ${hop}`;
@@ -99,7 +120,7 @@ async function whyBlocked(url: string): Promise<string | null> {
 async function proxyServesImage(path: string): Promise<string | null> {
   let r: Response;
   try { r = await fetch(`${PROD_ORIGIN}${path}`, { headers: { 'User-Agent': UA } }); }
-  catch (e) { return `proxy fetch threw (${String((e as Error).message).slice(0, 60)})`; }
+  catch (e) { return `${UNKNOWN}no response from our own origin — proxy fetch threw (${String((e as Error).message).slice(0, 60)})`; }
   if (r.status !== 200) return `proxy HTTP ${r.status}`;
   const ct = (r.headers.get('content-type') || '').toLowerCase();
   if (!ct.startsWith('image/')) return `proxy content-type ${ct || '(none)'} not image`;
@@ -109,29 +130,53 @@ async function proxyServesImage(path: string): Promise<string | null> {
 // A single card renders if ANY photo in its array renders — exactly the ListingPhoto onError chain.
 async function cardRenders(photoArray: string[]): Promise<string | null> {
   let lastReason = 'no photos';
+  let everJudged = false;
   for (const raw of photoArray) {
     const display = photoDisplayUrl(raw);
     const reason = display.startsWith('/_img/') ? await proxyServesImage(display) : await whyBlocked(display);
     if (reason === null) return null;      // this photo renders → the card shows it
+    if (!isUnknownVerdict(reason)) everJudged = true;
     lastReason = `${reason} (${display.slice(0, 60)})`;
   }
+  // Every photo failed. If NONE of them was actually answered by its host, this card is UNKNOWN,
+  // not blank — the difference between "the browser would refuse this" and "we never asked it".
+  if (!everJudged && photoArray.length) return `${UNKNOWN}no photo on this card was answered — ${lastReason}`;
   return lastReason;                        // every photo failed → the card is blank
 }
 
-let measured = 0, noPhoto = 0;
+let measured = 0, noPhoto = 0, unknownPlatforms = 0, judgedPlatforms = 0;
 for (const p of platforms) {
   const listings = await sampleListings(p);
   if (!listings.length) { noPhoto++; continue; }
   measured++;
   const verdicts = await Promise.all(listings.map(cardRenders));
   const rendered = verdicts.filter((v) => v === null).length;
+  // UNKNOWN cards are removed from the DENOMINATOR, not scored as failures: the majority rule is
+  // about the listings whose hosts actually answered. A platform where none answered is reported
+  // UNKNOWN and left unjudged, rather than declared broken on the strength of no evidence.
+  const unknown = verdicts.filter(isUnknownVerdict).length;
+  const judged = listings.length - unknown;
+  if (judged === 0) {
+    unknownPlatforms++;
+    console.log(`  ? ${p}: UNKNOWN — no sampled listing's host answered (${unknown}/${listings.length}); `
+      + `first reason: ${verdicts.find(isUnknownVerdict)}`);
+    continue;
+  }
+  judgedPlatforms++;
   // A platform-wide render failure (like Sadin's CORP block) sinks every sampled listing; a lone
   // corrupt url on one listing (e.g. aqar's trailing-backslash artifact) does not, because the card
   // falls through to the next photo. Require the MAJORITY to render.
-  check(`${p}: card photos render for the majority of listings (${rendered}/${listings.length})`,
-    majorityRender(rendered, listings.length),
-    `first failure: ${verdicts.find((v) => v !== null)}`);
+  check(`${p}: card photos render for the majority of ANSWERED listings (${rendered}/${judged}`
+    + `${unknown ? `, ${unknown} unknown` : ''})`,
+    majorityRender(rendered, judged),
+    `first failure: ${verdicts.find((v) => v !== null && !isUnknownVerdict(v))}`);
 }
+
+// UNKNOWN must never read as health. If no platform could be judged at all, this run proved nothing
+// about renderability and says so, instead of exiting 0 over a sweep that never reached a host.
+check('at least one platform was actually JUDGED (an all-UNKNOWN sweep proves nothing)',
+  judgedPlatforms > 0,
+  `${unknownPlatforms} platform(s) UNKNOWN, ${judgedPlatforms} judged — check this runner's egress before reading anything into it`);
 
 // ── EXECUTABLE MUTATION PROOFS — the render-decision predicates, on deliberately broken inputs ────
 const mustCatch = (label: string, invariantHeldOnBrokenInput: boolean) =>
@@ -146,7 +191,24 @@ mustCatch('an all-blank platform passes the majority gate', majorityRender(0, 4)
 // A platform where the majority render (aqar, 3/4) MUST pass.
 mustCatch('a healthy platform fails the majority gate', majorityRender(3, 4) === false);
 
-console.log(`\n${measured} platform(s) with photos checked, ${noPhoto} without photos skipped.`);
+// ── UNKNOWN vs BLOCKED — proven in BOTH directions (ops_incident #81) ────────────────────────────
+// Downgrading a red to an UNKNOWN is only legitimate if the red was never the host's answer. A
+// verdict the host DID produce must still count as a block, and it does.
+const hdrs = (o: Record<string, string>) => ({ get: (n: string) => o[n.toLowerCase()] ?? null });
+mustCatch('THE CI FAILURE OF 2026-09-06: `fetch failed` scored as «the browser would block this»',
+  isUnknownVerdict(`${UNKNOWN}no response — fetch threw (fetch failed)`) === false);
+mustCatch('an egress denial scored as the host\'s verdict (x-deny-reason is a header no image host sends)',
+  isEgressDenial(hdrs({ 'x-deny-reason': 'host_not_allowed' })) === false);
+mustCatch('a HOST-sent block downgraded to UNKNOWN — Sadin\'s CORP must still be a block',
+  isUnknownVerdict('CORP:same-origin at hop 0') === true
+  || isEgressDenial(hdrs({ 'cross-origin-resource-policy': 'same-origin' })) === true);
+mustCatch('a HOST-sent 404 downgraded to UNKNOWN',
+  isUnknownVerdict('HTTP 404') === true);
+mustCatch('the majority gate reading an UNKNOWN card as a rendered one (0 answered is not 0 broken)',
+  majorityRender(0, 0) === true);
+
+console.log(`\n${measured} platform(s) with photos checked, ${noPhoto} without photos skipped, `
+  + `${judgedPlatforms} judged, ${unknownPlatforms} UNKNOWN (no host answered).`);
 console.log(failed
   ? `\n✗ verify-card-photos-render-live: ${failed} platform(s) have DB photos the browser cannot render.\n`
   : '\n✅ verify-card-photos-render-live: every active platform\'s DB photo renders on the card.\n');
