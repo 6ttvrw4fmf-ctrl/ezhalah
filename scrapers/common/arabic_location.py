@@ -196,12 +196,19 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
     if md:
         district_ar = "حي " + re.sub(r"\s+", " ", md.group(1)).strip()
 
-    def _scan(tokens: list[str]) -> Optional[tuple[int, int]]:
+    def _scan(tokens: list[str]) -> tuple[Optional[tuple[int, int]], Optional[str]]:
         """Find a WHOLE-NAME catalog city in tokens, region-scoped to region_id when known. Picks the
         RIGHTMOST match (Aqar slugs put the city LAST — «‹street/district›-‹city›»; a district name
         that happens to also be a catalog city sits earlier, so leftmost-match mis-picks it). A
-        same-name twin with no region scope is skipped (never guessed)."""
+        same-name twin with no region scope is skipped (never guessed).
+
+        Returns (pick, rightmost catalog city NAME seen) — two DIFFERENT facts. WHICH city this is
+        can be unknowable (a same-name twin with no region scope) while WHETHER the trailing tokens
+        are a city name at all is still answered by the catalog. Incident #53 lived in that gap:
+        «المجمعة» has four same-name catalog twins, so the pick failed, and with it the district
+        never reached strip_city_suffix() and kept the city glued on («حي الامير نايف المجمعة»)."""
         hits: list[tuple[int, int, tuple[int, int]]] = []  # (end_index, size, (city_id, region_id))
+        names: list[tuple[int, int, str]] = []             # (end_index, size, city_norm) — id-free
         for size in (3, 2, 1):
             for i in range(len(tokens) - size + 1):
                 key = " ".join(tokens[i:i + size])
@@ -210,6 +217,7 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
                 cands = _CITY.get(key)
                 if not cands:
                     continue
+                names.append((i + size, size, key))
                 pick = None
                 if region_id is not None:
                     for cid, rid in cands:
@@ -220,23 +228,34 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
                     pick = cands[0]
                 if pick:
                     hits.append((i + size, size, pick))
+        name = max(names)[2] if names else None              # same rightmost-end, longest-window rule
         if not hits:
-            return None
+            return None, name
         hits.sort(key=lambda h: (h[0], h[1]), reverse=True)  # rightmost end, then longest window
-        return hits[0][2]
+        return hits[0][2], name
 
     # 2a) when region is known, the city is the token(s) right before «(امارة )?منطقة» — region-scoped.
     best: Optional[tuple[int, int]] = None
+    city_name: Optional[str] = None
     if region_id is not None:
         mc = re.search(r"([؀-ۿ]+(?:\s+[؀-ۿ]+)?)\s+(?:امارة\s+)?منطقه", n)
         if mc:
-            best = _scan(mc.group(1).split())
+            best, _ = _scan(mc.group(1).split())
     # 2b) otherwise the rightmost whole-name catalog city in the slug (Aqar puts the city last).
     if not best:
-        best = _scan(n.split())
+        best, city_name = _scan(n.split())
 
     if not best:
-        return {"city_ar": None, "city_id": None, "region_id": region_id, "district_ar": district_ar, "confidence": "unresolved"}
+        # An UNRESOLVED CITY IS NOT AN UNRESOLVED DISTRICT (incident #53). The city stays null — we
+        # cannot say which twin this is and never guess — but when the catalog recognised the NAME
+        # the delimiter-less slug glued on, the district is un-glued by the same rule the resolved
+        # path uses, from the same rightmost match. Stripping only ever REMOVES tokens the source ran
+        # together, so it can lose no published fact; leaving them INVENTS one — a district named
+        # after its own city. Proven against aqarmonthly's own comma-delimited `address`, which
+        # separates exactly what the slug does not: ids 762041/762272/1097370
+        # «… ، حي الامير نايف ، المجمعة ، المجمعة» and 762483 «… ، حي المجد ، القرى ، القري».
+        return {"city_ar": None, "city_id": None, "region_id": region_id,
+                "district_ar": strip_city_suffix(district_ar, city_name), "confidence": "unresolved"}
     cid, rid = best
     city_ar_val = _CID_AR.get(cid)
     district_ar = strip_city_suffix(district_ar, city_ar_val)

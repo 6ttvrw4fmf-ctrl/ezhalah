@@ -35,6 +35,12 @@ const migName = readdirSync(join(root, 'supabase/migrations'))
   .find((f) => f.endsWith('_aqarmonthly_district_suffix_canonical_guard.sql'));
 const sql = migName ? read(join('supabase/migrations', migName)) : '';
 
+// The incident-#53 half: the detector limbs and the id-free catalog-name helper that lets the rule
+// reach a row whose city is an unresolvable same-name twin.
+const twinMigName = readdirSync(join(root, 'supabase/migrations'))
+  .find((f) => f.endsWith('_an_unresolved_city_is_not_an_unresolved_district.sql'));
+const twinSql = twinMigName ? read(join('supabase/migrations', twinMigName)) : '';
+
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
   if (ok) { console.log(`PASS  ${label}`); return; }
@@ -102,6 +108,36 @@ check('a standing detector watches for re-scrape re-corruption, and is on the ro
   /create or replace function public\.mon_detect_aqarmonthly_district_city_suffix/.test(sql)
   && /mon_run_all_detectors/.test(sql) && /mon_raise\('P2','aqarmonthly_district_city_suffix'/.test(sql));
 
+// ── incident #53 — an UNRESOLVED CITY is not an UNRESOLVED DISTRICT ─────────────────────────────
+// «المجمعة» is a same-name catalog twin, so resolve_slug()'s city PICK correctly refuses to choose
+// one — and until 2026-09-06 that refusal ALSO skipped strip_city_suffix() entirely, so four rows
+// kept the city glued to the district for 13 days while the P2 alert stood open. WHICH city this is
+// and WHETHER these trailing tokens are a city NAME are two different questions; only the first one
+// is unanswerable. Behaviour (not just shape) is pinned in
+// scrapers/common/tests/test_aqarmonthly_resolve_slug_district_suffix.py against the four real
+// production slugs and their source `address` fields.
+check('_scan reports the rightmost catalog city NAME even when it cannot pick an id',
+  /names\.append\(\(i \+ size, size, key\)\)/.test(pyCode)
+  && /name = max\(names\)\[2\] if names else None/.test(pyCode));
+check('the UNRESOLVED branch still un-glues the district from that name',
+  /"district_ar": strip_city_suffix\(district_ar, city_name\)/.test(pyCode));
+check('…and still claims NO city, no id, no invented region (never guess a twin)',
+  /return \{"city_ar": None, "city_id": None, "region_id": region_id,/.test(pyCode));
+check('the null-city cohort is committed as a migration (mirror rule)', !!twinMigName);
+check('the detector grew limbs that do not require city_ar is not null',
+  /district_ar is not null and city_ar is null/.test(twinSql)
+  && /source_rows_recorrupted_city_unresolved/.test(twinSql)
+  && /index_rows_recorrupted_city_unresolved/.test(twinSql));
+check('those limbs use the catalog-name helper — relaxing the predicate alone is a no-op',
+  /create or replace function public\.district_trailing_catalog_city_norm/.test(twinSql)
+  && /public\.strip_district_city_suffix\(\s*\n?\s*district_ar, public\.district_trailing_catalog_city_norm\(district_ar\)\)/
+       .test(twinSql));
+check('the alert sample is drawn from EVERY limb, so a count never ships without an example',
+  /'where','index'/.test(twinSql) && /'where','source_city_unresolved'/.test(twinSql)
+  && /'where','index_city_unresolved'/.test(twinSql));
+check('the bulk repair fails CLOSED on an unexpected row count',
+  /if n_raw > 25 or n_idx > 25 then/.test(twinSql) && /raise exception/.test(twinSql));
+
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 console.log('\n  mutation proof — each guard must FAIL on its own defect\n');
 let mutFail = 0;
@@ -140,6 +176,19 @@ mustCatch('the SQL mirror losing the normalised comparison',
   !/public\.normalize_ar/.test(sql.replaceAll('public.normalize_ar', 'x')));
 mustCatch('the detector being dropped from the roster wiring',
   !/mon_run_all_detectors/.test(sql.replaceAll('mon_run_all_detectors', 'x')));
+// incident #53 — the exact regressions that let four rows rot for 13 days
+mustCatch('the unresolved-city branch going back to leaving the city glued on',
+  !/"district_ar": strip_city_suffix\(district_ar, city_name\)/.test(
+    mut(pyCode, '"district_ar": strip_city_suffix(district_ar, city_name)', '"district_ar": district_ar')));
+mustCatch('_scan going back to reporting only an id (blind to a twin’s NAME)',
+  !/name = max\(names\)\[2\] if names else None/.test(
+    mut(pyCode, 'name = max(names)[2] if names else None', 'name = None')));
+mustCatch('the detector losing its null-city limbs (the original blindness)',
+  !/district_ar is not null and city_ar is null/.test(
+    twinSql.replaceAll('district_ar is not null and city_ar is null',
+                       'district_ar is not null and city_ar is not null')));
+mustCatch('the sample narrowing back to the source limb only (a count with no example)',
+  !/'where','index_city_unresolved'/.test(twinSql.replaceAll("'where','index_city_unresolved'", "'x','y'")));
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
