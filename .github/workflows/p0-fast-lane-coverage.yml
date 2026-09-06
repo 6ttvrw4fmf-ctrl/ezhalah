@@ -66,6 +66,19 @@ jobs:
           node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
             scripts/verify-p0-fast-lane-detection.ts
 
+      # A second invariant with the SAME trigger shape, so it shares this job rather than earning a
+      # workflow of its own: mon_check_run_field_ranges' composite per-property_type null-price
+      # baseline (20260821031350) also breaks when a migration is APPLIED — a CREATE OR REPLACE that
+      # re-emits the pre-fix flat baseline brings back the false run_field_range P1s of alert 466,
+      # and run_field_range has no resolver, so each one is permanent. The barrier that migration
+      # named in its own header never existed until ops_incident #50. Same anon-only, secret-free
+      # read as the check above; `if: always()` so a red fast-lane check cannot hide it.
+      - name: The composite null-price baseline holds, and check (a) is still sensitive
+        if: always()
+        run: |
+          node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+            scripts/verify-run-field-range-composite-baseline-live.ts
+
       # An unattended workflow that fails silently notifies nobody (issue #1349), and a scheduled
       # guard nobody hears from is the dark-detector shape again. seam_check_failed is this
       # routine's kind, and 20260905110220 registered it in ops_alert_kind_external_resolver — so a

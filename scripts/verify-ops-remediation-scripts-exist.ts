@@ -66,8 +66,7 @@ const PATH_RE = /(?:scripts|e2e)\/[A-Za-z0-9_@./-]+\.(?:ts|mjs|js|cjs|sh|py)/g;
  * graveyard of stale excuses. It may only shrink.
  */
 const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
-  { path: 'scripts/verify-run-field-range-composite-baseline-live.ts', owner: 'routine-3-data-integrity',
-    why: 'claimed by 20260821031350_fix_run_field_range_composite_baseline.sql; scraped-field range baselines' },
+  // EMPTY, and it must stay that way: with no ledger left, ANY dangling barrier claim fails the run.
   // CLOSED 2026-09-05 by routine-2-production (PR #1850), the routine this gap was routed to.
   // scripts/verify-searchable-platforms-are-monitored.ts now exists and calls
   // ops_searchable_platforms_unmonitored() — the external reader migration 20260905062027 created
@@ -82,6 +81,14 @@ const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
   // exactly as 20260810123000 promised, policing every migration after the fix for a re-emitted
   // unguarded fallback disjunct; its behavioural twin verify-unlocated-fallback-scope-live.ts is
   // unchanged.
+  // CLOSED 2026-09-06 (ops_incident #50), the last entry. scripts/verify-run-field-range-composite-
+  // baseline-live.ts now exists and EXECUTES mon_check_run_field_ranges through
+  // ops_probe_field_range_composite() (20260906040717) on alert 466's own type-skew shape and on a
+  // genuine all-null regression, rolling every write back so the must-trip direction can reach
+  // mon_raise() without committing an alert of a kind that has no resolver. The earlier reading —
+  // that this gap could not be closed because the proof needs synthetic rows and a real raise — was
+  // wrong in both halves: 20260821031441 had already created the fixture table for exactly this
+  // purpose, and a subtransaction that aborts discards the raise along with the rows.
 ];
 
 console.log('ops remediation scripts — every barrier a migration claims must exist and run');
