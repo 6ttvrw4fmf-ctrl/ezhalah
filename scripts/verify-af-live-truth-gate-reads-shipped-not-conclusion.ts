@@ -93,6 +93,26 @@ const refsWithoutNeed = [...wf.matchAll(/^  ([a-z-]+):\n(?:.*\n)*?    needs: \[(
   .filter((m) => !m[2].includes('gate')).map((m) => m[1]);
 check('no job reads needs.gate without depending on gate', refsWithoutNeed.length === 0, refsWithoutNeed.join(', '));
 
+// EVERY JOB THAT STRIPS TYPES MUST PIN ITS NODE (caught on my own diff, post-merge).
+//
+// `--experimental-strip-types` needs Node >= 22.6 and the runner's default `node` is not
+// guaranteed to be that. Every other job in this workflow pins node-version via setup-node; the
+// gate job originally did not, and it is the ONE job whose failure makes all five others skip —
+// `shipped` would be empty and the barrier dark again, which is precisely the defect this file
+// exists to prevent, reintroduced by its own fix.
+//
+// Parsed per job rather than grepped over the file, because the question is per-job: a setup-node
+// in SOME other job does not help the one that strips types.
+const jobBlocks = wf.split(/\n(?=  [a-z][a-z0-9-]*:\n)/);
+const stripWithoutPin = jobBlocks
+  .filter((b) => b.includes('--experimental-strip-types') && !b.includes('setup-node'))
+  .map((b) => b.trim().split(':')[0].trim());
+check('every job that strips types pins its Node version', stripWithoutPin.length === 0,
+      stripWithoutPin.length ? `unpinned: ${stripWithoutPin.join(', ')}` : 'all pinned');
+check('the gate job in particular pins Node',
+      /gate:[\s\S]*?setup-node[\s\S]*?af-live-truth-deploy-gate\.ts/.test(wf),
+      'its failure would empty `shipped` and skip every live job');
+
 console.log('\n── mutations');
 // The version this replaces: /Aliased/ alone. It matches the REFUSED log too, so a run that
 // deployed nothing would trigger a full paid live check — and, worse, would report on a bundle
@@ -129,6 +149,13 @@ const DANGLING = "  af-x:\n    needs: [af-truth]\n    if: always() && needs.gate
 const danglingFound = [...DANGLING.matchAll(/^  ([a-z-]+):\n(?:.*\n)*?    needs: \[([^\]]*)\]\n    if: [^\n]*needs\.gate\./gm)]
   .filter((m) => !m[2].includes('gate'));
 mustCatch('a job reads needs.gate without depending on it', danglingFound.length === 1);
+
+// A job that strips types with no Node pin — the bug this file's own author shipped and then
+// caught by re-reading the diff. The detector must SEE it.
+const UNPINNED_JOB = "  gate:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: node --experimental-strip-types scripts/x.ts\n";
+const unpinnedSeen = UNPINNED_JOB.split(/\n(?=  [a-z][a-z0-9-]*:\n)/)
+  .filter((b) => b.includes('--experimental-strip-types') && !b.includes('setup-node'));
+mustCatch('a job strips types without pinning Node', unpinnedSeen.length === 1);
 
 // The revert: gating on the deploy conclusion again.
 const REVERTED = "if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'";
