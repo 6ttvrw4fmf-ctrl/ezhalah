@@ -30,6 +30,7 @@
 # format:  platform | probe status (as last measured) | note
 #
 abralosol      | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven (LISTING_LIFECYCLE_ENGINEER.md §8.6)
+abwbna         | UNPROBED                    | onboarded 2026-09-06; different tenant of the same Nuzul SaaS platform as aldarim (identical run.py shape — full-refresh crawl, prune on absence, no oracle). If aldarim ever gains a verify_gone oracle, this row inherits the same fix.
 aldarim        | UNPROBED                    |
 alhoshan       | UNPROBED                    |
 alkhaas        | UNPROBED                    |
