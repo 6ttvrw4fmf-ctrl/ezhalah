@@ -198,6 +198,11 @@
       "today_pct": 100,
       "active_rows": 6
     },
+    "remal": {
+      "floor_pct": 89,
+      "today_pct": 91.7,
+      "active_rows": 84
+    },
     "amaall": {
       "floor_pct": 97,
       "today_pct": 100.0,
