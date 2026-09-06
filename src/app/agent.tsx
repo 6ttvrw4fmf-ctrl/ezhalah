@@ -1021,6 +1021,7 @@ export default function Agent() {
   // land all at once). Each mounting card animates itself (CardIn); the tick cadence provides the
   // stagger. Uses the shared timers/active-ref so Stop and new-turn finalize keep working.
   const dripRange = (id: string, from: number, to: number, stepMs: number, onDone?: () => void) => {
+    if (typeof console !== 'undefined') console.log(`[TEMP-DEBUG-DRIP] dripRange called id=${id} from=${from} to=${to} stepMs=${stepMs}`);
     if (to <= from) { onDone?.(); return; }
     revealActiveRef.current = { id, count: to };
     setRevealing(true);
@@ -1030,12 +1031,16 @@ export default function Agent() {
       // over the shared active-ref, this cascade stops silently — it must never clear state it no
       // longer owns (that stranded the new turn's drip). Unrevealed cards stay recoverable behind
       // «عرض المزيد» (bufferMore).
-      if (revealActiveRef.current?.id !== id) return;
+      if (revealActiveRef.current?.id !== id) {
+        if (typeof console !== 'undefined') console.log(`[TEMP-DEBUG-DRIP] tick ABORTED (ownership lost) id=${id} shown=${shown} activeId=${revealActiveRef.current?.id ?? 'null'}`);
+        return;
+      }
       shown += 1;
       setRevealCount((c) => ({ ...c, [id]: shown }));
       if (shown < to) {
         revealTimers.current.push(setTimeout(tick, stepMs));
       } else {
+        if (typeof console !== 'undefined') console.log(`[TEMP-DEBUG-DRIP] tick COMPLETE id=${id} shown=${shown} to=${to}`);
         revealActiveRef.current = null;
         setRevealing(false);
         onDone?.();
@@ -1071,6 +1076,7 @@ export default function Agent() {
     }, delay);
   };
   const beginCardDrip = (id: string, n: number) => {
+    if (typeof console !== 'undefined') console.log(`[TEMP-DEBUG-DRIP] beginCardDrip id=${id} n=${n} alreadyStarted=${!!dripStartedRef.current[id]}`);
     if (dripStartedRef.current[id]) return;
     dripStartedRef.current[id] = true;
     pinModeRef.current = 'none'; // stop the bottom-follow so growing card list never yanks the view

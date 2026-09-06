@@ -191,6 +191,13 @@ const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA',
 const page = await ctx.newPage();
 const crashes = [];
 page.on('pageerror', (e) => { const m = String(e); if (!BENIGN.test(m)) crashes.push(m.slice(0, 200)); });
+// TEMP-DEBUG (2026-09-06): capturing agent.tsx's own temporary [TEMP-DEBUG-DRIP] console.log lines
+// to get direct evidence of the [J] reveal-cascade stall from a REAL CI run — three fixes attempted
+// blind (90s poll, 180s poll, anti-throttling launch flags) all failed identically, so this reads
+// what the cascade is actually doing instead of guessing a fourth time. Remove alongside the
+// TEMP-DEBUG-DRIP lines in agent.tsx once the root cause is confirmed and fixed.
+const dripDebugLog = [];
+page.on('console', (msg) => { const t = msg.text(); if (t.includes('[TEMP-DEBUG-DRIP]')) dripDebugLog.push(t); });
 
 const tap = async (txt) => {
   const box = await page.evaluate(CLICK_LEAF, txt);
@@ -928,6 +935,14 @@ try {
       }
       check('[J] ≤ 50 → no «عرض المزيد» is offered — every remaining listing is already revealed',
         !stillOffered, `final=${jFinal}`);
+      // TEMP-DEBUG (2026-09-06): dump the captured [TEMP-DEBUG-DRIP] console lines on failure only —
+      // see the capture site up top for why. Deliberately printed even though `stillOffered` might be
+      // false (harmless — the log is silent/short on a healthy run) so a flaky-then-passing run still
+      // shows what the cascade actually did.
+      if (stillOffered) {
+        console.log(`DEBUG [J] dripDebugLog (${dripDebugLog.length} lines):`);
+        for (const line of dripDebugLog) console.log('  ' + line);
+      }
       const lockedComposer = await page.locator('textarea[readonly][placeholder*="أُغلقت هذه المحادثة"]:visible').count();
       check('[J] ≤ 50 → the chat is COMPLETED: the composer locks (readOnly + «أُغلقت هذه المحادثة…» placeholder)',
         lockedComposer === 1, `final=${jFinal} lockedComposer=${lockedComposer}`);
