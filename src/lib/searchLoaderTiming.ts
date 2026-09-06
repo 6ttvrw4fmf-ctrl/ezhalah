@@ -29,8 +29,13 @@ export const PILL_FADE = 260;
 /**
  * The largest roster the reveal budget is sized for. Kept ≥ the real catalogue by the barrier, so a
  * newly onboarded platform can never quietly push the tail of the reveal past the floor.
+ *
+ * 40 → 50 on 2026-09-06: abwbna's onboarding took the real catalogue to 41, past the old ceiling —
+ * caught by this barrier, not by review. Raised with real headroom (the 40-candidate audit still
+ * has several platforms queued) instead of bumping it one-at-a-time on every onboarding; SEARCH_MIN_MS
+ * (agent.tsx) raised alongside it so REVEAL + SWEEP still lands inside the floor.
  */
-export const MAX_ROSTER = 40;
+export const MAX_ROSTER = 50;
 /** Every pill is on screen by this point, worst case. */
 export const LOADER_REVEAL_MS = (MAX_ROSTER - 1) * PILL_STAGGER + PILL_FADE;
 /**

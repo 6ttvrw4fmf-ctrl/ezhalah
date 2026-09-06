@@ -38,7 +38,10 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // 31 → 29 on 2026-09-06: raghdan and sanadak gained control-validated `_verify_gone` oracles
 // (scripts/verify-raghdan-absence-cannot-deactivate.ts,
 //  scripts/verify-sanadak-absence-cannot-deactivate.ts) and left the ledger.
-const RATCHET = 29;
+// 29 -> 30 later the same day: abwbna onboarded as a second tenant of aldarim's own Nuzul SaaS
+// platform, inheriting the exact same absence-only prune aldarim already carries (reviewed — see
+// the ledger entry's own note: if aldarim ever gains a verify_gone oracle, abwbna inherits the fix).
+const RATCHET = 30;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

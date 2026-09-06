@@ -523,6 +523,7 @@ const THERC_LOGO = require('../../assets/images/therc.png');
 const RAWASIDARK_LOGO = require('../../assets/images/rawasidark.png');
 const AOUJ_LOGO = require('../../assets/images/aouj.png');
 const AQARATIKOM_LOGO = require('../../assets/images/aqaratikom.jpg');
+const ABWBNA_LOGO = require('../../assets/images/abwbna.png');
 const REMAL_LOGO = require('../../assets/images/remal.png');
 const AMAALL_LOGO = require('../../assets/images/amaall.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
@@ -628,6 +629,7 @@ function SourceBadge({ source }: { source: string }) {
   // Batch 7 — text-chips until the user supplies logos.
   if (s.includes('aqaratikom')) return <Image source={AQARATIKOM_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('shmou al shmal') || s.includes('shmoualshmal')) return <Image source={SHMOUALSHMAL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('abwbna')) return <Image source={ABWBNA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('remal')) return <Image source={REMAL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('amaall')) return <Image source={AMAALL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -693,6 +695,7 @@ function sourceHost(source: string): string {
   // sourceName()'s own 'Nawait' label for the same source string. (found live 2026-07-25.)
   if (s.includes('aqaratikom')) return 'nawait.sa';
   if (s.includes('shmou al shmal') || s.includes('shmoualshmal')) return 'shmoua-alshmal.com';
+  if (s.includes('abwbna')) return 'abwbna.com';
   if (s.includes('remal')) return 'remalre.com';
   if (s.includes('amaall')) return 'amaall.com';
   if (s.includes('alta')) return 'alta.com.sa';

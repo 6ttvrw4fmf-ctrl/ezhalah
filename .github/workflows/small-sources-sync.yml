@@ -139,6 +139,10 @@ jobs:
           #           (68 EN + 67 AR), so taking both languages would double every property.
           - { source: remal,        cmd: "python -m scrapers.remal.run --type all" }
           - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all" }
+          # abwbna (owner-instructed 2026-09-06): a DIFFERENT TENANT of the SAME Nuzul SaaS platform
+          # aldarim already scrapes (same S3 bucket family, same public JSON API shape). Full crawl +
+          # prune, same as aldarim — not a --type flag scraper.
+          - { source: abwbna,       cmd: "python -m scrapers.abwbna.run --pages 50" }
           - { source: abralosol,   cmd: "python -m scrapers.abralosol.run --type all" }
           - { source: arkaan,      cmd: "python -m scrapers.arkaan.run --type all" }
           - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }
