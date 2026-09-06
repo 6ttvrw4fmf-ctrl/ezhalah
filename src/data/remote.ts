@@ -11,6 +11,7 @@ import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { decodeEntities } from '@/lib/htmlEntities';
+import { photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
@@ -1865,7 +1866,11 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
     // index 0. Confirmed live 2026-07-26: ~6.7% of active aqar_residential_listings had this
     // as their displayed photo; 0 occurrences on any other platform.
     const realPhotoUrls = Array.isArray(r.photo_urls)
-      ? r.photo_urls.filter((u: unknown) => typeof u === 'string' && !u.includes('/props/villa-default.png'))
+      ? r.photo_urls
+          .filter((u: unknown): u is string => typeof u === 'string' && !u.includes('/props/villa-default.png'))
+          // CANONICAL DISPLAY URL — routes CORP-blocked hosts (Sadin) through the same-origin proxy so
+          // the browser can actually render them; a no-op for every other host. See src/lib/photoUrl.ts.
+          .map((u: string) => photoDisplayUrl(u))
       : [];
     const photo = realPhotoUrls.length > 0 ? realPhotoUrls[0] : '';
     // Raw additional_info as a plain object (Gathern/new-platform shape). Aqar leaves it null; Wasalt/
