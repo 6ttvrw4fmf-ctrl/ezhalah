@@ -214,10 +214,10 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         return None, "residential"
     category = CATEGORY_FOR_TYPE[property_type]
 
-    deal = DEAL_MAP.get(L.get("type") or "")
-    if not deal:
+    raw_type = L.get("type") or ""
+    if raw_type not in DEAL_MAP:
         return None, category
-    is_rent = deal == "Rent"
+    is_rent = raw_type == "للإيجار"  # provably-total ternary below reads this, never DEAL_MAP itself
 
     rent_annual = _int(L.get("yearly_rent"))
     rent_monthly = _int(L.get("monthly_rent")) if rent_annual is None else None
@@ -239,7 +239,7 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "source": "Azdad",
         "active": (L.get("status") or "") in ACTIVE_STATUSES,
         "property_type": property_type,
-        "transaction_type": deal,
+        "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": _int(L.get("area")),
         "bedrooms": _int(L.get("rooms")),
         "bathrooms": _int(L.get("bathrooms")),
