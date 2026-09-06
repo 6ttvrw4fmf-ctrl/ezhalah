@@ -169,6 +169,119 @@ def session() -> cc.Session:
     return cc.Session(impersonate="chrome124")
 
 
+# ── The liveness oracle ─────────────────────────────────────────────────────────────────────────
+# `docs/ops/LISTING_LIVENESS.md` §1–§3: absence from our crawl is `EvidenceKind.ABSENCE`, a
+# candidate signal and NEVER a verdict. Only a DIRECT fetch of the listing's own URL may kill.
+
+
+def _oracle_session():
+    """Transport seam for `_verify_gone`. A test replaces this to execute the oracle against
+    injected responses — the decision itself lives in the pure `_gone_verdict`."""
+    return _session()
+
+
+def ad_number_to_url(ad_number: str) -> Optional[str]:
+    """`RG<sourceId>` → the listing's own canonical detail URL, or None if it is not one.
+
+    `prune_unseen(verify_gone=...)` hands the oracle an ad_number, not a URL, so the oracle has to
+    reconstruct the one page whose answer is allowed to matter. Raghdan ids are Firebase push-ids
+    (~20 alnum chars) or numeric — both go in the same path segment.
+    """
+    a = (ad_number or "").strip()
+    if not a.upper().startswith("RG"):
+        return None
+    sid = a[2:]
+    if not sid or not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", sid):
+        return None
+    return f"{BASE}/ar/property/{sid}/"
+
+
+def _gone_verdict(status: Optional[int], body: Optional[str],
+                  final_url: Optional[str]) -> Optional[tuple[str, str]]:
+    """The oracle's DECISION, separated from its transport so it can be executed exhaustively.
+
+    Pure: no I/O, no session, no clock. Returns a `(verdict, reason)` pair, or None meaning "no
+    answer yet — the caller may retry". A None from here NEVER means death; the caller turns an
+    exhausted retry budget into 'unknown'.
+
+    MEASURED SEPARATION (2026-09-06, 227 DIRECT probes of raghdan.sa from this repo's egress):
+      • every one of the 187 rows this platform had already deactivated answered HTTP 404 with the
+        generic 39.1 KB site page (title «رغدان للعقارات», no JSON-LD);
+      • 37 of 40 known-ACTIVE control rows answered HTTP 200 at 131–156 KB carrying a
+        `RealEstateListing` JSON-LD block with the listing's own name and offers.
+    The two populations do not overlap on either axis, and the controls were interleaved with the
+    dead cohort so a mid-run block would have shown in both. (The 3 controls that 404'd are real:
+    all three already carry `missing_count = 2` and are one crawl from grace — the oracle agreeing
+    with the strike counter, not contradicting it.)
+
+    WHY A BARE 404 IS STILL NOT ENOUGH ON ITS OWN. `LISTING_LIVENESS.md` §5.4 measured gathern
+    expressing BLOCKING as its own application-rendered 404 — a 100% false-death rate against
+    datacenter egress. So this oracle refuses to read a 404 as death when the body nevertheless
+    carries a listing payload, and it refuses to read a 200 as life unless the payload is there.
+    """
+    if status is None:
+        return None                                    # network/timeout → retry, then 'unknown'
+    if final_url is not None and "/property/" not in final_url:
+        # An unresolved redirect: we do not know where we landed (LISTING_LIVENESS.md §1).
+        return "unknown", f"redirected off the property path to {final_url[:120]!r}"
+    has_listing = bool(body) and "RealEstateListing" in body and "ld+json" in body
+    if status in (404, 410):
+        if has_listing:
+            # A not-found that still serves the listing is about our read, not the listing.
+            return "unknown", f"HTTP {status} whose body still carries a RealEstateListing payload"
+        return "gone", f"HTTP {status} and no listing payload (source does not serve this property)"
+    if status != 200:
+        return None                                    # 401/403/408/429/5xx/3xx → retry → 'unknown'
+    if not body:
+        return "unknown", "200 with an empty body"
+    if has_listing:
+        return "live", f"200 with a RealEstateListing JSON-LD payload ({len(body)} bytes)"
+    return "unknown", f"200 without a listing payload ({len(body)} bytes — shell/interstitial)"
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    """DIRECT per-listing liveness oracle for `db.prune_unseen(verify_gone=...)`.
+
+    WHY THIS EXISTS. Until 2026-09-06 this scraper called `db.prune_unseen()` with no oracle, so
+    three consecutive crawl misses deactivated a listing on ABSENCE alone — the inference
+    `docs/ops/LISTING_LIVENESS.md` §1–§3 forbids, because a throttled run, a truncated sitemap body
+    or a source-side index gap is indistinguishable from a removal. This platform is *especially*
+    exposed to that: its catalogue is enumerated from a multi-megabyte streamed sitemap whose read
+    is budget-bounded (see `_harvest_property_urls`), and a short list is exactly what drives a
+    false prune. It carried a standing P1 `unknown_treated_as_dead` (27 rows deactivated inside 48h
+    with no source verdict recorded anywhere), and what waits at the end of that road is a
+    permanent, unrecoverable delete.
+
+    Verdicts, per the three-valued law — anything that is not an affirmative answer is 'unknown',
+    and 'unknown' holds the strike without deactivating:
+      'live'    — HTTP 200 carrying the listing's own `RealEstateListing` JSON-LD
+      'gone'    — HTTP 404/410 with no listing payload
+      'unknown' — timeout, connection error, 401/403/408/429, any 5xx, a 200 shell with no payload,
+                  a 404 that nevertheless carries one, an unresolved redirect, or an ad_number this
+                  scraper cannot turn into a listing URL. NEVER death.
+    """
+    url = ad_number_to_url(ad_number)
+    if url is None:
+        return "unknown", f"ad_number {ad_number!r} does not resolve to a raghdan property URL"
+    s = _oracle_session()
+    last = "no attempt made"
+    for attempt in range(2):
+        status: Optional[int] = None
+        body: Optional[str] = None
+        final_url: Optional[str] = None
+        try:
+            r = s.get(url, timeout=45, allow_redirects=True)
+            status, body, final_url = r.status_code, r.text, str(r.url)
+            last = f"HTTP {status}"
+        except Exception as e:  # noqa: BLE001 — an unreachable source is never proof of death
+            last = f"{type(e).__name__}: {e}"
+        decided = _gone_verdict(status, body, final_url)
+        if decided is not None:
+            return decided
+        time.sleep(1.2 * (attempt + 1))
+    return "unknown", f"no answer after 2 attempts ({last})"
+
+
 def _int(v: Any) -> Optional[int]:
     n = normalize.to_int(v)
     return n if n else None
@@ -833,11 +946,15 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:80])
             return 0
 
-        # Full run: prune listings that were active before but weren't seen this crawl.
+        # Full run: age out listings that were active before but weren't seen this crawl — and
+        # ASK THE SOURCE before any of them is deactivated. Absence only selects WHICH rows to
+        # re-probe (`verify_gone` above); only an affirmative answer on the listing's own URL may
+        # kill one, and a 'live' answer self-heals the strike (docs/ops/LISTING_LIVENESS.md §1–§3).
         pruned = 0
         for tbl, rows_seen in (("raghdan_residential_listings", res),
                                ("raghdan_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Raghdan")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Raghdan",
+                                verify_gone=_verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

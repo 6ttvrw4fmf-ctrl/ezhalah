@@ -44,7 +44,7 @@ const lifted = await liftSymbols(
     { header: 'function closenessScore(' },
     { header: 'function closenessBonus(' },
   ],
-  ['sortListings', 'closenessScore', 'closenessBonus', 'sortPriceOf', 'priceOf'],
+  ['sortListings', 'closenessScore', 'closenessBonus', 'sortPriceOf', 'priceOf', 'rentAnnualValue'],
   [
     'type Listing = any; type SearchQuery = any; type SortKey = string;',
     'const RECENCY: Record<string, number> = {};',
@@ -56,6 +56,8 @@ const closenessScore = lifted.closenessScore as (l: unknown, q: unknown, cap: nu
 const closenessBonus = lifted.closenessBonus as (l: unknown, q: unknown, cap: number | null) => number;
 const sortPriceOf = lifted.sortPriceOf as (l: unknown) => number;
 const priceOf = lifted.priceOf as (l: unknown) => number;
+// §0 asserts the annual basis directly, so it needs the primitive that BUILDS it.
+const rentAnnualValue = lifted.rentAnnualValue as (l: Record<string, unknown>) => number;
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -80,6 +82,44 @@ const MIXED = [
   R(5, 'SAR 9,000/mo', 'monthly'),   // 108,000/yr  ← dearest, but displays as 9,000
 ];
 const ids = (rows: unknown[]) => rows.map((r) => (r as { id: number }).id);
+
+// ── 0. THE BASIS IS CARRIED, NOT RECONSTRUCTED (added 2026-09-06, regression hunter) ──────────────
+// The 2026-09-06 repair made every consumer below read rentAnnualValue(). That closed the 12×
+// disagreement — and left a smaller one inside rentAnnualValue itself, because it REBUILT
+// price_annual from the display string. listingPriceString() prints a source-monthly rent at
+// Math.round(price_annual / 12), so ×12 is short by up to 6 SAR whenever price_annual is not
+// divisible by 12, and the client then deletes a row the server's own bound accepted.
+//
+// It is not theoretical. Measured on production 2026-09-06: 430 of 32,226 monthly rows sit in that
+// gap and 892 integer budget floors delete at least one of them — including 151,000, a floor any
+// user might type. The worked case is listing 1143355 (الرياض): price_annual 151,001, printed
+// 12,583/mo, reconstructed 150,996.
+//
+// So `Listing.priceAnnual` now carries price_annual verbatim and rentAnnualValue prefers it. The ×12
+// remains ONLY as the fallback for rows that have none (the mock catalog, fixtures) — §1-§3 below
+// still exercise it, which is why those fixtures deliberately carry no priceAnnual.
+console.log('── the annual basis is the row\'s own price_annual, not ×12 of a rounded card figure ──');
+const REAL = { id: 1143355, deal: 'Rent', price: 'SAR 12,583/mo', rentPeriod: 'monthly',
+               priceAnnual: 151001, area: 100, beds: 2, listed: 'today' };
+check('a carried price_annual is returned EXACTLY (151,001 — not the 150,996 the card rebuilds to)',
+  rentAnnualValue(REAL) === 151001,
+  `got ${rentAnnualValue(REAL)}; the ×12 reconstruction of the printed 12,583 gives 150,996`);
+check("…so a 151,000 yearly floor keeps the row the server kept",
+  rentAnnualValue(REAL) >= 151000,
+  'the client net is deleting a row location_search_candidates_ar matched against the same bound');
+check('the ×12 fallback still serves a row that carries no price_annual (mock catalog, fixtures)',
+  rentAnnualValue({ price: 'SAR 4,000/mo', rentPeriod: 'monthly' }) === 48000);
+check('…and an annual/period-less row is unchanged by either path',
+  rentAnnualValue({ price: 'SAR 55,000/yr', rentPeriod: 'annual' }) === 55000
+  && rentAnnualValue({ price: 'SAR 30,000', rentPeriod: null }) === 30000
+  && rentAnnualValue({ price: 'SAR 55,000/yr', rentPeriod: 'annual', priceAnnual: 55000 }) === 55000);
+// MUTATION for §0, executed: force the reconstruction path on the real row and watch the floor drop
+// it. This is the defect exactly as production carried it.
+const reconstructed = rentAnnualValue({ price: REAL.price, rentPeriod: REAL.rentPeriod });
+check('(mutation) catches the reconstruction: without the carried figure the row falls below 151,000',
+  reconstructed < 151000 && reconstructed === 150996,
+  `MUTANT SURVIVED — the ×12 path gave ${reconstructed}, expected 150,996 (below the floor). If this `
+  + 'is no longer below the bound, the rounding gap this section exists for has moved.');
 
 // ── 1. the objective price sorts key on the basis the RPC ordered by ──────────────────────────────
 console.log('── «الأرخص أولاً» over a «شهري+سنوي» result set ──');

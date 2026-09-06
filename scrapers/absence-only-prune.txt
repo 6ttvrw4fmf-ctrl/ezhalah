@@ -52,11 +52,9 @@ muktamel       | UNPROBED                    | sharded prune
 mustqr         | ORACLE AVAILABLE            | 2026-09-06: the listing URL is a byte-identical SPA shell for every id (no signal), but run.py already reads a per-id Supabase REST endpoint carrying `status` — a discriminating oracle exists and is unwired. Could not be control-validated from the cloud sandbox: its API host is denied by that egress (403 CONNECT), which is UNKNOWN about our read, not about the platform.
 nowaisiry      | UNPROBED                    |
 october        | UNPROBED                    |
-raghdan        | ORACLE AVAILABLE            | 2026-09-06: source discriminates cleanly — a live listing returns 200 with a per-listing <title>, a removed one a byte-identical 39,130-byte 404. 6/8 canaries live, 2/8 genuinely gone; 5/5 rows we had aged out returned 404. Needs a control-validated _verify_gone, not a new signal.
 ramzalqasim    | UNPROBED                    |
 rawasidark     | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven
 sadin          | UNPROBED                    | 2026-09-06: listing URL 308-redirects to the apex, which did not answer from the cloud sandbox's egress. UNKNOWN about our read — NOT evidence the platform lacks a signal.
-sanadak        | ORACLE AVAILABLE            | 2026-09-06: source discriminates — a live listing SSRs a real <title> in a ~480-716KB page, a removed one an empty <title> in ~144KB. 8/8 canaries live, 29/29 rows we had aged out empty-titled. Needs a control-validated _verify_gone.
 satel          | UNPROBED                    |
 souq24         | UNPROBED                    |
 therc          | UNPROBED                    | activated 2026-09-03; lifecycle never instance-proven
