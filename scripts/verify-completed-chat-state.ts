@@ -45,7 +45,7 @@ const trueSites = (agent.match(/setCompleted\(true\)/g) ?? []).length;
 check(`setCompleted(true) appears exactly once (R11.1 — the ≤50 final set), found ${trueSites}`, trueSites === 1,
   "a second site means a count alone, a plain first search, or an exhausted-but-large set can lock the composer");
 check("R11.1: the post-round honest total ≤ INTERVIEW_STOP_AT completes, inside finishGuided's onFetched",
-  /onFetched: \(total\) => \{[\s\S]{0,900}?if \(total != null && total <= INTERVIEW_STOP_AT\) setCompleted\(true\);/.test(agent));
+  /onFetched: \(total\) => \{[\s\S]{0,900}?if \(searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(agent));
 check("R11.2 (revised 2026-09-04): a MEASURED 'no' after a committed AF round is SPOKEN, not a silent completion",
   /verdict === 'no' && afCarryRef\.current && !noMoreSaidRef\.current\[m\.id\]/.test(agent)
   && /No further truthful narrowing question exists for this scope/.test(agent)

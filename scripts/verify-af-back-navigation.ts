@@ -198,7 +198,11 @@ const cancelBranch = (src: string) => {
 };
 const backToStartCancels = (src: string) =>
   /if \(stepIndex <= 0\) \{[\s\S]{0,220}?setAgeFlow\(null\);/.test(src)
-  && /\(hasMore \|\| canNarrowFurther\)\s*\n\s*&& !afInterviewOwnsBrowsing\(ageFlow\?\.phase \?\? null\)/.test(src)
+  // The actions-row visibility moved into the pure resultsActionsRowVisible() gate (owner 2026-09-06,
+  // `final=50`), but agent.tsx still feeds it the interview phase — so cancelling the round (phase → null)
+  // still restores the row. Assert the phase is passed to that gate (afInterviewOwnsBrowsing now lives
+  // inside it and is proven in verify-af-terminal-at-50-no-load-more.ts).
+  && /resultsActionsRowVisible\(\{[\s\S]{0,220}?afPhase: ageFlow\?\.phase \?\? null/.test(src)
   && /ageFlowStepsRef\.current = \[\];/.test(cancelBranch(src))
   && /syncGuidedFromSteps\(0\);/.test(cancelBranch(src))
   && !/runRefine|finishGuided|commitGuidedStep/.test(cancelBranch(src));
@@ -330,7 +334,7 @@ mustCatch('the walk-back capturing the PRE-bump token (postfix ++ hands presentG
 mustCatch('Back-to-start no longer restoring the pre-AF controls',
   !backToStartCancels(mut(agentSrc, /if \(stepIndex <= 0\) \{/, 'if (false) {')));
 mustCatch('the pre-AF CTA row losing its AF-interview gate',
-  !backToStartCancels(mut(agentSrc, '&& !afInterviewOwnsBrowsing(ageFlow?.phase ?? null);', ';')));
+  !backToStartCancels(mut(agentSrc, 'afPhase: ageFlow?.phase ?? null', 'afPhase: null')));
 // The round-era defects the original two conditions could not see. `syncGuidedFromSteps(0);` is the
 // one line unique to this branch — anchoring on `ageFlowStepsRef.current = [];` or `setAgeFlow(null);`
 // would land the mutation in startAgeFlow and prove nothing about onAgeBack.

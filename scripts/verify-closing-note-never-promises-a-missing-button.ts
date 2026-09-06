@@ -124,7 +124,9 @@ check('agent.tsx derives offersNarrow from showActionsRow, not from canNarrowFur
 check('the visible sentence comes from the pure key function, not a second inline copy',
   /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow \}\)/.test(agentSrc));
 check('showActionsRow is still the single gate the buttons themselves are rendered behind',
-  /const showActionsRow = \(hasMore \|\| canNarrowFurther\)\s*\n\s*&& !afInterviewOwnsBrowsing\(ageFlow\?\.phase \?\? null\);/.test(agentSrc));
+  // Gate hoisted into the pure resultsActionsRowVisible() (owner 2026-09-06, `final=50`); still the
+  // single const the Pressables, the spoken note, and offersMore/offersNarrow all derive from.
+  /const showActionsRow = resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(agentSrc));
 
 // ── 5. THE PRODUCTION STATE THAT WAS MEASURED, REPLAYED ─────────────────────────────────────────
 // الرياض/بيع/فيلا + one AF answer: 5,970 matching, 10 shown, buffer holds more, AF interview open so
