@@ -29,10 +29,9 @@
 // A host that blocks embedding is reported, not silently tolerated: the honest product answer is
 // the placeholder (which layer 1 guarantees), and re-hosting another company's images to defeat
 // their anti-hotlink header is an OWNER decision, never an engineering default.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import { photoDisplayUrl } from '../src/lib/photoUrl.ts';
+import { loadRegistry, workflowInvokes } from './lib/testRegistry.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => {
@@ -60,143 +59,38 @@ check('the probe is web-only, so native keeps expo-image\'s own working onError'
 check('the probe is cleaned up on unmount (no setState after teardown)',
   /cancelled = true/.test(photoFn));
 
-// ── LAYER 2 — LIVE: judge real stored URLs the way a browser does ───────────────────────────────
-// A browser refuses to DISPLAY a cross-origin image when the response says
-// Cross-Origin-Resource-Policy: same-origin (or same-site, from a different site). Status 200 and
-// a correct content-type are NOT enough. This is exactly the evidence curl-based checks miss.
-const { url, key } = resolvePublicSupabase();
-const PLATFORM_TABLES = [
-  'sadin', 'satel', 'aqargate', 'eastabha', 'erapulse', 'eaqartabuk', 'hajer', 'alhoshan',
-  'fursaghyr', 'alta', 'shmoualshmal',
-];
-
-// THREE-VALUED, not two (2026-09-06, routine #10). `renderable: null` is UNKNOWN — we did not get
-// the HOST's answer, so we have no verdict about the host.
+// ── LAYER 2 — the LIVE half lives elsewhere, ON PURPOSE (2026-09-06, routine #10, ops_incident #81)
+// This file used to fetch ~40 THIRD-PARTY image hosts from inside `npm test`, which is the REQUIRED
+// status check on every PR. That made an unrelated PR's fate depend on whether satel, alta,
+// shmoualshmal and friends happened to answer at that moment — CI run 34005883286, on a no-op
+// chore(deploy) commit touching no code, went red with `eastabha: fetch failed; alta: fetch failed;
+// shmoualshmal: fetch failed`, while the two runs before it passed the same check on real code
+// changes. It is also why no agent session could run the required suite clean: the documented egress
+// proxy answers five of those hosts with HTTP 403.
 //
-// WHY: on this run, five platforms (satel, erapulse, alhoshan, alta, shmoualshmal) came back
-// «HTTP 403» and were reported as «a card can show a photo-less blank box», with advice to route
-// them through the same-origin proxy. Every one of those 403s was produced by the RUNNER's own
-// egress policy — `x-deny-reason: host_not_allowed`, a header no image host sends — and the photos
-// are fine. That is AGENTS.md's «A FAILED FETCH IS NOT AN EMPTY ANSWER» committed in the
-// verification layer: a request that never reached the origin, rendered as a confident negative
-// about the origin. The old `catch` had the same shape, scoring a transport failure as
-// `renderable: false`.
+// The repo's own rule for this is `scripts/test-exclusions.txt`: a live check belongs in a workflow
+// home, "so production being momentarily unhealthy must not fail an unrelated PR". The live sweep
+// already HAS that home — `verify-card-photos-render-live.ts`, in af-live-truth-check.yml — and it
+// is the stronger of the two: it walks the redirect chain hop by hop, samples several listings per
+// platform, and applies a majority gate. So NO coverage is lost here; a duplicate of it was sitting
+// in the wrong place.
 //
-// This does NOT soften the check. A 403 the HOST sends (hotlink protection) carries no deny-reason
-// and still FAILS, which is the negative control proven below. Only «we never got an answer» became
-// UNKNOWN, and UNKNOWN is not allowed to read as health either: if nothing could be judged, the
-// check fails.
-type Judgement = boolean | null;
-type Verdict = { platform: string; url: string; status: number; ctype: string; corp: string; renderable: Judgement; why: string };
-
-/** A response the local egress layer produced instead of the origin — never the host's verdict. */
-export const isEgressDenial = (h: { get(name: string): string | null }): boolean =>
-  Boolean(h.get('x-deny-reason'));
-
-// THE PRODUCTION ORIGIN, because a same-origin display url (the Sadin proxy path `/_img/sadin/*`)
-// only resolves against the deployed app — that Vercel rewrite is what makes it renderable at all.
-const ORIGIN = 'https://ezhalah-app.vercel.app';
-
-const judge = async (platform: string, storedUrl: string): Promise<Verdict> => {
-  // Judge what the BROWSER actually loads. Every photo entering the client passes through
-  // photoDisplayUrl (remote.ts finalize), so checking the raw stored url would test a string no
-  // <img> ever receives — and would have reported Sadin broken after the proxy fixed it.
-  const display = photoDisplayUrl(storedUrl);
-  const imgUrl = display.startsWith('/') ? ORIGIN + display : display;
-  try {
-    // GET, not HEAD: some hosts answer HEAD differently from the GET a browser actually issues.
-    const r = await fetch(imgUrl, { method: 'GET', redirect: 'follow' });
-    if (isEgressDenial(r.headers)) {
-      return { platform, url: imgUrl, status: r.status, ctype: '', corp: '', renderable: null,
-        why: `UNKNOWN: this run's own network refused the request (HTTP ${r.status}, `
-          + `x-deny-reason: ${r.headers.get('x-deny-reason')}) — the host never answered, so there is no verdict about it` };
-    }
-    const ctype = (r.headers.get('content-type') || '').toLowerCase();
-    const corp = (r.headers.get('cross-origin-resource-policy') || '').toLowerCase();
-    const okStatus = r.status === 200;
-    const okType = ctype.startsWith('image/');
-    // CORP IS A CROSS-ORIGIN-ONLY CHECK. `same-origin` blocks an <img> on ANOTHER origin and
-    // PERMITS one served from our own — which is the entire mechanism the Sadin proxy relies on.
-    // Judging it without asking "same origin as the app?" would condemn the very fix that works:
-    // measured live, the proxied url decoded at 900x1600 in the production browser while still
-    // carrying `cross-origin-resource-policy: same-origin` from Sadin's upstream response.
-    const sameOrigin = display.startsWith('/');
-    const okCorp = sameOrigin || corp === '' || corp === 'cross-origin';
-    const why = !okStatus ? `HTTP ${r.status}`
-      : !okType ? `content-type ${ctype || '(none)'}`
-      : !okCorp ? `cross-origin-resource-policy: ${corp} on a CROSS-origin url — the browser will REFUSE to display it (route the host through the same-origin proxy, as photoDisplayUrl does for Sadin)`
-      : '';
-    return { platform, url: imgUrl, status: r.status, ctype, corp, renderable: okStatus && okType && okCorp, why };
-  } catch (e) {
-    // No response at all — DNS, TLS, a dropped connection. That is not the host saying "no";
-    // silent → UNKNOWN, never unknown → NO.
-    return { platform, url: imgUrl, status: 0, ctype: '', corp: '', renderable: null,
-      why: `UNKNOWN: no response — ${String(e).slice(0, 70)}` };
-  }
-};
-
-const rows: { platform: string; url: string }[] = [];
-for (const p of PLATFORM_TABLES) {
-  const q = `${url}/rest/v1/${p}_residential_listings`
-    + `?select=photo_urls&active=eq.true&photo_urls=not.is.null&limit=1`;
-  try {
-    const r = await fetch(q, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
-    if (r.status !== 200) continue;
-    const j = (await r.json()) as { photo_urls: string[] | null }[];
-    const first = j?.[0]?.photo_urls?.[0];
-    if (first) rows.push({ platform: p, url: first });
-  } catch { /* platform skipped below by the coverage check */ }
-}
-
-check('the live sample actually reached production (this check cannot pass by finding nothing)',
-  rows.length >= Math.ceil(PLATFORM_TABLES.length * 0.7),
-  `only sampled ${rows.length}/${PLATFORM_TABLES.length} platforms — fails CLOSED rather than reporting a clean sweep`);
-
-if (rows.length) {
-  const verdicts = await Promise.all(rows.map((r) => judge(r.platform, r.url)));
-  const blocked = verdicts.filter((v) => v.renderable === false);
-  const unknown = verdicts.filter((v) => v.renderable === null);
-  const judged = verdicts.filter((v) => v.renderable === true);
-
-  for (const v of verdicts) {
-    const mark = v.renderable === true ? '✓' : v.renderable === false ? '✗' : '?';
-    console.log(`   ${mark} ${v.platform.padEnd(14)} ${v.renderable === true ? 'renderable' : v.why}`);
-  }
-
-  // UNKNOWN must not read as health either. If nothing could be judged, this check has proven
-  // nothing and says so — the same fail-closed rule the sampling floor above already applies.
-  check('at least one platform\'s photo was actually JUDGED (an all-UNKNOWN sweep proves nothing)',
-    judged.length + blocked.length > 0,
-    `all ${verdicts.length} sample(s) came back UNKNOWN — no host answered, so this run cannot speak `
-    + 'to renderability at all. Check this runner\'s egress policy before reading anything into it.');
-  if (unknown.length) {
-    console.log(`\n   ${unknown.length} platform(s) UNKNOWN (no host answer) — reported, not counted as broken:\n`
-      + unknown.map((u) => `     ${u.platform}: ${u.why}`).join('\n'));
-  }
-
-  // NO ALLOWLIST. There was one for Sadin while its CORP block had no answer; the same-origin
-  // proxy (PR #1918, src/lib/photoUrl.ts + the vercel.json rewrite) removed the reason for it, so
-  // the exception is gone rather than left behind to rot. Every platform is now simply required to
-  // render — which is the assertion we actually want.
-  check('every sampled platform\'s photo is BROWSER-RENDERABLE at its DISPLAY url',
-    blocked.length === 0,
-    blocked.length
-      ? blocked.map((b) => `${b.platform}: ${b.why}`).join('; ')
-        + '\n      If the host sends a blocking cross-origin-resource-policy, no URL rewrite fixes it: '
-        + 'either route that host through the same-origin proxy the way photoDisplayUrl() does for '
-        + 'Sadin, or accept the placeholder. Re-hosting another company\'s images is an OWNER '
-        + 'decision, never an engineering default.'
-      : '');
-
-  // The proxy is load-bearing: prove it is actually still rewriting, not quietly a no-op.
-  const sadinRow = rows.find((r) => r.platform === 'sadin');
-  if (sadinRow) {
-    check('sadin photos are routed through the same-origin proxy (the raw host still blocks)',
-      photoDisplayUrl(sadinRow.url).startsWith('/_img/sadin'),
-      `photoDisplayUrl left ${sadinRow.url.slice(0, 60)} untouched — sadin.com.sa sends CORP `
-      + 'same-origin, so an un-proxied url renders as a blank card.');
-  }
-}
+// COVERAGE CANNOT BE LOST SILENTLY BY THIS SPLIT. The live half's existence and its execution home
+// are asserted below, EXECUTED against the registry and the real workflow file rather than
+// string-matched — so deleting that file, or quietly unhoming it, turns THIS barrier red.
+const liveHalf = 'verify-card-photos-render-live.ts';
+check(`the LIVE half still exists on disk (${liveHalf})`,
+  existsSync(join(ROOT, 'scripts', liveHalf)),
+  'the live per-platform render sweep was removed from this file because that file covers it — if it '
+  + 'is gone, this class has no live coverage at all');
+const liveRow = loadRegistry(ROOT).excluded.find((e) => e.name === liveHalf);
+check('the LIVE half is a declared exclusion with a stated home',
+  Boolean(liveRow?.where), `no row for ${liveHalf} in scripts/test-exclusions.txt`);
+check('...and that home ACTUALLY INVOKES it (asked with workflowInvokes, never a bare includes)',
+  Boolean(liveRow) && liveRow!.where.startsWith('.github/')
+    && workflowInvokes(readFileSync(join(ROOT, liveRow!.where), 'utf8'), liveHalf),
+  `${liveRow?.where} does not run ${liveHalf} — a home that names a check without running it is how `
+  + 'two barriers went dark for weeks on 2026-09-03');
 
 // ── MUTATION PROOF — the renderability predicate, against responses that must be judged UNSAFE ──
 console.log('\n  mutation proof — the same predicate, against non-renderable responses\n');
@@ -236,18 +130,11 @@ mustCatch('CORP same-origin is ALLOWED when the url is served same-origin (the p
 mustCatch('...but the identical response is still refused cross-origin',
   renderable(200, 'image/png', 'same-origin', false) === false);
 
-// ── THE UNKNOWN DISCRIMINATOR — proven in BOTH directions, because turning a red into an UNKNOWN is
-// only legitimate if the red it removes was never the host's answer. The host's own refusal must
-// still fail, and it does.
-const hdrs = (o: Record<string, string>) => ({ get: (n: string) => o[n.toLowerCase()] ?? null });
-mustCatch('THE 2026-09-06 FALSE RED: the runner\'s own egress denial is UNKNOWN, not «the host blocks it»',
-  isEgressDenial(hdrs({ 'x-deny-reason': 'host_not_allowed' })) === true);
-mustCatch('a HOST-sent 403 (hotlink protection) is NOT excused as an egress denial — it still fails',
-  isEgressDenial(hdrs({ 'content-type': 'text/html', server: 'nginx' })) === false
-  && renderable(403, 'text/html', '') === false);
-mustCatch('a perfectly healthy image response is not mistaken for an egress denial (not vacuously UNKNOWN)',
-  isEgressDenial(hdrs({ 'content-type': 'image/jpeg' })) === false
-  && renderable(200, 'image/jpeg', '') === true);
+// A HOST-sent 403 (hotlink protection) is a real block and must stay one. The companion rule — that
+// a 403 the RUNNER's own egress layer produced is UNKNOWN rather than the host's verdict — belongs
+// to the live half now, and is proven there (verify-card-photos-render-live.ts, ops_incident #81).
+mustCatch('a host 403 (hotlink protection) treated as renderable',
+  renderable(403, 'text/html', '') === false);
 
 if (mutFail > 0) failed += mutFail;
 
