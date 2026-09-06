@@ -152,6 +152,17 @@ const CLICK_LEAF = (txt) => {
 // guard; they do not break the journey. Anything else uncaught is treated as a crash.
 const BENIGN = /Minified React error #(418|423|425)/;
 
+// The floor a post-search count read must clear before it can be trusted.
+//
+// finishGuided's mining transition holds the OLD (pre-AF) results on screen underneath for a
+// guaranteed minimum beat, so a count read during it is the STALE pre-answer number — and a stale
+// number sits perfectly "stable" across two reads, which is why stability alone is not enough.
+// This floor must therefore exceed the product's own beat: agent.tsx's SEARCH_MIN_MS (10000, the
+// owner's ten seconds for the platform roster, 2026-09-06) + LOADER_EXIT_MS (450) + margin. It was
+// 3000 while the beat was 2200; when the beat became 10s [J] read start=232 final=232 and failed on
+// a harness race, not a product defect. Named once so both journeys move together next time.
+const SEARCH_BEAT_FLOOR_MS = 12000;
+
 const launchOpts = { args: ['--no-sandbox', '--ignore-certificate-errors', '--disable-quic'] };
 if (process.env.PW_CHROMIUM) launchOpts.executablePath = process.env.PW_CHROMIUM;
 // A TLS-terminating egress proxy can reset Chromium's post-quantum ClientHello; pinning max TLS
@@ -731,7 +742,7 @@ try {
   // STABLE across two reads a second apart before trusting it.
   let reentrancyFinal = null;
   if (!reentrancyFinalOpen) {
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(SEARCH_BEAT_FLOOR_MS);
     let stableSince = null;
     const until = Date.now() + 45000;
     while (Date.now() < until) {
@@ -837,7 +848,7 @@ try {
   // the true narrowed count is 39 — a HARNESS race, not a product defect).
   let jFinal = null;
   if (!jFinalOpen) {
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(SEARCH_BEAT_FLOOR_MS);
     let stableSince = null;
     const until = Date.now() + 45000;
     while (Date.now() < until) {

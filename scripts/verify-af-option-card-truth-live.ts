@@ -954,12 +954,17 @@ try {
   // loading/intro/asking). MiningTransition — the deep-search beat after the interview ends — carries
   // NO testID at all, so a probe that looks only for `af-card` reports "overlay closed" while mining
   // is on screen. That false negative would point the blame straight at the pager instead of at an
-  // interview that never latched back to null, so the mining phase is detected by its own copy
-  // (afDeepSearchCopy.ts's «إزهله يدقّق في …» headline and the «نراجع … عقار» subline).
+  // interview that never latched back to null, so the mining phase is detected by its own copy —
+  // MiningTransition's «ندور لك على الأقرب لطلبك» headline, its «نراجع … عقار» subline, or the
+  // «لقينا … عقار أقرب لطلبك» found-beat it swaps to on completion. (Between 2026-08-31 and
+  // 2026-09-06 that headline was «إزهله يدقّق في …»; the owner reverted that redesign, so matching
+  // it alone would leave this diagnostic blind to the phase it exists to name.)
   const absentDiag = clicks > 0 ? '' : await page.evaluate(() => {
     const q = (s: string) => document.querySelectorAll(s).length;
     const body = document.body.innerText || '';
-    const mining = /إزهله يدقّق في/.test(body) || /نراجع\s[\d,٠-٩]+\sعقار/.test(body);
+    const mining = /ندور لك على الأقرب لطلبك/.test(body)
+      || /نراجع\s[\d,٠-٩]+\sعقار/.test(body)
+      || /لقينا\s[\d,٠-٩]+\sعقار أقرب لطلبك/.test(body);
     const shell = q('[data-testid="af-card"]') > 0;
     // `hasMore` also carries `isLatestResults` — only the NEWEST results turn keeps live actions
     // (owner 2026-08-24). So a NEWER results turn that renders nothing would silently retire the

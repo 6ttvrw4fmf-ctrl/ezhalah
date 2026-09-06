@@ -43,6 +43,7 @@ import {
   type LoaderPlatform,
 } from '@/data/loaderPlatforms';
 import { fetchActivePlatformNames } from '@/data/loaderActivePlatforms';
+import { PILL_STAGGER, highlightStepMs } from '@/lib/searchLoaderTiming';
 import type { SearchQuery } from '@/data/search';
 
 const IS_WEB = Platform.OS === 'web';
@@ -58,11 +59,12 @@ const SEARCH_TITLES = [
 ] as const;
 const TITLE_ROTATE_MS = 2400;
 
-// Pill choreography (ms) — deliberately calm (owner v4: slower, readable, premium; never "flashed
-// and disappeared"). 60ms stagger (owner range 60–100) lands the full 32-pill roster at ~2.12s
-// (31×60 + 260 fade), which agent.tsx's SEARCH_MIN_MS=2200 floor fully covers — the complete roster
-// is ALWAYS on screen before the exit fade can start (review finding: 75ms overran the floor).
-const PILL_STAGGER = 60;
+// Pill choreography — deliberately calm (owner v4: slower, readable, premium; never "flashed and
+// disappeared"), and since 2026-09-06 long enough that EVERY platform is both revealed and
+// highlighted before the loader may leave (owner: "make sure all the platforms show clearly … doing
+// it quick will make them lost"). The numbers and the contract live in ONE pure module so a barrier
+// can execute them — see lib/searchLoaderTiming.ts and
+// scripts/verify-search-loader-shows-every-platform.ts.
 const WAVE_RISE = 300;
 const WAVE_HOLD = 260;
 const WAVE_FALL = 380;
@@ -127,8 +129,11 @@ function PlatformPill({
   const glowLine: [string, string] = darkTheme ? ['#26312a', '#35543f'] : ['#e3ece6', '#b7dbc4'];
   useEffect(() => {
     if (reduced) { h.value = 0; return; }
-    // Full sweep ≈3.5–4.5s regardless of roster size; rest keeps each pill's phase stable per loop.
-    const step = Math.max(110, Math.min(220, Math.round(3600 / Math.max(1, total))));
+    // One full sweep takes LOADER_SWEEP_MS regardless of roster size, so the LAST pill is always
+    // reached inside the search floor (agent.tsx SEARCH_MIN_MS ≥ reveal + sweep — executed by
+    // scripts/verify-search-loader-shows-every-platform.ts). highlightStepMs also floors the step so
+    // a small roster reads as a wave, not a strobe. `rest` keeps each pill's phase stable per loop.
+    const step = highlightStepMs(total);
     const lit = WAVE_RISE + WAVE_HOLD + WAVE_FALL;
     const rest = Math.max(260, total * step - lit);
     h.value = withDelay(index * step, withRepeat(withSequence(

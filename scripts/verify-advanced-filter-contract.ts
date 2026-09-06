@@ -323,27 +323,28 @@ check('the result-intro count comes from matchTotal via quotableTotal(), never a
     /priceIsAnnual \|\| hasClientOnlyNarrowing\(r\.query\)\)\) return null/.test(fn));
 }
 
-// ── Deep-search transition (owner 2026-08-16 §9, redesigned 2026-08-31) ─────────────────────────
-// The deep-search beat is DECORATION: its dismissal is driven by plain setTimeout latches in
-// finishGuided (never an animation callback — src/lib/afterAnimation.ts's rule), a hard failsafe
-// dismisses it even if the search turn dies, and per the 2026-08-31 redesign it carries NO success
-// beat: the «لقينا N عقار أقرب لطلبك» claim is GONE (the overlay hands off directly to the results),
-// the headline is the dynamic «إزهله يدقّق في …» sentence built from the user's OWN committed
-// selections (src/lib/afDeepSearchCopy.ts), and the only number spoken is the honest from-count.
+// ── The «digging» transition (owner 2026-08-16 §9; briefly redesigned 2026-08-31, RESTORED by the
+//    owner 2026-09-06: "remove this design … keep it how it was") ─────────────────────────────────
+// The beat is DECORATION: its dismissal is driven by plain setTimeout latches in finishGuided (never
+// an animation callback — src/lib/afterAnimation.ts's rule) and a hard failsafe dismisses it even if
+// the search turn dies. It speaks the searching line, the honest from-count, and — once the search
+// lands — the «لقينا N عقار أقرب لطلبك» beat, whose number is quotableTotal()'s output handed in as
+// `to` (see verify-mining-total-honesty.ts for the honesty half). Reduced motion drops the drift.
 const miningSrc = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
 check('deep-search dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
   /phase: 'mining'/.test(agentSrc)
   && /timers\.push\(setTimeout\(/.test(agentSrc)
   && /15000/.test(agentSrc)
   && !/\.start\(\s*\(/.test(miningSrc));
-check('deep-search speaks the user\'s selections, claims no completion count, respects reduced motion',
+check('the transition speaks the searching line + the honest from-count, and respects reduced motion',
   /Going through \{count\} properties/.test(miningSrc)
-  && /deepSearchLine\(/.test(miningSrc)
-  && !/We found \{count\} properties closest to your request/.test(miningSrc)
+  && /Finding the closest match for you/.test(miningSrc)
   && /useReducedMotion/.test(miningSrc));
-check('the overlay sentence and the results pills are fed by the SAME deduped facet set',
+check('the completion beat is held long enough to be read (the 450ms direct hand-off was for a card that said nothing)',
+  /wait \+ 1100/.test(agentSrc),
+  'a copy swap the user cannot finish reading is the same as no copy at all');
+check('the results pills are fed by the deduped facet set (one label per committed answer)',
   /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
-  && /labels: dedupedFacets\.flatMap\(\(f\) => f\.labels\)/.test(agentSrc)
   && /facets: dedupedFacets,/.test(agentSrc));
 
 // ── Results summary + removable pills (owner 2026-08-16 §10) ────────────────────────────────────
