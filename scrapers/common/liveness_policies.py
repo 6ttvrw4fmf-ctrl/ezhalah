@@ -59,6 +59,11 @@ CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 # proof. alta additionally publishes an explicit property_status (تم البيع / تم التأجير / غير متاح)
 # which its scraper reads directly — that is SOURCE-STATED removal, a stronger signal than crawl
 # absence, and it deactivates through the scraper, never through this monitoring tier.
+# remal and amaall JOIN this set on 2026-09-06 (owner-instructed, continuing the 40-candidate
+# audit). CRAWL_PRESENCE_ONLY is the honest tier for both: small WordPress catalogues re-read in
+# full each run with no per-listing revisit endpoint. amaall additionally publishes an explicit
+# property_status (تم البيع / تم التأجير / تم التأجير بالكامل) which its scraper reads directly —
+# that is SOURCE-STATED removal and deactivates through the scraper, never through this tier.
 NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common"})
 
 
@@ -185,12 +190,12 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "alta", "aouj", "aqaratikom",
+            "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "alta", "amaall", "aouj", "aqaratikom",
             "aqarcity", "aqarmonthly", "arkaan", "awal", "eaqartabuk", "eastabha", "erapulse",
             "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry",
             "october",
-            "ramzalqasim", "rawasidark", "sadin", "satel", "shmoualshmal",
-            "souq24", "therc",
+            "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
+            "shmoualshmal", "souq24", "therc",
         )
     },
 }
