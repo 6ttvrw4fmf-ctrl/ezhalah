@@ -233,14 +233,33 @@ try {
   // the results STOPPED ARRIVING: rows hydrated and prices painted, both unchanged across consecutive
   // polls. Still neutral — a build that deletes rent rows quiesces on its Buy cards just the same and
   // fails the rent assertion below, which is the whole point of the journey.
-  let prev = { rows: -1, sar: -1 };
+  // QUIESCE ON RESULT CARDS, NOT ON "SOME PRICE TEXT" (2026-09-06). The readiness signal above was
+  // `sar > 0` — a count of «ر.س»/SAR occurrences anywhere in document.innerText. The FILTER FORM's
+  // own budget boxes carry that text, so `sar` was 1 before a single result existed, and 1 is
+  // perfectly stable across consecutive polls. The predicate could therefore be satisfied by a
+  // screen with no results on it at all.
+  //
+  // That went from theoretical to live the morning the owner raised the searching beat to ten
+  // seconds (agent.tsx SEARCH_MIN_MS 2,200 → 10,000 + LOADER_EXIT_MS 450). The beat HOLDS THE
+  // PREVIOUS SCREEN while it plays, and the hydration GETs finish underneath it — so `rows` and
+  // `sar` both went stable during the animation, the journey settled on the held screen, and
+  // reported «RENT cards are on screen — the Buy floor did not delete them: 0 «/سنوياً» + 0
+  // «/شهرياً» (price-bearing text nodes: 1)». One. The form's own label. It filed the
+  // pre-2026-09-02 rent-deletion defect against a production that does not have it.
+  //
+  // STILL NEUTRAL, which is the property that matters: the subject is now RESULT CARDS, and a build
+  // that really did delete rent rows still paints its Buy cards, still quiesces here, and still
+  // fails the rent assertion below. The readiness condition must never be the thing being asserted.
+  let prev = { rows: -1, cards: -1, sar: -1 };
   const results = await settleUntil(
     async () => {
-      const now = {
-        rows: hydrated.length,
-        sar: await page.evaluate(() => (document.body.innerText.match(/ر\.?س|SAR/g) || []).length),
-      };
-      const stable = now.rows > 0 && now.sar > 0 && now.rows === prev.rows && now.sar === prev.sar;
+      const dom = await page.evaluate(() => ({
+        cards: document.querySelectorAll('[data-testid^="card-listing-"]').length,
+        sar: (document.body.innerText.match(/ر\.?س|SAR/g) || []).length,
+      }));
+      const now = { rows: hydrated.length, cards: dom.cards, sar: dom.sar };
+      const stable = now.rows > 0 && now.cards > 0
+        && now.rows === prev.rows && now.cards === prev.cards;
       prev = now;
       return { ...now, stable };
     },
