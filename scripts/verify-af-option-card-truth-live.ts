@@ -950,12 +950,41 @@ try {
   // whole actions row is hidden while the AF interview overlay is open — the AF card is absolute, so
   // buttons underneath it are unreachable and hiding them is correct. Two different verdicts, one
   // indistinguishable message, which is how a barrier ends up accusing a correct production.
+  // ageFlow has FOUR phases and only three of them render `af-card` (the shared Shell used by
+  // loading/intro/asking). MiningTransition — the deep-search beat after the interview ends — carries
+  // NO testID at all, so a probe that looks only for `af-card` reports "overlay closed" while mining
+  // is on screen. That false negative would point the blame straight at the pager instead of at an
+  // interview that never latched back to null, so the mining phase is detected by its own copy
+  // (afDeepSearchCopy.ts's «إزهله يدقّق في …» headline and the «نراجع … عقار» subline).
   const absentDiag = clicks > 0 ? '' : await page.evaluate(() => {
     const q = (s: string) => document.querySelectorAll(s).length;
-    const afOpen = q('[data-testid="af-card"]') > 0 || q('[data-testid^="af-option"]') > 0;
-    return ` · cards on screen=${q('[data-testid^="card-listing-"]')} · af overlay open=${afOpen}` +
+    const body = document.body.innerText || '';
+    const mining = /إزهله يدقّق في/.test(body) || /نراجع\s[\d,٠-٩]+\sعقار/.test(body);
+    const shell = q('[data-testid="af-card"]') > 0;
+    // `hasMore` also carries `isLatestResults` — only the NEWEST results turn keeps live actions
+    // (owner 2026-08-24). So a NEWER results turn that renders nothing would silently retire the
+    // pager on the turn the user is actually looking at. Counting the result headlines distinguishes
+    // that from a pager the newest turn simply refused to draw.
+    const heads = [...document.querySelectorAll('*')]
+      .filter((e) => e.children.length === 0 && /لقينا/.test(e.textContent || ''))
+      .map((e) => (e.textContent || '').trim());
+    // THE DISCRIMINATOR. The closing note («عرضت لك أول …») is rendered by the SAME block as the
+    // buttons, and that block bails early on `(m.typing && !doneTyping) || shown < initialReveal(...)`.
+    // So: note ABSENT ⇒ the block returned null and the cause is the reveal gate — the cascade never
+    // reached initialReveal, and «عرض المزيد» is unreachable because it lives inside the very block
+    // the unfinished cascade suppresses. Note PRESENT ⇒ the block rendered and chose not to draw the
+    // button, i.e. hasMore was false, i.e. isLatestResults was false. Two different bugs, and nothing
+    // else on the page tells them apart.
+    const closingNotes = [...document.querySelectorAll('*')]
+      .filter((e) => e.children.length === 0 && /عرضت لك/.test(e.textContent || ''))
+      .map((e) => (e.textContent || '').trim());
+    return ` · cards on screen=${q('[data-testid^="card-listing-"]')}` +
+           ` · af shell (loading|intro|asking) open=${shell}` +
+           ` · af MINING overlay open=${mining}` +
            ` · load-more elements anywhere=${q('[data-testid="results-load-more"]')}` +
-           ` · af pills=${q('[data-testid^="af-pill-"]')}`;
+           ` · af pills=${q('[data-testid^="af-pill-"]')}` +
+           ` · result headlines=${heads.length} [${heads.join(' | ')}]` +
+           ` · CLOSING NOTES=${closingNotes.length} [${closingNotes.join(' | ')}]`;
   }).catch(() => ' · (diagnostic unavailable)');
   check('4. R10.1.1 — «عرض المزيد» was exercised (the button was there to click)', clicks > 0 || (landed.total ?? 0) <= FIRST_PAGE,
     clicks ? `${clicks} click(s), ${pages.length} network page(s) fired (p_offset ${pages.map((p) => p.body.p_offset).join(',') || '— buffer served every click'})` : `no button and total=${landed.total} > ${FIRST_PAGE}${absentDiag}`);
