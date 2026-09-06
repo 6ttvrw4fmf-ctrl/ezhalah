@@ -166,7 +166,6 @@ verify-farm-agriculture-plot-classification.ts
 verify-filter-autoapply-mirror.ts
 verify-filter-never-calls-agent.ts
 verify-filter-stop-cancels-and-restores.ts
-verify-frontend-bundle-matches-source-live.ts
 verify-furnishing-enum-both-labels.ts
 verify-gathern-liveness-evidence.ts
 verify-gathern-liveness-trust-gate.ts

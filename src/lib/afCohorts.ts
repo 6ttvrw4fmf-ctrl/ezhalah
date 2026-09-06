@@ -305,7 +305,13 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
 //   - villa-only tokens stay villa-only
 // Anything not returned here is NOT certified for this scope and must never reach q.amenities. The
 // caller asks the user instead — guessing an uncertified attribute is how UNKNOWN silently becomes No.
-const RESIDENTIAL_AMENITY_BASE = [
+// EXPORTED for scripts/verify-frontend-bundle-matches-source-live.ts, which must find this exact
+// ordered sequence as a COMPILED LITERAL in the served bundle. It takes the array itself rather than
+// re-typing the tokens, so the needle cannot drift from the declaration it is meant to track — and,
+// unlike certifiedAmenityKeys()'s RETURN value, this really is a literal a bundler emits verbatim
+// (the return value has `furnished` appended at runtime, so the joined return could never appear in
+// any artifact — that mistake made the live drift detector red on 15 consecutive scheduled runs).
+export const RESIDENTIAL_AMENITY_BASE = [
   'kitchen', 'parking', 'elevator', 'ac', 'private_entrance', 'maid_room', 'driver_room',
   // Added 2026-08-31 (owner, gym-bug class sweep): these columns already existed on
   // search_listings_ar (2026-08-10/11 rich-canonical-columns + car_entrance/optical_fibers
@@ -318,7 +324,7 @@ const RESIDENTIAL_AMENITY_BASE = [
   'separate_electricity_meter', 'separate_water_meter',
 ] as const;
 // aqar villa ads carry مدخل سيارة / صرف صحي checkboxes the apartment forms do not (2026-08-16).
-const VILLA_ONLY_AMENITIES = ['car_entrance', 'sanitation'] as const;
+export const VILLA_ONLY_AMENITIES = ['car_entrance', 'sanitation'] as const;
 
 export function certifiedAmenityKeys(q: SearchQuery): string[] {
   // Not certified for this cohort at all ⇒ no amenity token is applicable. Never fall through to a
