@@ -531,6 +531,7 @@ const AMAALL_LOGO = require('../../assets/images/amaall.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
 const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
 const AWAL_LOGO = require('../../assets/images/awal.jpg');
+const AZDAD_LOGO = require('../../assets/images/azdad.png');
 const ALKHAAS_LOGO = require('../../assets/images/alkhaas.jpg');
 const ABEEA_LOGO = require('../../assets/images/abeea.jpg');
 const JURASH_LOGO = require('../../assets/images/jurash.jpg');
@@ -638,6 +639,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('amaall')) return <Image source={AMAALL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('azdad')) return <Image source={AZDAD_LOGO} style={card.hostBadge} contentFit="contain" />;
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
   // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.
@@ -706,6 +708,7 @@ function sourceHost(source: string): string {
   if (s.includes('amaall')) return 'amaall.com';
   if (s.includes('alta')) return 'alta.com.sa';
   if (s.includes('awal')) return 'awaalun.com';
+  if (s.includes('azdad')) return 'azdadalaqaria.com';
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
   // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.

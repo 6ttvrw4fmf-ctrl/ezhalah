@@ -890,6 +890,7 @@ const AR: Record<string, string> = {
   'Amaall Real Estate Services':       'آمال للخدمات العقارية',    // official (amaall.com)
   'Alta Real Estate Services':         'ألتا للخدمات العقارية',   // official (alta.com.sa header)
   'Shmou Al Shmal Real Estate':        'شموع الشمال العقارية',    // official (shmoua-alshmal.com header)
+  'Azdad Al Aqariah':                  'مكتب ازداد العقارية',      // official (azdadalaqaria.com page title)
   'Awal United for Real Estate':       'أوال المتحدة العقارية', // official (their X @awaalun: «مؤسسة أوال المتحدة العقارية»)
   'Al Khaas':                          'الخاص للاستثمار العقاري',
   'Abeea Real Estate':                 'ابيعا العقارية',
