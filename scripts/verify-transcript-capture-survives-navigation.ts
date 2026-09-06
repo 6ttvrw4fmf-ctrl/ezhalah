@@ -54,6 +54,43 @@ check('what is stored restores to a real conversation, not an empty one',
 check('the revealed-card count survives, so the chat reopens where it was left',
   (back?.revealCount as any)?.r1 === 10);
 
+// ── 1b. A REOPENED CHAT IS HISTORY, NOT A REPLAY ────────────────────────────────────────────────
+// Owner, 2026-09-05: "when the user clicks on the sidebar, no animation or anything — it's like
+// history, for everything, whether he found the listings he wanted or there were none." The bar is
+// ChatGPT/Claude: tap a past conversation and it is simply THERE. Three things have to hold for
+// every kind of conversation, not just the happy one:
+//   · it must SERIALIZE at all — anything that fails to save falls through to a live re-search;
+//   · nothing may come back with `typing: true`, or the agent re-types its old answer;
+//   · every non-user turn must be marked finished, or the typewriter machinery re-runs it.
+// A ZERO-RESULT chat is the one most likely to regress, because "no listings" is easy to treat as
+// "nothing to save"; and a chat captured MID-TYPEWRITER must still come back finished, which is the
+// case that now exists precisely because staging happens mid-turn.
+const LISTING = { id: 'l1', title: 'شقة', price: 1, platform: 'aqar' } as any;
+const KINDS: Record<string, any[]> = {
+  'a chat with listings': [
+    { id: 'u', role: 'user', text: 'شقق' },
+    { id: 'r', role: 'results', text: 'لقينا 40', result: { listings: [LISTING], total: 40, hasMore: true } }],
+  'a ZERO-RESULT chat': [
+    { id: 'u', role: 'user', text: 'قصر بـ٥٠٠ ريال' },
+    { id: 'r', role: 'results', text: 'ما فيه نتائج', result: { listings: [], total: 0, hasMore: false } }],
+  'a chat-only conversation (no search)': [
+    { id: 'u', role: 'user', text: 'هلا والله' },
+    { id: 'a', role: 'agent', text: 'هلا فيك' }],
+  'a chat captured MID-TYPEWRITER': [
+    { id: 'u', role: 'user', text: 'شقق' },
+    { id: 'a', role: 'agent', text: 'أبشر', typing: true },
+    { id: 'r', role: 'results', text: 'لقينا', result: { listings: [LISTING], total: 5, hasMore: false } }],
+};
+for (const [kind, msgs] of Object.entries(KINDS)) {
+  const saved = serializeChat({ msgs, revealCount: { r: 10 }, afReceipt: {}, guidedPills: null } as any);
+  check(`${kind} is saved (an unsaved chat falls through to a live re-search)`, !!saved);
+  if (!saved) continue;
+  const back = restoreChat(saved)!;
+  check(`${kind} reopens with NO typewriter replay`, !back.msgs.some((m: any) => m.typing === true));
+  check(`${kind} reopens with every turn marked finished`,
+    back.msgs.filter((m: any) => m.role !== 'user').every((m: any) => back.doneTyping[m.id] === true));
+}
+
 // ── 2. the staging must happen BEFORE the busy guard ─────────────────────────────────────────────
 const src = readFileSync('src/app/agent.tsx', 'utf8');
 
