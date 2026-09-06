@@ -20,11 +20,33 @@
 // its listings answer UNKNOWN to those AF questions instead of answering with what the source
 // actually published. That is invisible from the search side — which is the whole problem.
 //
-// Both sides are read from PRODUCTION's live definitions, so this cannot be satisfied by editing a
-// list in this repo. The view definitions are fetched ONCE and scanned in memory: the first
-// attempt at this check lived in the migration and called pg_get_viewdef() once per platform,
-// which hit the statement timeout on a 270KB definition and rolled the migration back.
-import { resolvePublicSupabase } from './lib/public-supabase.ts';
+// ── THE SPLIT (2026-09-06, routine #10, ops_incident #104) ──────────────────────────────────────
+// This file used to ask PRODUCTION the question, from inside `npm test` — the REQUIRED status check
+// on every PR. Measured that morning:
+//   • EXPLAIN ANALYZE ops_af_attribute_coverage(): 9,803 ms execution, 9,930 shared buffers, 40 rows.
+//   • Three consecutive anon PostgREST calls: HTTP 200 at 8,971 / 10,076 / 11,283 ms.
+//   • The same call from CI at 05:05 UTC: HTTP 500 — a statement timeout, which this barrier
+//     correctly reported as «FAIL the coverage RPC could be reached — HTTP 500 — fails CLOSED».
+//   • The privileged call returns all 40 rows, so the FUNCTION IS CORRECT; only its cost is a
+//     problem. On one unchanged commit, `npm test` went RED, GREEN on re-run, then RED again.
+// A ~10-second production RPC sitting on the statement-timeout boundary cannot decide the verdict on
+// an unrelated diff. So the LIVE half moved to a workflow home, exactly as scripts/test-exclusions.txt
+// already does for verify-migration-drift-vs-production.ts and for the same stated reason.
+//
+// NOTHING WAS WEAKENED, AND NO COVERAGE OF A DIFF WAS LOST. The live half still fails CLOSED on an
+// unreachable RPC; it simply fails the RIGHT job now — a 6-hourly workflow that carries a
+// failure→alert_event bridge, so a real half-wired platform reaches a human within 6h instead of
+// reaching whichever unrelated PR author happened to be next. What `npm test` keeps is the half that
+// was ever a statement about the DIFF: the predicate, mutation-proven below.
+//
+// AND THE SPLIT CANNOT SILENTLY BECOME A DELETION. The live half's existence, its declared home, and
+// that the home ACTUALLY INVOKES it are asserted below — EXECUTED against the registry and the real
+// workflow file via liveHalfProblems(), never string-matched.
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { loadRegistry } from './lib/testRegistry.ts';
+import { liveHalfProblems } from './lib/liveHalf.ts';
+import { attributeCoverageIsClean, type AttrCoverageRow } from './lib/coverageGaps.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => {
@@ -32,78 +54,56 @@ const check = (label: string, ok: boolean, why = '') => {
   if (!ok) failed++;
 };
 
+const ROOT = join(import.meta.dirname, '..');
 console.log('\nEvery searchable platform appears in BOTH Advanced Filter attribute views\n');
 
-const { url, key } = resolvePublicSupabase();
-const rpc = async (fn: string, body: unknown) => {
-  const r = await fetch(`${url}/rest/v1/rpc/${fn}`, {
-    method: 'POST',
-    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return { status: r.status, json: await r.json().catch(() => null) };
-};
+// ── THE LIVE HALF MUST STILL RUN SOMEWHERE ──────────────────────────────────────────────────────
+const LIVE = 'verify-af-attribute-views-cover-every-platform-live.ts';
+const homing = liveHalfProblems(
+  LIVE,
+  loadRegistry(ROOT),
+  (name) => existsSync(join(ROOT, 'scripts', name)),
+  (rel) => (existsSync(join(ROOT, rel)) ? readFileSync(join(ROOT, rel), 'utf8') : null),
+);
+check(`the LIVE half is homed in a workflow that actually invokes it (${LIVE})`,
+  homing.length === 0, homing.join('\n      '));
 
-const res = await rpc('ops_af_attribute_coverage', {});
-
-if (res.status === 404) {
-  check('ops_af_attribute_coverage exists in production', false,
-    'HTTP 404 (PGRST202) — the coverage RPC has not shipped yet. Apply its migration; a check that ' +
-    'cannot run must not report success.');
-} else if (res.status !== 200) {
-  check('the coverage RPC could be reached', false, `HTTP ${res.status} — fails CLOSED`);
-} else {
-  type Row = { platform: string; in_rich: boolean; in_extra: boolean; searchable_rows: number };
-  const rows = (res.json as Row[]) ?? [];
-  const gaps = rows.filter((r) => !r.in_rich || !r.in_extra);
-
-  check('every searchable platform is in BOTH listing_rich_attrs and listing_extra_attrs',
-    gaps.length === 0,
-    gaps.length
-      ? gaps.map((g) => `${g.platform} (${g.searchable_rows} rows) missing from ` +
-          [!g.in_rich && 'listing_rich_attrs', !g.in_extra && 'listing_extra_attrs'].filter(Boolean).join(' + ')).join('; ')
-      : '');
-
-  // A coverage check that sees zero platforms would pass forever — the "barrier that supplies its
-  // own input" failure. Prove the comparison is evaluating the real fleet.
-  check('the coverage RPC is evaluating the real fleet (sanity: it still sees platforms)',
-    rows.length >= 30, `saw ${rows.length} searchable platforms`);
-}
-
-// ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
-console.log('\n  mutation proof — the same predicate, against broken coverage data\n');
+// ── MUTATION PROOF — the REAL predicate both halves share, against broken coverage data ─────────
+// attributeCoverageIsClean() is imported from scripts/lib/coverageGaps.ts, which is the same
+// function the live half runs against production. A copy here would prove nothing about the code
+// that decides production's verdict — that is the drift class that made verify-extract-price pass
+// while production broke on 2026-08-29.
+console.log('\n  mutation proof — the shared predicate, against broken coverage data\n');
 let mutFail = 0;
 const mustCatch = (label: string, caught: boolean) => {
   if (caught) { console.log(`  PASS  catches: ${label}`); return; }
   mutFail++;
   console.error(`  FAIL  BLIND to: ${label}`);
 };
-type Row = { platform: string; in_rich: boolean; in_extra: boolean; searchable_rows: number };
-// THIS is the predicate the barrier runs, extracted so the mutants exercise the real thing.
-const isClean = (rows: Row[]) => rows.filter((r) => !r.in_rich || !r.in_extra).length === 0;
-const ok = (p: string): Row => ({ platform: p, in_rich: true, in_extra: true, searchable_rows: 10 });
+const ok = (p: string): AttrCoverageRow => ({ platform: p, in_rich: true, in_extra: true, searchable_rows: 10 });
 
 // M-1: EXACTLY the awal shape — present in extra, absent from rich. The half-wired revival.
 mustCatch('a platform in listing_extra_attrs but NOT listing_rich_attrs (the awal shape)',
-  !isClean([ok('aqar'), { platform: 'awal', in_rich: false, in_extra: true, searchable_rows: 51 }]));
+  !attributeCoverageIsClean([ok('aqar'), { platform: 'awal', in_rich: false, in_extra: true, searchable_rows: 51 }]));
 // M-2: the mirror image — an onboarding that wires rich and forgets extra.
 mustCatch('a platform in listing_rich_attrs but NOT listing_extra_attrs',
-  !isClean([ok('aqar'), { platform: 'newone', in_rich: true, in_extra: false, searchable_rows: 7 }]));
+  !attributeCoverageIsClean([ok('aqar'), { platform: 'newone', in_rich: true, in_extra: false, searchable_rows: 7 }]));
 // M-3: missing from both — a fully un-wired platform that search still reaches via the union.
 mustCatch('a platform missing from BOTH views',
-  !isClean([{ platform: 'ghost', in_rich: false, in_extra: false, searchable_rows: 900 }]));
+  !attributeCoverageIsClean([{ platform: 'ghost', in_rich: false, in_extra: false, searchable_rows: 900 }]));
 // M-4: a gap on a platform with FEW rows is still a gap — small platforms are exactly the ones
 // that get half-wired and shrugged off.
 mustCatch('a gap on a 6-row platform is still a gap',
-  !isClean([{ platform: 'tiny', in_rich: false, in_extra: true, searchable_rows: 6 }]));
-// M-5: and a genuinely clean fleet must NOT be reported as broken.
-mustCatch('a fully-wired fleet is not reported as a failure', isClean([ok('a'), ok('b')]) === true);
+  !attributeCoverageIsClean([{ platform: 'tiny', in_rich: false, in_extra: true, searchable_rows: 6 }]));
+// M-5: and a genuinely clean fleet must NOT be reported as broken — the negative control, without
+// which a predicate that is red for everything would look like a working barrier.
+mustCatch('a fully-wired fleet is not reported as a failure', attributeCoverageIsClean([ok('a'), ok('b')]) === true);
 
 if (mutFail > 0) failed += mutFail;
 
 console.log(
   failed === 0
-    ? '\n✅ every searchable platform reaches the Advanced Filter through both attribute views.\n'
-    : `\n❌ ${failed} check(s) failed — a searchable platform is half-wired to the Advanced Filter.\n`,
+    ? '\n✅ the attribute-coverage predicate catches every half-wiring shape, and its live half still runs.\n'
+    : `\n❌ ${failed} check(s) failed.\n`,
 );
 process.exit(failed === 0 ? 0 : 1);

@@ -40,6 +40,7 @@ import { openAfOffer } from './lib/afOfferLive.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { AF_EVIDENCE, afActive, type AfCanon } from '../src/lib/afEvidence.ts';
+import { awaitResultsTurn, POST_SEARCH_BUDGET_MS, SEARCH_BEAT_MS } from './lib/afJourneyPacing.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -250,7 +251,29 @@ async function main() {
     `${(committed.rows ?? []).filter((r: any) => r.af_canon == null).length} of ${(committed.rows ?? []).length} rows unpacked`);
 
   // ── 3. read the chips a human reads, and hold each to the listing's own canonical row ─────────
-  await page.waitForTimeout(4000);
+  // WAIT FOR THE RESULTS TURN TO ARRIVE; NEVER READ IT AFTER A FIXED SLEEP (2026-09-06). This was
+  // `waitForTimeout(4000)`. On 2026-09-06 the owner raised the searching beat to ten seconds
+  // (SEARCH_MIN_MS 2,200 → 10,000, + LOADER_EXIT_MS 450), and the beat HOLDS THE PREVIOUS SCREEN
+  // while it plays — so this read landed in the middle of the animation, found 0 cards, and
+  // reported «§12A is not honest on the live card» against a rule that was working. The floor is
+  // now DERIVED from agent.tsx's own constants and the arrival is OBSERVED, so the next change to
+  // the beat moves this with it instead of turning it into an accusation.
+  // THE PREDICATE MUST NAME *THIS* TURN'S CARDS. The chat transcript keeps every previous results
+  // turn on screen, so "is any card-listing-<id> present?" is true before the answer is even sent —
+  // a poll that cannot fail is a fixed sleep with extra steps. Intersect with the ids the committed
+  // response actually returned, which is the only set that proves the NEW turn has rendered.
+  const committedIds = new Set<number>((committed.rows ?? []).map((r: any) => Number(r.listing_id)));
+  const landed = await awaitResultsTurn(
+    () => page.evaluate(() => [...document.querySelectorAll('[data-testid^="card-listing-"]')]
+      .map((e) => Number(/^card-listing-(\d+)$/.exec(e.getAttribute('data-testid') || '')?.[1]))
+      .filter((n) => Number.isFinite(n)))
+      .then((ids: number[]) => ids.filter((id) => committedIds.has(id)).length),
+    (ms) => page.waitForTimeout(ms));
+  if (!landed.settled) {
+    skip('the committed results turn rendered', `NOT EXERCISED — no card on screen ${POST_SEARCH_BUDGET_MS}ms after the answer committed (beat ${SEARCH_BEAT_MS}ms)`);
+    console.log('\n✗ the results turn never arrived — nothing about §12A was proved');
+    await browser.close(); process.exit(1);
+  }
   const cards = await page.evaluate(() => [...document.querySelectorAll('[data-testid="card-af-evidence"]')]
     .map((strip: any) => ({
       // WHICH LISTING this strip belongs to. Matching strips to response rows by POSITION is

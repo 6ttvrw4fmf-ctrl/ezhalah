@@ -807,3 +807,35 @@ export async function openMobileSidebar(page, { guestOk = false } = {}) {
   }
   return false;
 }
+
+// ── A HIT TEST THAT FOUND NOTHING IS NOT A NEIGHBOUR STEALING THE PRESS ─────────────────────────
+// `tap-targets-meet-44` probes five points of every 44px-marked control and asks who owns each one.
+// It collapsed two different answers into one string, `'nothing'`, and then reported BOTH under a
+// message that names a cause: «an expanded tap area is capturing presses meant for this control».
+//
+// That cause is only ever true when the point resolved to ANOTHER CONTROL — and in that case the
+// probe already has that control's label. When `document.elementFromPoint()` returns null, or lands
+// on an element inside no control at all, nothing was capturing anything: the hit test simply found
+// no control there. Asserting the first as the second is the PART 9 error the journey suite keeps
+// paying for — a message that sounds like a diagnosis and is really a guess.
+//
+// Measured, and the reason this exists (ops_incident #120, journey sweep run 15, 2026-09-06): the
+// first time this journey ever ran on WebKit and Firefox it produced 12 defects, and EVERY one was
+// the null branch, at all five points including the centre, on controls the rest of the sweep taps
+// successfully — «تصفية» and «الوكيل الذكي» among them. Whether that is a real un-tappable control
+// on those engines or a probe artifact is NOT established, and this function deliberately does not
+// decide it: it makes the two shapes say what they are, so the next per-engine sweep answers the
+// question instead of restating the guess (PART 11.2 rule 4; the #1053 precedent — instrument
+// rather than guess a third time).
+//
+// Neither shape is excused. Both still fail the journey.
+export function classifyTapOwnership(pts) {
+  const stolen = {};
+  const blind = {};
+  for (const [k, p] of Object.entries(pts || {})) {
+    if (p && p.ownerLabel) stolen[k] = p.ownerLabel;
+    else if (p && p.hitNull) blind[k] = 'the hit test returned no element at all';
+    else blind[k] = `the hit test landed on ${(p && p.hitTag) || 'an element it could not describe'}, which is inside no control`;
+  }
+  return { stolen, blind };
+}

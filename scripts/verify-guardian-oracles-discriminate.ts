@@ -99,25 +99,59 @@ console.log('§1 mutations');
 // ═══ §2 · the auth invitation: detection AND dismissal, executed together ═══════════════════════
 // A stub page that models what production actually renders. It answers about whichever selector the
 // real function asks for, so a mutation that reverts the selector genuinely changes the outcome.
+const CARD = '[data-testid="signin-card"]';
+const MODAL = '[data-testid="auth-popup"]';
+const CLOSE_X = '[data-testid="auth-popup-close"]';
+
 /** @param present  the invitation hosts production is currently rendering
- *  @param stubborn true = nothing ever closes it (used to prove a closure check can still fail) */
-function makePage(present: string[], stubborn = false) {
+ *  @param stubborn true = nothing ever closes it (used to prove a closure check can still fail)
+ *  @param remount  what MOUNTS after this one closes, and how long it takes to appear. This is the
+ *                  #118 state and the reason the stub needed it: production does not go to an empty
+ *                  screen when the modal closes, it hands over to the card (measured 3/3,
+ *                  harness.mjs). Modelling the close as "everything is gone forever" is what let
+ *                  this barrier stay green for the whole time the defect was live. */
+function makePage(
+  present: string[],
+  stubborn = false,
+  remount: { hosts: string[]; afterMs: number } | null = null,
+) {
   let live = new Set(present);
+  // ONE-SHOT, like the product: the modal hands over to the card once. Dismissing that card is a
+  // dismissal, not another hand-off — a stub that re-armed here would make the journey's two-step
+  // look like an infinite loop and hide the fact that the second dismissal genuinely sticks.
+  let pending = remount;
   const has = (sel: string) => sel.split(',').some((s) => live.has(s.trim()));
+  const hostOf = (sel: string) => sel.split(',').map((s) => s.trim()).find((s) => live.has(s));
+  const closed = () => {
+    if (stubborn) return;
+    live = new Set();
+    // The hand-off, on a real timer: the card mounts a beat after the modal unmounts.
+    if (pending) { const { hosts, afterMs } = pending; pending = null; setTimeout(() => { live = new Set(hosts); }, afterMs); }
+  };
   const p = {
     groundPresses: 0,
     closeClicks: 0,
     // page.$ resolves an element handle only for a selector that is actually rendered — so a
     // mutation reverting to a selector this presentation does not render really does get null.
-    $: async (sel: string) => (has(sel) ? {
-      click: async () => { p.closeClicks++; if (!stubborn) live = new Set(); },
-    } : null),
+    // The handle carries its own scoped .$(), because the × belongs to a PRESENTATION: the compact
+    // card renders one inside itself, the modal's main step renders none (AuthModal.tsx:272). A
+    // page-wide lookup cannot tell those apart, which is the shape the scoped lookup exists to stop.
+    $: async (sel: string) => {
+      const host = hostOf(sel);
+      if (!host) return null;
+      const click = async () => { p.closeClicks++; closed(); };
+      return {
+        host,
+        click,
+        $: async (s: string) => (s === CLOSE_X && live.has(CLOSE_X) && host !== MODAL ? { click } : null),
+      };
+    },
     mouse: {
       // The ground press is the centered modal's own outer Pressable (AuthModal.tsx:139). A press
       // at (10,10) on a desktop card page lands on the page, not the card, so the card is untouched.
       click: async (_x: number, _y: number) => {
         p.groundPresses++;
-        if (!stubborn && live.has('[data-testid="auth-popup"]')) live = new Set();
+        if (live.has(MODAL)) closed();
       },
     },
     // countVisible() goes through page.evaluate(fn, selector); the stub answers about whichever
@@ -151,6 +185,55 @@ console.log('\n§2 the auth invitation is found and closed on BOTH presentations
 }
 check('the shared selector covers both presentations and nothing else',
   AUTH_INVITATION_SELECTOR.includes('auth-popup"]') && AUTH_INVITATION_SELECTOR.includes('signin-card'));
+
+// ═══ §2b · #118 · closing the modal is not a dismissal, and a transient zero is not either ═══════
+// Production, desktop 1440, 3/3 fresh contexts, sampled every 250 ms after the ground press:
+//     0/1 → 0/0 → 1/0 → 1/0 …        (card/modal; ~250-750 ms with NEITHER on screen)
+// The card is suppressed only while the modal is open, so closing the modal hands back to the card
+// with a gap in between. Returning on the first zero certified a dismissal that never happened, and
+// the journey then filed «the dismissed auth invitation came back» as a P1 against correct product
+// behaviour. The verdict must therefore survive the hand-off window, and «it came back» is its own
+// answer — not a failure, and above all not a success.
+console.log('\n§2b a dismissal verdict survives the modal→card hand-off (#118)');
+{
+  const p = makePage([MODAL], false, { hosts: [CARD, CLOSE_X], afterMs: 600 });
+  const r = await dismissAuthInvitation(p as never, 1000);
+  check('closing the modal, with the card taking its place, reports "reappeared" — never "dismissed"',
+    r === 'reappeared');
+  check('the modal was closed by a ground press, as the product requires', p.groundPresses === 1);
+}
+{
+  // The same call on the card that took over: nothing replaces it, so this one really is a dismissal.
+  const p = makePage([CARD, CLOSE_X]);
+  check('dismissing the card, with nothing taking its place, is a real "dismissed"',
+    (await dismissAuthInvitation(p as never, 1000)) === 'dismissed');
+}
+{
+  // The two-step the journey performs, executed end to end: modal → card → stably gone.
+  const p = makePage([MODAL], false, { hosts: [CARD, CLOSE_X], afterMs: 400 });
+  const first = await dismissAuthInvitation(p as never, 1000);
+  // the card that arrived renders its own ×, exactly as the compact presentation does
+  const second = await dismissAuthInvitation(p as never, 2000);
+  check('dismiss → reappeared → dismiss again ends stably gone (the journey\'s own sequence)',
+    first === 'reappeared' && second === 'dismissed');
+}
+// KNOWN BOUND, stated rather than hidden: the hold is 1500 ms against a measured 250-750 ms
+// hand-off. A presentation that took longer than the hold to mount would read as 'dismissed'. The
+// margin is 2×; if the product's hand-off ever slows, this number is what has to move.
+{
+  const p = makePage([MODAL], false, { hosts: [CARD, CLOSE_X], afterMs: 5000 });
+  check('a hand-off SLOWER than the hold is the documented blind spot, not a silent one',
+    (await dismissAuthInvitation(p as never, 1000)) === 'dismissed');
+}
+{
+  // HARDENING, not the measured defect: today the card is unmounted while the modal is up, so a
+  // page-wide × lookup finds nothing and falls through to the ground press by luck. If both are
+  // ever on screen at once, the mechanism must still be the one belonging to the surface found.
+  const p = makePage([MODAL, CLOSE_X]);
+  await dismissAuthInvitation(p as never, 1000);
+  check('with a stray × elsewhere on the page, the modal is still closed by its ground press',
+    p.groundPresses === 1 && p.closeClicks === 0);
+}
 
 console.log('§2 mutations — the real file is edited and re-executed');
 {
@@ -217,10 +300,36 @@ console.log('§2 mutations — the real file is edited and re-executed');
   // must be caught calling it 'dismissed' anyway.
   await withMutation(
     'verifying closure by a × this presentation never renders, so a modal that never closed reports "dismissed"',
-    (s) => s.replace('const gone = await until(async () => (await countVisible(page, AUTH_INVITATION_SELECTOR)) === 0, 8000);',
-      'const gone = await until(async () => (await countVisible(page, \'[data-testid="auth-popup-close"]\')) === 0, 8000);'),
+    (s) => s.replaceAll('countVisible(page, AUTH_INVITATION_SELECTOR)',
+      'countVisible(page, \'[data-testid="auth-popup-close"]\')'),
     (r) => r === 'dismissed',
-    () => makePage(['[data-testid="auth-popup"]'], true),
+    () => makePage([MODAL], true),
+  );
+
+  // M4 — THE #118 DEFECT ITSELF: take the first zero and call it a dismissal. On the hand-off page
+  // that lands in the ~250-750 ms window where the modal has gone and the card has not arrived, and
+  // certifies a dismissal that never happened. This is the mutation the barrier existed for and
+  // could not express until the stub could model a re-mount.
+  await withMutation(
+    'returning on the first zero, so the modal→card hand-off window reads as a dismissal (#118)',
+    (s) => s.replace(`      const hold = Date.now() + DISMISSAL_HOLD_MS;
+      while (Date.now() < hold) {
+        await sleep(250);
+        if ((await countVisible(page, AUTH_INVITATION_SELECTOR)) !== 0) return 'reappeared';
+      }
+      return 'dismissed';`, `      return 'dismissed';`),
+    (r) => r === 'dismissed',
+    () => makePage([MODAL], false, { hosts: [CARD, CLOSE_X], afterMs: 600 }),
+  );
+
+  // M5 — the scoped × reverted to a page-wide lookup: it reaches for a control that belongs to a
+  // presentation other than the one on screen, and clicks it instead of closing what is up.
+  await withMutation(
+    'looking the × up page-wide, so one presentation is dismissed by another presentation\'s control',
+    (s) => s.replace("const close = await invitation.$('[data-testid=\"auth-popup-close\"]');",
+      "const close = await page.$('[data-testid=\"auth-popup-close\"]');"),
+    (_r, p) => p.closeClicks === 1 && p.groundPresses === 0,
+    () => makePage([MODAL, CLOSE_X]),
   );
 }
 

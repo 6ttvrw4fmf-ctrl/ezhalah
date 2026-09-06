@@ -48,6 +48,32 @@ jobs:
         if: always()
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-searchable-platforms-are-monitored.ts
 
+      # ── The three per-platform COVERAGE reads (ops_incident #104, 2026-09-06) ───────────────────
+      # Each of these was the LIVE half of a barrier that also carried a hermetic predicate. The
+      # predicates and their mutation proofs stay in the required `npm test`; these three can only be
+      # answered by asking production, so they belong here — same subject as the checks above (a
+      # platform must not be represented as more than it is), same anon read, so they share this job.
+      # They landed here rather than staying in `npm test` because a fact about production's roster
+      # was deciding the required status check on unrelated diffs: one of them flipped RED/GREEN/RED
+      # on a single unchanged commit, and another went red because a platform went live mid-PR.
+      # `if: always()` so an earlier red cannot hide a coverage gap.
+      #
+      # NOTE FOR WHOEVER TOUCHES THESE LINES: each offline half asserts, via liveHalfProblems(),
+      # that THIS FILE actually invokes its live sibling. Renaming or removing a step below turns the
+      # matching offline barrier RED in `npm test` — which is the point. A split must not be able to
+      # decay into a deletion.
+      - name: Every searchable platform is in BOTH Advanced Filter attribute views
+        if: always()
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-attribute-views-cover-every-platform-live.ts
+
+      - name: Every searchable platform has arms in listing_location_index
+        if: always()
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-location-index-covers-every-searchable-platform-live.ts
+
+      - name: Image coverage holds its floors and no platform is live undeclared
+        if: always()
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-image-coverage-ratchet-live.ts
+
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
       # This job runs unattended: a red run notifies nobody, so it has to reach alert_event to reach
       # a human. One open P1 per workflow file (dedup workflow_failed:loader-active-platforms-check.yml), and the next

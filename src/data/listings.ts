@@ -37,6 +37,16 @@ export type Listing = {
   // figure; when 'annual', the yearly one. Drives the per-month filter + the /mo vs /yr label.
   // NEVER defaulted — an unpublished period stays null. See listingPriceString().
   rentPeriod?: string | null;
+  // price_annual EXACTLY as the row carries it — the number the RPC's rent budget was compared
+  // against (location_search_candidates_ar filters rent rows on price_annual). Set on real fetched
+  // Rent rows; null/undefined on Buy and on the bundled mock catalog. It exists because `price` is
+  // a DISPLAY string: a source-monthly rent prints at Math.round(price_annual / 12), so multiplying
+  // the printed figure back is short by up to 6 SAR whenever price_annual is not divisible by 12.
+  // Any client-side comparison against a rent budget must read THIS, never the printed figure —
+  // rentAnnualValue() in search.ts is the one accessor, and scripts/verify-rent-price-basis-is-the-
+  // rpc-basis.ts holds every consumer to it. (found 2026-09-06: a 151,000 yearly floor deleted a
+  // 151,001 listing the server had matched.)
+  priceAnnual?: number | null;
   listed: string; // human recency (display only — NOT sortable, see recencyRank)
   // True RPC recency rank for real fetched listings (0 = newest, per the RPC's `last_updated desc`
   // order) — set in remote.ts before diversification reorders `rows`. Undefined for mock/placeholder

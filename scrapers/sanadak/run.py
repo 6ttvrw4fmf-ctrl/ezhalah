@@ -117,6 +117,170 @@ def session() -> cc.Session:
     return cc.Session(impersonate="chrome124")
 
 
+# ── The liveness oracle ─────────────────────────────────────────────────────────────────────────
+# `docs/ops/LISTING_LIVENESS.md` §1–§3: absence from our crawl is `EvidenceKind.ABSENCE`, a
+# candidate signal and NEVER a verdict. Only a DIRECT fetch of the listing's own URL may kill.
+#
+# SANADAK SOFT-404s, which is what makes this platform's oracle non-obvious. A removed listing does
+# NOT answer 404 — the app returns HTTP 200 with a ~144 KB shell carrying no SSR <title> and no
+# listing object; a live one returns ~640–716 KB with its own title and its own
+# `advertisementNumber` in the flight stream. Measured 2026-09-06 over 223 DIRECT probes: 140/143
+# rows already deactivated rendered the shell, and 77/80 known-ACTIVE controls rendered a real
+# listing. (The 3 controls that rendered a shell all already carry strikes — the oracle agreeing
+# with the strike counter, not contradicting it.)
+#
+# THE TRAP THIS PLATFORM ACTUALLY SETS, and it was found by running the probe rather than reading
+# the code: 39 of 1,724 sanadak rows (2.3%) carry a `listing_url` whose trailing advertisement
+# number is NOT this row's own ad_number. Probing those URLs asks a DIFFERENT listing whether THIS
+# one is alive — and three of them answered 'live' in the 2026-09-06 sweep, which a naive oracle
+# would have turned into three false resurrections. So identity is checked twice: the URL's own
+# trailing id must equal the ad_number, and the page must then yield the object whose
+# `advertisementNumber` matches (`_extract_obj_for_url`, the same primitive the capture path uses).
+
+_TITLE_RE = re.compile(r"<title[^>]*>\s*(\S.*?)\s*</title>", re.S)
+_CANARY_LOCK = threading.Lock()
+_canary: dict[str, Any] = {"urls": [], "verdict": None, "reason": "not evaluated"}
+
+
+def set_liveness_canaries(urls) -> None:
+    """Hand the oracle a few listing URLs this run has ALREADY fetched and parsed successfully.
+
+    `LISTING_LIVENESS.md` §5.4 asks for exactly this and records that nobody had built it: *"the
+    sharper instrument for a source like this is an in-run positive control: probe a handful of
+    known-alive canaries; if the canaries 404, the run is blocked, whatever the rest of the batch
+    says."* An aggregate alive-rate is a lagging signal — gathern inactivated 302 rows on 09-01 and
+    106 on 09-02 before its rate collapse was visible.
+
+    It matters more here than almost anywhere, because sanadak expresses "gone" as a 200 shell. If
+    the source ever starts serving that shell to our egress the way dealapp does (§5.1), every
+    probed row would read 'gone' and the oracle would become a mass-deactivation engine. The canary
+    makes that failure mode produce ZERO deactivations instead of all of them.
+    """
+    with _CANARY_LOCK:
+        _canary["urls"] = [u for u in (urls or []) if u][:3]
+        _canary["verdict"] = None
+        _canary["reason"] = "not evaluated"
+
+
+def _canary_ok() -> tuple[bool, str]:
+    """Is the source still ANSWERING us with real listings right now? Memoised per run.
+
+    Fails CLOSED in the safe direction: with no canaries, or with canaries that no longer render
+    their own listing, no 'gone' verdict may be issued at all.
+    """
+    with _CANARY_LOCK:
+        if _canary["verdict"] is not None:
+            return _canary["verdict"], _canary["reason"]
+        urls = list(_canary["urls"])
+    ok, reason = False, "no canary was supplied, so no removal can be believed"
+    for u in urls:
+        status, body, _final = _oracle_fetch(u)
+        if status == 200 and body and _extract_obj_for_url(body, u) is not None:
+            ok, reason = True, f"canary {u[-14:]} still renders its own listing"
+            break
+        reason = f"canary {u[-14:]} did not render its own listing (HTTP {status})"
+    with _CANARY_LOCK:
+        _canary["verdict"], _canary["reason"] = ok, reason
+    return ok, reason
+
+
+def _oracle_fetch(url: str) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    """Transport seam for the oracle. A test replaces this to execute the decision logic against
+    injected responses — the decision itself lives in the pure `_gone_verdict`."""
+    try:
+        r = _session().get(url, timeout=45, headers={"RSC": "1"})
+        return r.status_code, r.text, str(getattr(r, "url", url))
+    except Exception as e:  # noqa: BLE001 — an unreachable source is never proof of death
+        return None, None, f"{type(e).__name__}: {e}"
+
+
+def _gone_verdict(status: Optional[int], body: Optional[str], ad_number: str,
+                  url: str) -> Optional[tuple[str, str]]:
+    """The oracle's DECISION, separated from its transport so it can be executed exhaustively.
+
+    Pure apart from `_extract_obj_for_url`, which is itself pure parsing. Returns a
+    `(verdict, reason)` pair, or None meaning "no answer yet — the caller may retry". A None from
+    here NEVER means death; the caller turns an exhausted retry budget into 'unknown'.
+    """
+    sid = (ad_number or "")[2:] if (ad_number or "").upper().startswith("SN") else (ad_number or "")
+    if not sid.isdigit():
+        return "unknown", f"ad_number {ad_number!r} carries no sanadak advertisement number"
+    if _url_ad_number(url or "") != sid:
+        # The stored URL is a different listing's page. Whatever it says is not about this row.
+        return "unknown", (f"stored listing_url ends in {_url_ad_number(url or '')!r}, not this "
+                           f"row's {sid} — probing it would ask a different listing")
+    if status is None:
+        return None                                    # network/timeout → retry, then 'unknown'
+    if status in (404, 410):
+        return "gone", f"HTTP {status}"
+    if status != 200:
+        return None                                    # 401/403/408/429/5xx → retry → 'unknown'
+    if not body:
+        return "unknown", "200 with an empty body"
+    if _extract_obj_for_url(body, url) is not None:
+        return "live", f"200 rendering advertisementNumber {sid} ({len(body)} bytes)"
+    if _TITLE_RE.search(body):
+        # It rendered A listing, just not the one we asked about, or we could not parse it.
+        # Either way this is about our read, not about the listing's existence.
+        return "unknown", f"200 rendered a page we could not resolve to {sid} ({len(body)} bytes)"
+    return "gone", f"200 app shell with no listing and no SSR title ({len(body)} bytes)"
+
+
+def _verify_gone(ad_number: str, url: Optional[str] = None) -> tuple[str, str]:
+    """DIRECT per-listing liveness oracle for `db.prune_unseen(verify_gone=...)`.
+
+    WHY THIS EXISTS. Until 2026-09-06 this scraper called `db.prune_unseen()` with no oracle, so
+    three consecutive crawl misses deactivated a listing on ABSENCE alone — the inference
+    `LISTING_LIVENESS.md` §1–§3 forbids. It carried a standing P1 `unknown_treated_as_dead`
+    (alert_event 1490/1623: 32 rows deactivated inside 48h with no source verdict recorded).
+
+    Verdicts, per the three-valued law — anything that is not an affirmative answer is 'unknown',
+    and 'unknown' holds the strike without deactivating:
+      'live'    — 200 whose flight stream carries THIS row's `advertisementNumber`
+      'gone'    — 404/410, or the app's own 200 shell with no listing and no SSR title, AND only
+                  while an in-run canary proves the source is still serving real listings
+      'unknown' — everything else: a timeout, 401/403/408/429/5xx, an empty body, a page we could
+                  not resolve to this ad, a stored URL belonging to a different listing, or a run
+                  whose canary is not answering. NEVER death.
+    """
+    if url is None:
+        url = _listing_url_for(ad_number)
+    if not url:
+        return "unknown", f"no listing_url on record for {ad_number!r} — nothing DIRECT to probe"
+    last = "no attempt made"
+    for attempt in range(2):
+        status, body, note = _oracle_fetch(url)
+        if status is None and note:
+            last = note
+        elif status is not None:
+            last = f"HTTP {status}"
+        decided = _gone_verdict(status, body, ad_number, url)
+        if decided is not None:
+            if decided[0] != "gone":
+                return decided
+            ok, why = _canary_ok()
+            if not ok:
+                # A source that has stopped answering cannot testify that anything is gone.
+                return "unknown", f"removal withheld — {why} (would have been: {decided[1]})"
+            return decided
+        time.sleep(1.2 * (attempt + 1))
+    return "unknown", f"no answer after 2 attempts ({last})"
+
+
+def _listing_url_for(ad_number: str) -> Optional[str]:
+    """The row's own stored detail URL. Sanadak slugs carry Arabic text, so unlike aqargate/raghdan
+    the URL cannot be reconstructed from the ad_number — it has to be read back."""
+    for tbl in ("sanadak_residential_listings", "sanadak_commercial_listings"):
+        try:
+            r = (db.sb().table(tbl).select("listing_url")
+                 .eq("ad_number", ad_number).limit(1).execute())
+        except Exception:  # noqa: BLE001 — a failed lookup is UNKNOWN, never a kill
+            return None
+        if r.data:
+            return r.data[0].get("listing_url")
+    return None
+
+
 # Detail-fetch failure tally. Same reasoning as the sitemap reason capture (PR #1420) and the
 # dealapp breakdown: a 0-row run must say WHY, and "why" has to be recorded where it happens.
 # 2026-08-31: sanadak's sitemap recovered (200, 1,093 URLs) while EVERY listing page stayed down —
@@ -624,9 +788,17 @@ def main() -> int:
             return 0
 
         # (rows already upserted incrementally via flush())
+        #
+        # Absence only selects WHICH rows to re-probe. Every row about to cross the strike grace is
+        # then asked DIRECTLY, on its own URL, and only an affirmative answer may deactivate it
+        # (docs/ops/LISTING_LIVENESS.md §1–§3); a 'live' answer self-heals the strike instead.
+        # The canaries are listings THIS run already fetched and parsed, so a source that has
+        # started serving shells cannot be mistaken for a catalogue that emptied (§5.4).
+        set_liveness_canaries([r.get("listing_url") for r in (res + com)[:3]])
         pruned = 0
         for tbl, rows_seen in (("sanadak_residential_listings", res), ("sanadak_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Sanadak")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Sanadak",
+                                verify_gone=_verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

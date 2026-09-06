@@ -245,9 +245,53 @@ export async function tap(page, label, timeout = 15000) {
 export const AUTH_INVITATION_SELECTOR = '[data-testid="auth-popup"],[data-testid="signin-card"]';
 
 /**
+ * A ZERO IS NOT A DISMISSAL UNTIL IT HOLDS (incident #118, 2026-09-06).
+ *
+ * Closing the centered modal does NOT dismiss the invitation: the compact card is suppressed only
+ * *while* the modal is open (shouldShowSignInCard's `modalOpen` gate), so the moment the modal goes
+ * the card legitimately comes back — «Closing the modal without logging in brings the card back,
+ * because this is a separate gate input, not a write to `dismissed`» (authPopupBehavior.ts:37).
+ * Between the two there is a real window where NEITHER is on screen. Measured on production
+ * 2026-09-06, desktop 1440, 3/3 fresh contexts, sampled every 250 ms after a ground press:
+ *
+ *     modal 1 → 0 invitations → card 1 → card 1 → …      (0/1  0/0  1/0  1/0  1/0 …)
+ *                  ^ ~250-500 ms of nothing
+ *
+ * The old check polled for `count === 0` and returned on the first hit, so it landed in that window
+ * and certified a dismissal that had never happened — the journey then filed «the dismissed auth
+ * invitation came back after switching to الوكيل الذكي» as a P1 against an app doing exactly what
+ * its spec says. Same defect class as `data ?? []` (AGENTS.md): a transient reading rendered as a
+ * confident terminal answer.
+ *
+ * So a zero must SURVIVE, and coming back is its own verdict rather than a failure.
+ */
+const DISMISSAL_HOLD_MS = 1500;   // > the ~250-750 ms modal→card re-mount measured above
+
+/** 'dismissed' (a zero that held) | 'reappeared' (closed, then another presentation took its
+ *  place — the documented modal→card hand-off) | 'still-open' (nothing closed at all). */
+async function invitationSettled(page, budgetMs) {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    if ((await countVisible(page, AUTH_INVITATION_SELECTOR)) === 0) {
+      const hold = Date.now() + DISMISSAL_HOLD_MS;
+      while (Date.now() < hold) {
+        await sleep(250);
+        if ((await countVisible(page, AUTH_INVITATION_SELECTOR)) !== 0) return 'reappeared';
+      }
+      return 'dismissed';
+    }
+    if (Date.now() > deadline) return 'still-open';
+    await sleep(250);
+  }
+}
+
+/**
  * Close the signed-out sign-in invitation, the way a real guest does.
- * Returns 'dismissed' | 'absent' | 'still-open' — never throws: on a narrow viewport the product may
- * legitimately not offer the card unprompted, and "it was not there" is a fact, not a failure.
+ * Returns 'dismissed' | 'reappeared' | 'absent' | 'still-open' — never throws: on a narrow viewport
+ * the product may legitimately not offer the card unprompted, and "it was not there" is a fact, not
+ * a failure. 'reappeared' is likewise a fact: see invitationSettled above. A caller that needs the
+ * invitation actually GONE dismisses again; a caller merely clearing it out of the way of a search
+ * can ignore the distinction.
  *
  * TWO DISMISSAL MECHANISMS, BECAUSE THE PRODUCT HAS TWO (incident #23, fixed 2026-09-05). The
  * compact SignInCard keeps its ×. The centered AuthModal deliberately has NO × on its main step
@@ -257,15 +301,18 @@ export const AUTH_INVITATION_SELECTOR = '[data-testid="auth-popup"],[data-testid
  * detector was fixed while the dismissal was left blind, so the modal stayed up and covered the city
  * field in four unrelated mobile journeys. Measured on production 2026-09-05, mobile 375, 2/2 fresh
  * contexts: a ground press at (10,10) takes auth-popup from 1 to 0.
+ *
+ * The × is looked up INSIDE the invitation we found, never page-wide: the mechanism has to belong to
+ * the surface being dismissed, or this reaches for one presentation's control while the other is the
+ * thing on screen.
  */
 export async function dismissAuthInvitation(page, budgetMs = 6000) {
   const invitation = await until(() => page.$(AUTH_INVITATION_SELECTOR), budgetMs);
   if (!invitation) return 'absent';
-  const close = await page.$('[data-testid="auth-popup-close"]');
+  const close = await invitation.$('[data-testid="auth-popup-close"]');
   if (close) await close.click().catch(() => {});
   else await page.mouse.click(10, 10).catch(() => {});  // the empty ground, well clear of the card
-  const gone = await until(async () => (await countVisible(page, AUTH_INVITATION_SELECTOR)) === 0, 8000);
-  return gone ? 'dismissed' : 'still-open';
+  return invitationSettled(page, 8000);
 }
 
 // ── driving a real search ────────────────────────────────────────────────────────────────────────
@@ -294,13 +341,32 @@ export async function pickCity(page, city) {
   const handle = await page.evaluateHandle(optionSrc, city);
   const option = handle.asElement();
   if (!option) return false;
-  await option.scrollIntoViewIfNeeded().catch(() => {});
+  // Scroll the option with the DOM, not Playwright. `scrollIntoViewIfNeeded()` does NOT move a
+  // react-native-web ScrollView — measured, and documented in runSearch() below for the identical
+  // reason. That no-op is the mechanism that made the tap miss in the first place.
+  await option.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => {});
+  await sleep(250);
   await option.click().catch(() => {});
-  const committed = await until(async () => {
-    const v = await input.inputValue().catch(() => '');
-    return v && (v.includes(city) || city.includes(v)) ? v : null;
-  }, 8000);
-  return !!committed;
+
+  // §41.13 CORRECTED (ops_incident #103, 2026-09-06). The old confirmation was
+  // `const committed = await input.inputValue()` — but `input.fill(city)` had ALREADY WRITTEN that
+  // value, so the check passed whether or not the app ever accepted the pick. It confirmed the
+  // harness's own typing. The comment that justified it — «a click that missed leaves the field
+  // empty» — is disproven by production: measured 2026-09-06, 2 of 4 attempts left the field reading
+  // «الرياض» with citySelected NULL, «الرجاء اختيار مدينة من القائمة.» on screen and ZERO RPCs fired.
+  // The harness reported a successful pick, and the run then blamed the product for the silence.
+  //
+  // Confirm with the APP's OWN signal: [data-testid="selected-city-visual"] renders iff citySelected
+  // is set (src/app/index.tsx) — the same state onSearch itself requires. Retry the click once,
+  // because a single missed tap is a harness miss worth recovering from; then FAIL, so the caller
+  // reports a harness miss instead of walking into a search that will be refused.
+  const confirmed = async () => page.waitForSelector('[data-testid="selected-city-visual"]',
+    { timeout: 6000 }).then(() => true).catch(() => false);
+  if (await confirmed()) return true;
+  await option.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => {});
+  await sleep(250);
+  await option.click().catch(() => {});
+  return confirmed();
 }
 
 /** Press «بحث» and wait for the results screen to reach a terminal state. Harness-fails if not. */
