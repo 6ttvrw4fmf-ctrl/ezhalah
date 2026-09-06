@@ -471,6 +471,20 @@ handed only a flattened id set, so it can't see file pairs or filename collision
   independent copies of that parser is its own drift risk) or if any piece of this barrier goes
   missing, gets a loosened schedule, or stops being invoked.
 
+**The pre-baseline blind spot, and what watches it (incident #26, 2026-09-05).** All of the
+conditions above grandfather the pre-strict era — missing_in_git below `20260716093330`, the rest
+below `STRICT_ERA_BASELINE`. That is correct (judging legacy filenames would cry wolf forever) but
+it leaves a class none of them can see: **a production object created by a pre-baseline migration
+that was never committed at all.** `prune_inactive_from_search()` — the guaranteed remover of
+inactive rows from the served search index — sat in that gap for two months: called by
+`sync_search_listings_ar()` in four committed migrations, pinned by a barrier, defined nowhere in
+the tree. `scripts/verify-committed-sql-defines-what-it-calls.ts` (offline, deterministic, **in
+`npm test`**) now fails when committed SQL calls a `public.<name>()` that no committed migration
+creates; the 32 objects already in that state are a shrink-only floor in
+`scripts/production-only-object-baseline.txt`. It cannot see a production object nothing in the repo
+references — only the live check can, and it is blind below its own baseline. That gap is stated,
+not closed.
+
 **If `migration_drift` is ever red:** recover the missing SQL verbatim from
 `supabase_migrations.schema_migrations.statements` (matched by `version`) into
 `supabase/migrations/`, commit, and open a PR — this itself touches `supabase/migrations/`, so per
