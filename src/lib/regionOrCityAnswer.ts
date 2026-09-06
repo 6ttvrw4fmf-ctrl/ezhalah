@@ -24,6 +24,31 @@ const SAYS_REGION = /(?<![\p{L}\p{N}])منطقة(?![\p{L}\p{N}])/u;
 export type ScopeChoice = 'city' | 'region';
 
 /**
+ * The one-word answer to OUR OWN twin question: «المدينة» / «المنطقة».
+ *
+ * SAYS_CITY/SAYS_REGION above deliberately refuse any «ال»-fused form, because «المدينة المنورة» and
+ * «المنطقة الشرقية» are real places and must never be read as a scope choice. That exclusion is
+ * right for a sentence and wrong for a bare reply, and the gap was a live infinite loop: asked
+ * «تقصد مدينة الرياض ولا منطقة الرياض كاملة؟», the user answered «المدينة», nothing consumed it, and
+ * the identical question came back (owner screenshot, 2026-09-05).
+ *
+ * Safe because it is doubly constrained:
+ *   1. the WHOLE message must be that single word — «المدينة المنورة» is two, so it cannot match;
+ *   2. the caller may only consult it when the app itself just asked the twin question (askedTwin),
+ *      the same "because we asked" rule scopeNamedForTwin's doc comment states.
+ * Outside those two conditions a lone «المدينة» could genuinely mean Madinah, so this is NOT folded
+ * into regionOrCityChoice() and no other caller sees it.
+ */
+const BARE_CITY = /^[\s\p{P}]*(?:ال)?مدين[ةه][\s\p{P}]*$/u;
+const BARE_REGION = /^[\s\p{P}]*(?:ال)?منطق[ةه][\s\p{P}]*$/u;
+export function bareScopeAnswer(text: string | undefined | null): ScopeChoice | null {
+  const s = String(text ?? '');
+  if (BARE_CITY.test(s)) return 'city';
+  if (BARE_REGION.test(s)) return 'region';
+  return null;
+}
+
+/**
  * Which of the two offered scopes the user named — or null when they named neither or both (no
  * answer yet, so the question still stands). Never guesses.
  */
@@ -67,7 +92,14 @@ export function scopeNamedForTwin(text: string | undefined | null, twin: string 
   // «ال» is optional on the twin so «مدينة رياض» and «مدينة الرياض» both count.
   const core = bare.replace(/^ال/, '');
   const name = `(?:ال)?${core.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`;
-  const city = new RegExp(`(?<![\\p{L}\\p{N}])مدينة\\s+${name}(?![\\p{L}\\p{N}])`, 'u').test(s);
+  // «مدنية» is «مدينة» with ي/ن transposed — one of the most common Arabic typos, and it cost a real
+  // user the whole feature: «ابي شقة ... في مدنية الرياض» named the city explicitly, matched nothing
+  // here, and was answered with «تقصد مدينة الرياض ولا منطقة الرياض كاملة؟» (owner screenshot,
+  // 2026-09-05). Accepted ONLY in this position — immediately before the twin's own name — where it
+  // cannot be anything else. «مدنية» is a real word elsewhere (الأحوال المدنية, حالة مدنية), so it is
+  // deliberately NOT added to the general SAYS_CITY vocabulary above.
+  const CITY_WORD = '(?:مدينة|مدنية)';
+  const city = new RegExp(`(?<![\\p{L}\\p{N}])${CITY_WORD}\\s+${name}(?![\\p{L}\\p{N}])`, 'u').test(s);
   const region = new RegExp(`(?<![\\p{L}\\p{N}])منطقة\\s+${name}(?![\\p{L}\\p{N}])`, 'u').test(s);
   if (city === region) return null;
   return city ? 'city' : 'region';
