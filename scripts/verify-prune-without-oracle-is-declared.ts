@@ -45,10 +45,12 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // EVERY one of its inactive rows with interleaved known-active controls, and each routed through
 // the shared law in scrapers/common/http_liveness.py rather than a private copy of it
 // (scripts/verify-http-liveness-law.ts, scripts/verify-absence-oracles-are-measured.ts).
-// Both movements are real and both are kept: this number went UP by one and DOWN by four in the
-// same afternoon, which is exactly what a ratchet is for — it records the direction of each change
-// instead of letting one land silently inside the other.
-const RATCHET = 26;
+// 26 → 28 later still: alobid and bahadhabab onboarded as a third and fourth Nuzul tenant, same
+// inherited-fix note as abwbna.
+// Four movements landed the same afternoon (+1, -4, +2 across three separate edits) — exactly what
+// a ratchet is for: it records the direction of each change instead of letting one land silently
+// inside another.
+const RATCHET = 28;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

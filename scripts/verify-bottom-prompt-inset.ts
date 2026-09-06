@@ -1,5 +1,5 @@
-// BARRIER: a bottom-docked third-party prompt must never be laid out ON TOP of the app's own
-// controls.
+// BARRIER: a docked third-party auth prompt must never be laid out ON TOP of the app's own
+// controls — on EITHER edge, on any engine.
 //
 // WHY THIS EXISTS (real production bug, measured live 2026-09-01 against ezhalah-app.vercel.app).
 // Google One Tap's legacy prompt — the path GIS takes whenever FedCM is unavailable or fails, which
@@ -31,7 +31,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bottomPromptInset, ONE_TAP_IFRAME_SELECTOR } from '../src/lib/bottomPromptInset.ts';
+import {
+  bottomPromptInset, topPromptInset, promptInsets,
+  ONE_TAP_IFRAME_SELECTOR, AUTH_PROMPT_SELECTOR,
+} from '../src/lib/bottomPromptInset.ts';
 import { npmTestRuns } from './lib/testRegistry.ts';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -165,13 +168,30 @@ const SHEET = { top: 520, bottom: 664, height: 144 };
 {
   const layout = readFileSync(join(ROOT, 'src/app/_layout.tsx'), 'utf8');
   check('E1. the app root imports the inset hook',
-    /useBottomPromptInset/.test(layout) && /@\/lib\/bottomPromptInset/.test(layout));
-  check('E2. the app root APPLIES it as paddingBottom on its outermost View',
-    /paddingBottom:\s*bottomPromptInset/.test(layout),
+    /usePromptInsets/.test(layout) && /@\/lib\/bottomPromptInset/.test(layout));
+  check('E2. the app root APPLIES the bottom inset as paddingBottom on its outermost View',
+    /paddingBottom:\s*promptInset\.bottom/.test(layout),
     'the hook may be called but its value never reserved — the bug returns silently');
+  // #120: reserving one edge and not the other is how a top-docked sheet went unnoticed for as long
+  // as it did. Both halves are load-bearing and both are pinned.
+  check('E2b. …and the top inset as paddingTop on the same View',
+    /paddingTop:\s*promptInset\.top/.test(layout),
+    'a top-docked sheet would be measured correctly and then never reserved — #120 exactly');
   // The selector is the contract with GIS; a rename here silently disables the whole fix.
-  check('E3. the prompt selector is still GIS\'s legacy One Tap iframe',
+  check('E3. the legacy One Tap id is still recognised',
     ONE_TAP_IFRAME_SELECTOR === '#credential_picker_iframe', `got ${ONE_TAP_IFRAME_SELECTOR}`);
+  // …and the id ALONE is no longer the contract. GIS omits it entirely on WebKit (measured #120),
+  // which is why the selector must also identify the frame by its auth-provider origin.
+  check('E3b. the prompt is also identified by origin, not only by an id GIS sometimes omits',
+    AUTH_PROMPT_SELECTOR.includes('accounts.google.com/gsi/')
+      && AUTH_PROMPT_SELECTOR.includes(ONE_TAP_IFRAME_SELECTOR),
+    `got ${AUTH_PROMPT_SELECTOR}`);
+  check('E3c. …and covers the other provider the owner\'s 2026-09-01 ruling allows',
+    AUTH_PROMPT_SELECTOR.includes('appleid.apple.com'), `got ${AUTH_PROMPT_SELECTOR}`);
+  const libSrc = readFileSync(join(ROOT, 'src/lib/bottomPromptInset.ts'), 'utf8');
+  check('E3d. the DOM read uses the WIDE selector, not the legacy id',
+    /querySelectorAll\(AUTH_PROMPT_SELECTOR\)/.test(libSrc),
+    'the wide selector may exist and never be the thing actually queried');
   const lib = readFileSync(join(ROOT, 'src/lib/bottomPromptInset.ts'), 'utf8');
   // The sheet arrives ~1.3s after load and animates its height in; a mount-time measurement alone
   // reads 0 forever. Both observers are load-bearing.
@@ -180,6 +200,164 @@ const SHEET = { top: 520, bottom: 664, height: 144 };
   check('E5. …and for it GROWING once inserted (ResizeObserver)',
     /new ResizeObserver\(/.test(lib));
   check('E6. this barrier is discovered by `npm test`', npmTestRuns(ROOT, 'verify-bottom-prompt-inset'));
+}
+
+
+// ── F. THE TOP EDGE (ops_incident #120) ──────────────────────────────────────────────────────────
+// Measured on production, signed out, 375×812, the SAME bundle and client_id on both engines:
+//   Chromium  <iframe id="credential_picker_iframe">  375×144 at 0,668  → the bottom sheet, §A
+//   WebKit    <iframe class="L5Fo6c-PQbLGe">, NO id   375×150 at 0,20   → docked to the TOP
+// On WebKit `elementFromPoint` at the centre and all four edges of the sidebar button,
+// «إنشاء حساب / تسجيل الدخول», «تصفية» and «الوكيل الذكي» returned that iframe, on both Filter home
+// and AI Agent, 4/4 across two independent CI sweeps. The old guard missed it twice over: the id
+// selector matched nothing, and bottomPromptInset() returns 0 for a top-docked rect by design.
+const VH_PHONE = 812;
+const VW_PHONE = 375;
+const TOP_SHEET = { top: 20, bottom: 170, height: 150, width: 375 };
+const BOTTOM_SHEET = { top: 668, bottom: 812, height: 144, width: 375 };
+// The desktop corner card: top-anchored, but BESIDE the app rather than across it.
+const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
+{
+  check('F1. the measured WebKit top sheet reserves everything above its bottom edge',
+    topPromptInset(TOP_SHEET, VH_PHONE, VW_PHONE) === 170,
+    `got ${topPromptInset(TOP_SHEET, VH_PHONE, VW_PHONE)}`);
+  // The whole point: with the inset applied, the top bar starts BELOW Google's frame.
+  check('F2. …so the app\'s first control is laid out clear of it',
+    topPromptInset(TOP_SHEET, VH_PHONE, VW_PHONE) >= TOP_SHEET.bottom);
+  check('F3. the desktop corner CARD spans too little to be a dock → 0',
+    topPromptInset(CORNER_CARD, 900, 1440) === 0,
+    `got ${topPromptInset(CORNER_CARD, 900, 1440)} — the whole app would shift down for a card beside it`);
+  check('F4. the bottom sheet is not a top dock → 0',
+    topPromptInset(BOTTOM_SHEET, VH_PHONE, VW_PHONE) === 0);
+  check('F5. a frame floating below the tolerance is not docked → 0',
+    topPromptInset({ ...TOP_SHEET, top: 33 }, VH_PHONE, VW_PHONE) === 0);
+  check('F6. …and one just inside it still is',
+    topPromptInset({ ...TOP_SHEET, top: 32 }, VH_PHONE, VW_PHONE) === 170);
+  check('F7. hidden → 0', topPromptInset({ ...TOP_SHEET, hidden: true }, VH_PHONE, VW_PHONE) === 0);
+  check('F8. zero height → 0', topPromptInset({ top: 0, bottom: 0, height: 0, width: 375 }, VH_PHONE, VW_PHONE) === 0);
+  check('F9. no width measured → never spans → 0',
+    topPromptInset({ top: 20, bottom: 170, height: 150 }, VH_PHONE, VW_PHONE) === 0);
+  check('F10. nothing there → 0', topPromptInset(null, VH_PHONE, VW_PHONE) === 0
+    && topPromptInset(undefined, VH_PHONE, VW_PHONE) === 0);
+  check('F11. a nonsense viewport → 0', topPromptInset(TOP_SHEET, 0, VW_PHONE) === 0
+    && topPromptInset(TOP_SHEET, VH_PHONE, 0) === 0);
+  check('F12. a pathological rect is clamped, never blanking the app',
+    topPromptInset({ top: 0, bottom: 5000, height: 5000, width: 375 }, VH_PHONE, VW_PHONE) === 406,
+    `got ${topPromptInset({ top: 0, bottom: 5000, height: 5000, width: 375 }, VH_PHONE, VW_PHONE)}`);
+}
+
+// ── G. BOTH EDGES AT ONCE ────────────────────────────────────────────────────────────────────────
+{
+  const eq = (a: { top: number; bottom: number }, t: number, b: number) => a.top === t && a.bottom === b;
+  check('G1. the WebKit case reserves the top and nothing else',
+    eq(promptInsets([TOP_SHEET], VH_PHONE, VW_PHONE), 170, 0));
+  check('G2. the Chromium case is unchanged — bottom only',
+    eq(promptInsets([BOTTOM_SHEET], VH_PHONE, VW_PHONE), 0, 144));
+  check('G3. nothing docked → nothing reserved',
+    eq(promptInsets([], VH_PHONE, VW_PHONE), 0, 0) && eq(promptInsets(null, VH_PHONE, VW_PHONE), 0, 0));
+  check('G4. the desktop corner card reserves nothing on either edge',
+    eq(promptInsets([CORNER_CARD], 900, 1440), 0, 0));
+  // A frame covering the whole viewport qualifies on BOTH edges. Reserving "the space it occupies"
+  // is meaningless for something occupying everything — that is a modal, and it must not squeeze
+  // the app to nothing.
+  check('G5. a full-screen overlay is a modal, not a dock → nothing reserved',
+    eq(promptInsets([{ top: 0, bottom: VH_PHONE, height: VH_PHONE, width: VW_PHONE }], VH_PHONE, VW_PHONE), 0, 0));
+  check('G6. two prompts docked at once are both reserved',
+    eq(promptInsets([TOP_SHEET, BOTTOM_SHEET], VH_PHONE, VW_PHONE), 170, 144));
+  // 300 + 300 exceeds half the viewport; the larger survives whole and the app keeps the rest.
+  check('G7. the COMBINED reservation is capped, so an app always remains',
+    eq(promptInsets([
+      { top: 0, bottom: 300, height: 300, width: 375 },
+      { top: VH_PHONE - 300, bottom: VH_PHONE, height: 300, width: 375 },
+    ], VH_PHONE, VW_PHONE), 300, 106));
+  check('G8. a hidden prompt beside a real one does not disturb it',
+    eq(promptInsets([{ ...TOP_SHEET, hidden: true }, BOTTOM_SHEET], VH_PHONE, VW_PHONE), 0, 144));
+}
+
+// ── H. MUTATION PROOFS ON THE REAL FILE ──────────────────────────────────────────────────────────
+// §D mutates by re-implementation, which cannot notice the real file drifting away from the mutant.
+// These edit `src/lib/bottomPromptInset.ts` itself and re-import it, so the evidence is the shipped
+// code changing behaviour — the standard AGENTS.md holds barriers to after five source-TEXT
+// tripwires sat green over live defects on 2026-09-04.
+{
+  const LIB = join(ROOT, 'src/lib/bottomPromptInset.ts');
+  const original = readFileSync(LIB, 'utf8');
+  const { writeFileSync } = await import('node:fs');
+  let n = 0;
+  const withMutation = async (
+    label: string,
+    mutate: (src: string) => string,
+    broken: (m: typeof import('../src/lib/bottomPromptInset.ts')) => boolean,
+  ) => {
+    const mutated = mutate(original);
+    if (mutated === original) {
+      failures++; console.error(`FAIL  H. (mutation) «${label}» changed nothing — the anchor missed`); return;
+    }
+    writeFileSync(LIB, mutated);
+    try {
+      const mod = await import(`../src/lib/bottomPromptInset.ts?promptmut=${++n}`);
+      check(`H. mutant killed: ${label}`, broken(mod as never));
+    } catch (e) {
+      // A throw is not a killed mutation: the evidence must be behaviour changing, never the module
+      // falling over.
+      failures++;
+      console.error(`FAIL  H. (mutation) «${label}» broke the module instead of changing its behaviour: ${String(e).slice(0, 120)}`);
+    } finally {
+      writeFileSync(LIB, original);
+    }
+  };
+
+  // H1 — THE #120 DEFECT ITSELF: no top reservation at all.
+  await withMutation(
+    'the top edge reserves nothing (ops_incident #120 exactly)',
+    (src) => src.replace('  const overlap = rect.bottom;\n  if (!(overlap > 0)) return 0;', '  const overlap = 0;\n  if (!(overlap > 0)) return 0;'),
+    (m) => m.topPromptInset(TOP_SHEET, VH_PHONE, VW_PHONE) === 0,
+  );
+
+  // H2 — drop the span test: the desktop corner card would shove the whole app down.
+  await withMutation(
+    'the span test is dropped, so a corner CARD moves the app',
+    (src) => src.replace('  if (!(promptWidth >= viewportWidth * MIN_SHEET_SPAN_FRACTION)) return 0;', ''),
+    (m) => m.topPromptInset(CORNER_CARD, 900, 1440) !== 0,
+  );
+
+  // H3 — drop the top-anchor test: the BOTTOM sheet would also reserve space at the top.
+  await withMutation(
+    'the top-anchor test is dropped, so a bottom sheet reserves the top too',
+    (src) => src.replace('  if (rect.top > TOP_ANCHOR_TOLERANCE) return 0;', ''),
+    (m) => m.topPromptInset(BOTTOM_SHEET, VH_PHONE, VW_PHONE) !== 0,
+  );
+
+  // H4 — the selector reverts to the id GIS omits on WebKit: the frame is never found at all.
+  await withMutation(
+    'the selector reverts to the legacy id alone, which WebKit never sets',
+    (src) => src.replace(/export const AUTH_PROMPT_SELECTOR = \[[\s\S]*?\]\.join\(','\);/,
+      "export const AUTH_PROMPT_SELECTOR = ONE_TAP_IFRAME_SELECTOR;"),
+    (m) => !m.AUTH_PROMPT_SELECTOR.includes('accounts.google.com'),
+  );
+
+  // H5 — drop the both-edges guard: a full-screen overlay squeezes the app out of existence.
+  await withMutation(
+    'the full-screen guard is dropped, so a modal squeezes the app',
+    (src) => src.replace('    if (t > 0 && b > 0) continue;   // covers the whole viewport: a modal, not a dock', ''),
+    (m) => {
+      const i = m.promptInsets([{ top: 0, bottom: VH_PHONE, height: VH_PHONE, width: VW_PHONE }], VH_PHONE, VW_PHONE);
+      return i.top !== 0 || i.bottom !== 0;
+    },
+  );
+
+  // H6 — drop the combined cap: two docked prompts leave no app behind them.
+  await withMutation(
+    'the combined cap is dropped, so two prompts can reserve the whole viewport',
+    (src) => src.replace('  if (top + bottom > cap) {', '  if (false) {'),
+    (m) => {
+      const i = m.promptInsets([
+        { top: 0, bottom: 300, height: 300, width: 375 },
+        { top: VH_PHONE - 300, bottom: VH_PHONE, height: 300, width: 375 },
+      ], VH_PHONE, VW_PHONE);
+      return i.top + i.bottom > Math.floor(VH_PHONE * 0.5);
+    },
+  );
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nAll bottom-prompt-inset checks passed.');

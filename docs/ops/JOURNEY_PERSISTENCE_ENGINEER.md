@@ -161,6 +161,24 @@ old build and passes on the fix, not a unit test standing in for the click. At m
 10. A cross-browser (especially Safari/WebKit) rendering, focus, or feature-detection failure
 11. Mobile-viewport horizontal overflow or an unreachable control
 12. A loading state that never resolves, or an error state with no recovery path
+13. **A third-party auth overlay painted on top of one of our own interactive controls**
+    (owner rule, 2026-09-06: *«Google One Tap must never cover, block, or intercept any Ezhalah
+    controls on mobile or desktop»*). Confirmed twice, on the same bundle and client_id, with the
+    prompt landing on a DIFFERENT EDGE per engine — bottom on Chromium (`0,668`, fixed, z-index
+    9999) and top on WebKit (`0,20`, and with **no `id`** at all, so an id-based watcher saw
+    nothing). `src/lib/bottomPromptInset.ts` reserves the band it occupies on whichever edge it
+    docks to; `scripts/verify-bottom-prompt-inset.ts` proves the geometry offline with six
+    mutations against the real file; the journey `auth-overlay-clears-controls` proves
+    REACHABILITY in a real browser on every engine.
+    Two rules this class taught, both of which cost a wrong answer before they were written down:
+    · **Judge with `elementsFromPoint`, never `elementFromPoint`.** A control scrolled out of view
+      still has a rect, that rect can lie under the sheet, and the singular form then reports a
+      perfectly healthy build as «20 controls blocked» — measured, on a Chromium build whose inset
+      was working and whose scroll container had correctly shortened to 668 px. The plural form
+      returns the PAINTED stack, so a clipped control is absent from it entirely.
+    · **The absence of the prompt is a SKIP, never a pass.** Google suppresses One Tap freely
+      (cooldown, no Google session, opt-out), so a green run that never saw an overlay has proven
+      nothing about overlays and must not claim otherwise.
 
 Mutation-prove the important ones — deliberately break the fix, prove the barrier goes red, restore
 it. Before writing a new barrier, check whether an existing one already covers the shape (e.g.

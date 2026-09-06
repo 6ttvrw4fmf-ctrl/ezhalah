@@ -36,6 +36,12 @@
     "grace": 3
   },
   {
+    "platform": "alobid",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "alta",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -91,6 +97,12 @@
   },
   {
     "platform": "awal",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "bahadhabab",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3

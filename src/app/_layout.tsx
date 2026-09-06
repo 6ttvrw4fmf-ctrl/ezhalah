@@ -11,7 +11,7 @@ import { colors } from '@/theme/tokens';
 import { ThemeProvider, useTheme } from '@/theme/theme';
 import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import { markAppSessionStarted } from '@/lib/appSession';
-import { useBottomPromptInset } from '@/lib/bottomPromptInset';
+import { usePromptInsets } from '@/lib/bottomPromptInset';
 import { useVisualViewportRoot } from '@/lib/visualViewportFrame';
 import Head from 'expo-router/head';
 import { OG_IMAGE, SHARE_BLURB_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
@@ -52,12 +52,15 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
 function Shell() {
   const docked = useDocked();
   const { isRTL } = useI18n();
-  // Space occupied by a bottom-docked third-party prompt (Google One Tap's legacy bottom sheet on a
-  // phone). 0 whenever nothing is docked there — see src/lib/bottomPromptInset.ts for the measured
-  // bug this prevents: the sheet is `position:fixed; z-index:9999; pointer-events:auto` across the
-  // bottom 144px, and without this the app laid «بحث» and the Agent composer out underneath it,
-  // where every real tap landed on Google's iframe instead of the control.
-  const bottomPromptInset = useBottomPromptInset();
+  // Space occupied by a docked third-party auth prompt — Google One Tap's legacy sheet, on WHICHEVER
+  // edge it lands on. Zero whenever nothing is docked; see src/lib/bottomPromptInset.ts for both
+  // measured bugs this prevents. The sheet is `position:fixed; z-index:9999; pointer-events:auto`
+  // across a full-width band, and without this the app lays its own controls out underneath it,
+  // where every real tap lands on Google's iframe instead of the control:
+  //   bottom (Chromium, 144px)  «بحث» and the Agent composer          — fixed 2026-09-01
+  //   top    (WebKit,   170px)  the sidebar button, «إنشاء حساب /
+  //                             تسجيل الدخول», «تصفية», «الوكيل الذكي» — ops_incident #120
+  const promptInset = usePromptInsets();
   // APPEARANCE (owner 2026-08-28): the status bar follows the resolved theme. Screen content is
   // converted per-surface (Sidebar + account menu in this pass); the Stack's contentStyle stays the
   // light paper until each screen's inks are converted — flipping it first would break readability.
@@ -96,7 +99,7 @@ function Shell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
-    <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row', paddingBottom: bottomPromptInset }}>
+    <View style={{ flex: 1, flexDirection: isRTL ? 'row-reverse' : 'row', paddingTop: promptInset.top, paddingBottom: promptInset.bottom }}>
       <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />
       {/* /auth is a focused full-screen moment — no docked sidebar there. The /agent light-pin
           special-case (owner 2026-08-29) was reversed 2026-08-30: dark mode is global and sticky,
