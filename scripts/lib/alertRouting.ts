@@ -77,6 +77,12 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // nobody reading alerts, filed to the busiest triage queue.
   { routine: 7, test: /^(alert_queue_unworked|incident_stalled)$/ },
   { routine: 7, test: /^(cron_|migration_drift|sql_mirror_drift|deploy_lock_misuse)/ },
+  // gh_dispatch_* (2026-09-05, ops_incident #74) — the pg_cron → GitHub workflow_dispatch seam.
+  // public.trigger_gh_workflow() is the only path from cron to a workflow_dispatch-only workflow,
+  // and it used to return quietly when the PAT was absent, so 21 active jobs could stop running
+  // while every cron run recorded succeeded. This routine owns cron→workflow plumbing, and the
+  // #2 fallback would have received an alert about its own two hourly safety backstops going dark.
+  { routine: 7, test: /^gh_dispatch/ },
   { routine: 7, test: /^(detector_|orphaned_detector|unresolvable_|monitoring_watchdog)/ },
   { routine: 7, test: /^(registry_orphans|repair_guarantee|loc_rel_|rls_)/ },
   { routine: 7, test: /^(stale_no_remediation_path|frontend_runtime_gate_missing)$/ },
