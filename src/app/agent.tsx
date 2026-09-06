@@ -1553,17 +1553,31 @@ export default function Agent() {
     saveTranscript(p.id, p.t);
   };
   useEffect(() => {
-    if (busy) return;
     const id = chatIdRef.current;
     if (!id) return;
     const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed });
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
+    // STASH FIRST, EVEN MID-TURN. This assignment used to sit BELOW an `if (busy) return`, so during
+    // a turn there was nothing staged — and every abandon path calls flushPendingCapture(), which can
+    // only write what was staged. Leaving a chat while its search was still running therefore saved
+    // NOTHING for that turn, and reopening it found no transcript and RE-RAN THE SEARCH, loader and
+    // all (owner, 2026-09-05: "these are saved already, why the fuck does the search happen again").
+    // Measured on the owner's own account: of 10 chats, 1 had no transcript at all and 3 had a
+    // 284–1052 byte stub against 14–23KB for healthy ones — the turn was lost exactly this way.
+    // Staging mid-turn is SAFE because serializeChat drops `status` (in-flight) messages outright, so
+    // a flush during a search can never persist a frozen «جاري البحث» bubble — the very thing the
+    // busy guard was protecting against. The guard stays for the debounced WRITE below, which is what
+    // it was actually needed for: not writing once per revealed card while a turn drips in.
     pendingCaptureRef.current = { id, t, j };
+    if (busy) return;
     const timer = setTimeout(() => { pendingCaptureRef.current = null; lastCapturedRef.current = j; saveTranscript(id, t); }, 600);
     return () => clearTimeout(timer);
-  }, [busy, msgs, revealCount, afReceipt, guidedPills]);
+    // `completed` was missing from these deps: a chat that ENDED (Advanced Filter narrowed it to the
+    // final set) could keep a transcript that never recorded the ending, so it reopened with a live
+    // composer on a finished search.
+  }, [busy, msgs, revealCount, afReceipt, guidedPills, completed]);
   // A refresh/close inside the debounce window must not lose the last settled state either.
   // saveTranscript writes localStorage synchronously up front (store.tsx), so this flush lands on
   // disk even during unload. pagehide, not beforeunload: it also covers bfcache navigations.
