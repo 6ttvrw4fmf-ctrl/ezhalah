@@ -75,10 +75,13 @@ const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
   // test-exclusions.txt row naming .github/workflows/loader-active-platforms-check.yml as its home,
   // never the required hermetic npm test. The routing worked end to end — the gap was raised by the
   // session that mirrored the migration, and closed by the surface that owns the predicate.
-  { path: 'scripts/verify-sentry-heartbeat-detector-wired.ts', owner: 'routine-7-seam',
-    why: 'claimed by 20260830183604_sentry_check_heartbeat_and_silent_detector_layer2.sql; detector roster seam' },
-  { path: 'scripts/verify-unlocated-fallback-scope.ts', owner: 'routine-3-data-integrity',
-    why: 'claimed by 20260810123000_unlocated_fallback_must_only_rescue_unlocated_rows.sql; location source truth' },
+  // CLOSED 2026-09-06 (ops_incident #50). scripts/verify-sentry-heartbeat-detector-wired.ts now
+  // exists at the home 20260830183604 named for it, and it OBSERVES the detector running
+  // (ops_detector_sweep_health) instead of reading its roster's source text — the distinction this
+  // ledger's own header is about. scripts/verify-unlocated-fallback-scope.ts is in `npm test`
+  // exactly as 20260810123000 promised, policing every migration after the fix for a re-emitted
+  // unguarded fallback disjunct; its behavioural twin verify-unlocated-fallback-scope-live.ts is
+  // unchanged.
 ];
 
 console.log('ops remediation scripts — every barrier a migration claims must exist and run');
