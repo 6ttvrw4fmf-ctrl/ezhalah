@@ -315,6 +315,31 @@ run in a row without a decision is escalated as a product question under §G.2(b
 Track the census in `ops_qa_coverage_ledger` under the `redteam:census` dimension prefix (#6 and #7
 already use their own prefixes in the same table) so the diff is comparable run over run.
 
+**The decision that escalation asks for has been GIVEN — `docs/ops/CAPTURED_FIELD_CLASSIFICATION.md`
+(owner, 2026-09-06, PERMANENT), which also carries the settled verdict for all 17 fields of the
+2026-09-05/06 census.** Read it before reporting a census entry. In one line: capture is necessary
+for a filter and nowhere near sufficient — a field becomes filterable only if it is truthful, useful
+for narrowing and certifiable across its applicable cohorts (and then a card chip is MANDATORY);
+otherwise it is card evidence, or deliberately unplumbed with its reason recorded. **Never make a
+field filterable because we happen to capture it.** An entry that file has already ruled on is
+reported as SETTLED with its verdict, not re-escalated; only a genuinely NEW field, or one whose
+coverage/semantics have materially moved, is a fresh finding.
+
+**Two measurement rules that file's first pass established, both learned by getting them wrong:**
+
+1. **Check whether the column is an ALIAS of something already plumbed before counting it.**
+   `installment_available` sat in the census as "captured but not plumbed" for two runs. It is
+   defined `<platform>.rent_now_pay_later AS installment_available` on every branch of
+   `listing_rich_attrs` — 88,778 both-known rows, **0 ever differ** — so it was already filterable
+   as the `rnpl` amenity token and already rendered by `RnplBanner` the whole time. Diff the columns
+   and read the view definition; a distinct name is not a distinct fact.
+2. **Read the semantics from the LIVE view definition (`pg_get_viewdef`), never from the column
+   name.** `frontage_count` looks like a count and is 99.8% the value "3" — which reads as absurd
+   data until you see the mapping translates only «ثلاثة شوارع»→3 and «أربعة شوارع»→4 and NULLs
+   every other value. The stored values are honest; the capture is partial. That distinction is the
+   difference between a data-corruption incident and a capture-completeness defect, and only the
+   definition tells you which.
+
 ### 2.6 — The per-run floor
 
 `ENGINEER_ROUTINES.md` §G.4 governs effort and §G.11 removes the token excuse; these are the minimum
