@@ -551,16 +551,23 @@ appended after the block, per §G.8's "keep your richer domain block and append 
 
 Recorded so the next run does not rediscover them, and does not assume they were checked.
 
-1. **`prune_inactive_from_search()` has no definition tracked in this repository.** It is *called*
-   by `sync_search_listings_ar()` (migrations `20260716_batch2_search_truth`, `20260717_price_
-   fidelity_guarantee`, `20260717_deal_truth_recovery`, `20260729194317`), its presence in the sync
-   body is pinned by `20260824082414` and by `scripts/verify-sync-change-detection-canonical-
-   labels.ts` — but no `create [or replace] function ... prune_inactive_from_search` exists anywhere
-   in the tree. So the guaranteed remover of inactive rows from the served index is a
-   production-only object. **UNKNOWN: its exact predicate, and whether it is guarded.** First action
-   for a run that touches link §2.3: recover the definition from
-   `supabase_migrations.schema_migrations.statements` / `pg_get_functiondef`, mirror it into
-   `supabase/migrations/`, and only then write a barrier over it.
+1. ~~**`prune_inactive_from_search()` has no definition tracked in this repository.**~~ **CLOSED
+   2026-09-05 (ops_incident #26).** Recovered verbatim from
+   `supabase_migrations.schema_migrations.statements` into
+   `supabase/migrations/20260706163008_prune_inactive_from_search.sql` — byte-identical to the
+   applied statement (md5 `eaf7d972969dc71d23b35d590f267c6b`, 1,411 characters / 1,413 bytes), and
+   the applied body was confirmed equal to `pg_proc.prosrc` in production, so the committed file is
+   the CURRENT definition and not a stale ancestor. **The two UNKNOWNs are now answered:** the
+   predicate is, per source table, `delete from search_listings_ar s where s.source_table = <t> and
+   not exists (select 1 from public.<t> x where x.id = s.listing_id and x.active)`; and it IS
+   guarded — each table is skipped unless `to_regclass` resolves it and both `active` and `id`
+   columns exist, and each delete runs in its own `exception when others` block, so one odd table
+   cannot break the run. It is `security invoker` with no `search_path` pin.
+   The class is now barriered offline by `scripts/verify-committed-sql-defines-what-it-calls.ts`
+   (in `npm test`): committed SQL may not call a `public.<name>()` that no committed migration
+   creates. The 32 objects that were ALREADY production-only when it was written are enumerated in
+   `scripts/production-only-object-baseline.txt` as a shrink-only floor — they remain real debt, and
+   `search_listings_ar` itself is one of them.
 2. **None of routine #11's seven alert kinds has a detector.** `inactive_still_searchable`,
    `inactive_still_counted`, `false_resurrection`, `unknown_treated_as_dead`, `deletion_clock_*`,
    `orphan_after_delete` and `lifecycle_*` are routed by `scripts/lib/alertRouting.ts` and named in
