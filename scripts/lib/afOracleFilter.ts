@@ -78,6 +78,11 @@ export type OracleOpts = {
   /** The literal `district_ar` values present in the index. Required whenever p_districts is set —
    *  see the p_districts case for why a literal match alone is not sound. */
   knownDistricts?: Iterable<string>;
+  /** requested city name → the catalogue city_ids production resolves it to (loc_catalog_city
+   *  `city_norm` UNION loc_catalog_city_alias `alias_norm`). Required whenever p_cities is set —
+   *  see the p_cities case for why a label match alone undercounts an aliased city. Build it with
+   *  `loadCityScope()` in ./afOracleLive.ts from the reference catalogue itself. */
+  cityScope?: Record<string, number[]>;
   /** canonical direction key → every literal `direction_ar` spelling the index stores for it.
    *  Required whenever p_directions is set — see the p_directions case. Build it with
    *  `directionVariantsFrom()` below from the DISTINCT values actually in search_listings_ar. */
@@ -305,7 +310,73 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_types': if (!hasScopeB) parts.push(`type_ar=in.${inList((v as string[]).filter((t) => keepFor(t, 'A')))}`); break;
       case 'p_tables2': case 'p_types2': break; // folded into the or=() above when hasScopeB
       case 'p_region_ids': parts.push(`region_id=in.(${(v as number[]).join(',')})`); break;
-      case 'p_cities': parts.push(`city_ar=in.${inList(v as string[])}`); break;
+      // A CITY IS NOT MATCHED BY ITS LABEL ALONE (found live 2026-09-06, routine #9 red team).
+      //
+      // This emitted a bare `city_ar=in.(…)`. Production matches a THREE-ARM OR (the live
+      // location_search_candidates_ar clause, read with pg_get_functiondef):
+      //     normalize_ar(s.city_ar) = any(city_tokens)
+      //  OR s.city_id           = any(city_ids)
+      //  OR s.match_city_ids   && city_ids
+      // where city_ids comes from loc_catalog_city (city_norm) UNION loc_catalog_city_alias
+      // (alias_norm). The label arm is only ONE of the three, so the literal filter UNDERCOUNTS any
+      // city that carries an alias — silently, exactly the failure this module's own p_districts
+      // case already refuses to commit ("rather than silently emitting a filter that undercounts").
+      //
+      // MEASURED on production: الهفوف/بيع/فيلا returned 802 from the RPC and 652 from this oracle —
+      // a 150-row phantom "the product returned extra ineligible rows" against a perfectly healthy
+      // search. Fleet-wide it is 6,021 rows across the twin pair الهفوف/الاحساء (الاحساء misses
+      // 5,181, الهفوف misses 840). It stayed invisible because every city the AF corpus drives —
+      // الرياض, جدة, الدمام, الخبر, مكة, المدينة, بريدة, أبها, الطائف, حائل, تبوك and nine more —
+      // has NO alias contribution, so the literal agreed with production FOR THE WRONG REASON on
+      // all 21 cities checked. §40.2's "never Riyadh-heavy" rotation is what surfaced it.
+      //
+      // The gap runs both ways, which is why it had to be fixed rather than tolerated: an oracle
+      // that under-counts by construction cannot tell its own blind spot from the product genuinely
+      // returning rows it should not, so those cities were UNCERTIFIABLE in either direction.
+      //
+      // The translation is now the same three arms, built from PostgREST's own operators over the
+      // REFERENCE CATALOGUE the caller resolves (`cityScope`) — the identical route p_category and
+      // p_districts already take. It never reproduces normalize_ar(); it asks the catalogue instead.
+      // Verified exact on production: or=(city_ar.in.(الهفوف),city_id.in.(12,501),
+      // match_city_ids.ov.{12,501}) returns 6,021 — the RPC's own predicate to the row.
+      case 'p_cities': {
+        // SCOPE OF THIS REPAIR, stated so it cannot be mistaken for more than it is. The exact
+        // translation is OPT-IN (`cityScope`), and without it this still emits the label arm exactly
+        // as before. That is deliberate, not an oversight: twelve live checks call this module and
+        // build their own opts, and making the exact form mandatory would turn every one of them RED
+        // (`unhandled` ⇒ "the oracle covers every predicate" = FAIL) in a single change that cannot
+        // be run here — the standing-red wound this repo has been burned by. Every one of those
+        // twelve drives cities with NO alias contribution (measured: identical on 20 of 21 cities
+        // checked), so the default is exactly right for all of them today. Wiring them onto
+        // `cityScope`, so an aliased city becomes certifiable everywhere, is routed to routine #10
+        // as the sibling sweep (PRODUCTION_RED_TEAM_ENGINEER.md PART 1.3).
+        // scripts/verify-af-oracle-city-arms.ts pins BOTH branches and mutation-proves that the
+        // label-only form undercounts an aliased city, so this limitation cannot go quiet.
+        const names = v as string[];
+        const scope = opts?.cityScope;
+        if (!scope) { parts.push(`city_ar=in.${inList(names)}`); break; }
+        const ids = new Set<number>();
+        const unknown: string[] = [];
+        for (const n of names) {
+          const got = scope[n];
+          if (!got) { unknown.push(n); continue; }
+          for (const id of got) ids.add(id);
+        }
+        if (unknown.length) {
+          // Refuse rather than guess: a name the catalogue does not carry is one whose id arms this
+          // oracle cannot reproduce, and emitting the label arm alone is precisely the old bug.
+          unhandled.push(`p_cities:${unknown.join('|')} (not resolvable through loc_catalog_city/loc_catalog_city_alias — the id arms cannot be reproduced)`);
+          break;
+        }
+        const idList = [...ids].sort((a, b) => a - b);
+        const arms = [`city_ar.in.${inList(names)}`];
+        if (idList.length) {
+          arms.push(`city_id.in.(${idList.join(',')})`);
+          arms.push(`match_city_ids.ov.{${idList.join(',')}}`);
+        }
+        parts.push(`or=(${arms.join(',')})`);
+        break;
+      }
       // DISTRICTS ARE NOT MATCHED LITERALLY BY PRODUCTION (found live 2026-09-01).
       //
       // The clause matches `norm_district_tok(s.district_ar) = any(district_tokens)`, where

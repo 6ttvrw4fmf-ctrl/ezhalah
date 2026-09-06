@@ -30,3 +30,47 @@ export async function loadDirectionVariants(
   const map = strangers === 0 ? directionVariantsFrom(observed) : null;
   return { map, observed, strangers };
 }
+
+/**
+ * The reference read the oracle needs for p_cities: requested city name → the catalogue city_ids
+ * production resolves it to.
+ *
+ * WHY IT EXISTS (routine #9 red team, 2026-09-06). The live clause matches a city three ways —
+ * `normalize_ar(s.city_ar) = any(city_tokens)` OR `s.city_id = any(city_ids)` OR
+ * `s.match_city_ids && city_ids` — where city_ids is `loc_catalog_city.city_norm` UNION
+ * `loc_catalog_city_alias.alias_norm`. The oracle used to emit only the label arm, which undercounts
+ * every aliased city (measured: 6,021 rows across the الهفوف/الاحساء twin pair) while silently
+ * agreeing with production on every un-aliased one.
+ *
+ * normalize_ar() is deliberately NOT reproduced here — that would make the "independent" oracle
+ * depend on a guess about our own SQL, the one thing this module must never do. Instead the
+ * requested LABEL is looked up in the catalogue to obtain its stored `city_norm`, and that value —
+ * the server's own normalisation, read rather than recomputed — drives both id lookups.
+ *
+ * A name the catalogue does not carry verbatim is simply absent from the map, and buildOracleQS then
+ * REFUSES the request (`unhandled`) rather than emitting the label arm alone.
+ */
+export async function loadCityScope(
+  rest: string,
+  headers: Record<string, string>,
+  names: readonly string[],
+): Promise<Record<string, number[]>> {
+  const out: Record<string, number[]> = {};
+  const get = async (path: string) => {
+    const r = await fetch(`${rest}/rest/v1/${path}`, { headers });
+    if (!r.ok) throw new Error(`city scope probe REST ${r.status} on ${path}`);
+    return r.json() as Promise<Array<Record<string, unknown>>>;
+  };
+  for (const name of new Set(names)) {
+    const norms = await get(`loc_catalog_city?select=city_norm&city_ar=eq.${encodeURIComponent(name)}`);
+    if (!norms.length) continue;                       // not catalogued → left out, so the caller refuses
+    const ids = new Set<number>();
+    for (const n of new Set(norms.map((x) => String(x.city_norm)))) {
+      const q = encodeURIComponent(n);
+      for (const r of await get(`loc_catalog_city?select=city_id&city_norm=eq.${q}`)) ids.add(Number(r.city_id));
+      for (const r of await get(`loc_catalog_city_alias?select=city_id&alias_norm=eq.${q}`)) ids.add(Number(r.city_id));
+    }
+    out[name] = [...ids].sort((a, b) => a - b);
+  }
+  return out;
+}

@@ -132,6 +132,13 @@ jobs:
           #                 «اتصل»), so every price column is NULL by design. See each run.py.
           - { source: alta,         cmd: "python -m scrapers.alta.run --type all" }
           - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all" }
+          # Two more GREEN-audited additions (owner-instructed 2026-09-06).
+          #   remal   87 posts -> 84 listings. class_list carries city/type/offer; images bind by
+          #           attachment PARENT because the detail page renders OTHER listings' photos.
+          #   amaall  135 posts -> 50 listings, ARABIC ONLY: the site publishes every listing twice
+          #           (68 EN + 67 AR), so taking both languages would double every property.
+          - { source: remal,        cmd: "python -m scrapers.remal.run --type all" }
+          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all" }
           - { source: abralosol,   cmd: "python -m scrapers.abralosol.run --type all" }
           - { source: arkaan,      cmd: "python -m scrapers.arkaan.run --type all" }
           - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }
