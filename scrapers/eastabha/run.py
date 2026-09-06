@@ -238,10 +238,10 @@ def _num(s: Optional[str]) -> Optional[int]:
         return None
 
 
-def _price_from_text(s: Optional[str]) -> Optional[int]:
-    """Parse a price from free Arabic text, honouring magnitude words: '400 ألف ريال' → 400000,
-    '1.2 مليون' → 1200000. Plain numbers pass through. Sub-1000 results are treated as parse
-    noise (the bug that stored land prices as 400/100 — the 'ألف' was being dropped)."""
+def _amount_from_text(s: Optional[str], *, floor: int) -> Optional[int]:
+    """Parse an amount from free Arabic text, honouring magnitude words: '400 ألف ريال' → 400000,
+    '1.2 مليون' → 1200000. Plain numbers pass through. Anything under `floor` is discarded as
+    parse noise — see the two callers below for why the floor differs between them."""
     if not s:
         return None
     txt = re.sub(r"<[^>]+>", " ", up.unquote(str(s))).translate(_AR_DIGITS).replace("٬", ",")
@@ -257,7 +257,25 @@ def _price_from_text(s: Optional[str]) -> Optional[int]:
     elif any(w in txt for w in ("ألف", "الف", "آلاف")):
         val *= 1_000
     val = int(val)
-    return val if val >= 1000 else None
+    return val if val >= floor else None
+
+
+def _price_from_text(s: Optional[str]) -> Optional[int]:
+    """A TOTAL price. Sub-1000 results are treated as parse noise (the bug that stored land prices
+    as 400/100 — the 'ألف' was being dropped)."""
+    return _amount_from_text(s, floor=1000)
+
+
+def _rate_from_text(s: Optional[str]) -> Optional[int]:
+    """A PER-METRE rate, which has no business meeting a total price's ≥1000 floor: 300 ر.س/م² is
+    an ordinary land rate, and applying the total's floor here was a live defect (2026-09-06).
+    EA22962 publishes «سعر المتر 300ريال» beside a total of «ر.س2,280,000»; _price_from_text
+    discarded the 300 as noise, so the shape-A branch fell through to shape B and stored the
+    TOTAL as the per-metre rate (2,280,000 ر.س/م²) while marking the row price_is_rate — which
+    retracts the source's published total as well. One source figure lost, one invented, from a
+    floor that belongs to the other caller. Magnitude words still apply, so «3 آلاف للمتر» is
+    3,000; only the floor differs."""
+    return _amount_from_text(s, floor=1)
 
 
 def _attr(name: str, html: str) -> Optional[str]:
@@ -395,7 +413,7 @@ def parse_detail(html_text: str) -> dict[str, Any]:
     if qm:
         qual = re.sub(r"<[^>]+>", " ", qm.group(1))
     if re.search(r"(?:لل|ال)\s*متر", disp):
-        qual_rate = _price_from_text(qual) if re.search(r"(?:لل|ال)\s*متر", qual) else None
+        qual_rate = _rate_from_text(qual) if re.search(r"(?:لل|ال)\s*متر", qual) else None
         if qual_rate:
             out["price_per_meter"] = qual_rate            # shape A: price stays the TOTAL
         elif out.get("price"):
