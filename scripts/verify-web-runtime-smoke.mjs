@@ -879,12 +879,23 @@ try {
     // composer LOCKS in place (owner request 2026-09-05: no replacement card): the same box goes
     // readOnly with the closed-chat placeholder «أُغلقت هذه المحادثة…» pointing at the ☰, and the
     // send arrow becomes a disabled lock. Asserted only when the landed count really is ≤ 50 (DB
-    // truth today is 48; if inventory grows past 50 the interview is right to keep going and this
-    // block simply does not apply — it never demands a completion the data does not owe).
+    // truth 2026-09-06 is 50 — hajer/abwbna/wasalt's real Hofuf-duplex-1+bath inventory, grown
+    // from 48 as abwbna onboarded; if inventory grows past 50 the interview is right to keep going
+    // and this block simply does not apply — it never demands a completion the data does not owe).
     if (Number.isFinite(jFinal) && jFinal <= 50) {
-      const bodyTxt = await body();
+      // Same reveal-cadence reality as the lockBtn poll below (48-50 cards take ~40s on a CI
+      // runner) — a single-shot body() read here can catch the page mid-cascade, while «عرض
+      // المزيد» is still deliberately showing because more locally-fetched cards remain to drip
+      // in. Poll for it to disappear rather than sampling once (found live 2026-09-06: this exact
+      // single-shot read failed CI while the sibling lockBtn poll a few lines below passed).
+      let stillOffered = true;
+      for (const deadline = Date.now() + 90_000; Date.now() < deadline; ) {
+        stillOffered = (await body()).includes('عرض المزيد');
+        if (!stillOffered) break;
+        await page.waitForTimeout(1_000);
+      }
       check('[J] ≤ 50 → no «عرض المزيد» is offered — every remaining listing is already revealed',
-        !bodyTxt.includes('عرض المزيد'), `final=${jFinal}`);
+        !stillOffered, `final=${jFinal}`);
       const lockedComposer = await page.locator('textarea[readonly][placeholder*="أُغلقت هذه المحادثة"]:visible').count();
       check('[J] ≤ 50 → the chat is COMPLETED: the composer locks (readOnly + «أُغلقت هذه المحادثة…» placeholder)',
         lockedComposer === 1, `final=${jFinal} lockedComposer=${lockedComposer}`);
