@@ -148,6 +148,37 @@ try {
   const executed = real.events.find((l) => l.startsWith('npx '));
   check('what the rehearsal PRINTS is what the real run EXECUTES', printed === executed,
     `printed=${printed ?? 'nothing'} executed=${executed ?? 'nothing'}`);
+
+  // ── 6b. the short rehearsal TTL must be a REAL contract, not one this file's own stub invented ─
+  // LOCK_STUB above echoes `DEPLOY_LOCK_TTL_SECONDS` itself, so check 2's "60s" would stay green
+  // even if scripts/deploy-lock.sh stopped reading that variable — a barrier supplying its own
+  // input proves nothing. So execute the REAL lock helper against a recording `curl` and read the
+  // TTL it actually POSTs. If it were ever hardcoded, a rehearsal killed before its trap fires
+  // would hold the production lock for the full 600s mid-incident (the very thing the 60s exists to
+  // prevent), and deploy-frontend.yml's DEPLOY_LOCK_TTL_SECONDS=1800 would silently become 600 too.
+  const curlLog = join(sandbox, 'curl.log');
+  writeFileSync(join(bin, 'curl'),
+    `#!/bin/sh\nfor a in "$@"; do echo "$a" >> ${JSON.stringify(curlLog)}; done\necho '[{"acquired":true}]'\n`);
+  chmodSync(join(bin, 'curl'), 0o755);
+  /** The p_ttl_seconds the real deploy-lock.sh puts on the wire, with the env var set / unset. */
+  const postedTtl = (ttl?: string): string | null => {
+    writeFileSync(curlLog, '');
+    const env: Record<string, string | undefined> = {
+      ...process.env, PATH: `${bin}:${process.env.PATH}`,
+      SUPABASE_URL: 'http://deploy-lock.sandbox.invalid', SUPABASE_SERVICE_ROLE_KEY: 'sandbox-not-a-key',
+    };
+    delete env.DEPLOY_LOCK_TTL_SECONDS; // inherited from a CI job's env, this would fake the default
+    if (ttl !== undefined) env.DEPLOY_LOCK_TTL_SECONDS = ttl;
+    spawnSync('scripts/deploy-lock.sh', ['acquire', 'ttl-probe', 'ttl probe'],
+      { cwd: root, encoding: 'utf8', shell: false, env });
+    return (readFileSync(curlLog, 'utf8').match(/"p_ttl_seconds":\s*(\d+)/) ?? [])[1] ?? null;
+  };
+  const short = postedTtl('60');
+  const dflt = postedTtl();
+  check('the rehearsal\'s 60s really reaches the lock — deploy-lock.sh honours DEPLOY_LOCK_TTL_SECONDS',
+    short === '60', `posted p_ttl_seconds=${short ?? 'nothing'}`);
+  check('…and unset still means the 600s default docs/DEPLOY_SAFETY.md documents',
+    dflt === '600', `posted p_ttl_seconds=${dflt ?? 'nothing'}`);
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
 }
