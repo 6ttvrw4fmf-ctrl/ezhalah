@@ -49,9 +49,50 @@ import { useEffect, useState } from 'react';
  *  broad selector: a loose match could catch one of our own elements and blank out real layout. */
 export const ONE_TAP_IFRAME_SELECTOR = '#credential_picker_iframe';
 
+// ── THE ID IS NOT A CONTRACT, AND GIS DOES NOT ALWAYS SET IT (ops_incident #120, 2026-09-06) ─────
+// Measured on production, same bundle, same client_id, both engines, signed out at 375×812:
+//
+//   Chromium   <iframe id="credential_picker_iframe" class="L5Fo6c-PQbLGe">  375×144 at 0,668
+//              position:fixed  z-index:9999          → the bottom sheet this file was written for
+//   WebKit     <iframe class="L5Fo6c-PQbLGe">        375×150 at 0,20
+//              NO id at all                          → docked to the TOP, over the top bar
+//
+// So the guard above failed twice over on WebKit: `#credential_picker_iframe` matched nothing, and
+// even had it matched, bottomPromptInset() returns 0 for a top-docked rect by design. The app laid
+// its top bar out underneath Google's frame, and `document.elementFromPoint` at the centre AND all
+// four edges of the sidebar button, «إنشاء حساب / تسجيل الدخول», «تصفية» and «الوكيل الذكي»
+// returned that iframe — on both Filter home and AI Agent, 4/4 across two independent CI sweeps.
+//
+// Identify the prompt by WHAT IT IS — a frame served by an auth provider we actually use — rather
+// than by one id GIS happens to set on one engine. This stays narrow in the way that matters: an
+// iframe whose src is accounts.google.com or appleid.apple.com is definitionally not one of ours,
+// so the "a loose match could blank out real layout" risk above is not reintroduced. Apple is
+// included because the owner's 2026-09-01 ruling makes Google and Apple the only two auth
+// providers, and the next overlay to dock over the app should not need this file edited again.
+export const AUTH_PROMPT_SELECTOR = [
+  ONE_TAP_IFRAME_SELECTOR,
+  'iframe[src*="accounts.google.com/gsi/"]',
+  'iframe[src*="appleid.apple.com"]',
+].join(',');
+
 /** How far off the bottom edge still counts as "docked to the bottom". Sub-pixel layout and the
  *  sheet's slide-in animation both land a pixel or two short of the edge. */
 const BOTTOM_ANCHOR_TOLERANCE = 2;
+
+/** How far off the TOP edge still counts as "docked to the top". Measured at 20 px on WebKit — GIS
+ *  leaves a margin above its top-anchored sheet, so the 2 px the bottom edge needs is far too tight
+ *  here. Bounded deliberately: a frame further down than this is floating in the page, not docked,
+ *  and reserving the whole band above it would be wrong. */
+const TOP_ANCHOR_TOLERANCE = 32;
+
+/** A docked SHEET spans the viewport; a corner CARD does not. Only a sheet gets space reserved on
+ *  its edge — reserving a full-width band for the ~390 px desktop corner card would push the whole
+ *  app down for something sitting beside it, not over it. 0.8 rather than 1.0 leaves room for the
+ *  margins GIS puts either side (measured: 375 of 375 on mobile, so a real sheet clears this
+ *  easily). Applied to the TOP path only: the bottom path predates it, is proven in production,
+ *  and GIS has never rendered a bottom-docked CARD — widening its conditions here would be an
+ *  unforced change to the one half that already works. */
+const MIN_SHEET_SPAN_FRACTION = 0.8;
 
 /** A prompt may never eat more than this share of the viewport. A pathological or mis-measured rect
  *  must degrade to "a bit of wasted space", never to an app squeezed into nothing. */
@@ -61,9 +102,15 @@ export type PromptRect = {
   top: number;
   bottom: number;
   height: number;
+  /** Needed only by the TOP path, to tell a full-width docked SHEET from a corner CARD. Absent on
+   *  the bottom path's own fixtures, which predate it — an undefined width never spans. */
+  width?: number;
   /** `display:none`, `visibility:hidden`, or fully transparent — present in the DOM but not shown. */
   hidden?: boolean;
 };
+
+/** Space to reserve on each edge. Both zero whenever nothing is docked over the app. */
+export type PromptInsets = { top: number; bottom: number };
 
 /**
  * How many CSS pixels of the viewport's BOTTOM edge the prompt occupies.
@@ -90,15 +137,77 @@ export function bottomPromptInset(rect: PromptRect | null | undefined, viewportH
   return Math.min(Math.round(overlap), Math.floor(viewportHeight * MAX_INSET_FRACTION));
 }
 
-/** Read the live prompt's rect, or null when there is no prompt in the document. */
-function readPromptRect(): PromptRect | null {
-  if (typeof document === 'undefined') return null;
-  const el = document.querySelector(ONE_TAP_IFRAME_SELECTOR) as HTMLElement | null;
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  const cs = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
-  const hidden = !!cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0');
-  return { top: r.top, bottom: r.bottom, height: r.height, hidden };
+/**
+ * How many CSS pixels of the viewport's TOP edge the prompt occupies.
+ *
+ * The mirror of bottomPromptInset, and PURE for the same reason. Returns 0 for everything that must
+ * not move layout, plus one condition the bottom edge does not need: the prompt must SPAN the
+ * viewport, so the desktop corner card — top-anchored, ~390 px wide, sitting beside the app rather
+ * than over it — reserves nothing. A frame docked to the top of a phone is 375 of 375 wide.
+ */
+export function topPromptInset(
+  rect: PromptRect | null | undefined,
+  viewportHeight: number,
+  viewportWidth: number,
+): number {
+  const promptHeight = rect ? rect.height : 0;
+  if (!rect || rect.hidden || !(promptHeight > 0)) return 0;
+  if (!(viewportHeight > 0) || !(viewportWidth > 0)) return 0;
+  // Not docked to the top → nothing of ours is under it up here. (Desktop corner prompt, and the
+  // bottom sheet, both land on this line.)
+  if (rect.top > TOP_ANCHOR_TOLERANCE) return 0;
+  // A card beside the app, not a sheet across it.
+  const promptWidth = rect.width ?? 0;
+  if (!(promptWidth >= viewportWidth * MIN_SHEET_SPAN_FRACTION)) return 0;
+  const overlap = rect.bottom;
+  if (!(overlap > 0)) return 0;
+  return Math.min(Math.round(overlap), Math.floor(viewportHeight * MAX_INSET_FRACTION));
+}
+
+/**
+ * Both edges at once, over EVERY docked prompt in the document.
+ *
+ * Two rules that only exist once both edges are in play:
+ *  · A rect that qualifies on BOTH edges is not a dock at all — it is a full-screen overlay, and
+ *    "reserve the space it occupies" is meaningless for something covering everything. It
+ *    contributes nothing rather than squeezing the app to nothing.
+ *  · The COMBINED reservation is capped exactly like each half is. Two prompts docked at once must
+ *    still leave an app behind them.
+ */
+export function promptInsets(
+  rects: ReadonlyArray<PromptRect | null | undefined> | null | undefined,
+  viewportHeight: number,
+  viewportWidth: number,
+): PromptInsets {
+  let top = 0;
+  let bottom = 0;
+  for (const rect of rects ?? []) {
+    const t = topPromptInset(rect, viewportHeight, viewportWidth);
+    const b = bottomPromptInset(rect, viewportHeight);
+    if (t > 0 && b > 0) continue;   // covers the whole viewport: a modal, not a dock
+    if (t > top) top = t;
+    if (b > bottom) bottom = b;
+  }
+  const cap = viewportHeight > 0 ? Math.floor(viewportHeight * MAX_INSET_FRACTION) : 0;
+  if (top + bottom > cap) {
+    // Keep the larger reservation whole rather than halving both into uselessness — a sheet that is
+    // only half accounted for still eats the controls under its remaining half.
+    if (top >= bottom) { top = Math.min(top, cap); bottom = Math.max(0, cap - top); }
+    else { bottom = Math.min(bottom, cap); top = Math.max(0, cap - bottom); }
+  }
+  return { top, bottom };
+}
+
+/** Read every live prompt rect in the document. Empty when nothing is docked. */
+function readPromptRects(): PromptRect[] {
+  if (typeof document === 'undefined') return [];
+  const els = Array.from(document.querySelectorAll(AUTH_PROMPT_SELECTOR)) as HTMLElement[];
+  return els.map((el) => {
+    const r = el.getBoundingClientRect();
+    const cs = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
+    const hidden = !!cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0');
+    return { top: r.top, bottom: r.bottom, height: r.height, width: r.width, hidden };
+  });
 }
 
 /**
@@ -112,28 +221,28 @@ function readPromptRect(): PromptRect | null {
  *
  * Returns a cleanup function; safe to call on any platform (a no-op off web).
  */
-export function observeBottomPromptInset(onChange: (px: number) => void): () => void {
+export function observePromptInsets(onChange: (insets: PromptInsets) => void): () => void {
   if (typeof document === 'undefined' || typeof window === 'undefined') return () => {};
-  let last = -1;
+  let last: PromptInsets = { top: -1, bottom: -1 };
   let sizeObserver: ResizeObserver | null = null;
-  let watched: Element | null = null;
+  let watched: Element[] = [];
 
   const emit = () => {
-    const px = bottomPromptInset(readPromptRect(), window.innerHeight);
-    if (px === last) return;
-    last = px;
-    onChange(px);
+    const next = promptInsets(readPromptRects(), window.innerHeight, window.innerWidth);
+    if (next.top === last.top && next.bottom === last.bottom) return;
+    last = next;
+    onChange(next);
   };
 
-  // Keep a ResizeObserver attached to whichever prompt element is currently in the document.
+  // Keep a ResizeObserver attached to whichever prompt elements are currently in the document.
   const retarget = () => {
-    const el = document.querySelector(ONE_TAP_IFRAME_SELECTOR);
-    if (el === watched) return;
+    const els = Array.from(document.querySelectorAll(AUTH_PROMPT_SELECTOR));
+    if (els.length === watched.length && els.every((el, i) => el === watched[i])) return;
     if (sizeObserver) { sizeObserver.disconnect(); sizeObserver = null; }
-    watched = el;
-    if (el && typeof ResizeObserver === 'function') {
+    watched = els;
+    if (els.length && typeof ResizeObserver === 'function') {
       sizeObserver = new ResizeObserver(emit);
-      sizeObserver.observe(el);
+      for (const el of els) sizeObserver.observe(el);
     }
   };
 
@@ -155,9 +264,9 @@ export function observeBottomPromptInset(onChange: (px: number) => void): () => 
   };
 }
 
-/** The inset, as React state. 0 on native, on desktop, and whenever no prompt is docked. */
-export function useBottomPromptInset(): number {
-  const [inset, setInset] = useState(0);
-  useEffect(() => observeBottomPromptInset(setInset), []);
-  return inset;
+/** Both insets, as React state. Zeroes on native and whenever no prompt is docked over the app. */
+export function usePromptInsets(): PromptInsets {
+  const [insets, setInsets] = useState<PromptInsets>({ top: 0, bottom: 0 });
+  useEffect(() => observePromptInsets(setInsets), []);
+  return insets;
 }

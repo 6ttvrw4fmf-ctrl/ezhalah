@@ -11,7 +11,8 @@
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
          findings, skips, skip, ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
-         classifySearchRpc, classifyTapOwnership, SELECTED_CITY_MARKER } from './harness.mjs';
+         classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
+         SELECTED_CITY_MARKER } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -1758,6 +1759,135 @@ JOURNEYS['adv-crosstab-no-clobber'] = async (mobile) => withPage(
 // ═══ RUNNER ═════════════════════════════════════════════════════════════════════════════════════
 const t0 = Date.now();
 console.log(`JOURNEY SWEEP — ${new Date().toISOString()}`);
+// ── ops_incident #120 · NO AUTH OVERLAY MAY SIT OVER AN EZHALAH CONTROL ─────────────────────────
+// Owner rule, 2026-09-06: «Google One Tap must never cover, block, or intercept any Ezhalah controls
+// on mobile or desktop», while One Tap itself keeps working — including reappearing after account
+// deletion. So this journey never asks whether the prompt is there; it asks whether OUR controls are
+// still reachable while it is, and it proves the answer by actually pressing two of them.
+//
+// WHY elementsFromPoint AND NOT elementFromPoint. The singular form invites the exact false positive
+// this journey must not produce, and it produced one while #120 was being diagnosed: a control that
+// is SCROLLED OUT OF VIEW still has a bounding rect, that rect can lie under the sheet, and
+// elementFromPoint at its centre then returns the overlay — reading as «20 controls blocked» on a
+// Chromium build where the inset was working perfectly and the app's scroll container had correctly
+// been shortened to 668px. elementsFromPoint returns the PAINTED STACK at a point: a clipped control
+// is not in it at all, and a control that IS painted appears with everything above it. So «blocked»
+// becomes exactly what it should be — this control is painted here, and an auth overlay is on top
+// of it — and a control nobody can see cannot manufacture a defect.
+const AUTH_OVERLAY_ORIGINS = ['accounts.google.com', 'appleid.apple.com'];
+JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `auth-overlay-clears-controls:${mobile ? 'mobile375' : 'desktop1440'}`;
+
+  const READ = `(() => {
+    const ORIGINS = ${JSON.stringify(AUTH_OVERLAY_ORIGINS)};
+    const isOverlay = (el) => {
+      for (let n = el; n; n = n.parentElement) {
+        if (n.tagName === 'IFRAME') { let src = ''; try { src = String(n.src || ''); } catch (e) { src = ''; }
+          if (ORIGINS.some((o) => src.includes(o))) return true; }
+        if (n.id === 'credential_picker_iframe' || n.id === 'credential_picker_container') return true;
+      }
+      return false;
+    };
+    const isCtrl = (e) => { const st = getComputedStyle(e); const r = e.getAttribute('role');
+      return r === 'button' || r === 'link' || st.cursor === 'pointer'; };
+    const vis = (e) => { const r = e.getBoundingClientRect(); if (r.width <= 0 || r.height <= 0) return false;
+      const s = getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.01; };
+    const label = (e) => (e.getAttribute('aria-label') || (e.dataset && e.dataset.testid)
+      || (e.innerText || '').trim().slice(0, 24) || e.tagName).replace(/\s+/g, ' ');
+    const frames = [];
+    for (const f of document.querySelectorAll('iframe')) {
+      let src = ''; try { src = String(f.src || ''); } catch (e) { src = ''; }
+      if (!ORIGINS.some((o) => src.includes(o)) && f.id !== 'credential_picker_iframe') continue;
+      const r = f.getBoundingClientRect(); const cs = getComputedStyle(f);
+      frames.push({ id: f.id || null, src: src.slice(0, 56),
+        box: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
+        z: cs.zIndex, pos: cs.position, hidden: cs.visibility === 'hidden' || cs.display === 'none' });
+    }
+    const blocked = [];
+    if (frames.length) {
+      for (const e of document.querySelectorAll('*')) {
+        if (!vis(e) || !isCtrl(e) || isOverlay(e)) continue;
+        const r = e.getBoundingClientRect();
+        const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+        if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) continue;
+        const stack = document.elementsFromPoint(cx, cy);
+        const self = stack.indexOf(e);
+        if (self < 0) continue;                       // painted nowhere here — clipped or covered by our own UI
+        const over = stack.findIndex((n) => isOverlay(n));
+        if (over >= 0 && over < self) {
+          blocked.push({ label: label(e), at: [Math.round(cx), Math.round(cy)],
+            box: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] });
+        }
+      }
+    }
+    return { frames, blocked: blocked.slice(0, 10), blockedCount: blocked.length,
+             vp: { w: innerWidth, h: innerHeight } };
+  })()`;
+
+  // The prompt arrives late (~9-13 s measured) and Google suppresses it freely — a cooldown, no
+  // Google session, an opt-out. Absence is a legitimate outcome and must read as a SKIP, never as a
+  // pass: a run that never saw an overlay has proven nothing about overlays.
+  const waitForOverlay = async (budgetMs) => {
+    const end = Date.now() + budgetMs;
+    for (;;) {
+      const s = await page.evaluate(READ);
+      if (s.frames.some((f) => !f.hidden && f.box[3] > 0)) return s;
+      if (Date.now() > end) return s;
+      await sleep(1000);
+    }
+  };
+
+  const seen = {};
+  let sawOverlay = false;
+  for (const [where, path] of [['Filter home', '/'], ['AI Agent', '/agent']]) {
+    await gotoOrRetryTransport(page, BASE + path);
+    await settle(page);
+    const state = await waitForOverlay(20_000);
+    seen[where] = state;
+    if (!state.frames.length) continue;
+    sawOverlay = true;
+    if (state.blockedCount) {
+      defect(name, 'an auth overlay is sitting on top of an Ezhalah control',
+        `${where}: ${state.blockedCount} control(s) blocked — `
+        + state.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')
+        + `. overlay=${JSON.stringify(state.frames)} viewport=${JSON.stringify(state.vp)}`);
+    } else {
+      pass(name, `${where}: auth overlay present (${JSON.stringify(state.frames.map((f) => f.box))}) and 0 controls blocked`);
+    }
+  }
+
+  // THE REAL INTERACTION, not only the geometry. Playwright's click hit-tests and refuses an
+  // intercepted target, so a tab that actually switches is proof the control was reachable — the
+  // half a rect comparison can never give. Run whether or not an overlay showed: it is the same
+  // journey a person makes, and it costs two clicks.
+  await gotoOrRetryTransport(page, BASE + '/');
+  await settle(page);
+  const toAgent = await clickText(page, 'الوكيل الذكي');
+  await sleep(1500);
+  const onAgent = page.url().includes('/agent');
+  const back = onAgent ? await clickText(page, 'تصفية') : false;
+  await sleep(1500);
+  const home = page.url();
+  if (!toAgent || !onAgent) {
+    defect(name, 'a primary tab could not be pressed while the auth surface was live',
+      `«الوكيل الذكي» click landed=${toAgent}, url=${page.url()} (${clickReason() || 'no reason recorded'})`);
+  } else if (!back || home.includes('/agent')) {
+    defect(name, 'the return tab could not be pressed while the auth surface was live',
+      `«تصفية» click landed=${back}, url=${home} (${clickReason() || 'no reason recorded'})`);
+  } else {
+    pass(name, 'both primary tabs were pressed and both navigated — the controls are genuinely reachable');
+  }
+
+  if (!sawOverlay) {
+    // Not a pass and not a failure: Google decides whether to show it, and it often does not.
+    skip(name, 'no auth overlay appeared within 20s on either screen — geometry unproven this run '
+      + '(the tab presses above still ran and passed)');
+  }
+  const errs = appPageErrors(bag, name);
+  if (errs.length) defect(name, 'uncaught page error on the auth-overlay journey', errs[0]);
+  void seen;
+});
+
 const engines = ['chromium', 'webkit', 'firefox'].filter(engineAvailable);
 console.log(`ENGINES AVAILABLE HERE: ${engines.join(', ') || 'none'}`);
 console.log(`ENGINE THIS RUN: ${ENGINE}`);
