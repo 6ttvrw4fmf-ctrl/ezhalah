@@ -882,9 +882,15 @@ try {
     // truth today is 48; if inventory grows past 50 the interview is right to keep going and this
     // block simply does not apply — it never demands a completion the data does not owe).
     if (Number.isFinite(jFinal) && jFinal <= 50) {
-      const bodyTxt = await body();
-      check('[J] ≤ 50 → no «عرض المزيد» is offered — every remaining listing is already revealed',
-        !bodyTxt.includes('عرض المزيد'), `final=${jFinal}`);
+      // Assert the PAGER specifically, by its testid — not the substring «عرض المزيد» in the body.
+      // That phrase is ALSO the label of the per-card "See more" details expander
+      // (t('See more') === t('Load more') === «عرض المزيد»; ResultCard.tsx renders it for any Wasalt
+      // card with >4 additional_info rows), so the old substring check failed on legitimate card
+      // toggles whenever a Wasalt listing was in the ≤50 set — nothing to do with pagination. The
+      // owner's rule is about the pagination loop; `results-load-more` is exactly that control.
+      const loadMorePager = await page.locator('[data-testid="results-load-more"]:visible').count();
+      check('[J] ≤ 50 → no «عرض المزيد» pager is offered — every remaining listing is already revealed',
+        loadMorePager === 0, `final=${jFinal} pager=${loadMorePager}`);
       const lockedComposer = await page.locator('textarea[readonly][placeholder*="أُغلقت هذه المحادثة"]:visible').count();
       check('[J] ≤ 50 → the chat is COMPLETED: the composer locks (readOnly + «أُغلقت هذه المحادثة…» placeholder)',
         lockedComposer === 1, `final=${jFinal} lockedComposer=${lockedComposer}`);

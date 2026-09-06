@@ -35,7 +35,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, type AfPhase } from '../src/lib/afBrowsingGate.ts';
+import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRowVisible, type AfPhase } from '../src/lib/afBrowsingGate.ts';
 import { resultCounts } from '../src/data/resultCount.ts';
 import { initialReveal as initialRevealPure } from '../src/lib/initialReveal.ts';
 
@@ -87,13 +87,16 @@ check('every phase in the union is exercised by this barrier',
   `untested: ${declared.filter((p) => !(PHASES as string[]).includes(p)).join(',')}`);
 
 // ── 3. THE CALL SITE really routes through it ───────────────────────────────────────────────────
-check('agent.tsx gates the actions row on afInterviewOwnsBrowsing, not a bare !ageFlow',
-  /const showActionsRow = \(hasMore \|\| canNarrowFurther\)\s*\n\s*&& !afInterviewOwnsBrowsing\(ageFlow\?\.phase \?\? null\);/.test(agentSrc),
+check('agent.tsx routes the actions row through resultsActionsRowVisible with the interview phase (not a bare !ageFlow)',
+  /const showActionsRow = resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(agentSrc),
   'the whole point is that the rule is stated where it can be executed');
 check('the bare `!ageFlow` gate is gone',
   !/showActionsRow = \(hasMore \|\| canNarrowFurther\) && !ageFlow;/.test(agentSrc));
+// EXECUTED, not grepped: the gate itself refuses an empty row (nothing to page, nothing to ask).
 check('the row still requires something real to offer — an empty row is never rendered',
-  /const showActionsRow = \(hasMore \|\| canNarrowFurther\)/.test(agentSrc));
+  resultsActionsRowVisible({ hasMore: false, canNarrowFurther: false, afPhase: null, chatCompleted: false }) === false
+  && resultsActionsRowVisible({ hasMore: true, canNarrowFurther: false, afPhase: null, chatCompleted: false }) === true
+  && /const showActionsRow = resultsActionsRowVisible\(\{[\s\S]{0,120}?hasMore,[\s\S]{0,120}?canNarrowFurther,/.test(agentSrc));
 check('the wording still follows the rendered buttons (the 2026-09-05 honesty fix is intact)',
   /const offersMore = hasMore && showActionsRow;/.test(agentSrc)
   && /const offersNarrow = canNarrowFurther && showActionsRow;/.test(agentSrc));
@@ -126,7 +129,7 @@ check('narrowing is offered only ABOVE the threshold (canNarrowFurther > INTERVI
 // questions left would be declared finished and lose its pager — the owner's clause 2 exactly.
 const completedCalls = [...agentSrc.matchAll(/setCompleted\(true\)/g)].length;
 check('exactly ONE completed-trigger exists, and it is the small-result threshold (R11.1)',
-  completedCalls === 1 && /total <= INTERVIEW_STOP_AT\) setCompleted\(true\);/.test(agentSrc),
+  completedCalls === 1 && /searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(agentSrc),
   `saw ${completedCalls} setCompleted(true) call(s)`);
 
 // ── 5. CLAUSE 4 — the gate changes no count and no predicate ────────────────────────────────────

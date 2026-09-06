@@ -87,3 +87,31 @@ export function afInterviewOwnsBrowsing(phase: AfPhase | null): boolean {
 export function searchIsFinishedAtThreshold(honestTotal: number | null, stopAt: number): boolean {
   return honestTotal != null && honestTotal <= stopAt;
 }
+
+/**
+ * May a results turn render its actions row — «عرض المزيد» and/or «خلّنا نحدد الطلب أكثر» — right now?
+ *
+ * ONE gate, so the browsing invitation can never disagree with the terminal chat state (owner rule
+ * 2026-09-06, the `final=50` incident). Three reasons to withhold, in order:
+ *   • `chatCompleted` — the Advanced Filter round has TRUTHFULLY narrowed the eligible set to
+ *     ≤ INTERVIEW_STOP_AT, so the chat is terminal: the composer locks AND every remaining match is
+ *     already revealed. There is nothing to page and nothing left to ask — offering «عرض المزيد» here
+ *     is the exact unnecessary-pagination-loop the owner's rule forbids. Before this gate, the same
+ *     ≤50 landing locked the composer (clause via setCompleted) yet still rendered «عرض المزيد» when
+ *     the honest total sat exactly on the boundary — the two terminal signals disagreed.
+ *   • the interview still owns browsing (see afInterviewOwnsBrowsing) — clause 1/overlay reasons.
+ *   • nothing to offer — neither more matches to page nor a truthful question left to ask.
+ *
+ * Pure so a barrier can execute it across the 49/50/51 boundary and prove the lock and the pager
+ * always agree.
+ */
+export function resultsActionsRowVisible(a: {
+  hasMore: boolean;
+  canNarrowFurther: boolean;
+  afPhase: AfPhase | null;
+  chatCompleted: boolean;
+}): boolean {
+  if (a.chatCompleted) return false;
+  if (afInterviewOwnsBrowsing(a.afPhase)) return false;
+  return a.hasMore || a.canNarrowFurther;
+}

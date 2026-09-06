@@ -47,7 +47,7 @@ check('agent.tsx feeds initialReveal the canonical stop line (stopAt: INTERVIEW_
 const fin = agent.slice(agent.indexOf('const finishGuided = '), agent.indexOf('const startAgeFlow = '));
 check('finishGuided exists', fin.length > 200);
 check('R11.1: a round landing at ≤ INTERVIEW_STOP_AT completes the chat (composer → «محادثة جديدة»)',
-  /if \(total != null && total <= INTERVIEW_STOP_AT\) setCompleted\(true\);/.test(fin));
+  /if \(searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(fin));
 check('> INTERVIEW_STOP_AT: the SAME assessment the offer button uses decides whether a round follows',
   /total > INTERVIEW_STOP_AT && continueGuided && msgId/.test(fin)
   && /assessNarrowing\(continueQ, continueGuided\.asked\)/.test(fin));

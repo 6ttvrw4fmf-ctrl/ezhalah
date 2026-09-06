@@ -40,9 +40,11 @@ console.log('\nAdvanced Filter takes over the CTA space\n');
 // decide whether it may mention the buttons) — same gate, same semantics, just named. Accept either
 // shape: the definition carrying the exact boolean expression, and the JSX still branching on it.
 check('the pre-AF CTA row is hidden while the AF flow is open',
-  /const showActionsRow = \(hasMore \|\| canNarrowFurther\)\s*\n\s*&& !afInterviewOwnsBrowsing\(ageFlow\?\.phase \?\? null\);/.test(code)
+  // Gate hoisted into the pure resultsActionsRowVisible() (owner 2026-09-06, `final=50`); agent.tsx
+  // still feeds it the interview phase, so an open AF flow (phase ≠ null) still hides the row.
+  /const showActionsRow = resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(code)
   && /\{showActionsRow \? \(/.test(code),
-  'without `&& !ageFlow` in the gate (or a branch that no longer uses it) the two buttons keep rendering underneath the AF overlay');
+  'without the interview phase in the gate (or a branch that no longer uses it) the two buttons keep rendering underneath the AF overlay');
 
 // It must be the WHOLE row, so neither button can survive alone. Anchored on the JSX branch itself
 // (not the const definition, which now sits earlier, ahead of unrelated Read Aloud text-building
