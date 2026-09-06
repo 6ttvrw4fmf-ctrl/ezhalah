@@ -3263,7 +3263,7 @@ export default function Agent() {
                         // turn; this only decides whether the buttons are still THIS turn's to offer.
                         const isLatestResults = m.id === lastResultsMsg?.id;
                         const hasMore = rc.hasMore && isLatestResults;
-                        if (isLatestResults && typeof console !== 'undefined') console.log(`[TEMP-DEBUG-DRIP] render-gate id=${m.id} shown=${shown} fetched=${fetched} trueTotal=${trueTotal} clientNarrowed=${clientNarrowed} serverMore=${serverMore} rcHasMore=${rc.hasMore} hasMore=${hasMore}`);
+                        if (hasMore && typeof console !== 'undefined') console.log(`[TEMP-DEBUG-DRIP] render-gate id=${m.id} shown=${shown} fetched=${fetched} trueTotal=${trueTotal} clientNarrowed=${clientNarrowed} serverMore=${serverMore} rcHasMore=${rc.hasMore}`);
                         // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side).
                         const quoteTotal = !clientNarrowed;
                         // ≤25 RULE (owner brief 2026-08-19, item 4): the auto-opening AF intro already
