@@ -56,7 +56,7 @@ import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWes
 // See decide.ts's header for the full rationale. The model's own `kind` field is read ONLY to
 // decide whether to retry for wrong language; it is never trusted as the final answer again after
 // that — decideAgentTurn() (called from ./turnWiring.ts, below) is the one place that assigns kind.
-import { wantsGuidedInterview, hasUsableLocation, established } from "./decide.ts";
+import { wantsGuidedInterview, hasUsableLocation, hasEnoughToSearch, established } from "./decide.ts";
 // The establishedState-construction + decideAgentTurn() call site, extracted so it is Node-importable
 // and unit-testable end-to-end (round 2 fix, "untested wiring / foolable regex") — see its own header.
 import { buildTurnDecision } from "./turnWiring.ts";
@@ -1520,7 +1520,26 @@ Deno.serve(async (req: Request) => {
         // Deliberately narrower than the general rule one line down ("the platform enforces THAT this
         // turn is a clarification, never WHAT it asks about"): here the platform genuinely does know
         // what is missing, exactly as it does for a loc_classify ambiguity.
-        const noPlaceReply = !ambiguityReply && !hasUsableLocation(wired.establishedState)
+        // NO SEARCH INTENT AT ALL → SAY WHAT EZHALAH IS, ONCE (owner, 2026-09-06).
+        // «مرحبا», «وش هي إزهله؟», «كيف حالك؟» and «وش تقدر تسوي؟» all used to be answered with
+        // «في أي مدينة تبحث؟» — a city demand aimed at someone who never asked to search, and which
+        // never says what this app is. Measured against production 2026-09-06: all five off-topic
+        // probes returned exactly that.
+        //
+        // The owner's brief, verbatim: «your job is just to understand what the user want and give
+        // it to him» — so this is ONE line that orients and hands the turn straight back. It is not
+        // a conversation opener and there is no follow-up chat behind it.
+        //
+        // The test is deterministic and reuses the ladder's own predicate: nothing established at
+        // all (no type, no place, no budget, no beds, no AF) means the user has not started a
+        // search. The moment ANY of those is present — «ابغى شقة» — this yields to the city
+        // question below, which is the right answer for a real search that is only missing a place.
+        const noIntentReply = !ambiguityReply && !hasEnoughToSearch(wired.establishedState)
+          ? (locale === "en"
+              ? "I'm Ezhalah — I find real estate across Saudi Arabia from every platform. Tell me what you're looking for."
+              : "أنا إزهله — أدور لك عقارات في السعودية من كل المنصات. قلّي وش تدور عليه؟")
+          : null;
+        const noPlaceReply = !ambiguityReply && !noIntentReply && !hasUsableLocation(wired.establishedState)
           ? (locale === "en" ? "Which city are you searching in?" : "في أي مدينة تبحث؟")
           : null;
         // A genuine loc_classify ambiguity has a specific, pre-built question; otherwise fall back
@@ -1537,7 +1556,7 @@ Deno.serve(async (req: Request) => {
               ? "What kind of property are you looking for? (apartment, villa, land, building, office, shop…)"
               : "وش نوع العقار اللي تدور عليه؟ (شقة، فيلا، أرض، عمارة، مكتب، محل…)")
           : null;
-        const reply = ambiguityReply ?? noPlaceReply ?? noTypeReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities));
+        const reply = ambiguityReply ?? noIntentReply ?? noPlaceReply ?? noTypeReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities));
         // THIS QUESTION IS NOT OPTIONAL (owner, 2026-09-05). The client keeps its own ask-ceiling —
         // "asked twice already and we can see some intent, so stop pestering and just search"
         // (src/app/agent.tsx). For an ordinary clarification that is right. For a LOCATION question

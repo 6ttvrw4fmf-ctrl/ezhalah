@@ -128,9 +128,13 @@ const A_REAL_PLACE = ['الرياض', 'جدة', 'حي الملقا', 'منطقة
     'that reply is gated on the SAME hasUsableLocation() the ladder used — not a second rule');
   check(/في أي مدينة تبحث؟/.test(idx),
     'the refusal asks the city question in Arabic');
-  check(/ambiguityReply \?\? noPlaceReply \?\?/.test(idx),
+  // Matched by PRECEDENCE rather than by the literal chain (2026-09-06): a third platform-authored
+  // arm — noIntentReply, the «what is Ezhalah» one-liner — now sits between them. What must stay
+  // true is the ORDER (a specific ambiguity question outranks the generic city ask) and the GATE
+  // (the city ask never fires while an ambiguity is pending), and both are asserted directly.
+  check(/const reply = ambiguityReply(?: \?\? \w+)* \?\? noPlaceReply\b/.test(idx),
     'a loc_classify ambiguity still wins — its question is more specific than the generic city ask');
-  check(/!ambiguityReply && !hasUsableLocation/.test(idx),
+  check(/const noPlaceReply = !ambiguityReply &&(?:[^\n]*&&)? !hasUsableLocation/.test(idx),
     'the no-place question never overrides an ambiguity question');
 }
 
