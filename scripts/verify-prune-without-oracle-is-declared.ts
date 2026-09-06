@@ -35,7 +35,13 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 
 // The ledger's size on the day the ratchet was installed. It may FALL as platforms gain oracles.
 // Raising it is a deliberate, reviewed edit and means a platform started deactivating on absence.
-const RATCHET = 31;
+// 31 → 29 on 2026-09-06: raghdan and sanadak gained control-validated `_verify_gone` oracles
+// (scripts/verify-raghdan-absence-cannot-deactivate.ts,
+//  scripts/verify-sanadak-absence-cannot-deactivate.ts) and left the ledger.
+// 29 -> 30 later the same day: abwbna onboarded as a second tenant of aldarim's own Nuzul SaaS
+// platform, inheriting the exact same absence-only prune aldarim already carries (reviewed — see
+// the ledger entry's own note: if aldarim ever gains a verify_gone oracle, abwbna inherits the fix).
+const RATCHET = 30;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

@@ -585,7 +585,7 @@ const SOURCE_LABELS: Record<string, string> = {
   hajer: 'Hajer Houses Real Estate', sanadak: 'Sanadak', eastabha: 'East Abha Real Estate', aqarcity: 'Aqar City', raghdan: 'Raghdan Real Estate',
   eaqartabuk: 'Eqar Tabuk', satel: 'Satel', sadin: 'Sadin for Real Estate', toor: 'TOOR', mustqr: 'Mustaqarr Real Estate',
   ramzalqasim: 'Ramz Al Qassim Real Estate Investment', fursaghyr: 'Fursa Ghyr Real Estate', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj Real Estate',
-  muktamel: 'Muktamel', aqaratikom: 'Nawait', awal: 'Awal United for Real Estate', alta: 'Alta Real Estate Services', remal: 'Remal Real Estate', amaall: 'Amaall Real Estate Services', shmoualshmal: 'Shmou Al Shmal Real Estate', alkhaas: 'Al Khaas',
+  muktamel: 'Muktamel', aqaratikom: 'Nawait', awal: 'Awal United for Real Estate', alta: 'Alta Real Estate Services', abwbna: 'Abwbna Real Estate', remal: 'Remal Real Estate', amaall: 'Amaall Real Estate Services', shmoualshmal: 'Shmou Al Shmal Real Estate', alkhaas: 'Al Khaas',
   abeea: 'Abeea Real Estate', jurash: 'Jurash Real Estate', alnokhba: 'Al Nokhba', dealapp: 'Deal App',
   erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry Real Estate', october: '1 October Real Estate', gathern: 'Gathern',
 };
@@ -778,11 +778,23 @@ function listingPriceValue(price: string): number {
 }
 
 // A rent row's ANNUAL value — the unit the «Rent budget (yearly basis)» box and the RPC's
-// price_annual bound both speak. listingPriceString() renders a rent row AT price_annual, except a
-// source-published MONTHLY one, which it divides by 12 for the /mo card line; ×12 puts that back. No
-// period is ever guessed: a row whose source published none never took the ÷12 branch, so its
-// displayed figure already IS price_annual. (owner rule: period = source.)
+// price_annual bound both speak.
+//
+// PREFER THE CARRIED FIGURE. `l.priceAnnual` is price_annual verbatim off the row: the very number
+// location_search_candidates_ar compared the budget against, so reading it makes this the SERVER's
+// comparison rather than a reconstruction of it. Real fetched Rent rows always carry it.
+//
+// The ×12 below is the FALLBACK, for rows that have none — the bundled mock catalog and fixtures.
+// It is not exact and must never be preferred: listingPriceString() prints a source-MONTHLY rent at
+// Math.round(price_annual / 12), so ×12 recovers price_annual only when it divides by 12 and is
+// short by up to 6 SAR otherwise. Measured on production 2026-09-06: 430 of 32,226 monthly rows land
+// in that gap, and 892 integer budget floors — one of them the entirely typeable 151,000 — deleted a
+// row the server had kept. Listing 1143355 (الرياض) is the worked case: price_annual 151,001 prints
+// 12,583/mo and reconstructs to 150,996. No period is ever guessed: a row whose source published
+// none never took the ÷12 branch, so its displayed figure already IS price_annual.
+// (owner rule: period = source. scripts/verify-rent-price-basis-is-the-rpc-basis.ts §0.)
 function rentAnnualValue(l: Listing): number {
+  if (typeof l.priceAnnual === 'number') return l.priceAnnual;
   const v = listingPriceValue(l.price);
   return l.rentPeriod === 'monthly' ? v * 12 : v;
 }

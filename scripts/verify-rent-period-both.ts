@@ -148,9 +148,31 @@ check("the Filter offers ONLY two period buttons (سنوي/شهري) — no thir
 check("both toggle buttons route through togglePeriodButton (one canonical transition function)",
   /togglePeriodButton\(rentPeriod,\s*which\)/.test(index));
 
+// 2026-09-06 (regression hunter): this assertion used to match the literal hand-written ternary
+//     rentPeriod === 'monthly' ? 'شهري' … rentPeriod === 'both' ? 'كلاهما'
+// in index.tsx — that is, it REQUIRED the count path to keep its own second derivation of the token,
+// and would have gone red on the very repair that removes the divergence. It stayed green for the
+// whole time the two derivations could disagree (on bothDeals + deal 'Rent', where the results RPC
+// sends null and the copy sent a period token). The invariant was never "the ternary is spelled this
+// way"; it is "the pools speak the token the results RPC speaks". There is now ONE derivation, so
+// state THAT — strictly stronger than matching a shape, because a shape can be right and still be a
+// second opinion. The executable proof (the real function run over all 180 query shapes, mutation-
+// proven both ways) lives in scripts/verify-rent-period-token-has-one-derivation.ts.
 check("city/district pools use the SAME 'شهري'/'سنوي'/'كلاهما' token as the results RPC, never a bare boolean",
-  /rentPeriod\s*===\s*'monthly'\s*\?\s*'شهري'[\s\S]{0,40}rentPeriod\s*===\s*'both'\s*\?\s*'كلاهما'/.test(index),
-  "a combined search must send the EXACT كلاهما token to Trending too — null would wrongly include unpublished-period rows (docs/ARCHITECTURE.md §17)");
+  /import \{[^}]*\brentPeriodParam\b[^}]*\} from '@\/data\/remote'/.test(index)
+  // 2026-09-06 (production red team): this half used to pin the literal argument `(query)`. That
+  // argument was itself the next defect — `query.rentPeriod` is undefined for every fresh Rent
+  // search, so the count path sent null while the search defaulted to 'annual' and sent 'سنوي'. So
+  // this line, one commit after being rewritten to stop asserting the OLD defect, asserted the NEW
+  // one, and would have gone red on its repair. The invariant is the CALL, not the argument's name;
+  // WHICH input both paths must share is proven by execution in
+  // scripts/verify-count-and-search-share-one-query.ts.
+  && /const rentPeriodTok: string \| null = rentPeriodParam\([A-Za-z_$][\w$.]*\);/.test(index)
+  && !/rentPeriod\s*===\s*'(?:monthly|annual|both)'\s*\?\s*'(?:شهري|سنوي|كلاهما)'/.test(index),
+  "a combined search must send the EXACT كلاهما token to Trending too — null would wrongly include "
+  + "unpublished-period rows (docs/ARCHITECTURE.md §17). The count path must take that token from "
+  + "remote.ts's exported rentPeriodParam(), not re-derive it: two expressions that agree today are "
+  + 'a coincidence, not a guarantee.');
 
 check("the old boolean-scoped 'both → null' Trending gap is gone",
   !/rentPeriod\s*===\s*'both'\s*\?\s*null\s*:\s*rentPeriod\s*===\s*'monthly'/.test(index),

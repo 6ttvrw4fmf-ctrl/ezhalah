@@ -18,6 +18,7 @@ import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { judgeAfCta, type AfCtaObservation } from './lib/afOfferAgreement.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { AGENT_TURN_MS } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 // Self-sufficient endpoint (verify-live-checks-self-sufficient.ts §4b): the committed public
@@ -151,7 +152,16 @@ const run = async () => {
         await cta.last().click();
         // Sample across the whole window: a card that opens and then closes itself is NOT a pass,
         // and the actions row hiding at any point proves ageFlow was set (the round did start).
-        for (let i = 0; i < 60; i++) {          // 60 × 500ms = 30s
+        // BUDGET A FULL AGENT TURN, NOT A RENDER (2026-09-06). This sampled for 30s. The AF card
+        // does not come from a paint — it comes from a PAID LLM ROUND TRIP plus a count RPC,
+        // measured near 40s on production (scripts/lib/afJourneyPacing.ts, AGENT_TURN_MS = 60s).
+        // A 30s window therefore expires on a healthy round and this journey reports the strongest
+        // accusation it can make — «the offer gate and the round gate disagree», i.e. a live
+        // R4.4.2/R13.10 violation — on the strength of a stopwatch that was measuring the wrong
+        // event. This is not a widened tolerance: the budget now matches what is being waited for,
+        // and the loop still breaks the instant the card appears, so a fast round costs nothing.
+        const samples = Math.ceil(AGENT_TURN_MS / 500);
+        for (let i = 0; i < samples; i++) {
           await page.waitForTimeout(500);
           if ((await cta.count()) === 0) loadingEverAppeared = true;
           if ((await page.locator('[data-testid="af-card"]').count()) > 0) { cardEverAppeared = true; break; }

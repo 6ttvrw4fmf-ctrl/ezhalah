@@ -155,18 +155,22 @@ const muts: Mut[] = [
     apply: (s) => s.replace("await tap('بحث');", "await tap('بحث');\n    await page.waitForTimeout(14000);"),
     rule: (s) => trendingRules(s).noFixedSleep },
   { name: 'M2 delete the readiness wait in the combined journey', file: COMBINED,
-    apply: (s) => s.replace(/  let prev = \{ rows: -1, sar: -1 \};[\s\S]*?\n  \}\n\n(?=  const rentRows)/, ''),
+    apply: (s) => s.replace(/  let prev = \{ rows: -1,[\s\S]*?\n  \}\n\n(?=  const rentRows)/, ''),
     rule: (s) => combinedRules(s).exists && combinedRules(s).ordered },
   { name: 'M3 wait on the ASSERTED thing (rent), which would HIDE a real regression', file: COMBINED,
     apply: (s) => s.replace('(v) => v.stable,', '(v) => v.stable && hydrated.some((r: any) => r.transaction_type === \'Rent\'),'),
     rule: (s) => combinedRules(s).neutral },
   { name: 'M4 settle on FIRST SIGHT instead of quiescence', file: COMBINED,
-    apply: (s) => s.replace(/const stable = now\.rows > 0 && now\.sar > 0 && now\.rows === prev\.rows && now\.sar === prev\.sar;/,
-      'const stable = now.rows > 0 && now.sar > 0;'),
+    // The combined journey's readiness subject moved from "some «ر.س» text" to RESULT CARDS on
+    // 2026-09-06 — the form's own budget label made `sar` stably 1 before any result existed, so
+    // the beat could satisfy the old predicate with nothing on screen. The mutant follows the
+    // source it mutates; the RULE (quiescence) is unchanged.
+    apply: (s) => s.replace(/const stable = now\.rows > 0 && now\.cards > 0\s*&& now\.rows === prev\.rows && now\.cards === prev\.cards;/,
+      'const stable = now.rows > 0 && now.cards > 0;'),
     rule: (s) => combinedRules(s).quiescent },
   { name: 'M5 delete the wait but leave it behind as a COMMENT (the decoy)', file: COMBINED,
-    apply: (s) => s.replace(/  let prev = \{ rows: -1, sar: -1 \};[\s\S]*?\n  \}\n\n(?=  const rentRows)/,
-      '  // let prev = { rows: -1, sar: -1 };\n  // const results = await settleUntil(...) === prev.rows ... unobserved(\n'),
+    apply: (s) => s.replace(/  let prev = \{ rows: -1,[\s\S]*?\n  \}\n\n(?=  const rentRows)/,
+      '  // let prev = { rows: -1, cards: -1, sar: -1 };\n  // const results = await settleUntil(...) === prev.cards ... unobserved(\n'),
     rule: (s) => combinedRules(s).exists && combinedRules(s).ordered },
   { name: 'M7 restore the pre-#1688 fixed cap in the rule', file: PILL,
     apply: (s) => s.replace(

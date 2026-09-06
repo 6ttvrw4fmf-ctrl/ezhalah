@@ -46,6 +46,7 @@
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { awaitAfStep, settleUntil, POST_SEARCH_BUDGET_MS } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -218,25 +219,54 @@ const scrollToBottom = async () => {
  */
 const walkOneRound = async (): Promise<boolean> => {
   const before = searches.length;
+  const headlinesAtEntry = (await page.evaluate(READ_HEADLINES) as string[]).length;
   await scrollToBottom();
   const opened = await tap('خلّنا نحدد الطلب أكثر')
     .then(() => true)
     .catch(async () => tap('نحدد الطلب أكثر').then(() => true).catch(() => false));
   if (!opened) return false;
-  await page.waitForTimeout(3500);
-  for (let step = 1; step <= 8 && searches.length === before; step++) {
-    const opts = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
-    if (!opts.length) break;
-    await page.click(`[data-testid="${opts[0]}"]`);
+  // OBSERVE EACH STEP; NEVER SLEEP A FIXED TIME FOR ONE (2026-09-06). This walked the round on two
+  // fixed sleeps — 3,500ms for the first question's options and 3,800ms after each answer. Both
+  // were wrong at both ends: the options behind a step come from a paid agent turn (variable,
+  // measured near 40s), and the step after the LAST answer is the searching beat, which the owner
+  // raised to ten seconds that morning. So the walk read an empty option list on a healthy card and
+  // broke early, leaving round 1 with fewer than 2 removable pills — and where it did not break it
+  // clicked into the loader, which reported «subtree intercepts pointer events». The round then
+  // failed for having too few pills to remove, an accusation about the product made by a stopwatch.
+  const step = (previousOptions?: readonly string[]) => awaitAfStep(
+    () => page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')]
+      .map((e) => e.getAttribute('data-testid') || '')),
+    () => page.$('[data-testid="af-card"]').then((h) => !!h),
+    async () => searches.length > before,
+    (ms) => page.waitForTimeout(ms),
+    undefined, undefined, previousOptions);
+  let previous: string[] | undefined;
+  for (let i = 1; i <= 8; i++) {
+    const s = await step(previous);
+    if (s.outcome !== 'options') break;
+    await page.click(`[data-testid="${s.options[0]}"]`);
     await page.waitForTimeout(1400);
     const confirm = await page.$('[data-testid="af-confirm"]');
     if (!confirm) break;
     await confirm.click();
-    await page.waitForTimeout(3800);
+    previous = s.options;   // the next step must show a DIFFERENT question, not this one again
   }
   for (let i = 0; i < 12 && searches.length === before; i++) await page.waitForTimeout(1500);
-  return searches.length > before;
+  if (searches.length === before) return false;
+
+  // THE ROUND'S RESULTS TURN RENDERS BEHIND THE SEARCHING BEAT, AND THE PILLS COME WITH IT.
+  // Returning as soon as the REQUEST left the page (which is what `searches.length > before`
+  // proves) hands the caller a screen that is still 10.45s from existing — so countPills() read 0,
+  // the journey concluded round 1 had left no pills, tried a second round against a turn that had
+  // not landed, and reported «the offer was gone». R11.2 was blamed for an animation.
+  const landed = await settleUntil(
+    () => page.evaluate(READ_HEADLINES).then((h: string[]) => h.length),
+    (n) => n > headlinesAtEntry,
+    POST_SEARCH_BUDGET_MS, (ms) => page.waitForTimeout(ms));
+  if (!landed.settled) {
+    console.log(`      [diag] the round's search fired but no new results turn rendered within ${POST_SEARCH_BUDGET_MS}ms`);
+  }
+  return true;
 };
 
 const countPills = () =>
@@ -343,6 +373,15 @@ try {
     Number.isFinite(replayTotal) && replayTotal === after?.total,
     `ui/rpc=${after?.total} anon-replay=${Number.isFinite(replayTotal) ? replayTotal : JSON.stringify(replay).slice(0, 160)}`);
 
+  // The removal re-runs the search, so its new turn is behind the searching beat too. Give it the
+  // beat before reading — bounded, and its EXPIRY STILL FAILS the assertion below rather than
+  // skipping it. That distinction is the whole rule: waiting until the thing being asserted appears
+  // would turn a product that never lands a new turn into a non-arrival instead of the red it is.
+  // Only the BUDGET is corrected here; the assertion is untouched.
+  await settleUntil(
+    () => page.evaluate(READ_HEADLINES).then((h: string[]) => h.length),
+    (n) => n > headlinesBefore.length,
+    POST_SEARCH_BUDGET_MS, (ms) => page.waitForTimeout(ms));
   const headlinesAfter = await page.evaluate(READ_HEADLINES);
   console.log(`      [diag] headlines after removal: ${JSON.stringify(headlinesAfter)}`);
   const lost = headlinesBefore.filter((h) => !headlinesAfter.includes(h));

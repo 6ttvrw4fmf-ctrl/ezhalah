@@ -344,6 +344,24 @@ jobs:
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-strict-filter-parity-live.ts
 
+      # LIVE half (B) of verify-guided-counts-carry-monthly-af.ts, split out 2026-09-06 (routine #10,
+      # ops_incident #104). That file always declared two halves in its own header; A (the source
+      # contract, which is what catches the defect in a DIFF) stays in the required npm test and is
+      # now mutation-proven there, while B — which can only answer by asking production — moved here,
+      # beside the other AF count differentials. It asserts the advanced params still BITE server-side:
+      # cnt_selected(rating) == search total(rating) and != base, and the «استديو» option count equals
+      # what picking it actually returns with the rating answer still applied. Two REST calls, ~2s.
+      #
+      # The offline half asserts via liveHalfProblems() that THIS FILE really invokes it, so removing
+      # or renaming this step turns that barrier RED in npm test. A split must not decay into a deletion.
+      - name: Guided-count RPCs still carry every answered AF question (server-side)
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-guided-counts-carry-monthly-af-live.ts
+
   # THE WHOLE CERTIFIED SURFACE — ITS OWN JOB (split out 2026-09-03). The two option sweeps and the
   # four browser journeys below used to sit at the TAIL of af-truth's single 30-minute budget.
   # On 2026-09-03 that budget ran out inside the region sweep: the job was CANCELLED at 30:15,
