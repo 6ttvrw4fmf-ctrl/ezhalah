@@ -1362,8 +1362,25 @@ Deno.serve(async (req: Request) => {
           // (Madinah) contains «مدينة», «المنطقة الشرقية» (Eastern Province) contains «منطقة»; the
           // lookaround correctly excludes both since the preceding character there is a letter (from
           // «ال»), not a boundary.
-          const wantsCity = /(?<![\p{L}\p{N}])مدينة(?![\p{L}\p{N}])/u.test(text);
-          const wantsRegion = /(?<![\p{L}\p{N}])منطقة(?![\p{L}\p{N}])/u.test(text);
+          // A BARE ANSWER TO OUR OWN QUESTION (owner screenshot, 2026-09-05).
+          // The lookarounds below deliberately reject «ال»-fused forms so «المدينة المنورة» and
+          // «المنطقة الشرقية» are never read as scope words. That is right for a sentence and wrong
+          // for a ONE-WORD REPLY: asked «تقصد مدينة الرياض ولا منطقة الرياض كاملة؟» the user answered
+          // «المدينة» — neither branch fired, and the identical question came straight back. That is
+          // the loop the comment further down claimed was impossible; the claim was mine and it was
+          // wrong, because it only considered the «مدينة X» phrasing and not the bare one.
+          //
+          // Doubly constrained, so it cannot eat a real place: the WHOLE reply must be that single
+          // word (so «المدينة المنورة» — two words — can never match), AND we must actually have
+          // asked (alreadyAsked). Outside those two conditions a lone «المدينة» could genuinely mean
+          // Madinah, and this does not fire.
+          const bareCity = alreadyAsked && /^[\s\p{P}]*(?:ال)?مدين[ةه][\s\p{P}]*$/u.test(text);
+          const bareRegion = alreadyAsked && /^[\s\p{P}]*(?:ال)?منطق[ةه][\s\p{P}]*$/u.test(text);
+          // «مدنية» is «مدينة» with ي/ن transposed — the typo in the same screenshot
+          // («ابي شقة ... في مدنية الرياض»), which named the city explicitly and was asked anyway.
+          // Only the un-prefixed form: «المدنية» (the civil) is excluded by the lookbehind already.
+          const wantsCity = bareCity || /(?<![\p{L}\p{N}])(?:مدينة|مدنية)(?![\p{L}\p{N}])/u.test(text);
+          const wantsRegion = bareRegion || /(?<![\p{L}\p{N}])منطقة(?![\p{L}\p{N}])/u.test(text);
           // regionPin's contract (see its declaration above) is "pin a TWIN CITY to one region" — it
           // was never meant for "search the whole region" and resolveSearchScope() has no way to tell
           // the two apart (found live 2026-07-25: reusing it here silently narrowed a whole-region
@@ -1387,9 +1404,14 @@ Deno.serve(async (req: Request) => {
             // Guessing is the one thing not allowed here: «الرياض» is a city AND a region, the two
             // are different searches, and neither reading is safe to assume.
             //
-            // NOT A LOOP. The question is CLOSED — it names both options — and either answer
-            // resolves it deterministically on the very next turn through the two branches above
-            // («مدينة X» → wantsCity, «منطقة X» → wantsRegion), with no model round-trip. Repeating
+            // NOT A LOOP — and this claim has already been wrong once, so read the branches above
+            // before trusting it. The question is CLOSED (it names both options) and every answer
+            // shape it invites now resolves deterministically on the next turn with no model
+            // round-trip: «مدينة X» → wantsCity, «منطقة X» → wantsRegion, and — added 2026-09-05
+            // after a live re-ask loop — a bare «المدينة» / «المنطقة» via bareCity/bareRegion.
+            // The first version of this comment listed only the first two shapes and called the
+            // loop impossible; a user answered with the third and was asked the same thing twice.
+            // Repeating
             // it only happens when the user's reply is ambiguous AGAIN, which is when asking is the
             // correct behaviour: the Normal Filter refuses a search with no city for the same reason.
             ambiguityReply = `«${nm}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${nm} ولا منطقة ${nm} كاملة؟`;
