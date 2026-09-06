@@ -1,0 +1,56 @@
+# Production-only object baseline — the FLOOR, not a list (incident #26, 2026-09-05).
+#
+# Each line is a `public.<name>` that committed SQL in supabase/migrations/ CALLS, but that no
+# committed migration ever CREATES. Every one of them exists only in production: nobody can review
+# it, diff it, or restore it from this repository.
+#
+# HOW THE CLASS SURVIVED. Migration-drift conditions #1-#5 all compare a migration's IDENTIFIERS or
+# its text against production, and every one of them grandfathers the pre-strict era
+# (missing_in_git below 20260716093330, the other four below STRICT_ERA_BASELINE 20260815000000).
+# A function created by a pre-baseline migration that was never committed is therefore invisible to
+# all five — which is exactly how prune_inactive_from_search(), the guaranteed remover of inactive
+# rows from the served search index, was called by sync_search_listings_ar() and pinned by a barrier
+# for two months with no definition anywhere in the tree (ops_incident #26).
+#
+# THESE ARE EXEMPT SO THE BARRIER CAN EXIST AT ALL, NOT BECAUSE THEY ARE FINE. Reconciling one means
+# recovering its CREATE verbatim from supabase_migrations.schema_migrations.statements into
+# supabase/migrations/<the applied version>_<the applied name>.sql - then DELETING its line here.
+#
+# THE RATCHET: entries may only be REMOVED. verify-committed-sql-defines-what-it-calls.ts fails if
+# this file grows, so a NEW production-only object cannot be silenced by appending to it. Same shape
+# as scripts/test-baseline.txt, scripts/migration-content-parity-baseline.txt and
+# STRICT_ERA_BASELINE: history grandfathered, the present held to the rule.
+#
+# Format: one lowercase object name per line.
+aqarcity_commercial_listings
+aqarcity_residential_listings
+backfill_aqar_res
+capture_crawl_stats
+composite_match_city_ids
+deprecated_platforms
+district_name_bridge
+known_property_types
+listings_arabic_locations
+loc_catalog_city_alias
+loc_catalog_district
+loc_city_cluster
+loc_district_map
+loc_rel_refresh_state
+loc_rel_refresh_tick
+location_pipeline_alerts
+norm_district_tok
+norm_en_place
+normalize_ar
+novel_type_alerts
+purged_listings_archive
+reactivate_suspect_inactive
+run_location_selftest
+safe_bigint
+safe_bool
+safe_int
+safe_numeric
+scrape_runs
+search_listings_ar
+trigger_gh_workflow
+wasalt_commercial_listings
+wasalt_residential_listings
