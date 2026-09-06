@@ -3,6 +3,7 @@
 import {
   BASE, dbCount, assertChain, withPage, setDeal, setPeriod, pickCity, runSearch, tapByText,
   visibleState, defect, note, num, lastCount, sleep, SETTLED_RE, observeWatch,
+  onOneIndex, judgeAdvertisedVsLanded,
 } from './sweep.mjs';
 
 const enc = encodeURIComponent;
@@ -75,24 +76,30 @@ export async function trendingCity(plan) {
     await setDeal(page, plan.deal);
     await setPeriod(page, plan.period);
     if (plan.beds) { await page.getByText(plan.beds, { exact: true }).first().click().catch(() => {}); await sleep(900); }
-    await page.locator('[data-testid="city-input"]').click(); await sleep(3800);
-    const rows = await page.evaluate(() => {
-      const t = document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean);
-      const out = [];
-      for (let i = 0; i < t.length - 1; i++) if (/إعلان/.test(t[i + 1]) && t[i].length > 1 && t[i].length < 26 && !/إعلان|بحث|مدينة|حي/.test(t[i])) out.push([t[i], t[i + 1]]);
-      return out.slice(0, 6);
+    // ONE INDEX (incident #47). The chip's number is computed when top_cities_by_deal_ar answers and
+    // the landed number when the search RPC does — 20-50 s apart, across an index that is re-synced
+    // at :14 and refreshed at :20 every hour. Bracket the whole window; a mismatch that straddles a
+    // rebuild is UNDECIDED, never a defect. Everything else in the journey runs exactly as before.
+    const settled = await onOneIndex(async () => {
+      await page.locator('[data-testid="city-input"]').click(); await sleep(3800);
+      const rows = await page.evaluate(() => {
+        const t = document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean);
+        const out = [];
+        for (let i = 0; i < t.length - 1; i++) if (/إعلان/.test(t[i + 1]) && t[i].length > 1 && t[i].length < 26 && !/إعلان|بحث|مدينة|حي/.test(t[i])) out.push([t[i], t[i + 1]]);
+        return out.slice(0, 6);
+      });
+      if (!rows.length) { note(`${name}: no trending city rows rendered — skipped`); return null; }
+      const [cityName, countText] = rows[0];
+      const advertised = num(countText);
+      if (!await pickCity(page, cityName)) { note(`${name}: could not select «${cityName}» — skipped`); return null; }
+      await runSearch(page);
+      return { cityName, advertised, landed: lastCount(await page.evaluate(() => document.body.innerText)) };
     });
-    if (!rows.length) { note(`${name}: no trending city rows rendered — skipped`); return null; }
-    const [cityName, countText] = rows[0];
-    const advertised = num(countText);
-    if (!await pickCity(page, cityName)) { note(`${name}: could not select «${cityName}» — skipped`); return null; }
-    await runSearch(page);
-    const landed = lastCount(await page.evaluate(() => document.body.innerText));
-    if (advertised != null && landed != null && advertised !== landed) {
-      defect(name, 'UI→RENDERED', `trending city «${cityName}» advertised ${advertised}, landed ${landed}`);
-    }
-    return assertChain(`${name}:${cityName}`, {
-      intent: { city: cityName, deal: plan.deal, period: plan.period }, page, requests,
+    const seen = settled.result;
+    if (!seen) return null;
+    judgeAdvertisedVsLanded(name, `trending city «${seen.cityName}»`, seen.advertised, seen.landed, settled);
+    return assertChain(`${name}:${seen.cityName}`, {
+      intent: { city: seen.cityName, deal: plan.deal, period: plan.period }, page, requests,
     });
   });
 }
@@ -107,65 +114,73 @@ export async function trendingDistrict(plan) {
     // A narrowing filter is the point: an unnarrowed district count cannot expose the class of bug
     // this journey exists for (the count that ignores the active filter).
     if (plan.priceMax) { await page.locator('[data-testid="price-max-input"]').fill(String(plan.priceMax)).catch(() => {}); await sleep(1600); }
-    // R14.4.2 OBSERVER. Attached BEFORE the click so the panel's own RPC cannot land unseen. It is
-    // what lets an empty panel be told apart from a slow one — see the decision below.
-    const rpc = { returned: false, rows: null, ms: null, status: null };
-    const clickAt = Date.now();
-    page.on('response', async (r) => {
-      if (!r.url().includes('district_options_ar') || rpc.returned) return;
-      rpc.status = r.status();
-      try { const b = await r.json(); rpc.rows = Array.isArray(b) ? b.length : -1; } catch { rpc.rows = -1; }
-      rpc.returned = true; rpc.ms = Date.now() - clickAt;
-    });
-    await page.locator('[data-testid="district-input"]').click();
-    // POLL FOR READINESS; NEVER SLEEP A FIXED AMOUNT AND LOOK ONCE. This was `sleep(4200)` followed
-    // by a single scrape, which is a RACE dressed as a budget: the panel's RPC answers in ~0.6-1.5 s
-    // warm, so 4.2 s usually won — and when it did not (cold plan, or a browser job starved by the
-    // concurrent RPC sweeps, the load defect #1692 fixed), the scrape read a panel that had not
-    // rendered yet. Polling passes as soon as the panel is actually ready, so the normal case gets
-    // FASTER, and the slow case becomes a real reading instead of a coin flip.
-    let rows = [];
-    while (Date.now() - clickAt < DISTRICT_PANEL_BUDGET_MS) {
-      rows = await page.evaluate(scrapeDistrictRows);
-      if (rows.length) break;
-      await sleep(250);
-    }
-    const renderMs = Date.now() - clickAt;
-    // AN EMPTY PANEL IS NOT AUTOMATICALLY A SKIP. The old line noted "no numbered district rows" and
-    // returned null for BOTH of the two cases below, so a panel that never rendered was recorded as
-    // a skip — green, and indistinguishable from a city that genuinely has no districts. That is the
-    // shape R14.4.2 exists to forbid ("the field goes empty and the user loses the surface"), and it
-    // is exactly why the district render bug could fail once, pass on re-run, and never be a defect.
-    // The panel's OWN RPC settles it: what the surface was given is not a guess.
-    if (!rows.length) {
-      if (!rpc.returned) {
-        defect(name, 'R14.4.2', `district panel never rendered: district_options_ar had not answered `
-          + `${renderMs} ms after the field was opened. The user is left with an empty surface.`);
-      } else if (rpc.rows > 0) {
-        defect(name, 'R14.4.2', `district panel rendered NO rows ${renderMs} ms after the field was `
-          + `opened, but district_options_ar answered ${rpc.rows} option(s) in ${rpc.ms} ms `
-          + `(status ${rpc.status}). The data arrived and the surface did not show it.`);
-      } else {
-        note(`${name}: district_options_ar returned ${rpc.rows} options in ${rpc.ms} ms — this scope `
-          + `genuinely has no districts, skipped`);
+    // ONE INDEX (incident #47). Same contract as trending-city one level down: the panel's number
+    // comes from district_options_ar and the landed number from the search RPC, tens of seconds
+    // apart. Only judgeAdvertisedVsLanded() may accuse, and only on an index proven not to have
+    // moved between the two reads. The R14.4.2 checks inside are unrelated to the bracket and run
+    // exactly as before — `result` is handed back either way.
+    const settled = await onOneIndex(async () => {
+      // R14.4.2 OBSERVER. Attached BEFORE the click so the panel's own RPC cannot land unseen. It is
+      // what lets an empty panel be told apart from a slow one — see the decision below.
+      const rpc = { returned: false, rows: null, ms: null, status: null };
+      const clickAt = Date.now();
+      page.on('response', async (r) => {
+        if (!r.url().includes('district_options_ar') || rpc.returned) return;
+        rpc.status = r.status();
+        try { const b = await r.json(); rpc.rows = Array.isArray(b) ? b.length : -1; } catch { rpc.rows = -1; }
+        rpc.returned = true; rpc.ms = Date.now() - clickAt;
+      });
+      await page.locator('[data-testid="district-input"]').click();
+      // POLL FOR READINESS; NEVER SLEEP A FIXED AMOUNT AND LOOK ONCE. This was `sleep(4200)` followed
+      // by a single scrape, which is a RACE dressed as a budget: the panel's RPC answers in ~0.6-1.5 s
+      // warm, so 4.2 s usually won — and when it did not (cold plan, or a browser job starved by the
+      // concurrent RPC sweeps, the load defect #1692 fixed), the scrape read a panel that had not
+      // rendered yet. Polling passes as soon as the panel is actually ready, so the normal case gets
+      // FASTER, and the slow case becomes a real reading instead of a coin flip.
+      let rows = [];
+      while (Date.now() - clickAt < DISTRICT_PANEL_BUDGET_MS) {
+        rows = await page.evaluate(scrapeDistrictRows);
+        if (rows.length) break;
+        await sleep(250);
       }
-      return null;
-    }
-    const [districtName, countText] = rows[0];
-    const advertised = num(countText);
-    // §41.2: take the ELEMENT, never bare viewport coordinates. The same shape of click in
-    // pickCity() left the mobile «بحث» permanently unclickable and took out the §34 mobile floor
-    // on every «بيع» rotation; this was the only other one left in the harness.
-    const dh = await page.evaluateHandle((d) => [...document.querySelectorAll('div')]
-      .filter((e) => (e.innerText || '').trim().startsWith(d) && (e.innerText || '').length < 60).pop(), districtName);
-    const drow = dh.asElement();
-    if (drow) { await drow.scrollIntoViewIfNeeded().catch(() => {}); await drow.click().catch(() => {}); }
-    await sleep(1400);
-    await runSearch(page);
-    const landed = lastCount(await page.evaluate(() => document.body.innerText));
-    if (advertised != null && landed != null && advertised !== landed) {
-      defect(name, 'UI→RENDERED', `district «${districtName}» advertised ${advertised}, landed ${landed}`);
-    }
+      const renderMs = Date.now() - clickAt;
+      // AN EMPTY PANEL IS NOT AUTOMATICALLY A SKIP. The old line noted "no numbered district rows" and
+      // returned null for BOTH of the two cases below, so a panel that never rendered was recorded as
+      // a skip — green, and indistinguishable from a city that genuinely has no districts. That is the
+      // shape R14.4.2 exists to forbid ("the field goes empty and the user loses the surface"), and it
+      // is exactly why the district render bug could fail once, pass on re-run, and never be a defect.
+      // The panel's OWN RPC settles it: what the surface was given is not a guess.
+      if (!rows.length) {
+        if (!rpc.returned) {
+          defect(name, 'R14.4.2', `district panel never rendered: district_options_ar had not answered `
+            + `${renderMs} ms after the field was opened. The user is left with an empty surface.`);
+        } else if (rpc.rows > 0) {
+          defect(name, 'R14.4.2', `district panel rendered NO rows ${renderMs} ms after the field was `
+            + `opened, but district_options_ar answered ${rpc.rows} option(s) in ${rpc.ms} ms `
+            + `(status ${rpc.status}). The data arrived and the surface did not show it.`);
+        } else {
+          note(`${name}: district_options_ar returned ${rpc.rows} options in ${rpc.ms} ms — this scope `
+            + `genuinely has no districts, skipped`);
+        }
+        return null;
+      }
+      const [districtName, countText] = rows[0];
+      const advertised = num(countText);
+      // §41.2: take the ELEMENT, never bare viewport coordinates. The same shape of click in
+      // pickCity() left the mobile «بحث» permanently unclickable and took out the §34 mobile floor
+      // on every «بيع» rotation; this was the only other one left in the harness.
+      const dh = await page.evaluateHandle((d) => [...document.querySelectorAll('div')]
+        .filter((e) => (e.innerText || '').trim().startsWith(d) && (e.innerText || '').length < 60).pop(), districtName);
+      const drow = dh.asElement();
+      if (drow) { await drow.scrollIntoViewIfNeeded().catch(() => {}); await drow.click().catch(() => {}); }
+      await sleep(1400);
+      await runSearch(page);
+      return { districtName, advertised, landed: lastCount(await page.evaluate(() => document.body.innerText)) };
+    });
+    const seen = settled.result;
+    if (!seen) return null;
+    const { districtName, advertised, landed } = seen;
+    judgeAdvertisedVsLanded(name, `district «${districtName}»`, advertised, landed, settled);
     return assertChain(`${name}:${districtName}`, { intent: { city: plan.city, deal: plan.deal, district: districtName }, page, requests});
   });
 }
@@ -207,6 +222,18 @@ export async function trendingDistrict(plan) {
 // tracking response bodies (showmore.mjs) sees exactly that narrowed search's rows, not whatever the
 // pre-AF (broader) search already served.
 export async function commitOneAfAnswer(page, name, requests, before, served) {
+  // ONE INDEX (incident #47). The chip's promised count is computed when the AF counts RPC answers
+  // and the landed count when the narrowed search does — a minute or more apart on this journey,
+  // across an index re-synced at :14 and refreshed at :20 every hour. The interaction is unchanged;
+  // it is only BRACKETED, so a promised≠landed pair that straddles a rebuild is UNDECIDED rather
+  // than an accusation. A real AF mismatch is deterministic and still fails the first stable read.
+  const settled = await onOneIndex(() => afAnswerRound(page, name, requests, before, served));
+  const seen = settled.result;
+  if (seen) judgeAdvertisedVsLanded(name, `AF chip «${seen.pick.key}»`, seen.promised, seen.landed, settled);
+  return seen;
+}
+
+async function afAnswerRound(page, name, requests, before, served) {
   const narrow = page.getByText('خلّنا نحدد الطلب أكثر', { exact: false });
   if (!await narrow.count()) {
     if (before != null && before > 25) note(`${name}: AF not offered at ${before} results (allowed: needs a useful question)`);
@@ -282,9 +309,6 @@ export async function commitOneAfAnswer(page, name, requests, before, served) {
   await sleep(3500);
 
   const landed = lastCount(await page.evaluate(() => document.body.innerText));
-  if (promised != null && landed != null && promised !== landed) {
-    defect(name, 'UI→RENDERED', `AF chip «${pick.key}» promised ${promised}, landed ${landed}`);
-  }
   return { title: first.title, pick, promised, landed };
 }
 
