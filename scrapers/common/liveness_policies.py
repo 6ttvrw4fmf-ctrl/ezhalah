@@ -64,6 +64,11 @@ CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 # full each run with no per-listing revisit endpoint. amaall additionally publishes an explicit
 # property_status (تم البيع / تم التأجير / تم التأجير بالكامل) which its scraper reads directly —
 # that is SOURCE-STATED removal and deactivates through the scraper, never through this tier.
+# abwbna JOINS this set on 2026-09-06 (owner-instructed, continuing the 40-candidate audit).
+# CRAWL_PRESENCE_ONLY is the honest tier here too, for a different reason than the WordPress
+# sources above: abwbna is a full-refresh crawl of the SAME Nuzul SaaS platform aldarim already
+# runs (a different tenant, same public JSON API) — every run reads the COMPLETE current inventory
+# and prunes anything not seen, exactly aldarim's own registered tier. See scrapers/abwbna/run.py.
 NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common"})
 
 
@@ -154,7 +159,7 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abeea", "abralosol", "aldarim", "alhoshan", "alkhaas", "alta", "amaall", "aouj", "aqaratikom",
+            "abeea", "abralosol", "abwbna", "aldarim", "alhoshan", "alkhaas", "alta", "amaall", "aouj", "aqaratikom",
             "aqarcity", "aqarmonthly", "arkaan", "awal", "eaqartabuk", "eastabha", "erapulse",
             "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry",
             "october",

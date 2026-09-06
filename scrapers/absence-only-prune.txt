@@ -30,6 +30,7 @@
 # format:  platform | probe status (as last measured) | note
 #
 abralosol      | EGRESS BLOCKED                  | 2026-09-06: gateway denies abralosol.com (403 CONNECT). UNKNOWN about our read. Activated 2026-09-03; no inactive rows yet.
+abwbna         | UNPROBED                    | onboarded 2026-09-06; different tenant of the same Nuzul SaaS platform as aldarim (identical run.py shape — full-refresh crawl, prune on absence, no oracle). If aldarim ever gains a verify_gone oracle, this row inherits the same fix.
 aldarim        | NO DEAD COHORT                  | 2026-09-06: this platform has never deactivated a listing, so its removal signal cannot be control-validated — there is nothing to validate against. Live controls: 12/12 HTTP 200, 12 distinct titles. Its prune is unguarded but has never fired.
 alhoshan       | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 12/12 HTTP 200 (all redirect, consistently). Nothing to validate a death limb against.
 alkhaas        | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 12/12 HTTP 200, 12 distinct titles.

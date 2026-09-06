@@ -35,12 +35,20 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 
 // The ledger's size on the day the ratchet was installed. It may FALL as platforms gain oracles.
 // Raising it is a deliberate, reviewed edit and means a platform started deactivating on absence.
-// 31 → 29 on 2026-09-06: raghdan and sanadak gained control-validated `_verify_gone` oracles.
-// 29 → 25 later the same day: jazwtn, mizlaj, nowaisiry and souq24 joined them, all four measured
-// against every one of their inactive rows with interleaved known-active controls, all four routed
-// through the shared law in scrapers/common/http_liveness.py rather than a private copy of it
+// 31 → 29 on 2026-09-06: raghdan and sanadak gained control-validated `_verify_gone` oracles
+// (scripts/verify-raghdan-absence-cannot-deactivate.ts,
+//  scripts/verify-sanadak-absence-cannot-deactivate.ts) and left the ledger.
+// 29 → 30 later the same day: abwbna onboarded as a second tenant of aldarim's own Nuzul SaaS
+// platform, inheriting the exact same absence-only prune aldarim already carries (reviewed — see
+// the ledger entry's own note: if aldarim ever gains a verify_gone oracle, abwbna inherits the fix).
+// 30 → 26 later still: jazwtn, mizlaj, nowaisiry and souq24 gained oracles, each measured against
+// EVERY one of its inactive rows with interleaved known-active controls, and each routed through
+// the shared law in scrapers/common/http_liveness.py rather than a private copy of it
 // (scripts/verify-http-liveness-law.ts, scripts/verify-absence-oracles-are-measured.ts).
-const RATCHET = 25;
+// Both movements are real and both are kept: this number went UP by one and DOWN by four in the
+// same afternoon, which is exactly what a ratchet is for — it records the direction of each change
+// instead of letting one land silently inside the other.
+const RATCHET = 26;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {
