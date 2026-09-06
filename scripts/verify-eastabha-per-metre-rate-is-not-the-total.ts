@@ -45,6 +45,8 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : ` — ${detail}`}`);
   if (!ok) failed++;
 };
+const mustCatch = (what: string, wouldFail: boolean, detail = '') =>
+  check(`MUTATION: catches ${what}`, wouldFail, detail);
 
 // Verbatim from the two live pages: the url-encoded data-price the source serves, and the
 // data-clean_price beside it. Nothing here is paraphrased.
@@ -87,7 +89,7 @@ check('the shape-A branch reads the qualifier through the RATE parser', src.incl
 const reverted = src.replace(RATE_CALL, 'qual_rate = _price_from_text(qual)');
 check('mutation is a real edit', reverted !== src);
 const am = parse(A, reverted);
-check('MUTATION CAUGHT: the total-price floor on a rate turns 2,280,000 into the per-metre rate',
+mustCatch('the total-price floor being put back on the rate — 2,280,000 becomes the per-metre rate',
   am.price_per_meter === 2280000 && am.price_is_rate === true,
   `mutant produced ppm=${am.price_per_meter} is_rate=${am.price_is_rate}`);
 
@@ -109,7 +111,7 @@ check('an empty qualifier is still nothing, not zero', rates[2] === null, `got $
 const floorless = src.replace('return _amount_from_text(s, floor=1000)', 'return _amount_from_text(s, floor=1)');
 check('floor mutation is a real edit', floorless !== src);
 const loosened = pyCall(ROOT, MOD, '_price_from_text', [['400 ريال']], floorless);
-check('MUTATION CAUGHT: dropping the floor from TOTALS lets 400 ريال through as a price',
+mustCatch('the floor being dropped from TOTALS — «400 ريال» comes through as a price',
   loosened[0] === 400, `mutant produced ${loosened[0]}`);
 
 // ── 4. WIRING ─────────────────────────────────────────────────────────────────────────────────
