@@ -92,9 +92,45 @@ const orderedRun = (bundle: string, tokens: readonly string[]): boolean =>
 const quotedAnywhere = (bundle: string, t: string): boolean =>
   bundle.includes(`'${t}'`) || bundle.includes(`"${t}"`);
 
-/** The compiled form of `base.push('furnished')` survives minification as `<v>.push('furnished')`. */
-const pushedAtRuntime = (bundle: string, t: string): boolean =>
-  bundle.includes(`.push('${t}')`) || bundle.includes(`.push("${t}")`);
+/**
+ * The compiled form of `base.push('furnished')` survives minification as `<v>.push('furnished')` —
+ * but it must be THIS array's append, not any `.push` of the same token anywhere in 6.8 MB.
+ *
+ * WHY THE ANCHOR (2026-09-06, routine #10, ops_incident #89 — a defect in this file's OWN repair,
+ * shipped in PR #1938 that morning and found the same day by routine #9). The first version searched
+ * the WHOLE bundle for `.push('furnished')`, and the served bundle carries TWO such call sites:
+ *
+ *   6,683,352  …cohortAllows(o,'furnished')?o={...o,furnishedPref:…}:u.push('furnished'));…
+ *              ↑ afCertify's rejection path — nothing to do with the amenity certification
+ *   6,688,454  …const u=[...y];…c(t,'furnished')&&u.push('furnished'),u}
+ *              ↑ certifiedAmenityKeys()'s own append, the one this leg exists to pin
+ *
+ * So the leg written to be strictly stronger than "the word appears somewhere" was satisfiable by an
+ * unrelated call: delete the certification's append and ship it, and this stayed green. That is the
+ * exact class this barrier was repaired FOR, reproduced in the repair — which is why the mutation
+ * below runs against the REAL served bundle with the certification's push cut out and the unrelated
+ * one left in place.
+ *
+ * The anchor is the array's own literal run: the append is emitted beside the array it appends to.
+ * Measured on entry-dcecc3c9…js — certification push at +195 chars past the run's end; the unrelated
+ * one 4,907 chars BEFORE it. Forward-only, so anything earlier in the bundle cannot satisfy this,
+ * and a window an order of magnitude past the measured offset absorbs minifier layout changes
+ * without reaching the impostor.
+ */
+const APPEND_WINDOW = 2_000;
+const pushedAtRuntimeBeside = (
+  bundle: string, groupTokens: readonly string[], t: string, window = APPEND_WINDOW,
+): boolean => {
+  const needles = [`.push('${t}')`, `.push("${t}")`];
+  for (const quote of ["'", '"']) {
+    const run = groupTokens.map((x) => `${quote}${x}${quote}`).join(',');
+    for (let i = bundle.indexOf(run); i >= 0; i = bundle.indexOf(run, i + 1)) {
+      const region = bundle.slice(i, i + run.length + window);
+      if (needles.some((n) => region.includes(n))) return true;
+    }
+  }
+  return false;
+};
 
 /**
  * Every way the live bundle can be BEHIND the source it was built from, as a list of problems.
@@ -130,14 +166,18 @@ export function bundleParityProblems(
   }
 
   // 2. Tokens the source appends at RUNTIME are not in any literal run by construction; assert the
-  //    CALL SITE shipped, which a stray unrelated occurrence of the same word cannot satisfy.
+  //    CALL SITE shipped BESIDE the array it appends to, which neither a stray occurrence of the
+  //    word nor an unrelated `.push` of the same token elsewhere in the bundle can satisfy.
   for (const c of cohorts) {
     for (const t of c.certified) {
       if (inSomeGroup.has(t)) continue;
-      if (!pushedAtRuntime(bundle, t)) {
+      const beside = groups.some((g) => pushedAtRuntimeBeside(bundle, g.tokens, t));
+      if (!beside) {
         problems.push(
           `${c.label} certifies '${t}', which no lifted literal group contains, and the live bundle has no ` +
-          `.push('${t}') call site — the runtime append that adds it has not shipped.`);
+          `.push('${t}') call site within ${APPEND_WINDOW} chars of any certified array's literal run — ` +
+          'the runtime append that adds it has not shipped. (A `.push` of the same token elsewhere in ' +
+          'the bundle deliberately does NOT count: see ops_incident #89.)');
       }
     }
     // 3. Belt and braces: every certified token exists in the bundle as a string at all.
@@ -169,6 +209,21 @@ mustCatch('a source array REORDERED in main but not deployed (same tokens, diffe
 mustCatch('a RUNTIME-APPENDED token whose push() call site never shipped, even though the word appears elsewhere',
   bundleParityProblems(
     `const y=['kitchen','parking','elevator','ac'],_=['car_entrance','sanitation'];const label='furnished';`,
+    G, COH).length > 0);
+// ops_incident #89: the append must be THIS array's, not any `.push` of the same token in 6.8 MB.
+mustCatch('AN UNRELATED .push OF THE SAME TOKEN standing in for the certification\'s own append',
+  bundleParityProblems(
+    `o.push('furnished');${'x'.repeat(5_000)}const y=['kitchen','parking','elevator','ac'],_=['car_entrance','sanitation'];`,
+    G, COH).length > 0);
+mustCatch('…while the certification\'s OWN append, beside its array, is still accepted (not vacuously red)',
+  bundleParityProblems(
+    `o.push('furnished');${'x'.repeat(5_000)}const y=['kitchen','parking','elevator','ac'],_=['car_entrance','sanitation'];`
+    + `function h(t){const u=[...y];return u.push(..._),c(t,'furnished')&&u.push('furnished'),u}`,
+    G, COH).length === 0);
+mustCatch('an append that has drifted BEYOND the window (a real distance, not an unbounded search)',
+  bundleParityProblems(
+    `const y=['kitchen','parking','elevator','ac'],_=['car_entrance','sanitation'];`
+    + `${'x'.repeat(APPEND_WINDOW + 500)}u.push('furnished')`,
     G, COH).length > 0);
 
 mustCatch('the villa-only literal group failing to ship',
@@ -252,6 +307,26 @@ mustCatch('THE INCIDENT, against the REAL served bundle: one extra token certifi
     [{ name: groups[0].name, tokens: [...groups[0].tokens, 'undeployed_probe_token'] }, groups[1]],
     cohorts.map((c) => ({ ...c, certified: [...c.certified, 'undeployed_probe_token'] })),
   ).length > problems.length);
+
+// ops_incident #89, against PRODUCTION'S OWN BYTES rather than a fixture. Cut the certification's
+// append out of the served bundle and leave every OTHER `.push` of the same token exactly where it
+// is. Under the shipped-then-repaired whole-bundle search this stayed green; it must now go red.
+for (const runtimeToken of [...new Set(cohorts.flatMap((c) => c.certified))].filter((t) => !groups.some((g) => g.tokens.includes(t)))) {
+  const site = groups
+    .map((g) => {
+      const run = g.tokens.map((x) => `'${x}'`).join(',');
+      const at = bundle.indexOf(run);
+      if (at < 0) return -1;
+      const rel = bundle.slice(at, at + run.length + APPEND_WINDOW).indexOf(`.push('${runtimeToken}')`);
+      return rel < 0 ? -1 : at + rel;
+    })
+    .find((n) => n >= 0);
+  mustCatch(`'${runtimeToken}': the certification's OWN append deleted from the REAL bundle, every unrelated .push left in place`,
+    site !== undefined
+    && bundleParityProblems(
+      bundle.slice(0, site) + bundle.slice(site! + `.push('${runtimeToken}')`.length),
+      groups, cohorts).length > problems.length);
+}
 
 if (mutFail > 0) console.error(`\n✗ ${mutFail} mutation proof(s) FAILED — this barrier can no longer be trusted`);
 console.log(failed === 0 && mutFail === 0
