@@ -46,6 +46,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.liveness_canary import InRunCanary
 
 # PDPL: seller identity + contact — never stored. (sellerLicenseNumber is a REGA licence, kept.)
 _PII_SANADAK = {"sellerId", "sellerName", "sellerUsername", "sellerPhonenumber",
@@ -193,6 +194,128 @@ def fetch_one(url: str) -> Optional[tuple[dict, str, str]]:
         return None
     _record_fetch_failure(last)
     return None
+
+
+# ── The liveness oracle ─────────────────────────────────────────────────────────────────────────
+# Sanadak's commercial-register number, rendered in the footer of EVERY page including the
+# not-found one. It is the proof that the RSC shell rendered COMPLETELY. Without it a truncated or
+# half-streamed flight response — which naturally contains no listing object — would be
+# indistinguishable from "this listing is gone", which is the exact confusion §0 forbids.
+_SHELL_MARKER = "4030464127"
+
+
+def _sanadak_probe(url: str) -> tuple[Optional[int], str]:
+    """One DIRECT RSC fetch of this listing's own URL. status None = we never got an answer."""
+    s = _session()
+    for attempt in range(2):
+        try:
+            r = s.get(url, timeout=45, headers={"RSC": "1"})
+        except Exception:  # noqa: BLE001 — unreachable is never proof of death
+            time.sleep(1.5 * (attempt + 1))
+            continue
+        if r.status_code in (429, 500, 502, 503, 504):
+            time.sleep(2.0 * (attempt + 1))
+            continue
+        return r.status_code, r.text
+    return None, ""
+
+
+def sanadak_verdict(status: Optional[int], body: str, url: str, *, canary_ok: bool) -> tuple[str, str]:
+    """The oracle's DECISION, pure so a barrier can execute it exhaustively.
+
+    WHY THIS PLATFORM NEEDED THE CANARY AND AQARGATE DID NOT. Aqargate says «expired» out loud, so a
+    removal is self-describing. Sanadak never says anything: measured 2026-09-06, a live listing
+    returns a ~272KB flight payload containing its OWN advertisementNumber, while a removed listing
+    AND a bogus id that never existed both return an identical ~79.8KB payload with no listing
+    object and no error message anywhere in it. There is no «not found» text to key on.
+
+    So "no listing object" is only a believable death when we can also show the source is answering
+    us honestly right now — otherwise a backend blip that returns the bare shell would read exactly
+    like a removal and would deactivate live inventory. That is what `canary_ok` carries
+    (LISTING_LIVENESS.md §5.4's in-run positive control), and it is why this oracle refuses to
+    conclude death without it.
+
+    The affirmative-life path needs no control: a blocked environment cannot manufacture a listing.
+    """
+    if status is None:
+        return "unknown", "no answer from the source (transport/5xx after retries)"
+    if status != 200:
+        return "unknown", f"HTTP {status} is about our read, not the listing"
+    if _SHELL_MARKER not in body:
+        # A 200 whose shell did not fully render is an unreadable answer, not an empty one.
+        return "unknown", "200 whose RSC shell did not fully render (truncated/partial)"
+
+    obj = _extract_obj_for_url(body, url)
+    if obj is not None:
+        published = obj.get("isPublished")
+        if published is True:
+            return "live", "own listing object present with isPublished=true"
+        if published is False:
+            # The one case where sanadak DOES state a removal. Affirmative, so no control needed.
+            return "gone", "own listing object present with isPublished=false"
+        return "unknown", f"own listing object present but isPublished={published!r}"
+
+    # No object for THIS url's advertisementNumber. Two very different shapes hide here, and only
+    # one of them has ever been observed from the source.
+    #
+    # OBSERVED (2026-09-06): a removed listing and a bogus id both return a payload with NO listing
+    # objects at all — `advertisementNumber` does not appear anywhere. That is sanadak's not-found.
+    #
+    # NOT OBSERVED: a payload carrying OTHER listings' objects (the ~5 similar-listing carousel
+    # cards) but not ours. That could be a future not-found page that renders recommendations — or
+    # a partial render that dropped the primary object while the carousel survived. We cannot tell
+    # those apart, and we have never seen the source do it, so it stays UNKNOWN rather than being
+    # resolved by assumption. Concluding death on an unobserved shape is exactly the guesswork §0
+    # forbids; if sanadak ever starts doing this, the honest result is a held strike and a gap we
+    # can then go and measure.
+    others = sum(1 for _ in _iter_candidate_objs(body))
+    if others:
+        return "unknown", (f"{others} listing object(s) present but none is this page's own "
+                           f"— unobserved shape, not resolved by assumption")
+    if not canary_ok:
+        return "unknown", "no listing object, but the in-run canary control did not pass"
+    return "gone", "fully-rendered shell with no listing objects at all, canaries verified alive"
+
+
+def _sanadak_is_alive(ad_number: str) -> bool:
+    """Affirmative-life predicate for the canary control. False for anything unconfirmed."""
+    url = _oracle_url_for(ad_number)
+    if not url:
+        return False
+    status, body = _sanadak_probe(url)
+    return sanadak_verdict(status, body, url, canary_ok=False)[0] == "live"
+
+
+def _oracle_url_for(ad_number: str) -> Optional[str]:
+    """Sanadak URLs are /property-details/{arabic-slug}-{advertisementNumber}; the slug cannot be
+    rebuilt from the ad_number, so the row's own stored listing_url is the only correct input.
+    Same shape as abeea's oracle. A lookup failure is UNKNOWN, never a death."""
+    for tbl in ("sanadak_residential_listings", "sanadak_commercial_listings"):
+        try:
+            got = db.sb().table(tbl).select("listing_url").eq("ad_number", ad_number) \
+                    .limit(1).execute().data
+        except Exception:  # noqa: BLE001
+            return None
+        if got and got[0].get("listing_url"):
+            return got[0]["listing_url"]
+    return None
+
+
+def _make_verify_gone(canary):
+    """Bind the oracle to this run's canary control (scrapers/common/liveness_canary.py)."""
+    def _verify_gone(ad_number: str) -> tuple[str, str]:
+        url = _oracle_url_for(ad_number)
+        if not url:
+            return "unknown", f"no listing_url on record for {ad_number!r} — cannot probe"
+        status, body = _sanadak_probe(url)
+        # Only a would-be death needs the control; a live answer is trustworthy on its own.
+        provisional = sanadak_verdict(status, body, url, canary_ok=True)[0]
+        if provisional != "gone":
+            return sanadak_verdict(status, body, url, canary_ok=True)
+        ok = canary.ok()
+        verdict, why = sanadak_verdict(status, body, url, canary_ok=ok)
+        return verdict, (why if ok else f"{why} [{canary.reason()}]")
+    return _verify_gone
 
 
 def _int(v: Any) -> Optional[int]:
@@ -624,9 +747,18 @@ def main() -> int:
             return 0
 
         # (rows already upserted incrementally via flush())
+        # Absence from the sitemap SELECTS candidates to re-probe; it never decides. Only
+        # _verify_gone's affirmative per-listing answer may deactivate, and — because sanadak has no
+        # «not found» text to key on — only when this run's canary control has proved the source is
+        # answering us honestly (LISTING_LIVENESS.md §1-§3, §5.4).
+        canary = InRunCanary(_sanadak_is_alive, label="sanadak")
+        canary.offer(r["ad_number"] for r in res)
+        canary.offer(r["ad_number"] for r in com)
+        verify_gone = _make_verify_gone(canary)
         pruned = 0
         for tbl, rows_seen in (("sanadak_residential_listings", res), ("sanadak_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Sanadak")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Sanadak",
+                                verify_gone=verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
