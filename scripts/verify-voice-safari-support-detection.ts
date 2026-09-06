@@ -81,7 +81,10 @@ check(
 // ── Render site: the mic is gated on the SAME live function, not a re-derived or cached copy ───────
 check(
   'the mic button in agent.tsx calls isVoiceInputSupported() directly in render — evaluated fresh every render, never a one-time cached boolean (useState initializer / module-level constant) that could go stale',
-  /\{isVoiceInputSupported\(\) \? \(\s*<Pressable\s*\n\s*testID="voice-mic"/.test(agent) &&
+  // `&& !completed` joined the render gate 2026-09-05 (locked composer has no mic — see
+  // verify-completed-chat-state.ts). The property THIS check protects is unchanged: the LIVE
+  // function is called in render, first in the chain, never cached into a stale boolean.
+  /\{isVoiceInputSupported\(\) && !completed \? \(\s*<Pressable\s*\n\s*testID="voice-mic"/.test(agent) &&
     !/const \[?\w*[Ss]upported\]? = isVoiceInputSupported\(\)/.test(agent),
 );
 

@@ -189,7 +189,10 @@ check(
 //        hidden entirely rather than offered as a control that can only flash a toast and revert.
 check(
   '18. the mic button only renders when isVoiceInputSupported() is true',
-  /\{isVoiceInputSupported\(\) \? \(\s*<Pressable\s*\n\s*testID="voice-mic"/.test(agent),
+  // `&& !completed` joined the condition on 2026-09-05 (a locked composer has no live mic — see
+  // verify-completed-chat-state.ts). The capability gate this check exists for is unchanged:
+  // isVoiceInputSupported() still guards the render, first in the chain.
+  /\{isVoiceInputSupported\(\) && !completed \? \(\s*<Pressable\s*\n\s*testID="voice-mic"/.test(agent),
 );
 
 // ── 8/10. Waveform owns ONLY the flexible middle: overflow-clipped flex:1, fixed-size controls ──
