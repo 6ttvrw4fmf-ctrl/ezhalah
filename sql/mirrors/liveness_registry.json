@@ -12,6 +12,12 @@
     "grace": 3
   },
   {
+    "platform": "abwbna",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "aldarim",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
