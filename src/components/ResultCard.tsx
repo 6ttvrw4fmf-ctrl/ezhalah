@@ -540,6 +540,36 @@ const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.jpg');
 function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (k: string) => string }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => { setIdx(0); }, [photos.join('|')]);
+
+  // ON WEB, expo-image's onError DOES NOT FIRE when the browser BLOCKS the response rather than
+  // failing to fetch it. Verified live 2026-09-06 against sadin.com.sa, whose media replies
+  // `cross-origin-resource-policy: same-origin` — Chrome refuses the embed with
+  // ERR_BLOCKED_BY_RESPONSE.NotSameOrigin. The rendered <img> sat at complete=false,
+  // naturalWidth=0, STILL ON PHOTO #1 after 20s: the onError below never ran, idx never advanced,
+  // the `!uri` placeholder was never reached, and the card showed a 240x200 EMPTY BOX. A listing
+  // with 20 real photos in the database rendered as a blank rectangle, forever.
+  //
+  // A bare `new window.Image()` on the SAME url fires `error` normally, so we do our own probe and
+  // advance idx ourselves. This retires the whole class, not just this host: a CORP-blocked image,
+  // a 404, a deleted CDN object and a hotlink-denied referer all end at the honest placeholder
+  // instead of a blank box. Native keeps expo-image's own onError, which works there.
+  //
+  // The probe costs one extra request per candidate; the browser cache then serves the <img>
+  // render for free, and a URL that loads is never probed twice (idx stops advancing).
+  const key = photos.join('|');
+  useEffect(() => {
+    if (!IS_WEB || typeof window === 'undefined') return;
+    const uri = photos[idx];
+    if (!uri) return;
+    let cancelled = false;
+    const probe = new window.Image();
+    // Only ever advance PAST the url we probed — a stale probe resolving late must not skip a
+    // good photo that a newer render already settled on.
+    probe.onerror = () => { if (!cancelled) setIdx((i) => (i === idx ? i + 1 : i)); };
+    probe.src = uri;
+    return () => { cancelled = true; probe.onerror = null; };
+  }, [key, idx]);
+
   const uri = photos[idx];
   if (!uri) {
     return (
