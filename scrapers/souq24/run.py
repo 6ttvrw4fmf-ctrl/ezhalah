@@ -66,7 +66,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, http_liveness, normalize  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://24.com.sa"
@@ -248,6 +248,106 @@ def session() -> cc.Session:
     if _PROXIES:
         s.proxies = _PROXIES  # Saudi residential proxy so datacenter IPs aren't served the shell
     return s
+
+
+# ── Liveness oracle ─────────────────────────────────────────────────────────────────────────────
+# Until 2026-09-06 this scraper called db.prune_unseen() with NO oracle, so three missed crawls
+# deactivated a listing on crawl ABSENCE alone — the inference docs/ops/LISTING_LIVENESS.md §1–§3
+# forbids, because a throttled run or a source-side index gap is indistinguishable from a removal.
+#
+# THIS SOURCE DOES NOT 404 A REMOVED AD. It answers 200 and REDIRECTS off the listing path to a
+# generic page. MEASURED 2026-09-06 over every inactive row plus interleaved known-active controls:
+#   dead      14/14 already-inactive rows → HTTP 200, redirected off /<pid>/…, byte-identical
+#             165,475-byte page, ONE shared title across all 14
+#   controls  40/40 known-active rows → HTTP 200, NO redirect, 40 distinct per-listing titles
+# The populations do not overlap on either axis. A status-code oracle would have found nothing here
+# and quietly never deactivated anything, which is the other way an oracle fails.
+#
+# THE REDIRECT IS THIS PLATFORM'S SIGNAL, not a general rule. Everywhere else an unresolved redirect
+# is UNKNOWN (we do not know where we landed) and `http_liveness` keeps that default; souq24 states
+# otherwise about ITSELF, from measurement.
+#
+# The shell trap is real here and already documented: 24.com.sa serves datacenter IPs a listing-less
+# shell, which is why this scraper carries the Saudi residential proxy. The oracle reuses the same
+# session, so it inherits the proxy — and if the source ever serves a shell anyway, `map_listing`
+# fails to parse, `_signal` returns None, and the row is held at UNKNOWN rather than deactivated.
+#
+# The three-valued LAW is not restated here. `scrapers/common/http_liveness.decide()` owns it and
+# cannot be relaxed from this file.
+def _oracle_session() -> cc.Session:
+    """Transport seam for the probe. Tests replace this; the law is never replaced."""
+    return _session()
+
+
+_AD_NUMBER_RE = re.compile(r"^SQ24-(\d+)$")
+
+
+def _pid_of(ad_number: str) -> Optional[int]:
+    """`SQ24-<pid>` → pid. Anything else → None, which is UNKNOWN at the call site.
+
+    Matched STRICTLY against the one format `map_listing` writes (line ~731), not by stripping a
+    guessed prefix: a loose stripper turned "SQ24-1278" into "24-1278" and silently failed, and a
+    looser one could turn a different platform's id into a plausible souq24 pid and probe the wrong
+    page. An id we cannot parse must never become a verdict.
+    """
+    m = _AD_NUMBER_RE.match((ad_number or "").strip())
+    return int(m.group(1)) if m else None
+
+
+def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+    """24 Souq's OWN measured signals. `None` means "no opinion" — never "probably gone"."""
+    if status in (404, 410):
+        return "gone"
+    if status != 200:
+        return None
+    if path_changed:
+        # Sent away from this ad's own path: the source is saying the ad is not there.
+        return "gone"
+    # Still on the ad's own path AND the page parses as a listing through the SAME function the
+    # capture path uses → the source still serves it. A shell parses to None and stays UNKNOWN.
+    pid = _PROBE_PID.get()
+    if pid is not None and map_listing(pid, body or "")[0] is not None:
+        return "live"
+    return None
+
+
+class _ProbePid:
+    """Carries the ad's numeric id into `_signal`, which the law calls with (status, body, moved).
+
+    Thread-local rather than a closure because `db.prune_unseen` may probe rows concurrently and a
+    module-level scalar would let one row's id decide another row's verdict — an identity mix-up of
+    exactly the kind that produced three near-miss false resurrections on sanadak.
+    """
+
+    def __init__(self) -> None:
+        self._l = threading.local()
+
+    def set(self, pid: Optional[int]) -> None:
+        self._l.pid = pid
+
+    def get(self) -> Optional[int]:
+        return getattr(self._l, "pid", None)
+
+
+_PROBE_PID = _ProbePid()
+
+
+class _Souq24Probe(http_liveness.LivenessProbe):
+    def verify_gone(self, ad_number: str):
+        _PROBE_PID.set(_pid_of(ad_number))
+        try:
+            return super().verify_gone(ad_number)
+        finally:
+            _PROBE_PID.set(None)
+
+
+_probe = _Souq24Probe(
+    platform="souq24",
+    signal=_signal,
+    session=_oracle_session,
+    url_for=http_liveness.stored_listing_url(
+        ("souq24_residential_listings", "souq24_commercial_listings")),
+)
 
 
 def _clean(s: str) -> str:
@@ -766,7 +866,8 @@ def main() -> int:
             return 0 if healthy else 1
         for tbl, rows_seen in (("souq24_residential_listings", res),
                                ("souq24_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="24 Souq")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="24 Souq",
+                                verify_gone=_probe.verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

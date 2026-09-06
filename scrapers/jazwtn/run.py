@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, http_liveness, normalize  # noqa: E402
 
 BASE = "https://jazwtn.sa"
 SITEMAP = f"{BASE}/projects-sitemap.xml"
@@ -195,6 +195,50 @@ def session() -> cc.Session:
     if _PROXIES:
         s.proxies = _PROXIES  # Saudi residential proxy — datacenter IPs get connection-reset
     return s
+
+
+# ── Liveness oracle ─────────────────────────────────────────────────────────────────────────────
+# Until 2026-09-06 this scraper called db.prune_unseen() with NO oracle, so three missed crawls
+# deactivated a listing on crawl ABSENCE alone — the inference docs/ops/LISTING_LIVENESS.md §1–§3
+# forbids, because a throttled run or a source-side index gap is indistinguishable from a removal.
+#
+# MEASURED 2026-09-06, every inactive row plus interleaved known-active controls (controls are
+# interleaved so a mid-run block shows in BOTH cohorts rather than reading as a dead cohort — the
+# failure that made 3,273 wasalt rows look dead in §5.3):
+#   dead      29/31 already-inactive rows → HTTP 404 (~71.7 KB, one shared generic title)
+#             the other 2 redirected off the listing path → UNKNOWN, not a death
+#   controls  40/40 known-active rows → HTTP 200, 37 distinct per-listing titles, no redirect
+# The two populations do not overlap on status.
+#
+# The three-valued LAW is not restated here. `scrapers/common/http_liveness.decide()` owns it and
+# cannot be relaxed from this file: whatever `_signal` says, a 401/403/407/408/429, any 5xx, a
+# network error or an empty body can never become a death.
+def _oracle_session() -> cc.Session:
+    """Transport seam for the probe. Tests replace this; the law is never replaced."""
+    return _session()
+
+
+def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+    """jazwtn's OWN measured signals, and nothing else. `None` means "no opinion" — never
+    "probably gone"."""
+    if path_changed:
+        return None                      # an unresolved redirect: we do not know where we landed
+    if status in (404, 410):
+        return "gone"
+    if status == 200 and map_listing(body, BASE, None)[0] is not None:
+        # The page parses as a real listing through the SAME function the capture path uses, so
+        # this is the source still serving it. Used only to self-heal a wrongly-struck row.
+        return "live"
+    return None
+
+
+_probe = http_liveness.LivenessProbe(
+    platform="jazwtn",
+    signal=_signal,
+    session=_oracle_session,
+    url_for=http_liveness.stored_listing_url(
+        ("jazwtn_residential_listings", "jazwtn_commercial_listings")),
+)
 
 
 def _to_int(v: Any) -> Optional[int]:
@@ -689,12 +733,15 @@ def main() -> int:
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:72])
             return 0
 
-        # Full run: prune listings active before that weren't seen this crawl.
-        # db.prune_unseen carries the safety guards (0-scrape / collapse → skip, never wipe).
+        # Full run: absence selects WHICH rows to re-probe; only an affirmative answer on the
+        # listing's own URL may deactivate one (see the oracle above and
+        # docs/ops/LISTING_LIVENESS.md §1-§3). db.prune_unseen still carries its own guards
+        # (0-scrape / collapse → skip, never wipe) — the oracle adds to them, it replaces nothing.
         pruned = 0
         for tbl, rows_seen in (("jazwtn_residential_listings", res),
                                ("jazwtn_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Jazwtn")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Jazwtn",
+                                verify_gone=_probe.verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
