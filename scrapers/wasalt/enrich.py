@@ -31,6 +31,7 @@ from curl_cffi import requests as cc
 
 from scrapers.common import db
 from scrapers.common import normalize as N
+from scrapers.wasalt.run import _yes_no
 
 BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -107,6 +108,37 @@ def fetch_detail(slug: str) -> tuple[bool, list[dict[str, Any]]]:
     return False, []  # retries exhausted → transient; retry on a later run
 
 
+def meter_fields_from_deep(deep: list[dict[str, Any]]) -> dict[str, bool]:
+    """separate_water_meter / separate_electricity_meter from a detail-page `deep` payload.
+
+    SOURCE IS TRUTH (ops alert kind=wasalt_meter_parse_gap, raised 2026-09-04). This is the ONLY
+    place production actually learns waterMeter/electricityMeter: run.py's cloud sweeps run with
+    WASALT_FETCH_DETAIL unset (no workflow ever sets it), so the `deep` rows this daily new-only
+    detail fetch reads are the SOLE producing path for these two keys. Migration 20260809151000
+    parsed them from additional_info into separate_water_meter / separate_electricity_meter for the
+    rows that existed on 2026-08-09, but this module's update() call used to write fresh
+    additional_info without ever recomputing the two boolean columns from it — so every row
+    detail-enriched since (8,284 measured 2026-09-04, all of them scraped after the repair, none
+    before it) re-created the exact gap the migration had just repaired. This reuses the same
+    tri-state `_yes_no()` run.py's own base row builder uses, so both producing paths agree.
+
+    Returns only the keys that are DETERMINED (Yes -> True, No -> False). A key absent from `deep`
+    or carrying any other value is OMITTED from the result entirely — never written as None —
+    mirroring `db._unknown_must_not_overwrite_known()`: the caller here is a plain
+    `.table().update()` that does not go through that guard, so a key present with value None would
+    write SQL NULL and could erase a value a previous enrichment already read. Only a determined
+    Yes/No is ever returned.
+    """
+    out: dict[str, bool] = {}
+    wm = _yes_no(deep, "waterMeter")
+    if wm is not None:
+        out["separate_water_meter"] = wm
+    em = _yes_no(deep, "electricityMeter")
+    if em is not None:
+        out["separate_electricity_meter"] = em
+    return out
+
+
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
                  max_pending: int = 5000, allow_backfill: bool = False) -> dict[str, int]:
     c = db.sb()
@@ -164,6 +196,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
             # never a guess. This is the only place the trustworthy string is available.
             cy = next((r.get("value") for r in deep if r.get("key") == "completionYear"), None)
             upd["property_age"] = N.parse_property_age(cy)
+            upd.update(meter_fields_from_deep(deep))
         try:
             db.sb().table(table).update(upd).eq("ad_number", row["ad_number"]).execute()
             with lock: stats["deep" if deep else "empty"] += 1
