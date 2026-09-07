@@ -530,7 +530,7 @@ try {
   });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
-  await tap('الوكيل الذكي');
+  await tap('الوسيط الذكي');
   await page.waitForTimeout(2000);
   await page.click('textarea');
   await page.type('textarea', 'ابغى شقة للايجار في جدة', { delay: 30 });

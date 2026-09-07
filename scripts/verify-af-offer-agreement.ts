@@ -79,7 +79,7 @@ check('offered + NO card + loading seen ⇒ FAIL (round started, then gave up)',
   check('the live check imports the shared rule instead of re-implementing it',
     /from '\.\/lib\/afOfferAgreement\.ts'/.test(live));
   check('the live check drives the AGENT flow, not the Filter flow',
-    /الوكيل الذكي/.test(live), 'no agent-tab entry found — a Filter-flow journey cannot catch this bug');
+    /الوسيط الذكي/.test(live), 'no agent-tab entry found — a Filter-flow journey cannot catch this bug');
   const wf = read('.github/workflows/af-live-truth-check.yml');
   check('the AF live workflow runs the agent-flow check',
     /verify-af-agent-cta-live\.ts/.test(wf),
