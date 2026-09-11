@@ -14,7 +14,9 @@ const EVENT = process.env.GATE_EVENT_NAME ?? '';
 const RUN_ID = process.env.GATE_DEPLOY_RUN_ID ?? '';
 const REPO = process.env.GITHUB_REPOSITORY ?? '';
 const TOKEN = process.env.GITHUB_TOKEN ?? '';
-const API = process.env.GITHUB_API_URL ?? 'https://api.github.com';
+// `||`, NOT `??`: an unset/empty Actions variable is '' rather than undefined, and `??` would honour
+// it as the API base — every request would then fail against a meaningless URL.
+const API = process.env.GITHUB_API_URL || 'https://api.github.com';
 
 const headers = {
   accept: 'application/vnd.github+json',

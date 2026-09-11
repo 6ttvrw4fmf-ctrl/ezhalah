@@ -462,6 +462,41 @@ def to_int_numeric(v) -> Optional[int]:
     except (TypeError, ValueError):
         return None
 
+def count_flag(v) -> Optional[bool]:
+    """A source COUNT ("how many balconies?") → an amenity tri-state, never a manufactured negative.
+
+    WHY THIS EXISTS (measured 2026-09-11, ops_incident #154). Four scrapers on the aldarim SaaS shape
+    (aldarim, abwbna, alobid, bahadhabab) derived five amenity booleans as
+
+        "balcony_terrace": (_int(L.get("balconies")) or 0) > 0
+
+    and `to_int_numeric` returns None for BOTH an explicit source ``0`` and a source ``null``. So the
+    two collapse into the same False, and a listing the source said NOTHING about was stored as a
+    confident "this property has no balcony" — the owner-locked SOURCE IS TRUTH violation
+    (silent → NULL, never unknown → NO), on five Advanced-Filter amenity predicates.
+
+    Measured over the stored ``source_capture`` (the exact payload, so this is a probe and not an
+    inference): the key is PRESENT on 100% of rows for all four platforms, published as an explicit
+    0 on the overwhelming majority — and as JSON ``null`` on 20 abwbna rows and 12-13 aldarim rows
+    per key. Those, and only those, were fabricated negatives.
+
+    So the split this makes, deliberately narrow:
+      * ``None`` / ``""``            the source was SILENT              → None  (UNKNOWN)
+      * ``0`` / ``"0"``              the source published a NEGATIVE    → False (kept: source truth)
+      * a positive number            the source published a POSITIVE    → True
+      * anything unparseable         we cannot claim to know            → None
+
+    It deliberately does NOT route through to_int_numeric(): that helper's "0 means not set" reading
+    is right for a bedroom count and exactly wrong here, where 0 is the answer.
+    """
+    if v is None or (isinstance(v, str) and v.strip() == ""):
+        return None
+    try:
+        return int(float(v)) > 0
+    except (TypeError, ValueError):
+        return None
+
+
 def annualize_rent(price: Optional[int], period: Optional[str]) -> Optional[int]:
     """Make sure rent is stored ANNUAL. Daily/weekly/monthly/quarterly → ×N. Annual or
     unknown → leave as-is (assume the scraper already got an annual figure).

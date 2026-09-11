@@ -150,7 +150,11 @@ for (const dead of ['Pool', 'Gym']) {
 // Read from the LIVE registry rather than a copy here, so the check can never drift from the
 // contract it is enforcing. Network-dependent, unlike checks 1-4 — if the registry is unreachable
 // this FAILS rather than skipping, because a barrier that silently opts out is not a barrier.
-const REG_URL = process.env.EZHALAH_SUPABASE_URL ?? 'https://aannarbkwcymrotzwdbo.supabase.co';
+// `||`, NOT `??` — an UNSET GitHub Actions secret expands to the EMPTY STRING, not to undefined, so
+// `??` would honour '' as the endpoint and this check would probe nothing while looking configured.
+// `scripts/lib/public-supabase.ts` resolves the same value with `||` for exactly this reason; the
+// divergence was recorded in scripts/live-reaching-required-checks.txt and is fixed here.
+const REG_URL = process.env.EZHALAH_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
 const regKey = (await import('./lib/public-supabase.ts')).resolvePublicSupabase(process.env).key;
 try {
   const registry: Array<{ canonical_key: string; ui_exposed: boolean; not_exposed_reason: string | null; filter_tier?: string }> =
