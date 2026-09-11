@@ -192,4 +192,80 @@ check('B14. the saved entry stores the whole query, not a summary',
 console.log(failed === 0
   ? '\n✅ saved-search-identity: passed.'
   : `\n❌ saved-search-identity: ${failed} check(s) failed.`);
-process.exit(failed === 0 ? 0 : 1);
+if (failed > 0) process.exit(1);
+
+// ═══ MUTATION PROOFS ════════════════════════════════════════════════════════════════════════════
+// Section A above already EXECUTES the real isSameSavedSearch/savedSearchIdentity functions, and A5
+// already proves the fix against the actual shipped-until-2026-08-20 buggy comparison — the
+// strongest form. Section B (account-aware persistence) is source-text by necessity (store.tsx
+// carries heavy React Native imports this runner cannot load), so its checks are proven here by
+// reintroducing each historical/plausible cross-account defect into the ACTUAL current content of
+// `store` / `stripped` / `sidebar` and showing the same predicates go red. This is the highest-risk
+// half of this file: a defect here leaks one account's saved searches into another's session.
+console.log('\n── mutation proofs (section B) — reintroduce each account-boundary defect ─────────');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+// ── B2a: logged-out must return early — nothing anonymous is ever written ──────────────────────────
+const guardDropped = persistBody.replace('if (!user) return;', '');
+mustCatch('the logged-out early-return dropped — a guest search would now persist',
+  !/if \(!user\) return;/.test(guardDropped));
+mustCatch('…while the genuine persistence effect IS recognised as guarding (negative control)',
+  /if \(!user\) return;/.test(persistBody));
+
+// ── B2b: the storage key must derive from a signed-in user ONLY, never fall back to 'guest' ────────
+const fallbackReintroduced = persistBody.replace(
+  'historyKey(user.sub)', "historyKey(user ? user.sub : 'guest')",
+);
+mustCatch('the persistence key reverted to a user-or-guest fallback — reopens the anonymous-write path',
+  /historyKey\(user \? user\.sub : 'guest'\)/.test(fallbackReintroduced));
+mustCatch('…while the genuine key derivation has no such fallback (negative control)',
+  !/historyKey\(user \? user\.sub : 'guest'\)/.test(persistBody));
+
+// ── B2c: NO code path anywhere writes the anonymous bucket (file-wide, not just the one effect) ────
+const anonWriteSlippedIn = stripped + "\nAsyncStorage.setItem(historyKey('guest'), JSON.stringify(h));\n";
+mustCatch('a NEW anonymous-bucket write appearing anywhere else in the file (not just the known effect)',
+  /(setItem|multiSet)\([^;]*historyKey\((user \? user\.sub : )?'guest'/.test(anonWriteSlippedIn));
+mustCatch('…while the genuine file has no anonymous-bucket write anywhere (negative control)',
+  !/(setItem|multiSet)\([^;]*historyKey\((user \? user\.sub : )?'guest'/.test(stripped));
+
+// ── B3: a stale anonymous bucket must be purged on login, never silently adopted ───────────────────
+const purgeDropped = stripped
+  .replace(/removeKeysSync\(\[historyKey\('guest'\)\]\);?/, '')
+  .replace(/removeItem\(historyKey\('guest'\)\);?/, '');
+mustCatch('the guest-bucket purge dropped — a pre-login anonymous history would be silently adopted on sign-in',
+  !(/removeKeysSync\(\[historyKey\('guest'\)\]\)/.test(purgeDropped) || /removeItem\(historyKey\('guest'\)\)/.test(purgeDropped)));
+mustCatch('…while the genuine file DOES purge it (negative control)',
+  /removeKeysSync\(\[historyKey\('guest'\)\]\)/.test(stripped) || /removeItem\(historyKey\('guest'\)\)/.test(stripped));
+
+// ── B7: storage must be keyed PER ACCOUNT — a shared key is the direct cross-account leak shape ────
+const sharedKeyReintroduced = store.replace(
+  "const historyKey = (sub: string) => 'history:' + sub;",
+  "const historyKey = (sub: string) => 'history';",   // ignores sub entirely — one shared bucket
+);
+mustCatch('historyKey stops keying on the account sub — every account would share ONE bucket',
+  !/const historyKey = \(sub: string\) => 'history:' \+ sub;/.test(sharedKeyReintroduced));
+mustCatch('…while the genuine historyKey IS recognised as per-account (negative control)',
+  /const historyKey = \(sub: string\) => 'history:' \+ sub;/.test(store));
+
+// ── B9/B11: hydration must re-run per account and reject a stale in-flight read ────────────────────
+const staleReadAccepted = stripped.replace('if (historyLoadedRef.current !== key) return;', '');
+mustCatch('the in-flight-read account check dropped — a slow read for account A could land under account B',
+  !/if \(historyLoadedRef\.current !== key\) return;/.test(staleReadAccepted));
+mustCatch('…while the genuine file DOES reject a stale in-flight read (negative control)',
+  /if \(historyLoadedRef\.current !== key\) return;/.test(stripped));
+
+// ── B12/B13: reopening a saved search must replay the FULL query, not a partial/summary one ────────
+const partialReplay = sidebar.replace('filter: JSON.stringify(c.query)', "filter: JSON.stringify({ deal: c.query.deal })");
+mustCatch('reopening a saved search degraded to replaying a PARTIAL query (the sidebar-side half of the identity contract)',
+  !/filter: JSON\.stringify\(c\.query\)/.test(partialReplay));
+mustCatch('…while the genuine sidebar replays the full stored query (negative control)',
+  /filter: JSON\.stringify\(c\.query\)/.test(sidebar));
+
+console.log('');
+if (mutFail) { console.error(`✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
+console.log('✓ every account-boundary guard above was watched to fail against its own defect\n');

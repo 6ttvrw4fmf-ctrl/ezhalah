@@ -156,3 +156,33 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log('✓ all sanadak-rsc-object-match assertions passed');
+
+// ═══ MUTATION PROOFS ════════════════════════════════════════════════════════════════════════════
+// Every eq() above already runs the REAL, shipped `_extract_obj_for_url` Python function against a
+// real subprocess AND directly compares it to the pre-fix `_extract_obj` on the same fixtures — the
+// strongest form of proof this repo has: not a synthetic mutant, but the ACTUAL historical buggy
+// implementation, still present in run.py as `_extract_obj`, executed side-by-side with its fix.
+// This section only makes that comparison explicit in the ratchet's own vocabulary.
+console.log('\n── mutation proofs — the historical buggy path, executed, not simulated ──────────');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+const r1 = runPython(FIXTURE_CAROUSEL_FIRST, URL_FOR_REAL_AD);
+mustCatch('the OLD shipped function (_extract_obj, still in run.py) returns the WRONG ad on the reported bug shape',
+  r1.old_ad !== REAL_AD);
+mustCatch('…while the NEW shipped function returns the CORRECT ad on the same input (negative control)',
+  r1.new_ad === REAL_AD);
+
+const r3 = runPython(FIXTURE_NO_MATCH, URL_FOR_REAL_AD);
+mustCatch('the OLD function fabricates a result even when the URL\'s ad number is nowhere in the stream',
+  r3.old_ad !== null);
+mustCatch('…while the NEW function fails LOUD (None) on the same anomaly (negative control)',
+  r3.new_ad === null);
+
+console.log('');
+if (mutFail) { console.error(`✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
+console.log('✓ the fix is proven against its own historical bug, by executing both, side by side\n');
