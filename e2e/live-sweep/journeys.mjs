@@ -381,17 +381,33 @@ export async function cardClickBack(plan) {
   });
 }
 
-/** 7 — TAB SWITCHING must not push junk history (تصفية ↔ الوكيل الذكي). */
+/** 7 — TAB SWITCHING must not push junk history (تصفية ↔ الوسيط الذكي). */
 export async function tabHistory() {
   const name = 'watch:tab-switch-no-junk-history';
   return withPage(false, async (page) => {
     const h0 = await page.evaluate(() => history.length);
+    // A ROUND TRIP THAT NEVER HAPPENED SATISFIES THIS WATCH PERFECTLY. Both clicks swallow their
+    // own failure, and the oracle is `h1 - h0 <= 1` — so six clicks that all land on nothing give
+    // `h1 - h0 === 0` and the watch reports ok:true, having proven nothing. That is not theory: the
+    // 2026-09-06 rename «الوكيل الذكي» → «الوسيط الذكي» (PR #2061) left this selector diverged from
+    // `main` for five days, and green either way — correctly before the deploy carrying the rename
+    // (2026-09-11T12:12Z), vacuously after it. So each half of each trip is now confirmed
+    // by the app's OWN route, and a trip that did not happen is reported instead of counted.
+    let trips = 0;
     for (let i = 0; i < 3; i++) {
-      await page.getByText('الوكيل الذكي', { exact: true }).first().click().catch(() => {}); await sleep(2200);
+      await page.getByText('الوسيط الذكي', { exact: true }).first().click().catch(() => {}); await sleep(2200);
+      const reachedAgent = page.url().includes('/agent');
       await page.getByText('تصفية', { exact: true }).first().click().catch(() => {}); await sleep(2200);
+      const cameBack = !page.url().includes('/agent');
+      if (reachedAgent && cameBack) trips++;
     }
     const h1 = await page.evaluate(() => history.length);
     const forms = await page.locator('[data-testid="city-input"]').count();
+    if (trips === 0) {
+      defect(name, 'NAVIGATION', 'not one of the 3 تصفية↔الوسيط الذكي round trips landed — the tabs '
+        + 'never switched, so this watch measured nothing (h1-h0 would read 0 and pass vacuously)');
+      return { name, ok: false, historyGrowth: h1 - h0, forms, trips };
+    }
     observeWatch('tab-switch-no-junk-history');   // reached only if the round trips actually ran
     if (h1 - h0 > 1) defect(name, 'NAVIGATION', `3 round trips added ${h1 - h0} history entries (tab-switch-no-junk-history)`);
     if (forms > 1) defect(name, 'NAVIGATION', `${forms} Filter forms mounted at once — screens are leaking`);
