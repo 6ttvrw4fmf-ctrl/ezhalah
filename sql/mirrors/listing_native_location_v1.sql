@@ -12,9 +12,11 @@
 --   file's own precedent) found the mirror genuinely stale: the recorded body was 14,127 chars /
 --   md5 31036a9c8b92fddc5293b700985b869d, live production is 18,887 chars /
 --   md5 862a10b719341ab0d425b81b02d69871. Root cause: migration
---   20260906175800_wire_abwbna_bahadhabab_alobid_into_native_location_v1.sql (2026-09-06) added
---   three platforms' native arms, and 20260906210336_activate_azdad_in_search_unions.sql (same day)
---   added a fourth — both landed on production and were never mirrored. The body below is the FULL
+--   20260906181019_wire_abwbna_bahadhabab_alobid_into_native_location_v1.sql (2026-09-06, renamed
+--   from its original 20260906175800 filename by a later migration-mirror repair — content
+--   unchanged) added three platforms' native arms, and
+--   20260906210336_activate_azdad_in_search_unions.sql (same day) added a fourth — both landed on
+--   production and were never mirrored. The body below is the FULL
 --   current live definition, re-derived via
 --   encode(convert_to(pg_get_viewdef('public.listing_native_location_v1'::regclass, true),'UTF8'),
 --   'base64') to avoid any transcription risk, and its md5 was independently recomputed from the
