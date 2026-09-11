@@ -534,7 +534,15 @@
           "Telecom Tower",
           "برج اتصالات",
           "Parking",
-          "مواقف"
+          "مواقف",
+          "Hospital",
+          "مستشفى",
+          "Business Center",
+          "مركز أعمال",
+          "Resort",
+          "منتجع",
+          "ATM Site",
+          "موقع صراف"
         ],
         "kinds": [
           "res",

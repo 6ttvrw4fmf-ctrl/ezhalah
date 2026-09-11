@@ -38,23 +38,6 @@
 -- CREATE OR REPLACE ("cannot remove parameter defaults from existing function", 42P13). Dropping the
 -- 3-arg signature also guarantees no stale overload survives to let existing callers walk past the
 -- repair — the duplicate-overload shape (PGRST203) the migration drift guard already watches for.
---
--- PROVEN BY EXECUTION ON PRODUCTION immediately after apply (all four directions):
---   incident_resolve(-1,'x')                          -> 42883 function does not exist  (2-arg GONE)
---   incident_resolve(-1,'x',null)                     -> P0001 refused, guard now reachable
---   incident_resolve(-1,'x',now()+interval '1 hour')  -> P0001 refused, FUTURE is not evidence
---   incident_resolve(-1,'x',now()-interval '1 minute')-> true   (NOT vacuously red)
--- DELIBERATE CONTENT-PARITY DIVERGENCE FROM PRODUCTION'S RECORDED STATEMENT, documented here so it
--- is not "repaired" back. As APPLIED, this migration's RAISE guidance used a placeholder path as a
--- worked example spelled scripts/verify-<placeholder>.ts. No such file exists, and
--- scripts/verify-ops-remediation-scripts-exist.ts — correctly — reads any scripts/verify-*.ts named
--- by a migration as a PROMISED PROTECTION and fails when it is absent (the ops_incident #50 class).
--- Production's history is immutable, so the literal cannot be unsaid there; migration
--- 20260911183306 replaces the live function's message with the path-free wording below, and this
--- file carries that same wording. Same precedent as PR #2281's support_messages.sql, which is
--- deliberately left divergent because a required check bans a phrase production's own statement
--- contains. The FUNCTION BODY is identical in both; only the example inside one error string differs.
-
 drop function if exists public.incident_resolve(bigint, text, timestamptz);
 drop function if exists public.incident_resolve(bigint, text);
 
@@ -73,8 +56,7 @@ begin
     raise exception
       'incident % cannot resolve without a production verification timestamp. Pass the moment you '
       'ACTUALLY OBSERVED production behaving correctly through the real path a user hits (§G.9(6)) — '
-      'that is, incident_resolve(%, <the barrier that now covers this>, <the timestamp you observed '
-      'it at>). '
+      'e.g. incident_resolve(%, ''scripts/verify-x.ts'', timestamptz ''2026-09-11 15:50:00+00''). '
       'This parameter no longer defaults to now(): a timestamp the system supplies on your behalf is '
       'a record of the claim, not of the observation (ops_incident #186).', p_id, p_id;
   end if;

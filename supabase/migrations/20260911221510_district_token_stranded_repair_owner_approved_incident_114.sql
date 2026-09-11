@@ -19,11 +19,6 @@
 --   - Fleet-wide diff (all production_ready rows, old vs new token): EXACTLY 2 (city, old_tok,
 --     new_tok) groups change — نجران «حي الشرفه»->«شرفه» (9 rows) and المدينة المنورة
 --     «حي الخضراء»->«خضراء» (1 row). Nothing else anywhere in the fleet moves.
---
--- Production-verified post-apply: mon_detect_district_token_stranded() returns 0 (alert_event#1659
--- clears naturally on its next scheduled run, never hand-resolved); the real anon-key search RPC
--- (location_search_candidates_ar, p_cities=['نجران'], p_districts=['حي الشرفة']) now returns all 11
--- نجران حي الشرفة listings, including the two previously-stranded ones (296311, 8992705).
 create or replace function public.norm_district_tok(t text)
 returns text
 language sql

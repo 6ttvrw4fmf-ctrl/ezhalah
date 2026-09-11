@@ -10,7 +10,7 @@
 // gathern went 8 days (09-03..09-11) with zero ok=true liveness runs; v3 reported 388 rows (only
 // today's freshly-touched batch) where the true trusted-and-uncontradicted count was 1,244.
 //
-// THE FIX (v4, 20260911203157): split "is it still dead" from "was death ever proven". The LATEST
+// THE FIX (v4, 20260911203303): split "is it still dead" from "was death ever proven". The LATEST
 // probe at ANY trust level must still read 404/410 (so a 200, trusted or not, still clears a listing
 // immediately — a blocked environment cannot manufacture a live page). Separately, SOME probe that
 // specifically carries a trust anchor must ALSO have read 404/410. A later untrusted re-probe that
