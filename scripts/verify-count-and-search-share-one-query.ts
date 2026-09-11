@@ -99,6 +99,10 @@ const L_RENT_PERIOD = anchor("  const rentPeriod: 'monthly' | 'annual' | 'both' 
 const L_EFF_DEAL = anchor('  const effDeal = ');
 const L_RENT_PERIOD_TOK = anchor('  const rentPeriodTok');
 const L_BUILD_BASE = anchor('  const buildFilterBaseQuery = ', /^ {2}\};$/);
+// The COUNT surfaces' parameter object (Trending cities/districts and every locations.ts pool wrap
+// this). Section 4 executes it: whatever index.tsx hands the shared builder here is the count path's
+// input, and it must be the same object the search path runs on.
+const L_CITY_AF = anchor('  const cityAfRaw = ');
 
 // queryForPeriod — the ONE normalised object both paths read — is the repair itself, so its absence is
 // the regression rather than a re-anchoring problem. Falling back to `= query` reproduces exactly what
@@ -129,6 +133,34 @@ const lifted = await liftSymbols(
   process.exit(1);
 });
 const realRentPeriodParam = lifted.rentPeriodParam as (q: Record<string, unknown>) => string | null;
+
+// The REAL narrowing builder and its whole price chain, lifted the same way. agentPriceCapAnnual is
+// the one that makes this section necessary: it reads q.rentPeriod DIRECTLY and falls back to a
+// magnitude heuristic when it is unset, so "which query object did this path get" is worth 12x on
+// p_price_max. cohortTypesAr/bedroomTokens are shimmed — they carry NO period logic (p_types is
+// dropped by rpcAllNarrowingParams anyway), and section 5 covers what a shim cannot execute.
+const liftedNarrow = await liftSymbols(
+  REMOTE_TS,
+  [
+    { header: 'const pnum = ', endsWith: /;\s*$/ },
+    { header: 'function agentPriceCapAnnual(' },
+    { header: 'export function rentPeriodParam(' },
+    { header: 'export function rpcAdvancedFilterParams(' },
+    { header: 'function rpcFilterParams(' },
+    { header: 'export function rpcAllNarrowingParams(' },
+  ],
+  ['rpcAllNarrowingParams'],
+  `type SearchQuery = any;
+const RPC_SORT_KEYS = new Set(['oldest','price_asc','price_desc','area_asc','area_desc','beds_desc']);
+function cohortTypesAr(_q: any) { return null; }
+function bedroomTokens(_q: any) { return []; }`,
+).catch((e: unknown) => {
+  check('remote.ts still exposes rpcAllNarrowingParams and its price chain', false,
+    `could not lift it: ${e instanceof Error ? e.message : String(e)}`);
+  console.log(`\n❌ ${failed} check(s) failed.`);
+  process.exit(1);
+});
+const realNarrowing = liftedNarrow.rpcAllNarrowingParams as (q: Record<string, unknown>) => Record<string, unknown>;
 
 // ── build an executable module out of those real lines ────────────────────────────────────────────
 // The shims (`citySelected`, `resolveCitySelection`) carry NO period logic — buildFilterBaseQuery uses
@@ -339,7 +371,173 @@ const reshipped = await buildPair();
 check('(mutation) …while the REAL shipped shape still passes both invariants (not vacuously red)',
   divergences(reshipped).length === 0 && uiMismatches(reshipped).length === 0);
 
+// ── 4. THE SAME QUERY MEANS EVERY PARAMETER, NOT JUST THE PERIOD ──────────────────────────────────
+// Found 2026-09-11 (regression hunter) by re-attacking this file's OWN class one level up. Sections
+// 1-3 pin p_rent_period and were green for the whole time the defect below existed, because the
+// invariant they execute compares ONE parameter. The repair they guard states its own scope wider
+// than that — index.tsx: "Normalise ONCE, here, and let both the count token and buildFilterBaseQuery
+// read that one object, so a query the counts describe and a query the search runs cannot differ by
+// construction." That held for rentPeriodTok alone. The narrowing params and the table scope still
+// read the RAW store query:
+//
+//     counts   const cityAfRaw = { ...rpcAllNarrowingParams(query), ... }        rentPeriod undefined
+//     results  buildFilterBaseQuery() → { ...queryForPeriod }                    rentPeriod 'annual'
+//
+// and rpcFilterParams → agentPriceCapAnnual() reads q.rentPeriod directly, falling back to a
+// MAGNITUDE HEURISTIC when unset (`amount <= 25_000 ? amount * 12 : amount`). Measured by executing
+// the real builder on the two objects: budget 5,000 → counts 60,000 vs search 5,000; 12,000 →
+// 144,000 vs 12,000; 20,000 → 240,000 vs 20,000; 25,000 → 300,000 vs 25,000. A 12x overstatement on
+// every rent budget at or below 25,000, on the one state every Rent search starts in — the
+// 2026-09-03 Trending-vs-results scope class, on the price parameter.
+//
+// LATENT, never shipped: sanitizeForFilterRestore()'s allowlist (a THIRD file) drops priceInput from
+// every write into the Filter store, so query.priceInput is always ''. That is the same accident that
+// kept the bothDeals divergence off production, and this file's own header already refuses it as a
+// defence: parity that depends on an unrelated guard is not parity.
+//
+// So the invariant is stated over the WHOLE object, and priceInput is in the product:
+//
+//     for every store state S:  rpcAllNarrowingParams(what the COUNT path is handed)
+//                            === rpcAllNarrowingParams(what the SEARCH path runs)
+console.log('\n── every parameter, over every store state ──');
+
+type NarrowPair = { countParams: (q: Record<string, unknown>) => Record<string, unknown>;
+                    searchParams: (q: Record<string, unknown>) => Record<string, unknown> };
+
+async function buildNarrowing(parts: { queryForPeriod?: string; cityAf?: string; buildBase?: string } = {}): Promise<NarrowPair> {
+  // cityTableScope is shimmed to {}: searchTableScope reads deal/category/types/platforms, never the
+  // period, so it cannot differ between the two objects — proven by construction, and section 5 pins
+  // that it is nonetheless handed the same one. What is NOT shimmed is the call under test: the real
+  // rpcAllNarrowingParams, applied to whatever argument the shipped line actually passes it.
+  const src = `
+type SearchQuery = any;
+import { validRentPeriod } from '${ROOT}src/lib/searchDefaults.ts';
+export function countParams(query: any, rpcAllNarrowingParams: any): any {
+${L_RENT_PERIOD}
+${L_EFF_DEAL}
+${parts.queryForPeriod ?? L_QUERY_FOR_PERIOD}
+  const cityTableScope = {};
+${parts.cityAf ?? L_CITY_AF}
+  return cityAfRaw;
+}
+export function searchParams(query: any, rpcAllNarrowingParams: any): any {
+${L_RENT_PERIOD}
+${L_EFF_DEAL}
+${parts.queryForPeriod ?? L_QUERY_FOR_PERIOD}
+  const citySelected = { cityId: 1 } as any;
+  const resolveCitySelection = (_c: any) => ({ label: 'x' } as any);
+${parts.buildBase ?? L_BUILD_BASE}
+  return rpcAllNarrowingParams(buildFilterBaseQuery());
+}
+`;
+  const dir = mkdtempSync(join(tmpdir(), 'ezhalah-redteam-'));
+  const out = join(dir, 'narrow.mts');
+  writeFileSync(out, src);
+  const mod = await import(out);
+  return {
+    countParams: (q) => mod.countParams(q, realNarrowing),
+    searchParams: (q) => mod.searchParams(q, realNarrowing),
+  };
+}
+
+// The same product as section 1, crossed with the budgets that separate the heuristic from the
+// normalised basis. 25_001 and above are ABOVE the heuristic's threshold and must agree on both
+// paths either way — they are here so a mutant cannot pass by breaking everything uniformly.
+const BUDGETS = ['', '5000', '12000', '20000', '25000', '25001', '150000'];
+const NARROW_SHAPES: Array<Record<string, unknown>> = [];
+for (const s of SHAPES) for (const priceInput of BUDGETS)
+  NARROW_SHAPES.push({ ...s, priceInput, priceMin: null, priceMax: null, areaMin: null, areaMax: null });
+
+check('the narrowing product is not empty (an empty sweep is a broken sweep)',
+  NARROW_SHAPES.length === SHAPES.length * BUDGETS.length && NARROW_SHAPES.length > 300,
+  `built ${NARROW_SHAPES.length} shapes`);
+
+const keysOf = (o: Record<string, unknown>) => Object.keys(o).sort();
+/** Every store state on which the two paths send a different narrowing parameter set. */
+function paramDivergences(p: NarrowPair) {
+  const out: Array<{ s: Record<string, unknown>; key: string; c: unknown; r: unknown }> = [];
+  for (const s of NARROW_SHAPES) {
+    const c = p.countParams(s), r = p.searchParams(s);
+    for (const k of new Set([...keysOf(c), ...keysOf(r)])) {
+      if (JSON.stringify(c[k]) !== JSON.stringify(r[k])) out.push({ s, key: k, c: c[k], r: r[k] });
+    }
+  }
+  return out;
+}
+
+const shippedNarrow = await buildNarrowing();
+const narrowDiv = paramDivergences(shippedNarrow);
+check('the COUNT surfaces and the RESULTS RPC send the same value for EVERY narrowing parameter',
+  narrowDiv.length === 0,
+  narrowDiv.slice(0, 8).map(({ s, key, c, r }) =>
+    `${label(s)} priceInput=${JSON.stringify(s.priceInput)}\n        ${key}: counts send ${JSON.stringify(c)}, search sends ${JSON.stringify(r)}`)
+    .join('\n      ') + (narrowDiv.length > 8 ? `\n      …and ${narrowDiv.length - 8} more` : ''));
+
+// The exact state the defect lived on, named so a failure says WHICH one broke.
+const DEFAULT_RENT_BUDGET = { deal: 'Rent', rentPeriod: undefined, bothDeals: false, dealCombined: false,
+                              priceInput: '20000', priceMin: null, priceMax: null, category: 'Residential', location: '' };
+check('a fresh Rent search carrying a 20,000 budget: both paths cap at the SAME figure',
+  JSON.stringify(shippedNarrow.countParams(DEFAULT_RENT_BUDGET).p_price_max)
+  === JSON.stringify(shippedNarrow.searchParams(DEFAULT_RENT_BUDGET).p_price_max),
+  `counts p_price_max=${JSON.stringify(shippedNarrow.countParams(DEFAULT_RENT_BUDGET).p_price_max)}, `
+  + `search p_price_max=${JSON.stringify(shippedNarrow.searchParams(DEFAULT_RENT_BUDGET).p_price_max)}`
+  + ' — agentPriceCapAnnual()\'s unset-period heuristic against the normalised annual basis: the counts '
+  + 'advertise a set 12x wider than the search returns');
+
+// ── 5. EVERY COUNT-PATH BUILDER READS THE NORMALISED OBJECT ───────────────────────────────────────
+// The structural half, and it is NOT redundant with section 4. Section 4 executes one builder; the
+// count path also calls searchTableScope() and cohortTypesAr(), whose full chains are shimmed there.
+// Neither reads the period TODAY, so a value check cannot see them re-acquire a second input — and
+// "it agrees today" is precisely the shape this whole file exists to refuse. Enumerated from the
+// shipped lines, so a new count-path builder added tomorrow is covered the moment it appears here.
+console.log('\n── every count-path builder reads queryForPeriod ──');
+for (const [name, line] of [['rpcAllNarrowingParams', L_CITY_AF],
+                            ['searchTableScope', anchor('  const { isBroadCommercial:')],
+                            ['cohortTypesAr', anchor('  const cohortTypes = ')]] as const) {
+  const code = codeOf(line);
+  check(`the count path passes queryForPeriod to ${name}() (not the raw store query)`,
+    new RegExp(`${name}\\(queryForPeriod\\)`).test(code),
+    `${name}(query) reads the RAW store query — rentPeriod is undefined there for every fresh Rent `
+    + 'search, so this builder is deriving from a different object than the search runs on');
+}
+
+// ── 6. MUTATION PROOF for sections 4 and 5 ────────────────────────────────────────────────────────
+console.log('\n── mutation (every parameter) ──');
+const mustCatchNarrow = async (
+  what: string, parts: Parameters<typeof buildNarrowing>[0],
+  onlyIf?: (d: ReturnType<typeof paramDivergences>) => boolean,
+) => {
+  const mutant = await buildNarrowing(parts);
+  const d = paramDivergences(mutant);
+  check(`(mutation) catches ${what}`, d.length > 0 && (onlyIf ? onlyIf(d) : true),
+    d.length === 0
+      ? 'MUTANT SURVIVED — section 4 is blind to the defect it exists for'
+      : `caught ${d.length} divergence(s), but not of the expected shape`);
+};
+
+// THE DEFECT, exactly as it stood until 2026-09-11: the count path handed the RAW store query.
+await mustCatchNarrow('THE DEFECT: the count params derived from the RAW store query while the search ran the normalised one',
+  { cityAf: L_CITY_AF.replace('rpcAllNarrowingParams(queryForPeriod)', 'rpcAllNarrowingParams(query)') },
+  (d) => d.some(({ s, key, c, r }) => key === 'p_price_max' && s.deal === 'Rent'
+    && s.rentPeriod === undefined && s.priceInput === '20000' && c === 240000 && r === 20000));
+
+// THE MIRROR: the SEARCH side losing the normalisation while the counts keep it. The defect above
+// runs in the other direction, and a one-sided invariant would catch only the direction it was
+// written for. (Collapsing queryForPeriod on BOTH sides is deliberately NOT a mutant here: the two
+// paths then read one raw object and agree with each other — one input cannot disagree with itself,
+// which is the repair working, exactly as this file's section-3 note already records. Section 1b's
+// screen check is what catches that shape, by a second and independent reading.)
+await mustCatchNarrow('THE MIRROR: buildFilterBaseQuery spreading the raw query while the counts normalise',
+  { buildBase: L_BUILD_BASE.replace('...queryForPeriod,', '...query,') },
+  (d) => d.some(({ s, key, c, r }) => key === 'p_price_max' && s.deal === 'Rent'
+    && s.rentPeriod === undefined && s.priceInput === '20000' && c === 20000 && r === 240000));
+
+// NOT VACUOUSLY RED: the real shipped shape must still pass through the same machinery.
+const reNarrow = await buildNarrowing();
+check('(mutation) …while the REAL shipped shape still agrees on every parameter (not vacuously red)',
+  paramDivergences(reNarrow).length === 0);
+
 console.log(failed === 0
-  ? '\n✅ one derivation over one input: the count surfaces and the search cannot describe different periods.'
+  ? '\n✅ one derivation over one input: the count surfaces and the search cannot describe different periods,\n   budgets, or any other narrowing parameter.'
   : `\n❌ ${failed} check(s) failed.`);
 process.exit(failed === 0 ? 0 : 1);
