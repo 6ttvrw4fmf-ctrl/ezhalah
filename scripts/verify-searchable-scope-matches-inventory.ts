@@ -245,4 +245,46 @@ check('EXTRA: no client table is absent from production',
 console.log(failures === 0
   ? `\n✅ verify-searchable-scope-matches-inventory: ${SEARCHABLE_TABLES.length} tables, one scope, no drift.\n`
   : `\n✗ verify-searchable-scope-matches-inventory: ${failures} check(s) failed — the client scope and the live inventory disagree.\n`);
-process.exit(failures === 0 ? 0 : 1);
+if (failures > 0) process.exit(1);
+
+// ═══ MUTATION PROOFS ════════════════════════════════════════════════════════════════════════════
+// §1-2 above already EXECUTE the REAL, lifted resTables()/comTables()/monthlyInScope() against
+// real query modes — the strongest form. §3 already proves TRUTH against live production. These
+// proofs target the one remaining gap: does the PARTITION-IS-TOTAL and MONTHLY-GATE logic, applied
+// to the REAL lifted SEARCHABLE_TABLES, actually distinguish a broken inventory from a healthy one?
+// Fed synthetic table LISTS (never a synthetic resTables/comTables — those stay the real, executed
+// functions throughout), so this proves the STRUCTURAL predicate, not a copy of it.
+console.log('── mutation proofs — the structural predicates, fed a synthetic broken inventory ──');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+// ── the partition-is-total predicate, extracted and fed a table unreachable in every mode ─────────
+const unreachableCheck = (inventory: string[], reachable: Set<string>) =>
+  inventory.filter((t) => !reachable.has(t));
+mustCatch('a table added to the inventory but unreachable in every mode — the ORIGINAL 2026-09-03 defect shape',
+  unreachableCheck([...SEARCHABLE_TABLES, 'ghost_platform_residential_listings'], everReachable).length === 1);
+mustCatch('…while the genuine, real lifted inventory has NO unreachable table (negative control)',
+  unreachableCheck(SEARCHABLE_TABLES, everReachable).length === 0);
+
+// ── the monthly-only gate, fed a mode result that WRONGLY includes a monthly-only table in Buy ────
+const wrongInBuy = [...resTables({ deal: 'Buy' }), ...comTables({ deal: 'Buy' }), 'gathern_residential_listings'];
+mustCatch('a monthly-only table (gathern) leaking into a Buy result — the source-fidelity rule (CLAUDE.md: Gathern is rent-only)',
+  wrongInBuy.filter(isMonthlyOnly).length > 0);
+mustCatch('…while the genuine Buy mode, executed for real, carries NO monthly-only table (negative control)',
+  [...resTables({ deal: 'Buy' }), ...comTables({ deal: 'Buy' })].filter(isMonthlyOnly).length === 0);
+
+// ── the deep-link resolver's own literal-detection, fed a reintroduced hardcoded table name ────────
+const bogusResolverBody = `for (const t of ['gathern_residential_listings', ...DEEPLINK_TABLES]) {}`;
+const bogusLiteralTables = bogusResolverBody.match(/['"`][a-z0-9]+_(residential|commercial)_listings['"`]/g) ?? [];
+mustCatch('a private table literal reintroduced into the deep-link resolver body (drifts silently from the one inventory)',
+  bogusLiteralTables.length > 0);
+mustCatch('…while the genuine resolver loop shape contains none — reusing the real fnBody read above (negative control, real source text)',
+  literalTables.length === 0);
+
+console.log('');
+if (mutFail) { console.error(`✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
+console.log('✓ every structural predicate above was watched to fail against a synthetic broken inventory\n');
