@@ -264,6 +264,37 @@ export function observePromptInsets(onChange: (insets: PromptInsets) => void): (
   };
 }
 
+/**
+ * Where a FIXED overlay that the APP ITSELF docks `base` px off one edge must actually sit, given
+ * the band a foreign prompt has reserved on that same edge.
+ *
+ * WHY THIS EXISTS SEPARATELY FROM THE ROOT PADDING (ops_incident #163, 2026-09-11, regression hunter).
+ * The #120 repair reserves the band as `paddingTop`/`paddingBottom` on the app's outermost View, and
+ * that moves every control laid out INSIDE that box — which is what the measured case needed and
+ * what `verify-bottom-prompt-inset.ts` §E2 pins. But a `position: fixed` child is NOT laid out
+ * inside it: fixed resolves against the VIEWPORT, so an ancestor's padding is invisible to it by
+ * definition. The app's own docked card therefore stayed exactly where it was while the root made
+ * room around it, landing inside the very band the root had just reserved.
+ *
+ * Measured on the served bundle entry-3545b04ac003d2a47e8bec8441b0fe2e.js, which carries BOTH the
+ * inset mechanism and the consent card: One Tap's legacy sheet owns the bottom 144 px at
+ * `z-index: 9999; pointer-events: auto`, while CookieConsent stayed pinned at `bottom: 20` with its
+ * button row in its own bottom ~40 px — i.e. at viewport y ∈ [VH−60, VH−20], wholly inside
+ * [VH−144, VH]. Both consent buttons hit-test to Google's iframe, so a signed-out visitor cannot
+ * record «الضروري فقط» at all, and the card's own search-dismissal then records «السماح بالكل» on
+ * their behalf. The two surfaces target the IDENTICAL visitor (signed-out, web), so this is the
+ * default first-visit state on the legacy One Tap path, not a corner case.
+ *
+ * PURE, so the geometry is proven offline and mutation-tested without a browser
+ * (`scripts/verify-fixed-overlays-clear-docked-prompts.ts`). Returns `base` unchanged whenever
+ * nothing is docked, so nothing moves on the path that was already correct.
+ */
+export function dockedEdgeOffset(base: number, edgeInset: number): number {
+  const b = Number.isFinite(base) && base > 0 ? base : 0;
+  const band = Number.isFinite(edgeInset) && edgeInset > 0 ? edgeInset : 0;
+  return b + band;
+}
+
 /** Both insets, as React state. Zeroes on native and whenever no prompt is docked over the app. */
 export function usePromptInsets(): PromptInsets {
   const [insets, setInsets] = useState<PromptInsets>({ top: 0, bottom: 0 });

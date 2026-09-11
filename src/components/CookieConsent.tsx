@@ -20,6 +20,13 @@ import {
   setCookieConsent,
   type CookieConsent as Consent,
 } from '@/lib/cookieConsent';
+import { usePromptInsets, dockedEdgeOffset } from '@/lib/bottomPromptInset';
+
+// The gap this card keeps from the bottom edge when nothing foreign is docked there. The root's
+// paddingBottom cannot move this card — `position: fixed` resolves against the viewport, not
+// against a padded ancestor — so the reserved band is added HERE or the card sits inside it
+// (ops_incident #163).
+const EDGE_GAP = 20;
 
 const COPY = {
   ar: {
@@ -49,6 +56,9 @@ export default function CookieConsent() {
   const { user, authChecked, searchCount } = useApp();
   const { isRTL } = useI18n();
   const [consent, setConsent] = useState<Consent | null>(() => getCookieConsent());
+  // The band a docked third-party auth prompt has reserved. {0,0} on native, and whenever nothing
+  // is docked — so this changes nothing on the path that was already correct.
+  const promptInsets = usePromptInsets();
 
   const visible = shouldShowCookieBanner({
     isWeb: Platform.OS === 'web',
@@ -79,7 +89,10 @@ export default function CookieConsent() {
       dataSet={{ testid: 'cookie-consent' }}
       style={[
         st.host,
-        { right: 20 }, // owner: keep it on the far right in both languages
+        // `bottom` is set here rather than in st.host so the reserved band is part of the ONE
+        // expression that decides this edge. dockedEdgeOffset(EDGE_GAP, 0) === EDGE_GAP, so with
+        // nothing docked the card sits exactly where it always did.
+        { right: 20, bottom: dockedEdgeOffset(EDGE_GAP, promptInsets.bottom) }, // owner: keep it on the far right in both languages
         Platform.OS === 'web' && ({
           position: 'fixed',
           boxShadow: '0 18px 44px -20px rgba(18, 37, 27, 0.35)',
@@ -122,7 +135,7 @@ const st = StyleSheet.create({
   // page content; below the Sidebar drawer (50) and every real overlay (ShareSheet 60, InfoModal 70,
   // AuthModal 200). A consent card must never cover a modal.
   host: {
-    bottom: 20,
+    // bottom: set inline above — it must fold in the docked-prompt band (ops_incident #163).
     width: 280,
     zIndex: 38,
     backgroundColor: colors.surface,
