@@ -59,17 +59,21 @@ console.log("\n── the composer is the SAME box, made inert — not a separat
 const compIdx = agent.indexOf("<View style={[s.composerWrap");
 check("the composer block is unconditional — no ternary swaps in a different card for `completed`",
   compIdx > -1 && !/\{completed \? \(/.test(agent));
-check("the input goes non-editable when completed", /editable=\{!completed\}/.test(agent));
+// 2026-09-11: ONE MAIN REQUEST + ONE FOLLOW-UP (src/lib/refinementFollowup.ts) added a SECOND,
+// independent reason the same composer can go inert — `refinementComposerLocked`. Every one of these
+// checks now asserts `completed` is STILL part of the condition (never replaced), not that it is the
+// WHOLE condition — see verify-refinement-followup.ts for that flag's own dedicated coverage.
+check("the input goes non-editable when completed", /editable=\{!completed && !refinementComposerLocked\}/.test(agent));
 check("the input's value is cleared when completed (nothing typed can look sendable)",
-  /value=\{completed \? '' : typed\}/.test(agent));
+  /value=\{completed \|\| refinementComposerLocked \? '' : typed\}/.test(agent));
 check("the placeholder explains the closed state instead of inviting a message",
   /placeholder=\{completed \? t\('This chat is closed — tap ☰ at the top to start a new search'\)/.test(agent));
 check("the mic disappears when completed (no dead mic control on a locked composer)",
-  /isVoiceInputSupported\(\) && !completed \?/.test(agent));
+  /isVoiceInputSupported\(\) && !completed && !refinementComposerLocked \?/.test(agent));
 check("the send button is disabled once completed, regardless of typed text",
-  /disabled=\{completed \|\| !typed\.trim\(\)\}/.test(agent));
+  /disabled=\{completed \|\| refinementComposerLocked \|\| !typed\.trim\(\)\}/.test(agent));
 check("the send icon becomes a lock when completed, an arrow otherwise",
-  /name=\{completed \? 'lock-closed' : 'arrow-up'\}/.test(agent));
+  /name=\{completed \|\| refinementComposerLocked \? 'lock-closed' : 'arrow-up'\}/.test(agent));
 check("no separate replacement card, New Chat button, or their styles remain",
   !/completedWrap|completedBar|completedTxWrap|completedSub|newChatBtn|newChatTx/.test(agent));
 
@@ -84,15 +88,15 @@ console.log("\n── mutation proof — the barrier must actually catch a regre
 }
 {
   // Simulate someone forgetting to disable the send button while locking the icon to a lock.
-  const regressed = agent.replace("disabled={completed || !typed.trim()}", "disabled={!typed.trim()}");
+  const regressed = agent.replace("disabled={completed || refinementComposerLocked || !typed.trim()}", "disabled={!typed.trim()}");
   check("MUTATION: dropping `completed` from the send button's disabled condition is caught",
-    !/disabled=\{completed \|\| !typed\.trim\(\)\}/.test(regressed));
+    !/disabled=\{completed \|\| refinementComposerLocked \|\| !typed\.trim\(\)\}/.test(regressed));
 }
 
 console.log("\n── Back / reopen / New Chat ──");
 check("restore reinstates completed from the transcript", /setCompleted\(restored\.completed === true\);/.test(agent));
 check("New Chat (fresh) clears it", /setCompleted\(false\);/.test(agent));
-check("the capture persists it", /serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed \}\)/.test(agent));
+check("the capture persists it", /serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, refinementLocked: refinementTurn === 'locked' \}\)/.test(agent));
 
 console.log("\n── i18n contract ──");
 check("the closed-composer placeholder has an Arabic entry",

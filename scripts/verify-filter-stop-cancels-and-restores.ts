@@ -115,8 +115,10 @@ check('recordHistory/setSearchCount are gated on !signal?.aborted — a cancelle
   && /if \(record && !signal\?\.aborted\) \{[\s\S]{0,600}?recordHistory/.test(store));
 check('every live search-triggering runQuery() call in agent.tsx passes run.ac.signal (chat turns get real cancellation too)',
   // each live call now also names its conversation (ensureChatId — owner 2026-08-25); the signal
-  // still rides every one of the 4, which is what this check exists to hold.
-  (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 4);
+  // still rides every one of the 7 (4 → 7 on 2026-09-11: ONE MAIN REQUEST + ONE FOLLOW-UP added the
+  // refinement search, its zero-match relaxation trial, and the follow-up's own re-query on "yes" —
+  // see verify-chat-persistence.ts's identical count and src/lib/refinementFollowup.ts).
+  (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 7);
 check('the ONE runQuery call that must NOT pass a signal (history replay — no new run exists) still passes record=false',
   /runQuery\(q, false\); \/\/ viewing a saved chat/.test(agent));
 

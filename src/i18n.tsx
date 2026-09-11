@@ -1316,6 +1316,19 @@ const AR: Record<string, string> = {
   'Messages': 'الرسائل',
   'Mail': 'البريد',
   'Notes': 'الملاحظات',
+
+  // ONE MAIN REQUEST + ONE FOLLOW-UP (owner 2026-09-11, src/lib/refinementFollowup.ts). Mirrors the
+  // `completed` composer's own inert-placeholder + lock-icon pattern exactly — same composer, no
+  // separate card, just a distinct explanatory placeholder for THIS lock reason.
+  "You've used your one AI request for this search — tap ☰ at the top to start a new search.":
+    'استخدمت طلبك الوحيد للمساعد الذكي بهذا البحث — اضغط ☰ أعلى الصفحة لبدء بحث جديد',
+  "I couldn't find an exact match. I tried without this one condition — {requirement} — and found results. Want to see them?":
+    'ما لقيت نتائج مطابقة تمامًا لطلبك. جربت بدون شرط واحد بس — {requirement} — ولقيت نتائج. أعرضها لك؟',
+  'Here they are, without this condition ({requirement}):': 'تفضل، بدون هذا الشرط ({requirement}):',
+  "No problem — nothing matches your exact request as-is. Start a new search if you'd like to try something different.":
+    'ولا يهمك — ما فيه شي يطابق طلبك بالضبط كذا. ابدأ بحثاً جديداً لو تبي تجرب شي مختلف.',
+  "Sorry, nothing matches your exact request right now. Start a new search if you'd like to try something different.":
+    'للأسف ما فيه شي يطابق طلبك بالضبط حالياً. ابدأ بحثاً جديداً لو تبي تجرب شي مختلف.',
 };
 
 // Interpolate {placeholders}. Used by both en (key) and ar (translation) paths.

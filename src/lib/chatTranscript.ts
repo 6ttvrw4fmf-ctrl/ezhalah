@@ -36,6 +36,13 @@ export type PersistedChat = {
   // active composer. Optional and only ever `true`, so older transcripts and the persistence barrier's
   // literal round-trip are byte-identical when unset.
   completed?: true;
+  // ONE MAIN REQUEST + ONE FOLLOW-UP, then locked (owner 2026-09-11, src/lib/refinementFollowup.ts).
+  // This chat's free-text composer has used its one refinement turn for the result set on screen. A
+  // reopened/Back-navigated chat must restore the SAME locked composer, not a fresh quota — the rule
+  // is "one per search", and reopening a saved chat is still looking at that same search. Optional and
+  // only ever `true` for the identical reason `completed` is: an older transcript (recorded before this
+  // rule shipped) restores unlocked, which is the correct default — see chatTranscript's restore path.
+  refinementLocked?: true;
 };
 
 // Bounds. Listings dominate transcript size (a card is ~1-2KB of JSON); everything else is text.
@@ -54,6 +61,7 @@ type LiveChatState = {
   afReceipt: Record<string, string>;
   guidedPills: { msgId: string; baseQ: unknown; facets: unknown[]; asked: string[]; total: number | null } | null;
   completed?: boolean;
+  refinementLocked?: boolean;
 };
 
 // Serialize the live screen state into a persistable transcript. Returns null when there is no
@@ -87,6 +95,7 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
   return {
     v: 1,
     ...(live.completed ? { completed: true as const } : {}),
+    ...(live.refinementLocked ? { refinementLocked: true as const } : {}),
     msgs,
     revealCount,
     afReceipt,
@@ -119,6 +128,7 @@ export function restoreChat(raw: unknown): (PersistedChat & { doneTyping: Record
       ? p.guidedPills
       : null,
     ...(p.completed === true ? { completed: true as const } : {}),
+    ...(p.refinementLocked === true ? { refinementLocked: true as const } : {}),
     doneTyping,
   };
 }
