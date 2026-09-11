@@ -13,6 +13,8 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { colors, radius, font } from '@/theme/tokens';
 import {
   shouldShowCookieBanner,
@@ -48,6 +50,16 @@ const COPY = {
 export default function CookieConsent() {
   const { user, authChecked, searchCount } = useApp();
   const { isRTL } = useI18n();
+  // IS THERE ROOM BESIDE THE APP, OR ARE WE ON TOP OF IT? (owner decision 2026-09-11, #152)
+  // The same question — and the same breakpoint — SignInCard already asks to decide whether its
+  // floating card may exist at all. At/above it the app docks a sidebar and the filter card sits
+  // centred with a free right margin, which is the layout this card's 280 px corner form was
+  // measured against (1440/1512, gap > 0). Below it there is no free margin, so a corner card is
+  // simply a card ON the app: it becomes a full-width bottom SHEET instead, and the root reserves
+  // its height (lib/bottomPromptInset.ts) so «بحث», the composer and every other control lay out
+  // ABOVE it rather than under it. Routed through useAtLeast() like every width-gated flag, so the
+  // first client render still reproduces the server's (React #418 — see lib/responsive.ts).
+  const beside = useAtLeast(DOCK_BREAKPOINT);
   const [consent, setConsent] = useState<Consent | null>(() => getCookieConsent());
 
   const visible = shouldShowCookieBanner({
@@ -79,11 +91,19 @@ export default function CookieConsent() {
       dataSet={{ testid: 'cookie-consent' }}
       style={[
         st.host,
-        { right: 20 }, // owner: keep it on the far right in both languages
+        // DESKTOP: the owner's corner card — far right in both languages, 280 wide, beside the app.
+        // NARROW: a docked sheet across the bottom, and every part of that is load-bearing rather
+        // than cosmetic. It must SPAN (left and right pinned, no `width`) or bottomPromptInset()
+        // reads it as a card sitting beside the app and reserves nothing; and it must be FLUSH
+        // (`bottom: 0`) or it is not docked at all — the tolerance there is 2 px, so the old
+        // `bottom: 20` card was, correctly, just something floating in the page. Measured at
+        // 390×844: 390 of 390 wide, reserving 190 px, with «بحث» laying out above it.
+        beside
+          ? { right: 20, bottom: 20, width: 280, borderRadius: radius.card }
+          : { left: 0, right: 0, bottom: 0, borderTopLeftRadius: radius.card, borderTopRightRadius: radius.card },
         Platform.OS === 'web' && ({
           position: 'fixed',
           boxShadow: '0 18px 44px -20px rgba(18, 37, 27, 0.35)',
-          maxWidth: 'calc(100vw - 32px)',
         } as never),
       ]}
     >
@@ -122,11 +142,11 @@ const st = StyleSheet.create({
   // page content; below the Sidebar drawer (50) and every real overlay (ShareSheet 60, InfoModal 70,
   // AuthModal 200). A consent card must never cover a modal.
   host: {
-    bottom: 20,
-    width: 280,
+    // GEOMETRY IS SET PER-FORM, NOT HERE (2026-09-11, ops_incident #152). The corner card is 280
+    // wide at bottom:20; the docked sheet pins left AND right, sits FLUSH at bottom:0, and carries
+    // no width — otherwise it neither spans nor counts as docked, and the root reserves nothing.
     zIndex: 38,
     backgroundColor: colors.surface,
-    borderRadius: radius.card,
     borderWidth: 1,
     borderColor: colors.line,
     paddingHorizontal: 20,
