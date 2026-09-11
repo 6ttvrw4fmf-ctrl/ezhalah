@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -462,6 +462,19 @@ export default function Home() {
   // Warm the live district index when the home opens, so a typed district that exists in real
   // inventory (e.g. "Al Doha Dist." in Yanbu) is recognized by the time the user searches.
   useEffect(() => { void ensureLocationIndex(); }, []);
+  // Trending counts had no expiry (owner, 2026-09-11): a session left open for hours kept showing
+  // whatever it fetched once, even though the backend recomputes hourly. locations.ts now expires
+  // its own cache (POOL_TTL_MS) so the next focus refetches — this covers the common case. The gap
+  // that alone doesn't: the field left focused, app backgrounded, then resumed — no state changes,
+  // so the "field is in use" effects below never re-run on their own. Bumping resumeTick on resume
+  // gives them a reason to.
+  const [resumeTick, setResumeTick] = useState(0);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') setResumeTick((n) => n + 1);
+    });
+    return () => sub.remove();
+  }, []);
   // Warm the DEAL-SCOPED city-listing-counts pool whenever Deal changes (incl. the initial mount,
   // since query.deal always starts as a concrete 'Buy'/'Rent' — never null). Deal is picked BEFORE
   // City in this form, so it's always known here; Category is picked AFTER City/District, so a
@@ -543,8 +556,11 @@ export default function Home() {
         setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
       }
     });
+    // resumeTick (2026-09-11): app resumed from background — re-check with the SAME "field in use"
+    // gate above, so a resume while the field is closed stays a no-op (the TTL in locations.ts will
+    // catch it whenever it's next opened) and a resume while it's open/typed-in refreshes right away.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cityAfSig, cityFocus]);
+  }, [cityAfSig, cityFocus, resumeTick]);
 
   // Same reactive refresh for District, scoped to the currently-selected city — and ALSO to Category
   // (owner decision 2026-07-20, after proving live that Category matters more for districts than for
@@ -565,8 +581,9 @@ export default function Home() {
         setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
       }
     });
+    // resumeTick (2026-09-11): same app-resume refresh as the city effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effDeal, effCategory, citySelected, rentPeriodTok, cohortTypesSig, cityTableScopeSig]);
+  }, [effDeal, effCategory, citySelected, rentPeriodTok, cohortTypesSig, cityTableScopeSig, resumeTick]);
 
   // DISTRICT REHYDRATION — the districtsSelected twin of the citySelected fix above (2026-08-04).
   //

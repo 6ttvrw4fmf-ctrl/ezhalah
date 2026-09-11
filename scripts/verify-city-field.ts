@@ -183,7 +183,7 @@ check(
   // where «بحث» issued no search at all (caught by the web-runtime smoke test). Narrowing-driven
   // count refreshes moved to their OWN effect below, which never touches citySelected.
   /\}, \[effDeal, rentPeriodTok, effCategory, cohortTypesSig\]\);/.test(indexSrc)
-  && /\}, \[cityAfSig, cityFocus\]\);/.test(indexSrc)
+  && /\}, \[cityAfSig, cityFocus, resumeTick\]\);/.test(indexSrc)
   && /else if \(cityFocus\) \{\s*setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);/.test(indexSrc),
 );
 check('onChangeText clears citySelected on every keystroke (never silently reuses a stale pick)', /onChangeText=\{\(v\) => \{[\s\S]{0,300}?setCitySelected\(null\)/.test(indexSrc));

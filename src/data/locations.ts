@@ -731,6 +731,13 @@ const afKey = (af: AfParams | null) => {
 const cityPoolKey = (deal: Deal | null, periodTok: string | null, category: Category | null, types: string[] | null = null, af: AfParams | null = null) => `${deal}:${pmKey(periodTok)}:${category ?? ''}:${typesKey(types)}:${afKey(af)}`;
 const CITY_FIELD_POOLS = new Map<string, CityOption[]>();
 const _cityFieldPromises = new Map<string, Promise<CityOption[]>>();
+// STALENESS (owner, 2026-09-11): these pools had NO expiry — once fetched, a key served the same
+// counts for the rest of the tab's/app's lifetime, no matter how long it stayed open, even though
+// the backend (sync_search_listings_ar) recomputes them hourly (cron `sync-search-listings-ar`,
+// :36 * * * *). Half the TTL of that cron so a long-lived session is never more than ~one sync
+// cycle behind the number a fresh page load would show. Shared by the city and district pools below.
+const POOL_TTL_MS = 30 * 60 * 1000;
+const _cityPoolFetchedAt = new Map<string, number>();
 
 // Pool status — the dropdown's zero-state affordance (2026-08-14). The silent-[] catch below stays
 // (the field must never crash the form), but the UI can no longer distinguish "loading" from
@@ -822,7 +829,8 @@ export function collapseClustersForTrending(pool: CityOption[]): CityOption[] {
 export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string | null = null, category: Category | null = null, types: string[] | null = null, af: AfParams | null = null): Promise<CityOption[]> {
   const key = cityPoolKey(deal, periodTok, category, types, af);
   const cached = CITY_FIELD_POOLS.get(key);
-  if (cached) return cached;
+  const cachedAt = _cityPoolFetchedAt.get(key);
+  if (cached && cachedAt !== undefined && Date.now() - cachedAt < POOL_TTL_MS) return cached;
   const inflight = _cityFieldPromises.get(key);
   if (inflight) return inflight;
   _cityPoolStatus.set(key, 'loading');
@@ -905,6 +913,7 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
         // so both surfaces read a truthful count and Trending can present one row per cluster.
         const opts = applyClusterUnion(rawOpts, await ensureClusterMap());
         CITY_FIELD_POOLS.set(key, opts);
+        _cityPoolFetchedAt.set(key, Date.now());
         _cityPoolStatus.set(key, 'ready');
         return opts;
       }
@@ -967,6 +976,7 @@ export type DistrictOption = {
 // unaffected; only the popularity ranking / listing_count used for the Top-6 slice changes.
 const _districtCache = new Map<string, DistrictOption[]>();
 const _districtPromises = new Map<string, Promise<DistrictOption[]>>();
+const _districtFetchedAt = new Map<string, number>(); // same POOL_TTL_MS staleness rule as the city pool above
 // The TABLE SCOPE is part of the key (2026-09-03). The pool is now scoped to the tables the results
 // call reads, so two different scopes are two different pools — keying without it would serve a
 // count taken over a wider table set than the search the user is about to run.
@@ -977,7 +987,8 @@ const districtCacheKey = (cityId: number, deal: Deal | null, category: Category 
 export async function ensureDistrictOptions(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null = null, types: string[] | null = null, scope: AfParams | null = null): Promise<DistrictOption[]> {
   const key = districtCacheKey(cityId, deal, category, periodTok, types, scope);
   const cached = _districtCache.get(key);
-  if (cached) return cached;
+  const cachedAt = _districtFetchedAt.get(key);
+  if (cached && cachedAt !== undefined && Date.now() - cachedAt < POOL_TTL_MS) return cached;
   const inflight = _districtPromises.get(key);
   if (inflight) return inflight;
   _districtPoolStatus.set(key, 'loading');
@@ -1031,6 +1042,7 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal | null, c
           totalInCity: Number(r.total_in_city) || 0,
         }));
         _districtCache.set(key, opts);
+        _districtFetchedAt.set(key, Date.now());
         _districtPoolStatus.set(key, 'ready');
         return opts;
       }
