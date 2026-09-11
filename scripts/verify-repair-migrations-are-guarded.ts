@@ -127,6 +127,21 @@ const WAIVED: Record<string, string> = {
     'a standing trigger (prevention), not a backfill — watched by mon_detect_placeholder_price_'
     + 'stored (20260906043755, ops_incident #63), which the migration\'s own header names as the '
     + 'detection layer this trigger sits in front of',
+  // Recovered 2026-09-11 (mirroring drift blocking a frontend deploy — live in production, never
+  // committed). Same two-migrations-minutes-apart shape as every entry above: this repair re-wires
+  // amaall into listing_native_location_v1 so an exact district search can find its rows again; its
+  // companion 20260911201453 (6 minutes later) creates mon_detect_amaall_native_location_regressed(),
+  // needle-edits it into mon_run_all_detectors()'s roster, and EXECUTES it in the same migration
+  // (`do $verify$ ... raise exception if v_raised <> 0`) to prove the wiring holds at apply time. The
+  // detector watches two ways this exact repair can regress: (A) amaall's arm disappears from
+  // listing_native_location_v1 again — already happened ONCE live, minutes after the original fix,
+  // when a `DROP MATERIALIZED VIEW ... CASCADE` took the whole chain down; (B) the scraper stops
+  // writing district_ar (amaall's `property_area` WP taxonomy term goes missing from the site).
+  // Open the companion to check this reason rather than taking it on trust.
+  '20260911195109_amaall_native_location_wiring_and_exact_district_search.sql':
+    'watched by its companion 20260911201453_amaall_native_location_repair_reasserts_and_gets_a_'
+    + 'detector.sql, which ships + rosters + executes mon_detect_amaall_native_location_regressed() '
+    + 'in the same migration, proving the wiring is reachable and currently green',
 };
 
 // Enforcement starts here — the day this rule landed.
