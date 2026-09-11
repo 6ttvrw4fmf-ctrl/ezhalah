@@ -784,6 +784,24 @@ def main() -> int:
         _flush_alive()
         _flush_detail(detail_buf)
 
+    # ── CLOSING CANARY (2026-09-11, ops_incident #183) ────────────────────────────────────────────
+    # The opening canary proves the environment at run START. That alone must never be allowed to
+    # excuse the rate gate, because the failure the rate gate was built for — 2026-09-01 — looked
+    # healthy early and was blocked by the end. So the run is BRACKETED: the same control set is
+    # re-probed after the worklist, and only if BOTH ends pass is the environment considered proven
+    # for the whole window. A closing failure is treated exactly like an opening one: UNKNOWN, never
+    # death, nothing written in the destructive direction.
+    p_alive = p_probed = 0
+    p_hist = "skipped"
+    canary_ok: Optional[bool] = None
+    if args.canaries:
+        p_ok, p_alive, p_probed, p_hist = _run_canary(s, client, args.canaries)
+        canary_ok = bool(c_ok and p_ok)
+        if not p_ok:
+            print(f"✗ CLOSING CANARY FAILED {p_alive}/{p_probed} statuses[{p_hist}] — "
+                  f"{canary_diagnosis_from_hist(p_hist)}. The environment degraded DURING this run, "
+                  f"so its 404s are UNKNOWN. Nothing destructive will be written.", flush=True)
+
     # ── TRUST GATE (2026-09-03): may this run act on its own DEAD verdicts AT ALL? ────────────────
     # Asked BEFORE the cap, because the two guard different failures. The cap asks "is this BATCH
     # too big to believe?"; the trust gate asks "is this RUN's evidence believable at all?" On
@@ -795,7 +813,12 @@ def main() -> int:
     # rows stay exactly as they were and stay honestly UNKNOWN. Alive (200) writes are deliberately
     # NOT gated — a block cannot manufacture a live page, and restoring a live listing is the
     # fail-safe direction (docs/ops/DELETION_SAFETY.md §2.4).
-    trusted = environment_is_trustworthy(alive, seen)
+    #
+    # canary_ok carries the BRACKETED positive control. When it is True the environment has been
+    # proven directly at both ends, so the aggregate alive-rate — a proxy for the same question
+    # that cannot tell a lying source from a genuinely dead cohort — is not consulted. See
+    # environment_is_trustworthy's docstring for the measurement that forced this.
+    trusted = environment_is_trustworthy(alive, seen, canary_ok=canary_ok)
     trust_quarantine = (not trusted) and bool(strike_pending or kill_pending)
 
     anomaly = False
@@ -846,12 +869,23 @@ def main() -> int:
     notes = (f"{mode} scanned={seen} dead={dead} {verb}={kill_shown} strike={struck} "
              f"applied_strikes={applied_strikes} alive={alive} transient={transient} "
              f"kill_cap={kill_cap} [{cap_src}] alive_rate={alive_rate:.3f} trusted={trusted} "
-             f"proxy={bool(args.proxy)} canary={c_alive}/{c_probed} canary_statuses[{c_hist}]")
+             f"proxy={bool(args.proxy)} canary={c_alive}/{c_probed} canary_statuses[{c_hist}] "
+             f"close_canary={p_alive}/{p_probed} close_statuses[{p_hist}] canary_ok={canary_ok}")
     if trust_quarantine:
+        # trust_quarantine_reason() is kept exactly as main wrote it; the only change is WHICH
+        # canary result it is handed. It now receives the BRACKETED verdict (open AND close), not
+        # the opening probe alone, so it cannot describe a run as control-proven on the strength of
+        # an opening canary that had already gone stale by the end.
+        #
+        # Its "BUT the in-run canary independently PASSED" branch is now unreachable on a
+        # canary-running platform, and that is the point: a proven environment no longer reaches
+        # this quarantine at all. The branch is deliberately left standing — it still fires for any
+        # caller that passes a canary result without bracketing it, and its text is the clearest
+        # statement in the codebase of why the floor could not tell the two cases apart.
         notes = (f"TRUST-QUARANTINED alive_rate={alive_rate:.1%} below {MIN_ALIVE_RATE_FOR_TRUST:.0%} "
                  f"(min_probes={MIN_PROBES_FOR_TRUST}) — 0 strikes and 0 inactivations written "
                  f"(would_strike={len(strike_pending)} would_inactivate={len(kill_pending)}) — "
-                 + trust_quarantine_reason(c_ok, c_alive, c_probed) + ". "
+                 + trust_quarantine_reason(bool(canary_ok), c_alive, c_probed) + ". "
                  f"Owner review required. " + notes)
     elif anomaly:
         notes = (f"ANOMALY-CAPPED would_inactivate={len(kill_pending)} cap={kill_cap} — 0 rows "
