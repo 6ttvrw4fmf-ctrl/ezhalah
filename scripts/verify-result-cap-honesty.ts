@@ -73,8 +73,19 @@ for (const [trueTotal, shown] of [[9892, 100], [9892, 300], [437, 437], [46, 46]
 }
 
 // ── 5. the shipped wiring uses the module (never a re-derived local rule) ───────────────────────
-check('loadMore advances via nextBatchTarget (both the buffer path and the fetch path)',
-  (code.match(/nextBatchTarget\(/g) ?? []).length >= 2);
+// «عرض المزيد» was REDEFINED 2026-09-11 (Task 4): one tap now drains and reveals EVERY remaining
+// match, never a 100-boundary — so loadMore no longer calls nextBatchTarget at all (that pure
+// function, and the boundary contract above in section 1, stay valid for whatever else calls them;
+// they are just no longer loadMore's OWN reveal target). The honesty check that replaces it: the
+// reveal target loadMore computes is the exact merged total (fetched0 + everything the drain added),
+// on BOTH the instant-reveal path (a new turn started mid-fetch) and the cascade path — never a
+// re-derived boundary, never a partial count.
+check('nextBatchTarget is retired from loadMore — the target is the honest merged total, not a batch boundary',
+  !/nextBatchTarget\(/.test(code));
+check('loadMore reveals the exact merged length on BOTH the instant and cascade reveal paths',
+  /setRevealCount\(\(c\) => \(\{ \.\.\.c, \[mid\]: mergedLen \}\)\)/.test(code)
+  && /cascadeIn\(mid, cur, mergedLen\)/.test(code)
+  && /const mergedLen = fetched0 \+ add\.length;/.test(code));
 check('the lifetime-cap gate is GONE from loadMore',
   !/cur >= BROWSE_CAP/.test(code) && !/BROWSE_CAP/.test(code));
 check('the closing message and the gate share resultCounts()',

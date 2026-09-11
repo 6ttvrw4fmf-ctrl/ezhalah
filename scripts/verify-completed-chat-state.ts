@@ -22,6 +22,13 @@ const check = (label: string, ok: boolean, detail = "") => {
 };
 const agent = readFileSync(new URL("../src/app/agent.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../src/i18n.tsx", import.meta.url), "utf8");
+// A COMMENT IS NOT A CODE PATH: the site-count check below must count CALLS, not a prose mention of
+// `setCompleted(true)` in an explanatory comment (this file's own comments name the literal call,
+// and so does the 2026-09-11 comment at playListings' new call site — unstripped, either is exactly
+// the trap this rule exists to catch).
+const decomment = (src: string) =>
+  src.split("\n").map((l) => l.replace(/\/\/.*$/, "")).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
+const agentCode = decomment(agent);
 
 console.log("── persistence: executed round-trip ──");
 const base = { msgs: [{ id: "u1", role: "user", text: "شقق" }, { id: "r1", role: "results", text: "", result: { listings: [], matchTotal: 0 } }], revealCount: {}, afReceipt: {}, guidedPills: null };
@@ -35,15 +42,21 @@ check("restore round-trips completed=true", restoreChat(JSON.parse(JSON.stringif
 check("restore of a transcript WITHOUT the key yields no completed (an old chat reopens live)", !("completed" in (restoreChat(JSON.parse(JSON.stringify(open))) ?? {})));
 check("a forged non-boolean value is not honoured", !("completed" in (restoreChat({ ...JSON.parse(JSON.stringify(open)), completed: "yes" }) ?? {})));
 
-console.log("\n── the ONLY two ways a chat completes are the canonical AF stop conditions ──");
-const trueSites = (agent.match(/setCompleted\(true\)/g) ?? []).length;
-// OWNER PRODUCT RULE 2026-09-04: ONLY the ≤ INTERVIEW_STOP_AT (50) final set completes the chat
-// (R11.1). A set that is still ABOVE 50 with no truthful certified question left (the old R11.2)
-// is SAID OUT LOUD and the genuine results stay on screen with the composer LIVE — the user may
-// still refine by typing; the interview never invents a question, and never silently locks the
-// chat on a big set. So exactly ONE completion site remains.
-check(`setCompleted(true) appears exactly once (R11.1 — the ≤50 final set), found ${trueSites}`, trueSites === 1,
-  "a second site means a count alone, a plain first search, or an exhausted-but-large set can lock the composer");
+console.log("\n── the ONLY two ways a chat completes are the ≤ 50 threshold or an explicit show-all ──");
+// OWNER PRODUCT RULE 2026-09-04, GENERALIZED 2026-09-11: the ≤ INTERVIEW_STOP_AT (50) honest total
+// completes the chat (R11.1) — an AF round landing there, but also a plain Filter search or a typed
+// AI-Agent message that already lands at <= 50 (the shared playListings renderer all three flow
+// through) — OR the user's own explicit «عرض المزيد» show-all-and-finish choice (Task 4), which
+// finishes at ANY total because it is a deliberate click, not a guess. A set that is still ABOVE 50
+// with no truthful certified question left (the old R11.2) is SAID OUT LOUD and the composer stays
+// LIVE — the interview never invents a question, and never silently locks the chat on a big set. So
+// every completion site must be one of exactly these TWO named gates; the count itself is no longer
+// pinned to 1 now that more than one entry point legitimately reaches it.
+const trueSites = (agentCode.match(/setCompleted\(true\)/g) ?? []).length;
+const gatedSites = (agentCode.match(/if \((?:searchIsFinishedAtThreshold\(.*?\)|userChoseShowAllAndFinish)\)\s*setCompleted\(true\);/g) ?? []).length;
+check(`every setCompleted(true) site is gated by the ≤50 threshold or the explicit show-all choice (found ${trueSites}, ${gatedSites} gated)`,
+  trueSites >= 1 && trueSites === gatedSites,
+  "an ungated site means a count alone, a no-more-questions verdict, or anything else can lock the composer");
 check("R11.1: the post-round honest total ≤ INTERVIEW_STOP_AT completes, inside finishGuided's onFetched",
   /onFetched: \(total\) => \{[\s\S]{0,900}?if \(searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(agent));
 check("R11.2 (revised 2026-09-04): a MEASURED 'no' after a committed AF round is SPOKEN, not a silent completion",

@@ -65,8 +65,17 @@ check('the continuation waits for the count to land and read (AF_NEXT_ROUND_DELA
 check('a MEASURED "no" after an AF round posts the spoken line (i18n key present in both languages)',
   /verdict === 'no' && afCarryRef\.current && !noMoreSaidRef\.current\[m\.id\]/.test(agent)
   && read('src/i18n.tsx').includes("'No further truthful narrowing question exists for this scope — these are all the genuine matches.': 'ما فيه سؤال إضافي موثوق"));
-check('…and does NOT complete the chat (setCompleted(true) has exactly ONE site: the ≤ 50 rule)',
-  (agent.match(/setCompleted\(true\)/g) ?? []).length === 1);
+// Generalized 2026-09-11 (owner rule: a plain search or typed AI message landing at <= the
+// threshold finishes cleanly too, not only an AF round; AND the user's own explicit «عرض المزيد»
+// show-all-and-finish choice, Task 4, finishes at ANY total) from "exactly one site" to "every site
+// is one of the two named, honest gates and nothing else" — see
+// scripts/verify-af-interview-owns-browsing.ts for the call-site-level version of this same check;
+// this one keeps the ORIGINAL intent of this specific check intact: a measured "no more truthful
+// narrowing" verdict must never itself complete the chat.
+const GATED_COMPLETED = /if \((?:searchIsFinishedAtThreshold\(.*?\)|userChoseShowAllAndFinish)\)\s*setCompleted\(true\);/g;
+check('…and does NOT complete the chat (every setCompleted(true) site is the ≤ 50 rule or the explicit show-all choice, never the "no more questions" verdict)',
+  (agent.match(/setCompleted\(true\)/g) ?? []).length >= 1
+  && (agent.match(/setCompleted\(true\)/g) ?? []).length === (agent.match(GATED_COMPLETED) ?? []).length);
 check("assessNarrowing returns 'no' ONLY when every probe ANSWERED (ranked && !ranked.probeFailed), else 'unknown'",
   /if \(ranked && !ranked\.probeFailed\) return 'no';/.test(agent) && /return 'unknown';\s*\};/.test(agent));
 
@@ -127,8 +136,13 @@ mustCatch('the stop line reverted to 25 — a ≤ 50 set is no longer revealed i
 
 // A second setCompleted(true) site is exactly how "nothing truthful left" becomes a silent lock
 // instead of the spoken line.
-mustCatch('a second setCompleted(true) site locking the chat outside the ≤ 50 rule',
-  ((agent + "\nif (verdict === 'no') setCompleted(true);").match(/setCompleted\(true\)/g) ?? []).length !== 1);
+mustCatch('an UNGATED setCompleted(true) site locking the chat outside the ≤ 50 rule',
+  (() => {
+    const withUngated = agent + "\nif (verdict === 'no') setCompleted(true);";
+    const total = (withUngated.match(/setCompleted\(true\)/g) ?? []).length;
+    const gated = (withUngated.match(GATED_COMPLETED) ?? []).length;
+    return total !== gated;
+  })());
 
 // The round losing its carry: round N+1 re-asks everything round N already asked.
 mustCatch('the next round dropping the answered-or-skipped carry (questions repeat)',

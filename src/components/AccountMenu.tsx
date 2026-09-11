@@ -58,6 +58,7 @@ export default function AccountMenu({
   onClose,
   onHelp,
   onLegal,
+  onAbout,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -65,6 +66,10 @@ export default function AccountMenu({
   onHelp: () => void;
   /** Opens the «الشروط والخصوصية» reader (same InfoModal host as Support / About). */
   onLegal: () => void;
+  /** Opens «من نحن» (About Us). Consolidated in here 2026-09-11: was a separate sidebar row that
+   *  duplicated this menu's own entry point (Settings=this panel; Support already lived here as
+   *  «Help») — the standalone row is removed for signed-in users, this is its new home. */
+  onAbout: () => void;
 }) {
   const router = useRouter();
   const { height: winH } = useWindowDimensions();
@@ -375,6 +380,7 @@ export default function AccountMenu({
               <Row icon="contrast-outline" label={t('Appearance')} value={modeLabel} chevron onPress={() => go('appearance', 1)} testID="account-menu-appearance" />
               <Row icon="globe-outline" label={t('Language')} value="العربية" chevron onPress={() => go('language', 1)} testID="account-menu-language" />
               <Row icon="help-circle-outline" label={t('Help')} onPress={() => { onClose(); onHelp(); }} testID="account-menu-help" />
+              <Row icon="information-circle-outline" label={t('About Us')} onPress={() => { onClose(); onAbout(); }} testID="account-menu-about" />
               <Row icon="person-outline" label={t('Manage account')} chevron onPress={() => { setEditing(false); go('account', 1); }} testID="account-menu-account" />
               {/* «الشروط والخصوصية» (owner 2026-09-03, text drafted 2026-09-04) — directly above
                   «تسجيل الخروج». Still gated on hasLegalDocs(): a row that opens an empty reader

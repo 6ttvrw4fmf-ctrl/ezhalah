@@ -70,6 +70,27 @@ check('a new conversation forgets what it already explained',
 check('the id is normalised, so rating:VALUE and rating are the same caveat',
   /split\(':'\)\[0\]/.test(code));
 
+// ── 3b. THE NOTICE ACTUALLY REACHES THE RENDER (2026-09-11 fix) ─────────────────
+// THE HOLE THIS CLOSES — found by live-clicking the app, not by reading source. §2 above proves the
+// notice is appended to `backend.reply` and calls that "the reply the user sees" — but on the ONE
+// turn type this notice targets (kind==='listings'), the render call site NEVER passes `turn.reply`
+// to the results bubble: src/app/agent.tsx's primary listings branch builds its own deterministic,
+// query-derived summary (`buildScrapeIntro(result.query ...)`, anti-hallucination by design — the
+// headline can only say what actually ran, never what the model claims) and discards `turn.reply`
+// entirely. Every one of `playListings`'s 4 call sites does this. So `rejectionNotice()` had a
+// runtime reader (§2's fix) that itself was never rendered — the notice was computed, spent from
+// announcedRejections' once-per-conversation budget, and shown to nobody. §2's own check name ("the
+// reply the user sees") assumed what it never verified.
+const appTsx = readFileSync('src/app/agent.tsx', 'utf8').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
+check('AgentTurn carries the notice as its OWN field, not only folded into .reply',
+  /notice\?:\s*string/.test(code));
+check('respond() sets backend.notice, not only backend.reply',
+  /backend\.notice = notice/.test(code));
+check('the render call site actually reads turn.notice (not just turn.reply) before showing results',
+  /turn\.notice/.test(appTsx));
+check('a present notice is appended to what actually renders, not silently dropped',
+  /turn\.notice \? `\$\{reply\}\\n\$\{turn\.notice\}` : reply/.test(appTsx));
+
 // ── 4. THE WORDING ──────────────────────────────────────────────────────────────
 const KEY = 'That option is not available in this search, so I showed the results without it.';
 check('the notice is translated, not a hardcoded English string', i18n.includes(KEY));
