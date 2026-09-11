@@ -1,4 +1,4 @@
-22967466fdb26617cb6037291cda9dd132ac1c8d
+89ca799c7334c1ee77efc974975c0d58afc2bef7
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # 2026-09-11  faf768e  advanced MANUALLY, AHEAD of its deploy, to clear preflight-verify.sh's
 #   deletion guard before the FIRST deploy attempt since 3db1802 (2026-09-06, 31 commits/5 days of
@@ -323,3 +323,4 @@
 #   schema-drift + duplicate-overload gate reported clean against production.
 # 2026-09-06  737abde  deployed via safe-deploy.sh
 # 2026-09-11  2296746  deployed via safe-deploy.sh
+# 2026-09-11  89ca799  deployed via safe-deploy.sh
