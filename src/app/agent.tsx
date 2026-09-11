@@ -46,6 +46,8 @@ import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
+import { fetchListingsForQuery } from '@/data/remote';
+import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLocationProbe';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
@@ -2558,8 +2560,33 @@ export default function Agent() {
       // the terminal `unsearchable` state handled server-side, there is nothing left for a client
       // override to safely second-guess — every remaining case is a location question or a final
       // statement, both of which decide.ts already resolved correctly.
+      //
+      // ONE EXCEPTION (owner, 2026-09-11): "only ask the city if there is something [to find]" —
+      // before showing THE location question, quietly check whether the OTHER stated requirements
+      // (type/amenities/price/af/…) match anything AT ALL, anywhere. This never overrides kind or
+      // askCount and is never shown as a results page — it is a plain existence probe (real logic
+      // extracted to src/lib/agentLocationProbe.ts, zero-dependency so it can be executed directly
+      // by scripts/verify-agent-location-probe.ts), reusing the exact same match-first RPC a real
+      // search would hit, called directly (not via store.tsx's runQuery) so a FAILED fetch
+      // (listings: null) can be told apart from a GENUINE zero (listings: []) — collapsing those two
+      // would risk claiming "nothing matches" on our own network hiccup (A FAILED FETCH IS NOT AN
+      // EMPTY ANSWER). Only gated on `turn.locationQuestion` (server-computed: true for exactly this
+      // question, never for the `unsearchable` statement or an off-topic reply) so ordinary turns
+      // pay nothing extra. ponytail: fetches a full page just to check existence (no `limit` param
+      // plumbed through) — fine since a genuine zero costs the RPC the same either way; add a
+      // p_limit:1 knob if this ever measurably matters.
+      let reply = turn.reply;
+      if (turn.locationQuestion && turn.query) {
+        const probe = await fetchListingsForQuery(buildLocationProbeQuery(turn.query), { signal: run.ac.signal });
+        if (run.cancelled) return;
+        reply = replyAfterLocationProbe(
+          turn.reply,
+          t('Sorry, no listings currently match your request. Try using the Filter to widen your search.'),
+          probe.listings,
+        );
+      }
       setMsgs((m) =>
-        m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: turn.reply, typing: true } : x)),
+        m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: reply, typing: true } : x)),
       );
     }
     // The network turn is done; the cards then reveal on their own timers (busy is free, so the user can
