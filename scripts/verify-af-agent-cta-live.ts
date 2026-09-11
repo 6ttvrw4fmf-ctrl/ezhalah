@@ -147,6 +147,8 @@ const run = async () => {
       const ctaOffered = (await cta.count()) > 0;
       let cardEverAppeared = false;
       let loadingEverAppeared = false;
+      let ctaReturned = false;
+      let refineChipsAppeared = false;
 
       if (ctaOffered) {
         await cta.last().click();
@@ -166,15 +168,44 @@ const run = async () => {
           if ((await cta.count()) === 0) loadingEverAppeared = true;
           if ((await page.locator('[data-testid="af-card"]').count()) > 0) { cardEverAppeared = true; break; }
         }
+        // WHAT THE ROUND DID *INSTEAD* — the observation this check never made (2026-09-11).
+        // agent.tsx's round has THREE endings, not two, and they are not the same finding:
+        //   • a question renders                       — the promise was kept;
+        //   • it ASSERTS «nothing narrows» and offers   — the gates genuinely disagree (the product
+        //     the plain refine chips                      only does this on a MEASURED 'no');
+        //   • it asserts NOTHING and the CTA comes back — the count probes did not answer even after
+        //                                                 the bounded retry, so the round declines to
+        //                                                 claim anything (src/lib/afProbe.ts, owner-
+        //                                                 locked). That is CORRECT handling of an
+        //                                                 UNKNOWN, not an R4.4.2 violation.
+        // Recorded as diagnostics here so the next run can tell them apart instead of filing the
+        // strongest accusation available — the mistake this surface has now made five times.
+        if (!cardEverAppeared) {
+          ctaReturned = (await cta.count()) > 0;
+          // startRefine() renders no testid — it asks one of a small, fixed set of Arabic questions.
+          // Those strings ARE the assertion "we checked and nothing certified narrows", so they are
+          // what separates a measured 'no' from an undetermined probe.
+          const body = await page.innerText('body').catch(() => '');
+          refineChipsAppeared = ['كم ميزانيتك تقريباً؟', 'كم غرفة نوم تبغى؟', 'أي حي تفضّل']
+            .some((s) => body.includes(s));
+          console.log(`      [diag] ${j.name}: after the round closed — CTA back=${ctaReturned}, `
+            + `refine chips=${refineChipsAppeared}`);
+        }
       }
 
-      const o: AfCtaObservation = { ctaOffered, cardEverAppeared, loadingEverAppeared, journey: j.name };
+      const o: AfCtaObservation = {
+        ctaOffered, cardEverAppeared, loadingEverAppeared, ctaReturned, refineChipsAppeared,
+        journey: j.name,
+      };
       const verdict = judgeAfCta(o);
       if (verdict.ok) {
         report.push(`PASS  ${j.name} — ${verdict.reason}`);
       } else {
         failures.push(verdict.diagnosis);
-        report.push(`FAIL  ${j.name} — ${verdict.reason}`);
+        // An UNDETERMINED round still FAILS the run — a check that could not certify must never read
+        // green — but it is labelled for what it is, so nobody spends a morning rewriting a correct
+        // offer gate. See ops_incident #156 and the five false accusations before it.
+        report.push(`${verdict.undetermined ? 'SKIP' : 'FAIL'}  ${j.name} — ${verdict.reason}`);
       }
       // A rendered card must be backed by a real count RPC to the expected project.
       if (cardEverAppeared && !afRpcs.length) {
