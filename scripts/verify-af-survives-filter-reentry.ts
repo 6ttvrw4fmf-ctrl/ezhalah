@@ -326,7 +326,20 @@ assert(/const \{ query: storeQuery,/.test(indexTsx),
 const storeQueryUses = (indexTsx.match(/\bstoreQuery\b/g) ?? []).length;
 assert(storeQueryUses === 3,
   `the raw store has exactly ONE consumer — the reconciliation (storeQuery appears ${storeQueryUses}x; expected 3: destructure, reconcile, memo dep)`);
-assert(/rpcAllNarrowingParams\(query\)/.test(indexTsx), 'the Trending city counts read the reconciled query');
+// THE DERIVATION TEST, not the spelling — the same one «بحث» gets below, for the same reason. The
+// fact this line is about is "the counts read the RECONCILED query, never the raw store". Pinning the
+// literal `(query)` also forbade passing an object DERIVED from query, which is what the period
+// normalisation does (`queryForPeriod = { ...query, rentPeriod }`, 2026-09-11) — and a barrier that
+// fails on a strictly-better input is a barrier that argues for the defect. What must stay forbidden
+// is reading `storeQuery`, and that is asserted directly.
+const countArg = indexTsx.match(/rpcAllNarrowingParams\((\w+)\)/);
+assert(!!countArg, 'the Trending city counts are built from rpcAllNarrowingParams at all');
+assert(countArg![1] === 'query'
+  || new RegExp(`const ${countArg![1]}\\b[^=\\n]*=[^;\\n]*\\bquery\\b`).test(indexTsx),
+  `the Trending city counts read the reconciled query (read «${countArg![1]}», which must derive from «query»)`);
+assert(countArg![1] === 'query'
+  || !new RegExp(`const ${countArg![1]}\\b[^=\\n]*=[^;\\n]*\\bstoreQuery\\b`).test(indexTsx),
+  `the Trending city counts must NOT read the raw store («${countArg![1]}» derives from storeQuery)`);
 assert(/const districtNarrowingSig = JSON\.stringify\(\[query\./.test(indexTsx), 'the district live counts read the reconciled query');
 // …and they must read ALL of it. The AF half of that signature used to be 11 hand-typed `query.x`
 // entries, so a 12th predicate would silently stop invalidating the cached district counts — the
