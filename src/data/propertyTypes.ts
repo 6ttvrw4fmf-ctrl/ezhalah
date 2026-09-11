@@ -46,7 +46,10 @@ export const HIERARCHY: Record<Macro, SubGroup[]> = {
 // MIX of all five. The five stay DISTINCT clean types internally — the DB is NEVER merged and property cards
 // ALWAYS show the raw scraped type; they're just not shown as separate boxes. Selecting a specific one (agent
 // path / future UI) stays STRICT. 'Service Facilities' is never a card/DB value — grouping only.
-export const SERVICE_FACILITY_TYPES = ['Bank', 'School', 'Health Center', 'Telecom Tower', 'Parking'];
+export const SERVICE_FACILITY_TYPES = ['Bank', 'School', 'Health Center', 'Telecom Tower', 'Parking',
+  // owner decision 2026-09-11 (ops_incident #172): four more source-published facility types join the
+  // same box — see the RAW_TO_CLEAN comment for the sentinel story. Still one box, still a MIX.
+  'Hospital', 'Business Center', 'Resort', 'ATM Site'];
 export const SUBGROUPS: Record<string, string[]> = { 'Service Facilities': SERVICE_FACILITY_TYPES };
 
 // Verified type_ar labels (as stored in search_listings_ar) for the facility types. Used to type-SCOPE
@@ -55,6 +58,7 @@ export const SUBGROUPS: Record<string, string[]> = { 'Service Facilities': SERVI
 // buried under thousands of newer common listings and return 0. (bug fix 2026-07-07)
 export const FACILITY_TYPE_AR: Record<string, string> = {
   'Bank': 'بنك', 'School': 'مدرسة', 'Health Center': 'مركز صحي', 'Telecom Tower': 'برج اتصالات', 'Parking': 'مواقف',
+  'Hospital': 'مستشفى', 'Business Center': 'مركز أعمال', 'Resort': 'منتجع', 'ATM Site': 'موقع صراف',
 };
 
 // Flat clean-type → macro lookup (derived from HIERARCHY, the single source).
@@ -160,6 +164,17 @@ const RAW_TO_CLEAN: Record<string, string> = {
   'Hall': 'Commercial Building', 'Cinema': 'Commercial Building', // قاعة/سينما → Commercial Building (Specialized Facilities retired 2026-07-07; card still shows raw Hall/Cinema)
   'Gas Station': 'Gas Station', 'Station': 'Gas Station', 'محطة بنزين': 'Gas Station',
   'سكن عمال': 'Staff Housing',
+  // مرافق خدمية expansion (owner decision 2026-09-11, ops_incident #172): the source publishes these
+  // REAL Arabic types (dealapp: مستشفى «مستشفى / مركز صحي للإيجار», مركز أعمال ×3, منتجع, موقع صراف),
+  // but they were absent from known_type_ar so the search-index trigger (enforce_price_size_sanity)
+  // replaced them with the «غير معروف» sentinel — counted in the index yet selectable by no نوع.
+  // Each becomes its own strict clean type gathered under the Service Facilities box, same shape as
+  // Bank/School/etc. Cards keep showing the raw scraped value. «بلك» deliberately NOT mapped (its own
+  // listing title says أرض — no defensible facility reading; owner: keep unknown over inventing).
+  'Hospital': 'Hospital', 'مستشفى': 'Hospital',
+  'Business Center': 'Business Center', 'مركز أعمال': 'Business Center',
+  'Resort': 'Resort', 'منتجع': 'Resort',
+  'ATM Site': 'ATM Site', 'موقع صراف': 'ATM Site',
   // Long-tail dealapp raw types → existing clean types (owner-approved 2026-07-06; each verified against
   // the live listing — the card still shows the ORIGINAL scraped value). [[property-card-and-type-mapping-rule]]
   'تاون هاوس': 'Villa',               // titled فيلا, 4br + garage + majlis
@@ -253,6 +268,12 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   'School':              { rawTypes: ['School', 'مدرسة'], kinds: BOTH },
   'Health Center':       { rawTypes: ['Health Center', 'مركز صحي'], kinds: BOTH },
   'Parking':             { rawTypes: ['Parking', 'مواقف'], kinds: BOTH },
+  // مرافق خدمية expansion (owner 2026-09-11, ops_incident #172). kinds BOTH: today's rows all sit in
+  // dealapp_residential_listings (source misfile), and future ones may land on either table kind.
+  'Hospital':            { rawTypes: ['Hospital', 'مستشفى'], kinds: BOTH },
+  'Business Center':     { rawTypes: ['Business Center', 'مركز أعمال'], kinds: BOTH },
+  'Resort':              { rawTypes: ['Resort', 'منتجع'], kinds: BOTH },
+  'ATM Site':            { rawTypes: ['ATM Site', 'موقع صراف'], kinds: BOTH },
   // ('Service Facilities' is DERIVED from SERVICE_FACILITY_TYPES right after this object — single source of truth.)
   'Gas Station':         { rawTypes: ['Gas Station', 'Station', 'محطة بنزين'], kinds: BOTH },
   'Staff Housing':       { rawTypes: ['سكن عمال'], kinds: BOTH },
@@ -289,6 +310,9 @@ export const EN_TO_AR: Record<string, string> = {
   'Residential Land': 'أرض سكنية', 'Rest House': 'استراحة', 'Room': 'غرفة', 'School': 'مدرسة', 'Shop': 'محل',
   'Showroom': 'معرض', 'Specialized Facilities': 'منشآت متخصصة', 'Staff Housing': 'سكن عمال', 'Station': 'محطة',
   'Studio': 'استوديو', 'Telecom Tower': 'برج اتصالات', 'Villa': 'فيلا', 'Warehouse': 'مستودع', 'Workshop': 'ورشة',
+  // مرافق خدمية expansion (owner 2026-09-11): reverse entries so an EN-translated capture can never be
+  // Latin-guarded into the «غير معروف» sentinel (the aqargate 'Compound' precedent above).
+  'Hospital': 'مستشفى', 'Business Center': 'مركز أعمال', 'Resort': 'منتجع', 'ATM Site': 'موقع صراف',
 };
 
 // DERIVED from CLEAN_TO_QUERY (the single source for a clean type's raw strings) + EN_TO_AR — so adding a
