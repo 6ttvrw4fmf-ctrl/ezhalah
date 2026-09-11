@@ -82,9 +82,10 @@ check(
 check(
   'the mic button in agent.tsx calls isVoiceInputSupported() directly in render — evaluated fresh every render, never a one-time cached boolean (useState initializer / module-level constant) that could go stale',
   // `&& !completed` joined the render gate 2026-09-05 (locked composer has no mic — see
-  // verify-completed-chat-state.ts). The property THIS check protects is unchanged: the LIVE
-  // function is called in render, first in the chain, never cached into a stale boolean.
-  /\{isVoiceInputSupported\(\) && !completed \? \(\s*<Pressable\s*\n\s*testID="voice-mic"/.test(agent) &&
+  // verify-completed-chat-state.ts); `&& !refinementComposerLocked` joined it 2026-09-11 for the
+  // SAME reason, the other lock. The property THIS check protects is unchanged: the LIVE function
+  // is called in render, first in the chain, never cached into a stale boolean.
+  /\{isVoiceInputSupported\(\) && !completed && !refinementComposerLocked \? \(\s*<Pressable\s*\n\s*testID="voice-mic"/.test(agent) &&
     !/const \[?\w*[Ss]upported\]? = isVoiceInputSupported\(\)/.test(agent),
 );
 

@@ -198,16 +198,23 @@ check('migration: PDPL — chats cascade away with the auth user (account deleti
 
 // ── 3c. Agent capture + restore wiring ──────────────────────────────────────────────────────────
 const agent = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
-check('agent: every live recorded turn names the conversation (ensureChatId on all 4 record calls)',
-  (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 4);
+// 2026-09-11: the ONE MAIN REQUEST + ONE FOLLOW-UP rule added 3 more record calls — the refinement
+// search itself, its zero-match relaxation trial, and the follow-up's own re-query on "yes"
+// (src/lib/refinementFollowup.ts). 4 → 7. Each new call carries ensureChatId() for the identical
+// reason every pre-existing one does: a search made mid-conversation must record under the SAME
+// sidebar entry, never mint a new one.
+check('agent: every live recorded turn names the conversation (ensureChatId on all 7 record calls)',
+  (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 7);
 check('agent: a text turn keeps the same identity (recordChatTurn return adopted)',
   /const rid = recordChatTurn\(v\); if \(rid\) chatIdRef\.current = rid;/.test(agent));
 check('agent: a fresh chat clears the conversation id (New Chat + startFresh inherit nothing)',
   (agent.match(/chatIdRef\.current = null;/g) ?? []).length >= 2);
 // 2026-08-30: the capture also carries `completed` (AF narrowed the search to its final set — see
-// verify-completed-chat-state.ts). The invariant pinned here is unchanged: debounced, content-keyed.
+// verify-completed-chat-state.ts). 2026-09-11: and `refinementLocked` (ONE MAIN REQUEST + ONE
+// FOLLOW-UP — see verify-refinement-followup.ts). The invariant pinned here is unchanged: debounced,
+// content-keyed.
 check('agent: capture serializes the settled state, debounced and content-keyed',
-  /const t = serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed \}\);/.test(agent)
+  /const t = serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, refinementLocked: refinementTurn === 'locked' \}\);/.test(agent)
   && /if \(j === lastCapturedRef\.current\) return;/.test(agent)
   && /if \(busy\) return;/.test(agent));
 check('agent: restore reinstates ALL FIVE state slices (msgs, doneTyping, revealCount, afReceipt, guidedPills)',

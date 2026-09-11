@@ -64,6 +64,7 @@ import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
+import { nextTurnState, relaxationCandidates, withFieldRelaxed, parseYesNo, relaxedFieldLabel, type RefinementTurnState, type RelaxableField } from '@/lib/refinementFollowup';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
@@ -1142,6 +1143,24 @@ export default function Agent() {
   // The last canonical query this conversation produced — the carrier that lets accumulated state
   // survive a clarification turn. Cleared by newChat() like every other per-conversation ref.
   const lastQueryRef = useRef<SearchQuery | null>(null);
+  // ONE MAIN REQUEST + ONE FOLLOW-UP (owner 2026-09-11, src/lib/refinementFollowup.ts). Governs the
+  // free-text composer ONLY once this chat has shown its first result set — before that, the AI
+  // Agent's own onboarding (asking city/deal/type across a few turns) is completely untouched, exactly
+  // as it always worked; "has this chat shown results yet" is read straight off `msgs` (role==='results'),
+  // not tracked separately, so there is nothing new to keep in sync with it. Plain useState (not a ref)
+  // — mirrors `completed`'s own pattern: read directly in the composer's render and in send()'s closure,
+  // written once per resolved turn, no mid-flight reads needed. Reset alongside `completed` at every
+  // point a fresh chat/search begins (startFresh, New Chat, sendFilter) and restored alongside it from
+  // a saved transcript. Advanced Filter's OWN «نتائج أدق» fallback (pendingRefineRef below) is a
+  // structurally separate flow that intercepts send() before this state is ever consulted — it must
+  // stay reachable regardless of this lock, so every check of `refinementTurn` is paired with
+  // `!pendingRefineRef.current` wherever it gates the UI.
+  const [refinementTurn, setRefinementTurn] = useState<RefinementTurnState>('available');
+  // The ONE offered follow-up awaiting its yes/no answer (see nextTurnState/relaxationCandidates). Set
+  // only when a refinement search's exact merged query matched zero listings but dropping ONE of this
+  // turn's own new requirements would not. Read-and-cleared by send()'s follow-up intercept, mirroring
+  // pendingRefineRef's own read-and-cleared shape exactly (see the REFINE INTERCEPT below it).
+  const pendingFollowupRef = useRef<{ relaxedQuery: SearchQuery; droppedField: RelaxableField } | null>(null);
   // The PLAIN CITY we last asked «تقصد مدينة X كاملة، أو حي معيّن؟» about. pendingScopeRef above only
   // ever holds region/city TWIN names, so before this ref existed the app remembered nothing at all
   // about a plain-city question — and answering it «المدينة كاملة» searched المدينة المنورة, because
@@ -1566,7 +1585,7 @@ export default function Agent() {
   useEffect(() => {
     const id = chatIdRef.current;
     if (!id) return;
-    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed });
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, refinementLocked: refinementTurn === 'locked' });
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
@@ -1587,8 +1606,8 @@ export default function Agent() {
     return () => clearTimeout(timer);
     // `completed` was missing from these deps: a chat that ENDED (Advanced Filter narrowed it to the
     // final set) could keep a transcript that never recorded the ending, so it reopened with a live
-    // composer on a finished search.
-  }, [busy, msgs, revealCount, afReceipt, guidedPills, completed]);
+    // composer on a finished search. `refinementTurn` joins it for the identical reason (2026-09-11).
+  }, [busy, msgs, revealCount, afReceipt, guidedPills, completed, refinementTurn]);
   // A refresh/close inside the debounce window must not lose the last settled state either.
   // saveTranscript writes localStorage synchronously up front (store.tsx), so this flush lands on
   // disk even during unload. pagehide, not beforeunload: it also covers bfcache navigations.
@@ -1728,6 +1747,42 @@ export default function Agent() {
     // beginCardDrip already eases the new turn's TOP to ~80px under the viewport top (the 2026-07-09
     // "don't drag the whole screen down" rule), which is exactly where the owner wants a completed
     // round to land: the selection receipt, then the new count, then the new cards.
+    setBusy(false); runRef.current = null;
+  };
+
+  // ONE MAIN REQUEST + ONE FOLLOW-UP — the follow-up's answer (owner 2026-09-11). Called from send()'s
+  // intercept the moment pendingFollowupRef is set: whatever the user types next IS the yes/no answer
+  // (spec's own framing — no second chance, no re-ask). Answering ALWAYS locks the composer afterward,
+  // whichever way it goes; this is the one place refinementTurn is set to 'locked' directly rather than
+  // through nextTurnState, because there is no other transition an 'awaiting_followup' turn can make.
+  const runFollowup = async (answerText: string) => {
+    const pending = pendingFollowupRef.current;
+    pendingFollowupRef.current = null;
+    if (!pending) { setBusy(false); return; } // stale/defensive — the intercept already checked this
+    finalizeReveal();
+    setStopped(false);
+    const run = makeRun(); runRef.current = run;
+    setMsgs((m) => [...m, { id: uid(), role: 'user', text: answerText }]);
+    toBottom();
+    if (parseYesNo(answerText) === 'no') {
+      setMsgs((m) => [...m, { id: uid(), role: 'agent', text: t("No problem — nothing matches your exact request as-is. Start a new search if you'd like to try something different."), typing: true }]);
+      setRefinementTurn('locked');
+      setBusy(false); runRef.current = null;
+      toBottom();
+      return;
+    }
+    const statusId = uid();
+    searchingAtRef.current[statusId] = Date.now();
+    setMsgs((m) => [...m, { id: statusId, role: 'status', phase: 'searching', query: pending.relaxedQuery }]);
+    toBottom();
+    const result = await runQuery(pending.relaxedQuery, true, run.ac.signal, ensureChatId());
+    if (run.cancelled) return;
+    const label = relaxedFieldLabel(pending.droppedField, locale);
+    const intro = `${t('Here they are, without this condition ({requirement}):', { requirement: label })}\n\n${buildScrapeIntro(result.query ?? pending.relaxedQuery)}`;
+    await playListings(run, statusId, intro, result, answerText);
+    if (run.cancelled) return;
+    setRefinementTurn('locked');
+    void promptSignupSoon(run);
     setBusy(false); runRef.current = null;
   };
 
@@ -2268,9 +2323,14 @@ export default function Agent() {
     void runRefine(r.baseQ, r.dim, opt.value, opt.label);
   };
 
+  // ONE-SHOT LOCK belt-and-suspenders refusal (owner 2026-09-11), checked right where send() checks
+  // !v/busy — composer's own disabled prop already blocks this UI path; this covers the DOM Enter-key
+  // listener / voice-send, which don't. AF's «نتائج أدق» fallback (pendingRefineRef) stays reachable
+  // regardless of this lock — it is a structurally separate flow, see its own intercept a few lines down.
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
+    if (refinementTurn === 'locked' && !pendingRefineRef.current) return;
     // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
     // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
     // busy-refused submit is not a send.
@@ -2291,6 +2351,12 @@ export default function Agent() {
     if (pendingRefineRef.current) {
       const { q: baseQ, dim } = pendingRefineRef.current;
       await runRefine(baseQ, dim, v, v);
+      return;
+    }
+    // ONE MAIN REQUEST + ONE FOLLOW-UP — the follow-up intercept (owner 2026-09-11). Same shape as the
+    // REFINE INTERCEPT just above: this message IS the answer, never run through the normal agent path.
+    if (pendingFollowupRef.current) {
+      await runFollowup(v);
       return;
     }
     // Sidebar Recent entry: title = the user's exact message. First send in a new chat creates the
@@ -2361,6 +2427,13 @@ export default function Agent() {
     // The conversation's accumulated canonical state. Without it a clarification turn resets
     // everything the user already said — «شهرية» came back as RentAnnual and a 9.5 rating vanished
     // after one more question (owner-reported 2026-08-29). Explicit changes in the new turn still win.
+    // ONE MAIN REQUEST + ONE FOLLOW-UP (owner 2026-09-11): captured BEFORE respond() can overwrite
+    // lastQueryRef below, so a zero-match refinement can diff "what did THIS message add" against
+    // "what the chat already had" (see relaxationCandidates). "Has this chat shown results yet" is the
+    // gate for the whole rule — read straight off `msgs`, nothing new to keep in sync with it; the
+    // AI Agent's own onboarding (before any results exist) is completely unaffected either way.
+    const prevQ = lastQueryRef.current;
+    const postResults = msgs.some((m) => m.role === 'results');
     let turn = await respond(v, {
       loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current,
       askCount: askCountRef.current, userMessageId, historyTurnsRaw: historyAll.length,
@@ -2438,7 +2511,47 @@ export default function Agent() {
       return;
     }
 
-    if (turn.kind === 'listings') {
+    if (turn.kind === 'listings' && postResults) {
+      // ONE MAIN REQUEST + ONE FOLLOW-UP — the refinement path (owner 2026-09-11). This chat already
+      // has a result set on screen, so this message is either THE one allowed free-text refinement, or
+      // (if refinementTurn was 'awaiting_followup') unreachable here — that case is intercepted by
+      // pendingFollowupRef above and never reaches respond() at all. Run it exactly like any other
+      // search, then decide: nonzero results → show them and lock; zero results → NEVER silently drop
+      // a requirement (permanent rule) — try relaxing exactly ONE of this turn's own new requirements
+      // and, only if that produces results, offer it as the one follow-up. Nothing here can loop: every
+      // path below ends the turn either 'awaiting_followup' (composer stays open for one more reply,
+      // handled by runFollowup) or 'locked'.
+      saidRef.current = [];
+      beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
+      const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
+      if (run.cancelled) return;
+      if ((result.matchTotal ?? result.listings.length) > 0) {
+        await playListings(run, statusId, buildScrapeIntro(result.query ?? turn.query), result, v);
+        if (run.cancelled) return;
+        setRefinementTurn(nextTurnState(refinementTurn, false));
+        void promptSignupSoon(run);
+      } else {
+        let offered: { field: RelaxableField; relaxedQuery: SearchQuery } | null = null;
+        for (const field of relaxationCandidates(prevQ, turn.query)) {
+          const candidateQuery = withFieldRelaxed(prevQ, turn.query, field);
+          const trial = await runQuery(candidateQuery, true, run.ac.signal, ensureChatId());
+          if (run.cancelled) return;
+          if ((trial.matchTotal ?? trial.listings.length) > 0) { offered = { field, relaxedQuery: trial.query ?? candidateQuery }; break; }
+        }
+        if (offered) {
+          pendingFollowupRef.current = { relaxedQuery: offered.relaxedQuery, droppedField: offered.field };
+          setMsgs((m) => m.map((x) => (x.id === statusId
+            ? { id: statusId, role: 'agent', text: t("I couldn't find an exact match. I tried without this one condition — {requirement} — and found results. Want to see them?", { requirement: relaxedFieldLabel(offered!.field, locale) }), typing: true }
+            : x)));
+          setRefinementTurn(nextTurnState(refinementTurn, true));
+        } else {
+          setMsgs((m) => m.map((x) => (x.id === statusId
+            ? { id: statusId, role: 'agent', text: t("Sorry, nothing matches your exact request right now. Start a new search if you'd like to try something different."), typing: true }
+            : x)));
+          setRefinementTurn(nextTurnState(refinementTurn, false));
+        }
+      }
+    } else if (turn.kind === 'listings') {
       // THE SERVER IS THE SINGLE DECISION AUTHORITY (owner-approved consolidation, 2026-08-30).
       // decideAgentTurn() in supabase/functions/agent/decide.ts already decided this turn should
       // search — including deciding that broadly, with no city, is fine when nothing better is
@@ -2457,6 +2570,15 @@ export default function Agent() {
       await playListings(run, statusId, reply, result, v);
       if (run.cancelled) return;
       void promptSignupSoon(run);
+    } else if (postResults) {
+      // ONE MAIN REQUEST + ONE FOLLOW-UP: any model reply here (off-topic refusal, an ambiguity
+      // question, anything else 'message' covers) consumes the turn — the ONE follow-up this rule
+      // grants is exclusively the client-driven zero-match relaxation above, never a model-initiated
+      // question. (owner 2026-09-11.) The pre-results askCountRef/proximity-city logic below is
+      // deliberately NOT reused here — those rules exist to keep asking until the AI Agent's own
+      // onboarding has enough to search; once results already exist, one reply is simply the end.
+      setMsgs((m) => m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: turn.reply, typing: true } : x)));
+      setRefinementTurn(nextTurnState(refinementTurn, false));
     } else {
       const attemptText = saidRef.current.join(' ');
       const combined = parseQuery(attemptText);
@@ -2618,6 +2740,12 @@ export default function Agent() {
       setRevealCount(restored.revealCount);
       setAfReceipt(restored.afReceipt);
       setCompleted(restored.completed === true);
+      // ONE MAIN REQUEST + ONE FOLLOW-UP (owner 2026-09-11): restore the SAME lock the chat was left
+      // in — reopening a saved search is still looking at that search, not a new one. A transcript
+      // saved before this rule shipped has no such field and restores unlocked (fresh quota), which is
+      // the correct default for legacy data, same reasoning as `completed` above.
+      setRefinementTurn(restored.refinementLocked === true ? 'locked' : 'available');
+      pendingFollowupRef.current = null;
       // Dedup on restore too (owner audit, 2026-08-27): a chat saved before this fix shipped could
       // have a stray duplicate pill baked into its serialized transcript — restoring it verbatim
       // would resurrect exactly the bug this fix closes everywhere else. Deduping HERE (not just at
@@ -2743,6 +2871,13 @@ export default function Agent() {
       // startAgeFlow now also seeds from the incoming query's own receipt, a stale carry would beat
       // the receipt that actually describes this search.
       afCarryRef.current = null;
+      // ONE MAIN REQUEST + ONE FOLLOW-UP (owner 2026-09-11): a fresh Filter/seed search IS a new
+      // search — the one-shot quota resets. Fixes a real gap in `completed`'s own reset scope (that
+      // flag is reset only by New Chat, not here — this component is REUSED, never remounted, between
+      // searches, so without this a chat that reached 'locked' via one search would start its NEXT,
+      // unrelated Filter search with the composer already inert).
+      setRefinementTurn('available');
+      pendingFollowupRef.current = null;
     };
     // THE GATE (owner 2026-08-16). Params that were in the URL when the DOCUMENT loaded — a refresh,
     // a restored tab, a pasted link — are not a user action, so they must not execute anything. Drop
@@ -2851,6 +2986,8 @@ export default function Agent() {
         setMsgs([]);
         pendingScopeRef.current = null; // New Chat inherits nothing — not even a half-answered question
         setCompleted(false);
+        setRefinementTurn('available'); // …and not the previous conversation's used-up AI turn (2026-09-11)
+        pendingFollowupRef.current = null;
         lastQueryRef.current = null;    // …and not the previous conversation's accumulated filters
         pendingCityRef.current = null;  // …including the plain-city question's subject
         chatIdRef.current = null;       // …and not the previous conversation's sidebar identity
@@ -2903,6 +3040,12 @@ export default function Agent() {
   const introLanding = msgs.every((m) => m.role === 'agent' && !!m.greeting);
   const showIntroExamples =
     introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
+  // ONE MAIN REQUEST + ONE FOLLOW-UP (owner 2026-09-11): the composer's own lock condition, kept
+  // separate from `completed` (a stronger, AF-driven "this whole conversation is done" state — see the
+  // composer JSX below) so each gets its own explanatory copy. Advanced Filter's «نتائج أدق» fallback
+  // must stay reachable regardless — pendingRefineRef is a ref (not reactive state) but is always set
+  // alongside a setMsgs call that re-renders this screen, so reading it here reflects the current value.
+  const refinementComposerLocked = refinementTurn === 'locked' && !pendingRefineRef.current;
 
   return (
     // DARK MODE IS GLOBAL AND STICKY (owner 2026-08-30, reverses the 2026-08-29 "white by design"
@@ -3502,14 +3645,18 @@ export default function Agent() {
                 // rotation stops (any interaction) the familiar static placeholder returns.
                 // COMPLETED (owner request 2026-09-05): the box stays, it just goes inert — the
                 // placeholder explains why instead of inviting a message that can never send.
-                placeholder={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : (showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia..."))}
+                // ONE MAIN REQUEST + ONE FOLLOW-UP (owner 2026-09-11): same inert-with-placeholder
+                // treatment for the OTHER reason the composer can be closed — checked second, so
+                // `completed` (the stronger, whole-conversation-is-done state) always wins if both are
+                // somehow true at once.
+                placeholder={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : refinementComposerLocked ? t("You've used your one AI request for this search — tap ☰ at the top to start a new search.") : (showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia..."))}
                 placeholderTextColor={colors.muted}
                 selectionColor={colors.primary}
-                editable={!completed}
+                editable={!completed && !refinementComposerLocked}
                 // Stable Arabic label (owner brief §11): a screen reader always hears this one
                 // sentence for the field — never the rotating examples (those are aria-hidden).
                 accessibilityLabel={t('Describe the property you are looking for')}
-                value={completed ? '' : typed}
+                value={completed || refinementComposerLocked ? '' : typed}
                 onChangeText={(v: string) => { setIntroInteracted(true); setTyped(v); if (!v) setInputH(COMPOSER_MIN_H); }}
                 // Grows only as text wraps, capped at COMPOSER_MAX_H (then scrolls internally); the
                 // TARGET comes from RN's own line metrics (native + web), the MOTION from INPUT_EASE.
@@ -3561,7 +3708,7 @@ export default function Agent() {
                       evidence trail). Showing a mic that can only ever flash a failure toast and
                       revert reads as broken — but hiding a mic the runtime genuinely supports, on a
                       guess about the browser's name, is the same mistake in the other direction. */}
-                  {isVoiceInputSupported() && !completed ? (
+                  {isVoiceInputSupported() && !completed && !refinementComposerLocked ? (
                   <Pressable
                     testID="voice-mic"
                     onPress={() => { void startVoice(); }}
@@ -3576,10 +3723,12 @@ export default function Agent() {
                   ) : null}
                   {/* COMPLETED (owner request 2026-09-05): the send arrow becomes a lock — same
                       composer, same button, no separate card. It never fires (the real "start
-                      over" action is the hamburger, top left), so it always renders disabled. */}
+                      over" action is the hamburger, top left), so it always renders disabled.
+                      ONE MAIN REQUEST + ONE FOLLOW-UP (owner 2026-09-11): the same lock treatment for
+                      a used-up refinement turn — `completed` still takes precedence for the copy. */}
                   <Pressable
                     onPress={() => send()}
-                    disabled={completed || !typed.trim()}
+                    disabled={completed || refinementComposerLocked || !typed.trim()}
                     onPressIn={() => sendSpring(0.9)}
                     onPressOut={() => sendSpring(1)}
                     onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
@@ -3587,11 +3736,11 @@ export default function Agent() {
                     hitSlop={6}
                     // @ts-expect-error web-only DOM props on the RNW host node
                     dataSet={{ ...TAP44 }}
-                    accessibilityLabel={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : t('Search')}
-                    style={completed || !typed.trim() ? s.sendDisabled : undefined}
+                    accessibilityLabel={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : refinementComposerLocked ? t("You've used your one AI request for this search — tap ☰ at the top to start a new search.") : t('Search')}
+                    style={completed || refinementComposerLocked || !typed.trim() ? s.sendDisabled : undefined}
                   >
-                    <Animated.View style={[s.sendBtn, sendHover && !completed && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
-                      <Ionicons name={completed ? 'lock-closed' : 'arrow-up'} size={completed ? 15 : 17} color="#fff" />
+                    <Animated.View style={[s.sendBtn, sendHover && !completed && !refinementComposerLocked && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
+                      <Ionicons name={completed || refinementComposerLocked ? 'lock-closed' : 'arrow-up'} size={completed || refinementComposerLocked ? 15 : 17} color="#fff" />
                     </Animated.View>
                   </Pressable>
                 </>

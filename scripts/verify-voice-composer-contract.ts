@@ -191,8 +191,10 @@ check(
   '18. the mic button only renders when isVoiceInputSupported() is true',
   // `&& !completed` joined the condition on 2026-09-05 (a locked composer has no live mic — see
   // verify-completed-chat-state.ts). The capability gate this check exists for is unchanged:
-  // isVoiceInputSupported() still guards the render, first in the chain.
-  /\{isVoiceInputSupported\(\) && !completed \? \(\s*<Pressable\s*\n\s*testID="voice-mic"/.test(agent),
+  // isVoiceInputSupported() still guards the render, first in the chain. 2026-09-11: ONE MAIN
+  // REQUEST + ONE FOLLOW-UP added `&& !refinementComposerLocked` alongside `&& !completed` — the
+  // mic hides for either reason the composer can be locked, not just `completed`.
+  /\{isVoiceInputSupported\(\) && !completed && !refinementComposerLocked \? \(\s*<Pressable\s*\n\s*testID="voice-mic"/.test(agent),
 );
 
 // ── 8/10. Waveform owns ONLY the flexible middle: overflow-clipped flex:1, fixed-size controls ──
