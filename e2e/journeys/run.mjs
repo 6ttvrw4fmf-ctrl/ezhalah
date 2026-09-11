@@ -338,10 +338,11 @@ JOURNEYS['back-after-search'] = async (mobile) => withPage({ mobile }, async (pa
 JOURNEYS['voice-control'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `voice-control:${mobile ? 'mobile375' : 'desktop1440'}`;
   // A JOURNEY THAT NEVER REACHED ITS SURFACE MUST NOT READ AS A PASS. This tab click used to be
-  // unguarded, and every other outcome below is conditional on the mic existing — so between
-  // 2026-09-06 (the «الوكيل الذكي» → «الوسيط الذكي» rename) and 2026-09-11 this journey clicked a
-  // label that no longer existed, stayed on Filter home, found 0 mic controls, emitted a single
-  // note and recorded a clean PASS in the ledger, 31 times. The stale label is fixed and barriered
+  // unguarded, and every other outcome below is conditional on the mic existing — so once the
+  // «الوكيل الذكي» → «الوسيط الذكي» rename actually reached production (deploy 2026-09-11T12:12Z;
+  // it had been merged five days earlier) this journey clicked a label that no longer existed,
+  // stayed on Filter home, found 0 mic controls, emitted a single note and recorded a clean PASS —
+  // 4/4 in fresh contexts, both viewports. The stale label is fixed and barriered
   // (scripts/verify-e2e-targets-still-exist-in-the-product.ts); this guard is the second half, so
   // that ANY future reason for not reaching the agent screen is a skip rather than a quiet green.
   if (!(await clickText(page, 'الوسيط الذكي'))) { skip(name, `agent tab: ${clickReason()}`); return; }

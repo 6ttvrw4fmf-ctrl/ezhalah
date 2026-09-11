@@ -367,18 +367,34 @@ strictly worse, and which this routine has now measured end to end.
 **What happened.** PR #2061 (2026-09-06) renamed the agent tab «الوكيل الذكي» → «الوسيط الذكي» in
 `src/i18n.tsx`, on the owner's instruction. Three scripts were updated with it; **four e2e suites
 were not** — `e2e/journeys/run.mjs` (8 call sites), `e2e/guardian/journeys.mjs` (2),
-`e2e/live-sweep/journeys.mjs` (1), `e2e/ui-parity.spec.ts` (2). The production bundle served on
-2026-09-11 contains the new label exactly once and the old one zero times, so for five days every
-one of those clicks aimed at a string that does not exist.
+`e2e/live-sweep/journeys.mjs` (1), `e2e/ui-parity.spec.ts` (2).
 
-**What it cost — and why nothing went red.** Measured on the 2026-09-11 sweep, Chromium, fresh
-context per run, N=2 per viewport:
+**Divergence and breakage are two different dates, and conflating them is its own reporting
+defect.** The merge was 2026-09-06; the production deploy carrying it landed **2026-09-11T12:12:28Z**
+(`dpl_Eb6yPLNz…`, commit `e9a0522`, PR #2248), and the previous production deploy — 2026-09-07T00:14
+at `8d59aad` — did not contain the rename. So the harness sat diverged from `main` for **five days as
+a latent defect** and became a live coverage loss for **about an hour and three quarters** before it
+was found. The bundle served afterwards contains the new label exactly once and the old one zero
+times (decoded from `entry-3545b04a….js`).
+
+That morning's CI journey sweeps — 09:43 Chromium, 10:11 WebKit, 10:42 Firefox — each recorded
+`0/2 failed, 0 skipped` and were **right to**: they ran against a bundle that still had the old
+label. Nothing in the repo could distinguish a harness that agrees with production from one that has
+simply not been overtaken by a deploy yet. **PART 9.1 condition 3 is what caught it** — the same
+harness behaving correctly against a different bundle — and it is also why the barrier fires on
+DIVERGENCE, at the renaming PR, rather than waiting for the deploy that makes it bite.
+
+**What it cost — and why nothing went red.** Measured on the 2026-09-11 14:00 UTC sweep, Chromium,
+fresh context per run, N=2 per viewport, against the just-deployed bundle:
 
 | journey | what it reported | what it did |
 |---|---|---|
 | `new-chat-blank` (PART 5 shape #1) | SKIP 4/4, with a reason | never opened the agent |
-| `voice-control` | **PASS 4/4**, ledger `pass` ×31 | never left Filter home; 0 mic controls |
+| `voice-control` | **PASS 4/4** | never left Filter home; 0 mic controls |
 | live sweep `tab-switch-no-junk-history` | `ok: true` | six clicks landed on nothing |
+
+The window was short only because it was caught the same afternoon. Nothing in the shape of the
+failure bounds it: unfound, every later sweep would have reported the same clean pass indefinitely.
 
 `voice-control` is the one to remember: every assertion it makes is conditional on the mic existing,
 so it emitted a single `note`, recorded no pass, no skip and no defect — and **the runner's verdict

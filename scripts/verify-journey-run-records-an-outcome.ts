@@ -8,11 +8,17 @@
 // the console, in `ops_qa_coverage_ledger`, and in the rotation that decides what gets tested next.
 //
 // MEASURED, 2026-09-11 (routine #6). PR #2061 renamed the agent tab «الوكيل الذكي» → «الوسيط الذكي»
-// on 2026-09-06. `voice-control` clicks that tab unguarded and everything it asserts is conditional
-// on the mic control existing, so for five days it clicked a string that no longer existed, stayed
+// in the repo on 2026-09-06; the production deploy carrying it landed 2026-09-11T12:12:28Z.
+// `voice-control` clicks that tab unguarded and everything it asserts is conditional on the mic
+// control existing, so from that deploy onwards it clicked a string that no longer existed, stayed
 // on Filter home, logged «SpeechRecognition supported=true, mic control rendered=0», and returned —
-// no pass, no skip, no defect. The runner booked a pass. The ledger recorded `pass`, 31 times.
-// PART 10's whole voice surface was reported as covered while nothing had touched it.
+// no pass, no skip, no defect. The runner booked a pass, 4/4 in fresh contexts across both
+// viewports, and PART 10's whole voice surface read as covered while nothing had touched it.
+//
+// The window was short only because it was caught the same afternoon. What makes it worth a
+// permanent barrier is that nothing in the shape of the failure bounds it: had it not been found,
+// every subsequent sweep would have reported the same clean pass indefinitely, and the ledger's
+// rotation would have kept booking voice as attention already paid.
 //
 // The stale label is fixed and separately barriered
 // (scripts/verify-e2e-targets-still-exist-in-the-product.ts). This barrier is for the CLASS: the

@@ -59,9 +59,10 @@ export const skip = (journey, why) => { skips.push({ journey, why }); console.lo
 // PASSES ARE COUNTED, NOT JUST PRINTED — because the runner's verdict used to be a subtraction it
 // could not see the bottom of. It booked `pass` for any run that added no finding and no skip,
 // which is not the same claim: a journey that reached NO oracle at all adds neither. Measured
-// 2026-09-11, `voice-control` clicked an agent tab renamed five days earlier (PR #2061), stayed on
-// Filter home, found 0 mic controls, emitted one note and returned — and was recorded as a clean
-// PASS, 31 times, while asserting nothing. `classifyRunOutcome` below needs this count to tell
+// 2026-09-11, `voice-control` clicked an agent tab whose rename (PR #2061, merged five days
+// earlier) had just reached production, stayed on Filter home, found 0 mic controls, emitted one
+// note and returned — and was recorded as a clean PASS, 4/4 in fresh contexts across both
+// viewports, while asserting nothing. `classifyRunOutcome` below needs this count to tell
 // "everything I checked was fine" apart from "I checked nothing".
 export const passes = [];
 export const pass = (journey, what) => { passes.push({ journey, what }); console.log(`  ok      [${journey}] ${what}`); };

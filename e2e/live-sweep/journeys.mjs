@@ -389,8 +389,9 @@ export async function tabHistory() {
     // A ROUND TRIP THAT NEVER HAPPENED SATISFIES THIS WATCH PERFECTLY. Both clicks swallow their
     // own failure, and the oracle is `h1 - h0 <= 1` — so six clicks that all land on nothing give
     // `h1 - h0 === 0` and the watch reports ok:true, having proven nothing. That is not theory: the
-    // 2026-09-06 rename «الوكيل الذكي» → «الوسيط الذكي» (PR #2061) left this selector stale for
-    // five days and the watch stayed green throughout. So each half of each trip is now confirmed
+    // 2026-09-06 rename «الوكيل الذكي» → «الوسيط الذكي» (PR #2061) left this selector diverged from
+    // `main` for five days, and green either way — correctly before the deploy carrying the rename
+    // (2026-09-11T12:12Z), vacuously after it. So each half of each trip is now confirmed
     // by the app's OWN route, and a trip that did not happen is reported instead of counted.
     let trips = 0;
     for (let i = 0; i < 3; i++) {

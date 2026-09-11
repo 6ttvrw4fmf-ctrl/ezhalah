@@ -11,9 +11,20 @@
 //   e2e/live-sweep/journeys.mjs 1 click site    (tab-switch-no-junk-history)
 //   e2e/ui-parity.spec.ts       2 click sites
 //
-// The production bundle served on 2026-09-11 contains «الوسيط الذكي» exactly once and
-// «الوكيل الذكي» zero times (decoded from entry-3545b04a….js), so every one of those clicks had
-// been aiming at a string that does not exist for five days.
+// WHEN IT ACTUALLY BIT, which is NOT when it was introduced. The rename merged on 2026-09-06 but
+// the production deploy carrying it landed 2026-09-11T12:12:28Z (dpl_Eb6yPLNz…, commit e9a0522,
+// PR #2248); the previous production deploy, 2026-09-07T00:14:49Z at 8d59aad, did not contain the
+// rename. So the harness sat diverged from `main` for five days as a LATENT defect, and became a
+// live coverage loss at 12:12 — about an hour and three quarters before this barrier was written.
+// The bundle served afterwards contains «الوسيط الذكي» exactly once and «الوكيل الذكي» zero times
+// (decoded from entry-3545b04a….js).
+//
+// That distinction is the point, not a footnote: the CI journey sweeps at 09:43 (Chromium), 10:11
+// (WebKit) and 10:42 (Firefox) that morning all recorded `0/2 failed, 0 skipped` and were RIGHT to
+// — they ran against a bundle that still had the old label. Nothing in the repo could tell the
+// difference between a harness that agrees with production and one that merely has not been
+// overtaken by a deploy yet. This barrier fires at the moment of DIVERGENCE, on the PR that renames
+// the label, which is five days before the deploy makes it matter.
 //
 // WHAT IT ACTUALLY COST is the reason this barrier is not a lint rule. Most of those call sites are
 // guarded — `if (!(await clickText(page, …))) { skip(name, …); return; }` — so they did not fail.
