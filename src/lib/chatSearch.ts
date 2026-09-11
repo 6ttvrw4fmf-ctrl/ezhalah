@@ -93,6 +93,58 @@ export function matchesChat(haystack: string, query: string): boolean {
   return tokens.every((tk) => hay.includes(tk));
 }
 
+/** One run of displayed text, `bold` when it matched a query token — for rendering «bold the
+ *  matching text» in search results (owner request 2026-09-11) as a run of `<Text>` spans.
+ *  Concatenating every `text` reconstructs the ORIGINAL title exactly (never the normalized one) —
+ *  this only decides which slices to bold, it never changes what's on screen. */
+export type BoldSpan = { text: string; bold: boolean };
+
+/** normalizeArabic's four letter-folds (أإآٱ→ا, ة→ه, ى→ي) are 1-for-1 substitutions, so the
+ *  normalized string stays the same LENGTH and INDEX-ALIGNED with the original — only tatweel
+ *  stripping and whitespace collapsing break that alignment, and titles (generated or renamed)
+ *  essentially never carry either. Folding just those four keeps every index usable against the
+ *  original string; title/label text outside that rare case gets no bold run rather than a
+ *  mis-aligned one (fails closed to "no highlight", never to a wrong highlight). */
+function foldLengthPreserving(s: string): string {
+  let out = s.toLowerCase();
+  for (const a of 'أإآٱ') out = out.split(a).join('ا');
+  return out.split('ة').join('ه').split('ى').join('ي');
+}
+
+/** Split `title` into bold/non-bold runs for every query token that appears in it, using the SAME
+ *  tokenising and normalization matchesChat() uses (a token bolds only when it's actually part of
+ *  why this row matched). Pure, read-only, never reorders or drops characters. */
+export function boldSpans(title: string, query: string): BoldSpan[] {
+  if (!title) return [];
+  const foldedTitle = foldLengthPreserving(title);
+  const tokens = normalizeArabic(query).split(' ')
+    .filter((tk) => ARABIC_LETTER.test(tk) || /[0-9٠-٩۰-۹]/.test(tk))
+    .map(foldLengthPreserving)
+    .filter((tk, i, arr) => tk && arr.indexOf(tk) === i) // dedupe, keep first-seen order
+    .sort((a, b) => b.length - a.length); // longest token wins an overlapping span
+  if (!tokens.length || foldedTitle.length !== title.length) return [{ text: title, bold: false }];
+  const mask = new Array(title.length).fill(false);
+  for (const tk of tokens) {
+    let from = 0;
+    for (;;) {
+      const at = foldedTitle.indexOf(tk, from);
+      if (at === -1) break;
+      for (let i = at; i < at + tk.length; i++) mask[i] = true;
+      from = at + tk.length;
+    }
+  }
+  const spans: BoldSpan[] = [];
+  let i = 0;
+  while (i < title.length) {
+    const bold = mask[i];
+    let j = i;
+    while (j < title.length && mask[j] === bold) j++;
+    spans.push({ text: title.slice(i, j), bold });
+    i = j;
+  }
+  return spans;
+}
+
 /** Filter history rows by their searchable text. Pure: returns the SAME item references, in the
  *  caller's order, with zero writes — search is read-only discovery of existing conversations. */
 export function filterChats<T>(items: readonly T[], searchText: (item: T) => string, query: string): T[] {

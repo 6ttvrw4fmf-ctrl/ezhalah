@@ -43,6 +43,14 @@ const root = join(import.meta.dirname, '..');
 const agentSrc = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
 const gateSrc = readFileSync(join(root, 'src/lib/afBrowsingGate.ts'), 'utf8');
 const sweepSrc = readFileSync(join(root, 'e2e/live-sweep/showmore.mjs'), 'utf8');
+// A COMMENT IS NOT A CODE PATH (permanent repo rule): the completed-trigger count below must count
+// CALLS, never a prose mention of `setCompleted(true)` in an explanatory comment (this file's own
+// header comment for the 2026-09-11 change names the literal call, and unstripped that is exactly
+// the trap this rule exists to catch). Used only for that count — every other check in this file
+// matches structural code shapes the comment strip is not needed for.
+const decomment = (src: string) =>
+  src.split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+const agentCode = decomment(agentSrc);
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -125,12 +133,24 @@ check('an unquotable total is never treated as "finished"',
 // The narrow offer obeys the same line, in agent.tsx's own expression.
 check('narrowing is offered only ABOVE the threshold (canNarrowFurther > INTERVIEW_STOP_AT)',
   /const canNarrowFurther = rawTotal > INTERVIEW_STOP_AT && isLatestResults && afCanNarrow\[m\.id\] === true;/.test(agentSrc));
-// R11.1 is the ONLY thing that ends the flow; R11.2 must not, or a 3,000-match cohort with no
-// questions left would be declared finished and lose its pager — the owner's clause 2 exactly.
-const completedCalls = [...agentSrc.matchAll(/setCompleted\(true\)/g)].length;
-check('exactly ONE completed-trigger exists, and it is the small-result threshold (R11.1)',
-  completedCalls === 1 && /searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(agentSrc),
-  `saw ${completedCalls} setCompleted(true) call(s)`);
+// ONLY the small-result threshold may end the flow; R11.2 (no useful questions left) must not, or a
+// 3,000-match cohort with no questions left would be declared finished and lose its pager — the
+// owner's clause 2 exactly. Generalized 2026-09-11 (owner rule: a plain search or typed AI message
+// landing at <= the threshold finishes cleanly too, same as an AF round) from "exactly one call
+// site" to "every call site is gated by the same predicate" — the count is no longer the invariant,
+// the GATE is: every setCompleted(true) in this file must sit directly behind an
+// `if (searchIsFinishedAtThreshold(...))`, and searchIsFinishedAtThreshold itself is the one
+// function name allowed to gate it (clause 4 below independently proves that predicate touches no
+// count/query surface, so widening WHERE it's called from can never widen WHAT it's allowed to end
+// the flow on).
+const completedCalls = [...agentCode.matchAll(/setCompleted\(true\)/g)].length;
+// Non-greedy up to the first `))`: both today's call sites nest at most one paren inside the
+// predicate's own arguments (`quotableTotal(result)`), and that inner call is followed by `,` — the
+// FIRST `))` in the line is always the predicate's own outer close, never a false-early stop.
+const gatedCompletedCalls = [...agentCode.matchAll(/if \(searchIsFinishedAtThreshold\(.*?\)\)\s*setCompleted\(true\);/g)].length;
+check('every completed-trigger is the small-result threshold (R11.1) and nothing else',
+  completedCalls >= 2 && completedCalls === gatedCompletedCalls,
+  `saw ${completedCalls} setCompleted(true) call(s), ${gatedCompletedCalls} directly gated by searchIsFinishedAtThreshold(...)`);
 
 // ── 5. CLAUSE 4 — the gate changes no count and no predicate ────────────────────────────────────
 // Structural: the module must not import or mention any search/count/query surface. It decides which
@@ -167,9 +187,15 @@ mustCatch('a gate that releases the pager while a question is on screen is caugh
 // A threshold that finished the flow one match too early would strip a browsable set of its pager.
 mustCatch('an off-by-one threshold is caught at the boundary',
   searchIsFinishedAtThreshold(26, STOP_AT) === false && searchIsFinishedAtThreshold(25, STOP_AT) === true);
-// A second completed-trigger (R11.2) would declare a 3,000-match cohort finished.
-mustCatch('a second setCompleted(true) would be caught by the count check',
-  [...`${agentSrc}\nsetCompleted(true)`.matchAll(/setCompleted\(true\)/g)].length === completedCalls + 1);
+// An UNGATED completed-trigger (e.g. an R11.2 "no questions left" call, or any call not behind the
+// exact searchIsFinishedAtThreshold(...) predicate) is what this barrier must still catch, now that
+// more than one CORRECTLY gated call site is legitimate. A raw `setCompleted(true)` appended with no
+// guard raises completedCalls but not gatedCompletedCalls — the equality check goes red.
+const withUngatedCall = `${agentCode}\nsetCompleted(true);`;
+const ungatedTotal = [...withUngatedCall.matchAll(/setCompleted\(true\)/g)].length;
+const ungatedGated = [...withUngatedCall.matchAll(/if \(searchIsFinishedAtThreshold\(.*?\)\)\s*setCompleted\(true\);/g)].length;
+mustCatch('an un-gated completed-trigger (e.g. R11.2) is caught by the gated-count mismatch',
+  ungatedTotal !== ungatedGated && ungatedTotal === completedCalls + 1);
 
 if (failures) {
   console.error(`\n✗ ${failures} check(s) failed — the interview can hold browsing it has no right to, or the threshold no longer finishes cleanly.`);

@@ -95,12 +95,17 @@ check('the fallback does not reference the agent function or DeepSeek',
   !/functions\.invoke|deepseek/i.test(afterBackend));
 
 // ── 4. THE SEARCH/AF LAYERS CANNOT REACH THE MODEL AT ALL ──────────────────────
+// src/data/advancedFilters.ts (every AF question's resolveOptions) and src/app/index.tsx (the
+// Normal Filter form — city/type/price/etc, onSearch/navigateWithQuery) added 2026-09-11: neither
+// was previously scanned here, and index.tsx wasn't covered by ANY check in this file — only by
+// verify-filter-never-calls-agent.ts's repo-wide functions.invoke('agent')/import scan, which is a
+// file-level, not function-level, guarantee (see header comment above for why that gap matters).
 for (const f of ['src/data/remote.ts', 'src/lib/afPlan.ts', 'src/lib/afSteps.ts', 'src/lib/afCohorts.ts',
-                 'src/lib/chatTitle.ts']) {
+                 'src/lib/chatTitle.ts', 'src/data/advancedFilters.ts', 'src/app/index.tsx']) {
   let src = '';
   try { src = readFileSync(f, 'utf8'); } catch { check(`${f} exists`, false); continue; }
   check(`${f} never invokes the agent function`,
-    !/functions\.invoke/.test(src) && !/deepseek/i.test(src));
+    !/functions\.invoke/.test(src) && !/deepseek/i.test(src) && !/\brespond\s*\(/.test(decomment(src)));
 }
 
 // runQuery is not defined in agent.tsx - it comes from the store (useApp()). Assert the store's

@@ -1354,6 +1354,20 @@ export default function Agent() {
     // 2026-07-09: show the first card as soon as valid listings are ready; don't hold them hostage
     // to the typewriter). The more-message + feedback row still wait for the text (doneTyping).
     beginCardDrip(statusId, initialReveal(result));
+    // A RESULTS TURN THAT ALREADY SHOWS EVERY MATCH IS A FINISHED SEARCH (owner rule 2026-09-11,
+    // generalizing R11.1 to every entry point this shared renderer serves — plain Filter search,
+    // a typed AI-Agent message, a refine chip — not just an Advanced Filter round). initialReveal's
+    // own `honestTotal <= stopAt` branch above already means every one of `result`'s listings is on
+    // screen with nothing left to page — «عرض المزيد» never even appears (resultCounts() reports
+    // hasMore=false on its own). There is therefore nothing left for the user to DO with this search
+    // but start a new one, exactly the state R11.1 already locks an AF round into: composer
+    // disabled, «محادثة جديدة» shown, thumbs/Share still available (both are unconditioned on
+    // `completed`, see the composer/results-actions-row gating in this file). Gated on the same
+    // honest total (null whenever the count would overstate — client-only narrowing, agent-
+    // annualized budgets) so an unknown/overstated total never locks a search that still has more
+    // to show. R11.1's own setCompleted(true) call in the AF-round onFetched path is left in place —
+    // this is a superset, not a replacement, so no existing AF-round behavior changes.
+    if (searchIsFinishedAtThreshold(quotableTotal(result), INTERVIEW_STOP_AT)) setCompleted(true);
   };
 
   // «عرض المزيد» (Load more) — CONTINUATION IS THE RULE (owner 2026-08-29, supersedes the 2026-08-20
