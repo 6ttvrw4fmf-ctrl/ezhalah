@@ -39,7 +39,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 console.log('\nA later untrusted re-probe must not erase an earlier trusted dead confirmation\n');
 
 // ── 1. the v4 migration is committed (no production-only drift) ───────────────────────────────────
-const MIG = '20260911203157_served_despite_direct_404_v4_trust_is_not_erased_by_a_later_untrusted_agree.sql';
+const MIG = '20260911203303_served_despite_direct_404_v4_trust_is_not_erased_by_a_later_untrusted_agree.sql';
 const migrations = readdirSync(join(root, 'supabase/migrations'));
 check('the v4 fix migration is committed', migrations.includes(MIG), `${MIG} not found`);
 
@@ -87,6 +87,27 @@ check('v3\'s single coupled condition (exists(trusted_runs...) applied directly 
     .test(sql),
   'the old v3 shape (trust required on the single latest row) is still present alongside the v4 fix');
 
+// ── v5 (20260911203658) — the SECOND half of #188: the resolve limb may only clear a platform it
+// could actually SEE. A platform with no ok=true liveness run in the last 48h was never re-raised
+// (the raise loop had no trusted group for it) — that is silence, not a cleared condition, and
+// mon_resolve must not run on it. Landed by a concurrent session while this PR was in flight;
+// mirrored here in the same change per the migration-mirror rule.
+const MIG_V5 = '20260911203658_served_despite_direct_404_v5_resolve_only_what_was_observed.sql';
+check('the v5 resolve-observability migration is committed', migrations.includes(MIG_V5),
+  `${MIG_V5} not found`);
+const sqlV5 = migrations.includes(MIG_V5) ? readFileSync(join(root, 'supabase/migrations', MIG_V5), 'utf8') : '';
+
+check('the resolve loop is gated on a recent (48h) trusted liveness run for that platform',
+  /if exists \(select 1[\s\S]{0,200}?from public\.scrape_runs sr[\s\S]{0,200}?sr\.ok is true[\s\S]{0,100}?'48 hours'\)[\s\S]{0,100}?then\s*\n\s*perform public\.mon_resolve/
+    .test(sqlV5),
+  'resolve is not wrapped in an observability-window check before v5\'s naive unguarded resolve pattern');
+
+check('v5 carries its own apply-time self-test asserting the gate on the LIVE compiled function body',
+  sqlV5.includes("pg_get_functiondef('public.mon_detect_served_despite_direct_404()'::regprocedure)")
+    && sqlV5.includes('v5 self-test: the resolve limb lost its observability gate')
+    && sqlV5.includes('v5 self-test: the naive unguarded resolve loop is still present'),
+  'the migration no longer self-verifies against the live function it just replaced');
+
 // ── 4. MUTATION PROOF — this check must fail on the actual pre-fix (v3) function text ──────────────
 const mustCatch = (label: string, checkPassesOnBrokenInput: boolean) => {
   check(`MUTATION ${label} — the check catches it`, checkPassesOnBrokenInput === false,
@@ -120,6 +141,19 @@ mustCatch('reverting to the v3 single-row-coupled shape',
   /latest_probe as \(\s*select distinct on \(src, listing_id\)/.test(V3_SHAPE));
 mustCatch('reverting to the v3 shape (latest_trusted_dead absent)',
   /latest_trusted_dead as \(\s*select distinct on \(p\.src, p\.listing_id\)/.test(V3_SHAPE));
+
+// v5's own gate check must fail against the naive pre-v5 resolve loop (byte-identical to what
+// v3/v4 actually shipped: unconditional, no observability window).
+const NAIVE_RESOLVE_LOOP = `
+  if v_open is not null then
+    foreach r.src in array v_open loop
+      perform public.mon_resolve('served_despite_direct_404', r.src);
+    end loop;
+  end if;
+`;
+mustCatch('the pre-v5 unguarded resolve loop would pass the "gate is present" check',
+  /if exists \(select 1[\s\S]{0,200}?from public\.scrape_runs sr[\s\S]{0,200}?sr\.ok is true[\s\S]{0,100}?'48 hours'\)[\s\S]{0,100}?then\s*\n\s*perform public\.mon_resolve/
+    .test(NAIVE_RESOLVE_LOOP));
 
 console.log(failed
   ? `\n✗ verify-served-despite-404-trust-not-erased-by-later-untrusted: ${failed} check(s) failed.\n`
