@@ -1,13 +1,22 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-09-11 (amaall exact-district-search fix, migration 20260911195109): CHANGED and
+--   regenerated again, same day as the entry directly below. amaall joined this view as two new
+--   native arms (it had none before — every amaall row previously fell through v2's catch-all
+--   union, which hardcodes district_ar to NULL) so an exact-district search could actually find
+--   amaall listings instead of only a broad city scan. Re-ran pg_get_viewdef against the object
+--   cast to regclass, true as the second argument. Recorded md5 6fba4b52ff81e65afd7c02e98fbc012e
+--   (20062 chars) — was 862a10b719341ab0d425b81b02d69871 (18887 chars); the +1175 chars is exactly
+--   two new arms at the established ~587-char shape each.
+--
 -- Re-verified 2026-09-11 (migration-mirror hygiene sweep + fleet health check): CHANGED and
 --   regenerated. The view genuinely grew since 2026-09-06 — from earlier the same day, PR #2064
 --   (fix: abwbna/bahadhabab/alobid missing from native-location resolution) added six native arms
 --   for those three platforms, and the azdad activation (PR #2097, 20260906210336) added two more
 --   for azdad — eight new UNION ALL arms this mirror never picked up. Re-ran against live
 --   production, using pg_get_viewdef against the object cast to regclass, true as the second
---   argument. Recorded md5: 862a10b719341ab0d425b81b02d69871 (18887 chars) — was
+--   argument. Recorded md5 862a10b719341ab0d425b81b02d69871 (18887 chars) — was
 --   31036a9c8b92fddc5293b700985b869d (14127 chars); the +4760 chars is exactly eight new arms at
 --   the established ~595-char shape each. This checker flagged it via
 --   20260911141903_delete_propagates_to_listings_arabic_locations.sql, an unrelated migration that
@@ -81,7 +90,7 @@
 --
 -- Re-verified 2026-08-20 (prod-drift resolution): CHANGED and regenerated. Migration
 --   20260820074258_v1_legacy_city_resolution_scoped_to_published_region redefined this view
---   (legacy city resolution scoped to the published region). Recorded md5: 31036a9c8b92fddc5293b700985b869d (14127 chars),
+--   (legacy city resolution scoped to the published region). Recorded md5 31036a9c8b92fddc5293b700985b869d (14127 chars),
 --   from md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true)) against live production.
 -- Refreshed 2026-08-08 (senior run #7). The previous copy had drifted badly: it was missing the
 -- ENTIRE `satel` native branch (both the residential and commercial UNION ALL arms), and it still
@@ -143,8 +152,8 @@
 -- with the body below (same 13,385 chars, same md5) — content genuinely unchanged, only the
 -- verification date needed to advance past that migration.
 --
--- Regenerated from pg_get_viewdef('listing_native_location_v1'::regclass, true) — 18,887 chars.
--- Verified byte-exact; md5 of everything below this header block: 862a10b719341ab0d425b81b02d69871
+-- Regenerated from pg_get_viewdef('listing_native_location_v1'::regclass, true) — 20,062 chars.
+-- Verified byte-exact; md5 of everything below this header block: 6fba4b52ff81e65afd7c02e98fbc012e
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
@@ -193,6 +202,30 @@
             aldarim_commercial_listings.transaction_type
            FROM aldarim_commercial_listings
           WHERE aldarim_commercial_listings.active
+        UNION ALL
+         SELECT 'amaall'::text AS platform,
+            'amaall_residential_listings'::text AS source_table,
+            amaall_residential_listings.id AS listing_id,
+            amaall_residential_listings.city_ar,
+            amaall_residential_listings.city_id,
+            amaall_residential_listings.district_ar,
+            amaall_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            amaall_residential_listings.transaction_type
+           FROM amaall_residential_listings
+          WHERE amaall_residential_listings.active
+        UNION ALL
+         SELECT 'amaall'::text AS platform,
+            'amaall_commercial_listings'::text AS source_table,
+            amaall_commercial_listings.id AS listing_id,
+            amaall_commercial_listings.city_ar,
+            amaall_commercial_listings.city_id,
+            amaall_commercial_listings.district_ar,
+            amaall_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            amaall_commercial_listings.transaction_type
+           FROM amaall_commercial_listings
+          WHERE amaall_commercial_listings.active
         UNION ALL
          SELECT 'aqarmonthly'::text AS text,
             'aqarmonthly_residential_listings'::text AS text,

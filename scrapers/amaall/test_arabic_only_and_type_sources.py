@@ -23,6 +23,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
+import scrapers.common.arabic_location as _al  # noqa: E402
+_al.to_catalog = lambda city_ar, region_hint=None: (18, 2) if city_ar == "جدة" else (None, None)
 
 from scrapers.amaall.run import (  # noqa: E402
     TITLE_TYPE_WORDS, TYPE_CATEGORY_TERMS, TYPE_OVERRIDES, TYPE_UNMAPPABLE,
@@ -113,6 +115,20 @@ row, _ = _post(("شقة",), ("للبيع",), ("جدة",), "شقة", areas=("حي
 assert row["neighborhood"] == "حي العزيزية", "property_area must feed neighborhood verbatim"
 row, _ = _post(("شقة",), ("للبيع",), ("جدة",), "شقة")   # no area term at all
 assert row["neighborhood"] is None, "an absent property_area term stays NULL, never guessed"
+
+# ── 5c. ARABIC-NATIVE SHADOW (2026-09-11) — the SAME wiring azdad/abwbna/alobid/bahadhabab carry,
+# missing here until now: without city_id/region_id, listing_native_location_v1 (the native
+# resolver) never sees amaall at all, so a real district (5b) still couldn't be found by an
+# exact-district search — only by a broad city scan. city_id/region_id go through the shared
+# to_catalog() (stubbed above), never a hand-rolled mapping.
+row, _ = _post(("شقة",), ("للبيع",), ("جدة",), "شقة", areas=("حي العزيزية",))
+assert row["city_ar"] == "جدة", "city_ar is the site's own Arabic city term, verbatim"
+assert (row["city_id"], row["region_id"]) == (18, 2), "resolved via the shared catalog, not guessed"
+assert row["district_ar"] == "حي العزيزية", "district_ar mirrors neighborhood, the same source fact"
+# «حي النعيم» is filtered out by raw_city's own `if normalize.map_city(c)` guard (5., line 260),
+# so raw_city is None here too — city_ar must not fall back to storing the rejected raw term.
+row, _ = _post(("شقة",), ("للبيع",), ("حي النعيم",), "شقة")
+assert (row["city_ar"], row["city_id"], row["region_id"]) == (None, None, None)
 
 # ── 6. PRICE / PERIOD = SOURCE ──────────────────────────────────────────────────────────────────
 p = {"link": "https://www.amaall.com/projects/x/", "slug": "x", "id": 1,

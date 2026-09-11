@@ -45,6 +45,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://www.amaall.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -260,6 +261,13 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     city = normalize.map_city(raw_city) if raw_city else None
     region = normalize.region_for_city(city)
 
+    # Arabic-native shadow (2026-09-11, same pattern azdad/abwbna/alobid/bahadhabab already carry):
+    # raw_city IS already the site's own Arabic city term (see above), so city_id/region_id resolve
+    # through the same shared to_catalog() 6 other scrapers use — never a hand-rolled/ambiguous
+    # mapping. This is what lets listing_native_location_v1 (the native resolver) see amaall's own
+    # city at all, instead of falling through to a text-matching fallback.
+    city_id, region_id = to_catalog(raw_city) if raw_city else (None, None)
+
     # DISTRICT — the `property_area` taxonomy IS the site's «تسمية الحي» field (Houzez theme;
     # confirmed live 2026-09-11, term 60 on a real post resolves to «حي العزيزية», the exact text
     # the page itself labels «تسمية الحي»). It was simply never in TAXONOMIES, so every amaall
@@ -324,6 +332,11 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "city": city,
         "region": region,
         "neighborhood": raw_neighborhood,
+        # Arabic-native shadow — see the comment above raw_city/city_id/region_id.
+        "city_ar": raw_city,
+        "district_ar": raw_neighborhood,
+        "city_id": city_id,
+        "region_id": region_id,
         "rega_location_verified": False,
         "title": title,
         "description": _redact(body),
