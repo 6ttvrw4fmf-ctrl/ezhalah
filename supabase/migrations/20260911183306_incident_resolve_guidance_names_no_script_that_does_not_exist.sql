@@ -1,7 +1,7 @@
 -- Follow-up to 20260911181654 (ops_incident #186), same run, ~20 minutes later.
 --
--- That migration's RAISE guidance used «scripts/verify-x.ts» as a worked example of what to pass as
--- the barrier argument. It is a placeholder and no such file exists — and
+-- That migration's RAISE guidance used a placeholder path of the form scripts/verify-<name>.ts as a
+-- worked example of what to pass as the barrier argument. No such file exists — and
 -- scripts/verify-ops-remediation-scripts-exist.ts correctly reads any scripts/verify-*.ts named by a
 -- migration as a PROMISED PROTECTION and fails when the file is absent. It caught this on the very
 -- next full-suite run. The barrier is right: a migration that names a protection which does not

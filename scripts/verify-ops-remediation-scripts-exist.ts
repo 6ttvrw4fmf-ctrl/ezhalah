@@ -91,18 +91,6 @@ const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
   { path: 'scripts/verify-placeholder-price-detector-sees-the-whole-sentinel-set.ts', owner: 'routine-3-data-integrity',
     why: 'claimed by 20260906043755_wasalt_form_default_prices_are_retracted_and_watched.sql '
       + '(ops_incident #63/#65); wasalt placeholder-price detection is price/listing data integrity' },
-  // Raised 2026-09-11 while mirroring 2 migrations that were live in production but never
-  // committed to this repo (blocking an unrelated deploy). 'scripts/verify-x.ts' is NOT a real
-  // dependency — it is a worked-example placeholder inside a RAISE EXCEPTION message, illustrating
-  // the argument shape to pass. It was already dead at the database level ~20 minutes after it was
-  // written: the SAME run's follow-up migration below replaced the live function body (CREATE OR
-  // REPLACE) with generic prose. This barrier scans individual migration FILES, so the placeholder
-  // in the earlier file's immutable historical text still matches even though nothing live depends
-  // on it. Nothing to write — the name was never meant to become a real file.
-  { path: 'scripts/verify-x.ts', owner: 'routine-9-production-red-team',
-    why: 'claimed by 20260911181654_incident_resolution_gate_cannot_be_satisfied_by_its_own_default.sql '
-      + '(ops_incident #186); superseded same-run by 20260911183306_incident_resolve_guidance_names_no_script_that_does_not_exist.sql, '
-      + 'which is literally this fix and exists precisely because the placeholder was never real' },
 ];
 
 console.log('ops remediation scripts — every barrier a migration claims must exist and run');
