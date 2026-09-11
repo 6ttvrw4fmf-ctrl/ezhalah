@@ -127,6 +127,19 @@ const WAIVED: Record<string, string> = {
     'a standing trigger (prevention), not a backfill — watched by mon_detect_placeholder_price_'
     + 'stored (20260906043755, ops_incident #63), which the migration\'s own header names as the '
     + 'detection layer this trigger sits in front of',
+  // Recovered 2026-09-11 (mirroring migrations that blocked an unrelated docs deploy — live in
+  // production, never committed). Same two-migrations-apart shape as the res/com collision waiver
+  // above: 20260911201453 (2h24m later, same session) creates + rosters + runs
+  // mon_detect_amaall_native_location_regressed(), the migration's own header says explicitly it
+  // exists "required by verify-repair-migrations-are-guarded.ts". Like that waiver, the companion
+  // does NOT blindly re-assert the repair's UPDATE — it watches the repair's CLASS specifically:
+  // (A) whether listing_native_location_v1 still carries amaall's arm, (B) whether the scraper is
+  // still populating district_ar. Open the companion to verify this reason rather than taking it
+  // on trust.
+  '20260911195109_amaall_native_location_wiring_and_exact_district_search.sql':
+    'watched by its companion 20260911201453_amaall_native_location_repair_reasserts_and_gets_a_'
+    + 'detector.sql, which ships + rosters + runs mon_detect_amaall_native_location_regressed(), '
+    + 'checking both the resolver wiring and live district-coverage share',
 };
 
 // Enforcement starts here — the day this rule landed.
