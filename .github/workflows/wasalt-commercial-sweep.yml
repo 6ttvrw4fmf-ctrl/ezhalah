@@ -22,7 +22,11 @@ jobs:
       # five minutes after the residential one into a SEPARATE concurrency group, so the two
       # overlap by design; capping BOTH at 6 is what actually bounds the peak (12, not 34).
       # Changing this value without changing the residential cap leaves the peak unbounded.
-      max-parallel: 6
+      #
+      # FOLLOW-UP (2026-08-24, daily engineer): peak=12 still failed 73.5%/58.8% of jobs in the
+      # two post-#827 batches measured (see the matching note in wasalt-residential-sweep.yml for
+      # the evidence). Halving to keep the residential+commercial peak matched at 6 total.
+      max-parallel: 3
       matrix:
         slug: [shop, office, warehouse, commercial-land, showroom, building, land]
         deal: [sale, rent]

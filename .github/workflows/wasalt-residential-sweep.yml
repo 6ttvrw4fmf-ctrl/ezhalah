@@ -40,7 +40,17 @@ jobs:
       # souq24 runs ~04:38-06:52 while wasalt's proxy work lands at 00:40/00:45, 03:15-03:19,
       # 08:40/08:45, 16:40/16:45 and 21:01. souq24's own failure is a separate, still-open
       # defect (see mon_detect_run_duration_explosion / docs) and must not be attributed here.
-      max-parallel: 6
+      #
+      # FOLLOW-UP (2026-08-24, daily engineer, measured post-#827): peak=12 did not clear the
+      # contention. scrape_runs for platform='wasalt' after the #827 merge (2026-08-23 15:02 UTC)
+      # still shows 25/34 (73.5%) failed in the 16:00 UTC batch and 20/34 (58.8%) failed in the
+      # 2026-08-24 00:00 UTC batch — avg fail duration dropped from ~204s to ~90s (less wasted CI
+      # time, per #827's intent) but the fail RATE barely moved, so 12 concurrent sessions is
+      # still above whatever the Webshare plan actually sustains. Halving again per the comment's
+      # own "tune it down if failures persist" guidance. rows_collapse:wasalt (alert_event 907,
+      # ratio 0.028 of the pre-2026-08-17 baseline) and proxy_contention:shared_saudi_proxy
+      # (alert_event 905) are still open at time of this change.
+      max-parallel: 3
       matrix:
         slug: [apartment, villa-townhouse, floor, building, land, rest-house, chalet, farm, room, duplex]
         deal: [sale, rent]
