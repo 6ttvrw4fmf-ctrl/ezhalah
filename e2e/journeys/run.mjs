@@ -9,7 +9,8 @@
 // corollary: `… | tail` reports tail's status) — redirect to a file and read $?.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
-         findings, skips, skip, ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
+         findings, skips, skip, passes, classifyRunOutcome,
+         ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
          SELECTED_CITY_MARKER } from './harness.mjs';
@@ -1928,9 +1929,23 @@ for (const [key, fn] of Object.entries(JOURNEYS)) {
     for (let i = 1; i <= N; i++) {
       const before = findings.length;
       const skipsBefore = skips.length;
+      const passesBefore = passes.length;
       console.log(`\n▶ ${key} [${mobile ? 'mobile' : 'desktop'}] run ${i}/${N}`);
       try { await fn(mobile); } catch (e) { defect(key, 'journey threw', String(e).slice(0, 220)); }
       ran++;
+      // A RUN THAT ASSERTED NOTHING IS NOT A PASS. The verdict used to be a subtraction with no
+      // bottom: no finding and no skip meant `pass`, which silently also covered "this journey
+      // reached no oracle at all". That is how `voice-control` booked 31 clean passes while
+      // clicking a tab that had been renamed away (PR #2061) — see harness.mjs's classifyRunOutcome.
+      const outcome = classifyRunOutcome({
+        defects: findings.length - before,
+        skipped: skips.length - skipsBefore,
+        passed: passes.length - passesBefore,
+      });
+      if (outcome === 'no-outcome') {
+        skip(key, 'the journey recorded no pass, no skip and no defect — nothing was asserted, so '
+          + 'this run is not coverage. Give every early return an explicit outcome.');
+      }
       const k = `${key}${ENGINE === 'chromium' ? '' : `:${ENGINE}`}:${mobile ? 'mobile' : 'desktop'}`;
       perJourney[k] = perJourney[k] || { runs: 0, failed: 0, skipped: 0 };
       perJourney[k].runs++;

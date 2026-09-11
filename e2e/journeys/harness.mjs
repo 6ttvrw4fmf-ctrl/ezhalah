@@ -56,7 +56,30 @@ export const note = (msg) => { notes.push(msg); console.log(`  note    ${msg}`);
 // as passes while the drawer had never been opened.)
 export const skips = [];
 export const skip = (journey, why) => { skips.push({ journey, why }); console.log(`  SKIP    [${journey}] ${why}`); };
-export const pass = (journey, what) => console.log(`  ok      [${journey}] ${what}`);
+// PASSES ARE COUNTED, NOT JUST PRINTED — because the runner's verdict used to be a subtraction it
+// could not see the bottom of. It booked `pass` for any run that added no finding and no skip,
+// which is not the same claim: a journey that reached NO oracle at all adds neither. Measured
+// 2026-09-11, `voice-control` clicked an agent tab renamed five days earlier (PR #2061), stayed on
+// Filter home, found 0 mic controls, emitted one note and returned — and was recorded as a clean
+// PASS, 31 times, while asserting nothing. `classifyRunOutcome` below needs this count to tell
+// "everything I checked was fine" apart from "I checked nothing".
+export const passes = [];
+export const pass = (journey, what) => { passes.push({ journey, what }); console.log(`  ok      [${journey}] ${what}`); };
+
+/**
+ * What did ONE journey run actually establish?
+ *
+ * Precedence is unchanged from the runner's original subtraction — defect beats skip beats pass —
+ * so the ledger keeps meaning what it meant. The ONLY new verdict is `no-outcome`: a run that
+ * recorded nothing at all. That case previously fell into `pass` by omission, which is the single
+ * most dangerous reading available, because it is indistinguishable from success in every report,
+ * ledger row and rotation decision downstream.
+ *
+ * Pure and exported so `scripts/verify-journey-run-records-an-outcome.ts` EXECUTES its full truth
+ * table rather than grepping the runner for a shape.
+ */
+export const classifyRunOutcome = ({ defects = 0, skipped = 0, passed = 0 } = {}) =>
+  defects > 0 ? 'defect' : skipped > 0 ? 'skip' : passed > 0 ? 'pass' : 'no-outcome';
 
 // ── the browsers ────────────────────────────────────────────────────────────────────────────────
 const ENGINES = { chromium, webkit, firefox };
