@@ -173,22 +173,49 @@ Writers into the inactive state:
 ```
 <platform>_*_listings (active = true)
   → active_listing_ids_v2          MATERIALIZED VIEW; each arm is "... WHERE <table>.active IS TRUE"
-                                   refreshed hourly, pg_cron jobid 17, minute :00
-  → listing_native_location_v1 → listing_native_location_v2   (per-listing derived stores)
-  → listing_location_index
-  → sync_search_listings_ar()      pg_cron jobid 28 'sync-search-listings-ar', minute :14
-                                   *** STEP 1 OF 5 *** (see below)
+  → listing_native_location_v1     BOTH refreshed by ONE job: pg_cron jobid 17
+                                   'refresh_listing_native_location_v1', minute :20, timeout 900s
+  → listing_native_location_v2     (a VIEW over v1 — no refresh of its own)
+  → listing_location_index         pg_cron jobid 16 'refresh-location-index', 07:30 daily
+  → sync_search_listings_ar()      pg_cron jobid 28 'sync-search-listings-ar', minute :36,
+                                   timeout 600s.  *** STEP 1 OF 5 *** (see below)
   → search_listings_ar             THE SERVED INDEX
 ```
+
+**Corrected 2026-09-11, measured — the previous version of this block was wrong in three ways and
+the errors mattered.** It said jobid 17 refreshed `active_listing_ids_v2` at minute **:00**; jobid 17
+is named for `listing_native_location_v1`, runs at **:20**, and refreshes **both** matviews in one
+command. And it recorded the consumer at :14 as if that were fine.
+
+It was not fine: **the consumer was scheduled six minutes BEFORE the producer it reads.** Every sync
+therefore built the served index from the *previous* hour's snapshot — 54 minutes stale — so a
+source-confirmed dead listing stayed visible, and a restored one stayed invisible, for a full extra
+cycle. That is §1.1's rule ("the user must stop seeing it immediately", which §2.3 defines as *by the
+next completed propagation*) being broken by the propagation's own ordering.
+
+It was also not merely latency. Job 28's 600s timeout could carry it into job 28's start, and
+`cron.job_run_details` recorded both collisions on 2026-09-04: a **deadlock** at 16:14, and at 15:14
+a statement timeout that cancelled — by name — `delete from search_listings_ar s where not exists
+(select 1 from listing_native_location_v2 v ...)`, *the aliveness removal leg itself*.
+
+Fixed by migration `20260911141305`: the consumer moved to **:36**. Not :30, which the measured
+durations (producer avg 75.9s / p95 199.4s / max 492.5s over 168 runs) would allow — an observed
+maximum is a SAMPLE, while the producer's own `statement_timeout` of 900s is a GUARANTEE that bounds
+it at :35. `mon_detect_propagation_order_inverted` (kind `lifecycle_propagation_order_inverted`)
+grades against that guarantee, so it holds for any future reschedule of either job and never mentions
+a literal minute. Mutation-proven at the boundary: **:14 caught, :35 caught, :36 silent**
+(`20260911141433` tightened the comparison to `<=` after the first draft let :35 pass).
 
 Three properties of this leg that matter more here than anywhere else in the system:
 
 1. **Inactivation is not immediate on the served index.** `location_search_candidates_ar` has **no
    `active` predicate of its own** — aliveness is enforced entirely upstream, by the matview's
    `WHERE active IS TRUE` and by the sync's delete leg. A row deactivated at 12:05 stays served
-   until the :00 refresh and the :14 sync have both run. **That window is normal, and it is the
-   thing this routine measures.** "Immediately" in the owner's rule means *by the next completed
-   propagation*, and a leak that outlives one full refresh+sync cycle is a defect, not latency.
+   until the :20 refresh and the :36 sync have both run — roughly 12:38. **That window is normal,
+   and it is the thing this routine measures.** "Immediately" in the owner's rule means *by the next
+   completed propagation*, and a leak that outlives one full refresh+sync cycle is a defect, not
+   latency. Note the window is bounded only when the two run IN ORDER; see the correction below for
+   what happened when they did not.
 2. **The sync's DELETE leg can abort.** `sync_search_listings_ar()` counts rows absent from
    `listing_native_location_v2`; if that count exceeds `greatest(2000, 15% of the index)` it writes
    a `sync_delete_circuit_breaker` row to `location_pipeline_alerts` and **deletes nothing**. A

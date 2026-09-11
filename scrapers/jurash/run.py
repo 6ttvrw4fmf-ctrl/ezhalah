@@ -408,7 +408,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
     return row, category, gone
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+def _pin_sold_inactive(table: str, sold: list[tuple[str, str, str]]) -> None:
     """Make source-confirmed SOLD/RENTED rows inactive NOW and survivors of the nightly
     auto_recover_false_inactive() sweep.
 
@@ -422,13 +422,38 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     stuck in on 2026-07-16). prune_unseen() never undoes the pin: it only selects active=true
     rows. When a listing is later relisted, its next upsert carries active=true and the upsert's
     own missing_count=0 reset applies — the pin is only written for ids that are gone THIS
-    crawl."""
+    crawl.
+
+    EVIDENCE (ops_incident #144, 2026-09-11). Every pin here follows a DIRECT fetch of the
+    listing's own URL that read an affirmative removal signal (GONE_STATUS on the page's own
+    `status` field) — real evidence, not absence — but until now nothing outside this file could
+    see it: mon_detect_unknown_treated_as_dead() found 213 jurash rows deactivated with no
+    matching row in ops_stale_inactivation_probe and, correctly, could not itself tell a genuine
+    gap from a real-but-unrecorded kill (both look identical from outside). A control-validated
+    live re-probe that run (13/13 dead-vs-live separation on the title's own status token) proved
+    the kills were correct; this closes the gap going forward by writing the same evidence the
+    scraper already has. Monitoring must never fail the pin itself — evidence is written best-effort,
+    same pattern as db.prune_unseen()'s verify_gone evidence write."""
+    ad_numbers = [a for a, _, _ in sold]
     for i in range(0, len(ad_numbers), 200):
         db._execute(
             db.sb().table(table).update({"active": False, "missing_count": 3})
             .in_("ad_number", ad_numbers[i:i + 200]),
             what=table + ".sold_pin",
         )
+    try:
+        evidence = [
+            {"source_table": table, "ad_number": a, "listing_url": u, "verdict": "GONE",
+             "oracle": "jurash.status_title", "note": status_ar}
+            for a, u, status_ar in sold
+        ]
+        for i in range(0, len(evidence), 200):
+            db._execute(
+                db.sb().table("ops_stale_inactivation_probe").insert(evidence[i:i + 200]),
+                what="ops_stale_inactivation_probe.insert",
+            )
+    except Exception as e:  # noqa: BLE001 — evidence is best-effort; the pin above must not depend on it
+        print(f"{table}: could not record jurash sold/rented evidence ({type(e).__name__}: {e})")
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────
@@ -460,8 +485,11 @@ def main() -> int:
 
     res: list[dict] = []
     com: list[dict] = []
-    sold_res: list[str] = []
-    sold_com: list[str] = []
+    # Carries (ad_number, listing_url, status_ar) — not just the id — so the pin can also write
+    # fleet-wide evidence (ops_incident #144's follow-on: DIRECT evidence existed but reached no
+    # table anything outside this file reads).
+    sold_res: list[tuple[str, str, str]] = []
+    sold_com: list[tuple[str, str, str]] = []
     gone_ct = 0
     seen = 0
     try:
@@ -487,8 +515,11 @@ def main() -> int:
                     continue
                 if gone:
                     gone_ct += 1
-                    # remember the id so any EXISTING row is pinned inactive after the upserts
-                    (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
+                    # remember the id (+ its evidence) so any EXISTING row is pinned inactive after
+                    # the upserts, and the DIRECT evidence that justified it is auditable fleet-wide.
+                    entry = (row["ad_number"], row["listing_url"],
+                             row.get("additional_info", {}).get("status_ar") or "")
+                    (sold_com if cat == "commercial" else sold_res).append(entry)
                     continue  # don't list sold/rented
                 if args.type != "all" and cat != args.type:
                     continue
