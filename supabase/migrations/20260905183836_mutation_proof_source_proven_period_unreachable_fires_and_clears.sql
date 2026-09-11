@@ -25,7 +25,7 @@
 -- than on a defect (this migration did exactly that on its first attempt and was rolled back).
 -- The insta-resolve property was therefore proven where it is real - across separate transactions,
 -- live on production 2026-09-05: raised 18:37:31.837145+00, resolved 18:37:50.035148+00, held open
--- 18.198 s, resolved_at = created_at -> false. Re-run those two halves rather than re-deriving this.
+-- 18.198 s, resolved_at = created_at → false. Re-run those two halves rather than re-deriving this.
 
 do $$
 declare
