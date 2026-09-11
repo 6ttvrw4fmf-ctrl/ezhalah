@@ -105,31 +105,34 @@ def check_not_ready(client, counts: dict) -> bool:
 
 
 def check_awal(client) -> bool:
-    """True = OK. RETIRED 2026-07-28 — this check is now INVERTED.
+    """True = OK. REVIVED 2026-09-04 — restored to the check's ORIGINAL sense.
 
-    awaalun.com lapsed into a GoDaddy domain-parking page: the WP REST catalogue and every
-    individual /property/ URL return HTTP 200 with a ~114-133 byte redirect stub to /lander. The
-    scraper was retired (#252) and the 51 link-rotted listings were inactivated with the
-    source-confirmed pin missing_count=3 (#255, owner-approved) after 8/8 sampled URLs were
-    re-fetched and confirmed parked.
+    History, both flips deliberate:
+      * RETIRED 2026-07-28 (#252/#255, owner-approved): awaalun.com lapsed into a GoDaddy parking
+        stub; the 51 link-rotted listings were inactivated and this check was INVERTED to assert
+        0 active rows, with its own docstring saying: "If awaalun.com genuinely returns, un-retire
+        deliberately and restore this check to its original sense."
+      * REVIVED 2026-09-04 (#1782, owner-instructed): the source came back as a full real-estate
+        site (WP REST served 128 real posts); platform_registry retired→active (migration
+        20260905023206), small-sources-sync re-armed. The revival missed this file — the inverted
+        assertion then failed nightly against healthy stock. Re-adjudicated 2026-09-11: apex 200
+        with a ~158KB real site, 5/5 sampled /property/ URLs 200 with real listing pages, 0 parked
+        markers, last sync saw every row (low churn is documented source behavior in #1782).
 
-    So 0 active rows is now the CORRECT state, and the old assertion (active > 0, "the scraper
-    appears to have stopped") would fail every night forever. What is worth watching instead is the
-    opposite: rows coming BACK without a decision to un-retire, which would mean either the retired
-    scraper is running again or something reactivated dead stock. If awaalun.com genuinely returns,
-    un-retire deliberately and restore this check to its original sense.
+    So active rows are the healthy state again, and the failure worth watching is the original
+    one: 0 active rows = the scraper stopped or something mass-deactivated live stock. If awaalun
+    ever parks again, retire deliberately (the #252/#255 pattern) and re-invert.
     """
     active = 0
     for tbl in ("awal_residential_listings", "awal_commercial_listings"):
         active += client.table(tbl).select("listing_url", count="exact").eq("active", True).limit(1).execute().count or 0
-    if active == 0:
-        print("OK  awal retired: 0 active listings, as expected (awaalun.com is a parked domain; "
-              "scraper retired #252, listings inactivated #255).")
+    if active > 0:
+        print(f"OK  awal active: {active} active listings (platform revived #1782; healthy state).")
         return True
-    detail = (f"awal has {active} ACTIVE listings but the platform is retired and awaalun.com is a "
-              f"parked domain — something re-activated dead stock or the retired scraper ran.")
-    print(f"FAIL awal retired-state: {detail}")
-    _alert(client, "awal_reactivated_while_retired", active, detail)
+    detail = ("awal has 0 ACTIVE listings but the platform was revived (#1782) — the scraper "
+              "stopped or something mass-deactivated live stock.")
+    print(f"FAIL awal revived-state: {detail}")
+    _alert(client, "awal_empty_while_active", 1, detail)
     return False
 
 
@@ -284,7 +287,7 @@ MAX_PAID_AGENT_CALLS_PER_RUN = 4
 _paid_agent_calls = 0
 
 
-def _call_agent(text: str, history: list | None = None) -> dict:
+def _call_agent(text: str, history: list | None = None, ask_count: int | None = None) -> dict:
     global _paid_agent_calls
     if _paid_agent_calls >= MAX_PAID_AGENT_CALLS_PER_RUN:
         raise RuntimeError(
@@ -293,8 +296,13 @@ def _call_agent(text: str, history: list | None = None) -> dict:
             f"verification is genuinely needed."
         )
     _paid_agent_calls += 1
-    body = json.dumps({"text": text, "locale": "ar", "loggedIn": False, "order": False,
-                        "history": history or []}).encode()
+    payload = {"text": text, "locale": "ar", "loggedIn": False, "order": False,
+               "history": history or []}
+    # The server counts its question budget via this structured field (#1384 removed the old
+    # history-regex counter) — a probe that fabricates "budget already spent" must send it.
+    if ask_count is not None:
+        payload["askCount"] = ask_count
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
         f"{SUPABASE_URL}/functions/v1/agent", data=body, method="POST",
         headers={"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}",
@@ -336,41 +344,51 @@ def check_agent(client=None) -> bool:
     return ok
 
 
-# BROAD-SEARCH-AFTER-BUDGET (owner-reported live bug, 2026-08-30): "family of 5, a large
-# villa/apartment, either type is fine" never showed a single listing. supabase/functions/agent
-# forces kind="listings" once its own priorQuestions count hits 2, even with no city — this fabricates
-# that same history state directly (the server only reads history text/role, not how it was produced,
-# and this is 1 paid call instead of replaying the whole conversation) and asserts the model actually
-# complies: a SEARCHABLE, executable query (real non-location signal), not a 3rd/4th question.
-# NON-DETERMINISTIC: this is a live DeepSeek call, not a pure assertion — the model can occasionally
-# still choose to ask (see the real production replay, where it asked a 3rd question at turn 3 before
-# complying at turn 4). It is still a meaningful guard because it pins the STRUCTURAL contract this bug
-# broke: given the budget is already spent, a city-less broad search must be an ACCEPTED, executable
-# outcome, not something the pipeline treats as insufficient to search. The deterministic, mutation-proven
-# regression guard is scripts/verify-agent-broad-search-after-budget.ts (the client-side gate itself);
-# this is the live companion proving the server side of the same contract still holds against the real
-# model.
+# BROAD-SEARCH-AFTER-BUDGET — re-pinned to the CURRENT contract (2026-09-11).
+#
+# The original probe (2026-08-30, "family of 5" bug) asserted a CITY-LESS broad search once the
+# question budget was spent. That contract was REPEALED by the owner on 2026-09-04 (#1770,
+# reinforced #1785): «a search needs a real place» — nationwide search is closed at the decision
+# authority (the 39,055-nationwide-listings bug), so a user who never names a city keeps getting
+# the city question (decide.ts step 1c, deliberately unbounded), and location "" is no longer an
+# acceptable search. This probe kept grading the repealed rule and failed nightly against a
+# CORRECT production (verified live 2026-09-11: the kind="message" reply still carries
+# understoodState — deal kept, «كبير» captured as askAbout:["size"], never a bedroom count).
+#
+# The CURRENT contract this probe pins: with a real city named and the budget spent, the agent
+# must SEARCH (kind="listings" scoped to that city) rather than ask again. Two mechanics matter:
+#   * The server counts questions via the structured body.askCount the client sends (#1384
+#     removed the old history-regex counter), so the probe must send askCount, not just history.
+#   * The city is جدة, deliberately NOT الرياض — الرياض is a city/region twin and would correctly
+#     trigger the ambiguity question (decide.ts step ~207) instead of a search.
+# NON-DETERMINISTIC: still a live DeepSeek call; the deterministic ladder guard is
+# scripts/verify-agent-decide-turn.ts. This is the live companion proving the server half.
 AGENT_BROAD_SEARCH_HISTORY = [
-    {"role": "user", "text": "ماعرف عندك شيء حلو عندي 5 عيال"},
+    {"role": "user", "text": "ابغى شي في جدة عندي 5 عيال"},
     {"role": "model", "text": "أبشر! وش تدور عليه بالضبط؟"},
     {"role": "user", "text": "عادي الاثنين ماعندي مشكلة"},
     {"role": "model", "text": "طيب، إيجار ولا تمليك؟"},
 ]
 AGENT_BROAD_SEARCH_TEXT = "بس ودي شي كبير، ماعندي مانع الاثنين"
+AGENT_BROAD_SEARCH_ASK_COUNT = 2  # budget spent — the server reads this structured field (#1384)
 
 
 def check_agent_broad_search_after_budget(client=None) -> bool:
     try:
-        d = _call_agent(AGENT_BROAD_SEARCH_TEXT, history=AGENT_BROAD_SEARCH_HISTORY)
+        d = _call_agent(AGENT_BROAD_SEARCH_TEXT, history=AGENT_BROAD_SEARCH_HISTORY,
+                        ask_count=AGENT_BROAD_SEARCH_ASK_COUNT)
     except Exception as e:
         print(f"FAIL agent-broad-search-after-budget: request failed ({e})"); return False
     q = d.get("query") or {}
     problems = []
     if d.get("kind") != "listings":
-        problems.append(f"kind={d.get('kind')} (expected listings once the question budget is spent)")
-    # Never invent a city — location "" here is the HONEST, correct outcome. The regression this
-    # guards is the opposite failure: getting stuck asking forever instead of searching with the real
-    # signal already given (a type, and/or the vague-size ask_about captured from "كبير").
+        problems.append(f"kind={d.get('kind')} (expected listings: city named + budget spent)")
+    # The named city must survive into the executed search (owner 2026-09-04: a search needs a
+    # real place — and that place must be the one the user gave, never invented or dropped).
+    if "جدة" not in (q.get("location") or ""):
+        problems.append(f"location={q.get('location')!r} lost the named city جدة")
+    # The regression this half still guards: the non-location signal must not be erased — the
+    # vague-size «كبير» is captured as askAbout (never a bedroom count), and/or a type carries.
     if not (q.get("type") or (q.get("askAbout") or [])):
         problems.append(f"no usable non-location signal captured: query={q}")
     if problems:
