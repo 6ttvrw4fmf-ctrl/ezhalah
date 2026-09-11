@@ -103,3 +103,28 @@ jobs:
           --min-id ${{ github.event.inputs.min_id || '24000' }}
           --max-id ${{ github.event.inputs.max_id || '32300' }}
           --shards 8 --shard ${{ matrix.shard }}
+
+  # A red run of a SCHEDULED workflow notifies nobody by itself — this bridge is what reaches the
+  # ops dashboard (verify-scheduled-checks-alert-on-failure.ts enforces its presence). One aggregate
+  # verdict for the fleet, not eight per-shard alerts: needs.crawl.result is 'failure' if ANY
+  # non-continued shard failed, and 'success' resolves the standing key.
+  bridge:
+    name: Bridge fleet result to alert_event
+    runs-on: ubuntu-latest
+    needs: crawl
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Bridge this run's result to alert_event
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind ingestion_check_failed
+          --workflow muktamel-sharded.yml
+          --status ${{ needs.crawl.result }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
