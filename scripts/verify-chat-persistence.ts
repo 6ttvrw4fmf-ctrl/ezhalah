@@ -198,8 +198,11 @@ check('migration: PDPL — chats cascade away with the auth user (account deleti
 
 // ── 3c. Agent capture + restore wiring ──────────────────────────────────────────────────────────
 const agent = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
-check('agent: every live recorded turn names the conversation (ensureChatId on all 4 record calls)',
-  (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 4);
+// 4 -> 3 on 2026-09-11: ONE MAIN REQUEST + ONE LOCATION QUESTION deleted the client's own
+// "hasIntent && askCountRef>=2, search anyway" override and its runQuery(combined, ...) call —
+// decide.ts is now the single decision authority for kind='message' too.
+check('agent: every live recorded turn names the conversation (ensureChatId on all 3 record calls)',
+  (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 3);
 check('agent: a text turn keeps the same identity (recordChatTurn return adopted)',
   /const rid = recordChatTurn\(v\); if \(rid\) chatIdRef\.current = rid;/.test(agent));
 check('agent: a fresh chat clears the conversation id (New Chat + startFresh inherit nothing)',
