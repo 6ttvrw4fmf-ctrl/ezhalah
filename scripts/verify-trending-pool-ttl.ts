@@ -73,12 +73,34 @@ check('the city narrowing-refresh effect (gated on cityFocus/cityTextRef) re-run
 check('the district narrowing-refresh effect (gated on citySelected) re-runs on resume',
   /\}, \[effDeal, effCategory, citySelected, rentPeriodTok, cohortTypesSig, cityTableScopeSig, resumeTick\]\);/.test(indexSrc));
 
-// ── 7. mutation proof: the deps-array regex above must actually be able to fail ──
-// Prove check #6 is a real assertion, not a tautology, by feeding it source with resumeTick
-// stripped back out — the exact regression this barrier exists to catch.
+// ── 7. mutation proofs: every predicate above must actually be able to fail ──
+// Executable mustCatch(...) convention (verify-new-barriers-are-mutation-proven.ts): apply this
+// barrier's own predicates to deliberately broken input and demand they go red.
+const mustCatch = (label: string, caught: boolean) => check(`MUTATION — ${label}`, caught);
+
+// (a) resumeTick dropped back out of the city refresh effect's deps — the exact regression
+// this barrier exists to catch — must fail check #6's own regex.
 const mutatedNoResume = indexSrc.replace('}, [cityAfSig, cityFocus, resumeTick]);', '}, [cityAfSig, cityFocus]);');
-check('(mutation) catches resumeTick being dropped back out of the city refresh effect\'s deps',
+mustCatch('catches resumeTick being dropped back out of the city refresh effect\'s deps',
   !/\}, \[cityAfSig, cityFocus, resumeTick\]\);/.test(mutatedNoResume));
+
+// (b) the old "cached forever" bug reintroduced: strip the TTL gate from the city-pool hit and
+// demand check #2b's own regex goes red on the mutant source — proving that regex is a real
+// assertion over the gate, not a pattern that matches anything.
+const mutatedForeverCache = locSrc.replace(
+  /const cachedAt = _cityPoolFetchedAt\.get\(key\);\s*\n\s*if \(cached && cachedAt !== undefined && Date\.now\(\) - cachedAt < POOL_TTL_MS\) return cached;/,
+  'if (cached) return cached;');
+mustCatch('catches the TTL gate being stripped back to the unconditional city-pool return',
+  !/const cachedAt = _cityPoolFetchedAt\.get\(key\);\s*\n\s*if \(cached && cachedAt !== undefined && Date\.now\(\) - cachedAt < POOL_TTL_MS\) return cached;/.test(mutatedForeverCache));
+
+// (c) the freshness arithmetic: an off-by-one mutant (`<` loosened to `<=`) must disagree with
+// the real predicate exactly on section 4's boundary case — proving that case discriminates.
+function isFreshMutantLE(cachedAt: number | undefined, now: number): boolean {
+  return cachedAt !== undefined && now - cachedAt <= TTL; // strictness dropped
+}
+mustCatch('catches the <= boundary mutant (the exact-TTL instant must expire, not survive)',
+  isFreshMutantLE(1_000_000, 1_000_000 + TTL) === true
+  && isFresh(1_000_000, 1_000_000 + TTL) === false);
 
 console.log(
   failed === 0
