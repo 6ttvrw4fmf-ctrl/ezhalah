@@ -1,28 +1,3 @@
--- Real defect reported by the owner (2026-09-06): the abwbna card was missing its district, and a
--- separate observation ("الهفوف المبرز العيون are part of الأحساء") turned out to be the SAME root
--- cause, not a separate issue.
---
--- listing_native_location_v1's `native` CTE is a HAND-CURATED, hardcoded list of platforms whose own
--- city_ar/city_id/district_ar/region_id columns are trusted directly (alhoshan, aldarim, aqarmonthly,
--- aqargate, sanadak, hajer, wasalt, aqar, satel + the phasea catch-all). abwbna, bahadhabab and
--- alobid — three more Nuzul-tenant clones onboarded THIS SAME DAY, with the exact same native
--- city_ar/city_id/district_ar/region_id columns aldarim already carries — were never added to this
--- list, so their own accurate source data was ignored and every one of their rows instead fell
--- through to a legacy/derived location-inference path.
---
--- MEASURED, live, before this fix: abwbna city_ar was showing 'الهفوف' (Hofuf) even though abwbna's
--- OWN city_id column (resolved via to_catalog() from the source's own Arabic city name) correctly
--- points at loc_catalog_city id 3677 = 'الاحساء' (Al-Ahsa) — exactly the owner's point: الهفوف is
--- not the right city label for this source's Al-Ahsa-labeled listings. district_ar coverage was
--- 16/189 (abwbna), 3/53 (bahadhabab), 53/138 (alobid).
---
--- MEASURED, live, after this fix (own native columns now used directly, no re-derivation): city_ar
--- correctly shows 'الاحساء' for abwbna's Al-Ahsa rows (1 real 'الدمام' row and 53 source-null rows
--- kept exactly as the source states — never invented). district_ar coverage: 136/189 (abwbna),
--- 11/53 (bahadhabab), 101/138 (alobid).
---
--- Snapshot label: 'pre_native_location_v1_fix_20260906' — 4 views + 1 matview + 7 indexes + 112
--- grants, captured via the same pg_depend/pg_rewrite walk used for the search-union activations.
 DO $do$
 DECLARE
   base text; arms text := ''; t text; anchor text;
@@ -34,8 +9,6 @@ BEGIN
 
   base := rtrim(rtrim(pg_get_viewdef('public.listing_native_location_v1'::regclass,true)),';');
 
-  -- Anchor: right after aldarim_commercial_listings' own arm ends — new arms mirror that exact
-  -- shape (native_scraper, straight from the table's own city_ar/city_id/district_ar/region_id).
   anchor := 'FROM aldarim_commercial_listings
           WHERE aldarim_commercial_listings.active';
   IF position(anchor in base) = 0 THEN
@@ -73,8 +46,6 @@ BEGIN
 END
 $do$;
 
--- ── Restore every dependent, index and grant the CASCADE removed (multi-pass, never raises — see
--- 20260906171500 for why a single-pass-then-raise loop is unsafe here) ────────────────────────────
 DO $restore$
 DECLARE r record; pass int; okc int; last_okc int := -1;
 BEGIN
@@ -100,7 +71,6 @@ BEGIN
 END
 $restore$;
 
--- ── Prove the restore actually completed (measured live: 5/5 views+matviews, 112/112 grants) ─────
 DO $verify$
 DECLARE expected_vm int; actual_vm int; expected_grants int; actual_grants int;
 BEGIN
@@ -122,8 +92,3 @@ BEGIN
   END IF;
 END
 $verify$;
-
--- Push the fix through to the actual search table (idempotent — takes the single-writer advisory
--- lock, single-writer with the hourly `sync-search-listings-ar` pg_cron job; safe to no-op if the
--- lock is held elsewhere).
-SELECT sync_search_listings_ar();
