@@ -194,17 +194,70 @@ export const SEARCH_BEAT_MS = (() => { const b = readSearchBeatMs(); return b.fl
 export const POST_SEARCH_BUDGET_MS = SEARCH_BEAT_MS + AGENT_TURN_MS;
 
 /**
+ * THE IDS THAT PROVE A NEW RESULTS TURN: the ids this turn returned, MINUS the ids that were already
+ * on screen when the wait began.
+ *
+ * WHY THE SUBTRACTION IS THE WHOLE POINT (measured on production 2026-09-11). The first version of
+ * `awaitResultsTurn` polled "how many on-screen cards are in the committed id set", and its own
+ * comment called that "the only set that proves the NEW turn has rendered". It is not. An Advanced
+ * Filter answer NARROWS: the committed set is drawn from the very rows the previous screen was
+ * showing, so the intersection is non-empty BEFORE the new turn renders at all — the poll returns at
+ * t=0 and the caller reads the screen the beat is still holding. That is a fixed sleep with extra
+ * steps, which is exactly what the header of this file forbids, rebuilt one screen further on.
+ *
+ * Measured: الرياض/شقة, committed 159 rows against a screen of 13 cards from the pre-AF search. The
+ * old predicate settled immediately; the real turn arrived 9,065 ms later and DID render its
+ * «مطابق لطلبك» strips. Six live steps had been red for five days over it, every one of them
+ * accusing a correct production (ops_incident #141).
+ *
+ * This is the same lesson `awaitAfStep`'s `previousOptions` already encodes for the question card —
+ * "some options are on screen" is true the instant after a confirm — applied to the results turn.
+ */
+export function provingIds(turnIds: Iterable<number>, onScreenBefore: Iterable<number>): number[] {
+  const before = new Set<number>(onScreenBefore);
+  return [...new Set<number>(turnIds)].filter((id) => !before.has(id));
+}
+
+export type TurnArrival = {
+  /** a PROVING id was observed on screen. Only then may the caller read that screen. */
+  settled: boolean;
+  /**
+   * false ⇒ this turn cannot be proven by id from this screen (every id it returned was already
+   * rendered). The caller must report NOT EXERCISED — never fall back to "something is on screen",
+   * which is the defect this type exists to make unrepresentable.
+   */
+  provable: boolean;
+  /** how many proving ids were on screen when the poll stopped. */
+  proving: number;
+  /** how large the proving set was to begin with (0 ⇒ not provable). */
+  provingPool: number;
+};
+
+/**
  * Wait for the results turn a committed answer produced to be ON SCREEN, and say whether it ever
  * arrived. `settled:false` means it never did — the caller must abandon every assertion that reads
  * that screen and report NOT EXERCISED (rule 2 in the header), never judge what it found.
+ *
+ * The caller passes the turn's own ids and the ids ON SCREEN when the wait began; the proving set is
+ * computed here, once, so no journey can reintroduce the intersection predicate by hand. Snapshot
+ * `onScreenBefore` as soon as the committed response is captured — the beat holds the previous
+ * screen for SEARCH_BEAT_MS, so that read is the screen being replaced. If the new turn somehow
+ * rendered before the snapshot, the pool shrinks and this reports NOT PROVABLE: it fails toward
+ * "this run did not certify the product", never toward judging an unobserved screen.
  */
 export async function awaitResultsTurn(
-  readCardCount: () => Promise<number>,
+  readShownIds: () => Promise<readonly number[]>,
   sleep: (ms: number) => Promise<void>,
+  turn: { turnIds: Iterable<number>; onScreenBefore: Iterable<number> },
   budgetMs = POST_SEARCH_BUDGET_MS,
-): Promise<{ settled: boolean; cards: number }> {
-  const r = await settleUntil(readCardCount, (n) => n > 0, budgetMs, sleep);
-  return { settled: r.settled, cards: r.value };
+): Promise<TurnArrival> {
+  const pool = provingIds(turn.turnIds, turn.onScreenBefore);
+  if (pool.length === 0) return { settled: false, provable: false, proving: 0, provingPool: 0 };
+  const proof = new Set(pool);
+  const r = await settleUntil(
+    async () => (await readShownIds()).filter((id) => proof.has(id)).length,
+    (n) => n > 0, budgetMs, sleep);
+  return { settled: r.settled, provable: true, proving: r.value, provingPool: pool.length };
 }
 
 /**

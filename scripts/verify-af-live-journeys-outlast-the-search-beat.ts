@@ -41,7 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   readSearchBeatMs, SEARCH_BEAT_MS, POST_SEARCH_BUDGET_MS,
-  awaitResultsTurn, awaitAfStep, AGENT_TURN_MS,
+  awaitResultsTurn, awaitAfStep, provingIds, AGENT_TURN_MS,
 } from './lib/afJourneyPacing.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -78,28 +78,64 @@ const virtualClock = () => {
   return { sleep, at: () => now };
 };
 
+// THE NARROWING SCREEN — the shape that made all of section 2 vacuous until 2026-09-11. The previous
+// turn is on screen (ids 1..13); an AF answer narrows to a set drawn from those same rows plus rows
+// deeper in the inventory (ids 5..13 ∪ 900..902). "Any committed id on screen" is TRUE at t=0, so the
+// old predicate could not distinguish the held screen from the new turn. Measured live before the
+// fix: committed 159, already-rendered 19, real arrival 9,065ms later.
+const PREVIOUS_SCREEN = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+const COMMITTED_TURN = [5, 6, 7, 8, 9, 10, 11, 12, 13, 900, 901, 902];
 {
-  // (a) the arrival is LATE — behind the full beat. The helper must keep polling and still catch it.
+  // (a) the arrival is LATE — behind the full beat. The helper must keep polling and still catch it,
+  //     and must NOT settle on the narrowing overlap that is on screen the whole time.
   const clock = virtualClock();
-  const cards = () => Promise.resolve(clock.at() >= SEARCH_BEAT_MS ? 12 : 0);
-  const r = await awaitResultsTurn(cards, clock.sleep);
+  const shown = async () => (clock.at() >= SEARCH_BEAT_MS
+    ? [...PREVIOUS_SCREEN, ...COMMITTED_TURN]   // the transcript keeps the old turn AND adds the new
+    : PREVIOUS_SCREEN);
+  const r = await awaitResultsTurn(shown, clock.sleep,
+    { turnIds: COMMITTED_TURN, onScreenBefore: PREVIOUS_SCREEN });
   check('awaitResultsTurn waits THROUGH the beat and still sees a late results turn',
-    r.settled && r.cards === 12 && clock.at() >= SEARCH_BEAT_MS,
-    `settled=${r.settled} cards=${r.cards} observed at ${clock.at()}ms (beat ${SEARCH_BEAT_MS}ms)`);
+    r.settled && r.provable && r.proving === 3 && clock.at() >= SEARCH_BEAT_MS,
+    `settled=${r.settled} provable=${r.provable} proving=${r.proving} observed at ${clock.at()}ms (beat ${SEARCH_BEAT_MS}ms)`);
 }
 {
   // (b) nothing ever arrives — the caller MUST be told, never handed a screen to judge.
   const clock = virtualClock();
-  const r = await awaitResultsTurn(() => Promise.resolve(0), clock.sleep);
+  const r = await awaitResultsTurn(async () => PREVIOUS_SCREEN, clock.sleep,
+    { turnIds: COMMITTED_TURN, onScreenBefore: PREVIOUS_SCREEN });
   check('awaitResultsTurn reports settled=false when the results turn never arrives',
-    r.settled === false && r.cards === 0, `settled=${r.settled} cards=${r.cards}`);
+    r.settled === false && r.provable === true && r.proving === 0,
+    `settled=${r.settled} provable=${r.provable} proving=${r.proving}`);
 }
 {
   // (c) already on screen — a fast run must not be taxed by the large budget.
   const clock = virtualClock();
-  const r = await awaitResultsTurn(() => Promise.resolve(5), clock.sleep);
+  const r = await awaitResultsTurn(async () => [...PREVIOUS_SCREEN, ...COMMITTED_TURN], clock.sleep,
+    { turnIds: COMMITTED_TURN, onScreenBefore: PREVIOUS_SCREEN });
   check('awaitResultsTurn returns immediately when the turn is already rendered (no artificial hold)',
     r.settled && clock.at() === 0, `observed at ${clock.at()}ms`);
+}
+{
+  // (d) THE DEFECT ITSELF. The overlap is on screen for the whole beat and the new rows arrive late.
+  //     A predicate that accepts the overlap settles at 0ms — the harness then reads a screen that is
+  //     still showing the previous turn and reports the product broken. The helper must not.
+  const clock = virtualClock();
+  const shown = async () => (clock.at() >= SEARCH_BEAT_MS ? [...PREVIOUS_SCREEN, 900, 901, 902] : PREVIOUS_SCREEN);
+  const r = await awaitResultsTurn(shown, clock.sleep,
+    { turnIds: COMMITTED_TURN, onScreenBefore: PREVIOUS_SCREEN });
+  check('awaitResultsTurn does NOT settle on the narrowing overlap the held screen already shows',
+    r.settled && clock.at() >= SEARCH_BEAT_MS,
+    `settled at ${clock.at()}ms — the overlap (${COMMITTED_TURN.filter((i) => PREVIOUS_SCREEN.includes(i)).length} id(s)) was visible from 0ms`);
+}
+{
+  // (e) a turn that is a STRICT SUBSET of the screen cannot be proven by id at all. That must be said
+  //     out loud (NOT EXERCISED), never quietly treated as "arrived because something is on screen".
+  const clock = virtualClock();
+  const r = await awaitResultsTurn(async () => PREVIOUS_SCREEN, clock.sleep,
+    { turnIds: [5, 6, 7], onScreenBefore: PREVIOUS_SCREEN });
+  check('a turn whose every id was already rendered reports provable=false, not a silent arrival',
+    r.provable === false && r.settled === false && r.provingPool === 0,
+    `provable=${r.provable} settled=${r.settled} pool=${r.provingPool}`);
 }
 {
   const mk = <T,>(v: T) => async () => v;
@@ -199,6 +235,25 @@ const unpaced = MUST_PACE.filter((f) => !readFileSync(join(SCRIPTS, f), 'utf8').
 check('every journey corrected on 2026-09-06 still imports the shared pacing contract',
   unpaced.length === 0, unpaced.join(', '));
 
+// DISCOVERED, NOT LISTED (2026-09-11). Any journey that waits for a results turn must hand the
+// shared contract BOTH id sets — the turn's, and the screen it is replacing. Passing only the turn's
+// ids is the defect that made six live steps red for five days, so a call site that omits
+// `onScreenBefore` is red here rather than silently reading a held screen at 3am. TypeScript already
+// requires the argument; this catches the other direction — a future overload, or a journey that
+// reintroduces its own hand-rolled poll beside the shared one.
+const turnWaiters = readdirSync(SCRIPTS)
+  .filter((f) => /^verify-.*\.(ts|mjs)$/.test(f))
+  .filter((f) => stripComments(readFileSync(join(SCRIPTS, f), 'utf8')).includes('awaitResultsTurn('))
+  .filter((f) => f !== 'verify-af-live-journeys-outlast-the-search-beat.ts');
+const missingBefore = turnWaiters.filter((f) => {
+  const src = stripComments(readFileSync(join(SCRIPTS, f), 'utf8'));
+  return [...src.matchAll(/awaitResultsTurn\(/g)]
+    .some((m) => !/onScreenBefore/.test(src.slice(m.index!, m.index! + 400)));
+});
+check('every awaitResultsTurn call names the screen it is replacing (onScreenBefore)',
+  missingBefore.length === 0,
+  missingBefore.map((f) => `${f} waits for a results turn without saying what was already on screen`).join('; '));
+
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 console.log('\n  mutation proof — the same predicates, against the defects they exist to catch\n');
 let mutFail = 0;
@@ -232,6 +287,29 @@ mustCatch('a beat-sized number in a comment is NOT read as code',
 // M-5: a journey returned to a fixed sleep by dropping the shared import.
 mustCatch('a corrected journey that drops the shared pacing contract',
   ['a.ts'].filter(() => !'await page.waitForTimeout(4000);'.includes('afJourneyPacing')).length > 0);
+
+// M-7: THE 2026-09-11 DEFECT ITSELF — the proving set computed by INTERSECTION instead of by
+// subtraction. That is what `verify-af-card-evidence-live.ts` hand-rolled, and it is true before the
+// new turn renders on every narrowing answer. Executed against the measured shape, not grepped.
+mustCatch('a proving set built by intersection (true on the held screen) instead of subtraction',
+  (() => {
+    const intersect = COMMITTED_TURN.filter((id) => PREVIOUS_SCREEN.includes(id));
+    const subtract = provingIds(COMMITTED_TURN, PREVIOUS_SCREEN);
+    // the defect: the intersection is non-empty on the PREVIOUS screen; the correct set is not.
+    return intersect.some((id) => PREVIOUS_SCREEN.includes(id))
+        && !subtract.some((id) => PREVIOUS_SCREEN.includes(id));
+  })());
+
+// M-8: and the subtraction must actually name the NEW rows — a proving set that dropped them would
+// make every journey report NOT EXERCISED forever, which is a different way of testing nothing.
+mustCatch('a proving set that loses the turn\'s genuinely-new ids',
+  provingIds(COMMITTED_TURN, PREVIOUS_SCREEN).sort((a, b) => a - b).join(',') === '900,901,902');
+
+// M-9: a journey that goes back to hand-rolling the arrival predicate instead of handing the two id
+// sets to the shared contract. The call must carry `onScreenBefore` — that argument IS the fix.
+mustCatch('a live journey calling awaitResultsTurn without the screen it is replacing',
+  !/awaitResultsTurn\([\s\S]{0,400}?onScreenBefore/.test(
+    'const landed = await awaitResultsTurn(shownIds, sleep);'));
 
 // M-6: and a genuinely clean journey must NOT be reported as broken.
 mustCatch('a clean journey is not flagged',
