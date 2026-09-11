@@ -186,5 +186,35 @@ assert 'media_type") == "image"' in _img, (
     "measured; a video stored as a photo renders as a broken card")
 assert "parent=" in _img, "images must bind by attachment parent, never by scraping the page"
 
+# ── 9. ADVANCED FILTER — property_feature terms wired to real columns, added 2026-09-11. Before this,
+# features_ar was captured into additional_info but never reached elevator/parking/kitchen/
+# air_conditioner/maid_room/private_entrance — the columns listing_extra_attrs actually reads, so
+# these listings were structurally in the Advanced Filter's view but silently 0% populated. ─────────
+def _post_features(feature_names: tuple[str, ...]) -> dict:
+    p = {"link": "https://www.amaall.com/projects/x/", "slug": "x", "id": 1,
+         "property_type": [1], "property_status": [1], "property_city": [1],
+         "property_feature": list(range(1, len(feature_names) + 1)),
+         "title": {"rendered": "شقة"}, "content": {"rendered": ""}, "property_meta": {}}
+    tax = _tax(("شقة",), ("للبيع",), ("جدة",))
+    tax["property_feature"] = {i: n for i, n in enumerate(feature_names, start=1)}
+    return map_listing(p, tax)[0]
+
+# every mapped term verified live 2026-09-11 (real values from amaall_residential/commercial_listings)
+row = _post_features(("مصعد", "موقف سيارة خاص", "غرفة خادمة", "مطبخ راكب",
+                       "مدخل خاص", "تكييف سبليت"))
+assert row["elevator"] is True and row["parking"] is True and row["maid_room"] is True
+assert row["kitchen"] is True and row["private_entrance"] is True and row["air_conditioner"] is True
+# an unmapped feature (finishing level, not a flag) stays out of every boolean column, but the raw
+# term is still preserved for display in additional_info — never silently dropped
+row = _post_features(("مشطّب",))
+for col in ("elevator", "parking", "maid_room", "kitchen", "private_entrance", "air_conditioner"):
+    assert col not in row, f"an unmapped feature must never set {col}"
+assert row["additional_info"]["features_ar"] == ["مشطّب"]
+# no property_feature terms at all → every flag column absent (unknown), never a manufactured False
+row = _post_features(())
+for col in ("elevator", "parking", "maid_room", "kitchen", "private_entrance", "air_conditioner"):
+    assert col not in row, f"an absent feature list must never manufacture {col}=False"
+
 print("ok: amaall is Arabic-only, status is taxonomy-only, title-type is a fallback, "
-      "city never comes from a Florida pin, videos are not photos")
+      "city never comes from a Florida pin, videos are not photos, and Advanced Filter feature "
+      "flags are recognized from property_feature (never invented for an absent/unmapped term)")

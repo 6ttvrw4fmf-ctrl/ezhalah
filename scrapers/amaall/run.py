@@ -28,6 +28,14 @@ active=false — the source DID publish them, and hiding them from search is wha
 
 TYPES: سكني / تجاري are CATEGORIES, not types — nearly every post carries one alongside its real
 type, so they are skipped when picking the type and never stored as one.
+
+ADVANCED FILTER FEATURE FLAGS (2026-09-11): the property_feature taxonomy was already captured into
+additional_info.features_ar but never reached elevator/parking/kitchen/air_conditioner/maid_room/
+private_entrance — the columns listing_extra_attrs actually reads for the Advanced Filter, so these
+listings sat in that view 0% populated. FEATURE_MAP maps only the terms with ONE unambiguous target
+column (verified live against every distinct feature string across both amaall tables); an opt-in
+term for something else (finishing level, electricity availability) stays in additional_info instead
+of being forced onto an unrelated flag. Absence is UNKNOWN, never a manufactured False.
 """
 from __future__ import annotations
 
@@ -55,6 +63,34 @@ LAST_FETCH_NOTE = ""
 
 TAXONOMIES = ("property_type", "property_status", "property_city", "property_state",
               "property_feature", "property_label", "property_area")
+
+# The `property_feature` taxonomy is captured into additional_info.features_ar (below) but was never
+# wired into the Advanced Filter's own boolean columns (elevator/parking/kitchen/air_conditioner/
+# maid_room/private_entrance — every one of them a real, already-existing column on this platform's
+# own tables, read directly by listing_extra_attrs) — the same "captured but not connected to the
+# searchable surface" gap this session's district fix closed for city/district. Verified live
+# 2026-09-11 against every distinct feature string across both amaall tables (27 total) before
+# mapping: exact-only, no fuzzy fallback — only terms with ONE unambiguous target column are mapped;
+# a term that is opt-in evidence of something ELSE (finishing level, electricity availability, a
+# smart-lock brand) is left in additional_info rather than forced onto an unrelated flag. A feature's
+# ABSENCE from the list is UNKNOWN, never a manufactured "no" — same tri-state principle as azdad's
+# own EXTRAS_MAP (scrapers/azdad/run.py), which this mirrors.
+FEATURE_MAP = {
+    "مصعد": "elevator",
+    "موقف سيارة خاص": "parking",
+    "مواقف قبو": "parking",
+    "غرفة خادمة": "maid_room",
+    "مطبخ راكب": "kitchen",           # same target as azdad's own "مطبخ راكب" -> "kitchen"
+    "مدخل خاص": "private_entrance",
+    "مداخل خاصة": "private_entrance",
+    "تكييف سبليت": "air_conditioner",
+    "تكييف شباك": "air_conditioner",
+}
+
+
+def _feature_flags(features: list[str] | None) -> dict[str, bool]:
+    present = set(features or [])
+    return {col: True for token, col in FEATURE_MAP.items() if token in present}
 
 # Two vetted additions to the house taxonomy. Each has exactly one canonical answer and is not a
 # combined bucket: «أرض سكنية» and «عمارة سكنية» are the plain qualified forms of أرض / عمارة, and
@@ -302,13 +338,15 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     if is_rent:
         rent_period, price_annual = normalize.rent_period_and_annual(price, f"{title} {body}")
 
+    features = terms("property_feature")
+
     info = {
         "city_ar": raw_city,
         "type_ar": raw_type,
         "type_source": type_from,
         "status_ar": statuses or None,
         "state_ar": (terms("property_state") or [None])[0],
-        "features_ar": terms("property_feature") or None,
+        "features_ar": features or None,
         "wp_id": p.get("id"),
         "slug": p.get("slug") or None,
         "price_published": bool(price),
@@ -343,6 +381,7 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "photo_urls": (images or {}).get(p.get("id"), []),
         "additional_info": {k: v for k, v in info.items() if v not in (None, "", [], {})},
     }
+    row.update(_feature_flags(features))
     return row, category
 
 
