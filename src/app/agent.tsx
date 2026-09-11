@@ -669,7 +669,19 @@ export default function Agent() {
   // moment a search happens (any user message or results — same condition that hides the guest
   // chips), it fades + collapses away: mid-conversation the pill is noise. JS driver (height).
   const modeSearched = msgs.some((m) => m.role === 'user' || m.role === 'results');
-  const [modeGone, setModeGone] = useState(false);
+  // BUG (owner-reported 2026-09-11): opening an old chat from the sidebar made this pill visibly
+  // pop up then collapse away — a "weird animation" on every single history open. Root cause: `msgs`
+  // starts EMPTY (useState([]) above) and openSaved() fills it in ONE async setMsgs() call once the
+  // transcript loads, so `modeSearched` flips false→true in a single render step — indistinguishable
+  // from a live search's first message, so the effect below plays the SAME 220ms collapse it plays
+  // for a real search. But a history replay must render "in its final state straight away" (see the
+  // openHistory()/openSaved() comments — no typewriter, no thinking beats, and that rule was never
+  // extended to this pill). `replay === '0'` is a router param, known synchronously at first render
+  // (unlike msgs), so a replay's very first paint can start already-settled: `modeGone` initializes
+  // true, the wrapper below never mounts, nothing to animate. A genuinely fresh chat (replay unset)
+  // is untouched — modeGone still starts false, so its intentional collapse-on-first-message plays
+  // exactly as before.
+  const [modeGone, setModeGone] = useState(() => replay === '0');
   useEffect(() => {
     if (modeSearched && !modeGone) {
       // Let the CSS collapse (MODE_EASE, 200ms) finish, then unmount. setTimeout, not an animation
