@@ -13,6 +13,8 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useApp } from '@/store';
 import { useI18n } from '@/i18n';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { colors, radius, font } from '@/theme/tokens';
 import {
   shouldShowCookieBanner,
@@ -20,13 +22,7 @@ import {
   setCookieConsent,
   type CookieConsent as Consent,
 } from '@/lib/cookieConsent';
-import { usePromptInsets, dockedEdgeOffset } from '@/lib/bottomPromptInset';
-
-// The gap this card keeps from the bottom edge when nothing foreign is docked there. The root's
-// paddingBottom cannot move this card — `position: fixed` resolves against the viewport, not
-// against a padded ancestor — so the reserved band is added HERE or the card sits inside it
-// (ops_incident #163).
-const EDGE_GAP = 20;
+import { useForeignPromptInsets, dockedEdgeOffset } from '@/lib/bottomPromptInset';
 
 const COPY = {
   ar: {
@@ -55,10 +51,24 @@ const COPY = {
 export default function CookieConsent() {
   const { user, authChecked, searchCount } = useApp();
   const { isRTL } = useI18n();
+  // IS THERE ROOM BESIDE THE APP, OR ARE WE ON TOP OF IT? (owner decision 2026-09-11, #152)
+  // The same question — and the same breakpoint — SignInCard already asks to decide whether its
+  // floating card may exist at all. At/above it the app docks a sidebar and the filter card sits
+  // centred with a free right margin, which is the layout this card's 280 px corner form was
+  // measured against (1440/1512, gap > 0). Below it there is no free margin, so a corner card is
+  // simply a card ON the app: it becomes a full-width bottom SHEET instead, and the root reserves
+  // its height (lib/bottomPromptInset.ts) so «بحث», the composer and every other control lay out
+  // ABOVE it rather than under it. Routed through useAtLeast() like every width-gated flag, so the
+  // first client render still reproduces the server's (React #418 — see lib/responsive.ts).
+  const beside = useAtLeast(DOCK_BREAKPOINT);
   const [consent, setConsent] = useState<Consent | null>(() => getCookieConsent());
-  // The band a docked third-party auth prompt has reserved. {0,0} on native, and whenever nothing
-  // is docked — so this changes nothing on the path that was already correct.
-  const promptInsets = usePromptInsets();
+  // The band a THIRD-PARTY docked prompt (Google/Apple One Tap) has reserved — never the combined
+  // usePromptInsets(), which now also counts this very card's own rect (ops_incident #152 made this
+  // card a member of DOCKED_PROMPT_SELECTOR) and would fold the card's reservation back into itself.
+  // {0,0} on native, and whenever nothing foreign is docked — so this changes nothing on the path
+  // that was already correct. (ops_incident #163: this card's OWN element never moved out of a
+  // foreign prompt's way before — the root's reservation protects everything ELSE, not this card.)
+  const foreignInset = useForeignPromptInsets();
 
   const visible = shouldShowCookieBanner({
     isWeb: Platform.OS === 'web',
@@ -89,14 +99,26 @@ export default function CookieConsent() {
       dataSet={{ testid: 'cookie-consent' }}
       style={[
         st.host,
-        // `bottom` is set here rather than in st.host so the reserved band is part of the ONE
-        // expression that decides this edge. dockedEdgeOffset(EDGE_GAP, 0) === EDGE_GAP, so with
-        // nothing docked the card sits exactly where it always did.
-        { right: 20, bottom: dockedEdgeOffset(EDGE_GAP, promptInsets.bottom) }, // owner: keep it on the far right in both languages
+        // DESKTOP: the owner's corner card — far right in both languages, 280 wide, beside the app.
+        // NARROW: a docked sheet across the bottom, and every part of that is load-bearing rather
+        // than cosmetic. It must SPAN (left and right pinned, no `width`) or bottomPromptInset()
+        // reads it as a card sitting beside the app and reserves nothing; and it must be FLUSH
+        // (`bottom: 0`) or it is not docked at all — the tolerance there is 2 px, so the old
+        // `bottom: 20` card was, correctly, just something floating in the page. Measured at
+        // 390×844: 390 of 390 wide, reserving 190 px, with «بحث» laying out above it.
+        //
+        // BOTH branches fold in `dockedEdgeOffset(base, foreignInset.bottom)` (ops_incident #163):
+        // a THIRD-PARTY prompt (One Tap) docks on the SAME edge independently of this card's own
+        // `beside` state, and #152's repair only ever taught the ROOT to reserve space for this
+        // card — nothing previously taught this card to get out of a FOREIGN prompt's way. With
+        // nothing foreign docked, dockedEdgeOffset(base, 0) === base, so neither branch moves.
+        beside
+          ? { right: 20, bottom: dockedEdgeOffset(20, foreignInset.bottom), width: 280, borderRadius: radius.card }
+          : { left: 0, right: 0, bottom: dockedEdgeOffset(0, foreignInset.bottom),
+              borderTopLeftRadius: radius.card, borderTopRightRadius: radius.card },
         Platform.OS === 'web' && ({
           position: 'fixed',
           boxShadow: '0 18px 44px -20px rgba(18, 37, 27, 0.35)',
-          maxWidth: 'calc(100vw - 32px)',
         } as never),
       ]}
     >
@@ -135,11 +157,12 @@ const st = StyleSheet.create({
   // page content; below the Sidebar drawer (50) and every real overlay (ShareSheet 60, InfoModal 70,
   // AuthModal 200). A consent card must never cover a modal.
   host: {
-    // bottom: set inline above — it must fold in the docked-prompt band (ops_incident #163).
-    width: 280,
+    // GEOMETRY IS SET PER-FORM, NOT HERE (2026-09-11, ops_incident #152; edge offset extended for
+    // #163). The corner card is 280 wide at bottom:dockedEdgeOffset(20,…); the docked sheet pins
+    // left AND right, sits at bottom:dockedEdgeOffset(0,…), and carries no width — otherwise it
+    // neither spans nor counts as docked, and the root reserves nothing.
     zIndex: 38,
     backgroundColor: colors.surface,
-    borderRadius: radius.card,
     borderWidth: 1,
     borderColor: colors.line,
     paddingHorizontal: 20,

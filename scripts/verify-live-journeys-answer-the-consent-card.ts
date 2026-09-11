@@ -101,13 +101,24 @@ console.log('\nA live journey answers the cookie banner, in the shared arrival p
 // Discovery, not a list: any live journey that names a consent testid itself is keeping a private
 // copy of a shared vocabulary, which is how this surface drifts. gotoLive is the one legitimate
 // caller (it IS the shared arrival path), and this barrier names them for the same reason.
+//
+// THE SUBJECT IS A JOURNEY THAT DRIVES A PAGE, NOT ANY FILE THAT MENTIONS THE TESTID. A pure
+// geometry check can legitimately name 'cookie-consent' as a synthetic rect label without touching
+// the browser at all — scripts/verify-bottom-prompt-inset.ts does exactly this (ops_incident #152's
+// span-rule cases), and flagging it here would be exactly the false-positive class AGENTS.md warns
+// against (a source-TEXT tripwire, not a check of what the file actually does). Requiring a real
+// Playwright import is the same idiom `verify-af-live-journeys-outlast-the-search-beat.ts` already
+// uses to separate "types a wait" from "writes about one".
 const stripComments = (s: string) =>
   s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
 const OWNERS = new Set(['verify-live-journeys-answer-the-consent-card.ts', 'verify-cookie-consent-gating.ts']);
 const privateCopies = readdirSync(SCRIPTS)
   .filter((f) => /^verify-.*\.(ts|mjs)$/.test(f) && !OWNERS.has(f))
-  .filter((f) => /cookie-consent|cookie-allow-all|cookie-only-necessary/
-    .test(stripComments(readFileSync(join(SCRIPTS, f), 'utf8'))));
+  .filter((f) => {
+    const src = stripComments(readFileSync(join(SCRIPTS, f), 'utf8'));
+    return /from ['"]playwright['"]/.test(src)
+      && /cookie-consent|cookie-allow-all|cookie-only-necessary/.test(src);
+  });
 check('no live journey keeps its own copy of the consent dismissal',
   privateCopies.length === 0,
   privateCopies.map((f) => `${f} drives the consent card itself — use the shared arrival path`).join('; '));
@@ -152,13 +163,33 @@ mustCatch('an absent card mistaken for an error', await (async () => {
 mustCatch('the shared arrival path dropping the dismissal',
   !'await page.goto(url); return attempt;'.includes('dismissCookieConsent(page'));
 
-// M-5: a journey reintroducing its own copy beside the shared one.
-mustCatch('a journey that hand-rolls its own consent dismissal',
-  /cookie-allow-all/.test(stripComments('await page.click(\'[data-testid="cookie-allow-all"]\');')));
+// M-5: a journey reintroducing its own copy beside the shared one. Must carry BOTH conditions the
+// real predicate checks — a browser import AND the testid — or this proves nothing about it.
+//
+// The import line is assembled at runtime, deliberately never written as one contiguous literal in
+// THIS file's own source: `verify-live-nav-retries-transport-only.ts` text-scans every verify-*
+// file for exactly that substring to find real Playwright-driven checks, and a fixture that quoted
+// it verbatim made this very file misclassify as a browser check (caught live, 2026-09-11).
+mustCatch('a journey that hand-rolls its own consent dismissal', (() => {
+  const importLine = ['import', '{', 'chromium', '}', 'from', "'play" + "wright';"].join(' ');
+  const src = stripComments(`${importLine}\nawait page.click('[data-testid="cookie-allow-all"]');`);
+  return /from ['"]playwright['"]/.test(src) && /cookie-allow-all/.test(src);
+})());
 
 // M-6: and a journey that simply uses the shared path must NOT be flagged.
 mustCatch('a clean journey is not flagged',
   !/cookie-consent|cookie-allow-all/.test(stripComments('await gotoLive(page, `${BASE}/`);')));
+
+// M-7: THE 2026-09-11 FALSE POSITIVE — a pure geometry check that names the testid in a synthetic
+// rect label but drives no browser at all (verify-bottom-prompt-inset.ts's real shape). The
+// predicate must clear it, or every offline consumer of this selector fails the suite forever.
+mustCatch('a pure offline check that only NAMES the testid is not flagged as a private copy', (() => {
+  const src = stripComments(
+    "const CONSENT_SHEET = { top: 654, bottom: 844, width: 390 }; // '[data-testid=\"cookie-consent\"]'\n"
+    + "check('reserves its height', bottomPromptInset(CONSENT_SHEET, 844, 390) === 190);");
+  const flagged = /from ['"]playwright['"]/.test(src) && /cookie-consent/.test(src);
+  return !flagged;   // must NOT be flagged — this is the false positive that got caught
+})());
 
 if (mutFail > 0) failed += mutFail;
 
