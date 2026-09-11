@@ -359,6 +359,67 @@ Three corollaries, each learned the hard way elsewhere in this repo:
   that exact symptom triggered a real emergency rollback for a bug that did not exist — the tell was
   that the rolled-back "known good" build showed the identical symptom.
 
+### 9.5 THE HARNESS'S WORST FAILURE IS NOT RED — IT IS A TIDY SKIP, OR A PASS (measured 2026-09-11)
+
+9.4 is about a harness that breaks loudly. This is about the one that breaks quietly, which is
+strictly worse, and which this routine has now measured end to end.
+
+**What happened.** PR #2061 (2026-09-06) renamed the agent tab «الوكيل الذكي» → «الوسيط الذكي» in
+`src/i18n.tsx`, on the owner's instruction. Three scripts were updated with it; **four e2e suites
+were not** — `e2e/journeys/run.mjs` (8 call sites), `e2e/guardian/journeys.mjs` (2),
+`e2e/live-sweep/journeys.mjs` (1), `e2e/ui-parity.spec.ts` (2).
+
+**Divergence and breakage are two different dates, and conflating them is its own reporting
+defect.** The merge was 2026-09-06; the production deploy carrying it landed **2026-09-11T12:12:28Z**
+(`dpl_Eb6yPLNz…`, commit `e9a0522`, PR #2248), and the previous production deploy — 2026-09-07T00:14
+at `8d59aad` — did not contain the rename. So the harness sat diverged from `main` for **five days as
+a latent defect** and became a live coverage loss for **about an hour and three quarters** before it
+was found. The bundle served afterwards contains the new label exactly once and the old one zero
+times (decoded from `entry-3545b04a….js`).
+
+That morning's CI journey sweeps — 09:43 Chromium, 10:11 WebKit, 10:42 Firefox — each recorded
+`0/2 failed, 0 skipped` and were **right to**: they ran against a bundle that still had the old
+label. Nothing in the repo could distinguish a harness that agrees with production from one that has
+simply not been overtaken by a deploy yet. **PART 9.1 condition 3 is what caught it** — the same
+harness behaving correctly against a different bundle — and it is also why the barrier fires on
+DIVERGENCE, at the renaming PR, rather than waiting for the deploy that makes it bite.
+
+**What it cost — and why nothing went red.** Measured on the 2026-09-11 14:00 UTC sweep, Chromium,
+fresh context per run, N=2 per viewport, against the just-deployed bundle:
+
+| journey | what it reported | what it did |
+|---|---|---|
+| `new-chat-blank` (PART 5 shape #1) | SKIP 4/4, with a reason | never opened the agent |
+| `voice-control` | **PASS 4/4** | never left Filter home; 0 mic controls |
+| live sweep `tab-switch-no-junk-history` | `ok: true` | six clicks landed on nothing |
+
+The window was short only because it was caught the same afternoon. Nothing in the shape of the
+failure bounds it: unfound, every later sweep would have reported the same clean pass indefinitely.
+
+`voice-control` is the one to remember: every assertion it makes is conditional on the mic existing,
+so it emitted a single `note`, recorded no pass, no skip and no defect — and **the runner's verdict
+was a subtraction with no bottom** (`no finding and no skip ⇒ pass`), which cannot tell *everything
+I checked was fine* from *I checked nothing*.
+
+**Two rules, both now machine-enforced (PR #2253):**
+
+1. **A target the harness aims at must still exist in the product.**
+   `scripts/verify-e2e-targets-still-exist-in-the-product.ts` (offline, in `npm test`) requires every
+   Arabic string the e2e suites click, tap or match on to exist as a string **literal** in `src/`.
+   Comment lines are excluded from the corpus deliberately: four `src/` comments still mention the
+   old label, and a corpus built from raw file text would have stayed green through the whole
+   defect. Mutation-proven against the real pre-fix tree, which it turns RED naming all four suites.
+2. **A run that asserted nothing is a skip, never a pass.** `classifyRunOutcome()` in
+   `e2e/journeys/harness.mjs` adds exactly one verdict to the original precedence — `no-outcome` —
+   and `scripts/verify-journey-run-records-an-outcome.ts` executes its full truth table. Give every
+   early return in a journey an explicit outcome; a bare `note(...); return;` is now recorded as a
+   skip with its reason, which is what it always was.
+
+**The general form, for the next one:** a skip is a *measurement that did not happen*, so a run whose
+coverage consists of skips has proven nothing — and the rotation ledger, which decides what gets
+tested next, will happily keep booking it as attention already paid. When a journey skips, ask why
+before you accept it; when it passes, ask what it actually asserted.
+
 ## PART 10 — REAL-DEVICE HONESTY (permanent, added 2026-08-28)
 
 PART 3 item 4 tells you to test voice input and read-aloud "on Safari/WebKit specifically." That
