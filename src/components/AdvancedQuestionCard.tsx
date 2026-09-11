@@ -29,10 +29,75 @@ const DOUBLE_TAP_MS = 320;
 const PRESS_IN = { duration: 90, easing: Easing.bezier(0.22, 1, 0.36, 1) };
 const RELEASE = { damping: 18, stiffness: 260 };
 
+// ── THE COMMITTED PILLS ARE NOT COVERED BY THE ROUND (owner decision 2026-09-11, ops_incident 155) ───────────
+// «The AF round card must NOT cover the selected-filter pill row. The user's committed Advanced
+// Filter selections must remain visible and removable while the next AF round is active, on desktop
+// and mobile.»
+//
+// The round card is a centred modal over a scrim (s.overlay + s.backdrop), so it covered the pill
+// row in the chat transcript on EVERY viewport — the transcript is behind the scrim by construction.
+// Measured on a 390×844 phone: at the removal step the pill's own centre reported «@ 338,-6469» with
+// an empty painted stack, and scrolling it into view put it under this card's «af-confirm».
+//
+// So the pills are rendered HERE, in the overlay itself, ABOVE the card and above the scrim: nothing
+// is on top of them, and they keep their ✕. Not a copy of the transcript row — the same facets and
+// the same removal handler, threaded from the one place that owns them (agent.tsx's guidedPills /
+// removeGuidedFacet), so there is no second source of truth to drift.
+//
+// SCOPE FACETS STAY UNREMOVABLE, exactly as in the transcript row (owner 2026-08-23): every other
+// advanced answer only ever NARROWS, so removing it widens back to a scope the user already had,
+// while removing a TYPE pill would broaden the search past anything they ever asked for.
+export type CommittedFacet = { id: string; labels: string[] };
+
+function CommittedPills({ facets, onRemove, disabled, isScope }: {
+  facets: readonly CommittedFacet[];
+  onRemove?: (index: number) => void;
+  disabled?: boolean;
+  isScope: (id: string) => boolean;
+}) {
+  const { isRTL } = useI18n();
+  if (!facets.length) return null;
+  return (
+    <View
+      testID="af-card-pills"
+      style={[s.pillRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}
+    >
+      {facets.map((f, i) => (
+        isScope(f.id) || !onRemove ? (
+          <View key={`${f.id}-${i}`} style={s.pill}>
+            <Text style={s.pillTx}>{f.labels.join('، ')}</Text>
+          </View>
+        ) : (
+          <Pressable
+            key={`${f.id}-${i}`}
+            // @ts-expect-error web-only DOM props on the RNW host node
+            dataSet={{ testid: `af-card-pill-${i}` }}
+            style={s.pill}
+            onPress={() => onRemove(i)}
+            disabled={disabled}
+          >
+            <Text style={s.pillTx}>{f.labels.join('، ')}</Text>
+            <Ionicons name="close" size={13} color={colors.primary} />
+          </Pressable>
+        )
+      ))}
+    </View>
+  );
+}
+
+export type ShellPills = {
+  facets: readonly CommittedFacet[];
+  onRemove?: (index: number) => void;
+  disabled?: boolean;
+  isScope: (id: string) => boolean;
+};
+
 // Shared overlay shell (top bar + backdrop), reused by the loading, intro and question states so the
 // container never jumps between them. `countChip` is the live remaining-results pill — the narrowing
 // number the user should always see (owner: the user must always understand how far it narrowed).
-function Shell({ children, onClose, countChip }: { children: React.ReactNode; onClose: () => void; countChip?: number | null }) {
+function Shell({ children, onClose, countChip, pills }: {
+  children: React.ReactNode; onClose: () => void; countChip?: number | null; pills?: ShellPills;
+}) {
   const { t } = useI18n();
   return (
     // testIDs (2026-08-22): stable hooks so a production browser test can scope to THIS card. Arabic
@@ -40,6 +105,12 @@ function Shell({ children, onClose, countChip }: { children: React.ReactNode; on
     // (Load more / Show more / See more), and a global text match reads listing cards instead.
     <View style={s.overlay} testID="af-card">
       <Pressable style={s.backdrop} onPress={onClose} />
+      {pills ? (
+        <CommittedPills
+          facets={pills.facets} onRemove={pills.onRemove}
+          disabled={pills.disabled} isScope={pills.isScope}
+        />
+      ) : null}
       <Reveal style={s.card}>
         <View style={s.bar}>
           <View style={s.titleWrap}>
@@ -83,9 +154,9 @@ function AnimatedCount({ value }: { value: number }) {
   );
 }
 
-export function AdvancedQuestionLoading({ onClose }: { onClose: () => void }) {
+export function AdvancedQuestionLoading({ onClose, pills }: { onClose: () => void; pills?: ShellPills }) {
   return (
-    <Shell onClose={onClose}>
+    <Shell onClose={onClose} pills={pills}>
       <View style={s.loadingBody}>
         <LoadingDots color={colors.primary} />
       </View>
@@ -100,12 +171,12 @@ export function AdvancedQuestionLoading({ onClose }: { onClose: () => void }) {
 // The «عرض النتائج» decline link was REMOVED (owner follow-up, 2026-08-28: no عرض النتائج action
 // anywhere inside the AF flow). ✕ is the decline — it always ran the exact same handler, and the
 // results are already rendered behind the overlay, so nothing was lost with the link.
-export function AdvancedIntroCard({ total, onBegin, onClose }: {
-  total: number | null; onBegin: () => void; onClose: () => void;
+export function AdvancedIntroCard({ total, onBegin, onClose, pills }: {
+  total: number | null; onBegin: () => void; onClose: () => void; pills?: ShellPills;
 }) {
   const { t } = useI18n();
   return (
-    <Shell onClose={onClose}>
+    <Shell onClose={onClose} pills={pills}>
       <View style={s.introBody}>
         {total != null ? (
           <Text style={s.introCount}>{t('We found {count} properties', { count: grouped(total) })}</Text>
@@ -148,6 +219,10 @@ export type AdvancedQuestionCardProps = {
   // The skip-all prop was REMOVED (owner, 2026-08-28): the in-question «عرض النتائج» early-exit is
   // gone — the footer is متابعة / تخطي / رجوع only. The intro card's decline link is separate.
   onClose: () => void;                  // abandon
+  /** The committed selections, rendered in the overlay ABOVE this card so the round never covers
+   *  them (owner decision 2026-09-11, ops_incident 155). Optional so the card stays usable in
+   *  isolation; agent.tsx always supplies it. */
+  pills?: ShellPills;
 };
 
 // Soft press-compression wrapper (same feel as ui.tsx's Tappable, local so the card owns its motion).
@@ -219,7 +294,7 @@ function OptionRow({ option, selected, selection, first, onPress }: {
 
 export default function AdvancedQuestionCard({
   titleKey, descriptionKey, brandImage, selection, options, unknownCount, progressCur, progressTotal,
-  liveCount, initialKeys, onConfirm, onSkip, onBack, onClose,
+  liveCount, initialKeys, onConfirm, onSkip, onBack, onClose, pills,
 }: AdvancedQuestionCardProps) {
   const { t, isRTL } = useI18n();
   const [sel, setSel] = useState<string[]>(initialKeys ?? []);
@@ -347,7 +422,7 @@ export default function AdvancedQuestionCard({
   };
 
   return (
-    <Shell onClose={onClose} countChip={count}>
+    <Shell onClose={onClose} countChip={count} pills={pills}>
       {progressTotal > 1 ? (
         <View style={s.progRow}>
           <View style={s.progTrack}>
@@ -466,6 +541,14 @@ const s = StyleSheet.create({
     width: '100%', maxWidth: 380, maxHeight: '100%', backgroundColor: colors.paper,
     borderRadius: radius.sheet, overflow: 'hidden', borderLeftWidth: 6, borderLeftColor: colors.dark, ...cardShadow,
   },
+  // The committed-selection pills, in the overlay ABOVE the card: same tinted-chip idiom as the
+  // transcript row they are no longer hidden behind, sized to the card so they read as one column.
+  pillRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'center', width: '100%', maxWidth: 380, marginBottom: 10 },
+  pill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
+    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
+  },
+  pillTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
   bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: space.card, paddingTop: space.card, paddingBottom: 10 },
   titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
   barTitle: { fontFamily: font.family.bold, fontSize: 14, color: colors.dark },

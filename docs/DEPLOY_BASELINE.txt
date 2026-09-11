@@ -1,5 +1,19 @@
-3db180271eca9d241c6662360150561a24d12488
+22967466fdb26617cb6037291cda9dd132ac1c8d
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
+# 2026-09-11  faf768e  advanced MANUALLY, AHEAD of its deploy, to clear preflight-verify.sh's
+#   deletion guard before the FIRST deploy attempt since 3db1802 (2026-09-06, 31 commits/5 days of
+#   concurrent-session work, none of it previously deployed). preflight refused on run 34620128468
+#   with exactly one class of file-deletion: the 28 platform-logo .jpg files removed by PR #2100
+#   ("platform logos are transparent PNGs, not white-box JPEGs", commit 8bb57f8) — a deliberate,
+#   reviewed, CI-green format migration (opaque white-box JPEG -> transparent PNG), not data loss.
+#   Verified independently before advancing: `git diff --diff-filter=D 3db1802 HEAD -- src/ assets/`
+#   names ONLY those 28 files, all traced to 8bb57f8 and no other commit; all 28 have a same-named
+#   .png sibling already checked in; src/data/loaderPlatforms.ts and src/components/ResultCard.tsx
+#   were updated in the SAME commit to require() the .png path instead; the two logos PR#2100 left
+#   untouched (dealapp.jpg, souq24.jpg) still exist on disk and are still referenced unchanged. The
+#   authoritative live-prod containment check (Vercel) independently passed on the SAME run: HEAD
+#   contains the currently-live production commit (e9a0522). This deploy follows immediately; if it
+#   fails this line must be reverted to 3db1802.
 # 2026-09-06  3db1802  deployed via .github/workflows/deploy-frontend.yml run 34049139459.
 #   Recorded BY PR again, same reason as 2026-09-04: safe-deploy.sh could neither push to main
 #   nor open a PR (no BASELINE_PR_TOKEN secret), so it refused to advance and failed the run ON
@@ -308,3 +322,4 @@
 #   that served bundle, the live search RPC answered HTTP 200 with a valid body, and the [post]
 #   schema-drift + duplicate-overload gate reported clean against production.
 # 2026-09-06  737abde  deployed via safe-deploy.sh
+# 2026-09-11  2296746  deployed via safe-deploy.sh

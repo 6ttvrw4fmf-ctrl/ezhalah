@@ -22,6 +22,22 @@ export function arabicOrPlaceholder(text: string, locale: string, placeholder: s
   return hasArabicChar(text) ? text : placeholder;
 }
 
+/**
+ * The mirror of arabicOrPlaceholder, for the ENGLISH locale (owner, 2026-09-11 — "just a
+ * translation of what is in Arabic... for the bio, let's remove it"). A listing's own free-text
+ * prose (the ad description/title) is scraped Arabic and is NEVER machine-translated — showing it
+ * raw on an English screen mixes languages mid-card. Rather than translate it or leave it in
+ * Arabic, this hides it outright: returns null so the caller's existing `x ? <Text>… : null`
+ * gating drops the element, exactly like a listing that never had one.
+ *
+ * No-op in the Arabic locale and for text that ISN'T Arabic prose (nothing to hide there).
+ */
+export function hideArabicProseInEnglish(text: string | null, locale: string): string | null {
+  if (!text) return text;
+  if (locale !== 'en') return text;
+  return hasArabicChar(text) ? null : text;
+}
+
 /** True if the string contains at least one Latin letter (a-z/A-Z). */
 export function hasLatinLetter(s: string): boolean {
   return /[a-zA-Z]/.test(s);
