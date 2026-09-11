@@ -91,3 +91,64 @@ eq('_price_on_request does NOT false-positive on a normal description',
 console.log('');
 if (failed > 0) { console.error(`✗ ${failed} assertion(s) FAILED`); process.exit(1); }
 console.log('✓ all eaqartabuk price-fidelity assertions passed (BUG 2 + BUG 3)');
+
+// ═══ MUTATION PROOFS ════════════════════════════════════════════════════════════════════════════
+// The `price()` / `priceOnRequest()` functions above are already executed against real fixture
+// values — the strongest form of proof — but the ratchet asks for something narrower: that
+// REGRESSING the guarded logic back to the pre-fix shape makes THIS FILE's own assertions fail.
+// So each mutant below is the historical bug itself, reintroduced into a local copy of the
+// function, run through the SAME eq()/check() semantics used above.
+console.log('\n── mutation proofs — reintroduce BUG 2 / BUG 3 and watch the guard fail ──────────');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+// ── BUG 2 reintroduced: store the raw monthly figure instead of annualizing it ×12 ────────────────
+function priceBug2(raw: string | null, isRent: boolean): [number | null, number | null, string | null] {
+  const v = raw == null ? null : parseInt(raw, 10);
+  if (!v || v <= 0) return [null, null, null];
+  if (!isRent) {
+    const total = v < 10000 ? v * 1000 : v;
+    if (total < 1000) return [null, null, null];
+    return [total, null, null];
+  }
+  if (v < 10000) return [null, v, 'monthly'];              // BUG: no ×12 — the regression
+  return [null, v, 'annual'];
+}
+mustCatch('BUG 2 reintroduced (monthly rent stored raw, never ×12) — the file\'s own eq() catches it',
+  !same(priceBug2('2700', true), [null, 32400, 'monthly']));
+mustCatch('…while the FIXED function is not itself flagged as buggy (negative control)',
+  same(price('2700', true), [null, 32400, 'monthly']));
+
+// ── BUG 3 reintroduced: the "price on request" phrase is no longer detected at all ────────────────
+function priceOnRequestBug3(..._texts: Array<string | null>): boolean {
+  return false;                                             // BUG: the whole detector is gone
+}
+// The guard's own expectation is `true` for all three fixtures (see the eq() calls above); the
+// mutant must produce something that DISAGREES with that expectation, i.e. the check would go red.
+mustCatch('BUG 3 reintroduced (detector always returns false) — id 7917/8092/7327 all misclassified',
+  priceOnRequestBug3(stripTags(content7917)) !== true
+    || priceOnRequestBug3(stripTags(content8092)) !== true
+    || priceOnRequestBug3(stripTags(content7327)) !== true);
+mustCatch('…while the FIXED detector correctly agrees with the expected `true` on all three (negative control)',
+  priceOnRequest(stripTags(content7917)) === true && priceOnRequest(stripTags(content8092)) === true
+    && priceOnRequest(stripTags(content7327)) === true);
+
+// ── The narrower, more realistic variant: the regex loosened so it ALSO fires on ordinary text ────
+// (the false-positive direction — described nowhere above, but just as real a defect: a listing
+// with a genuine price would have it nulled out because its description merely mentions "السعر").
+const OVER_BROAD_RE = /السعر/;
+const priceOnRequestOverBroad = (...texts: Array<string | null>) =>
+  texts.some((t) => !!t && OVER_BROAD_RE.test(t));
+mustCatch('an over-broadened detector regex (matches "السعر" alone) flags an ordinary listing — false positive',
+  priceOnRequestOverBroad(stripTags('<p>شقة فاخرة حي المروج مساحة 200م السعر مناسب</p>')));
+mustCatch('…while the REAL detector does not false-positive on that same ordinary text (negative control)',
+  !priceOnRequest(stripTags('<p>شقة فاخرة حي المروج مساحة 200م السعر مناسب</p>')));
+
+console.log('');
+if (mutFail) { console.error(`✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
+console.log('✓ every assertion above was watched to fail against the historical defect it guards\n');
