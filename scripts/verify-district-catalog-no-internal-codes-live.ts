@@ -18,7 +18,7 @@
 // (verify-district-catalog-no-internal-codes.ts) already proves sound with 6 mutations against the
 // same shared predicate. A proof duplicated here would exercise nothing this file itself decides.
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import { auditDistrictOptions, type DistrictRow } from './lib/districtCatalog.ts';
+import { auditDistrictOptions, auditNoBogusEntries, HISTORICALLY_POLLUTED_CITIES, type DistrictRow } from './lib/districtCatalog.ts';
 
 const RIYADH = 3;
 const JAZAN = 17; // richest set of GENUINE numbered sub-districts observed — the positive control.
@@ -54,6 +54,17 @@ async function main() {
     const riyadh = await districtOptions(RIYADH, args);
     const problems = auditDistrictOptions(riyadh, jazan);
     check(`Riyadh (${label}, ${riyadh.length} districts): clean and complete`, problems.length === 0, problems.join('; '));
+  }
+
+  // Beyond Riyadh: prove the PUBLIC RPC PATH itself (not just the underlying table, which the
+  // standing detector already covers exhaustively for all 297 cities) stays clean for every city
+  // with a documented pollution history before the fix.
+  for (const city of HISTORICALLY_POLLUTED_CITIES) {
+    if (city.id === RIYADH) continue; // already swept above, across 4 scopes
+    const rows = await districtOptions(city.id);
+    const problems = auditNoBogusEntries(city.label, rows);
+    check(`${city.label} (${rows.length} districts): no internal-code-shaped entries via the RPC`,
+      problems.length === 0, problems.join('; '));
   }
 
   console.log(failed === 0

@@ -17,7 +17,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadRegistry } from './lib/testRegistry.ts';
 import { liveHalfProblems } from './lib/liveHalf.ts';
-import { auditDistrictOptions, EXPECTED_DISTINCT, REPORTED_STRINGS, type DistrictRow } from './lib/districtCatalog.ts';
+import { auditDistrictOptions, auditNoBogusEntries, EXPECTED_DISTINCT, HISTORICALLY_POLLUTED_CITIES, REPORTED_STRINGS, type DistrictRow } from './lib/districtCatalog.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -79,6 +79,13 @@ mustCatch('over-correction: numbered districts collapse into one bare merged ent
 // would be passing vacuously against a predicate that is red for everything.
 mustCatch('a genuinely clean response is NOT reported as a failure',
   auditDistrictOptions(CLEAN_RIYADH, CLEAN_JAZAN).length === 0 ? ['ok'] : []);
+// M-7: the per-city sweep (auditNoBogusEntries) — beyond Riyadh, proving the public RPC path stays
+// clean for every historically-polluted city, not just the one the owner happened to look at.
+mustCatch('a pollution pattern in a NON-Riyadh city (Jeddah) is caught by the per-city sweep',
+  auditNoBogusEntries('جدة', [{ district_ar: 'مخطط 745', listing_count: 1 }]));
+check('the per-city sweep does NOT flag a clean response', auditNoBogusEntries('جدة', CLEAN_RIYADH).length === 0);
+check(`${HISTORICALLY_POLLUTED_CITIES.length} historically-polluted cities are swept live (not just Riyadh)`,
+  HISTORICALLY_POLLUTED_CITIES.length >= 5);
 
 if (mutFail > 0) failed += mutFail;
 
