@@ -24,8 +24,14 @@ NONE of them would correctly resolve to no city, not silently become Abha (see `
 and its own test row for the negative case).
 
 DISTRICT is read from the already-clean `district` column when the source published one (9/25
-sampled) -- never invented from the free-text `location` field the way bahadhabab's had to be,
-because this source structures it separately.
+sampled). When that column is blank, `location` (2026-09-11) is checked too — but ONLY through
+find_district_in_text()'s catalog gate, never a general free-text parse: an earlier attempt to read
+`location` directly was refused this same session after finding live counter-examples where
+`location` names one place while the site's OWN verified `district` field said a different, correct
+one (e.g. location "المنسك...", district "حي المروج") -- proving the free text alone is not
+trustworthy. The gate is what makes this safe: it only ever CONFIRMS a district already in the
+curated catalog, so it recovers the genuinely-real cases (e.g. location "ابها - المعالي" -> حي
+المعالي, district column blank) without reopening the risk that sank the unguarded version.
 
 PRICE = SOURCE, verbatim, including the one implausible-looking outlier measured live: ad
 AD202510020003 carries `price: 1` for a land listing whose own description reads "السوم وصل ٥٢٠
@@ -60,7 +66,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.arabic_location import to_catalog  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 
 # PDPL: never store advertiser contact/identity. The rest of the row is kept.
 _PII = {"owner_phone", "owner_name", "advertiser_id"}
@@ -232,6 +238,17 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     city_ar = _city_from_location(location)
     cid, rid = to_catalog(city_ar) if city_ar else (None, None)
     district_ar = (L.get("district") or "").strip() or None
+    # Fallback (2026-09-11): when the site's own `district` field is blank, the free-text `location`
+    # line often still names a real district ("ابها - المعالي") — find_district_in_text() recognizes
+    # it ONLY when it exact-matches this city's own curated district catalog, never a landmark or
+    # informal area reference. This is deliberately NOT a general free-text parse of `location`: an
+    # earlier attempt at that was refused this same session after finding live counter-examples where
+    # `location` names one place ("المنسك") while the site's own verified `district` field said a
+    # completely different, correct one ("المروج") — proving free text alone is not trustworthy here.
+    # The catalog gate is what makes this safe: it can only ever confirm a real district, never invent
+    # one, so it recovers exactly the cases that ARE genuinely real without reopening that risk.
+    if not district_ar and location and cid:
+        district_ar = find_district_in_text(location, cid)
 
     row: dict[str, Any] = {
         "ad_number": ad_number,  # already a real, globally-unique source ID — used verbatim

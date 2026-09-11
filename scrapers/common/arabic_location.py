@@ -57,6 +57,7 @@ _REGION_NORM: dict[str, int] = {}                        # norm(region_ar) → r
 _REGION_AR_FOR: dict[int, str] = {}                      # region_id → canonical region_ar
 _CID_AR: dict[int, str] = {}                             # catalog city_id → canonical city_ar
 _DISTRICT_BY_CITY: dict[int, set[str]] = {}              # city_id → {district_norm, …} (disambiguation only)
+_DISTRICT_AR_BY_NORM: dict[str, str] = {}                # district_norm → canonical district_ar (catalog spelling)
 
 
 _LOAD_LOCK = threading.Lock()
@@ -87,8 +88,9 @@ def _load() -> None:
                 for r in (c.table("loc_catalog_region").select("region_id,region_ar").execute().data or []):
                     _REGION_NORM[norm_ar(r.get("region_ar"))] = r["region_id"]
                     _REGION_AR_FOR[r["region_id"]] = r["region_ar"]
-                for r in (c.table("loc_catalog_district").select("city_id,district_norm").execute().data or []):
+                for r in (c.table("loc_catalog_district").select("city_id,district_norm,district_ar").execute().data or []):
                     _DISTRICT_BY_CITY.setdefault(r["city_id"], set()).add(r["district_norm"])
+                    _DISTRICT_AR_BY_NORM.setdefault(r["district_norm"], r["district_ar"])
                 return
             except Exception as e:  # transient network/DB hiccup → clear partials, back off, retry
                 last = e
@@ -97,6 +99,7 @@ def _load() -> None:
                 _REGION_AR_FOR.clear()
                 _CID_AR.clear()
                 _DISTRICT_BY_CITY.clear()
+                _DISTRICT_AR_BY_NORM.clear()
                 time.sleep(1.5 * (attempt + 1))
         if last is not None:
             raise last
@@ -402,3 +405,60 @@ def resolve(
         return {"city_ar": None, "city_id": None, "region_id": rid, "region_ar": _REGION_AR_FOR.get(rid),
                 "district_ar": d_ar, "district_id": None, "confidence": "region_only"}
     return dict(empty) | {"district_ar": d_ar}
+
+
+_PLAN_WORD = "مخطط"  # a subdivision-PLAN reference ("مخطط الربوة", "مخطط تلال مكة") is never a district,
+# even when the plan's own name matches a real district elsewhere — see district_ar_looks_bogus()
+# (20260911201847) for the same rule enforced DB-side on already-stored text.
+
+
+def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Optional[str]:
+    """Recognizes a REAL district of `city_id` mentioned in free text (a title, a description) — for
+    sources that publish no separate district field/taxonomy at all (remal: class_list gives only an
+    unresolvable numeric term id; azdad: the district field is sometimes blank but the source's own
+    free-text `location` line still names the place). This NEVER invents: a candidate is accepted
+    ONLY when it is an EXACT match (city-scoped) against loc_catalog_district — the same curated
+    table `resolve()`'s district-disambiguation already trusts, and the same "100%-certain,
+    catalog-attested" bar this repo's EN→AR district mapping standard requires. A phrase that merely
+    LOOKS like a place name (a landmark, a plan/scheme name, a housing-program name) and isn't in the
+    catalog is silently rejected, never guessed at — see the module docstring's exact-location-only
+    rule. Returns the catalog's OWN canonical spelling (never the source's raw substring), so a
+    matched district always renders and searches identically to every other listing for that place.
+
+    Tries 3-, then 2-, then 1-word windows (longer / more specific first) over every run of Arabic
+    letters in `text`, skipping any window containing `مخطط` — a subdivision-plan reference is a
+    plan, never a district, no matter what its own name happens to be (measured live on remal,
+    2026-09-11: "مخطط الربوة" / "مخطط تلال مكة" / "مخطط الصفوة" are NOT in loc_catalog_district for
+    Mecca at all, while "الرصيفة" / "الخالدية" / "الشوقية" / "العوالي" / "الكعكية" — each stated
+    plainly in a title with no مخطط anywhere near it — are real, catalog-confirmed Mecca districts).
+    """
+    _load()
+    if not text or not city_id:
+        return None
+    known = _DISTRICT_BY_CITY.get(city_id)
+    if not known:
+        return None
+    words = re.findall(r"[؀-ۿ]+", text)
+    # A leading ب/ل (bi-/li-) ATTACHES directly to the following word with no space ("بالشوقية" is
+    # one token, ب + الشوقية) — try the word as-scraped AND with that one leading letter stripped, so
+    # "بالشوقية"/"للرصيفة" still isolate the noun ("الشوقية"/"الرصيفة") a window can match. Only the
+    # word's OWN two forms are tried; a multi-word window uses its first word's own list here too.
+    def _forms(word: str) -> list[str]:
+        if len(word) > 2 and word[0] in "بل":
+            return [word, word[1:]]
+        return [word]
+
+    for size in (3, 2, 1):
+        for i in range(len(words) - size + 1):
+            window = words[i:i + size]
+            if _PLAN_WORD in window:
+                continue
+            for first in _forms(window[0]):
+                candidate = " ".join([first, *window[1:]])
+                for form in (candidate, f"حي {candidate}"):
+                    n = norm_ar(form)
+                    if n in known:
+                        ar = _DISTRICT_AR_BY_NORM.get(n)
+                        if ar:
+                            return ar
+    return None
