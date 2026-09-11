@@ -91,6 +91,18 @@ const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
   { path: 'scripts/verify-placeholder-price-detector-sees-the-whole-sentinel-set.ts', owner: 'routine-3-data-integrity',
     why: 'claimed by 20260906043755_wasalt_form_default_prices_are_retracted_and_watched.sql '
       + '(ops_incident #63/#65); wasalt placeholder-price detection is price/listing data integrity' },
+  // NOT a real dangling reference — a FALSE POSITIVE in this barrier's own PATH_RE, found 2026-09-11
+  // while mirroring drift. 20260911181654_incident_resolution_gate_cannot_be_satisfied_by_its_own_
+  // default.sql's error message shows CALLERS illustrative example syntax — "e.g. incident_resolve(%,
+  // ''scripts/verify-x.ts'', timestamptz ...)" — where `verify-x.ts` is a generic placeholder name
+  // ("some barrier script"), not a claim that a specific file exists or was ever meant to. It will
+  // never be written, by design. Routed to routine-10-barrier (owns the verification apparatus
+  // itself) rather than routine-9-red-team (which wrote a normal, correct error message): the defect
+  // is PATH_RE matching illustrative doc text, not anything routine #9 did wrong.
+  { path: 'scripts/verify-x.ts', owner: 'routine-10-barrier',
+    why: 'claimed by 20260911181654_incident_resolution_gate_cannot_be_satisfied_by_its_own_default.sql, '
+      + 'but only as illustrative example syntax in an error message ("verify-x.ts" is a generic '
+      + 'placeholder for "some barrier script"), never a real path claim — this entry never heals' },
 ];
 
 console.log('ops remediation scripts — every barrier a migration claims must exist and run');
