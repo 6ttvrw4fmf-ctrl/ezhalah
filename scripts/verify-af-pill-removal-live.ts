@@ -46,7 +46,7 @@
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import { awaitAfStep, clickWhenReachable, settleUntil, POST_SEARCH_BUDGET_MS } from './lib/afJourneyPacing.ts';
+import { awaitAfStep, clickWhenReachable, settleUntil, POST_SEARCH_BUDGET_MS, AGENT_TURN_MS } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -450,12 +450,26 @@ try {
   // button comes back at all: if the removed id had stayed in the asked carry, the pool would be
   // one question poorer, and on a cohort whose pool the two rounds have spent, «تحديد أكثر»
   // disappears entirely with no way back. Asserting the offer is present after a widening removal
-  // is the observable half; verify-af-cross-round-carry.ts asserts the carry itself.
+  // is the observable half; verify-af-cross-round-carry.ts asserts the carry itself (offline,
+  // mutation-proven — the CARRY is provably correct; this half only proves it PAINTS).
+  //
+  // WAIT FOR THE OFFER PROBE, NEVER READ THE INSTANT AFTER THE TURN LANDS (2026-09-11, measured
+  // live). The offer button is not decided by the results turn arriving — agent.tsx's afCanNarrow
+  // effect fires on that turn and then makes its OWN real network round trip (assessNarrowing →
+  // rankQuestions → a count RPC) before «تحديد أكثر» is rendered. A read with no wait after it —
+  // this line, since the file's origin — is exactly the class every other check on this surface
+  // was fixed for today: reproduced live (390x844 جدة/فيلا), reporting "the question was not
+  // burned" while the probe may still have been computing. `awaitAfStep`'s own
+  // `cardPresent`/`searchFired` shape does not fit here (there is no card to wait for — the CTA is
+  // a bare chat control) so this polls the one thing that actually resolves: the text itself.
   await scrollToBottom();
-  const offerBack = await page.evaluate(() =>
-    [...document.querySelectorAll('div,span,button')].some((e: any) => /نحدد الطلب أكثر/.test((e.innerText || '').trim())));
+  const offer = await settleUntil(
+    async () => page.evaluate(() =>
+      [...document.querySelectorAll('div,span,button')].some((e: any) => /نحدد الطلب أكثر/.test((e.innerText || '').trim()))),
+    (found) => found === true, AGENT_TURN_MS, (ms) => page.waitForTimeout(ms), 500);
   check('R9.2.3 — the offer to narrow again is available after the removal (the question was not burned)',
-    offerBack, offerBack ? 'the «تحديد أكثر» offer is on the new turn' : 'no offer rendered — a removed question may have stayed in the asked carry');
+    offer.value, offer.value ? 'the «تحديد أكثر» offer is on the new turn'
+      : `no offer rendered after ${AGENT_TURN_MS}ms — a removed question may have stayed in the asked carry, or this cohort's remaining pool is genuinely exhausted (ops_incident #187)`);
 
   check('the journey exercised the expected production backend',
     origins.size === 1 && origins.has(new URL(SUPABASE_URL).origin),
