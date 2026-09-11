@@ -46,7 +46,7 @@
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import { awaitAfStep, settleUntil, POST_SEARCH_BUDGET_MS } from './lib/afJourneyPacing.ts';
+import { awaitAfStep, clickWhenReachable, settleUntil, POST_SEARCH_BUDGET_MS } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -320,14 +320,48 @@ try {
     `AF predicates before removal: ${preKeys.map((k) => `${k}=${JSON.stringify(preRemoval.body[k])}`).join(', ') || '(none)'}`);
 
   // ── 4. what is on screen BEFORE the removal ─────────────────────────────────────────────────
-  const headlinesBefore = await page.evaluate(READ_HEADLINES);
+  // SNAPSHOT A SETTLED SCREEN, NEVER A TYPING ONE (2026-09-11). The agent TYPES its reply, so a
+  // headline read mid-animation is a PREFIX of the sentence that will be there a moment later —
+  // «لقينا 159 إعلان يط» against «لقينا 159 إعلان يطابق طلبك.». The R9.2.2 check below then reports
+  // that headline as "changed or vanished" and accuses production of rewriting the transcript above
+  // the removal, which it had not done. Wait for the set to stop changing before recording it.
+  const headlinesBefore = (await settleUntil(
+    async () => page.evaluate(READ_HEADLINES) as Promise<string[]>,
+    (() => {
+      let prev: string | null = null;
+      return (v: string[]) => { const k = JSON.stringify(v); const same = k === prev; prev = k; return same; };
+    })(),
+    POST_SEARCH_BUDGET_MS, (ms) => page.waitForTimeout(ms), 1200)).value;
   const countBefore = preRemoval?.total ?? null;
   console.log(`      [diag] headlines before removal: ${JSON.stringify(headlinesBefore)}`);
 
   // ── 5. remove the FIRST pill ────────────────────────────────────────────────────────────────
   const nBefore = searches.length;
   await scrollToBottom();
-  await page.click('[data-testid="af-pill-0"]');
+  // THE PILL MUST BE REACHABLE BEFORE IT IS CLICKED (2026-09-11). The round's committed answer starts
+  // a search, and the searching loader is painted over the whole chat — with live pointer events —
+  // for the beat plus the agent turn behind it. This click used to land on the loader and die on
+  // Playwright's own 30s actionability budget («subtree intercepts pointer events»), a number that
+  // predates an 11s beat in front of a ~40s turn. Observe reachability instead of raising it.
+  // Name what is on top of the pill at the moment of the click. When a removal produces no request,
+  // this is the difference between "the press handler did not fire" and "something else took it".
+  const onTop = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="af-pill-0"]');
+    if (!el) return 'no pill';
+    const r = el.getBoundingClientRect();
+    const stack = document.elementsFromPoint(r.x + r.width / 2, r.y + r.height / 2) as any[];
+    return stack.slice(0, 3).map((n) => `${n.tagName}[${n.getAttribute?.('data-testid') ?? ''}]`).join(' > ')
+      + ` @ ${Math.round(r.x + r.width / 2)},${Math.round(r.y + r.height / 2)} size ${Math.round(r.width)}x${Math.round(r.height)}`;
+  });
+  console.log(`      [diag] at the pill's centre: ${onTop}`);
+  const reach = await clickWhenReachable(page, '[data-testid="af-pill-0"]', (ms) => page.waitForTimeout(ms));
+  if (!reach.clicked) {
+    check('the first pill became reachable (nothing is painted over it)', false,
+      `still «${reach.last}» after ${POST_SEARCH_BUDGET_MS}ms — the click would have landed on whatever `
+      + 'is on top (the searching loader, or the next round\'s question card on a narrow viewport), '
+      + 'so nothing about R9.2.1 was proved');
+    throw new Error('the af-pill-0 control never became clickable');
+  }
   await page.waitForTimeout(4000);
   for (let i = 0; i < 14 && searches.length === nBefore; i++) await page.waitForTimeout(1500);
 
