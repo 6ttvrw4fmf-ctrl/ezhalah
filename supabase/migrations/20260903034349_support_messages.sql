@@ -4,14 +4,18 @@
 -- with a problem had to leave the app, open a mail client and type the address by hand. The owner
 -- asked for an in-app form that reaches support@ezhalah.com.
 --
--- WHAT THIS TABLE IS. The message itself, stored inside the project's own (Saudi-hosted) Postgres.
+-- WHAT THIS TABLE IS. The message itself, stored inside the project's own Postgres — which lives in
+-- Supabase region ap-northeast-1 (Tokyo), NOT in the Kingdom. An earlier draft of this comment said
+-- "Saudi-hosted"; that was false, and a false residency note in a support-inbox migration is exactly
+-- the sentence someone later repeats in a PDPL answer. Residency is an OPEN item, not a fact.
 -- It is the receipt: once a row lands here the message is NOT lost, whether or not an email is ever
 -- sent. Email delivery is a SEPARATE, later step that needs a credential this project does not have
 -- (no Resend/SendGrid/SMTP secret exists anywhere in the repo or the function environment) — the
 -- `support-message` function sends only when that secret appears, and records the outcome in
 -- `delivery_status`. Nothing here ever claims a message was emailed when it was not.
 --
--- PDPL. The row holds what the user typed plus the reply address they gave — no browsing history,
+-- PDPL. Data minimisation, which is what this table CAN promise today (residency, per above, it
+-- cannot). The row holds what the user typed plus the reply address they gave — no browsing history,
 -- no listing activity, no location. The requester's IP is NEVER stored: only a salted SHA-256 of it,
 -- and only so a flood from one source can be rate-limited. Retention is the same promise the About
 -- screen makes about account data: deleting the account does not orphan these rows to a stranger,
