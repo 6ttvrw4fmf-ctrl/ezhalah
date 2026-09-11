@@ -123,15 +123,18 @@ check("the LISTINGS reply is grounded, now with the amenities it will actually c
 // questions with no inventory claims in them, so neither needs grounding — what must stay true is
 // that the MODEL's text is still the thing that gets grounded, and it is: the fallback arm is
 // unchanged. A mutation removing groundReply from that arm still fails this check.
-// The platform-authored questions (ambiguityReply / noPlaceReply / noTypeReply — the last added
-// 2026-09-06 for "location + property type ⇒ search") are fixed strings the platform writes itself,
-// with no inventory claim in them, so they deliberately bypass grounding. What must stay true is
-// that the MODEL's text is still what gets grounded. Matching the chain loosely on the platform
-// arms and STRICTLY on the final arm keeps that: a mutation removing groundReply from the fallback
-// still fails, while adding another platform-authored question does not need this line rewritten.
+// The platform-authored questions (unsearchableReply / ambiguityReply / noPlaceReply — noTypeReply
+// deleted 2026-09-11, ONE MAIN REQUEST + ONE LOCATION QUESTION: type is never asked about any more)
+// are fixed strings the platform writes itself, with no inventory claim in them, so they
+// deliberately bypass grounding. What must stay true is that the MODEL's text is still what gets
+// grounded. Matching the chain loosely on the platform arms and STRICTLY on the final arm keeps
+// that: a mutation removing groundReply from the fallback still fails, while adding/removing a
+// platform-authored question does not need this line rewritten. `unsearchableReply` leads the chain
+// (2026-09-11) because it must win over a still-unresolved ambiguityReply once the one-question
+// ceiling is spent — see decide.ts's `unsearchable` doc.
 check("the MESSAGE reply is grounded, also amenity-aware",
-  /const reply = ambiguityReply(?: \?\? \w+)* \?\? oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale, outAmenities\)\);/.test(edge));
-const paths = (edge.match(/reply: groundReply\(|reply: oneQuestionOnly\(groundReply\(|const reply = ambiguityReply(?: \?\? \w+)* \?\? oneQuestionOnly\(groundReply\(/g) ?? []).length;
+  /const reply = unsearchableReply \?\? ambiguityReply(?: \?\? \w+)* \?\? oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale, outAmenities\)\);/.test(edge));
+const paths = (edge.match(/reply: groundReply\(|reply: oneQuestionOnly\(groundReply\(|const reply = unsearchableReply \?\? ambiguityReply(?: \?\? \w+)* \?\? oneQuestionOnly\(groundReply\(/g) ?? []).length;
 check(`every reply path goes through it (${paths} found)`, paths >= 2,
   "listings + the one unified clarification path (empty-search and the model's-own-question cases are now the SAME return)");
 check("no reply path bypasses the guard",

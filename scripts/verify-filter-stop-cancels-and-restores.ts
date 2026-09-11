@@ -116,7 +116,11 @@ check('recordHistory/setSearchCount are gated on !signal?.aborted — a cancelle
 check('every live search-triggering runQuery() call in agent.tsx passes run.ac.signal (chat turns get real cancellation too)',
   // each live call now also names its conversation (ensureChatId — owner 2026-08-25); the signal
   // still rides every one of the 4, which is what this check exists to hold.
-  (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 4);
+  // 4 -> 3 on 2026-09-11: ONE MAIN REQUEST + ONE LOCATION QUESTION deleted the client's own
+  // "hasIntent && askCountRef>=2, search anyway" override and its own runQuery(combined, ...) call
+  // — decide.ts is now the single decision authority for kind='message' too, so there is nothing
+  // left for the client to independently re-search.
+  (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 3);
 check('the ONE runQuery call that must NOT pass a signal (history replay — no new run exists) still passes record=false',
   /runQuery\(q, false\); \/\/ viewing a saved chat/.test(agent));
 
