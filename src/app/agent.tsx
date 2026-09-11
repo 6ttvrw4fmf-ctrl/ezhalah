@@ -58,7 +58,7 @@ import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
-import { resultCounts, closingNoteKey } from '@/data/resultCount';
+import { resultCounts, closingNoteKey, nextBatchTarget } from '@/data/resultCount';
 import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRowVisible } from '@/lib/afBrowsingGate';
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -1371,24 +1371,39 @@ export default function Agent() {
     if (searchIsFinishedAtThreshold(quotableTotal(result), INTERVIEW_STOP_AT)) setCompleted(true);
   };
 
-  // «عرض المزيد» (Load more) — SHOW EVERYTHING AND FINISH (owner product rule 2026-09-11, Task 4,
-  // supersedes the 2026-08-29 100-at-a-time continuation): ONE tap reveals every remaining matching
-  // listing — draining every real DB page there is, not just the next 100 boundary — then finishes
-  // the search: composer locked, «محادثة جديدة» shown, exactly like R11.1's small-set completion,
-  // but reachable at ANY total. "This is an explicit choice by the user to see everything and finish
-  // that search" (owner's own words) — the button no longer offers "a bit more"; it offers "all of
-  // it, then I'm done", so a second tap is structurally impossible: completion hides the row.
-  // Correctness rule unchanged: the RPC filters the FULL matching set BEFORE any paging, so draining
-  // reaches every match, gap-free via p_offset, appended DE-DUPED (never a duplicate card, never a
-  // skipped id, never a re-ordering — pages concatenate in the RPC's own ORDER BY, which p_offset
-  // continues rather than restarts). loadingMore guards a double-tap from double-fetching.
+  // «عرض المزيد» (Load more) — 100, THEN THE CHOICE, THEN EVERYTHING (owner product rule
+  // 2026-09-11, Task 4 rev. 2 — revised same-day, before Task 4's "one tap drains everything" ever
+  // reached production; no user experienced that version, so this is not a regression, it is the
+  // shipped behavior). THE FIRST tap on a turn reveals the next clean 100-boundary only (…→100, not
+  // past it) — exactly BROWSE_BATCH's old boundary math, never retired, just no longer the ONLY
+  // target. The chat stays open and BOTH offers stand: «عرض المزيد» (if more than 100 remain) and
+  // «خلّنا نحدد الطلب أكثر» (if a useful AF question exists) — resultsActionsRowVisible already
+  // renders whichever apply, unchanged. A SECOND tap on that same turn — i.e. the user explicitly
+  // asking again after already seeing the first hundred — drains every remaining page and finishes
+  // the search: composer locked, exactly like R11.1's small-set completion, reachable at any total.
+  // Choosing Advanced Filter instead of a second tap is the OTHER branch: the existing AF interview
+  // (unchanged) narrows from here and finishes on its own ≤50 rule.
+  //
+  // "ALREADY EXPANDED" NEEDS NO NEW STATE. `cur` (revealCount[mid], falling back to the turn's own
+  // initialReveal floor) already tells the two presses apart: on the first tap `cur` still sits at
+  // that floor; every tap after it has ALREADY revealed past the floor, and this comparison stays
+  // true for every tap after the first even if a drain aborted or hit the page backstop, so a THIRD
+  // tap correctly resumes a full drain rather than re-offering a hundred that was already shown.
+  //
+  // Correctness rule unchanged either way: the RPC filters the FULL matching set BEFORE any paging,
+  // so a drain (first-press-bounded or later-press-full) reaches every match, gap-free via p_offset,
+  // appended DE-DUPED (never a duplicate card, never a skipped id, never a re-ordering — pages
+  // concatenate in the RPC's own ORDER BY, which p_offset continues rather than restarts). A
+  // first-press page can itself carry far more than 100 rows (the RPC's own page size, up to
+  // QUERY_LIMIT) — those extra rows are still merged into the buffer, just not revealed yet, so the
+  // NEXT tap reveals from what is already fetched before ever asking the network for more.
+  // loadingMore guards a double-tap from double-fetching.
   // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each mounting card also
   // fades+rises via CardIn, so the reveal flows in instead of landing at once. (owner 2026-07-09.)
   const LOAD_MORE_STEP_MS = 55;
   // Only the VISIBLE screenful cascades one-by-one (~0.8s); the rest mount together right after,
   // below the fold, each still fading in via CardIn. Keeps the premium feel without one sequential
-  // re-render per card of the whole unvirtualized list (review perf fix 2026-07-09) — unchanged by
-  // the 2026-09-11 redefinition: only the TARGET grew from a 100-boundary to "everything".
+  // re-render per card of the whole unvirtualized list (review perf fix 2026-07-09).
   const CASCADE_VISIBLE = 14;
   const cascadeIn = (mid: string, from: number, target: number) => {
     const animEnd = Math.min(from + CASCADE_VISIBLE, target);
@@ -1409,6 +1424,13 @@ export default function Agent() {
     if (loadingMore[mid]) return;
     const cur = revealCount[mid] ?? initialReveal(m.result);
     const fetched0 = m.result.listings.length;
+    // FIRST tap for this turn (still at the initial floor) stops at the next 100-boundary; any tap
+    // after that drains to the true end. `nextBatchTarget` clamps to the honest total when known
+    // (`matchTotal`), so a set under 100 still finishes on the first tap — there is no dummy second
+    // press to force when nothing is left to earn it. An unknown total (Infinity) just means "the
+    // plain next hundred," never a fabricated boundary.
+    const alreadyExpandedOnce = cur > initialReveal(m.result);
+    const target = alreadyExpandedOnce ? Infinity : nextBatchTarget(cur, m.result.matchTotal ?? Infinity);
     // De-dup against the CLOSURE copy (same data the message holds) so the merge is exact.
     const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
     const add: typeof m.result.listings = [];
@@ -1420,7 +1442,10 @@ export default function Agent() {
     setLoadingMore((s) => ({ ...s, [mid]: true }));
     try {
       let pages = 0;
-      while (hasMoreNow && q) {
+      // Stop fetching once the buffer already reaches this press's target — a first press asking
+      // for "the next 100" must not keep pulling pages once 100 is covered, even if the server has
+      // far more (that is exactly what makes it a bounded press rather than a drain).
+      while (hasMoreNow && q && fetched0 + add.length < target) {
         if (++pages > MAX_DRAIN_PAGES) {
           setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
             text: t('Loading listings — please try again in a few seconds.') }]);
@@ -1452,17 +1477,21 @@ export default function Agent() {
           }),
         );
       }
-      // Reveal EVERYTHING at once — not the old next-100-boundary target. If a new turn started
-      // while pages were fetching, reveal instantly (no cascade) — the drip machinery belongs to the
-      // new turn now; cards still fade in via CardIn. (review fix, unchanged by this redefinition.)
-      if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: mergedLen }));
-      else cascadeIn(mid, cur, mergedLen);
-      // EXPLICIT SHOW-ALL FINISHES THE SEARCH (owner rule 2026-09-11, Task 4). Distinct from R11.1's
-      // automatic small-set completion — which fires with no click, from the count alone — this is
-      // the USER'S OWN CHOICE, so it finishes at any total. Gated on `!hasMoreNow`, never a bare
-      // `true`: a failed or backstop-truncated drain returns above and never reaches this line, so
-      // completion can never be claimed for a reveal that did not actually finish.
-      const userChoseShowAllAndFinish = !hasMoreNow;
+      // Reveal up to what THIS press earned — the full merge on an already-expanded (drain) press,
+      // the 100-boundary (clamped to whatever's really buffered) on a first press. If a new turn
+      // started while pages were fetching, reveal instantly (no cascade) — the drip machinery
+      // belongs to the new turn now; cards still fade in via CardIn. (review fix, unchanged.)
+      const revealTo = Math.min(target, mergedLen);
+      if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: revealTo }));
+      else cascadeIn(mid, cur, revealTo);
+      // FINISHED ONLY WHEN NOTHING IS LEFT TO REVEAL, PERIOD (owner rule 2026-09-11, Task 4 rev. 2).
+      // Two conditions, both required: the server confirms no more pages exist (`!hasMoreNow`) AND
+      // this press revealed everything that is now buffered (`revealTo >= mergedLen` — false on a
+      // first press that stopped at a 100-boundary short of the buffer, true on a drain, and true on
+      // a first press whose boundary happened to reach the genuine end). Gated on the real numbers,
+      // never a bare `true`: a failed or backstop-truncated drain returns above and never reaches
+      // this line, so completion can never be claimed for a reveal that did not actually finish.
+      const userChoseShowAllAndFinish = !hasMoreNow && revealTo >= mergedLen;
       if (userChoseShowAllAndFinish) setCompleted(true);
     } finally {
       setLoadingMore((s) => ({ ...s, [mid]: false }));
