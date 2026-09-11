@@ -6,7 +6,7 @@ import { colors, radius, cardShadow } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
-import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText } from '@/lib/arabicText';
+import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
@@ -114,12 +114,14 @@ export function ResultCard({
   // on the RTL side — the ellipsis lands right after the last visible Arabic word ("…عنه"), never leading.
   // Without it, a description that STARTS with LTR content (a URL / phone / emoji) flips the paragraph's
   // base direction and pushes the clamp ellipsis to the wrong side ("… عنه"). (owner 2026-07-08)
-  const descAr = (() => { const d = (listing.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? '‏' + d : null; })();
+  // In the ENGLISH locale the raw Arabic paragraph is hidden rather than shown or translated (owner,
+  // 2026-09-11) — hideArabicProseInEnglish is a no-op in Arabic, so this line is unchanged there.
+  const descAr = hideArabicProseInEnglish((() => { const d = (listing.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? '‏' + d : null; })(), locale);
   // Gathern Tier-1: Gathern is the only source that carries a rich Arabic listing.title AND no
   // description (0% desc), so we surface the title in the description slot — but ONLY for Gathern, so
   // no other platform's layout changes. Same RLM (U+200F) base-direction guard as descAr above.
   const isGathern = (listing.source || '').toLowerCase().includes('gathern');
-  const titleAr = (() => { const s = (listing.title ?? '').trim(); return s && /[ء-ي]/.test(s) ? '‏' + s : null; })();
+  const titleAr = hideArabicProseInEnglish((() => { const s = (listing.title ?? '').trim(); return s && /[ء-ي]/.test(s) ? '‏' + s : null; })(), locale);
   // Guest rating (0–10) — present ONLY for sources that publish reviews (Gathern). null everywhere
   // else → the rating element renders nothing, so no other platform's card changes. (Gathern Tier-1.)
   const ratingVal = typeof listing.rating === 'number' && Number.isFinite(listing.rating) ? listing.rating : null;

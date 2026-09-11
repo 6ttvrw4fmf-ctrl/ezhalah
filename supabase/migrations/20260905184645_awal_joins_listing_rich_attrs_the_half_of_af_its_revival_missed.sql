@@ -15,11 +15,8 @@
 -- instead of contributing whatever the source actually published. Area/price/bedrooms/bathrooms
 -- were unaffected — those travel through active_listing_ids_v2, which is why search looked fine.
 --
--- MEASURED AFTER: awal now has 51 rows in BOTH views, and listing_rich_attrs totals 204,460 —
--- exactly the search total. The follow-up sync_listing_rich_attrs('awal_*') updated 0 rows, which
--- is CORRECT and worth recording: awal publishes 0 property_age, 0 direction and 0 street_width
--- across its 44 active rows (8 have bedrooms, 27 have area, 0 have a price). The plumbing was
--- missing; the source is simply sparse. SOURCE IS TRUTH is unchanged.
+-- SOURCE IS TRUTH is unchanged: awal publishes no price at all (see its scraper), so every price
+-- column stays NULL. This migration only lets the fields awal DOES publish reach the filter.
 --
 -- Cloned from the LIVE october arm, never hand-written — the same method used for the 5-platform
 -- wiring (20260903182553) and for alta/shmoualshmal (20260905053633). CREATE OR REPLACE VIEW is
@@ -28,10 +25,9 @@
 --
 -- NOTE ON THE MISSING TAIL GUARD: a first attempt ended this migration with a fail-closed block
 -- that called pg_get_viewdef() once PER searchable platform. That is O(platforms x view size) on a
--- ~270KB definition and hit the statement timeout, rolling the whole migration back. The equivalent
--- assertion now lives in ops_af_attribute_coverage() + verify-af-attribute-views-cover-every-
--- platform.ts, which read each definition ONCE — the right place for a check that must not cost a
--- production transaction.
+-- 270KB definition and hit the statement timeout, rolling the whole migration back. The equivalent
+-- assertion now lives in scripts/verify-af-attribute-views-cover-every-platform.ts, which reads the
+-- definition ONCE — the right place for a check that must not cost a production transaction.
 DO $do$
 DECLARE
   v text; src text; arm text; arms text; st int; en int; t text;

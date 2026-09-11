@@ -13,8 +13,9 @@
 //   4. APPEARANCE works and persists: the pure resolver is EXECUTED here (system follows the OS,
 //      light/dark override it), setMode writes synchronously on web + AsyncStorage, and the
 //      provider hydrates in effects only (SSR-parity initial state — the React #418 class).
-//   5. The Arabic-only language contract is untouched: setLocale still guards `l !== 'ar'`, and
-//      the menu's language view marks العربية active.
+//   5. Language is bilingual (owner, 2026-09-11 — superseded from the prior Arabic-only contract):
+//      setLocale carries NO `l !== 'ar'` guard, and both menu rows are live, calling setLocale with
+//      their own language and reflecting the ACTIVE one via `selected`.
 //   6. Logout and deletion kept their real paths: confirm → store signOut()/deleteAccount() with
 //      the same truth-telling semantics (deletion specifics live in verify-account-deletion.ts,
 //      which now reads AccountMenu.tsx).
@@ -100,11 +101,16 @@ check("'system' tracks the OS LIVE (a change listener, not a one-time read)",
 check('the menu offers exactly System / Light / Dark and applies the choice via setMode',
   /\(\['system', 'light', 'dark'\] as ThemeMode\[\]\)\.map/.test(menu) && /onPress=\{\(\) => setMode\(mm\)\}/.test(menu));
 
-// ── 5) Language: the Arabic-only contract is untouched ───────────────────────────────────────────
-check("i18n setLocale still guards l !== 'ar' (the product is Arabic-only)",
-  /if \(l !== 'ar'\) return; \/\/ Arabic-only product/.test(i18n));
-check('the menu marks العربية active and lists English as disabled',
-  /testID="language-ar"/.test(menu) && /testID="language-en"/.test(menu) && /langDisabled/.test(menu));
+// ── 5) Language: BILINGUAL (superseded 2026-09-11 — see the file header for the old assertion this
+// replaces; the original pinned setLocale's `l !== 'ar'` guard and an English row marked disabled,
+// which is now exactly the WRONG behaviour) ────────────────────────────────────────────────────────
+check("i18n setLocale carries NO Arabic-only guard (English is a real, selectable language)",
+  !/if \(l !== 'ar'\) return;/.test(i18n));
+check('both language rows exist and neither is rendered disabled',
+  /testID="language-ar"/.test(menu) && /testID="language-en"/.test(menu) && !/langDisabled/.test(menu));
+check('both rows call setLocale with their OWN language, and reflect the active one via `selected`',
+  /label="العربية" selected=\{locale === 'ar'\} onPress=\{\(\) => setLocale\('ar'\)\}/.test(menu) &&
+  /label="English" selected=\{locale === 'en'\} onPress=\{\(\) => setLocale\('en'\)\}/.test(menu));
 
 // ── 6) Logout + deletion kept their real paths ───────────────────────────────────────────────────
 // CONTRACT CHANGE (ops_incident hunt-2026-09-04:auth:03): the confirm no longer signs the UI out on
