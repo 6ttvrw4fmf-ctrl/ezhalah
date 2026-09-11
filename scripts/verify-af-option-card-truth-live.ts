@@ -91,7 +91,12 @@ const MAX_LOAD_MORE_CLICKS = 25;
 // platforms (owner 2026-09-02). Nothing here may treat it as "the number of cards before the first
 // «عرض المزيد»" — that assumption is half of ops_incident #125.
 const FIRST_PAGE = 10;
-const BROWSE_BATCH = 100;                 // each «عرض المزيد» reveals to the next 100-boundary
+// «عرض المزيد» was REDEFINED 2026-09-11 (Task 4): one tap now drains and reveals the ENTIRE
+// remaining eligible set, not a 100-card boundary, then finishes the chat — a second tap is
+// structurally impossible because the button (and the whole actions row) disappears the instant the
+// search completes. R10.1.1 below is updated to that contract: the expected reveal after the one
+// click that fires is the full `landed.total`, and the loop above is expected to exercise EXACTLY
+// one click before the button vanishes.
 // How long one «عرض المزيد» may take to settle. The click that spends the page-0 buffer is a real
 // backend round trip plus a ~100-card cascade, so it is budgeted as a backend turn rather than a
 // paint — the shared constant, not a number typed here (owner rule 2026-09-06).
@@ -985,7 +990,8 @@ try {
     revealed = settled.value.n;
     revealSnapshots.push(settled.value.ids);
     if (!settled.settled) settleFailures.push(`click ${clicks} never settled (reached ${revealed})`);
-    const expected = Math.min(landed.total ?? 0, BROWSE_BATCH * clicks);
+    // ONE click reveals the whole eligible set now (Task 4) — never a boundary clamp.
+    const expected = landed.total ?? 0;
     lastRevealCheckOk = lastRevealCheckOk && revealed === expected;
     networkPageSeen = searches.slice(armed4).some((s) => Number(s.body?.p_offset ?? 0) > 0);
     console.log(`      [diag] load-more click ${clicks}: revealed ${revealed} card(s) on the newest turn (expected ${expected})${networkPageSeen ? ' — a network page fired' : ''}`);
@@ -1056,8 +1062,10 @@ try {
     // sample of something still moving, which is exactly how #125 was written.
     check('4. R10.1.1 — every «عرض المزيد» came to rest before it was judged', settleFailures.length === 0,
       settleFailures.join(' · ') || `${clicks} click(s) all settled within ${REVEAL_SETTLE_MS}ms`);
-    check('4. R10.1.1 — every click revealed exactly to the next 100-boundary (or the end of the set)', lastRevealCheckOk && revealed === Math.min(landed.total ?? 0, BROWSE_BATCH * clicks),
+    check('4. R10.1.1 — the click revealed the ENTIRE eligible set, not a boundary-clamped batch', lastRevealCheckOk && revealed === (landed.total ?? 0),
       `revealed=${revealed} total=${landed.total} clicks=${clicks}`);
+    check('4. R10.1.1 — exactly ONE click sufficed (Task 4: no repeated «عرض المزيد» taps)', clicks === 1,
+      `${clicks} click(s) fired before the button/row disappeared — completion should hide it after the first`);
   }
 
   // ── THE VISIBLE SET IS THE FETCHED SET, EXACTLY (owner checklist, 2026-09-06) ──────────────────

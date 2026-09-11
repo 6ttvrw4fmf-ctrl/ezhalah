@@ -66,12 +66,14 @@ check('a MEASURED "no" after an AF round posts the spoken line (i18n key present
   /verdict === 'no' && afCarryRef\.current && !noMoreSaidRef\.current\[m\.id\]/.test(agent)
   && read('src/i18n.tsx').includes("'No further truthful narrowing question exists for this scope — these are all the genuine matches.': 'ما فيه سؤال إضافي موثوق"));
 // Generalized 2026-09-11 (owner rule: a plain search or typed AI message landing at <= the
-// threshold finishes cleanly too, not only an AF round) from "exactly one site" to "every site is
-// the ≤ 50 rule and nothing else" — see scripts/verify-af-interview-owns-browsing.ts for the
-// call-site-level version of this same check; this one keeps the ORIGINAL intent of this specific
-// check intact: a measured "no more truthful narrowing" verdict must never itself complete the chat.
-const GATED_COMPLETED = /if \(searchIsFinishedAtThreshold\(.*?\)\)\s*setCompleted\(true\);/g;
-check('…and does NOT complete the chat (every setCompleted(true) site is the ≤ 50 rule, never the "no more questions" verdict)',
+// threshold finishes cleanly too, not only an AF round; AND the user's own explicit «عرض المزيد»
+// show-all-and-finish choice, Task 4, finishes at ANY total) from "exactly one site" to "every site
+// is one of the two named, honest gates and nothing else" — see
+// scripts/verify-af-interview-owns-browsing.ts for the call-site-level version of this same check;
+// this one keeps the ORIGINAL intent of this specific check intact: a measured "no more truthful
+// narrowing" verdict must never itself complete the chat.
+const GATED_COMPLETED = /if \((?:searchIsFinishedAtThreshold\(.*?\)|userChoseShowAllAndFinish)\)\s*setCompleted\(true\);/g;
+check('…and does NOT complete the chat (every setCompleted(true) site is the ≤ 50 rule or the explicit show-all choice, never the "no more questions" verdict)',
   (agent.match(/setCompleted\(true\)/g) ?? []).length >= 1
   && (agent.match(/setCompleted\(true\)/g) ?? []).length === (agent.match(GATED_COMPLETED) ?? []).length);
 check("assessNarrowing returns 'no' ONLY when every probe ANSWERED (ranked && !ranked.probeFailed), else 'unknown'",

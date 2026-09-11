@@ -580,16 +580,19 @@ Things that cost a previous run real time, and are NOT product defects:
     (nobody types the beat; the helpers observe arrival) and `verify-af-reveal-accounting.ts` (the
     first page is `initialReveal()`, never a constant; a reveal is counted on the turn that owns it).
 
-21. **THE FIRST PAGE IS NOT A CONSTANT, AND THE BATCH IS A BOUNDARY, NOT AN INCREMENT.** Two product
+21. **THE FIRST PAGE IS NOT A CONSTANT, AND «عرض المزيد» IS NOW ONE TAP TO EVERYTHING.** Two product
     rules that a harness keeps getting wrong, both owner-set and both executable:
     - `initialReveal()` = `min(max(FIRST_PAGE, distinctPlatformCount), fetched)` — "the first screen
       is as wide as the market" (owner 2026-09-02). `FIRST_PAGE = 10` is a FLOOR. On a scope matching
       more than ten platforms the first page is wider, so any arithmetic that adds back 10 is wrong.
-    - `nextBatchTarget(shown, available)` reveals to the NEXT CLEAN 100-BOUNDARY (owner 2026-08-29):
-      "from the initial drip (e.g. 10 shown) the first press completes the first hundred, not
-      10+100=110". So after k presses the turn shows `min(100k, available)` — **independent of how
-      wide the first page was**. That independence is why `BROWSE_BATCH * clicks` is the correct
-      expectation and why 1,509 could never be right: it is not a boundary at all.
+    - REDEFINED 2026-09-11 (Task 4), supersedes the 2026-08-29 "next clean 100-boundary" rule below:
+      one tap of «عرض المزيد» now DRAINS every real page there is (looping `loadMoreListings` until
+      the server says `hasMore=false`) and reveals the ENTIRE remaining eligible set in that one tap
+      — then finishes the search (composer locked, «محادثة جديدة» shown), exactly like R11.1's
+      small-set completion but reachable at any total. `nextBatchTarget`/`BROWSE_BATCH` still exist
+      as pure, tested modules (src/data/resultCount.ts) but `loadMore` no longer calls them — a
+      harness that expects `min(100k, available)` after k clicks, or expects more than one click to
+      be needed, is testing the RETIRED contract. Expect: exactly one click, `revealed === total`.
 
 ## Hard safety rails (same as every other engineer — non-negotiable)
 

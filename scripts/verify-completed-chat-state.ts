@@ -42,17 +42,19 @@ check("restore round-trips completed=true", restoreChat(JSON.parse(JSON.stringif
 check("restore of a transcript WITHOUT the key yields no completed (an old chat reopens live)", !("completed" in (restoreChat(JSON.parse(JSON.stringify(open))) ?? {})));
 check("a forged non-boolean value is not honoured", !("completed" in (restoreChat({ ...JSON.parse(JSON.stringify(open)), completed: "yes" }) ?? {})));
 
-console.log("\n── the ONLY way a chat completes is the canonical R11.1 (≤ 50) threshold ──");
-// OWNER PRODUCT RULE 2026-09-04, GENERALIZED 2026-09-11: ONLY the ≤ INTERVIEW_STOP_AT (50) honest
-// total completes the chat (R11.1) — an AF round landing there, but also a plain Filter search or a
-// typed AI-Agent message that already lands at <= 50 (the shared playListings renderer both flow
-// through). A set that is still ABOVE 50 with no truthful certified question left (the old R11.2)
-// is SAID OUT LOUD and the composer stays LIVE — the interview never invents a question, and never
-// silently locks the chat on a big set. So every completion site must be the SAME gate; the count
-// itself is no longer pinned to 1 now that more than one entry point legitimately reaches it.
+console.log("\n── the ONLY two ways a chat completes are the ≤ 50 threshold or an explicit show-all ──");
+// OWNER PRODUCT RULE 2026-09-04, GENERALIZED 2026-09-11: the ≤ INTERVIEW_STOP_AT (50) honest total
+// completes the chat (R11.1) — an AF round landing there, but also a plain Filter search or a typed
+// AI-Agent message that already lands at <= 50 (the shared playListings renderer all three flow
+// through) — OR the user's own explicit «عرض المزيد» show-all-and-finish choice (Task 4), which
+// finishes at ANY total because it is a deliberate click, not a guess. A set that is still ABOVE 50
+// with no truthful certified question left (the old R11.2) is SAID OUT LOUD and the composer stays
+// LIVE — the interview never invents a question, and never silently locks the chat on a big set. So
+// every completion site must be one of exactly these TWO named gates; the count itself is no longer
+// pinned to 1 now that more than one entry point legitimately reaches it.
 const trueSites = (agentCode.match(/setCompleted\(true\)/g) ?? []).length;
-const gatedSites = (agentCode.match(/if \(searchIsFinishedAtThreshold\(.*?\)\)\s*setCompleted\(true\);/g) ?? []).length;
-check(`every setCompleted(true) site is gated by the R11.1 threshold (found ${trueSites}, ${gatedSites} gated)`,
+const gatedSites = (agentCode.match(/if \((?:searchIsFinishedAtThreshold\(.*?\)|userChoseShowAllAndFinish)\)\s*setCompleted\(true\);/g) ?? []).length;
+check(`every setCompleted(true) site is gated by the ≤50 threshold or the explicit show-all choice (found ${trueSites}, ${gatedSites} gated)`,
   trueSites >= 1 && trueSites === gatedSites,
   "an ungated site means a count alone, a no-more-questions verdict, or anything else can lock the composer");
 check("R11.1: the post-round honest total ≤ INTERVIEW_STOP_AT completes, inside finishGuided's onFetched",

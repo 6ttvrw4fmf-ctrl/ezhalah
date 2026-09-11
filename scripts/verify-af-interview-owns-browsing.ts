@@ -133,24 +133,26 @@ check('an unquotable total is never treated as "finished"',
 // The narrow offer obeys the same line, in agent.tsx's own expression.
 check('narrowing is offered only ABOVE the threshold (canNarrowFurther > INTERVIEW_STOP_AT)',
   /const canNarrowFurther = rawTotal > INTERVIEW_STOP_AT && isLatestResults && afCanNarrow\[m\.id\] === true;/.test(agentSrc));
-// ONLY the small-result threshold may end the flow; R11.2 (no useful questions left) must not, or a
-// 3,000-match cohort with no questions left would be declared finished and lose its pager — the
-// owner's clause 2 exactly. Generalized 2026-09-11 (owner rule: a plain search or typed AI message
-// landing at <= the threshold finishes cleanly too, same as an AF round) from "exactly one call
-// site" to "every call site is gated by the same predicate" — the count is no longer the invariant,
+// ONLY two things may end the flow: the small-result threshold (R11.1), or the user's own explicit
+// «عرض المزيد» show-all-and-finish choice (Task 4, 2026-09-11). R11.2 (no useful questions left)
+// must not, or a 3,000-match cohort with no questions left would be declared finished and lose its
+// pager — the owner's clause 2 exactly. Generalized 2026-09-11 from "exactly one call site" to
+// "every call site is one of the two named, honest gates" — the count is no longer the invariant,
 // the GATE is: every setCompleted(true) in this file must sit directly behind an
-// `if (searchIsFinishedAtThreshold(...))`, and searchIsFinishedAtThreshold itself is the one
-// function name allowed to gate it (clause 4 below independently proves that predicate touches no
-// count/query surface, so widening WHERE it's called from can never widen WHAT it's allowed to end
-// the flow on).
+// `if (searchIsFinishedAtThreshold(...))` or an `if (userChoseShowAllAndFinish)`, and those two
+// names are the only things allowed to gate it (clause 4 below independently proves the threshold
+// predicate touches no count/query surface; userChoseShowAllAndFinish is `!hasMoreNow` computed only
+// after a drain that never merely guessed — see loadMore — so neither gate can be satisfied by
+// anything but an honestly-finished reveal).
 const completedCalls = [...agentCode.matchAll(/setCompleted\(true\)/g)].length;
-// Non-greedy up to the first `))`: both today's call sites nest at most one paren inside the
+// Non-greedy up to the first `))`: today's threshold call sites nest at most one paren inside the
 // predicate's own arguments (`quotableTotal(result)`), and that inner call is followed by `,` — the
 // FIRST `))` in the line is always the predicate's own outer close, never a false-early stop.
-const gatedCompletedCalls = [...agentCode.matchAll(/if \(searchIsFinishedAtThreshold\(.*?\)\)\s*setCompleted\(true\);/g)].length;
-check('every completed-trigger is the small-result threshold (R11.1) and nothing else',
-  completedCalls >= 2 && completedCalls === gatedCompletedCalls,
-  `saw ${completedCalls} setCompleted(true) call(s), ${gatedCompletedCalls} directly gated by searchIsFinishedAtThreshold(...)`);
+// `userChoseShowAllAndFinish` needs no such care — it is a bare identifier, no nested parens.
+const gatedCompletedCalls = [...agentCode.matchAll(/if \((?:searchIsFinishedAtThreshold\(.*?\)|userChoseShowAllAndFinish)\)\s*setCompleted\(true\);/g)].length;
+check('every completed-trigger is the ≤50 threshold or the explicit show-all choice, and nothing else',
+  completedCalls >= 3 && completedCalls === gatedCompletedCalls,
+  `saw ${completedCalls} setCompleted(true) call(s), ${gatedCompletedCalls} directly gated by one of the two named predicates`);
 
 // ── 5. CLAUSE 4 — the gate changes no count and no predicate ────────────────────────────────────
 // Structural: the module must not import or mention any search/count/query surface. It decides which
@@ -193,7 +195,7 @@ mustCatch('an off-by-one threshold is caught at the boundary',
 // guard raises completedCalls but not gatedCompletedCalls — the equality check goes red.
 const withUngatedCall = `${agentCode}\nsetCompleted(true);`;
 const ungatedTotal = [...withUngatedCall.matchAll(/setCompleted\(true\)/g)].length;
-const ungatedGated = [...withUngatedCall.matchAll(/if \(searchIsFinishedAtThreshold\(.*?\)\)\s*setCompleted\(true\);/g)].length;
+const ungatedGated = [...withUngatedCall.matchAll(/if \((?:searchIsFinishedAtThreshold\(.*?\)|userChoseShowAllAndFinish)\)\s*setCompleted\(true\);/g)].length;
 mustCatch('an un-gated completed-trigger (e.g. R11.2) is caught by the gated-count mismatch',
   ungatedTotal !== ungatedGated && ungatedTotal === completedCalls + 1);
 

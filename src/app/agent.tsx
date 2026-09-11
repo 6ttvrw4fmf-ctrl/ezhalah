@@ -57,7 +57,7 @@ import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
-import { BROWSE_BATCH, nextBatchTarget, resultCounts, closingNoteKey } from '@/data/resultCount';
+import { resultCounts, closingNoteKey } from '@/data/resultCount';
 import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRowVisible } from '@/lib/afBrowsingGate';
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -1370,19 +1370,24 @@ export default function Agent() {
     if (searchIsFinishedAtThreshold(quotableTotal(result), INTERVIEW_STOP_AT)) setCompleted(true);
   };
 
-  // «عرض المزيد» (Load more) — CONTINUATION IS THE RULE (owner 2026-08-29, supersedes the 2026-08-20
-  // lifetime cap): each tap advances to the next clean batch boundary — first 100, then 101–200,
-  // then 201–300 — for as long as matching listings genuinely exist, all the way to the last one.
-  // Correctness rule unchanged: the RPC filters the FULL matching set BEFORE any paging, so paging
+  // «عرض المزيد» (Load more) — SHOW EVERYTHING AND FINISH (owner product rule 2026-09-11, Task 4,
+  // supersedes the 2026-08-29 100-at-a-time continuation): ONE tap reveals every remaining matching
+  // listing — draining every real DB page there is, not just the next 100 boundary — then finishes
+  // the search: composer locked, «محادثة جديدة» shown, exactly like R11.1's small-set completion,
+  // but reachable at ANY total. "This is an explicit choice by the user to see everything and finish
+  // that search" (owner's own words) — the button no longer offers "a bit more"; it offers "all of
+  // it, then I'm done", so a second tap is structurally impossible: completion hides the row.
+  // Correctness rule unchanged: the RPC filters the FULL matching set BEFORE any paging, so draining
   // reaches every match, gap-free via p_offset, appended DE-DUPED (never a duplicate card, never a
-  // skipped id). When the fetched buffer is spent and the DB still has more (m.result.hasMore), the
-  // next REAL page is fetched first. loadingMore guards a double-tap from double-fetching.
+  // skipped id, never a re-ordering — pages concatenate in the RPC's own ORDER BY, which p_offset
+  // continues rather than restarts). loadingMore guards a double-tap from double-fetching.
   // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each mounting card also
-  // fades+rises via CardIn, so the batch flows in instead of landing at once. (owner 2026-07-09.)
+  // fades+rises via CardIn, so the reveal flows in instead of landing at once. (owner 2026-07-09.)
   const LOAD_MORE_STEP_MS = 55;
-  // Only the VISIBLE screenful cascades one-by-one (~0.8s); the rest of the 100 mount together right
-  // after, below the fold, each still fading in via CardIn. Keeps the premium feel without 100
-  // sequential re-renders of the whole unvirtualized card list (review perf fix 2026-07-09).
+  // Only the VISIBLE screenful cascades one-by-one (~0.8s); the rest mount together right after,
+  // below the fold, each still fading in via CardIn. Keeps the premium feel without one sequential
+  // re-render per card of the whole unvirtualized list (review perf fix 2026-07-09) — unchanged by
+  // the 2026-09-11 redefinition: only the TARGET grew from a 100-boundary to "everything".
   const CASCADE_VISIBLE = 14;
   const cascadeIn = (mid: string, from: number, target: number) => {
     const animEnd = Math.min(from + CASCADE_VISIBLE, target);
@@ -1390,55 +1395,74 @@ export default function Agent() {
       if (target > animEnd) setRevealCount((c) => ({ ...c, [mid]: target }));
     });
   };
+  // A defensive backstop against a pathological `hasMore` that never clears — NOT a real product
+  // ceiling (the 2026-08-29 no-lifetime-cap promise is unchanged; this only bounds a single tap's
+  // network loop). 50 pages of the RPC's own 1,500-row page size covers any real Saudi property
+  // search (75,000 listings) many times over. Exceeding it fails the same honest way a single page
+  // failure does — never a silent partial reveal claimed as complete.
+  const MAX_DRAIN_PAGES = 50;
   const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {
     const mid = m.id;
     const q = m.result.query;
     if (runRef.current) return; // a real turn is mid-flight — never start a cascade under it (review fix)
-    const fetched = m.result.listings.length;
+    if (loadingMore[mid]) return;
     const cur = revealCount[mid] ?? initialReveal(m.result);
-    // (A) fetched-but-unrevealed cards remain → cascade to the next batch boundary from the buffer.
-    if (cur < fetched) {
-      cascadeIn(mid, cur, nextBatchTarget(cur, fetched));
-      return;
-    }
-    // (B) buffer exhausted but the DB has more → fetch the next real page, append de-duped, cascade.
-    if (!m.result.hasMore || !q || loadingMore[mid]) return;
+    const fetched0 = m.result.listings.length;
+    // De-dup against the CLOSURE copy (same data the message holds) so the merge is exact.
+    const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
+    const add: typeof m.result.listings = [];
+    let pageOffset = m.result.pageOffset ?? 0;
+    let hasMoreNow = m.result.hasMore;
+    // Nothing left to fetch, no query to fetch with — the buffer already IS everything (e.g. the
+    // last page already landed and only the reveal/cascade was pending). Skip the network loop.
+    if (!q) hasMoreNow = false;
     setLoadingMore((s) => ({ ...s, [mid]: true }));
     try {
-      const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, m.result.pageOffset ?? 0);
-      // A FAILED PAGE IS NOT AN EMPTY PAGE (AGENTS.md permanent rule, 2026-09-04; incident #33).
-      // store.tsx already refuses to treat a backend error as progress — the cursor and `hasMore`
-      // come back exactly as they went in, so the pager is correctly re-offered. But nothing here
-      // READ `failed`, and every downstream value then made the failure indistinguishable from
-      // success: `more` is [], so `add` is [], so `mergedLen === fetched`, so `nextBatchTarget`
-      // returns `cur` and `cascadeIn(cur, cur)` is a no-op. The user taps «عرض المزيد», the spinner
-      // runs, ZERO cards appear, no error is shown, and the button stays — a silent dead tap, which
-      // is a failed fetch rendered to the user as a successful nothing.
-      //
-      // So say it. Same wording and same posture page 0 already uses for its own fetch failure
-      // (`fetchFailed` → runSearch's retry suggestion, src/data/search.ts): tell the user to try
-      // again rather than implying there was nothing more to show. Nothing is merged and the cursor
-      // is untouched, so the next tap retries this exact page.
-      if (failed) {
-        setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
-          text: t('Loading listings — please try again in a few seconds.') }]);
-        return;
+      let pages = 0;
+      while (hasMoreNow && q) {
+        if (++pages > MAX_DRAIN_PAGES) {
+          setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
+            text: t('Loading listings — please try again in a few seconds.') }]);
+          return;
+        }
+        // A FAILED PAGE IS NOT AN EMPTY PAGE (AGENTS.md permanent rule, 2026-09-04; incident #33).
+        // store.tsx already refuses to treat a backend error as progress. Stop the drain here — say
+        // so out loud (same wording/posture page 0's own fetch failure uses, src/data/search.ts) —
+        // and never claim completion for a reveal that did not actually finish.
+        const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, pageOffset);
+        if (failed) {
+          setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
+            text: t('Loading listings — please try again in a few seconds.') }]);
+          return;
+        }
+        for (const l of more) {
+          const key = `${l.source}:${l.id}`;
+          if (!seen.has(key)) { seen.add(key); add.push(l); }
+        }
+        pageOffset = nextOffset;
+        hasMoreNow = hasMore;
       }
-      // De-dup against the CLOSURE copy (same data the message holds) so the cascade target is exact.
-      const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
-      const add = more.filter((l) => !seen.has(`${l.source}:${l.id}`));
-      const mergedLen = fetched + add.length;
-      setMsgs((prev) =>
-        prev.map((mm) => {
-          if (mm.id !== mid || mm.role !== 'results' || !mm.result) return mm;
-          return { ...mm, result: { ...mm.result, listings: [...mm.result.listings, ...add], pageOffset: nextOffset, hasMore } };
-        }),
-      );
-      const target = nextBatchTarget(cur, mergedLen);
-      // If a new turn started while the page was fetching, reveal instantly (no cascade) — the drip
-      // machinery belongs to the new turn now; cards still fade in via CardIn. (review fix.)
-      if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: target }));
-      else cascadeIn(mid, cur, target);
+      const mergedLen = fetched0 + add.length;
+      if (add.length) {
+        setMsgs((prev) =>
+          prev.map((mm) => {
+            if (mm.id !== mid || mm.role !== 'results' || !mm.result) return mm;
+            return { ...mm, result: { ...mm.result, listings: [...mm.result.listings, ...add], pageOffset, hasMore: hasMoreNow } };
+          }),
+        );
+      }
+      // Reveal EVERYTHING at once — not the old next-100-boundary target. If a new turn started
+      // while pages were fetching, reveal instantly (no cascade) — the drip machinery belongs to the
+      // new turn now; cards still fade in via CardIn. (review fix, unchanged by this redefinition.)
+      if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: mergedLen }));
+      else cascadeIn(mid, cur, mergedLen);
+      // EXPLICIT SHOW-ALL FINISHES THE SEARCH (owner rule 2026-09-11, Task 4). Distinct from R11.1's
+      // automatic small-set completion — which fires with no click, from the count alone — this is
+      // the USER'S OWN CHOICE, so it finishes at any total. Gated on `!hasMoreNow`, never a bare
+      // `true`: a failed or backstop-truncated drain returns above and never reaches this line, so
+      // completion can never be claimed for a reveal that did not actually finish.
+      const userChoseShowAllAndFinish = !hasMoreNow;
+      if (userChoseShowAllAndFinish) setCompleted(true);
     } finally {
       setLoadingMore((s) => ({ ...s, [mid]: false }));
     }
@@ -3277,11 +3301,11 @@ export default function Agent() {
                           cascadeStarted: !!dripStartedRef.current[m.id],
                           cascadeRunningForThisTurn: revealing && revealActiveRef.current?.id === m.id,
                         })) return null;
-                        // BROWSE-CONTINUATION RULE (owner 2026-08-29, supersedes the 2026-08-20 cap) — the
-                        // "load more" gate and the closing count come from ONE pure function
-                        // (src/data/resultCount.ts), so they can never disagree and one test locks them. The
-                        // user can browse EVERY match in batches of BROWSE_BATCH; the closing message states
-                        // the TRUE total, never a batch size or the buffer length.
+                        // SHOW-ALL RULE (owner 2026-08-29, redefined 2026-09-11 — Task 4) — the "load more"
+                        // gate and the closing count come from ONE pure function (src/data/resultCount.ts),
+                        // so they can never disagree and one test locks them. One tap of «عرض المزيد» reveals
+                        // every remaining match and finishes the search; the closing message states the TRUE
+                        // total, never a batch size or the buffer length.
                         const clientNarrowed = !!(m.result.query && hasClientOnlyNarrowing(m.result.query));
                         // TRUE eligible total — matchTotal FIRST (PR #608 "never the page-capped total"), NEVER
                         // `fetched`/`listings.length` (a page-buffer size). Under client-only narrowing the RPC
