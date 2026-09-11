@@ -190,8 +190,14 @@ const SHEET = { top: 520, bottom: 664, height: 144 };
     AUTH_PROMPT_SELECTOR.includes('appleid.apple.com'), `got ${AUTH_PROMPT_SELECTOR}`);
   const libSrc = readFileSync(join(ROOT, 'src/lib/bottomPromptInset.ts'), 'utf8');
   check('E3d. the DOM read uses the WIDE selector, not the legacy id',
-    /querySelectorAll\(DOCKED_PROMPT_SELECTOR\)/.test(libSrc),
-    'the wide selector may exist and never be the thing actually queried');
+    // The combined-inset path defaults its query to DOCKED_PROMPT_SELECTOR (ops_incident #163
+    // parametrised readPromptRects/observePromptInsets on a `selector` so a FOREIGN-only variant
+    // could reuse the same machinery — the wide selector is now the DEFAULT, not a literal call
+    // site, so the check follows the default rather than one fixed call shape).
+    /selector:\s*string\s*=\s*DOCKED_PROMPT_SELECTOR/.test(libSrc)
+      && /querySelectorAll\(selector\)/.test(libSrc)
+      && /observePromptInsets\(setInsets\)/.test(libSrc),
+    'the wide selector may exist and never be the thing actually queried by default');
   // …and "wide" must still CONTAIN everything it replaced. A combined selector that quietly dropped
   // the auth half would pass the regex above and reopen ops_incident #120.
   check('E3e. the queried selector still covers every auth prompt it used to',
@@ -210,7 +216,12 @@ const SHEET = { top: 520, bottom: 664, height: 144 };
   // The sheet form must pin BOTH sides and carry no width, or it does not span, and a rect that does
   // not span reserves nothing — the card would be back on top of «بحث» with the fix still "present".
   check('E3h. the narrow form is a FLUSH, full-width docked sheet, not a fixed-width floating card',
-    /left:\s*0,\s*right:\s*0,\s*bottom:\s*0/.test(consentSrc) && /right:\s*20,\s*bottom:\s*20,\s*width:\s*280/.test(consentSrc),
+    // `bottom` on both forms now runs through dockedEdgeOffset (ops_incident #163: the card must
+    // ALSO move out of a FOREIGN prompt's way, not just be counted when OTHER content reserves
+    // space for it) — the literal 0/20 anchors moved inside that call rather than disappearing.
+    /left:\s*0,\s*right:\s*0,\s*bottom:\s*dockedEdgeOffset\(0,/.test(consentSrc)
+      && /right:\s*20,\s*bottom:\s*dockedEdgeOffset\(20,/.test(consentSrc)
+      && /width:\s*280/.test(consentSrc),
     'the consent card no longer becomes a flush spanning sheet on narrow viewports — it would reserve nothing');
   const lib = readFileSync(join(ROOT, 'src/lib/bottomPromptInset.ts'), 'utf8');
   // The sheet arrives ~1.3s after load and animates its height in; a mount-time measurement alone
