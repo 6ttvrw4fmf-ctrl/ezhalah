@@ -25,9 +25,8 @@ import {
 //
 //   root       المظهر · اللغة · المساعدة · إدارة الحساب · تسجيل الخروج  (+ profile header)
 //   appearance النظام / فاتح / داكن — applied immediately via ThemeProvider, persisted
-//   language   العربية (active). English listed but disabled — the product is Arabic-only
-//              (i18n setLocale guards `l !== 'ar'`); the row still calls setLocale so the day
-//              that guard lifts, this menu works unchanged.
+//   language   العربية / English — both live (owner, 2026-09-11). Picking one calls setLocale();
+//              i18n.tsx + store.tsx own persistence (signed-in remembers it, guest resets on refresh).
 //   account    display-name inline edit · locked Google/Apple row (phone sign-in removed, owner 2026-09-01) ·
 //              logged-in device · delete account (destructive, kept at the bottom of the account
 //              area — never visually dominant at the menu root)
@@ -69,7 +68,7 @@ export default function AccountMenu({
 }) {
   const router = useRouter();
   const { height: winH } = useWindowDimensions();
-  const { t, locale } = useI18n();
+  const { t, locale, setLocale } = useI18n();
   const { user, updateUser, signOut, deleteAccount } = useApp();
   const { mode, setMode, resolved, colors: C } = useTheme();
   const reduced = useReducedMotion();
@@ -409,14 +408,8 @@ export default function AccountMenu({
             <View>
               <SubHeader title={t('Language')} />
               <View style={s.hairline} />
-              <Row icon="checkmark-circle-outline" label="العربية" selected onPress={() => {}} testID="language-ar" />
-              {/* Arabic-only product: English is visible but disabled. The press still routes
-                  through setLocale — whose guard makes it a no-op — so behavior has ONE owner. */}
-              <View style={s.langDisabled} testID="language-en">
-                <Ionicons name="ellipse-outline" size={17} color={C.muted} />
-                <Text style={[s.rowLabel, { color: C.muted }]}>English</Text>
-                <Text style={s.rowValue}>{t('Not available yet')}</Text>
-              </View>
+              <Row icon="checkmark-circle-outline" label="العربية" selected={locale === 'ar'} onPress={() => setLocale('ar')} testID="language-ar" />
+              <Row icon="checkmark-circle-outline" label="English" selected={locale === 'en'} onPress={() => setLocale('en')} testID="language-en" />
             </View>
           )}
 
@@ -809,7 +802,6 @@ function makeStyles(C: Record<string, string>, dark: boolean) {
     rowLabel: { flex: 1, fontSize: 13.5, fontWeight: '600', color: C.ink, textAlign: 'right', writingDirection: 'auto' as any },
     rowLabelDanger: { color: '#d05b4c' },
     rowValue: { fontSize: 12, color: C.muted, fontWeight: '500' },
-    langDisabled: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10, opacity: 0.55 },
 
     subHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 8, borderRadius: 10 },
     subHeadText: { fontSize: 13.5, fontWeight: '700', color: C.ink },
