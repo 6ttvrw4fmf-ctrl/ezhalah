@@ -95,13 +95,20 @@ check('rpcAllNarrowingParams drops ONLY p_types and p_sort_by',
   dropped.length === 2 && dropped.includes('p_types') && dropped.includes('p_sort_by'),
   `it discards: ${dropped.join(', ') || '(nothing parsed)'} — any other key here is a predicate Trending will silently stop applying`);
 
+// The ARGUMENT may be `query` or an object derived from it — `queryForPeriod` normalises the rent
+// period before the count builders read it (2026-09-11), which is what makes the counts and the
+// results agree on p_price_max rather than a spelling this file happened to freeze. The BUILDER is
+// what is pinned: the everything-the-user-chose one, never the advanced-only one.
+const NORMALISED_Q = '(?:query|queryForPeriod)';
 check('the Trending city pool is built from rpcAllNarrowingParams',
-  /rpcAllNarrowingParams\(query\)/.test(index),
+  new RegExp(`rpcAllNarrowingParams\\(${NORMALISED_Q}\\)`).test(index),
   'Trending must not be handed the advanced-only builder again');
 check('the Trending city pool no longer uses the advanced-ONLY builder',
   !/cityAfParams\s*=\s*useMemo\(\(\)\s*=>\s*rpcAdvancedFilterParams/.test(index)
-  && !/rpcAdvancedFilterParams\(query\)/.test(index),
-  'rpcAdvancedFilterParams(query) in index.tsx means the normal filters are being dropped again');
+  // Any argument, not just `(query)`: index.tsx has no legitimate call to the advanced-only builder,
+  // so `rpcAdvancedFilterParams(queryForPeriod)` must fail here exactly as `(query)` always did.
+  && !/rpcAdvancedFilterParams\(/.test(index),
+  'rpcAdvancedFilterParams(...) in index.tsx means the normal filters are being dropped again');
 
 // The pool object must reach the RPC, and every widening fallback must be gated on "user is not
 // narrowed" — a widened count under an active filter is the overstatement itself, delivered silently.
@@ -119,8 +126,8 @@ check('the narrowing params are spread into the top_cities_by_deal_ar arguments'
 // also occurs in the destructuring that produces it, so a looser regex stays green while the spread
 // into cityAfRaw is deleted — the exact defect. (Mutation-proven: deleting the spread fails this.)
 check('the Trending params carry the search TABLE scope, from searchTableScope(query)',
-  /const cityAfRaw = \{ \.\.\.rpcAllNarrowingParams\(query\), \.\.\.cityTableScope \}/.test(index)
-  && /= searchTableScope\(query\) \?\? \{\}/.test(index),
+  new RegExp(`const cityAfRaw = \\{ \\.\\.\\.rpcAllNarrowingParams\\(${NORMALISED_Q}\\), \\.\\.\\.cityTableScope \\}`).test(index)
+  && new RegExp(`= searchTableScope\\(${NORMALISED_Q}\\) \\?\\? \\{\\}`).test(index),
   'without p_tables, Trending counts platform tables the results RPC excludes');
 check('searchTableScope is the SHARED resolver, not a second copy of the table lists',
   /export function searchTableScope/.test(strip(read('src/data/remote.ts')))
