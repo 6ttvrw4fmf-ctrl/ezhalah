@@ -1334,6 +1334,10 @@ const AR: Record<string, string> = {
     'ولا يهمك — ما فيه شي يطابق طلبك بالضبط كذا. ابدأ بحثاً جديداً لو تبي تجرب شي مختلف.',
   "Sorry, nothing matches your exact request right now. Start a new search if you'd like to try something different.":
     'للأسف ما فيه شي يطابق طلبك بالضبط حالياً. ابدأ بحثاً جديداً لو تبي تجرب شي مختلف.',
+
+  // ONE MAIN REQUEST, ONE LOCATION QUESTION (owner 2026-09-11, AI Agent flow simplification).
+  'Sorry, no listings currently match your request. Try using the Filter to widen your search.':
+    'عذراً، ما لقينا نتائج مطابقة لطلبك حالياً. جرب استخدام الفلتر لتوسيع البحث.',
 };
 
 // Interpolate {placeholders}. Used by both en (key) and ar (translation) paths.
