@@ -38,6 +38,18 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // Same companion shape as the entries below: the repair (healing six dealapp rows the
+  // enforce_price_size_sanity trigger had sentineled to «غير معروف», owner decision 2026-09-11 /
+  // ops_incident #172) and its watcher landed as two migrations nine minutes apart, so the repair
+  // file itself never reaches a mon_detect_* in executed SQL. The class IS watched:
+  // mon_detect_service_facility_types_regressed() checks (A) the four مرافق خدمية types stay in
+  // known_type_ar AND no production_ready dealapp row whose RAW property_type is one of them
+  // carries the sentinel, and (B) zero live-promoted loc_canonical_district rows fail
+  // district_ar_looks_bogus — on the mon_run_all_detectors() roster, run green in-migration.
+  '20260911215017_service_facilities_taxonomy_and_district_filter_arabic_digits.sql':
+    'watched by its companion 20260911215940_service_facility_taxonomy_repair_gets_a_detector.sql, '
+    + 'which creates mon_detect_service_facility_types_regressed(), needle-edits it into the '
+    + 'mon_run_all_detectors() roster, and runs it green in the same migration',
   // The repair and the detector that watches its class landed as two migrations one minute apart,
   // so the repair file itself never reaches a mon_detect_* in executed SQL. The class IS watched:
   // 20260824115704 re-asserts this exact UPDATE idempotently and then calls
