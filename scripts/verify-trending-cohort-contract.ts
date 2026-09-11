@@ -25,7 +25,11 @@ const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`
 check('remote.ts exports cohortTypesAr and rpcFilterParams consumes it (single type-expansion definition)',
   /export function cohortTypesAr/.test(rem) && /const p_types = cohortTypesAr\(q\);/.test(rem));
 check('index.tsx derives the trending cohort from cohortTypesAr — never its own expansion',
-  /const cohortTypes = cohortTypesAr\(query\);/.test(idx) && !/typeArForTypes\(/.test(idx));
+  // The argument may be `query` or an object DERIVED from it (queryForPeriod normalises the rent
+  // period before the count builders read it, 2026-09-11). What this line forbids is index.tsx
+  // expanding types ITSELF — that is `typeArForTypes(`, asserted absent — not which normalised
+  // object the shared expansion is handed.
+  /const cohortTypes = cohortTypesAr\((?:query|queryForPeriod)\);/.test(idx) && !/typeArForTypes\(/.test(idx));
 
 // pool keys carry the types dimension → changing type recomputes by construction
 // pmKey's param was renamed paymentMonthly(boolean) -> periodTok(string) 2026-08-19 (owner mixed-

@@ -115,8 +115,18 @@ eq('THE KILL SWITCH AT THE GATE: an unresolved scope must NOT sneak past client-
 check('the flow planner (startAgeFlow) routes through rankQuestions -> eligibleQuestions',
   agent.includes('const ranked = await rankQuestions(q, ageFlowAskedRef.current);')
   && adv.includes('const pool = eligibleQuestions(q).filter'));
+// WEAK-BARRIER REPAIR (2026-09-11, routine #10, R1 sweep). The backreference `\1` here referred to
+// capture group 1 — `(filter|some)` — not group 2, the parameter-name group `(question|c)` the
+// pattern was clearly trying to reuse before `.eligibility`. So the regex required the literal text
+// `=> filter.eligibility` or `=> some.eligibility`, which no real call site — `(c) => c.eligibility`
+// or `(question) => question.eligibility` — can ever produce. The check was VACUOUSLY TRUE: no input
+// could ever make it fail, so it could never have caught the regression its own label describes.
+// Caught by this file's own mutation proof (below) on its first run. Fixed by pointing the
+// backreference at the correct group.
+const noRogueEligibilityFilter = (s: string) =>
+  !/ADVANCED_QUESTIONS\s*\.?\s*(?:filter|some)\(\((question|c)\) => \1\.eligibility/.test(s);
 check('NO call site re-derives eligibility by filtering ADVANCED_QUESTIONS itself (contract: gates live in the engine)',
-  !/ADVANCED_QUESTIONS\s*\.?\s*(filter|some)\(\((question|c)\) => \1\.eligibility/.test(agent));
+  noRogueEligibilityFilter(agent));
 check('hasClientOnlyNarrowing still guards the exact count headline too (its original job)',
   agent.includes('hasClientOnlyNarrowing(m.result.query)'));
 check('hasClientOnlyNarrowing still covers all three narrowers',
@@ -171,3 +181,126 @@ if (failed) {
   process.exit(1);
 }
 console.log('\nAll advanced-filter count-honesty checks passed.');
+
+// ═══ MUTATION PROOFS ════════════════════════════════════════════════════════════════════════════
+// The Math.max/rungs replicas and the anyGuidedEligible gate above already EXECUTE real logic — the
+// strongest form. The remaining source-text checks read the ACTUAL current content of adv/agent/
+// interview/search (loaded above), so each mutant below reintroduces one of the three historical
+// defects the header describes into a mutated copy of that SAME real content, and proves the check
+// would go red — never a synthetic fixture standing in for what ships.
+console.log('\n── mutation proofs — reintroduce each of the three historical defects ─────────────');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+// ── DEFECT 1: bathrooms re-ask WIDENED instead of intersecting ────────────────────────────────────
+const shippedApplyPattern = /apply:\s*\(q,\s*keys\)\s*=>\s*\{[\s\S]{0,400}?Math\.max\(n,\s*q\.bathMin\s*\?\?\s*0\)/;
+const usesMathMax = (s: string) => shippedApplyPattern.test(s);
+const advWidened = adv.replace(
+  'Math.max(n, q.bathMin ?? 0)', 'n',    // the exact historical bug: REPLACES instead of intersecting
+);
+mustCatch('apply() reverted to REPLACING bathMin instead of Math.max-intersecting — THE ORIGINAL BUG',
+  !usesMathMax(advWidened));
+mustCatch('…while the genuine, fixed apply() IS recognised (negative control)',
+  usesMathMax(adv));
+const oldOneLinerReintroduced = adv.replace(
+  '{ ...q, bathMin: Math.max(n, q.bathMin ?? 0) }', "{ ...q, bathMin: parseInt(keys[0], 10) || null }",
+);
+mustCatch('the pre-fix one-liner pasted back in (a stale-body revert, the class #2034 warns about)',
+  oldOneLinerReintroduced.includes('bathMin: parseInt(keys[0], 10) || null'));
+mustCatch('…while the genuine file does NOT contain that one-liner (negative control)',
+  !adv.includes('bathMin: parseInt(keys[0], 10) || null'));
+
+const rungsFilterMutated = adv.replace(
+  'rungs.filter((d) => parseInt(d.key, 10) > floor)', 'rungs.filter((d) => true)',
+);
+mustCatch('resolveOptions stops filtering rungs above the current floor (re-offers duplicate rungs)',
+  !/rungs\.filter\(\(d\) => parseInt\(d\.key, 10\) > floor\)/.test(rungsFilterMutated));
+mustCatch('…while the genuine filter IS recognised (negative control)',
+  /rungs\.filter\(\(d\) => parseInt\(d\.key, 10\) > floor\)/.test(adv));
+
+// ── DEFECT 2: option counts ignored client-only narrowers (up to 29× overstatement) ────────────────
+const killSwitchPattern = /export function eligibleQuestions\([\s\S]{0,200}?if \(hasClientOnlyNarrowing\(q\)\) return \[\];/;
+const advKillSwitchDropped = adv.replace(
+  'if (hasClientOnlyNarrowing(q)) return [];', '// kill switch removed',
+);
+mustCatch('the client-only-narrowing kill switch removed from eligibleQuestions — THE ORIGINAL OVERSTATEMENT BUG',
+  !killSwitchPattern.test(advKillSwitchDropped));
+mustCatch('…while the genuine engine gate IS recognised (negative control)',
+  killSwitchPattern.test(adv));
+
+// An `as` alias keeps the substring "hasClientOnlyNarrowing" in the import line (it names the
+// ORIGINAL export being aliased), so a mutant using `as _unused` would still satisfy the check —
+// caught on this proof's first run. The realistic defect is the import line disappearing entirely
+// (a refactor that inlines the check or deletes the dependency), which genuinely breaks the call.
+const advImportDropped = adv.replace(
+  "import { hasClientOnlyNarrowing } from './search';", '',
+);
+mustCatch('the import line removed entirely so advancedFilters.ts can no longer call the real gate',
+  !/import \{[^}]*hasClientOnlyNarrowing[^}]*\} from '\.\/search'/.test(advImportDropped));
+mustCatch('…while the genuine import IS recognised (negative control)',
+  /import \{[^}]*hasClientOnlyNarrowing[^}]*\} from '\.\/search'/.test(adv));
+
+// A call site that re-derives eligibility by hand instead of going through the engine gate — the
+// contract check exists specifically to forbid this shape reappearing anywhere in agent.tsx.
+// Both real-world spellings are proven: the short param name AND the long one.
+const rogueCallSiteShort = agent + "\nconst x = ADVANCED_QUESTIONS.filter((c) => c.eligibility(q));\n";
+const rogueCallSiteLong = agent + "\nconst x = ADVANCED_QUESTIONS.filter((question) => question.eligibility(q));\n";
+mustCatch('a rogue call site (short param name) re-deriving eligibility by filtering ADVANCED_QUESTIONS directly',
+  !noRogueEligibilityFilter(rogueCallSiteShort));
+mustCatch('a rogue call site (long param name) — the ORIGINAL regex\'s broken backreference (\\1 pointed at filter/some, not the param) could never have caught EITHER shape',
+  !noRogueEligibilityFilter(rogueCallSiteLong));
+mustCatch('…while the genuine file has no such call site (negative control)',
+  noRogueEligibilityFilter(agent));
+
+const hasClientOnlyNarrowingGutted = search
+  .replace('if (q.keywords && q.keywords.length) return true;', '')
+  .replace(/q\.contextSize \|\| \(q\.detail && !bedroomSpec\(q\)\)/, 'false');
+mustCatch('the keyword or size-band narrower silently dropped from hasClientOnlyNarrowing',
+  !(/if \(q\.keywords && q\.keywords\.length\) return true;/.test(hasClientOnlyNarrowingGutted)
+    && /q\.contextSize \|\| \(q\.detail && !bedroomSpec\(q\)\)/.test(hasClientOnlyNarrowingGutted)));
+mustCatch('…while the genuine three-narrower coverage IS recognised (negative control)',
+  /if \(q\.keywords && q\.keywords\.length\) return true;/.test(search)
+    && /q\.contextSize \|\| \(q\.detail && !bedroomSpec\(q\)\)/.test(search)
+    && /q\.deal === 'Buy'[\s\S]{0,300}?amount <= 50_000\) return true;/.test(search));
+
+// ── DEFECT 3: the guided interview's must-have amenity answer did nothing ──────────────────────────
+const buildQueryPattern = /if \(real\(a\.s_amenities\) && AMENITY_TOKEN\[a\.s_amenities\]\) q\.amenities = \[AMENITY_TOKEN\[a\.s_amenities\]\];/;
+const interviewAmenitiesDropped = interview.replace(
+  'if (real(a.s_amenities) && AMENITY_TOKEN[a.s_amenities]) q.amenities = [AMENITY_TOKEN[a.s_amenities]];',
+  '// buildQuery no longer writes q.amenities — THE ORIGINAL BUG (answer echoed, then ignored)',
+);
+mustCatch('buildQuery stops writing q.amenities from the answer — THE ORIGINAL BUG, verbatim',
+  !buildQueryPattern.test(interviewAmenitiesDropped));
+mustCatch('…while the genuine buildQuery IS recognised as writing it (negative control)',
+  buildQueryPattern.test(interview));
+
+// A typo'd or guessed amenity token would silently zero out every search that answers this question
+// (the vocabulary is fixed and an unknown token matches nothing BY DESIGN). 'pool' is NOT usable
+// here — it IS a certified live token (see the "Pool and Gym are NOT mapped" check above, which
+// guards a DIFFERENT invariant: an owner-scope decision, not vocabulary membership) — so the mutant
+// must be a token genuinely absent from LIVE_AMENITY_TOKENS. Caught on this proof's first run.
+const mapWithTypo = mapBlock
+  ? interview.replace(mapBlock[0], mapBlock[0].replace(/\{/, "{\n  guessed_slug: 'wifi_speed',"))
+  : interview;
+const mappedWithTypo = [...(mapWithTypo.match(/const AMENITY_TOKEN: Record<string, string> = \{([\s\S]*?)\};/)?.[1] ?? '').matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+mustCatch('an unmapped/guessed token (e.g. "pool") slipped into AMENITY_TOKEN — would silently zero every search',
+  !mappedWithTypo.every((tok) => LIVE_AMENITY_TOKENS.has(tok)));
+mustCatch('…while every genuinely mapped token IS in the live vocabulary (negative control)',
+  mapped.every((tok) => LIVE_AMENITY_TOKENS.has(tok)));
+
+const noPreferenceStillReal = interview.replace(
+  "const real = (v?: string) => !!v && v !== SKIP && v !== 'Other' && v !== NO_PREFERENCE;",
+  "const real = (v?: string) => !!v && v !== SKIP && v !== 'Other';",
+);
+mustCatch('the no-preference exclusion dropped from real() — "Doesn\'t matter" would be echoed as a chosen amenity',
+  !/const real = \(v\?: string\) => !!v && v !== SKIP && v !== 'Other' && v !== NO_PREFERENCE;/.test(noPreferenceStillReal));
+mustCatch('…while the genuine real() IS recognised as excluding it (negative control)',
+  /const real = \(v\?: string\) => !!v && v !== SKIP && v !== 'Other' && v !== NO_PREFERENCE;/.test(interview));
+
+console.log('');
+if (mutFail) { console.error(`✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
+console.log('✓ every source-text guard above was watched to fail against the defect it prevents\n');

@@ -104,3 +104,95 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log('✓ verify-wasalt-rent-period-evidence: all checks passed.');
+
+// ═══ MUTATION PROOFS ════════════════════════════════════════════════════════════════════════════
+// Every check() above reads a regex over source TEXT — necessary here, since the guarded logic is
+// Python and this repo has no Python-lifting equivalent of scripts/lib/liftSymbols.ts. A text
+// predicate can still be PROVEN: extract it as a pure function of the source string, feed it the
+// real defect (reconstructed by mutating the ACTUAL current run.py content, not a synthetic
+// snippet), and show it fails — then show the unmutated original still passes. That is R1's
+// technique applied to a text reader instead of an executable symbol.
+console.log('\n── mutation proofs — each guard must FAIL on its own defect ──────────────────────');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+// Pure predicates, mirroring the checks above exactly, so a proof and the guard it proves can never
+// silently diverge.
+const capturesRawBlock = (src: string) => /rent_freq_evidence\s*=\s*rent_freq\s+or\s+None/.test(src);
+const writesToSourceCapture = (src: string) =>
+  /"source_capture"\s*:\s*\{[^}]*"rent_freq"\s*:\s*rent_freq_evidence/.test(src);
+const captureIsConditional = (src: string) => /if rent_freq_evidence else \{\}/.test(src);
+const monthlyBranchOf = (src: string) => src.match(
+  /if rf_monthly\.get\("default_freq"\)[\s\S]*?rent_price = int\(rf_monthly\["amount"\]\) \* 12/,
+)?.[0];
+const monthlyBranchAvoidsYearly = (branch: string) => !/rent_price\s*=\s*rf_yearly/.test(branch);
+const yearlyBranchStoresVerbatim = (src: string) =>
+  /elif rf_yearly\.get\("amount"\):\s*\n\s*rent_price = rf_yearly\["amount"\]/.test(src);
+
+// ── 1. the capture (defect #1 in the header — 42.1-day-stale ar_data, formally unanswerable) ──────
+mustCatch('the raw rentFreq capture deleted — the ORIGINAL P1 defect, verbatim',
+  !capturesRawBlock(run.replace('rent_freq_evidence = rent_freq or None', 'rent_freq_evidence = None')));
+mustCatch('the capture renamed so it silently stops feeding source_capture',
+  !capturesRawBlock(run.replace(/rent_freq_evidence = rent_freq or None/, 'rfe = rent_freq or None')));
+mustCatch('source_capture stops writing the rent_freq field',
+  !writesToSourceCapture(run.replace(
+    '"rent_freq": rent_freq_evidence', '"rent_freq_dropped": rent_freq_evidence',
+  )));
+mustCatch('the conditional dropped so source_capture is written unconditionally, even when rent_freq_evidence is None',
+  !captureIsConditional(run.replace('if rent_freq_evidence else {}', 'if True else {}')));
+
+// ── 2. the monthly-default branch (defect #2 — the "helpful" x12→rf_yearly swap) ──────────────────
+const healthyBranch = monthlyBranchOf(run);
+mustCatch('the monthly-default branch present at all — a refactor that renames default_freq',
+  monthlyBranchOf(run.replace(
+    'elif rf_monthly.get("default_freq")', 'elif rf_monthly.get("is_default")',
+  )) === undefined);
+if (healthyBranch) {
+  mustCatch('the EXACT historical near-miss: swapping to rf_yearly["amount"] in the monthly-default branch',
+    !monthlyBranchAvoidsYearly(
+      healthyBranch.replace(
+        'rent_price = int(rf_monthly["amount"]) * 12',
+        'rent_price = int(rf_monthly["amount"]) * 12\n            rent_price = rf_yearly["amount"]',
+      ),
+    ));
+  mustCatch('…while the genuine, unmutated branch is NOT flagged (negative control)',
+    monthlyBranchAvoidsYearly(healthyBranch));
+}
+mustCatch('the yearly-default branch changed to derive instead of store verbatim (a fabricated figure)',
+  !yearlyBranchStoresVerbatim(run.replace(
+    // The naive mutant `rent_price = rf_yearly["amount"] // 12 * 12` still contains the exact
+    // matched substring as a PREFIX, so the un-anchored regex keeps matching it — caught on this
+    // proof's first run. Wrapping in int(...) breaks the literal text the regex requires.
+    '        elif rf_yearly.get("amount"):\n            rent_price = rf_yearly["amount"]',
+    '        elif rf_yearly.get("amount"):\n            rent_price = int(rf_yearly["amount"]) // 12 * 12',
+  )));
+mustCatch('…while the genuine branch IS recognised as storing verbatim (negative control)',
+  yearlyBranchStoresVerbatim(run));
+
+// ── 3. the staleness gate (defect #3 — comparing an 8-hourly value against a ~6-week snapshot) ────
+if (gate.length) {
+  const sql = readFileSync(join(migDir, gate[0]), 'utf8');
+  const p1FiresOnlyContemporaneous = (s: string) =>
+    /filter \(where stored_period is distinct from source_period and contemporaneous\)/.test(s);
+  mustCatch('the contemporaneous gate dropped from the P1 filter — the ORIGINAL staleness defect',
+    !p1FiresOnlyContemporaneous(sql.replace(
+      'filter (where stored_period is distinct from source_period and contemporaneous)',
+      'filter (where stored_period is distinct from source_period)',
+    )));
+  mustCatch('…while the genuine, gated SQL is NOT flagged (negative control)',
+    p1FiresOnlyContemporaneous(sql));
+  const staleReportedExists = (s: string) => /rent_period_stale_snapshot_only/.test(s);
+  mustCatch('the stale-only population silently dropped (the barrier would then be silencing, not distinguishing)',
+    !staleReportedExists(sql.replace(/rent_period_stale_snapshot_only/g, 'x')));
+}
+
+console.log('');
+if (mutFail) {
+  console.error(`✗ ${mutFail} guard(s) are BLIND to their own defect\n`);
+  process.exit(1);
+}
+console.log('✓ every guard in this file was watched to fail against its own defect\n');
