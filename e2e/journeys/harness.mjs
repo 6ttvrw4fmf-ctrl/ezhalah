@@ -500,7 +500,7 @@ export async function ledgerRecord(key, result, notesText) {
  * Close the 375px drawer so the screen underneath can be driven.
  *
  * NEEDED BECAUSE THE DRAWER COVERS THE MODE SWITCH. Measured on production 2026-08-31, mobile375:
- * the drawer panel is x=0 w=307.5 of a 375px viewport, and «الوكيل الذكي» sits at x=217 — INSIDE
+ * the drawer panel is x=0 w=307.5 of a 375px viewport, and «الوسيط الذكي» sits at x=217 — INSIDE
  * the panel's span, so any tap on it while the drawer is open is intercepted. That is the exact
  * failure `new-chat-blank` was rewritten to dodge by re-ordering its steps; a journey that must
  * open the drawer FIRST (star a row) and navigate SECOND cannot dodge it and needs a real close.
@@ -822,7 +822,7 @@ export async function openMobileSidebar(page, { guestOk = false } = {}) {
 // Measured, and the reason this exists (ops_incident #120, journey sweep run 15, 2026-09-06): the
 // first time this journey ever ran on WebKit and Firefox it produced 12 defects, and EVERY one was
 // the null branch, at all five points including the centre, on controls the rest of the sweep taps
-// successfully — «تصفية» and «الوكيل الذكي» among them. Whether that is a real un-tappable control
+// successfully — «تصفية» and «الوسيط الذكي» among them. Whether that is a real un-tappable control
 // on those engines or a probe artifact is NOT established, and this function deliberately does not
 // decide it: it makes the two shapes say what they are, so the next per-engine sweep answers the
 // question instead of restating the guess (PART 11.2 rule 4; the #1053 precedent — instrument

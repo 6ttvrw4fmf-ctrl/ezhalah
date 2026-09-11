@@ -336,7 +336,7 @@ const G3 = {
     'Assert the invitation does not cover the primary «بحث» control.',
     'If no invitation is offered at this viewport, press «إنشاء حساب / تسجيل الدخول» to open one and repeat those assertions.',
     'Open the sidebar sign-in entry point and assert there is still exactly one invitation.',
-    'Dismiss the invitation, switch to الوكيل الذكي and back to تصفية, and assert it stays dismissed.',
+    'Dismiss the invitation, switch to الوسيط الذكي and back to تصفية, and assert it stays dismissed.',
   ],
   async run(page, ctx) {
     await open(page, '/');
@@ -402,11 +402,11 @@ const G3 = {
     if (verdict === 'reappeared') bad.push('the auth invitation came back after dismissing both presentations — no dismissal sticks');
     if ((await authSurface(page)).invitations !== 0) bad.push('dismissing the auth invitation did not close it');
 
-    await tap(page, 'الوكيل الذكي');
+    await tap(page, 'الوسيط الذكي');
     await sleep(2500);
     const onAgent = await authSurface(page);
     seen['agent tab after dismissal'] = onAgent;
-    if (onAgent.invitations > 0) bad.push('the dismissed auth invitation came back after switching to الوكيل الذكي — dismissal must hold for the session');
+    if (onAgent.invitations > 0) bad.push('the dismissed auth invitation came back after switching to الوسيط الذكي — dismissal must hold for the session');
     await tap(page, 'تصفية');
     await sleep(2500);
     const backHome = await authSurface(page);
@@ -544,7 +544,7 @@ const G6 = {
     'Open https://ezhalah-app.vercel.app/ and wait up to 25s for every loading affordance to clear.',
     'Dismiss the sign-in card, pick الرياض and press «بحث».',
     'After the results settle, wait up to 25s again and assert no loading affordance is still visible.',
-    'Switch to الوكيل الذكي and assert the same there.',
+    'Switch to الوسيط الذكي and assert the same there.',
   ],
   async run(page, ctx) {
     const bad = [];
@@ -562,7 +562,7 @@ const G6 = {
     if (!await pickCity(page, 'الرياض')) throw new HarnessError('the product did not offer the city «الرياض»');
     await runSearch(page);
     await settle('results');
-    await tap(page, 'الوكيل الذكي');
+    await tap(page, 'الوسيط الذكي');
     await sleep(2500);
     await settle('agent screen');
 

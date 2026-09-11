@@ -157,11 +157,11 @@ JOURNEYS['open-saved-chat'] = async (mobile) => withPage({ mobile, signedIn: tru
 JOURNEYS['new-chat-blank'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
   const name = `new-chat-blank:${mobile ? 'mobile375' : 'desktop1440'}`;
   // ORDER MATTERS ON MOBILE. This used to open the drawer FIRST, and at 375px the open drawer
-  // covers the whole screen — so the tap on «الوكيل الذكي» was intercepted and the agent screen
+  // covers the whole screen — so the tap on «الوسيط الذكي» was intercepted and the agent screen
   // never opened. With the old swallow-the-failure clickText that read as a success, and the
   // journey skipped two runs running on the downstream symptom («composer not found»). The
   // sidebar is not needed until «محادثة جديدة», so it is opened THERE, not here.
-  if (!(await clickText(page, 'الوكيل الذكي'))) { skip(name, `agent tab: ${clickReason()}`); return; }
+  if (!(await clickText(page, 'الوسيط الذكي'))) { skip(name, `agent tab: ${clickReason()}`); return; }
   await sleep(3500);
   const composer = page.locator('textarea').first();
   if (!(await composer.count())) { skip(name, 'composer not found'); return; }
@@ -299,7 +299,7 @@ JOURNEYS['double-click-search'] = async (mobile) => {
 /** J7 — browser Back after a real search must land somewhere usable (PART 5 shape 9).
  *
  *  BACK IS ONLY MEANINGFUL ONCE THE APP HAS PUSHED AN ENTRY. The first version of this journey
- *  pressed Back straight after switching to «الوكيل الذكي» and filed a 4/4 "Back stranded the user
+ *  pressed Back straight after switching to «الوسيط الذكي» and filed a 4/4 "Back stranded the user
  *  at about:blank". Both halves of that were wrong: tab switching pushes NO history entry BY OWNER
  *  RULE (the live sweep's permanent watch `tab-switch-no-junk-history`), and `about:blank` is the
  *  fresh Playwright context's own initial page — a real visitor arrives with their own history and
@@ -336,7 +336,14 @@ JOURNEYS['back-after-search'] = async (mobile) => withPage({ mobile }, async (pa
  *  Chromium only — it says nothing about a real iPhone's microphone or audio session. */
 JOURNEYS['voice-control'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `voice-control:${mobile ? 'mobile375' : 'desktop1440'}`;
-  await clickText(page, 'الوكيل الذكي');
+  // A JOURNEY THAT NEVER REACHED ITS SURFACE MUST NOT READ AS A PASS. This tab click used to be
+  // unguarded, and every other outcome below is conditional on the mic existing — so between
+  // 2026-09-06 (the «الوكيل الذكي» → «الوسيط الذكي» rename) and 2026-09-11 this journey clicked a
+  // label that no longer existed, stayed on Filter home, found 0 mic controls, emitted a single
+  // note and recorded a clean PASS in the ledger, 31 times. The stale label is fixed and barriered
+  // (scripts/verify-e2e-targets-still-exist-in-the-product.ts); this guard is the second half, so
+  // that ANY future reason for not reaching the agent screen is a skip rather than a quiet green.
+  if (!(await clickText(page, 'الوسيط الذكي'))) { skip(name, `agent tab: ${clickReason()}`); return; }
   await sleep(3500);
   const supported = await page.evaluate(() => !!(window.SpeechRecognition || window.webkitSpeechRecognition));
   const mic = page.locator('[data-testid="voice-mic"]');
@@ -348,6 +355,11 @@ JOURNEYS['voice-control'] = async (mobile) => withPage({ mobile }, async (page, 
     const micErrs = appPageErrors(bag, name);
     if (micErrs.length) defect(name, 'mic tap threw', micErrs.join(' | '));
     else pass(name, 'mic tap did not throw');
+  } else {
+    // Not a defect: the product renders no mic where SpeechRecognition is absent, which is correct
+    // and is exactly the case in some headless builds. Not a pass either — nothing was exercised.
+    skip(name, `no voice-mic control on the agent screen (SpeechRecognition supported=${supported}) `
+      + `— nothing was exercised, so this is not coverage`);
   }
 });
 
@@ -719,7 +731,7 @@ JOURNEYS['adv-background-tab'] = async (mobile) => withPage({ mobile, signedIn: 
  *  proves the star survives a REMOUNT — a star written to disk but dropped from context state comes
  *  back on reload and vanishes on navigation, and only this half sees that.
  *
- *  The trip is the real mode toggle (تصفية ↔ الوكيل الذكي), both halves of which router.replace()
+ *  The trip is the real mode toggle (تصفية ↔ الوسيط الذكي), both halves of which router.replace()
  *  by owner rule (index.tsx, defect fix 2026-08-23) — so this journey also walks the exact path
  *  J17 asserts costs no history. */
 JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
@@ -737,10 +749,10 @@ JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobi
   const before = await starredIds();
   if (before !== 'h2') { skip(name, `favourite did not land (flagged [${before}]) — sidebar-row-actions owns that assertion`); return; }
 
-  // At 375px the drawer covers the ModeSwitch (panel w=307.5 of 375, «الوكيل الذكي» at x=217), so
+  // At 375px the drawer covers the ModeSwitch (panel w=307.5 of 375, «الوسيط الذكي» at x=217), so
   // the tap would be intercepted. Close it the way a person does — the exposed backdrop strip.
   if (mobile && !(await closeMobileSidebar(page))) { skip(name, 'mobile drawer would not close'); return; }
-  if (!(await clickText(page, 'الوكيل الذكي'))) { skip(name, `mode switch to agent: ${clickReason()}`); return; }
+  if (!(await clickText(page, 'الوسيط الذكي'))) { skip(name, `mode switch to agent: ${clickReason()}`); return; }
   await sleep(3500);
   if (!(await clickText(page, 'تصفية'))) { skip(name, `mode switch back to filter: ${clickReason()}`); return; }
   await sleep(3500);
@@ -748,7 +760,7 @@ JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobi
   const after = await starredIds();
   if (after !== before) {
     defect(name, 'the favourite did not survive navigation',
-      `starred [${before}] before the تصفية↔الوكيل الذكي round trip, [${after}] after — the star was dropped by a screen change, not by a refresh`);
+      `starred [${before}] before the تصفية↔الوسيط الذكي round trip, [${after}] after — the star was dropped by a screen change, not by a refresh`);
     return;
   }
   pass(name, `favourite survived a mode-switch round trip (still [${after}])`);
@@ -898,7 +910,7 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
   };
 
   await assess('Filter home');
-  if (await clickText(page, 'الوكيل الذكي')) {
+  if (await clickText(page, 'الوسيط الذكي')) {
     await sleep(4000);
     await assess('AI Agent');
   } else {
@@ -1055,7 +1067,7 @@ JOURNEYS['adv-modeswitch-back-push-vs-replace'] = async (mobile) => withPage({ m
 
   const ROUND_TRIPS = 3;
   for (let i = 0; i < ROUND_TRIPS; i++) {
-    if (!(await clickText(page, 'الوكيل الذكي'))) { skip(name, `mode switch to agent on trip ${i + 1}: ${clickReason()}`); return; }
+    if (!(await clickText(page, 'الوسيط الذكي'))) { skip(name, `mode switch to agent on trip ${i + 1}: ${clickReason()}`); return; }
     await sleep(2600);
     if (!(await clickText(page, 'تصفية'))) { skip(name, `mode switch back to filter on trip ${i + 1}: ${clickReason()}`); return; }
     await sleep(2600);
@@ -1065,7 +1077,7 @@ JOURNEYS['adv-modeswitch-back-push-vs-replace'] = async (mobile) => withPage({ m
   // own param-rewriting on the first mount; three round trips costing three entries cannot.
   if (h1 - h0 > 1) {
     defect(name, 'the mode toggle pushes junk history',
-      `${ROUND_TRIPS} تصفية↔الوكيل الذكي round trips added ${h1 - h0} history entries (owner rule: both halves router.replace, so this must be 0)`);
+      `${ROUND_TRIPS} تصفية↔الوسيط الذكي round trips added ${h1 - h0} history entries (owner rule: both halves router.replace, so this must be 0)`);
   } else {
     pass(name, `${ROUND_TRIPS} round trips added ${h1 - h0} history entries`);
   }
@@ -1492,7 +1504,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
   // Reached by TAPPING the pill, the way a person gets there — not by deep-linking to /agent, which
   // renders no composer for a guest and made this half skip on its own downstream symptom.
   await withPage({ mobile }, async (page) => {
-    if (!(await clickText(page, 'الوكيل الذكي'))) { skip(`${name}/composer`, `agent tab: ${clickReason()}`); return; }
+    if (!(await clickText(page, 'الوسيط الذكي'))) { skip(`${name}/composer`, `agent tab: ${clickReason()}`); return; }
     await sleep(3500);
     const sheet = await waitForSheet(page);
     if (!sheet) { skip(`${name}/composer`, 'Google never showed the One Tap prompt this run'); return; }
@@ -1862,7 +1874,7 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   // journey a person makes, and it costs two clicks.
   await gotoOrRetryTransport(page, BASE + '/');
   await settle(page);
-  const toAgent = await clickText(page, 'الوكيل الذكي');
+  const toAgent = await clickText(page, 'الوسيط الذكي');
   await sleep(1500);
   const onAgent = page.url().includes('/agent');
   const back = onAgent ? await clickText(page, 'تصفية') : false;
@@ -1870,7 +1882,7 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   const home = page.url();
   if (!toAgent || !onAgent) {
     defect(name, 'a primary tab could not be pressed while the auth surface was live',
-      `«الوكيل الذكي» click landed=${toAgent}, url=${page.url()} (${clickReason() || 'no reason recorded'})`);
+      `«الوسيط الذكي» click landed=${toAgent}, url=${page.url()} (${clickReason() || 'no reason recorded'})`);
   } else if (!back || home.includes('/agent')) {
     defect(name, 'the return tab could not be pressed while the auth surface was live',
       `«تصفية» click landed=${back}, url=${home} (${clickReason() || 'no reason recorded'})`);

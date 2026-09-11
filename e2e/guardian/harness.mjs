@@ -259,7 +259,7 @@ export const AUTH_INVITATION_SELECTOR = '[data-testid="auth-popup"],[data-testid
  *
  * The old check polled for `count === 0` and returned on the first hit, so it landed in that window
  * and certified a dismissal that had never happened — the journey then filed «the dismissed auth
- * invitation came back after switching to الوكيل الذكي» as a P1 against an app doing exactly what
+ * invitation came back after switching to الوسيط الذكي» as a P1 against an app doing exactly what
  * its spec says. Same defect class as `data ?? []` (AGENTS.md): a transient reading rendered as a
  * confident terminal answer.
  *
