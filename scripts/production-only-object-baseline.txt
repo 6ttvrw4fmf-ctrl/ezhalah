@@ -37,7 +37,6 @@ loc_district_map
 loc_rel_refresh_state
 loc_rel_refresh_tick
 location_pipeline_alerts
-norm_district_tok
 norm_en_place
 normalize_ar
 novel_type_alerts
