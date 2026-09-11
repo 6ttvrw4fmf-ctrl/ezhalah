@@ -115,6 +115,22 @@ console.log('\n§2 mutations');
   const HARNESS = join(ROOT, 'e2e/journeys/harness.mjs');
   const original = readFileSync(HARNESS, 'utf8');
   const { writeFileSync } = await import('node:fs');
+
+  // Signal-safe restore — see the identical block in verify-guardian-oracles-discriminate.ts for the
+  // full reasoning. In short: this mutates a TRACKED file in place, the `finally` below does not run
+  // on a signal, scripts/run-tests.mjs treats a signal-killed child as a failure because it happens,
+  // and this working directory is shared by concurrent sessions with no isolation — so a mutant left
+  // by a timeout is one `git add -A` away from being committed by someone else.
+  const restore = () => { try { writeFileSync(HARNESS, original); } catch { /* best effort */ } };
+  const onSignal = (sig: NodeJS.Signals) => {
+    restore();
+    process.removeListener(sig, onSignal);
+    process.kill(process.pid, sig);
+  };
+  process.once('SIGTERM', onSignal);
+  process.once('SIGINT', onSignal);
+  process.once('exit', restore);
+
   let n = 0;
   const withMutation = async (
     label: string,

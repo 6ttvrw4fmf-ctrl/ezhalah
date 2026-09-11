@@ -209,7 +209,6 @@ verify-loader-platforms-match-active.ts
 verify-loc-classify-postgrest-latency.ts
 verify-loc-rel-age-expression-indexes.ts
 verify-loc-rel-tick-single-statement-cron.ts
-verify-merge-gate-transport.ts
 verify-migration-content-parity-wired.ts
 verify-migration-content-parity.ts
 verify-migration-drift-guard-wired.ts

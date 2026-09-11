@@ -1,9 +1,3 @@
--- Re-seed the WHOLE liveness registry from sql/mirrors/liveness_registry.json (44 platforms),
--- now including azdad. Full re-seed + retention delete, per verify-liveness-registry-mirror.ts's
--- required shape.
---
--- azdad is its own Next.js + Supabase stack (not a Nuzul/Wasalt clone) — registered
--- CRAWL_PRESENCE_ONLY/168h/grace 3, the same tier every other small platform here carries.
 insert into public.ops_liveness_registry (platform, strategy, sla_hours, grace) values
   ('abeea','CRAWL_PRESENCE_ONLY',168,3),
   ('abralosol','CRAWL_PRESENCE_ONLY',168,3),
