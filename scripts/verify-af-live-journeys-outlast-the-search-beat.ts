@@ -41,7 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   readSearchBeatMs, SEARCH_BEAT_MS, POST_SEARCH_BUDGET_MS,
-  awaitResultsTurn, awaitAfStep, provingIds, AGENT_TURN_MS,
+  awaitResultsTurn, awaitAfStep, awaitClickable, provingIds, REACH_AT_CENTRE, AGENT_TURN_MS,
 } from './lib/afJourneyPacing.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -136,6 +136,62 @@ const COMMITTED_TURN = [5, 6, 7, 8, 9, 10, 11, 12, 13, 900, 901, 902];
   check('a turn whose every id was already rendered reports provable=false, not a silent arrival',
     r.provable === false && r.settled === false && r.provingPool === 0,
     `provable=${r.provable} settled=${r.settled} pool=${r.provingPool}`);
+}
+// ── THE OTHER HALF OF THE BEAT: MAY I CLICK IT YET? ─────────────────────────────────────────────
+// The loader is painted over the chat with live pointer events for the beat plus the agent turn, so
+// a click placed straight after a committed answer lands on the loader — Playwright says «subtree
+// intercepts pointer events» and then gives up on ITS budget (30s), which has nothing to do with the
+// product's 11,050ms beat in front of a ~40s turn. Measured 2026-09-11 on
+// verify-af-pill-removal-live, MOBILE جدة/فيلا. Observe reachability; never raise a number.
+{
+  const clock = virtualClock();
+  let covered = true;
+  const page = { evaluate: async () => (clock.at() >= SEARCH_BEAT_MS ? (covered = false, { reach: 'ok', x: 5, y: 5 }) : { reach: 'covered', x: -1, y: -1 }) };
+  const r = await awaitClickable(page as never, '[data-testid="af-pill-0"]', clock.sleep);
+  check('awaitClickable waits out an overlay that covers the control and then clicks it',
+    r.reachable && r.last === 'ok' && clock.at() >= SEARCH_BEAT_MS && !covered,
+    `reachable=${r.reachable} last=${r.last} at ${clock.at()}ms`);
+}
+{
+  const clock = virtualClock();
+  const page = { evaluate: async () => ({ reach: 'covered', x: -1, y: -1 }) as const };
+  const r = await awaitClickable(page as never, '[data-testid="af-pill-0"]', clock.sleep);
+  check('awaitClickable reports a control that NEVER surfaces instead of clicking into the overlay',
+    r.reachable === false && r.last === 'covered', `reachable=${r.reachable} last=${r.last}`);
+}
+{
+  // The DOM probe itself, executed against a stub: the PLURAL elementsFromPoint is what separates a
+  // covered control from a scrolled-out one (PR #2040's «20 controls blocked» false alarm).
+  const rect = { x: 0, y: 0, width: 10, height: 10 };
+  const mkDoc = (stackTop: unknown, el: unknown) => ({
+    querySelector: () => el,
+    elementsFromPoint: () => [stackTop, el].filter(Boolean),
+  });
+  const mkEl = (r: { x: number; y: number; width: number; height: number }) => {
+    const el: any = { getBoundingClientRect: () => r, scrollIntoView: () => {}, contains: (n: unknown) => n === el };
+    return el;
+  };
+  const g = globalThis as unknown as { document: unknown; window: unknown };
+  const saved = { d: g.document, w: g.window };
+  g.window = { innerWidth: 390, innerHeight: 844 };
+  try {
+    const el = mkEl(rect);
+    g.document = mkDoc(null, el);
+    const onTop = REACH_AT_CENTRE('x').reach;
+    g.document = { querySelector: () => el, elementsFromPoint: () => [{ nope: true }] };
+    const under = REACH_AT_CENTRE('x').reach;
+    g.document = { querySelector: () => null, elementsFromPoint: () => [] };
+    const gone = REACH_AT_CENTRE('x').reach;
+    g.document = { querySelector: () => mkEl({ x: 0, y: 0, width: 0, height: 0 }), elementsFromPoint: () => [] };
+    const unpainted = REACH_AT_CENTRE('x').reach;
+    // A control merely SCROLLED OUT is not covered — conflating the two is what made a healthy
+    // production read as «still covered after 71,050ms» (measured 2026-09-11, AF pill row, 390x844).
+    g.document = { querySelector: () => mkEl({ x: 10, y: 2400, width: 10, height: 10 }), elementsFromPoint: () => [] };
+    const off = REACH_AT_CENTRE('x').reach;
+    check('the reachability probe distinguishes on-top / covered / absent / unpainted / offscreen',
+      onTop === 'ok' && under === 'covered' && gone === 'absent' && unpainted === 'unpainted' && off === 'offscreen',
+      `${onTop}/${under}/${gone}/${unpainted}/${off}`);
+  } finally { g.document = saved.d; g.window = saved.w; }
 }
 {
   const mk = <T,>(v: T) => async () => v;
@@ -310,6 +366,19 @@ mustCatch('a proving set that loses the turn\'s genuinely-new ids',
 mustCatch('a live journey calling awaitResultsTurn without the screen it is replacing',
   !/awaitResultsTurn\([\s\S]{0,400}?onScreenBefore/.test(
     'const landed = await awaitResultsTurn(shownIds, sleep);'));
+
+// M-10: a reachability probe that answers 'ok' while the control is UNDER the overlay — which is
+// exactly what clicking blind does, and what the 30s actionability budget was standing in for.
+mustCatch('a reachability probe that calls a covered control clickable', (() => {
+  const el: any = { getBoundingClientRect: () => ({ x: 0, y: 0, width: 10, height: 10 }), scrollIntoView: () => {}, contains: () => false };
+  const g = globalThis as unknown as { document: unknown; window: unknown };
+  const saved = { d: g.document, w: g.window };
+  g.window = { innerWidth: 390, innerHeight: 844 };
+  g.document = { querySelector: () => el, elementsFromPoint: () => [{ loader: true }] };
+  const verdict = REACH_AT_CENTRE('x').reach;
+  g.document = saved.d; g.window = saved.w;
+  return verdict !== 'ok';
+})());
 
 // M-6: and a genuinely clean journey must NOT be reported as broken.
 mustCatch('a clean journey is not flagged',

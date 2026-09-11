@@ -261,6 +261,96 @@ export async function awaitResultsTurn(
 }
 
 /**
+ * IS THIS CONTROL REACHABLE BY A USER RIGHT NOW? — the other half of the beat, on the way IN.
+ *
+ * `awaitResultsTurn` answers "may I READ the screen yet". This answers "may I CLICK it yet", and it
+ * is the question a journey asks the moment a committed answer starts a new search: the searching
+ * loader is painted over the whole chat for the beat plus the agent turn behind it, with
+ * `pointer-events` live, so a click lands on the loader. Playwright's own actionability retry says
+ * exactly that — «subtree intercepts pointer events» — and then gives up on ITS budget, which has
+ * nothing to do with the product's.
+ *
+ * Measured 2026-09-11, verify-af-pill-removal-live on MOBILE جدة/فيلا: five checks green, then
+ * `page.click('[data-testid="af-pill-0"]')` timed out after 30,000 ms against the loader — a budget
+ * that predates a beat of 11,050 ms sitting in front of an agent turn measured near 40 s.
+ *
+ * The answer is NOT a bigger number. It is to observe the thing that actually matters: whether the
+ * control is on top at its own centre point. `elementsFromPoint` (the PLURAL — the singular form
+ * reports a scrolled-out control as blocked, an artifact that already cost one run a false «20
+ * controls blocked», see PR #2040) returns the painted stack; the control is reachable when it is in
+ * it. Bounded by the same POST_SEARCH_BUDGET_MS, and a control that never surfaces is reported, not
+ * clicked into.
+ */
+export type PointQueryable = {
+  evaluate: <R>(fn: (sel: string) => R, arg: string) => Promise<R>;
+};
+
+/**
+ * CLICK THE POINT THE PROBE VALIDATED, not the selector.
+ *
+ * `page.click(selector)` re-runs its own scroll-into-view before dispatching, so the element can end
+ * up at a DIFFERENT scroll offset from the one the reachability probe just measured — and on a
+ * narrow viewport that is enough to slide it back under the AF question card. Measured 2026-09-11:
+ * `awaitClickable` answered `ok`, and Playwright's own retry then reported the card's «af-confirm»
+ * intercepting at ITS scroll position. Clicking the measured coordinates closes that gap, and it is
+ * the same idiom the journeys already use for every other control (the CLICK_LEAF `tap` helpers).
+ */
+export type PointClickable = PointQueryable & {
+  mouse: { click: (x: number, y: number) => Promise<unknown> };
+};
+
+export type Reach = 'ok' | 'covered' | 'absent' | 'unpainted' | 'offscreen';
+
+/**
+ * The page-side probe, exported so a barrier can execute it against a fake DOM.
+ *
+ * IT SCROLLS FIRST, AND «OFFSCREEN» IS ITS OWN ANSWER. A control that is merely scrolled out of view
+ * still has a rect, and `elementsFromPoint` at a point outside the viewport returns an empty stack —
+ * which is indistinguishable from "an overlay is on top of it" unless the two are separated. Measured
+ * 2026-09-11: the AF pill row on a 390x844 viewport read «covered» for the full 71,050 ms budget
+ * while nothing was covering it at all. That is the same confusion PR #2040 recorded from the other
+ * direction («20 controls blocked» on a healthy build), and it must not be re-learned a third time.
+ */
+export const REACH_AT_CENTRE = (sel: string): { reach: Reach; x: number; y: number } => {
+  const no = (reach: Reach) => ({ reach, x: -1, y: -1 });
+  const el = document.querySelector(sel);
+  if (!el) return no('absent');
+  el.scrollIntoView({ block: 'center', inline: 'center' });
+  const r = el.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return no('unpainted');
+  const x = r.x + r.width / 2, y = r.y + r.height / 2;
+  if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return no('offscreen');
+  const stack = document.elementsFromPoint(x, y);
+  return stack.some((n) => n === el || el.contains(n)) ? { reach: 'ok', x, y } : no('covered');
+};
+
+export async function awaitClickable(
+  page: PointQueryable,
+  selector: string,
+  sleep: (ms: number) => Promise<void>,
+  budgetMs = POST_SEARCH_BUDGET_MS,
+  pollMs = 500,
+): Promise<{ reachable: boolean; last: Reach; x: number; y: number }> {
+  const r = await settleUntil(
+    () => page.evaluate(REACH_AT_CENTRE, selector),
+    (v) => v.reach === 'ok', budgetMs, sleep, pollMs);
+  return { reachable: r.settled, last: r.value.reach, x: r.value.x, y: r.value.y };
+}
+
+/** Wait for a control to be genuinely on top, then click the exact point that was validated. */
+export async function clickWhenReachable(
+  page: PointClickable,
+  selector: string,
+  sleep: (ms: number) => Promise<void>,
+  budgetMs = POST_SEARCH_BUDGET_MS,
+): Promise<{ clicked: boolean; last: Reach }> {
+  const r = await awaitClickable(page, selector, sleep, budgetMs);
+  if (!r.reachable) return { clicked: false, last: r.last };
+  await page.mouse.click(r.x, r.y);
+  return { clicked: true, last: r.last };
+}
+
+/**
  * Wait for the AF round's NEXT step to actually be readable: either its options have rendered, or
  * the round has ended (the card is gone, or the committed search has left the page).
  *
