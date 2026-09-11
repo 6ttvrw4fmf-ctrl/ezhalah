@@ -15,13 +15,9 @@
 -- refresh_city_name_bridge / refresh_district_name_bridge read from there, so souq24 never
 -- contributed its city/district spellings to the catalogs that canonicalise future listings.
 --
--- Same staged build + atomic swap used on 2026-09-03 and again earlier today; every dependent,
+-- Same staged build + atomic swap used on 2026-09-03 and again this morning; every dependent,
 -- index and grant restored from ops_ddl_snapshot label 'pre_souq24_lli_20260905'
 -- (11 views + 2 matviews + 20 indexes + 448 grants, captured in dependency order).
---
--- MEASURED AFTER: listing_location_index 204,460 rows, souq24 44, alta+shmoualshmal still 13,
--- 0 duplicate index_ids, 20 indexes restored, ops_location_index_coverage() returns 0 rows
--- against 38 searchable platforms.
 DO $do$
 DECLARE base text; arms text := ''; suffix text := ') u) v'; body text; r record;
 BEGIN
@@ -106,3 +102,7 @@ $fn$;
 
 REVOKE ALL ON FUNCTION public.ops_location_index_coverage(boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.ops_location_index_coverage(boolean) TO anon, authenticated, service_role;
+
+SELECT (SELECT count(*) FROM listing_location_index) AS lli_rows,
+       (SELECT count(*) FROM listing_location_index WHERE platform='souq24') AS souq24_in_lli,
+       (SELECT count(*) FROM public.ops_location_index_coverage()) AS uncovered_platforms;

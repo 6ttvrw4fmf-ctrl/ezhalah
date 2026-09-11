@@ -46,7 +46,7 @@
 import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import { awaitAfStep, clickWhenReachable, settleUntil, POST_SEARCH_BUDGET_MS } from './lib/afJourneyPacing.ts';
+import { awaitAfStep, clickWhenReachable, settleUntil, POST_SEARCH_BUDGET_MS, AGENT_TURN_MS } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -336,32 +336,47 @@ try {
   console.log(`      [diag] headlines before removal: ${JSON.stringify(headlinesBefore)}`);
 
   // ── 5. remove the FIRST pill ────────────────────────────────────────────────────────────────
+  // WHICH PILL, AND WHY IT MATTERS WHICH (owner decision 2026-09-11, ops_incident #155).
+  // «The AF round card must NOT cover the selected-filter pill row. The user's committed Advanced
+  // Filter selections must remain visible and removable while the next AF round is active, on
+  // desktop and mobile.» The round card is a centred modal over a scrim, so the transcript's pill
+  // row is behind it by construction whenever a round is open — measured on 390x844, the pill's own
+  // centre reported «@ 338,-6469» with an EMPTY painted stack, and scrolling it into view put it
+  // under the card's «af-confirm». The committed pills are therefore drawn in the overlay itself now
+  // (af-card-pill-N), above the scrim and outside the card.
+  //
+  // So the journey removes the pill A USER WOULD REACH: the overlay's copy while a round is on
+  // screen, the transcript's when no round is. That is not a fallback for convenience — asserting
+  // that the reachable one EXISTS in both states is precisely the owner's rule.
   const nBefore = searches.length;
   await scrollToBottom();
-  // THE PILL MUST BE REACHABLE BEFORE IT IS CLICKED (2026-09-11). The round's committed answer starts
-  // a search, and the searching loader is painted over the whole chat — with live pointer events —
-  // for the beat plus the agent turn behind it. This click used to land on the loader and die on
-  // Playwright's own 30s actionability budget («subtree intercepts pointer events»), a number that
-  // predates an 11s beat in front of a ~40s turn. Observe reachability instead of raising it.
-  // Name what is on top of the pill at the moment of the click. When a removal produces no request,
-  // this is the difference between "the press handler did not fire" and "something else took it".
-  const onTop = await page.evaluate(() => {
-    const el = document.querySelector('[data-testid="af-pill-0"]');
+  const roundOpen = (await page.locator('[data-testid="af-card"]').count()) > 0;
+  const PILL = roundOpen ? '[data-testid="af-card-pill-0"]' : '[data-testid="af-pill-0"]';
+  check('R155 — a committed selection is on screen and reachable, round open or not',
+    (await page.locator(PILL).count()) > 0,
+    `round ${roundOpen ? 'IS' : 'is NOT'} open and ${PILL} is absent — the user cannot see or remove `
+    + 'what they already committed');
+  // Name what is on top of it at the moment of the click. When a removal produces no request, this
+  // is the difference between "the press handler did not fire" and "something else took it".
+  const onTop = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
     if (!el) return 'no pill';
     const r = el.getBoundingClientRect();
     const stack = document.elementsFromPoint(r.x + r.width / 2, r.y + r.height / 2) as any[];
     return stack.slice(0, 3).map((n) => `${n.tagName}[${n.getAttribute?.('data-testid') ?? ''}]`).join(' > ')
       + ` @ ${Math.round(r.x + r.width / 2)},${Math.round(r.y + r.height / 2)} size ${Math.round(r.width)}x${Math.round(r.height)}`;
-  });
-  console.log(`      [diag] at the pill's centre: ${onTop}`);
-  const reach = await clickWhenReachable(page, '[data-testid="af-pill-0"]', (ms) => page.waitForTimeout(ms));
-  if (!reach.clicked) {
-    check('the first pill became reachable (nothing is painted over it)', false,
-      `still «${reach.last}» after ${POST_SEARCH_BUDGET_MS}ms — the click would have landed on whatever `
-      + 'is on top (the searching loader, or the next round\'s question card on a narrow viewport), '
-      + 'so nothing about R9.2.1 was proved');
-    throw new Error('the af-pill-0 control never became clickable');
-  }
+  }, PILL);
+  console.log(`      [diag] round open: ${roundOpen} · at the pill's centre: ${onTop}`);
+  // THE PILL MUST BE REACHABLE BEFORE IT IS CLICKED (2026-09-11). The round's committed answer starts
+  // a search, and the searching loader is painted over the whole chat — with live pointer events —
+  // for the beat plus the agent turn behind it. This click used to land on the loader and die on
+  // Playwright's own 30s actionability budget («subtree intercepts pointer events»), a number that
+  // predates an 11s beat in front of a ~40s turn. Observe reachability instead of raising it.
+  const reach = await clickWhenReachable(page, PILL, (ms) => page.waitForTimeout(ms));
+  check('R155 — …and nothing is painted on top of it', reach.clicked,
+    `still «${reach.last}» after ${POST_SEARCH_BUDGET_MS}ms — the click would have landed on whatever `
+    + 'is on top, so the committed selection is not removable');
+  if (!reach.clicked) throw new Error(`${PILL} never became clickable`);
   await page.waitForTimeout(4000);
   for (let i = 0; i < 14 && searches.length === nBefore; i++) await page.waitForTimeout(1500);
 
@@ -435,12 +450,26 @@ try {
   // button comes back at all: if the removed id had stayed in the asked carry, the pool would be
   // one question poorer, and on a cohort whose pool the two rounds have spent, «تحديد أكثر»
   // disappears entirely with no way back. Asserting the offer is present after a widening removal
-  // is the observable half; verify-af-cross-round-carry.ts asserts the carry itself.
+  // is the observable half; verify-af-cross-round-carry.ts asserts the carry itself (offline,
+  // mutation-proven — the CARRY is provably correct; this half only proves it PAINTS).
+  //
+  // WAIT FOR THE OFFER PROBE, NEVER READ THE INSTANT AFTER THE TURN LANDS (2026-09-11, measured
+  // live). The offer button is not decided by the results turn arriving — agent.tsx's afCanNarrow
+  // effect fires on that turn and then makes its OWN real network round trip (assessNarrowing →
+  // rankQuestions → a count RPC) before «تحديد أكثر» is rendered. A read with no wait after it —
+  // this line, since the file's origin — is exactly the class every other check on this surface
+  // was fixed for today: reproduced live (390x844 جدة/فيلا), reporting "the question was not
+  // burned" while the probe may still have been computing. `awaitAfStep`'s own
+  // `cardPresent`/`searchFired` shape does not fit here (there is no card to wait for — the CTA is
+  // a bare chat control) so this polls the one thing that actually resolves: the text itself.
   await scrollToBottom();
-  const offerBack = await page.evaluate(() =>
-    [...document.querySelectorAll('div,span,button')].some((e: any) => /نحدد الطلب أكثر/.test((e.innerText || '').trim())));
+  const offer = await settleUntil(
+    async () => page.evaluate(() =>
+      [...document.querySelectorAll('div,span,button')].some((e: any) => /نحدد الطلب أكثر/.test((e.innerText || '').trim()))),
+    (found) => found === true, AGENT_TURN_MS, (ms) => page.waitForTimeout(ms), 500);
   check('R9.2.3 — the offer to narrow again is available after the removal (the question was not burned)',
-    offerBack, offerBack ? 'the «تحديد أكثر» offer is on the new turn' : 'no offer rendered — a removed question may have stayed in the asked carry');
+    offer.value, offer.value ? 'the «تحديد أكثر» offer is on the new turn'
+      : `no offer rendered after ${AGENT_TURN_MS}ms — a removed question may have stayed in the asked carry, or this cohort's remaining pool is genuinely exhausted (ops_incident #187)`);
 
   check('the journey exercised the expected production backend',
     origins.size === 1 && origins.has(new URL(SUPABASE_URL).origin),

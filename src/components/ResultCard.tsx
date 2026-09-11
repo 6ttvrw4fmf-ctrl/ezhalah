@@ -6,7 +6,7 @@ import { colors, radius, cardShadow } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
-import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText } from '@/lib/arabicText';
+import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
@@ -114,12 +114,14 @@ export function ResultCard({
   // on the RTL side — the ellipsis lands right after the last visible Arabic word ("…عنه"), never leading.
   // Without it, a description that STARTS with LTR content (a URL / phone / emoji) flips the paragraph's
   // base direction and pushes the clamp ellipsis to the wrong side ("… عنه"). (owner 2026-07-08)
-  const descAr = (() => { const d = (listing.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? '‏' + d : null; })();
+  // In the ENGLISH locale the raw Arabic paragraph is hidden rather than shown or translated (owner,
+  // 2026-09-11) — hideArabicProseInEnglish is a no-op in Arabic, so this line is unchanged there.
+  const descAr = hideArabicProseInEnglish((() => { const d = (listing.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? '‏' + d : null; })(), locale);
   // Gathern Tier-1: Gathern is the only source that carries a rich Arabic listing.title AND no
   // description (0% desc), so we surface the title in the description slot — but ONLY for Gathern, so
   // no other platform's layout changes. Same RLM (U+200F) base-direction guard as descAr above.
   const isGathern = (listing.source || '').toLowerCase().includes('gathern');
-  const titleAr = (() => { const s = (listing.title ?? '').trim(); return s && /[ء-ي]/.test(s) ? '‏' + s : null; })();
+  const titleAr = hideArabicProseInEnglish((() => { const s = (listing.title ?? '').trim(); return s && /[ء-ي]/.test(s) ? '‏' + s : null; })(), locale);
   // Guest rating (0–10) — present ONLY for sources that publish reviews (Gathern). null everywhere
   // else → the rating element renders nothing, so no other platform's card changes. (Gathern Tier-1.)
   const ratingVal = typeof listing.rating === 'number' && Number.isFinite(listing.rating) ? listing.rating : null;
@@ -496,33 +498,33 @@ function AdditionalInformationPanel({ listing, t, locale }: { listing: Listing; 
 // (user request: replace Aqar with Wasalt cleanly, both rendered identical shape.)
 const AQAR_LOGO = require('../../assets/images/aqar-logo.png');
 const WASALT_LOGO = require('../../assets/images/wasalt-logo.png');
-const ALDARIM_LOGO = require('../../assets/images/aldarim.jpg');
-const AQARGATE_LOGO = require('../../assets/images/aqargate-logo.jpg');
-const ALHOSHAN_LOGO = require('../../assets/images/alhoshan.jpg');
-const HAJER_LOGO = require('../../assets/images/hajer-logo.jpg');
-const SANADAK_LOGO = require('../../assets/images/sanadak-logo.jpg');
-const EASTABHA_LOGO = require('../../assets/images/eastabha-logo.jpg');
-const AQARCITY_LOGO = require('../../assets/images/aqarcity-logo.jpg');
-const RAGHDAN_LOGO = require('../../assets/images/raghdan.jpg');
-const EAQARTABUK_LOGO = require('../../assets/images/eaqartabuk.jpg');
-const SATEL_LOGO = require('../../assets/images/satel.jpg');
-const SADIN_LOGO = require('../../assets/images/sadin.jpg');
-const TOOR_LOGO = require('../../assets/images/toor.jpg');
-const MUSTQR_LOGO = require('../../assets/images/mustaqr.jpg');
-const RAMZALQASIM_LOGO = require('../../assets/images/ramzalqassim.jpg');
-const FURSAGHYR_LOGO = require('../../assets/images/fursaghyr.jpg');
-const JAZWTN_LOGO = require('../../assets/images/jazan-watan.jpg');
-const MUKTAMEL_LOGO = require('../../assets/images/muktamel.jpg');
-const MIZLAJ_LOGO = require('../../assets/images/mizlaj.jpg');
+const ALDARIM_LOGO = require('../../assets/images/aldarim.png');
+const AQARGATE_LOGO = require('../../assets/images/aqargate-logo.png');
+const ALHOSHAN_LOGO = require('../../assets/images/alhoshan.png');
+const HAJER_LOGO = require('../../assets/images/hajer-logo.png');
+const SANADAK_LOGO = require('../../assets/images/sanadak-logo.png');
+const EASTABHA_LOGO = require('../../assets/images/eastabha-logo.png');
+const AQARCITY_LOGO = require('../../assets/images/aqarcity-logo.png');
+const RAGHDAN_LOGO = require('../../assets/images/raghdan.png');
+const EAQARTABUK_LOGO = require('../../assets/images/eaqartabuk.png');
+const SATEL_LOGO = require('../../assets/images/satel.png');
+const SADIN_LOGO = require('../../assets/images/sadin.png');
+const TOOR_LOGO = require('../../assets/images/toor.png');
+const MUSTQR_LOGO = require('../../assets/images/mustaqr.png');
+const RAMZALQASIM_LOGO = require('../../assets/images/ramzalqassim.png');
+const FURSAGHYR_LOGO = require('../../assets/images/fursaghyr.png');
+const JAZWTN_LOGO = require('../../assets/images/jazan-watan.png');
+const MUKTAMEL_LOGO = require('../../assets/images/muktamel.png');
+const MIZLAJ_LOGO = require('../../assets/images/mizlaj.png');
 const DEALAPP_LOGO = require('../../assets/images/dealapp.jpg');
-const GATHERN_LOGO = require('../../assets/images/gathern.jpg');
-const OCTOBER_LOGO = require('../../assets/images/october.jpg');
+const GATHERN_LOGO = require('../../assets/images/gathern.png');
+const OCTOBER_LOGO = require('../../assets/images/october.png');
 const ARKAAN_LOGO = require('../../assets/images/arkaan.png');
 const ABRALOSOL_LOGO = require('../../assets/images/abralosol.png');
 const THERC_LOGO = require('../../assets/images/therc.png');
 const RAWASIDARK_LOGO = require('../../assets/images/rawasidark.png');
 const AOUJ_LOGO = require('../../assets/images/aouj.png');
-const AQARATIKOM_LOGO = require('../../assets/images/aqaratikom.jpg');
+const AQARATIKOM_LOGO = require('../../assets/images/aqaratikom.png');
 const BAHADHABAB_LOGO = require('../../assets/images/bahadhabab.png');
 const ALOBID_LOGO = require('../../assets/images/alobid.png');
 const ABWBNA_LOGO = require('../../assets/images/abwbna.png');
@@ -530,15 +532,15 @@ const REMAL_LOGO = require('../../assets/images/remal.png');
 const AMAALL_LOGO = require('../../assets/images/amaall.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
 const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
-const AWAL_LOGO = require('../../assets/images/awal.jpg');
+const AWAL_LOGO = require('../../assets/images/awal.png');
 const AZDAD_LOGO = require('../../assets/images/azdad.png');
-const ALKHAAS_LOGO = require('../../assets/images/alkhaas.jpg');
-const ABEEA_LOGO = require('../../assets/images/abeea.jpg');
-const JURASH_LOGO = require('../../assets/images/jurash.jpg');
-const ALNOKHBA_LOGO = require('../../assets/images/alnokhba.jpg');
+const ALKHAAS_LOGO = require('../../assets/images/alkhaas.png');
+const ABEEA_LOGO = require('../../assets/images/abeea.png');
+const JURASH_LOGO = require('../../assets/images/jurash.png');
+const ALNOKHBA_LOGO = require('../../assets/images/alnokhba.png');
 const SOUQ24_LOGO = require('../../assets/images/souq24.jpg');
-const ERAPULSE_LOGO = require('../../assets/images/erapulse.jpg');
-const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.jpg');
+const ERAPULSE_LOGO = require('../../assets/images/erapulse.png');
+const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.png');
 // Card hero photo with graceful fallback. Some sources (e.g. aqarcity) carry photo URLs that have
 // been deleted on their CDN and 302→/notfound, or are only published as thumbnails — listing one
 // dead URL would leave the card with an empty grey block. We try each URL in order and, if every

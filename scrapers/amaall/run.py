@@ -53,7 +53,7 @@ PREFIX = "AML"
 LAST_FETCH_NOTE = ""
 
 TAXONOMIES = ("property_type", "property_status", "property_city", "property_state",
-              "property_feature", "property_label")
+              "property_feature", "property_label", "property_area")
 
 # Two vetted additions to the house taxonomy. Each has exactly one canonical answer and is not a
 # combined bucket: «أرض سكنية» and «عمارة سكنية» are the plain qualified forms of أرض / عمارة, and
@@ -260,9 +260,30 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     city = normalize.map_city(raw_city) if raw_city else None
     region = normalize.region_for_city(city)
 
+    # DISTRICT — the `property_area` taxonomy IS the site's «تسمية الحي» field (Houzez theme;
+    # confirmed live 2026-09-11, term 60 on a real post resolves to «حي العزيزية», the exact text
+    # the page itself labels «تسمية الحي»). It was simply never in TAXONOMIES, so every amaall
+    # listing shipped with neighborhood=None though the source states it plainly.
+    raw_neighborhood = (terms("property_area") or [None])[0]
+
     meta = p.get("property_meta") or {}
     price = normalize.to_int(_meta1(meta, "fave_property_price"))
-    area = normalize.to_int_numeric(_meta1(meta, "fave_property_size"))
+    # AREA — Houzez splits size across TWO meta keys depending on listing shape: fave_property_size
+    # for a built area (villa/apartment), fave_property_land for a bare plot. A land listing (most
+    # of this platform's inventory) has NO fave_property_size at all, so area_m2 was silently None
+    # for it even though the source states the size plainly (confirmed live: post 19900, «حي
+    # العزيزية» land ad — fave_property_size absent, fave_property_land="552", page shows «مساحة
+    # العقار: 552 متر مربع»). Falls back to land ONLY when size is absent/unparseable — never
+    # overrides a real size value.
+    #
+    # The two keys get DIFFERENT parsers on purpose. fave_property_size sometimes holds garbage
+    # unrelated to area (post 19413: "465 غرفة" — a room count, not a size) — to_int_numeric's
+    # strict float parse correctly refuses that (None), and must keep refusing it. fave_property_land
+    # is a simpler field (a number, sometimes with a bare unit suffix like "529 م" — post 20915) —
+    # to_int() strips that suffix safely; using it here does not reopen the size field's garbage risk
+    # because it only ever runs on land, never on size.
+    area = (normalize.to_int_numeric(_meta1(meta, "fave_property_size"))
+            or normalize.to_int(_meta1(meta, "fave_property_land")))
     beds = normalize.to_int(_meta1(meta, "fave_property_bedrooms"))
     baths = normalize.to_int(_meta1(meta, "fave_property_bathrooms"))
 
@@ -302,7 +323,7 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "rent_period": rent_period,
         "city": city,
         "region": region,
-        "neighborhood": None,
+        "neighborhood": raw_neighborhood,
         "rega_location_verified": False,
         "title": title,
         "description": _redact(body),
