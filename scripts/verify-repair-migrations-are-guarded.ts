@@ -152,6 +152,36 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260911201453_amaall_native_location_repair_reasserts_and_gets_a_'
     + 'detector.sql, which ships + rosters + runs mon_detect_amaall_native_location_regressed(), '
     + 'checking both the resolver wiring and live district-coverage share',
+  // Same two-migrations-apart shape (ops_incident #172, owner decision 2026-09-11): the taxonomy
+  // repair (seeds regenerated from taxonomy.source.json + the six healed dealapp rows + the
+  // district_ar_looks_bogus v2 hygiene fix) and its detector land 15 minutes apart. The companion
+  // 20260911215940 creates + rosters + self-verifies mon_detect_service_facility_types_regressed(),
+  // which watches BOTH halves of this repair specifically: (A) the four مرافق خدمية types stay in
+  // known_type_ar and no dealapp row whose raw type is one of them carries the «غير معروف» sentinel
+  // (the exact regression this repair fixes, judged against raw source truth, not just re-asserted),
+  // and (B) loc_canonical_district holds zero live-promoted rows failing the v2 hygiene rules. Open
+  // the companion to verify this reason rather than taking it on trust.
+  '20260911215017_service_facilities_taxonomy_and_district_filter_arabic_digits.sql':
+    'watched by its companion 20260911215940_service_facility_taxonomy_repair_gets_a_detector.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_service_facility_types_regressed(), checking '
+    + 'both the known_type_ar allowlist and the district_ar_looks_bogus v2 hygiene rules',
+  // ops_incident #189: strip_district_city_suffix() backfill for 3 fallback-resolved aqarmonthly
+  // listings (762041/762272/1097370). Applied as TWO migrations because the first apply call's
+  // response timed out at the connector and a split retry was made assuming it had failed — it had
+  // not; both landed (see 20260911222018's own header for the honest account). Both are therefore
+  // the SAME repair, twice. Its companion 20260911223037 lands 13-16 minutes later and creates +
+  // rosters + self-verifies mon_detect_aqarmonthly_district_suffix_repair_regressed(), scoped to
+  // exactly these 3 rows (not the whole table — a 4th flagged listing, 762483, is deliberately left
+  // unfixed as a genuine source-completeness gap, not part of this repair's claim). Open the
+  // companion to verify this reason rather than taking it on trust.
+  '20260911221734_aqarmonthly_district_suffix_backfill_incident_189.sql':
+    'watched by its companion 20260911223037_aqarmonthly_district_suffix_backfill_gets_a_detector_'
+    + 'incident_189.sql, which ships + rosters + self-verifies '
+    + 'mon_detect_aqarmonthly_district_suffix_repair_regressed(), scoped to the exact 3 repaired rows',
+  '20260911222018_aqarmonthly_district_suffix_backfill_incident_189.sql':
+    'same repair as 20260911221734 (a connector-timeout retry that turned out to also have landed — '
+    + 'see this file\'s own header) — watched by the same companion, '
+    + '20260911223037_aqarmonthly_district_suffix_backfill_gets_a_detector_incident_189.sql',
 };
 
 // Enforcement starts here — the day this rule landed.
