@@ -17,6 +17,7 @@
 // WHAT IT MUST NEVER GATE: writes in the restorative direction. A block cannot manufacture a live
 // 200, so refusing to record an alive row would turn a source outage into lost inventory. See
 // docs/ops/DELETION_SAFETY.md §2.4 (reactivations are kept during an inconclusive freeze).
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -46,8 +47,29 @@ check('a positive alive-rate floor is declared', !!rate && Number(rate) > 0, `ra
 check('the floor sits above the incident (>0.05) and below a healthy run (<0.60)',
   !!rate && Number(rate) > 0.05 && Number(rate) < 0.60, `rate=${rate}`);
 check('a minimum-probe floor is declared', !!probes && Number(probes) >= 1, `probes=${probes}`);
+// EXECUTED, not matched. This used to be a regex pinning one spelling of the guard
+// (`probe_count < min_probes or probe_count <= 0`). On 2026-09-11 that spelling was split into
+// two branches for the canary-supersession path — behaviour identical, fail-closed intact — and
+// this check went red anyway, demanding the old TEXT back. That is the ops_incident #129/#136
+// class: a barrier asserting a spelling instead of a contract, which inverts on the next correct
+// change. It now runs the real predicate and asserts what actually matters.
+const degenerate = JSON.parse(execFileSync('python3', ['-c', String.raw`
+import json, os, sys
+sys.path.insert(0, os.getcwd())
+from scrapers.common.liveness_trust import environment_is_trustworthy as t
+print(json.dumps({
+  "zero_probes":      t(0, 0),
+  "negative_probes":  t(5, -3),
+  "negative_alive":   t(-1, 100),
+  "below_min_probes": t(10, 10),
+  # ...and none of it is rescuable by a passing control, which must narrow, never widen.
+  "zero_probes_canary":     t(0, 0, canary_ok=True),
+  "negative_alive_canary":  t(-1, 100, canary_ok=True),
+}))
+`], { cwd: ROOT, encoding: 'utf8' }));
 check('degenerate probe counts fail closed',
-  /probe_count\s*<\s*min_probes\s*or\s*probe_count\s*<=\s*0/.test(trust));
+  Object.values(degenerate).every((v) => v === false),
+  JSON.stringify(degenerate));
 check('the floor comparison is inclusive (>=), not a stricter/looser variant',
   /\)\s*>=\s*min_rate/.test(trust));
 
@@ -55,8 +77,23 @@ check('the floor comparison is inclusive (>=), not a stricter/looser variant',
 check('sweep imports the shared predicate',
   /from scrapers\.common\.liveness_trust import/.test(sweep) &&
   /environment_is_trustworthy/.test(sweep));
-check('sweep computes trust from its own probes',
-  /trusted\s*=\s*environment_is_trustworthy\(\s*alive\s*,\s*seen\s*\)/.test(sweep));
+// Structural, not literal: the sweep must hand the gate ITS OWN probe counts as the first two
+// positional arguments. Extra keyword arguments (canary_ok, added 2026-09-11) are a refinement of
+// the same call, not a different one — the old regex forbade them by accident and would have
+// forced the sweep to keep a strictly worse gate.
+const gateCall = JSON.parse(execFileSync('python3', ['-c', String.raw`
+import ast, json, sys
+tree = ast.parse(sys.stdin.read())
+found = False
+for n in ast.walk(tree):
+    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+       and n.func.id == "environment_is_trustworthy":
+        pos = [a.id for a in n.args if isinstance(a, ast.Name)]
+        if pos[:2] == ["alive", "seen"]:
+            found = True
+print(json.dumps({"found": found}))
+`], { cwd: ROOT, input: sweep, encoding: 'utf8' }));
+check('sweep computes trust from its own probes', gateCall.found === true);
 
 // ── Part 3: strikes are DEFERRED, so a whole run can be quarantined ─────────────────────────────
 // The original bug: the strike write sat inside the probe loop, so by the time the run's alive-rate
