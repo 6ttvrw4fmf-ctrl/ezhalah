@@ -2,14 +2,16 @@
 -- Source of truth: ezhalah-app/src/data/taxonomy.source.json (labels: EN token -> canonical Arabic
 -- label; identical to propertyTypes.ts EN_TO_AR). Regenerate with `npm run verify:emit-sql`, then
 -- re-apply so the Arabic display label the app resolves for each English type stays in sync with the DB.
--- Full re-sync: the generated set is authoritative. 40 canonical EN->AR type labels.
+-- Full re-sync: the generated set is authoritative. 44 canonical EN->AR type labels.
 create table if not exists public.type_label_ar (en text primary key, ar text not null);
 truncate public.type_label_ar;
 insert into public.type_label_ar (en, ar) values
+  ('ATM Site', 'موقع صراف'),
   ('Agriculture Plot', 'أرض زراعية'),
   ('Apartment', 'شقة'),
   ('Bank', 'بنك'),
   ('Building', 'عمارة'),
+  ('Business Center', 'مركز أعمال'),
   ('Camp', 'مخيم'),
   ('Chalet', 'شاليه'),
   ('Cinema', 'سينما'),
@@ -23,6 +25,7 @@ insert into public.type_label_ar (en, ar) values
   ('Gas Station', 'محطة وقود'),
   ('Hall', 'صالة'),
   ('Health Center', 'مركز صحي'),
+  ('Hospital', 'مستشفى'),
   ('Hotel', 'فندق'),
   ('House', 'بيت'),
   ('Industrial Land', 'أرض صناعية'),
@@ -33,6 +36,7 @@ insert into public.type_label_ar (en, ar) values
   ('Parking', 'مواقف'),
   ('Residential Building', 'عمارة سكنية'),
   ('Residential Land', 'أرض سكنية'),
+  ('Resort', 'منتجع'),
   ('Rest House', 'استراحة'),
   ('Room', 'غرفة'),
   ('School', 'مدرسة'),
