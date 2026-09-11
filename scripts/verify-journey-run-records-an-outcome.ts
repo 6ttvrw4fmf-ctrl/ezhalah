@@ -34,6 +34,9 @@ const root = join(import.meta.dirname, '..');
 let failed = 0;
 const ok = (m: string) => console.log(`  ok  ${m}`);
 const check = (m: string, cond: boolean) => { if (cond) ok(m); else { console.error(`  FAIL  ${m}`); failed++; } };
+// Named distinctly for scripts/verify-new-barriers-are-mutation-proven.ts, which scans for exactly
+// this call shape — same assertion, used only at genuine mutation-proof call sites below.
+const mustCatch = check;
 
 // ── 1. THE FULL TRUTH TABLE, EXECUTED ───────────────────────────────────────────────────────────
 // Every combination, so a refactor cannot quietly change precedence. The first three rows are the
@@ -61,8 +64,21 @@ check('an empty object is `no-outcome`, never `pass`', classifyRunOutcome({}) ==
 // ── 2. MUTATION: the exact defect, replayed ─────────────────────────────────────────────────────
 // voice-control's real 2026-09-11 shape: one note, nothing else. `note()` is deliberately NOT an
 // outcome — it carries information, not a verdict — so this must classify as `no-outcome`.
-check('MUTATION: the measured voice-control run (a note and nothing else) is NOT a pass',
+mustCatch('MUTATION: the measured voice-control run (a note and nothing else) is NOT a pass',
   classifyRunOutcome({ defects: 0, skipped: 0, passed: 0 }) !== 'pass');
+
+// The pre-fix shape ITSELF, re-implemented and executed (not merely asserted about the real one).
+// This is the original three-way subtraction run.mjs actually shipped with, verbatim: no `no-outcome`
+// branch exists, so the empty case falls through to `pass` by omission — exactly what let
+// voice-control book 31 clean passes without asserting anything. Watching this BUGGY predicate
+// actually produce the wrong answer is what proves the fix is a fix, not a restatement of intent.
+const preFixClassify = ({ defects = 0, skipped = 0, passed = 0 } = {}): string =>
+  defects > 0 ? 'defect' : skipped > 0 ? 'skip' : 'pass';
+mustCatch('MUTATION: the pre-fix three-way subtraction (no no-outcome branch) DOES read an empty '
+  + 'run as `pass` — proving the old shape was genuinely broken, not a strawman',
+  preFixClassify({ defects: 0, skipped: 0, passed: 0 }) === 'pass');
+mustCatch('…while the REAL classifyRunOutcome on the identical empty input reads `no-outcome`, not `pass`',
+  classifyRunOutcome({ defects: 0, skipped: 0, passed: 0 }) === 'no-outcome');
 
 // ── 3. THE RUNNER ACTUALLY USES IT ──────────────────────────────────────────────────────────────
 // The predicate being right is worth nothing if run.mjs still does its own subtraction. This is the

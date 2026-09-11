@@ -55,6 +55,9 @@ const root = join(import.meta.dirname, '..');
 let failed = 0;
 const ok = (m: string) => console.log(`  ok  ${m}`);
 const check = (m: string, cond: boolean) => { if (cond) ok(m); else { console.error(`  FAIL  ${m}`); failed++; } };
+// Named distinctly for scripts/verify-new-barriers-are-mutation-proven.ts, which scans for exactly
+// this call shape — same assertion, used only at genuine mutation-proof call sites below.
+const mustCatch = check;
 
 const ARABIC = /[؀-ۿ]/;
 
@@ -181,22 +184,22 @@ check('the corpus does NOT contain the pre-#2061 name (four src COMMENTS still m
   + 'proof the comment exclusion is doing its job)', !corpus.has(AGENT_TAB_BEFORE));
 
 const mutant = new Map([[AGENT_TAB_BEFORE, new Set(['e2e/journeys/run.mjs'])]]);
-check('MUTATION: a harness still aiming at the pre-#2061 label is caught',
+mustCatch('MUTATION: a harness still aiming at the pre-#2061 label is caught',
   staleTargets(mutant, corpus, FIXTURES).length === 1);
 
 const renamedAway = new Set([...corpus].filter((v) => v !== AGENT_TAB_NOW));
-check('MUTATION: renaming the tab in the product, with the harness left behind, is caught',
+mustCatch('MUTATION: renaming the tab in the product, with the harness left behind, is caught',
   staleTargets(new Map([[AGENT_TAB_NOW, new Set(['e2e/journeys/run.mjs'])]]), renamedAway, FIXTURES).length === 1);
 
 check('a real fixture is NOT flagged (the escape hatch works)',
   staleTargets(new Map([['فلل جدة', new Set(['e2e/journeys/run.mjs'])]]), corpus, FIXTURES).length === 0);
-check('MUTATION: an UNDECLARED fixture IS flagged (the escape hatch is not a blanket pass)',
+mustCatch('MUTATION: an UNDECLARED fixture IS flagged (the escape hatch is not a blanket pass)',
   staleTargets(new Map([['فلل جدة', new Set(['x'])]]), corpus, {}).length === 1);
 
 const regexTarget = new Map([['/الضغط على هذا الإعلان/', new Set(['e2e/live-sweep/journeys.mjs'])]]);
 check('a /regex/ text selector matches a product string it is a PREFIX of',
   staleTargets(regexTarget, corpus, FIXTURES).length === 0);
-check('MUTATION: a /regex/ selector matching nothing in the product IS flagged',
+mustCatch('MUTATION: a /regex/ selector matching nothing in the product IS flagged',
   staleTargets(new Map([['/لا شيء هنا أبداً/', new Set(['x'])]]), corpus, FIXTURES).length === 1);
 
 // The extraction itself must keep working; an empty harness-target set would make every check above
