@@ -67,7 +67,7 @@ import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTransc
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
-import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
+import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
@@ -1761,6 +1761,21 @@ export default function Agent() {
     void runRefine(q, '__guided__', '', label,
       { guided: { baseQ: guidedPills.baseQ, facets: remaining, asked: guidedPills.asked.filter((id) => id !== removed.id) } });
   };
+
+  // THE COMMITTED PILLS THE ROUND CARD MUST NOT COVER (owner decision 2026-09-11, #155).
+  // One source of truth: the SAME facets the transcript row renders and the SAME removal handler,
+  // handed to the overlay so it can draw them above its own scrim. A copy here would be a second
+  // place for the user's committed selections to live, and the two would drift.
+  // Declared HERE, after removeGuidedFacet: the useMemo factory runs during render, so referencing
+  // that `const` from above its declaration is a temporal-dead-zone throw, not a lint nit.
+  const afCardPills: ShellPills = useMemo(() => ({
+    facets: guidedPills?.facets ?? [],
+    onRemove: removeGuidedFacet,
+    disabled: busy,
+    isScope: isScopeQuestionId,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [guidedPills, busy]);
+
 
   // Present the step at `stepIndex`. A step the user has already seen (walked Back to, or one
   // preserved past a changed earlier answer) is shown again with its recorded answer restored;
@@ -3691,12 +3706,13 @@ export default function Agent() {
       {ageFlow ? (
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           {ageFlow.phase === 'loading' ? (
-            <AdvancedQuestionLoading onClose={onAgeClose} />
+            <AdvancedQuestionLoading onClose={onAgeClose} pills={afCardPills} />
           ) : ageFlow.phase === 'intro' ? (
             <AdvancedIntroCard
               total={ageFlow.total}
               onBegin={onIntroBegin}
               onClose={onIntroShowResults}
+              pills={afCardPills}
             />
           ) : ageFlow.phase === 'mining' ? (
             <MiningTransition from={ageFlow.from} to={ageFlow.to} />
@@ -3718,6 +3734,7 @@ export default function Agent() {
               onSkip={onAgeSkip}
               onBack={onAgeBack}
               onClose={onAgeClose}
+              pills={afCardPills}
             />
           )}
         </View>

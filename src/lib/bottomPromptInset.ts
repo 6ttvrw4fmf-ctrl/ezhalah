@@ -75,6 +75,25 @@ export const AUTH_PROMPT_SELECTOR = [
   'iframe[src*="appleid.apple.com"]',
 ].join(',');
 
+// ── AND THE PROMPTS WE DOCK OURSELVES (owner decision 2026-09-11, ops_incident #152) ─────────────
+// The rule this file was written for — «must never cover, block, or intercept any Ezhalah controls
+// on mobile or desktop» — was about Google's frame, but it is a rule about the USER, not about whose
+// element it is. The cookie consent card broke it on a phone within days of shipping: `position:
+// fixed`, `bottom: 20`, `width: 280`, `pointer-events: auto`, spanning x∈[70,370] of a 390 px
+// screen, directly over «بحث». `document.elementFromPoint` at the centre of the search button
+// returned the card's own «السماح بالكل», and the first tap a visitor made was eaten by it
+// (measured on production, 2026-09-11). Owner ruling: the consent UI must never cover or block the
+// Search control, the composer, or any important action, on any width.
+//
+// Identified by its testID, which is ours and stable, rather than by a class the styler owns. It
+// reserves space only where it actually spans — a phone — because bottomPromptInset now asks that
+// question; the desktop corner card (280 of 1440) sits beside the app and reserves nothing, exactly
+// as measured when it shipped.
+export const OWN_DOCKED_PROMPT_SELECTOR = '[data-testid="cookie-consent"]';
+
+/** Everything that can dock over the app: third-party auth prompts AND our own docked cards. */
+export const DOCKED_PROMPT_SELECTOR = [AUTH_PROMPT_SELECTOR, OWN_DOCKED_PROMPT_SELECTOR].join(',');
+
 /** How far off the bottom edge still counts as "docked to the bottom". Sub-pixel layout and the
  *  sheet's slide-in animation both land a pixel or two short of the edge. */
 const BOTTOM_ANCHOR_TOLERANCE = 2;
@@ -89,9 +108,16 @@ const TOP_ANCHOR_TOLERANCE = 32;
  *  its edge — reserving a full-width band for the ~390 px desktop corner card would push the whole
  *  app down for something sitting beside it, not over it. 0.8 rather than 1.0 leaves room for the
  *  margins GIS puts either side (measured: 375 of 375 on mobile, so a real sheet clears this
- *  easily). Applied to the TOP path only: the bottom path predates it, is proven in production,
- *  and GIS has never rendered a bottom-docked CARD — widening its conditions here would be an
- *  unforced change to the one half that already works. */
+ *  easily).
+ *
+ *  NOW ON BOTH EDGES (owner decision 2026-09-11, ops_incident #152). It used to be top-only, and the
+ *  stated reason was that "GIS has never rendered a bottom-docked CARD". That premise stopped being
+ *  true the moment WE rendered one: the cookie consent card is bottom-docked on every viewport and
+ *  is a 280 px corner card on desktop, where it sits beside the app and must reserve nothing. So the
+ *  bottom path needs the same question the top path already asks. This is not a loosening — the
+ *  bottom path gains a condition — and it is opt-in by signature: `bottomPromptInset(rect, vh)`
+ *  behaves exactly as it always has, byte for byte, and only a caller that supplies a viewport WIDTH
+ *  is asking for the span test. */
 const MIN_SHEET_SPAN_FRACTION = 0.8;
 
 /** A prompt may never eat more than this share of the viewport. A pathological or mis-measured rect
@@ -121,7 +147,23 @@ export type PromptInsets = { top: number; bottom: number };
  * bottom, which is exactly how the same prompt renders on desktop (a card in the top corner). That
  * last rule is what keeps this a mobile-only correction without ever testing for "mobile".
  */
-export function bottomPromptInset(rect: PromptRect | null | undefined, viewportHeight: number): number {
+export function bottomPromptInset(
+  rect: PromptRect | null | undefined,
+  viewportHeight: number,
+  /**
+   * Supply this and a bottom-docked rect must SPAN the viewport to reserve anything — the same
+   * question topPromptInset already asks, and the only thing that tells our own desktop corner card
+   * (280 of 1440) from the sheet it becomes on a phone (358 of 390). Omit it and this function is
+   * unchanged in every respect, which is how all twelve of its original cases still read.
+   *
+   * THE TWO EDGES FAIL IN OPPOSITE DIRECTIONS, ON PURPOSE. Here an UNKNOWN width counts as
+   * spanning, so a rect we could not measure still gets its space reserved: the harm this file
+   * exists to prevent is a dead «بحث» under a sheet, and guessing "it is only a card" would bring
+   * that straight back. topPromptInset takes the opposite default for the same reason — up there the
+   * harm is shoving the whole app down for something beside it.
+   */
+  viewportWidth?: number,
+): number {
   // `promptHeight` rather than comparing `rect.height` directly: this is a PRESENCE test on one
   // element's box, not a viewport breakpoint, and `verify-ssr-hydration-parity.ts` §C rightly
   // objects to `height > <number>` appearing in src/ — that shape means a breakpoint being decided
@@ -132,6 +174,9 @@ export function bottomPromptInset(rect: PromptRect | null | undefined, viewportH
   if (!(viewportHeight > 0)) return 0;
   // Not docked to the bottom → it is not in anything's way at the bottom. (Desktop corner prompt.)
   if (rect.bottom < viewportHeight - BOTTOM_ANCHOR_TOLERANCE) return 0;
+  // A card beside the app, not a sheet across it — asked only when the caller supplied a width.
+  if (viewportWidth != null && viewportWidth > 0 && rect.width != null
+      && !(rect.width >= viewportWidth * MIN_SHEET_SPAN_FRACTION)) return 0;
   const overlap = viewportHeight - rect.top;
   if (!(overlap > 0)) return 0;
   return Math.min(Math.round(overlap), Math.floor(viewportHeight * MAX_INSET_FRACTION));
@@ -183,7 +228,7 @@ export function promptInsets(
   let bottom = 0;
   for (const rect of rects ?? []) {
     const t = topPromptInset(rect, viewportHeight, viewportWidth);
-    const b = bottomPromptInset(rect, viewportHeight);
+    const b = bottomPromptInset(rect, viewportHeight, viewportWidth);
     if (t > 0 && b > 0) continue;   // covers the whole viewport: a modal, not a dock
     if (t > top) top = t;
     if (b > bottom) bottom = b;
@@ -201,7 +246,7 @@ export function promptInsets(
 /** Read every live prompt rect in the document. Empty when nothing is docked. */
 function readPromptRects(): PromptRect[] {
   if (typeof document === 'undefined') return [];
-  const els = Array.from(document.querySelectorAll(AUTH_PROMPT_SELECTOR)) as HTMLElement[];
+  const els = Array.from(document.querySelectorAll(DOCKED_PROMPT_SELECTOR)) as HTMLElement[];
   return els.map((el) => {
     const r = el.getBoundingClientRect();
     const cs = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
@@ -236,7 +281,7 @@ export function observePromptInsets(onChange: (insets: PromptInsets) => void): (
 
   // Keep a ResizeObserver attached to whichever prompt elements are currently in the document.
   const retarget = () => {
-    const els = Array.from(document.querySelectorAll(AUTH_PROMPT_SELECTOR));
+    const els = Array.from(document.querySelectorAll(DOCKED_PROMPT_SELECTOR));
     if (els.length === watched.length && els.every((el, i) => el === watched[i])) return;
     if (sizeObserver) { sizeObserver.disconnect(); sizeObserver = null; }
     watched = els;
