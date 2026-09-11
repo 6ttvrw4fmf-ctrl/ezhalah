@@ -194,17 +194,160 @@ export const SEARCH_BEAT_MS = (() => { const b = readSearchBeatMs(); return b.fl
 export const POST_SEARCH_BUDGET_MS = SEARCH_BEAT_MS + AGENT_TURN_MS;
 
 /**
+ * THE IDS THAT PROVE A NEW RESULTS TURN: the ids this turn returned, MINUS the ids that were already
+ * on screen when the wait began.
+ *
+ * WHY THE SUBTRACTION IS THE WHOLE POINT (measured on production 2026-09-11). The first version of
+ * `awaitResultsTurn` polled "how many on-screen cards are in the committed id set", and its own
+ * comment called that "the only set that proves the NEW turn has rendered". It is not. An Advanced
+ * Filter answer NARROWS: the committed set is drawn from the very rows the previous screen was
+ * showing, so the intersection is non-empty BEFORE the new turn renders at all — the poll returns at
+ * t=0 and the caller reads the screen the beat is still holding. That is a fixed sleep with extra
+ * steps, which is exactly what the header of this file forbids, rebuilt one screen further on.
+ *
+ * Measured: الرياض/شقة, committed 159 rows against a screen of 13 cards from the pre-AF search. The
+ * old predicate settled immediately; the real turn arrived 9,065 ms later and DID render its
+ * «مطابق لطلبك» strips. Six live steps had been red for five days over it, every one of them
+ * accusing a correct production (ops_incident #141).
+ *
+ * This is the same lesson `awaitAfStep`'s `previousOptions` already encodes for the question card —
+ * "some options are on screen" is true the instant after a confirm — applied to the results turn.
+ */
+export function provingIds(turnIds: Iterable<number>, onScreenBefore: Iterable<number>): number[] {
+  const before = new Set<number>(onScreenBefore);
+  return [...new Set<number>(turnIds)].filter((id) => !before.has(id));
+}
+
+export type TurnArrival = {
+  /** a PROVING id was observed on screen. Only then may the caller read that screen. */
+  settled: boolean;
+  /**
+   * false ⇒ this turn cannot be proven by id from this screen (every id it returned was already
+   * rendered). The caller must report NOT EXERCISED — never fall back to "something is on screen",
+   * which is the defect this type exists to make unrepresentable.
+   */
+  provable: boolean;
+  /** how many proving ids were on screen when the poll stopped. */
+  proving: number;
+  /** how large the proving set was to begin with (0 ⇒ not provable). */
+  provingPool: number;
+};
+
+/**
  * Wait for the results turn a committed answer produced to be ON SCREEN, and say whether it ever
  * arrived. `settled:false` means it never did — the caller must abandon every assertion that reads
  * that screen and report NOT EXERCISED (rule 2 in the header), never judge what it found.
+ *
+ * The caller passes the turn's own ids and the ids ON SCREEN when the wait began; the proving set is
+ * computed here, once, so no journey can reintroduce the intersection predicate by hand. Snapshot
+ * `onScreenBefore` as soon as the committed response is captured — the beat holds the previous
+ * screen for SEARCH_BEAT_MS, so that read is the screen being replaced. If the new turn somehow
+ * rendered before the snapshot, the pool shrinks and this reports NOT PROVABLE: it fails toward
+ * "this run did not certify the product", never toward judging an unobserved screen.
  */
 export async function awaitResultsTurn(
-  readCardCount: () => Promise<number>,
+  readShownIds: () => Promise<readonly number[]>,
+  sleep: (ms: number) => Promise<void>,
+  turn: { turnIds: Iterable<number>; onScreenBefore: Iterable<number> },
+  budgetMs = POST_SEARCH_BUDGET_MS,
+): Promise<TurnArrival> {
+  const pool = provingIds(turn.turnIds, turn.onScreenBefore);
+  if (pool.length === 0) return { settled: false, provable: false, proving: 0, provingPool: 0 };
+  const proof = new Set(pool);
+  const r = await settleUntil(
+    async () => (await readShownIds()).filter((id) => proof.has(id)).length,
+    (n) => n > 0, budgetMs, sleep);
+  return { settled: r.settled, provable: true, proving: r.value, provingPool: pool.length };
+}
+
+/**
+ * IS THIS CONTROL REACHABLE BY A USER RIGHT NOW? — the other half of the beat, on the way IN.
+ *
+ * `awaitResultsTurn` answers "may I READ the screen yet". This answers "may I CLICK it yet", and it
+ * is the question a journey asks the moment a committed answer starts a new search: the searching
+ * loader is painted over the whole chat for the beat plus the agent turn behind it, with
+ * `pointer-events` live, so a click lands on the loader. Playwright's own actionability retry says
+ * exactly that — «subtree intercepts pointer events» — and then gives up on ITS budget, which has
+ * nothing to do with the product's.
+ *
+ * Measured 2026-09-11, verify-af-pill-removal-live on MOBILE جدة/فيلا: five checks green, then
+ * `page.click('[data-testid="af-pill-0"]')` timed out after 30,000 ms against the loader — a budget
+ * that predates a beat of 11,050 ms sitting in front of an agent turn measured near 40 s.
+ *
+ * The answer is NOT a bigger number. It is to observe the thing that actually matters: whether the
+ * control is on top at its own centre point. `elementsFromPoint` (the PLURAL — the singular form
+ * reports a scrolled-out control as blocked, an artifact that already cost one run a false «20
+ * controls blocked», see PR #2040) returns the painted stack; the control is reachable when it is in
+ * it. Bounded by the same POST_SEARCH_BUDGET_MS, and a control that never surfaces is reported, not
+ * clicked into.
+ */
+export type PointQueryable = {
+  evaluate: <R>(fn: (sel: string) => R, arg: string) => Promise<R>;
+};
+
+/**
+ * CLICK THE POINT THE PROBE VALIDATED, not the selector.
+ *
+ * `page.click(selector)` re-runs its own scroll-into-view before dispatching, so the element can end
+ * up at a DIFFERENT scroll offset from the one the reachability probe just measured — and on a
+ * narrow viewport that is enough to slide it back under the AF question card. Measured 2026-09-11:
+ * `awaitClickable` answered `ok`, and Playwright's own retry then reported the card's «af-confirm»
+ * intercepting at ITS scroll position. Clicking the measured coordinates closes that gap, and it is
+ * the same idiom the journeys already use for every other control (the CLICK_LEAF `tap` helpers).
+ */
+export type PointClickable = PointQueryable & {
+  mouse: { click: (x: number, y: number) => Promise<unknown> };
+};
+
+export type Reach = 'ok' | 'covered' | 'absent' | 'unpainted' | 'offscreen';
+
+/**
+ * The page-side probe, exported so a barrier can execute it against a fake DOM.
+ *
+ * IT SCROLLS FIRST, AND «OFFSCREEN» IS ITS OWN ANSWER. A control that is merely scrolled out of view
+ * still has a rect, and `elementsFromPoint` at a point outside the viewport returns an empty stack —
+ * which is indistinguishable from "an overlay is on top of it" unless the two are separated. Measured
+ * 2026-09-11: the AF pill row on a 390x844 viewport read «covered» for the full 71,050 ms budget
+ * while nothing was covering it at all. That is the same confusion PR #2040 recorded from the other
+ * direction («20 controls blocked» on a healthy build), and it must not be re-learned a third time.
+ */
+export const REACH_AT_CENTRE = (sel: string): { reach: Reach; x: number; y: number } => {
+  const no = (reach: Reach) => ({ reach, x: -1, y: -1 });
+  const el = document.querySelector(sel);
+  if (!el) return no('absent');
+  el.scrollIntoView({ block: 'center', inline: 'center' });
+  const r = el.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return no('unpainted');
+  const x = r.x + r.width / 2, y = r.y + r.height / 2;
+  if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return no('offscreen');
+  const stack = document.elementsFromPoint(x, y);
+  return stack.some((n) => n === el || el.contains(n)) ? { reach: 'ok', x, y } : no('covered');
+};
+
+export async function awaitClickable(
+  page: PointQueryable,
+  selector: string,
   sleep: (ms: number) => Promise<void>,
   budgetMs = POST_SEARCH_BUDGET_MS,
-): Promise<{ settled: boolean; cards: number }> {
-  const r = await settleUntil(readCardCount, (n) => n > 0, budgetMs, sleep);
-  return { settled: r.settled, cards: r.value };
+  pollMs = 500,
+): Promise<{ reachable: boolean; last: Reach; x: number; y: number }> {
+  const r = await settleUntil(
+    () => page.evaluate(REACH_AT_CENTRE, selector),
+    (v) => v.reach === 'ok', budgetMs, sleep, pollMs);
+  return { reachable: r.settled, last: r.value.reach, x: r.value.x, y: r.value.y };
+}
+
+/** Wait for a control to be genuinely on top, then click the exact point that was validated. */
+export async function clickWhenReachable(
+  page: PointClickable,
+  selector: string,
+  sleep: (ms: number) => Promise<void>,
+  budgetMs = POST_SEARCH_BUDGET_MS,
+): Promise<{ clicked: boolean; last: Reach }> {
+  const r = await awaitClickable(page, selector, sleep, budgetMs);
+  if (!r.reachable) return { clicked: false, last: r.last };
+  await page.mouse.click(r.x, r.y);
+  return { clicked: true, last: r.last };
 }
 
 /**

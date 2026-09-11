@@ -418,11 +418,19 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         # kitchen keeps its OWN resolver (PR#455): a non-zero `kitchens` COUNT proves a kitchen even
         # when the flag reads 0, which _flag alone cannot express.
         "kitchen":          _kitchen_state(L.get("is_kitchen_installed"), L.get("kitchens")),
-        "parking":          (_int(L.get("parking_spots")) or 0) > 0,
-        "elevator":         (_int(L.get("elevators")) or 0) > 0,
-        "maid_room":        (_int(L.get("maid_rooms")) or 0) > 0,
-        "driver_room":      (_int(L.get("driver_rooms")) or 0) > 0,
-        "balcony_terrace":  (_int(L.get("balconies")) or 0) > 0,
+        # TRI-STATE COUNTS (2026-09-11, ops_incident #154). These five were
+        # `(_int(L.get(k)) or 0) > 0`, and to_int_numeric() returns None for an explicit source 0 AND
+        # for a source null alike — so a listing the API said NOTHING about was stored as a confident
+        # "no balcony / no lift / no parking". Measured over the stored source_capture: the key is
+        # present on 100% of rows, an explicit 0 on almost all of them (real source negatives, kept)
+        # and JSON null on 20 abwbna / 12-13 aldarim rows per key (the fabricated ones). count_flag()
+        # keeps the published negative and returns UNKNOWN for the silence. Same rule, same reason as
+        # _flag() above; one shared definition rather than a fifth private copy.
+        "parking":          normalize.count_flag(L.get("parking_spots")),
+        "elevator":         normalize.count_flag(L.get("elevators")),
+        "maid_room":        normalize.count_flag(L.get("maid_rooms")),
+        "driver_room":      normalize.count_flag(L.get("driver_rooms")),
+        "balcony_terrace":  normalize.count_flag(L.get("balconies")),
         # (no detail_enriched — that's a Wasalt-only enrichment flag; Aldarim's API is already complete.)
         # ── Arabic-native (additive, shadow) + complete-source capture ──────────
         "city_ar": city_ar,

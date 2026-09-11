@@ -26,6 +26,7 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripCommentsAndStrings } from './lib/stripComments.ts';
 
 const root = join(import.meta.dirname, '..');
 const LIST = join(root, 'scripts', 'mutation-proof-grandfathered.txt');
@@ -107,26 +108,17 @@ export function fakeProofArgs(src: string): string[] {
 const FAKE_PROOF = (src: string) => fakeProofArgs(src).length > 0;
 const EXEMPT = /^\s*\/\/\s*MUTATION-PROOF-EXEMPT:\s*(\S.*)$/m;
 
+// The code-only reader lives in scripts/lib/stripComments.ts as `stripCommentsAndStrings`, NOT here.
+// It was a local copy until 2026-09-11; promoting it removed a duplicate that a second barrier was
+// about to clone (PART 1.6: a barrier holding its own copy of shared logic drifts, and then the test
+// passes while the thing it guards is broken). The proofs below are unchanged and now pin the SHARED
+// function — which is the point: they are a statement about the code that really decides, not a copy.
+//
 // Scan CODE, not prose or examples. This barrier's own file contains a literal `mustCatch('x', true)`
 // as the input to its fake-proof mutation test — and on its first run it flagged ITSELF, which is the
-// correct behaviour of the wrong reader. Comments and quoted strings are removed before the per-file
-// scan, so a barrier can describe an anti-pattern without committing it. The mutation proofs below
-// feed the regexes their own inputs directly and are unaffected.
-//
-// TRAILING COMMENTS COUNT TOO (repaired 2026-09-04 by routine #10). The first version stripped only
-// comments that START a line (`^\s*//`), so a barrier whose ONLY "proof" was a trailing note —
-// `let failed = 0; // TODO: add a mustCatch(...) proof one day` — read as PROVEN and satisfied the
-// rule without ever running anything. Watched to happen: that exact string passed
-// PROOF.test(codeOnly(…)). The reader now strips a `//` anywhere, EXCEPT one preceded by `:` or a
-// word character, so the `//` in a `https://…` literal is still not a comment. The comment pass stays
-// AHEAD of the string passes on purpose: an apostrophe inside a comment (`// the runner's own`) would
-// otherwise open a bogus string literal and swallow the real code after it.
-const codeOnly = (s: string) => s
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .replace(/(^|[^:\w])\/\/.*$/gm, '$1')
-  .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
-  .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
-  .replace(/`(?:[^`\\]|\\.)*`/g, '``');
+// correct behaviour of the wrong reader. See the shared function's header for the one-pass and
+// regex-literal rationale (ops_incident #132), both mutation-proven below.
+const codeOnly = stripCommentsAndStrings;
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -235,6 +227,40 @@ mustCatch('a barrier whose only "proof" is a TRAILING comment on a line of real 
   !PROOF.test(codeOnly('let failed = 0; // TODO: add a mustCatch(...) proof one day\ncheck(1);')));
 mustCatch('…while a URL inside a string still cannot swallow the real proof after it',
   PROOF.test(codeOnly("const doc = 'https://example.test/x'; mustCatch('y', !ok);")));
+
+// ── the quote-desync class (incident #132), pinned in BOTH directions ────────────────────────────
+// The reader must never let one quote kind re-open inside another. These are the two observable
+// verdicts that desync produced, so a return to independent global passes fails here, not silently
+// in a barrier nobody re-reads.
+const APOSTROPHE_THEN_FAKE =
+  "mustCatch('a genuine differential', !broken(x));\n" +
+  `const note = "the runner's own child"; mustCatch('this one can never fail', true);`;
+mustCatch('an unconditional proof HIDDEN by an apostrophe inside a double-quoted string on its own line',
+  FAKE_PROOF(codeOnly(APOSTROPHE_THEN_FAKE)));
+mustCatch('…and the mirror direction: a real proof SWALLOWED by that same apostrophe, reading as unproven',
+  PROOF.test(codeOnly(`const m = "it's fine"; mustCatch('the defect', !ok);`)));
+mustCatch('a stray backtick inside a quoted string NOT swallowing every line until the next one',
+  PROOF.test(codeOnly('const a = "run `npm test` now";\nmustCatch(\'the defect\', !ok);')));
+mustCatch('an apostrophe inside a TEMPLATE literal not re-opening as a single-quoted string',
+  PROOF.test(codeOnly("const m = `the runner's own child`; mustCatch('the defect', !ok);")));
+mustCatch("an UNTERMINATED apostrophe (prose, or a regex literal) not eating the file after it",
+  PROOF.test(codeOnly("const RE = /it's/;\nmustCatch('the defect', !ok);")));
+// The regex-literal face of the same class, watched on this file itself (see the reader's header).
+mustCatch('a BACKTICK inside a regex literal not opening a multiline template that splices the file',
+  PROOF.test(codeOnly('const RE = /`(?:[^`\\\\]|\\\\.)*`/g;\nmustCatch(\'the defect\', !ok);')));
+mustCatch('…and a quote inside a regex literal not re-opening as a string either',
+  PROOF.test(codeOnly('const RE = /["\']/g;\nmustCatch(\'the defect\', !ok);')));
+mustCatch('…while ordinary DIVISION is not mistaken for a regex that swallows the rest of the line',
+  PROOF.test(codeOnly("const ratio = hits / total; mustCatch('the defect', !ok);")));
+mustCatch('…and a `/` inside a regex CHARACTER CLASS does not close it early',
+  PROOF.test(codeOnly("const RE = /[/x]y/g; mustCatch('the defect', !ok);")));
+// Negative controls — the reader must still REMOVE what it exists to remove, or it is vacuously green.
+mustCatch('…while the reader still strips a real line comment (not vacuously permissive)',
+  !PROOF.test(codeOnly('let failed = 0; // mustCatch(...) one day\ncheck(1);')));
+mustCatch('…and still strips a real block comment',
+  !PROOF.test(codeOnly('/* mustCatch(\'x\', true); */\ncheck(1);')));
+mustCatch('…and still blanks a quoted string, so a barrier may DESCRIBE an anti-pattern in prose',
+  !FAKE_PROOF(codeOnly(`const bad = "mustCatch('x', true)"; check(1);`)));
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
