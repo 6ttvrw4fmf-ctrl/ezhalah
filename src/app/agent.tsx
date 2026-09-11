@@ -46,7 +46,8 @@ import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
-import { parseProximity } from '@/data/proximity';
+import { fetchListingsForQuery } from '@/data/remote';
+import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLocationProbe';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
@@ -2527,57 +2528,66 @@ export default function Agent() {
       // 2026-09-11: the SAME discard was about to swallow this session's own new unsupported-feature
       // honesty text (Task 7) — see scripts/verify-agent-unsupported-feature-honesty.ts.
       const withNotice = turn.notice ? `${reply}\n${turn.notice}` : reply;
-      await playListings(run, statusId, withNotice, result, v);
+      // ZERO MATCHES = ONE SIMPLE STATEMENT, NEVER A QUESTION (owner rule 2026-09-11 — the AI
+      // Agent flow only; Filter/Advanced Filter/the zero-match relaxation follow-up keep their own
+      // richer, earned zero-result diagnostics in src/data/search.ts's noResultsSuggestion(), both
+      // untouched). `.suggestion` is the ONE field the results renderer actually reads on a
+      // zero-result turn (see `introZeroResult ? m.result.suggestion` below), so overriding it HERE
+      // scopes the change to exactly this call site — a fresh, free-text AI-Agent search — rather
+      // than rewriting the shared module every other surface (Filter, AF) also depends on.
+      const zeroMatch = result.listings.length === 0
+        ? { ...result, suggestion: t('Sorry, no listings currently match your request. Try using the Filter to widen your search.') }
+        : result;
+      await playListings(run, statusId, withNotice, zeroMatch, v);
       if (run.cancelled) return;
       void promptSignupSoon(run);
     } else {
-      const attemptText = saidRef.current.join(' ');
-      const combined = parseQuery(attemptText);
-      // STANDARD smart city ask: a proximity/landmark search with NO city → ask WHICH CITY, echoing the
-      // user's own phrase, even if the model chose to ask something else (e.g. the property type). For a
-      // proximity search the city is the highest-value missing piece, and we never invent one. On the
-      // user's answer the search resumes with city + the same proximity (re-parsed across the attempt).
-      const proxAll = parseProximity(attemptText);
-      if (proxAll.length && !combined.location && askCountRef.current < 2) {
-        const phrase = proxAll
-          .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
-          .filter(Boolean)
-          .join(' و');
-        askCountRef.current += 1;
-        setMsgs((m) =>
-          m.map((x) => (x.id === statusId
-            ? { id: statusId, role: 'agent', text: phrase ? `في أي مدينة تبحث عن عقار ${phrase}؟` : 'في أي مدينة تبحث؟', typing: true }
-            : x)),
+      // THE SERVER IS THE SINGLE DECISION AUTHORITY here too (owner 2026-09-11 — extends the
+      // 2026-08-30/09-05 "kind='listings' is trusted unconditionally, never re-litigated" principle
+      // to kind='message'). decideAgentTurn() already decided this turn is a clarifying question —
+      // or that the one-question ceiling was already spent, in which case turn.reply is a plain
+      // "couldn't narrow this down, try the Filter" STATEMENT, never a question (decide.ts's own
+      // `unsearchable` case) — so the reply is shown exactly as the server sent it.
+      //
+      // DELETED: the client's own parallel askCountRef ceiling (a proximity-city ask capped at <2,
+      // and a `hasIntent && askCountRef>=2` "stop pestering and search anyway" override that
+      // re-parsed `saidRef` into its own query and searched THAT instead of showing the reply).
+      // Two systems deciding "ask or search", differently, is exactly the bug class decide.ts's own
+      // file header exists to end (2026-08-30) — this override was the one place it survived,
+      // because the `mustAnswer`/`locationQuestion` carve-out only patched the one case that had
+      // been measured live (the twin-city question) rather than removing the second decision
+      // surface outright. With the ceiling now at exactly ONE question, always about location, and
+      // the terminal `unsearchable` state handled server-side, there is nothing left for a client
+      // override to safely second-guess — every remaining case is a location question or a final
+      // statement, both of which decide.ts already resolved correctly.
+      //
+      // ONE EXCEPTION (owner, 2026-09-11): "only ask the city if there is something [to find]" —
+      // before showing THE location question, quietly check whether the OTHER stated requirements
+      // (type/amenities/price/af/…) match anything AT ALL, anywhere. This never overrides kind or
+      // askCount and is never shown as a results page — it is a plain existence probe (real logic
+      // extracted to src/lib/agentLocationProbe.ts, zero-dependency so it can be executed directly
+      // by scripts/verify-agent-location-probe.ts), reusing the exact same match-first RPC a real
+      // search would hit, called directly (not via store.tsx's runQuery) so a FAILED fetch
+      // (listings: null) can be told apart from a GENUINE zero (listings: []) — collapsing those two
+      // would risk claiming "nothing matches" on our own network hiccup (A FAILED FETCH IS NOT AN
+      // EMPTY ANSWER). Only gated on `turn.locationQuestion` (server-computed: true for exactly this
+      // question, never for the `unsearchable` statement or an off-topic reply) so ordinary turns
+      // pay nothing extra. ponytail: fetches a full page just to check existence (no `limit` param
+      // plumbed through) — fine since a genuine zero costs the RPC the same either way; add a
+      // p_limit:1 knob if this ever measurably matters.
+      let reply = turn.reply;
+      if (turn.locationQuestion && turn.query) {
+        const probe = await fetchListingsForQuery(buildLocationProbeQuery(turn.query), { signal: run.ac.signal });
+        if (run.cancelled) return;
+        reply = replyAfterLocationProbe(
+          turn.reply,
+          t('Sorry, no listings currently match your request. Try using the Filter to widen your search.'),
+          probe.listings,
         );
-      } else {
-        // The model asked a clarifying question. Read back EVERYTHING said so far: if we can already see
-        // a usable detail (a type, a city, a size, a budget) and we've asked twice, stop pestering and
-        // just search with whatever we have. (user request: max 2 asks → skip → scrape.)
-        const hasIntent = !!(combined.type || combined.location || combined.detail || combined.priceInput);
-        // A LOCATION QUESTION OUTRANKS THIS CEILING (owner, 2026-09-05). The rule below — "asked
-        // twice and we can see some intent, so stop pestering and just search" — is right for an
-        // ordinary clarification. It is wrong for the one question whose answer DEFINES the search
-        // scope: skipping it does not save the user a question, it picks a scope for them.
-        // Measured in production: the edge asked «تقصد مدينة الرياض ولا منطقة الرياض كاملة؟» and
-        // this branch discarded it and searched منطقة الرياض — 10,932 rows across 20 cities — for a
-        // user who had said only «الرياض». The flag is the EDGE's verdict (it owns the classifier),
-        // never re-derived here, so the two surfaces cannot drift.
-        const mustAnswer = turn.kind === 'message' && turn.locationQuestion === true;
-        if (hasIntent && askCountRef.current >= 2 && !mustAnswer) {
-          askCountRef.current = 0;
-          saidRef.current = [];
-          beginSearching(statusId, combined); // loader + min-beat overlap the fetch (like filter/refine)
-          const result = await runQuery(combined, true, run.ac.signal, ensureChatId());
-          await playListings(run, statusId, buildScrapeIntro(result.query ?? combined), result, v);
-          if (run.cancelled) return;
-          void promptSignupSoon(run);
-        } else {
-          if (hasIntent) askCountRef.current += 1; // only count asks once the user has shown intent
-          setMsgs((m) =>
-            m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: turn.reply, typing: true } : x)),
-          );
-        }
       }
+      setMsgs((m) =>
+        m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: reply, typing: true } : x)),
+      );
     }
     // The network turn is done; the cards then reveal on their own timers (busy is free, so the user can
     // type a new message — which finalizes the reveal via finalizeReveal). interview returns earlier.
