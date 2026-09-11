@@ -9,7 +9,7 @@
 // corollary: `… | tail` reports tail's status) — redirect to a file and read $?.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
-         findings, skips, skip, passes, classifyRunOutcome,
+         findings, skips, skip, passes, classifyRunOutcome, classifyBlockedControl,
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
@@ -1418,6 +1418,23 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
   // self-contradictory pass line «(587-606) is clear of the prompt (558-812)». The verdict was always
   // sound (elementFromPoint + a real click decide it), but a message whose numbers disagree with its
   // own conclusion is how a future reader talks themselves out of a real finding.
+  // DO NOT BLAME ONE TAP FOR A BLOCK ONE TAP DID NOT CAUSE. This journey's name is
+  // `onetap-clear-of-controls`, and every defect it used to file said "the One Tap prompt is
+  // covering …" unconditionally the moment a tap missed its target — even when the sheet's own
+  // measured rect does not overlap the control at all. Measured 2026-09-11: mobile375 reported
+  // «the One Tap prompt is covering «بحث»: sheet now 668-812; «بحث» 587-606» — 606 < 668, the two
+  // ranges do not touch, yet a tap at «بحث»'s centre still landed on an unrelated DIV. The real
+  // blocker on that exact shape (a fixed bottom card on a 390×844 phone) is ops_incident #152, the
+  // cookie-consent banner PR #2093 shipped 2026-09-06 — a plain `<div>`, never an `<iframe>`, so it
+  // could never be the element `SHEET_SEL` matches. Filing that as a One Tap regression would have
+  // sent whoever reads it chasing GoogleOneTap.tsx for a bug that lives in CookieConsent.tsx, and
+  // duplicated a P2 already open and correctly awaiting an owner product decision. PART 9.4: a
+  // harness defect is this routine's own bug, so `winnerIsSheet` decides which claim gets made.
+  //
+  // `elementsFromPoint` (PLURAL), not `elementFromPoint` — the same fix PART 5 shape 13 already
+  // required of the sibling `auth-overlay-clears-controls` journey and its own reachability check,
+  // for the identical reason: the singular form reports only the top-most hit, so a sheet painted
+  // BELOW another transparent layer at that point would never be seen at all.
   const winnerAt = (page, sel) => page.evaluate(({ s, sheetSel }) => {
     const el = s === 'cta'
       ? [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && (e.textContent || '').trim() === 'بحث')
@@ -1430,11 +1447,32 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const sheetNow = q && q.height > 0 ? `${Math.round(q.top)}-${Math.round(q.bottom)}` : 'gone';
     if (!el) return { missing: true, sheetNow };
     const r = el.getBoundingClientRect();
-    const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+    const stack = document.elementsFromPoint(cx, cy);
+    const t = stack[0] || null;
+    // GEOMETRY, NOT DOM ANCESTRY. A first attempt tried `n.contains(f)` — is the winning element an
+    // ANCESTOR of the sheet iframe — and it was wrong in the dangerous direction: `elementsFromPoint`
+    // walks UP the ancestor chain from the hit point, so `<body>` or an app-root wrapper appears in
+    // EVERY stack and trivially "contains" the iframe wherever it sits on the page. That made
+    // `winnerIsSheet` read true almost unconditionally — the opposite failure from the one this fix
+    // exists to prevent, discovered by re-running against production and watching a control 62-111 px
+    // above the sheet's own measured bounds still get blamed on it. The only question that actually
+    // answers "did the sheet win this tap" is whether the TESTED POINT falls inside the sheet's own
+    // rect, exactly the two numbers this journey already prints side by side in every finding.
+    const winnerIsSheet = !!q && q.height > 0 && cy >= q.top && cy <= q.bottom && cx >= q.left && cx <= q.right;
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), sheetNow,
-             winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}` : null,
-             isSelf: !!t && (t === el || t.contains(el) || el.contains(t)) };
+             winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}${t.className && typeof t.className === 'string' ? '.' + t.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}` : null,
+             isSelf: !!t && (t === el || t.contains(el) || el.contains(t)),
+             winnerIsSheet };
   }, { s: sel, sheetSel: SHEET_SEL });
+
+  /** Turn a failed hit-test into the RIGHT finding via the pure, mutation-proven classifier in
+   *  harness.mjs — One Tap's own class if the sheet is really the blocker, or an honest "some other
+   *  overlay" finding otherwise. Never the wrong one asserted with confidence. */
+  const reportBlocked = (journeyName, controlLabel, r) => {
+    const { what, detail } = classifyBlockedControl(r, controlLabel);
+    defect(journeyName, what, detail);
+  };
 
   await withPage({ mobile }, async (page, bag) => {
     const sheet = await waitForSheet(page);
@@ -1459,8 +1497,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const ms = await winnerAt(page, 'modeswitch');
     if (ms.missing) skip(`${name}/modeswitch`, '«تصفية» not rendered');
     else if (!ms.isSelf) {
-      defect(`${name}/modeswitch`, 'the One Tap prompt is covering «تصفية» (the mode switch)',
-        `sheet now ${ms.sheetNow}; «تصفية» ${ms.top}-${ms.bottom}; a tap at its centre goes to ${ms.winner}`);
+      reportBlocked(`${name}/modeswitch`, 'تصفية', ms);
     } else {
       let msErr = null;
       await page.getByText('تصفية', { exact: true }).first().click({ timeout: 10_000 })
@@ -1487,8 +1524,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     if (cta.skipCta) { /* handled above — fall through to the mode-switch check */ }
     else if (cta.missing) { skip(name, '«بحث» not rendered'); }
     else if (!cta.isSelf) {
-      defect(name, 'the One Tap prompt is covering «بحث»',
-        `sheet now ${cta.sheetNow}; «بحث» ${cta.top}-${cta.bottom}; a tap at its centre goes to ${cta.winner}`);
+      reportBlocked(name, 'بحث', cta);
     } else {
       // Not just the hit test — a REAL click must land (PART 9.2 (4)).
       let err = null;
@@ -1514,8 +1550,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const comp = await winnerAt(page, 'composer');
     if (comp.missing) { skip(`${name}/composer`, 'no composer on this screen'); return; }
     if (!comp.isSelf) {
-      defect(`${name}/composer`, 'the One Tap prompt is covering the AI Agent composer',
-        `sheet now ${comp.sheetNow}; composer ${comp.top}-${comp.bottom}; a tap at its centre goes to ${comp.winner}`);
+      reportBlocked(`${name}/composer`, 'the AI Agent composer', comp);
     } else {
       pass(`${name}/composer`, `composer (${comp.top}-${comp.bottom}) is clear of the prompt (now ${comp.sheetNow})`);
     }

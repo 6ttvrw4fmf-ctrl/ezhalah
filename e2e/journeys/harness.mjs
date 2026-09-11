@@ -863,3 +863,37 @@ export function classifyTapOwnership(pts) {
   }
   return { stolen, blind };
 }
+
+// ── A BLOCKED CONTROL IS NOT AUTOMATICALLY ONE TAP'S FAULT ──────────────────────────────────────
+// `onetap-clear-of-controls` used to file every failed hit-test as «the One Tap prompt is covering
+// «X»» unconditionally, the instant a tap missed its target — with no check that the sheet's own
+// measured rect had anything to do with the point that was actually tested.
+//
+// Measured, production, 2026-09-11: mobile375 reported «the One Tap prompt is covering «بحث»: sheet
+// now 668-812; «بحث» 587-606» — 606 < 668, the two ranges never touch — and «the One Tap prompt is
+// covering the AI Agent composer: sheet now 668-812; composer 557-579», same shape, further still.
+// The real blocker on that exact geometry (a fixed bottom card on a 390×844 phone) is
+// ops_incident #152 — the cookie-consent banner, a plain `<div>` that predates this journey and
+// could never be matched by `SHEET_SEL` (an `<iframe>` selector). Filing that as a One Tap
+// regression would have sent whoever reads it chasing `GoogleOneTap.tsx` for a bug that lives in
+// `CookieConsent.tsx`, and duplicated a P2 already open and correctly awaiting an owner product
+// decision. PART 9.4: a harness that misattributes a real finding is this routine's own bug.
+//
+// This is the decision alone, pulled out of the DOM-reading closure so it can be proven with plain
+// objects instead of a browser — the same precedent as `classifyTapOwnership` just above.
+export function classifyBlockedControl({ winnerIsSheet, sheetNow, top, bottom, winner }, controlLabel) {
+  if (winnerIsSheet) {
+    return {
+      what: `the One Tap prompt is covering «${controlLabel}»`,
+      detail: `sheet now ${sheetNow}; «${controlLabel}» ${top}-${bottom}; a tap at its centre goes to ${winner}`,
+      isOneTap: true,
+    };
+  }
+  return {
+    what: `an overlay OTHER than One Tap is covering «${controlLabel}» — not a One Tap regression`,
+    detail: `sheet reported at ${sheetNow} (does not include the winner), «${controlLabel}» ${top}-${bottom}, `
+      + `real blocker at that point: ${winner}. Check ops_incident for an already-open finding on this `
+      + `element before filing a new one — PART 9.4, do not misattribute to Google One Tap.`,
+    isOneTap: false,
+  };
+}
