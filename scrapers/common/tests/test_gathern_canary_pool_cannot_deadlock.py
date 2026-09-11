@@ -48,6 +48,7 @@ from scrapers.common.liveness_trust import canary_environment_ok  # noqa: E402
 from scrapers.gathern.liveness import (  # noqa: E402
     CANARY_MAX_AGE_HOURS,
     choose_canaries,
+    trust_quarantine_reason,
 )
 
 NOW = datetime(2026, 9, 11, 14, 0, tzinfo=timezone.utc)
@@ -143,3 +144,29 @@ def test_a_real_block_still_quarantines():
 def test_the_pool_is_capped_at_the_requested_size():
     fresh = [_row(100 + i, seen=NOW - timedelta(hours=i % 24)) for i in range(40)]
     assert len(choose_canaries(fresh, 10, now=NOW)) == 10
+
+
+# ── The quarantine note must not assert a cause it has evidence against ──────────────────────────
+# Observed 2026-09-11: the note read "the source is not answering this run reliably" on a run whose
+# canary had just returned 10/10 alive. That is the same confident-wrong-cause that sent five days
+# of readers, and one dispatch of the metered Saudi proxy, to the wrong system. The GATE is
+# unchanged by these — the run is still quarantined and still writes nothing.
+
+def test_a_passing_canary_forbids_blaming_the_source():
+    reason = trust_quarantine_reason(True, 10, 10)
+    assert "not answering this run reliably" not in reason
+    assert "canary independently PASSED" in reason
+    assert "10/10" in reason
+    assert "#180" in reason           # points at the real, open owner decision
+
+
+def test_a_failing_canary_still_blames_the_source():
+    reason = trust_quarantine_reason(False, 0, 10)
+    assert "not answering this run reliably" in reason
+
+
+def test_no_canary_is_not_a_passing_canary():
+    """--canaries 0 must never read downstream as 'the environment was proven healthy'."""
+    assert "not answering this run reliably" in trust_quarantine_reason(False, 0, 0)
+    # Even if a caller wrongly passes ok=True with nothing probed, an unprobed pool proves nothing.
+    assert "not answering this run reliably" in trust_quarantine_reason(True, 0, 0)
