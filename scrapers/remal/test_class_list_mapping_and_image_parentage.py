@@ -79,6 +79,19 @@ row, _ = map_listing(_post(["property-type-appartments", "city-jeddah", "offer-t
                            title="شقة للإيجار", body="السعر: 50,000 ريال سنوياً"))
 assert row["rent_period"] == "annual"
 
+# ── 5b. AREA — the real formats this source actually uses (measured live 2026-09-11: real posts
+# 6593/6544/6532), not just the plain "مساحة N" the regex originally caught. Fixed 2026-09-11 —
+# 29/87 -> 52/87 posts recovered.
+row, _ = map_listing(_post(["property-type-lands", "city-jeddah", "offer-type-for-sell"],
+                           title="أرض للبيع", body="* المساحة/900م2<br>* على 3 واجهات"))
+assert row["area_m2"] == 900, "slash-separated «المساحة/900م2» must be caught"
+row, _ = map_listing(_post(["property-type-lands", "city-jeddah", "offer-type-for-sell"],
+                           title="أرض للبيع", body="مساحات 600م2"))
+assert row["area_m2"] == 600, "plural «مساحات» (no separator at all) must be caught"
+row, _ = map_listing(_post(["property-type-lands", "city-jeddah", "offer-type-for-sell"],
+                           title="أرض للبيع", body="مساحة/ 888م2"))
+assert row["area_m2"] == 888, "slash+space «مساحة/ 888م2» must be caught"
+
 # ── 6. DISTRICT IS NOT INVENTED ─────────────────────────────────────────────────────────────────
 row, _ = map_listing(_post(["property-type-villas", "city-jeddah", "offer-type-for-sell",
                             "neighborhood-248", "street-384"], title="فيلا في حي الروضة"))
