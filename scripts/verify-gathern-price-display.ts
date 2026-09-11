@@ -99,3 +99,51 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log('✓ all gathern-price-display assertions passed');
+
+// ═══ MUTATION PROOFS ════════════════════════════════════════════════════════════════════════════
+// The URL-transform half above already executes the REAL gathernClickThroughUrl() — the strongest
+// form. The source-text half (openListing.ts's call site) cannot be lifted the same way (it pulls
+// in the Expo runtime), so its checks are proven here by reintroducing the ORIGINAL bug into a
+// mutated copy of the ACTUAL file content and showing the same predicates go red.
+console.log('\n── mutation proofs — reintroduce the original date-querystring bug ───────────────');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+const routesThroughHelper = (src: string) =>
+  stripWs(src).includes("raw?.includes('gathern.co')?gathernClickThroughUrl(raw)");
+const importsHelper = (src: string) =>
+  stripWs(src).includes("import{gathernClickThroughUrl}from'@/lib/gathernUrl'");
+const inlineDateParamsPresent = (src: string) => /check_in=\$\{|check_out=\$\{/.test(src);
+
+// ── the exact historical bug: an inline date-querystring appender bypassing the helper ────────────
+// The call site spans two lines in the real file (`raw?.includes('gathern.co')\n    ?
+// gathernClickThroughUrl(raw)`), so the mutant targets the call EXPRESSION only — the smallest
+// substring that isolates the defect without depending on incidental line-wrapping.
+const bugReintroduced = OPEN_LISTING_TS.replace(
+  'gathernClickThroughUrl(raw)',
+  '`${raw}?check_in=${today}&check_out=${today30}`',
+);
+mustCatch('the call site reverted to an inline `?check_in=${...}` appender — the ORIGINAL bug, verbatim',
+  inlineDateParamsPresent(bugReintroduced));
+mustCatch('…and the same mutant no longer routes through the tested helper',
+  !routesThroughHelper(bugReintroduced));
+mustCatch('…while the genuine, unmutated file is NOT flagged for the inline pattern (negative control)',
+  !inlineDateParamsPresent(OPEN_LISTING_TS));
+mustCatch('…and the genuine file IS recognised as routing through the helper (negative control)',
+  routesThroughHelper(OPEN_LISTING_TS));
+
+// ── the import silently dropped (a refactor that inlines the helper's logic) ──────────────────────
+mustCatch('the gathernClickThroughUrl import removed',
+  !importsHelper(OPEN_LISTING_TS.replace(
+    "import { gathernClickThroughUrl } from '@/lib/gathernUrl';", '',
+  )));
+mustCatch('…while the genuine file IS recognised as importing it (negative control)',
+  importsHelper(OPEN_LISTING_TS));
+
+console.log('');
+if (mutFail) { console.error(`✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
+console.log('✓ every source-text guard above was watched to fail against the original defect\n');

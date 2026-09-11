@@ -9,7 +9,8 @@
 // corollary: `… | tail` reports tail's status) — redirect to a file and read $?.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
-         findings, skips, skip, ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
+         findings, skips, skip, passes, classifyRunOutcome, classifyBlockedControl,
+         ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
          SELECTED_CITY_MARKER } from './harness.mjs';
@@ -157,11 +158,11 @@ JOURNEYS['open-saved-chat'] = async (mobile) => withPage({ mobile, signedIn: tru
 JOURNEYS['new-chat-blank'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
   const name = `new-chat-blank:${mobile ? 'mobile375' : 'desktop1440'}`;
   // ORDER MATTERS ON MOBILE. This used to open the drawer FIRST, and at 375px the open drawer
-  // covers the whole screen — so the tap on «الوكيل الذكي» was intercepted and the agent screen
+  // covers the whole screen — so the tap on «الوسيط الذكي» was intercepted and the agent screen
   // never opened. With the old swallow-the-failure clickText that read as a success, and the
   // journey skipped two runs running on the downstream symptom («composer not found»). The
   // sidebar is not needed until «محادثة جديدة», so it is opened THERE, not here.
-  if (!(await clickText(page, 'الوكيل الذكي'))) { skip(name, `agent tab: ${clickReason()}`); return; }
+  if (!(await clickText(page, 'الوسيط الذكي'))) { skip(name, `agent tab: ${clickReason()}`); return; }
   await sleep(3500);
   const composer = page.locator('textarea').first();
   if (!(await composer.count())) { skip(name, 'composer not found'); return; }
@@ -299,7 +300,7 @@ JOURNEYS['double-click-search'] = async (mobile) => {
 /** J7 — browser Back after a real search must land somewhere usable (PART 5 shape 9).
  *
  *  BACK IS ONLY MEANINGFUL ONCE THE APP HAS PUSHED AN ENTRY. The first version of this journey
- *  pressed Back straight after switching to «الوكيل الذكي» and filed a 4/4 "Back stranded the user
+ *  pressed Back straight after switching to «الوسيط الذكي» and filed a 4/4 "Back stranded the user
  *  at about:blank". Both halves of that were wrong: tab switching pushes NO history entry BY OWNER
  *  RULE (the live sweep's permanent watch `tab-switch-no-junk-history`), and `about:blank` is the
  *  fresh Playwright context's own initial page — a real visitor arrives with their own history and
@@ -336,7 +337,15 @@ JOURNEYS['back-after-search'] = async (mobile) => withPage({ mobile }, async (pa
  *  Chromium only — it says nothing about a real iPhone's microphone or audio session. */
 JOURNEYS['voice-control'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `voice-control:${mobile ? 'mobile375' : 'desktop1440'}`;
-  await clickText(page, 'الوكيل الذكي');
+  // A JOURNEY THAT NEVER REACHED ITS SURFACE MUST NOT READ AS A PASS. This tab click used to be
+  // unguarded, and every other outcome below is conditional on the mic existing — so once the
+  // «الوكيل الذكي» → «الوسيط الذكي» rename actually reached production (deploy 2026-09-11T12:12Z;
+  // it had been merged five days earlier) this journey clicked a label that no longer existed,
+  // stayed on Filter home, found 0 mic controls, emitted a single note and recorded a clean PASS —
+  // 4/4 in fresh contexts, both viewports. The stale label is fixed and barriered
+  // (scripts/verify-e2e-targets-still-exist-in-the-product.ts); this guard is the second half, so
+  // that ANY future reason for not reaching the agent screen is a skip rather than a quiet green.
+  if (!(await clickText(page, 'الوسيط الذكي'))) { skip(name, `agent tab: ${clickReason()}`); return; }
   await sleep(3500);
   const supported = await page.evaluate(() => !!(window.SpeechRecognition || window.webkitSpeechRecognition));
   const mic = page.locator('[data-testid="voice-mic"]');
@@ -348,6 +357,11 @@ JOURNEYS['voice-control'] = async (mobile) => withPage({ mobile }, async (page, 
     const micErrs = appPageErrors(bag, name);
     if (micErrs.length) defect(name, 'mic tap threw', micErrs.join(' | '));
     else pass(name, 'mic tap did not throw');
+  } else {
+    // Not a defect: the product renders no mic where SpeechRecognition is absent, which is correct
+    // and is exactly the case in some headless builds. Not a pass either — nothing was exercised.
+    skip(name, `no voice-mic control on the agent screen (SpeechRecognition supported=${supported}) `
+      + `— nothing was exercised, so this is not coverage`);
   }
 });
 
@@ -719,7 +733,7 @@ JOURNEYS['adv-background-tab'] = async (mobile) => withPage({ mobile, signedIn: 
  *  proves the star survives a REMOUNT — a star written to disk but dropped from context state comes
  *  back on reload and vanishes on navigation, and only this half sees that.
  *
- *  The trip is the real mode toggle (تصفية ↔ الوكيل الذكي), both halves of which router.replace()
+ *  The trip is the real mode toggle (تصفية ↔ الوسيط الذكي), both halves of which router.replace()
  *  by owner rule (index.tsx, defect fix 2026-08-23) — so this journey also walks the exact path
  *  J17 asserts costs no history. */
 JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobile, signedIn: true, history: THREE_CHATS() }, async (page, bag) => {
@@ -737,10 +751,10 @@ JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobi
   const before = await starredIds();
   if (before !== 'h2') { skip(name, `favourite did not land (flagged [${before}]) — sidebar-row-actions owns that assertion`); return; }
 
-  // At 375px the drawer covers the ModeSwitch (panel w=307.5 of 375, «الوكيل الذكي» at x=217), so
+  // At 375px the drawer covers the ModeSwitch (panel w=307.5 of 375, «الوسيط الذكي» at x=217), so
   // the tap would be intercepted. Close it the way a person does — the exposed backdrop strip.
   if (mobile && !(await closeMobileSidebar(page))) { skip(name, 'mobile drawer would not close'); return; }
-  if (!(await clickText(page, 'الوكيل الذكي'))) { skip(name, `mode switch to agent: ${clickReason()}`); return; }
+  if (!(await clickText(page, 'الوسيط الذكي'))) { skip(name, `mode switch to agent: ${clickReason()}`); return; }
   await sleep(3500);
   if (!(await clickText(page, 'تصفية'))) { skip(name, `mode switch back to filter: ${clickReason()}`); return; }
   await sleep(3500);
@@ -748,7 +762,7 @@ JOURNEYS['adv-favorite-survives-navigation'] = async (mobile) => withPage({ mobi
   const after = await starredIds();
   if (after !== before) {
     defect(name, 'the favourite did not survive navigation',
-      `starred [${before}] before the تصفية↔الوكيل الذكي round trip, [${after}] after — the star was dropped by a screen change, not by a refresh`);
+      `starred [${before}] before the تصفية↔الوسيط الذكي round trip, [${after}] after — the star was dropped by a screen change, not by a refresh`);
     return;
   }
   pass(name, `favourite survived a mode-switch round trip (still [${after}])`);
@@ -898,7 +912,7 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
   };
 
   await assess('Filter home');
-  if (await clickText(page, 'الوكيل الذكي')) {
+  if (await clickText(page, 'الوسيط الذكي')) {
     await sleep(4000);
     await assess('AI Agent');
   } else {
@@ -1055,7 +1069,7 @@ JOURNEYS['adv-modeswitch-back-push-vs-replace'] = async (mobile) => withPage({ m
 
   const ROUND_TRIPS = 3;
   for (let i = 0; i < ROUND_TRIPS; i++) {
-    if (!(await clickText(page, 'الوكيل الذكي'))) { skip(name, `mode switch to agent on trip ${i + 1}: ${clickReason()}`); return; }
+    if (!(await clickText(page, 'الوسيط الذكي'))) { skip(name, `mode switch to agent on trip ${i + 1}: ${clickReason()}`); return; }
     await sleep(2600);
     if (!(await clickText(page, 'تصفية'))) { skip(name, `mode switch back to filter on trip ${i + 1}: ${clickReason()}`); return; }
     await sleep(2600);
@@ -1065,7 +1079,7 @@ JOURNEYS['adv-modeswitch-back-push-vs-replace'] = async (mobile) => withPage({ m
   // own param-rewriting on the first mount; three round trips costing three entries cannot.
   if (h1 - h0 > 1) {
     defect(name, 'the mode toggle pushes junk history',
-      `${ROUND_TRIPS} تصفية↔الوكيل الذكي round trips added ${h1 - h0} history entries (owner rule: both halves router.replace, so this must be 0)`);
+      `${ROUND_TRIPS} تصفية↔الوسيط الذكي round trips added ${h1 - h0} history entries (owner rule: both halves router.replace, so this must be 0)`);
   } else {
     pass(name, `${ROUND_TRIPS} round trips added ${h1 - h0} history entries`);
   }
@@ -1404,6 +1418,23 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
   // self-contradictory pass line «(587-606) is clear of the prompt (558-812)». The verdict was always
   // sound (elementFromPoint + a real click decide it), but a message whose numbers disagree with its
   // own conclusion is how a future reader talks themselves out of a real finding.
+  // DO NOT BLAME ONE TAP FOR A BLOCK ONE TAP DID NOT CAUSE. This journey's name is
+  // `onetap-clear-of-controls`, and every defect it used to file said "the One Tap prompt is
+  // covering …" unconditionally the moment a tap missed its target — even when the sheet's own
+  // measured rect does not overlap the control at all. Measured 2026-09-11: mobile375 reported
+  // «the One Tap prompt is covering «بحث»: sheet now 668-812; «بحث» 587-606» — 606 < 668, the two
+  // ranges do not touch, yet a tap at «بحث»'s centre still landed on an unrelated DIV. The real
+  // blocker on that exact shape (a fixed bottom card on a 390×844 phone) is ops_incident #152, the
+  // cookie-consent banner PR #2093 shipped 2026-09-06 — a plain `<div>`, never an `<iframe>`, so it
+  // could never be the element `SHEET_SEL` matches. Filing that as a One Tap regression would have
+  // sent whoever reads it chasing GoogleOneTap.tsx for a bug that lives in CookieConsent.tsx, and
+  // duplicated a P2 already open and correctly awaiting an owner product decision. PART 9.4: a
+  // harness defect is this routine's own bug, so `winnerIsSheet` decides which claim gets made.
+  //
+  // `elementsFromPoint` (PLURAL), not `elementFromPoint` — the same fix PART 5 shape 13 already
+  // required of the sibling `auth-overlay-clears-controls` journey and its own reachability check,
+  // for the identical reason: the singular form reports only the top-most hit, so a sheet painted
+  // BELOW another transparent layer at that point would never be seen at all.
   const winnerAt = (page, sel) => page.evaluate(({ s, sheetSel }) => {
     const el = s === 'cta'
       ? [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && (e.textContent || '').trim() === 'بحث')
@@ -1416,11 +1447,32 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const sheetNow = q && q.height > 0 ? `${Math.round(q.top)}-${Math.round(q.bottom)}` : 'gone';
     if (!el) return { missing: true, sheetNow };
     const r = el.getBoundingClientRect();
-    const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+    const stack = document.elementsFromPoint(cx, cy);
+    const t = stack[0] || null;
+    // GEOMETRY, NOT DOM ANCESTRY. A first attempt tried `n.contains(f)` — is the winning element an
+    // ANCESTOR of the sheet iframe — and it was wrong in the dangerous direction: `elementsFromPoint`
+    // walks UP the ancestor chain from the hit point, so `<body>` or an app-root wrapper appears in
+    // EVERY stack and trivially "contains" the iframe wherever it sits on the page. That made
+    // `winnerIsSheet` read true almost unconditionally — the opposite failure from the one this fix
+    // exists to prevent, discovered by re-running against production and watching a control 62-111 px
+    // above the sheet's own measured bounds still get blamed on it. The only question that actually
+    // answers "did the sheet win this tap" is whether the TESTED POINT falls inside the sheet's own
+    // rect, exactly the two numbers this journey already prints side by side in every finding.
+    const winnerIsSheet = !!q && q.height > 0 && cy >= q.top && cy <= q.bottom && cx >= q.left && cx <= q.right;
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), sheetNow,
-             winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}` : null,
-             isSelf: !!t && (t === el || t.contains(el) || el.contains(t)) };
+             winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}${t.className && typeof t.className === 'string' ? '.' + t.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}` : null,
+             isSelf: !!t && (t === el || t.contains(el) || el.contains(t)),
+             winnerIsSheet };
   }, { s: sel, sheetSel: SHEET_SEL });
+
+  /** Turn a failed hit-test into the RIGHT finding via the pure, mutation-proven classifier in
+   *  harness.mjs — One Tap's own class if the sheet is really the blocker, or an honest "some other
+   *  overlay" finding otherwise. Never the wrong one asserted with confidence. */
+  const reportBlocked = (journeyName, controlLabel, r) => {
+    const { what, detail } = classifyBlockedControl(r, controlLabel);
+    defect(journeyName, what, detail);
+  };
 
   await withPage({ mobile }, async (page, bag) => {
     const sheet = await waitForSheet(page);
@@ -1445,8 +1497,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const ms = await winnerAt(page, 'modeswitch');
     if (ms.missing) skip(`${name}/modeswitch`, '«تصفية» not rendered');
     else if (!ms.isSelf) {
-      defect(`${name}/modeswitch`, 'the One Tap prompt is covering «تصفية» (the mode switch)',
-        `sheet now ${ms.sheetNow}; «تصفية» ${ms.top}-${ms.bottom}; a tap at its centre goes to ${ms.winner}`);
+      reportBlocked(`${name}/modeswitch`, 'تصفية', ms);
     } else {
       let msErr = null;
       await page.getByText('تصفية', { exact: true }).first().click({ timeout: 10_000 })
@@ -1473,8 +1524,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     if (cta.skipCta) { /* handled above — fall through to the mode-switch check */ }
     else if (cta.missing) { skip(name, '«بحث» not rendered'); }
     else if (!cta.isSelf) {
-      defect(name, 'the One Tap prompt is covering «بحث»',
-        `sheet now ${cta.sheetNow}; «بحث» ${cta.top}-${cta.bottom}; a tap at its centre goes to ${cta.winner}`);
+      reportBlocked(name, 'بحث', cta);
     } else {
       // Not just the hit test — a REAL click must land (PART 9.2 (4)).
       let err = null;
@@ -1492,7 +1542,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
   // Reached by TAPPING the pill, the way a person gets there — not by deep-linking to /agent, which
   // renders no composer for a guest and made this half skip on its own downstream symptom.
   await withPage({ mobile }, async (page) => {
-    if (!(await clickText(page, 'الوكيل الذكي'))) { skip(`${name}/composer`, `agent tab: ${clickReason()}`); return; }
+    if (!(await clickText(page, 'الوسيط الذكي'))) { skip(`${name}/composer`, `agent tab: ${clickReason()}`); return; }
     await sleep(3500);
     const sheet = await waitForSheet(page);
     if (!sheet) { skip(`${name}/composer`, 'Google never showed the One Tap prompt this run'); return; }
@@ -1500,8 +1550,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const comp = await winnerAt(page, 'composer');
     if (comp.missing) { skip(`${name}/composer`, 'no composer on this screen'); return; }
     if (!comp.isSelf) {
-      defect(`${name}/composer`, 'the One Tap prompt is covering the AI Agent composer',
-        `sheet now ${comp.sheetNow}; composer ${comp.top}-${comp.bottom}; a tap at its centre goes to ${comp.winner}`);
+      reportBlocked(`${name}/composer`, 'the AI Agent composer', comp);
     } else {
       pass(`${name}/composer`, `composer (${comp.top}-${comp.bottom}) is clear of the prompt (now ${comp.sheetNow})`);
     }
@@ -1862,7 +1911,7 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   // journey a person makes, and it costs two clicks.
   await gotoOrRetryTransport(page, BASE + '/');
   await settle(page);
-  const toAgent = await clickText(page, 'الوكيل الذكي');
+  const toAgent = await clickText(page, 'الوسيط الذكي');
   await sleep(1500);
   const onAgent = page.url().includes('/agent');
   const back = onAgent ? await clickText(page, 'تصفية') : false;
@@ -1870,7 +1919,7 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   const home = page.url();
   if (!toAgent || !onAgent) {
     defect(name, 'a primary tab could not be pressed while the auth surface was live',
-      `«الوكيل الذكي» click landed=${toAgent}, url=${page.url()} (${clickReason() || 'no reason recorded'})`);
+      `«الوسيط الذكي» click landed=${toAgent}, url=${page.url()} (${clickReason() || 'no reason recorded'})`);
   } else if (!back || home.includes('/agent')) {
     defect(name, 'the return tab could not be pressed while the auth surface was live',
       `«تصفية» click landed=${back}, url=${home} (${clickReason() || 'no reason recorded'})`);
@@ -1916,9 +1965,23 @@ for (const [key, fn] of Object.entries(JOURNEYS)) {
     for (let i = 1; i <= N; i++) {
       const before = findings.length;
       const skipsBefore = skips.length;
+      const passesBefore = passes.length;
       console.log(`\n▶ ${key} [${mobile ? 'mobile' : 'desktop'}] run ${i}/${N}`);
       try { await fn(mobile); } catch (e) { defect(key, 'journey threw', String(e).slice(0, 220)); }
       ran++;
+      // A RUN THAT ASSERTED NOTHING IS NOT A PASS. The verdict used to be a subtraction with no
+      // bottom: no finding and no skip meant `pass`, which silently also covered "this journey
+      // reached no oracle at all". That is how `voice-control` booked 31 clean passes while
+      // clicking a tab that had been renamed away (PR #2061) — see harness.mjs's classifyRunOutcome.
+      const outcome = classifyRunOutcome({
+        defects: findings.length - before,
+        skipped: skips.length - skipsBefore,
+        passed: passes.length - passesBefore,
+      });
+      if (outcome === 'no-outcome') {
+        skip(key, 'the journey recorded no pass, no skip and no defect — nothing was asserted, so '
+          + 'this run is not coverage. Give every early return an explicit outcome.');
+      }
       const k = `${key}${ENGINE === 'chromium' ? '' : `:${ENGINE}`}:${mobile ? 'mobile' : 'desktop'}`;
       perJourney[k] = perJourney[k] || { runs: 0, failed: 0, skipped: 0 };
       perJourney[k].runs++;

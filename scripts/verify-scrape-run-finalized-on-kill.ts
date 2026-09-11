@@ -296,3 +296,82 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log('✓ verify-scrape-run-finalized-on-kill: all checks passed.');
+
+// ═══ MUTATION PROOFS ════════════════════════════════════════════════════════════════════════════
+// §1/1b above already fork a REAL python subprocess, send a REAL SIGTERM, and inspect the calls it
+// actually made — the strongest form. §2-4 are source-text checks over db.py and the workflow YAML,
+// proven here by reintroducing each historical defect into the ACTUAL current content and showing
+// the same predicates go red — never a synthetic fixture.
+console.log('\n── mutation proofs (sections 2-4) — reintroduce each historical defect ────────────');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+// ── §2: end_run() must disarm the handler, or a shutdown SIGTERM could re-write a CLOSED run ───────
+// The assignment appears twice in db.py (once in the signal handler's own re-entrancy guard, once in
+// end_run()) — a single non-global replace only struck one and left the other satisfying the check.
+// Caught on this proof's first run; replaceAll models the assignment being genuinely gone.
+const disarmDropped = src.replaceAll('_OPEN_RUN["run_id"] = None', '# disarm removed');
+mustCatch('end_run() stops clearing _OPEN_RUN — a post-close SIGTERM would re-finalize an already-closed row',
+  !(/_OPEN_RUN\.get\("run_id"\) == run_id/.test(disarmDropped) && /_OPEN_RUN\["run_id"\] = None/.test(disarmDropped)));
+mustCatch('…while the genuine end_run() IS recognised as disarming (negative control)',
+  /_OPEN_RUN\.get\("run_id"\) == run_id/.test(src) && /_OPEN_RUN\["run_id"\] = None/.test(src));
+
+const stompGuardDropped = src.replace(
+  'signal.getsignal(sig) in (signal.SIG_DFL, signal.default_int_handler)', 'True',
+);
+mustCatch('the "only replace a DEFAULT disposition" guard dropped — would stomp a caller-installed handler',
+  !/signal\.getsignal\(sig\) in \(signal\.SIG_DFL, signal\.default_int_handler\)/.test(stompGuardDropped));
+mustCatch('…while the genuine guard IS recognised (negative control)',
+  /signal\.getsignal\(sig\) in \(signal\.SIG_DFL, signal\.default_int_handler\)/.test(src));
+
+// ── §4: THE EXEC-GUARD SCANNER ITSELF, fed a constructed workflow step ─────────────────────────────
+// This is the fix for the 2026-08-15 defect (handler correct, never SIGNALLED because `bash -e` sat
+// between the runner and python). Extract the scanner's per-line classification as a pure function
+// so the mutant can be a CONSTRUCTED workflow file, not the real fleet (already clean, checked above).
+function execMissingIn(lines: string[]): string[] {
+  const missing: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)run:\s*(\|-?|>-?)?\s*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const indent = m[1].length;
+    let cmds: string[] = [];
+    if (!m[2]) {
+      cmds = [m[3]];
+    } else {
+      const body: string[] = [];
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        const l = lines[j];
+        if (l.trim() !== '' && l.length - l.trimStart().length <= indent) break;
+        body.push(l);
+      }
+      i = j - 1;
+      const folded = m[2].startsWith('>')
+        ? [body.map((l) => l.trim()).filter(Boolean).join(' ')]
+        : body.join('\n').replace(/\\\n\s*/g, ' ').split('\n');
+      cmds = folded.map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    }
+    const last = cmds[cmds.length - 1];
+    if (!last || !SCRAPER_CMD.test(last)) continue;
+    if (!/^exec\s/.test(last)) missing.push(last);
+  }
+  return missing;
+}
+mustCatch('a scraper step reverted to `python -m scrapers.foo` with no `exec` — THE ORIGINAL 2026-08-15 DEFECT, exact shape',
+  execMissingIn(['  run: python -m scrapers.foo.run']).length === 1);
+mustCatch('…while the genuine `exec python -m …` form is NOT flagged (negative control)',
+  execMissingIn(['  run: exec python -m scrapers.foo.run']).length === 0);
+mustCatch('a multi-line block scalar whose LAST command drops `exec` (the fold-and-check-last-command path)',
+  execMissingIn(['  run: |', '    echo starting', '    python -m scrapers.foo.run']).length === 1);
+mustCatch('…while a multi-line block ending in `exec …` is NOT flagged (negative control)',
+  execMissingIn(['  run: |', '    echo starting', '    exec python -m scrapers.foo.run']).length === 0);
+mustCatch('a non-scraper command (matrix.cmd absent, no python -m scrapers.) is correctly ignored',
+  execMissingIn(['  run: npm test']).length === 0);
+
+console.log('');
+if (mutFail) { console.error(`✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
+console.log('✓ every guard above was watched to fail against the historical defect it prevents\n');
