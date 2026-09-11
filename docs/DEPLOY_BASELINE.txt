@@ -1,4 +1,4 @@
-3db180271eca9d241c6662360150561a24d12488
+e9a05226aed2f1bd22f8d47a57760d610ad700da
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # 2026-09-06  3db1802  deployed via .github/workflows/deploy-frontend.yml run 34049139459.
 #   Recorded BY PR again, same reason as 2026-09-04: safe-deploy.sh could neither push to main
@@ -308,3 +308,4 @@
 #   that served bundle, the live search RPC answered HTTP 200 with a valid body, and the [post]
 #   schema-drift + duplicate-overload gate reported clean against production.
 # 2026-09-06  737abde  deployed via safe-deploy.sh
+# 2026-09-11  e9a0522  deployed via safe-deploy.sh
