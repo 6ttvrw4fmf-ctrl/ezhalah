@@ -260,7 +260,7 @@ export default function Home() {
   // The cohort's Arabic types — the EXACT array the search RPC receives (one shared definition in
   // remote.ts), so Trending cities/districts, their counts, and their percentages always describe
   // the same inventory pressing Search returns.
-  const cohortTypes = cohortTypesAr(query);
+  const cohortTypes = cohortTypesAr(queryForPeriod);
   const cohortTypesSig = cohortTypes ? cohortTypes.join('|') : '';
   // EVERY predicate the user has already chosen, in the SAME shape the search RPC receives — the
   // advanced answers AND the normal narrowing (bedrooms, price, area, combined-mode rent budget).
@@ -293,7 +293,7 @@ export default function Home() {
   // and is unreachable here in practice: tablesFor() is non-empty for every real Filter state.
   // isBroadCommercial is dropped: it is a local branch flag for fetchListingsForQuery, NOT an RPC
   // argument — passing it would make PostgREST reject the whole call with PGRST202.
-  const { isBroadCommercial: _cityScopeFlag, ...cityTableScopeRaw } = searchTableScope(query) ?? {};
+  const { isBroadCommercial: _cityScopeFlag, ...cityTableScopeRaw } = searchTableScope(queryForPeriod) ?? {};
   // Memoised on its own CONTENT signature, exactly like cityAfParams below. The district pool takes
   // this object directly (its cache key folds it in), and the scope can change WITHOUT deal/category/
   // types changing — a platform filter alone rewrites it — so a stable identity keyed on the content
@@ -301,7 +301,23 @@ export default function Home() {
   const cityTableScopeSig = JSON.stringify(cityTableScopeRaw);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cityTableScope = useMemo(() => cityTableScopeRaw, [cityTableScopeSig]);
-  const cityAfRaw = { ...rpcAllNarrowingParams(query), ...cityTableScope };
+  // ONE NORMALISED INPUT FOR EVERY COUNT PARAMETER, not just the period token (2026-09-11, regression
+  // hunter — the class behind queryForPeriod, surviving on a sibling parameter). The repair above
+  // normalises ONCE and says both paths read that one object "by construction"; until this line that
+  // held for rentPeriodTok alone, while the narrowing params and the table scope still read the RAW
+  // store query. rpcFilterParams → agentPriceCapAnnual() reads q.rentPeriod directly and falls back to
+  // a MAGNITUDE HEURISTIC when it is unset (`amount <= 25_000 ? amount * 12 : amount`), so on the one
+  // state every Rent search starts in the two paths sent different budgets:
+  //     counts   rpcAllNarrowingParams(query)          rentPeriod undefined → p_price_max = 20000*12
+  //     results  buildFilterBaseQuery() → queryForPeriod  rentPeriod 'annual' → p_price_max = 20000
+  // — a 12x overstatement on every rent budget <= 25,000 (5k/12k/20k/25k measured), the 2026-09-03
+  // Trending-vs-results scope class again, on the price parameter instead of the period parameter.
+  // Latent, not shipped: sanitizeForFilterRestore()'s allowlist (a THIRD file) drops priceInput from
+  // every write into this store, so the Filter home's priceInput is always ''. Parity that depends on
+  // an unrelated guard is not parity — that is the same sentence the period repair above was written
+  // under, and the same reason this is fixed rather than noted.
+  // (scripts/verify-count-and-search-share-one-query.ts, the all-parameters half)
+  const cityAfRaw = { ...rpcAllNarrowingParams(queryForPeriod), ...cityTableScope };
   const cityAfSig = JSON.stringify(cityAfRaw);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cityAfParams = useMemo(() => cityAfRaw, [cityAfSig]);

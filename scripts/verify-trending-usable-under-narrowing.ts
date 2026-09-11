@@ -111,4 +111,37 @@ for (const st of STATES) {
 console.log(failures === 0
   ? '\n✓ Trending Cities stays fast AND exact under every narrowed state a real user reaches\n'
   : `\n✗ ${failures} check(s) FAILED — Trending Cities is degraded for narrowed users\n`);
-process.exit(failures === 0 ? 0 : 1);
+if (failures > 0) process.exit(1);
+
+// ═══ MUTATION PROOFS (offline half only) ═══════════════════════════════════════════════════════
+// This is a LIVE network check by design (header: "runs... through the same anon REST path a
+// browser uses") and cannot be mutation-proven end-to-end without production access. What CAN be
+// proven offline, without a network call, is the one assertion the header calls out as load-bearing
+// in its own right: "a future edit that softened these states into single-predicate calls would
+// leave a green check over a dead surface." That is a pure predicate over STATES, proven here.
+console.log('── mutation proof (offline) — the corpus itself must keep the shape that broke ────');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+const twoAxisCountOf = (states: State[]) =>
+  states.filter((s) => Object.keys(s.args).some(isSize) && Object.keys(s.args).some(isBudget)).length;
+
+const softened = STATES.map((s) => ({
+  label: s.label,
+  args: Object.fromEntries(Object.entries(s.args).filter(([k]) => !isBudget(k))),  // drop the budget axis
+}));
+mustCatch('the corpus softened to single-predicate states (the exact regression the header warns about)',
+  twoAxisCountOf(softened) < 4);
+mustCatch('…while the genuine, shipped corpus still has ≥4 two-axis states (negative control)',
+  twoAxisCountOf(STATES) >= 4);
+mustCatch('an EMPTY corpus is caught too, not just a softened one',
+  twoAxisCountOf([]) < 4);
+
+console.log('');
+if (mutFail) { console.error(`✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
+console.log('✓ the offline corpus-shape guard was watched to fail against a softened corpus');
+console.log('  (the LIVE half above — actual RPC truth and speed — cannot be mutation-proven without');
+console.log('   production access; it is exercised for real every 6h by the scheduled workflow.)\n');

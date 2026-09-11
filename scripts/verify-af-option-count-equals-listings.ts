@@ -180,4 +180,66 @@ const remote = stripComments(read('src/data/remote.ts'));
 console.log(failed === 0
   ? '\n✅ verify-af-option-count-equals-listings: all checks passed.'
   : `\n❌ verify-af-option-count-equals-listings: ${failed} check(s) failed.`);
-process.exit(failed === 0 ? 0 : 1);
+if (failed > 0) process.exit(1);
+
+// ═══ MUTATION PROOFS ════════════════════════════════════════════════════════════════════════════
+// §2 and §4 above already compare the REAL, EXECUTED chip vocabulary (via loadLifted/buildMatrix)
+// against the sweep migrations and remote.ts — the strongest form. These proofs mutate that SAME
+// real content (never a synthetic fixture) to reintroduce the two defects the header describes:
+// a chip the sweep cannot prove anything about, and a p_directions call site that could send [].
+console.log('\n── mutation proofs — an unswept chip, and an unguarded p_directions send ──────────');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+// ── §2: a real chip whose sweep coverage silently disappears ──────────────────────────────────────
+{
+  const L = await loadLifted(root);
+  const rec = recorder();
+  const cells = await buildMatrix(L, { guided: rec.row, age: rec.row });
+  const chipKeys = [...new Set(cells.flatMap((c) =>
+    c.fields.filter((f) => f.question.id === 'amenities').flatMap((f) => f.options.map((o) => o.key))))]
+    .filter((k) => k !== 'furnished');
+  const target = chipKeys[0];
+  const sweptTokensOf = (s: string) =>
+    new Set([...s.matchAll(/p_amenities:=array\[''([a-z_]+)''\]/g)].map((m) => m[1]));
+
+  // sweep is the UNION of every migration that has ever defined the option table (by design — see
+  // the header comment: later migrations needle-edit rows in rather than replacing the whole body,
+  // so a token added early can legitimately still appear via an OLDER migration's text even after a
+  // newer one changes). A single non-global replace only strikes ONE of the (here, three) historical
+  // copies and leaves the token still "covered" via the others — caught on this proof's first run.
+  // The realistic mutant is the token absent from EVERY migration's history, which replaceAll models.
+  mustCatch(`a real, currently-swept chip ("${target}") has its sweep entry deleted from every migration that carries it — proving nothing about it`,
+    !sweptTokensOf(sweep.replaceAll(`p_amenities:=array[''${target}'']`, `p_amenities:=array[]::text[]`))
+      .has(target));
+  mustCatch('…while the genuine, unmutated sweep still covers that same real chip (negative control)',
+    sweptTokensOf(sweep).has(target));
+}
+
+// ── §4: the p_directions spread loses its `.length` gate, so [] could be sent (fails closed WRONG) ──
+{
+  const sendsOf = (s: string) => [...s.matchAll(/\.\.\.\((.{0,60}?)\?\s*\{\s*p_directions:/g)].map((m) => m[1]);
+  const ungated = remote.replace('directions?.length', 'directions');
+  const guardedNow = sendsOf(ungated).every((g) => /directions\?\.length/.test(g));
+  mustCatch('the .length gate dropped from the p_directions spread — an empty array could now be sent',
+    !guardedNow);
+  mustCatch('…while the genuine, unmutated call site IS still gated (negative control)',
+    sendsOf(remote).every((g) => /directions\?\.length/.test(g)));
+
+  // A SECOND hand-typed p_directions literal reappearing — the exact class the header calls out
+  // ("the results path's hand-typed second copy was folded into the builder").
+  const secondCopy = remote + "\nconst legacy = { p_directions: q.directions };\n";
+  const literalCountOf = (s: string) => (s.match(/\bp_directions\s*:/g) ?? []).length;
+  mustCatch('a second hand-typed p_directions literal reappearing outside the shared builder',
+    literalCountOf(secondCopy) !== 1);
+  mustCatch('…while the genuine file has exactly the one guarded literal (negative control)',
+    literalCountOf(remote) === 1);
+}
+
+console.log('');
+if (mutFail) { console.error(`✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
+console.log('✓ every guard above was watched to fail against the defect it exists to catch\n');
