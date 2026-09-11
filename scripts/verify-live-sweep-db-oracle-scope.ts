@@ -113,14 +113,21 @@ const F = (patch: Record<string, unknown>) => {
   return r.comparable ? dec(r.filter) : `NOT-COMPARABLE:${r.reason}`;
 };
 
-// price — single deal, بيع
-check('a Buy budget is judged against price_total and excludes priceless rows',
-  F({ p_price_min: 100, p_price_max: 200 }).includes('price_total.gt.0')
-  && F({ p_price_min: 100, p_price_max: 200 }).includes('price_total.gte.100')
-  && F({ p_price_min: 100, p_price_max: 200 }).includes('price_total.lte.200'), F({ p_price_min: 100, p_price_max: 200 }));
+// price — single deal, بيع.
+// EFFECTIVE, NOT RAW (2026-09-11): the owner's 2026-09-03 PPM reversal made ppm × area a shown,
+// searchable Buy total; the RPC's بيع budget branch gates exclusively on price_total_effective
+// (pg_get_functiondef verified). The oracle judging raw price_total false-accused the RPC for two
+// days (عرعر/بيع, RPC 179 vs DB 177 — the "extras" were per-metre plots correctly inside budget).
+check('a Buy budget is judged against price_total_effective and excludes priceless rows',
+  F({ p_price_min: 100, p_price_max: 200 }).includes('price_total_effective.gt.0')
+  && F({ p_price_min: 100, p_price_max: 200 }).includes('price_total_effective.gte.100')
+  && F({ p_price_min: 100, p_price_max: 200 }).includes('price_total_effective.lte.200'), F({ p_price_min: 100, p_price_max: 200 }));
+check('MUTATION: a Buy budget must NOT be judged against raw price_total (a ppm-priced plot would vanish)',
+  !/price_total\.(gt|gte|lte)/.test(F({ p_price_min: 100, p_price_max: 200 }).replace(/price_total_effective\.[a-z]+/g, '')),
+  F({ p_price_min: 100, p_price_max: 200 }));
 check('MUTATION: price 0 is UNSET, not a real bound',
-  !F({ p_price_min: 0, p_price_max: 0 }).includes('price_total.gte.0')
-  && !F({ p_price_min: 0, p_price_max: 0 }).includes('price_total.lte.0'), F({ p_price_min: 0, p_price_max: 0 }));
+  !F({ p_price_min: 0, p_price_max: 0 }).includes('price_total_effective.gte.0')
+  && !F({ p_price_min: 0, p_price_max: 0 }).includes('price_total_effective.lte.0'), F({ p_price_min: 0, p_price_max: 0 }));
 
 // price — إيجار شهري must be multiplied to the stored ANNUAL basis
 const mo = dbFilterFromRequest({ ...REQ, p_deal: 'إيجار', p_rent_period: 'شهري', p_price_min: 1000, p_price_max: 2000 }, TAX, CITIES);
@@ -136,7 +143,7 @@ check('MUTATION: an ANNUAL budget is NOT multiplied',
 const both = dbFilterFromRequest({ ...REQ, p_deal: null, p_price_min: 5, p_price_max: 6, p_price_min_rent: 7, p_price_max_rent: 8 }, TAX, CITIES);
 const bothF = both.comparable ? dec(both.filter) : '';
 check('Buy+Rent = Buy ∪ Rent, each side judged by its OWN budget and column',
-  bothF.includes('or(and(deal_ar.eq.بيع') && bothF.includes('price_total.gte.5') && bothF.includes('price_total.lte.6')
+  bothF.includes('or(and(deal_ar.eq.بيع') && bothF.includes('price_total_effective.gte.5') && bothF.includes('price_total_effective.lte.6')
   && bothF.includes('deal_ar.eq.إيجار') && bothF.includes('price_annual.gte.7') && bothF.includes('price_annual.lte.8'), bothF);
 check('MUTATION: in combined mode a side with NO budget stays unconstrained (not excluded)',
   (() => { const x = dbFilterFromRequest({ ...REQ, p_deal: null, p_price_min_rent: 7 }, TAX, CITIES);
