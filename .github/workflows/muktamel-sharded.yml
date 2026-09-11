@@ -32,7 +32,17 @@
 
 name: Muktamel sharded crawl
 
+# SCHEDULED (2026-09-11, closing alert zero_new_stall:muktamel). muktamel was launched into
+# search on 2026-09-03 (3,900+ active rows) with NO scheduler at all: the old sequential weekly
+# pg_cron job (jobid 14) was paused 2026-07-14 and is hard-locked paused by migration
+# 20260815211103 — deliberately NOT re-enabled here, because the sequential sync mathematically
+# cannot finish the 8,301-id band inside its timeout (that is what killed the one manual run on
+# 09-05: 452 min of work vs a 330-min cap). This fleet was built for exactly that math (header
+# above) and is the thing that should have been scheduled at launch. Weekly, Monday 03:00 UTC —
+# the cadence the paused job had.
 on:
+  schedule:
+    - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
       min_id:
@@ -55,7 +65,14 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false   # one blocked/slow shard must never cancel the other seven
-      max-parallel: 8
+      # 2, NOT 8 (2026-09-11, measured): the only full 8-parallel fleet run (09-03, run
+      # 33806282154) drove 8 runners x MUKTAMEL_WORKERS=8 = 64 concurrent connections into an
+      # origin already under an open proxy_block_spike P1 and drowned in network_Timeout/500/502
+      # across shards, while the 2-shard probe the same evening completed cleanly. 2 waves the
+      # fleet through in 4 batches (~4-5h total; each shard still ~59-78 min, far inside its own
+      # 120m timeout). ponytail: origin-friendly floor; raise only after a clean full-fleet run
+      # at the higher setting.
+      max-parallel: 2
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
