@@ -36,22 +36,24 @@ assert is_arabic_post({"link": "https://www.amaall.com/en/projects/apartment-for
 assert is_arabic_post({"link": ""}) is True          # no link → not an English duplicate
 
 
-def _tax(types_=(), statuses=(), cities=()):
+def _tax(types_=(), statuses=(), cities=(), areas=()):
     return {
         "property_type":   {i: n for i, n in enumerate(types_, start=1)},
         "property_status": {i: n for i, n in enumerate(statuses, start=1)},
         "property_city":   {i: n for i, n in enumerate(cities, start=1)},
+        "property_area":   {i: n for i, n in enumerate(areas, start=1)},
         "property_state": {}, "property_feature": {}, "property_label": {},
     }
 
 
-def _post(types_=(), statuses=(), cities=(), title="", link="https://www.amaall.com/projects/x/"):
+def _post(types_=(), statuses=(), cities=(), title="", link="https://www.amaall.com/projects/x/", areas=()):
     p = {"link": link, "slug": "x", "id": 1,
          "property_type":   list(range(1, len(types_) + 1)),
          "property_status": list(range(1, len(statuses) + 1)),
          "property_city":   list(range(1, len(cities) + 1)),
+         "property_area":   list(range(1, len(areas) + 1)),
          "title": {"rendered": title}, "content": {"rendered": ""}, "property_meta": {}}
-    return map_listing(p, _tax(types_, statuses, cities))
+    return map_listing(p, _tax(types_, statuses, cities, areas))
 
 # An English post is never ingested, no matter how complete it looks.
 assert _post(("شقة",), ("للبيع",), ("جدة",), "Apartment",
@@ -104,6 +106,14 @@ p = {"link": "https://www.amaall.com/projects/x/", "slug": "x", "id": 1,
 row, _ = map_listing(p, _tax(("شقة",), ("للبيع",)))
 assert row["city"] is None and row["region"] is None
 
+# ── 5b. DISTRICT — the `property_area` taxonomy, added 2026-09-11 (was missing from TAXONOMIES
+# entirely; every amaall listing shipped neighborhood=None though the source states it as plainly
+# as city — confirmed live: term 60 -> «حي العزيزية», the page's own «تسمية الحي» field).
+row, _ = _post(("شقة",), ("للبيع",), ("جدة",), "شقة", areas=("حي العزيزية",))
+assert row["neighborhood"] == "حي العزيزية", "property_area must feed neighborhood verbatim"
+row, _ = _post(("شقة",), ("للبيع",), ("جدة",), "شقة")   # no area term at all
+assert row["neighborhood"] is None, "an absent property_area term stays NULL, never guessed"
+
 # ── 6. PRICE / PERIOD = SOURCE ──────────────────────────────────────────────────────────────────
 p = {"link": "https://www.amaall.com/projects/x/", "slug": "x", "id": 1,
      "property_type": [1], "property_status": [1], "property_city": [1],
@@ -116,6 +126,34 @@ assert row["price_per_meter"] is None, "price_per_meter is a calculation and is 
 # a rent row with no period token keeps rent_period NULL — never a manufactured 'annual'
 row, _ = _post(("شقة",), ("للإيجار",), ("جدة",), "شقة للإيجار")
 assert row["rent_period"] is None and row["price_annual"] is None
+
+# ── 6b. AREA — fave_property_land FALLBACK, added 2026-09-11. Houzez stores a LAND plot's size
+# under a different meta key than a built property's; a land listing had NO fave_property_size at
+# all, so area_m2 was silently None though the source states it plainly (confirmed live: post
+# 19900, a land ad — fave_property_size absent, fave_property_land="552", page shows «مساحة
+# العقار: 552 متر مربع»).
+p = {"link": "https://www.amaall.com/projects/x/", "slug": "x", "id": 1,
+     "property_type": [1], "property_status": [1], "property_city": [1],
+     "title": {"rendered": "أرض"}, "content": {"rendered": ""},
+     "property_meta": {"fave_property_land": ["552"]}}
+row, _ = map_listing(p, _tax(("أرض",), ("للبيع",), ("جدة",)))
+assert row["area_m2"] == 552, "fave_property_land must be read when size is absent"
+# a real size ALWAYS wins over land — land is a fallback, never an override
+p["property_meta"]["fave_property_size"] = ["300"]
+row, _ = map_listing(p, _tax(("أرض",), ("للبيع",), ("جدة",)))
+assert row["area_m2"] == 300, "a real fave_property_size must never be overridden by land"
+# garbage in fave_property_size (a room count, not a size — measured live: "465 غرفة") must not
+# become a fabricated area when there is no land value to fall back to
+p2 = {"link": "https://www.amaall.com/projects/y/", "slug": "y", "id": 2,
+      "property_type": [1], "property_status": [1], "property_city": [1],
+      "title": {"rendered": "فندق"}, "content": {"rendered": ""},
+      "property_meta": {"fave_property_size": ["465 غرفة"]}}
+row, _ = map_listing(p2, _tax(("أرض",), ("للبيع",), ("جدة",)))
+assert row["area_m2"] is None, "unparseable size text must not become a number"
+# a land value WITH a bare unit suffix (measured live: "529 م") must still be read
+p2["property_meta"] = {"fave_property_land": ["529 م"]}
+row, _ = map_listing(p2, _tax(("أرض",), ("للبيع",), ("جدة",)))
+assert row["area_m2"] == 529, "a land value with a bare unit suffix must still parse"
 
 # ── 7. OVERRIDES ARE REAL, AND DO NOT COLLIDE WITH THE REFUSE LIST ──────────────────────────────
 assert not (set(TYPE_OVERRIDES) & set(TYPE_UNMAPPABLE))
