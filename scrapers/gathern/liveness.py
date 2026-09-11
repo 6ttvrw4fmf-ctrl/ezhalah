@@ -74,6 +74,13 @@ RUN_NAME = "gathern_liveness"
 RUN_NAME_PROXY = "gathern_liveness_proxy"
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "1.0"))  # ~1 req/s: Gathern 429s above ~2
 
+# How recently the SOURCE must have been observed serving a listing for that listing to be usable as
+# a control. A canary's only job is to prove the source is answering truthfully RIGHT NOW, so a
+# stale control cannot do it: on this platform's short-stay inventory a days-old row has very often
+# been delisted for real, and its honest 404 is then misread as "the source is blocking us".
+# 48h spans one missed daily crawl without letting the pool drift into genuine deaths.
+CANARY_MAX_AGE_HOURS = 48
+
 
 def looks_dead(status: int) -> bool:
     """True iff the detail page confirms the unit is gone. Gathern serves a hard 404 (occasionally
@@ -153,18 +160,89 @@ def proxied_session(use_proxy: bool):
     return s
 
 
-def _collect_canaries(client, limit: int) -> list[dict]:
-    """Control set: rows the SOURCE ITSELF has most recently proven alive.
+def _observed_at(row: dict) -> Optional[datetime]:
+    """The freshest moment the SOURCE ITSELF was observed serving this listing.
 
-    Drawn from `last_verified_alive_at`, which only the liveness contract writes and only on a
-    literal 200 — so a canary is a row we know existed, on the source's own word, not ours. Newest
-    first, because the freshest proof is the least likely to have died of natural causes since."""
-    r = (client.table(TABLE).select("id, ad_number, listing_url, last_verified_alive_at")
-         .eq("source", SOURCE).eq("active", True)
-         .not_.is_("last_verified_alive_at", "null")
-         .not_.is_("listing_url", "null")
-         .order("last_verified_alive_at", desc=True).limit(limit).execute())
-    return r.data or []
+    BOTH columns are source observations, and the distinction LISTING_LIVENESS.md §3 draws between
+    them is about what may be STAMPED as verification — never about what may serve as a CONTROL. A
+    canary makes no claim about the canary row; its whole job is to ask "is the source answering us
+    truthfully right now?", and for that the freshest observation of any kind is the best available
+    control. `last_seen_at` is written only by a real crawl upsert or by this sweep's own 200 — no
+    DB function writes it — so it is a source observation, just not a verification stamp.
+    """
+    best: Optional[datetime] = None
+    for col in ("last_seen_at", "last_verified_alive_at"):
+        raw = row.get(col)
+        if not raw:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if best is None or ts > best:
+            best = ts
+    return best
+
+
+def choose_canaries(rows: list[dict], limit: int, now: Optional[datetime] = None,
+                    max_age_hours: int = CANARY_MAX_AGE_HOURS) -> list[dict]:
+    """Pure selection: freshest SOURCE observation first, and NOTHING older than the age bound.
+
+    THE DEADLOCK THIS EXISTS TO PREVENT (measured in production 2026-09-11, ops_incident #168).
+    This function used to rank by `last_verified_alive_at` alone — a column written ONLY by this
+    same sweep. That makes the control set self-referential, and self-referential controls cannot
+    recover:
+
+        sweep quarantines -> no new last_verified_alive_at -> the pool ages -> gathern is
+        short-stay rental inventory, so a 5-day-old "proven alive" row has very often been
+        delisted -> those genuine 404s read as "the source refused this egress" -> quarantine.
+
+    The loop is closed and tightens on its own: from 2026-09-07 every scheduled run reported
+    `CANARY FAIL 0/10 statuses[404x10]` and wrote zero strikes, while the top of the pool sat five
+    days stale. Proven by execution on 2026-09-11 — same container, same transport, same minute —
+    10/10 of the pool this function actually returned answered 404, and 10/10 rows the crawl had
+    seen that morning answered 200. The source was never blocking; our controls were dead.
+
+    An age bound is what makes the gate honest in BOTH directions, so it fails CLOSED: if nothing
+    has been observed recently (the crawl has stopped too), the pool is empty, `canary_environment_
+    ok(0, 0)` is False, and the run removes nothing at all. A stale control is not a weak control —
+    it is noise that can only ever fail, which is strictly worse than having none.
+    """
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=max_age_hours)
+    fresh: list[tuple[datetime, dict]] = []
+    for row in rows:
+        if not (row.get("listing_url") or "").strip():
+            continue
+        seen = _observed_at(row)
+        if seen is None or seen < cutoff:
+            continue
+        fresh.append((seen, row))
+    fresh.sort(key=lambda pair: pair[0], reverse=True)
+    return [row for _, row in fresh[:limit]]
+
+
+def _collect_canaries(client, limit: int) -> list[dict]:
+    """Control set: rows the SOURCE ITSELF was observed serving most recently.
+
+    Candidates are drawn on BOTH observation columns so neither signal alone can starve the pool
+    (the failure in `choose_canaries`' docstring), then `choose_canaries` applies the ranking and
+    the age bound. Over-fetch, because the bound discards rows and the pool must not silently
+    shrink below MIN_CANARIES on a healthy day."""
+    want = max(limit * 5, 50)
+    rows: dict[Any, dict] = {}
+    for order_col in ("last_seen_at", "last_verified_alive_at"):
+        r = (client.table(TABLE)
+             .select("id, ad_number, listing_url, last_seen_at, last_verified_alive_at")
+             .eq("source", SOURCE).eq("active", True)
+             .not_.is_("listing_url", "null")
+             .not_.is_(order_col, "null")
+             .order(order_col, desc=True).limit(want).execute())
+        for row in (r.data or []):
+            rows[row.get("id")] = row
+    return choose_canaries(list(rows.values()), limit)
 
 
 def _run_canary(s, client, n: int) -> tuple[bool, int, int, str]:
