@@ -14,9 +14,24 @@ attributes). Scraping the page would put a neighbour's photo on this card — th
 listing-fidelity breach alta's price nearly hit. /wp/v2/media?parent=<post id> cannot make that
 mistake: an attachment has exactly one parent. Verified distinct per post (1, 1, 1, 2, 0).
 
-PRICE IS ALMOST NEVER PUBLISHED. Measured across all 87 posts: only 5 state a figure anywhere in
-their own title or body, and 27 state an area. The rest keep NULL — never inferred, never derived
-from area (PRICE = SOURCE). featured_media is 0 on every post, so there is no price image either.
+PRICE IS ALMOST NEVER PUBLISHED IN THIS REST FIELD — but IS on the rendered page, unresolved.
+Measured across all 87 posts: only 5 state a figure anywhere in title/content.rendered — yet the
+live PAGE for one of those "priceless" posts (id 6593) shows «1,800,000 ريال» in plain text
+(confirmed 2026-09-11). The price is real and published; it just is not in the REST `content` field
+this scraper reads — WordPress is rendering it into the page template from somewhere REST does not
+expose (no `property_meta`/custom-field object exists on this post type at all, unlike amaall).
+Recovering it would mean fetching each listing's live page and extracting price from WITHIN the
+single listing's own container — the same "عقارات ذات صلة" related-listings block that forced the
+image fix onto attachment-parentage (see below) also puts 3-4 OTHER listings' prices on that same
+page, so a page-scrape here needs identical care against grabbing a neighbour's price. Not built
+yet — flagged for a deliberate follow-up, not attempted quickly. price_total stays NULL until then;
+never inferred, never derived from area (PRICE = SOURCE).
+
+AREA — widened 2026-09-11 after the SAME discovery (real area text was being written, missed only
+by the regex). The source uses «المساحة/900م2» (slash, no space) and «مساحات 600م2» (plural) as
+often as the plain «مساحة: N» form the original regex caught — measured: 29/87 → 52/87 posts now
+yield a real area with no change to WHAT counts as a match, only broadened separator/plural
+handling. featured_media is 0 on every post, so there is no price image either.
 
 DISTRICT IS NOT RECOVERABLE. class_list gives `neighborhood-248` / `street-384` — raw term IDs — and
 this site exposes no taxonomy REST endpoint that resolves them (only category/post_tag/nav_menu
@@ -79,7 +94,13 @@ _NUMERIC_SLUG = re.compile(r"^\d+$")
 
 PRICE_RE = re.compile(r"(?:السعر|بسعر|المطلوب)\s*[:：]?\s*([\d][\d,\.]{2,})")
 PRICE_LOOSE = re.compile(r"([\d][\d,\.]{5,})\s*(?:ريال|ر\.س)")
-AREA_RE = re.compile(r"(?:مساح[ةه]|المساح[ةه])\s*[:：]?\s*([\d][\d,\.]*)")
+# AREA — widened 2026-09-11 (confirmed live against real posts, id 6593/6544/6532): the source
+# writes «المساحة/900م2» (slash, no space), «مساحات 600م2» (PLURAL, no separator at all) and
+# «مساحة/ 888م2» just as often as the plain «مساحة: N» the old pattern only caught — all three real
+# posts had a genuine area sitting in content.rendered that this regex simply never matched.
+# (?:ة|ه|ات) covers مساحة/مساحه/مساحات; [:：/]* between label and number covers colon, slash, or
+# nothing at all; ONLY the number is captured, so the area value itself is unaffected.
+AREA_RE = re.compile(r"(?:ال)?مساح(?:ة|ه|ات)\s*[:：/]*\s*([\d][\d,\.]*)")
 BEDS_RE = re.compile(r"([\d]{1,2})\s*غرف?\s*(?:نوم)?")
 
 _PHONE_RE = re.compile(r"(?:\+?966|00966|0)?5\d{8}\b")
