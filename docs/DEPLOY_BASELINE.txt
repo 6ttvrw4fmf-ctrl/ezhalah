@@ -1,5 +1,19 @@
-3db180271eca9d241c6662360150561a24d12488
+e9a05226aed2f1bd22f8d47a57760d610ad700da
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
+# 2026-09-11  e9a0522  deployed via .github/workflows/deploy-frontend.yml run 34597666302.
+#   Recorded BY PR yet again, same reason as every prior entry below: safe-deploy.sh could
+#   neither push to main (protected branch) nor open a PR (`gh pr create failed: GitHub Actions
+#   is not permitted to create or approve pull requests`) — no BASELINE_PR_TOKEN secret exists,
+#   so it refused to advance and failed the run ON PURPOSE. The deploy itself SUCCEEDED: the
+#   canonical alias verified serving this run's own emitted bundle
+#   (entry-3545b04ac003d2a47e8bec8441b0fe2e.js, md5(bytes) match, references supabase.co), the
+#   live search RPC smoke test passed, and the post-deploy schema-drift/duplicate-overload gate
+#   passed. Found by routine-7-systems-seam 2026-09-11: this exact bundle is STILL being served
+#   (re-checked live) while this file sat on the older 3db1802, so the next preflight would have
+#   measured HEAD against a stale, weaker floor — advancing it restores the guard.
+#   STANDING GAP, unresolved for a week now: add repository secret BASELINE_PR_TOKEN (fine-grained
+#   PAT, Contents: read+write + Pull requests: read+write on this repo) so safe-deploy.sh can
+#   record its own baseline and this class of manual PR stops being necessary every deploy.
 # 2026-09-06  3db1802  deployed via .github/workflows/deploy-frontend.yml run 34049139459.
 #   Recorded BY PR again, same reason as 2026-09-04: safe-deploy.sh could neither push to main
 #   nor open a PR (no BASELINE_PR_TOKEN secret), so it refused to advance and failed the run ON
