@@ -26,7 +26,13 @@ import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 // the client — src/app/agent.tsx just stores whatever the server last said. Optional because the
 // bundled offline heuristic (backend unavailable) has no such concept and never sets it.
 export type AgentTurn =
-  | { kind: 'listings'; reply: string; query: SearchQuery; askCount?: number }
+  // `notice` (2026-09-11 fix): a rejection/honesty caveat computed for this turn, SEPARATE from
+  // `reply`. The listings-turn UI renders a deterministic, query-derived summary instead of `reply`
+  // (buildScrapeIntro in src/app/agent.tsx — anti-hallucination: the headline can only say what
+  // actually ran, never what the model claims it ran) — so anything appended only to `.reply` is
+  // silently never shown on the one turn type it was written for. `notice` is the explicit channel
+  // for exactly that tail: rejectionNotice()'s "that option wasn't applied" caveat today.
+  | { kind: 'listings'; reply: string; notice?: string; query: SearchQuery; askCount?: number }
   // `query` is the state the agent understood on a turn that did NOT search — a clarification.
   // Optional because most message turns carry nothing; present, it MUST be remembered (see below).
   | { kind: 'message'; reply: string; query?: SearchQuery; askCount?: number; locationQuestion?: boolean }
@@ -1138,6 +1144,10 @@ export async function respond(text: string, opts?: {
     const notice = backend.kind === 'listings' ? rejectionNotice() : '';
     if (notice && backend.kind === 'listings') {
       backend.reply = `${String(backend.reply ?? '').trim()}\n${notice}`.trim();
+      // ALSO a structured field (2026-09-11 fix), not just appended to `.reply`: the listings-turn
+      // UI never renders `.reply` (see the AgentTurn comment above) — without this, the notice was
+      // computed, consumed one-time from announcedRejections, and then shown to nobody.
+      backend.notice = notice;
     }
     return backend;
   }

@@ -2519,7 +2519,15 @@ export default function Agent() {
             ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
             : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
         : buildScrapeIntro(result.query ?? turn.query);
-      await playListings(run, statusId, reply, result, v);
+      // A rejection/honesty caveat (turn.notice) is a SEPARATE channel from turn.reply on purpose —
+      // this deterministic `reply` headline can only ever say what actually ran (anti-hallucination:
+      // buildScrapeIntro reflects result.query, never the model's own words) — but a real caveat the
+      // server computed (e.g. rejectionNotice's "that option wasn't applied") must still reach the
+      // user, as its own tail line, never silently discarded with the rest of turn.reply. Bug found
+      // 2026-09-11: the SAME discard was about to swallow this session's own new unsupported-feature
+      // honesty text (Task 7) — see scripts/verify-agent-unsupported-feature-honesty.ts.
+      const withNotice = turn.notice ? `${reply}\n${turn.notice}` : reply;
+      await playListings(run, statusId, withNotice, result, v);
       if (run.cancelled) return;
       void promptSignupSoon(run);
     } else {
