@@ -203,17 +203,86 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
   };
   if (category && !macros) unhandled.push(`p_category=${category} (no typeMacros supplied — category purity cannot be applied)`);
 
+  // A NULL LIST IS "NO RESTRICTION". AN EMPTY LIST IS "NOTHING MATCHES". THEY ARE NOT THE SAME
+  // (found live 2026-09-11, routine #9 red team — production_truth, ops_incident below).
+  //
+  // The live clause, read with pg_get_functiondef against production rather than from a migration
+  // file, is:
+  //     ((p_tables is null or s.source_table = any(p_tables))
+  //      and (p_types is null or s.type_ar   = any(p_types)))
+  // and in Postgres `x = any('{}')` is FALSE — so `[]` really does match nothing while `null`
+  // matches everything. Arm A was built UNCONDITIONALLY as
+  // `and(source_table.in.(…),type_ar.in.(…))` off `?? []`, so a request carrying `p_types: null`
+  // — which is what the app sends for EVERY category search with no نوع picked, the single most
+  // common search shape in the product — became `type_ar.in.()`, an empty in-list that matches no
+  // row at all. Arm A then contributed ZERO.
+  //
+  // MEASURED on production, تبوك / بيع / Residential, from the app's own captured request:
+  //   production (RPC total_count, and the count on screen) .......... 1,026
+  //   this oracle before the fix ......................................... 10   (arm B only)
+  //   missing 0 · extra 1,016 — a strict SUBSET, the signature of an over-narrow ORACLE rather
+  //   than a widened product (§41.15: suspect the oracle's ability to NAME the scope first).
+  //
+  // WHY IT IS A FALSE-GREEN MECHANISM AND NOT MERELY A FALSE RED. Today it would make a live check
+  // go loudly red. But the two readings are supposed to be INDEPENDENT, and here the oracle holds
+  // its own copy of exactly the mistake the RPC could make: drop the `p_types is null or` guard in
+  // af_eligibility_clause() — a one-token regression — and production returns 10 for every untyped
+  // category search, a 99% loss of results on the app's commonest journey, while this oracle also
+  // returns 10 and the barrier reports AGREEMENT. That is PART 2.2's "agrees with it for the wrong
+  // reason", and it is why the empty-list case is now asserted in both directions by
+  // scripts/verify-oracle-null-list-is-not-an-empty-list.ts.
+  //
+  // Arm B already guarded this (`t2.length ? … : null`); arm A did not. Both halves of arm A are
+  // guarded now, because `p_tables: null` carries the identical meaning.
+  //
+  // CATEGORY PURITY SURVIVES A NULL p_types. `p_types is null` removes the type LIST, not the
+  // separate purity clause — production still keeps a row only when its type_ar EXISTS in
+  // known_type_ar with macro = p_category (or macro = 'both', which survives on arm A because arm A
+  // reads the category's own tables). A type_ar absent from the reference table fails production's
+  // `exists(...)` and is excluded, so naming the permitted types explicitly is the faithful
+  // translation — leaving the type unconstrained would have over-counted instead, trading one
+  // wrong number for another.
+  const purityTypes = (arm: 'A' | 'B'): string[] | null =>
+    (category && macros) ? Object.keys(macros).filter((t) => keepFor(t, arm)) : null;
+  /** Arm A's conjuncts, honouring null-vs-empty on BOTH lists. Empty ⇒ the arm is unrestricted. */
+  const armAParts = (): string[] => {
+    const rawTables = reqBody.p_tables as string[] | null | undefined;
+    const rawTypes = reqBody.p_types as string[] | null | undefined;
+    const out: string[] = [];
+    if (rawTables != null) out.push(`source_table.in.(${rawTables.map((x) => enc(x)).join(',')})`);
+    if (rawTypes != null) {
+      out.push(`type_ar.in.(${rawTypes.filter((t) => keepFor(t, 'A')).map((x) => enc(`"${x}"`)).join(',')})`);
+    } else {
+      const allowed = purityTypes('A');
+      if (allowed) out.push(`type_ar.in.(${allowed.map((x) => enc(`"${x}"`)).join(',')})`);
+    }
+    return out;
+  };
+
   if (hasScopeB) {
-    const tables = (reqBody.p_tables as string[] | undefined) ?? [];
-    const types = ((reqBody.p_types as string[] | undefined) ?? []).filter((t) => keepFor(t, 'A'));
+    const aParts = armAParts();
     const t2 = (types2 as string[]).filter((t) => keepFor(t, 'B'));
-    const a = `and(source_table.in.(${tables.map((x) => enc(x)).join(',')}),type_ar.in.(${types.map((x) => enc(`"${x}"`)).join(',')}))`;
     // Scope B can legitimately empty out — every requested type being `both`-macro means the
     // commercial arm contributes nothing, which is what production computes too.
     const b = t2.length
       ? `and(source_table.in.(${(tables2 as string[]).map((x) => enc(x)).join(',')}),type_ar.in.(${t2.map((x) => enc(`"${x}"`)).join(',')}))`
       : null;
-    parts.push(b ? `or=(${a},${b})` : a);
+    // An arm with NO conjuncts is unconditionally true, so `A or B` is true and the whole scope
+    // predicate drops out — pushing nothing is the correct translation, never an empty in-list.
+    const a = aParts.length > 1 ? `and(${aParts.join(',')})` : (aParts[0] ?? null);
+    if (a && b) parts.push(`or=(${a},${b})`);
+    else if (a) parts.push(`and=(${aParts.join(',')})`);   // `and(…)` alone is not a PostgREST param
+    // else: arm A carries no conjuncts, so it is unconditionally TRUE and `A or B` is TRUE too —
+    // the scope predicate drops out entirely. Emitting `or=(B)` here would silently narrow the
+    // oracle to arm B, which is the very shape of mistake this block was just repaired for.
+  } else if ((reqBody.p_types as unknown) == null) {
+    // THE SAME RULE ON THE SINGLE-SCOPE PATH, in the OPPOSITE direction. Here the `case 'p_types'`
+    // arm of the loop below never fires (the loop skips null and empty values), so a null p_types
+    // left the oracle with NO type predicate at all — while production still applies its
+    // category-purity clause. That over-counts instead of under-counting, and an oracle that is
+    // wrong in either direction is not an independent reading.
+    const allowed = purityTypes('A');
+    if (allowed) parts.push(`type_ar=in.(${allowed.map((x) => enc(`"${x}"`)).join(',')})`);
   }
 
   // ── NUMERIC NARROWING, TRANSLATED VERBATIM FROM af_eligibility_clause() (2026-09-01) ────────────
