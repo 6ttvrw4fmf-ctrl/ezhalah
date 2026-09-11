@@ -22,6 +22,7 @@ import {
   setCookieConsent,
   type CookieConsent as Consent,
 } from '@/lib/cookieConsent';
+import { useForeignPromptInsets, dockedEdgeOffset } from '@/lib/bottomPromptInset';
 
 const COPY = {
   ar: {
@@ -61,6 +62,13 @@ export default function CookieConsent() {
   // first client render still reproduces the server's (React #418 — see lib/responsive.ts).
   const beside = useAtLeast(DOCK_BREAKPOINT);
   const [consent, setConsent] = useState<Consent | null>(() => getCookieConsent());
+  // The band a THIRD-PARTY docked prompt (Google/Apple One Tap) has reserved — never the combined
+  // usePromptInsets(), which now also counts this very card's own rect (ops_incident #152 made this
+  // card a member of DOCKED_PROMPT_SELECTOR) and would fold the card's reservation back into itself.
+  // {0,0} on native, and whenever nothing foreign is docked — so this changes nothing on the path
+  // that was already correct. (ops_incident #163: this card's OWN element never moved out of a
+  // foreign prompt's way before — the root's reservation protects everything ELSE, not this card.)
+  const foreignInset = useForeignPromptInsets();
 
   const visible = shouldShowCookieBanner({
     isWeb: Platform.OS === 'web',
@@ -98,9 +106,16 @@ export default function CookieConsent() {
         // (`bottom: 0`) or it is not docked at all — the tolerance there is 2 px, so the old
         // `bottom: 20` card was, correctly, just something floating in the page. Measured at
         // 390×844: 390 of 390 wide, reserving 190 px, with «بحث» laying out above it.
+        //
+        // BOTH branches fold in `dockedEdgeOffset(base, foreignInset.bottom)` (ops_incident #163):
+        // a THIRD-PARTY prompt (One Tap) docks on the SAME edge independently of this card's own
+        // `beside` state, and #152's repair only ever taught the ROOT to reserve space for this
+        // card — nothing previously taught this card to get out of a FOREIGN prompt's way. With
+        // nothing foreign docked, dockedEdgeOffset(base, 0) === base, so neither branch moves.
         beside
-          ? { right: 20, bottom: 20, width: 280, borderRadius: radius.card }
-          : { left: 0, right: 0, bottom: 0, borderTopLeftRadius: radius.card, borderTopRightRadius: radius.card },
+          ? { right: 20, bottom: dockedEdgeOffset(20, foreignInset.bottom), width: 280, borderRadius: radius.card }
+          : { left: 0, right: 0, bottom: dockedEdgeOffset(0, foreignInset.bottom),
+              borderTopLeftRadius: radius.card, borderTopRightRadius: radius.card },
         Platform.OS === 'web' && ({
           position: 'fixed',
           boxShadow: '0 18px 44px -20px rgba(18, 37, 27, 0.35)',
@@ -142,9 +157,10 @@ const st = StyleSheet.create({
   // page content; below the Sidebar drawer (50) and every real overlay (ShareSheet 60, InfoModal 70,
   // AuthModal 200). A consent card must never cover a modal.
   host: {
-    // GEOMETRY IS SET PER-FORM, NOT HERE (2026-09-11, ops_incident #152). The corner card is 280
-    // wide at bottom:20; the docked sheet pins left AND right, sits FLUSH at bottom:0, and carries
-    // no width — otherwise it neither spans nor counts as docked, and the root reserves nothing.
+    // GEOMETRY IS SET PER-FORM, NOT HERE (2026-09-11, ops_incident #152; edge offset extended for
+    // #163). The corner card is 280 wide at bottom:dockedEdgeOffset(20,…); the docked sheet pins
+    // left AND right, sits at bottom:dockedEdgeOffset(0,…), and carries no width — otherwise it
+    // neither spans nor counts as docked, and the root reserves nothing.
     zIndex: 38,
     backgroundColor: colors.surface,
     borderWidth: 1,
