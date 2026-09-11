@@ -71,7 +71,31 @@ const PREV_AF_KEYS = [
 // commercial/land nouns — same "regex mirrors the spec, not the full taxonomy" scope as index.ts's
 // pre-existing saidBedroomWord, not a taxonomy lookup (ponytail: promote to the real
 // src/data/propertyTypes.ts ALL_CLEAN_TYPES table if a real type word this misses gets reported).
-const TYPE_WORD_RE = /(شقق|شقة|شقه|فيلا|فلة|فله|بيت|منزل|\bدور\b|عماره|عمارة|برج|استراح|شاليه|مخيم|مخيّم|\bأرض\b|\bارض\b|مزرعة|مزرعه|مكتب|\bمحل\b|مستودع|معرض|استوديو|استديو|دوبلكس|apartment|villa|\bhouse\b|\bfloor\b|building|rest\s*house|chalet|\bcamp\b|\bland\b|\bfarm\b|\boffice\b|\bshop\b|warehouse|showroom|studio|duplex|\broom\b|bed\s?room)/i;
+//
+// ARABIC \b IS A NO-OP, NOT A BOUNDARY (found 2026-09-11, live: "أرض"/"ارض"/"دور"/"محل" NEVER
+// grounded — bare "أرض" alone got the generic "tell me what you're looking for" fallback despite
+// the model correctly classifying type="Residential Land"; "أرض في جدة" got asked "what type of
+// property?" AGAIN, "أرض" listed right there in the question's own options). JS `\b` is ASCII-only
+// (`\w` = [A-Za-z0-9_]); an Arabic character is never `\w`, so `\b` can never find an edge next to
+// one — the four short/common Arabic roots below were wrapped in `\b` specifically to avoid
+// matching as a SUBSTRING of a longer word (دور inside تدور/دورة — this app's own tagline and
+// "bathroom" — is exactly the false-positive `\b` was reached for), and the wrap silently made them
+// unmatchable instead, for every spelling, forever. AR_BOUND is the Unicode-aware replacement
+// (`\p{L}`/`\p{N}`, requires the `u` flag) — with one addition plain \p{L} boundaries would still
+// miss: the definite article «ال» attaches with NO space («الأرض», «المحل», «الدور» are the
+// ordinary way to say "the land/shop/floor"), so the left edge also accepts being preceded by «ال»
+// itself preceded by a boundary. Exhaustively verified (16 cases: real bare/prefixed/left-boundary
+// hits for all four words, PLUS the تدور/دورة/أرضية/England false-positive traps staying negative)
+// in scripts/verify-agent-turn-wiring.ts.
+const AR_BOUND_L = '(?:(?<![\\p{L}\\p{N}])|(?<=(?:^|[^\\p{L}\\p{N}])ال))';
+const AR_BOUND_R = '(?![\\p{L}\\p{N}])';
+const TYPE_WORD_RE = new RegExp(
+  `(شقق|شقة|شقه|فيلا|فلة|فله|بيت|منزل|${AR_BOUND_L}دور${AR_BOUND_R}|عماره|عمارة|برج|استراح|شاليه|مخيم|مخيّم|` +
+  `${AR_BOUND_L}أرض${AR_BOUND_R}|${AR_BOUND_L}ارض${AR_BOUND_R}|مزرعة|مزرعه|مكتب|${AR_BOUND_L}محل${AR_BOUND_R}|` +
+  'مستودع|معرض|استوديو|استديو|دوبلكس|apartment|villa|\\bhouse\\b|\\bfloor\\b|building|rest\\s*house|chalet|' +
+  '\\bcamp\\b|\\bland\\b|\\bfarm\\b|\\boffice\\b|\\bshop\\b|warehouse|showroom|studio|duplex|\\broom\\b|bed\\s?room)',
+  'iu',
+);
 
 // AF: the intents span several unrelated shapes (a number, a direction word, a subtype phrase), so a
 // per-key validator is a much bigger lift than this gap warrants (ponytail: build one if a false-pass
