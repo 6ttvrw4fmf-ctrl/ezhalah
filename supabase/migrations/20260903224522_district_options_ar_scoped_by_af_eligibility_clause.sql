@@ -62,7 +62,7 @@ begin
     raise exception 'extracted CTE block is missing an expected guard - refusing';
   end if;
 
-  -- ── the district-specific half, taken verbatim from what is RUNNING right now ───────────────
+  -- ── the district-specific half, taken verbatim from what is RUNNING right now ───────────────────
   v_def := pg_get_functiondef('public.district_options_ar(integer,text,text,text,text[])'::regprocedure);
   v_tail := substring(v_def from position('  total AS (SELECT count(*)::int AS t FROM cohort),' in v_def));
   if v_tail is null or length(v_tail) < 600 then
