@@ -44,8 +44,8 @@ check('offered + NO card + loading seen ⇒ FAIL (round started, then gave up)',
   check('a round that never started and rendered nothing is still a failure', never.ok === false);
   check('the two failures are distinguishable in their diagnosis',
     !started.ok && !never.ok && started.diagnosis !== never.diagnosis);
-  check('the "started" diagnosis names the empty plan',
-    !started.ok && /EMPTY plan/.test(started.diagnosis), !started.ok ? started.diagnosis : '');
+  check('the "started" diagnosis is about what the round DID next, not a blanket accusation',
+    !started.ok && started.reason !== 'offered-but-never-opened', !started.ok ? started.diagnosis : '');
   check('the "never started" diagnosis says the round never started',
     !never.ok && /NEVER STARTED/.test(never.diagnosis), !never.ok ? never.diagnosis : '');
   check('the failing journey is named in the diagnosis',
@@ -59,12 +59,63 @@ check('offered + NO card + loading seen ⇒ FAIL (round started, then gave up)',
 {
   let softened = 0;
   for (const loading of [true, false]) {
-    for (const journey of ['a', 'b']) {
-      if (judgeAfCta(obs({ cardEverAppeared: false, loadingEverAppeared: loading, journey })).ok) softened++;
+    for (const returned of [true, false, undefined]) {
+      for (const chips of [true, false, undefined]) {
+        for (const journey of ['a', 'b']) {
+          const v = judgeAfCta(obs({
+            cardEverAppeared: false, loadingEverAppeared: loading,
+            ctaReturned: returned, refineChipsAppeared: chips, journey,
+          }));
+          if (v.ok) softened++;
+        }
+      }
     }
   }
   check('SOFTENER GUARD: with the CTA offered, NO combination of other signals may pass without a card',
     softened === 0, `${softened} combination(s) passed without a rendered question`);
+}
+
+// ── 3b. THE ROUND'S THREE ENDINGS ARE TOLD APART (2026-09-11, ops_incident #156) ─────────────────
+// The two-outcome model reported the product's owner-locked UNKNOWN handling as a live R4.4.2
+// violation. Measured twice on production (الرياض/إيجار سنوي/شقق): no card, the round STARTED, the
+// CTA came BACK and no refine chips appeared — which is `mayAssertNothingToNarrow` declining to
+// claim anything, exactly as src/lib/afProbe.ts requires. Each ending now gets its own verdict, and
+// each verdict must stay a FAILURE: naming the cause correctly is the point, never going green.
+{
+  const started = { cardEverAppeared: false, loadingEverAppeared: true } as const;
+  const asserted = judgeAfCta(obs({ ...started, refineChipsAppeared: true, ctaReturned: false }));
+  const undet = judgeAfCta(obs({ ...started, refineChipsAppeared: false, ctaReturned: true }));
+  const stranded = judgeAfCta(obs({ ...started, refineChipsAppeared: false, ctaReturned: false }));
+
+  check('a round that ASSERTED «nothing narrows» is the genuine disagreement',
+    !asserted.ok && asserted.reason === 'offered-then-asserted-nothing-narrows'
+      && /MEASURED "no"/.test(asserted.diagnosis));
+  check('a round that asserted NOTHING and restored the CTA is UNDETERMINED, not an accusation',
+    !undet.ok && undet.reason === 'probe-undetermined' && undet.undetermined === true
+      && /NOT EXERCISED/.test(undet.diagnosis));
+  check('...and it points upstream at the count probe, not at the AF gates',
+    !undet.ok && /apartment_guided_counts_ar/.test(undet.diagnosis));
+  check('a round that left the user with NOTHING is its own, worst finding',
+    !stranded.ok && stranded.reason === 'offered-then-stranded');
+  check('the three endings are genuinely distinguishable',
+    new Set([asserted.reason, undet.reason, stranded.reason]).size === 3);
+  check('UNDETERMINED still FAILS — a run that could not certify never reads green',
+    undet.ok === false);
+  check('the assertion branch WINS over a returned CTA (chips are the stronger evidence)',
+    (() => {
+      const both = judgeAfCta(obs({ ...started, refineChipsAppeared: true, ctaReturned: true }));
+      return !both.ok && both.reason === 'offered-then-asserted-nothing-narrows';
+    })());
+  check('an unobserved pair (both undefined) still fails, and never as UNDETERMINED',
+    (() => {
+      const v = judgeAfCta(obs({ ...started }));
+      return !v.ok && v.reason === 'offered-then-stranded' && v.undetermined === undefined;
+    })());
+  check('a round that NEVER STARTED is unchanged by any of this',
+    (() => {
+      const v = judgeAfCta(obs({ cardEverAppeared: false, loadingEverAppeared: false, ctaReturned: true }));
+      return !v.ok && v.reason === 'offered-but-never-opened' && /NEVER STARTED/.test(v.diagnosis);
+    })());
 }
 
 // ── 4. the live half must exist, and must be reached by the workflow ─────────────────────────────

@@ -1,33 +1,7 @@
--- ACTIVATION of azdad in the two search-union roots + listing_native_location_v1's "native" CTE +
--- the AF attribute views, following the exact recipe recorded for remal/amaall (20260906051713)
--- and the abwbna/bahadhabab/alobid native-location fix (20260906175800).
---
--- Snapshot label: 'pre_azdad_activation_20260906' — 1 matview + 11 views + 7 indexes + 308 grants,
--- captured via the SAME recursive pg_depend walk used to VERIFY the prior hand-curated object list
--- was already complete (it was — this migration's dependent set matches it exactly).
---
--- NEAR-MISS, RECORDED HONESTLY: applying this live, `DROP MATERIALIZED VIEW active_listing_ids_v2
--- CASCADE` took down listing_native_location_v1 too (v1's own body JOINs active_listing_ids_v2 —
--- a real dependency the original hand-curated snapshot list never named, because that list only
--- ever captured DEPENDENTS of the 3 root matviews, not a dependency ONE of those roots itself has
--- on ANOTHER root). v1's own dependents (v2, listing_location_canonical(_mv), and 9 further views)
--- cascaded away in turn. Recovered from a same-day snapshot taken before an unrelated earlier fix
--- (label pre_native_location_v1_fix_20260906) plus this activation's own dependent snapshot — see
--- the restore loop below, which is unconditionally safe to replay (every statement is idempotent:
--- CREATE OR REPLACE VIEW, or a CASCADE-free CREATE MATERIALIZED VIEW guarded by an existence check).
---
--- APPLIED IN PIECES against the live database first (this call registers the migration version and
--- re-verifies idempotency), same reason as every prior activation this size: the connector's own
--- request timeout is shorter than a DROP CASCADE + multi-object restore takes on this catalogue.
---
--- MEASURED RESULT: platforms 43 -> 44. azdad's own catalogue was empty at the moment of this
--- migration (crawl not yet run) — the union arms are correct and will show real rows the next time
--- scrapers.azdad.run populates the tables, exactly like every other freshly-activated platform.
 DO $do$
 DECLARE
   base text; arms text := ''; suffix text := ') u) v'; body text; r record; t text;
 BEGIN
-  ---------------------------------------------------------------- active_listing_ids_v2
   IF position('azdad_residential_listings' in pg_get_viewdef('public.active_listing_ids_v2'::regclass,true)) = 0 THEN
     base := rtrim(rtrim(pg_get_viewdef('public.active_listing_ids_v2'::regclass,true)),';');
     FOREACH t IN ARRAY ARRAY['azdad_residential_listings','azdad_commercial_listings'] LOOP
@@ -46,7 +20,6 @@ UNION ALL
     EXECUTE 'ALTER INDEX public.active_listing_ids_v2__mig_pk RENAME TO active_listing_ids_v2_pk';
   END IF;
 
-  ---------------------------------------------------------------- listing_location_index
   IF position('azdad_residential_listings' in pg_get_viewdef('public.listing_location_index'::regclass,true)) = 0 THEN
     arms := '';
     base := rtrim(rtrim(pg_get_viewdef('public.listing_location_index'::regclass,true)),';');
@@ -79,7 +52,6 @@ UNION ALL
     EXECUTE 'ALTER INDEX public.lli__mig_pk RENAME TO listing_location_index_pk';
   END IF;
 
-  ---------------------------------------------------------------- listing_native_location_v1
   IF position('azdad_residential_listings.city_ar' in pg_get_viewdef('public.listing_native_location_v1'::regclass,true)) = 0 THEN
     DECLARE
       v1_base text; v1_arm text := ''; v1_anchor text;
@@ -118,8 +90,6 @@ UNION ALL
 END
 $do$;
 
--- ── AF attribute views — appending arms leaves the column list untouched: CREATE OR REPLACE, no
---    DROP, no CASCADE, no dependent rebuild (same pattern as remal/amaall's own wiring) ───────────
 DO $do$
 DECLARE
   v text; src text; arm text; arms text; st int; en int; t text;
@@ -146,8 +116,6 @@ BEGIN
 END
 $do$;
 
--- ── Restore every dependent, index and grant either CASCADE removed (a no-op replay here: ─────────
---    everything was already restored, in this exact order, against the live database) ─────────────
 DO $restore$
 DECLARE r record; pass int; okc int; last_okc int := -1; failed text[] := '{}';
 BEGIN

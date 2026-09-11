@@ -258,19 +258,32 @@ async function main() {
   // reported «§12A is not honest on the live card» against a rule that was working. The floor is
   // now DERIVED from agent.tsx's own constants and the arrival is OBSERVED, so the next change to
   // the beat moves this with it instead of turning it into an accusation.
-  // THE PREDICATE MUST NAME *THIS* TURN'S CARDS. The chat transcript keeps every previous results
-  // turn on screen, so "is any card-listing-<id> present?" is true before the answer is even sent —
-  // a poll that cannot fail is a fixed sleep with extra steps. Intersect with the ids the committed
-  // response actually returned, which is the only set that proves the NEW turn has rendered.
-  const committedIds = new Set<number>((committed.rows ?? []).map((r: any) => Number(r.listing_id)));
-  const landed = await awaitResultsTurn(
-    () => page.evaluate(() => [...document.querySelectorAll('[data-testid^="card-listing-"]')]
+  // THE PREDICATE MUST NAME *THIS* TURN'S CARDS — AND ONLY THE ONES THE PREVIOUS SCREEN COULD NOT
+  // HAVE SHOWN. The chat transcript keeps every previous results turn on screen, so "is any
+  // card-listing-<id> present?" is true before the answer is even sent. Intersecting with the
+  // committed id set is NOT enough either, and that is the defect this call used to carry: an AF
+  // answer NARROWS, so the committed rows are drawn from the very screen the beat is still holding
+  // (measured 2026-09-11: 19 of 159 committed ids were already rendered). The poll returned at t=0,
+  // the read landed 9s before the turn arrived, and «§12A is not honest on the live card» was filed
+  // against a production that renders its strips correctly. provingIds() does the subtraction now —
+  // in the shared contract, so no journey can hand-roll the intersection again.
+  const shownIds = (): Promise<number[]> =>
+    page.evaluate(() => [...document.querySelectorAll('[data-testid^="card-listing-"]')]
       .map((e) => Number(/^card-listing-(\d+)$/.exec(e.getAttribute('data-testid') || '')?.[1]))
-      .filter((n) => Number.isFinite(n)))
-      .then((ids: number[]) => ids.filter((id) => committedIds.has(id)).length),
-    (ms) => page.waitForTimeout(ms));
+      .filter((n) => Number.isFinite(n)));
+  const committedIds = new Set<number>((committed.rows ?? []).map((r: any) => Number(r.listing_id)));
+  const onScreenBefore = await shownIds();   // the screen the beat is still holding
+  const landed = await awaitResultsTurn(shownIds, (ms) => page.waitForTimeout(ms),
+    { turnIds: committedIds, onScreenBefore });
+  if (!landed.provable) {
+    skip('the committed results turn rendered',
+      `NOT EXERCISED — every one of the ${committedIds.size} committed id(s) was already on screen, `
+      + 'so no id can prove the new turn rendered (never judge a screen on an unprovable arrival)');
+    console.log('\n✗ the results turn could not be proven to have arrived — nothing about §12A was proved');
+    await browser.close(); process.exit(1);
+  }
   if (!landed.settled) {
-    skip('the committed results turn rendered', `NOT EXERCISED — no card on screen ${POST_SEARCH_BUDGET_MS}ms after the answer committed (beat ${SEARCH_BEAT_MS}ms)`);
+    skip('the committed results turn rendered', `NOT EXERCISED — none of the ${landed.provingPool} proving card(s) reached the screen ${POST_SEARCH_BUDGET_MS}ms after the answer committed (beat ${SEARCH_BEAT_MS}ms)`);
     console.log('\n✗ the results turn never arrived — nothing about §12A was proved');
     await browser.close(); process.exit(1);
   }

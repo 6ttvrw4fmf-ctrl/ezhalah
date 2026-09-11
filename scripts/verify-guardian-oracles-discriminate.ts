@@ -240,6 +240,29 @@ console.log('§2 mutations — the real file is edited and re-executed');
   const HARNESS = join(ROOT, 'e2e/guardian/harness.mjs');
   const original = readFileSync(HARNESS, 'utf8');
   const { writeFileSync } = await import('node:fs');
+
+  // THE `finally` BELOW DOES NOT RUN ON A SIGNAL, AND THIS FILE MUTATES A TRACKED FILE IN PLACE.
+  // scripts/run-tests.mjs treats a signal-killed child (status === null — timeout, OOM) as a
+  // FAILURE precisely because it happens; when it does, the `finally` is skipped and a semantic
+  // mutant — here, a DELETED `else` branch that still parses and still runs — is left sitting in
+  // the working tree. AGENTS.md states this working directory is shared by concurrent sessions with
+  // no isolation, so the next `git add -A` in any session commits it. Observed during the 2026-09-11
+  // apparatus sweep: `git status` showed exactly that diff mid-run.
+  //
+  // SIGKILL and a hard OOM cannot be trapped by anyone; SIGTERM and SIGINT — the realistic timeout
+  // and Ctrl-C cases — can, so they are. The handler re-raises after restoring so the process still
+  // dies the way the runner expects, and the listeners are removed on the normal path so this block
+  // leaves nothing armed behind it.
+  const restore = () => { try { writeFileSync(HARNESS, original); } catch { /* best effort */ } };
+  const onSignal = (sig: NodeJS.Signals) => {
+    restore();
+    process.removeListener(sig, onSignal);
+    process.kill(process.pid, sig);
+  };
+  process.once('SIGTERM', onSignal);
+  process.once('SIGINT', onSignal);
+  process.once('exit', restore);
+
   let n = 0;
   type Page = ReturnType<typeof makePage>;
   const withMutation = async (

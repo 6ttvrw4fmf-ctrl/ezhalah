@@ -106,15 +106,64 @@ console.log('\n── exhausting the attempts still FAILS, and says why ──')
 }
 
 // ── 3. ONLY THE NAVIGATION IS RETRIED ─────────────────────────────────────────────────────────────
-// The helper is handed a page and a url and nothing else — it cannot re-run an assertion even in
-// principle, because it never sees one. Pinned structurally rather than by reading the call sites:
-// its whole surface is `goto`.
+// The invariant is NOT "the helper touches nothing but goto" — since 2026-09-11 arriving at the app
+// also means answering the cookie banner, which is a DOM act (scripts/lib/liveConsent.ts, and
+// ops_incident #142 for why it must live in the shared path). The invariant that actually protects
+// this surface is narrower and is now EXECUTED rather than read off the source text:
+//
+//   • the retry loop retries the NAVIGATION and nothing else;
+//   • the consent dismissal runs EXACTLY ONCE per gotoLive, after the page has landed — never once
+//     per attempt, and never before one has;
+//   • a throw out of the dismissal PROPAGATES. It means a card that would not go away, which is a
+//     finding about the app; swallowing or retrying it is precisely how a real defect gets hidden
+//     behind a retry, which is the whole subject of this file.
 console.log('\n── the helper can only ever retry a navigation ──');
 const lib = readFileSync(new URL('./lib/liveNav.ts', import.meta.url), 'utf8');
-check('the helper calls nothing on the page but goto()',
+check('the helper still calls nothing on the page itself but goto() (the rest is delegated)',
   (lib.match(/page\.\w+\(/g) ?? []).every((m) => m === 'page.goto('),
   `found: ${JSON.stringify([...new Set(lib.match(/page\.\w+\(/g) ?? [])])}`);
-check('the Navigable contract exposes only goto', /export type Navigable = \{\s*\n\s*goto:/.test(lib));
+check('the Navigable contract is goto plus the consent surface, and nothing else',
+  /export type Navigable = ConsentPage & \{\s*\n\s*goto:/.test(lib));
+
+/** A page that fails `failFirst` navigations, then succeeds; and answers the consent card. */
+const consentPage = (failFirst: number, stuck = false) => {
+  const seen = { gotos: 0, waits: 0, clicks: 0 };
+  const page = {
+    goto: async () => { seen.gotos++; if (seen.gotos <= failFirst) throw new Error('net::ERR_TIMED_OUT'); },
+    waitForSelector: async (_s: string, o: { state: string }) => {
+      seen.waits++;
+      if (o.state === 'detached' && stuck) throw new Error('still there');
+      return {};
+    },
+    click: async () => { seen.clicks++; },
+  };
+  return { page: page as unknown as Navigable, seen };
+};
+{
+  const { page, seen } = consentPage(2);
+  await gotoLive(page, 'https://x/', { ...QUIET, attempts: 3 });
+  check('the consent card is answered EXACTLY ONCE, after the page lands — not once per attempt',
+    seen.gotos === 3 && seen.clicks === 1, `gotos=${seen.gotos} clicks=${seen.clicks}`);
+}
+{
+  const { page, seen } = consentPage(99);
+  await gotoLive(page, 'https://x/', { ...QUIET, attempts: 2 }).catch(() => {});
+  check('a page that never loads is never asked about consent (nothing to dismiss)',
+    seen.clicks === 0 && seen.waits === 0, `clicks=${seen.clicks} waits=${seen.waits}`);
+}
+{
+  const { page } = consentPage(0, true);
+  const err = await gotoLive(page, 'https://x/', { ...QUIET }).then(() => null, (e) => String(e));
+  check('a consent card that will not go away THROWS out of gotoLive (never retried, never swallowed)',
+    err != null && /STILL on screen/.test(err), String(err).slice(0, 120));
+}
+{
+  // The fixture with no DOM methods — every other test in this file — must pass straight through.
+  const { page, calls } = fakePage(0);
+  await gotoLive(page, 'https://x/', QUIET);
+  check('a page with no DOM methods is passed through untouched (the offline fixtures still work)',
+    calls.length === 1);
+}
 
 // ── 4. EVERY LIVE BROWSER CHECK ROUTES THROUGH IT ─────────────────────────────────────────────────
 // Otherwise the next live check added reintroduces the single-attempt goto and the class comes back.

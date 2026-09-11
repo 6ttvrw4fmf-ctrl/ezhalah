@@ -55,11 +55,23 @@ A 2026-09-04 audit found **five barriers that ASSERTED THE BUG rather than catch
 | `scripts/verify-city-rehydration.ts` | a source-TEXT tripwire over a function that was broken the whole time |
 | `scripts/verify-location-index-source.ts` | same shape — text over `ensureLocationIndex()`, which was broken the whole time |
 
-**State as this spec is written (verified by execution, not by memory):**
-`verify-chat-persistence.ts` and `verify-voice-composer-contract.ts` have been repaired — both now
-EXECUTE the shipped helpers and carry `mustCatch(...)` proofs, and both have left the grandfather
-list. **The other three are still source-text tripwires and still grandfathered.** They are this
-routine's day-one backlog, named in PART 3.
+**State, re-measured 2026-09-11 by execution (the previous paragraph had gone stale, and a stale
+coverage claim in this file is the PART 1.11 defect committed by the spec that defines it):**
+**all five have now left the grandfather list, and each carries `mustCatch(...)` proofs.**
+
+| barrier | proofs | reads product code by |
+|---|---|---|
+| `verify-chat-persistence.ts` | yes | EXECUTION (lifted helpers) |
+| `verify-voice-composer-contract.ts` | yes | EXECUTION (lifted helpers) |
+| `verify-added-date-iso.ts` | 5 | EXECUTION — lifts `cleanDate` out of `ResultCard.tsx` and runs it against real rows |
+| `verify-location-index-source.ts` | 5 | EXECUTION, plus `verify-failed-location-index-is-not-a-load.ts` over the same function |
+| `verify-city-rehydration.ts` | 4 | source TEXT still — but with a negative control ("the shipped code is NOT flagged") and a fail-closed proof ("a condition the reader cannot locate reads as MISSING, never as healthy"), and it states at its line 44 why the effect cannot be lifted out of a 200KB screen component |
+
+So the R3 day-one backlog named when this spec was written is **done**; `verify-city-rehydration.ts`
+is the one residual, and it is a text reader that is mutation-proven and fail-closed, not a blind
+tripwire. Do not re-derive this table from prose — `scripts/verify-barrier-spec-claims-are-true.ts`
+now EXECUTES every grandfather claim this file makes against the actual list, so the paragraph above
+cannot drift back out of truth without a red check.
 
 And the second measured fact: `scripts/verify-new-barriers-are-mutation-proven.ts` prints, on every
 run, `barriers: N · grandfathered: N · held to the rule: N`. At the time of writing that reads
@@ -232,15 +244,17 @@ text for a genuine reason, strip comments at the READER first (`scripts/lib/stri
 ratchet's own `codeOnly()` is the in-file version, added after it flagged itself for describing an
 anti-pattern in a comment).
 
-**Named day-one targets, each verified still text-only and still grandfathered:**
-`scripts/verify-added-date-iso.ts`, `scripts/verify-city-rehydration.ts`,
-`scripts/verify-location-index-source.ts`.
+**The three day-one targets named here are DONE** (`verify-added-date-iso.ts`,
+`verify-city-rehydration.ts`, `verify-location-index-source.ts` — see the table in §0.1 for each
+one's measured state). Pick the next targets from the printed ratchet line, never from this
+paragraph: prose describing coverage goes stale, and this very list did.
 
-The third is the instructive one, and the template for the whole ratchet. Its own header says *"a real
-import-and-execute test isn't practical here"* — which was true when it was written, and is now stale
-by construction: `scripts/verify-failed-location-index-is-not-a-load.ts` covers the SAME function,
-`ensureLocationIndex()`, by execution, via `liftSymbols`. **Hunt for that shape everywhere: a "not
-practical" note written before the tool that made it practical existed.**
+`verify-location-index-source.ts` remains the instructive one, and the template for the whole
+ratchet. Its own header said *"a real import-and-execute test isn't practical here"* — true when it
+was written, and made stale by the arrival of `liftSymbols`:
+`scripts/verify-failed-location-index-is-not-a-load.ts` covers the SAME function,
+`ensureLocationIndex()`, by execution. **Hunt for that shape everywhere: a "not practical" note
+written before the tool that made it practical existed.**
 
 ## PART 4 — DAILY APPARATUS SWEEP
 

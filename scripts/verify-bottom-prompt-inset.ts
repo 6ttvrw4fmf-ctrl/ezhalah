@@ -283,6 +283,24 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
   const LIB = join(ROOT, 'src/lib/bottomPromptInset.ts');
   const original = readFileSync(LIB, 'utf8');
   const { writeFileSync } = await import('node:fs');
+
+  // Signal-safe restore. This proof mutates PRODUCT SOURCE, which raises the stakes over the two
+  // harness mutators that share this pattern: the `finally` below does not run on a signal,
+  // scripts/run-tests.mjs treats a signal-killed child (timeout, OOM) as a failure because it
+  // happens, and AGENTS.md states this working directory is shared by concurrent sessions with no
+  // isolation. A mutant left in src/ by a timeout is one `git add -A` away from being committed by
+  // another session — and src/ is what ships. SIGKILL and a hard OOM cannot be trapped by anyone;
+  // SIGTERM and SIGINT can, so they are. Enforced by verify-in-place-mutators-restore-on-signal.ts,
+  // which is what found this file.
+  const restore = () => { try { writeFileSync(LIB, original); } catch { /* best effort */ } };
+  const onSignal = (sig: NodeJS.Signals) => {
+    restore();
+    process.removeListener(sig, onSignal);
+    process.kill(process.pid, sig);
+  };
+  process.once('SIGTERM', onSignal);
+  process.once('SIGINT', onSignal);
+  process.once('exit', restore);
   let n = 0;
   const withMutation = async (
     label: string,
