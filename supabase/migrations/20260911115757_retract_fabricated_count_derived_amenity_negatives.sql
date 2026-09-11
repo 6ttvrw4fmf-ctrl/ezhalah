@@ -52,7 +52,7 @@ begin
   end if;
 end $$;
 
--- ── THE ELEVEN PAIRS THAT REMAIN ARE SOURCE TRUTH ──────────────────────────────────────────────
+-- ── THE ELEVEN PAIRS THAT REMAIN ARE SOURCE TRUTH ────────────────────────────────────────────
 -- Registered per (platform, column) with the evidence that makes each one checkable, never a blanket
 -- suppression: detect_manufactured_negatives() keeps firing for every pair NOT listed here.
 insert into public.ops_source_published_negative (platform, col, evidence, verified_at) values
