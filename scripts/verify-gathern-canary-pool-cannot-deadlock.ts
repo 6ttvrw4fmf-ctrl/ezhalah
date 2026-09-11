@@ -145,6 +145,12 @@ out = {
                            row(4, seen=NOW - timedelta(hours=5)),
                            row(5, seen=NOW - timedelta(hours=10))], 3, now=NOW)),
     "age_hours": AGE,
+    # The quarantine NOTE must not assert a cause the run has evidence against. Behaviour is
+    # unchanged by this — the run is quarantined either way; only the stated reason differs.
+    "reason_canary_passed": lv.trust_quarantine_reason(True, 10, 10),
+    "reason_canary_failed": lv.trust_quarantine_reason(False, 0, 10),
+    "reason_no_canary": lv.trust_quarantine_reason(False, 0, 0),
+    "reason_unprobed_but_ok": lv.trust_quarantine_reason(True, 0, 0),
     # The gate itself, executed. These are NOT mutated by anything above; they pin that this
     # repair did not relax the thresholds the canary feeds.
     "gate": {
@@ -182,6 +188,10 @@ type Result = {
   cap?: number;
   ranking?: number[];
   age_hours?: number;
+  reason_canary_passed?: string;
+  reason_canary_failed?: string;
+  reason_no_canary?: string;
+  reason_unprobed_but_ok?: string;
   gate?: Record<string, boolean>;
   collect_calls_choose?: boolean;
   run_canary_calls_collect?: boolean;
@@ -214,9 +224,14 @@ const lawHolds = (r: Result): string[] => {
   if (eq(r.unparseable, [])) held.push('unparseable');
   if (r.cap === 10) held.push('cap');
   if (eq(r.ranking, [2, 4, 5])) held.push('ranking');
+  const blame = 'not answering this run reliably';
+  if (!(r.reason_canary_passed ?? '').includes(blame)) held.push('reason_no_false_blame');
+  if ((r.reason_canary_failed ?? '').includes(blame)) held.push('reason_real_block_named');
+  if ((r.reason_no_canary ?? '').includes(blame)
+      && (r.reason_unprobed_but_ok ?? '').includes(blame)) held.push('reason_fails_closed');
   return held;
 };
-const TOTAL = 10;
+const TOTAL = 13;
 
 const base = runHarness();
 check(!base.error, 'the shipped selection imports and runs', base.error ?? '');
@@ -249,6 +264,22 @@ check(JSON.stringify(base.ranking) === '[2,4,5]',
   'when more rows are eligible than the run wants, the FRESHEST are chosen, freshest-first',
   'returned ' + JSON.stringify(base.ranking) + ' — expected the 1h, 5h and 10h rows in that ' +
   'order; ranking oldest-first would hand the gate the controls closest to natural death');
+
+// ── The quarantine note names a cause it can actually support. ───────────────────────────────
+check(!(base.reason_canary_passed ?? '').includes('not answering this run reliably'),
+  'a PASSING canary forbids the note from blaming the source',
+  'returned ' + JSON.stringify(base.reason_canary_passed) + ' — this exact false cause sent five ' +
+  'days of readers, and one dispatch of the metered Saudi proxy, to the wrong system');
+check((base.reason_canary_passed ?? '').includes('#180'),
+  'and it points at the real open owner decision instead');
+check((base.reason_canary_failed ?? '').includes('not answering this run reliably'),
+  'a FAILING canary still names the source — the true case is not lost',
+  'returned ' + JSON.stringify(base.reason_canary_failed));
+check((base.reason_no_canary ?? '').includes('not answering this run reliably')
+   && (base.reason_unprobed_but_ok ?? '').includes('not answering this run reliably'),
+  'no canary is NOT a passing canary — an unprobed pool proves nothing (fails closed)',
+  'no_canary=' + JSON.stringify(base.reason_no_canary) +
+  ' unprobed_but_ok=' + JSON.stringify(base.reason_unprobed_but_ok));
 
 // ── The gate is UNCHANGED. This is the half that proves the fix is not a loosening. ──────────
 const gate = base.gate ?? {};
@@ -308,6 +339,16 @@ mustCatch('an unparseable timestamp being treated as a fresh observation',
 mustCatch('the age bound being widened until it admits the stale pool anyway',
   ['choose_canaries', 'cutoff = now - timedelta(hours=max_age_hours)',
    'cutoff = now - timedelta(days=3650)']);
+
+// The note regressing to a single hardcoded cause — the 2026-09-11 shape verbatim.
+mustCatch('the quarantine note blaming the source regardless of the canary',
+  ['trust_quarantine_reason', 'if canary_probed and canary_ok:', 'if False:']);
+// And the opposite: a note that never names a real block is just as useless.
+mustCatch('the quarantine note never naming a genuine block',
+  ['trust_quarantine_reason', 'if canary_probed and canary_ok:', 'if True:']);
+// An unprobed control pool must not read as a proven-healthy environment.
+mustCatch('an unprobed canary pool being reported as proof the environment was healthy',
+  ['trust_quarantine_reason', 'if canary_probed and canary_ok:', 'if canary_ok:']);
 
 console.log(failed === 0
   ? '\n✅ verify-gathern-canary-pool-cannot-deadlock: controls are fresh source observations; ' +

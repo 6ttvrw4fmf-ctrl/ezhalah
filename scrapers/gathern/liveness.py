@@ -282,6 +282,31 @@ def _run_canary(s, client, n: int) -> tuple[bool, int, int, str]:
     return ok, alive, probed, hist
 
 
+def trust_quarantine_reason(canary_ok: bool, canary_alive: int, canary_probed: int) -> str:
+    """Why this run's AGGREGATE alive-rate fell short — and it is not always the source.
+
+    The trust gate and the canary answer the same question with different instruments, and when
+    they disagree the note must say so rather than asserting the source is blocking us. On
+    2026-09-11 this line read "the source is not answering this run reliably" on a run whose canary
+    had just returned 10/10 alive — the identical misdiagnosis that had already sent five days of
+    readers (and one dispatch of the metered Saudi residential proxy) to the wrong system while the
+    real defect sat in the canary pool. A quarantine note is read precisely when nobody has context,
+    so a confident wrong cause in it is worse than no cause at all.
+
+    The gate's BEHAVIOUR is unchanged either way: the run is still quarantined and still writes
+    nothing. This only names the cause honestly.
+    """
+    if canary_probed and canary_ok:
+        return (f"BUT the in-run canary independently PASSED ({canary_alive}/{canary_probed} "
+                f"known-alive controls returned 200), so the environment was proven healthy and "
+                f"these 404s are NOT explained by a block. This worklist is selected "
+                f"oldest-stale-first, so a low aggregate rate is the expected result of the "
+                f"SELECTION, not evidence about the source. Quarantined anyway and nothing "
+                f"written — the absolute floor cannot tell those two cases apart on a biased "
+                f"cohort: ops_incident #180, owner decision")
+    return ("the source is not answering this run reliably, so its 404s are UNKNOWN, not death")
+
+
 def canary_diagnosis_from_hist(hist: str) -> str:
     """Same diagnosis, from the histogram string the run already carries."""
     counts: dict[int, int] = {}
@@ -643,6 +668,9 @@ def main() -> int:
     # the number existed. This asks the same question first, for the price of ~10 requests.
     c_alive = c_probed = 0
     c_hist = "skipped"
+    # FAIL CLOSED: with --canaries 0 the control pass never runs, and "no canary" must never read
+    # downstream as "the canary passed". Same posture as the gate itself.
+    c_ok = False
     if args.canaries:
         c_ok, c_alive, c_probed, c_hist = _run_canary(s, client, args.canaries)
         c_diag = canary_diagnosis_from_hist(c_hist)
@@ -822,8 +850,8 @@ def main() -> int:
     if trust_quarantine:
         notes = (f"TRUST-QUARANTINED alive_rate={alive_rate:.1%} below {MIN_ALIVE_RATE_FOR_TRUST:.0%} "
                  f"(min_probes={MIN_PROBES_FOR_TRUST}) — 0 strikes and 0 inactivations written "
-                 f"(would_strike={len(strike_pending)} would_inactivate={len(kill_pending)}). The "
-                 f"source is not answering this run reliably, so its 404s are UNKNOWN, not death. "
+                 f"(would_strike={len(strike_pending)} would_inactivate={len(kill_pending)}) — "
+                 + trust_quarantine_reason(c_ok, c_alive, c_probed) + ". "
                  f"Owner review required. " + notes)
     elif anomaly:
         notes = (f"ANOMALY-CAPPED would_inactivate={len(kill_pending)} cap={kill_cap} — 0 rows "
