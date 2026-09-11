@@ -110,13 +110,16 @@ check('header 🔍 is neutral at rest and takes the SAME interaction fill on hov
   /searchTopBtnHover: \{ backgroundColor: colors\.hoverRow \}/.test(sidebar)
   && !/searchTopBtn: \{[^}]*backgroundColor: colors\.(dark|primary)/.test(sidebar)
   && /isOn\(st\) \? colors\.onFill : dark \? '#a9c9b4' : colors\.dark/.test(sidebar));
-check('nav links (الإعدادات / المساعدة / من نحن), the profile row, the guest CTA and the ⋯ menu items ALL fill with hoverRow',
+check('nav links (اللغة / الإعدادات / المساعدة / من نحن), the profile row, the guest CTA and the ⋯ menu items ALL fill with hoverRow',
   /navLinkHover: \{ backgroundColor: colors\.hoverRow \}/.test(sidebar)
   && /userRowHover: \{ backgroundColor: colors\.hoverRow \}/.test(sidebar)
   && /ctaHover: \{ backgroundColor: colors\.hoverRow \}/.test(sidebar)
   && /rowMenuItemHover: \{ backgroundColor: colors\.hoverRow \}/.test(sidebar));
+// Count bumped 3 → 4 (owner 2026-09-11): the guest-reachable language-toggle row
+// (testID="sidebar-language-toggle") joins الإعدادات/المساعدة/من نحن as a fourth nav link riding
+// the exact same navTextOn pattern — see verify-sidebar-language-toggle.ts for its own wiring proof.
 check('…and their icon + label flip to white-on-fill (children-as-function on every one)',
-  /navTextOn: \{ color: colors\.onFill \}/.test(sidebar) && (sidebar.match(/isOn\(st\) && s\.navTextOn/g) ?? []).length === 3
+  /navTextOn: \{ color: colors\.onFill \}/.test(sidebar) && (sidebar.match(/isOn\(st\) && s\.navTextOn/g) ?? []).length === 4
   && /userTextOn: \{ color: colors\.onFill \}/.test(sidebar) && /on && s\.userTextOn/.test(sidebar)
   && /rowMenuTextOn: \{ color: colors\.onFill \}/.test(sidebar) && (sidebar.match(/isOn\(st\) && s\.rowMenuTextOn/g) ?? []).length === 3
   && (sidebar.match(/isOn\(st\) \? colors\.onFill/g) ?? []).length >= 6);

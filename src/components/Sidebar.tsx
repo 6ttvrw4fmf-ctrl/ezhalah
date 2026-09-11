@@ -116,7 +116,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // (dark green while its ⋯ menu is open), previously-visited chat (no visual state at all).
   const pathname = usePathname();
   const onAgentScreen = pathname?.startsWith('/agent') ?? false;
-  const { t, isRTL, locale } = useI18n();
+  const { t, isRTL, locale, setLocale } = useI18n();
   const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
   // APPEARANCE (owner 2026-08-28): the sidebar is a THEMED surface — it re-skins in dark mode via
   // the dark override sheet (dks) below. TC carries the resolved palette for inline icon colors.
@@ -620,6 +620,16 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       {/* Owner 2026-09-03: EVERY clickable sidebar row gives the exact feedback «محادثة جديدة» gives —
           the whole row fills with colors.hoverRow (dark green in light, muted deep green in dark) and
           the icon + label flip to white. Children-as-function so the glyph and text flip with the fill. */}
+      {/* Owner 2026-09-11: language is reachable WITHOUT sign-in — Settings' language rows sit behind
+          openAccountMenu()/openSignIn() above, but a guest never gets that far. Single tap toggles
+          ar<->en directly via the now-bilingual setLocale(); the label names the language a tap
+          switches TO, same convention as AccountMenu's two Language rows. */}
+      <Pressable testID="sidebar-language-toggle" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
+        {(st) => (<>
+          <Ionicons name="globe-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
+          <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{locale === 'ar' ? 'English' : 'العربية'}</Text>
+        </>)}
+      </Pressable>
       <Pressable testID="sidebar-settings-link" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => (user ? openAccountMenu() : openSignIn())}>
         {(st) => (<>
           <Ionicons name="settings-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
