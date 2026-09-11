@@ -1,4 +1,4 @@
-3db180271eca9d241c6662360150561a24d12488
+faf768e3ebcb6493cce2e6b79c394767eaa7cf63
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # 2026-09-06  3db1802  deployed via .github/workflows/deploy-frontend.yml run 34049139459.
 #   Recorded BY PR again, same reason as 2026-09-04: safe-deploy.sh could neither push to main
@@ -308,3 +308,12 @@
 #   that served bundle, the live search RPC answered HTTP 200 with a valid body, and the [post]
 #   schema-drift + duplicate-overload gate reported clean against production.
 # 2026-09-06  737abde  deployed via safe-deploy.sh
+# 2026-09-11  faf768e  advanced by hand-PR (no BASELINE_PR_TOKEN — same reason as 2026-09-04/09-06).
+#   The prior floor (3db1802, 2026-09-06) pre-dates #2100's deliberate JPG->PNG logo migration.
+#   preflight-verify.sh's file-deletion check has no rename detection, so it flagged the 28
+#   correctly-migrated .jpg files (aqarcity-logo.jpg, hajer-logo.jpg, awal.jpg, ...) as dropped
+#   UI, blocking EVERY deploy since #2100 merged. Verified before advancing: origin/main's
+#   ResultCard.tsx requires the matching .png for all 28 (aqarcity-logo.png, hajer-logo.png,
+#   awal.png, ...), and preflight's own diff named exactly these 28 files, nothing else — no
+#   other approved feature is missing. This is a floor advance only; the check's logic is
+#   unchanged and still refuses a genuine future deletion.
