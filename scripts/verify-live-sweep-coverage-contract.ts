@@ -59,6 +59,52 @@ check('journey «showMoreJourney» is actually run by the runner',
   /\bshowMoreJourney\s*\(/.test(runner),
   'an implemented-but-uncalled journey is zero coverage — §10 needs the pager CLICKED');
 
+// ── §1c — AF_PARAMS must cover every AF param the CLIENT can actually serialize ──────────────────
+// `rpcAdvancedFilterParams()` (src/data/remote.ts) is documented there as "the ONE definition" of an
+// advanced-filter param. showmore.mjs uses AF_PARAMS for two things at once: deciding whether a
+// committed AF answer reached the request (AF-NOT-CARRIED) and watching the AF half of the request
+// for drift across «عرض المزيد» batches. So a key the client can send but this list omits is BOTH a
+// false red AND an unwatched predicate.
+//
+// Measured 2026-09-11: AF_PARAMS held 10 of the 11 keys — `p_is_new_construction` was missing. The
+// age question has five answers and «جديد» is the only one that sets isNewConstruction while leaving
+// ageMin/ageMax null (src/data/advancedFilters.ts:133), so exactly one answer in five produced a
+// confident false «committed AF answer but the post-answer search carries no AF param», while a
+// pagination batch that dropped "new build only" would have gone unnoticed.
+//
+// Derived, never hardcoded: the expected set is PARSED from remote.ts, so a new AF question added
+// tomorrow makes this RED until it is registered in the sweep — the same self-maintaining shape the
+// MATCH-FIRST stage registry uses (AGENTS.md), not a list someone has to remember to update.
+const remoteTs = read('src/data/remote.ts');
+const afFnStart = remoteTs.indexOf('export function rpcAdvancedFilterParams');
+check('rpcAdvancedFilterParams() is still the one AF param definition in remote.ts', afFnStart !== -1,
+  'the AF param set can no longer be derived — re-anchor this check before trusting the sweep');
+if (afFnStart !== -1) {
+  const afFnBody = remoteTs.slice(afFnStart, remoteTs.indexOf('\n}', afFnStart));
+  const clientAfParams = [...new Set([...afFnBody.matchAll(/\bp_[a-z0-9_]+\b/g)].map((m) => m[0]))].sort();
+  check('rpcAdvancedFilterParams() yields a non-empty AF param set', clientAfParams.length > 0,
+    'parsed nothing — a refactor changed the shape and this check would silently pass on emptiness');
+
+  const afListBlock = showMore.slice(showMore.indexOf('const AF_PARAMS'), showMore.indexOf('];', showMore.indexOf('const AF_PARAMS')));
+  const sweepAfParams = [...new Set([...afListBlock.matchAll(/'(p_[a-z0-9_]+)'/g)].map((m) => m[1]))].sort();
+  const uncovered = clientAfParams.filter((p) => !sweepAfParams.includes(p));
+  check('the sweep watches EVERY AF param the client can serialize', uncovered.length === 0,
+    uncovered.length
+      ? `AF_PARAMS is missing ${uncovered.join(', ')} — an answer serializing only into it reads as `
+        + `"AF not carried" (false red) AND its loss across a «عرض المزيد» batch goes unwatched`
+      : `${clientAfParams.length} AF params, all watched`);
+
+  // MUTATION PROOF (§G.9.4): the check must actually FAIL when a key is dropped — the defect this
+  // was written for was a MISSING entry, so a guard that cannot see one is decoration.
+  const mutated = sweepAfParams.filter((p) => p !== 'p_is_new_construction');
+  check('MUTATION — dropping p_is_new_construction from AF_PARAMS is CAUGHT',
+    clientAfParams.some((p) => !mutated.includes(p)),
+    'the coverage check passes on a list that is missing a real client param — it proves nothing');
+  // And the inverse: the real list must pass, so the guard is not simply always-red.
+  check('MUTATION (inverse) — the real AF_PARAMS list passes the same predicate',
+    clientAfParams.every((p) => sweepAfParams.includes(p)));
+}
+
 // The two assertions that make the journey worth running at all: filters must survive every batch,
 // and the browse-cap message must still quote the TRUE total rather than the cap.
 check('the «عرض المزيد» journey asserts filter persistence across batches',
