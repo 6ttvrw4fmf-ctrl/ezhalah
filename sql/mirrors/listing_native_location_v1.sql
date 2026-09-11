@@ -1,6 +1,30 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- CURRENT: md5 of everything below this header block: 862a10b719341ab0d425b81b02d69871 (18,887
+-- chars). Verified byte-exact against live production 2026-09-11 — see that dated entry for how.
+--
+-- Re-verified 2026-09-11 (routine #11 lifecycle run, ops_incident #134 investigation): REAL DRIFT,
+--   now repaired. The migration that tripped this checker,
+--   20260911141903_delete_propagates_to_listings_arabic_locations.sql, MENTIONS this view only in
+--   prose ("listing_native_location_v1's legacy arm reads listings_arabic_locations") and does not
+--   redefine it — but checking anyway (rather than assuming another any-mention trip, per this
+--   file's own precedent) found the mirror genuinely stale: the recorded body was 14,127 chars /
+--   md5 31036a9c8b92fddc5293b700985b869d, live production is 18,887 chars /
+--   md5 862a10b719341ab0d425b81b02d69871. Root cause: migration
+--   20260906181019_wire_abwbna_bahadhabab_alobid_into_native_location_v1.sql (2026-09-06, renamed
+--   from its original 20260906175800 filename by a later migration-mirror repair — content
+--   unchanged) added three platforms' native arms, and
+--   20260906210336_activate_azdad_in_search_unions.sql (same day) added a fourth — both landed on
+--   production and were never mirrored. The body below is the FULL
+--   current live definition, re-derived via
+--   encode(convert_to(pg_get_viewdef('public.listing_native_location_v1'::regclass, true),'UTF8'),
+--   'base64') to avoid any transcription risk, and its md5 was independently recomputed from the
+--   file on disk (862a10b719341ab0d425b81b02d69871, 18,887 chars) — matches live exactly. The only
+--   change from the 2026-09-06 body is eight new UNION ALL arms (abwbna x2, bahadhabab x2,
+--   alobid x2, azdad x2) inserted after the satel arms and before `), legacy AS (`; nothing else in
+--   the view moved.
+--
 -- Re-verified 2026-09-06 (remal/amaall activation + 18-migration mirror recovery): UNCHANGED.
 --   Two independent reasons this run touched the view without redefining it. (1) The migration
 --   that trips this checker, 20260906042602_the_tree_carries_the_final_text_of_the_detector_it_
@@ -129,8 +153,14 @@
 -- with the body below (same 13,385 chars, same md5) — content genuinely unchanged, only the
 -- verification date needed to advance past that migration.
 --
+-- SUPERSEDED 2026-09-11 — see the dated entry at the top of this header. The declaration below is
+-- kept for history; it no longer describes the body.
 -- Regenerated from pg_get_viewdef('listing_native_location_v1'::regclass, true) — 13,385 chars.
--- Verified byte-exact; md5 of everything below this header block: d7fff7ec0378d6095728e862aee80106
+-- Verified byte-exact — that declaration described an EARLIER body; superseded 2026-09-11.
+--
+-- CURRENT: Regenerated from pg_get_viewdef('listing_native_location_v1'::regclass, true) —
+-- 18,887 chars. Verified byte-exact; md5 of everything below this header block:
+-- 862a10b719341ab0d425b81b02d69871
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
@@ -369,6 +399,102 @@
             s.transaction_type
            FROM satel_commercial_listings s
           WHERE s.active
+        UNION ALL
+         SELECT 'abwbna'::text AS platform,
+            'abwbna_residential_listings'::text AS source_table,
+            abwbna_residential_listings.id AS listing_id,
+            abwbna_residential_listings.city_ar,
+            abwbna_residential_listings.city_id,
+            abwbna_residential_listings.district_ar,
+            abwbna_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            abwbna_residential_listings.transaction_type
+           FROM abwbna_residential_listings
+          WHERE abwbna_residential_listings.active
+        UNION ALL
+         SELECT 'abwbna'::text AS platform,
+            'abwbna_commercial_listings'::text AS source_table,
+            abwbna_commercial_listings.id AS listing_id,
+            abwbna_commercial_listings.city_ar,
+            abwbna_commercial_listings.city_id,
+            abwbna_commercial_listings.district_ar,
+            abwbna_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            abwbna_commercial_listings.transaction_type
+           FROM abwbna_commercial_listings
+          WHERE abwbna_commercial_listings.active
+        UNION ALL
+         SELECT 'bahadhabab'::text AS platform,
+            'bahadhabab_residential_listings'::text AS source_table,
+            bahadhabab_residential_listings.id AS listing_id,
+            bahadhabab_residential_listings.city_ar,
+            bahadhabab_residential_listings.city_id,
+            bahadhabab_residential_listings.district_ar,
+            bahadhabab_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            bahadhabab_residential_listings.transaction_type
+           FROM bahadhabab_residential_listings
+          WHERE bahadhabab_residential_listings.active
+        UNION ALL
+         SELECT 'bahadhabab'::text AS platform,
+            'bahadhabab_commercial_listings'::text AS source_table,
+            bahadhabab_commercial_listings.id AS listing_id,
+            bahadhabab_commercial_listings.city_ar,
+            bahadhabab_commercial_listings.city_id,
+            bahadhabab_commercial_listings.district_ar,
+            bahadhabab_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            bahadhabab_commercial_listings.transaction_type
+           FROM bahadhabab_commercial_listings
+          WHERE bahadhabab_commercial_listings.active
+        UNION ALL
+         SELECT 'alobid'::text AS platform,
+            'alobid_residential_listings'::text AS source_table,
+            alobid_residential_listings.id AS listing_id,
+            alobid_residential_listings.city_ar,
+            alobid_residential_listings.city_id,
+            alobid_residential_listings.district_ar,
+            alobid_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            alobid_residential_listings.transaction_type
+           FROM alobid_residential_listings
+          WHERE alobid_residential_listings.active
+        UNION ALL
+         SELECT 'alobid'::text AS platform,
+            'alobid_commercial_listings'::text AS source_table,
+            alobid_commercial_listings.id AS listing_id,
+            alobid_commercial_listings.city_ar,
+            alobid_commercial_listings.city_id,
+            alobid_commercial_listings.district_ar,
+            alobid_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            alobid_commercial_listings.transaction_type
+           FROM alobid_commercial_listings
+          WHERE alobid_commercial_listings.active
+        UNION ALL
+         SELECT 'azdad'::text AS platform,
+            'azdad_residential_listings'::text AS source_table,
+            azdad_residential_listings.id AS listing_id,
+            azdad_residential_listings.city_ar,
+            azdad_residential_listings.city_id,
+            azdad_residential_listings.district_ar,
+            azdad_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            azdad_residential_listings.transaction_type
+           FROM azdad_residential_listings
+          WHERE azdad_residential_listings.active
+        UNION ALL
+         SELECT 'azdad'::text AS platform,
+            'azdad_commercial_listings'::text AS source_table,
+            azdad_commercial_listings.id AS listing_id,
+            azdad_commercial_listings.city_ar,
+            azdad_commercial_listings.city_id,
+            azdad_commercial_listings.district_ar,
+            azdad_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            azdad_commercial_listings.transaction_type
+           FROM azdad_commercial_listings
+          WHERE azdad_commercial_listings.active
         ), legacy AS (
          SELECT lal_1.platform,
             lal_1.source_table,

@@ -201,6 +201,15 @@ POLICIES: dict[str, _P] = {
                         "row's own stored listing_url is used, because 39 of 1,724 rows store another "
                         "listing's URL. Removals are additionally gated by an in-run canary"),
             ("souq24", "a redirect OFF this ad's own path (14/14 dead rows, 0/40 controls), plus 404/410"),
+            ("jurash", "this listing's OWN print_r-dumped `status` field reading تم البيع / تم "
+                       "التأجير / مباع / مؤجر / محجوز (GONE_STATUS) — read off the SAME detail-page "
+                       "fetch every crawl already makes, not a separate revisit. Every kill is pinned "
+                       "the crawl it is read (_pin_sold_inactive), and now mirrors GONE evidence into "
+                       "ops_stale_inactivation_probe (ops_incident #144, 2026-09-11). Control-validated "
+                       "against interleaved live controls: 13/13 already-deactivated rows carried a "
+                       "sold/rented status token, 10/10 known-active rows carried للبيع. NO 404 limb: "
+                       "unmeasured here, and jurash is a boutique ~11-listing catalogue — an edited "
+                       "listing could plausibly 404 without being gone"),
         )
     },
     **{
@@ -212,7 +221,7 @@ POLICIES: dict[str, _P] = {
         for p in (
             "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "aouj", "aqaratikom",
             "aqarmonthly", "arkaan", "awal", "azdad", "bahadhabab", "eaqartabuk", "erapulse",
-            "fursaghyr", "jurash", "muktamel", "mustqr",
+            "fursaghyr", "muktamel", "mustqr",
             "october",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
             "shmoualshmal", "therc",
