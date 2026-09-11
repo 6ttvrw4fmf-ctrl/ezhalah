@@ -105,7 +105,7 @@ export const WATCHES = [
   'no-html-entities-rendered',      // no literal &bull; / &quot; / &ndash; in card text
   'typed-district-not-dropped',     // a district typed but not tapped must not vanish silently
   'clarification-answer-commits',   // answering the city-vs-region question must search
-  'tab-switch-no-junk-history',     // تصفية ↔ الوكيل الذكي must not push history entries
+  'tab-switch-no-junk-history',     // تصفية ↔ الوسيط الذكي must not push history entries
 ];
 
 // ── small helpers ────────────────────────────────────────────────────────────────────────────────
