@@ -530,6 +530,9 @@ const ALOBID_LOGO = require('../../assets/images/alobid.png');
 const ABWBNA_LOGO = require('../../assets/images/abwbna.png');
 const REMAL_LOGO = require('../../assets/images/remal.png');
 const AMAALL_LOGO = require('../../assets/images/amaall.png');
+// Generic placeholder badge (no real logo supplied yet) — owner will drop the real amlakalahsa.com
+// logo into assets/images/amlakalahsa.png, replacing this file in place; no code change needed then.
+const AMLAKALAHSA_LOGO = require('../../assets/images/amlakalahsa.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
 const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
 const AWAL_LOGO = require('../../assets/images/awal.png');
@@ -639,6 +642,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('abwbna')) return <Image source={ABWBNA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('remal')) return <Image source={REMAL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('amaall')) return <Image source={AMAALL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('amlakalahsa')) return <Image source={AMLAKALAHSA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('azdad')) return <Image source={AZDAD_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -708,6 +712,7 @@ function sourceHost(source: string): string {
   if (s.includes('abwbna')) return 'abwbna.com';
   if (s.includes('remal')) return 'remalre.com';
   if (s.includes('amaall')) return 'amaall.com';
+  if (s.includes('amlakalahsa')) return 'amlakalahsa.com';
   if (s.includes('alta')) return 'alta.com.sa';
   if (s.includes('awal')) return 'awaalun.com';
   if (s.includes('azdad')) return 'azdadalaqaria.com';
