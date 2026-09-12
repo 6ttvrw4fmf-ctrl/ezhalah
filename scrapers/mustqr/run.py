@@ -157,6 +157,165 @@ def _headers(jwt: str, *, range_hdr: Optional[str] = None, count: bool = False) 
     return h
 
 
+# ── DIRECT per-listing liveness oracle for db.prune_unseen(verify_gone=…) ─────────────────────────
+#
+# WHY THIS EXISTS. Until now this scraper called db.prune_unseen() with NO oracle, so three
+# consecutive crawl misses deactivated a listing on ABSENCE alone — the inference
+# LISTING_LIVENESS.md §1–§3 forbids. It carried a standing P1 `unknown_treated_as_dead`
+# (alert_event 1488 since 2026-09-05 and 2054 since 2026-09-09, affirmed daily, never acknowledged).
+# Measured 2026-09-12: 238 mustqr rows are inactive, ALL at missing_count = 3, and not one of the
+# platform's 1,464 rows has EVER had last_verified_alive_at set — the entire platform's removals
+# rest on crawl absence.
+#
+# The absence has an innocent explanation, which is exactly why it must not be a death verdict:
+# fetch_all() ingests with `status=eq.متاح`, so a listing whose status merely CHANGES vanishes from
+# the crawl and looks identical to a timeout, a 403, a parser failure, or a crawl that did not run.
+#
+# WHY AN ORACLE IS AVAILABLE HERE. scrapers/absence-only-prune.txt records mustqr as "ORACLE
+# AVAILABLE, EGRESS BLOCKED": the listing PAGE is a byte-identical 18,310-byte SPA shell for dead
+# and live alike, so there is no page signal — but this scraper already reads a per-id PostgREST
+# endpoint that carries `status`, and fetch_status_histogram() already queries it with NO status
+# filter. That is a DIRECT read of this listing's own record. It was simply never wired to the
+# removal path.
+#
+# IDENTITY IS GUARANTEED BY CONSTRUCTION, not by trusting a stored URL. The 39-of-1,724 sanadak
+# finding (§4.2 lesson 2 — rows whose listing_url points at a DIFFERENT listing, three of which
+# would have produced false resurrections) cannot happen here: we query `id=eq.<pid>` derived from
+# the row's own ad_number and then assert the returned row's id equals that pid.
+#
+# THE EGRESS CAVEAT, STATED NOT PAPERED OVER. This host answers 403 CONNECT from the cloud-routine
+# sandbox, so the signal could not be control-validated against real rows before wiring (the
+# ordinary precondition in §4.2 lesson 1). That is UNKNOWN about OUR READ, never about the platform.
+# Two things make wiring it correct anyway:
+#   1. An oracle can only ever WITHHOLD a deactivation that absence alone performs today. A broken
+#      or unreachable oracle returns 'unknown', which holds the strike and kills nothing — strictly
+#      safer than the current unguarded prune, never less safe.
+#   2. Validation moves IN-RUN, per LISTING_LIVENESS.md §5.4 and the sanadak precedent: a canary
+#      drawn from rows THIS run already fetched must still read back as available before any 'gone'
+#      verdict is issued. It fails CLOSED — no canary means no removal at all — so the run validates
+#      itself from the egress that can actually reach the source, every run, without anyone
+#      remembering to.
+
+_MUSTQR_AVAILABLE = "متاح"          # the one status fetch_all() ingests; anything else is not stock
+_oracle: dict[str, Any] = {"session": None, "jwt": None, "canary_pids": [],
+                           "verdict": None, "reason": "not evaluated"}
+
+
+def set_liveness_oracle(s: cc.Session, jwt: str, canary_pids) -> None:
+    """Arm the oracle with this run's own session and a few ids it ALREADY fetched successfully."""
+    _oracle["session"] = s
+    _oracle["jwt"] = jwt
+    _oracle["canary_pids"] = [p for p in (canary_pids or []) if p][:3]
+    _oracle["verdict"] = None
+    _oracle["reason"] = "not evaluated"
+
+
+def _pid(ad_number: str) -> str:
+    """'MQ4726' → '4726'. The API is keyed on this integer id."""
+    a = (ad_number or "").strip()
+    return a[2:] if a.upper().startswith("MQ") else a
+
+
+def _oracle_fetch(pid: str) -> tuple[Optional[int], Optional[list]]:
+    """Transport seam. A test replaces this to execute the decision against injected responses;
+    the decision itself lives in the pure `_gone_verdict`."""
+    s, jwt = _oracle["session"], _oracle["jwt"]
+    if s is None or not jwt:
+        return None, None
+    try:
+        _throttle()
+        r = s.get(f"{PROJECT}/rest/v1/properties?id=eq.{pid}&select=id,status",
+                  headers=_headers(jwt), timeout=30)
+        if r.status_code != 200:
+            return r.status_code, None
+        body = r.json()
+        return 200, body if isinstance(body, list) else None
+    except Exception:  # noqa: BLE001 — an unreachable source is never proof of death
+        return None, None
+
+
+def _gone_verdict(status: Optional[int], rows: Optional[list], pid: str) -> Optional[tuple[str, str]]:
+    """The oracle's DECISION, pure and separated from transport so it can be executed exhaustively.
+
+    Returns (verdict, reason), or None meaning "no answer yet — the caller may retry". A None here
+    NEVER means death; an exhausted retry budget becomes 'unknown'.
+    """
+    if not pid.isdigit():
+        return "unknown", f"ad_number carries no mustqr property id (pid={pid!r})"
+    if status is None:
+        return None                                  # network/timeout → retry → 'unknown'
+    if status != 200:
+        return None                                  # 401/403/408/429/5xx → retry → 'unknown'
+    if rows is None:
+        return "unknown", "200 whose body was not a JSON array we could read"
+    if len(rows) == 0:
+        # The record is gone from the source's own table, asked for by primary key with NO status
+        # filter. This is an affirmative negative, not an absence from a filtered list.
+        return "gone", f"property id {pid} no longer exists in the source table"
+    row = rows[0] if isinstance(rows[0], dict) else {}
+    if str(row.get("id")) != pid:
+        # Asked for one id and got another: this answer is not about this row.
+        return "unknown", f"asked for id {pid} and the source returned id {row.get('id')!r}"
+    st = (row.get("status") or "").strip()
+    if not st:
+        return "unknown", f"property id {pid} exists but published no status"
+    if st == _MUSTQR_AVAILABLE:
+        return "live", f"status «{st}»"
+    # Present, readable, and no longer the status this platform ingests as stock. The removal side
+    # now agrees with the ingest side rather than inventing a new rule.
+    return "gone", f"status «{st}» is no longer «{_MUSTQR_AVAILABLE}»"
+
+
+def _canary_ok() -> tuple[bool, str]:
+    """Is the source still answering us with real AVAILABLE listings right now? Memoised per run.
+
+    Fails CLOSED: no canary, or a canary that no longer reads back as available, forbids every
+    'gone' verdict in the run.
+    """
+    if _oracle["verdict"] is not None:
+        return _oracle["verdict"], _oracle["reason"]
+    ok, reason = False, "no canary was supplied, so no removal can be believed"
+    for pid in list(_oracle["canary_pids"]):
+        status, rows = _oracle_fetch(str(pid))
+        decided = _gone_verdict(status, rows, str(pid))
+        if decided is not None and decided[0] == "live":
+            ok, reason = True, f"canary {pid} still reads back available"
+            break
+        reason = (f"canary {pid} did not read back available "
+                  f"({decided[1] if decided else f'HTTP {status}'})")
+    _oracle["verdict"], _oracle["reason"] = ok, reason
+    return ok, reason
+
+
+def _verify_gone(ad_number: str, url: Optional[str] = None) -> tuple[str, str]:
+    """DIRECT per-listing oracle for `db.prune_unseen(verify_gone=…)`.
+
+    Verdicts, per the three-valued law — anything that is not an affirmative answer is 'unknown',
+    and 'unknown' holds the strike without deactivating:
+      'live'    — the source returns THIS id with status «متاح»
+      'gone'    — the source returns THIS id with another status, or no longer holds the id at all,
+                  AND only while an in-run canary proves the source is still answering
+      'unknown' — everything else: a timeout, 401/403/408/429/5xx, an unreadable body, an id
+                  mismatch, a missing status, or a run whose canary is not answering. NEVER death.
+    """
+    pid = _pid(ad_number)
+    last = "no attempt made"
+    for _attempt in range(2):
+        status, rows = _oracle_fetch(pid)
+        last = f"HTTP {status}" if status is not None else "no response"
+        decided = _gone_verdict(status, rows, pid)
+        if decided is None:
+            continue                                  # unbelievable read → spend the second attempt
+        if decided[0] != "gone":
+            return decided
+        ok, why = _canary_ok()
+        if not ok:
+            # A source that has stopped answering cannot testify that anything is gone.
+            return "unknown", f"removal withheld — {why} (would have been: {decided[1]})"
+        return decided
+    return "unknown", f"no believable answer after 2 attempts ({last})"
+
+
 def fetch_neighborhoods(s: cc.Session, jwt: str) -> dict[str, str]:
     """name → region (north|south|east|west). Used for an additional_info hint only."""
     _throttle()
@@ -618,11 +777,17 @@ def main() -> int:
             db.upsert_mustqr_commercial_batch(com)
         pruned = 0
         if full_run:
+            # Arm the DIRECT oracle with ids THIS run already fetched and mapped successfully, so
+            # the in-run positive control is drawn from proven-available rows rather than from a
+            # column this same path writes (the self-referential canary pool that deadlocked
+            # gathern for five days — ops_incident #168).
+            set_liveness_oracle(s, jwt, [_pid(r["ad_number"]) for r in (res + com)[:3]])
             for tbl, rows_seen in (
                 ("mustqr_residential_listings", res),
                 ("mustqr_commercial_listings", com),
             ):
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Mustqr")
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Mustqr",
+                                    verify_gone=_verify_gone)
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
