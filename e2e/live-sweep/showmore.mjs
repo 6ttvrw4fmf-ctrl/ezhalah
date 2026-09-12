@@ -73,6 +73,25 @@ const SCOPE_QUESTION_TITLES = ['أي نوع من العقارات تبحث عن�
 const countCards = (page) => page.evaluate(() => (document.body.innerText.match(/الضغط على هذا الإعلان/g) || []).length);
 
 /**
+ * A CRASHED RENDERER IS A PRODUCT DEFECT, AND THE ORACLE MUST BE ABLE TO SAY SO (2026-09-12).
+ *
+ * Reading the page used to be a bare `page.evaluate`, so when the tab DIED the journey threw and
+ * the run recorded a harness error — the one outcome §40.7 says must never stand in for a product
+ * verdict. That is not hypothetical: on الرياض/إيجار/سنوي (20,782 matching) the second press mounts
+ * ~20,000 unvirtualized cards and production's renderer process crashes. The sweep never saw it
+ * only because its old 28s settle gave up and closed the page while the drain was still running —
+ * it walked away from a crash it was 90 seconds from witnessing.
+ *
+ * So every read inside a press is fallible, and a dead page is reported as CRASH, by name.
+ * Playwright words this as "Target crashed" (renderer gone) or "Target page … has been closed".
+ */
+const CRASH_RE = /Target crashed|Target page, context or browser has been closed|browser has been closed/i;
+async function readCards(page) {
+  try { return { n: await countCards(page), crashed: false }; }
+  catch (e) { if (CRASH_RE.test(e?.message ?? '')) return { n: null, crashed: true }; throw e; }
+}
+
+/**
  * Wait out ONE «عرض المزيد» press, and say WHY the wait ended.
  *
  * A later press drains every remaining page (owner 2026-09-11), which on a big cohort is minutes of
@@ -94,12 +113,17 @@ const PRESS_CAP_MS = 260_000;   // a full 50-page drain measured ~200s + the rev
 const PRESS_STALL_MS = 45_000;  // no new page AND no new card for this long ⇒ the press is over
 async function settlePress(page, searches, before) {
   const t0 = Date.now();
-  let cards = await countCards(page);
+  const first = await readCards(page);
+  if (first.crashed) return { n: before, fetching: false, pages: searches().length, crashed: true };
+  let cards = first.n;
   let pages = searches().length;
   let cardMovedAt = t0, pageMovedAt = t0, steadySince = null;
   while (Date.now() - t0 < PRESS_CAP_MS) {
     await sleep(1500);
-    const n = await countCards(page);
+    const read = await readCards(page);
+    // The tab died mid-press. Report it as what it is — the press killed the page.
+    if (read.crashed) return { n: cards, fetching: false, pages: searches().length, crashed: true };
+    const n = read.n;
     const p = searches().length;
     const now = Date.now();
     if (n !== cards) { cards = n; cardMovedAt = now; steadySince = null; }
@@ -323,6 +347,14 @@ export async function showMoreJourney(plan) {
       const before = n;
       const press = await settlePress(page, searches, before);
       n = press.n;
+      // A dead tab ends the journey — nothing below can be read off a page that no longer exists,
+      // and reporting a second, derived complaint about a crashed page would just be noise.
+      if (press.crashed) {
+        defect(name, 'RENDERER-CRASH',
+          `batch ${b} killed the page: the press pulled ${press.pages} result requests over a `
+        + `${total0}-match cohort and the renderer died while revealing them (${before} cards before it went)`);
+        break;
+      }
       const st = await visibleState(page);
 
       // ── §10 assertions, every batch ──────────────────────────────────────────────────────────
