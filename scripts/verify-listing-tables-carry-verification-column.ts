@@ -72,11 +72,23 @@ export function findOffenders(
       // Look at the statement body from the CREATE onward; the column may also be added by a
       // follow-up ALTER in the same migration, which is equally fine.
       const body = src.slice(m.index ?? 0);
-      const hasInline = /last_verified_alive_at/i.test(body.slice(0, body.indexOf(';') + 1 || undefined));
+      const stmt = body.slice(0, body.indexOf(';') + 1 || undefined);
+      const hasInline = /last_verified_alive_at/i.test(stmt);
       const hasAlter = new RegExp(
         `alter\\s+table\\s+(?:public\\.)?"?${table}"?[\\s\\S]{0,400}?last_verified_alive_at`, 'i',
       ).test(src);
-      if (!hasInline && !hasAlter) offenders.push(`${f} → ${table}`);
+      // `LIKE <another listing table> INCLUDING ALL` inherits every column the source table has,
+      // last_verified_alive_at included (confirmed live 2026-09-12: amlakalahsa_residential_listings
+      // carries it via this exact clause). This repo's own newest-platform onboarding pattern does
+      // the same clone dynamically (format('… LIKE %I INCLUDING ALL', …) in
+      // 20260906155543_add_1_green_platform_tables_abwbna.sql and its siblings) — invisible to this
+      // regex entirely, so a LITERAL LIKE clause (visible) is held to no stricter a standard than
+      // the dynamic one already is. This does NOT verify the SOURCE table itself carries the column
+      // — a text-only check has no way to without a live query (see file header) — so a future
+      // migration that LIKEs a source genuinely missing it would slip past this one check; that
+      // narrower gap needs a live schema audit, not this offline barrier.
+      const hasLike = /like\s+(?:public\.)?"?[a-z0-9_]+_(?:residential|commercial)_listings"?\s+including\s+all/i.test(stmt);
+      if (!hasInline && !hasAlter && !hasLike) offenders.push(`${f} → ${table}`);
     }
   }
   return offenders;
@@ -164,6 +176,21 @@ mustCatch('a commercial listings table is covered by the same detector, not just
   findOffenders([{
     name: `${AFTER}_onboard_commercial.sql`,
     src: `create table if not exists public.newplatform_commercial_listings (\n  id bigint\n);`,
+  }], BASELINE).length === 1);
+
+// ── the real defect this session hit: a literal LIKE-of-a-listing-table clone (no inline mention,
+//    no follow-up ALTER) must NOT be flagged — it inherits the column from the source ────────────
+mustCatch('…and a table cloned via `LIKE <another listing table> INCLUDING ALL` is NOT flagged (negative control — it inherits the column)',
+  findOffenders([{
+    name: `${AFTER}_onboard_cloned_platform.sql`,
+    src: `create table public.newplatform_residential_listings (like public.abwbna_residential_listings including all);`,
+  }], BASELINE).length === 0);
+
+// ── the LIKE exemption must stay SCOPED to listing-table sources, not any LIKE clause at all ──────
+mustCatch('…but a table cloned via LIKE of something that is NOT itself a listing table is STILL flagged (the exemption is scoped, not a blanket LIKE pass)',
+  findOffenders([{
+    name: `${AFTER}_onboard_bad_clone.sql`,
+    src: `create table public.newplatform_residential_listings (like public.some_unrelated_config_table including all);`,
   }], BASELINE).length === 1);
 
 console.log('');
