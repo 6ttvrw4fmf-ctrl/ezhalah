@@ -362,6 +362,28 @@ jobs:
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-guided-counts-carry-monthly-af-live.ts
 
+      # LIVE half of verify-ui-controls-have-predicates.ts, split out 2026-09-12 (routine #10,
+      # ops_incident #126). It judges the shipped chips against the LIVE af_field_registry: a
+      # backend-only field that acquired a chip, a chip no registry row describes, a hidden field with
+      # no recorded reason, and the owner's 2026-08-11 tier boundary (every interview field 'advanced',
+      # bedrooms 'normal'). Reading the registry live is deliberate — a copy inside the test would
+      # drift from the contract it enforces. One REST call, <1s.
+      #
+      # The offline half keeps every assertion that reads only committed source. Measured before the
+      # split: with the endpoint blackholed, 20 such assertions did not run at all, because they sat
+      # inside the live fetch's `if` block — including the boundary-rule TEETH over src/lib/afPlan.ts.
+      # Both halves apply the SAME predicate (scripts/lib/uiControlPredicates.ts), which the offline
+      # half mutation-proves per-PR against every disagreement shape including a failed read, so NO
+      # per-PR coverage was lost. It also asserts via liveHalfProblems() that THIS FILE really invokes
+      # this step, so removing or renaming it turns that barrier RED in npm test.
+      - name: Shipped filter chips still agree with the live af_field_registry
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-ui-controls-have-predicates-live.ts
+
   # THE WHOLE CERTIFIED SURFACE — ITS OWN JOB (split out 2026-09-03). The two option sweeps and the
   # four browser journeys below used to sit at the TAIL of af-truth's single 30-minute budget.
   # On 2026-09-03 that budget ran out inside the region sweep: the job was CANCELLED at 30:15,
