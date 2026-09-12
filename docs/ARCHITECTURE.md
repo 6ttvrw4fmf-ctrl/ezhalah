@@ -1086,10 +1086,57 @@ migration-drift-guard rule in `AGENTS.md`).
   changing this behavior again, it needs the owner's direct confirmation, checked fresh — not another
   PR body's claim.
 
+- **Settings/Help/About live inside the profile menu, not as separate sidebar rows, for signed-in
+  users (owner, 2026-09-11, permanent).** The old standalone «الإعدادات» sidebar row was a *duplicate*
+  — it already opened the exact same profile-menu panel («المساعدة/تواصل معنا» and «من نحن» already
+  lived there as "Help"/"About"). Consolidated to one entry point; the sidebar's history list is no
+  longer competing with account chrome for space. Guests keep the standalone rows — they have no
+  profile menu to consolidate into. Shipped: `src/components/Sidebar.tsx` /
+  `src/components/AccountMenu.tsx`, PR #2272, merge `2e918673`.
+
+- **History search bolds the matching text in each chat title (owner, 2026-09-11, permanent).** The
+  magnifying-glass search over saved conversations reuses the exact same Arabic-normalized matcher
+  `matchesChat()` already used to decide a match, so what's bolded is provably the same substring
+  that made the row match — never a separate, potentially-inconsistent highlighter. Shipped:
+  `src/lib/chatSearch.ts` (`boldSpans()`), PR #2272, merge `2e918673`.
+
+- **The AI Agent must name an unsupported search request honestly, never as a false absence (owner,
+  2026-09-11, permanent).** When the user asks for something Ezhalah's data does not track (e.g. a
+  subjective or unmapped feature — "quiet street", "sea view"), the model must quote the user's own
+  word/phrase, say the DATA doesn't track it, and is explicitly forbidden from phrasing this as an
+  absence claim ("these listings don't have that") — that would assert something about the
+  properties the model cannot know. This is a different case from a genuine zero-match search
+  (`noResultsSuggestion`, unchanged) and from a proposed in-vocabulary filter the current cohort
+  won't certify (`rejectionNotice`, unchanged). Shipped as a `JSON_SHAPE_HINT` system-prompt rule,
+  `supabase/functions/agent/index.ts`, PR #2272, merge `2e918673`; pinned by
+  `scripts/verify-agent-unsupported-feature-honesty.ts`.
+  **KNOWN, DIAGNOSED, UNRESOLVED GAP (live-tested 2026-09-11):** on a `kind="listings"` turn (the
+  model decides to search immediately, the common case), the client renders a deterministic
+  `buildScrapeIntro()` summary instead of the model's own `reply` text — a deliberate
+  anti-hallucination design, not a bug — so this honesty caveat can be computed correctly and still
+  never reach the screen. The SAME render gap silently swallowed the pre-existing `rejectionNotice()`
+  mechanism (2026-08-30) until PR #2272 gave that one specific case its own structured `notice`
+  field, extracted from `.reply` at the render call site. The honesty caveat could not get the same
+  fix in the same PR — unlike `rejectionNotice()`'s short, deterministic string, it lives entirely
+  inside the model's own free-text reply with no clean way to separate it out, and showing more of
+  the model's own words in the results header reopens the exact hallucination risk the render design
+  exists to prevent. **Do not silently "fix" this by reverting to always rendering `.reply`** — that
+  is a real product/UX call (more of the model's own words on screen vs. this specific gap), not a
+  bug with one obvious right answer, and needs the owner's decision the same way the loadMore
+  behavior above did.
+
 ---
 
 ## 21. Open questions / decisions still pending
 
+- **Support-form email delivery — needs a `RESEND_API_KEY` (owner action, since 2026-09-02, still
+  open).** The support form → `supabase/functions/support-message/index.ts` → `support_messages`
+  table insert path is fully wired and works today; the email-out half is gated behind
+  `if (RESEND_API_KEY)` and that secret has never been configured (no `.env.example` entry, no
+  Supabase function secret, no docs). The UI's success message is honest by construction — it
+  confirms the DB insert, never claims an email was sent. Nothing to fix in code: add
+  `RESEND_API_KEY` (and `SUPPORT_INBOX`/`SUPPORT_MAIL_FROM` if unset) as a Supabase function secret
+  and delivery starts with zero further changes.
 - **Location canonicalization residue** (not yet decided; do not touch without owner answer): composite
   labels (e.g. `امارة مكة-الطائف` mis-resolved), catalog duplicates (الهفوف, فرسان each with two
   city_ids), hamza-less catalog spellings (`ابها`, `الاحساء`), Souq24 exact-join NULLs. Search recall is
