@@ -306,14 +306,79 @@ export function promptInsets(
   return { top, bottom };
 }
 
+/** How far up the ancestor chain a prompt's real positioning box may sit. GIS wraps its frame once;
+ *  a bound keeps a pathological tree from walking into the app's own layout. */
+const MEASUREMENT_TARGET_MAX_HOPS = 6;
+
+/**
+ * THE ELEMENT WE MATCH IS NOT ALWAYS THE ELEMENT THAT COVERS THINGS (ops_incident #202).
+ *
+ * `DOCKED_PROMPT_SELECTOR` identifies a prompt by what it IS — an iframe served by an auth provider
+ * — which is the right question to ask and the wrong box to measure. GIS does not ship one shape:
+ *
+ *  · CHROMIUM (FedCM) renders `#credential_picker_iframe` and puts `position: fixed` ON THE IFRAME
+ *    itself. Measured on production 2026-09-12, 375x812, 2/2 fresh contexts: 375x144 at 0,668,
+ *    z-index 9999, and NO `#credential_picker_container` exists in the document at all.
+ *  · WEBKIT gets the classic sheet: `<iframe class="L5Fo6c-PQbLGe">` at `position: STATIC`, 375x150
+ *    at 0,20, wrapped in `<div id="credential_picker_container">` at `position: fixed`, z-index
+ *    9999, `pointer-events: auto` — and 375x**158** at 0,20. Measured in journey-sweep run
+ *    34684276901 (webkit job 103528397023), 2/2 on both Filter home and AI Agent.
+ *
+ * A static iframe has no positioning box of its own; the fixed ancestor is what the compositor
+ * actually paints and hit-tests. So on WebKit the app reserved the iframe's 150 px (bottom 170)
+ * while the container reached 178 — and the eight controls the sweep reported blocked sit at y=174,
+ * inside precisely that 8 px gap: the sign-in CTA «إنشاء حساب / تسجيل الدخول», «مشاركة», and the
+ * top-bar controls at x = 35, 130, 217, 227, 361.
+ *
+ * Resolving to the nearest FIXED ancestor-or-self answers both engines with one rule, and it is a
+ * provable NO-OP on the path that was already correct: Chromium's iframe is itself the fixed node,
+ * so the walk stops at hop 0 and returns the same element it was handed (measured 2/2, above).
+ * Matching on identity and MEASURING the positioning box also generalises past this one wrapper —
+ * whatever GIS nests its frame in next is covered without editing a selector.
+ *
+ * Pure, and DOM-free by signature, so `verify-bottom-prompt-inset.ts` can EXECUTE it against both
+ * engines' measured shapes offline rather than grepping for it — the distinction PART 9.5 and this
+ * repo's mutation rules exist to enforce. Deliberately NOT size-guarded: an absurdly large fixed
+ * wrapper is already handled downstream, where `promptInsets` treats a rect qualifying on both
+ * edges as a modal contributing nothing and caps the combined reservation at MAX_INSET_FRACTION.
+ */
+export function promptMeasurementTarget<T extends { parentElement: T | null }>(
+  el: T | null | undefined,
+  positionOf: (node: T) => string,
+  maxHops: number = MEASUREMENT_TARGET_MAX_HOPS,
+): T | null {
+  if (!el) return null;
+  let node: T | null = el;
+  for (let hops = 0; node && hops <= maxHops; node = node.parentElement, hops++) {
+    if (positionOf(node) === 'fixed') return node;
+  }
+  // Nothing fixed within reach. Measure what we matched — today's behaviour, unchanged.
+  return el;
+}
+
+const cssPosition = (n: Element): string =>
+  (typeof getComputedStyle === 'function' ? getComputedStyle(n).position : 'static');
+
+const isHidden = (n: Element): boolean => {
+  const cs = typeof getComputedStyle === 'function' ? getComputedStyle(n) : null;
+  return !!cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0');
+};
+
+/** The element whose rect decides the inset, for one matched prompt. */
+function measuredElement(matched: Element): Element {
+  return promptMeasurementTarget<Element>(matched, cssPosition) ?? matched;
+}
+
 /** Read every live rect matching `selector`. Empty when nothing matches. */
 function readPromptRects(selector: string = DOCKED_PROMPT_SELECTOR): PromptRect[] {
   if (typeof document === 'undefined') return [];
   const els = Array.from(document.querySelectorAll(selector)) as HTMLElement[];
-  return els.map((el) => {
+  return els.map((matched) => {
+    const el = measuredElement(matched);
     const r = el.getBoundingClientRect();
-    const cs = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
-    const hidden = !!cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0');
+    // Hidden on EITHER node means nothing is shown: a display:none iframe inside a live container
+    // reserves nothing, and so does a live iframe inside a hidden container.
+    const hidden = isHidden(el) || isHidden(matched);
     return { top: r.top, bottom: r.bottom, height: r.height, width: r.width, hidden };
   });
 }
@@ -345,9 +410,13 @@ export function observePromptInsets(
     onChange(next);
   };
 
-  // Keep a ResizeObserver attached to whichever prompt elements are currently in the document.
+  // Keep a ResizeObserver attached to whichever prompt elements are currently in the document —
+  // AND to the element each one is actually MEASURED by (ops_incident #202). On WebKit that is the
+  // fixed `#credential_picker_container`, not the static iframe inside it, so observing only the
+  // match would miss the slide-in of the very box whose rect decides the inset.
   const retarget = () => {
-    const els = Array.from(document.querySelectorAll(selector));
+    const matched = Array.from(document.querySelectorAll(selector));
+    const els = [...new Set(matched.flatMap((m) => [m, measuredElement(m)]))];
     if (els.length === watched.length && els.every((el, i) => el === watched[i])) return;
     if (sizeObserver) { sizeObserver.disconnect(); sizeObserver = null; }
     watched = els;
