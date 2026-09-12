@@ -285,15 +285,19 @@ const MUTANTS: Array<[string, [string, string], string]> = [
    'declared_none'],
 ];
 
+/** The repo's proof convention (verify-new-barriers-are-mutation-proven.ts): `caught` is COMPUTED
+ *  from running the mutant, never a literal — a proof that cannot fail is not a proof. */
+const mustCatch = (label: string, caught: boolean, detail = '') =>
+  check(caught, `mutant "${label}" is caught`, detail);
+
 for (const [label, mutation, mustBreak] of MUTANTS) {
   const m = runHarness(mutation);
-  if (m.error) { check(false, `mutant "${label}" applied`, m.error); continue; }
-  const held = holds(m);
-  const broke = baseHeld.filter((h) => !held.includes(h));
-  check(broke.length > 0 && broke.some((b) => b.endsWith(mustBreak)),
-    `mutant "${label}" is caught`,
-    `expected the assertion on ${mustBreak} to fail; assertions lost: ${broke.join(', ') || 'NONE'} ` +
-    '— a barrier that stays green through its own defect is decoration');
+  // A mutant that could not be applied proves nothing, so it keeps every assertion and fails here
+  // exactly like one that was applied and went unnoticed — no separate literal-argument branch.
+  const broke = baseHeld.filter((h) => !(m.error ? baseHeld : holds(m)).includes(h));
+  mustCatch(label, broke.some((b) => b.endsWith(mustBreak)),
+    m.error ?? `expected the assertion on ${mustBreak} to fail; assertions lost: ` +
+    `${broke.join(', ') || 'NONE'} — a barrier that stays green through its own defect is decoration`);
 }
 
 console.log(
