@@ -4,7 +4,13 @@ Lifecycle, identical for all platforms: active → inactive → eligible → sou
 permanently deleted. A row is ONLY hard-deleted when ALL hold:
   1. active = false
   2. missing_count >= policy.min_missing_count   (historical liveness signal)
-  3. last_seen_at < now - policy.min_inactive_days
+  3. source_confirmed_dead_at < now - policy.min_inactive_days
+     ^ THE SOURCE said this listing is gone, at that moment, and 30 days have passed SINCE THEN.
+       A row whose source_confirmed_dead_at is NULL was never confirmed dead by the source and is
+       NEVER deletable, however old it is (owner decision 2026-09-12, ops_incident #24). This used
+       to read `last_seen_at`, which is "a crawl last encountered it" — a fact about US, not about
+       the source — so a listing that merely fell out of a crawl entered the queue for permanent,
+       unrecoverable deletion on exactly the evidence LISTING_LIVENESS.md §1-§3 forbids as death.
   4. the run is NOT an anomaly (candidate count <= max(anomaly_floor, anomaly_factor × trailing median))
   5. a FRESH re-fetch of the real listing_url confirms it is genuinely gone (404/410 or the platform's
      dead-marker). Anything ambiguous — a live page, a 403/429/5xx, a proxy block, a network error —
@@ -186,12 +192,15 @@ def _bounded_candidates(client, tables, pol, cutoff, safe_cap):
     unchanged, so this never alters production behaviour for a normal automated run."""
     cands: list[tuple[str, dict]] = []
     for t in tables:
-        rows = (client.table(t).select("id, ad_number, listing_url, missing_count, last_seen_at")
+        rows = (client.table(t)
+                .select("id, ad_number, listing_url, missing_count, last_seen_at,"
+                        " source_confirmed_dead_at")
                 .eq("active", False).gte("missing_count", pol["min_missing_count"])
-                .lt("last_seen_at", cutoff).order("last_seen_at")
+                .not_.is_("source_confirmed_dead_at", "null")
+                .lt("source_confirmed_dead_at", cutoff).order("source_confirmed_dead_at")
                 .limit(safe_cap).execute().data or [])
         cands.extend((t, r) for r in rows)
-    cands.sort(key=lambda tr: tr[1].get("last_seen_at") or "")
+    cands.sort(key=lambda tr: tr[1].get("source_confirmed_dead_at") or "")
     return cands[:safe_cap]
 
 
@@ -258,7 +267,8 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                 eligible_total += _count_of(
                     client.table(t).select("id", count="exact")
                     .eq("active", False).gte("missing_count", pol["min_missing_count"])
-                    .lt("last_seen_at", cutoff).limit(1).execute())
+                    .not_.is_("source_confirmed_dead_at", "null")
+                    .lt("source_confirmed_dead_at", cutoff).limit(1).execute())
                 platform_rows += _count_of(
                     client.table(t).select("id", count="exact").limit(1).execute())
             stats["eligible_total"] = eligible_total
@@ -325,9 +335,13 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                 # ── work-set: only now do we pull rows, and only up to the per-run cap ───────────
                 cands = []
                 for t in tables:
-                    rows = (client.table(t).select("id, ad_number, listing_url, missing_count, last_seen_at")
+                    rows = (client.table(t)
+                            .select("id, ad_number, listing_url, missing_count, last_seen_at,"
+                                    " source_confirmed_dead_at")
                             .eq("active", False).gte("missing_count", pol["min_missing_count"])
-                            .lt("last_seen_at", cutoff).order("last_seen_at")
+                            .not_.is_("source_confirmed_dead_at", "null")
+                            .lt("source_confirmed_dead_at", cutoff)
+                            .order("source_confirmed_dead_at")
                             .limit(pol["max_delete_per_run"]).execute().data or [])
                     cands.extend((t, r) for r in rows)
                 cands = cands[: pol["max_delete_per_run"]]     # hard cap across ALL tables
@@ -357,9 +371,14 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                         status, v = None, "dead"     # explicit opt-out (not used by default policy)
                     if v == "dead":
                         to_delete.setdefault(t, []).append(r["id"])
-                        age_days = _age_days(r.get("last_seen_at"), now)
+                        # The clock's age is measured from the SOURCE's confirmation, which is what
+                        # the 30 days actually mean now. last_seen_at is still recorded beside it
+                        # because the two disagreeing is itself diagnostic after the fact.
+                        age_days = _age_days(r.get("source_confirmed_dead_at"), now)
                         reason = {"inactive_days": age_days, "missing_count": r.get("missing_count"),
-                                  "http_status": status, "verdict": "dead"}
+                                  "http_status": status, "verdict": "dead",
+                                  "source_confirmed_dead_at": r.get("source_confirmed_dead_at"),
+                                  "last_seen_at": r.get("last_seen_at")}
                         if bounded_cap is not None:
                             reason["bounded_run"] = True
                             reason["bounded_cap"] = bounded_cap
@@ -448,11 +467,13 @@ def _days(n):
     return timedelta(days=int(n))
 
 
-def _age_days(last_seen_iso: str | None, now: datetime) -> int | None:
-    if not last_seen_iso:
+def _age_days(stamp_iso: str | None, now: datetime) -> int | None:
+    """Days since a timestamp. Fed the SOURCE CONFIRMATION, not last crawl contact — a NULL stamp
+    has no age at all, which is why a row without one can never satisfy the retention window."""
+    if not stamp_iso:
         return None
     try:
-        ls = datetime.fromisoformat(last_seen_iso.replace("Z", "+00:00"))
+        ls = datetime.fromisoformat(stamp_iso.replace("Z", "+00:00"))
         return (now - ls).days
     except Exception:
         return None

@@ -132,6 +132,7 @@ class Decision:
     reason: str      # machine-readable, stored on every active=true→false transition
     strikes: int     # the strike count to persist
     verified_alive: bool = False   # True ⇒ caller must stamp last_verified_alive_at
+    confirmed_dead: bool = False   # True ⇒ caller must stamp source_confirmed_dead_at
 
 
 def decide(
@@ -179,6 +180,7 @@ def decide(
             action="deactivate",
             reason=f"source_confirmed_dead:direct:strikes={new_strikes}/{policy.grace}",
             strikes=new_strikes,
+            confirmed_dead=True,
         )
     return Decision(
         action="strike",
@@ -209,6 +211,37 @@ def verification_patch(decision: Decision, *, now_iso: str) -> dict:
     added to fix: it would put a confident, recent-looking timestamp on a listing nobody verified.
     """
     return {"last_verified_alive_at": now_iso} if decision.verified_alive else {}
+
+
+def death_patch(decision: Decision, *, now_iso: str) -> dict:
+    """The ONLY sanctioned way to write `source_confirmed_dead_at`.
+
+    WHY THIS COLUMN EXISTS (owner decision, 2026-09-12). Until now the 30-day deletion clock was
+    keyed on `last_seen_at` — when a crawl last ENCOUNTERED the row — and `missing_count`, which
+    `prune_unseen()` accumulates from crawl ABSENCE. So a listing entered the queue for permanent,
+    unrecoverable deletion on exactly the evidence `LISTING_LIVENESS.md` §1–§3 forbids as a death
+    verdict. Only the delete-time re-probe stood between an absence-accumulated candidate and an
+    irreversible delete (`ops_incident` #24).
+
+    Measured on production the day this shipped: of the rows already eligible for deletion,
+    **aqar had 20,548 with no recorded source verdict of any kind** — not because aqar does not
+    probe (it does, at full grace) but because it never wrote its evidence down. gathern had
+    1,811/1,811 with a recorded DIRECT 404 and wasalt 8,029/11,207. You cannot gate a clock on
+    evidence nobody recorded, which is why the evidence blackout had to be fixed first.
+
+    The owner's rule, in his words: *"whenever something is removed, we remove it"* — and the
+    other half, which this column enforces: **removed means the SOURCE said so.**
+
+    So this stamp marks the moment a listing became SOURCE-CONFIRMED dead, and the retention clock
+    runs from it rather than from last crawl contact. No stamp ⇒ never deletable, however old.
+
+    It is written ONLY from a `Decision` that reached `action='deactivate'`, which `decide()`
+    returns only on DIRECT evidence at full grace. ABSENCE and UNKNOWN cannot produce one, so a
+    timeout, a 403, a shell body or a missing crawl can never start the clock. A sweep that sets
+    this column by hand can condemn a row nobody actually read — the mirror of the hand-written
+    `last_verified_alive_at` stamp §3 already forbids — so the same barrier rejects both.
+    """
+    return {"source_confirmed_dead_at": now_iso} if decision.confirmed_dead else {}
 
 
 def direct_alive_patch(*, now_iso: str) -> dict:
