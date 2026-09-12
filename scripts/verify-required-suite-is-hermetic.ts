@@ -51,7 +51,14 @@ import { transitivelyReaches } from './lib/importGraph.ts';
 // than install the ratchet at whatever number happened to exist, verify-guided-counts-carry-monthly-af.ts
 // was split the same day (its own header already declared a hermetic A half and a live B half), taking
 // the set 6 → 5. Lower it as further splits land; raising it needs a stated reason in the PR body.
-const PRODUCTION_DEPENDENT_CEILING = 5;
+// 2026-09-12 (routine #10, ops_incident #126): 5 → 4. verify-ui-controls-have-predicates.ts was split.
+// It was not only in the wrong job: measured by execution with the endpoint blackholed, 14 of its
+// assertions that read ONLY committed source never ran, because they sat inside the live registry
+// fetch's `if` block — including the TEETH of the owner's 2026-08-11 boundary rule over
+// src/lib/afPlan.ts. A production blip therefore took that guard dark while reporting itself as
+// `TypeError: fetch failed`. The live read moved to verify-ui-controls-have-predicates-live.ts and
+// both halves now share one mutation-proven predicate (scripts/lib/uiControlPredicates.ts).
+const PRODUCTION_DEPENDENT_CEILING = 4;
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => {
