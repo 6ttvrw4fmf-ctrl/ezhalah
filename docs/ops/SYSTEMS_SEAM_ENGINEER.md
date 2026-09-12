@@ -73,6 +73,18 @@ a link to the fix commit/PR**. An issue that you resolve without a barrier is a 
 contract, not a fix. Report `SENTRY ISSUES CLAIMED THIS RUN: N` and `SENTRY ISSUES RESOLVED THIS
 RUN: N` in your FINAL REPORT.
 
+**AND RECORD THE HEARTBEAT — `select ops_record_sentry_heartbeat('systems-seam', <seen>, <claimed>,
+<resolved>, '<what you actually read>');` — immediately after the read (added here 2026-09-12; the
+requirement itself is older).** `mon_detect_routine_sentry_silent()` raises **P1** when a routine's
+slug has no heartbeat row in 30 h, and reading Sentry without writing the row is indistinguishable
+from not reading it at all. That is not hypothetical for this routine: alert **1537**
+(`routine_sentry_silent:systems-seam`) stood open from 2026-09-05 to 2026-09-12 — **seven days** —
+while runs were reading the queue and never recording it. The step was mandated by the detector and
+absent from this file, so a run following the spec exactly still came out silent. **Say what you
+read in the note**, including a zero result and the evidence that the connection was live — an empty
+unresolved queue and an unreachable endpoint look identical from the outside, which is this repo's
+`A FAILED FETCH IS NOT AN EMPTY ANSWER` rule pointed at your own instrumentation.
+
 If you find an issue whose ownership per §2 is NOT you: leave it, do not claim it, and let its
 owner take it on their next run. Ambiguous or multi-owner issues escalate to routine #2 (Senior
 Production) as the standing triage router — do not fix outside your surface. See §4 of the routing
