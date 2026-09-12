@@ -1,0 +1,95 @@
+# EVERY DATA REPAIR MUST BE IN THE REGISTRY THAT RE-VERIFIES IT.
+#
+# public.ops_repair_guarantee_registry carries PERMANENT coverage of every landed data repair, with
+# oldest-first rotation so nothing ever ages out of re-verification. That design exists because a
+# July 2026 district-suffix repair silently decayed for a month with zero alerts. But the rotation
+# can only reach repairs that are IN the registry, and until 2026-09-12 nothing checked that a repair
+# ever got there: mon_detect_repair_guarantee_stale() has two limbs — a REGISTERED repair nothing
+# watches, and a REGISTERED repair nothing re-verified — and both take the registry as their
+# universe, so a repair that was never enrolled is outside both. Measured that day: 28 strict-era
+# listing repairs committed and live, and 9 of them had never been enrolled — five landed in the
+# previous 24 hours, including both halves of an aqarmonthly district-suffix backfill, the very
+# repair family the registry was built for.
+#
+# THE SCHEDULE IS THE LOAD-BEARING TRIGGER. This invariant breaks when somebody LANDS A REPAIR and
+# does not enrol it, and the enrolment happens in production long after the pull request is gone.
+# `push` to main catches the repair arriving in the repo; `schedule` catches the registry drifting on
+# its own. Same reasoning as p0-fast-lane-coverage.yml, which is modelled on the migration drift
+# guard for exactly this.
+#
+# NOT IN THE REQUIRED `npm test`, deliberately: that suite is a required status check on every pull
+# request, and this verdict is decided by PRODUCTION's registry contents, which move whenever any of
+# the eleven routines writes a row. A live read there turns someone else's enrolment into a red X on
+# an unrelated change — the placement defect AGENTS.md records for four checks on 2026-09-06.
+# scripts/test-exclusions.txt records this file as its home, and the hermetic half proves BY
+# EXECUTION that this workflow really invokes it, so the split cannot decay into a deletion.
+#
+# IT NEEDS THE SERVICE KEY, and that is the point rather than an inconvenience. The registry is
+# RLS-protected: an anon read returns HTTP 200 with `[]`, which read naively says "nothing is
+# enrolled". The script refuses a zero-row registry outright instead of reporting 28 false positives
+# — AGENTS.md, "A FAILED FETCH IS NOT AN EMPTY ANSWER". No `pull_request` trigger for the same
+# reason: a fork PR has no secrets and would only ever produce that unreadable result.
+name: Repair enrollment guard (live)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+      - 'scripts/repair-enrollment-waivers.txt'
+      - 'scripts/lib/repairClassifier.ts'
+      - 'scripts/verify-repair-guarantee-enrollment-live.ts'
+      - '.github/workflows/repair-enrollment-guard.yml'
+  schedule:
+    - cron: '13,43 * * * *'   # off :00, off the :29/:59 detector sweep, off :09/:39 alert dispatch
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-enrollment-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  enrollment:
+    name: Every landed repair is enrolled in the orphaned-guarantee registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      # No `npm ci`: the script imports nothing outside node builtins and scripts/lib.
+      - name: No landed repair is outside the registry's rotation
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+            scripts/verify-repair-guarantee-enrollment-live.ts
+
+      # An unattended workflow that fails silently notifies nobody (issue #1349), and a scheduled
+      # guard nobody hears from is the dark-detector shape again. `seam_check_failed` is routine #7's
+      # kind and is registered in ops_alert_kind_external_resolver, so a green run here calls
+      # mon_resolve_key on the same dedup key and the alert self-heals. The script ALSO raises the
+      # specific repair_guarantee/repair_guarantee_unenrolled alert carrying the version list — this
+      # bridge reports that the CHECK ITSELF ran and how it ended, which is the part a silent
+      # workflow failure would otherwise hide.
+      #
+      # `always()` bare, exactly as the other bridged workflows do it:
+      # verify-scheduled-checks-alert-on-failure.ts must be able to prove the bridge is reachable on
+      # a FAILING run, and a compound condition it cannot parse is indistinguishable from one that
+      # quietly never fires on red.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind seam_check_failed
+          --workflow repair-enrollment-guard.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
