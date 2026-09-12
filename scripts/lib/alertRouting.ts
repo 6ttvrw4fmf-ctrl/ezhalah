@@ -86,6 +86,14 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // Explicitly routed rather than left to the #2 fallback, so a cost alert arrives with an owner.
   { routine: 7, test: /^ai_cost_health$/ },
   { routine: 7, test: /^search_index_diverges_from_sync_source$/ },
+  // Same detector's SELF-MIRROR limb (2026-09-12). Its oracle is a copy of an expression inside
+  // sync_search_listings_ar(), and on 2026-09-03 the two silently stopped agreeing: the owner
+  // retired the annual rent-period fallback in the sync and the copy kept predicting it. The
+  // detector then spent nine days calling 1,000+ correct rows divergent while its own open dedup
+  // key made a GENUINE divergence unraisable. This kind says "my oracle is stale" instead, and it
+  // belongs here rather than with the data routines — the defect is two copies of one contract
+  // drifting apart, which is this routine's whole surface, not anything wrong with the rows.
+  { routine: 7, test: /^search_index_oracle_stale$/ },
   // The `*_check_failed` family (2026-09-04) — a SCHEDULED WORKFLOW ITSELF went red. Raised by
   // scripts/ops/raise-workflow-alert.mjs, one open alert per workflow file, self-healing on the
   // next green run. Before it, 17 scheduled workflows could fail and alert nobody (issue #1349:
