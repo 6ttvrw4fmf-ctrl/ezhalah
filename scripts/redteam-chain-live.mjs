@@ -36,6 +36,11 @@ import { chromium, devices } from 'playwright';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadCityScope } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { dismissCookieConsent } from './lib/liveConsent.ts';
+// The REAL clean-type → type_ar expansion the app itself ships (src/data/propertyTypes.ts has no
+// imports, so it loads directly under Node's type stripping — no copy, no lift needed). See the
+// L1==L3 assertion below for why a substring test over p_types was wrong.
+import { CLEAN_MACRO, EN_TO_AR, typeArForSelection } from '../src/data/propertyTypes.ts';
 import { parseVisibleState } from '../e2e/live-sweep/visibleState.mjs';
 
 const BASE = 'https://ezhalah-app.vercel.app';
@@ -221,6 +226,21 @@ async function runChain(cell) {
     await page.goto(`${BASE}/`, { waitUntil: 'load', timeout: 90000 });
     await sleep(5000);
 
+    // ARRIVING AT THE APP INCLUDES ANSWERING THE COOKIE BANNER (added 2026-09-12, routine #9).
+    // MEASURED, this run: the first six DESKTOP chains passed every equality and the first two
+    // MOBILE chains both died identically — `page.waitForFunction` timing out at 90 s waiting for a
+    // terminal headline that never arrived, before a single assertion ran. On a phone viewport the
+    // consent card is painted over the primary «بحث» control (ops_incident #142/#152), so the taps
+    // this driver made were being consumed by a `position: fixed` overlay and the search was never
+    // submitted. That is the exact trap scripts/lib/liveConsent.ts exists for, and which
+    // scripts/lib/liveNav.ts already routes every other live journey through — this driver predates
+    // that helper and never got it. Reported as a HARNESS failure (UNDETERMINED) rather than a
+    // product bug, per AUTONOMOUS_INCIDENT_LOOP.md §6, and fixed here rather than worked around.
+    //
+    // OUTSIDE any retry, deliberately: a card that refuses to go away is a finding about the APP,
+    // and dismissCookieConsent() throws in that case rather than letting a journey click into it.
+    await dismissCookieConsent(page, { log: (m) => console.log(m) });
+
     for (const d of cell.deal ?? []) if (!await tap(d)) throw new Error(`deal control never rendered: ${d}`);
     if (cell.category && !await tap(cell.category)) throw new Error(`category never rendered: ${cell.category}`);
 
@@ -265,8 +285,45 @@ async function runChain(cell) {
       const sent = (first.body.p_cities ?? []).join('|');
       eq(name, 'L1 city == L3 p_cities', sent.includes(vs.city) || vs.city.includes(sent), `ui=${vs.city} rpc=[${sent}]`);
     }
-    if (vs.type) eq(name, 'L1 type == L3 p_types', JSON.stringify(first.body.p_types ?? []).includes(vs.type),
-      `ui=${vs.type} rpc=${JSON.stringify(first.body.p_types)}`);
+    // L1 type == L3 p_types — THE CLEAN LABEL MUST EXPAND TO EXACTLY THE RAW SET THE REQUEST CARRIED.
+    //
+    // REPAIRED 2026-09-12 after this check accused a CORRECT production (PART 7: when a check is red
+    // and production is right, the finding is that the check was wrong — write it down and repair it,
+    // never delete it). It used to ask `JSON.stringify(p_types).includes(vs.type)`, which conflates
+    // two different vocabularies: «ملخص البحث» renders the CLEAN type label, while p_types carries the
+    // RAW source `type_ar` values that label expands to. On بريدة/بيع/عمارة سكنية it read
+    //     ui=عمارة سكنية   rpc=["عمارة","مجمع سكني","مجمع","برج"]
+    // and called it a disagreement. It is the documented expansion —
+    // CLEAN_TO_QUERY['Residential Building'].rawTypes = ['Building','مجمع سكني','مجمع','برج'] with
+    // EN_TO_AR.Building = 'عمارة' — and every other layer of that chain agreed exactly
+    // (L4 oracle = L5 screen = L6 RPC = 66, all 66 cards reached, none outside the response). The old
+    // test passed on شقة only by COINCIDENCE: the clean label happens to also be one of its own raw
+    // values, which is exactly the kind of accidental pass that hides a defect on every other type.
+    //
+    // The repaired form is strictly stronger: SET EQUALITY against the app's own shipped expansion,
+    // so a raw value silently added to, dropped from, or invented in the request is now caught —
+    // none of which the substring test could see.
+    if (vs.type) {
+      // INVERT EN_TO_AR OVER CLEAN TYPES ONLY. That map is not injective and deliberately so: it
+      // carries RAW types alongside clean ones, and several raws fold onto one clean label —
+      // 'Villa' AND 'Palace' both render «فيلا» (propertyTypes.ts: قصر folds into فيلا, owner rule).
+      // A bare `Object.keys(EN_TO_AR).find(...)` returned 'Palace', which is not a clean type, so
+      // typeArForSelection() correctly returned [] and this check accused a CORRECT production a
+      // second time (MOB تبوك/بيع+إيجار/فيلا: rpc sent ["فيلا","تاون هاوس","بيت"], which is exactly
+      // CLEAN_TO_QUERY['Villa'].rawTypes mapped through EN_TO_AR). Restricting the inversion to
+      // CLEAN_MACRO's key set — the clean types, and nothing else — is what makes it single-valued.
+      const cleanEn = Object.keys(CLEAN_MACRO).find((k) => EN_TO_AR[k] === vs.type) ?? null;
+      const expected = cleanEn ? (typeArForSelection(cleanEn) ?? []) : null;
+      const sent = first.body.p_types ?? [];
+      const same = expected !== null
+        && expected.length === sent.length
+        && [...expected].sort().every((v, i) => v === [...sent].sort()[i]);
+      eq(name, 'L1 type == L3 p_types (clean label expands to exactly the raw set sent)', !!same,
+        cleanEn === null
+          ? `the app rendered «${vs.type}», which is not a clean type label in the shipped EN_TO_AR map `
+            + '— the summary and the taxonomy disagree about what was searched'
+          : `ui=${vs.type} (${cleanEn}) expands to ${JSON.stringify(expected)}  rpc=${JSON.stringify(sent)}`);
+    }
     eq(name, 'L3 carries the scope key p_tables', Array.isArray(first.body.p_tables) && first.body.p_tables.length > 0,
       `p_tables=${JSON.stringify(first.body.p_tables)}`);
 
