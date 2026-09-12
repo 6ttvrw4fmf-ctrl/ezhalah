@@ -3621,18 +3621,20 @@ export default function Agent() {
             restore this same state from `completed`. */}
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
-            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): only the input row is gated — the
-                disclaimer below stays always-on regardless of origin (it's a listings-source legal
-                notice, not part of "the chat"). See filterOrigin's own comment above.
-                `|| busy || revealing` (fixed same-day, caught by web-runtime-smoke's own [E] Stop
-                journey): a Filter search still becomes an in-flight fetch the moment it lands here,
-                and Stop-then-restore-to-Filter (verify-filter-stop-cancels-and-restores.ts, a
-                separate, pre-existing owner rule) needs the composer's own Stop control to exist
-                while `busy`/`revealing` — hiding the WHOLE composer unconditionally also hid Stop,
-                so an in-flight Filter search could no longer be cancelled. Not "chat" either way:
-                the busy/revealing ternary a few lines down only ever shows Stop OR mic+send, never
-                both, so this window shows the input row + Stop, never a usable send path. */}
-            {(!filterOrigin || busy || revealing) && (
+            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12): the free-text
+                composer never shows for a Filter-origin conversation — the disclaimer below stays
+                always-on regardless of origin (it's a listings-source legal notice, not part of
+                "the chat"). See filterOrigin's own comment above.
+                WHILE `busy`/`revealing` (the search/reveal animation), Filter-origin still needs
+                Stop-then-restore-to-Filter to work (verify-filter-stop-cancels-and-restores.ts, a
+                separate, pre-existing owner rule) — but showing the FULL composer pill with its
+                inviting "type what you're looking for" text input read as an active chat during an
+                animation the user only ever reached by pressing بحث (owner, 2026-09-12: "still
+                shows chat button ... remove that"). So Filter-origin busy/revealing gets Stop ALONE,
+                undressed as a composer — no input, no pill, no placeholder — while the AI-Agent path
+                keeps its full composer (input + Stop while busy/revealing, input + mic/send once
+                idle) exactly as before. */}
+            {!filterOrigin ? (
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
@@ -3812,7 +3814,24 @@ export default function Agent() {
                 </Pressable>
               </View>
             </View>
-            )}
+            ) : (busy || revealing) ? (
+              // FILTER-ORIGIN, SEARCH IN FLIGHT (owner, 2026-09-12): Stop alone, not dressed as a
+              // composer — see the comment above this block for why the full pill was removed here.
+              // Wrapped in a flex-end row so it lands where Stop always has (the trailing edge of
+              // this LTR-pinned column, same as inside the real composer) instead of hugging start.
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+                <Pressable
+                  onPress={stop}
+                  style={s.stopBtn}
+                  hitSlop={8}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  accessibilityLabel={t('Stop')}
+                >
+                  <Ionicons name="stop" size={15} color="#fff" />
+                </Pressable>
+              </View>
+            ) : null}
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
             </Text>
