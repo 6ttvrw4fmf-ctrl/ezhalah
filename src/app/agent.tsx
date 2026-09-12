@@ -58,7 +58,7 @@ import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
-import { resultCounts, closingNoteKey, nextBatchTarget } from '@/data/resultCount';
+import { resultCounts, closingNoteKey, nextBatchTarget, drainPageBudget, LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
 import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRowVisible } from '@/lib/afBrowsingGate';
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -1419,12 +1419,17 @@ export default function Agent() {
       if (target > animEnd) setRevealCount((c) => ({ ...c, [mid]: target }));
     });
   };
-  // A defensive backstop against a pathological `hasMore` that never clears — NOT a real product
-  // ceiling (the 2026-08-29 no-lifetime-cap promise is unchanged; this only bounds a single tap's
-  // network loop). 50 pages of the RPC's own 1,500-row page size covers any real Saudi property
-  // search (75,000 listings) many times over. Exceeding it fails the same honest way a single page
-  // failure does — never a silent partial reveal claimed as complete.
-  const MAX_DRAIN_PAGES = 50;
+  // A defensive backstop against a pathological `hasMore` that never clears, and a bound on how many
+  // search RPCs ONE tap may cost production — NOT a real product ceiling (the 2026-08-29
+  // no-lifetime-cap promise is unchanged; this only bounds a SINGLE tap's network loop, and a press
+  // that reaches it still advances the user by everything it fetched and keeps «عرض المزيد» offered).
+  //
+  // SIZED FROM THE PAGE SIZE ACTUALLY USED (src/data/resultCount.ts). It was a bare `50` until
+  // 2026-09-12, justified in prose as "50 pages of the RPC's own 1,500-row page size … 75,000 …
+  // many times over" — but loadMoreListings pages at LOAD_MORE_PAGE_SIZE = 500, so the true reach
+  // was 25,000 and the two biggest cities sit past it. See drainPageBudget()'s note for the live
+  // measurement; the arithmetic lives there now so the constant and its justification cannot drift.
+  const MAX_DRAIN_PAGES = drainPageBudget(LOAD_MORE_PAGE_SIZE);
   const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {
     const mid = m.id;
     const q = m.result.query;
@@ -1454,11 +1459,22 @@ export default function Agent() {
       // for "the next 100" must not keep pulling pages once 100 is covered, even if the server has
       // far more (that is exactly what makes it a bounded press rather than a drain).
       while (hasMoreNow && q && fetched0 + add.length < target) {
-        if (++pages > MAX_DRAIN_PAGES) {
-          setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
-            text: t('Loading listings — please try again in a few seconds.') }]);
-          return;
-        }
+        // THE BACKSTOP HANDS THE CHOICE BACK — IT NEVER THROWS THE PAGES AWAY (2026-09-12).
+        // This used to `return`, which skipped the merge and the reveal below and discarded every
+        // row the drain had just fetched. Measured live on الرياض (37,532 matching): one press fired
+        // 50 RPC searches over 3.5 minutes, produced ZERO new cards, posted «حاول مرة ثانية بعد
+        // لحظات» — and, because no part of the turn's state had advanced, the next press reproduced
+        // it EXACTLY, forever. The user could not reach match 101 of 37,532 by any route, and every
+        // attempt cost production another 50 searches. That is the removed lifetime cap, rebuilt out
+        // of a defensive guard.
+        // `break` instead: fall through to the SAME merge + reveal every other press uses, so the
+        // user advances by the whole budget, the cursor keeps its place, and `hasMoreNow` is still
+        // true — which keeps «عرض المزيد» offered and (via the untouched `!hasMoreNow` term below)
+        // makes it impossible for this press to claim the search finished. The next press resumes
+        // from the advanced cursor. Nothing is said out loud because nothing failed and nothing is
+        // hidden: the closing line already states «عرضت لك أول N من أصل TOTAL» off these real
+        // numbers. A genuine page FAILURE is a different case and still reports, just below.
+        if (++pages > MAX_DRAIN_PAGES) break;
         // A FAILED PAGE IS NOT AN EMPTY PAGE (AGENTS.md permanent rule, 2026-09-04; incident #33).
         // store.tsx already refuses to treat a backend error as progress. Stop the drain here — say
         // so out loud (same wording/posture page 0's own fetch failure uses, src/data/search.ts) —

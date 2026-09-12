@@ -10,13 +10,28 @@
 // text-shaped keys collided across 150 genuinely distinct مكتب cards on a previous run). Nothing
 // here is clicked through to a source platform, so the journey generates ZERO source traffic (§40.6).
 //
-// WHAT "DONE" LOOKS LIKE (owner 2026-08-29, supersedes the 2026-08-20 lifetime cap). Paging
-// CONTINUES in clean 100-batches for as long as matches remain: a healthy الرياض run is 10 → 100 →
-// 200 → 300 across this journey's budgeted clicks, with the pager still offered whenever more
-// matches genuinely exist. A pager may legitimately be ABSENT only when everything matching is on
-// screen — and then the closing line must state the true matched total with the honest shown count
-// («عرضت لك أول 100 من أصل 21,868 إعلان مطابق» mid-browse, «عرضت لك جميع الإعلانات …» at the end),
-// never a batch size standing in for the total (scripts/verify-result-cap-honesty.ts).
+// WHAT "DONE" LOOKS LIKE (owner 2026-09-11, Task 4 rev. 2, PR #2330 — supersedes the 2026-08-29
+// "clean 100-batches all the way down" wording this header carried until 2026-09-12):
+//   · the FIRST press on a turn reveals the next clean 100-boundary only (10 → 100) and leaves both
+//     «عرض المزيد» and «خلّنا نحدد الطلب أكثر» standing;
+//   · a LATER press DRAINS every remaining page and finishes the search (composer locks, actions row
+//     goes) — it is not another hundred.
+// So a healthy الرياض run is 10 → 100 → (drain), NOT 10 → 100 → 200 → 300. This file asserted the
+// superseded shape for a day and reported a false PAGINATION/PAGER-MISSING pair against production
+// on 2026-09-10..12 — but the SAME journey's second finding was real (the drain's page backstop
+// discarded every page it fetched), which is §41.19's lesson exactly: suspect the oracle first, then
+// FINISH the diagnosis.
+//
+// A drain over a huge cohort legitimately takes MINUTES (50 pages × 500 rows), so "the card count
+// did not grow inside my wait" is NOT by itself a defect. The discriminator is whether the app is
+// still FETCHING: cards flat while the RPC page count keeps climbing is a drain in progress (no
+// verdict); cards flat AFTER fetching has stopped is the real stranding defect. That distinction is
+// what separates the false finding from the true one above, so it is machinery here, not judgement.
+//
+// A pager may legitimately be ABSENT only when everything matching is on screen — and then the
+// closing line must state the true matched total with the honest shown count («عرضت لك أول 100 من
+// أصل 21,868 إعلان مطابق» mid-browse, «عرضت لك جميع الإعلانات …» at the end), never a batch size
+// standing in for the total (scripts/verify-result-cap-honesty.ts).
 //
 // Traps this journey is built around: §41.2 (scroll_into_view, never bare coordinates), §41.3 (card
 // descriptions carry their own «عرض المزيد» — and its 25px rule no longer separates them, see
@@ -56,6 +71,50 @@ const AF_PARAMS = [
 const SCOPE_QUESTION_TITLES = ['أي نوع من العقارات تبحث عنه؟', 'أي نوع عقار تحديدًا؟'];
 
 const countCards = (page) => page.evaluate(() => (document.body.innerText.match(/الضغط على هذا الإعلان/g) || []).length);
+
+/**
+ * Wait out ONE «عرض المزيد» press, and say WHY the wait ended.
+ *
+ * A later press drains every remaining page (owner 2026-09-11), which on a big cohort is minutes of
+ * sequential RPCs with the card count flat the whole time — the reveal happens once, at the end.
+ * Measured on production 2026-09-12: الخبر/5,706 sat at 100 cards for 82s across ~10 pages and then
+ * revealed all 5,706 at once. So a flat card count inside a fixed window says NOTHING on its own,
+ * and the old fixed 28s settle() reported it as «batch 2 added no cards» — a false defect.
+ *
+ * The real discriminator is whether the app is still FETCHING. Returns `{ n, fetching, pages }`:
+ *   · grew and settled            → fetching:false, and the caller asserts the batch normally;
+ *   · flat, but pages still       → fetching:true — a drain in flight, NO verdict (§40.7: an
+ *     arriving                       untested thing is reported, never passed and never failed);
+ *   · flat, and nothing has been  → fetching:false — the press is genuinely over and produced
+ *     fetched for STALL_MS          nothing. THAT is the stranding defect, and it is real.
+ * Stall is time-based, not poll-based: real drain pages arrived up to ~20s apart, so "the RPC count
+ * held still for N polls" would call a healthy drain dead.
+ */
+const PRESS_CAP_MS = 260_000;   // a full 50-page drain measured ~200s + the reveal
+const PRESS_STALL_MS = 45_000;  // no new page AND no new card for this long ⇒ the press is over
+async function settlePress(page, searches, before) {
+  const t0 = Date.now();
+  let cards = await countCards(page);
+  let pages = searches().length;
+  let cardMovedAt = t0, pageMovedAt = t0, steadySince = null;
+  while (Date.now() - t0 < PRESS_CAP_MS) {
+    await sleep(1500);
+    const n = await countCards(page);
+    const p = searches().length;
+    const now = Date.now();
+    if (n !== cards) { cards = n; cardMovedAt = now; steadySince = null; }
+    else if (steadySince == null) steadySince = now;
+    if (p !== pages) { pages = p; pageMovedAt = now; }
+    // Grew past where the press started and has held still for a beat — the batch landed.
+    if (cards > before && steadySince != null && now - steadySince >= 4500) return { n: cards, fetching: false, pages };
+    // Nothing new on screen and nothing new off the wire for a good while — the press is finished,
+    // and it finished without giving the user anything.
+    if (cards <= before && now - pageMovedAt >= PRESS_STALL_MS && now - cardMovedAt >= PRESS_STALL_MS) {
+      return { n: cards, fetching: false, pages };
+    }
+  }
+  return { n: cards, fetching: Date.now() - pageMovedAt < PRESS_STALL_MS, pages };
+}
 
 /** §41.4 — wait until the card count STOPS growing; a stable 0 is not settled. */
 async function settle(page, { minCards = 1, tries = 40 } = {}) {
@@ -262,12 +321,26 @@ export async function showMoreJourney(plan) {
       await sleep(400);
       await btn.click({ timeout: 20000 }).catch((e) => defect(name, 'PAGER-CLICK', `batch ${b}: ${e.message}`));
       const before = n;
-      n = await settle(page, { minCards: before + 1 });
+      const press = await settlePress(page, searches, before);
+      n = press.n;
       const st = await visibleState(page);
 
       // ── §10 assertions, every batch ──────────────────────────────────────────────────────────
       if (n <= before) {
-        defect(name, 'PAGINATION', `batch ${b} added no cards (${before} → ${n}) while a pager was offered`);
+        if (press.fetching) {
+          // Still pulling pages when the window closed. No verdict either way — reported, never
+          // silently passed (§40.7). The predicate checks below still run on what it HAS sent.
+          note(`${name}: batch ${b} still draining when the ${PRESS_CAP_MS / 1000}s window closed `
+             + `(${press.pages} result requests so far, ${n} cards) — no pagination verdict this run`);
+        } else {
+          // The press is over, the wire has been quiet, and the user got nothing. This is the
+          // 2026-09-12 stranding defect: on الرياض the drain pulled 50 pages, hit its page backstop
+          // and DISCARDED all of them (src/app/agent.tsx — fixed, barriered in
+          // scripts/verify-loadmore-failure-is-not-a-silent-tap.ts §BACKSTOP).
+          defect(name, 'PAGINATION',
+            `batch ${b} added no cards (${before} → ${n}) after the press stopped fetching — `
+          + `${press.pages} result requests were issued and none of them reached the user`);
+        }
       }
       if (st.headline !== total0) {
         defect(name, 'TRUE-TOTAL', `headline moved across «عرض المزيد»: ${total0} → ${st.headline}`);

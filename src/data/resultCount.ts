@@ -27,6 +27,40 @@ export function nextBatchTarget(shown: number, available: number, batch = BROWSE
   return Math.min(boundary, Math.max(0, Math.floor(available)));
 }
 
+// ── ONE PRESS'S PAGE BUDGET ──────────────────────────────────────────────────────────────────────
+// A «عرض المزيد» drain walks REAL DB pages in a loop, so the loop needs a bound: against a
+// pathological `hasMore` that never clears, and against one tap costing production an unbounded
+// number of search RPCs (SEARCH_MATCH_QA_ENGINEER.md §40.1 — the search RPC is already 64.4% of all
+// database time). The bound is NOT a product ceiling and must never become one: a press that
+// reaches it reveals everything it DID fetch and leaves «عرض المزيد» offered, so every match stays
+// reachable across presses and the owner's 2026-08-29 no-lifetime-cap promise holds.
+//
+// EXPRESS THE BUDGET IN ROWS AND DERIVE THE PAGE COUNT — never hardcode the page count.
+// Until 2026-09-12 agent.tsx carried a bare `MAX_DRAIN_PAGES = 50`, justified in its own comment as
+// "50 pages of the RPC's own 1,500-row page size covers any real Saudi property search (75,000
+// listings) many times over". But the load-more path pages at LOAD_MORE_PAGE_SIZE = 500, not 1,500,
+// so the real reach was 25,000 — and the two largest cities in the index sit past it (الرياض 74,724
+// rows, جدة 44,533). Measured live on production that day, الرياض/37,532 matching: the second press
+// fired 50 RPC searches over 3.5 minutes, hit the backstop, and RETURNED — discarding all 50 pages
+// it had just fetched — leaving the user on 100 cards with «حاول مرة ثانية بعد لحظات», permanently,
+// because nothing about the turn's state had advanced.
+//
+// A page count whose adequacy depends on a constant in a DIFFERENT file is a comment, not a
+// guarantee. Both numbers live here now and the relationship is arithmetic a barrier EXECUTES.
+
+/** The row page size `loadMoreListings` asks the backend for (src/store.tsx). ONE definition. */
+export const LOAD_MORE_PAGE_SIZE = 500;
+
+/** How many rows ONE «عرض المزيد» press may pull before it stops and hands the choice back. */
+export const DRAIN_ROW_BUDGET = 25_000;
+
+/** Pages one press may walk = the row budget over the page size actually used. Never a bare count. */
+export function drainPageBudget(pageSize: number, rowBudget: number = DRAIN_ROW_BUDGET): number {
+  const size = Math.max(1, Math.floor(pageSize));
+  const rows = Math.max(0, Math.floor(rowBudget));
+  return Math.max(1, Math.ceil(rows / size));
+}
+
 // Which closing sentence to show, and with which number. The renderer maps the kind → an i18n
 // string; keeping the STRING out of here is what lets the same logic be asserted without a
 // translation table. 'capped' is GONE — with continuation there is no third state.
