@@ -1,0 +1,68 @@
+{
+  "_what": "COMMITTED MIRROR of public.ops_cron_ordering_contract and the schedules of the jobs it governs.",
+  "_why": [
+    "ops_cron_ordering_contract declares, as DATA, that one cron job CONSUMES what another PRODUCES.",
+    "Production is enforced by mon_detect_cron_ordering_contract(), twice an hour. That detector is",
+    "correct and fails closed, but it can only speak AFTER a migration is live: a migration that",
+    "reschedules a contracted job passed every PR check, and the contract was violated that way at",
+    "~14:00Z on 2026-09-11. This mirror is the per-PR input that closes the review-time half",
+    "(ops_incident #185, routine #10).",
+    "",
+    "APPLY-AND-MIRROR IS ONE CHANGE (AGENTS.md). If you reschedule a contracted job, or add/change a",
+    "contract row, update this file in the SAME diff. scripts/verify-cron-ordering-contract.ts then",
+    "checks the gap arithmetic BEFORE the migration is applied, and its live half asserts this file",
+    "has not drifted from production's contract rows.",
+    "",
+    "DO NOT fix a red check by lowering min_gap_minutes or deleting a row. The detector's own",
+    "do_not says it: fix the SCHEDULE. Lowering the floor re-creates the silent staleness the",
+    "contract exists to catch, and for this routine it is Prohibition 1 (docs/ops/BARRIER_ENGINEER.md",
+    "PART 6) — never weaken a barrier to make it green."
+  ],
+  "_semantics": "gap = downstream_minute - upstream_minute, PLAIN subtraction, not modulo 60 — copied from the live detector on purpose. A consumer must trail its producer WITHIN the hour; one that runs first reads an input up to a full cycle stale. See scripts/lib/cronOrdering.ts.",
+  "_mirrored_through_migration": "20260911152632",
+  "_mirrored_through_migration_why": "The NEWEST migration version in supabase/migrations/ whose SQL mentions ops_cron_ordering_contract. scripts/verify-cron-ordering-contract.ts recomputes this from the tree and fails if it does not match, so a migration that changes the contract without updating this file goes RED on its own PR. That is AGENTS.md's apply-and-mirror rule enforced from the diff alone — no secret, no network, and no SQL parsing. If you add such a migration, re-read production, update the rows/schedules above, and set this to the new version.",
+
+  "_measured_at": "2026-09-12",
+  "_measured_by": "routine-10-barrier, via Supabase MCP against project aannarbkwcymrotzwdbo: select * from ops_cron_ordering_contract; and select jobid, jobname, schedule, active from cron.job.",
+
+  "contract": [
+    {
+      "upstream_job": "sync-search-listings-ar",
+      "downstream_job": "resolve-english-city-overlay",
+      "min_gap_minutes": 9,
+      "why": "resolve_english_city_overlay SELECTs FROM public.search_listings_ar, which sync_search_listings_ar writes. Floor raised 5 -> 9 on 2026-09-11: the sync's max runtime was re-measured at 487.9s (8.1 min) over 167 runs in 7 days."
+    },
+    {
+      "upstream_job": "refresh_listing_native_location_v1",
+      "downstream_job": "sync-search-listings-ar",
+      "min_gap_minutes": 7,
+      "why": "sync_search_listings_ar() selects from listing_native_location_v2, a VIEW referencing the MATVIEW active_listing_ids_v2; jobid 17 refreshes that matview. Floor 7 min: jobid 17 max runtime 360.4s (6.0 min) over 168 runs in 7 days. (ops_incident #143)"
+    },
+    {
+      "upstream_job": "refresh-district-display-canon",
+      "downstream_job": "sync-search-listings-ar",
+      "min_gap_minutes": 2,
+      "why": "sync_search_listings_ar() reads loc_display_district_canon, the ONE canonical user-visible district rendering per (city_id, normalised district) required by SEARCH_MATCH_QA_ENGINEER.md §42.1; jobid 109 rebuilds it. Floor 2 min: jobid 109 max runtime 6.9s over 125 runs in 7 days."
+    }
+  ],
+
+  "schedules": {
+    "refresh-district-display-canon": "8 * * * *",
+    "refresh_listing_native_location_v1": "20 * * * *",
+    "sync-search-listings-ar": "36 * * * *",
+    "resolve-english-city-overlay": "50 * * * *"
+  },
+
+  "_jobids": {
+    "refresh-district-display-canon": 109,
+    "refresh_listing_native_location_v1": 17,
+    "sync-search-listings-ar": 28,
+    "resolve-english-city-overlay": 35
+  },
+
+  "_gaps_as_measured": [
+    "refresh-district-display-canon :08 -> sync-search-listings-ar :36 = 28 min (floor 2)",
+    "refresh_listing_native_location_v1 :20 -> sync-search-listings-ar :36 = 16 min (floor 7)",
+    "sync-search-listings-ar :36 -> resolve-english-city-overlay :50 = 14 min (floor 9)"
+  ]
+}

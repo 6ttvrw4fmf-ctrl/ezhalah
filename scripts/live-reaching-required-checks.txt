@@ -34,7 +34,15 @@ verify-af-compound-predicates.ts        | production-dependent | normal=0 blackh
 verify-orphaned-detector-meta-check.ts  | production-dependent | normal=0 blackhole=1 (2026-09-06). Executes mon_detect_orphaned_detectors()'s decision against an injected candidate; the decision lives in the DB, so the live call IS the check — there may be no hermetic half to keep.
 verify-safety-barrier.ts                | production-dependent | normal=0 blackhole=1 (2026-09-06). Owner-rule field-level safety barrier (silent→NULL, never unknown→NO) read from production state; touches routine #3's surface.
 verify-public-anon-key-still-authenticates.ts | production-dependent | normal=0 blackhole=0 by env, BUT its live probe targets the COMMITTED PUBLIC_SUPABASE_URL constant directly rather than the resolved one, so SUPABASE_URL cannot redirect it. Production-dependent by inspection: its unguarded `await fetch` throws (fails closed, loudly) when production is unreachable. NOTE the env-probe blind spot this row records — a check that hardcodes the endpoint is invisible to the blackhole measurement, so read the source before trusting a blackhole=normal result.
-verify-ui-controls-have-predicates.ts   | production-dependent | normal=0, EZHALAH_SUPABASE_URL blackhole=1 (2026-09-06). Reads af_field_registry live, on purpose ("rather than a copy here, so the check can never drift from the contract it is enforcing"), and fails CLOSED in its catch. Found by THIS barrier's module-graph walk, not by the ad-hoc query that preceded it — it reaches the endpoint through a DYNAMIC `await import()`, which a grep for import lines misses. It also reads its own env var (EZHALAH_SUPABASE_URL) with `??` rather than the `||` scripts/lib/public-supabase.ts documents, so an empty workflow secret would be honoured as a URL.
+# verify-ui-controls-have-predicates.ts — SPLIT 2026-09-12 (routine #10, ops_incident #126), so it is
+#   no longer a candidate at all and its row is DELETED rather than kept (a stale row makes this
+#   ratchet read better than reality, which this barrier's own mutation proof refuses). The live
+#   registry read is now verify-ui-controls-have-predicates-live.ts, homed in
+#   .github/workflows/af-live-truth-check.yml per scripts/test-exclusions.txt. The split ADDED per-PR
+#   coverage: measured with the endpoint blackholed, 20 assertions reading ONLY committed source did
+#   not run, because they sat inside the live fetch's `if` block — including the owner boundary-rule
+#   teeth over src/lib/afPlan.ts. The `??`-vs-`||` divergence this row used to record is fixed in the
+#   live half. Both halves now share one mutation-proven predicate, scripts/lib/uiControlPredicates.ts.
 
 # ── offline-safe: imports the resolver, but its verdict does not depend on reaching production ───
 verify-live-canon-sync.ts               | offline-safe | normal=0 blackhole=0 (2026-09-06)

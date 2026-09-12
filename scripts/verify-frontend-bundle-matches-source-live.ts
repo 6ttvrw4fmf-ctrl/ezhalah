@@ -323,7 +323,17 @@ for (const t of appendedTokens) {
 }
 
 if (mutFail > 0) console.error(`\n✗ ${mutFail} mutation proof(s) FAILED — this barrier can no longer be trusted`);
+// SAY WHAT WAS PROVED, NOT WHAT A READER WISHES HAD BEEN (routine #9, 2026-09-12). This line used
+// to end «— no undeployed drift», a claim about the WHOLE frontend that this check has never made:
+// its subject is the amenity token vocabulary of src/lib/afCohorts.ts and nothing else. On
+// 2026-09-12 it printed that sentence while production was four src/ commits and ~22 hours behind
+// main (two of them P1 user-facing repairs, ops_incident #199 and #211) — all true, all outside this
+// file's subject. The broad question now has its own measured owner, named here so a reader who
+// wants that answer knows where it lives rather than mistaking this one for it.
 console.log(failed === 0 && mutFail === 0
-  ? '\n✓ the live bundle\'s compiled amenity certification matches current main — no undeployed drift'
-  : `\n✗ ${failed + mutFail} check(s) FAILED — the live frontend has drifted behind main. See .github/workflows/deploy-frontend.yml to ship it.`);
+  ? '\n✓ the live bundle\'s compiled AMENITY CERTIFICATION matches current main.'
+    + '\n  Scope: src/lib/afCohorts.ts\'s token vocabulary only — this says nothing about the rest of'
+    + '\n  the frontend. «Is any user-visible commit on main unshipped?» is answered by'
+    + '\n  scripts/verify-undeployed-user-visible-drift-live.ts, in this same workflow.'
+  : `\n✗ ${failed + mutFail} check(s) FAILED — the live frontend's amenity certification has drifted behind main. See .github/workflows/deploy-frontend.yml to ship it.`);
 process.exit(failed === 0 && mutFail === 0 ? 0 : 1);
