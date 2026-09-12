@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  bottomPromptInset, topPromptInset, promptInsets,
+  bottomPromptInset, topPromptInset, promptInsets, promptMeasurementTarget,
   ONE_TAP_IFRAME_SELECTOR, AUTH_PROMPT_SELECTOR, OWN_DOCKED_PROMPT_SELECTOR, DOCKED_PROMPT_SELECTOR,
 } from '../src/lib/bottomPromptInset.ts';
 import { npmTestRuns } from './lib/testRegistry.ts';
@@ -518,6 +518,95 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
       '      if (false) continue;'),
     (m) => m.promptInsets([{ top: 0, bottom: VH_PHONE, height: VH_PHONE, width: VW_PHONE }],
       VH_PHONE, VW_PHONE).bottom !== 0,
+  );
+
+  // ── J. THE MATCHED ELEMENT IS NOT ALWAYS THE MEASURED ONE (ops_incident #202) ─────────────────
+  // Both shapes below are MEASURED, not imagined:
+  //  · chromium, production, 375x812, 2/2 fresh contexts 2026-09-12: #credential_picker_iframe is
+  //    itself position:fixed, 375x144 at 0,668, and NO #credential_picker_container exists.
+  //  · webkit, journey-sweep run 34684276901 job 103528397023, 2/2 on both screens: the GIS iframe
+  //    is position:STATIC 375x150 at 0,20, inside #credential_picker_container position:fixed
+  //    375x158 at 0,20 z-index 9999 pointer-events auto. Eight controls at y=174 read as blocked.
+  type PNode = { id: string; position: string; parentElement: PNode | null };
+  const pnode = (id: string, position: string, parentElement: PNode | null = null): PNode =>
+    ({ id, position, parentElement });
+  const posOf = (n: PNode) => n.position;
+
+  const chromeFrame = pnode('credential_picker_iframe', 'fixed');
+  const wkContainer = pnode('credential_picker_container', 'fixed');
+  const wkFrame = pnode('L5Fo6c-PQbLGe', 'static', wkContainer);
+
+  check('J1. chromium: a frame that is itself fixed resolves to ITSELF — a provable no-op',
+    promptMeasurementTarget(chromeFrame, posOf) === chromeFrame);
+  check('J2. THE DEFECT: webkit\'s static frame resolves to its fixed container, not to the frame',
+    promptMeasurementTarget(wkFrame, posOf) === wkContainer);
+  check('J3. nothing fixed anywhere → the matched element, i.e. today\'s behaviour unchanged',
+    (() => { const p = pnode('p', 'relative'); const f = pnode('f', 'static', p);
+             return promptMeasurementTarget(f, posOf) === f; })());
+  check('J4. null in → null out', promptMeasurementTarget(null, posOf) === null);
+  check('J5. the NEAREST fixed ancestor wins, not the outermost',
+    (() => { const outer = pnode('outer', 'fixed'); const inner = pnode('inner', 'fixed', outer);
+             const f = pnode('f', 'static', inner);
+             return promptMeasurementTarget(f, posOf) === inner; })());
+  check('J6. a fixed ancestor beyond the hop bound is not reached',
+    (() => { let n: PNode = pnode('far', 'fixed');
+             for (let i = 0; i < 9; i++) n = pnode(`s${i}`, 'static', n);
+             return promptMeasurementTarget(n, posOf, 6) === n; })());
+
+  // J7/J8 — the USER-FACING consequence, computed rather than asserted in prose: the 8 px between
+  // the frame's bottom (170) and the container's (178) is exactly where the blocked controls sit.
+  const WK_FRAME_RECT     = { top: 20, bottom: 170, height: 150, width: 375 };
+  const WK_CONTAINER_RECT = { top: 20, bottom: 178, height: 158, width: 375 };
+  const BLOCKED_CONTROL_Y = 174;   // journey-sweep webkit: 8 controls, both screens, 2/2
+  const reservedFrame     = topPromptInset(WK_FRAME_RECT, VH_PHONE, VW_PHONE);
+  const reservedContainer = topPromptInset(WK_CONTAINER_RECT, VH_PHONE, VW_PHONE);
+  check('J7. measuring the FRAME leaves the blocked controls outside the reservation (the defect)',
+    reservedFrame === 170 && BLOCKED_CONTROL_Y > reservedFrame, `reserved ${reservedFrame}px`);
+  check('J8. measuring the CONTAINER brings them inside it (the fix)',
+    reservedContainer === 178 && BLOCKED_CONTROL_Y < reservedContainer, `reserved ${reservedContainer}px`);
+
+  // J9 — the resolver is actually WIRED into the DOM read and the observer, not merely exported.
+  check('J9. readPromptRects measures the resolved target, not the raw match',
+    /function readPromptRects[\s\S]*?measuredElement\(matched\)/.test(original));
+  check('J9b. …and the ResizeObserver watches the resolved target too, or a container resize is missed',
+    /const retarget[\s\S]*?measuredElement\(m\)/.test(original));
+
+  const MUT_POS_LINE = "    if (positionOf(node) === 'fixed') return node;";
+  const wkShape = () => {
+    const c = { id: 'c', position: 'fixed', parentElement: null };
+    return { c, f: { id: 'f', position: 'static', parentElement: c } };
+  };
+
+  // J10 — THE DEFECT ITSELF: the resolver always returns what it was handed.
+  await withMutation(
+    'the measurement target is always the matched element (ops_incident #202 exactly)',
+    (src) => src.replace(MUT_POS_LINE, ''),
+    (m) => { const { c, f } = wkShape();
+             return (m as never as typeof import('../src/lib/bottomPromptInset.ts'))
+               .promptMeasurementTarget(f as never, (n: never) => (n as { position: string }).position) !== c; },
+  );
+
+  // J11 — it resolves on the wrong property, so a static frame never finds its fixed wrapper.
+  await withMutation(
+    'the resolver looks for position:absolute instead of fixed',
+    (src) => src.replace(MUT_POS_LINE, MUT_POS_LINE.replace("'fixed'", "'absolute'")),
+    (m) => { const { c, f } = wkShape();
+             return (m as never as typeof import('../src/lib/bottomPromptInset.ts'))
+               .promptMeasurementTarget(f as never, (n: never) => (n as { position: string }).position) !== c; },
+  );
+
+  // J12 — the walk runs past the nearest fixed node to the outermost one, over-reserving.
+  await withMutation(
+    'the walk keeps going after the nearest fixed ancestor and returns the outermost',
+    (src) => src.replace(MUT_POS_LINE,
+      "    if (positionOf(node) === 'fixed' && !node.parentElement) return node;"),
+    (m) => {
+      const outer = { id: 'o', position: 'fixed', parentElement: null };
+      const inner = { id: 'i', position: 'fixed', parentElement: outer };
+      const f = { id: 'f', position: 'static', parentElement: inner };
+      return (m as never as typeof import('../src/lib/bottomPromptInset.ts'))
+        .promptMeasurementTarget(f as never, (n: never) => (n as { position: string }).position) !== inner;
+    },
   );
 }
 
