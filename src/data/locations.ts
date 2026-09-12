@@ -76,9 +76,12 @@ for (const [id, regionId, en, ar] of DATA.cities) CITY_BY_ID.set(id, { en, ar, r
 // ---------------------------------------------------------------------------------------------
 // Normalization + search keys
 // ---------------------------------------------------------------------------------------------
-// Lowercase, strip Arabic diacritics + tatweel, fold common Arabic letter variants (أإآ→ا, ة→ه,
-// ى/ي→ي) so spelling differences still match, then drop everything that isn't a letter or digit
-// (spaces, dots, commas). Latin and Arabic letters are preserved.
+// The client fold. MUST stay in sync with the DB's norm_district_tok (2026-09-12 owner rule:
+// "the user types the filter with different spelling, our job is to match": ء drop, ئ→ي,
+// Arabic-Indic digits ٠-٩→0-9, tashkeel strip, حي/ال stripping) — those cases are handled by
+// stripAl/stripDistrictWord downstream + this fold, so every match-time comparison a user's
+// typing hits (district picker, city picker, chat resolver, listing safety-net) tolerates the
+// same spellings the DB does. Display text is never routed through this. Latin preserved.
 const norm = (s: string) =>
   s
     .toLowerCase()
@@ -87,6 +90,9 @@ const norm = (s: string) =>
     .replace(/[أإآٱ]/g, 'ا')
     .replace(/ة/g, 'ه')
     .replace(/[ىي]/g, 'ي')
+    .replace(/ئ/g, 'ي')
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/ء/g, '')
     .replace(/[^\p{L}\p{N}]/gu, '');
 // Drop a leading definite article so "narjis" matches "Al Narjis" / "النرجس".
 const stripAl = (s: string) => s.replace(/^al/, '').replace(/^ال/, '');
