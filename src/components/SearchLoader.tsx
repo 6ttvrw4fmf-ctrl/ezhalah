@@ -43,13 +43,24 @@ import {
   type LoaderPlatform,
 } from '@/data/loaderPlatforms';
 import { fetchActivePlatformNames } from '@/data/loaderActivePlatforms';
+import { fetchLoaderScaleStats, type LoaderScaleStats } from '@/data/loaderScaleStats';
 import { PILL_STAGGER, highlightStepMs } from '@/lib/searchLoaderTiming';
+import { buildSearchLoaderTitles } from '@/lib/searchLoaderTitles';
 import type { SearchQuery } from '@/data/search';
+import { grouped } from '@/data/search';
 
 const IS_WEB = Platform.OS === 'web';
 const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
 
 // Rotating searching headlines (owner-approved copy, v4 set — short, alive, smooth cross-fades).
+// EXTENDED 2026-09-12 (owner: "those things are more like marketing... people would be like wow,
+// this has a big database") — three of the six lines below carry a LIVE number instead of static
+// copy: total searchable listings, the platform count (reused from the roster this same screen
+// already computed — never a second, independently-fetched count that could disagree with what's
+// on screen), and city+district coverage. Every number is DERIVED, never hardcoded — see
+// loaderScaleStats.ts and loader_scale_stats_ar(). SOURCE IS TRUTH / "a failed fetch is not an empty
+// answer": if the scale-stats fetch hasn't resolved (or fails), the number-bearing lines fall back to
+// their original plain wording — never a zero, never a stale/guessed figure.
 const SEARCH_TITLES = [
   'Ezhalah is searching the platforms…',
   'Checking the matching properties…',
@@ -173,15 +184,34 @@ function PlatformPill({
 // The headline — minimal, ROTATING while searching (no sentence sits for seconds), with a smooth
 // cross-fade on every change and a continuous gentle shimmer-pulse so the text always reads as
 // actively working. Rotation freezes while exiting. Reduced-motion: static first title, plain fades.
-function PhaseTitle({ phase, rtl, reduced, exiting }: { phase: 'thinking' | 'searching'; rtl: boolean; reduced: boolean; exiting: boolean }) {
+function PhaseTitle({
+  phase, rtl, reduced, exiting, platformCount, scaleStats,
+}: {
+  phase: 'thinking' | 'searching'; rtl: boolean; reduced: boolean; exiting: boolean;
+  // The SAME count the pills on screen show — never an independent fetch that could disagree.
+  platformCount: number;
+  // null until loader_scale_stats_ar() resolves (or forever, on failure) — the two lines that use
+  // it fall back to their original static wording, and the coverage line is simply omitted.
+  scaleStats: LoaderScaleStats | null;
+}) {
   const { t } = useI18n();
   const [titleIdx, setTitleIdx] = useState(0);
+  const titles = useMemo(() => buildSearchLoaderTitles({
+    search: t(SEARCH_TITLES[0]),
+    checking: scaleStats ? t('Checking more than {count} properties…', { count: grouped(scaleStats.listingCount) }) : t(SEARCH_TITLES[1]),
+    matchFilters: t(SEARCH_TITLES[2]),
+    reviewing: platformCount > 0 ? t('Reviewing {count} real-estate platforms…', { count: platformCount }) : t(SEARCH_TITLES[3]),
+    coverage: scaleStats ? t('Covering more than {cities} cities and {districts} districts…', { cities: grouped(scaleStats.cityCount), districts: grouped(scaleStats.districtCount) }) : null,
+    preparing: t(SEARCH_TITLES[4]),
+  }), [t, scaleStats, platformCount]);
   useEffect(() => {
     if (phase !== 'searching' || reduced || exiting) return;
-    const id = setInterval(() => setTitleIdx((i) => (i + 1) % SEARCH_TITLES.length), TITLE_ROTATE_MS);
+    const id = setInterval(() => setTitleIdx((i) => (i + 1) % titles.length), TITLE_ROTATE_MS);
     return () => clearInterval(id);
-  }, [phase, reduced, exiting]);
-  const label = phase === 'thinking' ? t('Ezhalah is thinking…') : t(SEARCH_TITLES[titleIdx]);
+  }, [phase, reduced, exiting, titles.length]);
+  // titles can shrink (e.g. scaleStats arrives, or activeNames narrows the roster) between renders —
+  // clamp so a stale index never reads past the current array's end.
+  const label = phase === 'thinking' ? t('Ezhalah is thinking…') : titles[Math.min(titleIdx, titles.length - 1)];
 
   const v = useSharedValue(1);       // cross-fade on phase/title change
   const pulse = useSharedValue(1);   // continuous soft shimmer
@@ -245,6 +275,17 @@ export default function SearchLoader({
     return () => { cancelled = true; };
   }, []);
 
+  // The "big database" marketing numbers (owner 2026-09-12) — resolved once per mount, same
+  // null-on-failure/no-guess contract as activeNames above. See loaderScaleStats.ts.
+  const [scaleStats, setScaleStats] = useState<LoaderScaleStats | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchLoaderScaleStats().then((stats) => {
+      if (!cancelled && stats) setScaleStats(stats);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   // Roster is computed once per (query, resultSources, activeNames) and FROZEN — `resultSources`
   // arriving later (as the query resolves) only reorders which pills lead; it must never reshuffle
   // or hide pills already on screen. `query` just gates WHEN the strip mounts (a search is actually
@@ -275,7 +316,7 @@ export default function SearchLoader({
       {/* Headline: sparkle + rotating phase text (+ soft dots while thinking) */}
       <View style={[s.titleRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
         <Ionicons name="sparkles" size={15} color={colors.primary} />
-        <PhaseTitle phase={phase} rtl={rtl} reduced={reduced} exiting={exiting} />
+        <PhaseTitle phase={phase} rtl={rtl} reduced={reduced} exiting={exiting} platformCount={platforms.length} scaleStats={scaleStats} />
         {phase === 'thinking' ? <Dots reduced={reduced} /> : null}
       </View>
 
