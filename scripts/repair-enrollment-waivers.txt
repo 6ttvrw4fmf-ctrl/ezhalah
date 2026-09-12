@@ -1,0 +1,15 @@
+# REPAIRS THAT DO NOT NEED A ROW IN ops_repair_guarantee_registry — WITH A REASON, NEVER A MUTE BUTTON.
+#
+# Format:  <14-digit migration version> | <reason>
+#
+# scripts/verify-repair-guarantee-enrollment-live.ts classifies every committed in-era migration
+# with scripts/lib/repairClassifier.ts and requires each repair to be either REGISTERED in the
+# standing orphaned-guarantee registry or waived HERE. A waiver must name why the repaired state
+# cannot drift back — "it looked fine" is not a reason, and the check fails on a reason shorter than
+# 20 characters and on a waiver that no longer matches anything the classifier flags, so this file
+# cannot become a graveyard.
+#
+# Living in git rather than in a table is deliberate: an exemption from a safety rule should take a
+# reviewed pull request, not an INSERT that any session holding the service key can make silently.
+
+20260831195108 | not a repair — the only UPDATE is `city_id = city_id` on search_listings_ar, a self-assignment that writes each row its own existing value purely to fire the set_match_city_ids trigger for the Al-Ahsa/Hofuf cluster. No row changes meaning, so there is no repaired state that can drift back and nothing for a standing detector to watch. The migration's real change is two loc_city_cluster rows (catalog/config, not listing data). Verify by reading the statement: if it ever stops being `city_id = city_id`, this waiver is wrong and the migration needs a registry row instead. Same reasoning, same wording, as the entry this file's merge-time sibling (scripts/verify-repair-migrations-are-guarded.ts WAIVED) already carries for the same file.
