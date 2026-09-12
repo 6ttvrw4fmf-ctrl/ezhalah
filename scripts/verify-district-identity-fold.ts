@@ -105,6 +105,32 @@ check('detector is roster-wired by needle-edit on a unique anchor (never a whole
 check('companion runs the detector GREEN in the same migration',
   /raised % on freshly-repaired state/.test(det));
 
+// ── the AGENT hears the fold too (owner 2026-09-12: «people can say it in both ways … that
+// shouldn't stop them») ───────────────────────────────────────────────────────────────────────────
+const AGENT_MIG = '20260912181017_loc_classify_speaks_the_folded_district_token.sql';
+check('the loc_classify fold migration is committed', migrations.includes(AGENT_MIG), `${AGENT_MIG} not found`);
+const cls = migrations.includes(AGENT_MIG) ? readFileSync(join(MIG_DIR, AGENT_MIG), 'utf8') : '';
+const clsFolded = (s: string) =>
+  (s.match(/public\.norm_district_tok\(d\.district_ar\)/g) ?? []).length >= 1
+  && (s.match(/public\.norm_district_tok\(v\.district_ar\)/g) ?? []).length >= 1;
+check('loc_classify matches district CANDIDATES and INVENTORY via norm_district_tok (no private copy)',
+  clsFolded(cls));
+check('loc_classify city arm still speaks normalize_ar (city identity stays city_id-scoped)',
+  cls.includes('normalize_ar(c.city_ar) = tok_norm'));
+check('the migration proves the three spellings see ONE city set, in-transaction',
+  /identity is still split/.test(cls) && cls.includes("loc_classify('صفا')"));
+
+const agentSrc = readFileSync(join(root, 'supabase/functions/agent/index.ts'), 'utf8');
+const arNormFolded = (s: string) => {
+  const m = s.match(/function arNorm\(s: string\): string \{[\s\S]*?\n\}/);
+  const body = m ? m[0] : '';
+  return body.includes('.replace(/ئ/g, "ي")') && body.includes('.replace(/ء/g, "")')
+    && body.includes('٠١٢٣٤٥٦٧٨٩');
+};
+check('the agent edge arNorm folds like the district token (answers spelled «الاحسا»/«صفاء»/«شرايع» '
+    + 'still match their candidate instead of re-asking)',
+  arNormFolded(agentSrc));
+
 // ── MUTATION PROOF — each pinned property must actually be able to fail ───────────────────────────
 const mustCatch = (label: string, checkPassesOnBrokenInput: boolean) => {
   check(`MUTATION ${label} — the check catches it`, checkPassesOnBrokenInput === false,
@@ -143,6 +169,21 @@ mustCatch('softening the lock-refusal abort into a silent pass',
 const COUNT_ONLY_DETECTOR = det.replace(/norm_district_tok\('الصفاء'\)/g, "'صفا'");
 mustCatch('a detector that stops executing the real fn on the twin spellings',
   COUNT_ONLY_DETECTOR.includes("norm_district_tok('الصفاء')"));
+
+// (e) a loc_classify reverted to its pre-fold district arms (normalize_ar comparisons) must fail
+// the clsFolded pin — this is the exact "third private copy" shape the fix removed.
+const PRE_FOLD_CLASSIFY = cls
+  .replace(/public\.norm_district_tok\(d\.district_ar\)/g, 'normalize_ar(d.district_ar)')
+  .replace(/public\.norm_district_tok\(v\.district_ar\)/g, "normalize_ar(coalesce(v.district_ar,''))");
+mustCatch('loc_classify reverting its district arms to the city normalizer',
+  clsFolded(PRE_FOLD_CLASSIFY));
+
+// (f) an agent edge whose arNorm loses the fold lines must fail the arNorm pin.
+const PRE_FOLD_ARNORM = agentSrc
+  .replace('.replace(/ئ/g, "ي")\n', '')
+  .replace('.replace(/ء/g, "")\n', '');
+mustCatch('the agent edge arNorm losing its ء/ئ fold lines',
+  arNormFolded(PRE_FOLD_ARNORM));
 
 console.log(failed
   ? `\n✗ verify-district-identity-fold: ${failed} check(s) failed.\n`

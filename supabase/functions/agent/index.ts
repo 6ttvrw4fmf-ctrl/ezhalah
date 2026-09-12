@@ -346,13 +346,23 @@ async function locClassify(token: string): Promise<Record<string, unknown> | nul
 // Arabic fold mirroring SQL normalize_ar: unify alef/ta-marbuta/alef-maqsura, drop
 // tatweel + bidi marks, collapse spaces. Used to check whether the user already named
 // one of the catalog candidates (so we don't re-ask a question they've answered).
+// 2026-09-12 (owner district-identity decision): also fold like norm_district_tok —
+// strip tashkeel, ئ→ي, Arabic-Indic digits→ASCII, drop ء — so an answer spelled
+// «الاحسا»/«صفاء»/«شرايع» still matches its candidate («الاحساء»/«الصفا»/«شرائع»)
+// instead of re-asking a question the user already answered. MATCH-ONLY: nothing
+// arNorm touches is ever displayed.
 function arNorm(s: string): string {
   return (s || "")
     .replace(/[‎‏‪-‮؜]/g, "")
     .replace(/ـ/g, "")
+    .replace(/[ً-ْٰ]/g, "")
     .replace(/[أإآٱ]/g, "ا")
     .replace(/ة/g, "ه")
     .replace(/ى/g, "ي")
+    .replace(/ئ/g, "ي")
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/ء/g, "")
+    .replace(/([ء-ي])([0-9])/g, "$1 $2")
     .replace(/\s+/g, " ")
     .trim();
 }
