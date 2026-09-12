@@ -173,13 +173,42 @@ Writers into the inactive state:
 ```
 <platform>_*_listings (active = true)
   → active_listing_ids_v2          MATERIALIZED VIEW; each arm is "... WHERE <table>.active IS TRUE"
-                                   refreshed hourly, pg_cron jobid 17, minute :00
+                                   refreshed hourly, pg_cron jobid 17, minute :20
+                                   (job name is `refresh_listing_native_location_v1`, which
+                                   understates it — the same command refreshes BOTH matviews;
+                                   statement_timeout 900s)
   → listing_native_location_v1 → listing_native_location_v2   (per-listing derived stores)
   → listing_location_index
-  → sync_search_listings_ar()      pg_cron jobid 28 'sync-search-listings-ar', minute :14
+  → sync_search_listings_ar()      pg_cron jobid 28 'sync-search-listings-ar', minute :36
                                    *** STEP 1 OF 5 *** (see below)
   → search_listings_ar             THE SERVED INDEX
 ```
+
+**Those two minutes were WRONG in this file until 2026-09-12, and the error was not cosmetic.** It
+said the producer ran at :00 and the consumer at :14 — a 14-minute gap that reads as correctly
+ordered. Production had the producer at :20 and the consumer at :14, so **the consumer ran six
+minutes BEFORE the producer, every hour**: the sync always read the PREVIOUS hour's aliveness
+snapshot, and every deactivation and every restore reached the user a full cycle late. That is
+`§1.1`'s "immediately" quietly costing an extra hour, and reading this file would have told you it
+was fine. Repaired in production on 2026-09-11 between 13:14 and 14:36 by moving the sync to :36.
+
+Two things to carry forward:
+
+- **`mon_detect_propagation_order_inverted` / `ops_lifecycle_propagation_order_inverted()` watches
+  this now**, and its `observed_overlap` branch looks back **48 hours** — so it stays lit for two
+  days after a genuine repair. An alert of this kind is not evidence the condition is still true;
+  check `cron.job_run_details` for the last actual occurrence before treating it as live. (Measured
+  2026-09-12: 22 reported occurrences, last true one 2026-09-11 13:14, zero since the repair.)
+- **Its message is imprecise in a way that costs investigation time.** The predicate is
+  `cons_start < prod_end`, which is true both when the consumer starts *during* the producer and
+  when it starts *before the producer begins* — and the message asserts only the first ("the sync
+  started while the matview refresh it reads was still running"). What actually happened was the
+  second. Tracked as `ops_incident` #219.
+- **The current gap is correct but thin.** The producer starts at :20 carrying
+  `statement_timeout 900s`, so its worst permitted finish is :35, one minute before the consumer at
+  :36. Observed refresh durations are 60–264s, so real margin is ~11 minutes — but the *permitted*
+  margin is 60 seconds. Widening it is a cron change and an owner-visible timing decision, not a
+  drive-by.
 
 Three properties of this leg that matter more here than anywhere else in the system:
 
