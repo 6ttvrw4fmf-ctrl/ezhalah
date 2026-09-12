@@ -9,9 +9,11 @@
 //   Measured 2026-09-12 by execution, with the endpoint blackholed:
 //     EZHALAH_SUPABASE_URL="https://127.0.0.1:9" node --experimental-strip-types \
 //       scripts/verify-ui-controls-have-predicates.ts
-//   → 14 assertions that read ONLY committed source never executed at all.
+//   → 20 assertions that read ONLY committed source never executed at all (10 of them the
+//     boundary-rule teeth below, plus 4 more afPlan/scope assertions, deed_location_text, and the
+//     5 "interview question exists in the pool" checks).
 //
-// Those 14 included the owner's 2026-08-11 BOUNDARY RULE teeth — "the scope prefix never writes
+// Those 20 included the owner's 2026-08-11 BOUNDARY RULE teeth — "the scope prefix never writes
 // Normal-Filter 'bedrooms' / 'priceMin' / 'location' / …", which read `src/lib/afPlan.ts` and nothing
 // else. They sat inside `if (Array.isArray(registry) && registry.length) { … }`, so a momentary
 // production blip took the owner-boundary guard dark while the run still looked like it had simply

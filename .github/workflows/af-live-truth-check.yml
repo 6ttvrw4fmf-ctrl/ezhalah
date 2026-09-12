@@ -370,7 +370,7 @@ jobs:
       # drift from the contract it enforces. One REST call, <1s.
       #
       # The offline half keeps every assertion that reads only committed source. Measured before the
-      # split: with the endpoint blackholed, 14 such assertions did not run at all, because they sat
+      # split: with the endpoint blackholed, 20 such assertions did not run at all, because they sat
       # inside the live fetch's `if` block — including the boundary-rule TEETH over src/lib/afPlan.ts.
       # Both halves apply the SAME predicate (scripts/lib/uiControlPredicates.ts), which the offline
       # half mutation-proves per-PR against every disagreement shape including a failed read, so NO

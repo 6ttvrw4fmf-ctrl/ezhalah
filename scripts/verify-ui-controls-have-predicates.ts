@@ -26,7 +26,7 @@
 //
 //     EZHALAH_SUPABASE_URL="https://127.0.0.1:9" node --experimental-strip-types \
 //       scripts/verify-ui-controls-have-predicates.ts
-//   → 14 assertions that read ONLY committed source never executed.
+//   → 20 assertions that read ONLY committed source never executed.
 //
 // They sat inside `if (Array.isArray(registry) && registry.length) { … }`, and they included the
 // TEETH of the owner's 2026-08-11 boundary rule — "the scope prefix never writes Normal-Filter
@@ -34,7 +34,7 @@
 // momentary production blip took the owner-boundary guard dark, and a PR that violated that rule in
 // afPlan.ts would have been reported as `TypeError: fetch failed`. That is coverage reading as
 // protection while protecting nothing (docs/ops/BARRIER_ENGINEER.md PART 1) — and the tempting
-// "fix", making the network half tolerant, would have taken those 14 dark permanently.
+// "fix", making the network half tolerant, would have taken those 20 dark permanently.
 //
 // So: every assertion that reads only committed source is here, ungated, and runs on every PR. The
 // LIVE registry read is verify-ui-controls-have-predicates-live.ts, homed in
@@ -44,7 +44,7 @@
 // disagreement shape it is responsible for.
 //
 // NO per-PR coverage was LOST: the assertions that moved are exactly the ones that could not answer
-// from the diff, the predicate deciding them is mutation-proven here on every PR, and 14 assertions
+// from the diff, the predicate deciding them is mutation-proven here on every PR, and 20 assertions
 // that previously DID NOT RUN whenever production was unreachable now always do.
 //
 //   node --experimental-strip-types scripts/verify-ui-controls-have-predicates.ts   (in `npm test`)

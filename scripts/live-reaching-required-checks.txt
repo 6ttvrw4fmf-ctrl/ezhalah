@@ -39,7 +39,7 @@ verify-public-anon-key-still-authenticates.ts | production-dependent | normal=0 
 #   ratchet read better than reality, which this barrier's own mutation proof refuses). The live
 #   registry read is now verify-ui-controls-have-predicates-live.ts, homed in
 #   .github/workflows/af-live-truth-check.yml per scripts/test-exclusions.txt. The split ADDED per-PR
-#   coverage: measured with the endpoint blackholed, 14 assertions reading ONLY committed source did
+#   coverage: measured with the endpoint blackholed, 20 assertions reading ONLY committed source did
 #   not run, because they sat inside the live fetch's `if` block — including the owner boundary-rule
 #   teeth over src/lib/afPlan.ts. The `??`-vs-`||` divergence this row used to record is fixed in the
 #   live half. Both halves now share one mutation-proven predicate, scripts/lib/uiControlPredicates.ts.
