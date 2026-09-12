@@ -1623,6 +1623,114 @@ const fillSupportDraft = async (page) => {
  *  This is the real-browser half of the barrier (PART 5: never a unit test standing in for the
  *  click). `scripts/verify-support-message-contract.ts` executes the cache; this proves the CLICK
  *  a person actually makes no longer destroys their message. */
+/** A SECOND prompt docking on the bottom edge must not UN-reserve the first (ops_incident #201).
+ *
+ *  PART 5 shape 13, one layer down. #152 taught the app root to reserve the cookie card's band so
+ *  «بحث» lays out above it; #163 taught the card to lift clear of a third-party prompt docking on
+ *  the same edge. Both shipped correct and they cancel: once lifted, the card's rect is no longer
+ *  flush with the viewport bottom, `bottomPromptInset()` answers "not docked" and reserves ZERO for
+ *  it — so the card lands back ON the app, which is the exact thing the owner's 2026-09-11 ruling
+ *  forbids.
+ *
+ *  WHY THIS JOURNEY INJECTS ITS OWN PROMPT. Google serves One Tap at its own discretion (cooldown,
+ *  no Google session, opt-out), and PART 5 is explicit that its absence is a SKIP and never a pass.
+ *  A barrier for a two-prompt interaction that can only fire when Google feels like sending the
+ *  second prompt would report a tidy green for as long as the defect was live — PART 9.5's failure
+ *  shape exactly. The injected frame is a real, same-origin-matching `<iframe>` carrying the GIS src
+ *  the app's own DOCKED_PROMPT_SELECTOR matches, docked and spanning exactly as GIS renders it
+ *  (measured 375x144 at 0,668), so the app cannot tell it from the real thing — which is the point.
+ *
+ *  THE ORACLE IS THE ROOT'S OWN RESERVATION, not a rect comparison: the app root View carries
+ *  `paddingBottom: promptInset.bottom` (src/app/_layout.tsx), so what the layout actually did is
+ *  readable directly. Measured on production 2026-09-12, 2/2 fresh contexts, on the UNFIXED bundle:
+ *  272 px reserved with the card alone → 144 px once a prompt docked under it, with the card sitting
+ *  at 396..668 and 272 px of app content beneath it. A reservation that SHRINKS when more is docked
+ *  is the defect, stated as a property rather than as a magic number the data may move. */
+JOURNEYS['docked-prompts-stack'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `docked-prompts-stack:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const SYNTH = 'iframe[data-synthetic-docked-prompt]';
+
+  // The root's reserved bottom band + where the consent card actually is, in one read.
+  const read = () => page.evaluate(() => {
+    let reserved = 0;
+    for (const el of document.querySelectorAll('div')) {
+      const r = el.getBoundingClientRect();
+      // The app root: the full-viewport View that carries the reservation.
+      if (r.width < window.innerWidth - 1 || r.top > 1) continue;
+      const pb = parseFloat(getComputedStyle(el).paddingBottom) || 0;
+      if (pb > reserved) reserved = pb;
+    }
+    const card = document.querySelector('[data-testid="cookie-consent"]');
+    const cr = card && card.getBoundingClientRect();
+    return {
+      reserved,
+      card: cr && cr.height > 0
+        ? { top: Math.round(cr.top), bottom: Math.round(cr.bottom), w: Math.round(cr.width) }
+        : null,
+      vh: window.innerHeight,
+      vw: window.innerWidth,
+    };
+  });
+
+  const before = await read();
+  // No card, no interaction to test. Consent persists once answered, so this is a legitimate
+  // state — and a skip, never a pass (PART 9.5).
+  if (!before.card) { skip(name, 'the cookie consent card is not on screen this run — nothing docks to stack under'); return; }
+  // The card must actually be DOCKED and SPANNING for the root to owe it anything; on desktop it is
+  // the owner's 280 px corner card, which correctly reserves nothing and is not this journey's case.
+  // 0.8 is MIN_SHEET_SPAN_FRACTION — the same threshold src/lib/bottomPromptInset.ts applies.
+  if (!(before.card.w >= before.vw * 0.8)) {
+    skip(name, `the card is a corner card here (${before.card.w}px of ${before.vw}px), not a docked sheet — it reserves nothing by design`);
+    return;
+  }
+  if (!(before.reserved > 0)) {
+    defect(name, 'a docked, spanning consent card reserved NOTHING before any second prompt existed',
+      `card ${before.card.top}-${before.card.bottom} (${before.card.w}px wide), root reserved ${before.reserved}px`);
+    return;
+  }
+
+  await page.evaluate(() => {
+    const f = document.createElement('iframe');
+    // The src is what DOCKED_PROMPT_SELECTOR matches — identity by origin, as the app does it.
+    f.src = 'https://accounts.google.com/gsi/iframe/select?synthetic=journey';
+    f.setAttribute('data-synthetic-docked-prompt', '1');
+    Object.assign(f.style, { position: 'fixed', left: '0px', bottom: '0px', width: '100%',
+                             height: '144px', zIndex: '9999', border: '0' });
+    document.body.appendChild(f);
+  });
+  // Wait on the CONDITION the app reports — the card moving — not on a fixed sleep (PART 11.2).
+  // It may legitimately not move (already clear of the band), so this is a bounded poll, and the
+  // assertion below stands either way.
+  for (let i = 0; i < 20; i++) {
+    const now = await read();
+    if (!now.card || now.card.bottom !== before.card.bottom) break;
+    await sleep(300);
+  }
+  const after = await read();
+  await page.evaluate((s) => document.querySelectorAll(s).forEach((n) => n.remove()), SYNTH);
+
+  if (!after.card) { skip(name, 'the consent card disappeared while the second prompt was docked'); return; }
+
+  const band = after.vh - after.card.top;           // what the card now occupies, from its top down
+  if (after.reserved < before.reserved) {
+    defect(name, 'a SECOND docked prompt SHRANK the reservation the first one had earned',
+      `root reserved ${before.reserved}px → ${after.reserved}px; the card moved `
+      + `${before.card.top}-${before.card.bottom} → ${after.card.top}-${after.card.bottom}, so `
+      + `${band - after.reserved}px of app content is now under an opaque card. ops_incident #201.`);
+  } else if (after.reserved + 1 < Math.min(band, Math.floor(after.vh * 0.5))) {
+    // Not a shrink, but still short of the band the card occupies (allowing the documented 50% cap).
+    defect(name, 'the reservation does not cover the band the consent card occupies',
+      `root reserved ${before.reserved}px → ${after.reserved}px, but the card occupies ${band}px from `
+      + `${after.card.top} down (cap ${Math.floor(after.vh * 0.5)}px), so `
+      + `${Math.min(band, Math.floor(after.vh * 0.5)) - after.reserved}px of app content is under an `
+      + `opaque card. ops_incident #201.`);
+  } else {
+    pass(name, `a second docked prompt grew the reservation ${before.reserved}px → ${after.reserved}px `
+      + `(card ${after.card.top}-${after.card.bottom}), so nothing lays out under it`);
+  }
+  bag.ok = true;
+});
+
 JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `support-draft-survives-dismiss:${mobile ? 'mobile375' : 'desktop1440'}`;
   const why = await openSupport(page, mobile);

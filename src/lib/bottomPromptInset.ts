@@ -210,6 +210,69 @@ export function topPromptInset(
 }
 
 /**
+ * BOTTOM-DOCKED PROMPTS STACK, and the band is the union of the whole stack (ops_incident #201).
+ *
+ * `bottomPromptInset` asks one question of one rect: is your bottom edge flush with the viewport's
+ * (within BOTTOM_ANCHOR_TOLERANCE)? That is exactly right for a lone prompt and silently wrong for
+ * two, because the SECOND prompt to dock does not touch the viewport edge — it rests on top of the
+ * first. Taking `max()` over the individual answers then reserves only the flush one's height and
+ * leaves the upper prompt floating over live app content.
+ *
+ * MEASURED, on production, 375x812, 2/2 fresh contexts (2026-09-12): with no foreign prompt the
+ * cookie consent card is flush (top 540, bottom 812) and reserves its full 272 px. Insert a
+ * bottom-docked GIS frame and `dockedEdgeOffset` correctly lifts the card clear of it (top 396,
+ * bottom 668) — at which point `bottomPromptInset(card) === 0`, because 668 < 812 − 2. The combined
+ * reservation collapses 272 → 144, and 272 px of opaque, `pointer-events: auto` card is over the
+ * app with nothing reserved for it. Both halves shipped correct and cancel each other: #152 taught
+ * the ROOT to reserve the card's band, #163 taught the CARD to clear a foreign prompt.
+ *
+ * The repair is a FIXED POINT over the existing predicate rather than a new one. A rect resting on
+ * a band of height `band` is flush with respect to a viewport whose bottom edge is the band's top,
+ * so each pass simply re-asks `bottomPromptInset` against that shortened viewport. Every guard the
+ * single-rect function already enforces — hidden, zero-height, must-span, the per-rect cap — keeps
+ * applying unchanged, and with `band === 0` the first pass IS today's behaviour, byte for byte,
+ * which is why all twelve of its original cases still read the same.
+ *
+ * Multiple passes because ORDER IS NOT GUARANTEED: `document.querySelectorAll` returns the card
+ * before the frame here, and the card only becomes admissible once the frame's band exists.
+ *
+ * Nothing tracks which rects have already been counted, and deliberately so: re-admission is
+ * prevented by the GEOMETRY, not by bookkeeping. Admitting a rect moves `bandTop` to that rect's
+ * own top, so the next pass asks it for `bandTop − rect.top === 0` and `bottomPromptInset`'s
+ * `!(overlap > 0)` guard returns 0. That is the same line which keeps two prompts resting at the
+ * SAME level from double-counting (case I6), so it is already mutation-proven. A `used` set was
+ * written here first and then removed for cause: no mutation could kill it. The only path on which
+ * a rect is admitted twice is one taller than the per-rect cap, and there the combined cap in
+ * `promptInsets` clamps both the inflated and the correct answer to the identical value — an
+ * unobservable difference, i.e. decoration (PART 11.4).
+ *
+ * Termination does not depend on that argument: `bandTop` never increases, every admission strictly
+ * decreases it, and the pass count is bounded by the number of rects.
+ */
+function bottomStackInset(
+  rects: ReadonlyArray<PromptRect | null | undefined>,
+  viewportHeight: number,
+  viewportWidth: number,
+): number {
+  if (!(viewportHeight > 0)) return 0;
+  // The y of the top of the band reserved so far. Starts at the viewport's own bottom edge.
+  let bandTop = viewportHeight;
+  for (let pass = 0; pass < rects.length; pass++) {
+    let grew = false;
+    for (const rect of rects) {
+      // A full-screen overlay is not a dock on either edge — same rule as the top loop, asked
+      // against the REAL viewport so a shortened band cannot turn a modal into a dock.
+      if (topPromptInset(rect, viewportHeight, viewportWidth) > 0
+          && bottomPromptInset(rect, viewportHeight, viewportWidth) > 0) continue;
+      const b = bottomPromptInset(rect, bandTop, viewportWidth);
+      if (b > 0) { bandTop -= b; grew = true; }
+    }
+    if (!grew) break;
+  }
+  return viewportHeight - bandTop;
+}
+
+/**
  * Both edges at once, over EVERY docked prompt in the document.
  *
  * Two rules that only exist once both edges are in play:
@@ -224,15 +287,15 @@ export function promptInsets(
   viewportHeight: number,
   viewportWidth: number,
 ): PromptInsets {
+  const list = rects ?? [];
   let top = 0;
-  let bottom = 0;
-  for (const rect of rects ?? []) {
+  for (const rect of list) {
     const t = topPromptInset(rect, viewportHeight, viewportWidth);
     const b = bottomPromptInset(rect, viewportHeight, viewportWidth);
     if (t > 0 && b > 0) continue;   // covers the whole viewport: a modal, not a dock
     if (t > top) top = t;
-    if (b > bottom) bottom = b;
   }
+  let bottom = bottomStackInset(list, viewportHeight, viewportWidth);
   const cap = viewportHeight > 0 ? Math.floor(viewportHeight * MAX_INSET_FRACTION) : 0;
   if (top + bottom > cap) {
     // Keep the larger reservation whole rather than halving both into uselessness — a sheet that is

@@ -451,6 +451,74 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
       return i.top + i.bottom > Math.floor(VH_PHONE * 0.5);
     },
   );
+
+  // ── I. BOTTOM-DOCKED PROMPTS STACK (ops_incident #201) ────────────────────────────────────────
+  // Two prompts dock on the same edge and the upper one is NOT flush with it. Every rect below was
+  // MEASURED on production at 375x812, 2/2 fresh contexts, 2026-09-12.
+  const ONE_TAP_DOCKED = { top: 668, bottom: 812, height: 144, width: 375 };
+  const CARD_FLUSH     = { top: 540, bottom: 812, height: 272, width: 375 };
+  const CARD_LIFTED    = { top: 396, bottom: 668, height: 272, width: 375 };
+  // Real DOM order: the consent card lives in the app tree, the GIS frame is appended to <body>
+  // afterwards — so the rect that is NOT yet admissible is enumerated FIRST. Any implementation
+  // that makes a single ordered pass fails on exactly this input and passes on the reverse.
+  const DOM_ORDER = [CARD_LIFTED, ONE_TAP_DOCKED];
+  const CAP = Math.floor(VH_PHONE * 0.5);
+
+  check('I1. with no foreign prompt the flush card still reserves its full height (unchanged)',
+    promptInsets([CARD_FLUSH], VH_PHONE, VW_PHONE).bottom === 272);
+  check('I2. THE DEFECT: a foreign prompt must not collapse the card\'s reservation to its own height',
+    promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom !== 144,
+    `got ${promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom}`);
+  check('I3. the stack reserves up to the TOP of the upper prompt, clamped by the combined cap',
+    promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom === Math.min(VH_PHONE - CARD_LIFTED.top, CAP));
+  check('I4. …and the answer does not depend on enumeration order',
+    promptInsets([ONE_TAP_DOCKED, CARD_LIFTED], VH_PHONE, VW_PHONE).bottom
+      === promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom);
+  check('I5. a lifted card with NOTHING under it is genuinely floating and still reserves nothing',
+    promptInsets([CARD_LIFTED], VH_PHONE, VW_PHONE).bottom === 0);
+  check('I6. two prompts resting at the same level are not double-counted',
+    promptInsets([ONE_TAP_DOCKED, { top: 700, bottom: 812, height: 112, width: 375 }],
+      VH_PHONE, VW_PHONE).bottom === 144);
+
+  // I7 — THE DEFECT ITSELF: the bottom edge reverts to max() over the individual answers.
+  await withMutation(
+    'the bottom edge takes max() per rect instead of stacking (ops_incident #201 exactly)',
+    (src) => src.replace('  let bottom = bottomStackInset(list, viewportHeight, viewportWidth);',
+      '  let bottom = 0;\n  for (const rect of list) {\n'
+      + '    const bb = bottomPromptInset(rect, viewportHeight, viewportWidth);\n'
+      + '    if (bb > bottom) bottom = bb;\n  }'),
+    (m) => m.promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom === 144,
+  );
+
+  // I8 — the fixed point makes a single pass: correct only if the DOM happens to enumerate the
+  // flush prompt first, which it does not.
+  await withMutation(
+    'the stack makes one ordered pass, so a card enumerated before the frame is never admitted',
+    (src) => src.replace('  for (let pass = 0; pass < rects.length; pass++) {',
+      '  for (let pass = 0; pass < 1; pass++) {'),
+    (m) => m.promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom === 144,
+  );
+
+  // I9 — the band stops ACCUMULATING: each admission resets it to that one rect's own height, so
+  // the stack reserves only the topmost prompt instead of everything from it down to the edge.
+  await withMutation(
+    'the band is reset per rect instead of accumulating down the stack',
+    (src) => src.replace('      if (b > 0) { bandTop -= b; grew = true; }',
+      '      if (b > 0) { bandTop = viewportHeight - b; grew = true; }'),
+    (m) => m.promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom
+      !== Math.min(VH_PHONE - CARD_LIFTED.top, CAP),
+  );
+
+  // I10 — the full-screen guard is dropped INSIDE the stack: a modal reserves a band again.
+  await withMutation(
+    'the stack loses its full-screen guard, so a modal is treated as a dock',
+    (src) => src.replace(
+      '      if (topPromptInset(rect, viewportHeight, viewportWidth) > 0\n'
+      + '          && bottomPromptInset(rect, viewportHeight, viewportWidth) > 0) continue;',
+      '      if (false) continue;'),
+    (m) => m.promptInsets([{ top: 0, bottom: VH_PHONE, height: VH_PHONE, width: VW_PHONE }],
+      VH_PHONE, VW_PHONE).bottom !== 0,
+  );
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nAll bottom-prompt-inset checks passed.');
