@@ -54,6 +54,30 @@ export const LOAD_MORE_PAGE_SIZE = 500;
 /** How many rows ONE «عرض المزيد» press may pull before it stops and hands the choice back. */
 export const DRAIN_ROW_BUDGET = 25_000;
 
+// ── THE REVEAL CEILING — the product physically cannot render an unbounded result set ────────────
+// MEASURED ON PRODUCTION, 2026-09-12, unmodified code. The results list is UNVIRTUALIZED, so a
+// press that reveals its whole matched set mounts one card component per match:
+//     الخبر        5,706 matching → press 2 drains ~10 pages in 82s and reveals all 5,706. Fine.
+//     الرياض/إيجار/سنوي 20,782    → press 2 drains 40 pages and the RENDERER PROCESS CRASHES.
+// The JS heap sat flat at ~195 MB through the entire fetch, so this is not the rows — it is mounting
+// ~20,000 cards at once. A user on the single most common search in the product who presses
+// «عرض المزيد» twice gets a dead tab.
+//
+// So the owner's 2026-09-11 rule — a later press "drains every remaining page and finishes the
+// search" — holds wherever it CAN hold, and stops short of a crash where it cannot. A press reveals
+// at most DRAIN_REVEAL_MAX new cards; if matches remain, «عرض المزيد» stays offered and the search
+// is NOT marked finished, so nothing is lost and the user keeps browsing. Rows already buffered
+// make the next press instant — it reveals from memory before asking the network for anything.
+// Every cohort at or under this ceiling still drains and finishes in ONE press exactly as before,
+// which is the common case.
+//
+// THE NUMBER IS A SAFETY CEILING, NOT A UX PREFERENCE, and it is deliberately conservative: the one
+// size proven to render is 5,706 on a 4-core/16 GB container, and real users are on phones that will
+// give out far earlier. 2,000 keeps a 2.8× margin under the only measured-good point while staying
+// 20× BROWSE_BATCH. The real answer is a virtualized list; until then this is the bound that keeps
+// the tab alive. Revisit it with a measurement, never with a guess.
+export const DRAIN_REVEAL_MAX = 2_000;
+
 /** Pages one press may walk = the row budget over the page size actually used. Never a bare count. */
 export function drainPageBudget(pageSize: number, rowBudget: number = DRAIN_ROW_BUDGET): number {
   const size = Math.max(1, Math.floor(pageSize));

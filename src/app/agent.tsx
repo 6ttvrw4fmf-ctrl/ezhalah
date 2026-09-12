@@ -58,7 +58,7 @@ import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
-import { resultCounts, closingNoteKey, nextBatchTarget, drainPageBudget, LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
+import { resultCounts, closingNoteKey, nextBatchTarget, drainPageBudget, LOAD_MORE_PAGE_SIZE, DRAIN_REVEAL_MAX } from '@/data/resultCount';
 import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRowVisible } from '@/lib/afBrowsingGate';
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -1443,7 +1443,14 @@ export default function Agent() {
     // press to force when nothing is left to earn it. An unknown total (Infinity) just means "the
     // plain next hundred," never a fabricated boundary.
     const alreadyExpandedOnce = cur > initialReveal(m.result);
-    const target = alreadyExpandedOnce ? Infinity : nextBatchTarget(cur, m.result.matchTotal ?? Infinity);
+    // A later press drains — but bounded by DRAIN_REVEAL_MAX, because the list is unvirtualized and
+    // revealing a whole 20,782-match cohort CRASHES the renderer (measured on production
+    // 2026-09-12; see the constant's note). Every cohort that fits under the ceiling still drains
+    // and finishes in one press exactly as the owner's 2026-09-11 rule says; a bigger one reveals
+    // the ceiling, keeps «عرض المزيد» offered and is never marked finished. Bounding the TARGET
+    // also bounds the fetch loop — the same press used to pull 40–50 pages (one tap = 50 search
+    // RPCs against a 2-vCPU instance); it now pulls the four or so it can actually show.
+    const target = alreadyExpandedOnce ? cur + DRAIN_REVEAL_MAX : nextBatchTarget(cur, m.result.matchTotal ?? Infinity);
     // De-dup against the CLOSURE copy (same data the message holds) so the merge is exact.
     const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
     const add: typeof m.result.listings = [];
