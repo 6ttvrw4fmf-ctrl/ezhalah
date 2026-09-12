@@ -74,11 +74,19 @@ now EXECUTES every grandfather claim this file makes against the actual list, so
 cannot drift back out of truth without a red check.
 
 And the second measured fact: `scripts/verify-new-barriers-are-mutation-proven.ts` prints, on every
-run, `barriers: N · grandfathered: N · held to the rule: N`. At the time of writing that reads
-**363 · 333 · 30** (the audit that authorised this routine measured 362 · 333 · 29 earlier the same
-day). **Read the printed line every run; never quote a number from prose, including this
-paragraph.** The gap between "held to the rule" and "barriers" IS this routine's backlog, and the
-number is supposed to move.
+run, `barriers: N · grandfathered: N · held to the rule: N`. Measured 2026-09-12 it reads
+**492 · 310 · 182** (it read 363 · 333 · 30 when this spec was written, and 362 · 333 · 29 in the
+audit that authorised the routine). **Read the printed line every run; never quote a number from
+prose, including this paragraph** — the refresh above is a courtesy to the next reader, not a source.
+The gap between "held to the rule" and "barriers" IS this routine's backlog, and the number is
+supposed to move.
+
+A second ratchet worth reading on the way in, same rule — never quote it from here:
+`scripts/verify-required-suite-is-hermetic.ts` prints
+`required run set · live-reaching candidates · production-dependent (ceiling)`, which on 2026-09-12
+reads **436 · 9 · 4 (ceiling 4)**. `production-dependent` is shrink-only and every member is a check
+in the REQUIRED `npm test` whose verdict is decided by production rather than by the diff. Shrink it
+by SPLITTING, never by weakening: see AGENTS.md, "The required suite is HERMETIC".
 
 ## §S — SENTRY and your incident queue (mandatory, every run, first)
 
