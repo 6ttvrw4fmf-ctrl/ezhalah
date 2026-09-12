@@ -129,6 +129,44 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   orphaned-guarantee bug wearing a registry as a disguise. When another routine lands a repair and
   does not register it, register it yourself on the next run rather than filing a request; the
   routine that keeps the registry honest is this one.
+
+  **ENROLLMENT IS NOW MACHINE-CHECKED, AND IT IS NOT `mon_detect_repair_guarantee_stale()`'S JOB
+  (2026-09-12).** That detector has exactly two limbs — a REGISTERED repair nothing watches, and a
+  REGISTERED repair nothing re-verified — and **both take the registry as their universe**, so
+  neither can see a repair that was never entered. The paragraph above therefore depended entirely
+  on somebody remembering, and measured on the day this was written it had not been: **28 strict-era
+  listing repairs committed and live, 9 of them never enrolled**, five landed in the previous 24
+  hours, including *both halves of an aqarmonthly district-suffix backfill* — the exact repair family
+  this registry exists for. The gap was self-referential: the asset built to catch decayed guarantees
+  could not catch a guarantee that never arrived.
+  - `scripts/verify-repair-guarantee-enrollment-live.ts` is the enrollment limb, homed in
+    `.github/workflows/repair-enrollment-guard.yml` (schedule + push to `main`), raising
+    `repair_guarantee`/`repair_guarantee_unenrolled` and self-healing on a clean run.
+  - `scripts/verify-repair-guarantee-enrollment.ts` is its hermetic half in `npm test`: the waiver
+    file's honesty, the homing proof, and twelve mutants on the shared rule.
+  - **The classifier now lives once**, in `scripts/lib/repairClassifier.ts`, imported by BOTH this
+    and the merge-time `scripts/verify-repair-migrations-are-guarded.ts`. Do not re-implement it in
+    SQL so a `mon_detect_*` can run it: that was tried, and executed against the same corpus the SQL
+    twin **missed six of the 28 repairs** (Postgres ARE applies one greediness decision to a whole
+    regex, so the function-body strip swallowed the executed `UPDATE` after it). A second copy of a
+    safety predicate that under-detects reports green over exactly the repairs it cannot see.
+  - A genuine non-repair goes in `scripts/repair-enrollment-waivers.txt` **with a reason**, never
+    into the registry with an empty detector. The check fails on a reasonless waiver and on one that
+    no longer matches anything the classifier flags, so that file cannot become a graveyard.
+  - The enrollment read **fails closed on the friendly-looking failure**:
+    `ops_repair_guarantee_registry` is RLS-protected and an anon read of it returns **HTTP 200 with
+    `[]`**. A zero-row registry is treated as UNREADABLE, never as "nothing is enrolled" — otherwise
+    a permissions failure would report every repair on the list as unenrolled.
+
+  **The verdict vocabulary has a known gap: there is no `superseded`.** `last_verdict` is
+  CHECK-constrained to `holds` / `violated` / `detector_missing` / `undetermined`, and on 2026-09-12
+  two entries (`20260720171946`, `20260720172500` — "the Al-Ahsa cluster alias never re-appears")
+  turned out to assert an invariant a LATER OWNER DECISION deliberately reversed: `loc_city_cluster`
+  carries city_id 3677 and 12 under `cluster_key = 'al_ahsa'` again, written by `20260831195108`. The
+  rows are correct and it is the ENTRY that is now wrong, so `violated` would be a lie and
+  `undetermined` is the least-wrong value. Recorded in `last_detail` with an owner ask. If this shape
+  recurs, adding the value is a one-line CHECK change — but it is a schema change, so it needs the
+  usual migration + mirror, not a quiet edit.
 - **Deploy-claim vs. served-bundle reconciliation.** A workflow run marked `success` or `failure` is
   a claim, not a fact — verify what `ezhalah-app.vercel.app` is actually serving independently of
   what CI says about itself.
