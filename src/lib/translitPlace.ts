@@ -185,7 +185,7 @@ function normAr(s: string): string {
     .replace(/[ً-ٰٟ]/g, '').replace(/ـ/g, '')
     .trim()
     .replace(/^ال?حي\s+/, '').replace(/^حى\s+/, '')
-    .replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي')
+    .replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/ئ/g, 'ي').replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)).replace(/ء/g, '')
     .replace(/\s+/g, ' ').trim();
 }
 // Tidy an English catalog name for display: drop the "Dist."/"District"/"Neighborhood" markers.

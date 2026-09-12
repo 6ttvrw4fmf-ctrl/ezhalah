@@ -1432,10 +1432,14 @@ Deno.serve(async (req: Request) => {
           const pick = cities.find((c) => said(String(c.city_ar)));
           if (pick) { location = String(pick.city_ar); districtPin = `حي ${nm}`; }
           else if (!alreadyAsked && cities.length > 1) {
-            const top = cities.slice(0, 8);
-            const lines = top.map((c) => `• ${c.city_ar}`).join("\n");
-            const more = cities.length > top.length ? "\n• أو مدينة أخرى" : "";
-            ambiguityReply = `حي ${nm} موجود في أكثر من مدينة. تقصد حي ${nm} في أي مدينة؟\n${lines}${more}`;
+            // Owner 2026-09-12: one natural sentence, not a bulleted list. "بالمناسبة، حي X موجود
+            // في أكثر من مدينة — A، B، وC — أي وحدة منها تقصد؟"
+            const top = cities.slice(0, 8).map((c) => String(c.city_ar));
+            const more = cities.length > top.length ? "، أو مدينة أخرى" : "";
+            const list = top.length > 1
+              ? `${top.slice(0, -1).join("، ")}، و${top[top.length - 1]}`
+              : top[0];
+            ambiguityReply = `بالمناسبة، حي ${nm} موجود في أكثر من مدينة — ${list}${more} — أي وحدة منها تقصد؟`;
           }
         } else if (ck === "region" && !alreadyAsked) {
           // RESTORED CASE (round 2, LOST LOCATION-AMBIGUITY CASES) — a plain region with no

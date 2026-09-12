@@ -35,11 +35,15 @@ export function sanitizeArabicSearch(raw: string): SanitizedSearch {
   return { text, hadLatin };
 }
 
-/** Same folding the rest of the app uses for Arabic comparison (mirrors normalize_ar/norm_ar). */
+/** Client fold — MIRRORS the DB's norm_district_tok (owner 2026-09-12: "user types with different
+ *  spelling, our job is to match"): ء drop, ئ→ي, Arabic-Indic digits ٠-٩→0-9, plus the
+ *  pre-existing alef/ta-marbuta/alef-maqsura/tatweel folds. Match-only — display text is never
+ *  routed through this. Keep in step with src/data/locations.ts `norm` and the edge's arNorm. */
 export function normalizeArabic(s: string): string {
   let out = (s ?? '').toLowerCase();
   for (const a of 'أإآٱ') out = out.split(a).join('ا');
-  out = out.split('ة').join('ه').split('ى').join('ي').split('ـ').join('');
+  out = out.split('ة').join('ه').split('ى').join('ي').split('ئ').join('ي').split('ـ').join('').split('ء').join('');
+  out = out.replace(/[ً-ٟ]/g, '').replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
   return out.replace(/\s+/g, ' ').trim();
 }
 
