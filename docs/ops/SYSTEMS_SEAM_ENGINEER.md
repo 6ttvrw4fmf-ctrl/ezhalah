@@ -293,6 +293,34 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   figure. It is left byte-exact deliberately — it is the record of what production RAN, and drift
   condition #5 compares the mirror against it. This section supersedes it.
 
+  **RE-MEASURED 2026-09-12, AND THE 203–371 s FIGURE ABOVE NO LONGER HOLDS — THE MIGRATION'S ~15-20 s
+  DOES.** Every P0 raised in the seven days to 2026-09-12 was delivered in **17–23 s**, nine of nine,
+  worst case **23.0 s against the 300 s SLO — zero breaches**, and `mon_detect_p0_delivery_sla()` has
+  no open alert of any limb:
+
+  | alert | kind | raised | `dispatched_at − created_at` |
+  |---|---|---|---|
+  | 2489 | silent_scraper_death | 2026-09-12 04:24 | **22.0 s** |
+  | 2327 | silent_scraper_death | 2026-09-11 04:24 | **18.0 s** |
+  | 2051 | silent_scraper_death | 2026-09-09 04:24 | **17.0 s** |
+  | 1803 | silent_scraper_death | 2026-09-07 04:24 | **21.0 s** |
+  | 1635 | deleted_but_source_live | 2026-09-06 05:07 | **19.9 s** |
+
+  Confirmed end to end rather than inferred from the column: a synthetic P2 raised 11:07:58 had its
+  GitHub issue (#2381) **created at 11:08:27 — 29 s** — and closed 9 s after the alert was resolved.
+  `dispatched_at` still has exactly one writer, so these are issue-filed times, not enqueue times.
+
+  **What changed is the TRIGGER, not the workflow.** `gh-alert-dispatch-backstop` (cron jobid 83,
+  `24 * * * *`) fires `alert-dispatch.yml` **from the database** instead of waiting for GitHub's own
+  scheduler, which is what the 203–371 s measurement was actually measuring. Eight of the nine P0s
+  above were born at `:24` or `:07` and went out ~20 s later.
+
+  **This changes nothing that is a RULE.** The SLO stays 300 s; limbs 1–3 stay as they are; the
+  destination stays an **OWNER input** — a mechanism that meets the SLO into a sink is still not the
+  SLO being met. What it changes is the engineering conclusion this section drew from a stale
+  measurement: a direct webhook is no longer the *only* path that can meet 300 s, so do not treat
+  "we must add a webhook channel" as settled. Re-measure before acting on either figure.
+
   **What that chaining COSTS, and what watches it (2026-08-29).** `alert_event.created_at` defaults
   to `now()` = **transaction start**, so a P0's 5-minute clock starts when the *sweep* starts and the
   sweep's whole runtime is spent before dispatch begins — sweep duration is now the dominant term in
