@@ -593,6 +593,14 @@ export default function Agent() {
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typed, setTyped] = useState('');
+  // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
+  // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
+  // results with no composer at all; free-text follow-up chat exists ONLY on a conversation that
+  // started in the AI Agent itself. Refine chips are unaffected — this hides only the typed-input
+  // row, never the whole composerWrap (which also carries the listings disclaimer, kept always-on).
+  // Reset to false by startFresh() like every other per-conversation flag (chatIdRef, afCarryRef),
+  // so a brand-new AI-chat search after a filter search gets its composer back.
+  const [filterOrigin, setFilterOrigin] = useState(false);
   // Rotating-example interaction latch (owner brief §6): the FIRST click/tap into the composer, the
   // first typed character, or a mic tap stops the rotating placeholder for good — it never fights
   // the user and never restarts mid-session. Only a genuinely fresh empty chat (sendGreeting: New
@@ -2849,6 +2857,7 @@ export default function Agent() {
       setBusy(false);
       setMsgs([]);                                         // new search = a clean chat view
       chatIdRef.current = null;                            // new conversation → new sidebar chat (a restore re-sets it)
+      setFilterOrigin(false);                              // default: has a composer, until the `filter` branch below says otherwise
       // The Advanced Filter carry belongs to the conversation being left. It is only ever WRITTEN on
       // a «تحديد أكثر» tap, so without this a brand-new search inherited the previous chat's answered
       // set and opened its first round already believing those questions were resolved — and, since
@@ -2909,6 +2918,7 @@ export default function Agent() {
         writeFilterStore(q);
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
         startFresh();
+        setFilterOrigin(true); // this whole screen instance came from «بحث» — no composer (see the flag's own comment above)
         if (replay === '0') void openSaved(hid, q, override);
         else sendFilter(q, override);
         // Intent consumed — including for a sidebar replay, so refreshing a REOPENED chat also lands
@@ -3588,6 +3598,18 @@ export default function Agent() {
             restore this same state from `completed`. */}
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
+            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): only the input row is gated — the
+                disclaimer below stays always-on regardless of origin (it's a listings-source legal
+                notice, not part of "the chat"). See filterOrigin's own comment above.
+                `|| busy || revealing` (fixed same-day, caught by web-runtime-smoke's own [E] Stop
+                journey): a Filter search still becomes an in-flight fetch the moment it lands here,
+                and Stop-then-restore-to-Filter (verify-filter-stop-cancels-and-restores.ts, a
+                separate, pre-existing owner rule) needs the composer's own Stop control to exist
+                while `busy`/`revealing` — hiding the WHOLE composer unconditionally also hid Stop,
+                so an in-flight Filter search could no longer be cancelled. Not "chat" either way:
+                the busy/revealing ternary a few lines down only ever shows Stop OR mic+send, never
+                both, so this window shows the input row + Stop, never a usable send path. */}
+            {(!filterOrigin || busy || revealing) && (
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
@@ -3767,6 +3789,7 @@ export default function Agent() {
                 </Pressable>
               </View>
             </View>
+            )}
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
             </Text>

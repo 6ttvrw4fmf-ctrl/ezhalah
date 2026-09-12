@@ -891,23 +891,26 @@ try {
       const loadMorePager = await page.locator('[data-testid="results-load-more"]:visible').count();
       check('[J] ≤ 50 → no «عرض المزيد» pager is offered — every remaining listing is already revealed',
         loadMorePager === 0, `final=${jFinal} pager=${loadMorePager}`);
-      const lockedComposer = await page.locator('textarea[readonly][placeholder*="أُغلقت هذه المحادثة"]:visible').count();
-      check('[J] ≤ 50 → the chat is COMPLETED: the composer locks (readOnly + «أُغلقت هذه المحادثة…» placeholder)',
-        lockedComposer === 1, `final=${jFinal} lockedComposer=${lockedComposer}`);
-      const liveComposer = await page.locator('textarea:not([readonly]):visible').count();
-      check('[J] ≤ 50 → no LIVE text input remains (the locked box is the only one)',
-        liveComposer === 0, `liveInputs=${liveComposer}`);
-      // The lock replaces the send arrow only once the card reveal SETTLES — while the ≤50 set is
-      // still dripping in, the button is deliberately the Stop box (tap to freeze the reveal), so
-      // poll rather than sample: 48 cards at the reveal cadence take ~40s on a CI runner.
-      let lockBtn = 0;
+      // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11 — supersedes the "locked composer" look
+      // asserted here until the same day): this whole journey is Filter-originated (started via
+      // `tap('بحث')` on the Filter Home, never the AI Agent composer — agent.tsx's `filterOrigin`
+      // flag is true for every journey in this file that begins that way). A completed (≤50)
+      // FILTER-origin chat therefore has NO composer at all — not the readonly-locked textarea +
+      // disabled-lock send button an AI-CHAT-originated completion still gets (journey [G] proves
+      // that shape separately, and unlike this journey it never taps «بحث» on the Filter Home).
+      // Poll rather than sample once: while the ≤50 set is still dripping in (`revealing`), the
+      // composer briefly still renders — Stop must survive an in-flight reveal too, a SEPARATE
+      // owner rule (see agent.tsx's gate: `!filterOrigin || busy || revealing`) — so a same-instant
+      // zero-count would be coincidental timing, not proof of the actually-settled state this
+      // assertion is about.
+      let composerEls = -1;
       for (const deadline = Date.now() + 90_000; Date.now() < deadline; ) {
-        lockBtn = await page.locator(`[aria-label*="أُغلقت هذه المحادثة"][aria-disabled="true"]`).count();
-        if (lockBtn >= 1) break;
+        composerEls = await page.locator('textarea:visible, [aria-label*="أُغلقت هذه المحادثة"]:visible').count();
+        if (composerEls === 0) break;
         await page.waitForTimeout(1_000);
       }
-      check('[J] ≤ 50 → once the reveal settles, the send button is a disabled lock carrying the closed-chat label',
-        lockBtn >= 1, `lockBtn=${lockBtn}`);
+      check('[J] ≤ 50, Filter-origin → once the reveal settles, there is NO composer at all (not even a locked one)',
+        composerEls === 0, `composerEls=${composerEls}`);
     } else if (Number.isFinite(jFinal)) {
       console.log(`NOTE  [J] landed at ${jFinal} (> 50) — completion assertions not owed; the interview is right to continue`);
     }
