@@ -7,6 +7,13 @@
 // part of this change (owner-confirmed scope) — only the typed-input row disappears; the always-on
 // listings-source disclaimer (a legal notice, not "the chat") must still render either way.
 //
+// `|| busy || revealing` (same-day fix, caught by web-runtime-smoke's own "[E] Stop control appears
+// while the Filter search is running" journey): the FIRST version of this gate hid the composer
+// unconditionally, which also hid its own Stop control — breaking the separate, pre-existing owner
+// rule that an in-flight Filter search must stay cancellable
+// (verify-filter-stop-cancels-and-restores.ts). The busy/revealing ternary a few lines below only
+// ever shows Stop OR mic+send, never both, so this window is never a usable "chat" either way.
+//
 //   node --experimental-strip-types scripts/verify-filter-results-no-composer.ts  (in `npm test`)
 import { readFileSync } from 'node:fs';
 
@@ -41,9 +48,12 @@ check('that ONE call site sits in the `?filter=` branch, right after startFresh(
 check('the seed-chip path (a chip, NOT the Filter) never sets it true',
   !/lastSeedRef\.current = seed;[\s\S]{0,300}setFilterOrigin\(true\)/.test(code));
 
-console.log('\n── JSX: the composer is gated, the disclaimer never is ──');
+console.log('\n── JSX: the composer is gated, the disclaimer never is, Stop survives ──');
+const GATE = /\{\(!filterOrigin \|\| busy \|\| revealing\) && \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/;
 check('composerWrap exists and the gate immediately precedes the composer View',
-  /\{!filterOrigin && \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/.test(code));
+  GATE.test(code));
+check("the gate is `!filterOrigin || busy || revealing` — NOT bare `!filterOrigin` (that shape hid Stop mid-search, the exact regression web-runtime-smoke caught)",
+  !/\{!filterOrigin && \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/.test(code));
 // The disclaimer must sit right after the LITERAL `)}` that closes THIS conditional, with nothing
 // else between them — i.e. `</View>\n            )}\n            <Text style={s.disc}>` verbatim.
 // This is a direct adjacency check (not a paren-balance heuristic), so it cannot be fooled by a
@@ -53,15 +63,24 @@ check("the disclaimer sits IMMEDIATELY after the gate's own closing `)}` (outsid
   closeThenDisc.test(code));
 
 console.log('\n── mutation proof: this check actually fails on the regressions it exists to catch ──');
-// Mutation 1: someone "simplifies" the JSX by dropping the `{!filterOrigin && ( ... )}` wrapper
-// entirely, leaving the composer unconditional again (the ORIGINAL bug this barrier prevents).
+// Mutation 1: someone "simplifies" the JSX by dropping the whole gate wrapper entirely, leaving the
+// composer unconditional again (the ORIGINAL bug this barrier prevents).
 const mutatedNoGate = agent.replace(
-  '{!filterOrigin && (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>',
+  '{(!filterOrigin || busy || revealing) && (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>',
   '<View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>',
 );
 mustCatch('removing the gate (composer unconditional again)',
-  !/\{!filterOrigin && \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/.test(decomment(mutatedNoGate)));
-// Mutation 2: the gate stays, but someone moves the disclaimer's closing `)}` to AFTER the
+  !GATE.test(decomment(mutatedNoGate)));
+// Mutation 2 (the REAL regression this barrier shipped without, caught only by CI's browser smoke
+// test): someone "simplifies" the gate back down to bare `!filterOrigin`, which reads as equally
+// correct by eye but hides Stop while a Filter search is in flight.
+const mutatedBareGate = agent.replace(
+  '{(!filterOrigin || busy || revealing) && (',
+  '{!filterOrigin && (',
+);
+mustCatch('narrowing the gate back to bare `!filterOrigin` (Stop becomes unreachable mid-search)',
+  mutatedBareGate !== agent && !GATE.test(decomment(mutatedBareGate)));
+// Mutation 3: the gate stays, but someone moves the disclaimer's closing `)}` to AFTER the
 // disclaimer instead of before it — i.e. accidentally pulls the disclaimer INSIDE the gated block,
 // hiding the legal notice along with the composer on Filter-origin screens.
 const mutatedDiscInside = agent.replace(

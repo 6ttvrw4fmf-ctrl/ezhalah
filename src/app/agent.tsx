@@ -3571,8 +3571,16 @@ export default function Agent() {
           <View style={[s.col, s.composerCol]}>
             {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): only the input row is gated — the
                 disclaimer below stays always-on regardless of origin (it's a listings-source legal
-                notice, not part of "the chat"). See filterOrigin's own comment above. */}
-            {!filterOrigin && (
+                notice, not part of "the chat"). See filterOrigin's own comment above.
+                `|| busy || revealing` (fixed same-day, caught by web-runtime-smoke's own [E] Stop
+                journey): a Filter search still becomes an in-flight fetch the moment it lands here,
+                and Stop-then-restore-to-Filter (verify-filter-stop-cancels-and-restores.ts, a
+                separate, pre-existing owner rule) needs the composer's own Stop control to exist
+                while `busy`/`revealing` — hiding the WHOLE composer unconditionally also hid Stop,
+                so an in-flight Filter search could no longer be cancelled. Not "chat" either way:
+                the busy/revealing ternary a few lines down only ever shows Stop OR mic+send, never
+                both, so this window shows the input row + Stop, never a usable send path. */}
+            {(!filterOrigin || busy || revealing) && (
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size

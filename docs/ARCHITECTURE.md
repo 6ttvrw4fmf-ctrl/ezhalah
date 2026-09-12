@@ -201,14 +201,29 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   `FIRST_PAGE = 25`, "Show all results" up to 200. Zero results → neutral suggestion, no cards.
 - **Greeting:** brand word only (`ازهله`), types itself out on a fresh empty chat; example-prompt chips
   appear after (guests only), gone once a search happens.
+- **Filter results have no chat composer (owner, 2026-09-11).** Filter and the AI Agent share this one
+  screen; a Filter search arrives via the `?filter=` route param. The `filterOrigin` state flag is set
+  `true` only in that arrival branch (reset to `false` by `startFresh()`, same lifecycle as every other
+  per-conversation flag here) and gates the composer's `<View>` — `{(!filterOrigin || busy || revealing)
+  && (...)}`. **Only the free-text input row (input box, mic, send arrow) disappears** — refine chips and
+  «تحديد أكثر» (Advanced Filter) stay fully available, and so does the composer's own Stop control while
+  `busy`/`revealing` (an in-flight Filter search must stay cancellable —
+  `verify-filter-stop-cancels-and-restores.ts` is a separate, older owner rule this must never break;
+  the FIRST version of this gate did, silently, until `web-runtime-smoke`'s own Stop journey caught it).
+  The always-on listings-source disclaimer is a legal notice, not "the chat", and is never gated.
+  Barrier: `scripts/verify-filter-results-no-composer.ts`.
 
 ### 6.2 Agent behavior rules (neutrality / compliance)
 
 Never recommends/ranks/says "best"; advice queries return a decline. Neutral results copy ("I found a
-few properties…"). **Max 2 clarifying questions**, then search with whatever is known. **Never invent a
-location** (bare district in multiple cities, twin city, region-or-city same name, geography/proximity
-cue with no city → ask, never guess; a city the user never typed is stripped). Naming **Gathern forces
-Rent + monthly**. Guests are search-first; logged-in users get conversational help and search on an
+few properties…"). **ONE clarifying question, about location only (owner, 2026-09-11, supersedes the
+older "max 2" ceiling)** — enough info + a resolvable location searches immediately with zero questions;
+missing/ambiguous location asks exactly once, then searches (or, once that one question is spent and
+still unresolved, states plainly that it can't narrow the search rather than asking again or defaulting
+to nationwide). See `supabase/functions/agent/decide.ts`'s `QUESTION_BUDGET_CEILING` and its
+`unsearchable` result. **Never invent a location** (bare district in multiple cities, twin city,
+region-or-city same name, geography/proximity cue with no city → ask, never guess; a city the user
+never typed is stripped). Naming **Gathern forces Rent + monthly**. Guests are search-first; logged-in users get conversational help and search on an
 explicit order. Distress input → supportive non-real-estate reply. **Authoritative model behavior lives
 in the edge `agent` function + `agent_notes` DB table**, not in the client (the client only backstops
 deterministically).
