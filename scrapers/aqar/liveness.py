@@ -52,6 +52,35 @@ DEAD_MARKERS = (
 )
 
 
+def evidence_row(source_table: str, listing_id: int, http_status: Optional[int], verdict: str,
+                 mc_before: int, mc_after: int, *, applied: bool) -> dict:
+    """One `aqar_liveness_detail` row. Module-level and pure so it can be asserted directly.
+
+    EVIDENCE ONLY — nothing here decides anything. It records the reading that a branch in main()
+    has ALREADY acted on, so the question "why was this row deactivated" can be answered from our
+    own data instead of from expiring GitHub Actions logs.
+
+    Two invariants worth naming because getting them wrong would turn an audit trail into a lie:
+
+      * `http_status` is NULL when no response arrived, per the table's own column comment. The
+        sweep carries `status = 0` for that case and 0 is not an HTTP status — writing it would
+        record a fetch that never happened as if the source had answered.
+      * `applied` is False whenever the row was not actually changed: a --report-only verify run, or
+        a transient reading (which applies nothing at all, LISTING_LIVENESS.md §1). An UNKNOWN must
+        never be readable back as a death.
+    """
+    return {
+        "run_at": datetime.now(timezone.utc).isoformat(),
+        "source_table": source_table,
+        "listing_id": listing_id,
+        "http_status": http_status if http_status else None,
+        "verdict": verdict,
+        "missing_count_before": mc_before,
+        "missing_count_after": mc_after,
+        "applied": applied,
+    }
+
+
 def _run_with_retry(fn, tries: int = 5):
     """Run a DB call, retrying on Postgres statement-timeout (57014) — these come from transient
     lock contention when the 4h sweep is mid-upsert on the same table. Back off and try again."""
@@ -355,6 +384,50 @@ def main() -> None:
     price_refresh_on = table.startswith("aqar_")
     started = time.time()
 
+    # ── Per-row evidence (aqar_liveness_detail, migration 20260831003901) ─────────────────────────
+    # That migration created the table, the ops_aqar_recent_kills view over it, and four arms of
+    # mon_detect_served_despite_direct_404 that read it — and NOTHING EVER WROTE A ROW. Measured
+    # 2026-09-12: aqar_liveness_detail_id_seq.last_value was still NULL and pg_stat_user_tables
+    # reported n_tup_ins = 0, twelve days after creation, while this sweep killed ~300 rows a day.
+    # So the audit trail built to answer "why did 13,139 listings disappear on 2026-08-30" was
+    # empty by construction, and the only detector watching whether source-confirmed-dead rows are
+    # still served was permanently dark on aqar and dealapp — a clean bill of health over an
+    # unmeasured surface, which is the exact class AGENTS.md opens with.
+    #
+    # ALIVE is deliberately not logged (the migration's own reasoning): last_verified_alive_at
+    # records it per row, and ~97k alive probes a day would bury the readings that matter. Only
+    # readings that moved a row TOWARDS removal are logged — strike / kill / transient.
+    #
+    # EVIDENCE ONLY. This writes no listing state, gates nothing, and can never deactivate a row:
+    # the verdict is computed by the branches below exactly as before and merely recorded here. The
+    # flush is best-effort for the same reason gathern's is — an audit-log write must never fail or
+    # roll back a liveness sweep. `applied` is False under --report-only, where the row is
+    # untouched, so a verify run can never be read back as a real deactivation.
+    detail_on = table.startswith("aqar_")  # wasalt rows swept by this same script have their own
+    detail_buf: list[dict] = []            # ledger (wasalt_liveness_pilot_detail); never cross them
+
+    def _flush_detail() -> None:
+        """Best-effort: an audit-log write must never fail or roll back a liveness sweep."""
+        if not detail_buf:
+            return
+        for i in range(0, len(detail_buf), 500):
+            chunk = detail_buf[i:i + 500]
+            try:
+                client.table("aqar_liveness_detail").insert(chunk).execute()
+            except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
+                print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
+                      f"{str(exc)[:160]}", flush=True)
+        detail_buf.clear()
+
+    def _detail(listing_id: int, http_status: Optional[int], verdict: str,
+                mc_before: int, mc_after: int, *, applied: bool) -> None:
+        if not detail_on:
+            return
+        detail_buf.append(evidence_row(table, listing_id, http_status, verdict,
+                                       mc_before, mc_after, applied=applied))
+        if len(detail_buf) >= 500:
+            _flush_detail()
+
     try:
         # Pull active rows in pages of 1000 via KEYSET pagination (walk forward by id) — NOT offset.
         # Offset pagination on a 77k+ row table re-scans and skips `offset` rows every page, getting
@@ -392,7 +465,11 @@ def main() -> None:
                 body = r.text if r is not None else ""
 
                 if r is not None and looks_dead(status, body):
-                    new_missing = (row.get("missing_count") or 0) + 1
+                    mc_before = row.get("missing_count") or 0
+                    new_missing = mc_before + 1
+                    _detail(row["id"], status,
+                            "kill" if new_missing >= args.grace else "strike",
+                            mc_before, new_missing, applied=not args.report_only)
                     if args.report_only:
                         # VERIFY, don't act. Count the verdict we WOULD have reached and write
                         # nothing: no active=false, no missing_count increment. The row keeps the
@@ -457,6 +534,14 @@ def main() -> None:
                         alive_ids.clear()
                 else:
                     transient += 1
+                    # UNKNOWN, recorded as such. A transient reading applies nothing to the row —
+                    # no strike, no deactivation (LISTING_LIVENESS.md §1) — so `applied` is False
+                    # and missing_count is unchanged on both sides. Logged because "the source did
+                    # not answer us" is the evidence that distinguishes an UNKNOWN from a death,
+                    # and without it a row's silence is indistinguishable from a verdict.
+                    _detail(row["id"], status, "transient",
+                            row.get("missing_count") or 0, row.get("missing_count") or 0,
+                            applied=False)
 
                 if seen % 50 == 0:
                     elapsed = time.time() - started
@@ -482,6 +567,10 @@ def main() -> None:
                         .update({"last_seen_at": now_iso, "missing_count": 0,
                                  **direct_alive_patch(now_iso=now_iso)})
                         .in_("id", ids).execute())
+
+    # Flush the remaining per-row evidence. Runs after the alive flush and before end_run so the
+    # audit trail is durable even for a shard that ended on StopIteration or Ctrl-C.
+    _flush_detail()
 
     notes = (
         f"refreshed={refreshed} killed={killed} "
