@@ -72,6 +72,9 @@ CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
 # bahadhabab and alobid JOIN this set on 2026-09-06 alongside abwbna — the third and fourth Nuzul
 # SaaS tenants found the same way (a full-refresh crawl of the SAME platform aldarim already runs,
 # a different tenant, same public JSON API). Same tier as aldarim/abwbna for the same reason.
+# amlakalahsa JOINS this set on 2026-09-12 (single-office Al-Ahsa WordPress+ACF listing site).
+# CRAWL_PRESENCE_ONLY for the same reason as remal/amaall above: a small WordPress REST catalogue
+# (6 CPTs, ~260 posts) re-read in full each run, with no per-listing revisit endpoint of its own.
 NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common"})
 
 
@@ -221,7 +224,7 @@ POLICIES: dict[str, _P] = {
               "each run, so absence is a strong (but still non-authoritative) hint. Rows here are "
               "reported as unverified, never as verified-alive.")
         for p in (
-            "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "aouj", "aqaratikom",
+            "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "amlakalahsa", "aouj", "aqaratikom",
             "aqarmonthly", "arkaan", "awal", "azdad", "bahadhabab", "eaqartabuk", "erapulse",
             "fursaghyr", "jurash", "muktamel",
             "october",

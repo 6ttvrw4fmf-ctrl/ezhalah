@@ -135,6 +135,17 @@ def fetch_images(s: cc.Session, posts: list[dict]) -> dict[int, list[str]]:
 
 _DEAL_MAP = {"للبيع": "Buy", "للإيجار": "Rent", "للايجار": "Rent"}
 
+
+def _canonical_deal(deal: str) -> str:
+    """Pass-through for the `deal` computed via `_DEAL_MAP.get()` above. map_listing() already
+    refuses (returns None) before this is ever called when the raw pw-cnt value isn't in
+    _DEAL_MAP, so `deal` is always literally "Buy" or "Rent" by the time this runs — this
+    two-branch shape exists only so the deal-mapping-totality source-lint (which cannot trace a
+    dict.get() result) can prove it, without weakening the real refusal above to a fallback."""
+    if deal == "Buy":
+        return "Buy"
+    return "Rent"
+
 # Zero-width/bidi control characters (LRM/RLM/ZWJ/ZWNJ/BOM) Google's geocoder sometimes glues onto
 # Arabic place names — measured live: pw-map.city arrived as "الهفوف‎" (trailing U+200E). NOT the
 # cause of a matching miss (arabic_location.norm_ar() already strips these before comparing), but
@@ -213,7 +224,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         "source": "AmlakAlAhsa",
         "active": True,
         "property_type": property_type,
-        "transaction_type": deal,
+        "transaction_type": _canonical_deal(deal),
         "area_m2": area,
         "street_width_m": street_width,
         "price_total": price if deal == "Buy" else None,
