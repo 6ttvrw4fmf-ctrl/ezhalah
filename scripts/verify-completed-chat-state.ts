@@ -12,14 +12,27 @@
 //
 // `completed` is set ONLY by the two canonical AF stop conditions. A plain first search with 20
 // results and no AF round is not "finished" — pinned below by counting setCompleted(true) sites.
-import { readFileSync } from "node:fs";
-import { serializeChat, restoreChat } from "../src/lib/chatTranscript.ts";
+import { readFileSync, readdirSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { serializeChat, restoreChat, persistedOnly, TRANSCRIPT_LISTING_CAP, TRANSCRIPT_FIRST_PAGE, type PersistedChat } from "../src/lib/chatTranscript.ts";
+import { resultCounts } from "../src/data/resultCount.ts";
+import { resultsActionsRowVisible } from "../src/lib/afBrowsingGate.ts";
+
+const SRC_DIR = fileURLToPath(new URL("../src", import.meta.url));
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = "") => {
   if (!ok) failed++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${!ok && detail ? `\n      ${detail}` : ""}`);
 };
+/**
+ * A MUTATION PROOF: this barrier's own predicate, applied to a deliberately broken REAL module,
+ * asserting it really comes back RED. `caught` must be computed — a literal `true` is the shape
+ * scripts/verify-new-barriers-are-mutation-proven.ts exists to refuse.
+ */
+const mustCatch = (label: string, caught: boolean, detail = "") => check(`MUTATION — ${label}`, caught, detail);
 const agent = readFileSync(new URL("../src/app/agent.tsx", import.meta.url), "utf8");
 const i18n = readFileSync(new URL("../src/i18n.tsx", import.meta.url), "utf8");
 // A COMMENT IS NOT A CODE PATH: the site-count check below must count CALLS, not a prose mention of
@@ -110,6 +123,152 @@ check("the capture persists it", /serializeChat\(\{ msgs: msgs as any, revealCou
 console.log("\n── i18n contract ──");
 check("the closed-composer placeholder has an Arabic entry",
   /'This chat is closed — tap ☰ at the top to start a new search': 'أُغلقت هذه المحادثة/.test(i18n));
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// §TERMINALITY — `completed` IS A CLAIM ABOUT LISTINGS THE TRANSCRIPT TRUNCATES (routine #8,
+// 2026-09-12). THE SEAM: this file's own subject (the terminal-chat rule, #4/#5) composed with
+// src/lib/chatTranscript.ts's size bound (#6). Each side is correct alone; the defect exists only
+// across the transition, which is why every check above stayed green while it was live — the
+// round-trip cases at the top of this file all use `listings: []`, a turn that can never truncate.
+//
+// TWO DEFECTS, ONE MECHANISM: the transcript layer treated `completed` as an ordinary optional
+// field — carried where it had been falsified (a truncated last turn), and dropped where it was
+// true (store.tsx's hand-written re-projection on the server-hydration path).
+//
+// EXECUTED, NEVER GREPPED: the real serializeChat/restoreChat/persistedOnly run against the real
+// resultCounts + resultsActionsRowVisible gates, and every mutation below IMPORTS A MUTATED COPY OF
+// THE REAL MODULE rather than asserting about its text.
+console.log("\n── §TERMINALITY: a reopened chat never withholds BOTH the pager and the composer while matches remain ──");
+
+const rows = (n: number) => Array.from({ length: n }, (_, i) => ({ source: "aqar", id: `L${i}` }));
+/** A finished chat: `n` matches, all revealed, optionally preceded by a larger earlier turn. */
+const finishedChat = (n: number, earlierBigTurn = false) => ({
+  msgs: [
+    { id: "u1", role: "user", text: "شقق للإيجار في الرياض" },
+    ...(earlierBigTurn
+      ? [{ id: "old", role: "results", result: { listings: rows(900), pageOffset: 500, hasMore: true, matchTotal: 9000, query: {} } }]
+      : []),
+    { id: "mid", role: "results", result: { listings: rows(n), pageOffset: 0, hasMore: false, matchTotal: n, query: {} } },
+  ],
+  revealCount: { ...(earlierBigTurn ? { old: 100 } : {}), mid: n },
+  afReceipt: {}, guidedPills: null, completed: true,
+});
+
+/**
+ * Reopen a chat through the REAL round trip and ask the REAL gates what the user is left with.
+ * `deadEnd` is the defect: matches remain off screen, «عرض المزيد» is withheld by `completed`, and
+ * the composer is locked by the same flag — no route to them from that chat.
+ */
+const reopen = (
+  live: ReturnType<typeof finishedChat>,
+  ser: typeof serializeChat = serializeChat,
+  res: typeof restoreChat = restoreChat,
+) => {
+  const back = res(ser(live as never) as never);
+  if (!back) throw new Error("serialize/restore returned null for a real conversation");
+  const turn = back.msgs.filter((m) => m.role === "results").at(-1) as never as
+    { id: string; result: { listings: unknown[]; matchTotal: number; hasMore?: boolean } };
+  const shown = back.revealCount[turn.id] ?? TRANSCRIPT_FIRST_PAGE;
+  const rc = resultCounts({ trueTotal: turn.result.matchTotal, shown, fetched: turn.result.listings.length, serverMore: !!turn.result.hasMore });
+  const completed = back.completed === true;
+  const pager = resultsActionsRowVisible({ hasMore: rc.hasMore, canNarrowFurther: false, afPhase: null, chatCompleted: completed });
+  return { shown, total: turn.result.matchTotal, completed, pager, deadEnd: rc.hasMore && !pager && completed };
+};
+
+// The boundary is exact and both sides are load-bearing: at or under the cap nothing is truncated,
+// so the terminal claim still holds and the lock is right; one row past it the claim is false.
+const atCap = reopen(finishedChat(TRANSCRIPT_LISTING_CAP));
+check(`a finished chat at the cap (${TRANSCRIPT_LISTING_CAP} matches) keeps its lock — nothing was truncated, so nothing is out of reach`,
+  atCap.completed === true && atCap.pager === false && atCap.deadEnd === false,
+  JSON.stringify(atCap));
+const pastCap = reopen(finishedChat(TRANSCRIPT_LISTING_CAP + 1));
+check(`one row past the cap (${TRANSCRIPT_LISTING_CAP + 1}) is NOT terminal on reopen — the claim "every match is already revealed" is false once a row is dropped`,
+  pastCap.deadEnd === false && pastCap.pager === true,
+  JSON.stringify(pastCap));
+for (const n of [100, 1_200, 2_060]) {
+  const r = reopen(finishedChat(n));
+  check(`a ${n.toLocaleString("en-US")}-match search browsed to its end reopens browsable, not stranded (${r.shown} on screen, pager=${r.pager})`,
+    r.deadEnd === false && r.pager === true, JSON.stringify(r));
+}
+// The AF completions (R11.1/R11.2) are ≤ INTERVIEW_STOP_AT rows and so can never truncate — their
+// lock is owner rule 2026-08-30 and must survive untouched, INCLUDING inside a chat whose earlier,
+// larger turn was truncated. Only the LAST results turn may decide terminality.
+const afSmall = reopen(finishedChat(20));
+check("an AF-completed chat (20 rows, ≤ INTERVIEW_STOP_AT) still reopens LOCKED — owner rule 2026-08-30 untouched",
+  afSmall.completed === true && afSmall.pager === false && afSmall.deadEnd === false, JSON.stringify(afSmall));
+const afAfterBigTurn = reopen(finishedChat(20, true));
+check("...and still locked when an EARLIER turn in the same chat was truncated — only the LAST results turn decides",
+  afAfterBigTurn.completed === true && afAfterBigTurn.pager === false, JSON.stringify(afAfterBigTurn));
+
+console.log("\n── §PROJECTION: a restored transcript handed back to storage loses nothing ──");
+// store.tsx's hydrateTranscript (the server-copy path — every chat older than
+// LOCAL_TRANSCRIPT_ENTRIES, and every chat opened on a second device) must not rebuild the
+// transcript field by field. `completed?: true` is OPTIONAL, so tsc cannot catch an omission.
+const restoredAll = restoreChat(serializeChat(finishedChat(20) as never) as never)!;
+const projected = persistedOnly(restoredAll);
+const lost = Object.keys(restoredAll).filter((k) => k !== "doneTyping" && !(k in projected));
+check("every field of a restored transcript survives the projection — enumerated at run time, never a written list",
+  lost.length === 0, `lost: ${JSON.stringify(lost)}`);
+check("`completed` in particular survives (the field that was silently dropped)", projected.completed === true);
+check("the render-only `doneTyping` is the ONE thing stripped", !("doneTyping" in projected));
+check("a re-restore of the projection still reopens the chat LOCKED",
+  restoreChat(JSON.parse(JSON.stringify(projected)))?.completed === true);
+// The class, enumerated over the tree rather than pinned to the one line that had the defect: a
+// PersistedChat assembled by hand anywhere outside its own module is the shape that lost the field.
+{
+  const handRolled: string[] = [];
+  for (const f of readdirSync(SRC_DIR, { recursive: true, encoding: "utf8" })) {
+    if (!/\.tsx?$/.test(f) || f.endsWith("lib/chatTranscript.ts")) continue;
+    const src = decomment(readFileSync(join(SRC_DIR, f), "utf8"));
+    if (/\{\s*v:\s*1\s*,[\s\S]{0,120}?msgs\s*:/.test(src)) handRolled.push(f);
+  }
+  check("no module outside chatTranscript.ts assembles a PersistedChat by hand",
+    handRolled.length === 0, `hand-rolled in: ${handRolled.join(", ")}`);
+  check("store.tsx's server-hydration path routes through persistedOnly()",
+    /return persistedOnly\(valid\);/.test(decomment(readFileSync(join(SRC_DIR, "store.tsx"), "utf8"))));
+}
+
+console.log("\n── §TERMINALITY/§PROJECTION mutation proofs — each re-introduces the real defect in a real module copy ──");
+/** Import a deliberately broken copy of the REAL module and return its exports. */
+const mutantModule = async (from: string, to: string) => {
+  const file = join(SRC_DIR, "lib/chatTranscript.ts");
+  const src = readFileSync(file, "utf8");
+  if (!src.includes(from)) throw new Error(`mutation anchor missing in chatTranscript.ts:\n${from}`);
+  const out = join(mkdtempSync(join(tmpdir(), "ezhalah-completed-mut-")), "chatTranscript.mts");
+  writeFileSync(out, src.replace(from, to));
+  return await import(out) as { serializeChat: typeof serializeChat; restoreChat: typeof restoreChat; persistedOnly: typeof persistedOnly };
+};
+{
+  // THE DEFECT AS IT SHIPPED: carry `completed` across truncation.
+  const m = await mutantModule(
+    "...(live.completed && !lastResultsTruncated ? { completed: true as const } : {}),",
+    "...(live.completed ? { completed: true as const } : {}),",
+  );
+  const r = reopen(finishedChat(1_200), m.serializeChat, m.restoreChat);
+  mustCatch("M-carry — carrying `completed` across truncation strands the user (1,140 of 1,200 unreachable)",
+    r.deadEnd === true, JSON.stringify(r));
+}
+{
+  // The "LAST results turn" precision is load-bearing, not incidental: widening it to ANY turn
+  // silently unlocks an AF-completed chat, breaking owner rule 2026-08-30 in the other direction.
+  const m = await mutantModule(
+    "lastResultsTruncated = keep < r.listings.length;",
+    "lastResultsTruncated = lastResultsTruncated || keep < r.listings.length;",
+  );
+  const r = reopen(finishedChat(20, true), m.serializeChat, m.restoreChat);
+  mustCatch("M-any-turn — deciding terminality from ANY turn unlocks an AF-completed chat",
+    r.completed === false, JSON.stringify(r));
+}
+{
+  // THE OTHER DEFECT AS IT SHIPPED: the hand-written field list in store.tsx's projection.
+  const m = await mutantModule(
+    "const { doneTyping: _doneTyping, ...persisted } = restored;\n  return persisted;",
+    "return { v: 1, msgs: restored.msgs, revealCount: restored.revealCount, afReceipt: restored.afReceipt, guidedPills: restored.guidedPills } as PersistedChat;",
+  );
+  const dropped = m.persistedOnly(restoredAll);
+  mustCatch("M-projection — re-listing the fields to keep drops `completed`, reopening a finished chat with a LIVE composer",
+    dropped.completed !== true, JSON.stringify(Object.keys(dropped)));
+}
 
 if (failed) { console.error(`\n✗ ${failed} check(s) FAILED`); process.exit(1); }
 console.log("\nOK — a completed search locks the SAME composer (inert input, no mic, lock icon), persists, and never resurrects a live one");
