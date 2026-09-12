@@ -516,7 +516,7 @@ const FURSAGHYR_LOGO = require('../../assets/images/fursaghyr.png');
 const JAZWTN_LOGO = require('../../assets/images/jazan-watan.png');
 const MUKTAMEL_LOGO = require('../../assets/images/muktamel.png');
 const MIZLAJ_LOGO = require('../../assets/images/mizlaj.png');
-const DEALAPP_LOGO = require('../../assets/images/dealapp.jpg');
+const DEALAPP_LOGO = require('../../assets/images/dealapp.png');
 const GATHERN_LOGO = require('../../assets/images/gathern.png');
 const OCTOBER_LOGO = require('../../assets/images/october.png');
 const ARKAAN_LOGO = require('../../assets/images/arkaan.png');
@@ -541,7 +541,7 @@ const ALKHAAS_LOGO = require('../../assets/images/alkhaas.png');
 const ABEEA_LOGO = require('../../assets/images/abeea.png');
 const JURASH_LOGO = require('../../assets/images/jurash.png');
 const ALNOKHBA_LOGO = require('../../assets/images/alnokhba.png');
-const SOUQ24_LOGO = require('../../assets/images/souq24.jpg');
+const SOUQ24_LOGO = require('../../assets/images/souq24.png');
 const ERAPULSE_LOGO = require('../../assets/images/erapulse.png');
 const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.png');
 // Card hero photo with graceful fallback. Some sources (e.g. aqarcity) carry photo URLs that have
