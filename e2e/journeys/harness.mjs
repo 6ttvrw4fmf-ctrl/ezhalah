@@ -56,7 +56,31 @@ export const note = (msg) => { notes.push(msg); console.log(`  note    ${msg}`);
 // as passes while the drawer had never been opened.)
 export const skips = [];
 export const skip = (journey, why) => { skips.push({ journey, why }); console.log(`  SKIP    [${journey}] ${why}`); };
-export const pass = (journey, what) => console.log(`  ok      [${journey}] ${what}`);
+// PASSES ARE COUNTED, NOT JUST PRINTED — because the runner's verdict used to be a subtraction it
+// could not see the bottom of. It booked `pass` for any run that added no finding and no skip,
+// which is not the same claim: a journey that reached NO oracle at all adds neither. Measured
+// 2026-09-11, `voice-control` clicked an agent tab whose rename (PR #2061, merged five days
+// earlier) had just reached production, stayed on Filter home, found 0 mic controls, emitted one
+// note and returned — and was recorded as a clean PASS, 4/4 in fresh contexts across both
+// viewports, while asserting nothing. `classifyRunOutcome` below needs this count to tell
+// "everything I checked was fine" apart from "I checked nothing".
+export const passes = [];
+export const pass = (journey, what) => { passes.push({ journey, what }); console.log(`  ok      [${journey}] ${what}`); };
+
+/**
+ * What did ONE journey run actually establish?
+ *
+ * Precedence is unchanged from the runner's original subtraction — defect beats skip beats pass —
+ * so the ledger keeps meaning what it meant. The ONLY new verdict is `no-outcome`: a run that
+ * recorded nothing at all. That case previously fell into `pass` by omission, which is the single
+ * most dangerous reading available, because it is indistinguishable from success in every report,
+ * ledger row and rotation decision downstream.
+ *
+ * Pure and exported so `scripts/verify-journey-run-records-an-outcome.ts` EXECUTES its full truth
+ * table rather than grepping the runner for a shape.
+ */
+export const classifyRunOutcome = ({ defects = 0, skipped = 0, passed = 0 } = {}) =>
+  defects > 0 ? 'defect' : skipped > 0 ? 'skip' : passed > 0 ? 'pass' : 'no-outcome';
 
 // ── the browsers ────────────────────────────────────────────────────────────────────────────────
 const ENGINES = { chromium, webkit, firefox };
@@ -500,7 +524,7 @@ export async function ledgerRecord(key, result, notesText) {
  * Close the 375px drawer so the screen underneath can be driven.
  *
  * NEEDED BECAUSE THE DRAWER COVERS THE MODE SWITCH. Measured on production 2026-08-31, mobile375:
- * the drawer panel is x=0 w=307.5 of a 375px viewport, and «الوكيل الذكي» sits at x=217 — INSIDE
+ * the drawer panel is x=0 w=307.5 of a 375px viewport, and «الوسيط الذكي» sits at x=217 — INSIDE
  * the panel's span, so any tap on it while the drawer is open is intercepted. That is the exact
  * failure `new-chat-blank` was rewritten to dodge by re-ordering its steps; a journey that must
  * open the drawer FIRST (star a row) and navigate SECOND cannot dodge it and needs a real close.
@@ -822,7 +846,7 @@ export async function openMobileSidebar(page, { guestOk = false } = {}) {
 // Measured, and the reason this exists (ops_incident #120, journey sweep run 15, 2026-09-06): the
 // first time this journey ever ran on WebKit and Firefox it produced 12 defects, and EVERY one was
 // the null branch, at all five points including the centre, on controls the rest of the sweep taps
-// successfully — «تصفية» and «الوكيل الذكي» among them. Whether that is a real un-tappable control
+// successfully — «تصفية» and «الوسيط الذكي» among them. Whether that is a real un-tappable control
 // on those engines or a probe artifact is NOT established, and this function deliberately does not
 // decide it: it makes the two shapes say what they are, so the next per-engine sweep answers the
 // question instead of restating the guess (PART 11.2 rule 4; the #1053 precedent — instrument
@@ -838,4 +862,38 @@ export function classifyTapOwnership(pts) {
     else blind[k] = `the hit test landed on ${(p && p.hitTag) || 'an element it could not describe'}, which is inside no control`;
   }
   return { stolen, blind };
+}
+
+// ── A BLOCKED CONTROL IS NOT AUTOMATICALLY ONE TAP'S FAULT ──────────────────────────────────────
+// `onetap-clear-of-controls` used to file every failed hit-test as «the One Tap prompt is covering
+// «X»» unconditionally, the instant a tap missed its target — with no check that the sheet's own
+// measured rect had anything to do with the point that was actually tested.
+//
+// Measured, production, 2026-09-11: mobile375 reported «the One Tap prompt is covering «بحث»: sheet
+// now 668-812; «بحث» 587-606» — 606 < 668, the two ranges never touch — and «the One Tap prompt is
+// covering the AI Agent composer: sheet now 668-812; composer 557-579», same shape, further still.
+// The real blocker on that exact geometry (a fixed bottom card on a 390×844 phone) is
+// ops_incident #152 — the cookie-consent banner, a plain `<div>` that predates this journey and
+// could never be matched by `SHEET_SEL` (an `<iframe>` selector). Filing that as a One Tap
+// regression would have sent whoever reads it chasing `GoogleOneTap.tsx` for a bug that lives in
+// `CookieConsent.tsx`, and duplicated a P2 already open and correctly awaiting an owner product
+// decision. PART 9.4: a harness that misattributes a real finding is this routine's own bug.
+//
+// This is the decision alone, pulled out of the DOM-reading closure so it can be proven with plain
+// objects instead of a browser — the same precedent as `classifyTapOwnership` just above.
+export function classifyBlockedControl({ winnerIsSheet, sheetNow, top, bottom, winner }, controlLabel) {
+  if (winnerIsSheet) {
+    return {
+      what: `the One Tap prompt is covering «${controlLabel}»`,
+      detail: `sheet now ${sheetNow}; «${controlLabel}» ${top}-${bottom}; a tap at its centre goes to ${winner}`,
+      isOneTap: true,
+    };
+  }
+  return {
+    what: `an overlay OTHER than One Tap is covering «${controlLabel}» — not a One Tap regression`,
+    detail: `sheet reported at ${sheetNow} (does not include the winner), «${controlLabel}» ${top}-${bottom}, `
+      + `real blocker at that point: ${winner}. Check ops_incident for an already-open finding on this `
+      + `element before filing a new one — PART 9.4, do not misattribute to Google One Tap.`,
+    isOneTap: false,
+  };
 }

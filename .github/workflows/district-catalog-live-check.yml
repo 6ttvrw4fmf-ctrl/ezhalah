@@ -1,0 +1,57 @@
+name: District catalog — live internal-code check
+
+# Executes the REAL production RPC (district_options_ar) and asserts the district picklist never
+# leaks an internal plan/parcel code, a land-use tag, or a leaked listing-description sentence as a
+# selectable "district" — and that genuine numbered Saudi sub-districts (e.g. جازان's المحمدية
+# 1/2/3) stay distinct rather than getting merged away by a future over-correction.
+#
+# Owner report, 2026-09-11: the Riyadh Advanced Filter district dropdown showed raw internal plot
+# numbers ("الخبر الحمراء 3537"). Root cause: public.refresh_loc_canonical_district()'s 'live'
+# fallback branch promoted unrecognized scraped district_ar text verbatim. Fixed by
+# public.district_ar_looks_bogus() (migration 20260911201716). This is the LIVE behavioral half of
+# that fix's regression protection — it complements nothing offline, because the underlying rule is
+# a database predicate, not app code; this IS the test that proves it stays wired in.
+#
+# Activation: needs the app's PUBLIC anon key as a repo secret (never the service role), same as
+# diversity-live-check.yml.
+
+on:
+  schedule:
+    - cron: '43 */6 * * *' # every 6 hours, offset from the diversity check
+  workflow_dispatch:
+
+concurrency:
+  group: district-catalog-live-check
+  cancel-in-progress: false
+
+jobs:
+  district-catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Live district-catalog assertions
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-district-catalog-no-internal-codes-live.ts
+
+      # ── Failure→alert bridge (issue #1349) ──────────────────────────────────────────────────────
+      # This job runs unattended: a red run notifies nobody unless it reaches alert_event. One open
+      # P1 per workflow file (dedup workflow_failed:district-catalog-live-check.yml), and the next
+      # green run resolves it. always() so a failing run still gets here.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind data_live_check_failed
+          --workflow district-catalog-live-check.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

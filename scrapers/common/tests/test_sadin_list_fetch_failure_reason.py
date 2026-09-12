@@ -19,6 +19,8 @@ Run: python -m pytest scrapers/common/tests/test_sadin_list_fetch_failure_reason
 """
 import inspect
 
+import pytest
+
 from scrapers.sadin import run as sd
 
 
@@ -29,18 +31,35 @@ class _Resp:
 
 
 class _Session:
-    """One scripted response per call, or an exception — enough for _pages()'s single .get()."""
+    """Either one scripted response/exception repeated every call (`resp=`/`raise_exc=`, the
+    original single-attempt shape), or a `sequence=[...]` of _Resp/Exception items consumed one
+    per call and held at the last item once exhausted — enough to script a retry-then-recover."""
 
-    def __init__(self, resp=None, raise_exc=None):
+    def __init__(self, resp=None, raise_exc=None, sequence=None):
         self._resp = resp
         self._raise = raise_exc
+        self._sequence = list(sequence) if sequence is not None else None
         self.calls = 0
 
     def get(self, url, **kw):
         self.calls += 1
+        if self._sequence is not None:
+            item = self._sequence[min(self.calls, len(self._sequence)) - 1]
+            if isinstance(item, Exception):
+                raise item
+            return item
         if self._raise is not None:
             raise self._raise
         return self._resp
+
+
+@pytest.fixture(autouse=True)
+def _no_real_delays(monkeypatch):
+    """LIST_FETCH_ATTEMPTS retries back off with time.sleep(); neuter both that and the per-page
+    throttle so the retry tests below are fast and deterministic, same as ramzalqasim's `rq`
+    fixture (test_cloudflare_52x_is_transient.py)."""
+    monkeypatch.setattr(sd.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(sd, "_throttle", lambda *_a, **_k: None)
 
 
 def setup_function(_fn):
@@ -67,6 +86,50 @@ def test_http_500_on_page_one_is_recorded_as_a_concrete_reason():
 def test_transport_failure_is_recorded_by_exception_type():
     _drain(sd._pages(_Session(raise_exc=ConnectionError("reset by peer")), sd.LIST_ALL))
     assert "transport_ConnectionError" in sd.list_fetch_failure_summary()
+
+
+# ── THE 2026-09-12 REGRESSION: a transient 503 must be retried, not treated as final ─────────
+def test_http_503_retries_and_succeeds_on_a_later_attempt():
+    """THE REAL INCIDENT: sadin drew http_503 on page 1 of all 3 list URLs, 5 days running, and
+    every run failed with zero cards because a single unretried GET took the 503 as the final
+    answer. 503 then 200 must recover, not abort."""
+    html = '<a href="/property/AD001"></a>'
+    # page 1: 503 then 200-with-a-card; page 2: 200-with-no-NEW-card, which ends the crawl —
+    # _pages() always looks one page ahead, so the 3rd call belongs to that pagination check,
+    # not to page 1's retry.
+    s = _Session(sequence=[_Resp(503, ""), _Resp(200, html), _Resp(200, html)])
+    pages = _drain(sd._pages(s, sd.LIST_ALL))
+    assert pages == [html]
+    assert sd.list_fetch_failure_summary() == "", "an eventual success must record no failure"
+    assert s.calls == 3, "the 503 must be retried, not accepted as the final answer"
+
+
+def test_http_503_exhausts_retries_and_records_the_reason_once():
+    """A genuine outage must still end the crawl (fail-safe unchanged) and still record a
+    CONCRETE reason exactly once per page — not once per retry attempt, which would make
+    list_fetch_failure_summary()'s counts describe attempts instead of pages."""
+    s = _Session(_Resp(503, ""))
+    pages = _drain(sd._pages(s, sd.LIST_ALL))
+    assert pages == []
+    assert sd.list_fetch_failure_summary() == "http_503=1", sd.list_fetch_failure_summary()
+    assert s.calls == sd.LIST_FETCH_ATTEMPTS, "retries must be bounded, not open-ended"
+
+
+def test_http_500_is_permanent_and_is_not_retried():
+    """500 is an application error from the source, not an edge/transient blip (same distinction
+    scrapers/common/http.py's TRANSIENT_STATUSES already draws) — retrying it would just burn the
+    retry budget a real transient blip needs."""
+    s = _Session(_Resp(500, ""))
+    _drain(sd._pages(s, sd.LIST_ALL))
+    assert s.calls == 1, "a non-transient status must fail fast, not spend retries on it"
+
+
+def test_retry_budget_is_bounded():
+    """Caught by mutation testing on the ramzalqasim sibling of this fix: an assertion that only
+    checks self-consistency (calls == LIST_FETCH_ATTEMPTS) still passes if the constant itself is
+    raised unreasonably high, quietly turning a brief block into minutes of retries per page
+    across a 3-list-URL, multi-page crawl."""
+    assert 2 <= sd.LIST_FETCH_ATTEMPTS <= 6
 
 
 def test_a_real_200_with_zero_ids_on_page_one_is_a_different_bucket_from_a_500():

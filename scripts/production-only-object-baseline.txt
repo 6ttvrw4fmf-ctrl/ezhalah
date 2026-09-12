@@ -29,7 +29,6 @@ capture_crawl_stats
 composite_match_city_ids
 deprecated_platforms
 district_name_bridge
-known_property_types
 listings_arabic_locations
 loc_catalog_city_alias
 loc_catalog_district
@@ -38,7 +37,6 @@ loc_district_map
 loc_rel_refresh_state
 loc_rel_refresh_tick
 location_pipeline_alerts
-norm_district_tok
 norm_en_place
 normalize_ar
 novel_type_alerts

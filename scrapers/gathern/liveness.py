@@ -74,6 +74,13 @@ RUN_NAME = "gathern_liveness"
 RUN_NAME_PROXY = "gathern_liveness_proxy"
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "1.0"))  # ~1 req/s: Gathern 429s above ~2
 
+# How recently the SOURCE must have been observed serving a listing for that listing to be usable as
+# a control. A canary's only job is to prove the source is answering truthfully RIGHT NOW, so a
+# stale control cannot do it: on this platform's short-stay inventory a days-old row has very often
+# been delisted for real, and its honest 404 is then misread as "the source is blocking us".
+# 48h spans one missed daily crawl without letting the pool drift into genuine deaths.
+CANARY_MAX_AGE_HOURS = 48
+
 
 def looks_dead(status: int) -> bool:
     """True iff the detail page confirms the unit is gone. Gathern serves a hard 404 (occasionally
@@ -153,18 +160,89 @@ def proxied_session(use_proxy: bool):
     return s
 
 
-def _collect_canaries(client, limit: int) -> list[dict]:
-    """Control set: rows the SOURCE ITSELF has most recently proven alive.
+def _observed_at(row: dict) -> Optional[datetime]:
+    """The freshest moment the SOURCE ITSELF was observed serving this listing.
 
-    Drawn from `last_verified_alive_at`, which only the liveness contract writes and only on a
-    literal 200 — so a canary is a row we know existed, on the source's own word, not ours. Newest
-    first, because the freshest proof is the least likely to have died of natural causes since."""
-    r = (client.table(TABLE).select("id, ad_number, listing_url, last_verified_alive_at")
-         .eq("source", SOURCE).eq("active", True)
-         .not_.is_("last_verified_alive_at", "null")
-         .not_.is_("listing_url", "null")
-         .order("last_verified_alive_at", desc=True).limit(limit).execute())
-    return r.data or []
+    BOTH columns are source observations, and the distinction LISTING_LIVENESS.md §3 draws between
+    them is about what may be STAMPED as verification — never about what may serve as a CONTROL. A
+    canary makes no claim about the canary row; its whole job is to ask "is the source answering us
+    truthfully right now?", and for that the freshest observation of any kind is the best available
+    control. `last_seen_at` is written only by a real crawl upsert or by this sweep's own 200 — no
+    DB function writes it — so it is a source observation, just not a verification stamp.
+    """
+    best: Optional[datetime] = None
+    for col in ("last_seen_at", "last_verified_alive_at"):
+        raw = row.get(col)
+        if not raw:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if best is None or ts > best:
+            best = ts
+    return best
+
+
+def choose_canaries(rows: list[dict], limit: int, now: Optional[datetime] = None,
+                    max_age_hours: int = CANARY_MAX_AGE_HOURS) -> list[dict]:
+    """Pure selection: freshest SOURCE observation first, and NOTHING older than the age bound.
+
+    THE DEADLOCK THIS EXISTS TO PREVENT (measured in production 2026-09-11, ops_incident #168).
+    This function used to rank by `last_verified_alive_at` alone — a column written ONLY by this
+    same sweep. That makes the control set self-referential, and self-referential controls cannot
+    recover:
+
+        sweep quarantines -> no new last_verified_alive_at -> the pool ages -> gathern is
+        short-stay rental inventory, so a 5-day-old "proven alive" row has very often been
+        delisted -> those genuine 404s read as "the source refused this egress" -> quarantine.
+
+    The loop is closed and tightens on its own: from 2026-09-07 every scheduled run reported
+    `CANARY FAIL 0/10 statuses[404x10]` and wrote zero strikes, while the top of the pool sat five
+    days stale. Proven by execution on 2026-09-11 — same container, same transport, same minute —
+    10/10 of the pool this function actually returned answered 404, and 10/10 rows the crawl had
+    seen that morning answered 200. The source was never blocking; our controls were dead.
+
+    An age bound is what makes the gate honest in BOTH directions, so it fails CLOSED: if nothing
+    has been observed recently (the crawl has stopped too), the pool is empty, `canary_environment_
+    ok(0, 0)` is False, and the run removes nothing at all. A stale control is not a weak control —
+    it is noise that can only ever fail, which is strictly worse than having none.
+    """
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=max_age_hours)
+    fresh: list[tuple[datetime, dict]] = []
+    for row in rows:
+        if not (row.get("listing_url") or "").strip():
+            continue
+        seen = _observed_at(row)
+        if seen is None or seen < cutoff:
+            continue
+        fresh.append((seen, row))
+    fresh.sort(key=lambda pair: pair[0], reverse=True)
+    return [row for _, row in fresh[:limit]]
+
+
+def _collect_canaries(client, limit: int) -> list[dict]:
+    """Control set: rows the SOURCE ITSELF was observed serving most recently.
+
+    Candidates are drawn on BOTH observation columns so neither signal alone can starve the pool
+    (the failure in `choose_canaries`' docstring), then `choose_canaries` applies the ranking and
+    the age bound. Over-fetch, because the bound discards rows and the pool must not silently
+    shrink below MIN_CANARIES on a healthy day."""
+    want = max(limit * 5, 50)
+    rows: dict[Any, dict] = {}
+    for order_col in ("last_seen_at", "last_verified_alive_at"):
+        r = (client.table(TABLE)
+             .select("id, ad_number, listing_url, last_seen_at, last_verified_alive_at")
+             .eq("source", SOURCE).eq("active", True)
+             .not_.is_("listing_url", "null")
+             .not_.is_(order_col, "null")
+             .order(order_col, desc=True).limit(want).execute())
+        for row in (r.data or []):
+            rows[row.get("id")] = row
+    return choose_canaries(list(rows.values()), limit)
 
 
 def _run_canary(s, client, n: int) -> tuple[bool, int, int, str]:
@@ -202,6 +280,31 @@ def _run_canary(s, client, n: int) -> tuple[bool, int, int, str]:
           f"(need >={MIN_CANARY_ALIVE_RATE:.0%} of >={MIN_CANARIES}) statuses[{hist}]"
           + ("" if ok else f" — {canary_diagnosis(statuses)}"), flush=True)
     return ok, alive, probed, hist
+
+
+def trust_quarantine_reason(canary_ok: bool, canary_alive: int, canary_probed: int) -> str:
+    """Why this run's AGGREGATE alive-rate fell short — and it is not always the source.
+
+    The trust gate and the canary answer the same question with different instruments, and when
+    they disagree the note must say so rather than asserting the source is blocking us. On
+    2026-09-11 this line read "the source is not answering this run reliably" on a run whose canary
+    had just returned 10/10 alive — the identical misdiagnosis that had already sent five days of
+    readers (and one dispatch of the metered Saudi residential proxy) to the wrong system while the
+    real defect sat in the canary pool. A quarantine note is read precisely when nobody has context,
+    so a confident wrong cause in it is worse than no cause at all.
+
+    The gate's BEHAVIOUR is unchanged either way: the run is still quarantined and still writes
+    nothing. This only names the cause honestly.
+    """
+    if canary_probed and canary_ok:
+        return (f"BUT the in-run canary independently PASSED ({canary_alive}/{canary_probed} "
+                f"known-alive controls returned 200), so the environment was proven healthy and "
+                f"these 404s are NOT explained by a block. This worklist is selected "
+                f"oldest-stale-first, so a low aggregate rate is the expected result of the "
+                f"SELECTION, not evidence about the source. Quarantined anyway and nothing "
+                f"written — the absolute floor cannot tell those two cases apart on a biased "
+                f"cohort: ops_incident #180, owner decision")
+    return ("the source is not answering this run reliably, so its 404s are UNKNOWN, not death")
 
 
 def canary_diagnosis_from_hist(hist: str) -> str:
@@ -565,6 +668,9 @@ def main() -> int:
     # the number existed. This asks the same question first, for the price of ~10 requests.
     c_alive = c_probed = 0
     c_hist = "skipped"
+    # FAIL CLOSED: with --canaries 0 the control pass never runs, and "no canary" must never read
+    # downstream as "the canary passed". Same posture as the gate itself.
+    c_ok = False
     if args.canaries:
         c_ok, c_alive, c_probed, c_hist = _run_canary(s, client, args.canaries)
         c_diag = canary_diagnosis_from_hist(c_hist)
@@ -678,6 +784,24 @@ def main() -> int:
         _flush_alive()
         _flush_detail(detail_buf)
 
+    # ── CLOSING CANARY (2026-09-11, ops_incident #183) ────────────────────────────────────────────
+    # The opening canary proves the environment at run START. That alone must never be allowed to
+    # excuse the rate gate, because the failure the rate gate was built for — 2026-09-01 — looked
+    # healthy early and was blocked by the end. So the run is BRACKETED: the same control set is
+    # re-probed after the worklist, and only if BOTH ends pass is the environment considered proven
+    # for the whole window. A closing failure is treated exactly like an opening one: UNKNOWN, never
+    # death, nothing written in the destructive direction.
+    p_alive = p_probed = 0
+    p_hist = "skipped"
+    canary_ok: Optional[bool] = None
+    if args.canaries:
+        p_ok, p_alive, p_probed, p_hist = _run_canary(s, client, args.canaries)
+        canary_ok = bool(c_ok and p_ok)
+        if not p_ok:
+            print(f"✗ CLOSING CANARY FAILED {p_alive}/{p_probed} statuses[{p_hist}] — "
+                  f"{canary_diagnosis_from_hist(p_hist)}. The environment degraded DURING this run, "
+                  f"so its 404s are UNKNOWN. Nothing destructive will be written.", flush=True)
+
     # ── TRUST GATE (2026-09-03): may this run act on its own DEAD verdicts AT ALL? ────────────────
     # Asked BEFORE the cap, because the two guard different failures. The cap asks "is this BATCH
     # too big to believe?"; the trust gate asks "is this RUN's evidence believable at all?" On
@@ -689,7 +813,12 @@ def main() -> int:
     # rows stay exactly as they were and stay honestly UNKNOWN. Alive (200) writes are deliberately
     # NOT gated — a block cannot manufacture a live page, and restoring a live listing is the
     # fail-safe direction (docs/ops/DELETION_SAFETY.md §2.4).
-    trusted = environment_is_trustworthy(alive, seen)
+    #
+    # canary_ok carries the BRACKETED positive control. When it is True the environment has been
+    # proven directly at both ends, so the aggregate alive-rate — a proxy for the same question
+    # that cannot tell a lying source from a genuinely dead cohort — is not consulted. See
+    # environment_is_trustworthy's docstring for the measurement that forced this.
+    trusted = environment_is_trustworthy(alive, seen, canary_ok=canary_ok)
     trust_quarantine = (not trusted) and bool(strike_pending or kill_pending)
 
     anomaly = False
@@ -740,12 +869,23 @@ def main() -> int:
     notes = (f"{mode} scanned={seen} dead={dead} {verb}={kill_shown} strike={struck} "
              f"applied_strikes={applied_strikes} alive={alive} transient={transient} "
              f"kill_cap={kill_cap} [{cap_src}] alive_rate={alive_rate:.3f} trusted={trusted} "
-             f"proxy={bool(args.proxy)} canary={c_alive}/{c_probed} canary_statuses[{c_hist}]")
+             f"proxy={bool(args.proxy)} canary={c_alive}/{c_probed} canary_statuses[{c_hist}] "
+             f"close_canary={p_alive}/{p_probed} close_statuses[{p_hist}] canary_ok={canary_ok}")
     if trust_quarantine:
+        # trust_quarantine_reason() is kept exactly as main wrote it; the only change is WHICH
+        # canary result it is handed. It now receives the BRACKETED verdict (open AND close), not
+        # the opening probe alone, so it cannot describe a run as control-proven on the strength of
+        # an opening canary that had already gone stale by the end.
+        #
+        # Its "BUT the in-run canary independently PASSED" branch is now unreachable on a
+        # canary-running platform, and that is the point: a proven environment no longer reaches
+        # this quarantine at all. The branch is deliberately left standing — it still fires for any
+        # caller that passes a canary result without bracketing it, and its text is the clearest
+        # statement in the codebase of why the floor could not tell the two cases apart.
         notes = (f"TRUST-QUARANTINED alive_rate={alive_rate:.1%} below {MIN_ALIVE_RATE_FOR_TRUST:.0%} "
                  f"(min_probes={MIN_PROBES_FOR_TRUST}) — 0 strikes and 0 inactivations written "
-                 f"(would_strike={len(strike_pending)} would_inactivate={len(kill_pending)}). The "
-                 f"source is not answering this run reliably, so its 404s are UNKNOWN, not death. "
+                 f"(would_strike={len(strike_pending)} would_inactivate={len(kill_pending)}) — "
+                 + trust_quarantine_reason(bool(canary_ok), c_alive, c_probed) + ". "
                  f"Owner review required. " + notes)
     elif anomaly:
         notes = (f"ANOMALY-CAPPED would_inactivate={len(kill_pending)} cap={kill_cap} — 0 rows "

@@ -39,10 +39,15 @@ function hasAuthSession(): boolean {
 // ALWAYS Arabic-first (we ignore any leftover saved value), and a refresh/return keeps them Arabic.
 // (user request.) The store re-confirms this once auth resolves and clears any stale value.
 function readSavedLocale(): Locale {
+  // English re-enabled (owner, 2026-09-11): pure display-layer toggle, no scraper/backend change —
+  // see setLocale() below and AccountMenu.tsx's Language rows for the other two halves of this gate.
+  // A SIGNED-IN user's saved value loads with no flash; a GUEST never has one to read in the first
+  // place, because the store clears LOCALE_KEY on sign-out — so "guest is Arabic-first" still holds
+  // with no hardcoded return here.
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     try {
-      // Arabic-only product: the UI is always Arabic. Clear any legacy saved 'en' so it can't resurface.
-      if (window.localStorage?.getItem(LOCALE_KEY) === 'en') window.localStorage.removeItem(LOCALE_KEY);
+      const v = window.localStorage?.getItem(LOCALE_KEY);
+      if (v === 'en' || v === 'ar') return v;
     } catch {}
   }
   return 'ar';
@@ -1316,6 +1321,23 @@ const AR: Record<string, string> = {
   'Messages': 'الرسائل',
   'Mail': 'البريد',
   'Notes': 'الملاحظات',
+
+  // ONE MAIN REQUEST + ONE FOLLOW-UP (owner 2026-09-11, src/lib/refinementFollowup.ts). Mirrors the
+  // `completed` composer's own inert-placeholder + lock-icon pattern exactly — same composer, no
+  // separate card, just a distinct explanatory placeholder for THIS lock reason.
+  "You've used your one AI request for this search — tap ☰ at the top to start a new search.":
+    'استخدمت طلبك الوحيد للمساعد الذكي بهذا البحث — اضغط ☰ أعلى الصفحة لبدء بحث جديد',
+  "I couldn't find an exact match. I tried without this one condition — {requirement} — and found results. Want to see them?":
+    'ما لقيت نتائج مطابقة تمامًا لطلبك. جربت بدون شرط واحد بس — {requirement} — ولقيت نتائج. أعرضها لك؟',
+  'Here they are, without this condition ({requirement}):': 'تفضل، بدون هذا الشرط ({requirement}):',
+  "No problem — nothing matches your exact request as-is. Start a new search if you'd like to try something different.":
+    'ولا يهمك — ما فيه شي يطابق طلبك بالضبط كذا. ابدأ بحثاً جديداً لو تبي تجرب شي مختلف.',
+  "Sorry, nothing matches your exact request right now. Start a new search if you'd like to try something different.":
+    'للأسف ما فيه شي يطابق طلبك بالضبط حالياً. ابدأ بحثاً جديداً لو تبي تجرب شي مختلف.',
+
+  // ONE MAIN REQUEST, ONE LOCATION QUESTION (owner 2026-09-11, AI Agent flow simplification).
+  'Sorry, no listings currently match your request. Try using the Filter to widen your search.':
+    'عذراً، ما لقينا نتائج مطابقة لطلبك حالياً. جرب استخدام الفلتر لتوسيع البحث.',
 };
 
 // Interpolate {placeholders}. Used by both en (key) and ar (translation) paths.
@@ -1535,7 +1557,9 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   // on Send, then call respond()) gets a reply in the NEW language — not the previous one. React
   // state stays the source of truth; this just removes the one-render lag for the static `t()`.
   const setLocale = useCallback((l: Locale) => {
-    if (l !== 'ar') return; // Arabic-only product: the UI never switches to English
+    // English re-enabled (owner, 2026-09-11) — see readSavedLocale()'s comment above for the full
+    // rationale. This function was the single owner of the old Arabic-only guard; it is now the
+    // single owner of turning both languages on, so nothing else needed a second copy of this check.
     _locale = l;
     persistLocale(l); // save synchronously (web) so a refresh keeps this language — guest or signed-in
     setLocaleState(l);

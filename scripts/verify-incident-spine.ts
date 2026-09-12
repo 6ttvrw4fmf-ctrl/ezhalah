@@ -110,6 +110,47 @@ check('resolution requires a production verification', /production_verified_at\s
 check('both are required together, not either-or', /\band\b/.test(earned) && !/\bor\s+production_verified/.test(earned),
   `the constraint reads: ${earned.replace(/\s+/g, ' ').trim()}`);
 
+// ── 1b. THE GATE MUST NOT BE SATISFIABLE BY THE FUNCTION'S OWN DEFAULT (ops_incident #186) ─────
+// The CHECK above enforces that a COLUMN IS NOT NULL. That is not the same promise as "somebody
+// observed production", and until 2026-09-11 the difference was the whole ballgame:
+//
+//     p_production_verified_at timestamptz DEFAULT now()   -- and the only guard was `is null`
+//
+// so incident_resolve(id, 'barrier.ts') — two arguments, no timestamp — always passed. MEASURED on
+// production the day it was found: 58 of 84 all-time resolutions (69%), and 17 of 17 that day,
+// carried production_verified_at EXACTLY equal to resolved_at, i.e. the system supplied the
+// evidence on the caller's behalf and then accepted it as the caller's.
+//
+// This check is deliberately about the PARAMETER, not the constraint, because the checks above
+// passed for the entire life of the defect — one of them literally reports "resolution requires a
+// production verification" while the default made that unreachable.
+const resolveFn = latestMigrationDefining('function public.incident_resolve');
+
+/** Does the committed incident_resolve let a caller omit the production verification?
+ *
+ *  SQL `--` comments are stripped FIRST, and that is load-bearing rather than tidy: the first draft
+ *  of this predicate read the parameter text raw and was tripped by the migration's own annotation
+ *  `-- NO DEFAULT (ops_incident #186)`, which contains the word DEFAULT. It reported the correct,
+ *  fixed definition as still defective. A comment is not a code path in SQL either — and the
+ *  "not vacuously red" mutation below is what caught it. */
+const gateSatisfiableByOmission = (sql: string): boolean => {
+  const code = sql.replace(/--[^\n]*/g, '');   // SQL line comments; stripComments.ts is JS-shaped
+  const sig = /function\s+public\.incident_resolve\s*\(([\s\S]*?)\)\s*returns/i.exec(code)?.[1] ?? '';
+  if (!sig) return true;                       // cannot find it ⇒ assume the worst, never a silent pass
+  const param = /p_production_verified_at[^,)]*/i.exec(sig)?.[0] ?? '';
+  if (!param) return true;                     // the parameter is gone ⇒ nothing to supply
+  return /\bdefault\b/i.test(param);           // a default means the caller can omit it
+};
+
+check('a committed migration defines incident_resolve', resolveFn !== '');
+check('the production verification cannot be supplied by the function itself (no DEFAULT)',
+  !gateSatisfiableByOmission(resolveFn),
+  'p_production_verified_at carries a DEFAULT, so incident_resolve(id, script) silently stamps a '
+  + 'timestamp of the CLAIM and the "earned resolution" promise is decorative (ops_incident #186)');
+check('a verification dated in the FUTURE is refused',
+  /p_production_verified_at\s*>\s*now\(\)/.test(resolveFn),
+  'nothing stops a caller reaching for now() + interval to get past the requirement');
+
 check('the two non-fix exits must state a reason',
   /constraint\s+ops_incident_non_fix_exit_needs_a_reason/.test(spine)
   && /state\s+not\s+in\s*\(\s*'blocked'\s*,\s*'wont_fix'\s*\)/.test(spine));
@@ -250,6 +291,34 @@ mustCatch('a surface named in the vocabulary but never routed',
 mustCatch('the guard being moved AFTER the insert (a bad surface would already have landed)',
   (() => { const bad = "insert into public.ops_incident\n raise exception 'unknown incident surface";
            return bad.indexOf("raise exception 'unknown incident surface") > bad.indexOf('insert into public.ops_incident'); })());
+
+// ops_incident #186 — the mutation is THE DEFECT AS IT SHIPPED, re-introduced into the real
+// committed SQL and run through the real predicate. Every assertion below executes
+// gateSatisfiableByOmission() rather than grepping a file, so a refactor that keeps the words and
+// loses the behaviour still goes red.
+// Mutate the COMMENT-STRIPPED code, not the raw file. The migration's own header quotes the old
+// defective signature verbatim as documentation, so a non-global replace against the raw text
+// rewrites the QUOTE and leaves the real signature untouched — a mutation that mutates nothing and
+// then reports the barrier blind. (Observed while writing this: three mutations "survived" for
+// exactly that reason.)
+const resolveCode = resolveFn.replace(/--[^\n]*/g, '');
+mustCatch('the production-verification default being re-introduced (the defect as it shipped)',
+  gateSatisfiableByOmission(
+    resolveCode.replace(/p_production_verified_at\s+timestamptz/i,
+                        'p_production_verified_at timestamptz DEFAULT now()')));
+mustCatch('…the same default written as `DEFAULT clock_timestamp()` (not a now()-specific tripwire)',
+  gateSatisfiableByOmission(
+    resolveCode.replace(/p_production_verified_at\s+timestamptz/i,
+                        'p_production_verified_at timestamptz DEFAULT clock_timestamp()')));
+mustCatch('the parameter being dropped entirely (nothing left to supply)',
+  gateSatisfiableByOmission(resolveCode.replace(/p_production_verified_at[^,)]*/i, '')));
+mustCatch('the function disappearing from the migrations (fails closed, never a silent pass)',
+  gateSatisfiableByOmission(''));
+mustCatch('…while the REAL committed definition is NOT flagged (the predicate is not vacuously red)',
+  !gateSatisfiableByOmission(resolveFn));
+mustCatch('the future-verification guard being removed',
+  !/p_production_verified_at\s*>\s*now\(\)/.test(
+    resolveFn.replace(/if\s+p_production_verified_at\s*>\s*now\(\)[\s\S]*?end if;/i, '')));
 
 mustCatch('the migration-finder going blind when the table is gone',
   (() => { const s = spine.replace('create table if not exists public.ops_incident', 'create table x');

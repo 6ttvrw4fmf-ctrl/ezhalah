@@ -28,6 +28,14 @@ active=false — the source DID publish them, and hiding them from search is wha
 
 TYPES: سكني / تجاري are CATEGORIES, not types — nearly every post carries one alongside its real
 type, so they are skipped when picking the type and never stored as one.
+
+ADVANCED FILTER FEATURE FLAGS (2026-09-11): the property_feature taxonomy was already captured into
+additional_info.features_ar but never reached elevator/parking/kitchen/air_conditioner/maid_room/
+private_entrance — the columns listing_extra_attrs actually reads for the Advanced Filter, so these
+listings sat in that view 0% populated. FEATURE_MAP maps only the terms with ONE unambiguous target
+column (verified live against every distinct feature string across both amaall tables); an opt-in
+term for something else (finishing level, electricity availability) stays in additional_info instead
+of being forced onto an unrelated flag. Absence is UNKNOWN, never a manufactured False.
 """
 from __future__ import annotations
 
@@ -45,6 +53,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://www.amaall.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -53,7 +62,35 @@ PREFIX = "AML"
 LAST_FETCH_NOTE = ""
 
 TAXONOMIES = ("property_type", "property_status", "property_city", "property_state",
-              "property_feature", "property_label")
+              "property_feature", "property_label", "property_area")
+
+# The `property_feature` taxonomy is captured into additional_info.features_ar (below) but was never
+# wired into the Advanced Filter's own boolean columns (elevator/parking/kitchen/air_conditioner/
+# maid_room/private_entrance — every one of them a real, already-existing column on this platform's
+# own tables, read directly by listing_extra_attrs) — the same "captured but not connected to the
+# searchable surface" gap this session's district fix closed for city/district. Verified live
+# 2026-09-11 against every distinct feature string across both amaall tables (27 total) before
+# mapping: exact-only, no fuzzy fallback — only terms with ONE unambiguous target column are mapped;
+# a term that is opt-in evidence of something ELSE (finishing level, electricity availability, a
+# smart-lock brand) is left in additional_info rather than forced onto an unrelated flag. A feature's
+# ABSENCE from the list is UNKNOWN, never a manufactured "no" — same tri-state principle as azdad's
+# own EXTRAS_MAP (scrapers/azdad/run.py), which this mirrors.
+FEATURE_MAP = {
+    "مصعد": "elevator",
+    "موقف سيارة خاص": "parking",
+    "مواقف قبو": "parking",
+    "غرفة خادمة": "maid_room",
+    "مطبخ راكب": "kitchen",           # same target as azdad's own "مطبخ راكب" -> "kitchen"
+    "مدخل خاص": "private_entrance",
+    "مداخل خاصة": "private_entrance",
+    "تكييف سبليت": "air_conditioner",
+    "تكييف شباك": "air_conditioner",
+}
+
+
+def _feature_flags(features: list[str] | None) -> dict[str, bool]:
+    present = set(features or [])
+    return {col: True for token, col in FEATURE_MAP.items() if token in present}
 
 # Two vetted additions to the house taxonomy. Each has exactly one canonical answer and is not a
 # combined bucket: «أرض سكنية» and «عمارة سكنية» are the plain qualified forms of أرض / عمارة, and
@@ -260,9 +297,37 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     city = normalize.map_city(raw_city) if raw_city else None
     region = normalize.region_for_city(city)
 
+    # Arabic-native shadow (2026-09-11, same pattern azdad/abwbna/alobid/bahadhabab already carry):
+    # raw_city IS already the site's own Arabic city term (see above), so city_id/region_id resolve
+    # through the same shared to_catalog() 6 other scrapers use — never a hand-rolled/ambiguous
+    # mapping. This is what lets listing_native_location_v1 (the native resolver) see amaall's own
+    # city at all, instead of falling through to a text-matching fallback.
+    city_id, region_id = to_catalog(raw_city) if raw_city else (None, None)
+
+    # DISTRICT — the `property_area` taxonomy IS the site's «تسمية الحي» field (Houzez theme;
+    # confirmed live 2026-09-11, term 60 on a real post resolves to «حي العزيزية», the exact text
+    # the page itself labels «تسمية الحي»). It was simply never in TAXONOMIES, so every amaall
+    # listing shipped with neighborhood=None though the source states it plainly.
+    raw_neighborhood = (terms("property_area") or [None])[0]
+
     meta = p.get("property_meta") or {}
     price = normalize.to_int(_meta1(meta, "fave_property_price"))
-    area = normalize.to_int_numeric(_meta1(meta, "fave_property_size"))
+    # AREA — Houzez splits size across TWO meta keys depending on listing shape: fave_property_size
+    # for a built area (villa/apartment), fave_property_land for a bare plot. A land listing (most
+    # of this platform's inventory) has NO fave_property_size at all, so area_m2 was silently None
+    # for it even though the source states the size plainly (confirmed live: post 19900, «حي
+    # العزيزية» land ad — fave_property_size absent, fave_property_land="552", page shows «مساحة
+    # العقار: 552 متر مربع»). Falls back to land ONLY when size is absent/unparseable — never
+    # overrides a real size value.
+    #
+    # The two keys get DIFFERENT parsers on purpose. fave_property_size sometimes holds garbage
+    # unrelated to area (post 19413: "465 غرفة" — a room count, not a size) — to_int_numeric's
+    # strict float parse correctly refuses that (None), and must keep refusing it. fave_property_land
+    # is a simpler field (a number, sometimes with a bare unit suffix like "529 م" — post 20915) —
+    # to_int() strips that suffix safely; using it here does not reopen the size field's garbage risk
+    # because it only ever runs on land, never on size.
+    area = (normalize.to_int_numeric(_meta1(meta, "fave_property_size"))
+            or normalize.to_int(_meta1(meta, "fave_property_land")))
     beds = normalize.to_int(_meta1(meta, "fave_property_bedrooms"))
     baths = normalize.to_int(_meta1(meta, "fave_property_bathrooms"))
 
@@ -273,13 +338,15 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     if is_rent:
         rent_period, price_annual = normalize.rent_period_and_annual(price, f"{title} {body}")
 
+    features = terms("property_feature")
+
     info = {
         "city_ar": raw_city,
         "type_ar": raw_type,
         "type_source": type_from,
         "status_ar": statuses or None,
         "state_ar": (terms("property_state") or [None])[0],
-        "features_ar": terms("property_feature") or None,
+        "features_ar": features or None,
         "wp_id": p.get("id"),
         "slug": p.get("slug") or None,
         "price_published": bool(price),
@@ -302,13 +369,19 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
         "rent_period": rent_period,
         "city": city,
         "region": region,
-        "neighborhood": None,
+        "neighborhood": raw_neighborhood,
+        # Arabic-native shadow — see the comment above raw_city/city_id/region_id.
+        "city_ar": raw_city,
+        "district_ar": raw_neighborhood,
+        "city_id": city_id,
+        "region_id": region_id,
         "rega_location_verified": False,
         "title": title,
         "description": _redact(body),
         "photo_urls": (images or {}).get(p.get("id"), []),
         "additional_info": {k: v for k, v in info.items() if v not in (None, "", [], {})},
     }
+    row.update(_feature_flags(features))
     return row, category
 
 

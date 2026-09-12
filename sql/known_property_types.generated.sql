@@ -3,17 +3,19 @@
 -- plus the ambiguous «Building» raw; identical to the propertyTypes.ts RAW_TO_CLEAN key set + «Building»).
 -- This is the discovery allowlist detect_novel_property_types() (pg_cron jobid 33) diffs live data
 -- against; a raw type absent here is flagged as novel. APPEND-ONLY: existing rows' added_at / note are
--- preserved (ON CONFLICT DO NOTHING), so applying this never resets discovery history. 56 known raw aliases.
+-- preserved (ON CONFLICT DO NOTHING), so applying this never resets discovery history. 64 known raw aliases.
 create table if not exists public.known_property_types (
   raw_type text primary key,
   added_at timestamptz not null default now(),
   note text
 );
 insert into public.known_property_types (raw_type) values
+  ('ATM Site'),
   ('Agriculture Plot'),
   ('Apartment'),
   ('Bank'),
   ('Building'),
+  ('Business Center'),
   ('Camp'),
   ('Chalet'),
   ('Cinema'),
@@ -26,6 +28,7 @@ insert into public.known_property_types (raw_type) values
   ('Gas Station'),
   ('Hall'),
   ('Health Center'),
+  ('Hospital'),
   ('Hotel'),
   ('House'),
   ('Industrial Land'),
@@ -35,6 +38,7 @@ insert into public.known_property_types (raw_type) values
   ('Palace'),
   ('Parking'),
   ('Residential Land'),
+  ('Resort'),
   ('Rest House'),
   ('Room'),
   ('School'),
@@ -62,9 +66,13 @@ insert into public.known_property_types (raw_type) values
   ('محطة بنزين'),
   ('مخازن سحابية'),
   ('مدرسة'),
+  ('مركز أعمال'),
   ('مركز صحي'),
+  ('مستشفى'),
   ('مكاتب مشتركة'),
   ('ملحق علوي'),
-  ('مواقف')
+  ('منتجع'),
+  ('مواقف'),
+  ('موقع صراف')
 on conflict (raw_type) do nothing;
 notify pgrst, 'reload schema';

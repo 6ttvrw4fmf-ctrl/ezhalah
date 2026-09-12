@@ -94,6 +94,15 @@ const GRANDFATHERED = new Set([
   // surrounding 3h. Drift mirror must stay byte-identical; the NEXT roster edit still must use the
   // pg_get_functiondef needle-edit.
   '20260815234309_roster_full_explicit_after_wasalt_annualisation_detector.sql',
+  // 2026-09-11: miss #8 — applied straight to prod at 21:47 by a concurrent session as a wholesale
+  // rewrite; this guard (correctly) refused the verbatim file at mirror time (md5
+  // d9b90ac50896615d27ad9c94f5a3d4e0). LIVE ROSTER VERIFIED INTACT before grandfathering: the four
+  // newest detectors (remal/amaall native-location, service-facility, district-catalog-pollution)
+  // are all present in the live body, mon_detect_orphaned_detectors() = 0, and zero orphan/roster
+  // alerts open — subsequent same-evening needle-edits built on this copy, so nothing was dropped.
+  // Drift mirror must stay byte-identical; the NEXT roster edit still must use the
+  // pg_get_functiondef needle-edit.
+  '20260911214754_remal_native_location_gets_a_detector.sql',
 ]);
 
 // Every detector the 2026-08-10 repair put back. Pinned so a future revert of that migration, or a

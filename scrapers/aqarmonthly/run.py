@@ -32,6 +32,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
@@ -123,27 +124,120 @@ DETAIL_Q = ("query($id:Int!,$s:Float!,$e:Float!){ "
             "discounted_price total_price } } }")
 
 
-def discover_ids(max_listings: int | None = None) -> list[int]:
-    """Page through every available daily_rentable listing id. ES caps from+size — but the vertical
-    is ~3.8k (< 10k), so a single paged stream covers it."""
+ES_FROM_CAP = 9500          # ES refuses from+size past ~10k; the vertical is smaller, but pin the bound.
+MAX_PASSES = 4              # bounded re-paging; see discover_ids' "why more than one pass" note.
+COVERAGE_SLACK_PCT = 0.05   # measured convergence headroom, NOT a fudge factor — see coverage_verdict.
+
+
+class Discovery(NamedTuple):
+    """What one discovery pass captured, AND whether it can prove that is all the source published.
+
+    `declared` is the source's OWN `Search.find.total` for the very filter we asked for — the only
+    thing on the wire that distinguishes "aqar published 240 today" from "our page stream died after
+    240 of 3,800". Before 2026-09-12 this field was read on every page and thrown away.
+    """
+    ids: list[int]
+    declared: int | None    # source-declared total; None ⇒ we never got a readable first page
+    truncated: bool         # a page fetch failed / came back empty MID-stream (not exhaustion)
+    capped: bool            # stopped at ES_FROM_CAP, not because the source ran out
+
+
+def coverage_verdict(d: Discovery) -> tuple[bool, str]:
+    """(complete, reason) — is `d` provably the whole of what the source published?
+
+    PURE: no network, no clock, no DB. scripts/verify-aqarmonthly-coverage-beats-row-floor.ts
+    executes THIS function, so the predicate a barrier proves is the predicate production runs.
+
+    The rule is a COVERAGE relation against source truth, never an absolute row count:
+
+      • a failed/empty page mid-stream is UNKNOWN, never "the source has no more" — AGENTS.md,
+        "A FAILED FETCH IS NOT AN EMPTY ANSWER". Nothing else on the wire tells these apart.
+      • no readable first page ⇒ we cannot prove anything ⇒ not complete.
+      • captured materially short of `declared` ⇒ OUR crawl truncated ⇒ not complete.
+      • captured ≈ declared ⇒ complete, HOWEVER SMALL. 240 ids against a declared 240 is the
+        source's own answer and is preserved as such (source fidelity outranks plausibility).
+
+    The slack is MEASURED, not guessed. Aqar's ES pages without a stable tiebreaker, so documents
+    shift between page requests and one pass returns duplicates in place of ids it never showed.
+    Measured live 2026-09-12 against a declared 240: one pass yields 194-199 distinct (~19% short);
+    cumulative distinct over repeated passes went 194 → 224 → 234, i.e. it converges on the declared
+    total but does not reach it exactly. discover_ids() now re-pages (see there); 5% is the headroom
+    that convergence needs and is still far tighter than the collapse shapes it must reject — 900 of
+    a declared 3,800 is 24% and fails by a wide margin.
+    """
+    if d.truncated:
+        return False, "page stream failed mid-flight — UNKNOWN coverage, not a small source"
+    if d.declared is None:
+        return False, "no readable first page — coverage unprovable"
+    if d.capped:
+        return True, f"captured {len(d.ids)} up to the ES from-cap ({ES_FROM_CAP}) of {d.declared}"
+    slack = max(5, int(d.declared * COVERAGE_SLACK_PCT))
+    missing = d.declared - len(d.ids)
+    if missing > slack:
+        return False, f"captured {len(d.ids)} of {d.declared} the source declared ({missing} missing > {slack} slack)"
+    return True, f"captured {len(d.ids)} of {d.declared} the source declared"
+
+
+def discover_ids(max_listings: int | None = None) -> Discovery:
+    """Page through every available daily_rentable listing id, and report whether that stream is
+    PROVABLY complete against the source's own declared total (see coverage_verdict).
+
+    WHY MORE THAN ONE PASS (measured 2026-09-12, senior audit). Aqar's ES `from`/`size` paging has
+    no stable tiebreaker, so documents move between page requests: a single pass hands back the same
+    id on two pages and never shows others at all. Against a declared total of 240 one pass yielded
+    194-199 DISTINCT ids — a silent ~19% capture loss on every run since this scraper shipped, which
+    nothing could see because len(ids) was never compared to the total the source declared on each
+    page. Re-paging recovers them: cumulative distinct went 194 → 224 → 234 over three passes. Page
+    size cannot fix it instead — the endpoint caps a page at ~70 however large a `size` we ask for.
+
+    That loss is not only a freshness gap. On the UNSHARDED path the surviving id set is what
+    prune_unseen() is handed, so a fifth of the live catalogue would look absent from the crawl.
+
+    Bounded: at most MAX_PASSES, and we stop the moment a pass stops paying for itself.
+    """
     ids: list[int] = []
-    frm, size = 0, 50
-    while True:
-        d, _ = _gql(FIND_Q, {"drf": {"availability": {"eq": 1}}, "size": size, "from": frm})
-        if not d:
-            break
-        fr = d["Search"]["find"]
-        total = fr.get("total") or 0
-        batch = [l["id"] for l in (fr.get("listings") or []) if l.get("id")]
-        if not batch:
-            break
-        ids.extend(batch)
-        frm += size
-        if max_listings and len(ids) >= max_listings:
-            return ids[:max_listings]
-        if frm >= total or frm >= 9500:
-            break
-    return ids
+    seen: set[int] = set()
+    declared: int | None = None
+    truncated = capped = False
+
+    for _pass in range(MAX_PASSES):
+        before = len(ids)
+        frm, size = 0, 50
+        while True:
+            d, _ = _gql(FIND_Q, {"drf": {"availability": {"eq": 1}}, "size": size, "from": frm})
+            if not d:
+                truncated = True      # transport gave up: UNKNOWN, never "that was the last page"
+                break
+            fr = d["Search"]["find"]
+            total = fr.get("total") or 0
+            if declared is None:
+                declared = int(total)
+            batch = [l["id"] for l in (fr.get("listings") or []) if l.get("id")]
+            if not batch:
+                # An empty page BEFORE the declared total is a source-side hiccup, not the end of
+                # the catalogue — indistinguishable on the wire, so say UNKNOWN rather than guess.
+                truncated = frm < (declared or 0)
+                break
+            for lid in batch:         # dedupe ACROSS passes: len(ids) must mean "distinct ids
+                if lid not in seen:   # captured", or coverage compares against an inflated number
+                    seen.add(lid)
+                    ids.append(lid)
+            frm += size
+            if max_listings and len(ids) >= max_listings:
+                return Discovery(ids[:max_listings], declared, False, True)
+            if frm >= total:
+                break
+            if frm >= ES_FROM_CAP:
+                capped = True
+                break
+        gained = len(ids) - before
+        if truncated or capped or declared is None:
+            break                     # a broken/bounded stream is not made whole by re-running it
+        if len(ids) >= declared:
+            break                     # we hold everything the source says exists
+        if _pass and gained <= max(1, int(declared * 0.01)):
+            break                     # converged: another pass would buy ~nothing for real traffic
+    return Discovery(ids, declared, truncated, capped)
 
 
 def _redact(t: str | None) -> str | None:
@@ -315,13 +409,23 @@ def main() -> int:
     ids: list[int] = []
     counter = {"done": 0, "ok": 0}
     try:
-        ids = discover_ids(max_listings=args.limit or None)
-        print(f"✓ discovered {len(ids)} daily-rentable listings")
+        disc = discover_ids(max_listings=args.limit or None)
+        ids = list(disc.ids)
+        complete, why = coverage_verdict(disc)
+        print(f"✓ discovered {len(ids)} daily-rentable listings — {why}")
         if not ids:
             print("No listings — aborting (no prune on an empty discovery).")
             if run_id is not None:
                 db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0,
                            notes="discovery returned 0 daily-rentable ids (blocked/empty source?)")
+            return 1
+        if not complete:
+            # OUR crawl is short of what the source published. Do not upsert a partial catalogue
+            # under a healthy verdict, and never let it near prune_unseen().
+            print(f"✗ incomplete discovery — {why}")
+            if run_id is not None:
+                db.end_run(run_id, ok=False, rows_seen=len(ids), rows_upserted=0,
+                           notes=f"incomplete discovery: {why}")
             return 1
 
         # Parallel matrix: each shard prices a deterministic stride slice ids[i::N] (own runner/IP). A
@@ -379,22 +483,29 @@ def main() -> int:
         if run_id is not None:
             healthy = db.end_run(run_id, ok=True, rows_seen=len(ids), rows_upserted=len(rows),
                        degraded=pruned < 0,  # a tripped prune guard is an integrity trip → honest red
-                       # SANITY FLOOR (added after the 2026-08-22/29 + 2026-09-05 Saturday incidents):
-                       # every one of the 16 shards independently re-discovers the SAME live vertical
-                       # via discover_ids(), which this file's own 0-row-semantics comment above
-                       # documents as "~100-240 ids [per shard] — never legitimately empty while the
-                       # vertical is alive". Three consecutive Saturdays it collapsed to ~15-16/shard
-                       # (a ~93% drop, full recovery the very next day) while still reporting
-                       # rows_seen>0 and ok=True — the exact "silent_partial_success" shape:
-                       # ok=true suppresses every failure barrier, and a short-but-nonzero list can
-                       # look like a legitimately small run. 50 sits well below the documented normal
-                       # floor (100) and well above the observed collapse (15-16), for both the
-                       # sharded (~100-240) and unsharded/full (~1.5k-3.8k) paths — so a real
-                       # discovery collapse now demotes this run to ok=False via end_run()'s existing
-                       # RC-B floor guard instead of silently succeeding.
-                       floor=50,
+                       # NO absolute `floor=` here, DELIBERATELY — coverage_verdict() above already
+                       # decided this, against the source's own declared total, and it is strictly
+                       # stronger than the row floor it replaces (senior audit 2026-09-12).
+                       #
+                       # The floor was `floor=50`, added after the 2026-08-22/29 + 09-05 Saturday
+                       # collapses to ~15/shard, on the stated premise that a slice is "never
+                       # legitimately [that small] while the vertical is alive". MEASURED on the
+                       # fifth consecutive Saturday (2026-09-12), that premise is false in one
+                       # specific way: the vertical IS alive — `Search.find` with no availability
+                       # filter answered total=3,953 — but the facet we ask for,
+                       # availability:{eq:1}, answered **240** (availability:{eq:0} answered 399;
+                       # the other ~3,300 carry no availability value at all). Discovery captured
+                       # 240 of 240. A COMPLETE crawl of a small source answer was being demoted to
+                       # ok=False, reddening CI and raising a P1 `ingestion_check_failed` every
+                       # Saturday for a fact the source itself published.
+                       #
+                       # An absolute floor is blind in BOTH directions, and the other one is worse:
+                       # a stream that died after 900 of a declared 3,800 leaves each shard ~56 rows
+                       # — comfortably OVER 50 — so it passed as healthy, and on the unsharded path
+                       # that verdict feeds prune_unseen(). Coverage catches that; the floor did not.
                        notes=f"shard={args.shard or 'full'} priced={counter['ok']}/{len(ids)} "
-                             f"pruned={max(pruned, 0)}", check_tables=["aqarmonthly_residential_listings"])
+                             f"pruned={max(pruned, 0)} source_total={disc.declared} coverage={why}",
+                       check_tables=["aqarmonthly_residential_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

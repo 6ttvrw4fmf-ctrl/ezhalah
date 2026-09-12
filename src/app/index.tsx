@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, Animated as RNAnimated, Easing as RNEasing, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -260,7 +260,7 @@ export default function Home() {
   // The cohort's Arabic types — the EXACT array the search RPC receives (one shared definition in
   // remote.ts), so Trending cities/districts, their counts, and their percentages always describe
   // the same inventory pressing Search returns.
-  const cohortTypes = cohortTypesAr(query);
+  const cohortTypes = cohortTypesAr(queryForPeriod);
   const cohortTypesSig = cohortTypes ? cohortTypes.join('|') : '';
   // EVERY predicate the user has already chosen, in the SAME shape the search RPC receives — the
   // advanced answers AND the normal narrowing (bedrooms, price, area, combined-mode rent budget).
@@ -293,7 +293,7 @@ export default function Home() {
   // and is unreachable here in practice: tablesFor() is non-empty for every real Filter state.
   // isBroadCommercial is dropped: it is a local branch flag for fetchListingsForQuery, NOT an RPC
   // argument — passing it would make PostgREST reject the whole call with PGRST202.
-  const { isBroadCommercial: _cityScopeFlag, ...cityTableScopeRaw } = searchTableScope(query) ?? {};
+  const { isBroadCommercial: _cityScopeFlag, ...cityTableScopeRaw } = searchTableScope(queryForPeriod) ?? {};
   // Memoised on its own CONTENT signature, exactly like cityAfParams below. The district pool takes
   // this object directly (its cache key folds it in), and the scope can change WITHOUT deal/category/
   // types changing — a platform filter alone rewrites it — so a stable identity keyed on the content
@@ -301,7 +301,23 @@ export default function Home() {
   const cityTableScopeSig = JSON.stringify(cityTableScopeRaw);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cityTableScope = useMemo(() => cityTableScopeRaw, [cityTableScopeSig]);
-  const cityAfRaw = { ...rpcAllNarrowingParams(query), ...cityTableScope };
+  // ONE NORMALISED INPUT FOR EVERY COUNT PARAMETER, not just the period token (2026-09-11, regression
+  // hunter — the class behind queryForPeriod, surviving on a sibling parameter). The repair above
+  // normalises ONCE and says both paths read that one object "by construction"; until this line that
+  // held for rentPeriodTok alone, while the narrowing params and the table scope still read the RAW
+  // store query. rpcFilterParams → agentPriceCapAnnual() reads q.rentPeriod directly and falls back to
+  // a MAGNITUDE HEURISTIC when it is unset (`amount <= 25_000 ? amount * 12 : amount`), so on the one
+  // state every Rent search starts in the two paths sent different budgets:
+  //     counts   rpcAllNarrowingParams(query)          rentPeriod undefined → p_price_max = 20000*12
+  //     results  buildFilterBaseQuery() → queryForPeriod  rentPeriod 'annual' → p_price_max = 20000
+  // — a 12x overstatement on every rent budget <= 25,000 (5k/12k/20k/25k measured), the 2026-09-03
+  // Trending-vs-results scope class again, on the price parameter instead of the period parameter.
+  // Latent, not shipped: sanitizeForFilterRestore()'s allowlist (a THIRD file) drops priceInput from
+  // every write into this store, so the Filter home's priceInput is always ''. Parity that depends on
+  // an unrelated guard is not parity — that is the same sentence the period repair above was written
+  // under, and the same reason this is fixed rather than noted.
+  // (scripts/verify-count-and-search-share-one-query.ts, the all-parameters half)
+  const cityAfRaw = { ...rpcAllNarrowingParams(queryForPeriod), ...cityTableScope };
   const cityAfSig = JSON.stringify(cityAfRaw);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cityAfParams = useMemo(() => cityAfRaw, [cityAfSig]);
@@ -446,6 +462,19 @@ export default function Home() {
   // Warm the live district index when the home opens, so a typed district that exists in real
   // inventory (e.g. "Al Doha Dist." in Yanbu) is recognized by the time the user searches.
   useEffect(() => { void ensureLocationIndex(); }, []);
+  // Trending counts had no expiry (owner, 2026-09-11): a session left open for hours kept showing
+  // whatever it fetched once, even though the backend recomputes hourly. locations.ts now expires
+  // its own cache (POOL_TTL_MS) so the next focus refetches — this covers the common case. The gap
+  // that alone doesn't: the field left focused, app backgrounded, then resumed — no state changes,
+  // so the "field is in use" effects below never re-run on their own. Bumping resumeTick on resume
+  // gives them a reason to.
+  const [resumeTick, setResumeTick] = useState(0);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') setResumeTick((n) => n + 1);
+    });
+    return () => sub.remove();
+  }, []);
   // Warm the DEAL-SCOPED city-listing-counts pool whenever Deal changes (incl. the initial mount,
   // since query.deal always starts as a concrete 'Buy'/'Rent' — never null). Deal is picked BEFORE
   // City in this form, so it's always known here; Category is picked AFTER City/District, so a
@@ -527,8 +556,11 @@ export default function Home() {
         setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
       }
     });
+    // resumeTick (2026-09-11): app resumed from background — re-check with the SAME "field in use"
+    // gate above, so a resume while the field is closed stays a no-op (the TTL in locations.ts will
+    // catch it whenever it's next opened) and a resume while it's open/typed-in refreshes right away.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cityAfSig, cityFocus]);
+  }, [cityAfSig, cityFocus, resumeTick]);
 
   // Same reactive refresh for District, scoped to the currently-selected city — and ALSO to Category
   // (owner decision 2026-07-20, after proving live that Category matters more for districts than for
@@ -549,8 +581,9 @@ export default function Home() {
         setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
       }
     });
+    // resumeTick (2026-09-11): same app-resume refresh as the city effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effDeal, effCategory, citySelected, rentPeriodTok, cohortTypesSig, cityTableScopeSig]);
+  }, [effDeal, effCategory, citySelected, rentPeriodTok, cohortTypesSig, cityTableScopeSig, resumeTick]);
 
   // DISTRICT REHYDRATION — the districtsSelected twin of the citySelected fix above (2026-08-04).
   //

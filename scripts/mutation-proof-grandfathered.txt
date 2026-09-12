@@ -7,7 +7,6 @@ verify-about-premium-contract.ts
 verify-account-deletion.ts
 verify-adjudication-is-never-undone.ts
 verify-advanced-filter-contract.ts
-verify-advanced-filter-count-honesty.ts
 verify-af-agent-cta-live.ts
 verify-af-capture-state-discriminator.ts
 verify-af-card-evidence-live.ts
@@ -40,7 +39,6 @@ verify-af-offer-agreement.ts
 verify-af-offer-gate.ts
 verify-af-oneshot-no-reask.ts
 verify-af-option-card-truth-live.ts
-verify-af-option-count-equals-listings.ts
 verify-af-oracle-classifies-every-search-param.ts
 verify-af-oracle-soundness.ts
 verify-af-pill-removal-live.ts
@@ -158,7 +156,6 @@ verify-district-source-truth-live.ts
 verify-district-suggestion-parity-live.ts
 verify-district-typed-not-dropped.ts
 verify-duplex-source-truth.ts
-verify-eaqartabuk-price-fidelity.ts
 verify-edge-deploy-boot-test.ts
 verify-edge-functions-parse.ts
 verify-example-prompts-arabic.ts
@@ -169,7 +166,6 @@ verify-filter-stop-cancels-and-restores.ts
 verify-furnishing-enum-both-labels.ts
 verify-gathern-liveness-evidence.ts
 verify-gathern-liveness-trust-gate.ts
-verify-gathern-price-display.ts
 verify-global-engineering-policy.ts
 verify-google-one-tap-fedcm-race.ts
 verify-google-one-tap.ts
@@ -188,7 +184,6 @@ verify-journey-seam-engineer-contracts.ts
 verify-journey-transport-discriminator.ts
 verify-landmark-collision-and-platform-mention-fix.ts
 verify-legacy-query-defaults.ts
-verify-listing-tables-carry-verification-column.ts
 verify-live-canon-sync.ts
 verify-live-check-workflow-attendance.ts
 verify-live-checks-self-sufficient.ts
@@ -209,7 +204,6 @@ verify-loader-platforms-match-active.ts
 verify-loc-classify-postgrest-latency.ts
 verify-loc-rel-age-expression-indexes.ts
 verify-loc-rel-tick-single-statement-cron.ts
-verify-merge-gate-transport.ts
 verify-migration-content-parity-wired.ts
 verify-migration-content-parity.ts
 verify-migration-drift-guard-wired.ts
@@ -272,13 +266,9 @@ verify-rpc-price-sort-fix.ts
 verify-safe-deploy-postcheck-hardened.ts
 verify-safety-barrier.ts
 verify-sanadak-building-age-mapped.ts
-verify-sanadak-rsc-object-match.ts
 verify-satel-listing-url.ts
-verify-saved-search-identity.ts
-verify-scrape-run-finalized-on-kill.ts
 verify-scraper-type-tokens-mapped.ts
 verify-search-is-free.ts
-verify-searchable-scope-matches-inventory.ts
 verify-selector-reliability.ts
 verify-sentry-mandate-runs-first.ts
 verify-sentry-routing-wired.ts
@@ -308,7 +298,6 @@ verify-trending-carries-full-filter-state.ts
 verify-trending-cohort-contract.ts
 verify-trending-filter-state-live.ts
 verify-trending-live-four-way-truth.ts
-verify-trending-usable-under-narrowing.ts
 verify-trending-visuals.ts
 verify-type-and-attribute-fallback.ts
 verify-type-ar-expansion-total.ts
@@ -320,8 +309,6 @@ verify-voice-error-classification.ts
 verify-voice-ios-capture-and-stop-loading.ts
 verify-voice-safari-support-detection.ts
 verify-wasalt-amenity-vocabulary.ts
-verify-wasalt-price-total-never-ppm.ts
-verify-wasalt-rent-period-evidence.ts
 verify-web-runtime-smoke.mjs
 verify-whole-number-input.ts
 verify-workflow-yaml-valid.ts

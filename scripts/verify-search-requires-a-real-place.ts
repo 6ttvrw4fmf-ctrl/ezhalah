@@ -129,12 +129,15 @@ const A_REAL_PLACE = ['الرياض', 'جدة', 'حي الملقا', 'منطقة
   check(/في أي مدينة تبحث؟/.test(idx),
     'the refusal asks the city question in Arabic');
   // Matched by PRECEDENCE rather than by the literal chain (2026-09-06): a third platform-authored
-  // arm — noIntentReply, the «what is Ezhalah» one-liner — now sits between them. What must stay
-  // true is the ORDER (a specific ambiguity question outranks the generic city ask) and the GATE
-  // (the city ask never fires while an ambiguity is pending), and both are asserted directly.
-  check(/const reply = ambiguityReply(?: \?\? \w+)* \?\? noPlaceReply\b/.test(idx),
+  // arm — noIntentReply, the «what is Ezhalah» one-liner — now sits between them. 2026-09-11 added a
+  // FOURTH, `unsearchableReply`, which leads the whole chain (it must win even over a still-unresolved
+  // ambiguity once the one-question ceiling is spent — see decide.ts's `unsearchable` doc) — matched
+  // here as an optional leading term so this still pins the thing that actually matters: the ORDER (a
+  // specific ambiguity question outranks the generic city ask) and the GATE (the city ask never fires
+  // while an ambiguity is pending), both asserted directly.
+  check(/const reply = (?:unsearchableReply \?\? )?ambiguityReply(?: \?\? \w+)* \?\? noPlaceReply\b/.test(idx),
     'a loc_classify ambiguity still wins — its question is more specific than the generic city ask');
-  check(/const noPlaceReply = !ambiguityReply &&(?:[^\n]*&&)? !hasUsableLocation/.test(idx),
+  check(/const noPlaceReply = !unsearchableReply && !ambiguityReply &&(?:[^\n]*&&)? !hasUsableLocation/.test(idx),
     'the no-place question never overrides an ambiguity question');
 }
 
@@ -168,10 +171,21 @@ const A_REAL_PLACE = ['الرياض', 'جدة', 'حي الملقا', 'منطقة
   check(/decision = \{ kind: "message"/.test(wiring),
     'an unresolved ambiguity that somehow reached "listings" degrades to a QUESTION, fail-closed');
 
-  // The ladder must not re-acquire a budget bound on the ambiguity step.
+  // SUPERSEDED 2026-09-11 (owner: "ask ONE follow-up question about location... Do not waste tokens
+  // with unnecessary back-and-forth"). This used to assert the OPPOSITE — that the ambiguity step
+  // must NEVER re-acquire a budget bound, because a 2026-09-05 bound on JUST that step, alone, is
+  // what produced the nationwide-search bug (bounding it converged on "listings" while the
+  // location was still unresolved, and turnWiring's absence-clearing made that the whole Kingdom).
+  // The 2026-09-11 fix bounds it a DIFFERENT way that does not reopen that bug: ambiguity and
+  // missing-location are now UNIFIED into one "location not resolved" gate sharing ONE ceiling
+  // (see decide.ts step 1), and once spent it goes `unsearchable` — never "listings" with an
+  // unresolved location — so a bound here no longer implies the old defect. Full coverage of this
+  // exact invariant (bounded, converges to unsearchable, never loops, never nationwide) lives in
+  // scripts/verify-agent-decide-turn.ts §(f2); this check just confirms the OLD pattern (a bound on
+  // `locationAmbiguous` alone, still capable of falling through to a bare "listings") is gone.
   const decideSrc = readFileSync(join(root, 'supabase/functions/agent/decide.ts'), 'utf8');
-  check(!/locationAmbiguous && askCount < QUESTION_BUDGET_CEILING/.test(decideSrc),
-    'the twin question is NOT bounded by the question budget (that bound is what produced the bug)');
+  check(!/if \(locationAmbiguous\) \{\s*\n\s*return \{ kind: "message", askCount: askCount \+ 1 \};\s*\n\s*\}/.test(decideSrc),
+    'the ambiguity step is no longer a STANDALONE bare-bounded branch (it is unified with missing-location, sharing one ceiling — see decide.ts step 1)');
   // DEFENCE IN DEPTH, pinned at the source because it is deliberately unreachable today and so has
   // no behaviour to mutate: step 1 always asks on an ambiguity, so the no-place gate below never
   // sees one. Keep it unexempted anyway — the safety of that gate must not depend on the ladder's

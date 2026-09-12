@@ -184,6 +184,68 @@ def test_blank_or_unknown_inputs_stay_untouched():
     assert al.strip_city_suffix("حي المروج ابها", "") == "حي المروج ابها"
 
 
+# ── the city-UNRESOLVED limb: a twin the parser must not guess still has a dirty district ────────
+# Found live 2026-09-12 (routine #3). aqarmonthly row 762483 sat in the served index as
+# «حي المجد القرى القري» — city_ar NULL, because «القرى» is a same-name twin _pick_candidate()
+# correctly refuses to resolve. resolve_slug() returned the district UNSTRIPPED on that path, while
+# mon_detect_aqarmonthly_district_city_suffix()'s two city-NULL limbs assert the opposite of stored
+# rows, so the P2 re-raised after every crawl and a data-only repair would be retracted by the next
+# one. The parser and the detector must be ONE algorithm — that is this file's whole thesis.
+
+
+@pytest.fixture
+def twin_catalog(monkeypatch):
+    """«القري» exists in two regions, so it is a name the catalog knows but _pick_candidate() must
+    refuse to turn into an id — exactly the cohort that produces the glued districts."""
+    monkeypatch.setattr(al, "_load", lambda: None)
+    monkeypatch.setattr(al, "_CITY", {
+        "القري": [(7, 1), (8, 6)],
+        "الرياض": [(3, 1)],
+        # A two-word city whose SECOND word is itself a catalog city, so the 1-token and the 2-token
+        # trailing windows BOTH match and only the longest one is right. Both are twins, so neither
+        # resolves to an id and this stays the city-unresolved path.
+        "مشيط": [(9, 6), (10, 1)],
+        "خميس مشيط": [(11, 6), (12, 1)],
+    })
+    monkeypatch.setattr(al, "_CID_AR", {3: "الرياض", 7: "القرى", 8: "القرى"})
+    yield
+
+
+def test_trailing_catalog_city_norm_is_id_free_so_a_twin_still_answers(twin_catalog):
+    """It reports the NAME, never the id — which is why it can clean a row the resolver cannot
+    resolve. Mirrors SQL district_trailing_catalog_city_norm()."""
+    assert al.trailing_catalog_city_norm("حي المجد القرى القري") == "القري"
+    assert al.trailing_catalog_city_norm("حي المجد") is None          # no catalog city trailing
+    assert al.trailing_catalog_city_norm(None) is None
+    assert al.trailing_catalog_city_norm("") is None
+
+
+def test_the_longest_trailing_window_wins_not_the_shortest(twin_catalog):
+    """SQL orders its 1/2/3-token windows `by w.sz desc`; the Python mirror must too. «مشيط» is a
+    catalog city in its own right, so a shortest-window-first scan would report «مشيط» and leave
+    «خميس» glued to the district forever — a half-strip that looks clean and is not."""
+    assert al.trailing_catalog_city_norm("حي المطار خميس مشيط") == "خميس مشيط"
+    r = al.resolve_slug("حي-المطار-خميس-مشيط-1")
+    assert r["city_id"] is None                                        # both windows are twins
+    assert r["district_ar"] == "حي المطار"                             # BOTH glued tokens removed
+
+
+def test_unresolvable_twin_city_is_still_stripped_off_the_district(twin_catalog):
+    """THE LIVE DEFECT: city stays honestly NULL, but the glued city name is removed anyway."""
+    r = al.resolve_slug("حي-المجد-القرى-القري-762483")
+    assert r["city_id"] is None and r["city_ar"] is None      # never guess a twin
+    assert r["confidence"] == "unresolved"
+    assert r["district_ar"] == "حي المجد"                     # …yet the district is clean
+
+
+def test_unresolved_city_never_invents_a_strip_when_no_catalog_city_trails(twin_catalog):
+    """Anti-fabrication: the id-free test only ever removes a name the catalog already carries, and
+    the two-token floor still holds, so a real district is never hollowed out."""
+    r = al.resolve_slug("حي-المجد-الشمالي-999")
+    assert r["district_ar"] == "حي المجد الشمالي"             # nothing trailing is a city → untouched
+    assert al.strip_city_suffix("حي القري", al.trailing_catalog_city_norm("حي القري")) == "حي القري"
+
+
 # ── exact-location-only must survive this change (audit 2026-08-10) ──────────────────────────────
 
 def test_region_label_is_not_upgraded_into_a_city(monkeypatch):

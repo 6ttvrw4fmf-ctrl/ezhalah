@@ -66,6 +66,7 @@ def environment_is_trustworthy(
     probe_count: int,
     min_rate: float = MIN_ALIVE_RATE_FOR_TRUST,
     min_probes: int = MIN_PROBES_FOR_TRUST,
+    canary_ok: bool | None = None,
 ) -> bool:
     """May this run write strikes / deactivations?
 
@@ -77,9 +78,55 @@ def environment_is_trustworthy(
     manufactured by a block (a blocked environment produces 404s and shells, not live pages), and
     `docs/ops/DELETION_SAFETY.md` §2.4 keeps reactivations during an inconclusive freeze for
     exactly that reason — restoring a live listing is the fail-safe direction.
+
+    ── canary_ok: the LEADING control supersedes the LAGGING proxy (2026-09-11, ops_incident #183)
+
+    Read this module's header: the aggregate alive-rate and the canary ask THE SAME QUESTION —
+    "is this environment answering truthfully?" — one after the fact, one before. The rate was
+    only ever a proxy, adopted because no positive control existed yet. It has one structural
+    flaw as a proxy: it cannot separate "the source is lying to us" from "this cohort really is
+    mostly dead", because both look like a low alive-rate. The worklist is selected by
+    `--min-stale-days`, i.e. deliberately composed of the rows most likely to be gone, so a low
+    rate is the EXPECTED result of a correct run against a healthy source.
+
+    Measured on gathern 2026-09-11, after PR #2271 made the canary pool trustworthy — one run,
+    both signals, flatly contradicting each other:
+
+        canary   10/10 known-alive controls -> HTTP 200   (the source is answering perfectly)
+        worklist 1,469 of 1,500 -> 404, alive_rate 2.1%   (this stale cohort really is dead)
+        verdict  TRUST-QUARANTINED "the source is not answering this run reliably"  <- wrong
+
+    And it worsens with scale, because the worklist is ordered oldest-stale-first: 8.3% at n=60,
+    6.0% at n=150, 2.1% at n=1500. The more complete and more honest the run, the more certainly
+    it condemned itself. Only a partial run could ever clear the floor.
+
+    So when a purpose-built positive control has PROVEN the environment across the run's window,
+    that direct evidence stands and the proxy is not consulted. This is not a lowered threshold:
+    MIN_ALIVE_RATE_FOR_TRUST and MIN_PROBES_FOR_TRUST are untouched, and every fail-closed branch
+    below still applies.
+
+    THE CALLER MUST EARN `canary_ok=True` BY BRACKETING THE RUN — controls probed BEFORE the
+    worklist *and again after it*, both passing `canary_environment_ok`. A single opening canary
+    only proves the environment at run start, which would reopen exactly the mid-run degradation
+    the rate gate was built to catch (2026-09-01: healthy early, blocked by the end). Bracketing
+    closes that window with direct evidence instead of inference.
+
+        None  (default) -> the proxy decides, exactly as before. Unchanged for every caller that
+                           does not run canaries, which is why dealapp is byte-for-byte unaffected.
+        False           -> untrusted, full stop. The control failed; nothing here can rescue it.
+        True            -> the environment is proven for this window; the proxy is not consulted.
     """
-    if probe_count < min_probes or probe_count <= 0:
+    if probe_count <= 0:
         return False
     if alive_count < 0:
+        return False
+    if canary_ok is False:
+        return False
+    if canary_ok is True:
+        # Proven by direct positive control at both ends of the run. The degenerate guards above
+        # still ran; min_probes deliberately does not, because its whole job was to stop a thin
+        # sample producing a noisy RATE, and no rate is being consulted on this path.
+        return True
+    if probe_count < min_probes:
         return False
     return (alive_count / probe_count) >= min_rate

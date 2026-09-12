@@ -41,7 +41,11 @@
     "Telecom Tower": "برج اتصالات",
     "Villa": "فيلا",
     "Warehouse": "مستودع",
-    "Workshop": "ورشة"
+    "Workshop": "ورشة",
+    "Hospital": "مستشفى",
+    "Business Center": "مركز أعمال",
+    "Resort": "منتجع",
+    "ATM Site": "موقع صراف"
   },
   "buildingAmbiguous": {
     "raw": "Building",
@@ -54,7 +58,11 @@
     "School",
     "Health Center",
     "Telecom Tower",
-    "Parking"
+    "Parking",
+    "Hospital",
+    "Business Center",
+    "Resort",
+    "ATM Site"
   ],
   "cleanTypes": [
     {
@@ -526,7 +534,15 @@
           "Telecom Tower",
           "برج اتصالات",
           "Parking",
-          "مواقف"
+          "مواقف",
+          "Hospital",
+          "مستشفى",
+          "Business Center",
+          "مركز أعمال",
+          "Resort",
+          "منتجع",
+          "ATM Site",
+          "موقع صراف"
         ],
         "kinds": [
           "res",
@@ -650,6 +666,74 @@
         "rawTypes": [
           "Parking",
           "مواقف"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Hospital",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Hospital",
+          "مستشفى"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Business Center",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Business Center",
+          "مركز أعمال"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Resort",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Resort",
+          "منتجع"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "ATM Site",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "ATM Site",
+          "موقع صراف"
         ],
         "kinds": [
           "res",

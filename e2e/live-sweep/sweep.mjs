@@ -105,7 +105,7 @@ export const WATCHES = [
   'no-html-entities-rendered',      // no literal &bull; / &quot; / &ndash; in card text
   'typed-district-not-dropped',     // a district typed but not tapped must not vanish silently
   'clarification-answer-commits',   // answering the city-vs-region question must search
-  'tab-switch-no-junk-history',     // تصفية ↔ الوكيل الذكي must not push history entries
+  'tab-switch-no-junk-history',     // تصفية ↔ الوسيط الذكي must not push history entries
 ];
 
 // ── small helpers ────────────────────────────────────────────────────────────────────────────────
@@ -834,21 +834,30 @@ function dbFilterFromRequest(req, tax, cities) {
   // السعر. The contract, per deal mode:
   //   combined (p_deal null) — Buy ∪ Rent, each side judged by its OWN budget, and a side with no
   //     budget set is unconstrained. The Rent side is annual: combined mode has no period selector.
-  //   single deal — بيع against price_total; إيجار against price_annual, with a شهري budget
-  //     multiplied by 12 because the index stores the ANNUAL price.
+  //   single deal — بيع against price_total_effective; إيجار against price_annual, with a شهري
+  //     budget multiplied by 12 because the index stores the ANNUAL price.
   // A listing with no usable price (null or 0) is excluded once a budget applies, and included
   // when none does — that asymmetry is the product's, and the oracle must reproduce it.
+  //
+  // BUY JUDGES price_total_effective, NOT price_total (oracle catch-up, 2026-09-11). The owner's
+  // 2026-09-03 reversal made PPM × area a SHOWN, SEARCHABLE total: the RPC's بيع budget branch now
+  // gates exclusively on s.price_total_effective (pg_get_functiondef verified — zero raw
+  // price_total gates remain), so a plot published per-metre matches a Buy budget by its computed
+  // total while its raw price_total stays NULL. This oracle kept judging raw price_total and
+  // false-accused the RPC: live-search-sweep red 2 days on عرعر/بيع (RPC 179 vs DB 177 — the 2
+  // "extras" were muktamel plots with price_total_effective 199,710/300,510 = ppm × area, exactly
+  // and correctly inside the 900k budget).
   const pmin = nz(req.p_price_min), pmax = nz(req.p_price_max);
   const rmin = nz(req.p_price_min_rent), rmax = nz(req.p_price_max_rent);
   if (req.p_deal == null) {
     const buy = (pmin == null && pmax == null) ? 'deal_ar.eq.بيع'
-      : `and(deal_ar.eq.بيع,price_total.gt.0,${range('price_total', pmin, pmax, false)})`;
+      : `and(deal_ar.eq.بيع,price_total_effective.gt.0,${range('price_total_effective', pmin, pmax, false)})`;
     const rent = (rmin == null && rmax == null) ? 'deal_ar.eq.إيجار'
       : `and(deal_ar.eq.إيجار,price_annual.gt.0,${range('price_annual', rmin, rmax, false)})`;
     if (!(pmin == null && pmax == null && rmin == null && rmax == null)) clauses.push(`or(${buy},${rent})`);
   } else if (pmin != null || pmax != null) {
     const k = req.p_rent_period === 'شهري' ? 12 : 1;
-    if (req.p_deal === 'بيع') clauses.push(`and(price_total.gt.0,${range('price_total', pmin, pmax, false)})`);
+    if (req.p_deal === 'بيع') clauses.push(`and(price_total_effective.gt.0,${range('price_total_effective', pmin, pmax, false)})`);
     else if (req.p_deal === 'إيجار') {
       clauses.push(`and(price_annual.gt.0,${range('price_annual', pmin == null ? null : pmin * k, pmax == null ? null : pmax * k, false)})`);
     } else return { comparable: false, reason: `p_deal=${req.p_deal} with a budget: unknown deal mode` };

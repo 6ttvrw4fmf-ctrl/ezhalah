@@ -19,7 +19,7 @@ import { useTheme } from '@/theme/theme';
 import HeroBackground from '@/components/HeroBackground';
 import AccountMenu from '@/components/AccountMenu';
 import { useApp, type HistoryItem } from '@/store';
-import { sanitizeArabicSearch, isSearchableQuery, filterChats, arabicHintAfterInput } from '@/lib/chatSearch';
+import { sanitizeArabicSearch, isSearchableQuery, filterChats, arabicHintAfterInput, boldSpans } from '@/lib/chatSearch';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { queryLabel } from '@/data/search';
 import { HOLD_MS, canReorder, dragTargetIndex, dragCrossIntent, neighboursAt, preActivate, sortByOrder, type CrossIntent } from '@/lib/sidebarReorder';
@@ -116,7 +116,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // (dark green while its ⋯ menu is open), previously-visited chat (no visual state at all).
   const pathname = usePathname();
   const onAgentScreen = pathname?.startsWith('/agent') ?? false;
-  const { t, isRTL, locale } = useI18n();
+  const { t, isRTL, locale, setLocale } = useI18n();
   const { user, history, setQuery, toggleStar, deleteHistory, renameHistory, openModal, openAuth, activeChatId, setActiveChat, newChat } = useApp();
   // APPEARANCE (owner 2026-08-28): the sidebar is a THEMED surface — it re-skins in dark mode via
   // the dark override sheet (dks) below. TC carries the resolved palette for inline icon colors.
@@ -620,6 +620,16 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       {/* Owner 2026-09-03: EVERY clickable sidebar row gives the exact feedback «محادثة جديدة» gives —
           the whole row fills with colors.hoverRow (dark green in light, muted deep green in dark) and
           the icon + label flip to white. Children-as-function so the glyph and text flip with the fill. */}
+      {/* Owner 2026-09-11: language is reachable WITHOUT sign-in — Settings' language rows sit behind
+          openAccountMenu()/openSignIn() above, but a guest never gets that far. Single tap toggles
+          ar<->en directly via the now-bilingual setLocale(); the label names the language a tap
+          switches TO, same convention as AccountMenu's two Language rows. */}
+      <Pressable testID="sidebar-language-toggle" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
+        {(st) => (<>
+          <Ionicons name="globe-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
+          <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{locale === 'ar' ? 'English' : 'العربية'}</Text>
+        </>)}
+      </Pressable>
       <Pressable testID="sidebar-settings-link" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => (user ? openAccountMenu() : openSignIn())}>
         {(st) => (<>
           <Ionicons name="settings-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
@@ -812,7 +822,18 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                             accessibilityHint={t('Hold to reorder the conversation')}
                           >
                             <Ionicons name="chatbubble-outline" size={15} color={hot ? colors.surface : '#8a978f'} />
-                            <Text style={[s.histLabel, dark && dks.histLabel, (hot || drag?.id === c.id) && s.histLabelHot]} numberOfLines={1}>{displayTitle(c, locale) || queryLabel(c.query)}</Text>
+                            <Text style={[s.histLabel, dark && dks.histLabel, (hot || drag?.id === c.id) && s.histLabelHot]} numberOfLines={1}>
+                              {/* Bold the matching text (owner request 2026-09-11) — only while an active
+                                  search is actually filtering the list; a normal row never carries the
+                                  cost of computing spans it will never render. boldSpans reconstructs the
+                                  exact original title, so this can never alter what's displayed, only
+                                  which runs of it are bold. */}
+                              {searchActive
+                                ? boldSpans(displayTitle(c, locale) || queryLabel(c.query), searchText).map((sp, i) => (
+                                    <Text key={i} style={sp.bold ? s.histLabelMatch : undefined}>{sp.text}</Text>
+                                  ))
+                                : displayTitle(c, locale) || queryLabel(c.query)}
+                            </Text>
                             {c.starred && <Ionicons name="star" size={13} color={GOLD} />}
                           </Pressable>
                         )}
@@ -835,7 +856,13 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
             </ScrollView>
 
             <View style={[s.divider, dark && dks.divider]} />
-            {NavLinks}
+            {/* Settings/Help/About are NOT repeated here for a signed-in user (owner request
+                2026-09-11, "move into the profile menu, not separate sidebar items"): Settings IS
+                this profile row's own AccountMenu, and AccountMenu already carries Help (Support)
+                and now About Us as menu rows. Rendering NavLinks here too was pure duplication —
+                and on mobile it pushed the history-search view down with rows unrelated to finding
+                a conversation. Guests (below) keep NavLinks: they have no profile/AccountMenu to
+                consolidate into. */}
             {/* Note #7 — profile row layout is IDENTICAL in both languages: avatar → name + email on
                 the right. `direction: ltr` locks it so Arabic doesn't auto-flip the avatar to the
                 opposite side. The name text itself still flows in its own language. (user request.) */}
@@ -983,7 +1010,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         ) : null}
         {menuOverlay}
         {deleteConfirmOverlay}
-        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} onLegal={() => openInfo('legal')} />
+        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} onLegal={() => openInfo('legal')} onAbout={() => openInfo('about')} />
       </View>
     );
   }
@@ -1000,7 +1027,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
         ) : null}
-        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} onLegal={() => openInfo('legal')} />
+        <AccountMenu visible={acctOpen} onClose={() => setAcctOpen(false)} onHelp={() => openInfo('support')} onLegal={() => openInfo('legal')} onAbout={() => openInfo('about')} />
       </Animated.View>
     </View>
   );
@@ -1064,6 +1091,7 @@ const s = StyleSheet.create({
   histRowActive: { backgroundColor: '#dcefe1' },
   histItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 8 },
   histLabel: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
+  histLabelMatch: { fontWeight: '800' },
   // Editing keeps the row's metrics as close as it can so the list barely moves on rename.
   // fontSize >= 16 on web keeps mobile Safari from zooming on focus and stranding the user zoomed in
   // (scripts/verify-input-font-no-ios-zoom.ts). This is the one place where the bigger web font costs a

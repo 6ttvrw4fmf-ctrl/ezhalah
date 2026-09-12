@@ -96,6 +96,57 @@ console.log('\n(1) NOISE-GUARD GAP — a FABRICATED type/price/af with zero text
     exhaustedNoPlace.decision.kind === 'message', JSON.stringify(exhaustedNoPlace.decision));
 }
 
+console.log('\n(5) ARABIC \\b IS A NO-OP — أرض/ارض/دور/محل must ground like every other type word\n');
+{
+  // No prevQuery here (unlike `base`) — any established type below can ONLY have come from THIS
+  // turn's own saidTypeWord grounding, never the "type established on an earlier turn" fallback.
+  const noPrior: TurnWiringInput = { ...base, prevQuery: null };
+
+  // THE LIVE REPRO (2026-09-11): bare "أرض" alone got the generic "tell me what you're looking
+  // for" fallback — the model correctly classified type="Residential Land", but \bأرض\b never
+  // matched the literal text "أرض" (JS \b is ASCII-only; no boundary exists next to Arabic script),
+  // so the noise-guard threw the correctly-classified type away.
+  const land = buildTurnDecision({ ...noPrior, text: 'أرض', out: { type: 'Residential Land', af: {}, amenities: [] } });
+  check('(5) bare "أرض" grounds type (was: silently dropped, "\\bأرض\\b" never matches)',
+    land.establishedState.type === 'Residential Land', JSON.stringify(land.establishedState.type));
+
+  // THE SECOND LIVE REPRO: "أرض في جدة السعر يكون حوالي 800 المتر" (location + price both grounded
+  // fine) still got asked "وش نوع العقار اللي تدور عليه؟ (شقة، فيلا، أرض، عمارة، مكتب، محل…)" —
+  // "أرض" listed right there in the question it was asked BECAUSE "أرض" didn't ground.
+  const landWithCity = buildTurnDecision({ ...noPrior, text: 'أبغى أرض في جدة السعر يكون حوالي 800 المتر', location: 'جدة', out: { type: 'Residential Land', af: {}, amenities: [] } });
+  check('(5) "أرض في جدة ... 800 المتر" grounds type -> listings (was: message asking for type again)',
+    landWithCity.decision.kind === 'listings' && landWithCity.establishedState.type === 'Residential Land',
+    JSON.stringify(landWithCity.decision));
+
+  const landNoHamza = buildTurnDecision({ ...noPrior, text: 'ابغى ارض في الرياض', location: 'الرياض', out: { type: 'Residential Land', af: {}, amenities: [] } });
+  check('(5) bare "ارض" (no hamza) grounds type', landNoHamza.establishedState.type === 'Residential Land');
+
+  const floor = buildTurnDecision({ ...noPrior, text: 'عندي دور واحد فقط في جدة', location: 'جدة', out: { type: 'Floor', af: {}, amenities: [] } });
+  check('(5) bare "دور" (floor) grounds type', floor.establishedState.type === 'Floor');
+
+  const shop = buildTurnDecision({ ...noPrior, text: 'أبغى محل تجاري في الدمام', location: 'الدمام', out: { type: 'Shop', af: {}, amenities: [] } });
+  check('(5) bare "محل" (shop) grounds type', shop.establishedState.type === 'Shop');
+
+  // THE DEFINITE ARTICLE (attaches with no space — «الأرض»/«المحل»/«الدور» are the ORDINARY way to
+  // say "the land/shop/floor", not an edge case): must ALSO ground, not just the bare noun.
+  const theLand = buildTurnDecision({ ...noPrior, text: 'ابغى الأرض اللي بجدة', location: 'جدة', out: { type: 'Residential Land', af: {}, amenities: [] } });
+  check('(5) "الأرض" (definite article, no space) grounds type too', theLand.establishedState.type === 'Residential Land');
+  const theShop = buildTurnDecision({ ...noPrior, text: 'أبغى المحل اللي في السوق بالرياض', location: 'الرياض', out: { type: 'Shop', af: {}, amenities: [] } });
+  check('(5) "المحل" (definite article, no space) grounds type too', theShop.establishedState.type === 'Shop');
+
+  // THE EXACT FALSE-POSITIVE \b WAS ORIGINALLY REACHED FOR (must stay negative, or the fix just
+  // trades a false-negative for a worse false-positive): "دور" as a bare \b-wrapped substring would
+  // have matched this app's OWN tagline verb تدور and the common noun دورة (bathroom/session).
+  const tagline = buildTurnDecision({ ...noPrior, text: 'تدور على عقار في الرياض', location: 'الرياض', out: { type: 'Floor', af: {}, amenities: [] } });
+  check('(5) "تدور" (verb, app tagline) must NOT ground type — fabricated type stays dropped',
+    tagline.establishedState.type === null, JSON.stringify(tagline.establishedState.type));
+  const bathroom = buildTurnDecision({ ...noPrior, text: 'فيها 3 دورات مياه في الرياض', location: 'الرياض', out: { type: 'Floor', af: {}, amenities: [] } });
+  check('(5) "دورات مياه" (bathrooms) must NOT ground type', bathroom.establishedState.type === null);
+  const flooring = buildTurnDecision({ ...noPrior, text: 'نوع الأرضية بلاط في الرياض', location: 'الرياض', out: { type: 'Residential Land', af: {}, amenities: [] } });
+  check('(5) "الأرضية" (flooring — a different word, not «land» + «ال») must NOT ground type',
+    flooring.establishedState.type === null, JSON.stringify(flooring.establishedState.type));
+}
+
 console.log('\n(4) establishedState FIELD-NAME BUG — a REAL prevQuery (SearchQuery shape) must be read correctly\n');
 {
   // A REAL SearchQuery shape (src/data/search.ts): priceInput/priceMin/priceMax, never `.price`; flat

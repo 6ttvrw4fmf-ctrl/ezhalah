@@ -57,6 +57,7 @@ _REGION_NORM: dict[str, int] = {}                        # norm(region_ar) → r
 _REGION_AR_FOR: dict[int, str] = {}                      # region_id → canonical region_ar
 _CID_AR: dict[int, str] = {}                             # catalog city_id → canonical city_ar
 _DISTRICT_BY_CITY: dict[int, set[str]] = {}              # city_id → {district_norm, …} (disambiguation only)
+_DISTRICT_AR_BY_NORM: dict[str, str] = {}                # district_norm → canonical district_ar (catalog spelling)
 
 
 _LOAD_LOCK = threading.Lock()
@@ -87,8 +88,9 @@ def _load() -> None:
                 for r in (c.table("loc_catalog_region").select("region_id,region_ar").execute().data or []):
                     _REGION_NORM[norm_ar(r.get("region_ar"))] = r["region_id"]
                     _REGION_AR_FOR[r["region_id"]] = r["region_ar"]
-                for r in (c.table("loc_catalog_district").select("city_id,district_norm").execute().data or []):
+                for r in (c.table("loc_catalog_district").select("city_id,district_norm,district_ar").execute().data or []):
                     _DISTRICT_BY_CITY.setdefault(r["city_id"], set()).add(r["district_norm"])
+                    _DISTRICT_AR_BY_NORM.setdefault(r["district_norm"], r["district_ar"])
                 return
             except Exception as e:  # transient network/DB hiccup → clear partials, back off, retry
                 last = e
@@ -97,6 +99,7 @@ def _load() -> None:
                 _REGION_AR_FOR.clear()
                 _CID_AR.clear()
                 _DISTRICT_BY_CITY.clear()
+                _DISTRICT_AR_BY_NORM.clear()
                 time.sleep(1.5 * (attempt + 1))
         if last is not None:
             raise last
@@ -159,6 +162,30 @@ def strip_city_suffix(district_ar: Optional[str], city_ar: Optional[str]) -> Opt
             continue
         break
     return " ".join(dist_tokens)
+
+
+def trailing_catalog_city_norm(district_ar: Optional[str]) -> Optional[str]:
+    """The catalog `city_norm` that the district's TRAILING 1-3 tokens spell (longest window wins),
+    else None.
+
+    Deliberately ID-FREE: it answers "is this a city name", never "which city is this", so it stays
+    right about a same-name twin that `_pick_candidate()` must refuse to resolve. That distinction is
+    the whole point — the cohort that produced the glued districts in the first place is exactly the
+    one where the city is an unresolvable twin, so a rule that needs a city_id can never clean it.
+
+    Python mirror of SQL `public.district_trailing_catalog_city_norm()`; the two are ONE algorithm and
+    their parity is pinned by scripts/verify-aqarmonthly-district-suffix-guard.ts. It never invents
+    precision: it only ever reports a name the catalog already carries, and the caller still hands the
+    result to strip_city_suffix(), which keeps the trailing-only and two-token-floor invariants.
+    """
+    _load()
+    toks = (district_ar or "").split()
+    for size in (3, 2, 1):  # longest window wins, mirroring the SQL's `order by w.sz desc`
+        if len(toks) >= size:
+            key = " ".join(norm_ar(t) for t in toks[-size:])
+            if key in _CITY:
+                return key
+    return None
 
 
 def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None) -> dict:
@@ -236,7 +263,17 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
         best = _scan(n.split())
 
     if not best:
-        return {"city_ar": None, "city_id": None, "region_id": region_id, "district_ar": district_ar, "confidence": "unresolved"}
+        # The city is unresolvable (no catalog hit, or a same-name twin _pick_candidate() refuses to
+        # guess) — but the source still GLUED it onto the district, so the district is still dirty.
+        # Strip it by NAME without ever claiming which city it is: exactly what the canonical SQL
+        # does (`strip_district_city_suffix(d, district_trailing_catalog_city_norm(d))`), and what
+        # mon_detect_aqarmonthly_district_city_suffix()'s two city-NULL limbs assert of stored rows.
+        # Leaving it unstripped here is what put «حي المجد القرى القري» in the served index and kept
+        # that P2 re-raising: the parser and the detector were reading two different rules.
+        # strip_city_suffix() still returns the district untouched when this yields None.
+        return {"city_ar": None, "city_id": None, "region_id": region_id,
+                "district_ar": strip_city_suffix(district_ar, trailing_catalog_city_norm(district_ar)),
+                "confidence": "unresolved"}
     cid, rid = best
     city_ar_val = _CID_AR.get(cid)
     district_ar = strip_city_suffix(district_ar, city_ar_val)
@@ -402,3 +439,60 @@ def resolve(
         return {"city_ar": None, "city_id": None, "region_id": rid, "region_ar": _REGION_AR_FOR.get(rid),
                 "district_ar": d_ar, "district_id": None, "confidence": "region_only"}
     return dict(empty) | {"district_ar": d_ar}
+
+
+_PLAN_WORD = "مخطط"  # a subdivision-PLAN reference ("مخطط الربوة", "مخطط تلال مكة") is never a district,
+# even when the plan's own name matches a real district elsewhere — see district_ar_looks_bogus()
+# (20260911201847) for the same rule enforced DB-side on already-stored text.
+
+
+def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Optional[str]:
+    """Recognizes a REAL district of `city_id` mentioned in free text (a title, a description) — for
+    sources that publish no separate district field/taxonomy at all (remal: class_list gives only an
+    unresolvable numeric term id; azdad: the district field is sometimes blank but the source's own
+    free-text `location` line still names the place). This NEVER invents: a candidate is accepted
+    ONLY when it is an EXACT match (city-scoped) against loc_catalog_district — the same curated
+    table `resolve()`'s district-disambiguation already trusts, and the same "100%-certain,
+    catalog-attested" bar this repo's EN→AR district mapping standard requires. A phrase that merely
+    LOOKS like a place name (a landmark, a plan/scheme name, a housing-program name) and isn't in the
+    catalog is silently rejected, never guessed at — see the module docstring's exact-location-only
+    rule. Returns the catalog's OWN canonical spelling (never the source's raw substring), so a
+    matched district always renders and searches identically to every other listing for that place.
+
+    Tries 3-, then 2-, then 1-word windows (longer / more specific first) over every run of Arabic
+    letters in `text`, skipping any window containing `مخطط` — a subdivision-plan reference is a
+    plan, never a district, no matter what its own name happens to be (measured live on remal,
+    2026-09-11: "مخطط الربوة" / "مخطط تلال مكة" / "مخطط الصفوة" are NOT in loc_catalog_district for
+    Mecca at all, while "الرصيفة" / "الخالدية" / "الشوقية" / "العوالي" / "الكعكية" — each stated
+    plainly in a title with no مخطط anywhere near it — are real, catalog-confirmed Mecca districts).
+    """
+    _load()
+    if not text or not city_id:
+        return None
+    known = _DISTRICT_BY_CITY.get(city_id)
+    if not known:
+        return None
+    words = re.findall(r"[؀-ۿ]+", text)
+    # A leading ب/ل (bi-/li-) ATTACHES directly to the following word with no space ("بالشوقية" is
+    # one token, ب + الشوقية) — try the word as-scraped AND with that one leading letter stripped, so
+    # "بالشوقية"/"للرصيفة" still isolate the noun ("الشوقية"/"الرصيفة") a window can match. Only the
+    # word's OWN two forms are tried; a multi-word window uses its first word's own list here too.
+    def _forms(word: str) -> list[str]:
+        if len(word) > 2 and word[0] in "بل":
+            return [word, word[1:]]
+        return [word]
+
+    for size in (3, 2, 1):
+        for i in range(len(words) - size + 1):
+            window = words[i:i + size]
+            if _PLAN_WORD in window:
+                continue
+            for first in _forms(window[0]):
+                candidate = " ".join([first, *window[1:]])
+                for form in (candidate, f"حي {candidate}"):
+                    n = norm_ar(form)
+                    if n in known:
+                        ar = _DISTRICT_AR_BY_NORM.get(n)
+                        if ar:
+                            return ar
+    return None

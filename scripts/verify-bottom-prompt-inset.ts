@@ -33,7 +33,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   bottomPromptInset, topPromptInset, promptInsets,
-  ONE_TAP_IFRAME_SELECTOR, AUTH_PROMPT_SELECTOR,
+  ONE_TAP_IFRAME_SELECTOR, AUTH_PROMPT_SELECTOR, OWN_DOCKED_PROMPT_SELECTOR, DOCKED_PROMPT_SELECTOR,
 } from '../src/lib/bottomPromptInset.ts';
 import { npmTestRuns } from './lib/testRegistry.ts';
 
@@ -190,8 +190,39 @@ const SHEET = { top: 520, bottom: 664, height: 144 };
     AUTH_PROMPT_SELECTOR.includes('appleid.apple.com'), `got ${AUTH_PROMPT_SELECTOR}`);
   const libSrc = readFileSync(join(ROOT, 'src/lib/bottomPromptInset.ts'), 'utf8');
   check('E3d. the DOM read uses the WIDE selector, not the legacy id',
-    /querySelectorAll\(AUTH_PROMPT_SELECTOR\)/.test(libSrc),
-    'the wide selector may exist and never be the thing actually queried');
+    // The combined-inset path defaults its query to DOCKED_PROMPT_SELECTOR (ops_incident #163
+    // parametrised readPromptRects/observePromptInsets on a `selector` so a FOREIGN-only variant
+    // could reuse the same machinery — the wide selector is now the DEFAULT, not a literal call
+    // site, so the check follows the default rather than one fixed call shape).
+    /selector:\s*string\s*=\s*DOCKED_PROMPT_SELECTOR/.test(libSrc)
+      && /querySelectorAll\(selector\)/.test(libSrc)
+      && /observePromptInsets\(setInsets\)/.test(libSrc),
+    'the wide selector may exist and never be the thing actually queried by default');
+  // …and "wide" must still CONTAIN everything it replaced. A combined selector that quietly dropped
+  // the auth half would pass the regex above and reopen ops_incident #120.
+  check('E3e. the queried selector still covers every auth prompt it used to',
+    DOCKED_PROMPT_SELECTOR.includes(AUTH_PROMPT_SELECTOR)
+      && DOCKED_PROMPT_SELECTOR.includes(ONE_TAP_IFRAME_SELECTOR),
+    `got ${DOCKED_PROMPT_SELECTOR}`);
+  // OUR OWN docked cards are in scope too (owner decision 2026-09-11, ops_incident #152): the rule
+  // is about the user's controls, not about whose element is on top of them.
+  check('E3f. …and our own docked consent card, identified by its own stable testID',
+    DOCKED_PROMPT_SELECTOR.includes(OWN_DOCKED_PROMPT_SELECTOR)
+      && OWN_DOCKED_PROMPT_SELECTOR.includes('cookie-consent'),
+    `got ${OWN_DOCKED_PROMPT_SELECTOR}`);
+  const consentSrc = readFileSync(join(ROOT, 'src/components/CookieConsent.tsx'), 'utf8');
+  check('E3g. the consent card really carries that testID, so the selector can find it',
+    /testid:\s*'cookie-consent'/.test(consentSrc), 'CookieConsent no longer identifies itself');
+  // The sheet form must pin BOTH sides and carry no width, or it does not span, and a rect that does
+  // not span reserves nothing — the card would be back on top of «بحث» with the fix still "present".
+  check('E3h. the narrow form is a FLUSH, full-width docked sheet, not a fixed-width floating card',
+    // `bottom` on both forms now runs through dockedEdgeOffset (ops_incident #163: the card must
+    // ALSO move out of a FOREIGN prompt's way, not just be counted when OTHER content reserves
+    // space for it) — the literal 0/20 anchors moved inside that call rather than disappearing.
+    /left:\s*0,\s*right:\s*0,\s*bottom:\s*dockedEdgeOffset\(0,/.test(consentSrc)
+      && /right:\s*20,\s*bottom:\s*dockedEdgeOffset\(20,/.test(consentSrc)
+      && /width:\s*280/.test(consentSrc),
+    'the consent card no longer becomes a flush spanning sheet on narrow viewports — it would reserve nothing');
   const lib = readFileSync(join(ROOT, 'src/lib/bottomPromptInset.ts'), 'utf8');
   // The sheet arrives ~1.3s after load and animates its height in; a mount-time measurement alone
   // reads 0 forever. Both observers are load-bearing.
@@ -274,6 +305,50 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
     eq(promptInsets([{ ...TOP_SHEET, hidden: true }, BOTTOM_SHEET], VH_PHONE, VW_PHONE), 0, 144));
 }
 
+// ── I. OUR OWN DOCKED CARD, AND THE BOTTOM EDGE'S SPAN RULE (owner decision 2026-09-11, #152) ────
+// The consent card is bottom-docked on EVERY width, so "is it docked?" can no longer tell the phone
+// sheet from the desktop corner card — only "does it span?" can. Both forms are measured from the
+// real component: 280 wide at right:20 on desktop, and left:16/right:16 on a 390 px phone.
+{
+  // Flush and full-width on a phone; a floating corner card on desktop. Both shapes come straight
+  // from the component's own style branch.
+  const CONSENT_SHEET = { top: 844 - 190, bottom: 844, height: 190, width: 390 };
+  const CONSENT_CARD_DESKTOP = { top: 900 - 20 - 190, bottom: 900 - 20, height: 190, width: 280 };
+  // The same corner card if it were ever pinned flush — the case the span rule, and ONLY the span
+  // rule, has to catch. Without it this reserves 190 px at the bottom of a 1440 px desktop.
+  const CONSENT_CARD_FLUSH = { top: 900 - 190, bottom: 900, height: 190, width: 280 };
+
+  check('I1. the phone SHEET reserves its height, so «بحث» lays out above it',
+    bottomPromptInset(CONSENT_SHEET, 844, 390) === 190,
+    `got ${bottomPromptInset(CONSENT_SHEET, 844, 390)}`);
+  check('I2. the desktop CORNER CARD reserves nothing — it is not even docked, let alone spanning',
+    bottomPromptInset(CONSENT_CARD_DESKTOP, 900, 1440) === 0,
+    `got ${bottomPromptInset(CONSENT_CARD_DESKTOP, 900, 1440)}`);
+  check('I2b. …and a flush card of the same width still reserves nothing, because it does not SPAN',
+    bottomPromptInset(CONSENT_CARD_FLUSH, 900, 1440) === 0,
+    `got ${bottomPromptInset(CONSENT_CARD_FLUSH, 900, 1440)}`);
+  check('I3. …and promptInsets agrees on both, which is what the app root actually calls',
+    promptInsets([CONSENT_SHEET], 844, 390).bottom === 190
+      && promptInsets([CONSENT_CARD_FLUSH], 900, 1440).bottom === 0);
+
+  // THE TWO EDGES FAIL IN OPPOSITE DIRECTIONS. At the bottom an unmeasurable width still reserves:
+  // the harm here is a dead «بحث» under a sheet, so "assume it is only a card" is the wrong guess.
+  check('I4. a bottom rect whose width could not be measured STILL reserves (fail toward the user)',
+    bottomPromptInset({ top: 700, bottom: 844, height: 144 }, 844, 390) === 144,
+    `got ${bottomPromptInset({ top: 700, bottom: 844, height: 144 }, 844, 390)}`);
+  check('I5. …while the TOP keeps the opposite default, because shoving the app down is the harm up there',
+    topPromptInset({ top: 0, bottom: 150, height: 150 }, 844, 390) === 0);
+
+  // BACKWARDS COMPATIBILITY, EXECUTED. Every original caller passes two arguments; those must behave
+  // exactly as they always have, or this change would be a silent loosening of the One Tap fix.
+  check('I6. the two-argument call is unchanged — no span test is applied at all',
+    bottomPromptInset(CONSENT_CARD_FLUSH, 900) === 190,
+    `got ${bottomPromptInset(CONSENT_CARD_FLUSH, 900)}`);
+  check('I7. the measured One Tap bottom sheet is unaffected either way',
+    bottomPromptInset(BOTTOM_SHEET, VH_PHONE) === 144
+      && bottomPromptInset(BOTTOM_SHEET, VH_PHONE, VW_PHONE) === 144);
+}
+
 // ── H. MUTATION PROOFS ON THE REAL FILE ──────────────────────────────────────────────────────────
 // §D mutates by re-implementation, which cannot notice the real file drifting away from the mutant.
 // These edit `src/lib/bottomPromptInset.ts` itself and re-import it, so the evidence is the shipped
@@ -283,6 +358,24 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
   const LIB = join(ROOT, 'src/lib/bottomPromptInset.ts');
   const original = readFileSync(LIB, 'utf8');
   const { writeFileSync } = await import('node:fs');
+
+  // Signal-safe restore. This proof mutates PRODUCT SOURCE, which raises the stakes over the two
+  // harness mutators that share this pattern: the `finally` below does not run on a signal,
+  // scripts/run-tests.mjs treats a signal-killed child (timeout, OOM) as a failure because it
+  // happens, and AGENTS.md states this working directory is shared by concurrent sessions with no
+  // isolation. A mutant left in src/ by a timeout is one `git add -A` away from being committed by
+  // another session — and src/ is what ships. SIGKILL and a hard OOM cannot be trapped by anyone;
+  // SIGTERM and SIGINT can, so they are. Enforced by verify-in-place-mutators-restore-on-signal.ts,
+  // which is what found this file.
+  const restore = () => { try { writeFileSync(LIB, original); } catch { /* best effort */ } };
+  const onSignal = (sig: NodeJS.Signals) => {
+    restore();
+    process.removeListener(sig, onSignal);
+    process.kill(process.pid, sig);
+  };
+  process.once('SIGTERM', onSignal);
+  process.once('SIGINT', onSignal);
+  process.once('exit', restore);
   let n = 0;
   const withMutation = async (
     label: string,

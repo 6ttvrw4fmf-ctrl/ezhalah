@@ -12,8 +12,11 @@ Pins the decisions that would silently corrupt data if a future edit got them wr
   - CITY has no dedicated column — extracted from the free-text «location» field by matching
     against the exact names the source (and the site's own title) uses, never defaulted; a location
     naming neither Abha nor a known Abha district correctly resolves to no city.
-  - DISTRICT comes from the already-clean «district» column only — never invented from «location»
-    the way bahadhabab's had to be, because this source structures it separately.
+  - DISTRICT comes from the already-clean «district» column first; when that is blank,
+    find_district_in_text() checks «location» too, but ONLY behind its catalog gate (a candidate
+    must exact-match this city's own curated district) — never a raw parse of the free text, which
+    this same session found gives a wrong answer often enough to have refused it outright once
+    already (location naming one place, the verified district column naming a different one).
   - PRICE is stored EXACTLY as published, including an implausible-looking real outlier (price: 1).
   - extras are opt-in features: absence is UNKNOWN, never a manufactured "no".
 """
@@ -24,7 +27,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
 import scrapers.common.arabic_location as _al  # noqa: E402
-_al.to_catalog = lambda city_ar, region_hint=None: (None, None)
+_al.to_catalog = lambda city_ar, region_hint=None: (15, 6) if city_ar == "أبها" else (None, None)
+# Seed a tiny, real slice of Abha's OWN catalog (city_id 15) directly, bypassing find_district_in_
+# text()'s _load() (which would otherwise hit a live DB) — "حي المعالي" is a real, catalog-confirmed
+# Abha district (verified live 2026-09-11), used below to prove the location-fallback path works.
+_al._CITY["_stub_"] = [(1, 1)]
+_al._DISTRICT_BY_CITY[15] = {_al.norm_ar("حي المعالي")}
+_al._DISTRICT_AR_BY_NORM[_al.norm_ar("حي المعالي")] = "حي المعالي"
 
 from scrapers.azdad import run  # noqa: E402
 
@@ -79,11 +88,20 @@ assert row["city_ar"] is None, "a location naming a real different city must nev
 row, _ = _post(location=None)
 assert row["city_ar"] is None
 
-# ── 5. DISTRICT — only the clean column, never invented from location ──────────────────────────
+# ── 5. DISTRICT — the clean column first; the location fallback ONLY behind the catalog gate ────
 row, _ = _post(district="حي البديع", location="ابها ملاحقه للفندا بارك او عسيىر مول")
 assert row["neighborhood"] == "حي البديع"
 row, _ = _post(district=None, location="ابها ملاحقه للفندا بارك او عسيىر مول")
-assert row["neighborhood"] is None, "district must never be guessed from the location free text"
+assert row["neighborhood"] is None, (
+    "a landmark reference (a mall, a park) in location must never be guessed as a district")
+# The location fallback DOES recognize a real, catalog-confirmed district when the column is blank —
+# the measured live case (id 10778044): district column empty, location plainly states one.
+row, _ = _post(district=None, location="ابها - المعالي غرفة مؤثثه بدورة مياة مقابل الراشد مول")
+assert row["neighborhood"] == "حي المعالي", (
+    "a real, catalog-confirmed district stated in location must be recognized when district is blank")
+# The clean column still wins outright when the source publishes one — the fallback never overrides it.
+row, _ = _post(district="حي البديع", location="ابها - المعالي")
+assert row["neighborhood"] == "حي البديع", "a populated district column must never be second-guessed"
 
 # ── 6. PRICE = SOURCE, verbatim — including the measured implausible outlier ────────────────────
 row, _ = _post(type="للبيع", category="أراضي سكنية", price=1,

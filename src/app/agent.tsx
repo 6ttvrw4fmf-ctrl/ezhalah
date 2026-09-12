@@ -46,7 +46,8 @@ import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard } from '@/components/ResultCard';
 import { parseQuery, respond } from '@/data/agent';
-import { parseProximity } from '@/data/proximity';
+import { fetchListingsForQuery } from '@/data/remote';
+import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLocationProbe';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
@@ -57,7 +58,7 @@ import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
-import { BROWSE_BATCH, nextBatchTarget, resultCounts, closingNoteKey } from '@/data/resultCount';
+import { resultCounts, closingNoteKey, nextBatchTarget } from '@/data/resultCount';
 import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRowVisible } from '@/lib/afBrowsingGate';
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -67,7 +68,7 @@ import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTransc
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
-import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard } from '@/components/AdvancedQuestionCard';
+import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
 import MiningTransition from '@/components/MiningTransition';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
@@ -592,6 +593,14 @@ export default function Agent() {
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typed, setTyped] = useState('');
+  // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
+  // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
+  // results with no composer at all; free-text follow-up chat exists ONLY on a conversation that
+  // started in the AI Agent itself. Refine chips are unaffected — this hides only the typed-input
+  // row, never the whole composerWrap (which also carries the listings disclaimer, kept always-on).
+  // Reset to false by startFresh() like every other per-conversation flag (chatIdRef, afCarryRef),
+  // so a brand-new AI-chat search after a filter search gets its composer back.
+  const [filterOrigin, setFilterOrigin] = useState(false);
   // Rotating-example interaction latch (owner brief §6): the FIRST click/tap into the composer, the
   // first typed character, or a mic tap stops the rotating placeholder for good — it never fights
   // the user and never restarts mid-session. Only a genuinely fresh empty chat (sendGreeting: New
@@ -669,7 +678,19 @@ export default function Agent() {
   // moment a search happens (any user message or results — same condition that hides the guest
   // chips), it fades + collapses away: mid-conversation the pill is noise. JS driver (height).
   const modeSearched = msgs.some((m) => m.role === 'user' || m.role === 'results');
-  const [modeGone, setModeGone] = useState(false);
+  // BUG (owner-reported 2026-09-11): opening an old chat from the sidebar made this pill visibly
+  // pop up then collapse away — a "weird animation" on every single history open. Root cause: `msgs`
+  // starts EMPTY (useState([]) above) and openSaved() fills it in ONE async setMsgs() call once the
+  // transcript loads, so `modeSearched` flips false→true in a single render step — indistinguishable
+  // from a live search's first message, so the effect below plays the SAME 220ms collapse it plays
+  // for a real search. But a history replay must render "in its final state straight away" (see the
+  // openHistory()/openSaved() comments — no typewriter, no thinking beats, and that rule was never
+  // extended to this pill). `replay === '0'` is a router param, known synchronously at first render
+  // (unlike msgs), so a replay's very first paint can start already-settled: `modeGone` initializes
+  // true, the wrapper below never mounts, nothing to animate. A genuinely fresh chat (replay unset)
+  // is untouched — modeGone still starts false, so its intentional collapse-on-first-message plays
+  // exactly as before.
+  const [modeGone, setModeGone] = useState(() => replay === '0');
   useEffect(() => {
     if (modeSearched && !modeGone) {
       // Let the CSS collapse (MODE_EASE, 200ms) finish, then unmount. setTimeout, not an animation
@@ -1342,21 +1363,55 @@ export default function Agent() {
     // 2026-07-09: show the first card as soon as valid listings are ready; don't hold them hostage
     // to the typewriter). The more-message + feedback row still wait for the text (doneTyping).
     beginCardDrip(statusId, initialReveal(result));
+    // A RESULTS TURN THAT ALREADY SHOWS EVERY MATCH IS A FINISHED SEARCH (owner rule 2026-09-11,
+    // generalizing R11.1 to every entry point this shared renderer serves — plain Filter search,
+    // a typed AI-Agent message, a refine chip — not just an Advanced Filter round). initialReveal's
+    // own `honestTotal <= stopAt` branch above already means every one of `result`'s listings is on
+    // screen with nothing left to page — «عرض المزيد» never even appears (resultCounts() reports
+    // hasMore=false on its own). There is therefore nothing left for the user to DO with this search
+    // but start a new one, exactly the state R11.1 already locks an AF round into: composer
+    // disabled, «محادثة جديدة» shown, thumbs/Share still available (both are unconditioned on
+    // `completed`, see the composer/results-actions-row gating in this file). Gated on the same
+    // honest total (null whenever the count would overstate — client-only narrowing, agent-
+    // annualized budgets) so an unknown/overstated total never locks a search that still has more
+    // to show. R11.1's own setCompleted(true) call in the AF-round onFetched path is left in place —
+    // this is a superset, not a replacement, so no existing AF-round behavior changes.
+    if (searchIsFinishedAtThreshold(quotableTotal(result), INTERVIEW_STOP_AT)) setCompleted(true);
   };
 
-  // «عرض المزيد» (Load more) — CONTINUATION IS THE RULE (owner 2026-08-29, supersedes the 2026-08-20
-  // lifetime cap): each tap advances to the next clean batch boundary — first 100, then 101–200,
-  // then 201–300 — for as long as matching listings genuinely exist, all the way to the last one.
-  // Correctness rule unchanged: the RPC filters the FULL matching set BEFORE any paging, so paging
-  // reaches every match, gap-free via p_offset, appended DE-DUPED (never a duplicate card, never a
-  // skipped id). When the fetched buffer is spent and the DB still has more (m.result.hasMore), the
-  // next REAL page is fetched first. loadingMore guards a double-tap from double-fetching.
+  // «عرض المزيد» (Load more) — 100, THEN THE CHOICE, THEN EVERYTHING (owner product rule
+  // 2026-09-11, Task 4 rev. 2 — revised same-day, before Task 4's "one tap drains everything" ever
+  // reached production; no user experienced that version, so this is not a regression, it is the
+  // shipped behavior). THE FIRST tap on a turn reveals the next clean 100-boundary only (…→100, not
+  // past it) — exactly BROWSE_BATCH's old boundary math, never retired, just no longer the ONLY
+  // target. The chat stays open and BOTH offers stand: «عرض المزيد» (if more than 100 remain) and
+  // «خلّنا نحدد الطلب أكثر» (if a useful AF question exists) — resultsActionsRowVisible already
+  // renders whichever apply, unchanged. A SECOND tap on that same turn — i.e. the user explicitly
+  // asking again after already seeing the first hundred — drains every remaining page and finishes
+  // the search: composer locked, exactly like R11.1's small-set completion, reachable at any total.
+  // Choosing Advanced Filter instead of a second tap is the OTHER branch: the existing AF interview
+  // (unchanged) narrows from here and finishes on its own ≤50 rule.
+  //
+  // "ALREADY EXPANDED" NEEDS NO NEW STATE. `cur` (revealCount[mid], falling back to the turn's own
+  // initialReveal floor) already tells the two presses apart: on the first tap `cur` still sits at
+  // that floor; every tap after it has ALREADY revealed past the floor, and this comparison stays
+  // true for every tap after the first even if a drain aborted or hit the page backstop, so a THIRD
+  // tap correctly resumes a full drain rather than re-offering a hundred that was already shown.
+  //
+  // Correctness rule unchanged either way: the RPC filters the FULL matching set BEFORE any paging,
+  // so a drain (first-press-bounded or later-press-full) reaches every match, gap-free via p_offset,
+  // appended DE-DUPED (never a duplicate card, never a skipped id, never a re-ordering — pages
+  // concatenate in the RPC's own ORDER BY, which p_offset continues rather than restarts). A
+  // first-press page can itself carry far more than 100 rows (the RPC's own page size, up to
+  // QUERY_LIMIT) — those extra rows are still merged into the buffer, just not revealed yet, so the
+  // NEXT tap reveals from what is already fetched before ever asking the network for more.
+  // loadingMore guards a double-tap from double-fetching.
   // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each mounting card also
-  // fades+rises via CardIn, so the batch flows in instead of landing at once. (owner 2026-07-09.)
+  // fades+rises via CardIn, so the reveal flows in instead of landing at once. (owner 2026-07-09.)
   const LOAD_MORE_STEP_MS = 55;
-  // Only the VISIBLE screenful cascades one-by-one (~0.8s); the rest of the 100 mount together right
-  // after, below the fold, each still fading in via CardIn. Keeps the premium feel without 100
-  // sequential re-renders of the whole unvirtualized card list (review perf fix 2026-07-09).
+  // Only the VISIBLE screenful cascades one-by-one (~0.8s); the rest mount together right after,
+  // below the fold, each still fading in via CardIn. Keeps the premium feel without one sequential
+  // re-render per card of the whole unvirtualized list (review perf fix 2026-07-09).
   const CASCADE_VISIBLE = 14;
   const cascadeIn = (mid: string, from: number, target: number) => {
     const animEnd = Math.min(from + CASCADE_VISIBLE, target);
@@ -1364,55 +1419,88 @@ export default function Agent() {
       if (target > animEnd) setRevealCount((c) => ({ ...c, [mid]: target }));
     });
   };
+  // A defensive backstop against a pathological `hasMore` that never clears — NOT a real product
+  // ceiling (the 2026-08-29 no-lifetime-cap promise is unchanged; this only bounds a single tap's
+  // network loop). 50 pages of the RPC's own 1,500-row page size covers any real Saudi property
+  // search (75,000 listings) many times over. Exceeding it fails the same honest way a single page
+  // failure does — never a silent partial reveal claimed as complete.
+  const MAX_DRAIN_PAGES = 50;
   const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {
     const mid = m.id;
     const q = m.result.query;
     if (runRef.current) return; // a real turn is mid-flight — never start a cascade under it (review fix)
-    const fetched = m.result.listings.length;
+    if (loadingMore[mid]) return;
     const cur = revealCount[mid] ?? initialReveal(m.result);
-    // (A) fetched-but-unrevealed cards remain → cascade to the next batch boundary from the buffer.
-    if (cur < fetched) {
-      cascadeIn(mid, cur, nextBatchTarget(cur, fetched));
-      return;
-    }
-    // (B) buffer exhausted but the DB has more → fetch the next real page, append de-duped, cascade.
-    if (!m.result.hasMore || !q || loadingMore[mid]) return;
+    const fetched0 = m.result.listings.length;
+    // FIRST tap for this turn (still at the initial floor) stops at the next 100-boundary; any tap
+    // after that drains to the true end. `nextBatchTarget` clamps to the honest total when known
+    // (`matchTotal`), so a set under 100 still finishes on the first tap — there is no dummy second
+    // press to force when nothing is left to earn it. An unknown total (Infinity) just means "the
+    // plain next hundred," never a fabricated boundary.
+    const alreadyExpandedOnce = cur > initialReveal(m.result);
+    const target = alreadyExpandedOnce ? Infinity : nextBatchTarget(cur, m.result.matchTotal ?? Infinity);
+    // De-dup against the CLOSURE copy (same data the message holds) so the merge is exact.
+    const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
+    const add: typeof m.result.listings = [];
+    let pageOffset = m.result.pageOffset ?? 0;
+    let hasMoreNow = m.result.hasMore;
+    // Nothing left to fetch, no query to fetch with — the buffer already IS everything (e.g. the
+    // last page already landed and only the reveal/cascade was pending). Skip the network loop.
+    if (!q) hasMoreNow = false;
     setLoadingMore((s) => ({ ...s, [mid]: true }));
     try {
-      const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, m.result.pageOffset ?? 0);
-      // A FAILED PAGE IS NOT AN EMPTY PAGE (AGENTS.md permanent rule, 2026-09-04; incident #33).
-      // store.tsx already refuses to treat a backend error as progress — the cursor and `hasMore`
-      // come back exactly as they went in, so the pager is correctly re-offered. But nothing here
-      // READ `failed`, and every downstream value then made the failure indistinguishable from
-      // success: `more` is [], so `add` is [], so `mergedLen === fetched`, so `nextBatchTarget`
-      // returns `cur` and `cascadeIn(cur, cur)` is a no-op. The user taps «عرض المزيد», the spinner
-      // runs, ZERO cards appear, no error is shown, and the button stays — a silent dead tap, which
-      // is a failed fetch rendered to the user as a successful nothing.
-      //
-      // So say it. Same wording and same posture page 0 already uses for its own fetch failure
-      // (`fetchFailed` → runSearch's retry suggestion, src/data/search.ts): tell the user to try
-      // again rather than implying there was nothing more to show. Nothing is merged and the cursor
-      // is untouched, so the next tap retries this exact page.
-      if (failed) {
-        setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
-          text: t('Loading listings — please try again in a few seconds.') }]);
-        return;
+      let pages = 0;
+      // Stop fetching once the buffer already reaches this press's target — a first press asking
+      // for "the next 100" must not keep pulling pages once 100 is covered, even if the server has
+      // far more (that is exactly what makes it a bounded press rather than a drain).
+      while (hasMoreNow && q && fetched0 + add.length < target) {
+        if (++pages > MAX_DRAIN_PAGES) {
+          setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
+            text: t('Loading listings — please try again in a few seconds.') }]);
+          return;
+        }
+        // A FAILED PAGE IS NOT AN EMPTY PAGE (AGENTS.md permanent rule, 2026-09-04; incident #33).
+        // store.tsx already refuses to treat a backend error as progress. Stop the drain here — say
+        // so out loud (same wording/posture page 0's own fetch failure uses, src/data/search.ts) —
+        // and never claim completion for a reveal that did not actually finish.
+        const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, pageOffset);
+        if (failed) {
+          setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
+            text: t('Loading listings — please try again in a few seconds.') }]);
+          return;
+        }
+        for (const l of more) {
+          const key = `${l.source}:${l.id}`;
+          if (!seen.has(key)) { seen.add(key); add.push(l); }
+        }
+        pageOffset = nextOffset;
+        hasMoreNow = hasMore;
       }
-      // De-dup against the CLOSURE copy (same data the message holds) so the cascade target is exact.
-      const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
-      const add = more.filter((l) => !seen.has(`${l.source}:${l.id}`));
-      const mergedLen = fetched + add.length;
-      setMsgs((prev) =>
-        prev.map((mm) => {
-          if (mm.id !== mid || mm.role !== 'results' || !mm.result) return mm;
-          return { ...mm, result: { ...mm.result, listings: [...mm.result.listings, ...add], pageOffset: nextOffset, hasMore } };
-        }),
-      );
-      const target = nextBatchTarget(cur, mergedLen);
-      // If a new turn started while the page was fetching, reveal instantly (no cascade) — the drip
-      // machinery belongs to the new turn now; cards still fade in via CardIn. (review fix.)
-      if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: target }));
-      else cascadeIn(mid, cur, target);
+      const mergedLen = fetched0 + add.length;
+      if (add.length) {
+        setMsgs((prev) =>
+          prev.map((mm) => {
+            if (mm.id !== mid || mm.role !== 'results' || !mm.result) return mm;
+            return { ...mm, result: { ...mm.result, listings: [...mm.result.listings, ...add], pageOffset, hasMore: hasMoreNow } };
+          }),
+        );
+      }
+      // Reveal up to what THIS press earned — the full merge on an already-expanded (drain) press,
+      // the 100-boundary (clamped to whatever's really buffered) on a first press. If a new turn
+      // started while pages were fetching, reveal instantly (no cascade) — the drip machinery
+      // belongs to the new turn now; cards still fade in via CardIn. (review fix, unchanged.)
+      const revealTo = Math.min(target, mergedLen);
+      if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: revealTo }));
+      else cascadeIn(mid, cur, revealTo);
+      // FINISHED ONLY WHEN NOTHING IS LEFT TO REVEAL, PERIOD (owner rule 2026-09-11, Task 4 rev. 2).
+      // Two conditions, both required: the server confirms no more pages exist (`!hasMoreNow`) AND
+      // this press revealed everything that is now buffered (`revealTo >= mergedLen` — false on a
+      // first press that stopped at a 100-boundary short of the buffer, true on a drain, and true on
+      // a first press whose boundary happened to reach the genuine end). Gated on the real numbers,
+      // never a bare `true`: a failed or backstop-truncated drain returns above and never reaches
+      // this line, so completion can never be claimed for a reveal that did not actually finish.
+      const userChoseShowAllAndFinish = !hasMoreNow && revealTo >= mergedLen;
+      if (userChoseShowAllAndFinish) setCompleted(true);
     } finally {
       setLoadingMore((s) => ({ ...s, [mid]: false }));
     }
@@ -1761,6 +1849,21 @@ export default function Agent() {
     void runRefine(q, '__guided__', '', label,
       { guided: { baseQ: guidedPills.baseQ, facets: remaining, asked: guidedPills.asked.filter((id) => id !== removed.id) } });
   };
+
+  // THE COMMITTED PILLS THE ROUND CARD MUST NOT COVER (owner decision 2026-09-11, #155).
+  // One source of truth: the SAME facets the transcript row renders and the SAME removal handler,
+  // handed to the overlay so it can draw them above its own scrim. A copy here would be a second
+  // place for the user's committed selections to live, and the two would drift.
+  // Declared HERE, after removeGuidedFacet: the useMemo factory runs during render, so referencing
+  // that `const` from above its declaration is a temporal-dead-zone throw, not a lint nit.
+  const afCardPills: ShellPills = useMemo(() => ({
+    facets: guidedPills?.facets ?? [],
+    onRemove: removeGuidedFacet,
+    disabled: busy,
+    isScope: isScopeQuestionId,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [guidedPills, busy]);
+
 
   // Present the step at `stepIndex`. A step the user has already seen (walked Back to, or one
   // preserved past a changed earlier answer) is shown again with its recorded answer restored;
@@ -2454,57 +2557,74 @@ export default function Agent() {
             ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
             : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
         : buildScrapeIntro(result.query ?? turn.query);
-      await playListings(run, statusId, reply, result, v);
+      // A rejection/honesty caveat (turn.notice) is a SEPARATE channel from turn.reply on purpose —
+      // this deterministic `reply` headline can only ever say what actually ran (anti-hallucination:
+      // buildScrapeIntro reflects result.query, never the model's own words) — but a real caveat the
+      // server computed (e.g. rejectionNotice's "that option wasn't applied") must still reach the
+      // user, as its own tail line, never silently discarded with the rest of turn.reply. Bug found
+      // 2026-09-11: the SAME discard was about to swallow this session's own new unsupported-feature
+      // honesty text (Task 7) — see scripts/verify-agent-unsupported-feature-honesty.ts.
+      const withNotice = turn.notice ? `${reply}\n${turn.notice}` : reply;
+      // ZERO MATCHES = ONE SIMPLE STATEMENT, NEVER A QUESTION (owner rule 2026-09-11 — the AI
+      // Agent flow only; Filter/Advanced Filter/the zero-match relaxation follow-up keep their own
+      // richer, earned zero-result diagnostics in src/data/search.ts's noResultsSuggestion(), both
+      // untouched). `.suggestion` is the ONE field the results renderer actually reads on a
+      // zero-result turn (see `introZeroResult ? m.result.suggestion` below), so overriding it HERE
+      // scopes the change to exactly this call site — a fresh, free-text AI-Agent search — rather
+      // than rewriting the shared module every other surface (Filter, AF) also depends on.
+      const zeroMatch = result.listings.length === 0
+        ? { ...result, suggestion: t('Sorry, no listings currently match your request. Try using the Filter to widen your search.') }
+        : result;
+      await playListings(run, statusId, withNotice, zeroMatch, v);
       if (run.cancelled) return;
       void promptSignupSoon(run);
     } else {
-      const attemptText = saidRef.current.join(' ');
-      const combined = parseQuery(attemptText);
-      // STANDARD smart city ask: a proximity/landmark search with NO city → ask WHICH CITY, echoing the
-      // user's own phrase, even if the model chose to ask something else (e.g. the property type). For a
-      // proximity search the city is the highest-value missing piece, and we never invent one. On the
-      // user's answer the search resumes with city + the same proximity (re-parsed across the attempt).
-      const proxAll = parseProximity(attemptText);
-      if (proxAll.length && !combined.location && askCountRef.current < 2) {
-        const phrase = proxAll
-          .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
-          .filter(Boolean)
-          .join(' و');
-        askCountRef.current += 1;
-        setMsgs((m) =>
-          m.map((x) => (x.id === statusId
-            ? { id: statusId, role: 'agent', text: phrase ? `في أي مدينة تبحث عن عقار ${phrase}؟` : 'في أي مدينة تبحث؟', typing: true }
-            : x)),
+      // THE SERVER IS THE SINGLE DECISION AUTHORITY here too (owner 2026-09-11 — extends the
+      // 2026-08-30/09-05 "kind='listings' is trusted unconditionally, never re-litigated" principle
+      // to kind='message'). decideAgentTurn() already decided this turn is a clarifying question —
+      // or that the one-question ceiling was already spent, in which case turn.reply is a plain
+      // "couldn't narrow this down, try the Filter" STATEMENT, never a question (decide.ts's own
+      // `unsearchable` case) — so the reply is shown exactly as the server sent it.
+      //
+      // DELETED: the client's own parallel askCountRef ceiling (a proximity-city ask capped at <2,
+      // and a `hasIntent && askCountRef>=2` "stop pestering and search anyway" override that
+      // re-parsed `saidRef` into its own query and searched THAT instead of showing the reply).
+      // Two systems deciding "ask or search", differently, is exactly the bug class decide.ts's own
+      // file header exists to end (2026-08-30) — this override was the one place it survived,
+      // because the `mustAnswer`/`locationQuestion` carve-out only patched the one case that had
+      // been measured live (the twin-city question) rather than removing the second decision
+      // surface outright. With the ceiling now at exactly ONE question, always about location, and
+      // the terminal `unsearchable` state handled server-side, there is nothing left for a client
+      // override to safely second-guess — every remaining case is a location question or a final
+      // statement, both of which decide.ts already resolved correctly.
+      //
+      // ONE EXCEPTION (owner, 2026-09-11): "only ask the city if there is something [to find]" —
+      // before showing THE location question, quietly check whether the OTHER stated requirements
+      // (type/amenities/price/af/…) match anything AT ALL, anywhere. This never overrides kind or
+      // askCount and is never shown as a results page — it is a plain existence probe (real logic
+      // extracted to src/lib/agentLocationProbe.ts, zero-dependency so it can be executed directly
+      // by scripts/verify-agent-location-probe.ts), reusing the exact same match-first RPC a real
+      // search would hit, called directly (not via store.tsx's runQuery) so a FAILED fetch
+      // (listings: null) can be told apart from a GENUINE zero (listings: []) — collapsing those two
+      // would risk claiming "nothing matches" on our own network hiccup (A FAILED FETCH IS NOT AN
+      // EMPTY ANSWER). Only gated on `turn.locationQuestion` (server-computed: true for exactly this
+      // question, never for the `unsearchable` statement or an off-topic reply) so ordinary turns
+      // pay nothing extra. ponytail: fetches a full page just to check existence (no `limit` param
+      // plumbed through) — fine since a genuine zero costs the RPC the same either way; add a
+      // p_limit:1 knob if this ever measurably matters.
+      let reply = turn.reply;
+      if (turn.locationQuestion && turn.query) {
+        const probe = await fetchListingsForQuery(buildLocationProbeQuery(turn.query), { signal: run.ac.signal });
+        if (run.cancelled) return;
+        reply = replyAfterLocationProbe(
+          turn.reply,
+          t('Sorry, no listings currently match your request. Try using the Filter to widen your search.'),
+          probe.listings,
         );
-      } else {
-        // The model asked a clarifying question. Read back EVERYTHING said so far: if we can already see
-        // a usable detail (a type, a city, a size, a budget) and we've asked twice, stop pestering and
-        // just search with whatever we have. (user request: max 2 asks → skip → scrape.)
-        const hasIntent = !!(combined.type || combined.location || combined.detail || combined.priceInput);
-        // A LOCATION QUESTION OUTRANKS THIS CEILING (owner, 2026-09-05). The rule below — "asked
-        // twice and we can see some intent, so stop pestering and just search" — is right for an
-        // ordinary clarification. It is wrong for the one question whose answer DEFINES the search
-        // scope: skipping it does not save the user a question, it picks a scope for them.
-        // Measured in production: the edge asked «تقصد مدينة الرياض ولا منطقة الرياض كاملة؟» and
-        // this branch discarded it and searched منطقة الرياض — 10,932 rows across 20 cities — for a
-        // user who had said only «الرياض». The flag is the EDGE's verdict (it owns the classifier),
-        // never re-derived here, so the two surfaces cannot drift.
-        const mustAnswer = turn.kind === 'message' && turn.locationQuestion === true;
-        if (hasIntent && askCountRef.current >= 2 && !mustAnswer) {
-          askCountRef.current = 0;
-          saidRef.current = [];
-          beginSearching(statusId, combined); // loader + min-beat overlap the fetch (like filter/refine)
-          const result = await runQuery(combined, true, run.ac.signal, ensureChatId());
-          await playListings(run, statusId, buildScrapeIntro(result.query ?? combined), result, v);
-          if (run.cancelled) return;
-          void promptSignupSoon(run);
-        } else {
-          if (hasIntent) askCountRef.current += 1; // only count asks once the user has shown intent
-          setMsgs((m) =>
-            m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: turn.reply, typing: true } : x)),
-          );
-        }
       }
+      setMsgs((m) =>
+        m.map((x) => (x.id === statusId ? { id: statusId, role: 'agent', text: reply, typing: true } : x)),
+      );
     }
     // The network turn is done; the cards then reveal on their own timers (busy is free, so the user can
     // type a new message — which finalizes the reveal via finalizeReveal). interview returns earlier.
@@ -2737,6 +2857,7 @@ export default function Agent() {
       setBusy(false);
       setMsgs([]);                                         // new search = a clean chat view
       chatIdRef.current = null;                            // new conversation → new sidebar chat (a restore re-sets it)
+      setFilterOrigin(false);                              // default: has a composer, until the `filter` branch below says otherwise
       // The Advanced Filter carry belongs to the conversation being left. It is only ever WRITTEN on
       // a «تحديد أكثر» tap, so without this a brand-new search inherited the previous chat's answered
       // set and opened its first round already believing those questions were resolved — and, since
@@ -2797,6 +2918,7 @@ export default function Agent() {
         writeFilterStore(q);
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
         startFresh();
+        setFilterOrigin(true); // this whole screen instance came from «بحث» — no composer (see the flag's own comment above)
         if (replay === '0') void openSaved(hid, q, override);
         else sendFilter(q, override);
         // Intent consumed — including for a sidebar replay, so refreshing a REOPENED chat also lands
@@ -3236,11 +3358,11 @@ export default function Agent() {
                           cascadeStarted: !!dripStartedRef.current[m.id],
                           cascadeRunningForThisTurn: revealing && revealActiveRef.current?.id === m.id,
                         })) return null;
-                        // BROWSE-CONTINUATION RULE (owner 2026-08-29, supersedes the 2026-08-20 cap) — the
-                        // "load more" gate and the closing count come from ONE pure function
-                        // (src/data/resultCount.ts), so they can never disagree and one test locks them. The
-                        // user can browse EVERY match in batches of BROWSE_BATCH; the closing message states
-                        // the TRUE total, never a batch size or the buffer length.
+                        // SHOW-ALL RULE (owner 2026-08-29, redefined 2026-09-11 — Task 4) — the "load more"
+                        // gate and the closing count come from ONE pure function (src/data/resultCount.ts),
+                        // so they can never disagree and one test locks them. One tap of «عرض المزيد» reveals
+                        // every remaining match and finishes the search; the closing message states the TRUE
+                        // total, never a batch size or the buffer length.
                         const clientNarrowed = !!(m.result.query && hasClientOnlyNarrowing(m.result.query));
                         // TRUE eligible total — matchTotal FIRST (PR #608 "never the page-capped total"), NEVER
                         // `fetched`/`listings.length` (a page-buffer size). Under client-only narrowing the RPC
@@ -3476,6 +3598,18 @@ export default function Agent() {
             restore this same state from `completed`. */}
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
+            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): only the input row is gated — the
+                disclaimer below stays always-on regardless of origin (it's a listings-source legal
+                notice, not part of "the chat"). See filterOrigin's own comment above.
+                `|| busy || revealing` (fixed same-day, caught by web-runtime-smoke's own [E] Stop
+                journey): a Filter search still becomes an in-flight fetch the moment it lands here,
+                and Stop-then-restore-to-Filter (verify-filter-stop-cancels-and-restores.ts, a
+                separate, pre-existing owner rule) needs the composer's own Stop control to exist
+                while `busy`/`revealing` — hiding the WHOLE composer unconditionally also hid Stop,
+                so an in-flight Filter search could no longer be cancelled. Not "chat" either way:
+                the busy/revealing ternary a few lines down only ever shows Stop OR mic+send, never
+                both, so this window shows the input row + Stop, never a usable send path. */}
+            {(!filterOrigin || busy || revealing) && (
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
@@ -3655,6 +3789,7 @@ export default function Agent() {
                 </Pressable>
               </View>
             </View>
+            )}
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
             </Text>
@@ -3691,12 +3826,13 @@ export default function Agent() {
       {ageFlow ? (
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           {ageFlow.phase === 'loading' ? (
-            <AdvancedQuestionLoading onClose={onAgeClose} />
+            <AdvancedQuestionLoading onClose={onAgeClose} pills={afCardPills} />
           ) : ageFlow.phase === 'intro' ? (
             <AdvancedIntroCard
               total={ageFlow.total}
               onBegin={onIntroBegin}
               onClose={onIntroShowResults}
+              pills={afCardPills}
             />
           ) : ageFlow.phase === 'mining' ? (
             <MiningTransition from={ageFlow.from} to={ageFlow.to} />
@@ -3718,6 +3854,7 @@ export default function Agent() {
               onSkip={onAgeSkip}
               onBack={onAgeBack}
               onClose={onAgeClose}
+              pills={afCardPills}
             />
           )}
         </View>

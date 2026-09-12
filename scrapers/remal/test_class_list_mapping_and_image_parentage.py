@@ -13,8 +13,11 @@ Also pinned:
     mis-files unfamiliar category names (proven on alta, where "محلات ومعارض" → "Residential Land").
   · A few posts carry a raw term ID where a slug belongs (property-type-357, city-364, city-348) —
     the site's own broken rows. Skipped and counted, never guessed.
-  · District is NOT recoverable: class_list gives `neighborhood-248` and this site exposes no
-    taxonomy endpoint that resolves it, so neighborhood stays NULL and the raw ids are preserved.
+  · class_list's `neighborhood-248` is a raw term id this site exposes no taxonomy endpoint to
+    resolve — it is never itself used as the district, only preserved for audit. The title/content
+    free text often DOES state a real district, though, and find_district_in_text() (2026-09-11)
+    recognizes it — but only when it exact-matches the city's own curated district catalog, so a
+    subdivision-plan name or a housing-program name sitting next to a real place is never invented.
 """
 import sys
 import types
@@ -22,6 +25,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
+
+import scrapers.common.arabic_location as _al  # noqa: E402
+# Seed the module's own state directly (bypasses _load()'s live DB fetch — `if _CITY: return`
+# short-circuits on the first non-empty entry) with a tiny, hand-picked slice of the REAL Jeddah
+# catalog, so find_district_in_text() runs its actual matching logic against KNOWN answers rather
+# than being stubbed into a dumb always-None/always-same-value shape that would stop testing it.
+_al._CITY["_stub_"] = [(1, 1)]
+_al._DISTRICT_BY_CITY[18] = {_al.norm_ar("حي الروضة")}
+_al._DISTRICT_AR_BY_NORM[_al.norm_ar("حي الروضة")] = "حي الروضة"
+_al.to_catalog = lambda city_ar, region_hint=None: (18, 2) if city_ar == "جدة" else (None, None)
 
 from scrapers.common import normalize  # noqa: E402
 from scrapers.remal.run import CITY_SLUG, OFFER_BUY, OFFER_RENT, TYPE_SLUG, map_listing  # noqa: E402
@@ -79,11 +92,40 @@ row, _ = map_listing(_post(["property-type-appartments", "city-jeddah", "offer-t
                            title="شقة للإيجار", body="السعر: 50,000 ريال سنوياً"))
 assert row["rent_period"] == "annual"
 
-# ── 6. DISTRICT IS NOT INVENTED ─────────────────────────────────────────────────────────────────
+# ── 5b. AREA — the real formats this source actually uses (measured live 2026-09-11: real posts
+# 6593/6544/6532), not just the plain "مساحة N" the regex originally caught. Fixed 2026-09-11 —
+# 29/87 -> 52/87 posts recovered.
+row, _ = map_listing(_post(["property-type-lands", "city-jeddah", "offer-type-for-sell"],
+                           title="أرض للبيع", body="* المساحة/900م2<br>* على 3 واجهات"))
+assert row["area_m2"] == 900, "slash-separated «المساحة/900م2» must be caught"
+row, _ = map_listing(_post(["property-type-lands", "city-jeddah", "offer-type-for-sell"],
+                           title="أرض للبيع", body="مساحات 600م2"))
+assert row["area_m2"] == 600, "plural «مساحات» (no separator at all) must be caught"
+row, _ = map_listing(_post(["property-type-lands", "city-jeddah", "offer-type-for-sell"],
+                           title="أرض للبيع", body="مساحة/ 888م2"))
+assert row["area_m2"] == 888, "slash+space «مساحة/ 888م2» must be caught"
+
+# ── 6. DISTRICT — recognized ONLY via catalog match, the raw term id is NEVER the source ────────
+# The raw numeric term id (248) must never itself become the district, no matter what — that half
+# of the original design is unchanged.
 row, _ = map_listing(_post(["property-type-villas", "city-jeddah", "offer-type-for-sell",
                             "neighborhood-248", "street-384"], title="فيلا في حي الروضة"))
-assert row["neighborhood"] is None, "the raw term id is not a district name, and the title is not the source"
-assert row["additional_info"]["neighborhood_ids"] == ["248"]
+assert row["additional_info"]["neighborhood_ids"] == ["248"], "the raw ids stay audit-only, never a district"
+# But the title's own free text names a REAL, catalog-confirmed Jeddah district (حي الروضة, stubbed
+# above from the actual catalog) — find_district_in_text() recognizes it, exactly as it would live.
+assert row["neighborhood"] == "حي الروضة", (
+    "a real, catalog-confirmed district plainly stated in the title must be recognized, not discarded")
+assert row["city_ar"] == "جدة" and row["city_id"] == 18 and row["region_id"] == 2, (
+    "the Arabic-native shadow columns must be populated alongside neighborhood"
+)
+# A subdivision-PLAN mention is never mistaken for a district, even sitting right next to one.
+row, _ = map_listing(_post(["property-type-villas", "city-jeddah", "offer-type-for-sell"],
+                           title="فيلا للبيع في مخطط الياسمين"))
+assert row["neighborhood"] is None, "a مخطط (plan) name must never be invented as a district"
+# Nothing recognizable at all → stays honestly unknown, never guessed.
+row, _ = map_listing(_post(["property-type-villas", "city-jeddah", "offer-type-for-sell"],
+                           title="فيلا فاخرة للبيع بموقع مميز"))
+assert row["neighborhood"] is None, "no candidate text present → NULL, never invented"
 
 # ── 7. IMAGES BIND BY PARENT, AND THE PAGE IS NEVER SCRAPED ─────────────────────────────────────
 row, _ = map_listing(_post(["property-type-villas", "city-jeddah", "offer-type-for-sell"], pid=42),

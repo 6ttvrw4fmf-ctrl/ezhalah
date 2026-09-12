@@ -128,7 +128,7 @@ test('AI mode — free-text query classifies correctly, replies in Arabic', asyn
   test.skip(!ALLOW_PAID_AI, 'paid live-model test — set EZHALAH_ALLOW_PAID_AI=1 to run');
   await labelAgentCallsAsCI(page);
   await home(page);
-  await page.getByText('الوكيل الذكي', { exact: true }).click(); // switch to AI mode
+  await page.getByText('الوسيط الذكي', { exact: true }).click(); // switch to AI mode
   // The composer's `placeholder` attribute is intentionally EMPTY on the clean intro-landing screen
   // (PR#1008, 2026-08-24): rotating example queries occupy that slot instead, and the static
   // placeholder only returns after the user interacts. getByPlaceholder(...) therefore matches ZERO
@@ -157,7 +157,7 @@ test('AI mode — a city that is also a region asks to disambiguate (no wrong gu
   test.skip(!ALLOW_PAID_AI, 'paid live-model test — set EZHALAH_ALLOW_PAID_AI=1 to run');
   await labelAgentCallsAsCI(page);
   await home(page);
-  await page.getByText('الوكيل الذكي', { exact: true }).click();
+  await page.getByText('الوسيط الذكي', { exact: true }).click();
   // Stable accessibilityLabel, not the transient placeholder — see the comment on the test above.
   const composer = page.getByLabel('اكتب وصف العقار اللي تبحث عنه');
   await composer.fill('شقة للإيجار في الرياض');

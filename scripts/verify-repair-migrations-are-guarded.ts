@@ -38,6 +38,18 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // Same companion shape as the entries below: the repair (healing six dealapp rows the
+  // enforce_price_size_sanity trigger had sentineled to «غير معروف», owner decision 2026-09-11 /
+  // ops_incident #172) and its watcher landed as two migrations nine minutes apart, so the repair
+  // file itself never reaches a mon_detect_* in executed SQL. The class IS watched:
+  // mon_detect_service_facility_types_regressed() checks (A) the four مرافق خدمية types stay in
+  // known_type_ar AND no production_ready dealapp row whose RAW property_type is one of them
+  // carries the sentinel, and (B) zero live-promoted loc_canonical_district rows fail
+  // district_ar_looks_bogus — on the mon_run_all_detectors() roster, run green in-migration.
+  '20260911215017_service_facilities_taxonomy_and_district_filter_arabic_digits.sql':
+    'watched by its companion 20260911215940_service_facility_taxonomy_repair_gets_a_detector.sql, '
+    + 'which creates mon_detect_service_facility_types_regressed(), needle-edits it into the '
+    + 'mon_run_all_detectors() roster, and runs it green in the same migration',
   // The repair and the detector that watches its class landed as two migrations one minute apart,
   // so the repair file itself never reaches a mon_detect_* in executed SQL. The class IS watched:
   // 20260824115704 re-asserts this exact UPDATE idempotently and then calls
@@ -127,6 +139,36 @@ const WAIVED: Record<string, string> = {
     'a standing trigger (prevention), not a backfill — watched by mon_detect_placeholder_price_'
     + 'stored (20260906043755, ops_incident #63), which the migration\'s own header names as the '
     + 'detection layer this trigger sits in front of',
+  // Recovered 2026-09-11 (mirroring migrations that blocked an unrelated docs deploy — live in
+  // production, never committed). Same two-migrations-apart shape as the res/com collision waiver
+  // above: 20260911201453 (2h24m later, same session) creates + rosters + runs
+  // mon_detect_amaall_native_location_regressed(), the migration's own header says explicitly it
+  // exists "required by verify-repair-migrations-are-guarded.ts". Like that waiver, the companion
+  // does NOT blindly re-assert the repair's UPDATE — it watches the repair's CLASS specifically:
+  // (A) whether listing_native_location_v1 still carries amaall's arm, (B) whether the scraper is
+  // still populating district_ar. Open the companion to verify this reason rather than taking it
+  // on trust.
+  '20260911195109_amaall_native_location_wiring_and_exact_district_search.sql':
+    'watched by its companion 20260911201453_amaall_native_location_repair_reasserts_and_gets_a_'
+    + 'detector.sql, which ships + rosters + runs mon_detect_amaall_native_location_regressed(), '
+    + 'checking both the resolver wiring and live district-coverage share',
+  // ops_incident #189: strip_district_city_suffix() backfill for 3 fallback-resolved aqarmonthly
+  // listings (762041/762272/1097370). Applied as TWO migrations because the first apply call's
+  // response timed out at the connector and a split retry was made assuming it had failed — it had
+  // not; both landed (see 20260911222018's own header for the honest account). Both are therefore
+  // the SAME repair, twice. Its companion 20260911223037 lands 13-16 minutes later and creates +
+  // rosters + self-verifies mon_detect_aqarmonthly_district_suffix_repair_regressed(), scoped to
+  // exactly these 3 rows (not the whole table — a 4th flagged listing, 762483, is deliberately left
+  // unfixed as a genuine source-completeness gap, not part of this repair's claim). Open the
+  // companion to verify this reason rather than taking it on trust.
+  '20260911221734_aqarmonthly_district_suffix_backfill_incident_189.sql':
+    'watched by its companion 20260911223037_aqarmonthly_district_suffix_backfill_gets_a_detector_'
+    + 'incident_189.sql, which ships + rosters + self-verifies '
+    + 'mon_detect_aqarmonthly_district_suffix_repair_regressed(), scoped to the exact 3 repaired rows',
+  '20260911222018_aqarmonthly_district_suffix_backfill_incident_189.sql':
+    'same repair as 20260911221734 (a connector-timeout retry that turned out to also have landed — '
+    + 'see this file\'s own header) — watched by the same companion, '
+    + '20260911223037_aqarmonthly_district_suffix_backfill_gets_a_detector_incident_189.sql',
 };
 
 // Enforcement starts here — the day this rule landed.

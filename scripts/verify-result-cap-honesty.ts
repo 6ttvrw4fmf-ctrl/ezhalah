@@ -73,8 +73,22 @@ for (const [trueTotal, shown] of [[9892, 100], [9892, 300], [437, 437], [46, 46]
 }
 
 // ── 5. the shipped wiring uses the module (never a re-derived local rule) ───────────────────────
-check('loadMore advances via nextBatchTarget (both the buffer path and the fetch path)',
-  (code.match(/nextBatchTarget\(/g) ?? []).length >= 2);
+// «عرض المزيد» was REDEFINED 2026-09-11 (Task 4), then REVISED the same day, before Task 4's
+// one-tap-drains-everything version ever reached production (Task 4 rev. 2): the FIRST tap on a
+// turn reveals only the next 100-boundary — nextBatchTarget is back in loadMore, not retired — and
+// only a SECOND tap (the turn already past its initial-reveal floor) drains to the true end. The
+// honesty check: loadMore reveals exactly `min(target, mergedLen)` on BOTH the instant-reveal path
+// (a new turn started mid-fetch) and the cascade path — the boundary on a first press, the full
+// merge on a later one — never a re-derived number, never a partial count silently mislabelled whole.
+check('nextBatchTarget decides the FIRST-press reveal target (rev. 2 — no longer retired)',
+  /nextBatchTarget\(cur, m\.result\.matchTotal \?\? Infinity\)/.test(code));
+check('a first vs. later press is told apart by the turn\'s OWN reveal state, not new component state',
+  /const alreadyExpandedOnce = cur > initialReveal\(m\.result\);/.test(code));
+check('loadMore reveals exactly min(target, mergedLen) on BOTH the instant and cascade reveal paths',
+  /setRevealCount\(\(c\) => \(\{ \.\.\.c, \[mid\]: revealTo \}\)\)/.test(code)
+  && /cascadeIn\(mid, cur, revealTo\)/.test(code)
+  && /const revealTo = Math\.min\(target, mergedLen\);/.test(code)
+  && /const mergedLen = fetched0 \+ add\.length;/.test(code));
 check('the lifetime-cap gate is GONE from loadMore',
   !/cur >= BROWSE_CAP/.test(code) && !/BROWSE_CAP/.test(code));
 check('the closing message and the gate share resultCounts()',

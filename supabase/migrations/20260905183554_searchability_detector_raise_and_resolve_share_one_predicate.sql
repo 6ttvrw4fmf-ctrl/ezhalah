@@ -1,5 +1,5 @@
--- Companion to 20260905183507 (the honest-UNKNOWN denominator fix), and a correction to a trap that
--- fix would otherwise have sprung.
+-- Companion to 20260905... (the honest-UNKNOWN denominator fix), and a correction to a trap that fix
+-- would otherwise have sprung.
 --
 -- mon_detect_searchability_collapse() had TWO independently worded predicates for one question:
 --   raise:   from mon_searchability_alerts where verdict <> 'OK'

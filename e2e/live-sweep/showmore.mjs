@@ -31,9 +31,21 @@ import { commitOneAfAnswer } from './journeys.mjs';
 // The AF params REQUEST-DRIFT must also watch once a predicate is committed — every certified AF
 // field's RPC param name (src/data/advancedFilters.ts). A page carrying a DIFFERENT AF param set
 // than the page before it silently dropped or invented a predicate mid-browse.
+// MUST cover every key rpcAdvancedFilterParams() (src/data/remote.ts) can serialize — that function
+// is "the ONE definition" of an AF predicate param, and this list is used for BOTH the
+// AF-NOT-CARRIED check and the AF half of the REQUEST-DRIFT watch below. A key missing here fails
+// in two directions at once, which is how `p_is_new_construction` got caught on 2026-09-11:
+//   · FALSE RED — «كم عمر العقار تقريباً؟» answered «جديد» sets isNewConstruction and leaves
+//     ageMin/ageMax null (advancedFilters.ts:133), so the one age answer in five that serializes
+//     ONLY into p_is_new_construction read as «committed an AF answer but carries no AF param».
+//   · REAL BLIND SPOT — because AF_PARAMS is also the drift watch list, a «عرض المزيد» batch that
+//     silently DROPPED p_is_new_construction (widening "new build only" back to any age, §31's
+//     "one filter silently disabling another") would not have been noticed.
+// scripts/verify-live-sweep-coverage-contract.ts derives the expected set from remote.ts and fails
+// if this list ever falls behind again, so a new AF question is RED until it is registered here.
 const AF_PARAMS = [
   'p_amenities', 'p_bath_min', 'p_furnished', 'p_street_width_min', 'p_rating_min', 'p_reviews_min',
-  'p_unit_subtypes', 'p_age_min', 'p_age_max', 'p_directions',
+  'p_unit_subtypes', 'p_age_min', 'p_age_max', 'p_directions', 'p_is_new_construction',
 ];
 
 // SCOPE questions (src/data/advancedFilters.ts SCOPE_QUESTIONS) share the AF card UI and round
