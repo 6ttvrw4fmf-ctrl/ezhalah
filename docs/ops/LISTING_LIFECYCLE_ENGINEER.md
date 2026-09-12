@@ -173,13 +173,42 @@ Writers into the inactive state:
 ```
 <platform>_*_listings (active = true)
   → active_listing_ids_v2          MATERIALIZED VIEW; each arm is "... WHERE <table>.active IS TRUE"
-                                   refreshed hourly, pg_cron jobid 17, minute :00
+                                   refreshed hourly, pg_cron jobid 17, minute :20
+                                   (job name is `refresh_listing_native_location_v1`, which
+                                   understates it — the same command refreshes BOTH matviews;
+                                   statement_timeout 900s)
   → listing_native_location_v1 → listing_native_location_v2   (per-listing derived stores)
   → listing_location_index
-  → sync_search_listings_ar()      pg_cron jobid 28 'sync-search-listings-ar', minute :14
+  → sync_search_listings_ar()      pg_cron jobid 28 'sync-search-listings-ar', minute :36
                                    *** STEP 1 OF 5 *** (see below)
   → search_listings_ar             THE SERVED INDEX
 ```
+
+**Those two minutes were WRONG in this file until 2026-09-12, and the error was not cosmetic.** It
+said the producer ran at :00 and the consumer at :14 — a 14-minute gap that reads as correctly
+ordered. Production had the producer at :20 and the consumer at :14, so **the consumer ran six
+minutes BEFORE the producer, every hour**: the sync always read the PREVIOUS hour's aliveness
+snapshot, and every deactivation and every restore reached the user a full cycle late. That is
+`§1.1`'s "immediately" quietly costing an extra hour, and reading this file would have told you it
+was fine. Repaired in production on 2026-09-11 between 13:14 and 14:36 by moving the sync to :36.
+
+Two things to carry forward:
+
+- **`mon_detect_propagation_order_inverted` / `ops_lifecycle_propagation_order_inverted()` watches
+  this now**, and its `observed_overlap` branch looks back **48 hours** — so it stays lit for two
+  days after a genuine repair. An alert of this kind is not evidence the condition is still true;
+  check `cron.job_run_details` for the last actual occurrence before treating it as live. (Measured
+  2026-09-12: 22 reported occurrences, last true one 2026-09-11 13:14, zero since the repair.)
+- **Its message is imprecise in a way that costs investigation time.** The predicate is
+  `cons_start < prod_end`, which is true both when the consumer starts *during* the producer and
+  when it starts *before the producer begins* — and the message asserts only the first ("the sync
+  started while the matview refresh it reads was still running"). What actually happened was the
+  second. Tracked as `ops_incident` #219.
+- **The current gap is correct but thin.** The producer starts at :20 carrying
+  `statement_timeout 900s`, so its worst permitted finish is :35, one minute before the consumer at
+  :36. Observed refresh durations are 60–264s, so real margin is ~11 minutes — but the *permitted*
+  margin is 60 seconds. Widening it is a cron change and an owner-visible timing decision, not a
+  drive-by.
 
 Three properties of this leg that matter more here than anywhere else in the system:
 
@@ -403,6 +432,29 @@ alone unless the caller supplies a `verify_gone` oracle. `ops_incident` #84 trac
 | **mizlaj** | 404 (4/4 dead; 24/24 controls 200) | same | — |
 | **nowaisiry** | 404 (5/5 dead; 11/11 controls 200) | same | — |
 | **souq24** | **REDIRECT off the listing path** (14/14 dead; 40/40 controls no redirect) | same | 30 → **26** (abwbna onboarded +1 the same day) |
+| **mustqr** | per-id PostgREST read with NO status filter: row absent, or `status` no longer «متاح» | `verify-mustqr-absence-cannot-deactivate.ts` | 25 → **24** (2026-09-12) |
+
+**mustqr is the first oracle wired WITHOUT a pre-wiring control validation, and the reason is worth
+recording rather than repeating by accident.** §4.2 lesson 1 says to control-validate against real
+rows before wiring, and that was impossible here: the API host answers `403 CONNECT` at the
+cloud-routine gateway (re-measured 2026-09-12, independently confirming the ledger's own note),
+while `mustqr.sa` itself returns 200 — so the signal could be *read about* but not *exercised*. Two
+things make wiring it correct anyway, and both must hold before anyone does this again:
+
+1. **An oracle can only WITHHOLD a deactivation that absence alone already performs.** mustqr was
+   deactivating on absence with no source check at all — 238 rows inactive, all at
+   `missing_count = 3`, and not one of its 1,464 rows had ever carried `last_verified_alive_at`. An
+   unreachable oracle returns `unknown`, which holds the strike and kills nothing. Strictly safer
+   than the unguarded prune, never less safe. **This argument does NOT transfer to a platform whose
+   prune is already guarded** — there, a wrong signal can newly kill, and validation comes first.
+2. **Validation moves IN-RUN** (`LISTING_LIVENESS.md` §5.4, sanadak precedent): a canary drawn from
+   rows *this run already fetched* must read back available before any `gone` verdict is issued, and
+   it fails CLOSED — no canary means no removal. The run validates itself from the egress that can
+   actually reach the source, every run, so nobody has to remember to.
+
+The canary pool is deliberately armed from `(res + com)[:3]` — rows the crawl just parsed — and
+**never** from `last_verified_alive_at`, which is the self-referential pool that deadlocked gathern
+for five days (`ops_incident` #168: a control set that certifies itself cannot detect its own rot).
 
 **The law now lives in one place: `scrapers/common/http_liveness.py`.** After four platforms it was
 clear that a scraper carries two different kinds of thing, and only one of them is per-platform:
@@ -433,7 +485,7 @@ problem but five, and they need different things:
 | class | platforms | what it needs |
 |---|---|---|
 | **Egress blocked from a cloud routine** | awal, muktamel, sadin, therc, abralosol, aouj, arkaan, rawasidark | The gateway denies these hosts (`403 CONNECT`). This is UNKNOWN **about our read**, never about the platform — control validation has to run from an egress that can reach them, which their own CI can. |
-| **No signal on the listing page** | aqaratikom (5,795-byte shell), mustqr (18,310-byte shell) | Dead and live are byte-identical. mustqr's real oracle is the per-id API its scraper already reads; aqaratikom needs its API investigated. |
+| **No signal on the listing page** | aqaratikom (5,795-byte shell), ~~mustqr~~ | Dead and live are byte-identical. ~~mustqr's real oracle is the per-id API its scraper already reads~~ — **mustqr WIRED 2026-09-12, see §4.1**; aqaratikom needs its API investigated. |
 | **Dead rows are STILL SERVED** | eastabha, hajer, satel (131 inactive!), fursaghyr | Their deactivated rows answer 200 with real per-listing titles. Either the source keeps pages up after delisting — in which case the oracle needs a body-level sold/rented marker, the aqar «مغلق» shape — or those deactivations were false and these are restore candidates. **A 404 rule here would never fire.** Unanswered. |
 | **No dead cohort at all** | aldarim, abwbna, alhoshan, alkhaas, aqarmonthly, erapulse, jurash, october | These have never deactivated a listing, so a death limb cannot be control-validated: there has been no death to validate against. The prune is unguarded but has never fired. |
 | **A real oracle exists, beside an unevidenced prune** | dealapp, gathern | Both have genuine DIRECT sweeps (`dealapp/liveness.py` with `classify_dealapp` + `environment_is_trustworthy`; `gathern/liveness.py` with `probe`/`classify` and a canary system) AND an absence-only prune in `run.py`. The fix is to route the prune through the oracle that already exists — inventing nothing. **gathern demands the most care of anything in this table**: §5.4 measured it answering blocking with its own 404 at a 100% false-death rate from datacenter egress, and it is one of the four delete-ENABLED platforms. Any wiring there must go through its canary gate, not through `looks_dead()` alone. |

@@ -34,11 +34,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          # FULL history, deliberately. The merged-but-never-served check below asks git whether the
+          # commit production is RECORDED to serve is an ancestor of this head, and for the file list
+          # between them. actions/checkout defaults to fetch-depth 1, under which neither question can
+          # be answered — and the shared predicate correctly reports an UNANSWERED question as a
+          # FAILURE, not as "no drift". So a shallow checkout here would turn this into a standing red
+          # rather than a silent pass; full history is what makes it able to answer at all.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Live bundle vs main certification parity
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-frontend-bundle-matches-source-live.ts
+
+      # ── THE BROAD QUESTION the step above does NOT answer (routine #9, 2026-09-12) ──────────────
+      # The step above compares ONE thing: the amenity token vocabulary of src/lib/afCohorts.ts. On
+      # 2026-09-12 it printed «no undeployed drift» while production was four src/ commits and ~22
+      # hours behind main, two of them P1 user-facing repairs — because none of those commits touched
+      # that file. The narrow proposition was true; the broad one everyone read it as was false.
+      # This step asks the broad one: is ANY user-visible commit on main unshipped?
+      # `always()` so a failure of the narrow check never hides the answer to the broad one.
+      - name: Merged but never served — is any user-visible commit on main unshipped?
+        if: always()
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-undeployed-user-visible-drift-live.ts
 
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
       # This job runs unattended: a red run notifies nobody, so it has to reach alert_event to reach

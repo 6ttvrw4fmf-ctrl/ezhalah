@@ -302,7 +302,6 @@ verify-trending-visuals.ts
 verify-type-and-attribute-fallback.ts
 verify-type-ar-expansion-total.ts
 verify-typewriter-completion-guarantee.ts
-verify-ui-controls-have-predicates.ts
 verify-unknown-rent-period-not-annual.ts
 verify-unlocated-fallback-scope-live.ts
 verify-voice-error-classification.ts

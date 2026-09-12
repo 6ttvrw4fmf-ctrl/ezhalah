@@ -203,7 +203,7 @@ def main() -> int:
                    if sitemap else 1)
         cands = cands[:args.limit] if args.limit else cands
 
-        pending: list[tuple[dict, str, int]] = []   # (row, action, strikes)
+        pending: list[tuple[dict, str, int, int]] = []   # (row, action, strikes, http_status)
         for row in cands:
             adid = _adid(row["listing_url"])
             if budget.exhausted:
@@ -216,7 +216,7 @@ def main() -> int:
 
             d = decide(verdict, strikes=int(row.get("missing_count") or 0),
                        policy=policy, evidence=EvidenceKind.DIRECT)
-            pending.append((row, d.action, d.strikes))
+            pending.append((row, d.action, d.strikes, status))
 
             if args.apply and d.action == "reset":
                 patch = {"missing_count": 0, **verification_patch(d, now_iso=now_iso)}
@@ -229,7 +229,7 @@ def main() -> int:
             stats["quarantined"] = True
 
         if args.apply and trusted:
-            for row, action, strikes in pending:
+            for row, action, strikes, _status in pending:
                 if action == "strike":
                     client.table(TABLE).update({"missing_count": strikes}).eq("id", row["id"]).execute()
                     stats["struck"] += 1
@@ -237,6 +237,40 @@ def main() -> int:
                     client.table(TABLE).update(
                         {"missing_count": strikes, "active": False}).eq("id", row["id"]).execute()
                     stats["deactivated"] += 1
+
+        # ── Per-row evidence (dealapp_liveness_detail, migration 20260831004139) ──────────────────
+        # Created 2026-08-31 together with four arms of mon_detect_served_despite_direct_404 that
+        # read it, and never written: measured 2026-09-12, dealapp_liveness_detail_id_seq.last_value
+        # was still NULL and n_tup_ins = 0, so that detector was permanently dark on dealapp.
+        #
+        # Written AFTER the trust gate on purpose, so `applied` records what actually reached the
+        # row rather than what was contemplated. On a quarantined run — dealapp's normal outcome,
+        # §5.1 — every row lands with applied=false, which is the honest record: the verdict was
+        # reached and deliberately not applied. ALIVE is not logged (last_verified_alive_at carries
+        # it); an UNKNOWN lands as 'transient', because the distinction between "the source said
+        # gone" and "the source did not answer" is the whole evidence this table exists to keep.
+        # Best-effort, evidence-only: it gates nothing and can never deactivate a row.
+        detail_rows = [
+            {
+                "run_at": now_iso,
+                "source_table": TABLE,
+                "listing_id": row["id"],
+                "http_status": st if st else None,   # NULL = the fetch itself failed
+                "verdict": {"strike": "strike", "deactivate": "kill"}.get(action, "transient"),
+                "missing_count_before": int(row.get("missing_count") or 0),
+                "missing_count_after": strikes,
+                "applied": bool(args.apply and trusted and action in ("strike", "deactivate")),
+            }
+            for row, action, strikes, st in pending
+            if action != "reset"
+        ]
+        for i in range(0, len(detail_rows), 500):
+            chunk = detail_rows[i:i + 500]
+            try:
+                client.table("dealapp_liveness_detail").insert(chunk).execute()
+            except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
+                print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
+                      f"{str(exc)[:160]}", flush=True)
 
         note = (f"{'APPLY' if args.apply else 'DRY-RUN'} "
                 f"egress={'proxy' if proxy_url else 'ci'} "
