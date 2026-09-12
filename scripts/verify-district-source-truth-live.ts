@@ -77,15 +77,21 @@ check(
 
 // 3. Guard against over-correction: the fix must not have wiped district coverage wholesale.
 //    Districts are still resolved for the overwhelming majority of rows that publish one.
-const withSource = await count('listing_source_district_ar?select=listing_id&limit=1');
-const gathernFilled = await count(
-  'search_listings_ar?select=listing_id&platform=eq.gathern&district_ar=not.is.null&limit=1',
+//    COHORT FIX (2026-09-12): the old denominator was ALL of listing_source_district_ar — a
+//    snapshot that keeps retired listings forever. With 4,123 of its 33,704 rows drained from the
+//    index (gathern 3-strike retirement), the ratio was capped at 87.8% and the 90% floor became
+//    unpassable no matter how good resolution was (live-row coverage was 97.9% at the time).
+//    mon_gathern_district_coverage (migration 20260912175532) counts the honest cohort: live
+//    gathern rows that PUBLISH a source district.
+const cov = await rows<{ covered: number; with_source_live: number }>(
+  'mon_gathern_district_coverage?select=covered,with_source_live',
 );
-const pct = withSource > 0 ? (100 * gathernFilled) / withSource : 0;
+const { covered, with_source_live: withSourceLive } = cov[0] ?? { covered: 0, with_source_live: 0 };
+const pct = withSourceLive > 0 ? (100 * covered) / withSourceLive : 0;
 check(
-  'district coverage stayed healthy after enforcing source truth',
-  pct >= 90,
-  `${gathernFilled}/${withSource} = ${pct.toFixed(1)}% (floor 90%)`,
+  'district coverage stayed healthy after enforcing source truth (live rows that publish one)',
+  withSourceLive >= 1000 && pct >= 90,
+  `${covered}/${withSourceLive} = ${pct.toFixed(1)}% (floor 90%, cohort floor 1000)`,
 );
 
 console.log(
