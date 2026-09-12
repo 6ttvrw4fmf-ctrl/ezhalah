@@ -170,7 +170,11 @@ POLICIES: dict[str, _P] = {
               "Absence from the crawl now only SELECTS candidates: scrapers/" + p + "/run.py hands "
               "prune_unseen a verify_gone oracle, so a row at grace gets a DIRECT re-fetch of its "
               "own URL and an affirmative answer before it may be deactivated. Every oracle here "
-              "was control-validated against interleaved known-alive rows, and every UNKNOWN shape "
+              "was EITHER control-validated against interleaved known-alive rows, OR — where the "
+              "source is unreachable from our CI egress and so could not be exercised before "
+              "wiring — gated by an in-run canary that fails CLOSED, which moves the same "
+              "validation inside every run (see that platform's own signal string). And every "
+              "UNKNOWN shape "
               "(no answer, 401/403/407/408/429, 5xx, empty body, unresolved redirect) holds the "
               "strike without deactivating. TIER UNCHANGED and that is honest: the population still "
               "carries no recent affirmative verification, so these rows are reported as unverified "
@@ -201,6 +205,13 @@ POLICIES: dict[str, _P] = {
                         "row's own stored listing_url is used, because 39 of 1,724 rows store another "
                         "listing's URL. Removals are additionally gated by an in-run canary"),
             ("souq24", "a redirect OFF this ad's own path (14/14 dead rows, 0/40 controls), plus 404/410"),
+            ("mustqr", "a per-id PostgREST read with NO status filter — the row absent from the "
+                       "source's own table, or present with a `status` other than «متاح». Identity "
+                       "is guaranteed by construction (queried by primary key, and the returned "
+                       "id is asserted equal), not by trusting a stored URL. NOT pre-validated "
+                       "against a dead cohort: the API host answers 403 CONNECT from CI egress, so "
+                       "removals are instead gated by an in-run canary drawn from rows the same "
+                       "run already fetched, and it fails CLOSED — no canary, no removal"),
         )
     },
     **{
@@ -212,7 +223,7 @@ POLICIES: dict[str, _P] = {
         for p in (
             "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "aouj", "aqaratikom",
             "aqarmonthly", "arkaan", "awal", "azdad", "bahadhabab", "eaqartabuk", "erapulse",
-            "fursaghyr", "jurash", "muktamel", "mustqr",
+            "fursaghyr", "jurash", "muktamel",
             "october",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
             "shmoualshmal", "therc",
