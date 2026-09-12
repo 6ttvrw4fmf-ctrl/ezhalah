@@ -169,17 +169,46 @@ it by reading the repo, without replaying this conversation. Consolidate overlap
 canonical statement instead of letting duplicates accumulate; if you find a stale fact while working
 nearby, fix it in the same edit.
 
-**Token/context discipline (applies to every session, every routine):**
+**Token/context discipline (applies to every session, every routine) — PERMANENT, owner rule
+2026-09-12.** Earned the hard way: retyping a ~1,650-line file into a tool call, by hand, across
+three separate subagents that each re-read it and failed the same way, burned ~620,000 tokens
+before anyone reached for the CI path that already existed and worked in one shot.
 - Query only the columns/rows/lines needed to answer the current question — don't dump full SQL
   results, logs, payloads, or whole source files into context when a targeted read/grep answers it.
-- Don't spawn multiple agents for a simple check; use parallel agents only when they cover genuinely
-  independent work or materially save wall-clock time.
+- **Never paste or retype a whole source file into a tool call when it already exists on disk or in
+  git.** If a tool needs file content, prefer a path/git-based mechanism over inlining. For a
+  deployment specifically, check for and prefer the repo's existing GitHub Actions / CI / disk-based
+  workflow FIRST — for the AI Agent edge function that is `.github/workflows/deploy-edge-function.yml`
+  (reads straight from git); do not inline `supabase/functions/agent/index.ts` (~1,650 lines) into
+  `deploy_edge_function` or any other tool call.
+- **A tool call refused for being too large is a STOP signal, not a retry signal.** Don't re-attempt
+  the same method with smaller chunks, and don't hand the identical approach to a fresh subagent
+  hoping it fits this time — find the actually-different mechanism (a CLI, a CI workflow, a
+  path-based API) before trying again.
+- Give a subagent the smallest relevant scope — a function, a file region, a grep result — not a
+  whole large file "to be safe" unless the task genuinely needs the whole thing.
+- Search/grep for the relevant function or lines first; don't repeatedly re-read an entire large file
+  across turns or across subagents when a targeted read already answered the question.
+- Reuse evidence and results already established earlier in the current task instead of
+  independently recomputing them again without a reason to distrust them.
+- Use subagents only when the parallelism genuinely saves wall-clock time or the isolation is
+  needed — never for a simple deploy or verification step a single direct call already covers, and
+  don't spawn multiple agents for a simple check.
+- Keep tool output narrow: a status line, a targeted grep, a diff, or the relevant lines — not a
+  giant log dump — answers most questions.
 - Reports: **issue → root cause → fix → barrier → production verification → remaining.** Full evidence
   dumps only when something is disputed or needs an owner decision.
 - Before a large investigation, check whether the answer already exists in `docs/`, git history, or a
   monitor/dashboard before re-discovering it from scratch.
-- None of this trades away rigor: fix → regression test → verify → deploy still applies in full: it
-  just runs on targeted reads instead of wholesale context dumps.
+- **One issue per session whenever practical.** When the requested issue is finished and verified,
+  stop — don't go discover unrelated work in the same breath (a separate owner rule, memory
+  `feedback_one-chat-per-issue-working-style`, restates the same principle from the user's side).
+- When two safe paths accomplish the same task, prefer the one using fewer tokens, fewer tool calls,
+  and less duplicated work — provided neither correctness nor verification is weakened.
+- **None of this ever trades away rigor.** Testing, safety gates, production verification, and
+  correctness are never sacrificed to save tokens: fix → regression test → verify → deploy still
+  applies in full — this just runs it on targeted reads and the right mechanism instead of wholesale
+  context dumps and brute-force retries.
 
 **PR safety in this shared repo (permanent, 2026-08-10):** this working directory is shared by
 concurrent sessions with no per-session isolation — a background `gh pr create` with no `--head` can
@@ -645,6 +674,15 @@ node scripts/agent-surface-preflight.mjs final      # semantic diff + parse gate
 `final` refuses if the branch is behind main, prints the merged file's diff against `origin/main`,
 and calls out **removed** lines — that is where a silent overwrite hides. Read them. Confirm every
 one is intentional before merging.
+
+### How to actually deploy (owner rule, 2026-09-12 — token-efficiency)
+**Dispatch `.github/workflows/deploy-edge-function.yml`.** It checks out the merged code from git
+and deploys it straight from disk — no tool-call size limit, no retyping. **Never hand-assemble
+`index.ts` (~1,650 lines) and its siblings into a `deploy_edge_function` MCP call's inline `files`
+array** — three subagents doing exactly that in one session each re-read the file, each failed the
+same way (the payload was too large to paste reliably), and burned ~620,000 tokens combined before
+anyone used the workflow that already existed and worked in one shot. See "Token/context discipline"
+above for the general rule this is one instance of.
 
 ### After deploy
 ```bash
