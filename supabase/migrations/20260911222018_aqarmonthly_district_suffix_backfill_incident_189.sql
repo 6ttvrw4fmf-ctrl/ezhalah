@@ -27,17 +27,6 @@
 -- by them. The matview refresh + resync are run as a separate, non-transactional operational step
 -- immediately after this migration (REFRESH MATERIALIZED VIEW CONCURRENTLY cannot run inside a
 -- migration's transaction block) — same commands jobid 17/28 already run hourly, unattended.
---
--- PROVENANCE NOTE (added here, not in the applied SQL above, which is mirrored verbatim): the prior
--- migration (20260911221734) is the SAME fix — the Supabase MCP connector reported "not responding"
--- for that call, so this split retry was made assuming it had failed. It had not: both landed in
--- supabase_migrations.schema_migrations. The UPDATE is idempotent (strip_district_city_suffix on
--- already-stripped text is a no-op) and the redundant second REFRESH CONCURRENTLY (run standalone,
--- immediately after this migration, not shown above) was harmless — no data damage, just one extra
--- refresh cycle. This migration's own comment's claim that CONCURRENTLY "cannot run inside a
--- migration's transaction block" is preserved verbatim from what was actually applied, even though
--- 20260911221734 shows it evidently CAN in this tool's execution model — recorded honestly rather
--- than edited after the fact.
 update public.aqarmonthly_residential_listings r
    set district_ar = public.strip_district_city_suffix(r.district_ar, l.city_ar)
   from public.listings_arabic_locations l

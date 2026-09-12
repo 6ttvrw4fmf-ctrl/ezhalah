@@ -110,7 +110,24 @@ const RESIDENCY = [
 // a PDPL answer or a user-facing screen. A wrong fact about where personal data lives does damage
 // wherever it is written down. scripts/ is excluded on purpose — this very file quotes the false
 // claims in order to ban them.
-const residencyFiles = [...files, ...walk(BACKEND, [], /\.(ts|tsx|sql)$/)];
+//
+// ONE migration is excluded by exact path, not by pattern (2026-09-11): supabase/migrations/
+// 20260903034349_support_messages.sql is the file this rule's own memory names as the original
+// bug — it shipped "(Saudi-hosted) Postgres" into an ALREADY-APPLIED production migration. This
+// checker could not see it until today, because the file itself had been missing from git entirely
+// (migration-drift recovery). It is not a NEW false claim slipping past review; it is the historical
+// record of the one that already did, in 2026-08 or earlier, before this checker existed. An applied
+// migration is immutable — verify-migration-content-parity.ts fails the build if this file's text
+// ever stops matching byte-exact what production actually ran, so editing the sentence here is not
+// an option. The LIVE fact is corrected instead, in the only place engineers or users can actually
+// read it now: 20260911200404_support_messages_comment_replaces_the_saudi_hosted_claim.sql replaces
+// the table's live COMMENT with the true ap-northeast-1 (Tokyo) statement (that follow-up migration
+// describes the fix without quoting the banned phrase, so it needs no exclusion of its own). Any
+// OTHER file — including any migration written from today onward — still fails on this exact same
+// sentence; only this one specific, dated, already-corrected historical artifact is excluded.
+const RESIDENCY_HISTORICAL_EXCLUDE = join(BACKEND, 'migrations', '20260903034349_support_messages.sql');
+const residencyFiles = [...files, ...walk(BACKEND, [], /\.(ts|tsx|sql)$/)]
+  .filter((f) => f !== RESIDENCY_HISTORICAL_EXCLUDE);
 let resHits = 0;
 for (const f of residencyFiles) {
   readFileSync(f, 'utf8').split('\n').forEach((line, i) => {

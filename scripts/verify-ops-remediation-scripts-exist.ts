@@ -93,6 +93,23 @@ const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
       + '(ops_incident #63/#65); wasalt placeholder-price detection is price/listing data integrity' },
 ];
 
+/**
+ * SUPERSEDED PLACEHOLDERS — unlike KNOWN_GAPS, these are not real protections someone still owes.
+ * Each is a worked-example path inside a RAISE EXCEPTION message that was never meant to name a
+ * real file, left behind in an already-applied (therefore immutable — verify-migration-content-
+ * parity.ts) migration. The very next migration replaced the live guidance so nothing points at the
+ * placeholder anymore; only the frozen historical text of the first migration still does. Routing
+ * this to a KNOWN_GAPS "owner" would be dishonest — no routine should ever go write
+ * scripts/verify-x.ts, because it was never a real protection to begin with.
+ */
+const SUPERSEDED_PLACEHOLDER_CLAIMS: { path: string; from: string; why: string }[] = [
+  { path: 'scripts/verify-x.ts', from: '20260911181654_incident_resolution_gate_cannot_be_satisfied_by_its_own_default.sql',
+    why: 'a worked-example path inside a RAISE EXCEPTION message, not a real barrier. Superseded '
+      + 'same day by 20260911183306_incident_resolve_guidance_names_no_script_that_does_not_exist.sql, '
+      + "which replaced the live function's guidance to name no concrete path at all — see that "
+      + "migration's own comment for the full account." },
+];
+
 console.log('ops remediation scripts — every barrier a migration claims must exist and run');
 
 // ── Collect every reference, with the migration that made the claim ──────────────────────────────
@@ -106,14 +123,20 @@ check('migrations were scanned and do reference ops scripts (the corpus is not e
 
 // ── 1. EXISTENCE ─────────────────────────────────────────────────────────────────────────────────
 const gapPaths = new Set(KNOWN_GAPS.map((g) => g.path));
+const supersededPaths = new Set(SUPERSEDED_PLACEHOLDER_CLAIMS.map((s) => s.path));
 const dangling: string[] = [];
 for (const [p, from] of [...claims].sort()) {
   if (existsSync(join(root, p))) continue;
   if (gapPaths.has(p)) continue;
+  if (supersededPaths.has(p)) continue;
   dangling.push(`${p}  — claimed by ${from}`);
 }
 check('no migration claims a barrier that was never written', dangling.length === 0);
 for (const d of dangling) console.error(`      ${d}`);
+if (SUPERSEDED_PLACEHOLDER_CLAIMS.length) {
+  console.log(`      ${SUPERSEDED_PLACEHOLDER_CLAIMS.length} superseded placeholder claim(s), already fixed live:`);
+  for (const s of SUPERSEDED_PLACEHOLDER_CLAIMS) console.log(`        ${s.path} (${s.from})`);
+}
 
 // The ledger may only shrink: an entry whose file now exists is a stale excuse and must be deleted.
 const healed = KNOWN_GAPS.filter((g) => existsSync(join(root, g.path)));

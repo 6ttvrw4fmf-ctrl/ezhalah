@@ -1,39 +1,15 @@
 -- v4 of mon_detect_served_despite_direct_404. Supersedes v3 (20260911145248).
 --
--- BUG (ops_incident #188, found by routine-11-lifecycle 2026-09-11 while reporting on #168): v3
--- requires the SINGLE LATEST probe per listing to itself carry a trusted (ok=true, within 6h)
--- anchor. Re-probing a listing during a QUARANTINED run — canary-block or the aggregate alive-rate
--- floor, both legitimate anti-false-kill gates (docs/ops/LISTING_LIVENESS.md 5, ops_incident #180)
--- — still WRITES a fresh gathern_liveness_detail row (measured: TRUST-QUARANTINED runs today wrote
--- 2,093 fresh 404 rows and 57 fresh 200 rows despite `ok=false`). That fresh, untrusted row becomes
--- the new "latest" and, having no trust anchor of its own, silently DROPS the listing from this
--- P1 detector — even when an EARLIER, genuinely trusted probe already confirmed the exact same
--- 404/410 and nothing has said otherwise since. Measured live 2026-09-11 20:19: v3 reported 388
--- gathern rows (only today's freshly-touched, freshly-trusted batch); the true count of listings
--- carrying a real trusted-dead confirmation that nothing has since contradicted is 1,244.
+-- BUG (ops_incident #188): v3 requires the SINGLE LATEST probe per listing to itself carry a
+-- trusted (ok=true, within 6h) anchor. Re-probing during a QUARANTINED run still writes a fresh
+-- detail row with no trust anchor, silently dropping the listing even when an EARLIER trusted
+-- probe already confirmed the same 404/410 and nothing has said otherwise since.
 --
--- Gathern had gone EIGHT DAYS (2026-09-03 to 2026-09-11) with no `ok=true` liveness run at all, so
--- under v3 any listing touched even once by an intervening quarantined run — and quarantined runs
--- ran repeatedly across that week — had already gone dark to this detector. This is the barrier of
--- record for ops_incident #168's exposure; a barrier that a quarantined run can blind is not a
--- barrier.
---
--- FIX: a later UNTRUSTED probe may no longer ERASE an earlier TRUSTED one. Split "is the listing
--- still dead" from "was death ever proven":
---   (a) LATEST PROBE, any trust level, must still read 404/410 — unchanged safety property: if the
---       most recent look (trusted or not) saw 200, or the raw crawl re-saw it in the feed, this is
---       an immediate resurrection signal and the listing is excluded, full stop. A blocked/quarantined
---       environment cannot manufacture a 200 (scrapers/common/liveness_trust.py's own reasoning for
---       why restorative writes are never gated), so an untrusted 200 is still honest evidence of life.
---   (b) SOME probe — the most recent one that specifically carries a trust anchor — must ALSO have
---       read 404/410. This is exactly v3's existing per-probe trust condition, just no longer forced
---       onto the single latest row.
--- Nothing about WHAT counts as "trusted" changed (same ok=true-within-6h anchor, same 90-day ceiling
--- on the anchor's own age). Nothing about the KILL/STRIKE pipeline changed — this function only ever
--- raises a read-only P1 alert; it does not write active/inactive and never has. ops_incident #180's
--- semantics question (whether a passed in-run canary alone may authorise the SWEEP to strike/kill
--- despite a low aggregate rate) is untouched and remains an owner decision — this fix does not touch
--- MIN_ALIVE_RATE_FOR_TRUST, the canary thresholds, or the anomaly cap.
+-- FIX: a later UNTRUSTED probe may no longer ERASE an earlier TRUSTED one.
+--   (a) LATEST PROBE, any trust level, must still read 404/410 (resurrection still clears instantly).
+--   (b) SOME probe that specifically carries a trust anchor must ALSO have read 404/410.
+-- Nothing about what counts as "trusted", the kill/strike pipeline, or ops_incident #180's owner
+-- decision changed. Read-only alerting fix only.
 create or replace function public.mon_detect_served_despite_direct_404()
 returns integer
 language plpgsql
@@ -102,13 +78,10 @@ begin
       union all select * from ar union all select * from ac
       union all select * from dr union all select * from dc
     ), latest_probe as (
-      -- (a) the single most recent probe per listing, at ANY trust level — must still read dead.
       select distinct on (src, listing_id) src, tok, listing_id, http_status, run_at, last_seen_at, active
         from probes
        order by src, listing_id, run_at desc
     ), latest_trusted_dead as (
-      -- (b) the most recent probe per listing that specifically carries a trust anchor AND read
-      -- dead — unchanged from v3's per-row condition, just decoupled from being "the" latest row.
       select distinct on (p.src, p.listing_id) p.src, p.listing_id, p.run_at as trusted_run_at
         from probes p
        where p.http_status in (404, 410)
@@ -127,9 +100,9 @@ begin
       join latest_trusted_dead ltd on ltd.src = lp.src and ltd.listing_id = lp.listing_id
       join public.search_listings_ar s
         on s.source_table = lp.src and s.listing_id = lp.listing_id and s.production_ready
-     where lp.http_status in (404, 410)          -- (a) most recent look, any trust level, still dead
+     where lp.http_status in (404, 410)
        and lp.active
-       and lp.last_seen_at <= lp.run_at           -- not re-seen in the platform feed since
+       and lp.last_seen_at <= lp.run_at
      group by lp.src
   loop
     n := n + public.mon_raise(
