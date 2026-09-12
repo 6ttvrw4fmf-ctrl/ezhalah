@@ -69,3 +69,13 @@ export const ABOUT_ART_BREAKPOINT = 640;
 // every deploy's post-deploy hydration gate from 2026-09-05 21:33Z onward. Routed through
 // useAtLeast() like every other width-gated flag; the scan now also catches renamed width reads.
 export const SHARE_LABEL_BREAKPOINT = 380;
+
+// Search-loading platform strip (owner 2026-09-12, mobile: "I want them to all show on one screen
+// ... I noticed the user has to scroll to see them"). At/above this width, pills keep their
+// logo+name form (unchanged desktop behaviour). Below it, the strip drops the name text and shrinks
+// to logo-only tiles — with ~45 live platforms, a labeled pill per row can't fit a phone screen
+// without scrolling, but a compact icon grid genuinely can. The logo is the primary trust signal
+// already (SearchLoader.tsx's own header comment); the name is secondary and safe to drop on the
+// narrowest viewports. Routed through useAtLeast() like every other width-gated flag — SSR (width 0)
+// and the client must agree, or this becomes another React #418 (see SHARE_LABEL_BREAKPOINT above).
+export const LOADER_PILL_LABEL_BREAKPOINT = 640;

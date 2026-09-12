@@ -33,6 +33,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useResolvedTheme } from '@/lib/appearance';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { LOADER_PILL_LABEL_BREAKPOINT } from '@/lib/responsive';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -129,9 +131,12 @@ function Dots({ reduced }: { reduced: boolean }) {
 // is being checked right now" — then eases back as the wave moves on. Several pills are lit at once
 // (highlight duration > step). NO checkmarks / status icons (owner: never a checklist).
 function PlatformPill({
-  item, index, total, rtl, reduced, name,
+  item, index, total, rtl, reduced, name, compact,
 }: {
   item: LoaderPlatform; index: number; total: number; rtl: boolean; reduced: boolean; name: string;
+  // Owner 2026-09-12 (mobile, "all show on one screen"): logo-only tile below LOADER_PILL_LABEL_
+  // BREAKPOINT — see responsive.ts. Desktop/tablet keep the logo+name pill unchanged.
+  compact: boolean;
 }) {
   const h = useSharedValue(0);
   // Theme-paired glow literals — interpolateColor parses colors, so no var() tokens here.
@@ -171,11 +176,18 @@ function PlatformPill({
   });
   return (
     <Appear delay={index * (reduced ? 25 : PILL_STAGGER)} reduced={reduced}>
-      <Animated.View style={[s.pill, { flexDirection: rtl ? 'row-reverse' : 'row' }, a]}>
-        <Image source={item.logo} style={s.pillLogo} contentFit="contain" />
-        <Text style={[s.pillName, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]} numberOfLines={1}>
-          {name}
-        </Text>
+      <Animated.View
+        style={[compact ? s.pillCompact : s.pill, { flexDirection: rtl ? 'row-reverse' : 'row' }, a]}
+        // Compact tiles drop the visible name (screen real estate), but the platform identity must
+        // stay reachable — same accessible name a sighted user would read off the full pill.
+        accessibilityLabel={compact ? name : undefined}
+      >
+        <Image source={item.logo} style={compact ? s.pillLogoCompact : s.pillLogo} contentFit="contain" />
+        {compact ? null : (
+          <Text style={[s.pillName, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]} numberOfLines={1}>
+            {name}
+          </Text>
+        )}
       </Animated.View>
     </Appear>
   );
@@ -252,6 +264,9 @@ export default function SearchLoader({
 }) {
   const { t, isRTL } = useI18n();
   const reduced = useReducedMotion();
+  // SSR-safe (starts false, matching the server's width-0 answer — see useAtLeast.ts): pills render
+  // logo-only until the client confirms it's wide enough for labels, never the other way round.
+  const showPillLabels = useAtLeast(LOADER_PILL_LABEL_BREAKPOINT);
   const rtl = isRTL;
 
   // Per-search rotation cursor — with the full roster always shown it only varies the ORDER, so the
@@ -320,11 +335,13 @@ export default function SearchLoader({
         {phase === 'thinking' ? <Dots reduced={reduced} /> : null}
       </View>
 
-      {/* The complete platform roster — logo + Arabic name pills with the traveling highlight */}
+      {/* The complete platform roster — logo + Arabic name pills with the traveling highlight.
+          Below LOADER_PILL_LABEL_BREAKPOINT the name drops and pills shrink to a logo-only grid
+          (owner 2026-09-12: "I want them to all show on one screen" on mobile). */}
       {phase === 'searching' && platforms.length > 0 ? (
         <View style={[s.strip, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
           {platforms.map((p, i) => (
-            <PlatformPill key={p.name} item={p} index={i} total={platforms.length} rtl={rtl} reduced={reduced} name={t(p.i18nKey)} />
+            <PlatformPill key={p.name} item={p} index={i} total={platforms.length} rtl={rtl} reduced={reduced} name={t(p.i18nKey)} compact={!showPillLabels} />
           ))}
         </View>
       ) : null}
@@ -348,5 +365,13 @@ const s = StyleSheet.create({
     backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
   },
   pillLogo: { width: 18, height: 18, borderRadius: 4, backgroundColor: colors.surface },
+  // Compact (below LOADER_PILL_LABEL_BREAKPOINT): a square logo-only tile, no name text, so ~45
+  // platforms genuinely fit a phone screen without scrolling (owner 2026-09-12). Same tint/border/
+  // glow treatment as the full pill — only the shape and the dropped label differ.
+  pillCompact: {
+    width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
+  },
+  pillLogoCompact: { width: 22, height: 22, borderRadius: 5, backgroundColor: colors.surface },
   pillName: { fontSize: 12.5, fontWeight: '600', color: colors.body, maxWidth: 150 },
 });
