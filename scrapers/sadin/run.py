@@ -49,6 +49,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 
 BASE = "https://www.sadin.com.sa"
 # 2026-07 site redesign ("v4", found live 2026-07-30 after 4 days of 0-card runs): /properties/all
@@ -226,6 +227,43 @@ def list_fetch_failure_summary() -> str:
     return ", ".join(f"{r}={n}" for r, n in Counter(_list_fetch_fail_reasons).most_common(6))
 
 
+LIST_FETCH_ATTEMPTS = 4
+
+
+def _fetch_page(s: cc.Session, url: str, page: int, attempts: int = LIST_FETCH_ATTEMPTS):
+    """GET one list page, retrying transient statuses/exceptions. None once genuinely unavailable,
+    with the concrete failure reason already recorded via _record_list_fetch_failure() — mirrors
+    ramzalqasim's _fetch_page() (2026-08-26), which exists for exactly this source-flap shape.
+
+    THE INCIDENT THIS FIXES (daily engineer, 2026-09-12): sadin drew http_503 on page 1 of every
+    one of its 3 list URLs, 5 days running (09-08 through 09-12, silent_scraper_death P0) — a
+    single unretried GET treated each 503 as final, so 100% of runs failed with zero cards even
+    though 503 is exactly the "server had a moment" shape scrapers/common/http.py's
+    TRANSIENT_STATUSES already names and already retries for other platforms. A genuine outage
+    still ends in None after `attempts` tries — the caller's fail-safe (prune guard, no
+    inactivation) is deliberately unchanged."""
+    for attempt in range(1, attempts + 1):
+        _throttle()
+        try:
+            r = s.get(_page_url(url, page), timeout=40)
+        except Exception as e:
+            if attempt == attempts:
+                _record_list_fetch_failure(f"transport_{type(e).__name__}")
+                return None
+            time.sleep(0.5 * attempt)
+            continue
+        if r.status_code == 200:
+            return r
+        if r.status_code in TRANSIENT_STATUSES and attempt < attempts:
+            time.sleep(0.5 * attempt)
+            continue
+        # A non-200 that's either permanent or has exhausted its retries is the source
+        # refusing/blocking us — never let it look like "no more pages left to read".
+        _record_list_fetch_failure(f"http_{r.status_code}")
+        return None
+    return None
+
+
 def _pages(s: cc.Session, url: str, max_pages: int = 40):
     """Yield each list page's HTML, following the redesign's server-side ?page=N pagination.
 
@@ -240,21 +278,14 @@ def _pages(s: cc.Session, url: str, max_pages: int = 40):
     the loop. Do not re-add a stop that depends on a specific pager marker — the catalogue itself is
     the only reliable signal that there is nothing left to read.
 
-    Every early return now records a CONCRETE reason first (transport exception, non-200 status,
-    or a real 200 whose first page carries zero property links — a markup/parser-drift signal, not
-    proof the catalogue is empty) so a run that captures nothing can name the cause."""
+    Every early return now records a CONCRETE reason first (transport exception, non-200 status
+    that survived retry, or a real 200 whose first page carries zero property links — a
+    markup/parser-drift signal, not proof the catalogue is empty) so a run that captures nothing
+    can name the cause."""
     seen: set[str] = set()
     for p in range(1, max_pages + 1):
-        _throttle()
-        try:
-            r = s.get(_page_url(url, p), timeout=40)
-        except Exception as e:
-            _record_list_fetch_failure(f"transport_{type(e).__name__}")
-            return
-        if r.status_code != 200:
-            # A non-200 is the source refusing/blocking us — never let it look like "no more
-            # pages left to read".
-            _record_list_fetch_failure(f"http_{r.status_code}")
+        r = _fetch_page(s, url, p)
+        if r is None:
             return
         html = r.text
         ids = set(_PROPERTY_HREF_RE.findall(html))
