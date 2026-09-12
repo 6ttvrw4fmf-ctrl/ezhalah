@@ -54,7 +54,15 @@ const RECOVERED_MD5 = 'eaf7d972969dc71d23b35d590f267c6b';
 // enumerated in the baseline as known debt. Reconciling one means DELETING its line, so this number
 // may only go DOWN. Raising it means "we accepted a new object that exists only in production" —
 // a decision that belongs in a reviewed diff, not in an append to a text file.
-const MAX_BASELINE_ENTRIES = 32;
+//
+// 2026-09-11: known_property_types reconciled — its CREATE TABLE IF NOT EXISTS was recovered
+// verbatim in 20260911215017_service_facilities_taxonomy_and_district_filter_arabic_digits.sql
+// (the same migration that maps the four service-facility types into known_type_ar). 32 -> 31.
+//
+// 2026-09-11: norm_district_tok reconciled — its CREATE OR REPLACE FUNCTION was recovered verbatim
+// in 20260911221510_district_token_stranded_repair_owner_approved_incident_114.sql (ops_incident
+// #114, owner-approved). 31 -> 30.
+const MAX_BASELINE_ENTRIES = 30;
 
 let failed = 0;
 const check = (ok: boolean, msg: string, extra = '') => {

@@ -33,10 +33,20 @@ often as the plain «مساحة: N» form the original regex caught — measured
 yield a real area with no change to WHAT counts as a match, only broadened separator/plural
 handling. featured_media is 0 on every post, so there is no price image either.
 
-DISTRICT IS NOT RECOVERABLE. class_list gives `neighborhood-248` / `street-384` — raw term IDs — and
-this site exposes no taxonomy REST endpoint that resolves them (only category/post_tag/nav_menu
-exist). Rather than invent a district from the title, neighborhood stays NULL and the raw ids are
-kept in additional_info so a future run can resolve them if the endpoint ever appears.
+DISTRICT — class_list's `neighborhood-248` / `street-384` are raw term IDs, and this site exposes no
+taxonomy REST endpoint that resolves them (only category/post_tag/nav_menu exist; confirmed live
+2026-09-11) — the ids are kept in additional_info so a future run can resolve them if the endpoint
+ever appears, but they are never the district's source today.
+
+Corrected 2026-09-11 (owner-caught: several of these titles plainly state a real district, e.g.
+"في الكعكية بمكة المكرمة", "بالرصيفة", "بالشوقية"). The title/content free text DOES state a real
+district often enough to recognize safely — via find_district_in_text() (scrapers/common/
+arabic_location.py), which accepts a candidate ONLY when it exact-matches this city's own curated
+district catalog, so a subdivision-plan mention ("مخطط الربوة", "مخطط تلال مكة") or a housing-program
+name ("الاسكان العام") is never mistaken for a district no matter how often it sits next to one.
+Titles that name only a مخطط, or nothing recognizable at all, still leave neighborhood NULL — never
+invented, exactly as the original design here intended; only the SOURCE of "recognized vs. not" text
+changed, not the standing rule against guessing.
 """
 from __future__ import annotations
 
@@ -54,6 +64,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 
 BASE = "https://www.remalre.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -217,10 +228,21 @@ def map_listing(p: dict, images: Optional[dict[int, list[str]]] = None) -> tuple
     city_ar = CITY_SLUG.get(raw_city) if raw_city else None
     city = normalize.map_city(city_ar) if city_ar else None
     region = normalize.region_for_city(city)
+    city_id, region_id = to_catalog(city_ar) if city_ar else (None, None)
 
     title = _clean((p.get("title") or {}).get("rendered", ""))
     body = _clean((p.get("content") or {}).get("rendered", ""))
     text = f"{title} {body}"
+
+    # DISTRICT (2026-09-11) — class_list's `neighborhood-<id>` is still unresolvable (no taxonomy
+    # endpoint, see the module docstring), but the title/content free text plainly states a real
+    # district often enough to be worth recognizing SAFELY: find_district_in_text() accepts a
+    # candidate ONLY when it exact-matches this city's own curated loc_catalog_district entry,
+    # never a subdivision-plan name ("مخطط الربوة") or a housing-program name ("الاسكان العام") that
+    # merely sits next to a real place in the same sentence. Confirmed live 2026-09-11 against
+    # Mecca's catalog: "الرصيفة"/"الخالدية"/"الشوقية"/"العوالي"/"الكعكية" are real districts and
+    # match; "الربوة"/"تلال مكة"/"الصفوة"/"الزايدي" are plan names only and correctly do not.
+    district_ar = find_district_in_text(text, city_id)
 
     m = PRICE_RE.search(text) or PRICE_LOOSE.search(text)
     price = normalize.to_int(m.group(1)) if m else None
@@ -238,8 +260,9 @@ def map_listing(p: dict, images: Optional[dict[int, list[str]]] = None) -> tuple
         "city_slug": raw_city,
         "type_slug": raw_type,
         "offer_slugs": offers or None,
-        # kept raw: this site exposes no endpoint that resolves them, so a district cannot be
-        # stated truthfully today. Never guessed from the title.
+        # class_list's own ids are still kept raw for audit — this site exposes no endpoint that
+        # resolves THEM specifically. The listing's district (when recognized) comes instead from
+        # find_district_in_text() above, catalog-verified, never from these numeric ids.
         "neighborhood_ids": _classes(p, "neighborhood-") or None,
         "street_ids": _classes(p, "street-") or None,
         "wp_id": p.get("id"),
@@ -263,7 +286,14 @@ def map_listing(p: dict, images: Optional[dict[int, list[str]]] = None) -> tuple
         "rent_period": rent_period,
         "city": city,
         "region": region,
-        "neighborhood": None,           # see info["neighborhood_ids"]
+        "neighborhood": district_ar,
+        # Arabic-native shadow (same pattern amaall/azdad/abwbna/alobid/bahadhabab carry) — lets
+        # listing_native_location_v1 (the resolver every exact-district search actually reads) see
+        # this listing's city+district natively, instead of falling through to a broad-city-only path.
+        "city_ar": city_ar,
+        "district_ar": district_ar,
+        "city_id": city_id,
+        "region_id": region_id,
         "rega_location_verified": False,
         "title": title,
         "description": _redact(body),

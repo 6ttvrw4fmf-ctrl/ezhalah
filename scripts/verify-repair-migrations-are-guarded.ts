@@ -152,6 +152,23 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260911201453_amaall_native_location_repair_reasserts_and_gets_a_'
     + 'detector.sql, which ships + rosters + runs mon_detect_amaall_native_location_regressed(), '
     + 'checking both the resolver wiring and live district-coverage share',
+  // ops_incident #189: strip_district_city_suffix() backfill for 3 fallback-resolved aqarmonthly
+  // listings (762041/762272/1097370). Applied as TWO migrations because the first apply call's
+  // response timed out at the connector and a split retry was made assuming it had failed — it had
+  // not; both landed (see 20260911222018's own header for the honest account). Both are therefore
+  // the SAME repair, twice. Its companion 20260911223037 lands 13-16 minutes later and creates +
+  // rosters + self-verifies mon_detect_aqarmonthly_district_suffix_repair_regressed(), scoped to
+  // exactly these 3 rows (not the whole table — a 4th flagged listing, 762483, is deliberately left
+  // unfixed as a genuine source-completeness gap, not part of this repair's claim). Open the
+  // companion to verify this reason rather than taking it on trust.
+  '20260911221734_aqarmonthly_district_suffix_backfill_incident_189.sql':
+    'watched by its companion 20260911223037_aqarmonthly_district_suffix_backfill_gets_a_detector_'
+    + 'incident_189.sql, which ships + rosters + self-verifies '
+    + 'mon_detect_aqarmonthly_district_suffix_repair_regressed(), scoped to the exact 3 repaired rows',
+  '20260911222018_aqarmonthly_district_suffix_backfill_incident_189.sql':
+    'same repair as 20260911221734 (a connector-timeout retry that turned out to also have landed — '
+    + 'see this file\'s own header) — watched by the same companion, '
+    + '20260911223037_aqarmonthly_district_suffix_backfill_gets_a_detector_incident_189.sql',
 };
 
 // Enforcement starts here — the day this rule landed.
