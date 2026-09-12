@@ -7,15 +7,21 @@
 // part of this change (owner-confirmed scope) — only the typed-input row disappears; the always-on
 // listings-source disclaimer (a legal notice, not "the chat") must still render either way.
 //
-// TIGHTENED 2026-09-12 (owner: "when the animation shows it still shows chat button ... remove
-// that"): the first fix (`|| busy || revealing` widening the OLD `!filterOrigin` gate) kept Stop
-// reachable during an in-flight Filter search, but did it by showing the FULL composer pill —
-// TextInput, inviting placeholder, the works — with only Stop swapped in for send. That still read
-// as an active chat mid-animation. The gate is now a three-way branch: `!filterOrigin` → the real
-// composer, unchanged; `filterOrigin && (busy || revealing)` → Stop ALONE, undressed as a composer
-// (verify-filter-stop-cancels-and-restores.ts still holds — Stop is reachable, just not wrapped in
-// an input row); otherwise → nothing. A completed Filter-origin screen still shows no composer at
-// all (unchanged from the 09-11 fix).
+// TIGHTENED AGAIN 2026-09-12 (owner: "REMOVE THIS IN THE FILTER SIMPLE" — screenshot of the small
+// green Stop square lingering on Filter-origin results during the cascade reveal): the previous
+// three-way branch (`filterOrigin && (busy || revealing)` → Stop alone) is gone. The gate is now a
+// simple two-way branch: `!filterOrigin` → the real composer, unchanged; otherwise → nothing at all.
+// A Filter-origin conversation never shows any composer/Stop UI, at any state — busy, revealing, or
+// completed. The stop() function itself stays intact (verify-filter-stop-cancels-and-restores.ts
+// still holds unchanged — it only asserts stop()'s behaviour when called, not that a button exists),
+// so a Filter search cancelled by other means — route change via the top ☰ menu / تصفية tab /
+// browser back / any effect cleanup — still aborts the network request and returns to the Filter
+// screen with restored state. Trade-off owner-accepted 2026-09-12: no in-place cancel during a
+// mid-flight Filter search.
+//
+// EARLIER HISTORY (kept for provenance): 2026-09-12 first tightening replaced a `|| busy ||
+// revealing` composer widening with a `filterOrigin && (busy || revealing)` Stop-alone branch;
+// this second tightening removes even that Stop-alone branch entirely.
 //
 //   node --experimental-strip-types scripts/verify-filter-results-no-composer.ts  (in `npm test`)
 import { readFileSync } from 'node:fs';
@@ -51,40 +57,51 @@ check('that ONE call site sits in the `?filter=` branch, right after startFresh(
 check('the seed-chip path (a chip, NOT the Filter) never sets it true',
   !/lastSeedRef\.current = seed;[\s\S]{0,300}setFilterOrigin\(true\)/.test(code));
 
-console.log('\n── JSX: three-way branch — real composer, Stop-alone, or nothing — disclaimer never gated ──');
+console.log('\n── JSX: two-way branch — real composer OR nothing — disclaimer never gated ──');
 // Branch 1: the REAL composer (TextInput and all) renders ONLY on `!filterOrigin`.
 const COMPOSER_BRANCH = /\{!filterOrigin \? \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/;
 check('the real composer is gated behind `!filterOrigin` (never a wider condition that could show it for a Filter search)',
   COMPOSER_BRANCH.test(code));
-// Branch 2: filterOrigin && (busy||revealing) → Stop alone. Must contain a Pressable calling stop(),
-// and must NOT contain a TextInput/composer pill anywhere in that branch — that is the exact
-// regression this tightening exists to prevent (Stop dressed back up as a composer).
-const stopBranchStart = code.indexOf(') : (busy || revealing) ? (');
-const stopBranchEnd = stopBranchStart >= 0 ? code.indexOf(') : null}', stopBranchStart) : -1;
-const stopBranch = stopBranchStart >= 0 && stopBranchEnd >= 0 ? code.slice(stopBranchStart, stopBranchEnd) : '';
-check('a `(busy || revealing) ? (...) : null` branch exists right after the composer branch',
-  stopBranch.length > 0);
-check('that branch calls onPress={stop} (Stop is genuinely reachable, not just decorative)',
-  /onPress=\{stop\}/.test(stopBranch));
-check('that branch renders NO TextInput (Stop stands alone — not the composer with the button swapped)',
-  !/<TextInput/.test(stopBranch));
-check('that branch renders NO composer pill (`s.composer`) and NO inviting placeholder text',
-  !/s\.composer\b/.test(stopBranch) && !/placeholder=/.test(stopBranch));
+// Branch 2: filterOrigin → NOTHING. No Stop-alone branch, no composer pill, no TextInput anywhere
+// reachable when filterOrigin is true. The gate goes straight from `!filterOrigin ? (...) : null}`
+// with nothing in between.
+const twoWayEnd = /\)\s*\n\s*\}\s*<\/View>\s*\n\s*<\/View>\s*\n\s*<Pressable/;  // sanity: outer composer wrap closes cleanly
+// The branch must close with `) : null}` and MUST NOT open a `(busy || revealing) ?` sub-branch
+// (the earlier Stop-alone tightening this second tightening removes).
+const composerBranchStart = code.indexOf('{!filterOrigin ? (');
+const nullCloseIdx = composerBranchStart >= 0 ? code.indexOf(') : null}', composerBranchStart) : -1;
+const midBranch = composerBranchStart >= 0 && nullCloseIdx >= 0
+  ? code.slice(composerBranchStart, nullCloseIdx + ') : null}'.length)
+  : '';
+check("the branch closes with `) : null}` (nothing renders when filterOrigin is true)",
+  midBranch.endsWith(') : null}'));
+check('there is NO `(busy || revealing) ?` sub-branch between the composer branch and its closing null',
+  !/\) : \(busy \|\| revealing\) \? \(/.test(midBranch));
+check('no Stop Pressable renders under a filterOrigin path (the Stop-alone regression this second tightening removes)',
+  // Look at the code AFTER the AI-Agent composer branch's own closing `) : null}` — anything
+  // between there and the disclaimer's `<Text style={s.disc}>` that mentions `onPress={stop}`
+  // means a filterOrigin Stop branch has crept back in.
+  (() => {
+    const afterComposer = code.slice(nullCloseIdx + ') : null}'.length);
+    const discIdx = afterComposer.indexOf('<Text style={s.disc}>');
+    if (discIdx < 0) return false; // disclaimer must exist
+    const between = afterComposer.slice(0, discIdx);
+    return !/onPress=\{stop\}/.test(between);
+  })());
 
 console.log('\n── the composer that DOES exist for AI-Agent conversations still keeps Stop reachable mid-search ──');
 // Inside the `!filterOrigin` composer branch, the pre-existing busy/revealing ternary (Stop OR
 // mic+send, never both) must still be intact — this fix must not regress the AI-Agent path.
-const composerBranchStart = code.indexOf('{!filterOrigin ? (');
-const composerBranchEnd = composerBranchStart >= 0 ? code.indexOf(') : (busy || revealing) ? (', composerBranchStart) : -1;
+const composerBranchEnd = composerBranchStart >= 0 ? code.indexOf(') : null}', composerBranchStart) : -1;
 const composerBranch = composerBranchStart >= 0 && composerBranchEnd >= 0 ? code.slice(composerBranchStart, composerBranchEnd) : '';
 check('the composer branch still has its own busy||revealing → Stop ternary (AI-Agent Stop unaffected)',
   /busy \|\| revealing \?/.test(composerBranch) && /onPress=\{stop\}/.test(composerBranch));
 
-// The disclaimer must sit right after the LITERAL `) : null}` that closes the whole three-way
-// branch, with nothing else between them. Direct adjacency (not a paren-balance heuristic), so it
-// cannot be fooled by a mutation that moves the disclaimer earlier (inside a branch).
-const closeThenDisc = /\) : null\}\s*\n\s*<Text style=\{s\.disc\}>/;
-check("the disclaimer sits IMMEDIATELY after the branch's own closing `) : null}` (outside every branch)",
+// The disclaimer must render at top-level of the composer wrap, not gated on any branch. After
+// decomment(), JSX block comments collapse to `{}` so we allow arbitrary intermediate whitespace
+// or empty jsx-expressions between the `) : null}` and the disclaimer, but no other JSX or code.
+const closeThenDisc = /\) : null\}(?:\s|\{\})*<Text style=\{s\.disc\}>/;
+check("the disclaimer sits after the branch's closing `) : null}` (outside every branch)",
   closeThenDisc.test(code));
 
 console.log('\n── mutation proof: this check actually fails on the regressions it exists to catch ──');
@@ -96,42 +113,25 @@ const mutatedNoGate = agent.replace(
 );
 mustCatch('removing the branch (composer unconditional again)',
   !COMPOSER_BRANCH.test(decomment(mutatedNoGate)));
-// Mutation 2 (the 09-11 regression, caught only by CI's browser smoke test at the time): someone
-// narrows back to bare `!filterOrigin ? (...) : null`, DELETING the busy||revealing Stop branch
-// entirely (not just relabelling its condition, which a static-text check can't "evaluate" —
-// actually removing the branch body is what a real narrowing edit does) — Stop becomes unreachable
-// mid-search for a Filter-origin conversation again.
-// Sliced out of `agent` directly (not `code`/decommented) — decomment() deletes block-comment
-// text entirely, shifting offsets, so a fragment sliced from `code` is not literally present in
-// `agent` and `agent.replace(fragment, '')` would silently no-op (match nothing), making this
-// mutation a false PASS instead of a caught regression.
-const bareGateStart = agent.indexOf(') : (busy || revealing) ? (');
-const bareGateEnd = bareGateStart >= 0 ? agent.indexOf(') : null}', bareGateStart) : -1;
-const mutatedBareGate = bareGateStart >= 0 && bareGateEnd >= 0
-  ? agent.slice(0, bareGateStart) + agent.slice(bareGateEnd)
-  : agent;
-mustCatch('narrowing away the busy||revealing Stop branch (Stop becomes unreachable mid-search)',
-  mutatedBareGate !== agent && !decomment(mutatedBareGate).includes(') : (busy || revealing) ? ('));
-// Mutation 3 (the 09-12 regression this tightening exists to prevent): someone "restores" the full
-// composer pill inside the Stop-alone branch instead of leaving it undressed — the exact "chat
-// button during the animation" bug the owner reported.
-const mutatedComposerBackInStopBranch = agent.replace(
-  '              <View style={{ flexDirection: \'row\', justifyContent: \'flex-end\' }}>\n                <Pressable\n                  onPress={stop}',
-  '              <View style={[s.composer, COMPOSER_EASE]}>\n                <TextInput placeholder="typing" />\n                <Pressable\n                  onPress={stop}',
+// Mutation 2 (the 09-12 SECOND-tightening regression this update exists to prevent): someone
+// re-adds a `(busy || revealing) ?` Stop-alone branch under filterOrigin — the exact small green
+// Stop square the owner sent a screenshot of and asked to remove ("REMOVE THIS IN THE FILTER
+// SIMPLE"). Simulate by re-inserting the previous three-way branch shape and confirming the check
+// catches it.
+const mutatedStopBackForFilter = agent.replace(
+  ') : null}\n            {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY',
+  ') : (busy || revealing) ? (\n              <View style={{ flexDirection: \'row\', justifyContent: \'flex-end\' }}>\n                <Pressable onPress={stop} style={s.stopBtn}><Ionicons name="stop" size={15} color="#fff" /></Pressable>\n              </View>\n            ) : null}\n            {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY',
 );
-mustCatch('a TextInput/composer pill creeping back into the Stop-alone branch (the animation-time "chat button" regression)',
-  mutatedComposerBackInStopBranch !== agent && (() => {
-    const c = decomment(mutatedComposerBackInStopBranch);
-    const s0 = c.indexOf(') : (busy || revealing) ? (');
-    const s1 = s0 >= 0 ? c.indexOf(') : null}', s0) : -1;
-    const branch = s0 >= 0 && s1 >= 0 ? c.slice(s0, s1) : '';
-    return /<TextInput/.test(branch);
+mustCatch('a Stop-alone branch creeping back into the filterOrigin path (the exact regression this second tightening removes)',
+  mutatedStopBackForFilter !== agent && (() => {
+    const c = decomment(mutatedStopBackForFilter);
+    return /\{!filterOrigin \? \([\s\S]*?\) : \([\s\S]*?onPress=\{stop\}[\s\S]*?\) : null\}/.test(c);
   })());
-// Mutation 4: the branch stays, but someone moves the disclaimer's closing marker so it lands
-// INSIDE the three-way branch, hiding the legal notice along with the composer on Filter-origin.
+// Mutation 3: the branch stays, but someone moves the disclaimer's closing marker so it lands
+// INSIDE the branch, hiding the legal notice along with the composer on Filter-origin.
 const mutatedDiscInside = agent.replace(
-  ') : null}\n            <Text style={s.disc}>',
-  ') : (\n            <Text style={s.disc}>',
+  ') : null}\n            {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY',
+  ') : (\n            {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY',
 );
 mustCatch('pulling the disclaimer inside the branch (it would vanish on Filter-origin too)',
   mutatedDiscInside !== agent && !closeThenDisc.test(decomment(mutatedDiscInside)));
