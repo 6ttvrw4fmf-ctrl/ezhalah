@@ -1,4 +1,5 @@
-// PLATFORM LOGOS MUST BE TRANSPARENT PNGs, NOT WHITE-BOX JPEGs (owner 2026-09-06, Approach A).
+// PLATFORM LOGOS MUST BE TRANSPARENT PNGs, NOT WHITE-BOX JPEGs (owner 2026-09-06, Approach A;
+// dealapp/souq24 closed 2026-09-12).
 //
 // The owner's brief: "Remove the ugly white JPEG box so the logos blend naturally into the UI, but
 // preserve the original brand colors, proportions, and fidelity." A JPEG cannot hold transparency,
@@ -7,13 +8,25 @@
 // each referenced image's PNG header and fails on a raster with no alpha, so a future logo dropped in
 // as a white-box JPEG (the exact regression this closes) turns it red.
 //
-// EXEMPTIONS are explicit and reasoned — a logo may stay a JPEG only when transparency cannot be
-// produced faithfully from the asset we have (never as a silent pass):
-//   • dealapp.jpg   — full-bleed artwork; the background is not a removable white box (corner
-//                     flood-fill lifted 0%), so making it transparent would eat real logo pixels.
-//                     Needs a proper transparent source from the brand. Tracked, not hidden.
-//   • souq24.jpg    — its background is not white; it is a designed coloured mark, not a box.
+// dealapp.jpg / souq24.jpg were exempted 2026-09-06 because a CORNER FLOOD-FILL (the technique on
+// hand that day) genuinely could not lift their backgrounds without eating real logo pixels. That
+// was a tooling limit, not a property of the images: real subject-segmentation (2026-09-12, this
+// same owner report — "make sure they look like an actual logo... this applies also to... the
+// animation") produced clean transparent cutouts of both with zero pixel loss. Converted to
+// dealapp.png / souq24.png; the exemption is retired, not widened.
+//
+// EXEMPTIONS are explicit and reasoned — a logo may stay a JPEG only when transparency genuinely
+// cannot be produced faithfully from the asset we have (never as a silent pass):
 //   • eagle-night.jpg — the hero/night backdrop, not a platform logo at all.
+//
+// ponytail: pngHasAlpha() below proves a PNG CAN carry transparency (colour-type/tRNS), not that any
+// pixel actually USES it — a flattened logo re-saved as "RGBA" with every pixel opaque (alpha≡255)
+// would read as clean here. That gap is exactly how the 9 PNG offenders fixed 2026-09-12 (arkaan,
+// abralosol, therc, rawasidark, aouj, azdad, shmoualshmal, amaall) sat broken through this barrier
+// for six days — it never caught them because none were JPEGs. Upgrade path: decode IDAT scanlines
+// (Node's builtin zlib.inflateSync covers the compression; PNG filter-type reconstruction is the
+// remaining ~50-80 lines) and assert at least one pixel's alpha is meaningfully below 255 — verified
+// by hand for this fix via PIL's `alpha.getextrema()`, not automated here.
 //
 // Run: node --experimental-strip-types scripts/verify-platform-logos-are-transparent.ts
 
@@ -23,7 +36,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCES = ['src/data/loaderPlatforms.ts', 'src/components/ResultCard.tsx', 'src/components/InfoModal.tsx'];
-const EXEMPT = new Set(['dealapp.jpg', 'souq24.jpg', 'eagle-night.jpg']);
+const EXEMPT = new Set(['eagle-night.jpg']);
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -82,6 +95,12 @@ for (const ex of EXEMPT) {
 // Spot-check: three of the converted logos genuinely have alpha (the proof is not vacuous).
 for (const name of ['aldarim.png', 'gathern.png', 'aqarcity-logo.png']) {
   check(`${name} carries alpha (conversion produced real transparency)`,
+    pngHasAlpha(readFileSync(join(ROOT, 'assets/images', name))));
+}
+
+// The 9 PNGs and 2 JPEGs fixed 2026-09-12 are now real PNGs with a real alpha channel.
+for (const name of ['dealapp.png', 'souq24.png', 'arkaan.png', 'abralosol.png', 'therc.png', 'rawasidark.png', 'aouj.png', 'azdad.png', 'shmoualshmal.png', 'amaall.png']) {
+  check(`${name} carries alpha (2026-09-12 fix — no longer a white/flat box)`,
     pngHasAlpha(readFileSync(join(ROOT, 'assets/images', name))));
 }
 
