@@ -23,7 +23,9 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { amenityChipKeys, registryPayload, registryProblems } from './lib/uiControlPredicates.ts';
+import {
+  AF_QUESTION_FIELDS, afQuestionIds, amenityChipKeys, registryPayload, registryProblems,
+} from './lib/uiControlPredicates.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -43,7 +45,22 @@ console.log('\nThe shipped filter UI, judged against the LIVE af_field_registry\
 const REG_URL = process.env.EZHALAH_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
 const regKey = resolvePublicSupabase(process.env).key;
 
-const chipKeys = amenityChipKeys(readFileSync(join(ROOT, 'src/data/advancedFilters.ts'), 'utf8'));
+const advancedSrc = readFileSync(join(ROOT, 'src/data/advancedFilters.ts'), 'utf8');
+const chipKeys = amenityChipKeys(advancedSrc);
+
+// THE WHOLE CONTROL SURFACE, not just the amenity chips (2026-09-12, routine #9). Four of the nine
+// live questions narrow on something that is not an amenity, so judging chipKeys alone left them
+// invisible to both exposure rules — see AF_QUESTION_FIELDS' header for the measurement.
+const questionIds = afQuestionIds(advancedSrc);
+check(`the Advanced Filter question ids parsed out of advancedFilters.ts (${questionIds.length})`,
+  questionIds.length >= 9,
+  `found ${questionIds.length}: ${questionIds.join(', ')} — a parse miss makes the exposure rules `
+  + 'vacuous over everything but the amenity chips, so it is a failure here rather than a silent pass');
+const unmapped = questionIds.filter((q) => !(q in AF_QUESTION_FIELDS));
+check('every live question declares which registry field it narrows on', unmapped.length === 0,
+  `unmapped: ${unmapped.join(', ')} — add it to AF_QUESTION_FIELDS rather than leaving a control `
+  + 'nothing can judge');
+const controlFields = questionIds.flatMap((q) => AF_QUESTION_FIELDS[q] ?? []);
 // A parse miss would hand registryProblems() an EMPTY chip list, against which the leak and
 // undescribed-chip rules are both vacuously satisfied. Refuse that before asking production.
 check(`the amenity chip keys parsed out of advancedFilters.ts (${chipKeys.length})`, chipKeys.length >= 6,
@@ -88,9 +105,11 @@ try {
   registry = { fetchFailed: String(e) };
 }
 
-const problems = chipKeys.length >= 6
-  ? registryProblems(registry, chipKeys)
-  : ['chip keys did not parse — the registry rules were not evaluated (see the failure above)'];
+const problems = (chipKeys.length >= 6 && questionIds.length >= 9 && unmapped.length === 0)
+  ? registryProblems(registry, chipKeys, controlFields)
+  : ['the shipped control surface did not parse — the registry rules were NOT evaluated (see the '
+    + 'failure above). Evaluating them over a partial surface would report a clean registry over '
+    + 'controls nothing looked at, which is the failure this check exists to prevent'];
 
 check('the live af_field_registry agrees with the shipped UI', problems.length === 0,
   problems.join('\n      '));
