@@ -997,10 +997,32 @@ cards actually grow · the headline total never moves · المدينة/الحي
 all survive · no HTML entities or `undefined` appear in later batches · the request's predicate does
 not drift (same `p_deal`/`p_rent_period`/`p_cities`/`p_districts`/`p_category`/`p_types`, later
 offset only) · no duplicate `source_table:listing_id` in the served set (§30 identity, never card
-text). **A healthy first page is 10 → 100 cards on exactly ONE pager click, and paging then
-CONTINUES in clean 100-batches (100 → 200 → 300 …) for as long as matches remain** — owner
-2026-08-29, superseding the 2026-08-20 lifetime cap this paragraph used to describe; «خلّنا نحدد
-الطلب أكثر» is offered alongside, never instead of, continued browsing. What the journey asserts is
+text). **A healthy first page is 10 → 100 cards on exactly ONE pager click. The SECOND press then
+DRAINS — it is not another hundred** (owner 2026-09-11, Task 4 rev. 2, PR #2330, superseding the
+2026-08-29 "clean 100-batches 100 → 200 → 300 …" rule this paragraph described until 2026-09-12, which
+had itself superseded the 2026-08-20 lifetime cap). «خلّنا نحدد الطلب أكثر» is offered alongside,
+never instead of, continued browsing.
+
+**Two bounds sit on that drain, both earned on production 2026-09-12 (PR #2377), and a run that does
+not know about them will file false defects — or miss real ones:**
+- **`DRAIN_REVEAL_MAX` (2,000) — the reveal ceiling.** The results list is UNVIRTUALIZED, so
+  "reveal every remaining match" is not implementable at scale: الرياض/إيجار/سنوي (20,782 matching)
+  drained 40 pages and **crashed the renderer**, while الخبر's 5,706 rendered fine. A press over the
+  ceiling reveals the ceiling, keeps «عرض المزيد», and is NOT marked finished. Every cohort at or
+  under it still drains and finishes in one press, which is the common case. The owner's rule is kept
+  wherever it CAN hold and stops short of a crash where it cannot — flagged to the owner, not
+  silently redefined; the ceiling value and whether to virtualize the list are owner calls.
+- **`drainPageBudget(LOAD_MORE_PAGE_SIZE)` — the page backstop.** It must never DISCARD what it
+  fetched: it used to `return` past the merge, so الرياض (37,532) pulled 50 pages, showed none of
+  them, and stranded the user at 100 cards permanently.
+
+**A flat card count is NOT by itself a pagination defect** — a drain is legitimately minutes long with
+nothing on screen until it lands. The discriminator is whether the app is still FETCHING (§41.19's
+lesson, made machinery in `settlePress`): cards flat with pages still arriving is a drain in flight
+and gets NO verdict; cards flat after the wire has been quiet is the real stranding defect. And a
+CRASHED tab is a product defect the sweep must NAME (`RENDERER-CRASH`), never a harness error.
+
+What the journey asserts is
 that every batch keeps the per-batch invariants above AND the closing line always states the TRUE
 total with the honest shown count — «عرضت لك أول 100 من أصل 21,868 إعلان مطابق» — never a batch
 size standing in for the total, and never a «عرض المزيد» offered when no matches remain
