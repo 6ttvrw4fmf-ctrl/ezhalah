@@ -31,6 +31,16 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { COMMITTED_NOT_APPLIED_BASELINE } from './lib/migrationDrift.ts';
+// THE CLASSIFIER MOVED OUT, IT DID NOT CHANGE (2026-09-12). The standing half of this rule — the
+// orphaned-guarantee registry — must ask the SAME question this file asks, and a second copy of it
+// silently under-detected six of the 28 repairs when it was tried (scripts/lib/repairClassifier.ts
+// records the measurement). So both halves import one implementation, and the mutation proofs at
+// the bottom of this file now prove the shared lib rather than a private copy of it.
+import {
+  executedSql, stripSqlComments, LISTING_TABLE, repairsData, isGuarded, migrationVersion,
+} from './lib/repairClassifier.ts';
+
+export { executedSql, stripSqlComments, LISTING_TABLE, repairsData, isGuarded };
 
 const root = join(import.meta.dirname, '..');
 const MIGRATIONS = join(root, 'supabase', 'migrations');
@@ -185,53 +195,8 @@ const KNOWN_BACKLOG = [
   '20260822072730_restore_four_source_live_gathern_listings.sql',
 ];
 
-/** Strip `create [or replace] function … $tag$ body $tag$` spans. An UPDATE inside a function body
- *  is a definition, not an execution — it only repairs data when something calls it. A `do $$ … $$`
- *  block is deliberately NOT stripped: that runs at migration time, and is how most repairs (the
- *  aqarmonthly one included) are actually written. */
-function executedSql(sql: string): string {
-  let out = '';
-  let i = 0;
-  const fnStart = /create\s+(or\s+replace\s+)?function\b/gi;
-  for (;;) {
-    fnStart.lastIndex = i;
-    const m = fnStart.exec(sql);
-    if (!m) { out += sql.slice(i); break; }
-    out += sql.slice(i, m.index);
-    const tag = /\$([A-Za-z_]*)\$/.exec(sql.slice(m.index));
-    if (!tag) { out += sql.slice(m.index); break; }
-    const open = m.index + tag.index + tag[0].length;
-    const close = sql.indexOf(tag[0], open);
-    if (close === -1) { break; }            // unterminated: treat the rest as function body
-    i = close + tag[0].length;
-  }
-  return out;
-}
 
-const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*--.*$/gm, '');
-
-/** Tables whose rows a scraper re-writes. THIS is the decay mechanism: a config or registry row
- *  stays where you put it, but a repaired LISTING row gets overwritten by the next scrape of that
- *  listing — so a listing repair is exactly the kind whose invariant can silently come undone, and
- *  exactly the kind that needs something standing watch. */
-const LISTING_TABLE = /(^|_)listings$|^search_listings_ar$|^listing_[a-z0-9_]+$/;
-
-/** Does this migration EXECUTE a repair of listing data? */
-export function repairsData(sql: string): boolean {
-  const body = executedSql(stripComments(sql));
-  const re = /\bupdate\s+(?:only\s+)?([a-z_][a-z0-9_.]*)/gi;
-  for (let m = re.exec(body); m; m = re.exec(body)) {
-    const t = m[1].toLowerCase().replace(/^public\./, '');
-    if (LISTING_TABLE.test(t)) return true;
-  }
-  return false;
-}
-
-export function isGuarded(sql: string): boolean {
-  return /mon_detect_[a-z0-9_]+/i.test(stripComments(sql));
-}
-
-const version = (f: string) => (f.match(/^(\d{8,14})/)?.[1] ?? '').padEnd(14, '0');
+const version = migrationVersion;
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
