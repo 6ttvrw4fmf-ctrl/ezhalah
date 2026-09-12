@@ -31,7 +31,9 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { undeployedDriftProblems, isUserVisible, type DriftReading } from './lib/undeployedDrift.ts';
+import {
+  liveBundleReading, undeployedDriftProblems, isUserVisible, type DriftReading,
+} from './lib/undeployedDrift.ts';
 import { loadRegistry } from './lib/testRegistry.ts';
 import { liveHalfProblems } from './lib/liveHalf.ts';
 
@@ -117,6 +119,21 @@ mustCatch('a baseline that is NOT an ancestor of head — the record and the bra
   undeployedDriftProblems({ ...HEALTHY, baselineIsAncestorOfHead: false }).length > 0);
 mustCatch('an uncomputable file list read as «no files changed»',
   undeployedDriftProblems({ ...HEALTHY, changedPaths: null }).length > 0);
+
+// ── THE RESPONSE→READING RULE, executed here too, so it is covered on every PR and not only on
+// the live run. This is the step where a failed request becomes a plausible-looking answer.
+const REAL_HTML = '<!doctype html><script src="/_expo/static/js/web/entry-deadbeef.js"></script>';
+mustCatch('a non-200 production response treated as a readable page',
+  liveBundleReading(false, REAL_HTML) === null);
+mustCatch('an empty or unreadable 200 body treated as a readable page',
+  liveBundleReading(true, '') === null && liveBundleReading(true, null) === null);
+mustCatch('a 200 carrying an ERROR PAGE passed off as a bundle, then accepted by the predicate',
+  undeployedDriftProblems({
+    ...HEALTHY, liveEntryBundle: liveBundleReading(true, '<!doctype html><h1>502 Bad Gateway</h1>'),
+  }).length > 0);
+mustCatch('…while a real bundle reference IS extracted and IS accepted (not vacuously null)',
+  liveBundleReading(true, REAL_HTML) === '_expo/static/js/web/entry-deadbeef.js'
+  && undeployedDriftProblems({ ...HEALTHY, liveEntryBundle: liveBundleReading(true, REAL_HTML) }).length === 0);
 
 // ── THE CLASSIFIER, executed. A path list is only as good as the rule that reads it. ───────────
 check('isUserVisible() executed: src/, assets/, app.json are visible',

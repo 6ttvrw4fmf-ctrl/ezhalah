@@ -76,6 +76,28 @@ export type DriftReading = {
 
 const SHA = /^[0-9a-f]{40}$/;
 
+/** The Expo web entry bundle path, as it appears in the served HTML. */
+export const ENTRY_BUNDLE = /_expo\/static\/js\/web\/entry-[A-Za-z0-9._-]+\.js/;
+
+/**
+ * Turn ONE production HTTP response into the `liveEntryBundle` reading, and nothing else.
+ *
+ * Lives here rather than inline in the live half so it is mutation-proven on every PR by the
+ * hermetic half — the same reason `registryPayload()` sits in scripts/lib/uiControlPredicates.ts
+ * rather than in its own live sibling. The rule it encodes is the one AGENTS.md states permanently:
+ * a request that FAILED must never arrive at a verdict looking like a plausible answer.
+ *
+ *   · a non-200 → `null`. Read the body for a human, never let it stand in for the app's HTML.
+ *   · a 200 with no entry bundle → the first 120 chars of what WAS served, so `undeployedDriftProblems`
+ *     can say what arrived instead (a 200 carrying an error page looks healthy to a status-code check).
+ *   · nothing readable at all → `null`.
+ */
+export function liveBundleReading(ok: boolean, html: string | null): string | null {
+  if (!ok || html === null || html === '') return null;
+  const m = html.match(ENTRY_BUNDLE);
+  return m ? m[0] : html.slice(0, 120);
+}
+
 /**
  * Every reason the claim "what main says the app is, is what users are being served" does NOT hold.
  * An empty array is the only pass. Order is deliberate: liveness first, then coherence, then drift —
@@ -92,7 +114,7 @@ export function undeployedDriftProblems(r: DriftReading): string[] {
       + 'being served, and reports that as a FAILURE rather than as "no drift" (AGENTS.md: a failed '
       + 'fetch is not an empty answer).',
     );
-  } else if (!/_expo\/static\/js\/web\/entry-[A-Za-z0-9._-]+\.js/.test(r.liveEntryBundle)) {
+  } else if (!ENTRY_BUNDLE.test(r.liveEntryBundle)) {
     problems.push(
       `production served something that is not an Expo web entry bundle: ${JSON.stringify(r.liveEntryBundle)}. `
       + 'A 200 carrying an error page looks exactly like a healthy read to a check that only asks for '

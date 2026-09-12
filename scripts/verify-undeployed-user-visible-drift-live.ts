@@ -32,7 +32,9 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { undeployedDriftProblems, USER_VISIBLE_ROOTS, type DriftReading } from './lib/undeployedDrift.ts';
+import {
+  liveBundleReading, undeployedDriftProblems, USER_VISIBLE_ROOTS, type DriftReading,
+} from './lib/undeployedDrift.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const SITE = process.env.EZHALAH_SITE_URL || 'https://ezhalah-app.vercel.app';
@@ -84,18 +86,35 @@ const commitLine = (baselineSha && headSha && baselineIsAncestorOfHead === true)
       ?.split('\n').filter(Boolean) ?? [])
   : [];
 
+// ── MUTATION PROOF — the response→reading rule, BEFORE it is used on anything real ──────────────
+// Same shape and same reason as the sibling split live halves: the rule that decides whether a
+// production response counts as an answer is proven here, against responses that are NOT answers —
+// including the dangerous one, a 200 whose body is an error page. If any of these read as a bundle,
+// every verdict below would be about a page nobody looked at.
+const mustCatch = (what: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${what}`); return; }
+  failures++;
+  console.error(`FAIL  (mutation) did NOT catch ${what}`);
+};
+const REAL_HTML = '<!doctype html><script src="/_expo/static/js/web/entry-deadbeef.js"></script>';
+mustCatch('a non-200 (502/404/anything) treated as a readable page',
+  liveBundleReading(false, REAL_HTML) === null);
+mustCatch('an unreadable/empty body at 200 treated as a readable page',
+  liveBundleReading(true, '') === null && liveBundleReading(true, null) === null);
+mustCatch('a 200 carrying an ERROR PAGE passed off as a bundle (the status-code-only trap)',
+  liveBundleReading(true, '<!doctype html><h1>502 Bad Gateway</h1>')
+    ?.includes('502 Bad Gateway') === true);
+mustCatch('…while a genuine bundle reference IS extracted (the rule is not vacuously null)',
+  liveBundleReading(true, REAL_HTML) === '_expo/static/js/web/entry-deadbeef.js');
+
 // ── READING 3: what production ACTUALLY SERVES. Fail-closed on every failure mode. ──────────────
 let liveEntryBundle: string | null = null;
 try {
   const res = await fetch(SITE, { signal: AbortSignal.timeout(30_000) });
-  // A non-200 is NOT a page. Never let an error body stand in for the app's HTML.
-  const html = res.ok ? await res.text().catch(() => '') : '';
-  const m = html.match(/_expo\/static\/js\/web\/entry-[A-Za-z0-9._-]+\.js/);
-  // Hand the predicate what we SAW: the bundle path when there is one, a snippet of whatever was
-  // served when there is not, and null when nothing could be read at all. The three are different
-  // facts and the shared, mutation-proven rule decides what each one means.
-  liveEntryBundle = m ? m[0] : (res.ok && html ? html.slice(0, 120) : null);
-  console.log(`  live: HTTP ${res.status}, ${html.length} bytes, bundle ${m ? m[0] : '(none found)'}`);
+  const html = res.ok ? await res.text().catch(() => null) : null;
+  // The shared, mutation-proven rule decides what the response MEANS — never a second copy here.
+  liveEntryBundle = liveBundleReading(res.ok, html);
+  console.log(`  live: HTTP ${res.status}, ${html?.length ?? 0} bytes, bundle ${liveEntryBundle ?? '(none)'}`);
 } catch (e) {
   console.log(`  live: unreachable — ${String(e).slice(0, 160)}`);
 }
