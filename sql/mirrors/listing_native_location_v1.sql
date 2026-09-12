@@ -1,6 +1,17 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-09-12 (amlakalahsa activation, migration 20260912190822): CHANGED and
+--   regenerated. amlakalahsa joined this view as two new native arms (it had none before — every
+--   amlakalahsa row previously fell through v2's catch-all union, which hardcodes district_ar to
+--   NULL) so an exact-district search could actually find amlakalahsa listings instead of only a
+--   broad city scan. Re-ran pg_get_viewdef against the object cast to regclass, true as the second
+--   argument. Recorded md5 52b8d750cd49b1f46fdb471499678afc (22,492 chars) — was
+--   77785f36a000d3fedad8fe19e6a67566 (21,217 chars); the +1,275 chars is exactly two new arms
+--   (amlakalahsa's residential + commercial, 1,248 chars from the arm's own SELECT through its
+--   platform name is a longer identifier than remal/amaall, so each arm runs a bit larger than the
+--   ~577-590 char shapes seen above for shorter platform names).
+--
 -- Re-verified 2026-09-11 (remal exact-district-search fix, migration 20260911214511): CHANGED and
 --   regenerated, same day as the entry directly below. remal joined this view as two new native
 --   arms (it had none before — every remal row previously fell through v2's catch-all union, which
@@ -161,8 +172,8 @@
 -- with the body below (same 13,385 chars, same md5) — content genuinely unchanged, only the
 -- verification date needed to advance past that migration.
 --
--- Regenerated from pg_get_viewdef('listing_native_location_v1'::regclass, true) — 21,217 chars.
--- Verified byte-exact; md5 of everything below this header block: 77785f36a000d3fedad8fe19e6a67566
+-- Regenerated from pg_get_viewdef('listing_native_location_v1'::regclass, true) — 22,492 chars.
+-- Verified byte-exact; md5 of everything below this header block: 52b8d750cd49b1f46fdb471499678afc
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
@@ -211,6 +222,30 @@
             aldarim_commercial_listings.transaction_type
            FROM aldarim_commercial_listings
           WHERE aldarim_commercial_listings.active
+        UNION ALL
+         SELECT 'amlakalahsa'::text AS platform,
+            'amlakalahsa_residential_listings'::text AS source_table,
+            amlakalahsa_residential_listings.id AS listing_id,
+            amlakalahsa_residential_listings.city_ar,
+            amlakalahsa_residential_listings.city_id,
+            amlakalahsa_residential_listings.district_ar,
+            amlakalahsa_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            amlakalahsa_residential_listings.transaction_type
+           FROM amlakalahsa_residential_listings
+          WHERE amlakalahsa_residential_listings.active
+        UNION ALL
+         SELECT 'amlakalahsa'::text AS platform,
+            'amlakalahsa_commercial_listings'::text AS source_table,
+            amlakalahsa_commercial_listings.id AS listing_id,
+            amlakalahsa_commercial_listings.city_ar,
+            amlakalahsa_commercial_listings.city_id,
+            amlakalahsa_commercial_listings.district_ar,
+            amlakalahsa_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            amlakalahsa_commercial_listings.transaction_type
+           FROM amlakalahsa_commercial_listings
+          WHERE amlakalahsa_commercial_listings.active
         UNION ALL
          SELECT 'remal'::text AS platform,
             'remal_residential_listings'::text AS source_table,
