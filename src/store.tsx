@@ -20,6 +20,7 @@ import { mergeOne, pickTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { buildSyncedName } from '@/lib/nameSync';
 import { identifyUser } from '@/lib/observability';
 import { forgetSupportDraft } from '@/lib/supportDraft';
+import { LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
 
 type DataSource = 'local' | 'supabase';
 
@@ -920,7 +921,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // (filter-first, recency order) so broad searches page through the FULL set. Returns the ranked
       // page + the advanced cursor; the caller appends (de-duped) to the shown list.
       loadMoreListings: async (q: SearchQuery, offset: number) => {
-        const PAGE_MORE = 500;
+        // ONE definition, shared with the «عرض المزيد» drain budget that is derived from it
+        // (src/data/resultCount.ts). It was a second, private `500` here until 2026-09-12, while
+        // agent.tsx's page-count backstop was sized in its comment against 1,500 — so the guard
+        // covered 25,000 rows while believing it covered 75,000.
+        const PAGE_MORE = LOAD_MORE_PAGE_SIZE;
         const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE });
         // A FAILED PAGE IS NOT PROGRESS (defect hunt-2026-09-04:pagination:06). `rows === null` is
         // this fetch's backend-error signal — the SAME one page 0 hands runSearch as `fetchFailed`

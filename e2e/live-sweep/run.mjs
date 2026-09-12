@@ -205,8 +205,13 @@ async function main() {
   // §10 requires «عرض المزيد» to be actually clicked in production EVERY run. Riyadh, not a rotated
   // city: the journey needs a cohort big enough to reach the browse cap, and a small city that
   // returns fewer than 10 results would silently skip — which is exactly how this floor would rot.
+  // TWO presses, not three (2026-09-12). Under the owner's Task 4 rev. 2 rule the SECOND press is a
+  // full drain — every remaining page — so presses 1 and 2 are the whole contract and a third press
+  // is not another batch: it is a second drain, costing production up to another DRAIN_ROW_BUDGET
+  // worth of search RPCs for no new assertion. §40.6 is explicit that a certification is not a load
+  // test, and the search RPC is already 64.4% of all database time (§40.1).
   await run('«عرض المزيد» → batches keep every filter',
-    () => showMoreJourney({ city: RIYADH, deal: 'إيجار', period: 'سنوي', batches: 3 }),
+    () => showMoreJourney({ city: RIYADH, deal: 'إيجار', period: 'سنوي', batches: 2 }),
     () => { done.showMore++; citiesTested.add(RIYADH); });
 
   // AF-SCOPED PAGINATION (owner PERMANENT, 2026-09-04): "the app's actual Load More UI, under an

@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripTypeScriptTypes } from 'node:module';
-import { BROWSE_BATCH, nextBatchTarget, resultCounts } from '../src/data/resultCount.ts';
+import { BROWSE_BATCH, nextBatchTarget, resultCounts, LOAD_MORE_PAGE_SIZE } from '../src/data/resultCount.ts';
 
 const root = join(import.meta.dirname, '..');
 const code = readFileSync(join(root, 'src', 'app', 'agent.tsx'), 'utf8')
@@ -115,7 +115,14 @@ const loadMore = (() => {
     process.exit(1);
   }
   const js = stripTypeScriptTypes(`const surface = { ${m[0]} };`, { mode: 'strip' });
-  return new Function('fetchListingsForQuery', 'runSearch', 'buildPools', `${js}\nreturn surface.loadMoreListings;`) as
+  // LOAD_MORE_PAGE_SIZE is injected, not stubbed: since 2026-09-12 the page size has ONE definition
+  // (src/data/resultCount.ts) because agent.tsx's drain budget is derived from it — the two used to
+  // be independent literals, which is how a backstop sized in its comment against 1,500 came to
+  // cover a 500-row pager. Handing the lift the REAL constant keeps this check measuring the shipped
+  // arithmetic; a stub here would re-open exactly the drift the shared constant closed.
+  const raw = new Function('fetchListingsForQuery', 'runSearch', 'buildPools', 'LOAD_MORE_PAGE_SIZE',
+    `${js}\nreturn surface.loadMoreListings;`);
+  return ((f: unknown, r: unknown, b: unknown) => raw(f, r, b, LOAD_MORE_PAGE_SIZE)) as
     (f: unknown, r: unknown, b: unknown) => (q: unknown, offset: number) =>
       Promise<{ listings: unknown[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
 })();
