@@ -164,6 +164,30 @@ def strip_city_suffix(district_ar: Optional[str], city_ar: Optional[str]) -> Opt
     return " ".join(dist_tokens)
 
 
+def trailing_catalog_city_norm(district_ar: Optional[str]) -> Optional[str]:
+    """The catalog `city_norm` that the district's TRAILING 1-3 tokens spell (longest window wins),
+    else None.
+
+    Deliberately ID-FREE: it answers "is this a city name", never "which city is this", so it stays
+    right about a same-name twin that `_pick_candidate()` must refuse to resolve. That distinction is
+    the whole point — the cohort that produced the glued districts in the first place is exactly the
+    one where the city is an unresolvable twin, so a rule that needs a city_id can never clean it.
+
+    Python mirror of SQL `public.district_trailing_catalog_city_norm()`; the two are ONE algorithm and
+    their parity is pinned by scripts/verify-aqarmonthly-district-suffix-guard.ts. It never invents
+    precision: it only ever reports a name the catalog already carries, and the caller still hands the
+    result to strip_city_suffix(), which keeps the trailing-only and two-token-floor invariants.
+    """
+    _load()
+    toks = (district_ar or "").split()
+    for size in (3, 2, 1):  # longest window wins, mirroring the SQL's `order by w.sz desc`
+        if len(toks) >= size:
+            key = " ".join(norm_ar(t) for t in toks[-size:])
+            if key in _CITY:
+                return key
+    return None
+
+
 def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None) -> dict:
     """DETERMINISTIC Arabic R/C/D parse from an Aqar-style slug/title, VALIDATED against the catalog
     (no loose substring matching). Priority within the parser:
@@ -239,7 +263,17 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
         best = _scan(n.split())
 
     if not best:
-        return {"city_ar": None, "city_id": None, "region_id": region_id, "district_ar": district_ar, "confidence": "unresolved"}
+        # The city is unresolvable (no catalog hit, or a same-name twin _pick_candidate() refuses to
+        # guess) — but the source still GLUED it onto the district, so the district is still dirty.
+        # Strip it by NAME without ever claiming which city it is: exactly what the canonical SQL
+        # does (`strip_district_city_suffix(d, district_trailing_catalog_city_norm(d))`), and what
+        # mon_detect_aqarmonthly_district_city_suffix()'s two city-NULL limbs assert of stored rows.
+        # Leaving it unstripped here is what put «حي المجد القرى القري» in the served index and kept
+        # that P2 re-raising: the parser and the detector were reading two different rules.
+        # strip_city_suffix() still returns the district untouched when this yields None.
+        return {"city_ar": None, "city_id": None, "region_id": region_id,
+                "district_ar": strip_city_suffix(district_ar, trailing_catalog_city_norm(district_ar)),
+                "confidence": "unresolved"}
     cid, rid = best
     city_ar_val = _CID_AR.get(cid)
     district_ar = strip_city_suffix(district_ar, city_ar_val)
