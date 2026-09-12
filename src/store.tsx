@@ -14,7 +14,7 @@ import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
 import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
-import { restoreChat, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
+import { restoreChat, persistedOnly, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, type ChatMeta } from '@/lib/chatSync';
 import { mergeOne, pickTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { buildSyncedName } from '@/lib/nameSync';
@@ -909,7 +909,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             const fetched = await fetchChatTranscript(id);
             const valid = fetched ? restoreChat(fetched) : null;
             if (!valid) return null;
-            return { v: 1, msgs: valid.msgs, revealCount: valid.revealCount, afReceipt: valid.afReceipt, guidedPills: valid.guidedPills };
+            // NEVER re-list the fields to keep — strip the one render-only field instead. Rebuilding
+            // this object by hand dropped `completed` (an optional field tsc cannot miss for you),
+            // reopening a finished chat with a live composer. persistedOnly() is total by
+            // construction; see its note in src/lib/chatTranscript.ts.
+            return persistedOnly(valid);
           },
         );
         if (!t) return null;
