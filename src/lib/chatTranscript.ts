@@ -61,6 +61,9 @@ type LiveChatState = {
 // store an entry that would restore to a blank screen.
 export function serializeChat(live: LiveChatState): PersistedChat | null {
   const msgs: PersistedMsg[] = [];
+  // Was the LAST results turn truncated? `completed` is a CLAIM about that turn — "every match is
+  // already revealed" — and truncation is what makes the claim false. See the note below.
+  let lastResultsTruncated = false;
   for (const m of live.msgs) {
     if (m.role !== 'user' && m.role !== 'agent' && m.role !== 'results') continue; // status = transient
     // Transient animation flags never persist: a restored chat renders in its final state.
@@ -69,6 +72,7 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
       const r = rest.result;
       const revealed = live.revealCount[m.id] ?? TRANSCRIPT_FIRST_PAGE;
       const keep = Math.min(r.listings.length, Math.max(TRANSCRIPT_FIRST_PAGE, Math.min(revealed, TRANSCRIPT_LISTING_CAP)));
+      lastResultsTruncated = keep < r.listings.length; // the LAST results turn's value is the one that stands
       if (keep < r.listings.length) {
         // Truncated ⇒ restart paging (store.tsx snapshot precedent): loadMore de-dups, gap-free.
         rest.result = { ...r, listings: r.listings.slice(0, keep), pageOffset: 0, hasMore: true };
@@ -86,7 +90,35 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
   const gp = live.guidedPills;
   return {
     v: 1,
-    ...(live.completed ? { completed: true as const } : {}),
+    // TRUNCATION AND TERMINALITY ARE ONE DECISION (2026-09-12, routine #8 — the seam between this
+    // module's bound and the agent screen's terminal-chat rule).
+    //
+    // `completed` is not an ordinary field to copy: it is a CLAIM about the listings this same
+    // function truncates twenty lines up. src/lib/afBrowsingGate.ts states the claim in its own
+    // words — "the chat is terminal: the composer locks AND every remaining match is already
+    // revealed. There is nothing to page" — and acts on it by withholding «عرض المزيد»
+    // (`resultsActionsRowVisible`: `if (a.chatCompleted) return false`), while agent.tsx locks the
+    // composer off the same flag. Both are RIGHT while the claim holds. Truncation is precisely
+    // what falsifies it, and the truncation branch already knows: it rewrites `pageOffset`/
+    // `hasMore` so paging can resume, then left the one flag that REVOKES paging untouched.
+    //
+    // MEASURED by executing the real serializeChat → restoreChat → resultCounts →
+    // resultsActionsRowVisible chain: a 1,200-match search browsed to its end (all 1,200 on screen,
+    // composer correctly locked) reopened as 60 cards of 1,200 with the pager withheld by
+    // `completed` AND the composer locked by the same flag — 1,140 matches the user HAD on screen,
+    // unreachable in that chat by any route. The boundary is exact: 60 kept = fine, 61 = dead end.
+    //
+    // So a truncated last turn is NOT terminal, and the honest transcript says so. Nothing is lost
+    // by dropping the flag: the restored turn carries `hasMore: true` and `pageOffset: 0`, the user
+    // pages back through it de-duped and gap-free (the mitigation this truncation already promises),
+    // and `loadMore` re-sets `completed` on its own the moment the last match is revealed again.
+    //
+    // Only the LAST results turn can decide this, because only the newest turn carries live actions
+    // (`isLatestResults`, owner 2026-08-24). An AF-completed chat (R11.1, ≤ INTERVIEW_STOP_AT = 25
+    // rows — always under TRANSCRIPT_LISTING_CAP, so never truncated) keeps its lock exactly as
+    // owner rule 2026-08-30 requires, even when an EARLIER, larger turn in the same chat was
+    // truncated. Both directions are executed in scripts/verify-completed-chat-state.ts.
+    ...(live.completed && !lastResultsTruncated ? { completed: true as const } : {}),
     msgs,
     revealCount,
     afReceipt,
@@ -121,6 +153,32 @@ export function restoreChat(raw: unknown): (PersistedChat & { doneTyping: Record
     ...(p.completed === true ? { completed: true as const } : {}),
     doneTyping,
   };
+}
+
+// THE PERSISTED SUBSET OF A RESTORED TRANSCRIPT — TOTAL BY CONSTRUCTION, NEVER A FIELD LIST.
+//
+// `restoreChat` returns the transcript PLUS `doneTyping`, which is render-only state and must not be
+// stored again. The one caller that needs to hand a restored transcript back to storage
+// (store.tsx's `hydrateTranscript`, the server-copy path) used to rebuild it field by field:
+//
+//     return { v: 1, msgs: valid.msgs, revealCount: valid.revealCount, afReceipt: valid.afReceipt,
+//              guidedPills: valid.guidedPills };            // ← `completed` is not in the list
+//
+// and silently DROPPED `completed`. `completed?: true` is OPTIONAL on PersistedChat, so tsc cannot
+// see the omission, and `restoreChat` — which preserves the flag correctly — sat one line above it.
+// Measured by execution 2026-09-12 (routine #8): a chat the Advanced Filter truthfully finished,
+// reopened through this path, came back with `completed` gone and therefore an ACTIVE composer —
+// the exact state owner rule 2026-08-30 forbids in those words ("a reopened/Back-navigated chat must
+// NOT resurrect an active composer"). The path is ordinary, not exotic: any chat older than
+// LOCAL_TRANSCRIPT_ENTRIES (10) has no local transcript, and so does every chat opened on a second
+// device, so both re-hydrate from the server through here.
+//
+// Removing ONE known field is total; listing the fields to keep is not. Every future field of
+// PersistedChat survives this by construction, which is the whole point — the previous shape was a
+// list someone had to remember to update, and nobody did.
+export function persistedOnly(restored: PersistedChat & { doneTyping: Record<string, boolean> }): PersistedChat {
+  const { doneTyping: _doneTyping, ...persisted } = restored;
+  return persisted;
 }
 
 // Two serialized transcripts are the same conversation state — used by the capture effect to skip
