@@ -25,6 +25,7 @@ import { liveHalfProblems } from './lib/liveHalf.ts';
 import { COMMITTED_NOT_APPLIED_BASELINE } from './lib/migrationDrift.ts';
 import {
   repairsData, migrationVersion, enrollmentVerdict, parseWaivers, MIN_WAIVER_REASON,
+  registryVersionsFromResponse,
 } from './lib/repairClassifier.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -138,6 +139,26 @@ mustCatch('a duplicated repair version cannot inflate or hide the gap',
       repairs: ['20260901000000', '20260901000000'], enrolled: ['20260902000000'], waived: new Map(),
     });
     return !v.ok && v.unenrolled.length === 1;
+  })());
+
+// registryVersionsFromResponse() is the other half of the same honesty, one layer earlier: it is
+// what the live half calls on the raw HTTP answer, and an RLS-filtered read of this table really
+// does come back as 200 with []. If this function ever "helpfully" returned [] for a failure, every
+// mutant above would still pass and the check would report all 28 repairs unenrolled.
+mustCatch('a non-2xx registry response is UNKNOWN, never an empty registry',
+  registryVersionsFromResponse(false, []) === null
+  && registryVersionsFromResponse(false, [{ repair_version: '20260901000000' }]) === null);
+
+mustCatch('a 200 whose body is not an array is UNKNOWN (an error object is not data)',
+  registryVersionsFromResponse(true, { message: 'permission denied' }) === null
+  && registryVersionsFromResponse(true, null) === null);
+
+mustCatch('a real 200 array IS data, and an RLS-emptied 200 is passed on as [] for the rule to refuse',
+  (() => {
+    const rows = registryVersionsFromResponse(true, [{ repair_version: '20260901000000' }]);
+    const empty = registryVersionsFromResponse(true, []);
+    return rows?.length === 1 && rows[0] === '20260901000000'
+      && Array.isArray(empty) && empty.length === 0;
   })());
 
 if (mut) { console.error(`\n✗ ${mut} enrollment-rule case(s) wrong\n`); process.exit(1); }

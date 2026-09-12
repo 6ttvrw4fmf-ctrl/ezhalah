@@ -38,13 +38,21 @@
 // repair applied to production and never committed is invisible here by construction — that is
 // migration drift (AGENTS.md condition 1, applied-but-not-committed), which has its own guard
 // running every 15 minutes and blocks every deploy while it is red.
+//
+// MUTATION-PROOF-EXEMPT: this file has no logic of its own to mutate — it fetches, hands the answer
+// to registryVersionsFromResponse() and the result to enrollmentVerdict(), and prints. Both live in
+// scripts/lib/repairClassifier.ts and its hermetic sibling
+// (verify-repair-guarantee-enrollment.ts) proves them with twelve mutations against those same
+// shared functions, including the two that decide this check's honesty: a non-2xx and an
+// RLS-emptied 200 must each read as UNKNOWN rather than as a registry with nothing in it. A proof
+// duplicated here would exercise nothing this file itself decides.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { COMMITTED_NOT_APPLIED_BASELINE } from './lib/migrationDrift.ts';
 import {
-  repairsData, migrationVersion, enrollmentVerdict, parseWaivers,
+  repairsData, migrationVersion, enrollmentVerdict, parseWaivers, registryVersionsFromResponse,
 } from './lib/repairClassifier.ts';
 
 const root = join(import.meta.dirname, '..');
@@ -88,10 +96,12 @@ async function readRegistry(): Promise<string[] | null> {
       const r = await fetch(
         `${URL_BASE}/rest/v1/ops_repair_guarantee_registry?select=repair_version&limit=10000`,
         { headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` } });
-      if (!r.ok) { console.error(`  registry read attempt ${attempt}: HTTP ${r.status}`); continue; }
-      const rows = await r.json() as Array<{ repair_version: string }>;
-      if (!Array.isArray(rows)) { console.error(`  registry read attempt ${attempt}: not an array`); continue; }
-      return rows.map((x) => String(x.repair_version));
+      const versions = registryVersionsFromResponse(r.ok, await r.json().catch(() => null));
+      if (versions === null) {
+        console.error(`  registry read attempt ${attempt}: unusable answer (HTTP ${r.status})`);
+        continue;
+      }
+      return versions;
     } catch (e) {
       console.error(`  registry read attempt ${attempt}: ${(e as Error).message}`);
     }

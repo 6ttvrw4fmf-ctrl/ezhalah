@@ -159,6 +159,22 @@ export function enrollmentVerdict(input: EnrollmentInput): EnrollmentVerdict {
   return { ok: unenrolled.length === 0 && problems.length === 0, unenrolled, problems };
 }
 
+/**
+ * Turn ONE HTTP answer about the registry into `string[]` or `null`, and nothing in between.
+ *
+ * This is the line the whole check hangs on, so it is pure and lives beside the rule rather than
+ * inside the fetch loop. `ops_repair_guarantee_registry` is RLS-protected: an anon read of it
+ * returns HTTP **200 with `[]`**, which is a permissions failure wearing the shape of an answer. A
+ * non-2xx is `null` (unknown), a non-array body is `null` (unknown), and only a real array is data.
+ * The caller then decides what an EMPTY array means — see enrollmentVerdict(), which refuses it
+ * while repairs exist rather than reporting every repair as unenrolled.
+ */
+export function registryVersionsFromResponse(ok: boolean, body: unknown): string[] | null {
+  if (!ok) return null;
+  if (!Array.isArray(body)) return null;
+  return body.map((r) => String((r as { repair_version: unknown }).repair_version));
+}
+
 /** Parse the committed waiver file: `version | reason`, `#` comments and blank lines ignored. */
 export function parseWaivers(text: string): Map<string, string> {
   const out = new Map<string, string>();
