@@ -98,3 +98,27 @@ export function evaluateImageCoverage(
   }
   return problems;
 }
+
+// ── 4. listing_extra_attrs TABLE coverage (finer grain than #1) ────────────────────────────────
+// #1 above (attributeViewGaps) is PLATFORM-grained: ops_af_attribute_coverage() EXISTS-checks
+// pg_depend for EITHER of a platform's two candidate tables, so a platform with both a residential
+// and a commercial table reads in_extra=true the moment ONE of the two has a listing_extra_attrs
+// branch. A table-level gap — one of the two wired, the sibling not — is invisible to it. amlakalahsa
+// itself (2026-09-12/13) was a full absence on BOTH its tables and would have tripped #1 too, but the
+// half-wired shape is a strictly larger blind spot that #1 cannot see. This predicate is TABLE-grained
+// instead: one row per SEARCHABLE_TABLES entry, never collapsed to its platform.
+//
+// A table with searchable_rows === 0 is NOT a gap — there is nothing for a missing branch to lose yet
+// (same reasoning attributeCoverageIsClean's own onboarding-timing case uses, applied per table).
+export type ExtraAttrsTableRow = { table: string; searchable_rows: number; in_extra_attrs: boolean };
+
+export const extraAttrsTableGaps = (rows: ExtraAttrsTableRow[]): ExtraAttrsTableRow[] =>
+  rows.filter((r) => r.searchable_rows > 0 && !r.in_extra_attrs);
+
+export const extraAttrsTableCoverageIsClean = (rows: ExtraAttrsTableRow[]): boolean =>
+  extraAttrsTableGaps(rows).length === 0;
+
+export const describeExtraAttrsTableGaps = (gaps: ExtraAttrsTableRow[]): string =>
+  gaps
+    .map((g) => `${g.table} (${g.searchable_rows} searchable rows) has NO branch in listing_extra_attrs`)
+    .join('; ');
