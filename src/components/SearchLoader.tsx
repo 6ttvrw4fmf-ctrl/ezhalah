@@ -364,7 +364,11 @@ const s = StyleSheet.create({
     alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 11, borderRadius: 14,
     backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
   },
-  pillLogo: { width: 18, height: 18, borderRadius: 4, backgroundColor: colors.surface },
+  // No backgroundColor: the platform logos are transparent PNGs (see 2026-09-11 launch-lock work +
+  // verify-platform-logos-are-transparent.ts), and a solid `colors.surface` behind a transparent
+  // image reads as a visible white square around every glyph — different, dirtier, than the
+  // ResultCard's own hostBadge (also no background). Owner 2026-09-13: match the card's clean look.
+  pillLogo: { width: 18, height: 18, borderRadius: 4 },
   // Compact (below LOADER_PILL_LABEL_BREAKPOINT): a square logo-only tile, no name text, so ~45
   // platforms genuinely fit a phone screen without scrolling (owner 2026-09-12). Same tint/border/
   // glow treatment as the full pill — only the shape and the dropped label differ.
@@ -372,6 +376,6 @@ const s = StyleSheet.create({
     width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
   },
-  pillLogoCompact: { width: 22, height: 22, borderRadius: 5, backgroundColor: colors.surface },
+  pillLogoCompact: { width: 22, height: 22, borderRadius: 5 },
   pillName: { fontSize: 12.5, fontWeight: '600', color: colors.body, maxWidth: 150 },
 });
