@@ -52,6 +52,8 @@ function check(label: string, ok: boolean, detail = ''): void {
   console.log(`  ${ok ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}`);
   if (!ok) failures++;
 }
+/** A mutation proof: this barrier's OWN predicate, run against a deliberately broken input. */
+const mustCatch = (label: string, caught: boolean) => check(`MUTATION — ${label}`, caught);
 
 /** The digest a mirror header claims it was verified against. Same shape the sibling check reads. */
 export function recordedMd5(fileText: string): string | null {
@@ -149,40 +151,40 @@ check(
 console.log('\n  mutation proofs:');
 {
   const reg = new Set(['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']);
-  check(
-    '    an unregistered digest is caught',
+  mustCatch(
+    'an unregistered digest is caught',
     unregisteredMirrors([{ file: 'x.sql', md5: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }], reg).length === 1,
   );
-  check(
-    '    a registered digest passes',
+  mustCatch(
+    'a registered digest passes',
     unregisteredMirrors([{ file: 'x.sql', md5: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }], reg).length === 0,
   );
-  check(
-    '    a mirror with no recorded digest is left to the sibling check',
+  mustCatch(
+    'a mirror with no recorded digest is left to the sibling check',
     unregisteredMirrors([{ file: 'x.sql', md5: null }], reg).length === 0,
   );
   // The real 2026-09-12 shape: the file moved to 52b8d750…, migrations still only wrote 862a10b7….
-  check(
-    '    the actual 2026-09-12 regression is caught',
+  mustCatch(
+    'the actual 2026-09-12 regression is caught',
     unregisteredMirrors(
       [{ file: 'listing_native_location_v1.sql', md5: '52b8d750cd49b1f46fdb471499678afc' }],
       new Set(['862a10b719341ab0d425b81b02d69871']),
     ).length === 1,
   );
-  check(
-    '    …and passes once the catch-up migration exists',
+  mustCatch(
+    '…and passes once the catch-up migration exists',
     unregisteredMirrors(
       [{ file: 'listing_native_location_v1.sql', md5: '52b8d750cd49b1f46fdb471499678afc' }],
       new Set(['862a10b719341ab0d425b81b02d69871', '52b8d750cd49b1f46fdb471499678afc']),
     ).length === 0,
   );
-  check(
-    '    digest extraction reads a real header',
+  mustCatch(
+    'digest extraction reads a real header',
     recordedMd5('-- Recorded md5: 52b8d750cd49b1f46fdb471499678afc\nselect 1;') ===
       '52b8d750cd49b1f46fdb471499678afc',
   );
-  check(
-    '    a digest in the BODY is not mistaken for the header record',
+  mustCatch(
+    'a digest in the BODY is not mistaken for the header record',
     recordedMd5('-- no digest here\nselect md5: 52b8d750cd49b1f46fdb471499678afc;') === null,
   );
 }
