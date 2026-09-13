@@ -903,6 +903,7 @@ const AR: Record<string, string> = {
   'Remal Real Estate':                 'رمال العقارية',            // official (remalre.com header logo)
   'Amaall Real Estate Services':       'آمال للخدمات العقارية',    // official (amaall.com)
   'Amlak Al-Ahsa Real Estate':         'أملاك الأحساء',            // official (amlakalahsa.com header)
+  'Aqar Al Saudia Real Estate':        'منصة العروض العقارية',     // official (aqaralsaudia.com header)
   'Alta Real Estate Services':         'ألتا للخدمات العقارية',   // official (alta.com.sa header)
   'Shmou Al Shmal Real Estate':        'شموع الشمال العقارية',    // official (shmoua-alshmal.com header)
   'Azdad Al Aqariah':                  'مكتب ازداد العقارية',      // official (azdadalaqaria.com page title)

@@ -72,6 +72,12 @@
     "grace": 3
   },
   {
+    "platform": "aqaralsaudia",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "aqaratikom",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
