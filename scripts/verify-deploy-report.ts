@@ -28,11 +28,11 @@ const check = (name: string, cond: boolean) => {
 
 type Verdict = { SHIPPED: string; REFUSED_PRE: string; POST_FAILED: string; DEPLOY_URL: string };
 
-// Write `content` to a temp log file, source the REAL library, call the REAL function against it,
-// and return the four flags it set. Never re-implements the parsing — it only ever hands a fixture
-// to the actual function safe-deploy.yml sources.
+// Write `content` to a temp log file, source the REAL library (or, for the mutation proofs below,
+// a deliberately-broken temp COPY of it — never the other way around: real code is always checked
+// against the real file), call the function against it, and return the four flags it set.
 const tmpDirs: string[] = [];
-const verdictFor = (content: string | null): Verdict => {
+const verdictFor = (content: string | null, libPath: string = LIB): Verdict => {
   const dir = mkdtempSync(path.join(tmpdir(), 'deploy-report-'));
   tmpDirs.push(dir);
   const log = path.join(dir, 'safe-deploy.log');
@@ -40,7 +40,7 @@ const verdictFor = (content: string | null): Verdict => {
   const missingLog = path.join(dir, 'does-not-exist.log');
   const r = spawnSync('bash', ['-c',
     `set -euo pipefail
-. "${LIB}"
+. "${libPath}"
 deploy_report_verdict "${content !== null ? log : missingLog}"
 printf 'SHIPPED=%s\\nREFUSED_PRE=%s\\nPOST_FAILED=%s\\nDEPLOY_URL=%s\\n' "$SHIPPED" "$REFUSED_PRE" "$POST_FAILED" "$DEPLOY_URL"`],
     { encoding: 'utf8' });
@@ -128,6 +128,43 @@ check('deploy-frontend.yml no longer re-inlines the four evidence greps directly
   !/if grep -qE 'Aliased\|\^https:\/\/ezhalah-\[a-z0-9\]\+-' "\$LOG"/.test(workflow));
 check('the Report step prints the computed verdict to its own log (not just $GITHUB_STEP_SUMMARY)',
   /echo "Computed verdict: SHIPPED=\$SHIPPED/.test(workflow));
+
+// ── (10) MUTATION PROOFS — the checks above must be able to fail, not just pass on real code ────
+// Each proof writes a deliberately-broken TEMP COPY of the real library (never touches the real
+// file) and re-runs the exact same verdictFor() helper against it, proving the assertions above
+// actually discriminate correct from incorrect implementations rather than passing vacuously.
+const mustCatch = (label: string, caught: boolean) => check(`MUTATION ${label}`, caught);
+const realLib = readFileSync(LIB, 'utf8');
+const mutantLib = (broken: string): string => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'deploy-report-mutant-'));
+  tmpDirs.push(dir);
+  const p = path.join(dir, 'deploy-report.sh');
+  writeFileSync(p, broken);
+  return p;
+};
+
+// Mutant A: the SHIPPED-determining grep is neutralized (the exact false-negative this whole
+// investigation was about) — must be caught even with a real "Aliased" line in the log.
+const noShippedCheck = realLib.replace(
+  /if grep -qE 'Aliased\|\^https:\/\/ezhalah-\[a-z0-9\]\+-' "\$log"; then SHIPPED=yes; fi/,
+  'SHIPPED=no # MUTANT: log-read removed',
+);
+check('sanity: mutant A actually changed the source (regex still matches the real file)',
+  noShippedCheck !== realLib);
+mustCatch('SHIPPED hardcoded to "no" is caught even with a real Aliased line present',
+  verdictFor(RUN_34724048886_EXCERPT, mutantLib(noShippedCheck)).SHIPPED !== 'yes');
+
+// Mutant B: the `|| true` guard on DEPLOY_URL is removed (the latent bug this PR fixed) — must be
+// caught by the exact scenario that exposed it: a log with no preview-URL match (a real pre-deploy
+// refusal never prints one), sourced under verdictFor's own `set -euo pipefail`.
+const noTrueGuard = realLib.replace(
+  `'https://ezhalah-[a-z0-9]+-[a-z0-9-]+\\.vercel\\.app' "$log" | tail -1 || true)"`,
+  `'https://ezhalah-[a-z0-9]+-[a-z0-9-]+\\.vercel\\.app' "$log" | tail -1)"`,
+);
+check('sanity: mutant B actually changed the source (|| true was really removed)',
+  noTrueGuard !== realLib);
+mustCatch('removing the || true guard crashes the whole function on a log with no preview URL',
+  verdictFor('safe-deploy: REFUSING TO DEPLOY — dirty tree.\n', mutantLib(noTrueGuard)).SHIPPED === '<crash>');
 
 for (const d of tmpDirs) { try { rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } }
 
