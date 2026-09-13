@@ -3820,24 +3820,18 @@ export default function Agent() {
                 </Pressable>
               </View>
             </View>
-            ) : (busy || revealing) ? (
-              // FILTER-ORIGIN, SEARCH IN FLIGHT (owner, 2026-09-12): Stop alone, not dressed as a
-              // composer — see the comment above this block for why the full pill was removed here.
-              // Wrapped in a flex-end row so it lands where Stop always has (the trailing edge of
-              // this LTR-pinned column, same as inside the real composer) instead of hugging start.
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
-                <Pressable
-                  onPress={stop}
-                  style={s.stopBtn}
-                  hitSlop={8}
-                  // @ts-expect-error web-only DOM props on the RNW host node
-                  dataSet={{ ...TAP44 }}
-                  accessibilityLabel={t('Stop')}
-                >
-                  <Ionicons name="stop" size={15} color="#fff" />
-                </Pressable>
-              </View>
             ) : null}
+            {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
+                "REMOVE THIS IN THE FILTER SIMPLE" — the small green Stop square that lingered on
+                Filter-origin results, during both busy AND the cascade reveal animation, is gone.
+                Nothing renders here for filterOrigin anymore.
+                The stop() function itself stays intact — verify-filter-stop-cancels-and-restores.ts
+                still holds — so a Filter search that is cancelled by other means (route change via
+                the top ☰ menu / تصفية tab / browser back / any effect cleanup that runs when the
+                user leaves the results screen) still aborts the network request, clears
+                lastFilterRef/lastSeedRef, and returns to the Filter screen with restored state.
+                The trade-off: a mid-flight Filter search has no in-place cancel button; the user
+                navigates away instead. Owner-accepted (2026-09-12). */}
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
             </Text>

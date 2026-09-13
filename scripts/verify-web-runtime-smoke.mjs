@@ -387,8 +387,14 @@ try {
   // getting the EXACT SAME landed count as an uninterrupted run of the identical filter. If Stop had
   // silently dropped the district, widened the type, or reset the bedroom count, the resubmitted
   // count would differ. That is what E/F assert.
-  const stopSel = '[aria-label="إيقاف"]';
+  const stopSel = '[aria-label="إيقاف"]';                                                          // Chat-only, kept for [G]
   const tapStop = async () => { await page.click(stopSel, { timeout: 5000 }); await page.waitForTimeout(600); };
+  // FILTER CANCELLATION IS NAVIGATION-BASED SINCE 2026-09-12 (owner: "REMOVE THIS IN THE FILTER
+  // SIMPLE"). The Stop button on Filter-origin results was removed entirely — a Filter search is now
+  // cancelled by leaving /agent (browser back, ☰ menu, تصفية tab). The effect cleanup that runs on
+  // route change aborts the network request and restores Filter state, same as the old Stop button
+  // did. E/F/H-mobile below use browser back as the canonical user path.
+  const cancelViaNav = async () => { await page.goBack({ waitUntil: 'domcontentloaded' }); await page.waitForTimeout(600); };
   const landedCount = async () => {
     const m = [...(await body()).matchAll(/لقينا ([\d,٬،]+) إعلان/g)];
     return m.length ? parseInt(m[m.length - 1][1].replace(/[^\d]/g, ''), 10) : null;
@@ -454,16 +460,16 @@ try {
   const baselineReq = lastSearchBody;
   check('[E] baseline search request was captured (the oracle below depends on it)', baselineReq != null);
 
-  // ---- E: rapid Stop — pressed the instant the search starts. ----
+  // ---- E: rapid cancel — navigate back the instant the search starts (Stop button removed 2026-09-12). ----
   await fillOwnerExample();
   await tap('بحث');
-  const stopVisible = await page.waitForSelector(stopSel, { timeout: 5000 }).catch(() => null);
-  check('[E] Stop control appears while the Filter search is running', !!stopVisible);
-  await tapStop();
-  check('[E] rapid-Stop lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
-  check('[E] rapid-Stop shows no results/partial text', !RESULT_COUNT.test(await body()));
+  await page.waitForTimeout(300); // land on /agent before navigating back — real user cancel timing
+  check('[E] Filter search landed on /agent before cancellation', page.url().includes('/agent'), `url=${page.url()}`);
+  await cancelViaNav();
+  check('[E] rapid-cancel-via-back lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
+  check('[E] rapid-cancel shows no results/partial text', !RESULT_COUNT.test(await body()));
   const postRapidInputs = await visibleInputs();
-  check('[E] rapid-Stop restores city/district/area EXACTLY', JSON.stringify(postRapidInputs) === JSON.stringify(preStopInputs),
+  check('[E] rapid-cancel restores city/district/area EXACTLY', JSON.stringify(postRapidInputs) === JSON.stringify(preStopInputs),
     `pre=${JSON.stringify(preStopInputs)} post=${JSON.stringify(postRapidInputs)}`);
   await submitSearch(); // the sig below must be THIS resubmit's request, never [E]-baseline leftovers
   const rapidResubmitCount = await waitForCount(90000);
@@ -475,10 +481,10 @@ try {
   // What Stop must actually guarantee is that the QUERY survived intact — so the oracle is the
   // serialized search request, compared key-order-insensitively. The count stays only as a
   // liveness check: the resubmit must land real results, whatever today's inventory is.
-  check('[E] resubmitting untouched after rapid-Stop fires the EXACT SAME serialized search request as the uninterrupted baseline',
+  check('[E] resubmitting untouched after rapid-cancel fires the EXACT SAME serialized search request as the uninterrupted baseline',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
-  check('[E] the rapid-Stop resubmit still lands a real result count', Number.isFinite(rapidResubmitCount), `count=${rapidResubmitCount}`);
+  check('[E] the rapid-cancel resubmit still lands a real result count', Number.isFinite(rapidResubmitCount), `count=${rapidResubmitCount}`);
 
   // ---- F: Stop pressed mid-flight (network artificially slowed), and the late response — which
   // resolves AFTER the user is already back on Filter — must never repopulate results or write history.
@@ -492,25 +498,25 @@ try {
   await fillOwnerExample();
   await tap('بحث');
   await page.waitForTimeout(1500); // land inside the artificial delay window — genuinely mid-flight
-  check('[F] the slowed request is confirmed in flight before Stop is pressed', inFlightSeen);
-  await tapStop();
-  check('[F] mid-flight Stop lands back on the Filter home immediately (does not wait out the slow request)',
+  check('[F] the slowed request is confirmed in flight before cancellation', inFlightSeen);
+  await cancelViaNav();
+  check('[F] mid-flight cancel-via-back lands back on the Filter home immediately (does not wait out the slow request)',
     page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   const postMidInputs = await visibleInputs();
-  check('[F] mid-flight Stop restores city/district/area EXACTLY', JSON.stringify(postMidInputs) === JSON.stringify(preStopInputs));
+  check('[F] mid-flight cancel restores city/district/area EXACTLY', JSON.stringify(postMidInputs) === JSON.stringify(preStopInputs));
   // Let the slow response actually land now, well after Stop + navigation.
   await page.waitForTimeout(6000);
-  check('[F] the late response (resolved after Stop) never populated results on the Filter screen',
+  check('[F] the late response (resolved after cancel) never populated results on the Filter screen',
     !RESULT_COUNT.test(await body()));
   check('[F] still on the Filter home after the late response lands (no surprise navigation into results)',
     page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   await page.unroute('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
   await submitSearch();
   const midResubmitCount = await waitForCount(90000);
-  check('[F] resubmitting untouched after a mid-flight Stop still fires the EXACT SAME serialized search request',
+  check('[F] resubmitting untouched after a mid-flight cancel still fires the EXACT SAME serialized search request',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
-  check('[F] the mid-flight-Stop resubmit still lands a real result count', Number.isFinite(midResubmitCount), `count=${midResubmitCount}`);
+  check('[F] the mid-flight-cancel resubmit still lands a real result count', Number.isFinite(midResubmitCount), `count=${midResubmitCount}`);
 
   // ---- G: a CHAT-originated Stop must NOT navigate home — origin-tracking must not over-apply. ----
   // ZERO PAID AI (owner rule 2026-08-29: CI must not call paid DeepSeek unless the test genuinely
@@ -546,22 +552,22 @@ try {
   }
   await page.unroute('**/functions/v1/agent');
 
-  // ---- H: same rapid-Stop + exact-restore proof on MOBILE. ----
+  // ---- H: same rapid-cancel + exact-restore proof on MOBILE (Stop button removed 2026-09-12). ----
   await page.setViewportSize({ width: 390, height: 844 });
   await fillOwnerExample();
   const preStopInputsMobile = await visibleInputs();
   await tap('بحث');
-  const mobStopVisible = await page.waitForSelector(stopSel, { timeout: 5000 }).catch(() => null);
-  check('[H mobile] Stop control appears while the Filter search is running', !!mobStopVisible);
-  await tapStop();
-  check('[H mobile] rapid-Stop lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
-  check('[H mobile] rapid-Stop shows no results/partial text', !RESULT_COUNT.test(await body()));
+  await page.waitForTimeout(300);
+  check('[H mobile] Filter search landed on /agent before cancellation', page.url().includes('/agent'), `url=${page.url()}`);
+  await cancelViaNav();
+  check('[H mobile] rapid-cancel-via-back lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
+  check('[H mobile] rapid-cancel shows no results/partial text', !RESULT_COUNT.test(await body()));
   const postMobileInputs = await visibleInputs();
-  check('[H mobile] rapid-Stop restores city/district/area EXACTLY',
+  check('[H mobile] rapid-cancel restores city/district/area EXACTLY',
     JSON.stringify(postMobileInputs) === JSON.stringify(preStopInputsMobile));
   await submitSearch(); // never inherit [F]/[G] traffic — this window proves the MOBILE resubmit
   const mobResubmitCount = await waitForCount(90000);
-  check('[H mobile] resubmitting untouched after rapid-Stop fires the EXACT SAME serialized search request as baseline',
+  check('[H mobile] resubmitting untouched after rapid-cancel fires the EXACT SAME serialized search request as baseline',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
   // Failed twice in CI (2026-08-24) while the request fired+matched, [E] desktop landed, a direct
