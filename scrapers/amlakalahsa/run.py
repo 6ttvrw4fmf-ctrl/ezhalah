@@ -192,6 +192,11 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     area = normalize.to_int(acf.get("pw-squ"))
     price = normalize.to_int(acf.get("pw-prc"))
     street_width = _first_street_width(acf.get("pw-str"))
+    # land-num is a plain plot/parcel number (رقم القطعة); the one observed non-clean value on this
+    # source is a sub-lot suffix ("388_1" = parcel 388, sub-unit 1), not a multi-measurement compound
+    # like pw-str's — the first number IS the parcel number, never a concatenation risk here.
+    _land_num = re.search(r"\d+", str(acf.get("land-num") or ""))
+    land_number = _land_num.group() if _land_num else None
 
     district_ar = (acf.get("pw-dis") or "").strip() or None
 
@@ -241,6 +246,12 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         "city_id": city_id,
         "region_id": region_id,
         "source_capture": {k: v for k, v in acf.items()},
+        # street_width/parcel_number keys + omit-when-empty convention match every sibling platform
+        # (raghdan, aqarcity, mizlaj, ...) — same ADDL_FIELDS labels the frontend already renders.
+        "additional_info": {k: v for k, v in {
+            "street_width": street_width,
+            "parcel_number": land_number,
+        }.items() if v not in (None, "", [], {})} or None,
     }
     return row, category.lower()
 

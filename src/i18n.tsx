@@ -1124,7 +1124,6 @@ const AR: Record<string, string> = {
   // Drawer / sidebar
   'New Chat': 'محادثة جديدة',
   'Search complete': 'اكتمل البحث',
-  'No further truthful narrowing question exists for this scope — these are all the genuine matches.': 'ما فيه سؤال إضافي موثوق يضيّق هذا النطاق أكثر — هذي كل النتائج المطابقة فعلاً.',
   'Start a new chat to search again': 'ابدأ محادثة جديدة للبحث من جديد',
   // Completed-search composer (owner request 2026-09-05): the composer keeps its normal look —
   // no separate card — the input goes inert with this as its placeholder, and the send arrow

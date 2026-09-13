@@ -1722,7 +1722,6 @@ export default function Agent() {
   // It probes with the SAME rankQuestions call and the SAME carried asked-set the round itself will
   // use, so the offer and the round can never disagree. This is PASSIVE: it renders a button and
   // nothing else — it never opens the overlay. The interview stays a manual tap (owner 2026-08-19).
-  const noMoreSaidRef = useRef<Record<string, true>>({});
   // ONE ASSESSMENT, TWO CALLERS (owner 2026-09-04). Walks the scope tiers exactly as presentGuided
   // does, then ranks the advanced pool with the SAME carried asked-set the round will use, so the
   // offer button, the automatic round continuation and the round itself can never disagree.
@@ -1771,14 +1770,10 @@ export default function Agent() {
     // interview the user already opened lives in finishGuided (owner 2026-09-04) — this effect
     // never opens the overlay on a plain search turn (owner 2026-08-19 stands).
     void assessNarrowing(q, asked).then((verdict) => {
+      // owner 2026-09-12: reverses the 2026-09-04 decision to narrate "nothing left" as a chat
+      // bubble — too dense/confusing in practice. Silent now: afCanNarrow alone still correctly
+      // hides «تحديد أكثر» when exhausted (line ~3418); «عرض المزيد» is untouched by this verdict.
       setAfCanNarrow((c) => ({ ...c, [m.id]: verdict === 'yes' }));
-      // A MEASURED "nothing left" after an AF round is said out loud, not silently swallowed
-      // (owner 2026-09-04): the chat stays open — the user may still refine by typing — and the
-      // results shown are the genuine set. ≤ INTERVIEW_STOP_AT is handled in finishGuided.
-      if (verdict === 'no' && afCarryRef.current && !noMoreSaidRef.current[m.id]) {
-        noMoreSaidRef.current[m.id] = true;
-        setMsgs((mm) => [...mm, { id: uid(), role: 'agent', text: t('No further truthful narrowing question exists for this scope — these are all the genuine matches.'), typing: true }]);
-      }
     });
   }, [lastResultsMsg, guidedPills]);
 
