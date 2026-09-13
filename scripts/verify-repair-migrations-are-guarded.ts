@@ -212,6 +212,23 @@ const WAIVED: Record<string, string> = {
   '20260913063214_amlakalahsa_backfill_soum_price_sentinel.sql':
     'watched by its companion 20260913063423_amlakalahsa_soum_price_backfill_gets_a_detector.sql, '
     + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_soum_price_regressed()',
+  // Amlakalahsa الجفر "ضاحية هجر" district merge (owner instruction 2026-09-13): 9 numbered
+  // sub-division values collapsed to one match district "الضاحية" (32 rows). Two repair migrations
+  // for the same change (base table, then the search-index backfill needed because
+  // listing_native_location_v1 is a MATERIALIZED view and search_listings_ar is a synced copy, not
+  // a live passthrough). Companion lands ~2 migrations later and creates + rosters + self-verifies
+  // mon_detect_amlakalahsa_jafr_dahiya_merge_regressed(), which checks BOTH the base table and the
+  // search index independently, plus a population floor — see the companion's own header for the
+  // three-check shape. scrapers/amlakalahsa/run.py was also fixed to apply this same collapse on
+  // every future scrape, so a regression here means that scraper fix itself was reverted, not just
+  // a one-off sync gap. Open the companion to verify this reason rather than taking it on trust.
+  '20260913080703_amlakalahsa_jafr_dahiya_districts_merged_to_one.sql':
+    'watched by its companion 20260913082310_amlakalahsa_jafr_dahiya_merge_gets_a_detector.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_jafr_dahiya_merge_regressed()',
+  '20260913081200_amlakalahsa_jafr_dahiya_search_index_backfill.sql':
+    'same merge as 20260913080703 (search_listings_ar backfill, needed because it is a synced copy '
+    + 'not a live passthrough) — watched by the same companion, '
+    + '20260913082310_amlakalahsa_jafr_dahiya_merge_gets_a_detector.sql',
 };
 
 // Enforcement starts here — the day this rule landed.
