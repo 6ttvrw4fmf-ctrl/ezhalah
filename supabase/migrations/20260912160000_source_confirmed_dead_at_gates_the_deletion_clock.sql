@@ -144,7 +144,22 @@ begin
    where d.listing_id = r.id and r.active is false and r.source_confirmed_dead_at is null;
   get diagnostics n_this = row_count; n_stamped := n_stamped + n_this;
 
-  -- ── 3. Every platform: the shared oracle ledger (verdict='gone' is an affirmative negative) ──
+  -- ── 3. Every platform: the shared oracle ledger (a GONE verdict is an affirmative negative) ──
+  --
+  -- TWO THINGS THIS JOIN GETS RIGHT, both found by verifying against production rather than by
+  -- reading the schema (2026-09-13, the first real mustqr run after PR #2391):
+  --
+  --  1. THE VERDICT IS STORED UPPERCASE. db.prune_unseen() lowercases the oracle's reply for its
+  --     own comparison but writes `"verdict": "GONE"` into the ledger. Matching 'gone' matched
+  --     ZERO of the 4,541 GONE rows — a backfill that silently did nothing while reporting success.
+  --  2. HALF THE LEDGER HAS NO listing_id. prune_unseen writes evidence keyed by ad_number
+  --     (2,157 of 4,541 GONE rows carry ad_number and a NULL listing_id), because at that point it
+  --     is working from the set of ad_numbers it just probed. Joining on listing_id alone silently
+  --     skipped every oracle-guarded platform — mustqr, raghdan, sanadak, aqargate, jurash —
+  --     i.e. exactly the platforms whose evidence is the whole reason this ledger exists.
+  --
+  -- Matching on EITHER key is correct: both identify the same row, and the evidence is real
+  -- regardless of which column the writer happened to fill in.
   for t in
     select tablename from pg_tables
      where schemaname = 'public' and tablename ~ '_(residential|commercial)_listings$'
@@ -153,11 +168,12 @@ begin
     execute format($f$
       update public.%I r
          set source_confirmed_dead_at = p.first_gone
-        from (select listing_id, min(probed_at) as first_gone
+        from (select listing_id, ad_number, min(probed_at) as first_gone
                 from public.ops_stale_inactivation_probe
-               where verdict = 'gone' and source_table = %L
-               group by listing_id) p
-       where p.listing_id = r.id and r.active is false and r.source_confirmed_dead_at is null
+               where upper(verdict) = 'GONE' and source_table = %L
+               group by listing_id, ad_number) p
+       where (p.listing_id = r.id or (p.listing_id is null and p.ad_number = r.ad_number))
+         and r.active is false and r.source_confirmed_dead_at is null
     $f$, t, t);
     get diagnostics n_this = row_count; n_stamped := n_stamped + n_this;
   end loop;
@@ -205,8 +221,10 @@ begin
              count(*) filter (
                where r.source_confirmed_dead_at is not null
                  and not exists (select 1 from public.ops_stale_inactivation_probe p
-                                  where p.source_table = %L and p.listing_id = r.id
-                                    and p.verdict = 'gone')
+                                  where p.source_table = %L
+                                    and (p.listing_id = r.id
+                                         or (p.listing_id is null and p.ad_number = r.ad_number))
+                                    and upper(p.verdict) = 'GONE')
                  and not exists (select 1 from public.gathern_liveness_detail g
                                   where %L = 'gathern_residential_listings'
                                     and g.listing_id = r.id and g.http_status in (404,410))
