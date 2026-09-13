@@ -16,10 +16,10 @@
 | 5 | 🎯 Senior Advanced Filter + Trending Data Integrity Engineer | `trig_01FmaKmMVJgT5VHFj8Mk9q13` | 04:00 | 11:00 | claude-opus-5 | Advanced Filter + Trending Cities/Districts + the data integrity behind every AF predicate, end to end |
 | 6 | 👣 Daily Journey & Persistence Engineer | `trig_011mQL1FvMQiS8bwx2fp76QN` | 03:00 | 10:00 | claude-opus-5 | Real-user journeys: state, navigation, sessions, sidebar/history/Favorites, cross-browser/device — never search matching itself |
 | 7 | 🧵 Daily Systems Seam Engineer | `trig_01T5yuLGCj3yDqPDsVrPjNmd` | 03:30 | 10:30 | claude-opus-5 | Cross-system integration integrity: cron→detector→alert, migration→mirror→prod, deploy-claim-vs-served-bundle, RLS, orphaned guarantees |
-| 8 | 🔴 Daily REGRESSION HUNTER | _owner to create_ | 07:00 | 14:00 | claude-opus-5 | **The GAPS BETWEEN owned surfaces**, and fixes that did not hold. Adversarial, cross-boundary, assumes every previous fix is incomplete |
-| 9 | 🔬 Daily PRODUCTION RED TEAM | _owner to create_ | 08:00 | 15:00 | claude-opus-5 | **The AGREEMENT between layers on production**: action = request = RPC params = DB truth = displayed count = returned ids = card evidence. Distrusts every harness |
-| 10 | 🧱 Daily BUG PREVENTION & BARRIER | _owner to create_ | 06:30 | 13:30 | claude-opus-5 | **The VERIFICATION APPARATUS itself**, never the product: barriers that assert the bug, checks with no mutation proof, tests that pass while production is wrong |
-| 11 | ♻️ Daily LISTING LIFECYCLE | _owner to create_ | 07:30 | 14:30 | claude-opus-5 | **A listing AFTER its source confirms it is gone**: inactive → unsearchable → 30 days → deleted, and every way a dead listing can still be seen, counted or resurrected |
+| 8 | 🔴 Daily REGRESSION HUNTER | `trig_01NY1bBuxRjGU1kSPhxVLH5Y` | 07:00 | 14:00 | claude-opus-5 | **The GAPS BETWEEN owned surfaces**, and fixes that did not hold. Adversarial, cross-boundary, assumes every previous fix is incomplete |
+| 9 | 🔬 Daily PRODUCTION RED TEAM | `trig_01SDtQHmbrh7S3AKf6HqiLrC` | 08:00 | 15:00 | claude-opus-5 | **The AGREEMENT between layers on production**: action = request = RPC params = DB truth = displayed count = returned ids = card evidence. Distrusts every harness |
+| 10 | 🧱 Daily BUG PREVENTION & BARRIER | `trig_01LiyGWGdM4c5VdobH2iMbvy` | 06:30 | 13:30 | claude-opus-5 | **The VERIFICATION APPARATUS itself**, never the product: barriers that assert the bug, checks with no mutation proof, tests that pass while production is wrong |
+| 11 | ♻️ Daily LISTING LIFECYCLE | `trig_019YLRvpvG7Z2XjoYvZYiRYi` | 07:30 | 14:30 | claude-opus-5 | **A listing AFTER its source confirms it is gone**: inactive → unsearchable → 30 days → deleted, and every way a dead listing can still be seen, counted or resurrected |
 
 **Schedule note (2026-08-23):** routine #5 runs at the SAME 04:00 Arizona slot as routine #1
 (owner's explicit instruction), not staggered 30 minutes like #1–#4 are from each other. It does
