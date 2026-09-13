@@ -28,6 +28,12 @@ const check = (label: string, ok: boolean, detail = '') => {
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${!ok && detail ? ` — ${detail}` : ''}`);
 };
+// MUTATION PROOF (repo convention — see verify-new-barriers-are-mutation-proven.ts): `caught` must
+// be the result of applying THIS barrier's own predicate to a deliberately broken input, never a
+// bare literal — a `mustCatch('x', true)` that can never fail is refused by that meta-barrier.
+const mustCatch = (what: string, caught: boolean) =>
+  check(`(mutation) catches ${what}`, caught,
+    'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
 
 // ── 1. Source-shape: both call sites actually read districtCanonical first ────────────────────────
 const searchSrc = readFileSync(new URL('../src/data/search.ts', import.meta.url), 'utf8');
@@ -76,9 +82,12 @@ const picked = ['حي هجر الخامس'];
 
 check('2. canonical set: the real listing matches the district the user picked',
   matches({ district: raw, districtCanonical: canonical }, picked) === true);
-check('2. (mutation) canonical ABSENT reproduces the live bug — raw text alone does not match',
+// Reverting the fix looks exactly like these two inputs (the field simply didn't exist, or a
+// platform resolves to '' when unmatched) — if either ever matches again, the fallback has quietly
+// started masking real index↔raw drift instead of proving the bug is gone.
+mustCatch('the live bug (districtCanonical ABSENT — every listing before this fix existed)',
   matches({ district: raw }, picked) === false);
-check('2. (mutation) canonical EMPTY STRING also falls back to raw (still reproduces the bug)',
+mustCatch('the live bug with districtCanonical as an EMPTY STRING (falls back to raw the same way)',
   matches({ district: raw, districtCanonical: '' }, picked) === false);
 check('2. sanity: a genuinely different canonical district is still correctly excluded',
   matches({ district: raw, districtCanonical: 'حي النرجس' }, picked) === false);
