@@ -166,7 +166,12 @@ check('index.tsx placeholder text is "Which city?" (renders أي مدينة؟), 
 // query.dealCombined, else query.deal) instead of query.deal directly, so combined mode scopes
 // Trending/pools to the same Buy∪Rent(any period) set the backend's p_deal IS NULL branch does —
 // see verify-buy-rent-combined-effdeal-threading.ts for that contract specifically.
-check('onFocus with empty text shows the deal+period+category-scoped Top 6 (topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6))', /onFocus=\{\(\) => \{[\s\S]{0,1800}?topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)/.test(indexSrc));
+// Distance ceiling raised 1800→3000 chars 2026-09-13 (owner iOS keyboard fix): a legitimate iOS
+// scrollIntoView block was added at the top of the same onFocus handler, and the arbitrary
+// character window here — set when the handler was shorter — was preventing genuine, unrelated
+// commentary from ever growing again. The ASSERTION is unchanged (the Top-6 call must still exist
+// inside onFocus, with the exact args); only the window it may live within is wider.
+check('onFocus with empty text shows the deal+period+category-scoped Top 6 (topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6))', /onFocus=\{\(\) => \{[\s\S]{0,3000}?topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)/.test(indexSrc));
 check(
   'REGRESSION (found live in testing): the Top-6-on-focus promise callback re-checks cityTextRef at resolution time before overwriting citySuggestions — without this guard, a keystroke typed right after focus can have its correctly-filtered results silently clobbered back to the stale Top 6 by the async callback resolving a moment later',
   /if \(!cityTextRef\.current\) setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);/.test(indexSrc) && /cityTextRef\.current = v;/.test(indexSrc),
