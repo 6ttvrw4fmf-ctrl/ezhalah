@@ -530,8 +530,6 @@ const ALOBID_LOGO = require('../../assets/images/alobid.png');
 const ABWBNA_LOGO = require('../../assets/images/abwbna.png');
 const REMAL_LOGO = require('../../assets/images/remal.png');
 const AMAALL_LOGO = require('../../assets/images/amaall.png');
-// Generic placeholder badge (no real logo supplied yet) — owner will drop the real amlakalahsa.com
-// logo into assets/images/amlakalahsa.png, replacing this file in place; no code change needed then.
 const AMLAKALAHSA_LOGO = require('../../assets/images/amlakalahsa.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
 const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
