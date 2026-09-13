@@ -136,17 +136,27 @@ check(!/^[^#\n]*\bpython\b[^\n]*scrapers\.aqar\.cleanup/m.test(shCode),
 
 // The engine's own irreducible guarantees. If any of these disappear, the sanctioned path stops
 // being safe and this guard's allowlist entry stops being justified.
+//
+// Extracted as a PURE function so it can be fed a deliberately broken engine and watched to fail.
+// Until 2026-09-13 these were five inline regexes: correct, but never once watched to go red, so a
+// typo that made one of them unfalsifiable would have read as five guarantees holding. That is the
+// grandfather-list backlog this routine exists to drain (BARRIER_ENGINEER.md PART 3, R1).
+export function engineGuaranteeProblems(src: string): string[] {
+  const REQUIRED: [RegExp, string][] = [
+    [/def _probe\(/, 're-fetches the source before deleting (_probe)'],
+    [/cleanup_deletion_log/, 'writes a per-row audit trail'],
+    [/_platform_health_ok/, 'gates on platform health'],
+    [/_FREEZE_MAX_INCONCLUSIVE_RATE/, 'freezes on inconclusive source health'],
+    [/max_delete_per_run/, 'caps the batch'],
+  ];
+  return REQUIRED.filter(([re]) => !re.test(src)).map(([, what]) => `the engine no longer ${what}`);
+}
+
 const engine = readFileSync('scrapers/common/cleanup.py', 'utf8');
-check(/def _probe\(/.test(engine),
-  'the engine still re-fetches the source before deleting (_probe)');
-check(/cleanup_deletion_log/.test(engine),
-  'the engine still writes a per-row audit trail');
-check(/_platform_health_ok/.test(engine),
-  'the engine still gates on platform health');
-check(/_FREEZE_MAX_INCONCLUSIVE_RATE/.test(engine),
-  'the engine still freezes on inconclusive source health');
-check(/max_delete_per_run/.test(engine),
-  'the engine still caps the batch');
+const engineProblems = engineGuaranteeProblems(engine);
+check(engineProblems.length === 0,
+  'the engine keeps all five irreducible guarantees (probe · ledger · health · freeze · cap)');
+for (const p of engineProblems) console.error(`     ${p}`);
 
 // ── Barrier 14: the runtime half. ───────────────────────────────────────────────────────────────
 // Everything above is static: it proves no TRACKED FILE hard-deletes a listings table outside the
@@ -161,26 +171,41 @@ const barrier14 = readdirSync(MIGRATIONS_DIR)
   .map((f) => ({ f, sql: readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8') }))
   .find(({ sql }) => /create\s+trigger\s+trg_archive_hard_delete/i.test(sql));
 
-check(!!barrier14, 'a migration arms trg_archive_hard_delete on the listings tables');
-if (barrier14) {
-  const sql = barrier14.sql;
+// Extracted as a PURE function, same reason as engineGuaranteeProblems above: five inline regexes
+// over a migration nobody had ever watched this check reject. A `null` migration — none found —
+// is a PROBLEM, never a skip: "the barrier-14 migration is absent" must not read as "barrier 14 is
+// fine", which is the shape an `if (barrier14)` guard silently produces.
+export function barrier14Problems(sql: string | null): string[] {
+  if (sql === null) return ['no migration arms trg_archive_hard_delete on the listings tables'];
+  const out: string[] = [];
   // The arming must be a PATTERN LOOP over the listings tables, never a hand-listed set: a new
   // platform's table would otherwise ship unaudited, and nothing would say so.
-  check(/table_name\s+like\s+'%\\_residential\\_listings'/i.test(sql)
-        && /table_name\s+like\s+'%\\_commercial\\_listings'/i.test(sql),
-    '  …over every *_{residential,commercial}_listings table, by pattern, not a hardcoded list');
-  check(/create\s+or\s+replace\s+function\s+public\.mon_detect_unledgered_hard_delete/i.test(sql),
-    '  …and defines mon_detect_unledgered_hard_delete()');
-  check(/cleanup_deletion_log/.test(sql) && /purged_listings_archive/.test(sql),
-    '  …which compares what vanished against the engine ledger');
+  if (!(/table_name\s+like\s+'%\\_residential\\_listings'/i.test(sql)
+     && /table_name\s+like\s+'%\\_commercial\\_listings'/i.test(sql))) {
+    out.push('the trigger is not armed over every *_{residential,commercial}_listings table by pattern');
+  }
+  if (!/create\s+or\s+replace\s+function\s+public\.mon_detect_unledgered_hard_delete/i.test(sql)) {
+    out.push('mon_detect_unledgered_hard_delete() is not defined');
+  }
+  if (!(/cleanup_deletion_log/.test(sql) && /purged_listings_archive/.test(sql))) {
+    out.push('the detector does not compare what vanished against the engine ledger');
+  }
   // The detector must never key on deletion_reason: a bypass path can set that GUC as easily as it
   // can skip the ledger, so trusting it would let the caught actor silence its own alarm.
   const detectorBody = sql.slice(sql.indexOf('mon_detect_unledgered_hard_delete'));
-  check(!/deletion_reason\s*(=|<>|!=|like|in\b)/i.test(detectorBody),
-    '  …and does NOT trust deletion_reason, which the deleter itself writes');
-  check(/pg_get_functiondef/i.test(sql) && /mon_run_all_detectors/i.test(sql),
-    '  …and is wired into the detector roster by a guarded needle-edit');
+  if (/deletion_reason\s*(=|<>|!=|like|in\b)/i.test(detectorBody)) {
+    out.push('the detector TRUSTS deletion_reason, which the deleter itself writes');
+  }
+  if (!(/pg_get_functiondef/i.test(sql) && /mon_run_all_detectors/i.test(sql))) {
+    out.push('the detector is not wired into the roster by a guarded needle-edit');
+  }
+  return out;
 }
+
+const b14Problems = barrier14Problems(barrier14 ? barrier14.sql : null);
+check(b14Problems.length === 0,
+  'barrier 14 is armed by pattern, defined, ledger-comparing, unspoofable and rostered');
+for (const p of b14Problems) console.error(`     ${p}`);
 
 // ── Self-test: the comment-stripping must not become a way through. ─────────────────────────────
 // Both directions, because only one of them is obvious. If codeOnly() ever over-strips, the guard
@@ -188,15 +213,67 @@ if (barrier14) {
 const REAL = 'delete from aqar_residential_listings where id = 1;';
 const hits = (path: string, body: string) =>
   CODE_PATTERNS.some((re) => re.test(codeOnly(path, body)));
-check(hits('x.sql', REAL), 'self-test: a real SQL delete is still caught');
-check(hits('x.sql', `-- explaining ${REAL}\n${REAL}`),
-  '  …including one sitting under a comment that quotes it');
-check(hits('x.py', `client.table("aqar_residential_listings").delete().execute()`),
-  '  …and a client-side .delete() in python');
+
+// ── MUTATION PROOFS ─────────────────────────────────────────────────────────────────────────────
+// Every predicate this guard owns is fed a deliberately broken world and watched to FAIL. Before
+// 2026-09-13 this file was on scripts/mutation-proof-grandfathered.txt: fifteen assertions over the
+// deletion path — the single most unrecoverable operation in this system — and not one of them had
+// ever been observed going red. The engine and barrier-14 checks were inline regexes, so a typo that
+// made one unfalsifiable would have read as a guarantee holding.
+const mustCatch = (label: string, caught: boolean) => {
+  console.log(`  ${caught ? '✓' : '❌'} MUTATION caught: ${label}`);
+  if (!caught) failed = true;
+};
+
+// The deleter-detection predicate, both directions.
+mustCatch('a real SQL delete against a source listings table',
+  hits('x.sql', REAL));
+mustCatch('a real delete sitting on the line under a comment that quotes it',
+  hits('x.sql', `-- explaining ${REAL}\n${REAL}`));
+mustCatch('a client-side .delete() in python',
+  hits('x.py', 'client.table("aqar_residential_listings").delete().execute()'));
+
+// The engine's five guarantees, removed ONE AT A TIME against the REAL engine source — so each
+// regex is proven to be load-bearing individually, not merely as a group where one survivor hides
+// four dead ones.
+for (const [needle, what] of [
+  ['def _probe(', 'the source re-fetch (_probe)'],
+  ['cleanup_deletion_log', 'the per-row audit trail'],
+  ['_platform_health_ok', 'the platform-health gate'],
+  ['_FREEZE_MAX_INCONCLUSIVE_RATE', 'the inconclusive-health freeze'],
+  ['max_delete_per_run', 'the per-run batch cap'],
+] as const) {
+  mustCatch(`the engine losing ${what}`,
+    engineGuaranteeProblems(engine.split(needle).join('/* REMOVED */')).length === 1);
+}
+
+// Barrier 14, each limb independently.
+mustCatch('the barrier-14 migration being ABSENT (must not read as "barrier 14 is fine")',
+  barrier14Problems(null).length === 1);
+if (barrier14) {
+  const sql = barrier14.sql;
+  mustCatch('the trigger armed from a HARDCODED table list instead of by pattern',
+    barrier14Problems(sql.replace(/table_name\s+like\s+'%\\_residential\\_listings'/i,
+      "table_name = 'aqar_residential_listings'")).length === 1);
+  mustCatch('the detector no longer comparing against purged_listings_archive',
+    barrier14Problems(sql.split('purged_listings_archive').join('some_other_table')).length === 1);
+  mustCatch('the detector TRUSTING deletion_reason, which the deleter itself writes',
+    barrier14Problems(sql.replace(/mon_detect_unledgered_hard_delete/,
+      "mon_detect_unledgered_hard_delete /* */ where deletion_reason = 'x' --")).length >= 1);
+  // Negative control: the REAL migration is not flagged. Without this, an over-broad repair to any
+  // limb above would pass every mutation and quietly fail every real run.
+  check(barrier14Problems(sql).length === 0,
+    'self-test: the SHIPPED barrier-14 migration is NOT flagged (the predicate is not vacuous)');
+}
+
+// Negative controls for the deleter predicate — a guard that is red for everything is as useless as
+// one that is green for everything, and this is what catches an over-broad repair to codeOnly().
 check(!hits('x.sql', `-- a bypass could run \`${REAL}\` and nothing would see it`),
-  '  …while the same statement inside a comment is not a violation');
+  'self-test: the same statement inside a comment is NOT a violation');
 check(!hits('x.md', `A bypass could run \`${REAL}\`.`),
   '  …nor is documenting it in markdown');
+check(engineGuaranteeProblems(engine).length === 0,
+  '  …and the REAL engine source is not flagged (not vacuously red)');
 
 console.log(failed
   ? '\n❌ verify-no-unguarded-deleter: failed.'

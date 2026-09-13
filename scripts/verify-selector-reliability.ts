@@ -38,7 +38,10 @@ check('districtOnPress cancels the close timer and REFOCUSES the input', /const 
 
 // ── P2: focusing a field that already holds text populates its matches from the cache — a tap on a
 //    prefilled field (returning from /agent, or mid-typing refocus) must never open an empty box. ──
-check('city onFocus with existing text runs the match immediately (cohort-typed)', /onFocus=\{\(\) => \{[\s\S]{0,2400}?\} else \{[\s\S]{0,700}?if \(!isLatinOnlyInput\(query\.location\)\) \{\s*setCitySuggestions\(matchCitiesByText\(effDeal, rentPeriodTok, effCategory, query\.location, cohortTypes, cityAfParams\)\);/.test(indexSrc));
+// Distance ceiling raised 2400→3600 2026-09-13 for the same reason as verify-city-field.ts's own
+// bump: the legitimate iOS scrollIntoView block added at the top of this onFocus handler took the
+// distance to the `} else {` branch past the arbitrary window. Assertion unchanged.
+check('city onFocus with existing text runs the match immediately (cohort-typed)', /onFocus=\{\(\) => \{[\s\S]{0,3600}?\} else \{[\s\S]{0,700}?if \(!isLatinOnlyInput\(query\.location\)\) \{\s*setCitySuggestions\(matchCitiesByText\(effDeal, rentPeriodTok, effCategory, query\.location, cohortTypes, cityAfParams\)\);/.test(indexSrc));
 check('district onFocus with existing text runs the match immediately (cohort-typed)', /\} else if \(!isLatinOnlyInput\(districtTextRef\.current\)\) \{[\s\S]{0,300}?setDistrictSuggestions\(matchDistrictsByCityId\(citySelected\.cityId, effDeal, effCategory, rentPeriodTok, districtTextRef\.current, cohortTypes, cityTableScope\)\);/.test(indexSrc));
 
 // ── P1 + zero-states A/C/D/E/F/H: the dropdown gates open on loading/error/empty too — an empty

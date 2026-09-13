@@ -325,6 +325,76 @@ def fetch_neighborhoods(s: cc.Session, jwt: str) -> dict[str, str]:
     return {row["name"]: row.get("region") for row in r.json() if row.get("name")}
 
 
+def recheck_deactivated(s: cc.Session, jwt: str, limit: Optional[int] = None) -> dict[str, Any]:
+    """READ-ONLY re-adjudication of the rows this platform retired on crawl ABSENCE alone.
+
+    WHY. Before the oracle above was wired (2026-09-12), `db.prune_unseen()` ran here with no
+    `verify_gone`, so three consecutive crawl misses deactivated a listing on absence — 238 rows,
+    every one at missing_count = 3, not one of them resting on an answer from the source. They carry
+    a standing P1 `unknown_treated_as_dead` (alert_event 1488, open since 2026-09-05) whose own
+    prescribed action is exactly this: *re-probe the affected rows by DIRECT fetch and restore every
+    one the source still serves.* That action had no entrypoint; this is it.
+
+    WHY IT ONLY REPORTS. Those 238 are honestly UNKNOWN — LISTING_LIVENESS.md §1 forbids reading
+    absence as death, and DELETION_SAFETY.md §1 forbids reading an inconclusive verdict as
+    permission in EITHER direction, restoration included. So this writes nothing at all: no
+    `active`, no `missing_count`, no `last_verified_alive_at`, no probe row. It turns UNKNOWN into a
+    MEASURED verdict and hands the numbers to a human. Restoring what it finds live is a separate,
+    evidence-backed decision taken on this report.
+
+    THE DECISION IS NOT RE-IMPLEMENTED. Every verdict comes from `_verify_gone()` — the same
+    function the removal path calls, canary gate and all — so this report cannot be kinder or
+    harsher than the oracle that actually retires rows. A second copy of the decision would be a
+    second chance to get it wrong.
+
+    A FAILED FETCH IS NOT AN EMPTY ANSWER. supabase-js/py returns data=None on a failed read, and
+    `data or []` would render "we could not read the cohort" as "there is nothing to re-check".
+    A read that did not answer raises instead.
+
+    Run it via `.github/workflows/mustqr-probe.yml` (mode: recheck-dead), which has the egress the
+    cloud-routine sandbox does not.
+    """
+    client = db.sb()
+    cohort: list[dict] = []
+    for tbl in ("mustqr_residential_listings", "mustqr_commercial_listings"):
+        q = (client.table(tbl)
+             .select("id,ad_number,missing_count,deactivated_at,last_seen_at")
+             .eq("active", False)
+             .order("deactivated_at", desc=True))
+        if limit:
+            q = q.limit(limit)
+        data = getattr(q.execute(), "data", None)
+        if data is None:
+            raise RuntimeError(f"{tbl}: the inactive cohort could not be READ — "
+                               "that is UNKNOWN about our read, never an empty cohort")
+        cohort += [{**row, "table": tbl} for row in data]
+
+    # Canary pool: ACTIVE rows, which the CRAWL writes — never last_verified_alive_at, the
+    # self-referential pool that deadlocked gathern for five days (ops_incident #168). mustqr has
+    # never carried that column anyway, which is the whole reason this cohort exists.
+    canaries: list[str] = []
+    for tbl in ("mustqr_residential_listings", "mustqr_commercial_listings"):
+        data = getattr(client.table(tbl).select("ad_number").eq("active", True)
+                       .limit(3).execute(), "data", None)
+        if data is None:
+            raise RuntimeError(f"{tbl}: the canary pool could not be READ")
+        canaries += [_pid(r["ad_number"]) for r in data if r.get("ad_number")]
+    set_liveness_oracle(s, jwt, canaries[:3])
+
+    tally = {"gone": 0, "live": 0, "unknown": 0}
+    restore_candidates: list[dict] = []
+    for row in cohort:
+        verdict, reason = _verify_gone(row["ad_number"])
+        tally[verdict] = tally.get(verdict, 0) + 1
+        if verdict == "live":
+            restore_candidates.append({"table": row["table"], "id": row["id"],
+                                       "ad_number": row["ad_number"], "why": reason})
+
+    canary_ok, canary_why = _canary_ok()
+    return {"cohort": len(cohort), "canary_ok": canary_ok, "canary_why": canary_why,
+            **tally, "restore_candidates": restore_candidates}
+
+
 def probe_status_values(s: cc.Session, jwt: str) -> dict[str, int]:
     """Diagnostic (2026-08-10): the real fetch_page() filters on status=eq.متاح ('available') — when
     that returns 0 rows twice in a row (2026-08-10 04:22 and 12:13, both with a working JWT and a
@@ -726,6 +796,12 @@ def main() -> int:
     ap.add_argument("--probe-column-singles", action="store_true",
                      help="read-only: test every _PROPERTIES_COLUMNS column individually for the "
                           "definitive restricted-column list — see probe_column_singles() docstring")
+    ap.add_argument("--recheck-dead", action="store_true",
+                     help="read-only: re-adjudicate the rows retired on crawl ABSENCE alone through "
+                          "the real _verify_gone oracle and REPORT — writes nothing at all "
+                          "— see recheck_deactivated() docstring")
+    ap.add_argument("--recheck-limit", type=int, default=None,
+                     help="cap --recheck-dead to the N most recently deactivated rows per table")
     args = ap.parse_args()
 
     s = session()
@@ -751,6 +827,19 @@ def main() -> int:
     if args.probe_column_singles:
         results = probe_column_singles(s, jwt)
         return 0 if all(v == "OK" for v in results.values()) else 1
+
+    if args.recheck_dead:
+        rep = recheck_deactivated(s, jwt, limit=args.recheck_limit)
+        print(f"Mustqr recheck-dead: cohort={rep['cohort']} "
+              f"gone={rep['gone']} live={rep['live']} unknown={rep['unknown']} "
+              f"| canary_ok={rep['canary_ok']} ({rep['canary_why']})")
+        for c in rep["restore_candidates"]:
+            print(f"  RESTORE CANDIDATE {c['table']} id={c['id']} {c['ad_number']}: {c['why']}")
+        print("  (read-only: nothing was written — restoring is a separate, evidence-backed step)")
+        # A run whose canary never answered has measured nothing: every verdict in it is 'unknown'
+        # by construction, and reporting that as a clean adjudication is the failure this whole
+        # cohort exists because of.
+        return 0 if rep["canary_ok"] else 1
 
     n_to_region = fetch_neighborhoods(s, jwt)
     print(f"  neighborhoods: {len(n_to_region)} mapped")
