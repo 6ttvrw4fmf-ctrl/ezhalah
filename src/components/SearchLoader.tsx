@@ -45,7 +45,7 @@ import {
 import { fetchActivePlatformNames } from '@/data/loaderActivePlatforms';
 import { fetchLoaderScaleStats, type LoaderScaleStats } from '@/data/loaderScaleStats';
 import { PILL_STAGGER, highlightStepMs } from '@/lib/searchLoaderTiming';
-import { buildSearchLoaderTitles } from '@/lib/searchLoaderTitles';
+import { buildSearchLoaderTitles, readingDurationMs } from '@/lib/searchLoaderTitles';
 import type { SearchQuery } from '@/data/search';
 import { grouped } from '@/data/search';
 
@@ -68,7 +68,10 @@ const SEARCH_TITLES = [
   'Reviewing sites and prices…',
   'Preparing the results…',
 ] as const;
-const TITLE_ROTATE_MS = 2400;
+// Per-line rotation duration is now reading-pace proportional — see readingDurationMs() in
+// lib/searchLoaderTitles.ts (owner 2026-09-12: "make it all at the same speed"). The old fixed
+// TITLE_ROTATE_MS=2400 constant is gone; readingDurationMs('نطابق الفلاتر') lands close to it, so
+// the short lines don't perceptibly change pace — only the long live-number lines slow down.
 
 // Pill choreography — deliberately calm (owner v4: slower, readable, premium; never "flashed and
 // disappeared"), and since 2026-09-06 long enough that EVERY platform is both revealed and
@@ -213,14 +216,34 @@ function PhaseTitle({
     checking: scaleStats ? t('Checking more than {count} properties…', { count: grouped(scaleStats.listingCount) }) : t(SEARCH_TITLES[1]),
     matchFilters: t(SEARCH_TITLES[2]),
     reviewing: platformCount > 0 ? t('Reviewing {count} real-estate platforms…', { count: platformCount }) : t(SEARCH_TITLES[3]),
-    coverage: scaleStats ? t('Covering more than {cities} cities and {districts} districts…', { cities: grouped(scaleStats.cityCount), districts: grouped(scaleStats.districtCount) }) : null,
+    // ONE combined number, not two (owner 2026-09-12: "make a combination of city and district...
+    // we cover almost this many places around Saudi Arabia... the number looks big"). cityCount +
+    // districtCount is still an honest count — every city and every district loader_scale_stats_ar()
+    // counted is a real distinct place a real search can land in; summing them just tells the story
+    // as one bigger number instead of two smaller ones.
+    coverage: scaleStats ? t('Covering more than {count} places across Saudi Arabia…', { count: grouped(scaleStats.cityCount + scaleStats.districtCount) }) : null,
     preparing: t(SEARCH_TITLES[4]),
   }), [t, scaleStats, platformCount]);
   useEffect(() => {
     if (phase !== 'searching' || reduced || exiting) return;
-    const id = setInterval(() => setTitleIdx((i) => (i + 1) % titles.length), TITLE_ROTATE_MS);
-    return () => clearInterval(id);
-  }, [phase, reduced, exiting, titles.length]);
+    // Reading-pace rotation (owner 2026-09-12): each line stays up for readingDurationMs(that
+    // line) — a self-rescheduling timeout, not a fixed setInterval, so a short line and a long
+    // live-number line both feel like the same READING speed instead of the same raw duration.
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      setTitleIdx((i) => {
+        const next = (i + 1) % titles.length;
+        if (!cancelled) timer = setTimeout(tick, readingDurationMs(titles[next]));
+        return next;
+      });
+    };
+    timer = setTimeout(tick, readingDurationMs(titles[Math.min(titleIdx, titles.length - 1)]));
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- titleIdx deliberately excluded: the
+    // functional setTitleIdx update above reads the current index without needing it in scope, and
+    // including it would restart this effect (and the pending timer) on every single tick.
+  }, [phase, reduced, exiting, titles]);
   // titles can shrink (e.g. scaleStats arrives, or activeNames narrows the roster) between renders —
   // clamp so a stale index never reads past the current array's end.
   const label = phase === 'thinking' ? t('Ezhalah is thinking…') : titles[Math.min(titleIdx, titles.length - 1)];
