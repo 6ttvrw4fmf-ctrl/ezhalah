@@ -272,6 +272,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         "بستان المطيرفي": ("المبرز", 2748), "الجابرية": ("المبرز", 2748), "الغسانية": ("المبرز", 2748),
         "البستنان": ("الحليلة", 2762),
         "الرابية بالعيون": ("العيون", 2038), "الصفا": ("العيون", 2038), "الصفا 2": ("العيون", 2038),
+        "الرياض": ("الهفوف", 12),
     }
     if city_id is None and district_ar in _DISTRICT_IMPLIES_CITY:
         city_ar, city_id = _DISTRICT_IMPLIES_CITY[district_ar]
