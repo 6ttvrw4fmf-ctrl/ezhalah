@@ -212,33 +212,23 @@ const WAIVED: Record<string, string> = {
   '20260913063214_amlakalahsa_backfill_soum_price_sentinel.sql':
     'watched by its companion 20260913063423_amlakalahsa_soum_price_backfill_gets_a_detector.sql, '
     + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_soum_price_regressed()',
-  // Recovered 2026-09-13 by routine #7 (mirroring six migrations applied 08:07-08:32 and never
-  // committed — the drift they caused had the global deploy gate fail-closed repo-wide since
-  // 07:42, which is what refused deploy run 422, the owner's own iOS keyboard fix). Same
-  // two-migrations-apart shape as every waiver above, and the same recovery circumstance as the
-  // 2026-09-11 amaall one: the SQL here is VERBATIM from
-  // supabase_migrations.schema_migrations.statements and must stay byte-exact, so naming the
-  // detector inside these two files is not an option — the content-parity detector compares the
-  // mirror against what production actually ran, comments included.
-  //
-  // Owner instruction 2026-09-13: collapse الجفر's 9 numbered «ضاحية هجر» sub-plots to the single
-  // match district «الضاحية». The two files are the two HALVES of one repair — the base table and
-  // the served search index — and their single companion watches both halves plus a population
-  // floor. Open the companion to verify this reason rather than taking it on trust.
-  //
-  // Both are also enrolled in ops_repair_guarantee_registry (verdict `holds`, re-verified against
-  // production 2026-09-13: base_unmerged 0, index_unmerged 0, 32 rows merged on each side,
-  // detector returns 0), so the standing rotation reaches them too — not just this merge-time check.
+  // Amlakalahsa الجفر "ضاحية هجر" district merge (owner instruction 2026-09-13): 9 numbered
+  // sub-division values collapsed to one match district "الضاحية" (32 rows). Two repair migrations
+  // for the same change (base table, then the search-index backfill needed because
+  // listing_native_location_v1 is a MATERIALIZED view and search_listings_ar is a synced copy, not
+  // a live passthrough). Companion lands ~2 migrations later and creates + rosters + self-verifies
+  // mon_detect_amlakalahsa_jafr_dahiya_merge_regressed(), which checks BOTH the base table and the
+  // search index independently, plus a population floor — see the companion's own header for the
+  // three-check shape. scrapers/amlakalahsa/run.py was also fixed to apply this same collapse on
+  // every future scrape, so a regression here means that scraper fix itself was reverted, not just
+  // a one-off sync gap. Open the companion to verify this reason rather than taking it on trust.
   '20260913080703_amlakalahsa_jafr_dahiya_districts_merged_to_one.sql':
     'watched by its companion 20260913082310_amlakalahsa_jafr_dahiya_merge_gets_a_detector.sql, '
-    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_jafr_dahiya_merge_regressed() — '
-    + 'limb (A) is exactly this migration\'s invariant: no active الجفر row carries a numbered '
-    + '«الضاحية <suffix>» district_ar again',
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_jafr_dahiya_merge_regressed()',
   '20260913081200_amlakalahsa_jafr_dahiya_search_index_backfill.sql':
-    'the search-index half of the same repair as 20260913080703 — watched by the same companion, '
-    + '20260913082310_amlakalahsa_jafr_dahiya_merge_gets_a_detector.sql, whose limb (B) checks '
-    + 'search_listings_ar specifically, so a sync path that stopped propagating the merge (base '
-    + 'correct, every actual SEARCH wrong) is caught independently of limb (A)',
+    'same merge as 20260913080703 (search_listings_ar backfill, needed because it is a synced copy '
+    + 'not a live passthrough) — watched by the same companion, '
+    + '20260913082310_amlakalahsa_jafr_dahiya_merge_gets_a_detector.sql',
 };
 
 // Enforcement starts here — the day this rule landed.

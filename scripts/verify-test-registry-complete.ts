@@ -35,7 +35,7 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadRegistry, argvFor, workflowInvokes } from './lib/testRegistry.ts';
+import { loadRegistry, argvFor, workflowInvokes, childOutcome, outcomeIsPass } from './lib/testRegistry.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -191,11 +191,25 @@ const runner = read('scripts/run-tests.mjs');
 // an earlier version of this check merely grepped for `r.signal`, which matched the text inside an
 // error MESSAGE and stayed green when the failure RECORD dropped it. A check that matches incidental
 // prose is not a check.
-const okLine = runner.match(/const ok = ([^;]+);/)?.[1]?.trim() ?? '';
-check('the runner decides pass/fail by strict equality to exit code 0',
-  okLine === 'r.status === 0', `const ok = ${okLine || '(not found)'}`);
+// REPAIRED 2026-09-13 (routine #10, ops_incident #136's class). Until today these two lines matched
+// the literal source spelling `const ok = r.status === 0;` — and the comment directly above them
+// already said "Assert the mechanism, not the vocabulary". They asserted the vocabulary, and so they
+// went RED on the CORRECT repair: ops_incident #222 replaced that expression with a shared
+// classifier so a hung check could be time-bounded and NAMED. A barrier that inverts on the right
+// change is the shape this repo has been burned by five times (AGENTS.md, 2026-09-04).
+//
+// The mechanism is now asserted BY EXECUTION against the very function the runner calls, so any
+// rewrite — today's or a future one — is judged on what it DECIDES rather than on how it is spelled.
+const passes = (r: Parameters<typeof childOutcome>[0]) => outcomeIsPass(childOutcome(r));
+check('the runner treats a clean exit 0 as the ONLY pass',
+  passes({ status: 0 }) && !passes({ status: 1 }));
 check('…so a signal-killed child (status === null) cannot be counted as a pass',
-  okLine === 'r.status === 0' && !/!r\.status|r\.status \?\?/.test(runner));
+  !passes({ status: null, signal: 'SIGKILL' })
+  && !passes({ status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' } }),
+  'a null status must never read as success — that is how a timeout or an OOM reads as a green check');
+// The runner must actually USE that shared decision, not re-derive its own beside it.
+check('…and run-tests.mjs decides with that shared classifier rather than an inline expression',
+  /outcomeIsPass\(/.test(runner) && !/const ok = r\.status/.test(runner));
 check('the runner refuses to report success over an empty run set', /run\.length === 0/.test(runner));
 check('the runner uses the shared registry rather than its own list', /loadRegistry/.test(runner));
 

@@ -47,6 +47,7 @@ const BRIDGE_KINDS: Record<string, RoutineNumber> = {
   data_live_check_failed: 3,    // 🛡️ Data Integrity
   ingestion_check_failed: 1,    // ⚡ Junior Scraping
   seam_check_failed: 7,         // 🧵 Systems Seam
+  barrier_check_failed: 10,     // 🧱 Bug Prevention & Barrier — the apparatus itself
 };
 
 /**
