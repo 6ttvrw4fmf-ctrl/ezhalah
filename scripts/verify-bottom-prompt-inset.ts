@@ -295,12 +295,44 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
     eq(promptInsets([{ top: 0, bottom: VH_PHONE, height: VH_PHONE, width: VW_PHONE }], VH_PHONE, VW_PHONE), 0, 0));
   check('G6. two prompts docked at once are both reserved',
     eq(promptInsets([TOP_SHEET, BOTTOM_SHEET], VH_PHONE, VW_PHONE), 170, 144));
-  // 300 + 300 exceeds half the viewport; the larger survives whole and the app keeps the rest.
+  // 300 + 300 = 600 exceeds the 568 px budget (812 less the 30% the app keeps); the larger survives
+  // whole and the app keeps the rest. This is the genuinely unsatisfiable case — the only one where
+  // clamping still happens at all.
   check('G7. the COMBINED reservation is capped, so an app always remains',
     eq(promptInsets([
       { top: 0, bottom: 300, height: 300, width: 375 },
       { top: VH_PHONE - 300, bottom: VH_PHONE, height: 300, width: 375 },
-    ], VH_PHONE, VW_PHONE), 300, 106));
+    ], VH_PHONE, VW_PHONE), 300, 268));
+
+  // ── THE MEASURED REAL-WORLD BOTH-EDGES CASE (ops_incident #202 follow-up, 2026-09-13) ───────────
+  // One Tap's WebKit container docked TOP (fixed, 375x158 at 0,20 → reaches 178) and our own cookie
+  // consent card docked BOTTOM (272 px). Demand 178 + 272 = 450.
+  //
+  // Under the old clamp this budgeted 406 (half the viewport) for the pair, kept the larger band
+  // whole and clipped the top to 406 - 272 = 134 — so the app reserved 134 against an overlay
+  // reaching 178 and laid 44 px of live controls under it. MEASURED on production, Chromium,
+  // 375x812, fresh context, 2/2: reservedTop 134 with 8 controls stranded at cy=173, against
+  // reservedTop 178 and 0 stranded once the consent card was dismissed. The eight are the same
+  // eight, at the same y, that journey-sweep 34750102523 reports blocked on WebKit.
+  //
+  // G9 IS THE LOAD-BEARING ONE: under-reserving an occupied edge is never a safe degradation, so the
+  // top must come back 178 — the full band the overlay occupies — not 134.
+  const ONE_TAP_TOP_WEBKIT = { top: 20, bottom: 178, height: 158, width: 375 };
+  const CONSENT_CARD_BOTTOM = { top: VH_PHONE - 272, bottom: VH_PHONE, height: 272, width: 375 };
+  check('G9. the measured both-edges case reserves the FULL top band, not a clipped one',
+    eq(promptInsets([ONE_TAP_TOP_WEBKIT, CONSENT_CARD_BOTTOM], VH_PHONE, VW_PHONE), 178, 272),
+    JSON.stringify(promptInsets([ONE_TAP_TOP_WEBKIT, CONSENT_CARD_BOTTOM], VH_PHONE, VW_PHONE)));
+  // The user-facing consequence, stated as the arithmetic that decides it: every control the sweep
+  // found blocked sits at cy=173, which must fall INSIDE the reserved top band.
+  {
+    const reservedTop = promptInsets([ONE_TAP_TOP_WEBKIT, CONSENT_CARD_BOTTOM], VH_PHONE, VW_PHONE).top;
+    check('G10. the 8 controls stranded at cy=173 are inside the reservation (134 left them outside)',
+      reservedTop >= 173, `reservedTop=${reservedTop}`);
+  }
+  // And the counterfactual that isolates the cap as the cause: with the card gone, the top was
+  // always correct — so nothing about the TOP measurement was ever the defect.
+  check('G11. top-only was already correct, which is what makes G9 about the COMBINED clamp',
+    eq(promptInsets([ONE_TAP_TOP_WEBKIT], VH_PHONE, VW_PHONE), 178, 0));
   check('G8. a hidden prompt beside a real one does not disturb it',
     eq(promptInsets([{ ...TOP_SHEET, hidden: true }, BOTTOM_SHEET], VH_PHONE, VW_PHONE), 0, 144));
 }
@@ -469,8 +501,17 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
   check('I2. THE DEFECT: a foreign prompt must not collapse the card\'s reservation to its own height',
     promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom !== 144,
     `got ${promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom}`);
-  check('I3. the stack reserves up to the TOP of the upper prompt, clamped by the combined cap',
-    promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom === Math.min(VH_PHONE - CARD_LIFTED.top, CAP));
+  // The band the stack actually occupies — card top (396) to the viewport bottom — is 416 px, and
+  // that is now what is reserved. It used to be clipped to the 406 px combined cap, which left a
+  // 10 px strip of live app content under the card: the same under-reservation class that stranded
+  // eight controls at the TOP edge (section G9-G11, ops_incident #202 follow-up, 2026-09-13). The
+  // expectation moved because the clamp was wrong, not because the check was loosened — CAP is kept
+  // below purely to assert that the old clipped answer is no longer produced.
+  check('I3. the stack reserves the band it actually occupies, unclipped',
+    promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom === VH_PHONE - CARD_LIFTED.top,
+    `got ${promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom}, want ${VH_PHONE - CARD_LIFTED.top}`);
+  check('I3b. …and specifically no longer the old cap-clipped answer, which hid 10px of app under the card',
+    promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom !== CAP);
   check('I4. …and the answer does not depend on enumeration order',
     promptInsets([ONE_TAP_DOCKED, CARD_LIFTED], VH_PHONE, VW_PHONE).bottom
       === promptInsets(DOM_ORDER, VH_PHONE, VW_PHONE).bottom);
@@ -593,6 +634,52 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
     (m) => { const { c, f } = wkShape();
              return (m as never as typeof import('../src/lib/bottomPromptInset.ts'))
                .promptMeasurementTarget(f as never, (n: never) => (n as { position: string }).position) !== c; },
+  );
+
+  // ── K. THE COMBINED-CLAMP DEFECT ITSELF (ops_incident #202 follow-up, 2026-09-13) ───────────────
+  const PHONE_H = 812, PHONE_W = 375;
+  const TOP_178 = { top: 20, bottom: 178, height: 158, width: 375 };
+  const BOTTOM_272 = { top: PHONE_H - 272, bottom: PHONE_H, height: 272, width: 375 };
+
+  // K1 — THE SHIPPED DEFECT, restored verbatim: budget the two bands against the SINGLE-band cap.
+  // This is what was live on production, and it must turn the measured case red at 134.
+  await withMutation(
+    'the combined clamp budgets MAX_INSET_FRACTION for the pair (the defect that stranded 8 controls)',
+    (src) => src.replace(
+      'const cap = viewportHeight > 0 ? Math.floor(viewportHeight * (1 - MIN_APP_FRACTION)) : 0;',
+      'const cap = viewportHeight > 0 ? Math.floor(viewportHeight * MAX_INSET_FRACTION) : 0;'),
+    (m) => {
+      const got = (m as never as typeof import('../src/lib/bottomPromptInset.ts'))
+        .promptInsets([TOP_178, BOTTOM_272] as never, PHONE_H, PHONE_W);
+      // The defect's exact signature: the top clipped to 134, leaving cy=173 outside it.
+      return got.top === 134 && got.top < 173;
+    },
+  );
+
+  // K2 — the floor is raised until the real case clamps again. Guards against "fix" by a number
+  // that happens to clear 450 today and would strand the same controls on a shorter viewport.
+  await withMutation(
+    'the app-retained floor is widened until the measured 450px demand is clamped again',
+    (src) => src.replace('const MIN_APP_FRACTION = 0.3;', 'const MIN_APP_FRACTION = 0.5;'),
+    (m) => (m as never as typeof import('../src/lib/bottomPromptInset.ts'))
+      .promptInsets([TOP_178, BOTTOM_272] as never, PHONE_H, PHONE_W).top < 178,
+  );
+
+  // K3 — the clamp drops the top entirely rather than the bottom. The tie-break must never zero an
+  // occupied edge; a band reserved at 0 strands every control under it.
+  await withMutation(
+    'the combined clamp sacrifices the whole top band',
+    (src) => src.replace(
+      'if (top >= bottom) { top = Math.min(top, cap); bottom = Math.max(0, cap - top); }',
+      'if (top >= bottom) { top = 0; bottom = Math.min(bottom, cap); }'),
+    (m) => {
+      const got = (m as never as typeof import('../src/lib/bottomPromptInset.ts'))
+        .promptInsets([
+          { top: 0, bottom: 300, height: 300, width: 375 },
+          { top: PHONE_H - 300, bottom: PHONE_H, height: 300, width: 375 },
+        ] as never, PHONE_H, PHONE_W);
+      return got.top === 0;
+    },
   );
 
   // J12 — the walk runs past the nearest fixed node to the outermost one, over-reserving.

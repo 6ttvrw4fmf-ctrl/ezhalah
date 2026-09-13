@@ -124,6 +124,41 @@ const MIN_SHEET_SPAN_FRACTION = 0.8;
  *  must degrade to "a bit of wasted space", never to an app squeezed into nothing. */
 const MAX_INSET_FRACTION = 0.5;
 
+/**
+ * The share of the viewport the app keeps for itself when BOTH edges are docked at once
+ * (ops_incident #202 follow-up, measured 2026-09-13).
+ *
+ * WHY THIS EXISTS, AND WHY IT IS NOT `1 - MAX_INSET_FRACTION`. The combined clamp used to budget
+ * `MAX_INSET_FRACTION` — half the viewport — for the two bands TOGETHER, while each band is already
+ * capped at half on its own. On a 375x812 phone with One Tap docked TOP (a 158 px fixed container
+ * ending at 178) and our own cookie consent card docked BOTTOM (272 px), the demand is 178 + 272 =
+ * 450 against a budget of 406. The tie-break then kept the larger band whole and handed the top the
+ * remainder — 406 - 272 = **134** — so the app reserved 134 px against an overlay that reaches 178
+ * and laid 44 px of live, tappable controls underneath it.
+ *
+ * MEASURED on production, Chromium, 375x812, fresh context, 2/2, with the WebKit container shape
+ * injected (a STATIC gsi iframe inside a `position:fixed` #credential_picker_container):
+ *   both docked  → reservedTop 134, reservedBottom 272, **8 controls stranded** at cy=173
+ *   card dismissed → reservedTop 178, reservedBottom 0,   **0 stranded**
+ * The eight are «إنشاء حساب / تسجيل الدخول», «مشاركة» and the top-bar controls — the same eight, at
+ * the same y, that journey-sweep run 34750102523 reports blocked on WebKit. That sweep is why this
+ * was found; the defect itself is engine-independent, and Chromium reproduces it exactly.
+ *
+ * So the old clamp did the precise harm its own comment warned about — "a sheet that is only half
+ * accounted for still eats the controls under its remaining half" — to whichever edge lost the
+ * tie-break. Under-reserving is never a safe degradation: it does not cost layout comfort, it puts
+ * controls under an opaque `pointer-events:auto` overlay, which is what the owner rule of
+ * 2026-09-11 forbids outright («must never cover, block, or intercept any Ezhalah controls»).
+ *
+ * The budget is therefore stated as what the APP keeps rather than what the prompts may take: both
+ * bands are honoured in full whenever the app still retains 30% of the viewport (on 812 px that is
+ * a 568 px budget, comfortably above the 450 px real-world worst case), and the app scrolls within
+ * what is left. Clamping now happens only when the two bands genuinely cannot both fit — a state no
+ * observed configuration reaches — and that remains the one case where a control can still be
+ * stranded, which is stated here rather than hidden, and is preferred to an app of zero height.
+ */
+const MIN_APP_FRACTION = 0.3;
+
 export type PromptRect = {
   top: number;
   bottom: number;
@@ -296,7 +331,10 @@ export function promptInsets(
     if (t > top) top = t;
   }
   let bottom = bottomStackInset(list, viewportHeight, viewportWidth);
-  const cap = viewportHeight > 0 ? Math.floor(viewportHeight * MAX_INSET_FRACTION) : 0;
+  // The two bands together may take everything the app does not need to keep — NOT the single-band
+  // cap, which budgeted one band's worth for two and clipped whichever edge lost the tie-break to
+  // less than the overlay actually occupies (ops_incident #202 follow-up; see MIN_APP_FRACTION).
+  const cap = viewportHeight > 0 ? Math.floor(viewportHeight * (1 - MIN_APP_FRACTION)) : 0;
   if (top + bottom > cap) {
     // Keep the larger reservation whole rather than halving both into uselessness — a sheet that is
     // only half accounted for still eats the controls under its remaining half.
