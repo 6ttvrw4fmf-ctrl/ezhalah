@@ -26,3 +26,20 @@ export function buildSearchLoaderTitles(parts: {
     parts.preparing,
   ];
 }
+
+// READING-PACE ROTATION (owner 2026-09-12: "I feel like it's a bit fast... make it all at the same
+// speed"). The rotation used to sit on one fixed interval (2400ms) for every line — genuinely
+// identical ON-SCREEN TIME per line, but NOT identical READING speed: the live-number lines this
+// same session added ("نغطي أكثر من 4,027 موقع...") are much longer than the original short phrases
+// ("نطابق الفلاتر"), so the same fixed window reads as rushed for the long ones and idle for the
+// short ones. This computes a PER-LINE duration proportional to its length, so every line gets
+// roughly the same time-per-character to read — "the same speed" in the sense the owner meant it,
+// not the same millisecond count. MS_PER_CHAR/MIN/MAX are tuned so the original short lines land
+// close to the old 2400ms floor (no perceptible slowdown for those) while the new long lines get
+// proportionally more, capped so no single line can stall the rotation for multiple seconds.
+const MS_PER_CHAR = 90;
+const MIN_TITLE_MS = 1900;
+const MAX_TITLE_MS = 4200;
+export function readingDurationMs(title: string): number {
+  return Math.min(MAX_TITLE_MS, Math.max(MIN_TITLE_MS, title.length * MS_PER_CHAR));
+}

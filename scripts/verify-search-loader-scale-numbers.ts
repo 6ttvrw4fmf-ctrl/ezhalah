@@ -112,7 +112,7 @@ const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 for (const [key, placeholders] of [
   ['Checking more than {count} properties…', ['{count}']],
   ['Reviewing {count} real-estate platforms…', ['{count}']],
-  ['Covering more than {cities} cities and {districts} districts…', ['{cities}', '{districts}']],
+  ['Covering more than {count} places across Saudi Arabia…', ['{count}']],
 ] as const) {
   check(`EN key referenced from SearchLoader/i18n: "${key}"`, loaderSrc.includes(key) || i18n.includes(`'${key}'`));
   const arMatch = i18n.match(new RegExp(`'${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']*)'`));
@@ -120,6 +120,28 @@ for (const [key, placeholders] of [
   check(`AR translation exists and carries every placeholder (${placeholders.join(', ')})`,
     !!arLine && placeholders.every((p) => arLine.includes(p)), `got: "${arLine}"`);
 }
+check('coverage is ONE combined number (cityCount + districtCount), not a separate cities/districts pair',
+  /coverage: scaleStats \? t\('Covering more than \{count\} places across Saudi Arabia…', \{ count: grouped\(scaleStats\.cityCount \+ scaleStats\.districtCount\) \}\) : null/.test(loaderSrc));
+
+console.log('\n── 4. reading-pace rotation: every line gets time proportional to its length, not one fixed window ──');
+const { readingDurationMs } = await import('../src/lib/searchLoaderTitles.ts');
+
+check('a short line lands close to the old fixed 2400ms (no perceptible pace change for existing short copy)',
+  Math.abs(readingDurationMs('نطابق الفلاتر…') - 2400) < 700,
+  `got ${readingDurationMs('نطابق الفلاتر…')}ms`);
+check('a long live-number line gets MORE time than a short line — the whole point of this fix',
+  readingDurationMs('نغطي أكثر من 4,027 موقع في جميع أنحاء المملكة…') > readingDurationMs('نطابق الفلاتر…'));
+check('duration is floored — even an empty/near-empty string never flashes by instantly', readingDurationMs('') >= 1900);
+check('duration is ceilinged — an extreme length never stalls the rotation for many seconds', readingDurationMs('غ'.repeat(500)) <= 4200);
+
+mustCatch('a mutant that makes ALL lines the same duration regardless of length (the exact regression)',
+  (() => {
+    const shortD = readingDurationMs('نطابق الفلاتر…');
+    const longD = readingDurationMs('نغطي أكثر من 4,027 موقع في جميع أنحاء المملكة…');
+    return shortD !== longD; // a fixed-duration mutant would make these equal
+  })());
+check('SearchLoader actually uses readingDurationMs (not a fixed TITLE_ROTATE_MS interval)',
+  /setTimeout\(tick, readingDurationMs\(/.test(loaderSrc) && !/setInterval\(.*TITLE_ROTATE_MS/.test(loaderSrc));
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll search-loader-scale-numbers checks passed');
 process.exit(failed ? 1 : 0);

@@ -1,16 +1,18 @@
-// MOBILE: THE SEARCH-LOADING STRIP MUST NOT DRAG THE PAGE, AND MUST FIT WITHOUT SCROLLING
-// (owner 2026-09-12, testing on phone: "when I click on the following things I want in the filter...
-// it shows me all the platforms, and it takes me down automatically... it shouldn't drag me down"
-// / "I want them to all show on one screen... I noticed the user has to scroll to see them").
+// SEARCH-LOADING STRIP: NO FORCED SCROLL, NO BOX, THE NAME ALWAYS SHOWS
+// (owner 2026-09-12, testing on phone: "it shows me all the platforms, and it takes me down
+// automatically... it shouldn't drag me down". Same day, a few hours later, on the pill treatment
+// itself: "the animated logos are not nice... I don't know why you made them in boxes... remove
+// those boxes... make the background transparent so it blends in with our background, because now
+// it shows that it is a box and it's a photo... put the name also, because we need to include the
+// name of each website" — this REVERSES the same-day logo-only mobile compact tile; the name now
+// always renders, every viewport).
 //
-// Two independent fixes, each pinned here by EXECUTING the real predicate:
+// Two independent invariants, each pinned here by EXECUTING the real predicate:
 //   1. Filter search's onBubbleDone() no longer force-scrolls the page the instant the searching
 //      loader mounts (agent.tsx). pinModeRef is already 'none' at that point, so nothing else
-//      re-triggers a scroll either (onGrow() only acts on 'top'/'bottom').
-//   2. Below LOADER_PILL_LABEL_BREAKPOINT, platform pills drop their name and shrink to a compact
-//      logo-only tile (SearchLoader.tsx), so ~45 platforms can fit a phone screen without scrolling.
-//      The accessible name survives the drop (accessibilityLabel), and the breakpoint is SSR-safe
-//      (routed through useAtLeast(), same contract verify-ssr-hydration-parity.ts already proves).
+//      re-triggers a scroll either (onGrow() only acts on 'top'/'bottom'). UNCHANGED by the box fix.
+//   2. PlatformPill never carries a fill or a border — resting or highlighted — and the name Text
+//      always renders (no compact/logo-only branch survives). The highlight is shadow+color only.
 //
 //   node --experimental-strip-types scripts/verify-mobile-search-loader-no-drag.ts   (in `npm test`)
 
@@ -56,35 +58,55 @@ mustCatch('re-inserting toBottom() right after the searching-status setMsgs (the
     return /toBottom\(\)/.test(span2);
   })());
 
-console.log('\n── 2. platform pills drop to a compact, logo-only, SSR-safe tile on narrow viewports ──');
+console.log('\n── 2. platform pills carry NO box, and the name ALWAYS renders ──');
 const loader = readFileSync(join(root, 'src/components/SearchLoader.tsx'), 'utf8');
-const responsive = readFileSync(join(root, 'src/lib/responsive.ts'), 'utf8');
+const loaderCode = decomment(loader);
 
-check('LOADER_PILL_LABEL_BREAKPOINT is declared in lib/responsive.ts (the one shared home for breakpoints)',
-  /export const LOADER_PILL_LABEL_BREAKPOINT = \d+;/.test(responsive));
-check('SearchLoader reads it through useAtLeast() — SSR-safe, never a raw useWindowDimensions() compare',
-  /const showPillLabels = useAtLeast\(LOADER_PILL_LABEL_BREAKPOINT\);/.test(loader));
-check('PlatformPill accepts a compact prop and threads it from showPillLabels',
-  /compact: boolean;/.test(loader) && /compact=\{!showPillLabels\}/.test(loader));
-check('compact renders NO name Text node (logo-only) — the actual JSX branch, not just a style tweak',
-  /\{compact \? null : \(/.test(loader));
-check('the accessible name survives the drop (accessibilityLabel carries it when compact)',
-  /accessibilityLabel=\{compact \? name : undefined\}/.test(loader));
+check('no leftover compact prop/branch anywhere (the reversed feature is fully gone, not just unused)',
+  !/compact/i.test(loaderCode));
 
-mustCatch('compact rendering the Text anyway (label never actually drops)',
-  (() => {
-    const mutated = loader.replace('{compact ? null : (', '{false ? null : (');
-    if (mutated === loader) return false;
-    return !/\{compact \? null : \(/.test(mutated);
-  })());
-mustCatch('the breakpoint check reading a bare useWindowDimensions() width instead of useAtLeast()',
+const pillStyleMatch = loaderCode.match(/pill: \{([^}]*)\}/);
+const pillStyleBody = pillStyleMatch?.[1] ?? '';
+check("the pill's base style declares NO backgroundColor and NO borderWidth/borderColor",
+  pillStyleBody.length > 0 && !/backgroundColor/.test(pillStyleBody) && !/border(Width|Color)/.test(pillStyleBody),
+  `pill: {${pillStyleBody}}`);
+
+const pillLogoStyleMatch = loaderCode.match(/pillLogo: \{([^}]*)\}/);
+check("the logo's own style declares NO backgroundColor either (no backdrop square behind it)",
+  !/backgroundColor/.test(pillLogoStyleMatch?.[1] ?? ''));
+
+const rowGlowMatch = loaderCode.match(/const rowGlow = useAnimatedStyle\(\(\) => \{([\s\S]*?)\n  \}\);/);
+const rowGlowBody = rowGlowMatch?.[1] ?? '';
+check('the highlight animated-style (rowGlow) never sets backgroundColor or borderColor — shadow/transform only',
+  rowGlowBody.length > 0 && !/backgroundColor:/.test(rowGlowBody) && !/borderColor:/.test(rowGlowBody),
+  rowGlowBody);
+check('the highlight still animates a shadow (boxShadow web / shadow* native) — the glow itself survives',
+  /boxShadow:/.test(rowGlowBody) && /shadowColor:/.test(rowGlowBody));
+
+check('the name Text renders unconditionally (no `compact ? null :` branch, no ternary hiding it)',
+  /<Animated\.Text[\s\S]{0,200}\{name\}[\s\S]{0,20}<\/Animated\.Text>/.test(loaderCode)
+  && !/compact \? null/.test(loaderCode));
+check('the name itself is what animates on highlight (nameGlow interpolates its color)',
+  /const nameGlow = useAnimatedStyle\(\(\) => \(\{\s*color: interpolateColor\(h\.value/.test(loaderCode));
+
+mustCatch('a fill creeping back into the base pill style (the exact "box" regression)',
   (() => {
     const mutated = loader.replace(
-      'const showPillLabels = useAtLeast(LOADER_PILL_LABEL_BREAKPOINT);',
-      'const showPillLabels = useWindowDimensions().width >= LOADER_PILL_LABEL_BREAKPOINT;',
+      'pill: { alignItems: \'center\', gap: 7, height: 34, paddingHorizontal: 2 },',
+      'pill: { alignItems: \'center\', gap: 7, height: 34, paddingHorizontal: 2, backgroundColor: colors.tint },',
     );
     if (mutated === loader) return false;
-    return !/const showPillLabels = useAtLeast\(LOADER_PILL_LABEL_BREAKPOINT\);/.test(mutated);
+    const body = decomment(mutated).match(/pill: \{([^}]*)\}/)?.[1] ?? '';
+    return /backgroundColor/.test(body);
+  })());
+mustCatch('the name being hidden behind a conditional again (the exact "logo-only" regression)',
+  (() => {
+    const mutated = loader.replace(
+      '<Animated.Text',
+      '{false ? null : <Animated.Text',
+    ).replace('</Animated.Text>', '</Animated.Text>}');
+    if (mutated === loader) return false;
+    return /\{false \? null : <Animated\.Text/.test(mutated);
   })());
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll mobile-search-loader-no-drag checks passed');
