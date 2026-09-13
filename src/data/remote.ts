@@ -1718,6 +1718,10 @@ export async function fetchListingsForQuery(
     // fall back to the source's own Arabic district token (l.districtArFallback, Gathern-only &
     // city-name-guarded in finalize). null for every other source → `|| ''` keeps them byte-identical.
     l.district = /[ء-ي]/.test(rawDistrict || '') ? rawDistrict : ((ar?.district) || l.districtArFallback || '');
+    // MATCH-truth companion to the display-oriented `l.district` above — never overridden by raw
+    // text, so the strict district filter (listingInDistricts) has a value it can trust regardless
+    // of how the source spelled its own free-text neighborhood. See the field's own doc comment.
+    l.districtCanonical = canonDistrict;
     l.regionAr = (ar?.region) || l.regionAr || '';
     // §12A: the AF-canonical row travels with the listing so ResultCard can prove, per card, that
     // this row really satisfies each active predicate — read from the SAME row the filter ran on,
