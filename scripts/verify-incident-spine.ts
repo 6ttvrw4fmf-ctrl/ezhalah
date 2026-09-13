@@ -89,7 +89,17 @@ const routing = latestMigrationDefining('function public.incident_route_owner');
 // The surface VOCABULARY, added 2026-09-04 after a coverage audit found ~9 real user-reachable
 // surfaces with no name — so findings on them fell through to the routine-2 fallback and arrived
 // indistinguishable from noise.
-const vocab = latestMigrationDefining('incident_known_surfaces');
+// `function public.incident_known_surfaces` rather than the bare name, for the same reason the
+// `routine` needle above is a pg_proc lookup: the needle must match a migration that DEFINES the
+// vocabulary, not one that merely mentions it in prose. On 2026-09-13 migration 20260913141149
+// (the owner roster) explained itself as mirroring "the existing incident_known_surfaces()
+// exactly"; it sorts last, so the bare needle resolved the vocabulary to that file, found no
+// `select array[...]` in it, and reported 0 surfaces — turning 11 checks red on a migration that
+// changed nothing about surfaces. That migration is a mirror of what production ran and is
+// therefore byte-frozen, so the fix belongs here. This is strictly more precise, not looser: the
+// defining migration still matches, and a migration that stopped defining it would go unmatched
+// and fail the non-trivial check below.
+const vocab = latestMigrationDefining('function public.incident_known_surfaces');
 const guard = migrationNamed('unknown incident surface');
 
 console.log('\nIncident spine — resolution stays earned, and ownership stays total\n');
