@@ -588,13 +588,30 @@ Things that cost a previous run real time, and are NOT product defects:
       is as wide as the market" (owner 2026-09-02). `FIRST_PAGE = 10` is a FLOOR. On a scope matching
       more than ten platforms the first page is wider, so any arithmetic that adds back 10 is wrong.
     - REDEFINED 2026-09-11 (Task 4), supersedes the 2026-08-29 "next clean 100-boundary" rule below:
-      one tap of «عرض المزيد» now DRAINS every real page there is (looping `loadMoreListings` until
+      one tap of «عرض المزيد» DRAINS every real page there is (looping `loadMoreListings` until
       the server says `hasMore=false`) and reveals the ENTIRE remaining eligible set in that one tap
       — then finishes the search (composer locked, «محادثة جديدة» shown), exactly like R11.1's
       small-set completion but reachable at any total. `nextBatchTarget`/`BROWSE_BATCH` still exist
       as pure, tested modules (src/data/resultCount.ts) but `loadMore` no longer calls them — a
-      harness that expects `min(100k, available)` after k clicks, or expects more than one click to
-      be needed, is testing the RETIRED contract. Expect: exactly one click, `revealed === total`.
+      harness that expects `min(100k, available)` after k clicks is testing the RETIRED contract.
+    - **…AND THAT DRAIN IS NOW CAPPED. «exactly one click, `revealed === total`» IS NO LONGER TRUE,
+      and a harness that still asserts it is red on a correct production** (routine #5, 2026-09-13).
+      Four days after Task 4, a shipped safety cap superseded the unbounded half of it: the results
+      list is UNVIRTUALIZED, and draining الرياض/إيجار/سنوي (20,782 matches) mounted ~20,000 cards and
+      **crashed the renderer process** on production 2026-09-12 (`ops_incident` #199, P1 — the JS heap
+      stayed flat at ~195 MB, so it is the mount, not the rows). `DRAIN_REVEAL_MAX = 2_000`
+      (`src/data/resultCount.ts`) now bounds ONE press to 2,000 new cards; **if matches remain the
+      pager STAYS offered and the search is NOT marked finished**, so nothing is stranded — the user
+      presses again. Every cohort under the ceiling still drains and finishes in one press.
+      Measured 2026-09-13 on الرياض/شراء/شقة + an amenity, eligible 6,319: press 1 → 100 cards,
+      press 2 → 2,100, network pages at `p_offset` 1500 then 2000.
+      **So assert the shipped rule, not the retired one:** a press reveals everything remaining OR
+      stops exactly at the ceiling, and a press that stopped at the ceiling must leave «عرض المزيد»
+      offered. Import `DRAIN_REVEAL_MAX` from the real module — never re-type the number. Worked
+      example: `scripts/verify-af-option-card-truth-live.ts` §4, corrected 2026-09-13 after being red
+      daily against a production that was behaving exactly as designed.
+      Still OPEN and NOT settled here: whether the ACCUMULATED mount across many presses is safe —
+      `ops_incident` #212 (P1, routine #4, `blocked`). Do not pin that from this surface.
 
 ## Hard safety rails (same as every other engineer — non-negotiable)
 

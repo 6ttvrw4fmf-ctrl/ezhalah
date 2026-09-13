@@ -42,6 +42,7 @@ import { dismissCookieConsent } from './lib/liveConsent.ts';
 // L1==L3 assertion below for why a substring test over p_types was wrong.
 import { CLEAN_MACRO, EN_TO_AR, typeArForSelection } from '../src/data/propertyTypes.ts';
 import { parseVisibleState } from '../e2e/live-sweep/visibleState.mjs';
+import { setDifferential, differentialIsClean, describeDifferential } from './lib/setDifferential.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
@@ -88,6 +89,10 @@ async function knownDistrictsFor(names) {
   return out;
 }
 
+// The largest cohort whose full id set this driver will page out. Module-scoped so the COUNT-ONLY
+// message below quotes the REAL cap rather than a second copy that could drift from it.
+const ID_SET_CAP = 1200;
+
 async function oracle(body) {
   // The city arms are resolved from the REFERENCE CATALOGUE, not from the label alone: production
   // matches city_ar OR city_id OR match_city_ids (see afOracleFilter.ts's p_cities case, and
@@ -106,7 +111,6 @@ async function oracle(body) {
   const count = hdr?.includes('/') ? Number(hdr.split('/')[1]) : null;
   // ID-set comparison only below the cap: a set sitting exactly at the cap could be a truncation
   // mistaken for a complete set (PART 2.3, the sweep's own ID_SET_CAP reasoning).
-  const ID_SET_CAP = 1200;
   if (count == null || count > ID_SET_CAP) return { count, ids: null, unhandled };
   const ids = new Set();
   for (let off = 0; off < ID_SET_CAP + 1000; off += 1000) {
@@ -338,6 +342,31 @@ async function runChain(cell) {
       unreached(name, 'L4 independent oracle', `unhandled params: ${o.unhandled.join(', ')}`);
     } else {
       eq(name, 'L6 RPC total_count == L4 independent oracle count', o.count === rpcTotal, `rpc=${rpcTotal} oracle=${o.count}`);
+
+      // ── L4 = L6 AS A SET, not just as a number (ops_incident #221) ─────────────────────────────
+      // The oracle already BUILDS the (source_table, listing_id) set above, and until 2026-09-13
+      // nothing differenced it against the response — every chain compared L4 to L6 by COUNT alone.
+      // A dropped row plus an added row cancel out exactly in a count comparison, which is the same
+      // blind spot verify-trending-set-equals-the-click-live.ts exists to close for Trending: "every
+      // other Trending barrier compares COUNTS, and a dropped row plus an added row cancel out in
+      // every one of them." The paginated L8 assertions below already difference ids; the FIRST
+      // response, the one every chain exercises, did not.
+      //
+      // o.ids is null when the cohort is larger than ID_SET_CAP — a partial page must never be
+      // mistaken for a complete set. That is a real bound, so it is REPORTED as COUNT-ONLY rather
+      // than passing silently: an unmeasured chain and a measured one must not look alike.
+      if (o.ids === null) {
+        unreached(name, 'L4 == L6 as a SET',
+          `cohort of ${o.count} exceeds the ${ID_SET_CAP} id-set cap — COUNT-ONLY for this cell`);
+      } else {
+        // The differential itself lives in scripts/lib/setDifferential.ts so it can be executed
+        // against broken input offline — scripts/verify-set-differential-counts-both-directions.ts
+        // proves it. An inline comparison in a browser-driving script is unprovable by construction.
+        const d = setDifferential(first.json.map((r) => `${r.source_table}:${r.listing_id}`),
+          o.ids, o.count);
+        eq(name, 'L4 == L6 as a SET (missing = extra = duplicates = 0)',
+          differentialIsClean(d), describeDifferential(d));
+      }
     }
 
     // ── L6 = L7 : every card on screen is a row the response actually returned ───────────────────

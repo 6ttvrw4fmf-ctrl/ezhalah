@@ -269,6 +269,20 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         region_id = EASTERN_PROVINCE_REGION_ID
     city_en = normalize.map_city(city_ar) if city_ar else None
 
+    # Owner instruction 2026-09-13: في الجفر specifically, the office's "ضاحية هجر" numbered
+    # sub-plots (measured live: 9 distinct values — 1st/2nd/3rd/4th/5th/6th/8th/10th + one named
+    # "التعاون" slice, 32 listings) are one physical development, not 9 places a buyer would know to
+    # search by number. Collapsed to one MATCH district, "الضاحية" — city-scoped on purpose: the
+    # exact same "الضاحية <ordinal>" text also appears on this source under أخرى Al-Ahsa towns
+    # (الهفوف، الفضول), which the owner did NOT ask to merge, so this never touches those. Only the
+    # MATCH value collapses — `neighborhood` (the card's own display text) keeps every listing's real
+    # sub-division name (e.g. "الضاحية الخامس") verbatim, per this repo's standing district_ar=match
+    # / neighborhood=card-text split.
+    district_ar_for_match = (
+        "الضاحية" if city_ar == "الجفر" and district_ar and district_ar.startswith("الضاحية")
+        else district_ar
+    )
+
     # The office's own free-text spec paragraph — real prose (measured live, 3/3 sampled posts),
     # e.g. "للبيع ارض في حي الورود الغربي ارض رقم 219 \ ف مساحة 360 م شارع عرض 15 شرقا ... السعر
     # 250,000". Stored AS-IS (cleaned of HTML, PII-redacted) — NOT re-parsed for the dimensions/
@@ -300,7 +314,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         "description": description,
         "photo_urls": images.get(pid, []),
         "city_ar": city_ar,
-        "district_ar": district_ar,
+        "district_ar": district_ar_for_match,
         "city_id": city_id,
         "region_id": region_id,
         "source_capture": {k: v for k, v in acf.items()},

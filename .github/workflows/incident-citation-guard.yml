@@ -1,0 +1,101 @@
+# EVERY CLOSED INCIDENT MUST CITE A BARRIER THAT EXISTS.
+#
+# public.ops_incident is the spine that makes a finding durable: `state = 'resolved'` is unreachable
+# without naming a permanent regression barrier AND stamping a production verification, and a CHECK
+# constraint enforces it rather than an agent remembering at the end of a long run. That gate is why
+# "every bug gets a barrier" no longer depends on anybody's memory.
+#
+# But the gate can only check that A STRING IS PRESENT. Postgres cannot see the repository, so the
+# one thing the constraint exists for — that a closed finding leaves permanent cover behind — was the
+# one thing nothing verified. Measured 2026-09-13 over every incident in a state that CLAIMS cover:
+# FOUR citations name a file that appears in no commit on any branch —
+#
+#   #37  fixed      scripts/verify-search-sync-pass-is-evidenced.ts
+#   #55  fixed      scripts/verify-search-index-single-writer.ts
+#   #74  verifying  scripts/verify-gh-dispatch-fails-loud.ts
+#   #177 verifying  scrapers/common/tests/test_jurash_sold_pin_evidence.py
+#
+# — each cited with a confident count of checks and mutation proofs. They are the most convincing
+# sentences in the queue and the only four that describe nothing.
+#
+# THE SCHEDULE IS THE LOAD-BEARING TRIGGER. This invariant breaks when a routine writes a CITATION
+# into the database, which happens long after any pull request is gone — so a push-triggered check
+# alone would never see it. `push` to main catches the opposite direction, a barrier being deleted or
+# renamed out from under a citation that still names it. Same reasoning as the migration drift guard
+# and p0-fast-lane-coverage.yml.
+#
+# NOT IN THE REQUIRED `npm test`, deliberately: that suite is a required status check on every pull
+# request, and this verdict is decided by PRODUCTION's incident table, which moves whenever any of
+# the eleven routines writes a row. A live read there turns someone else's incident into a red X on
+# an unrelated change — the placement defect AGENTS.md records for four checks on 2026-09-06.
+# scripts/test-exclusions.txt records this file as the home, and the hermetic half
+# (scripts/verify-incident-citations-name-real-barriers.ts) proves BY EXECUTION that this workflow
+# really invokes it, so the split cannot decay into a deletion.
+#
+# IT NEEDS THE SERVICE KEY, and that is the point rather than an inconvenience. ops_incident is
+# RLS-protected: an anon read returns HTTP 200 with `[]`, which read naively says "no incident cites
+# a phantom barrier" — a clean bill of health manufactured out of a permissions failure. The script
+# refuses a zero-row read outright (AGENTS.md, "A FAILED FETCH IS NOT AN EMPTY ANSWER"). No
+# `pull_request` trigger for the same reason: a fork PR has no secrets and could only ever produce
+# that unreadable result.
+name: Incident citation guard (live)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/lib/barrierCitations.ts'
+      - 'scripts/verify-incident-citations-name-real-barriers-live.ts'
+      - '.github/workflows/incident-citation-guard.yml'
+  schedule:
+    - cron: '17,47 * * * *'   # off :00, off the :29/:59 detector sweep, off :09/:39 alert dispatch,
+                              # off :13/:43 (repair-enrollment-guard) and :15/:30/:45 (drift guard)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incident-citation-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  citations:
+    name: No closed incident cites a barrier that was never written
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      # No `npm ci`: the script imports nothing outside node builtins and scripts/lib.
+      - name: Every claimed-state incident cites an artefact that exists
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+            scripts/verify-incident-citations-name-real-barriers-live.ts
+
+      # An unattended workflow that fails silently notifies nobody, and a scheduled guard nobody
+      # hears from is the dark-detector shape this repo has been burned by (nine dark detectors
+      # reading as a clean bill of health, AGENTS.md). `barrier_check_failed` routes to routine #10
+      # via scripts/lib/alertRouting.ts, and a green run calls mon_resolve_key on the same dedup key
+      # so the alert self-heals.
+      #
+      # `always()` bare, exactly as the other bridged workflows do it:
+      # verify-scheduled-checks-alert-on-failure.ts must be able to prove the bridge is reachable on
+      # a FAILING run, and a compound condition it cannot parse is indistinguishable from one that
+      # quietly never fires on red.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind barrier_check_failed
+          --workflow incident-citation-guard.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
