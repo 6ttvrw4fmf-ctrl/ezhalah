@@ -520,6 +520,19 @@ def main() -> int:
             print(f"✓ Arkaan VALIDATION: {len(res)} residential + {len(com)} commercial upserted (no prune)")
             return 0
 
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen because it reasons from positive evidence (we parsed and classified the ad
+        # this run), not from absence — prune's guards protect an orphan rather than age it out,
+        # and verify_gone's 'live' verdict then makes it immortal. See db.retire_superseded_siblings.
+        # Measured here 2026-09-13: AK907 («أرض سكنية للبيع … رقم الأرض 42», captured 09-03) was
+        # retitled by arkaan itself to «أرض تجارية للبيع … رقم الأرض 42» and re-captured 09-13 into
+        # the commercial table. Both rows stayed production_ready, so the Normal Filter rendered one
+        # plot as two cards on one URL.
+        superseded = db.retire_superseded_siblings(
+            res_table="arkaan_residential_listings", com_table="arkaan_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source=SOURCE)
+
         pruned = 0
         for tbl, rows_seen in (("arkaan_residential_listings", res),
                                ("arkaan_commercial_listings", com)):
@@ -528,7 +541,8 @@ def main() -> int:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
-        print(f"✓ Arkaan: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
+        print(f"✓ Arkaan: {len(res)} residential + {len(com)} commercial upserted, "
+              f"{superseded} cross-table superseded, {pruned} stale pruned")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
                              notes=f"pruned={pruned}",
                              check_tables=["arkaan_residential_listings", "arkaan_commercial_listings"])
