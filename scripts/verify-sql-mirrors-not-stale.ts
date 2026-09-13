@@ -29,8 +29,24 @@
 // needle-edit a function body via regexp_replace — 20260805190111 changed aqar_parse without ever
 // spelling out `CREATE OR REPLACE FUNCTION public.aqar_parse`, which is precisely why a
 // CREATE-only heuristic would have missed the real drift.
+//
+// …BUT A COMMENT IS NOT A CHANGE (2026-09-13, routine #5). "Any mention" was reading the migration
+// file RAW, so a migration that merely NAMES an object while explaining itself marked that object's
+// mirror stale. Measured: 20260913111514 edits only `af_field_registry` rows and mentions
+// `af_eligibility_clause` twice, in prose, to say where an undeclared predicate lives — and
+// af_eligibility_clause.sql (verified 2026-09-06, md5 unchanged, production untouched) went RED,
+// failing the REQUIRED npm test on a PR that could not have changed it. That is the hermetic suite
+// failing an unrelated diff, and the remedy it invites — re-dating a mirror nobody re-verified — is
+// worse than the false positive.
+//
+// So (B) now asks the same question the repo already asks of a migration elsewhere: does it name the
+// object in EXECUTED SQL? (`isGuarded`, scripts/lib/repairClassifier.ts — "a comment does not
+// count".) Nothing the rule was built for is lost: a regexp_replace needle-edit names the object
+// inside an executed string literal, and a CREATE/ALTER/DROP names it in executed DDL. Only prose
+// stops counting. Mutation-proven at the bottom of this file.
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
+import { stripSqlComments } from './lib/repairClassifier.ts';
 
 const MIRRORS_DIR = 'sql/mirrors';
 const MIGRATIONS_DIR = 'supabase/migrations';
@@ -50,7 +66,14 @@ check('sql/mirrors contains at least one mirror', mirrors.length > 0);
 // version prefix (YYYYMMDDHHMMSS) -> YYYY-MM-DD, for every migration, once.
 const migrations = readdirSync(MIGRATIONS_DIR)
   .filter((f) => f.endsWith('.sql'))
-  .map((f) => ({ file: f, date: f.slice(0, 8), body: readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8') }));
+  .map((f) => ({
+    file: f,
+    date: f.slice(0, 8),
+    // EXECUTED SQL only — see the note on (B) above. The raw text is kept so a future rule that
+    // genuinely needs prose has it, and so the mutation proofs can show the two differ.
+    raw: readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8'),
+    body: stripSqlComments(readFileSync(`${MIGRATIONS_DIR}/${f}`, 'utf8')),
+  }));
 
 for (const file of mirrors) {
   const objectName = file.replace(/\.sql$/, '');
@@ -102,6 +125,30 @@ for (const file of mirrors) {
     console.log(`    (no migration mentions ${objectName} — date check not applicable)`);
   }
 }
+
+// ── MUTATION PROOFS for (B)'s "a comment is not a change" rule (2026-09-13) ────────────────────
+// EXECUTED against the real predicate, not asserted about it. Each case is a migration body shaped
+// like one the tree actually contains; `touches()` is the exact expression the loop above uses.
+console.log('\n  mutation proof — (B) counts EXECUTED SQL and ignores prose\n');
+const touches = (obj: string, sql: string) => new RegExp(`\\b${obj}\\b`).test(stripSqlComments(sql));
+const OBJ = 'aqar_parse';
+
+check('    a CREATE OR REPLACE of the object still counts',
+  touches(OBJ, `create or replace function public.${OBJ}() returns void as $$ begin end $$;`));
+check('    a regexp_replace needle-edit still counts (the 20260805190111 shape this rule exists for)',
+  touches(OBJ, `do $$ begin\n  perform 1;\n  tpl := regexp_replace(prosrc, 'x', 'y');\nend $$;\n-- touches ${OBJ}\nselect pg_get_functiondef('public.${OBJ}()'::regprocedure);`));
+check('    a DROP still counts', touches(OBJ, `drop function if exists public.${OBJ}();`));
+check('    the object named inside an executed STRING LITERAL still counts',
+  touches(OBJ, `do $$ begin execute 'alter function public.${OBJ}() owner to postgres'; end $$;`));
+check('    a line comment that only MENTIONS the object does NOT count (the false positive)',
+  !touches(OBJ, `-- see public.${OBJ} for where the parse happens\nupdate public.af_field_registry set ui_exposed = true;`));
+check('    a block comment that only mentions it does NOT count',
+  !touches(OBJ, `/* background: public.${OBJ} owns this\n   and nothing here changes it */\nupdate public.af_field_registry set ui_exposed = true;`));
+check('    …and the RAW text of that same migration DOES mention it — so the two really differ, '
+  + 'i.e. the proof above is not passing because the string was empty',
+  /\baqar_parse\b/.test(`-- see public.${OBJ} for where the parse happens\nupdate public.af_field_registry set ui_exposed = true;`));
+check('    a migration that mentions nothing at all does not count',
+  !touches(OBJ, 'update public.af_field_registry set ui_exposed = true;'));
 
 console.log('');
 if (failures > 0) {

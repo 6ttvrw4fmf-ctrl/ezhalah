@@ -1977,7 +1977,47 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
         }
       }
     }
+    // WHAT THE APP ITSELF RESERVED, and what its OWN selector sees (routine #6, 2026-09-13).
+    //
+    // Without this, a blocked-control finding says only THAT the overlay won and never WHY, and the
+    // difference decides the fix. ops_incident #202 shipped a fix for the 8 px container-vs-iframe
+    // gap and the 2026-09-13 WebKit sweep is still red — but the blocked controls sit at y=149-174,
+    // ABOVE even the unfixed 170 px reservation, so the app cannot be reserving 170 OR 178; it looks
+    // to be reserving nothing at all, which is a different defect from the one that was fixed.
+    // "Looks to be" is exactly the guess PART 10.2 forbids repeating on an engine this routine
+    // cannot drive (the three-fix voice-input case), so the next sweep MEASURES it instead:
+    //   reservedTop 178 → the band is reserved and the geometry is still wrong.
+    //   reservedTop 0   → the app never saw the prompt; appSees says whether that is the SELECTOR
+    //                     (no match at all), the RESOLVER (matched, resolved to the wrong box), or
+    //                     TIMING (matched now, but the inset was computed before GIS rendered).
+    let reservedTop = 0, reservedBottom = 0;
+    for (const el of document.querySelectorAll('div')) {
+      const rr = el.getBoundingClientRect();
+      if (rr.width < innerWidth - 1 || rr.top > 1) continue;   // the full-viewport app root
+      const cs = getComputedStyle(el);
+      const pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
+      if (pt > reservedTop) reservedTop = pt;
+      if (pb > reservedBottom) reservedBottom = pb;
+    }
+    // Mirrors AUTH_PROMPT_SELECTOR + promptMeasurementTarget + isHidden from
+    // src/lib/bottomPromptInset.ts, so a divergence between what the app sees and what actually
+    // covers the controls is visible in the SAME line rather than inferred across two runs.
+    const APP_SEL = '#credential_picker_iframe,iframe[src*="accounts.google.com/gsi/"],iframe[src*="appleid.apple.com"]';
+    const appSees = Array.from(document.querySelectorAll(APP_SEL)).map((m) => {
+      let node = m, hops = 0;
+      while (node && hops <= 6 && getComputedStyle(node).position !== 'fixed') { node = node.parentElement; hops++; }
+      const resolved = (node && getComputedStyle(node).position === 'fixed') ? node : m;
+      const rr = resolved.getBoundingClientRect(), cs = getComputedStyle(resolved), ms = getComputedStyle(m);
+      return { resolvedTo: resolved === m ? 'self (no fixed ancestor in reach)' : (resolved.id || resolved.tagName),
+               hops: resolved === m ? null : hops,
+               box: [Math.round(rr.x), Math.round(rr.y), Math.round(rr.width), Math.round(rr.height)],
+               pos: cs.position,
+               // isHidden() is asked of BOTH nodes, and either one true reserves nothing.
+               hiddenResolved: cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0',
+               hiddenMatched: ms.display === 'none' || ms.visibility === 'hidden' || ms.opacity === '0' };
+    });
     return { frames, blocked: blocked.slice(0, 10), blockedCount: blocked.length,
+             reservedTop, reservedBottom, appSees,
              vp: { w: innerWidth, h: innerHeight } };
   })()`;
 
@@ -2007,6 +2047,8 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
       defect(name, 'an auth overlay is sitting on top of an Ezhalah control',
         `${where}: ${state.blockedCount} control(s) blocked — `
         + state.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')
+        + `. APP RESERVED top=${state.reservedTop} bottom=${state.reservedBottom}`
+        + ` appSees=${JSON.stringify(state.appSees)}`
         + `. overlay=${JSON.stringify(state.frames)} viewport=${JSON.stringify(state.vp)}`);
     } else {
       pass(name, `${where}: auth overlay present (${JSON.stringify(state.frames.map((f) => f.box))}) and 0 controls blocked`);
