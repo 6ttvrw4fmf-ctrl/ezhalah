@@ -236,6 +236,38 @@ mustCatch('`rows ?? []` creeping back into loadMoreListings',
   !/if \(rows === null\) return \{ listings: \[\], nextOffset: offset, hasMore: true, failed: true \};/.test(
     storeSrc.replace('if (rows === null) return { listings: [], nextOffset: offset, hasMore: true, failed: true };', 'const r0 = buildPools(rows ?? []);')));
 
+// ── THE SENTENCE STATES WHAT ONE TAP ACTUALLY REVEALS (owner 2026-09-13) ────────────────────────
+// The Arabic used to end «إذا عرضت لك المزيد بعرض لك كل الإعلانات» — one tap shows ALL — while a tap
+// really advances to the next BROWSE_BATCH boundary clamped to what exists. The owner's second half
+// matters just as much: a hardcoded «100» is wrong in the other direction, because "it would be
+// funny if you say 100 and you would only show him 20". So the number is nextBatchTarget()'s, the
+// same function the button pages with, and these checks pin BOTH failure directions.
+console.log('\nThe «عرض المزيد» sentence states the real next-tap target\n');
+const i18nSrc = readFileSync(join(root, 'src', 'i18n.tsx'), 'utf8');
+const moreKeys = [
+  'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}.',
+  'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}, or help you find more precise ones.',
+];
+for (const k of moreKeys) {
+  const ar = i18nSrc.match(new RegExp(`'${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']*)'`))?.[1] ?? '';
+  check(`AR carries the {next} placeholder, not a fixed number: "${k.slice(60, 90)}…"`,
+    ar.includes('{next}') && !/\b100\b/.test(ar), `got: "${ar}"`);
+}
+check('the retired «بعرض لك كل الإعلانات» one-tap-shows-everything promise is gone from every key',
+  !i18nSrc.includes('إذا عرضت لك المزيد بعرض لك كل الإعلانات'));
+check('agent.tsx fills {next} from nextBatchTarget(endShown, endTotal) — the same function the button pages with',
+  /next: nextBatchTarget\(rc\.endShown, rc\.endTotal\)/.test(code));
+// EXECUTED, both directions: the stated number must equal the tap's real reveal target.
+for (const [shown, total] of [[13, 437], [13, 47], [10, 9892], [100, 437], [10, 101]] as const) {
+  const target = nextBatchTarget(shown, total);
+  check(`shown ${shown} of ${total} → the sentence would state ${target} (= what the tap reveals, clamped to what exists)`,
+    target === Math.min((Math.floor(shown / BROWSE_BATCH) + 1) * BROWSE_BATCH, total));
+}
+mustCatch('a hardcoded 100 standing in for the real target on a 47-match search (the owner\'s "funny" case)',
+  nextBatchTarget(13, 47) !== 100);
+mustCatch('a sentence that promises the whole set on one tap (9,892 matches, one tap ≠ everything)',
+  nextBatchTarget(10, 9892) !== 9892);
+
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
 console.log('\n✓ continuation honest end to end: clean boundaries, true totals, no ceiling, no fabricated more\n');

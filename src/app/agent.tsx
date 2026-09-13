@@ -3503,6 +3503,11 @@ export default function Agent() {
                             shown: rc.endShown.toLocaleString('en-US'),
                             total: rc.endTotal.toLocaleString('en-US'),
                             n: (rc.endKind === 'more' ? rc.endShown : (clientNarrowed ? rc.endShown : rc.endTotal)).toLocaleString('en-US'),
+                            // What ONE «عرض المزيد» tap actually reveals, from the SAME function the
+                            // button pages with (nextBatchTarget) — clamped to what exists, so the
+                            // sentence says 47 on a 47-match search and 100 on a 9,892-match one.
+                            // Never a hardcoded 100, never «كل الإعلانات» (owner 2026-09-13).
+                            next: nextBatchTarget(rc.endShown, rc.endTotal).toLocaleString('en-US'),
                           },
                         );
                         // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the

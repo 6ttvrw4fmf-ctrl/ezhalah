@@ -149,8 +149,8 @@ check('an older results turn (isLatestResults false) also stops promising a reti
 const preFixKey = (s: State): ClosingNoteKey =>
   s.endKind === 'more'
     ? (s.quoteTotal
-        ? (s.offersNarrow ? 'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?'
-                          : 'I showed you the first {shown} of {total} matching listings. Want me to show more?')
+        ? (s.offersNarrow ? 'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}, or help you find more precise ones.'
+                          : 'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}.')
         : (s.offersNarrow ? 'I showed you the first {n} listings. Want me to show more, or help you find more precise ones?'
                           : 'I showed you the first {n} listings. Want me to show more?'))
     : (s.offersNarrow ? 'I showed you all {n} matching listings. Want help finding more precise ones?'
