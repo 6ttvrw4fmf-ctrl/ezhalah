@@ -140,8 +140,19 @@ assert "0512345678" not in row["description"]
 row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1}, content=""), {})
 assert row["description"] is None, "no content at all -> honestly NULL, never fabricated"
 
+# ── 10. pw-prc=0 means "على السوم" (price on request), NEVER a real SAR 0 listing — added
+#     2026-09-13 after finding it live-tested as a real user: a card displayed "ر.س 0" for a plot
+#     whose own description says "على السوم". Measured live: 18/262 rows, all 18 negotiable, raw
+#     pw-prc literally "0" in every one — never blank, so this can't be caught by a truthiness
+#     check on the RAW value alone; it has to happen after to_int() parses it to the integer 0.
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 0, "pw-squ": "600"}), {})
+assert row["price_total"] is None, "pw-prc=0 (\"على السوم\") must never store/display as a real SAR 0"
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 250000, "pw-squ": "600"}), {})
+assert row["price_total"] == 250000, "a real positive price must still pass through untouched"
+
 print("ok: amlakalahsa excludes the plan CPT, district is verbatim from its own clean field, "
       "city stays NULL without a geocode rather than guessed, the Al-Ahsa same-name-twin resolves "
       "only with its region hint, unmapped type/deal values are refused rather than assumed, "
       "direction/price-per-meter are captured without ever fabricating a value from ACF's sentinels, "
-      "and description is captured cleaned + PII-redacted from content.rendered")
+      "description is captured cleaned + PII-redacted from content.rendered, and pw-prc=0 "
+      "(\"على السوم\") is stored as an honest NULL rather than a fabricated SAR 0")
