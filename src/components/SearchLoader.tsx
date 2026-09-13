@@ -18,7 +18,7 @@
 // Honors reduce-motion (plain fades; no wave, no pulse, no movement). The message column is
 // LTR-pinned, so RTL is handled manually here (anchor right + row-reverse), like the rest of agent.tsx.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
   Easing,
@@ -143,6 +143,18 @@ function PlatformPill({
 }: {
   item: LoaderPlatform; index: number; total: number; rtl: boolean; reduced: boolean; name: string;
 }) {
+  // Responsive sizing (owner 2026-09-13): "make the logos a bit bigger on a laptop / big screen…
+  // on iPhone the size is perfect". Wide viewports render the logo, name and pill roughly 40%
+  // bigger and the strip gaps looser so the roster feels present on a big screen; narrow viewports
+  // keep the current "perfect on iPhone" pill and only tighten the strip's row gap slightly so more
+  // pills fit per screen height (owner: "I don't want the user to scroll down to see all of them").
+  // Static pill/pillLogo shape (no backgroundColor, no border) is UNCHANGED — the barrier
+  // scripts/verify-mobile-search-loader-no-drag.ts still binds; sizes are inline overrides only.
+  const { width: winW } = useWindowDimensions();
+  const wide = winW >= 720;
+  const pillOverride = wide ? { height: 44, gap: 9, paddingHorizontal: 4 } : null;
+  const logoOverride = wide ? { width: 26, height: 26, borderRadius: 6 } : null;
+  const nameOverride = wide ? { fontSize: 14, maxWidth: 220 } : null;
   const h = useSharedValue(0);
   // LITERAL hex, not the colors.* token (owner theme contract: interpolateColor parses actual color
   // values — colors.* resolves to var(--ez-*) on web, which it cannot parse). Same pattern the
@@ -183,10 +195,10 @@ function PlatformPill({
   }));
   return (
     <Appear delay={index * (reduced ? 25 : PILL_STAGGER)} reduced={reduced}>
-      <Animated.View style={[s.pill, { flexDirection: rtl ? 'row-reverse' : 'row' }, rowGlow]}>
-        <Image source={item.logo} style={s.pillLogo} contentFit="contain" />
+      <Animated.View style={[s.pill, pillOverride, { flexDirection: rtl ? 'row-reverse' : 'row' }, rowGlow]}>
+        <Image source={item.logo} style={[s.pillLogo, logoOverride]} contentFit="contain" />
         <Animated.Text
-          style={[s.pillName, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }, nameGlow]}
+          style={[s.pillName, nameOverride, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }, nameGlow]}
           numberOfLines={1}
         >
           {name}
@@ -381,7 +393,10 @@ const s = StyleSheet.create({
   // nothing ever reads as "a box" or "a photo." The highlight is a shadow-only glow (PlatformPill's
   // rowGlow) plus the name warming from muted to primary — transforms/shadow/color only, so the wave
   // still causes ZERO layout shift.
-  strip: { flexWrap: 'wrap', alignSelf: 'stretch', gap: 9, rowGap: 9 },
+  // rowGap 6 (was 9): mobile owner 2026-09-13 "I don't want the user to scroll down to see all of
+  // them" — tighter row spacing shaves ~3-4 rows worth of empty vertical space without touching the
+  // pill's own "perfect on iPhone" size. Horizontal gap stays 9 so pills-per-row is unaffected.
+  strip: { flexWrap: 'wrap', alignSelf: 'stretch', gap: 9, rowGap: 6 },
   pill: { alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 2 },
   pillLogo: { width: 18, height: 18, borderRadius: 4 },
   pillName: { fontSize: 12.5, fontWeight: '600', color: colors.body, maxWidth: 150 },
