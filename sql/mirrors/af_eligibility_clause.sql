@@ -1,5 +1,17 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
 --
+-- Re-verified 2026-09-13 (AF + Trending data-integrity daily run): UNCHANGED — and, for the second
+--   time in seven days, a MENTION rather than a redefinition. Migration 20260913111514 edits
+--   af_field_registry rows only; it names `af_eligibility_clause` twice in `--` comments and once
+--   inside the not_exposed_reason TEXT it stores for tenant_ar, to record that p_tenant is a live
+--   predicate no UI control sends. verify-sql-mirrors-not-stale now strips SQL comments before the
+--   match (a comment is not a change — mutation-proven in that file), but a string literal inside
+--   executed SQL still trips it, correctly: the guard cannot tell prose in a stored value from a
+--   regexp_replace needle-edit, and asking a human to look is the point. Settled by reading
+--   production, not by re-dating on faith:
+--   md5(pg_get_functiondef) = 47feed9ce3a08e743c44a7fb978f4278, length 9,452 — byte-identical to
+--   the md5 this file already records, so the body below stands untouched.
+--
 -- Re-verified 2026-09-06 (Search & Matching QA daily heartbeat): UNCHANGED — and a MENTION, not a
 --   redefinition, which is the distinction this file keeps having to make. Migration
 --   20260906082233 (district display canon refresh + two new detectors) names
