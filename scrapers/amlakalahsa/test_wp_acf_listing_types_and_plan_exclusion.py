@@ -66,13 +66,13 @@ assert row["ad_number"] == "AMH19602"
 #    now defaults to Eastern Province — owner-confirmed 2026-09-12: this office is Al-Ahsa-only,
 #    entirely within one region, so region is a known FACT even when the exact town isn't. ────────
 row, _ = map_listing(_post(pid=2, post_type="home", acf={
-    "pw-typ": "منزل", "pw-cnt": "للبيع", "pw-dis": "الجشة", "pw-prc": 970000, "pw-squ": "325",
+    "pw-typ": "منزل", "pw-cnt": "للبيع", "pw-dis": "حي غير معروف تمامًا", "pw-prc": 970000, "pw-squ": "325",
 }), {})
 assert row["property_type"] == "Villa"
 assert row["city_ar"] is None and row["city_id"] is None, (
     "a listing with no geocoded address must never have a CITY guessed onto it")
 assert row["region_id"] == 5, "region IS known (Al-Ahsa-only office) even without a geocode"
-assert row["neighborhood"] == "الجشة"
+assert row["neighborhood"] == "حي غير معروف تمامًا"
 assert row["photo_urls"] == [], "no attachment found -> empty list, never borrowed from elsewhere"
 
 # ── 4. an unmapped raw property type is refused, never guessed ─────────────────────────────────
@@ -158,6 +158,25 @@ row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-
 assert row["city_ar"] == "الهفوف" and row["city_id"] == 12, "no geocode at all, but this district is known to be الهفوف"
 assert row["district_ar"] == "الطرف" and row["neighborhood"] == "الطرف"
 
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "الرياض"}), {})
+assert row["city_ar"] == "الهفوف" and row["city_id"] == 12, "bare \"الرياض\" is a real الهفوف neighborhood, not the capital"
+assert row["district_ar"] == "الرياض" and row["neighborhood"] == "الرياض"
+
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "الجشة"}), {})
+assert row["city_ar"] == "الجشة" and row["city_id"] == 2746, "bare \"الجشة\" district with no city means its own city"
+assert row["district_ar"] == "الجشة" and row["neighborhood"] == "الجشة"
+
+# One specific listing (id 11606266) is proven الهفوف by ITS OWN raw text ("حي المروج الجنوبي"),
+# even though its structured district field only says bare "المروج" — id-scoped, not district-scoped.
+row, _ = map_listing(_post(pid=11606266, acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "المروج"}), {})
+assert row["city_ar"] == "الهفوف" and row["city_id"] == 12, "this specific listing's own text proves الهفوف"
+assert row["district_ar"] == "المروج", "district_ar itself is untouched — only city is filled in"
+
+# A different listing with the SAME bare "المروج" district must NOT get the id-scoped fix — bare
+# "المروج" alone is genuinely ambiguous (~40 Saudi cities have one), so only that one proven id gets it.
+row, _ = map_listing(_post(pid=99999999, acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "المروج"}), {})
+assert row["city_ar"] is None and row["city_id"] is None, "a different listing's bare المروج stays honestly unresolved"
+
 row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "الصفا 2"}), {})
 assert row["city_ar"] == "العيون" and row["city_id"] == 2038
 assert row["district_ar"] == "الصفا", "numbered variant matches its bare form"
@@ -170,10 +189,18 @@ row, _ = map_listing(_post(acf={
 assert row["district_ar"] == "المباركية", "numbered variant matches its bare form even with a real geocode"
 assert row["neighborhood"] == "المباركية 3"
 
-# A district NOT in either map is never touched or guessed at.
-row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "العقير"}), {})
+# The 3 "no specific city provable, broad governorate only" districts — owner-directed: "we guess
+# we don't know, we just leave it" — district_ar stays exactly as scraped, only city gets the
+# honest broad answer.
+for _known_broad in ("النور", "العقير", "الجرن"):
+    row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": _known_broad}), {})
+    assert row["city_ar"] == "الاحساء" and row["city_id"] == 3677, _known_broad
+    assert row["district_ar"] == _known_broad == row["neighborhood"], "district left exactly as scraped"
+
+# A district NOT in ANY of the three maps is never touched or guessed at.
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "حي غير معروف تمامًا"}), {})
 assert row["city_ar"] is None and row["city_id"] is None, "an unmapped district stays honestly unresolved"
-assert row["district_ar"] == "العقير" == row["neighborhood"]
+assert row["district_ar"] == "حي غير معروف تمامًا" == row["neighborhood"]
 
 # ── 11. الجفر's "ضاحية هجر" numbered sub-plots collapse to one MATCH district "الضاحية" — owner
 #     instruction 2026-09-13: a buyer shouldn't have to know which of 9+ numbers to pick for one

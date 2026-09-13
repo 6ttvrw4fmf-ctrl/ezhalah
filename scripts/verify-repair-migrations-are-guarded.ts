@@ -246,6 +246,37 @@ const WAIVED: Record<string, string> = {
   '20260913175242_amlakalahsa_ayoun_safa2_number_strip_missed_row.sql':
     'same consolidation as 20260913174942 (one row its WHERE clause missed) — watched by the same '
     + 'companion, 20260913180152_amlakalahsa_district_consolidation_gets_a_detector.sql',
+  // Amlakalahsa's last 3 unresolved districts (النور، العقير، الجرن — no specific city provable
+  // anywhere in the fleet, unlike the 10 in the migration above): owner-directed 2026-09-13,
+  // assigned the broad-but-true "الأحساء" governorate city rather than staying cityless.
+  // district_ar deliberately untouched (owner: "we guess we don't know, we just leave it").
+  // Companion lands ~6 minutes later and EXTENDS the existing
+  // mon_detect_amlakalahsa_district_consolidation_regressed() (no new function — same regression
+  // shape, three more names added to its existing no_city check), self-verified green in the same
+  // migration. scrapers/amlakalahsa/run.py updated the same session so this applies to every
+  // future scrape too. Open the companion to verify this reason rather than taking it on trust.
+  '20260913182357_amlakalahsa_final_three_districts_get_broad_city.sql':
+    'watched by its companion 20260913182939_amlakalahsa_final_three_districts_detector_extended.sql, '
+    + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover these '
+    + '3 district names and self-verifies green',
+  // "الرياض" -> الهفوف (regionally-unique catalog match + abralosol cross-platform confirmation +
+  // listings_arabic_locations overlay agreement). district_ar deliberately untouched. Companion
+  // lands ~3 minutes later and EXTENDS the existing mon_detect_amlakalahsa_district_consolidation_
+  // regressed() (no new function — same regression shape, one more name added to its existing
+  // no_city check), self-verified green in the same migration. run.py updated the same session.
+  '20260913184721_amlakalahsa_riyadh_district_resolves_to_hofuf.sql':
+    'watched by its companion 20260913185054_amlakalahsa_riyadh_district_detector_extended.sql, '
+    + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover this '
+    + 'district name and self-verifies green',
+  // "الجشة" (bare, its own city) + listing 11606266 ("المروج" -> حي المروج الجنوبي, proven only by
+  // that listing's own text, id-scoped). district_ar untouched in both. Companion lands ~3 minutes
+  // later and EXTENDS the existing mon_detect_amlakalahsa_district_consolidation_regressed() (no new
+  // function — "الجشة" joins the existing no_city list, plus one new id-scoped check), self-verified
+  // green in the same migration. run.py updated the same session for both.
+  '20260913190703_amlakalahsa_jasha_and_marouj_janoubi_resolved.sql':
+    'watched by its companion 20260913191008_amlakalahsa_jasha_and_marouj_janoubi_detector_extended.sql, '
+    + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover "الجشة" '
+    + 'and listing 11606266, and self-verifies green',
 };
 
 // Enforcement starts here — the day this rule landed.
