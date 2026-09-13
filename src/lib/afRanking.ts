@@ -97,10 +97,20 @@ export function askTier(id: string): number { return ASK_FIRST_TIER[id] ?? 0; }
 // into a button that opens a round and immediately closes it — the exact bug shape PR #1094 had to
 // fix for a different cause. One predicate makes that unrepresentable.
 //
-// Removal form (`total - count >= total * FRACTION`), so EXACTLY 10% qualifies: at N=50 a count of
-// 45 is the last qualifying answer, not the first rejected one. The second clause exists so the LAST
-// step to the target is never blocked by a percentage: at N=26 a count of 25 removes only 3.8% but
-// lands AT the target, which is the whole point of the round.
+// Removal form (`total - count >= total * FRACTION`), so EXACTLY 10% qualifies.
+//
+// THE WORKED EXAMPLES BELOW ARE EXECUTED, NOT DECORATIVE. Every `[N=…, k=… -> qualifies|rejected]`
+// in this tree is parsed out and run against this very function by
+// scripts/verify-af-worked-examples-are-true.ts (in `npm test`). That barrier exists because the
+// examples that used to sit here were written against INTERVIEW_STOP_AT = 25 and silently became
+// arithmetically FALSE on 2026-09-04 when the owner raised it to 50 — the old line claimed "at N=50
+// a count of 45 is the last qualifying answer", while at 50 the true last qualifying answer is 50
+// itself. Nothing caught it, because a comment is not executable. Now it is.
+//
+// Above the escape line the 10% clause decides alone: [N=1000, k=900 -> qualifies] is exactly 10%
+// removed, [N=1000, k=901 -> rejected] is just under. The second clause exists so the LAST step to
+// the target is never blocked by a percentage: [N=51, k=50 -> qualifies] removes only 2% but lands
+// AT INTERVIEW_STOP_AT, which is the whole point of the round.
 export const MEANINGFUL_NARROWING_FRACTION = 0.1;
 export function optionNarrowsMeaningfully(count: number, total: number): boolean {
   return total - count >= total * MEANINGFUL_NARROWING_FRACTION || count <= INTERVIEW_STOP_AT;
@@ -180,8 +190,13 @@ export const AF_ROUND_MAX_QUESTIONS = 4;
 // ── THE OFFER GATE — same rule as the ASK gate, one turn earlier (owner 2026-08-24/2026-08-25) ──
 // May we OFFER «تحديد أكثر» at all? A round costs the user taps, so it is offered only when it can
 // pay for itself: more than INTERVIEW_STOP_AT results AND some remaining option that
-// optionNarrowsMeaningfully(). At N=50 an option yielding 45 qualifies and one yielding 47 does not;
-// at N=27 an option yielding 24 qualifies. Nothing qualifying ⇒ the button is HIDDEN.
+// optionNarrowsMeaningfully(). This gate only ever runs ABOVE the stop line, so its worked examples
+// live there too: [N=100, k=90 -> qualifies] removes exactly 10%, [N=100, k=91 -> rejected] falls
+// just short, and [N=51, k=50 -> qualifies] wins by landing AT INTERVIEW_STOP_AT rather than by
+// percentage. Nothing qualifying ⇒ the button is HIDDEN. (These are executed — see the note on
+// optionNarrowsMeaningfully above. The pair that used to sit here, "at N=50 an option yielding 45
+// qualifies and one yielding 47 does not", was true at INTERVIEW_STOP_AT = 25 and false at 50, and
+// additionally used an N this gate can no longer reach.)
 //
 // As of the owner's 2026-08-25 decision this calls the SAME predicate scoreQuestion() uses, instead of
 // re-implementing the arithmetic. That is a hard requirement, not tidiness: while the ask gate was the

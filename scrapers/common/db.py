@@ -591,6 +591,7 @@ def _ensure_capture(r: dict[str, Any]) -> None:
         cap.setdefault("url_path", r.get("listing_url"))
         cap.setdefault("schema", "unspecified")
     _fold_price_evidence(r)
+    _fold_images_evidence(r)
     # PDPL capture barrier (owner rule 2026-08-09). The capture is PRIVATE (anon has no SELECT on
     # it), but "private" is not "allowed to accumulate contact details" — hidden PII is still PII,
     # and 614 sanadak rows proved it accumulates silently. redact_capture() scrubs FREE TEXT only:
@@ -633,6 +634,40 @@ def _fold_price_evidence(r: dict[str, Any]) -> None:
     if any(r.get(c) is not None for c in _PRICE_COLS):
         cap.setdefault("price_evidence",
                        {"found": None, "unverified": True, "reason": "adapter_emitted_no_evidence"})
+
+
+def _fold_images_evidence(r: dict[str, Any]) -> None:
+    """IMAGES = SOURCE, layer 1 — the same contract as _fold_price_evidence, for photos.
+
+    `source_capture["image_count"]` is `len(row["photo_urls"])`: a restatement of what WE
+    stored, never a fact about the source. So a stored `image_count: 0` is exactly as consistent
+    with "the source published no photos" as with "the images key moved, the response was a
+    shell, the session expired, or the parser missed it". A FAILED FETCH IS NOT AN EMPTY ANSWER
+    (AGENTS.md, permanent) — and here the derived count actively LOOKS like capture evidence,
+    which is worse than capturing nothing.
+
+    That gap is not hypothetical. scripts/verify-image-coverage-ratchet-live.ts asks exactly one
+    question — "scraper regression or source change; investigate, never lower the floor" — and on
+    2026-09-13 wasalt had been below its 90% floor for four consecutive runs (89.4%, 5,733 rows)
+    with no stored field able to answer it. Row-by-row the pipeline was provably faithful
+    (captured count == stored photos on every crawl day), so nothing was LOST; what was missing
+    was any record of what the source's image container actually held.
+
+    A scraper that looked at that container declares `images_evidence` on the row (container
+    present? key present? how many?). This folds it into `source_capture` and drops the
+    top-level key, which is NOT a column. Everything else is labelled `adapter_emitted_no
+    evidence`, so a derived zero can never be read back as a source-published zero. The evidence
+    is a witness only: it never changes photo_urls or image_count.
+    """
+    ev = r.pop("images_evidence", None)
+    cap = r.get("source_capture")
+    if not isinstance(cap, dict):
+        return
+    if ev:
+        cap.setdefault("images_evidence", ev)
+        return
+    cap.setdefault("images_evidence",
+                   {"observed": None, "unverified": True, "reason": "adapter_emitted_no_evidence"})
 
 
 # Location columns checked on EVERY upsert path (2026-07-10 architecture redesign — see
