@@ -61,10 +61,17 @@ check('the continuation is bound to the round token — a superseded flow can ne
 check('the continuation waits for the count to land and read (AF_NEXT_ROUND_DELAY_MS), it does not pre-empt the results',
   /AF_NEXT_ROUND_DELAY_MS/.test(fin) && /const AF_NEXT_ROUND_DELAY_MS = \d+;/.test(agent));
 
-// ── 3. > 50 with nothing truthful left is SAID, not silently completed ──────────────────────────
-check('a MEASURED "no" after an AF round posts the spoken line (i18n key present in both languages)',
-  /verdict === 'no' && afCarryRef\.current && !noMoreSaidRef\.current\[m\.id\]/.test(agent)
-  && read('src/i18n.tsx').includes("'No further truthful narrowing question exists for this scope — these are all the genuine matches.': 'ما فيه سؤال إضافي موثوق"));
+// ── 3. > 50 with nothing truthful left is SILENT, but never a completion ────────────────────────
+// Owner reversal 2026-09-12/13: the 2026-09-04 decision to SPEAK a "nothing left" verdict as a chat
+// bubble is reversed — too dense/confusing in practice. The verdict must still be measured honestly
+// (afCanNarrow still hides «تحديد أكثر» when exhausted) and must still never silently COMPLETE the
+// chat (that's the next check) — it just no longer narrates itself. So this check now asserts the
+// OPPOSITE of its original name: the old spoken-message call site and its i18n key are both gone.
+check('a MEASURED "no" after an AF round stays SILENT (no chat bubble, no dangling i18n key)',
+  !/noMoreSaidRef/.test(agent)
+  && !/No further truthful narrowing question exists for this scope/.test(agent)
+  && !read('src/i18n.tsx').includes("No further truthful narrowing question exists for this scope")
+  && /setAfCanNarrow\(\(c\) => \(\{ \.\.\.c, \[m\.id\]: verdict === 'yes' \}\)\);/.test(agent));
 // Generalized 2026-09-11 (owner rule: a plain search or typed AI message landing at <= the
 // threshold finishes cleanly too, not only an AF round; AND the user's own explicit «عرض المزيد»
 // show-all-and-finish choice, Task 4, finishes at ANY total) from "exactly one site" to "every site
