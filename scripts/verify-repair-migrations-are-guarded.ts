@@ -201,6 +201,17 @@ const WAIVED: Record<string, string> = {
   '20260913044540_amlakalahsa_backfill_description.sql':
     'watched by its companion 20260913044634_amlakalahsa_description_backfill_gets_a_detector.sql, '
     + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_description_regressed()',
+  // Amlakalahsa "على السوم" price sentinel: pw-prc=0 means "price on request", never a real SAR 0
+  // — found live-testing as a real user (a card displayed "ر.س 0"). Companion lands ~2 minutes
+  // later and creates + rosters + self-verifies mon_detect_amlakalahsa_soum_price_regressed(),
+  // which re-checks every active row for source_capture pw-prc="0" alongside a non-null
+  // price_total — caught a REAL regression live during this very fix: a concurrent scrape run
+  // (the newly-scheduled small-sources-sync workflow, PR #2489) re-wrote all 18 rows back to 0
+  // using the still-unfixed main branch before this PR's scraper fix could land, which is exactly
+  // why this backfill's own migration timestamp is later than you'd expect from a single pass.
+  '20260913063214_amlakalahsa_backfill_soum_price_sentinel.sql':
+    'watched by its companion 20260913063423_amlakalahsa_soum_price_backfill_gets_a_detector.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_soum_price_regressed()',
 };
 
 // Enforcement starts here — the day this rule landed.
