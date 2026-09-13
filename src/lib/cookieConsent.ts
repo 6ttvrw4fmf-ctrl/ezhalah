@@ -1,14 +1,19 @@
-// COOKIE CONSENT — capture for signed-out, first-time web visitors (owner 2026-09-06).
+// COOKIE CONSENT — appears on EVERY signed-out web visit (owner 2026-09-13, permanent; supersedes
+// the "once per visitor" rule from 2026-09-06 that would hide the card on the second visit).
 //
-// Owner brief, verbatim intent: a Perplexity-style cookie card that
-//   • pops up when the visitor is NOT logged in,
-//   • shows only the FIRST time (never again once a choice is recorded),
-//   • goes away the moment the user runs a search, and
-//   • treats "left without choosing" (e.g. dismissed by searching) as ALLOW ALL.
+// Owner brief, verbatim intent (2026-09-13): the card must show for EVERY non-logged-in visitor, on
+// every refresh — same lifecycle as SignInCard, which dismisses in-memory and returns on reload. It
+// disappears only when the visitor signs in.
 //
-// Two buttons: "Allow all" records 'all'; "Only necessary" records 'necessary'. The choice is
-// persisted to localStorage so the card is genuinely once-per-visitor, surviving reloads (unlike the
-// in-memory SignInCard dismissal, which is meant to return).
+// The pure gate below is unchanged: `shouldShowCookieBanner` still refuses if `consent != null`, so
+// clicking a button hides the card for THIS pageload. Reload → the component seeds `consent` to null
+// again (see src/components/CookieConsent.tsx) → the card comes back. localStorage is still WRITTEN
+// on click so `analyticsAllowed()` keeps the visitor's real preference across visits, but it is no
+// longer READ to decide whether to show the card.
+//
+// Two buttons: "Allow all" records 'all'; "Only necessary" records 'necessary'. A search while the
+// card is up counts as ALLOW ALL for THIS pageload (owner: "no selection = allow all"); the card
+// still re-appears on the next reload, that is the point.
 //
 // THE HONEST HALF: whatever the popup promises, the code must keep. `analyticsAllowed()` is the ONE
 // switch the future usage tracker MUST read before it measures anything. It FAILS CLOSED — no stored
@@ -49,8 +54,11 @@ export function analyticsAllowed(): boolean {
 }
 
 /**
- * Pure gate for the banner. Shown only to a signed-out web visitor who has not chosen yet, and only
- * after the auth session restore has settled (so a returning signed-in user never sees a flash).
+ * Pure gate for the banner. Shown to any signed-out web visitor after the auth session restore has
+ * settled (so a returning signed-in user never sees a flash). `consent` is the IN-MEMORY choice for
+ * THIS pageload — clicking a button sets it and hides the card until the next reload; the persisted
+ * choice is not read here anymore (owner 2026-09-13: card must return on every refresh, matching
+ * SignInCard's in-memory dismissal — see src/components/CookieConsent.tsx).
  */
 export function shouldShowCookieBanner(a: {
   isWeb: boolean;
