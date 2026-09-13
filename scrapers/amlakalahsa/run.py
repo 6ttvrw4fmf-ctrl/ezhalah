@@ -38,6 +38,7 @@ Usage:  python -m scrapers.amlakalahsa.run [--limit-test N]
 from __future__ import annotations
 
 import argparse
+import html as ihtml
 import os
 import re
 import sys
@@ -161,6 +162,31 @@ def _clean_geocode_text(v: Any) -> Optional[str]:
     return s or None
 
 
+# content.rendered carries the office's own free-text description (measured live: real HTML, e.g.
+# `<p class="wp-block-paragraph">...</p>`, on every one of 3 sampled posts — never captured before
+# this fix, WP REST returns it unconditionally and fetch_type_page() never restricted `_fields`).
+# _clean/_redact are the same house pattern every other WP-content-block scraper uses (shmoualshmal,
+# eastabha, alta, awal, amaall, nowaisiry, remal) — kept local rather than shared since each of those
+# copies it too. redact() is belt-and-suspenders: scrapers.common.db._redact_user_visible_text()
+# already PDPL-redacts the `description` column centrally on every upsert path regardless.
+_PHONE_RE = re.compile(r"(?:\+?966|00966|0)?5\d{8}\b")
+_PHONE_LOOSE = re.compile(r"(?:[\d٠-٩][\s\-]?){9,}")
+
+
+def _clean(s: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", ihtml.unescape(s or ""))).strip()
+
+
+def _redact(text: Optional[str]) -> Optional[str]:
+    """Strip contact numbers before storage (PDPL) — same treatment every scraper applies."""
+    if not text:
+        return text
+    t = _PHONE_LOOSE.sub(" ", _PHONE_RE.sub(" ", text))
+    t = re.sub(r"_?للتواصل[^_\n]*", " ", t)
+    t = re.sub(r"_?للاتصال[^_\n]*", " ", t)
+    return re.sub(r"\s{2,}", " ", t).strip() or None
+
+
 def _first_street_width(v: Any) -> Optional[int]:
     """pw-str is sometimes a COMPOUND value for a corner plot with two frontages — measured live on
     40 of 262 rows, e.g. "15 * 10", "40 * 20", "20 * 8 * مرفق". Feeding that through the generic
@@ -237,6 +263,13 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         region_id = EASTERN_PROVINCE_REGION_ID
     city_en = normalize.map_city(city_ar) if city_ar else None
 
+    # The office's own free-text spec paragraph — real prose (measured live, 3/3 sampled posts),
+    # e.g. "للبيع ارض في حي الورود الغربي ارض رقم 219 \ ف مساحة 360 م شارع عرض 15 شرقا ... السعر
+    # 250,000". Stored AS-IS (cleaned of HTML, PII-redacted) — NOT re-parsed for the dimensions/
+    # direction it happens to also restate in prose: pw-str/pw-front already give those cleanly via
+    # ACF, so parsing this free text for the same facts would only add fabrication risk, not new data.
+    description = _redact(_clean((post.get("content") or {}).get("rendered", ""))) or None
+
     category = "Residential" if normalize.category_for_type(property_type) == "Residential" else "Commercial"
 
     row = {
@@ -258,6 +291,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         "city": city_en,
         "neighborhood": district_ar,
         "title": (post.get("title") or {}).get("rendered"),
+        "description": description,
         "photo_urls": images.get(pid, []),
         "city_ar": city_ar,
         "district_ar": district_ar,
