@@ -229,6 +229,34 @@ const WAIVED: Record<string, string> = {
     'same merge as 20260913080703 (search_listings_ar backfill, needed because it is a synced copy '
     + 'not a live passthrough) — watched by the same companion, '
     + '20260913082310_amlakalahsa_jafr_dahiya_merge_gets_a_detector.sql',
+  // Recovered 2026-09-13 by routine #6, mirroring the six migrations that had the drift gate closed
+  // for ~10h and were refusing EVERY frontend deploy in the repo (alert_event 2712). Same shape as
+  // the 2026-09-11 amaall waiver above, which was itself added by a mirror recovery: the barrier
+  // could not weigh these files at all while they existed only in production, so it was green
+  // because the evidence was missing, not because the rule held.
+  //
+  // The repair is owner-directed (2026-09-13): 10 "no city" rows resolved to their proven city, and
+  // 5 numbered district variants folded into their bare name in district_ar (match-truth) while
+  // neighborhood — the card's own display text — is left untouched throughout.
+  //
+  // The companion is the STRONGER form, the one the res/com waiver above distinguishes: it does not
+  // watch a class and it does not re-assert the UPDATE. It watches THESE REPAIRS SPECIFICALLY —
+  // limb A counts active rows that are back to a NULL city on any of the exact 10 resolved district
+  // names, limb B counts active rows back on any of the exact 5 numbered variants. Its own header
+  // names both repair migrations and states why the watch is needed: the scraper was NOT changed,
+  // so a re-scrape's ordinary upsert would silently overwrite district_ar back to the raw text the
+  // office typed. It needle-edits itself into the mon_run_all_detectors() roster and asserts itself
+  // green (raised <> 0 → raise exception) in the same migration. Open the companion to verify this
+  // reason rather than taking it on trust.
+  '20260913174942_amlakalahsa_confirmed_city_fixes_and_number_strip.sql':
+    'watched by its companion 20260913180152_amlakalahsa_district_consolidation_gets_a_detector.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_district_consolidation_'
+    + 'regressed(), scoped to the exact 10 resolved district names and 5 folded numbered variants',
+  '20260913175242_amlakalahsa_ayoun_safa2_number_strip_missed_row.sql':
+    'same repair as 20260913174942 (the one "الصفا 2" row that already had city_ar set and so fell '
+    + 'through both of that migration\'s branches — see this file\'s own header) — watched by the '
+    + 'same companion, 20260913180152_amlakalahsa_district_consolidation_gets_a_detector.sql, whose '
+    + 'limb A covers "الصفا 2" explicitly',
 };
 
 // Enforcement starts here — the day this rule landed.
