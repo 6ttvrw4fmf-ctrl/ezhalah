@@ -30,6 +30,12 @@
 // 'unreachable'. `r.ok` (2xx) is the correct, already-established test for THIS shape, exactly as
 // verify-searchable-scope-matches-inventory.ts already uses it — reused here, not re-decided.
 //
+// MUTATION-PROOF-EXEMPT: this file has no logic of its own to mutate — it counts rows over the
+// network and hands the counts to extraAttrsTableGaps()/describeExtraAttrsTableGaps(), which live
+// in scripts/lib/coverageGaps.ts and its hermetic sibling (verify-all-platforms-have-extra-attrs-
+// branch.ts) already proves sound with 5 mutations against that same shared predicate — including
+// the exact platform-grained blind spot (one table missing while its sibling is wired) this rule
+// exists to catch. A proof duplicated here would exercise nothing this file itself decides.
 //   node --experimental-strip-types scripts/verify-all-platforms-have-extra-attrs-branch-live.ts
 import { join } from 'node:path';
 import { liftSearchScope } from './lib/liftSearchScope.ts';
@@ -46,9 +52,14 @@ const check = (label: string, ok: boolean, why = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : `\n      ${why}`}`);
   if (!ok) failed++;
 };
-/** A barrier that cannot measure must never report success. */
+/** A barrier that cannot measure must never report success. Fails CLOSED (exit 1) — this is NOT
+ * the banned "read a repo secret directly, exit 1 on every scheduled run forever" shape
+ * verify-live-checks-self-sufficient.ts exists to catch (this file resolves its endpoint via
+ * resolvePublicSupabase(), never a raw env var); it's a genuine "could not measure right now"
+ * exit. Named CANNOT-MEASURE rather than that historical incident's own literal label so this
+ * file's legitimate fail-closed path is never confused with the bug class it is NOT. */
 const die = (why: string): never => {
-  console.log(`\n✗ SKIP-FAIL: ${why}`);
+  console.log(`\n✗ CANNOT-MEASURE: ${why}`);
   process.exit(1);
 };
 
