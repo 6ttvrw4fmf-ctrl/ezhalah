@@ -35,12 +35,12 @@ _al.to_catalog = lambda city_ar, region_hint=None: (
     (12, 5) if city_ar == "الهفوف" and region_hint == "المنطقة الشرقية" else (None, None)
 )
 
-from scrapers.amlakalahsa.run import LISTING_TYPES, map_listing, _clean_geocode_text, _first_street_width  # noqa: E402
+from scrapers.amlakalahsa.run import LISTING_TYPES, map_listing, _clean_geocode_text, _first_street_width, _clean, _redact  # noqa: E402
 
 
-def _post(pid=1, post_type="land", title="", acf=None):
+def _post(pid=1, post_type="land", title="", acf=None, content=""):
     return {"id": pid, "type": post_type, "link": f"https://amlakalahsa.com/{post_type}/x-{pid}/",
-            "title": {"rendered": title}, "acf": acf or {}}
+            "title": {"rendered": title}, "content": {"rendered": content}, "acf": acf or {}}
 
 
 # ── 1. `plan` is never a listing type, never queried ────────────────────────────────────────────
@@ -102,6 +102,46 @@ assert _first_street_width("") is None
 row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-str": "15 * 10"}), {})
 assert row["street_width_m"] == 15, "must never store the concatenated 1510"
 
+# ── 8. direction (pw-front) and price-per-meter (pw-prc-mtr) — added 2026-09-13 after an audit
+#    found both were captured raw in source_capture but never read into their own columns, even
+#    though 37/262 and 82/262 real rows carry them. pw-front is a single-element JSON array
+#    ("["شمالي"]") on every real row observed — used as-is, never re-parsed. pw-prc-mtr's ACF
+#    "not set" sentinel is a NEGATIVE integer (-1/-2/-5, measured on 4 rows) rather than blank —
+#    normalize.to_int() strips the sign, which would otherwise fabricate a positive price from it.
+row, _ = map_listing(_post(acf={
+    "pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-front": ["شمالي"], "pw-prc-mtr": "1350",
+}), {})
+assert row["direction"] == "شمالي"
+assert row["price_per_meter"] == 1350
+
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-prc-mtr": "-2"}), {})
+assert row["price_per_meter"] is None, "ACF's negative 'not set' sentinel must never become a fabricated price"
+assert row["direction"] is None, "no pw-front at all -> honestly NULL, never guessed"
+
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-front": [], "pw-prc-mtr": ""}), {})
+assert row["direction"] is None and row["price_per_meter"] is None
+
+# ── 9. description (content.rendered) — added 2026-09-13 after an audit found WP REST returns it
+#    unconditionally on every post, but only the ACF block ever reached source_capture/the row.
+#    Real shape measured live: HTML paragraphs restating the spec in prose, e.g.
+#    '<p class="wp-block-paragraph">للبيع ارض ...</p>'. Stored cleaned + PII-redacted, never re-parsed.
+assert _clean('<p class="wp-block-paragraph">للبيع ارض</p>\n\n\n\n<p>مساحة 360</p>') == 'للبيع ارض مساحة 360'
+assert _clean('') == '' and _clean(None) == ''
+assert _redact('تواصل 0512345678 للبيع') == 'تواصل للبيع', "a real Saudi mobile number must never reach storage"
+assert _redact('') == '' and _redact(None) is None, "falsy input passes through unchanged, never coerced"
+
+row, _ = map_listing(_post(
+    acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1},
+    content='<p class="wp-block-paragraph">للبيع ارض في حي الورود رقم 219 اتصل 0512345678</p>',
+), {})
+assert row["description"] == "للبيع ارض في حي الورود رقم 219 اتصل", "cleaned of HTML, and the phone number is gone"
+assert "0512345678" not in row["description"]
+
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1}, content=""), {})
+assert row["description"] is None, "no content at all -> honestly NULL, never fabricated"
+
 print("ok: amlakalahsa excludes the plan CPT, district is verbatim from its own clean field, "
       "city stays NULL without a geocode rather than guessed, the Al-Ahsa same-name-twin resolves "
-      "only with its region hint, and unmapped type/deal values are refused rather than assumed")
+      "only with its region hint, unmapped type/deal values are refused rather than assumed, "
+      "direction/price-per-meter are captured without ever fabricating a value from ACF's sentinels, "
+      "and description is captured cleaned + PII-redacted from content.rendered")

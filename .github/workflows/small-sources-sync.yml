@@ -156,6 +156,12 @@ jobs:
           - { source: abralosol,   cmd: "python -m scrapers.abralosol.run --type all" }
           - { source: arkaan,      cmd: "python -m scrapers.arkaan.run --type all" }
           - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }
+          # amlakalahsa (owner-approved 2026-09-12, ops_incident #2667/daily-engineer 2026-09-13):
+          # scrapers/amlakalahsa/run.py shipped the same day the platform was approved, but no
+          # workflow ever scheduled it — zero scrape_runs rows ever existed for it (its own 236
+          # production_ready rows came from a one-off manual/backfill run). No --type/--pages flag:
+          # like azdad, run.py fetches its whole small WordPress catalogue in one pass.
+          - { source: amlakalahsa, cmd: "python -m scrapers.amlakalahsa.run" }
           # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
           # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
           # property-card markup); scrape_runs went from rows_seen=5 (2026-07-07) to
