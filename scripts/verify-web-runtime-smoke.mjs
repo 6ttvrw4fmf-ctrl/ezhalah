@@ -91,6 +91,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
+import { readRestoredFormState } from '../e2e/lib/formRestoreOracle.mjs';
 
 const DIST = new URL('../dist/', import.meta.url).pathname;
 let failed = 0;
@@ -248,13 +249,20 @@ const RESULT_COUNT = /لقينا|ما لقينا/;
 // card is a floating auth overlay, not filter state — and it legitimately disappears when a
 // journey's own send dismisses it, which would otherwise shift these snapshots mid-journey
 // (run 33224*: [E]/[F] "restores EXACTLY" failed on exactly that).
-const inputs = () => page.evaluate(() => Array.from(document.querySelectorAll('input')).filter((e) => !e.closest('[data-testid="signin-card"]')).map((e) => e.value));
+// (The standalone `inputs()` helper that used to sit here was dead — every caller had already moved
+// to the snapshot below — and it was an inline copy of the same inputs-only oracle, so it would
+// have quietly re-taught the next author the shape this file just stopped using.)
 // Expo Router's Stack keeps a replaced screen's prior instance mounted-but-hidden rather than fully
 // unmounting it (confirmed pre-existing: the plain «تصفية» tab click — no Stop involved — produces
 // the identical doubled, half-hidden input set). Harmless and invisible to a real user; scoping to
 // `offsetParent !== null` reads exactly what the user actually sees, same as a human tester would.
-const visibleInputs = () => page.evaluate(() =>
-  Array.from(document.querySelectorAll('input')).filter((e) => e.offsetParent !== null && !e.closest('[data-testid="signin-card"]')).map((e) => e.value));
+// THE DISTRICT LIVES IN A CHIP, NOT IN AN INPUT — so an inputs-only oracle cannot see it, and the
+// three «restores city/district/area EXACTLY» checks below spent their whole life comparing '' to
+// '' for the district half. See e2e/lib/formRestoreOracle.mjs for the full story, the measurement
+// that settled ops_incident #224, and why the reader is a shared pure function rather than an
+// inline closure: scripts/verify-restore-oracle-sees-the-district.ts EXECUTES this exact function
+// against a synthetic DOM, which a source-text tripwire over this line could never do.
+const visibleInputs = () => page.evaluate(readRestoredFormState);
 
 try {
   // ---- Journey A: the primary CTA must produce results, not a blank page. ----
