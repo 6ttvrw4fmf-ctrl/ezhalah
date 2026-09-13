@@ -259,6 +259,15 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260913182939_amlakalahsa_final_three_districts_detector_extended.sql, '
     + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover these '
     + '3 district names and self-verifies green',
+  // "الرياض" -> الهفوف (regionally-unique catalog match + abralosol cross-platform confirmation +
+  // listings_arabic_locations overlay agreement). district_ar deliberately untouched. Companion
+  // lands ~3 minutes later and EXTENDS the existing mon_detect_amlakalahsa_district_consolidation_
+  // regressed() (no new function — same regression shape, one more name added to its existing
+  // no_city check), self-verified green in the same migration. run.py updated the same session.
+  '20260913184721_amlakalahsa_riyadh_district_resolves_to_hofuf.sql':
+    'watched by its companion 20260913185054_amlakalahsa_riyadh_district_detector_extended.sql, '
+    + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover this '
+    + 'district name and self-verifies green',
 };
 
 // Enforcement starts here — the day this rule landed.

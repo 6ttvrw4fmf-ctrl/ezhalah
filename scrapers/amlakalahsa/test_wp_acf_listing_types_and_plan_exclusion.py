@@ -158,6 +158,10 @@ row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-
 assert row["city_ar"] == "الهفوف" and row["city_id"] == 12, "no geocode at all, but this district is known to be الهفوف"
 assert row["district_ar"] == "الطرف" and row["neighborhood"] == "الطرف"
 
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "الرياض"}), {})
+assert row["city_ar"] == "الهفوف" and row["city_id"] == 12, "bare \"الرياض\" is a real الهفوف neighborhood, not the capital"
+assert row["district_ar"] == "الرياض" and row["neighborhood"] == "الرياض"
+
 row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "الصفا 2"}), {})
 assert row["city_ar"] == "العيون" and row["city_id"] == 2038
 assert row["district_ar"] == "الصفا", "numbered variant matches its bare form"
