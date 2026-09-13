@@ -70,6 +70,13 @@ jobs:
         if: always()
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-location-index-covers-every-searchable-platform-live.ts
 
+      # TABLE-grained sibling of the attribute-views check above (2026-09-12, the amlakalahsa
+      # listing_extra_attrs gap). That check is PLATFORM-grained and cannot see a gap on one of a
+      # platform's two tables while its sibling table is fully wired; this one asks per table.
+      - name: Every searchable TABLE has its own branch in listing_extra_attrs
+        if: always()
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-all-platforms-have-extra-attrs-branch-live.ts
+
       - name: Every searchable platform is visible to the image-coverage monitor
         if: ${{ !cancelled() }}
         env:

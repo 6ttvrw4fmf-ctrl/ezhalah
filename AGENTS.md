@@ -169,17 +169,78 @@ it by reading the repo, without replaying this conversation. Consolidate overlap
 canonical statement instead of letting duplicates accumulate; if you find a stale fact while working
 nearby, fix it in the same edit.
 
-**Token/context discipline (applies to every session, every routine):**
-- Query only the columns/rows/lines needed to answer the current question — don't dump full SQL
-  results, logs, payloads, or whole source files into context when a targeted read/grep answers it.
-- Don't spawn multiple agents for a simple check; use parallel agents only when they cover genuinely
-  independent work or materially save wall-clock time.
-- Reports: **issue → root cause → fix → barrier → production verification → remaining.** Full evidence
-  dumps only when something is disputed or needs an owner decision.
-- Before a large investigation, check whether the answer already exists in `docs/`, git history, or a
-  monitor/dashboard before re-discovering it from scratch.
-- None of this trades away rigor: fix → regression test → verify → deploy still applies in full: it
-  just runs on targeted reads instead of wholesale context dumps.
+## Token-Efficient Engineering — Required (owner rule, 2026-09-12, permanent)
+
+Token efficiency is a permanent engineering requirement for Ezhalah.
+
+Always use the cheapest reliable execution path that preserves correctness, security, tests, safety
+gates, deployment safety, and production verification. Do not reduce quality merely to save tokens.
+
+**How this was earned.** Retyping a ~1,650-line file (`supabase/functions/agent/index.ts`) into a
+tool call, by hand, then handing the identical broken approach to three separate subagents that each
+re-read it and failed the same way, burned ~620,000 tokens before anyone reached for the CI workflow
+that already existed and deployed it correctly in one shot.
+
+### Core rules
+
+- Before starting any task, identify the smallest reliable path: an existing script, GitHub Actions
+  workflow, CI/CD workflow, package command, CLI command, repository utility, targeted test, or
+  documented deployment process.
+- Prefer repository-native, disk-based, Git-based, CI/CD-based, and platform-native workflows over
+  manually recreating, pasting, retyping, or transmitting code through tool calls.
+- Never paste, retype, reconstruct, or inline an entire large source file into a tool call when that
+  file already exists on disk or in Git.
+- For the AI Agent Supabase Edge Function, deploy through the repository workflow
+  `deploy-edge-function.yml`. Never inline `supabase/functions/agent/index.ts` (approximately 1,650
+  lines) into a tool call.
+- If a tool call fails because its input or output is too large, stop after the first failure. Do
+  not retry the same mechanism with formatting changes, chunking, re-pasting, or a new agent. Find
+  the correct disk/Git/CI/script-based path instead.
+- Do not send multiple subagents to repeat an approach that already failed.
+- Use subagents only when work is genuinely independent and parallelism materially reduces total
+  time or token use. Do not use subagents for simple deployment, simple verification, or duplicated
+  investigation.
+
+### Scope and context
+
+- Before reading a file, search for the relevant file, symbol, function, route, error, diff, test,
+  or line range.
+- Read the smallest relevant scope first. Do not scan the entire repository or reread a large file
+  unless the task genuinely requires it.
+- Do not read generated output, dependency directories, build artifacts, lockfiles, coverage
+  folders, large logs, environment files, or unrelated data unless essential to the task.
+- Reuse evidence, files, results, commands, diffs, and conclusions already established during the
+  current task. Do not independently recompute or rediscover information without a concrete reason.
+- Keep tool output narrow. Prefer file status, targeted grep/search, focused line ranges, concise
+  diffs, filtered logs, and exact error excerpts over full file dumps, raw JSON, verbose command
+  logs, or entire test-suite output.
+- Use one targeted test, type check, lint command, build step, or production check that matches the
+  changed scope. Run broader verification only when the change's risk or evidence makes it necessary.
+
+### Workflow
+
+1. Restate the specific requested outcome in one sentence.
+2. Identify the smallest relevant files, commands, scripts, workflows, and verification method.
+3. Check for an existing repository-native mechanism before creating a new one.
+4. Make the smallest safe change or execute the existing workflow.
+5. Run focused verification appropriate to the actual change.
+6. Report only: files changed or workflow used, concise result, verification performed, and one
+   remaining risk if relevant.
+7. When the requested issue is complete and verified, stop. Do not start unrelated audits, cleanup,
+   refactors, enhancements, or investigations.
+
+### Decision rule
+
+When two or more safe approaches can accomplish the same task, choose the approach that uses fewer
+tokens, fewer tool calls, less context, less duplicated work, and fewer unnecessary file reads —
+provided it does not reduce correctness, safety, testing, security, deployment reliability, or
+production verification.
+
+If uncertain, ask one focused clarifying question before broad exploration. Do not guess, repeatedly
+retry failed approaches, or create unnecessary parallel work.
+
+One issue per session whenever practical (mirrors the owner's separate chat-scoping rule, memory
+`feedback_one-chat-per-issue-working-style`) — finish and verify the requested issue, then stop.
 
 **PR safety in this shared repo (permanent, 2026-08-10):** this working directory is shared by
 concurrent sessions with no per-session isolation — a background `gh pr create` with no `--head` can
@@ -645,6 +706,15 @@ node scripts/agent-surface-preflight.mjs final      # semantic diff + parse gate
 `final` refuses if the branch is behind main, prints the merged file's diff against `origin/main`,
 and calls out **removed** lines — that is where a silent overwrite hides. Read them. Confirm every
 one is intentional before merging.
+
+### How to actually deploy (owner rule, 2026-09-12 — token-efficiency)
+**Dispatch `.github/workflows/deploy-edge-function.yml`.** It checks out the merged code from git
+and deploys it straight from disk — no tool-call size limit, no retyping. **Never hand-assemble
+`index.ts` (~1,650 lines) and its siblings into a `deploy_edge_function` MCP call's inline `files`
+array** — three subagents doing exactly that in one session each re-read the file, each failed the
+same way (the payload was too large to paste reliably), and burned ~620,000 tokens combined before
+anyone used the workflow that already existed and worked in one shot. See "Token-Efficient
+Engineering — Required" above for the general rule this is one instance of.
 
 ### After deploy
 ```bash

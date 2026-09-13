@@ -69,3 +69,9 @@ export const ABOUT_ART_BREAKPOINT = 640;
 // every deploy's post-deploy hydration gate from 2026-09-05 21:33Z onward. Routed through
 // useAtLeast() like every other width-gated flag; the scan now also catches renamed width reads.
 export const SHARE_LABEL_BREAKPOINT = 380;
+
+// RETIRED 2026-09-12 (same day, a few hours later): LOADER_PILL_LABEL_BREAKPOINT drove a logo-only
+// compact tile on the search-loading strip below 640px. Owner reversed it — "put the name also,
+// because we need to include the name of each website" — so the name now always renders, every
+// viewport (SearchLoader.tsx). The name stayed here rather than being silently deleted so the next
+// person grepping this file's history finds the reasoning, not just an absence.

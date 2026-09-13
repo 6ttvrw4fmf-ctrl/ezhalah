@@ -171,6 +171,13 @@ export function ResultCard({
   const VISIBLE = 6;
   const visible = expanded ? allActive : allActive.slice(0, VISIBLE);
   const overflow = Math.max(0, allActive.length - VISIBLE);
+  // Land listings (amlakalahsa, etc.) legitimately have zero boolean amenities (no elevator/parking/
+  // kitchen on raw land) while still having real street_width/parcel_number in additional_info — that
+  // combo was rendering "No additional features listed" directly above a populated "Additional
+  // Information" panel, which reads as self-contradicting even though the two sections cover different
+  // data. Same filter AdditionalInformationPanel uses below, so the empty-state only fires when BOTH
+  // panels would otherwise be blank. (owner-reported 2026-09-13, found while re-testing amlakalahsa.)
+  const hasAddlInfo = !!listing.additional_info?.some((r) => r && r.label && r.value);
 
   return (
     // Desktop (≥820px): 3 columns side-by-side. Mobile/narrow: STACK vertically (photo on top, then
@@ -343,7 +350,7 @@ export function ResultCard({
               </View>
             ))}
           </View>
-        ) : (
+        ) : hasAddlInfo ? null : (
           <Text style={card.noFeat}>{t('No additional features listed')}</Text>
         )}
         {overflow > 0 ? (
@@ -516,7 +523,7 @@ const FURSAGHYR_LOGO = require('../../assets/images/fursaghyr.png');
 const JAZWTN_LOGO = require('../../assets/images/jazan-watan.png');
 const MUKTAMEL_LOGO = require('../../assets/images/muktamel.png');
 const MIZLAJ_LOGO = require('../../assets/images/mizlaj.png');
-const DEALAPP_LOGO = require('../../assets/images/dealapp.jpg');
+const DEALAPP_LOGO = require('../../assets/images/dealapp.png');
 const GATHERN_LOGO = require('../../assets/images/gathern.png');
 const OCTOBER_LOGO = require('../../assets/images/october.png');
 const ARKAAN_LOGO = require('../../assets/images/arkaan.png');
@@ -530,6 +537,7 @@ const ALOBID_LOGO = require('../../assets/images/alobid.png');
 const ABWBNA_LOGO = require('../../assets/images/abwbna.png');
 const REMAL_LOGO = require('../../assets/images/remal.png');
 const AMAALL_LOGO = require('../../assets/images/amaall.png');
+const AMLAKALAHSA_LOGO = require('../../assets/images/amlakalahsa.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
 const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
 const AWAL_LOGO = require('../../assets/images/awal.png');
@@ -538,7 +546,7 @@ const ALKHAAS_LOGO = require('../../assets/images/alkhaas.png');
 const ABEEA_LOGO = require('../../assets/images/abeea.png');
 const JURASH_LOGO = require('../../assets/images/jurash.png');
 const ALNOKHBA_LOGO = require('../../assets/images/alnokhba.png');
-const SOUQ24_LOGO = require('../../assets/images/souq24.jpg');
+const SOUQ24_LOGO = require('../../assets/images/souq24.png');
 const ERAPULSE_LOGO = require('../../assets/images/erapulse.png');
 const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.png');
 // Card hero photo with graceful fallback. Some sources (e.g. aqarcity) carry photo URLs that have
@@ -639,6 +647,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('abwbna')) return <Image source={ABWBNA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('remal')) return <Image source={REMAL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('amaall')) return <Image source={AMAALL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('amlakalahsa')) return <Image source={AMLAKALAHSA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('azdad')) return <Image source={AZDAD_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -708,6 +717,7 @@ function sourceHost(source: string): string {
   if (s.includes('abwbna')) return 'abwbna.com';
   if (s.includes('remal')) return 'remalre.com';
   if (s.includes('amaall')) return 'amaall.com';
+  if (s.includes('amlakalahsa')) return 'amlakalahsa.com';
   if (s.includes('alta')) return 'alta.com.sa';
   if (s.includes('awal')) return 'awaalun.com';
   if (s.includes('azdad')) return 'azdadalaqaria.com';
@@ -941,8 +951,16 @@ const card = StyleSheet.create({
   addlCell: {
     width: '50%', paddingVertical: 4, paddingRight: 6, gap: 1,
   },
-  addlLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
-  addlValue: { fontSize: 11.5, color: colors.ink, fontWeight: '600' },
+  // writingDirection is REQUIRED here, not decorative: with no explicit direction, RN Web isolates
+  // each Text run (unicode-bidi:isolate) and lets the BROWSER pick its direction from the run's own
+  // content — an Arabic label auto-resolves rtl, but a bare-digit value (e.g. street_width="15",
+  // parcel_number="190") has no strong bidi character and auto-resolves ltr. Two 50%-width RTL cells
+  // then each right-align their label but LEFT-align their value, so every value slides to the far
+  // side of its own cell — on a 2-cell row the neighbor's label ends up sitting right next to the
+  // WRONG value (measured live: أملاك الأحساء's «عرض الشارع» / «رقم القطعة» pair, amlakalahsa is the
+  // first source to show two numeric additional_info fields side by side, which is what exposed it).
+  addlLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', writingDirection: 'rtl' },
+  addlValue: { fontSize: 11.5, color: colors.ink, fontWeight: '600', writingDirection: 'rtl' },
   addlMoreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
     paddingVertical: 6, marginTop: 4,

@@ -1,4 +1,4 @@
-// FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11). Auto-discovered barrier.
+// FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12). Auto-discovered barrier.
 //
 // "when user uses the filter, gets the result the chat below doesn't exist, only exists with the AI
 //  chat" — a search that arrived via Normal Filter's «بحث» (the `?filter=` route param) shows its
@@ -7,12 +7,21 @@
 // part of this change (owner-confirmed scope) — only the typed-input row disappears; the always-on
 // listings-source disclaimer (a legal notice, not "the chat") must still render either way.
 //
-// `|| busy || revealing` (same-day fix, caught by web-runtime-smoke's own "[E] Stop control appears
-// while the Filter search is running" journey): the FIRST version of this gate hid the composer
-// unconditionally, which also hid its own Stop control — breaking the separate, pre-existing owner
-// rule that an in-flight Filter search must stay cancellable
-// (verify-filter-stop-cancels-and-restores.ts). The busy/revealing ternary a few lines below only
-// ever shows Stop OR mic+send, never both, so this window is never a usable "chat" either way.
+// TIGHTENED AGAIN 2026-09-12 (owner: "REMOVE THIS IN THE FILTER SIMPLE" — screenshot of the small
+// green Stop square lingering on Filter-origin results during the cascade reveal): the previous
+// three-way branch (`filterOrigin && (busy || revealing)` → Stop alone) is gone. The gate is now a
+// simple two-way branch: `!filterOrigin` → the real composer, unchanged; otherwise → nothing at all.
+// A Filter-origin conversation never shows any composer/Stop UI, at any state — busy, revealing, or
+// completed. The stop() function itself stays intact (verify-filter-stop-cancels-and-restores.ts
+// still holds unchanged — it only asserts stop()'s behaviour when called, not that a button exists),
+// so a Filter search cancelled by other means — route change via the top ☰ menu / تصفية tab /
+// browser back / any effect cleanup — still aborts the network request and returns to the Filter
+// screen with restored state. Trade-off owner-accepted 2026-09-12: no in-place cancel during a
+// mid-flight Filter search.
+//
+// EARLIER HISTORY (kept for provenance): 2026-09-12 first tightening replaced a `|| busy ||
+// revealing` composer widening with a `filterOrigin && (busy || revealing)` Stop-alone branch;
+// this second tightening removes even that Stop-alone branch entirely.
 //
 //   node --experimental-strip-types scripts/verify-filter-results-no-composer.ts  (in `npm test`)
 import { readFileSync } from 'node:fs';
@@ -48,49 +57,83 @@ check('that ONE call site sits in the `?filter=` branch, right after startFresh(
 check('the seed-chip path (a chip, NOT the Filter) never sets it true',
   !/lastSeedRef\.current = seed;[\s\S]{0,300}setFilterOrigin\(true\)/.test(code));
 
-console.log('\n── JSX: the composer is gated, the disclaimer never is, Stop survives ──');
-const GATE = /\{\(!filterOrigin \|\| busy \|\| revealing\) && \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/;
-check('composerWrap exists and the gate immediately precedes the composer View',
-  GATE.test(code));
-check("the gate is `!filterOrigin || busy || revealing` — NOT bare `!filterOrigin` (that shape hid Stop mid-search, the exact regression web-runtime-smoke caught)",
-  !/\{!filterOrigin && \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/.test(code));
-// The disclaimer must sit right after the LITERAL `)}` that closes THIS conditional, with nothing
-// else between them — i.e. `</View>\n            )}\n            <Text style={s.disc}>` verbatim.
-// This is a direct adjacency check (not a paren-balance heuristic), so it cannot be fooled by a
-// mutation that moves the disclaimer earlier (inside the gate) or leaves stray nesting behind.
-const closeThenDisc = /<\/View>\s*\n\s*\)\}\s*\n\s*<Text style=\{s\.disc\}>/;
-check("the disclaimer sits IMMEDIATELY after the gate's own closing `)}` (outside it, not nested deeper)",
+console.log('\n── JSX: two-way branch — real composer OR nothing — disclaimer never gated ──');
+// Branch 1: the REAL composer (TextInput and all) renders ONLY on `!filterOrigin`.
+const COMPOSER_BRANCH = /\{!filterOrigin \? \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/;
+check('the real composer is gated behind `!filterOrigin` (never a wider condition that could show it for a Filter search)',
+  COMPOSER_BRANCH.test(code));
+// Branch 2: filterOrigin → NOTHING. No Stop-alone branch, no composer pill, no TextInput anywhere
+// reachable when filterOrigin is true. The gate goes straight from `!filterOrigin ? (...) : null}`
+// with nothing in between.
+const twoWayEnd = /\)\s*\n\s*\}\s*<\/View>\s*\n\s*<\/View>\s*\n\s*<Pressable/;  // sanity: outer composer wrap closes cleanly
+// The branch must close with `) : null}` and MUST NOT open a `(busy || revealing) ?` sub-branch
+// (the earlier Stop-alone tightening this second tightening removes).
+const composerBranchStart = code.indexOf('{!filterOrigin ? (');
+const nullCloseIdx = composerBranchStart >= 0 ? code.indexOf(') : null}', composerBranchStart) : -1;
+const midBranch = composerBranchStart >= 0 && nullCloseIdx >= 0
+  ? code.slice(composerBranchStart, nullCloseIdx + ') : null}'.length)
+  : '';
+check("the branch closes with `) : null}` (nothing renders when filterOrigin is true)",
+  midBranch.endsWith(') : null}'));
+check('there is NO `(busy || revealing) ?` sub-branch between the composer branch and its closing null',
+  !/\) : \(busy \|\| revealing\) \? \(/.test(midBranch));
+check('no Stop Pressable renders under a filterOrigin path (the Stop-alone regression this second tightening removes)',
+  // Look at the code AFTER the AI-Agent composer branch's own closing `) : null}` — anything
+  // between there and the disclaimer's `<Text style={s.disc}>` that mentions `onPress={stop}`
+  // means a filterOrigin Stop branch has crept back in.
+  (() => {
+    const afterComposer = code.slice(nullCloseIdx + ') : null}'.length);
+    const discIdx = afterComposer.indexOf('<Text style={s.disc}>');
+    if (discIdx < 0) return false; // disclaimer must exist
+    const between = afterComposer.slice(0, discIdx);
+    return !/onPress=\{stop\}/.test(between);
+  })());
+
+console.log('\n── the composer that DOES exist for AI-Agent conversations still keeps Stop reachable mid-search ──');
+// Inside the `!filterOrigin` composer branch, the pre-existing busy/revealing ternary (Stop OR
+// mic+send, never both) must still be intact — this fix must not regress the AI-Agent path.
+const composerBranchEnd = composerBranchStart >= 0 ? code.indexOf(') : null}', composerBranchStart) : -1;
+const composerBranch = composerBranchStart >= 0 && composerBranchEnd >= 0 ? code.slice(composerBranchStart, composerBranchEnd) : '';
+check('the composer branch still has its own busy||revealing → Stop ternary (AI-Agent Stop unaffected)',
+  /busy \|\| revealing \?/.test(composerBranch) && /onPress=\{stop\}/.test(composerBranch));
+
+// The disclaimer must render at top-level of the composer wrap, not gated on any branch. After
+// decomment(), JSX block comments collapse to `{}` so we allow arbitrary intermediate whitespace
+// or empty jsx-expressions between the `) : null}` and the disclaimer, but no other JSX or code.
+const closeThenDisc = /\) : null\}(?:\s|\{\})*<Text style=\{s\.disc\}>/;
+check("the disclaimer sits after the branch's closing `) : null}` (outside every branch)",
   closeThenDisc.test(code));
 
 console.log('\n── mutation proof: this check actually fails on the regressions it exists to catch ──');
-// Mutation 1: someone "simplifies" the JSX by dropping the whole gate wrapper entirely, leaving the
-// composer unconditional again (the ORIGINAL bug this barrier prevents).
+// Mutation 1: someone "simplifies" the JSX by dropping the whole three-way branch, leaving the
+// composer unconditional again (the ORIGINAL 09-11 bug this barrier prevents).
 const mutatedNoGate = agent.replace(
-  '{(!filterOrigin || busy || revealing) && (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>',
+  '{!filterOrigin ? (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>',
   '<View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>',
 );
-mustCatch('removing the gate (composer unconditional again)',
-  !GATE.test(decomment(mutatedNoGate)));
-// Mutation 2 (the REAL regression this barrier shipped without, caught only by CI's browser smoke
-// test): someone "simplifies" the gate back down to bare `!filterOrigin`, which reads as equally
-// correct by eye but hides Stop while a Filter search is in flight.
-const mutatedBareGate = agent.replace(
-  '{(!filterOrigin || busy || revealing) && (',
-  '{!filterOrigin && (',
+mustCatch('removing the branch (composer unconditional again)',
+  !COMPOSER_BRANCH.test(decomment(mutatedNoGate)));
+// Mutation 2 (the 09-12 SECOND-tightening regression this update exists to prevent): someone
+// re-adds a `(busy || revealing) ?` Stop-alone branch under filterOrigin — the exact small green
+// Stop square the owner sent a screenshot of and asked to remove ("REMOVE THIS IN THE FILTER
+// SIMPLE"). Simulate by re-inserting the previous three-way branch shape and confirming the check
+// catches it.
+const mutatedStopBackForFilter = agent.replace(
+  ') : null}\n            {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY',
+  ') : (busy || revealing) ? (\n              <View style={{ flexDirection: \'row\', justifyContent: \'flex-end\' }}>\n                <Pressable onPress={stop} style={s.stopBtn}><Ionicons name="stop" size={15} color="#fff" /></Pressable>\n              </View>\n            ) : null}\n            {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY',
 );
-mustCatch('narrowing the gate back to bare `!filterOrigin` (Stop becomes unreachable mid-search)',
-  mutatedBareGate !== agent && !GATE.test(decomment(mutatedBareGate)));
-// Mutation 3: the gate stays, but someone moves the disclaimer's closing `)}` to AFTER the
-// disclaimer instead of before it — i.e. accidentally pulls the disclaimer INSIDE the gated block,
-// hiding the legal notice along with the composer on Filter-origin screens.
+mustCatch('a Stop-alone branch creeping back into the filterOrigin path (the exact regression this second tightening removes)',
+  mutatedStopBackForFilter !== agent && (() => {
+    const c = decomment(mutatedStopBackForFilter);
+    return /\{!filterOrigin \? \([\s\S]*?\) : \([\s\S]*?onPress=\{stop\}[\s\S]*?\) : null\}/.test(c);
+  })());
+// Mutation 3: the branch stays, but someone moves the disclaimer's closing marker so it lands
+// INSIDE the branch, hiding the legal notice along with the composer on Filter-origin.
 const mutatedDiscInside = agent.replace(
-  "            </View>\n            )}\n            <Text style={s.disc}>",
-  "            </View>\n            <Text style={s.disc}>",
-).replace(
-  "            </Text>\n          </View>\n        </View>\n      </KeyboardAvoidingView>",
-  "            </Text>\n            )}\n          </View>\n        </View>\n      </KeyboardAvoidingView>",
+  ') : null}\n            {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY',
+  ') : (\n            {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY',
 );
-mustCatch('pulling the disclaimer inside the gate (it would vanish on Filter-origin too)',
+mustCatch('pulling the disclaimer inside the branch (it would vanish on Filter-origin too)',
   mutatedDiscInside !== agent && !closeThenDisc.test(decomment(mutatedDiscInside)));
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll filter-results-no-composer checks passed');

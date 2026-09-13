@@ -569,6 +569,13 @@ const AR: Record<string, string> = {
   'Matching the filters…': 'نطابق الفلاتر…',
   'Reviewing sites and prices…': 'نراجع المواقع والأسعار…',
   'Preparing the results…': 'نجهز النتائج…',
+  // Live-number variants (owner 2026-09-12) — {count}/{cities}/{districts} are real, derived
+  // figures (loaderScaleStats.ts), never hardcoded; see SEARCH_TITLES's comment in SearchLoader.tsx.
+  'Checking more than {count} properties…': 'نفحص أكثر من {count} عقار…',
+  'Reviewing {count} real-estate platforms…': 'نراجع {count} منصة عقارية…',
+  // ONE combined place count (owner 2026-09-12), not a separate cities+districts pair — see
+  // SearchLoader.tsx's own comment at the coverage line for why.
+  'Covering more than {count} places across Saudi Arabia…': 'نغطي أكثر من {count} موقع في جميع أنحاء المملكة…',
   'Matching the location…': 'نطابق الموقع…',
   'Applying the filters…': 'نطبق الفلاتر…',
   'Sorting results and mixing platforms…': 'نرتب النتائج وننوعها بين المنصات…',
@@ -663,14 +670,16 @@ const AR: Record<string, string> = {
   'Load more': 'عرض المزيد',
   'Loading more…': 'جاري تحميل المزيد…',
   'We found {n} listings matching your search.': 'لقينا {n} إعلان يطابق طلبك.',
-  'I showed you the first {n} listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد، أو أساعدك نلقى نتائج أدق؟',
+  'I showed you the first {n} listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟ إذا عرضت لك المزيد بعرض لك كل الإعلانات، أو أقدر أساعدك توصل لنتايج أدق.',
   'I showed you all {n} matching listings. Want help finding more precise ones?': 'عرضت لك كل النتائج المطابقة ({n} إعلان). تبي أساعدك نلقى نتائج أدق؟',
-  // ≤25-result variants (owner 2026-08-19, item 4): no "help me find more precise ones?" invitation
+  // ≤50-result variants (owner brief 2026-08-19 item 4; threshold raised 25 → 50 by the owner
+  // product rule of 2026-09-04 — live value INTERVIEW_STOP_AT, src/lib/afRanking.ts): no
+  // "help me find more precise ones?" invitation
   // when the result set is already small enough that Advanced Filter has nothing useful left to offer.
   // Browse continuation (owner 2026-08-29): trusted totals state BOTH numbers while more remain.
-  'I showed you the first {shown} of {total} matching listings. Want me to show more?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد؟',
-  'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد، أو أساعدك توصل لنتائج أدق؟',
-  'I showed you the first {n} listings. Want me to show more?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟',
+  'I showed you the first {shown} of {total} matching listings. Want me to show more?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد؟ إذا عرضت لك المزيد بعرض لك كل الإعلانات.',
+  'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد؟ إذا عرضت لك المزيد بعرض لك كل الإعلانات، أو أقدر أساعدك توصل لنتايج أدق.',
+  'I showed you the first {n} listings. Want me to show more?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟ إذا عرضت لك المزيد بعرض لك كل الإعلانات.',
   'I showed you all {n} matching listings.': 'عرضت لك كل النتائج المطابقة ({n} إعلان).',
   // NO-OFFER variants (2026-09-05): the same honest counts, with NO invitation, for the states where
   // the actions row is not rendered — an older results turn that is no longer the latest, or an open
@@ -893,6 +902,7 @@ const AR: Record<string, string> = {
   'Abwbna Real Estate':                'أبوابنا العقارية',        // official (abwbna.com)
   'Remal Real Estate':                 'رمال العقارية',            // official (remalre.com header logo)
   'Amaall Real Estate Services':       'آمال للخدمات العقارية',    // official (amaall.com)
+  'Amlak Al-Ahsa Real Estate':         'أملاك الأحساء',            // official (amlakalahsa.com header)
   'Alta Real Estate Services':         'ألتا للخدمات العقارية',   // official (alta.com.sa header)
   'Shmou Al Shmal Real Estate':        'شموع الشمال العقارية',    // official (shmoua-alshmal.com header)
   'Azdad Al Aqariah':                  'مكتب ازداد العقارية',      // official (azdadalaqaria.com page title)
@@ -1118,7 +1128,6 @@ const AR: Record<string, string> = {
   // Drawer / sidebar
   'New Chat': 'محادثة جديدة',
   'Search complete': 'اكتمل البحث',
-  'No further truthful narrowing question exists for this scope — these are all the genuine matches.': 'ما فيه سؤال إضافي موثوق يضيّق هذا النطاق أكثر — هذي كل النتائج المطابقة فعلاً.',
   'Start a new chat to search again': 'ابدأ محادثة جديدة للبحث من جديد',
   // Completed-search composer (owner request 2026-09-05): the composer keeps its normal look —
   // no separate card — the input goes inert with this as its placeholder, and the send arrow

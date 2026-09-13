@@ -179,6 +179,39 @@ const WAIVED: Record<string, string> = {
     'same repair as 20260911221734 (a connector-timeout retry that turned out to also have landed — '
     + 'see this file\'s own header) — watched by the same companion, '
     + '20260911223037_aqarmonthly_district_suffix_backfill_gets_a_detector_incident_189.sql',
+  // Amlakalahsa direction/price-per-meter backfill (audit found both ACF keys — pw-front,
+  // pw-prc-mtr — captured raw in source_capture but never read into their own columns, 37/262 and
+  // 82/262 real rows respectively). Companion lands 55 minutes later (same session, different
+  // migration) and creates + rosters + self-verifies
+  // mon_detect_amlakalahsa_direction_ppm_regressed(), which re-checks BOTH fields against
+  // source_capture on every sweep — if scrapers/amlakalahsa/run.py ever stops reading either ACF
+  // key again, this fires. Open the companion to verify this reason rather than taking it on trust.
+  '20260913035126_amlakalahsa_backfill_direction_and_price_per_meter.sql':
+    'watched by its companion 20260913040021_amlakalahsa_direction_ppm_backfill_gets_a_detector.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_direction_ppm_regressed(), '
+    + 'checking both direction and price_per_meter against source_capture',
+  // Amlakalahsa description backfill: content.rendered (the office's own free-text spec
+  // paragraph) was never captured at all — WP REST returns it on every post, but only the ACF
+  // block ever reached source_capture. Companion lands ~1 minute later and creates + rosters +
+  // self-verifies mon_detect_amlakalahsa_description_regressed(), which re-checks every active row
+  // for a NULL description — unlike the direction/price-per-meter detector this needs no
+  // source_capture cross-check, since 100% of active rows carry real content (measured live), so
+  // ANY null description is a scraper regression. Open the companion to verify this reason rather
+  // than taking it on trust.
+  '20260913044540_amlakalahsa_backfill_description.sql':
+    'watched by its companion 20260913044634_amlakalahsa_description_backfill_gets_a_detector.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_description_regressed()',
+  // Amlakalahsa "على السوم" price sentinel: pw-prc=0 means "price on request", never a real SAR 0
+  // — found live-testing as a real user (a card displayed "ر.س 0"). Companion lands ~2 minutes
+  // later and creates + rosters + self-verifies mon_detect_amlakalahsa_soum_price_regressed(),
+  // which re-checks every active row for source_capture pw-prc="0" alongside a non-null
+  // price_total — caught a REAL regression live during this very fix: a concurrent scrape run
+  // (the newly-scheduled small-sources-sync workflow, PR #2489) re-wrote all 18 rows back to 0
+  // using the still-unfixed main branch before this PR's scraper fix could land, which is exactly
+  // why this backfill's own migration timestamp is later than you'd expect from a single pass.
+  '20260913063214_amlakalahsa_backfill_soum_price_sentinel.sql':
+    'watched by its companion 20260913063423_amlakalahsa_soum_price_backfill_gets_a_detector.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_soum_price_regressed()',
 };
 
 // Enforcement starts here — the day this rule landed.

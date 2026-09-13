@@ -18,7 +18,7 @@
 // Honors reduce-motion (plain fades; no wave, no pulse, no movement). The message column is
 // LTR-pinned, so RTL is handled manually here (anchor right + row-reverse), like the rest of agent.tsx.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
   Easing,
@@ -32,8 +32,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useResolvedTheme } from '@/lib/appearance';
 import { colors } from '@/theme/tokens';
+import { useResolvedTheme } from '@/lib/appearance';
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import {
@@ -43,13 +43,24 @@ import {
   type LoaderPlatform,
 } from '@/data/loaderPlatforms';
 import { fetchActivePlatformNames } from '@/data/loaderActivePlatforms';
+import { fetchLoaderScaleStats, type LoaderScaleStats } from '@/data/loaderScaleStats';
 import { PILL_STAGGER, highlightStepMs } from '@/lib/searchLoaderTiming';
+import { buildSearchLoaderTitles, readingDurationMs } from '@/lib/searchLoaderTitles';
 import type { SearchQuery } from '@/data/search';
+import { grouped } from '@/data/search';
 
 const IS_WEB = Platform.OS === 'web';
 const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
 
 // Rotating searching headlines (owner-approved copy, v4 set — short, alive, smooth cross-fades).
+// EXTENDED 2026-09-12 (owner: "those things are more like marketing... people would be like wow,
+// this has a big database") — three of the six lines below carry a LIVE number instead of static
+// copy: total searchable listings, the platform count (reused from the roster this same screen
+// already computed — never a second, independently-fetched count that could disagree with what's
+// on screen), and city+district coverage. Every number is DERIVED, never hardcoded — see
+// loaderScaleStats.ts and loader_scale_stats_ar(). SOURCE IS TRUTH / "a failed fetch is not an empty
+// answer": if the scale-stats fetch hasn't resolved (or fails), the number-bearing lines fall back to
+// their original plain wording — never a zero, never a stale/guessed figure.
 const SEARCH_TITLES = [
   'Ezhalah is searching the platforms…',
   'Checking the matching properties…',
@@ -57,7 +68,10 @@ const SEARCH_TITLES = [
   'Reviewing sites and prices…',
   'Preparing the results…',
 ] as const;
-const TITLE_ROTATE_MS = 2400;
+// Per-line rotation duration is now reading-pace proportional — see readingDurationMs() in
+// lib/searchLoaderTitles.ts (owner 2026-09-12: "make it all at the same speed"). The old fixed
+// TITLE_ROTATE_MS=2400 constant is gone; readingDurationMs('نطابق الفلاتر') lands close to it, so
+// the short lines don't perceptibly change pace — only the long live-number lines slow down.
 
 // Pill choreography — deliberately calm (owner v4: slower, readable, premium; never "flashed and
 // disappeared"), and since 2026-09-06 long enough that EVERY platform is both revealed and
@@ -113,20 +127,41 @@ function Dots({ reduced }: { reduced: boolean }) {
   );
 }
 
-// A platform pill with the traveling-highlight treatment: when the calm wave reaches it, the pill's
-// tint brightens, the border warms, a SOFT GLOW blooms underneath and it lifts ~2% — "this platform
-// is being checked right now" — then eases back as the wave moves on. Several pills are lit at once
-// (highlight duration > step). NO checkmarks / status icons (owner: never a checklist).
+// A platform pill with the traveling-highlight treatment. NO BOX (owner 2026-09-12: "remove those
+// boxes... make the background transparent so it blends in with our background, because now it
+// shows that it is a box and it's a photo" — the pill NEVER carries a fill or a border, resting or
+// highlighted; the logo (a real transparent PNG since #2426) and the name sit directly on the app's
+// own background). The name always renders — no logo-only compact mode (owner: "put the name also,
+// because we need to include the name of each website" — reverses the 2026-09-12 mobile compact
+// tile). The highlight itself survives as a SHADOW-ONLY glow (no fill under it) plus the name text
+// warming from muted to primary and a ~2% logo pop — the same vocabulary ui.tsx's own selection glow
+// already uses (text-color interpolation + boxShadow/shadow*), just with the fill dropped so nothing
+// ever reads as a box. Several pills are lit at once (highlight duration > step). NO checkmarks /
+// status icons (owner: never a checklist).
 function PlatformPill({
   item, index, total, rtl, reduced, name,
 }: {
   item: LoaderPlatform; index: number; total: number; rtl: boolean; reduced: boolean; name: string;
 }) {
+  // Responsive sizing (owner 2026-09-13): "make the logos a bit bigger on a laptop / big screen…
+  // on iPhone the size is perfect". Wide viewports render the logo, name and pill roughly 40%
+  // bigger and the strip gaps looser so the roster feels present on a big screen; narrow viewports
+  // keep the current "perfect on iPhone" pill and only tighten the strip's row gap slightly so more
+  // pills fit per screen height (owner: "I don't want the user to scroll down to see all of them").
+  // Static pill/pillLogo shape (no backgroundColor, no border) is UNCHANGED — the barrier
+  // scripts/verify-mobile-search-loader-no-drag.ts still binds; sizes are inline overrides only.
+  const { width: winW } = useWindowDimensions();
+  const wide = winW >= 720;
+  const pillOverride = wide ? { height: 44, gap: 9, paddingHorizontal: 4 } : null;
+  const logoOverride = wide ? { width: 26, height: 26, borderRadius: 6 } : null;
+  const nameOverride = wide ? { fontSize: 14, maxWidth: 220 } : null;
   const h = useSharedValue(0);
-  // Theme-paired glow literals — interpolateColor parses colors, so no var() tokens here.
+  // LITERAL hex, not the colors.* token (owner theme contract: interpolateColor parses actual color
+  // values — colors.* resolves to var(--ez-*) on web, which it cannot parse). Same pattern the
+  // pre-existing glow literals below already used; verify-theme-contract.ts fails the build on a
+  // colors.* token reaching this call.
   const darkTheme = useResolvedTheme() === 'dark';
-  const glowBg: [string, string] = darkTheme ? ['#1a241e', '#213529'] : ['#f4f9f6', '#e2f1e7'];
-  const glowLine: [string, string] = darkTheme ? ['#26312a', '#35543f'] : ['#e3ece6', '#b7dbc4'];
+  const nameBase: [string, string] = darkTheme ? ['#c9cbc9', '#2b6f4c'] : ['#34403a', '#1d4a37'];
   useEffect(() => {
     if (reduced) { h.value = 0; return; }
     // One full sweep takes LOADER_SWEEP_MS regardless of roster size, so the LAST pill is always
@@ -144,27 +179,30 @@ function PlatformPill({
     ), -1, false));
     return () => cancelAnimation(h);
   }, [h, index, total, reduced]);
-  const a = useAnimatedStyle(() => {
+  const rowGlow = useAnimatedStyle(() => {
     const g = h.value;
     return {
-      backgroundColor: interpolateColor(g, [0, 1], glowBg),
-      borderColor: interpolateColor(g, [0, 1], glowLine),
       transform: reduced ? [] : [{ scale: 1 + g * 0.02 }],
-      // Soft green glow under the active pill — premium emphasis, not a flash. Same pattern as the
-      // app's selection glow (ui.tsx): boxShadow string on web; shadow* + elevation on native
-      // (elevation is required for Android — shadow* alone is iOS-only; review finding).
+      // Soft green glow — SHADOW ONLY, no fill/border, so the highlight reads as ambient light under
+      // the logo+name, never a filled box. Same rgba/blur curve ui.tsx's own selection glow uses.
       ...(IS_WEB
         ? ({ boxShadow: `0px ${4 * g}px ${14 * g}px rgba(20,80,45,${0.16 * g})` } as any)
         : { shadowColor: '#14502d', shadowOpacity: 0.16 * g, shadowRadius: 14 * g, shadowOffset: { width: 0, height: 4 * g }, elevation: 4 * g }),
     };
   });
+  const nameGlow = useAnimatedStyle(() => ({
+    color: interpolateColor(h.value, [0, 1], nameBase),
+  }));
   return (
     <Appear delay={index * (reduced ? 25 : PILL_STAGGER)} reduced={reduced}>
-      <Animated.View style={[s.pill, { flexDirection: rtl ? 'row-reverse' : 'row' }, a]}>
-        <Image source={item.logo} style={s.pillLogo} contentFit="contain" />
-        <Text style={[s.pillName, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]} numberOfLines={1}>
+      <Animated.View style={[s.pill, pillOverride, { flexDirection: rtl ? 'row-reverse' : 'row' }, rowGlow]}>
+        <Image source={item.logo} style={[s.pillLogo, logoOverride]} contentFit="contain" />
+        <Animated.Text
+          style={[s.pillName, nameOverride, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }, nameGlow]}
+          numberOfLines={1}
+        >
           {name}
-        </Text>
+        </Animated.Text>
       </Animated.View>
     </Appear>
   );
@@ -173,15 +211,54 @@ function PlatformPill({
 // The headline — minimal, ROTATING while searching (no sentence sits for seconds), with a smooth
 // cross-fade on every change and a continuous gentle shimmer-pulse so the text always reads as
 // actively working. Rotation freezes while exiting. Reduced-motion: static first title, plain fades.
-function PhaseTitle({ phase, rtl, reduced, exiting }: { phase: 'thinking' | 'searching'; rtl: boolean; reduced: boolean; exiting: boolean }) {
+function PhaseTitle({
+  phase, rtl, reduced, exiting, platformCount, scaleStats,
+}: {
+  phase: 'thinking' | 'searching'; rtl: boolean; reduced: boolean; exiting: boolean;
+  // The SAME count the pills on screen show — never an independent fetch that could disagree.
+  platformCount: number;
+  // null until loader_scale_stats_ar() resolves (or forever, on failure) — the two lines that use
+  // it fall back to their original static wording, and the coverage line is simply omitted.
+  scaleStats: LoaderScaleStats | null;
+}) {
   const { t } = useI18n();
   const [titleIdx, setTitleIdx] = useState(0);
+  const titles = useMemo(() => buildSearchLoaderTitles({
+    search: t(SEARCH_TITLES[0]),
+    checking: scaleStats ? t('Checking more than {count} properties…', { count: grouped(scaleStats.listingCount) }) : t(SEARCH_TITLES[1]),
+    matchFilters: t(SEARCH_TITLES[2]),
+    reviewing: platformCount > 0 ? t('Reviewing {count} real-estate platforms…', { count: platformCount }) : t(SEARCH_TITLES[3]),
+    // ONE combined number, not two (owner 2026-09-12: "make a combination of city and district...
+    // we cover almost this many places around Saudi Arabia... the number looks big"). cityCount +
+    // districtCount is still an honest count — every city and every district loader_scale_stats_ar()
+    // counted is a real distinct place a real search can land in; summing them just tells the story
+    // as one bigger number instead of two smaller ones.
+    coverage: scaleStats ? t('Covering more than {count} places across Saudi Arabia…', { count: grouped(scaleStats.cityCount + scaleStats.districtCount) }) : null,
+    preparing: t(SEARCH_TITLES[4]),
+  }), [t, scaleStats, platformCount]);
   useEffect(() => {
     if (phase !== 'searching' || reduced || exiting) return;
-    const id = setInterval(() => setTitleIdx((i) => (i + 1) % SEARCH_TITLES.length), TITLE_ROTATE_MS);
-    return () => clearInterval(id);
-  }, [phase, reduced, exiting]);
-  const label = phase === 'thinking' ? t('Ezhalah is thinking…') : t(SEARCH_TITLES[titleIdx]);
+    // Reading-pace rotation (owner 2026-09-12): each line stays up for readingDurationMs(that
+    // line) — a self-rescheduling timeout, not a fixed setInterval, so a short line and a long
+    // live-number line both feel like the same READING speed instead of the same raw duration.
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      setTitleIdx((i) => {
+        const next = (i + 1) % titles.length;
+        if (!cancelled) timer = setTimeout(tick, readingDurationMs(titles[next]));
+        return next;
+      });
+    };
+    timer = setTimeout(tick, readingDurationMs(titles[Math.min(titleIdx, titles.length - 1)]));
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- titleIdx deliberately excluded: the
+    // functional setTitleIdx update above reads the current index without needing it in scope, and
+    // including it would restart this effect (and the pending timer) on every single tick.
+  }, [phase, reduced, exiting, titles]);
+  // titles can shrink (e.g. scaleStats arrives, or activeNames narrows the roster) between renders —
+  // clamp so a stale index never reads past the current array's end.
+  const label = phase === 'thinking' ? t('Ezhalah is thinking…') : titles[Math.min(titleIdx, titles.length - 1)];
 
   const v = useSharedValue(1);       // cross-fade on phase/title change
   const pulse = useSharedValue(1);   // continuous soft shimmer
@@ -245,6 +322,17 @@ export default function SearchLoader({
     return () => { cancelled = true; };
   }, []);
 
+  // The "big database" marketing numbers (owner 2026-09-12) — resolved once per mount, same
+  // null-on-failure/no-guess contract as activeNames above. See loaderScaleStats.ts.
+  const [scaleStats, setScaleStats] = useState<LoaderScaleStats | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchLoaderScaleStats().then((stats) => {
+      if (!cancelled && stats) setScaleStats(stats);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   // Roster is computed once per (query, resultSources, activeNames) and FROZEN — `resultSources`
   // arriving later (as the query resolves) only reorders which pills lead; it must never reshuffle
   // or hide pills already on screen. `query` just gates WHEN the strip mounts (a search is actually
@@ -275,11 +363,13 @@ export default function SearchLoader({
       {/* Headline: sparkle + rotating phase text (+ soft dots while thinking) */}
       <View style={[s.titleRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
         <Ionicons name="sparkles" size={15} color={colors.primary} />
-        <PhaseTitle phase={phase} rtl={rtl} reduced={reduced} exiting={exiting} />
+        <PhaseTitle phase={phase} rtl={rtl} reduced={reduced} exiting={exiting} platformCount={platforms.length} scaleStats={scaleStats} />
         {phase === 'thinking' ? <Dots reduced={reduced} /> : null}
       </View>
 
-      {/* The complete platform roster — logo + Arabic name pills with the traveling highlight */}
+      {/* The complete platform roster — logo + Arabic name pills with the traveling highlight, NO
+          box (owner 2026-09-12: "remove those boxes... put the name also" — supersedes the same-day
+          logo-only mobile compact tile; the name always renders now, on every viewport). */}
       {phase === 'searching' && platforms.length > 0 ? (
         <View style={[s.strip, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
           {platforms.map((p, i) => (
@@ -298,14 +388,16 @@ const s = StyleSheet.create({
   dots: { flexDirection: 'row', alignItems: 'center', gap: 4, marginHorizontal: 3 },
   thinkDot: { width: 4.5, height: 4.5, borderRadius: 2.5, backgroundColor: colors.muted },
 
-  // Premium, consistent pills: identical height/logo sizes, soft near-neutral fill, hairline-soft
-  // border, generous spacing. backgroundColor/borderColor/glow are ANIMATED per-pill (highlight wave)
-  // from these base values — transforms only, so the wave causes ZERO layout shift.
-  strip: { flexWrap: 'wrap', alignSelf: 'stretch', gap: 9, rowGap: 9 },
-  pill: {
-    alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 11, borderRadius: 14,
-    backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
-  },
-  pillLogo: { width: 18, height: 18, borderRadius: 4, backgroundColor: colors.surface },
+  // NO BOX (owner 2026-09-12): the pill has no fill and no border, resting or highlighted — the
+  // logo (a real transparent PNG, #2426) and the name sit directly on the app's own background, so
+  // nothing ever reads as "a box" or "a photo." The highlight is a shadow-only glow (PlatformPill's
+  // rowGlow) plus the name warming from muted to primary — transforms/shadow/color only, so the wave
+  // still causes ZERO layout shift.
+  // rowGap 6 (was 9): mobile owner 2026-09-13 "I don't want the user to scroll down to see all of
+  // them" — tighter row spacing shaves ~3-4 rows worth of empty vertical space without touching the
+  // pill's own "perfect on iPhone" size. Horizontal gap stays 9 so pills-per-row is unaffected.
+  strip: { flexWrap: 'wrap', alignSelf: 'stretch', gap: 9, rowGap: 6 },
+  pill: { alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 2 },
+  pillLogo: { width: 18, height: 18, borderRadius: 4 },
   pillName: { fontSize: 12.5, fontWeight: '600', color: colors.body, maxWidth: 150 },
 });

@@ -61,8 +61,9 @@ console.log("\n── the ONLY two ways a chat completes are the ≤ 50 threshol
 // AI-Agent message that already lands at <= 50 (the shared playListings renderer all three flow
 // through) — OR the user's own explicit «عرض المزيد» show-all-and-finish choice (Task 4), which
 // finishes at ANY total because it is a deliberate click, not a guess. A set that is still ABOVE 50
-// with no truthful certified question left (the old R11.2) is SAID OUT LOUD and the composer stays
-// LIVE — the interview never invents a question, and never silently locks the chat on a big set. So
+// with no truthful certified question left (the old R11.2) stays SILENT — owner-reversed 2026-09-12/13
+// from the 2026-09-04 "say it out loud" decision — and the composer stays LIVE either way: the
+// interview never invents a question, and never silently locks the chat on a big set. So
 // every completion site must be one of exactly these TWO named gates; the count itself is no longer
 // pinned to 1 now that more than one entry point legitimately reaches it.
 const trueSites = (agentCode.match(/setCompleted\(true\)/g) ?? []).length;
@@ -72,14 +73,12 @@ check(`every setCompleted(true) site is gated by the ≤50 threshold or the expl
   "an ungated site means a count alone, a no-more-questions verdict, or anything else can lock the composer");
 check("R11.1: the post-round honest total ≤ INTERVIEW_STOP_AT completes, inside finishGuided's onFetched",
   /onFetched: \(total\) => \{[\s\S]{0,900}?if \(searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(agent));
-check("R11.2 (revised 2026-09-04): a MEASURED 'no' after a committed AF round is SPOKEN, not a silent completion",
-  /verdict === 'no' && afCarryRef\.current && !noMoreSaidRef\.current\[m\.id\]/.test(agent)
-  && /No further truthful narrowing question exists for this scope/.test(agent)
+check("R11.2 (revised again 2026-09-12/13, silent this time): a MEASURED 'no' after a committed AF round is neither spoken nor a silent completion",
+  !/No further truthful narrowing question exists for this scope/.test(agent)
+  && !/noMoreSaidRef/.test(agent)
   && !/if \(!ok && afCarryRef\.current\) setCompleted\(true\);/.test(agent));
 check("...and that verdict path still records afCanNarrow first (the «تحديد أكثر» gate is untouched)",
   /setAfCanNarrow\(\(c\) => \(\{ \.\.\.c, \[m\.id\]: verdict === 'yes' \}\)\);/.test(agent));
-check("the spoken line is said at most ONCE per results turn (noMoreSaidRef guard)",
-  /noMoreSaidRef\.current\[m\.id\] = true;/.test(agent));
 
 console.log("\n── the composer is the SAME box, made inert — not a separate card ──");
 const compIdx = agent.indexOf("<View style={[s.composerWrap");

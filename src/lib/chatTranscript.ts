@@ -114,7 +114,7 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
     // and `loadMore` re-sets `completed` on its own the moment the last match is revealed again.
     //
     // Only the LAST results turn can decide this, because only the newest turn carries live actions
-    // (`isLatestResults`, owner 2026-08-24). An AF-completed chat (R11.1, ≤ INTERVIEW_STOP_AT = 25
+    // (`isLatestResults`, owner 2026-08-24). An AF-completed chat (R11.1, ≤ INTERVIEW_STOP_AT = 50
     // rows — always under TRANSCRIPT_LISTING_CAP, so never truncated) keeps its lock exactly as
     // owner rule 2026-08-30 requires, even when an EARLIER, larger turn in the same chat was
     // truncated. Both directions are executed in scripts/verify-completed-chat-state.ts.

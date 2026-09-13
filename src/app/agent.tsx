@@ -884,11 +884,12 @@ export default function Agent() {
   const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
-  // INTERVIEW_STOP_AT (25): the same line at which Advanced Filter stops narrowing (R11.1) and the set
+  // INTERVIEW_STOP_AT (50, owner product rule 2026-09-04 — was 25): the same line at which Advanced
+  // Filter stops narrowing (R11.1) and the set
   // is by contract the FINAL one, so there is nothing left for a first page to be a preview OF. Gated
   // on quotableTotal() — the honest total, null whenever the RPC count would overstate (client-only
   // narrowing, agent-annualized budgets) — and in those cases we fall back to FIRST_PAGE rather than
-  // reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 25, so a ≤25 set is always
+  // reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 50, so a ≤50 set is always
   // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
   // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
   const initialReveal = (r: SearchResult | undefined | null): number =>
@@ -1722,7 +1723,6 @@ export default function Agent() {
   // It probes with the SAME rankQuestions call and the SAME carried asked-set the round itself will
   // use, so the offer and the round can never disagree. This is PASSIVE: it renders a button and
   // nothing else — it never opens the overlay. The interview stays a manual tap (owner 2026-08-19).
-  const noMoreSaidRef = useRef<Record<string, true>>({});
   // ONE ASSESSMENT, TWO CALLERS (owner 2026-09-04). Walks the scope tiers exactly as presentGuided
   // does, then ranks the advanced pool with the SAME carried asked-set the round will use, so the
   // offer button, the automatic round continuation and the round itself can never disagree.
@@ -1771,14 +1771,10 @@ export default function Agent() {
     // interview the user already opened lives in finishGuided (owner 2026-09-04) — this effect
     // never opens the overlay on a plain search turn (owner 2026-08-19 stands).
     void assessNarrowing(q, asked).then((verdict) => {
+      // owner 2026-09-12: reverses the 2026-09-04 decision to narrate "nothing left" as a chat
+      // bubble — too dense/confusing in practice. Silent now: afCanNarrow alone still correctly
+      // hides «تحديد أكثر» when exhausted (line ~3418); «عرض المزيد» is untouched by this verdict.
       setAfCanNarrow((c) => ({ ...c, [m.id]: verdict === 'yes' }));
-      // A MEASURED "nothing left" after an AF round is said out loud, not silently swallowed
-      // (owner 2026-09-04): the chat stays open — the user may still refine by typing — and the
-      // results shown are the genuine set. ≤ INTERVIEW_STOP_AT is handled in finishGuided.
-      if (verdict === 'no' && afCarryRef.current && !noMoreSaidRef.current[m.id]) {
-        noMoreSaidRef.current[m.id] = true;
-        setMsgs((mm) => [...mm, { id: uid(), role: 'agent', text: t('No further truthful narrowing question exists for this scope — these are all the genuine matches.'), typing: true }]);
-      }
     });
   }, [lastResultsMsg, guidedPills]);
 
@@ -2249,8 +2245,8 @@ export default function Agent() {
     // transition in presentGuided, where the type scope finally exists to judge it against.
     if (unresolvedScopeTiers(q).length) { void presentGuided(0, token); return; }
     // Rank the pool against the user's ACTUAL current result set (score = split × salience over the
-    // live counts). Below the >25 floor rankQuestions returns [], so the interview simply never
-    // opens on a small result set — the ≤25 rule and the entry gate are the same constant.
+    // live counts). Below the >50 floor rankQuestions returns [], so the interview simply never
+    // opens on a small result set — the ≤50 rule and the entry gate are the same constant.
     // UNKNOWN IS NOT NO (owner 2026-08-26). Each question earns its place by one live count RPC
     // capped at 4s; a probe that times out used to yield the same empty result as a scope that
     // genuinely has nothing to offer, so a load blip closed the interview and demoted the user to
@@ -2711,7 +2707,13 @@ export default function Agent() {
     const statusId = pending.statusId;
     searchingAtRef.current[statusId] = Date.now();
     setMsgs((m) => [...m, { id: statusId, role: 'status', phase: 'searching', query: pending.q }]);
-    toBottom();
+    // NO toBottom() here (owner 2026-09-12, mobile: "it shouldn't drag me down... when the
+    // animation happens I notice that in the phone it drags me down"). pinModeRef is already 'none'
+    // (set above), so onGrow() won't re-trigger a scroll either — the platform-checking loader just
+    // appears wherever the page already was; nothing forces the viewport down to meet it. The
+    // request bubble above stays fully visible instead of being yanked past. Results still land
+    // normally afterwards via playListings' own reveal/scroll (unaffected — this removes only the
+    // FIRST, abrupt jump at the moment the loader mounts).
     void (async () => {
       // Fetch the matching subset DURING the loading animation — the network wait hides inside the
       // thinking→searching choreography (no post-network hold: playListings morphs to results as soon
@@ -3404,11 +3406,13 @@ export default function Agent() {
                         const hasMore = rc.hasMore && isLatestResults;
                         // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side).
                         const quoteTotal = !clientNarrowed;
-                        // ≤25 RULE (owner brief 2026-08-19, item 4): the auto-opening AF intro already
+                        // ≤50 RULE (owner brief 2026-08-19 item 4, threshold raised 25 → 50 by the owner product
+                        // rule of 2026-09-04; the live value is INTERVIEW_STOP_AT in src/lib/afRanking.ts):
+                        // the auto-opening AF intro already
                         // correctly gated on this same threshold (agent.tsx ~1375) — this SEPARATE manual
                         // button did not, and its click path (startAgeFlow → rankQuestions, which itself
-                        // floors on the SAME MIN_TOTAL_TO_SHOW=26 constant) fell through to the plain
-                        // refine-chip flow for any ≤25 scope rather than doing nothing. A ≤25 result set
+                        // floors on the SAME MIN_TOTAL_TO_SHOW=51 constant) fell through to the plain
+                        // refine-chip flow for any ≤50 scope rather than doing nothing. A ≤50 result set
                         // gets ONLY the normal lightweight actions (Load more if genuinely more exists,
                         // FeedbackRow below) — never a "narrow further" prompt when there is nothing
                         // useful left to narrow.
@@ -3497,7 +3501,7 @@ export default function Agent() {
                                   المزيد» reveals everything up to the cap, so the button needs no count caption. */}
                               {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
                                   «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
-                                  when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
+                                  when there is genuinely more than INTERVIEW_STOP_AT=50 left to narrow. */}
                               {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
                                   user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
                                   the old CTA row must not sit behind it competing for the same decision.
@@ -3621,18 +3625,20 @@ export default function Agent() {
             restore this same state from `completed`. */}
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
           <View style={[s.col, s.composerCol]}>
-            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): only the input row is gated — the
-                disclaimer below stays always-on regardless of origin (it's a listings-source legal
-                notice, not part of "the chat"). See filterOrigin's own comment above.
-                `|| busy || revealing` (fixed same-day, caught by web-runtime-smoke's own [E] Stop
-                journey): a Filter search still becomes an in-flight fetch the moment it lands here,
-                and Stop-then-restore-to-Filter (verify-filter-stop-cancels-and-restores.ts, a
-                separate, pre-existing owner rule) needs the composer's own Stop control to exist
-                while `busy`/`revealing` — hiding the WHOLE composer unconditionally also hid Stop,
-                so an in-flight Filter search could no longer be cancelled. Not "chat" either way:
-                the busy/revealing ternary a few lines down only ever shows Stop OR mic+send, never
-                both, so this window shows the input row + Stop, never a usable send path. */}
-            {(!filterOrigin || busy || revealing) && (
+            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12): the free-text
+                composer never shows for a Filter-origin conversation — the disclaimer below stays
+                always-on regardless of origin (it's a listings-source legal notice, not part of
+                "the chat"). See filterOrigin's own comment above.
+                WHILE `busy`/`revealing` (the search/reveal animation), Filter-origin still needs
+                Stop-then-restore-to-Filter to work (verify-filter-stop-cancels-and-restores.ts, a
+                separate, pre-existing owner rule) — but showing the FULL composer pill with its
+                inviting "type what you're looking for" text input read as an active chat during an
+                animation the user only ever reached by pressing بحث (owner, 2026-09-12: "still
+                shows chat button ... remove that"). So Filter-origin busy/revealing gets Stop ALONE,
+                undressed as a composer — no input, no pill, no placeholder — while the AI-Agent path
+                keeps its full composer (input + Stop while busy/revealing, input + mic/send once
+                idle) exactly as before. */}
+            {!filterOrigin ? (
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
@@ -3812,7 +3818,18 @@ export default function Agent() {
                 </Pressable>
               </View>
             </View>
-            )}
+            ) : null}
+            {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
+                "REMOVE THIS IN THE FILTER SIMPLE" — the small green Stop square that lingered on
+                Filter-origin results, during both busy AND the cascade reveal animation, is gone.
+                Nothing renders here for filterOrigin anymore.
+                The stop() function itself stays intact — verify-filter-stop-cancels-and-restores.ts
+                still holds — so a Filter search that is cancelled by other means (route change via
+                the top ☰ menu / تصفية tab / browser back / any effect cleanup that runs when the
+                user leaves the results screen) still aborts the network request, clears
+                lastFilterRef/lastSeedRef, and returns to the Filter screen with restored state.
+                The trade-off: a mid-flight Filter search has no in-place cancel button; the user
+                navigates away instead. Owner-accepted (2026-09-12). */}
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
             </Text>

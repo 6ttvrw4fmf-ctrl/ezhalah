@@ -220,12 +220,91 @@ def test_MUTATION_the_old_no_op_behaviour_fails(monkeypatch):
     assert store["p_residential_listings"][0]["active"] is True
 
 
-def test_both_dual_table_platforms_actually_call_it():
-    """A correct helper nothing calls is decoration. Pin the two wired scrapers by source."""
+# Dual-routing scrapers that do NOT yet call the supersession step. SHRINK-ONLY: the ceiling below
+# can never be raised, so this backlog is visible and can only be worked down. A scraper added
+# tomorrow that routes to both tables is RED until it either wires the step or is deliberately
+# added here — which is a reviewed edit, not something a rename or a new platform can do silently.
+#
+# WHY THIS FILE HAS A LIST AT ALL. Until 2026-09-13 this test asserted over the literal tuple
+# ("sadin", "dealapp") and called them "the two dual-table platforms". They were not: 47 scrapers
+# route to both tables, so the guard was green over 45 unwired ones. Two of them then collided in
+# production on consecutive days — amaall (6 ads) and arkaan (1) — and the wiring check had nothing
+# to say about either, because neither was in the tuple. Discovery by SHAPE is the fix; the baseline
+# only records how much of the discovered set is still outstanding.
+UNWIRED_DUAL_ROUTING_BASELINE = {
+    "abeea", "abralosol", "abwbna", "aldarim", "alhoshan", "alkhaas", "alnokhba", "alobid",
+    "alta", "amlakalahsa", "aouj", "aqaratikom", "aqarcity", "aqargate", "awal", "azdad",
+    "bahadhabab", "deal", "eaqartabuk", "eastabha", "erapulse", "fursaghyr", "hajer", "jazwtn",
+    "jurash", "mizlaj", "muktamel", "mustqr", "nowaisiry", "october", "raghdan", "ramzalqasim",
+    "rawasidark", "remal", "sanadak", "satel", "shmoualshmal", "souq24", "therc", "toor", "wasalt",
+}
+# Measured 2026-09-13. Lowering this is the point; raising it is a regression.
+UNWIRED_CEILING = 41
+
+
+def _dual_routing_scrapers():
+    """DISCOVER, by shape, every scraper whose run.py writes to BOTH sibling tables.
+
+    Shape, not a list: a scraper that names `<platform>_residential_listings` (or its batch upsert)
+    AND the commercial twin can route one ad to either table, which is the precondition for the
+    orphan this whole file exists to prevent. Nobody has to remember to register a new platform.
+    """
     import pathlib
-    root = pathlib.Path(__file__).resolve().parents[3]
-    for scraper in ("sadin", "dealapp"):
-        src = (root / "scrapers" / scraper / "run.py").read_text(encoding="utf-8")
-        assert "retire_superseded_siblings(" in src, f"{scraper} does not call the supersession step"
+    root = pathlib.Path(__file__).resolve().parents[3] / "scrapers"
+    found = {}
+    for run_py in sorted(root.glob("*/run.py")):
+        platform = run_py.parent.name
+        src = run_py.read_text(encoding="utf-8")
+        if f"{platform}_residential_listings" in src and f"{platform}_commercial_listings" in src:
+            found[platform] = src
+    return found
+
+
+def test_discovery_actually_finds_the_dual_routing_scrapers():
+    """Guard the guard: a discovery that silently matched nothing would make every check below vacuous."""
+    found = _dual_routing_scrapers()
+    assert len(found) >= 40, f"shape discovery collapsed to {len(found)} scrapers — it is broken, not the fleet"
+    for known in ("sadin", "dealapp", "amaall", "arkaan"):
+        assert known in found, f"{known} routes to both tables but discovery missed it"
+
+
+def test_every_dual_routing_scraper_is_wired_or_explicitly_outstanding():
+    """A correct helper nothing calls is decoration — and a wiring check over a hardcoded pair is worse."""
+    found = _dual_routing_scrapers()
+    unwired = {p for p, src in found.items() if "retire_superseded_siblings(" not in src}
+    newly_unwired = unwired - UNWIRED_DUAL_ROUTING_BASELINE
+    assert not newly_unwired, (
+        f"these scrapers route to BOTH sibling tables but never supersede: {sorted(newly_unwired)}. "
+        "Call db.retire_superseded_siblings() before prune_unseen (see sadin/run.py), or add the "
+        "platform to UNWIRED_DUAL_ROUTING_BASELINE with a reason."
+    )
+    assert len(unwired) <= UNWIRED_CEILING, (
+        f"{len(unwired)} dual-routing scrapers are unwired but the ceiling is {UNWIRED_CEILING}. "
+        "This number is shrink-only."
+    )
+    stale = UNWIRED_DUAL_ROUTING_BASELINE - set(found)
+    assert not stale, f"baseline names scrapers that no longer route to both tables: {sorted(stale)}"
+
+
+def test_a_wired_scraper_supersedes_before_it_prunes():
+    """Order is load-bearing: prune's guards protect the orphan rather than ageing it out."""
+    found = _dual_routing_scrapers()
+    wired = {p: src for p, src in found.items() if "retire_superseded_siblings(" in src}
+    assert wired, "no scraper calls the supersession step — the helper is decoration"
+    for platform, src in sorted(wired.items()):
+        if "db.prune_unseen(" not in src:
+            continue  # amaall prunes nothing; there is no ordering to get wrong
         assert src.index("retire_superseded_siblings(") < src.index("db.prune_unseen("), \
-            f"{scraper} must supersede BEFORE prune_unseen — prune's guards protect the orphan"
+            f"{platform} must supersede BEFORE prune_unseen — prune's guards protect the orphan"
+
+
+def test_the_two_platforms_repaired_on_2026_09_13_are_wired():
+    """Pin the specific fix, so a revert of either wiring is RED rather than a silent baseline drift."""
+    found = _dual_routing_scrapers()
+    for platform in ("amaall", "arkaan"):
+        assert "retire_superseded_siblings(" in found[platform], (
+            f"{platform} collided in production on 2026-09-13 and was wired then; "
+            "un-wiring it re-opens that defect"
+        )
+        assert platform not in UNWIRED_DUAL_ROUTING_BASELINE, \
+            f"{platform} is wired — it must not sit in the outstanding baseline"

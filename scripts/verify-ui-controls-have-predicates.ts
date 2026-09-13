@@ -54,7 +54,7 @@ import { join } from 'node:path';
 import { loadRegistry } from './lib/testRegistry.ts';
 import { liveHalfProblems } from './lib/liveHalf.ts';
 import {
-  INTERVIEW_FIELDS, REGISTRY_KEY, amenityChipKeys, registryPayload, registryProblems,
+  AF_QUESTION_FIELDS, INTERVIEW_FIELDS, REGISTRY_KEY, afQuestionIds, amenityChipKeys, registryPayload, registryProblems,
 } from './lib/uiControlPredicates.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -246,10 +246,63 @@ const withRow = (key: string, patch: Record<string, unknown>) =>
 
 mustCatch('a backend-only field that has acquired a chip (the inverse of the Pool/Gym bug)',
   registryProblems(withRow('parking', { ui_exposed: false, not_exposed_reason: 'zero inventory' }), CHIPS)
-    .some((p) => p.includes('rendered as a chip')));
+    .some((p) => p.includes('exposed to users as a filter control')));
 
 mustCatch('a chip the registry cannot DESCRIBE at all (the optical_fibers shape)',
   registryProblems(healthy(), [...CHIPS, 'optical_fibers']).some((p) => p.includes('no af_field_registry row')));
+
+// ── 6c. THE NON-AMENITY HALF OF THE SURFACE (added 2026-09-12, routine #9) ──────────────────────
+// Every proof above passes `CHIPS` — amenity tokens — because that was the only surface the rules
+// could see. Four of the nine live questions narrow on something that is not an amenity, and the
+// live registry is wrong about all four TODAY while this check is green. These proofs feed the same
+// shared predicate the real shapes, through the third argument that carries the rest of the surface.
+const DIRECTION_ROW = { canonical_key: 'direction_ar', ui_exposed: true, not_exposed_reason: null, filter_tier: 'more_options' };
+const STREETW_ROW = { canonical_key: 'street_width_m', ui_exposed: true, not_exposed_reason: null, filter_tier: 'more_options' };
+const healthyWide = (): Array<Record<string, unknown>> => [...healthy(), DIRECTION_ROW, STREETW_ROW];
+const WIDE = ['direction_ar', 'street_width_m'];
+
+mustCatch('THE LIVE DEFECT: direction_ar is ui_exposed=false while the app asks the direction '
+  + 'question and sends p_directions (registry reason: «9% coverage — too thin», actual 46.2%)',
+  registryProblems(
+    healthyWide().map((r) => (r.canonical_key === 'direction_ar'
+      ? { ...r, ui_exposed: false, not_exposed_reason: '9% coverage - too thin to be useful yet' } : r)),
+    CHIPS, WIDE,
+  ).some((p) => p.includes('direction_ar')));
+
+mustCatch('the same for street_width_m (registry reason: «12.5% coverage today», actual 41.8%)',
+  registryProblems(
+    healthyWide().map((r) => (r.canonical_key === 'street_width_m'
+      ? { ...r, ui_exposed: false, not_exposed_reason: '12.5% coverage today' } : r)),
+    CHIPS, WIDE,
+  ).some((p) => p.includes('street_width_m')));
+
+mustCatch('a live filter control with NO registry row at all (rating / reviews_count / '
+  + 'unit_subtype_ar — all three, right now, in production)',
+  ['rating', 'reviews_count', 'unit_subtype_ar'].every((k) =>
+    registryProblems(healthyWide(), CHIPS, [...WIDE, k])
+      .some((p) => p.includes('no af_field_registry row') && p.includes(k))));
+
+mustCatch('…and the OLD narrow call still misses every one of them — the false green, reproduced',
+  registryProblems(
+    healthyWide().map((r) => (r.canonical_key === 'direction_ar' ? { ...r, ui_exposed: false, not_exposed_reason: 'x' } : r)),
+    CHIPS,  // no third argument: exactly how the predicate was called before this repair
+  ).length === 0);
+
+mustCatch('…while a registry that DOES describe the whole surface is not flagged (not vacuously red)',
+  registryProblems(healthyWide(), CHIPS, WIDE).length === 0);
+
+// Discovery, not a list: the ids come out of the real advancedFilters.ts, and an unmapped one is a
+// failure. Without this, a question added tomorrow would silently rejoin the invisible set.
+const discovered = afQuestionIds(advanced);
+check(`afQuestionIds() finds every live AdvancedQuestion in the real source (${discovered.length})`,
+  discovered.length >= 9 && discovered.includes('direction') && discovered.includes('rating')
+  && discovered.includes('unit_subtype') && discovered.includes('street_width'),
+  `found: ${discovered.join(', ')}`);
+check('…and it is not vacuously permissive — a source with no questions yields none',
+  afQuestionIds('const X = 1;\n').length === 0);
+const unmappedQ = discovered.filter((q) => !(q in AF_QUESTION_FIELDS));
+check('every discovered question declares the registry field(s) it narrows on', unmappedQ.length === 0,
+  `unmapped: ${unmappedQ.join(', ')} — a control nothing can judge`);
 
 mustCatch('a hidden field that never records WHY it is hidden',
   registryProblems(withRow('deed_location_text', { not_exposed_reason: null }), CHIPS)

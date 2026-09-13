@@ -82,6 +82,7 @@ export function sourceName(source: string): string {
   if (s.includes('abwbna')) return 'Abwbna Real Estate';
   if (s.includes('remal')) return 'Remal Real Estate';
   if (s.includes('amaall')) return 'Amaall Real Estate Services';
+  if (s.includes('amlakalahsa')) return 'Amlak Al-Ahsa Real Estate';
   if (s.includes('alta')) return 'Alta Real Estate Services';
   if (s.includes('awal')) return 'Awal United for Real Estate';
   if (s.includes('azdad')) return 'Azdad Al Aqariah';

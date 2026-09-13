@@ -1,4 +1,4 @@
-b3a7ba220bc7c2667097ce2a60833b3dbeccccd4
+3798d9dce7b594f1c36c196dc6a122b9d14d8336
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # 2026-09-11  faf768e  advanced MANUALLY, AHEAD of its deploy, to clear preflight-verify.sh's
 #   deletion guard before the FIRST deploy attempt since 3db1802 (2026-09-06, 31 commits/5 days of
@@ -327,3 +327,15 @@ b3a7ba220bc7c2667097ce2a60833b3dbeccccd4
 # 2026-09-11  098003c  deployed via safe-deploy.sh
 # 2026-09-11  9805906  deployed via safe-deploy.sh
 # 2026-09-12  b3a7ba2  deployed via safe-deploy.sh
+# 2026-09-12  c9ce60e  deployed via safe-deploy.sh (run 34707664134 success + run 34707723517
+#   "DEPLOY SUCCEEDED — a later step FAILED"). Recorded by hand from a branch pushed with a
+#   token that STARTS WORKFLOWS, because safe-deploy.sh's own baseline PR (#2395) got zero
+#   check runs: a branch pushed with the built-in GITHUB_TOKEN starts no workflows (GitHub's
+#   recursion guard), so its required checks can never run and it can never merge. Same cause
+#   as the stranded #2347 (fb961de) and #2345 (dc2e303); the real fix is the BASELINE_PR_TOKEN
+#   secret, tracked in PR #2262. Live-verified before recording: the served bundle contains
+#   `persistedOnly`, which exists in 0 files at b3a7ba2 and 2 files at c9ce60e.
+# 2026-09-12  3fd3c1c  deployed via safe-deploy.sh
+# 2026-09-13  95bed23  deployed via safe-deploy.sh
+# 2026-09-13  82832cb  deployed via safe-deploy.sh
+# 2026-09-13  3798d9d  deployed via safe-deploy.sh

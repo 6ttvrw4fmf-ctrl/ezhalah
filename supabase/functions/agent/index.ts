@@ -346,13 +346,23 @@ async function locClassify(token: string): Promise<Record<string, unknown> | nul
 // Arabic fold mirroring SQL normalize_ar: unify alef/ta-marbuta/alef-maqsura, drop
 // tatweel + bidi marks, collapse spaces. Used to check whether the user already named
 // one of the catalog candidates (so we don't re-ask a question they've answered).
+// 2026-09-12 (owner district-identity decision): also fold like norm_district_tok —
+// strip tashkeel, ئ→ي, Arabic-Indic digits→ASCII, drop ء — so an answer spelled
+// «الاحسا»/«صفاء»/«شرايع» still matches its candidate («الاحساء»/«الصفا»/«شرائع»)
+// instead of re-asking a question the user already answered. MATCH-ONLY: nothing
+// arNorm touches is ever displayed.
 function arNorm(s: string): string {
   return (s || "")
     .replace(/[‎‏‪-‮؜]/g, "")
     .replace(/ـ/g, "")
+    .replace(/[ً-ْٰ]/g, "")
     .replace(/[أإآٱ]/g, "ا")
     .replace(/ة/g, "ه")
     .replace(/ى/g, "ي")
+    .replace(/ئ/g, "ي")
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/ء/g, "")
+    .replace(/([ء-ي])([0-9])/g, "$1 $2")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1422,10 +1432,14 @@ Deno.serve(async (req: Request) => {
           const pick = cities.find((c) => said(String(c.city_ar)));
           if (pick) { location = String(pick.city_ar); districtPin = `حي ${nm}`; }
           else if (!alreadyAsked && cities.length > 1) {
-            const top = cities.slice(0, 8);
-            const lines = top.map((c) => `• ${c.city_ar}`).join("\n");
-            const more = cities.length > top.length ? "\n• أو مدينة أخرى" : "";
-            ambiguityReply = `حي ${nm} موجود في أكثر من مدينة. تقصد حي ${nm} في أي مدينة؟\n${lines}${more}`;
+            // Owner 2026-09-12: one natural sentence, not a bulleted list. "بالمناسبة، حي X موجود
+            // في أكثر من مدينة — A، B، وC — أي وحدة منها تقصد؟"
+            const top = cities.slice(0, 8).map((c) => String(c.city_ar));
+            const more = cities.length > top.length ? "، أو مدينة أخرى" : "";
+            const list = top.length > 1
+              ? `${top.slice(0, -1).join("، ")}، و${top[top.length - 1]}`
+              : top[0];
+            ambiguityReply = `بالمناسبة، حي ${nm} موجود في أكثر من مدينة — ${list}${more} — أي وحدة منها تقصد؟`;
           }
         } else if (ck === "region" && !alreadyAsked) {
           // RESTORED CASE (round 2, LOST LOCATION-AMBIGUITY CASES) — a plain region with no

@@ -61,7 +61,7 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // pairs with a RUN-level trust gate a per-row callback cannot see. It is the largest platform here.
 // 26 → 25 later still: azdad onboarded (own Next.js + Supabase stack, a corrected 40-candidate-
 // audit link) — same unevidenced-absence-only shape as every other freshly onboarded platform.
-const RATCHET = 24;
+const RATCHET = 25;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {
