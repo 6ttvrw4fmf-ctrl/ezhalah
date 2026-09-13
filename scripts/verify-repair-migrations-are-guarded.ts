@@ -229,6 +229,23 @@ const WAIVED: Record<string, string> = {
     'same merge as 20260913080703 (search_listings_ar backfill, needed because it is a synced copy '
     + 'not a live passthrough) — watched by the same companion, '
     + '20260913082310_amlakalahsa_jafr_dahiya_merge_gets_a_detector.sql',
+  // Amlakalahsa district/city consolidation (owner-directed 2026-09-13, real-user "test it and
+  // confirm" pass): 10 "no city" listings resolved to a specific city (each independently proven —
+  // same district text already correct elsewhere, on this platform or others — never a guessed
+  // pattern), plus 5 numbered district variants folded to their bare match form ("الصفا 2" ->
+  // "الصفا", card text untouched). Two migrations for the base-table fix (a follow-up caught one
+  // row the first WHERE clause missed). Companion lands ~3 migrations later and creates + rosters +
+  // self-verifies mon_detect_amlakalahsa_district_consolidation_regressed(), which watches for
+  // either shape reappearing. scrapers/amlakalahsa/run.py was also updated (the same session) to
+  // apply both corrections on every future scrape, so a regression here means that scraper fix
+  // itself was reverted, not just a one-off sync gap. Open the companion to verify this reason
+  // rather than taking it on trust.
+  '20260913174942_amlakalahsa_confirmed_city_fixes_and_number_strip.sql':
+    'watched by its companion 20260913180152_amlakalahsa_district_consolidation_gets_a_detector.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_district_consolidation_regressed()',
+  '20260913175242_amlakalahsa_ayoun_safa2_number_strip_missed_row.sql':
+    'same consolidation as 20260913174942 (one row its WHERE clause missed) — watched by the same '
+    + 'companion, 20260913180152_amlakalahsa_district_consolidation_gets_a_detector.sql',
 };
 
 // Enforcement starts here — the day this rule landed.

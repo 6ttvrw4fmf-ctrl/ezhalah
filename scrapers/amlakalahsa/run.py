@@ -259,6 +259,23 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # guess between them without a region hint, so the geocoded state ("المنطقة الشرقية") is passed
     # through to disambiguate, exactly the documented `region_hint` contract.
     city_id, region_id = to_catalog(city_ar, region_hint=region_hint) if city_ar else (None, None)
+
+    # Owner-confirmed 2026-09-13: when Google's geocode gives NO city at all (no pw-map), the
+    # district text itself is sometimes enough to know the city anyway — proven per-district by
+    # cross-referencing OTHER listings (this platform's own, or other platforms' live rows) that
+    # already carry the identical district text WITH a resolved city. Each entry below is a single,
+    # specific, evidence-backed fact about ONE district name — never a guessed pattern — so this
+    # stays a short named list, not a general "infer city from district" rule (that would risk
+    # exactly the cross-city fan-out to_catalog()'s own region_hint guard exists to prevent).
+    _DISTRICT_IMPLIES_CITY = {
+        "شرق شرق الحديقة": ("الهفوف", 12), "اليمامة": ("الهفوف", 12), "الطرف": ("الهفوف", 12),
+        "بستان المطيرفي": ("المبرز", 2748), "الجابرية": ("المبرز", 2748), "الغسانية": ("المبرز", 2748),
+        "البستنان": ("الحليلة", 2762),
+        "الرابية بالعيون": ("العيون", 2038), "الصفا": ("العيون", 2038), "الصفا 2": ("العيون", 2038),
+    }
+    if city_id is None and district_ar in _DISTRICT_IMPLIES_CITY:
+        city_ar, city_id = _DISTRICT_IMPLIES_CITY[district_ar]
+
     # Owner-confirmed 2026-09-12: this office serves ONLY Al-Ahsa, entirely within the Eastern
     # Province — every one of its listings, without exception. Region is therefore safe to default
     # even when Google's geocode gave no city at all (measured live: 52/262 rows, mostly "ضاحية هجر"
@@ -282,6 +299,21 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         "الضاحية" if city_ar == "الجفر" and district_ar and district_ar.startswith("الضاحية")
         else district_ar
     )
+
+    # Owner instruction 2026-09-13: a numbered variant of an otherwise-plain district name
+    # ("الصفا 2", "النسيم 3") matches to its bare form — same district_ar=match / neighborhood=
+    # card-text split as the الضاحية collapse above: the card still shows the office's exact
+    # wording (neighborhood, untouched), only the MATCH value drops the number. Each pair below is
+    # a specific, evidence-backed fact (the bare and numbered forms were independently proven to be
+    # the same real place) — not a general "strip trailing digits" rule, which would wrongly merge
+    # the many OTHER Saudi districts where the number names a genuinely different area (e.g. حي ج1
+    # vs حي ج2 elsewhere in the fleet are not the same place).
+    _NUMBERED_MATCHES_BARE = {
+        "النسيم 2": "النسيم", "النسيم 3": "النسيم",
+        "المزروع 2": "المزروع", "المباركية 3": "المباركية", "الغسانية 2": "الغسانية",
+        "الصفا 2": "الصفا",
+    }
+    district_ar_for_match = _NUMBERED_MATCHES_BARE.get(district_ar_for_match, district_ar_for_match)
 
     # The office's own free-text spec paragraph — real prose (measured live, 3/3 sampled posts),
     # e.g. "للبيع ارض في حي الورود الغربي ارض رقم 219 \ ف مساحة 360 م شارع عرض 15 شرقا ... السعر
