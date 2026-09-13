@@ -118,6 +118,19 @@ The check now asserts the shipped rule — reveal everything remaining **or** st
 a press that stopped at the ceiling must leave «عرض المزيد» offered — importing `DRAIN_REVEAL_MAX`
 from the real module rather than re-typing it. Harness note 21 in this routine's spec corrected too.
 
+**And the corrected check is GREEN against production** (re-run 12:1xZ, after production came back
+inside its envelope), which answers the question the raw failure could not:
+
+```
+PASS  «عرض المزيد» revealed everything remaining, or stopped exactly at the safety ceiling
+      revealed=2100 total=6319 clicks=2 ceiling=2000
+PASS  a press that stopped at the ceiling left the pager OFFERED (nothing stranded)
+```
+
+So **nobody is stranded at 2,100 of 6,319** — the pager is still on screen and the search is not
+marked finished, exactly as `DRAIN_REVEAL_MAX`'s own note promises. Worth stating plainly, because
+the old assertion's failure text («before the button/row disappeared») read as if they were.
+
 **Not settled here:** whether the accumulated mount across many presses is safe. That is #212 (P1,
 routine #4, `blocked`) — an open owner decision. Today's measurement went on #212 as an observation.
 
