@@ -693,14 +693,20 @@ Recorded so the next run does not rediscover them, and does not assume they were
    creates. The 32 objects that were ALREADY production-only when it was written are enumerated in
    `scripts/production-only-object-baseline.txt` as a shrink-only floor — they remain real debt, and
    `search_listings_ar` itself is one of them.
-2. **None of routine #11's seven alert kinds has a detector.** `inactive_still_searchable`,
-   `inactive_still_counted`, `false_resurrection`, `unknown_treated_as_dead`, `deletion_clock_*`,
-   `orphan_after_delete` and `lifecycle_*` are routed by `scripts/lib/alertRouting.ts` and named in
-   migration `20260905022312`'s header — but no `mon_raise()` anywhere in `supabase/migrations/`
-   emits any of them. The queue is addressable and currently unfillable. §4 builds them.
-3. **`unknown_treated_as_dead` is described as *"the alert kind that fires when it is broken"* in
-   migration `20260905022312`. It does not fire today.** That is the single highest-value detector
-   in §4 and the one whose absence most directly contradicts §0.
+2. ~~**None of routine #11's seven alert kinds has a detector.**~~ **CLOSED — the emitters landed in
+   `20260906041121` and are live.** `unknown_treated_as_dead`, `deletion_clock_*`,
+   `lifecycle_duplicate_stale_copy` and the rest now raise against real rows; `ops_incident` #25
+   tracks the remainder. Read the alerts before assuming a kind is dark.
+3. ~~**`unknown_treated_as_dead` … does not fire today.**~~ **It fires, and its first precision
+   defect is already fixed (2026-09-13).** It counted an ADJUDICATED res/com de-duplication as a
+   death on unknown evidence — seven rows across amaall and arkaan whose `listing_url` stayed served
+   by an active twin — and its own `action` field told the reader to RESTORE them, which would have
+   re-created the duplicate card `20260830140110` repaired. Now excluded only on an affirmative
+   ledger row (`ops_res_com_collision_adjudication`, verdict `REPAIRABLE`, same platform + side +
+   id, within an hour of the deactivation), reported in its own payload field rather than silently
+   subtracted, and held by `scripts/verify-unknown-kill-excludes-adjudicated-dedup.ts`.
+   **A detector this file calls the highest-value one in §4 is also the one that can least afford to
+   cry wolf** — see migration `20260913144532`.
 4. **`e2e/guardian/journeys.mjs` declares no `lifecycle` or `inactive_listing` surface.** Existing
    journeys cover `theme`, `chat_persistence`, `auth`, `navigation`, `result_card`,
    `loading_states`, `modal`, `search`. Whether a lifecycle journey belongs there — a deep link to a
