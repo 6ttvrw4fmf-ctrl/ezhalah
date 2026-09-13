@@ -30,7 +30,8 @@ being stated. They were always binding. Now they are also visible.
 
 1. **`docs/ADVANCED_FILTER_PRODUCT_CONTRACT.md`** — the CANONICAL, owner-mandated source of
    truth for what Advanced Filter does. 74 numbered rules across category/multi-type intersection,
-   scope hierarchy, offer button, the 10%-OR-≤25 usefulness rule, rounds, live counts, Skip/Back/
+   scope hierarchy, offer button, the 10%-OR-≤50 usefulness rule (INTERVIEW_STOP_AT, raised from 25
+   by the owner product rule of 2026-09-04), rounds, live counts, Skip/Back/
    pills, Show More, stopping conditions, must-nevers, and tuning constants — with worked
    examples (gym 100/98/8, bathrooms ladder, Apartment+Villa union, 5000→22 progressive
    narrowing).
@@ -484,9 +485,10 @@ Things that cost a previous run real time, and are NOT product defects:
    token's count column is `cnt_<token>`. Where a value genuinely cannot be derived (a translated
    label), reconcile the two at LOAD time and fail loudly, not per-cohort by luck.
 14. **When a journey needs a SECOND question, do not click the narrowest option** (2026-09-03).
-   R4.3.1/R11.1 stop the interview at `INTERVIEW_STOP_AT = 25`, so the narrowest option is the
+   R4.3.1/R11.1 stop the interview at `INTERVIEW_STOP_AT = 50` (owner product rule 2026-09-04, raised
+   from 25 — the live value is in `src/lib/afRanking.ts`), so the narrowest option is the
    surest way to end it before the next question can be tested — and the resulting "it didn't
-   advance" failure is a correct production, not a defect. Pick the narrowest option leaving **>25**,
+   advance" failure is a correct production, not a defect. Pick the narrowest option leaving **>50**,
    and report NOT EXERCISED when the cohort offers none.
 15. **A CI job log can only be read from the TAIL, so a red step in the middle of a job is invisible**
    (2026-09-04). The live-check jobs are long chains (`af-truth` is 16 steps) and every step runs

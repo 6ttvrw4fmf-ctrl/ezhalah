@@ -884,11 +884,12 @@ export default function Agent() {
   const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
-  // INTERVIEW_STOP_AT (25): the same line at which Advanced Filter stops narrowing (R11.1) and the set
+  // INTERVIEW_STOP_AT (50, owner product rule 2026-09-04 — was 25): the same line at which Advanced
+  // Filter stops narrowing (R11.1) and the set
   // is by contract the FINAL one, so there is nothing left for a first page to be a preview OF. Gated
   // on quotableTotal() — the honest total, null whenever the RPC count would overstate (client-only
   // narrowing, agent-annualized budgets) — and in those cases we fall back to FIRST_PAGE rather than
-  // reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 25, so a ≤25 set is always
+  // reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 50, so a ≤50 set is always
   // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
   // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
   const initialReveal = (r: SearchResult | undefined | null): number =>
@@ -2244,8 +2245,8 @@ export default function Agent() {
     // transition in presentGuided, where the type scope finally exists to judge it against.
     if (unresolvedScopeTiers(q).length) { void presentGuided(0, token); return; }
     // Rank the pool against the user's ACTUAL current result set (score = split × salience over the
-    // live counts). Below the >25 floor rankQuestions returns [], so the interview simply never
-    // opens on a small result set — the ≤25 rule and the entry gate are the same constant.
+    // live counts). Below the >50 floor rankQuestions returns [], so the interview simply never
+    // opens on a small result set — the ≤50 rule and the entry gate are the same constant.
     // UNKNOWN IS NOT NO (owner 2026-08-26). Each question earns its place by one live count RPC
     // capped at 4s; a probe that times out used to yield the same empty result as a scope that
     // genuinely has nothing to offer, so a load blip closed the interview and demoted the user to
@@ -3405,11 +3406,13 @@ export default function Agent() {
                         const hasMore = rc.hasMore && isLatestResults;
                         // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side).
                         const quoteTotal = !clientNarrowed;
-                        // ≤25 RULE (owner brief 2026-08-19, item 4): the auto-opening AF intro already
+                        // ≤50 RULE (owner brief 2026-08-19 item 4, threshold raised 25 → 50 by the owner product
+                        // rule of 2026-09-04; the live value is INTERVIEW_STOP_AT in src/lib/afRanking.ts):
+                        // the auto-opening AF intro already
                         // correctly gated on this same threshold (agent.tsx ~1375) — this SEPARATE manual
                         // button did not, and its click path (startAgeFlow → rankQuestions, which itself
-                        // floors on the SAME MIN_TOTAL_TO_SHOW=26 constant) fell through to the plain
-                        // refine-chip flow for any ≤25 scope rather than doing nothing. A ≤25 result set
+                        // floors on the SAME MIN_TOTAL_TO_SHOW=51 constant) fell through to the plain
+                        // refine-chip flow for any ≤50 scope rather than doing nothing. A ≤50 result set
                         // gets ONLY the normal lightweight actions (Load more if genuinely more exists,
                         // FeedbackRow below) — never a "narrow further" prompt when there is nothing
                         // useful left to narrow.
@@ -3498,7 +3501,7 @@ export default function Agent() {
                                   المزيد» reveals everything up to the cap, so the button needs no count caption. */}
                               {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
                                   «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
-                                  when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
+                                  when there is genuinely more than INTERVIEW_STOP_AT=50 left to narrow. */}
                               {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
                                   user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
                                   the old CTA row must not sit behind it competing for the same decision.

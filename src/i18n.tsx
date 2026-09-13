@@ -672,7 +672,9 @@ const AR: Record<string, string> = {
   'We found {n} listings matching your search.': 'لقينا {n} إعلان يطابق طلبك.',
   'I showed you the first {n} listings. Want me to show more, or help you find more precise ones?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟ إذا عرضت لك المزيد بعرض لك كل الإعلانات، أو أقدر أساعدك توصل لنتايج أدق.',
   'I showed you all {n} matching listings. Want help finding more precise ones?': 'عرضت لك كل النتائج المطابقة ({n} إعلان). تبي أساعدك نلقى نتائج أدق؟',
-  // ≤25-result variants (owner 2026-08-19, item 4): no "help me find more precise ones?" invitation
+  // ≤50-result variants (owner brief 2026-08-19 item 4; threshold raised 25 → 50 by the owner
+  // product rule of 2026-09-04 — live value INTERVIEW_STOP_AT, src/lib/afRanking.ts): no
+  // "help me find more precise ones?" invitation
   // when the result set is already small enough that Advanced Filter has nothing useful left to offer.
   // Browse continuation (owner 2026-08-29): trusted totals state BOTH numbers while more remain.
   'I showed you the first {shown} of {total} matching listings. Want me to show more?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أعرض لك المزيد؟ إذا عرضت لك المزيد بعرض لك كل الإعلانات.',
