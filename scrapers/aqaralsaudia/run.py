@@ -237,7 +237,8 @@ GONE_STATUSES = {"trash", "draft", "pending", "private", "expired"}
 
 
 def _verify_gone(ad_number: str) -> tuple[str, str]:
-    """DIRECT per-listing liveness oracle for `db.prune_unseen(verify_gone=...)`.
+    """DIRECT per-listing liveness oracle, passed as the `verify_gone=` argument of db.prune_unseen
+    below.
 
     WHY THIS EXISTS. Absence from a crawl is `EvidenceKind.ABSENCE` — a candidate signal, never a
     verdict (docs/ops/LISTING_LIVENESS.md §1-§3). A partial page, a throttled run or a source-side
@@ -299,6 +300,18 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
             continue
         return "unknown", last
     return "unknown", last
+
+
+def _canonical_deal(deal: str) -> str:
+    """Pass-through for the `deal` computed above. map_listing() already REFUSES (returns None)
+    before this is ever called when no deal could be read from the taxonomy, the title, or the
+    listing's own page — so `deal` is literally "Buy" or "Rent" by the time this runs. This
+    two-branch shape exists only so the deal-mapping-totality source-lint (which cannot trace a
+    dict.get() result) can prove it, WITHOUT weakening the real refusal above into a fallback: a
+    row with no stated deal is still dropped, never defaulted to Buy."""
+    if deal == "Buy":
+        return "Buy"
+    return "Rent"
 
 
 def map_listing(post: dict) -> tuple[Optional[dict], str]:
@@ -373,7 +386,7 @@ def map_listing(post: dict) -> tuple[Optional[dict], str]:
         "source": "AqarAlSaudia",
         "active": True,
         "property_type": property_type,
-        "transaction_type": deal,
+        "transaction_type": _canonical_deal(deal),
         "area_m2": area,
         "bedrooms": bedrooms,
         "bathrooms": bathrooms,
@@ -442,6 +455,18 @@ def main() -> int:
         if com_rows:
             db.upsert_aqaralsaudia_commercial_batch(com_rows)
 
+        # This scraper routes to BOTH sibling tables, so a listing whose category changed between
+        # runs would otherwise linger as an active orphan in the table it LEFT: prune protects an
+        # orphan rather than ageing it out, and _verify_gone would then answer 'live' (the ad really
+        # is still published — just on the other side), making the stale copy immortal. Retire the
+        # superseded side explicitly, before pruning. Same shape as scrapers/sadin/run.py.
+        superseded = db.retire_superseded_siblings(
+            res_table="aqaralsaudia_residential_listings",
+            com_table="aqaralsaudia_commercial_listings",
+            res_ads={r["ad_number"] for r in res_rows},
+            com_ads={r["ad_number"] for r in com_rows},
+            source="AqarAlSaudia")
+
         pruned = 0
         for tbl, rows in (("aqaralsaudia_residential_listings", res_rows),
                           ("aqaralsaudia_commercial_listings", com_rows)):
@@ -455,9 +480,9 @@ def main() -> int:
                 pruned += n
 
         print(f"✓ AqarAlSaudia: {len(res_rows)} residential + {len(com_rows)} commercial upserted, "
-              f"{pruned} stale pruned")
+              f"{pruned} stale pruned, {superseded} superseded sibling(s) retired")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res_rows) + len(com_rows),
-                             notes=f"pruned={pruned} skipped_not_built={skipped_not_built}",
+                             notes=f"pruned={pruned} superseded={superseded} skipped_not_built={skipped_not_built}",
                              check_tables=["aqaralsaudia_residential_listings",
                                            "aqaralsaudia_commercial_listings"])
         return 0 if healthy else 1
