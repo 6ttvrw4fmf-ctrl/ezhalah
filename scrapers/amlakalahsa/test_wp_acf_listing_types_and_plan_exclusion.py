@@ -150,9 +150,38 @@ assert row["price_total"] is None, "pw-prc=0 (\"على السوم\") must never 
 row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 250000, "pw-squ": "600"}), {})
 assert row["price_total"] == 250000, "a real positive price must still pass through untouched"
 
+# ── 11. الجفر's "ضاحية هجر" numbered sub-plots collapse to one MATCH district "الضاحية" — owner
+#     instruction 2026-09-13: a buyer shouldn't have to know which of 9+ numbers to pick for one
+#     physical development. neighborhood (the CARD's own text) must keep the real sub-division name
+#     verbatim — only district_ar (match-truth) collapses, and ONLY when city_ar is exactly الجفر,
+#     never for the same "الضاحية <ordinal>" text under a different Al-Ahsa town (measured live:
+#     amlakalahsa also uses this exact naming under الهفوف and الفضول, which the owner did NOT ask
+#     to merge).
+row, _ = map_listing(_post(acf={
+    "pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "الضاحية الخامس",
+    "pw-map": {"city": "الجفر"},
+}), {})
+assert row["district_ar"] == "الضاحية", "must collapse to the shared match district in الجفر"
+assert row["neighborhood"] == "الضاحية الخامس", "the card must still show the real sub-division name"
+
+row, _ = map_listing(_post(acf={
+    "pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "الضاحية الخامس",
+    "pw-map": {"city": "الهفوف"},
+}), {})
+assert row["district_ar"] == "الضاحية الخامس", "same district text under a DIFFERENT city must NOT collapse"
+assert row["neighborhood"] == "الضاحية الخامس"
+
+row, _ = map_listing(_post(acf={
+    "pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "حي الصقور",
+    "pw-map": {"city": "الجفر"},
+}), {})
+assert row["district_ar"] == "حي الصقور", "a real، non-ضاحية الجفر district must pass through untouched"
+
 print("ok: amlakalahsa excludes the plan CPT, district is verbatim from its own clean field, "
       "city stays NULL without a geocode rather than guessed, the Al-Ahsa same-name-twin resolves "
       "only with its region hint, unmapped type/deal values are refused rather than assumed, "
       "direction/price-per-meter are captured without ever fabricating a value from ACF's sentinels, "
-      "description is captured cleaned + PII-redacted from content.rendered, and pw-prc=0 "
-      "(\"على السوم\") is stored as an honest NULL rather than a fabricated SAR 0")
+      "description is captured cleaned + PII-redacted from content.rendered, pw-prc=0 "
+      "(\"على السوم\") is stored as an honest NULL rather than a fabricated SAR 0, and الجفر's "
+      "numbered ضاحية sub-plots collapse to one match district without touching the card's own text "
+      "or any other city's identically-named districts")
