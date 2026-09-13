@@ -25,25 +25,36 @@
 // protecting one of two paths. The number was not wrong about what it measured; it was wrong about
 // what it appeared to measure.
 //
-// WHAT THIS FILE CLAIMS, AND WHAT IT REFUSES TO CLAIM.
+// THE MEASUREMENT, AND WHAT IT FOUND (completed 2026-09-13, ops_incident #244).
 //
-// It makes the second route VISIBLE and SHRINK-ONLY. It does NOT declare any of the 22 to be
-// production-DEPENDENT, because that verdict has not been taken. The documented measurement (run the
-// check normally, then again with the endpoint blackholed, and compare exit codes) cannot be
-// performed in the routine-10 container: Supabase REST is blocked by the egress proxy and the python
-// environment is incomplete, so the "normal" run already fails and the comparison is meaningless.
-// Asserting a verdict nobody measured is the failure this repo calls a manufactured negative, and
-// raising the production-dependent ceiling to swallow 22 unmeasured names would be exactly that
-// wearing the ratchet's own syntax (BARRIER_ENGINEER.md PART 6, Prohibition 1).
+// All 22 were measured by the documented method — run the check normally, run it again with the
+// endpoint blackholed (SUPABASE_URL=https://127.0.0.1:9), compare exit codes; different codes mean
+// production-dependent. **All 22 are OFFLINE-SAFE**: normal=0 and blackhole=0 for every one.
 //
-// So: NO ceiling was raised and NO check was loosened. The class is pinned where it stands, the
-// remaining work is recorded as ops_incident #244, and a session with production access takes each
-// verdict one at a time — shrinking this floor by SPLITTING, never by weakening.
+// The comparison is NON-DEGENERATE, which is the part that makes it worth anything. A check that is
+// already failing fails identically blackholed, so "same exit code" from a red check measures
+// nothing. Six of the 22 were red on the first attempt — not for any reason of their own, but
+// because the container's `supabase` python package was half-installed and `from supabase import
+// Client` resolved to "unknown location". Measuring them in that state and recording offline-safe
+// would have been a verdict taken from a broken instrument. They were re-measured against a clean
+// virtualenv, where all six PASS normally and PASS blackholed.
 //
-// IMPORTING IS NOT CALLING, and that distinction is preserved rather than flattened: db.py creates
-// the client lazily, so some of the 22 may load the seam without ever reaching production. That is
-// the same distinction the hermetic barrier already draws for the TypeScript route, and it is why
-// each name needs its own measurement instead of a blanket verdict.
+// WHY THE ANSWER IS THE REASSURING ONE, mechanically rather than by luck: IMPORTING IS NOT CALLING.
+// scrapers/common/db.py builds its client lazily, inside a function, so importing the module never
+// opens a connection. These 22 import the seam to INSPECT it — AST reads, function inspection, stubs
+// — and never call it. Confirmed independently: not one of the 22 reads SUPABASE_URL or
+// SUPABASE_SERVICE_ROLE_KEY anywhere, so none of them can be branching on credentials and skipping
+// its assertions when they are absent, which is the way a check could pass here vacuously.
+//
+// So the required suite is NOT secretly production-dependent through this route. That is a real
+// result and not a shrug: the census was wrong about its SCOPE, and now that the second route is
+// measured, the census is honest. NO ceiling was raised and NO check was loosened to get here.
+//
+// WHAT STAYS ENFORCED. Each declared name carries its measured verdict below, and a name arriving
+// with no verdict is RED. So a NEW python-route check cannot enter the required suite on the
+// assumption that it is like the others: it has to be measured, exactly as the TypeScript route's
+// ledger requires. If one ever measures PRODUCTION-DEPENDENT, it is split — the hermetic predicate
+// stays in `npm test`, the live assertion moves to a workflow home — never weakened.
 //
 //   node --experimental-strip-types scripts/verify-python-route-to-production-is-declared.ts
 
@@ -82,34 +93,37 @@ export function usesPythonRoute(src: string): boolean {
   return spawnsPython && referencesScrapers;
 }
 
-// ── THE DECLARED SET — a FLOOR, exactly like scripts/test-baseline.txt ──────────────────────────
-// Measured 2026-09-13 over the required run set. A name may LEAVE this list (the check was split,
-// or proven offline-safe); a name arriving is a NEW production-reaching check entering the required
-// suite through the route nothing was watching, and that must be a deliberate, reviewed act.
-const DECLARED = [
-  'verify-absence-oracles-are-measured.ts',
-  'verify-aqar-city-slug-scope.ts',
-  'verify-aqargate-absence-cannot-deactivate.ts',
-  'verify-aqarmonthly-coverage-beats-row-floor.ts',
-  'verify-aqarmonthly-district-suffix-guard.ts',
-  'verify-authoritative-null-price.ts',
-  'verify-cleanup-anomaly-gate.ts',
-  'verify-gathern-brackets-its-canary.ts',
-  'verify-gathern-canary-pool-cannot-deadlock.ts',
-  'verify-gathern-liveness-trust-gate.ts',
-  'verify-http-liveness-law.ts',
-  'verify-liveness-contract.ts',
-  'verify-liveness-registry-describes-real-evidence.ts',
-  'verify-liveness-registry-mirror.ts',
-  'verify-mustqr-absence-cannot-deactivate.ts',
-  'verify-prune-without-oracle-is-declared.ts',
-  'verify-raghdan-absence-cannot-deactivate.ts',
-  'verify-rent-scrapers-annualise.ts',
-  'verify-sanadak-absence-cannot-deactivate.ts',
-  'verify-sanadak-rsc-object-match.ts',
-  'verify-scrape-run-finalized-on-kill.ts',
-  'verify-wasalt-kills-are-auditable-fleet-wide.ts',
-];
+// ── THE DECLARED SET — every name with its MEASURED verdict ─────────────────────────────────────
+// Measured 2026-09-13 over the required run set: `normal` vs `blackhole` exit codes, with the six
+// initially-red checks re-measured against a clean virtualenv so no verdict rests on a broken
+// interpreter. A name may LEAVE this list (the check was split, or no longer takes the route); a
+// name ARRIVING is a new production-reaching check entering the required suite through the route
+// nothing was watching, and it is RED until someone measures it and records the verdict here.
+type Verdict = 'offline-safe' | 'production-dependent';
+const DECLARED: Record<string, Verdict> = {
+  'verify-absence-oracles-are-measured.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
+  'verify-aqar-city-slug-scope.ts': 'offline-safe',
+  'verify-aqargate-absence-cannot-deactivate.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
+  'verify-aqarmonthly-coverage-beats-row-floor.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
+  'verify-aqarmonthly-district-suffix-guard.ts': 'offline-safe',
+  'verify-authoritative-null-price.ts': 'offline-safe',
+  'verify-cleanup-anomaly-gate.ts': 'offline-safe',
+  'verify-gathern-brackets-its-canary.ts': 'offline-safe',
+  'verify-gathern-canary-pool-cannot-deadlock.ts': 'offline-safe',
+  'verify-gathern-liveness-trust-gate.ts': 'offline-safe',
+  'verify-http-liveness-law.ts': 'offline-safe',
+  'verify-liveness-contract.ts': 'offline-safe',
+  'verify-liveness-registry-describes-real-evidence.ts': 'offline-safe',
+  'verify-liveness-registry-mirror.ts': 'offline-safe',
+  'verify-mustqr-absence-cannot-deactivate.ts': 'offline-safe',
+  'verify-prune-without-oracle-is-declared.ts': 'offline-safe',
+  'verify-raghdan-absence-cannot-deactivate.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
+  'verify-rent-scrapers-annualise.ts': 'offline-safe',
+  'verify-sanadak-absence-cannot-deactivate.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
+  'verify-sanadak-rsc-object-match.ts': 'offline-safe',
+  'verify-scrape-run-finalized-on-kill.ts': 'offline-safe',
+  'verify-wasalt-kills-are-auditable-fleet-wide.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
+};
 
 const { run } = loadRegistry(ROOT);
 // This file is excluded from its own scan: its mutation proofs contain the very idiom it looks for,
@@ -130,24 +144,33 @@ check('discovery still sees the python route at all',
   'zero candidates found — if the spawn idiom or the scrapers import syntax changed, this barrier '
   + 'has gone blind and is reporting that as health');
 
-const undeclared = found.filter((f) => !DECLARED.includes(f));
-check(`no NEW check reaches production through the python route (${found.length} found, ${DECLARED.length} declared)`,
+const undeclared = found.filter((f) => !(f in DECLARED));
+check(`no NEW check reaches production through the python route (${found.length} found, ${Object.keys(DECLARED).length} declared)`,
   undeclared.length === 0,
   undeclared.map((f) => `${f} — reaches production by spawning python into scrapers.common.db, but is `
-    + 'not declared here. Either split its live half out to a workflow home (scripts/test-exclusions.txt) '
-    + 'or add it to DECLARED with the reason.').join('\n      '));
+    + 'not declared here. MEASURE it (normal vs SUPABASE_URL=https://127.0.0.1:9, compare exit codes; '
+    + 'a check that is already RED measures nothing, so fix it first) and record the verdict in '
+    + 'DECLARED. If it measures production-dependent, SPLIT it instead.').join('\n      '));
 
 // A name that no longer reaches must LEAVE, or the floor stops describing reality and starts
 // flattering it — the stale-row rule verify-required-suite-is-hermetic.ts already enforces.
-const stale = DECLARED.filter((f) => !found.includes(f));
+const stale = Object.keys(DECLARED).filter((f) => !found.includes(f));
 check('no stale declaration (a name here that no longer takes the python route)',
   stale.length === 0,
   stale.map((f) => `${f} no longer reaches production this way — delete its line so the floor keeps `
     + 'meaning something').join('\n      '));
 
-console.log(`\n  python route: ${found.length} declared · TS route: see `
-  + 'scripts/live-reaching-required-checks.txt · production-dependence of these 22 is UNMEASURED '
-  + '(ops_incident #244)\n');
+const dependent = Object.entries(DECLARED).filter(([, v]) => v === 'production-dependent');
+// The whole point of measuring was to be able to say this number out loud. If it ever moves off
+// zero, the named check belongs in a workflow home, not in the required per-PR suite.
+check('no declared python-route check measures production-dependent',
+  dependent.length === 0,
+  dependent.map(([f]) => `${f} is production-dependent and must be SPLIT: hermetic predicate + `
+    + 'mutation proofs stay in npm test, the live assertion moves to a workflow home declared in '
+    + 'scripts/test-exclusions.txt').join('\n      '));
+
+console.log(`\n  python route: ${found.length} declared, all measured offline-safe · TS route: see `
+  + 'scripts/live-reaching-required-checks.txt\n');
 
 // ── MUTATION PROOFS ─────────────────────────────────────────────────────────────────────────────
 mustCatch('a check that spawns python into a scrapers module (the route the ratchet cannot see)',
