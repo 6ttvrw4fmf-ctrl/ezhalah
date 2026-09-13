@@ -88,6 +88,19 @@ jobs:
         if: always()
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-image-coverage-ratchet-live.ts
 
+      # The SHARP half of the image rule, and the reason the ratchet step above can be a coarse net.
+      # A coverage percentage cannot separate "we dropped images the source gave us" (our bug) from
+      # "the source published fewer" (not our bug) — both are the same red. This asks the capture
+      # instead: of the listings whose source published images, we must have stored every one.
+      # Needs the service role because source_capture is PDPL-private and anon cannot SELECT it;
+      # the job already holds that secret for its alert bridge below. `if: always()` for the same
+      # reason as every step above — an earlier red must not hide a capture regression.
+      - name: Every image the source published is actually stored
+        if: always()
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-images-we-were-given-are-stored-live.ts
+
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
       # This job runs unattended: a red run notifies nobody, so it has to reach alert_event to reach
       # a human. One open P1 per workflow file (dedup workflow_failed:loader-active-platforms-check.yml), and the next

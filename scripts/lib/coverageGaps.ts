@@ -122,3 +122,53 @@ export const describeExtraAttrsTableGaps = (gaps: ExtraAttrsTableRow[]): string 
   gaps
     .map((g) => `${g.table} (${g.searchable_rows} searchable rows) has NO branch in listing_extra_attrs`)
     .join('; ');
+
+// ── 5. IMAGES WE WERE GIVEN AND DID NOT STORE ───────────────────────────────────────────────────
+// THE GAP THIS CLOSES, earned 2026-09-13. The image-coverage ratchet (#3 above) measures a
+// PERCENTAGE, and a percentage cannot tell two opposite findings apart:
+//
+//   A. we dropped images the source published  -> OUR BUG, must be loud, must never be waived
+//   B. the source published fewer images        -> NOT our bug, and no floor edit can make it one
+//
+// Both produce the identical red. On 2026-09-13 wasalt sat at 89.4% against a 90% floor and looked
+// exactly like (A): rows the newest crawl passes touched were 13.3% and 10.0% photo-less against
+// ~1% for the older cohort. It was (B) — every one of the 5,691 active photo-less rows carried
+// source_capture->>'image_count' = 0, a single bucket, zero exceptions. The scraper stored
+// precisely what wasalt published.
+//
+// THE SIGNAL IS FLEET-WIDE, NOT A WASALT SPECIAL CASE. scrapers/common/db.py records
+// image_count = len(photos) into source_capture for every platform that goes through the shared
+// write path. Measured across the ten largest platforms, 2026-09-13: 199,509 of 199,511 active
+// rows carry the key, and `dropped` is 0 on every one of them.
+//
+// So this predicate is the SHARP rule the ratchet's percentage cannot be: of the listings whose
+// source published images, how many did we fail to store? The answer must be ZERO, at any coverage
+// percentage, on every platform — and unlike a floor it is not a judgement call anyone can tune.
+//
+// UNKNOWN IS NOT ZERO. A row with no image_count key is NOT evidence of nothing dropped; it is a
+// row this rule cannot judge, counted separately and reported, never folded into the pass.
+export type DroppedImageRow = {
+  table: string;
+  active_rows: number;
+  /** Rows carrying source_capture->>'image_count' at all — the judgeable population. */
+  rows_with_signal: number;
+  /** Rows where the source published >0 images and we stored none. MUST be 0. */
+  dropped: number;
+};
+
+export const droppedImageGaps = (rows: DroppedImageRow[]): DroppedImageRow[] =>
+  rows.filter((r) => r.dropped > 0);
+
+export const describeDroppedImages = (gaps: DroppedImageRow[]): string =>
+  gaps
+    .map((g) => `${g.table}: ${g.dropped} row(s) where the source published images and we stored `
+      + `NONE (of ${g.rows_with_signal} judgeable rows in ${g.active_rows} active)`)
+    .join('; ');
+
+/**
+ * How much of the fleet this rule can actually judge. A platform whose rows carry no image_count is
+ * INVISIBLE to the check, and a check that silently judges nothing is the failure mode this repo has
+ * been burned by — so the caller asserts coverage explicitly rather than reading `0 gaps` as health.
+ */
+export const droppedImageBlindRows = (rows: DroppedImageRow[]): number =>
+  rows.reduce((n, r) => n + Math.max(0, r.active_rows - r.rows_with_signal), 0);

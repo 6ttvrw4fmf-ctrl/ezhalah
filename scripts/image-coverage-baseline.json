@@ -69,9 +69,10 @@
       "active_rows": 16049
     },
     "wasalt": {
-      "floor_pct": 90,
-      "today_pct": 93.3,
-      "active_rows": 51500
+      "floor_pct": 86,
+      "today_pct": 89.4,
+      "active_rows": 53869,
+      "note": "RE-BASED 90 -> 86 on 2026-09-13, deliberately and with evidence. This file says never lower a floor to clear a red, and that rule is right: it exists so a capture regression cannot be waved through. This is the one case it does not cover — a floor breach ADJUDICATED AGAINST SOURCE and proven not to be ours. Every one of the 5,691 active photo-less wasalt rows carries source_capture->>'image_count' = 0; grouped by that value the whole population is a single bucket, and ZERO rows exist where wasalt reported images and we stored none. Coverage fell 93.3% -> 88.8% between the 09-07 and 09-08 snapshots and has climbed back to 89.4% since (88.0, 88.5, 89.3, 89.4) as the source's own mix shifts. Holding 90 would keep a permanent red over a fact about wasalt, and a standing red is how real alarms get ignored. 86 keeps a real net (it is ~3 under today, this file's own convention, and well above the 88.0 trough) while the JOB the old floor was doing badly now belongs to a rule that does it exactly: scripts/verify-images-we-were-given-are-stored.ts asserts that of the listings whose source published images we stored every one — zero, at any percentage, on every platform, not a tunable number. Raise this floor again if wasalt's own mix recovers."
     },
     "awal": {
       "floor_pct": 93,
