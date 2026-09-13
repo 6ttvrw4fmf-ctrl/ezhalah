@@ -573,7 +573,9 @@ const AR: Record<string, string> = {
   // figures (loaderScaleStats.ts), never hardcoded; see SEARCH_TITLES's comment in SearchLoader.tsx.
   'Checking more than {count} properties…': 'نفحص أكثر من {count} عقار…',
   'Reviewing {count} real-estate platforms…': 'نراجع {count} منصة عقارية…',
-  'Covering more than {cities} cities and {districts} districts…': 'نغطي أكثر من {cities} مدينة و{districts} حي…',
+  // ONE combined place count (owner 2026-09-12), not a separate cities+districts pair — see
+  // SearchLoader.tsx's own comment at the coverage line for why.
+  'Covering more than {count} places across Saudi Arabia…': 'نغطي أكثر من {count} موقع في جميع أنحاء المملكة…',
   'Matching the location…': 'نطابق الموقع…',
   'Applying the filters…': 'نطبق الفلاتر…',
   'Sorting results and mixing platforms…': 'نرتب النتائج وننوعها بين المنصات…',
