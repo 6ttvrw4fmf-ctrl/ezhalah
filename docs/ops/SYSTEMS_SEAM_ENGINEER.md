@@ -262,6 +262,28 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   (daily jobs like `30 2 * * *` are not counted at all). Measured on the live roster: **49 of 60
   minutes sit at ≤ 1** and can accept one more. The design space was never two slots; it was 49.
 
+  **THAT 49 IS A 2026-08-30 MEASUREMENT AND IT HAS EXPIRED — RE-MEASURE, AND ONLY WITH THE
+  DETECTOR'S OWN EXPANSION (routine #7, 2026-09-13).** Re-run against the live roster today:
+  **exactly ONE minute (`:32`) carries zero hourly jobs, and only nine carry ≤ 1.** The roster grew;
+  the number did not follow it. Reading the stale 49 as current is how this section stops being a
+  measurement and becomes folklore.
+
+  **The trap is sharper than staleness, and it cost a wrong migration in the run that found it.**
+  `mon_detect_cron_minute_collision()` expands **five** minute-field shapes — `*`, `N`, `N,M,…`,
+  `*/N`, and `N-59/N`. An ad-hoc query that matches only a literal minute and a comma list
+  *undercounts*, and the two shapes it misses are the common ones: `3-59/10` occupies
+  3/13/23/33/43/53, and a comma list like `2,6,9,12,14,23,30,33,40,…` occupies eleven minutes at
+  once. On 2026-09-13 a re-slot off the 3-job `:25` collision landed on `:33` on exactly that bad
+  count — and `:33` already held two, so the move traded one collision for an identical one.
+  **Ask the detector, or reuse its CTE verbatim. Never hand-roll the count.**
+
+  **And do not read the detector's return value as the answer.** After that wrong move it still
+  returned **0**, because `mon_raise()` returns 0 on an already-open dedup key and alert 2725 was
+  still open — so "0 raised" meant "already reported", not "no collision". Re-run the expansion, or
+  check that the alert actually **resolved**; a cleared condition must release its key, and only
+  `resolved_at` does that (PART 1, acknowledgment → detector self-clear). The corrective migration
+  asserts both, which is why the second attempt could not repeat the first.
+
   So `mon-p0-fast-lane` (jobid 86) now runs `mon_dispatch_p0_fast()` on
   `1,4,7,10,13,15,18,21,24,26,28,31,34,35,38,40,42,44,46,48,51,54,57,58 * * * *` — **24 slots, worst
   gap 3 minutes including the wrap past the top of the hour**, avoiding minute 0, the ten minutes
