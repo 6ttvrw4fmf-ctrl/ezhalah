@@ -454,6 +454,22 @@ def main() -> int:
         if sold_com:
             _pin_sold_inactive("amaall_commercial_listings", sold_com)
 
+        # An ad this run classified into one table is superseded in the OTHER one. amaall writes no
+        # prune_unseen, so nothing else would ever clear the orphan: absence-based cleanup cannot
+        # (the ad is alive in the sibling table, so verify_gone answers 'live' and resets the
+        # strike). See db.retire_superseded_siblings. Skipped under --limit, where the seen-set is a
+        # deliberately truncated sample and this is the only run mode that writes no lifecycle state.
+        # Measured 2026-09-13: six ads (AML256913961963093 and five siblings) sat live in BOTH
+        # tables — commercial rows captured 2026-09-06 by the pre-scraper ingestion, residential
+        # rows captured 2026-09-12 by this file's first run — so one plot rendered as two cards.
+        if not args.limit:
+            superseded = db.retire_superseded_siblings(
+                res_table="amaall_residential_listings", com_table="amaall_commercial_listings",
+                res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+                source=SOURCE)
+            if superseded:
+                print(f"  cross-table superseded: {superseded}")
+
         if unmapped:
             print("  skipped (no canonical type, not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(unmapped.items(), key=lambda x: -x[1])))
