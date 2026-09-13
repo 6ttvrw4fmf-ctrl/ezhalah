@@ -215,8 +215,8 @@ RULES LIVE-TESTED THIS RUN: 75/142
 RULES BARRIER-PROTECTED: 55/142
 RULES WITH INSUFFICIENT COVERAGE: 12/142
 
-REAL BROWSER JOURNEYS: 11
-AF JOURNEYS: 6        (4 × pill-removal جدة/فيلا mobile, 2 × option-card الرياض/شقة)
+REAL BROWSER JOURNEYS: 12
+AF JOURNEYS: 7        (5 × pill-removal جدة/فيلا mobile, 2 × option-card الرياض/شقة)
 TRENDING CITY JOURNEYS: 4
 TRENDING DISTRICT JOURNEYS: 4   (inside the same four)
 CITIES TESTED: 3      (الرياض, جدة, الدمام)
