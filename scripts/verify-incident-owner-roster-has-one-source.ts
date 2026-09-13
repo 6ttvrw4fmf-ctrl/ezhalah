@@ -70,14 +70,46 @@ export const sliceFunction = (sql: string, fn: string): string => {
 };
 
 /**
- * Array literals inside `sql` that carry a roster of their own — two or more routine slugs in one
- * `array[...]`. Two is the threshold on purpose: a detector naming ONE routine in a message
- * ('routine-11-lifecycle' in mon_detect_unknown_treated_as_dead) is an attribution, not a roster.
+ * Array literals inside `sql` that carry a roster of their own. Kept as a named sub-case because
+ * `array[...]` is how all three repaired siblings spelled it, but it is NOT the test — see below.
  */
 export const rosterArraysIn = (sql: string): string[] =>
   [...sql.matchAll(/array\s*\[([^\]]*)\]/gi)]
     .map((m) => m[1])
     .filter((body) => new Set(slugsIn(body)).size >= 2);
+
+/**
+ * Does this function body enumerate the roster itself, in ANY syntax?
+ *
+ * THE TEST IS THE SLUG COUNT, NOT THE BRACKET. The first version of this barrier asked only
+ * `rosterArraysIn(body).length > 0` while its check reported the far broader claim "no function
+ * re-enumerates the roster by hand" — ops_incident #218's pattern exactly: a check whose success
+ * sentence is wider than the set it actually iterates. Measured 2026-09-13, three natural spellings
+ * walked straight past it, every one of them a roster a person would plausibly write:
+ *
+ *   case r when 'routine-1-scraping' then 1 when 'routine-2-production' then 2 ... end
+ *   from (values ('routine-1-scraping'),('routine-2-production'),...) t(r)
+ *   where r in ('routine-1-scraping','routine-2-production',...)
+ *
+ * The CASE spelling is not hypothetical: it is how incident_route_owner() is written, so the one
+ * shape most likely to be copied by someone adding a twelfth routine was the one shape invisible.
+ *
+ * Counting DISTINCT slugs in the body is syntax-agnostic and therefore cannot be dodged by choosing
+ * a different bracket. Two is the threshold on purpose: a detector naming ONE routine in its alert
+ * text ('routine-11-lifecycle' in mon_detect_unknown_treated_as_dead) is an attribution, not a
+ * roster, and must stay green.
+ */
+export const ROSTER_HOMES = new Set([
+  'incident_known_owners',  // the roster itself
+  'incident_route_owner',   // the surface->owner MAP; names every slug by construction, and its
+                            // totality + agreement with alertRouting.ts is pinned separately by
+                            // scripts/verify-incident-spine.ts
+]);
+
+export const handRolledRosterIn = (fnName: string, body: string): number =>
+  ROSTER_HOMES.has(fnName.toLowerCase()) ? 0 : new Set(slugsIn(body)).size >= 2
+    ? new Set(slugsIn(body)).size
+    : 0;
 
 /** The roster the committed SQL declares, as a sorted set. */
 export const declaredRoster = (knownOwnersFn: string): string[] =>
@@ -154,14 +186,14 @@ for (const body of slugBearing) {
 }
 const handRolled: string[] = [];
 for (const fn of declaredFns) {
-  if (fn === 'incident_known_owners') continue; // the one legitimate home
-  const arrays = rosterArraysIn(latestDefinitionOf(fn));
-  if (arrays.length > 0) handRolled.push(fn);
+  const n = handRolledRosterIn(fn, latestDefinitionOf(fn));
+  if (n > 0) handRolled.push(`${fn} (${n} slugs)`);
 }
-check(`no function re-enumerates the roster by hand (${declaredFns.size} committed functions scanned)`,
+check(`no function re-enumerates the roster by hand, in ANY syntax (${declaredFns.size} committed functions scanned)`,
   handRolled.length === 0,
   `hand-rolled roster(s) in: ${handRolled.join(', ')}. Call public.incident_known_owners() instead — ` +
-  `a second copy is how routine-10-barrier's alert sat unretireable for 96.3 hours.`);
+  `a second copy is how routine-10-barrier's alert sat unretireable for 96.3 hours. If this is a ` +
+  `legitimate second home, add it to ROSTER_HOMES with a reason rather than widening the predicate.`);
 
 // ── 4. The hidden path is closed: a raw UPDATE cannot address a queue nobody reads.
 const constraintMig = [...bodies.values()].find((b) => b.includes('ops_incident_owner_is_a_real_routine')) ?? '';
@@ -211,12 +243,35 @@ const reInlined = `create or replace function public.mon_detect_something() retu
 declare c_owners text[] := array['routine-1-scraping','routine-2-production','routine-3-data-integrity'];
 begin return 0; end $function$;`;
 mustCatch('a detector re-inlining its own roster array (the next stale copy)',
-  rosterArraysIn(sliceFunction(reInlined, 'mon_detect_something')).length > 0);
+  handRolledRosterIn('mon_detect_something', sliceFunction(reInlined, 'mon_detect_something')) > 0);
 mustCatch('…the same thing written as the stale seven',
-  rosterArraysIn(`array['routine-1-scraping','routine-2-production','routine-3-data-integrity',
-    'routine-4-search-qa','routine-5-af-trending','routine-6-journey','routine-7-seam']`).length > 0);
+  handRolledRosterIn('mon_detect_x', `array['routine-1-scraping','routine-2-production','routine-3-data-integrity',
+    'routine-4-search-qa','routine-5-af-trending','routine-6-journey','routine-7-seam']`) > 0);
+
+// THE THREE SPELLINGS THAT ESCAPED THE FIRST VERSION OF THIS BARRIER (measured 2026-09-13).
+// Each is a roster a person would plausibly write, and each returned false under the array-only
+// predicate while the check above reported "no function re-enumerates the roster by hand".
+mustCatch('a roster written as a CASE — the shape incident_route_owner itself uses',
+  handRolledRosterIn('mon_detect_thing', `select case r
+     when 'routine-1-scraping' then 1 when 'routine-2-production' then 2
+     when 'routine-3-data-integrity' then 3 when 'routine-7-seam' then 7 end`) > 0);
+mustCatch('…a roster written as a VALUES list',
+  handRolledRosterIn('mon_detect_other',
+    `from (values ('routine-1-scraping'),('routine-2-production'),('routine-7-seam')) t(r)`) > 0);
+mustCatch('…a roster written as an IN list',
+  handRolledRosterIn('mon_detect_third',
+    `where r in ('routine-1-scraping','routine-2-production','routine-7-seam')`) > 0);
+
 mustCatch('…while a detector naming ONE routine for attribution is NOT flagged (no false red)',
-  rosterArraysIn(`array['routine-11-lifecycle']`).length === 0);
+  handRolledRosterIn('mon_detect_unknown_treated_as_dead', `'routine-11-lifecycle'`) === 0);
+mustCatch('…and the roster function itself is NOT flagged for containing the roster',
+  handRolledRosterIn('incident_known_owners', knownOwners) === 0);
+mustCatch('…nor is incident_route_owner, the surface→owner map pinned by verify-incident-spine.ts',
+  handRolledRosterIn('incident_route_owner',
+    `case s when 'search' then 'routine-4-search-qa' when 'trending' then 'routine-5-af-trending' end`) === 0);
+mustCatch('…but an exempt NAME does not launder a roster in a DIFFERENT function',
+  handRolledRosterIn('mon_detect_copycat',
+    `case s when 'search' then 'routine-4-search-qa' when 'trending' then 'routine-5-af-trending' end`) > 0);
 
 // Fail-closed: a missing definition must never read as a silent pass.
 mustCatch('the roster function disappearing from the migrations',
