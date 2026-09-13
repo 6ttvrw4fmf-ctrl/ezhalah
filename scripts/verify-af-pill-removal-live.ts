@@ -186,6 +186,31 @@ page.on('response', async (r) => {
   } catch { /* a body we could not read is not a search we can assert on */ }
 });
 
+// THE PROBE LEDGER — so a red on this journey can never again be undiagnosable (ops_incident #187).
+//
+// #187 sat open for two days with its own note saying «a removed question may have stayed in the
+// asked carry, OR this cohort's remaining pool is genuinely exhausted» and «which of the two is NOT
+// established». Both hypotheses were wrong, and the run log could not say so because it recorded no
+// probe outcomes: a FAILED count RPC (UNKNOWN, afProbe.ts) and a count RPC that answered «nothing
+// narrows» produce the same silent screen. One instrumented run settled it — every probe answered
+// 200 in 372-735 ms, so the verdict was MEASURED, not undetermined.
+//
+// Printed only when something fails, so a green run stays readable.
+const rpcLog: string[] = [];
+const startedAt = new Map<unknown, number>();
+page.on('request', (rq) => { if (rq.url().includes('/rest/v1/rpc/')) startedAt.set(rq, Date.now()); });
+page.on('requestfailed', (rq) => {
+  if (!rq.url().includes('/rest/v1/rpc/')) return;
+  rpcLog.push(`FAILED ${rq.url().split('/rpc/')[1]} after ${Date.now() - (startedAt.get(rq) ?? Date.now())}ms :: ${rq.failure()?.errorText} — an UNANSWERED probe, never a verdict`);
+});
+page.on('response', (r) => {
+  const rq = r.request();
+  if (!r.url().includes('/rest/v1/rpc/') || rq.method() !== 'POST') return;
+  const name = r.url().split('/rpc/')[1];
+  if (!/guided_counts|option_counts|location_search_candidates/.test(name)) return;
+  rpcLog.push(`${r.status()} ${name} ${Date.now() - (startedAt.get(rq) ?? Date.now())}ms`);
+});
+
 const tap = async (txt: string, timeoutMs = 10000) => {
   const until = Date.now() + timeoutMs;
   let box: any = null;
@@ -352,10 +377,19 @@ try {
   await scrollToBottom();
   const roundOpen = (await page.locator('[data-testid="af-card"]').count()) > 0;
   const PILL = roundOpen ? '[data-testid="af-card-pill-0"]' : '[data-testid="af-pill-0"]';
+  // THE DETAIL MUST DESCRIBE WHAT HAPPENED, NOT WHAT WOULD HAVE FAILED (2026-09-13, routine #5).
+  // `check()` prints its detail on PASS as well as FAIL, and these two lines were written as failure
+  // explanations only — so a GREEN run printed «the user cannot see or remove what they already
+  // committed» and «the committed selection is not removable» directly under two PASS lines, i.e. the
+  // exact opposite of what the journey had just proved. A run log is another routine's evidence;
+  // stating a defect that did not happen is the same class of harm as hiding one that did.
+  const pillPresent = (await page.locator(PILL).count()) > 0;
   check('R155 — a committed selection is on screen and reachable, round open or not',
-    (await page.locator(PILL).count()) > 0,
-    `round ${roundOpen ? 'IS' : 'is NOT'} open and ${PILL} is absent — the user cannot see or remove `
-    + 'what they already committed');
+    pillPresent,
+    pillPresent
+      ? `round ${roundOpen ? 'IS' : 'is NOT'} open and ${PILL} is on screen`
+      : `round ${roundOpen ? 'IS' : 'is NOT'} open and ${PILL} is absent — the user cannot see or remove `
+        + 'what they already committed');
   // Name what is on top of it at the moment of the click. When a removal produces no request, this
   // is the difference between "the press handler did not fire" and "something else took it".
   const onTop = await page.evaluate((sel) => {
@@ -374,8 +408,10 @@ try {
   // predates an 11s beat in front of a ~40s turn. Observe reachability instead of raising it.
   const reach = await clickWhenReachable(page, PILL, (ms) => page.waitForTimeout(ms));
   check('R155 — …and nothing is painted on top of it', reach.clicked,
-    `still «${reach.last}» after ${POST_SEARCH_BUDGET_MS}ms — the click would have landed on whatever `
-    + 'is on top, so the committed selection is not removable');
+    reach.clicked
+      ? 'the pill took the click itself — nothing intercepted it'
+      : `still «${reach.last}» after ${POST_SEARCH_BUDGET_MS}ms — the click would have landed on whatever `
+        + 'is on top, so the committed selection is not removable');
   if (!reach.clicked) throw new Error(`${PILL} never became clickable`);
   await page.waitForTimeout(4000);
   for (let i = 0; i < 14 && searches.length === nBefore; i++) await page.waitForTimeout(1500);
@@ -467,9 +503,53 @@ try {
     async () => page.evaluate(() =>
       [...document.querySelectorAll('div,span,button')].some((e: any) => /نحدد الطلب أكثر/.test((e.innerText || '').trim()))),
     (found) => found === true, AGENT_TURN_MS, (ms) => page.waitForTimeout(ms), 500);
+  // ── R9.2.1 / §7 ON SCREEN: NO ROUND MAY SURVIVE PRICED ON THE COHORT THE REMOVAL DESTROYED ──
+  // (ops_incident #242, found by this journey 2026-09-13, fixed in agent.tsx removeGuidedFacet.)
+  //
+  // The owner's #155 decision put the committed pills INTO the round overlay, so the removal above
+  // can happen with a question on screen — and it did: this journey removes `af-card-pill-0`
+  // whenever a round is open. The round was then never told. Measured live, 3/3, on
+  // جدة/الفلل والبيوت/فيلا/شراء at 390x844: the search widened to 295 (headline, anon replay and DB
+  // truth all agreeing) while the card 60s later still read «125 نتيجة», still drew FOUR committed
+  // pills including the deleted one, and was asking a question priced on the 125 set — شمال 27 /
+  // جنوب 27 / شرق 27 / غرب 19, against a real 62 / 49 / 67 / 47 on the wire.
+  //
+  // The invariant asserted is the CONTRACT, not the repair: a card may be gone (what the fix does)
+  // or re-priced in place (what a future one might do) — what it may never be is on screen quoting a
+  // total the search no longer has. Read as a number, never as "is a card present": a check that
+  // only counted cards would pass the moment someone re-priced the round instead of closing it, and
+  // would also pass on a card showing any other wrong number.
+  const roundOnScreen = await page.evaluate(() => {
+    const card = document.querySelector('[data-testid="af-card"]') as HTMLElement | null;
+    if (!card) return null;
+    const m = (card.innerText || '').replace(/[\u066C,]/g, '').match(/(\d+)\s*نتيجة/);
+    return { total: m ? Number(m[1]) : null, pills: card.querySelectorAll('[data-testid^="af-card-pill"]').length };
+  });
+  check('R9.2.1/§7 — no AF round is left on screen quoting the pre-removal cohort',
+    roundOnScreen == null || roundOnScreen.total == null || roundOnScreen.total === after?.total,
+    roundOnScreen == null
+      ? 'the round closed when its cohort was destroyed — the next round is priced on the new set'
+      : `a round card is still open quoting «${roundOnScreen.total} نتيجة» with ${roundOnScreen.pills} committed pill(s), `
+        + `while the search now returns ${after?.total} (pre-removal was ${preRemoval?.total}) — every option count on `
+        + 'that card is priced on a set the user no longer has');
+
   check('R9.2.3 — the offer to narrow again is available after the removal (the question was not burned)',
     offer.value, offer.value ? 'the «تحديد أكثر» offer is on the new turn'
-      : `no offer rendered after ${AGENT_TURN_MS}ms — a removed question may have stayed in the asked carry, or this cohort's remaining pool is genuinely exhausted (ops_incident #187)`);
+      // The two hypotheses this line used to offer were BOTH wrong when it was finally measured
+      // (ops_incident #187 → #242, 2026-09-13): the asked-carry was filtered correctly and the pool
+      // was not exhausted — a round was simply still on screen, priced on the destroyed cohort, and
+      // the interview owns browsing while a round is open, so the offer could not render. The
+      // assertion above now names that state directly, and the probe ledger below says whether the
+      // counts ANSWERED. Read both before reaching for a hypothesis.
+      : `no offer rendered after ${AGENT_TURN_MS}ms — check the R9.2.1/§7 line above (a round left `
+        + 'on screen hides this offer by design) and the probe ledger below (an UNANSWERED count is '
+        + 'not a verdict) before concluding the question was burned');
+
+  // The probe ledger, printed ONLY when something failed — see its declaration for why it exists.
+  if (failures > 0) {
+    console.log('\n── PROBE LEDGER (did the counts ANSWER, or never arrive?) ──');
+    for (const line of rpcLog.slice(-12)) console.log('   ' + line);
+  }
 
   check('the journey exercised the expected production backend',
     origins.size === 1 && origins.has(new URL(SUPABASE_URL).origin),
