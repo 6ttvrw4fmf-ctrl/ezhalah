@@ -1398,7 +1398,11 @@ export function runSearch(q: SearchQuery, pools: Pools, opts?: { fetchFailed?: b
     // district(s). Zero in-district matches → show NONE (the 0-results path says "couldn't find that
     // area"), NEVER widen to the whole city under a neighborhood heading. (user: match what I picked
     // to the cards, or tell me you couldn't find it — never show the wrong ones.)
-    eligible = eligible.filter((l) => listingInDistricts(l.district || '', q.districts!));
+    // Match against the resolved canonical district, not the raw-preferring display field
+    // (l.district) — a source's own free-text label can diverge from what the index actually
+    // matched (e.g. geocoded, not text-matched), which silently dropped correctly-indexed listings.
+    // See Listing.districtCanonical's doc comment.
+    eligible = eligible.filter((l) => listingInDistricts(l.districtCanonical || l.district || '', q.districts!));
   }
 
   const ns = notes(q);
@@ -1538,7 +1542,7 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
       .filter((l) => supports(l.source, q2.deal))
       .filter((l) => matchesType(l, q2));
     if (q2.districts && q2.districts.length) {
-      list = list.filter((l) => listingInDistricts(l.district || '', q2.districts!));
+      list = list.filter((l) => listingInDistricts(l.districtCanonical || l.district || '', q2.districts!));
     }
     const pf = priceFilter(q2); if (pf) list = list.filter(pf);
     const sf = sizeFilter(q2); if (sf) list = list.filter(sf);

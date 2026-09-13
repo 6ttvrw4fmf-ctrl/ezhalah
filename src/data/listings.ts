@@ -91,6 +91,16 @@ export type Listing = {
   // (that stays keyed on the canonical index value); display-only, city-name-guarded. undefined for
   // every non-Gathern source. (Gathern Tier-1.)
   districtArFallback?: string | null;
+  // The resolved canonical index district (remote.ts's own `canonDistrict`) — kept SEPARATELY from
+  // `district` above, which prefers raw source text for display (owner 2026-07-06, source-accurate)
+  // and can therefore diverge from the catalog match: e.g. a raw scraped label like "الضاحية الخامس"
+  // that the index correctly resolved to "حي هجر الخامس" via geocoding, not text similarity. STRICT
+  // district matching (listingInDistricts in search.ts) must compare against THIS field — comparing
+  // against the raw-preferring `district` silently drops index-matched listings whenever a source's
+  // own free-text label doesn't textually resemble its resolved district (found live 2026-09-12:
+  // amlakalahsa land listings in "حي هجر الخامس" answered "no results in this district"). '' when
+  // the index has no confident district match, same convention as `district`.
+  districtCanonical?: string;
   // Wasalt-only "Additional Information" panel — label/value pairs rendered on the card.
   // Aqar rows leave this null and skip the panel. (user: rich Wasalt facts on the card.)
   additional_info?: { key: string; label: string; value: string }[] | null;
