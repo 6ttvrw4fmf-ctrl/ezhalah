@@ -1354,6 +1354,19 @@ export default function Home() {
                   onFocus={() => {
                     clearBlurTimer(cityBlurTimer); // P3: a pending close from a just-blurred state must not outlive the refocus
                     setCityFocus(true);
+                    // iOS keyboard reveal (owner 2026-09-13, mobile screenshot): the app root is pinned
+                    // to visualViewport (lib/visualViewportFrame.ts) so it correctly resizes to just the
+                    // visible area, BUT the ScrollView inside doesn't automatically bring the focused
+                    // input into view — Safari's own scroll-to-focus scrolls the layout viewport, which
+                    // the position:fixed root absorbs. Result: user taps City on iPhone and can't see
+                    // what they're typing. Delay 380ms so the keyboard is already up and visualViewport
+                    // has shrunk when we measure; then scroll the input to the middle of the visible
+                    // area. Web-only — native RN handles this via KeyboardAvoidingView elsewhere.
+                    if (Platform.OS === 'web') {
+                      setTimeout(() => {
+                        (cityRef.current as unknown as Element | null)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+                      }, 380);
+                    }
                     // Focus with no text yet → immediately show the Top 6 (spec: "When the user
                     // clicks the City field without typing, immediately show only the Top 6 cities").
                     // GUARD (real race found in testing): ensureCityFieldIndex() resolves via a
@@ -1542,6 +1555,14 @@ export default function Home() {
                     if (!citySelected) return;
                     clearBlurTimer(districtBlurTimer); // P3 — same stale-close guard as the city field
                     setDistrictFocus(true);
+                    // Same iOS-keyboard reveal as the City field above — see that comment for the full
+                    // reasoning. This field sits further down the page so it's the more common case
+                    // where a user actually taps into a keyboard-obscured input.
+                    if (Platform.OS === 'web') {
+                      setTimeout(() => {
+                        (districtRef.current as unknown as Element | null)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+                      }, 380);
+                    }
                     // Empty focus → Top-6 popular districts in the chosen city. Same race-guard as the
                     // city field: the options load async (though usually pre-warmed on city select), so
                     // re-check the live text via districtTextRef before showing the Top-6.
