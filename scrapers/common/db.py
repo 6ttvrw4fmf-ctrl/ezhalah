@@ -22,6 +22,9 @@ from typing import Any, Callable, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
+from scrapers.common.liveness_contract import (
+    DEAD, EvidenceKind, LivenessPolicy, death_patch, decide,
+)
 from scrapers.common.pii import is_free_text, redact_capture, redact_pii
 from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder
 
@@ -948,7 +951,21 @@ def prune_unseen(
                              what="ops_stale_inactivation_probe.insert")
             except Exception as e:
                 print(f"{table}: could not record prune probe evidence ({type(e).__name__}: {e})")
-            ads, payload = confirmed_gone, {"missing_count": new_missing, "active": False}
+            # A row reaching here has a DIRECT per-listing oracle verdict of 'gone' AND has reached
+            # full strike grace — precisely decide()'s deactivate case. So it earns the stamp that
+            # starts the 30-day retention clock (ops_incident #24). Routed through decide() +
+            # death_patch() rather than written inline, because the contract is the ONLY sanctioned
+            # writer of source_confirmed_dead_at and a hand-written stamp condemns a row nobody read.
+            #
+            # Without this, an oracle-guarded platform could never become deletable even when the
+            # source genuinely confirmed the removal — which is the exact case that matters as
+            # platforms are switched on one by one (owner, 2026-09-12).
+            _dec = decide(DEAD, strikes=m,
+                          policy=LivenessPolicy(platform=table, grace=grace),
+                          evidence=EvidenceKind.DIRECT)
+            ads = confirmed_gone
+            payload = {"missing_count": new_missing, "active": False,
+                       **death_patch(_dec, now_iso=datetime.now(timezone.utc).isoformat())}
             if not ads:
                 continue
         for i in range(0, len(ads), 200):

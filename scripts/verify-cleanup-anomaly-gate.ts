@@ -62,7 +62,10 @@ TABLE = "gathern_residential_listings"
 def _rows(n, start=1):
     return [{"id": start + i, "ad_number": "G%d" % (start + i),
              "listing_url": "https://gathern.co/u/%d" % (start + i),
-             "missing_count": 3, "last_seen_at": "2026-07-05T00:00:00+00:00"} for i in range(n)]
+             "missing_count": 3, "last_seen_at": "2026-07-05T00:00:00+00:00",
+             # Source-confirmed dead well past the retention window: these rows are meant to be
+             # legitimately eligible, and since ops_incident #24 eligibility is keyed on THIS.
+             "source_confirmed_dead_at": "2026-07-05T00:00:00+00:00"} for i in range(n)]
 
 class Q:
     def __init__(self, t): self.t=t; self.op=None; self.payload=None; self._count=False; self._limit=None
@@ -75,6 +78,11 @@ class Q:
     def gte(self,c,v): return self
     def lt(self,c,v): return self
     def is_(self,c,v): return self
+    # supabase-py exposes negation as a PROPERTY: client.table(t).not_.is_(col, "null").
+    # The deletion clock's NULL guard (ops_incident #24) goes through it, so the stub has to
+    # model it or the whole candidate query silently returns None.
+    @property
+    def not_(self): return self
     def order(self,*a,**k): return self
     def limit(self,n): self._limit=n; return self
     def in_(self,c,vals):

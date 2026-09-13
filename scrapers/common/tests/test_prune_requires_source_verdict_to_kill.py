@@ -270,3 +270,42 @@ def test_aqarcity_unparseable_page_is_unknown_never_gone():
     assert '("notfound", "exists")' not in gone, (
         "'exists' is back on the kill path alongside 'notfound' — the exact pre-fix mapping."
     )
+
+
+# ── The deletion clock's stamp (ops_incident #24, owner decision 2026-09-12) ──────────────────────
+#
+# A source-confirmed kill through this path must record WHEN the source confirmed it, because the
+# 30-day retention clock now runs from that stamp rather than from last_seen_at. Without it an
+# oracle-guarded platform could never become deletable even when the source genuinely confirmed the
+# removal — which is exactly the case that matters as platforms are switched on one at a time.
+#
+# Found by verifying the real 2026-09-13 mustqr run, not by reading the code: the oracle wrote 5
+# GONE evidence rows and deactivated 5 rows, and neither carried a confirmation stamp.
+
+def _kill_payloads(sink):
+    return [payload for _tbl, payload, ads in sink if payload.get("active") is False]
+
+
+def test_a_source_confirmed_kill_stamps_the_deletion_clock(wired):
+    killed = db.prune_unseen("aqarcity_residential_listings", SEEN, verify_gone=lambda ad: "gone")
+    assert killed == 3
+    payloads = _kill_payloads(wired)
+    assert payloads, "expected a deactivation payload"
+    for p in payloads:
+        assert p.get("source_confirmed_dead_at"), (
+            "a DIRECT oracle verdict of 'gone' at full grace must stamp source_confirmed_dead_at — "
+            "without it the row is never deletable, however certainly the source said it is gone"
+        )
+
+
+def test_a_held_or_live_verdict_never_stamps_the_deletion_clock(wired):
+    """UNKNOWN IS NOT DEAD: the stamp is the start of an irreversible countdown, so only an
+    affirmative source verdict may write it."""
+    for verdict in ("live", "unknown", "timeout"):
+        sink_before = len(wired)
+        db.prune_unseen("aqarcity_residential_listings", SEEN, verify_gone=lambda ad, v=verdict: v)
+        for _tbl, payload, _ads in wired[sink_before:]:
+            assert "source_confirmed_dead_at" not in payload, (
+                f"a '{verdict}' verdict stamped the deletion clock — an unconfirmed row must never "
+                f"start the 30-day countdown to permanent deletion"
+            )

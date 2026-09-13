@@ -26,11 +26,23 @@ class _Table:
     def __init__(self, client, name):
         self.c, self.name, self._op, self._ids = client, name, None, None
         self._filters = []
+        self._negate = False
     def select(self, *a, **k): return self
     def eq(self, col, val): self._filters.append(("eq", col, val)); return self
     def gte(self, col, val): self._filters.append(("gte", col, val)); return self
     def lt(self, col, val): self._filters.append(("lt", col, val)); return self
-    def is_(self, col, val): self._filters.append(("is", col, val)); return self
+    def is_(self, col, val):
+        self._filters.append(("is_not" if self._negate else "is", col, val))
+        self._negate = False          # negation applies to the NEXT filter only, as in supabase-py
+        return self
+    # supabase-py exposes negation as a PROPERTY, not a method: .not_.is_(col, "null").
+    # The deletion clock's "never deletable without a source confirmation" guard
+    # (ops_incident #24) goes through it, so the fake must model it — and must model it
+    # HONESTLY. Recording `not_.is_(col, "null")` as a plain `is null` would invert the
+    # guard inside the fake: it would keep exactly the unconfirmed rows the guard exists
+    # to exclude, and the tests would then be asserting the bug.
+    @property
+    def not_(self): self._negate = True; return self
     def order(self, *a, **k): return self
     def limit(self, *a, **k): return self
     def update(self, payload): self._op = ("update", payload); return self
@@ -47,6 +59,8 @@ class _Table:
             if op == "gte" and not (v is not None and v >= val): return False
             if op == "lt" and not (v is not None and v < val): return False
             if op == "is" and val == "null" and v is not None: return False
+            # NOT IS NULL — the deletion clock's source-confirmation guard (ops_incident #24).
+            if op == "is_not" and val == "null" and v is None: return False
             if op == "in" and v not in val: return False
         return True
     def execute(self):
@@ -84,7 +98,62 @@ def _install(monkey_rows, policy, probe, platform="testp", tables=("testp_listin
 
 POL = lambda **k: {"min_inactive_days": 30, "min_missing_count": 3, "require_source_recheck": True,
                    "max_delete_per_run": 500, "anomaly_floor": 300, "anomaly_factor": 4, "enabled": True, **k}
-def _cand(i): return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": "2026-01-01T00:00:00+00:00", "active": False}
+def _cand(i): return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": "2026-01-01T00:00:00+00:00", "active": False,
+                      # Source-confirmed dead long ago. Since ops_incident #24 the retention clock
+                      # runs from THIS, not from last_seen_at, so a candidate fixture must carry it
+                      # or it is not a candidate at all.
+                      "source_confirmed_dead_at": "2026-01-01T00:00:00+00:00"}
+
+
+def _unconfirmed(i):
+    """A row deactivated on crawl ABSENCE alone: old, struck out, and never confirmed by the
+    source. This is the shape ops_incident #24 was about — the old predicate deleted it."""
+    r = _cand(i)
+    r["source_confirmed_dead_at"] = None
+    return r
+
+
+def test_a_row_the_source_never_confirmed_dead_is_never_deleted():
+    """UNKNOWN IS NOT DEAD, enforced at the deletion clock rather than only at the final re-probe.
+
+    The probe here says 404 — i.e. even the delete-time re-check would agree it is gone — so this
+    test isolates the CLOCK: an unconfirmed row must not even be SELECTED as a candidate, however
+    old and however struck out. Before ops_incident #24 this row was deleted permanently.
+    """
+    c = _install({"testp_listings": [_unconfirmed(1)]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["deleted"] == 0, "a listing the source never confirmed dead must never be deleted"
+    assert c.deleted == {}
+    assert s["candidates"] == 0, "it must not even be counted as an eligible candidate"
+
+
+def test_age_alone_never_earns_deletion():
+    """No amount of time converts an absence into a death."""
+    ancient = _unconfirmed(1)
+    ancient["last_seen_at"] = "2020-01-01T00:00:00+00:00"   # ~6 years of crawl absence
+    c = _install({"testp_listings": [ancient]}, POL(), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["deleted"] == 0 and c.deleted == {}
+
+
+def test_the_clock_runs_from_the_confirmation_not_from_last_seen():
+    """A row the crawl saw yesterday but the source confirmed dead 60 days ago IS deletable;
+    a row absent from the crawl for a year but confirmed dead yesterday is NOT."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    old_confirm = (now - timedelta(days=60)).isoformat()
+    new_confirm = (now - timedelta(days=1)).isoformat()
+
+    seen_recently = {**_cand(1), "last_seen_at": now.isoformat(),
+                     "source_confirmed_dead_at": old_confirm}
+    c = _install({"testp_listings": [seen_recently]}, POL(), probe=lambda url: (404, ""))
+    assert C.run("testp", force=True)["deleted"] == 1, "60-day-old confirmation is past the window"
+
+    long_absent = {**_cand(2), "last_seen_at": "2025-01-01T00:00:00+00:00",
+                   "source_confirmed_dead_at": new_confirm}
+    c2 = _install({"testp_listings": [long_absent]}, POL(), probe=lambda url: (404, ""))
+    assert C.run("testp", force=True)["deleted"] == 0, "confirmed only yesterday — window not met"
+    assert c2.deleted == {}
 
 
 def test_live_row_is_reactivated_never_deleted():
@@ -154,7 +223,11 @@ def test_anomaly_abort_stays_quiet_when_the_fraction_gate_would_pass():
 
 
 def _cand_ts(i, ts):
-    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3, "last_seen_at": ts, "active": False}
+    # `ts` is the row's position in the retention queue. Since ops_incident #24 that position is
+    # the SOURCE CONFIRMATION, not last crawl contact, so it drives source_confirmed_dead_at and
+    # last_seen_at alike — 'oldest-first' now means 'confirmed dead longest ago'.
+    return {"id": i, "ad_number": f"A{i}", "listing_url": f"http://x/{i}", "missing_count": 3,
+            "last_seen_at": ts, "active": False, "source_confirmed_dead_at": ts}
 
 
 def test_bounded_cap_never_exceeds_what_unbounded_gates_would_allow():
@@ -287,13 +360,16 @@ def test_below_missing_count_threshold_never_becomes_a_candidate():
 
 
 def test_below_min_age_never_becomes_a_candidate():
-    """Barrier 5 (minimum inactive age): a row with enough strikes but still INSIDE the grace
-    window (last_seen_at recent) must never be fetched as a candidate. Mutation-proof: if
-    cleanup.py's .lt("last_seen_at", cutoff) filter were ever dropped, this row would get
-    force-deleted 5 days after going inactive instead of waiting the full 30."""
+    """Barrier 5 (minimum inactive age): a row with enough strikes but still INSIDE the retention
+    window must never be fetched as a candidate. Mutation-proof: if cleanup.py's
+    .lt("source_confirmed_dead_at", cutoff) filter were ever dropped, this row would get
+    force-deleted 5 days after the source confirmed it, instead of waiting the full 30.
+
+    The window is measured from the CONFIRMATION since ops_incident #24, so this row carries a
+    recent confirmation — the thing that actually starts the clock."""
     import datetime
     recent = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=5)).isoformat()
-    struck_but_young = {**_cand(1), "last_seen_at": recent}
+    struck_but_young = {**_cand(1), "last_seen_at": recent, "source_confirmed_dead_at": recent}
     c = _install({"testp_listings": [struck_but_young]}, POL(), probe=lambda url: (404, ""))
     s = C.run("testp", force=True)
     assert s["eligible_total"] == 0 and s["deleted"] == 0 and c.deleted == {}
