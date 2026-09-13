@@ -268,6 +268,15 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260913185054_amlakalahsa_riyadh_district_detector_extended.sql, '
     + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover this '
     + 'district name and self-verifies green',
+  // "الجشة" (bare, its own city) + listing 11606266 ("المروج" -> حي المروج الجنوبي, proven only by
+  // that listing's own text, id-scoped). district_ar untouched in both. Companion lands ~3 minutes
+  // later and EXTENDS the existing mon_detect_amlakalahsa_district_consolidation_regressed() (no new
+  // function — "الجشة" joins the existing no_city list, plus one new id-scoped check), self-verified
+  // green in the same migration. run.py updated the same session for both.
+  '20260913190703_amlakalahsa_jasha_and_marouj_janoubi_resolved.sql':
+    'watched by its companion 20260913191008_amlakalahsa_jasha_and_marouj_janoubi_detector_extended.sql, '
+    + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover "الجشة" '
+    + 'and listing 11606266, and self-verifies green',
 };
 
 // Enforcement starts here — the day this rule landed.
