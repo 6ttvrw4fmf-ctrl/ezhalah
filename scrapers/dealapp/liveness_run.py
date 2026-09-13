@@ -256,7 +256,15 @@ def main() -> int:
                 "source_table": TABLE,
                 "listing_id": row["id"],
                 "http_status": st if st else None,   # NULL = the fetch itself failed
-                "verdict": {"strike": "strike", "deactivate": "kill"}.get(action, "transient"),
+                # dealapp_liveness_detail's CHECK allows ('strike','kill','unknown') — NOT
+                # 'transient', which is aqar_liveness_detail's word for the same state. Measured the
+                # hard way on 2026-09-13: the first real run after PR #2390 emitted 573 'transient'
+                # rows, every insert violated the constraint, and the best-effort handler swallowed
+                # it — the sequence advanced to 2 while the table stayed empty. An evidence writer
+                # whose every write is rejected is indistinguishable from a working one unless
+                # something checks the VOCABULARY, which is why
+                # scripts/verify-liveness-evidence-tables-have-writers.ts now does.
+                "verdict": {"strike": "strike", "deactivate": "kill"}.get(action, "unknown"),
                 "missing_count_before": int(row.get("missing_count") or 0),
                 "missing_count_after": strikes,
                 "applied": bool(args.apply and trusted and action in ("strike", "deactivate")),

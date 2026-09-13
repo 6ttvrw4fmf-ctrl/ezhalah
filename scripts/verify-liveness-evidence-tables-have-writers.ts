@@ -103,6 +103,69 @@ export function evidenceTablesWithoutWriters(corpus: Corpus): string[] {
     );
 }
 
+// ─── A WRITER WHOSE EVERY WRITE IS REJECTED LOOKS EXACTLY LIKE A WORKING ONE ────────────────────
+//
+// MEASURED 2026-09-13, the first real dealapp run after this barrier shipped. The writer existed,
+// this barrier was green, and the table stayed EMPTY: dealapp_liveness_detail's CHECK allows
+// ('strike','kill','unknown') while aqar_liveness_detail's allows ('strike','kill','transient'),
+// and the dealapp writer emitted aqar's word. All 573 inserts violated the constraint; the
+// best-effort handler swallowed the error (correctly — an audit write must never break a sweep);
+// the identity sequence advanced to 2 while `select count(*)` stayed 0.
+//
+// So "has a writer" is necessary and NOT sufficient. The vocabulary has to agree too, and that
+// agreement is checkable offline from the committed CHECK constraint and the writer's own literals.
+
+/** `verdict` values a table's CHECK constraint permits, from the committed migration that made it. */
+export function allowedVerdicts(table: string, migrations: string[]): string[] | null {
+  for (const sql of migrations) {
+    const create = new RegExp(
+      `create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?(?:public\\.)?${table}\\b([\\s\\S]*?);`,
+      'i',
+    );
+    const m = sql.match(create);
+    if (!m) continue;
+    const check = m[1].match(/verdict\s+text[^,]*?check\s*\(\s*verdict\s+in\s*\(([^)]*)\)/i);
+    if (!check) return null; // no CHECK ⇒ nothing to disagree with
+    return [...check[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  }
+  return null;
+}
+
+/** `"verdict": "<literal>"` values a scraper writes for this table, read from the insert payload. */
+export function writtenVerdicts(table: string, scrapers: string[]): string[] {
+  const out = new Set<string>();
+  for (const src of scrapers) {
+    if (!new RegExp(`["']${table}["']`).test(src)) continue;
+    for (const m of src.matchAll(/["']verdict["']\s*:\s*(?:[^,\n]*?)?["']([a-z_]+)["']/g)) {
+      out.add(m[1]);
+    }
+    // `{"a": "x", "b": "y"}.get(action, "z")` — the fallback is a written value too.
+    for (const m of src.matchAll(/\.get\(\s*\w+\s*,\s*["']([a-z_]+)["']\s*\)/g)) out.add(m[1]);
+  }
+  return [...out];
+}
+
+/** Verdicts a scraper writes that its table's CHECK constraint would reject. */
+export function verdictsTheTableWouldReject(corpus: Corpus): string[] {
+  const problems: string[] = [];
+  for (const t of declaredEvidenceTables(corpus.migrations)) {
+    const allowed = allowedVerdicts(t, corpus.migrations);
+    if (!allowed || allowed.length === 0) continue;
+    const owning = corpus.scrapers.filter((s) => new RegExp(`["']${t}["']`).test(s));
+    if (owning.length === 0) continue;
+    for (const v of writtenVerdicts(t, owning)) {
+      if (!allowed.includes(v)) {
+        problems.push(
+          `${t}: a writer emits verdict '${v}', which its CHECK constraint REJECTS ` +
+            `(allowed: ${allowed.map((a) => `'${a}'`).join(', ')}). Every such insert fails ` +
+            `silently into the best-effort handler and the ledger stays empty.`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
 // ─── Executable mutation proofs — run the real predicate against deliberately broken inputs ─────
 
 let failures = 0;
@@ -173,6 +236,52 @@ mustCatch(
   }).length === 0,
 );
 
+// THE 2026-09-13 DEFECT: a writer that exists but emits a word its own table rejects.
+const AQAR_DDL =
+  "create table if not exists public.aqar_liveness_detail (verdict text not null " +
+  "check (verdict in ('strike','kill','transient')));";
+const DEALAPP_DDL =
+  "create table if not exists public.dealapp_liveness_detail (verdict text not null " +
+  "check (verdict in ('strike','kill','unknown')));";
+
+mustCatch(
+  "a writer emitting aqar's 'transient' into dealapp's ledger is DETECTED (the real defect)",
+  verdictsTheTableWouldReject({
+    migrations: [DEALAPP_DDL],
+    scrapers: ['client.table("dealapp_liveness_detail").insert([{"verdict": "transient"}])'],
+  }).length === 1,
+);
+
+mustCatch(
+  'a rejected verdict hidden in a .get() fallback is DETECTED',
+  verdictsTheTableWouldReject({
+    migrations: [DEALAPP_DDL],
+    scrapers: [
+      'client.table("dealapp_liveness_detail").insert([{"verdict": ' +
+        '{"strike": "strike"}.get(action, "transient")}])',
+    ],
+  }).length === 1,
+);
+
+mustCatch(
+  'the correct vocabulary passes (no false red)',
+  verdictsTheTableWouldReject({
+    migrations: [DEALAPP_DDL],
+    scrapers: [
+      'client.table("dealapp_liveness_detail").insert([{"verdict": ' +
+        '{"strike": "strike", "deactivate": "kill"}.get(action, "unknown")}])',
+    ],
+  }).length === 0,
+);
+
+mustCatch(
+  "each table is judged against ITS OWN constraint, not a shared one",
+  verdictsTheTableWouldReject({
+    migrations: [AQAR_DDL],
+    scrapers: ['client.table("aqar_liveness_detail").insert([{"verdict": "transient"}])'],
+  }).length === 0,
+);
+
 if (failures > 0) {
   console.error(`\n${failures} mutation(s) survived — this barrier does not hold.`);
   process.exit(1);
@@ -203,7 +312,7 @@ if (corpus.migrations.length === 0 || corpus.scrapers.length === 0) {
 }
 
 const tables = declaredEvidenceTables(corpus.migrations);
-const problems = evidenceTablesWithoutWriters(corpus);
+const problems = [...evidenceTablesWithoutWriters(corpus), ...verdictsTheTableWouldReject(corpus)];
 
 console.log(`\nDeclared per-row liveness evidence tables: ${tables.length}`);
 for (const t of tables) {
