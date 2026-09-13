@@ -946,8 +946,16 @@ const card = StyleSheet.create({
   addlCell: {
     width: '50%', paddingVertical: 4, paddingRight: 6, gap: 1,
   },
-  addlLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
-  addlValue: { fontSize: 11.5, color: colors.ink, fontWeight: '600' },
+  // writingDirection is REQUIRED here, not decorative: with no explicit direction, RN Web isolates
+  // each Text run (unicode-bidi:isolate) and lets the BROWSER pick its direction from the run's own
+  // content — an Arabic label auto-resolves rtl, but a bare-digit value (e.g. street_width="15",
+  // parcel_number="190") has no strong bidi character and auto-resolves ltr. Two 50%-width RTL cells
+  // then each right-align their label but LEFT-align their value, so every value slides to the far
+  // side of its own cell — on a 2-cell row the neighbor's label ends up sitting right next to the
+  // WRONG value (measured live: أملاك الأحساء's «عرض الشارع» / «رقم القطعة» pair, amlakalahsa is the
+  // first source to show two numeric additional_info fields side by side, which is what exposed it).
+  addlLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', writingDirection: 'rtl' },
+  addlValue: { fontSize: 11.5, color: colors.ink, fontWeight: '600', writingDirection: 'rtl' },
   addlMoreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
     paddingVertical: 6, marginTop: 4,
