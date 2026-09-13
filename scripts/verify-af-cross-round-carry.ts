@@ -251,6 +251,35 @@ check('a REMOVED facet is un-asked: its id is dropped from the carried asked-set
   has(/asked: guidedPills\.asked\.filter\(\(id\) => id !== removed\.id\)/),
   'src/app/agent.tsx removeGuidedFacet — carrying the removed question forward makes pill removal a '
   + 'one-way door: that dimension can never be answered again, and an exhausted pool hides the CTA');
+// ── AND THE ROUND ON SCREEN IS ABANDONED, BECAUSE ITS COHORT NO LONGER EXISTS ──────────────────
+// (ops_incident #242, measured on production 2026-09-13 by verify-af-pill-removal-live.ts, 3/3.)
+//
+// The two checks above are about the CARRY — what the next round may ask. This one is about the
+// round already on screen. Since the owner's 2026-09-11 decision (#155) drew the committed pills in
+// the overlay, a removal can land with a question up; the query is rebuilt and re-searched, and the
+// live round was never told. Measured on جدة/الفلل والبيوت/فيلا/شراء at 390x844: the search widened
+// 125 → 295 (headline, anon replay and DB truth agreeing) and the card still read «125 نتيجة» a
+// minute later, still drew four committed pills including the deleted one, and asked a question
+// priced on the dead set — شمال 27 / جنوب 27 / شرق 27 / غرب 19, where the live set has 62 / 49 / 67
+// / 47. Every number the user could read was 2.3x wrong, which §2.5/§7 forbid outright, and R9.2.1
+// was false ON SCREEN while true on the wire.
+//
+// The token bump is not decoration and is checked separately: a step's resolveOptions /
+// rankQuestions probe for the dead cohort can still be in flight, and every one of them guards on
+// the token it captured — without the bump a slow probe repaints the card after the close, which is
+// the same defect with a delay. Same two lines, same order, as the ✕ handler (onAgeClose).
+//
+// SOURCE-PINNED, and honest about it: removeGuidedFacet is React wiring with no pure surface, like
+// its two siblings above. The EXECUTED proof of this rule is the live journey named at the top of
+// this block, which reads the number off the real card. Both mutations below are watched.
+check('a pill removal ABANDONS the round on screen (its cohort is gone — it may not keep quoting it)',
+  has(/const remaining = guidedPills\.facets\.filter\(\(_, i\) => i !== facetIndex\);\s*ageFlowTokenRef\.current\+\+;\s*setAgeFlow\(null\);/),
+  'src/app/agent.tsx removeGuidedFacet — without this the open round keeps its pre-removal total, '
+  + 'its pre-removal option counts and its pre-removal pills while the search has already widened');
+check('…and the token is bumped BEFORE the card is dropped, so an in-flight probe cannot repaint it',
+  agentSrc.indexOf('ageFlowTokenRef.current++;\n    setAgeFlow(null);') >= 0,
+  'src/app/agent.tsx removeGuidedFacet — setAgeFlow(null) alone leaves a resolveOptions/rankQuestions '
+  + 'probe for the destroyed cohort free to land afterwards and re-open the card on stale counts');
 check('the guided record is never dropped wholesale (no setGuidedPills(null))',
   !has(/setGuidedPills\(null\)/),
   'src/app/agent.tsx — clearing the record throws away the asked-set with it. If a future flow '
@@ -372,6 +401,12 @@ mustCatch('removeGuidedFacet dropping the record when the last pill goes',
 mustCatch('removeGuidedFacet carrying the REMOVED question forward (pill removal as a one-way door)',
   !/asked: guidedPills\.asked\.filter\(\(id\) => id !== removed\.id\)/.test(
     mut(agentSrc, 'asked: guidedPills.asked.filter((id) => id !== removed.id)', 'asked: guidedPills.asked')));
+mustCatch('removeGuidedFacet leaving the round on screen priced on the cohort it destroyed (#242)',
+  !/const remaining = guidedPills\.facets\.filter\(\(_, i\) => i !== facetIndex\);\s*ageFlowTokenRef\.current\+\+;\s*setAgeFlow\(null\);/.test(
+    mut(agentSrc, 'ageFlowTokenRef.current++;\n    setAgeFlow(null);\n', '')));
+mustCatch('the card being dropped WITHOUT bumping the token (an in-flight probe repaints it)',
+  !/ageFlowTokenRef\.current\+\+;\n    setAgeFlow\(null\);/.test(
+    mut(agentSrc, 'ageFlowTokenRef.current++;\n    setAgeFlow(null);', 'setAgeFlow(null);')));
 mustCatch('setGuidedPills(null) coming back (the asked-set goes with it)',
   /setGuidedPills\(null\)/.test(mut(agentSrc, 'if (!guidedPills || busy) return;',
     'if (!guidedPills || busy) { setGuidedPills(null); return; }')));

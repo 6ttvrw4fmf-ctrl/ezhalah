@@ -62,6 +62,9 @@ import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS, AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+// The SHIPPED per-press reveal ceiling, imported from the module production uses — never a
+// re-typed number. Raising or lowering it moves this journey's assertion with it.
+import { DRAIN_REVEAL_MAX } from '../src/data/resultCount.ts';
 import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
@@ -941,7 +944,6 @@ try {
   const armed4 = searches.length;
   let clicks = 0;
   let revealed = 0;
-  let lastRevealCheckOk = true;
   const settleFailures: string[] = [];
   const revealSnapshots: number[][] = [];
   // Click until a NETWORK page (p_offset > 0) has fired — that is the only click that proves R10.1.1
@@ -990,9 +992,7 @@ try {
     revealed = settled.value.n;
     revealSnapshots.push(settled.value.ids);
     if (!settled.settled) settleFailures.push(`click ${clicks} never settled (reached ${revealed})`);
-    // ONE click reveals the whole eligible set now (Task 4) — never a boundary clamp.
     const expected = landed.total ?? 0;
-    lastRevealCheckOk = lastRevealCheckOk && revealed === expected;
     networkPageSeen = searches.slice(armed4).some((s) => Number(s.body?.p_offset ?? 0) > 0);
     console.log(`      [diag] load-more click ${clicks}: revealed ${revealed} card(s) on the newest turn (expected ${expected})${networkPageSeen ? ' — a network page fired' : ''}`);
   }
@@ -1062,10 +1062,45 @@ try {
     // sample of something still moving, which is exactly how #125 was written.
     check('4. R10.1.1 — every «عرض المزيد» came to rest before it was judged', settleFailures.length === 0,
       settleFailures.join(' · ') || `${clicks} click(s) all settled within ${REVEAL_SETTLE_MS}ms`);
-    check('4. R10.1.1 — the click revealed the ENTIRE eligible set, not a boundary-clamped batch', lastRevealCheckOk && revealed === (landed.total ?? 0),
-      `revealed=${revealed} total=${landed.total} clicks=${clicks}`);
-    check('4. R10.1.1 — exactly ONE click sufficed (Task 4: no repeated «عرض المزيد» taps)', clicks === 1,
-      `${clicks} click(s) fired before the button/row disappeared — completion should hide it after the first`);
+    // ── THE REVEAL RULE, AS PRODUCTION ACTUALLY SHIPS IT (corrected 2026-09-13, routine #5) ──────
+    // These two assertions encoded the Task-4 rule of 2026-09-11 — «one tap drains every remaining
+    // page and finishes the search», so `revealed === total` and `clicks === 1`. That rule was
+    // SUPERSEDED four days later by a shipped safety cap, and these lines had been red daily ever
+    // since on a production that was behaving exactly as designed:
+    //
+    //   الرياض/إيجار/سنوي, 20,782 matches → press 2 drained 40 pages and CRASHED the renderer
+    //   (measured on production 2026-09-12; ops_incident #199, P1). The list is unvirtualized, so
+    //   the cost is mounting ~20,000 cards, not the rows. DRAIN_REVEAL_MAX (src/data/resultCount.ts)
+    //   now bounds ONE press to 2,000 new cards; if matches remain the pager STAYS offered and the
+    //   search is NOT marked finished, so nothing is stranded — the user simply presses again.
+    //
+    // Measured here 2026-09-13 on الرياض/شراء/شقة + an amenity, eligible 6,319: press 1 → 100,
+    // press 2 → 2,100, pages p_offset 1500 and 2000. `revealed === 6319` is now a statement about a
+    // retired contract, and `clicks === 1` was additionally FALSE BY CONSTRUCTION — the loop above
+    // breaks on `networkPageSeen`, not on the button vanishing, so its own failure text («before the
+    // button/row disappeared») described something it had not observed.
+    //
+    // What is asserted instead is the rule that IS shipped, and it is strictly more than the old
+    // one: each press reveals everything remaining UNLESS it hits the ceiling, and hitting the
+    // ceiling is only allowed while there is genuinely more to come. DRAIN_REVEAL_MAX is IMPORTED
+    // from the module production uses — never re-typed here — so raising or lowering the ceiling
+    // moves this assertion with it. The set-level guarantees (no duplicates, monotone growth, every
+    // visible card inside the independent oracle) are asserted below and are untouched.
+    //
+    // NOT ASSERTED HERE, deliberately: whether the ACCUMULATED mount across many presses is safe.
+    // That is ops_incident #212 (P1, routine #4) and it is an open owner decision, not something to
+    // pin from this surface while it is still being settled.
+    const cap = revealed >= DRAIN_REVEAL_MAX;
+    check('4. R10.1.1 — «عرض المزيد» revealed everything remaining, or stopped exactly at the safety ceiling',
+      revealed === (landed.total ?? 0) || cap,
+      `revealed=${revealed} total=${landed.total} clicks=${clicks} ceiling=${DRAIN_REVEAL_MAX}`
+      + (cap ? ' — at the ceiling, which is allowed only while matches remain (asserted next)' : ''));
+    check('4. R10.1.1 — a press that stopped at the ceiling left the pager OFFERED (nothing stranded)',
+      !cap || revealed >= (landed.total ?? 0)
+        || (await page.$$('[data-testid="results-load-more"]')).length > 0,
+      cap
+        ? `revealed ${revealed} of ${landed.total} and NO «عرض المزيد» remains — ${(landed.total ?? 0) - revealed} eligible listing(s) are unreachable on this turn`
+        : 'the whole set was revealed, so there is no ceiling case to judge');
   }
 
   // ── THE VISIBLE SET IS THE FETCHED SET, EXACTLY (owner checklist, 2026-09-06) ──────────────────

@@ -1847,6 +1847,31 @@ export default function Agent() {
     if (!guidedPills || busy) return;
     const removed = guidedPills.facets[facetIndex];
     const remaining = guidedPills.facets.filter((_, i) => i !== facetIndex);
+    // A ROUND ON SCREEN IS PRICED ON A COHORT THIS REMOVAL JUST DESTROYED — CLOSE IT
+    // (ops_incident #242, measured on production 2026-09-13, reproduced 3/3).
+    //
+    // The owner's 2026-09-11 decision (#155) put the committed pills INTO the round overlay, so a
+    // user can delete an answer while a question is on screen. The removal widened the search
+    // correctly — but the round itself was never told: its plan, its header total, its option counts
+    // and its own facet list all still belonged to the pre-removal query, and nothing re-derived
+    // them. Measured live on جدة/الفلل والبيوت/فيلا/شراء, 390x844: round 1 committed four answers
+    // (125 results); removing «جديد» widened the search to 295 (headline 295, anon replay 295, DB
+    // truth 295) and 60s later the card still read «125 نتيجة», still drew FOUR committed pills
+    // including the deleted one, and was asking «وش الاتجاه اللي تفضله؟» priced on the 125 set —
+    // شمال 27 / جنوب 27 / شرق 27 / غرب 19 where the real set has 62 / 49 / 67 / 47. Tapping a
+    // number the user can read off the screen would have returned 2.3x that many listings, which is
+    // the one thing every AF count rule forbids (§2.5, §7: visible count = count RPC = request = DB
+    // truth), and R9.2.1 was false ON SCREEN while being true on the wire.
+    //
+    // So the round is ABANDONED, exactly as ✕ and «رجوع» from question one abandon it: bump the
+    // token first so any in-flight resolveOptions/rankQuestions probe for the dead cohort is
+    // discarded rather than painting over the close, then drop the card. Nothing is lost that was
+    // not already invalid — the committed ANSWERS live in `guidedPills`, which this function rebuilds
+    // and hands to runRefine below, and the asked-carry rides with them. What comes back is the
+    // «خلّنا نحدد الطلب أكثر» offer on the new, wider turn, and a fresh round priced on the set the
+    // user actually has (startAgeFlow re-seeds every round ref, so the next round is clean).
+    ageFlowTokenRef.current++;
+    setAgeFlow(null);
     let q = guidedPills.baseQ;
     for (const f of remaining) {
       // SCOPE questions live outside ADVANCED_QUESTIONS, so the lookup must span BOTH pools: a
