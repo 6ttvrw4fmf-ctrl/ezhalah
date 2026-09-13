@@ -222,6 +222,18 @@
       "floor_pct": 97,
       "today_pct": 100.0,
       "active_rows": 53
+    },
+    "azdad": {
+      "floor_pct": 72,
+      "today_pct": 87.0,
+      "active_rows": 23,
+      "note": "Declared 2026-09-13. Went production-searchable without a baseline row and failed the onboarding gate for days. The floor is deliberately well below today_pct because this platform is TINY and therefore VOLATILE: at 23 active rows a single listing is 4.3 points, and the seven observed snapshots run 76.0 / 76.0 / 76.9 / 78.3 / 79.2 / 86.4 / 87.0. 72 sits one listing below the lowest figure ever observed, so the gate fires on a real capture regression and not on ordinary churn. Raise it once the platform is large enough for a percentage to mean something."
+    },
+    "amlakalahsa": {
+      "floor_pct": 96,
+      "today_pct": 99.2,
+      "active_rows": 262,
+      "note": "Declared 2026-09-13. Went production-searchable 2026-09-12 without a baseline row. 260 of 262 rows carry an image on the only snapshot taken so far, so the floor follows this file's own today-minus-about-three convention; it is a first observation, not a long trend."
     }
   }
 }
