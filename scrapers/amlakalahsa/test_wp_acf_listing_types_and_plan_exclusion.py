@@ -102,6 +102,26 @@ assert _first_street_width("") is None
 row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-str": "15 * 10"}), {})
 assert row["street_width_m"] == 15, "must never store the concatenated 1510"
 
+# ── 8. direction (pw-front) and price-per-meter (pw-prc-mtr) — added 2026-09-13 after an audit
+#    found both were captured raw in source_capture but never read into their own columns, even
+#    though 37/262 and 82/262 real rows carry them. pw-front is a single-element JSON array
+#    ("["شمالي"]") on every real row observed — used as-is, never re-parsed. pw-prc-mtr's ACF
+#    "not set" sentinel is a NEGATIVE integer (-1/-2/-5, measured on 4 rows) rather than blank —
+#    normalize.to_int() strips the sign, which would otherwise fabricate a positive price from it.
+row, _ = map_listing(_post(acf={
+    "pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-front": ["شمالي"], "pw-prc-mtr": "1350",
+}), {})
+assert row["direction"] == "شمالي"
+assert row["price_per_meter"] == 1350
+
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-prc-mtr": "-2"}), {})
+assert row["price_per_meter"] is None, "ACF's negative 'not set' sentinel must never become a fabricated price"
+assert row["direction"] is None, "no pw-front at all -> honestly NULL, never guessed"
+
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-front": [], "pw-prc-mtr": ""}), {})
+assert row["direction"] is None and row["price_per_meter"] is None
+
 print("ok: amlakalahsa excludes the plan CPT, district is verbatim from its own clean field, "
       "city stays NULL without a geocode rather than guessed, the Al-Ahsa same-name-twin resolves "
-      "only with its region hint, and unmapped type/deal values are refused rather than assumed")
+      "only with its region hint, unmapped type/deal values are refused rather than assumed, and "
+      "direction/price-per-meter are captured without ever fabricating a value from ACF's sentinels")

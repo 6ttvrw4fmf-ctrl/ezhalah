@@ -198,6 +198,22 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     _land_num = re.search(r"\d+", str(acf.get("land-num") or ""))
     land_number = _land_num.group() if _land_num else None
 
+    # pw-front publishes the facade/direction as a single-element JSON array (e.g. ["شمالي"]) on
+    # 37/262 rows — every element observed fleet-wide is a lone value, never a multi-frontage
+    # compound. Every sibling platform stores direction as plain Arabic text, canonicalized
+    # downstream by canon_direction_ar(), so the array's one element is used as-is.
+    _pw_front = acf.get("pw-front")
+    direction = (_pw_front[0].strip() or None
+                 if isinstance(_pw_front, list) and len(_pw_front) == 1 and isinstance(_pw_front[0], str)
+                 else None)
+
+    # pw-prc-mtr is a plain price-per-meter integer string on 82/262 rows — but WordPress ACF's
+    # "not set" sentinel for this field is a NEGATIVE integer (-1/-2/-5, measured on 4 rows) rather
+    # than blank. normalize.to_int() strips the '-' sign, which would fabricate a positive price
+    # from a sentinel, so a leading '-' is rejected before parsing — never coerced into a real value.
+    _ppm_raw = str(acf.get("pw-prc-mtr") or "").strip()
+    price_per_meter = normalize.to_int(_ppm_raw) if _ppm_raw and not _ppm_raw.startswith("-") else None
+
     district_ar = (acf.get("pw-dis") or "").strip() or None
 
     # Google's geocoded pw-map fields sometimes carry an invisible LRM mark (U+200E) glued onto the
@@ -232,6 +248,8 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         "transaction_type": _canonical_deal(deal),
         "area_m2": area,
         "street_width_m": street_width,
+        "direction": direction,
+        "price_per_meter": price_per_meter,
         "price_total": price if deal == "Buy" else None,
         # No rent-period signal has ever been observed on this source (every sampled row is Buy) —
         # if a future row is genuinely Rent, price is stored as an annual figure ONLY when the source
