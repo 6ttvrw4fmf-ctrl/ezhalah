@@ -216,7 +216,13 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
         return None, "residential"  # a deal we don't recognize is never assumed to be Buy or Rent
 
     area = normalize.to_int(acf.get("pw-squ"))
-    price = normalize.to_int(acf.get("pw-prc"))
+    # pw-prc is literally the numeral 0 (never blank) on every listing marked "على السوم"
+    # (negotiable/price-on-request) — measured live: 18/262 rows, 18/18 of them say "على السوم" in
+    # their own description text. to_int(0) faithfully parses that as the integer 0, which would
+    # otherwise store and DISPLAY a fabricated "SAR 0" price instead of the honest "price on
+    # request" the source actually means — never a real free listing.
+    _price_raw = normalize.to_int(acf.get("pw-prc"))
+    price = _price_raw if _price_raw else None
     street_width = _first_street_width(acf.get("pw-str"))
     # land-num is a plain plot/parcel number (رقم القطعة); the one observed non-clean value on this
     # source is a sub-lot suffix ("388_1" = parcel 388, sub-unit 1), not a multi-measurement compound
