@@ -18,6 +18,11 @@
 //   fleets) — OR the platform has a reviewed exception row in
 //   scripts/scraper-schedule-exclusions.txt naming where its retirement is documented and why.
 //
+// AND THE OTHER HALF, added the same day as a near-miss (see duplicateMatrixEntries below):
+//   No platform is scheduled TWICE in one matrix. "At least one" is satisfied by two, so the
+//   assertion above is blind on its own to the double-schedule that two concurrent sessions came
+//   within one merge of creating on 2026-09-13.
+//
 // A word-boundary match (`scrapers\.<platform>\.run\b`) is required so "deal" cannot be satisfied
 // by "dealapp" (or vice versa) — the literal bug class this repo already hit once with 'Al Khaas'
 // vs 'alkhaas' (see verify-platform-registration-complete.ts).
@@ -65,10 +70,11 @@ check('found scraper platforms', platforms.length >= 30, `got ${platforms.length
 
 // ── Concatenate every workflow's source once ─────────────────────────────────────────────────
 const WF_DIR = join(ROOT, '.github', 'workflows');
-const workflowText = readdirSync(WF_DIR)
+const workflowFiles = readdirSync(WF_DIR)
   .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
-  .map((f) => readFileSync(join(WF_DIR, f), 'utf8'))
-  .join('\n---\n');
+  .sort()
+  .map((f) => ({ name: f, text: readFileSync(join(WF_DIR, f), 'utf8') }));
+const workflowText = workflowFiles.map((f) => f.text).join('\n---\n');
 
 // ── The exclusions ledger: platform | where | why ────────────────────────────────────────────
 const exclusionsRaw = readFileSync(join(ROOT, 'scripts', 'scraper-schedule-exclusions.txt'), 'utf8');
@@ -90,6 +96,49 @@ for (const line of exclusionsRaw.split('\n')) {
 const isScheduledIn = (platform: string, text: string) =>
   new RegExp(String.raw`scrapers\.${platform}\.run\w*\b`).test(text);
 const scheduled = (platform: string) => isScheduledIn(platform, workflowText);
+
+// ── THE OTHER HALF OF THE SAME RULE: scheduled ONCE, not scheduled TWICE ───────────────────────
+// Earned as a near-miss the same day this file was created (2026-09-13). Two sessions found the
+// amlakalahsa gap 44 minutes apart and each opened a PR adding the byte-identical matrix line, at
+// two different points in the matrix (#2489 after `rawasidark`, #2490 after `amaall`). Because the
+// insertion points differ, git would have merged BOTH without a conflict, and the check above would
+// have stayed green on the result — it asks "at least one", which two satisfies. The outcome would
+// have been two identical daily jobs running a full crawl AND a prune-on-absence over the same
+// tables concurrently: the worst possible shape, because the two runs can observe each other's
+// partial state. #2490 was closed instead, but nothing in the tree would have stopped the merge.
+//
+// IDENTITY IS EVERY KEY EXCEPT `cmd`. Sharded fleets legitimately repeat a source and differentiate
+// on another key (`{ source: aqar, shard: 0 }`, `{ source: aqar, shard: 1 }`), so those stay
+// distinct and are not flagged. Excluding `cmd` is deliberate in the other direction: a second
+// amlakalahsa entry with a *slightly different command* is still a second daily job for the same
+// platform, and must not be able to slip past by not being byte-identical.
+export function duplicateMatrixEntries(text: string): string[] {
+  const seen = new Map<string, number>();
+  const dups: string[] = [];
+  text.split('\n').forEach((raw, i) => {
+    const m = /^\s*-\s*\{(.+)\}\s*,?\s*$/.exec(raw);
+    if (!m) return;
+    const fields = new Map<string, string>();
+    for (const f of m[1].matchAll(/([A-Za-z_][\w-]*)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^,}]*))/g)) {
+      fields.set(f[1], (f[2] ?? f[3] ?? f[4] ?? '').trim());
+    }
+    if (!fields.has('source')) return;          // not a platform matrix entry
+    const identity = [...fields.entries()]
+      .filter(([k]) => k !== 'cmd')
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}=${v}`)
+      .join(' ');
+    const first = seen.get(identity);
+    if (first != null) dups.push(`«${identity}» at line ${i + 1} (already present at line ${first})`);
+    else seen.set(identity, i + 1);
+  });
+  return dups;
+}
+
+for (const wf of workflowFiles) {
+  const dups = duplicateMatrixEntries(wf.text);
+  check(`${wf.name}: no platform is scheduled twice in one matrix`, dups.length === 0, dups.join('; '));
+}
 
 const unscheduledAndUnexcluded: string[] = [];
 for (const platform of platforms) {
@@ -151,6 +200,38 @@ mustCatch('a malformed exclusions line (missing the "why" column)',
   parseExclusionLine('someplatform | somewhere').length !== 3);
 mustCatch('a well-formed exclusions line NOT being falsely flagged as malformed',
   parseExclusionLine('someplatform | somewhere | some reason').length === 3);
+
+// M5: the double-schedule near-miss of 2026-09-13, replayed as the merge that was never made —
+// the two real lines from PRs #2489 and #2490, at the two insertion points they actually used.
+mustCatch('the SAME platform scheduled twice in one matrix (the #2489+#2490 merge that almost happened)',
+  duplicateMatrixEntries([
+    '          - { source: amaall,      cmd: "python -m scrapers.amaall.run --type all" }',
+    '          - { source: amlakalahsa, cmd: "python -m scrapers.amlakalahsa.run" }',
+    '          - { source: rawasidark,  cmd: "python -m scrapers.rawasidark.run --type all" }',
+    '          - { source: amlakalahsa, cmd: "python -m scrapers.amlakalahsa.run" }',
+  ].join('\n')).length === 1);
+
+// …and it must still catch it when the second entry is NOT byte-identical, which is why `cmd` is
+// excluded from the identity. A differently-flagged second job is still a second daily job.
+mustCatch('a second entry for the same platform hiding behind a different cmd',
+  duplicateMatrixEntries([
+    '          - { source: amlakalahsa, cmd: "python -m scrapers.amlakalahsa.run" }',
+    '          - { source: amlakalahsa, cmd: "python -m scrapers.amlakalahsa.run --type all" }',
+  ].join('\n')).length === 1);
+
+// The other direction, so the check above is not simply failing everything: a sharded fleet
+// legitimately repeats a source and differentiates on another key, and a plain distinct list is
+// clean. Either being flagged would make this barrier a false alarm on the repo's real workflows.
+mustCatch('a sharded fleet (same source, different shard) being falsely flagged as a duplicate',
+  duplicateMatrixEntries([
+    '      - { source: aqar, shard: 0, cmd: "python -m scrapers.aqar.run_residential --shard 0" }',
+    '      - { source: aqar, shard: 1, cmd: "python -m scrapers.aqar.run_residential --shard 1" }',
+  ].join('\n')).length === 0);
+mustCatch('a clean list of distinct platforms being falsely flagged as duplicated',
+  duplicateMatrixEntries([
+    '          - { source: remal,       cmd: "python -m scrapers.remal.run --type all" }',
+    '          - { source: amaall,      cmd: "python -m scrapers.amaall.run --type all" }',
+  ].join('\n')).length === 0);
 
 console.log('');
 console.log(failed === 0 ? `PASS — all ${platforms.length} scraper platforms are scheduled or documented as excluded.` : `FAIL — ${failed} check(s) failed.`);
