@@ -20,9 +20,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "status | query-shape | column-bisect | column-singles"
+        description: "status | query-shape | column-bisect | column-singles | recheck-dead"
         required: false
         default: "status"
+      recheck_limit:
+        description: "recheck-dead only: cap to the N most recently deactivated rows per table (blank = all)"
+        required: false
+        default: ""
 
 concurrency:
   group: mustqr-probe
@@ -44,8 +48,19 @@ jobs:
       - name: Probe status values
         env:
           SCRAPE_MIN_INTERVAL: "0.3"
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          if [ "${{ inputs.mode }}" = "query-shape" ]; then
+          if [ "${{ inputs.mode }}" = "recheck-dead" ]; then
+            # READ-ONLY re-adjudication of the absence-only cohort. Reads the DB, probes each row
+            # through the real _verify_gone oracle, and prints the verdicts. Writes nothing:
+            # restoring what it finds live is a separate, evidence-backed decision.
+            if [ -n "${{ inputs.recheck_limit }}" ]; then
+              python -m scrapers.mustqr.run --recheck-dead --recheck-limit "${{ inputs.recheck_limit }}"
+            else
+              python -m scrapers.mustqr.run --recheck-dead
+            fi
+          elif [ "${{ inputs.mode }}" = "query-shape" ]; then
             python -m scrapers.mustqr.run --probe-query-shape
           elif [ "${{ inputs.mode }}" = "column-bisect" ]; then
             python -m scrapers.mustqr.run --probe-column-bisect
