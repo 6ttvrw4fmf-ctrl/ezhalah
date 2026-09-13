@@ -1,6 +1,16 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-09-13 (migration 20260913025049_amlakalahsa_extra_attrs_registration):
+--   UNCHANGED. That migration mentions this view only as a FROM-clause reference inside
+--   listing_native_location_v2's own body (which it does replace) — v1 itself is neither read
+--   with CREATE OR REPLACE nor altered. Re-ran pg_get_viewdef against the object cast to regclass,
+--   true as the second argument, and confirmed md5 52b8d750cd49b1f46fdb471499678afc (22,492 chars)
+--   — identical to the entry directly below. Body/md5 left untouched; only this dated line is new,
+--   so scripts/verify-sql-mirrors-not-stale.ts's "any mention" rule (needed to catch the aqar_parse
+--   class of regexp_replace edit that never spells out CREATE OR REPLACE) does not read a migration
+--   that merely REFERENCES this view as one that silently drifted it.
+--
 -- Re-verified 2026-09-12 (amlakalahsa activation, migration 20260912190822): CHANGED and
 --   regenerated. amlakalahsa joined this view as two new native arms (it had none before — every
 --   amlakalahsa row previously fell through v2's catch-all union, which hardcodes district_ar to
