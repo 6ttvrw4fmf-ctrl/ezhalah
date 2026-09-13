@@ -141,7 +141,7 @@ export function optionNarrowsMeaningfully(count: number, total: number): boolean
 // that ban was the real bug (street_width «30m+» at 60 of 1,874 = 3.2%, dropped while it would have
 // taken the user from 1,874 to 60). That half stays banned forever. The over-correction was keeping
 // options like 1,820 of 1,874 (97.1%), which cost the user a tap and moved nothing. Nothing is
-// invented and nothing is forced to reach the ≤25 target: when no meaningful truthful option remains,
+// invented and nothing is forced to reach the ≤50 target: when no meaningful truthful option remains,
 // the Advanced Filter is DONE, at 50 or 100 results, and only «عرض المزيد» is left.
 //
 // (d) UNCHANGED AROUND IT. Every option here already cleared the ABSOLUTE per-option floor

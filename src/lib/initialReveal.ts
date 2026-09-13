@@ -7,7 +7,7 @@
 // the set is, by contract, the FINAL one — so there is nothing left for a first page to be a preview
 // of. Gated on the HONEST total (quotableTotal: null whenever the RPC count would overstate — client-
 // only narrowing, agent-annualized budgets); when it is unknown we fall back to the first page rather
-// than reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 25, so a ≤25 set is always
+// than reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 50, so a ≤50 set is always
 // fully buffered on page 0: revealing `fetched` IS revealing every match, and resultCounts() then
 // reports hasMore=false on its own. Larger sets keep the first-page preview untouched.
 export function initialReveal(args: {
