@@ -179,6 +179,17 @@ const WAIVED: Record<string, string> = {
     'same repair as 20260911221734 (a connector-timeout retry that turned out to also have landed — '
     + 'see this file\'s own header) — watched by the same companion, '
     + '20260911223037_aqarmonthly_district_suffix_backfill_gets_a_detector_incident_189.sql',
+  // Amlakalahsa direction/price-per-meter backfill (audit found both ACF keys — pw-front,
+  // pw-prc-mtr — captured raw in source_capture but never read into their own columns, 37/262 and
+  // 82/262 real rows respectively). Companion lands 55 minutes later (same session, different
+  // migration) and creates + rosters + self-verifies
+  // mon_detect_amlakalahsa_direction_ppm_regressed(), which re-checks BOTH fields against
+  // source_capture on every sweep — if scrapers/amlakalahsa/run.py ever stops reading either ACF
+  // key again, this fires. Open the companion to verify this reason rather than taking it on trust.
+  '20260913035126_amlakalahsa_backfill_direction_and_price_per_meter.sql':
+    'watched by its companion 20260913040021_amlakalahsa_direction_ppm_backfill_gets_a_detector.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_direction_ppm_regressed(), '
+    + 'checking both direction and price_per_meter against source_capture',
 };
 
 // Enforcement starts here — the day this rule landed.
