@@ -227,7 +227,6 @@ verify-no-hardcoded-rent-period.ts
 verify-no-invented-city-suggestion.ts
 verify-no-phone-auth.ts
 verify-no-public-test-crash-surface.ts
-verify-no-unguarded-deleter.ts
 verify-no-unsupported-claims.ts
 verify-no-vercel-bypass.ts
 verify-nonprice-price-monitor.ts
