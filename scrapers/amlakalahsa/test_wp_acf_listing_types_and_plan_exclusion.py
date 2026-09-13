@@ -150,6 +150,31 @@ assert row["price_total"] is None, "pw-prc=0 (\"على السوم\") must never 
 row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 250000, "pw-squ": "600"}), {})
 assert row["price_total"] == 250000, "a real positive price must still pass through untouched"
 
+# ── 11. district-implies-city + numbered-variant-matches-bare — added 2026-09-13, owner-directed.
+#     No pw-map at all, but the district text alone is enough (each pair below independently
+#     evidence-backed, not a general pattern — see run.py's own comment). The CARD still shows the
+#     office's raw text (neighborhood, untouched); only district_ar (match-truth) is resolved/folded.
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "الطرف"}), {})
+assert row["city_ar"] == "الهفوف" and row["city_id"] == 12, "no geocode at all, but this district is known to be الهفوف"
+assert row["district_ar"] == "الطرف" and row["neighborhood"] == "الطرف"
+
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "الصفا 2"}), {})
+assert row["city_ar"] == "العيون" and row["city_id"] == 2038
+assert row["district_ar"] == "الصفا", "numbered variant matches its bare form"
+assert row["neighborhood"] == "الصفا 2", "the card keeps the office's exact wording, number included"
+
+row, _ = map_listing(_post(acf={
+    "pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "المباركية 3",
+    "pw-map": {"city": "الهفوف", "state": "المنطقة الشرقية"},
+}), {})
+assert row["district_ar"] == "المباركية", "numbered variant matches its bare form even with a real geocode"
+assert row["neighborhood"] == "المباركية 3"
+
+# A district NOT in either map is never touched or guessed at.
+row, _ = map_listing(_post(acf={"pw-typ": "ارض", "pw-cnt": "للبيع", "pw-prc": 1, "pw-dis": "العقير"}), {})
+assert row["city_ar"] is None and row["city_id"] is None, "an unmapped district stays honestly unresolved"
+assert row["district_ar"] == "العقير" == row["neighborhood"]
+
 # ── 11. الجفر's "ضاحية هجر" numbered sub-plots collapse to one MATCH district "الضاحية" — owner
 #     instruction 2026-09-13: a buyer shouldn't have to know which of 9+ numbers to pick for one
 #     physical development. neighborhood (the CARD's own text) must keep the real sub-division name
