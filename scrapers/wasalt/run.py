@@ -456,11 +456,26 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
     # Property photos are served by Cloudflare Images, keyed by listing id + image filename. The
     # bare cdn.wasalt.sa/<uuid> guess 404s — the real path is imagedelivery.net/<acct>/production/
     # properties/<id>/images/<uuid>.jpg/<transform>. (verified against the live <img src>.)
-    imgs = (prop.get("propertyFiles") or {}).get("images") or []
+    _files = prop.get("propertyFiles")
+    _files_present = isinstance(_files, dict)
+    _imgs_raw = _files.get("images") if _files_present else None
+    imgs = _imgs_raw if isinstance(_imgs_raw, list) else []
     photo_urls = [
         f"https://imagedelivery.net/1DNKFJPRaeUdy_j8F7HT3w/production/properties/{pid}/images/{i}/width=800,quality=70,format=auto"
         for i in imgs[:30] if isinstance(i, str)
     ]
+    # WHAT THE SOURCE'S IMAGE CONTAINER ACTUALLY HELD, recorded separately from what we stored.
+    # `source_capture.image_count` is len(photo_urls) — our own output — so a 0 there cannot tell
+    # "wasalt published this ad with no photos" from "propertyFiles came back empty/absent because
+    # the response was a shell". That is the single question the image-coverage ratchet asks, and
+    # it kept wasalt un-adjudicable below its floor for four runs (2026-09-13). Folded into the
+    # capture by scrapers/common/db.py::_fold_images_evidence; a witness only, never an input.
+    images_evidence = {
+        "observed": True,
+        "container_present": _files_present,
+        "key_present": _files_present and "images" in _files,
+        "count": len(imgs),
+    }
 
     # Aqar-parity rich fields (user request: same feature row + features grid as Aqar). Wasalt
     # exposes them on prop.attributes (key/value), propertyInfo.*, and prop.featureAmenities.
@@ -539,6 +554,7 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
         "neighborhood": info.get("zone") or info.get("address"),
         "title": info.get("title"),
         "photo_urls": photo_urls,
+        "images_evidence": images_evidence,  # folded into source_capture; NOT a column
         "rega_location_verified": bool(prop.get("isRegaProp")),
         # "Additional Information" panel + the enriched flag (resolved above). Base rows come FREE
         # from the search-list; deep rows only when WASALT_FETCH_DETAIL=1. detail_enriched lets the
