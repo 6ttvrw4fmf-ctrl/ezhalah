@@ -117,3 +117,51 @@ export function workflowInvokes(src: string, name: string): boolean {
     .join('\n');
   return code.includes(bare);
 }
+
+// ── PER-CHECK TIME BOUND (ops_incident #222, routine #10, 2026-09-13) ───────────────────────────
+//
+// scripts/run-tests.mjs called spawnSync with NO `timeout`, so ONE hung check consumed the whole
+// 25-minute budget of full-verification-ci.yml and the job died as a GitHub Actions timeout that
+// names nothing — the suite's output is streamed with stdio:'inherit', so the last thing anyone sees
+// is a check that started, and the run is attributed to "the suite" rather than to the check that
+// hung. Routed here by routine #2 while driving PR #2365 to green.
+//
+// THE BOUND IS MEASURED, NOT GUESSED. Every one of the 452 checks was timed on 2026-09-13
+// (total 254s). The distribution is extremely skewed and the gap is enormous:
+//
+//     verify-af-live-journeys-outlast-the-search-beat.ts   142,323 ms   (it drives a virtual clock)
+//     verify-guardian-oracles-discriminate.ts               30,038 ms
+//     verify-liveness-registry-describes-real-evidence.ts    5,843 ms
+//     …every other check                                    ≤ 5,495 ms
+//
+// 600,000 ms is 4.2x the slowest check ever measured, which leaves room for a CI runner several
+// times slower than this container, while still being far below the 25-minute job budget — so a
+// genuinely hung check is KILLED AND NAMED with ~15 minutes of budget left for the rest of the
+// suite. Raising a real check past this bound should be a deliberate, reviewed change, not a
+// silent drift into an unbounded run.
+export const PER_CHECK_TIMEOUT_MS = Number(process.env.RUN_TESTS_TIMEOUT_MS) || 600_000;
+
+/**
+ * How a finished child process must be classified. Extracted as a pure function so the runner's
+ * fail-closed behaviour can be fed every result shape and watched to fail
+ * (scripts/verify-run-tests-bounds-each-check.ts).
+ *
+ * The one rule: ONLY a clean zero exit is a pass. A signal-killed child reports `status === null`,
+ * and treating that as anything but a failure is how a timeout or an OOM reads as a green check.
+ */
+export type ChildOutcome = 'ok' | 'failed' | 'timeout' | 'signal';
+
+export function childOutcome(
+  r: { status: number | null; signal?: string | null; error?: { code?: string } | null },
+): ChildOutcome {
+  // spawnSync surfaces a timeout as error.code === 'ETIMEDOUT'. It is checked FIRST because a timed
+  // out child is ALSO signal-killed, and "timed out" is the diagnosis the operator needs — the whole
+  // point of #222 is that the failure currently names nothing.
+  if (r.error && r.error.code === 'ETIMEDOUT') return 'timeout';
+  if (r.status === 0) return 'ok';
+  if (r.status === null) return 'signal';
+  return 'failed';
+}
+
+/** Only `ok` passes. Everything else fails the run — closed, loudly, never silently. */
+export const outcomeIsPass = (o: ChildOutcome): boolean => o === 'ok';
