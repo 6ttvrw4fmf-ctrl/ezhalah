@@ -32,10 +32,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useResolvedTheme } from '@/lib/appearance';
-import { useAtLeast } from '@/lib/useAtLeast';
-import { LOADER_PILL_LABEL_BREAKPOINT } from '@/lib/responsive';
 import { colors } from '@/theme/tokens';
+import { useResolvedTheme } from '@/lib/appearance';
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import {
@@ -126,23 +124,29 @@ function Dots({ reduced }: { reduced: boolean }) {
   );
 }
 
-// A platform pill with the traveling-highlight treatment: when the calm wave reaches it, the pill's
-// tint brightens, the border warms, a SOFT GLOW blooms underneath and it lifts ~2% — "this platform
-// is being checked right now" — then eases back as the wave moves on. Several pills are lit at once
-// (highlight duration > step). NO checkmarks / status icons (owner: never a checklist).
+// A platform pill with the traveling-highlight treatment. NO BOX (owner 2026-09-12: "remove those
+// boxes... make the background transparent so it blends in with our background, because now it
+// shows that it is a box and it's a photo" — the pill NEVER carries a fill or a border, resting or
+// highlighted; the logo (a real transparent PNG since #2426) and the name sit directly on the app's
+// own background). The name always renders — no logo-only compact mode (owner: "put the name also,
+// because we need to include the name of each website" — reverses the 2026-09-12 mobile compact
+// tile). The highlight itself survives as a SHADOW-ONLY glow (no fill under it) plus the name text
+// warming from muted to primary and a ~2% logo pop — the same vocabulary ui.tsx's own selection glow
+// already uses (text-color interpolation + boxShadow/shadow*), just with the fill dropped so nothing
+// ever reads as a box. Several pills are lit at once (highlight duration > step). NO checkmarks /
+// status icons (owner: never a checklist).
 function PlatformPill({
-  item, index, total, rtl, reduced, name, compact,
+  item, index, total, rtl, reduced, name,
 }: {
   item: LoaderPlatform; index: number; total: number; rtl: boolean; reduced: boolean; name: string;
-  // Owner 2026-09-12 (mobile, "all show on one screen"): logo-only tile below LOADER_PILL_LABEL_
-  // BREAKPOINT — see responsive.ts. Desktop/tablet keep the logo+name pill unchanged.
-  compact: boolean;
 }) {
   const h = useSharedValue(0);
-  // Theme-paired glow literals — interpolateColor parses colors, so no var() tokens here.
+  // LITERAL hex, not the colors.* token (owner theme contract: interpolateColor parses actual color
+  // values — colors.* resolves to var(--ez-*) on web, which it cannot parse). Same pattern the
+  // pre-existing glow literals below already used; verify-theme-contract.ts fails the build on a
+  // colors.* token reaching this call.
   const darkTheme = useResolvedTheme() === 'dark';
-  const glowBg: [string, string] = darkTheme ? ['#1a241e', '#213529'] : ['#f4f9f6', '#e2f1e7'];
-  const glowLine: [string, string] = darkTheme ? ['#26312a', '#35543f'] : ['#e3ece6', '#b7dbc4'];
+  const nameBase: [string, string] = darkTheme ? ['#c9cbc9', '#2b6f4c'] : ['#34403a', '#1d4a37'];
   useEffect(() => {
     if (reduced) { h.value = 0; return; }
     // One full sweep takes LOADER_SWEEP_MS regardless of roster size, so the LAST pill is always
@@ -160,34 +164,30 @@ function PlatformPill({
     ), -1, false));
     return () => cancelAnimation(h);
   }, [h, index, total, reduced]);
-  const a = useAnimatedStyle(() => {
+  const rowGlow = useAnimatedStyle(() => {
     const g = h.value;
     return {
-      backgroundColor: interpolateColor(g, [0, 1], glowBg),
-      borderColor: interpolateColor(g, [0, 1], glowLine),
       transform: reduced ? [] : [{ scale: 1 + g * 0.02 }],
-      // Soft green glow under the active pill — premium emphasis, not a flash. Same pattern as the
-      // app's selection glow (ui.tsx): boxShadow string on web; shadow* + elevation on native
-      // (elevation is required for Android — shadow* alone is iOS-only; review finding).
+      // Soft green glow — SHADOW ONLY, no fill/border, so the highlight reads as ambient light under
+      // the logo+name, never a filled box. Same rgba/blur curve ui.tsx's own selection glow uses.
       ...(IS_WEB
         ? ({ boxShadow: `0px ${4 * g}px ${14 * g}px rgba(20,80,45,${0.16 * g})` } as any)
         : { shadowColor: '#14502d', shadowOpacity: 0.16 * g, shadowRadius: 14 * g, shadowOffset: { width: 0, height: 4 * g }, elevation: 4 * g }),
     };
   });
+  const nameGlow = useAnimatedStyle(() => ({
+    color: interpolateColor(h.value, [0, 1], nameBase),
+  }));
   return (
     <Appear delay={index * (reduced ? 25 : PILL_STAGGER)} reduced={reduced}>
-      <Animated.View
-        style={[compact ? s.pillCompact : s.pill, { flexDirection: rtl ? 'row-reverse' : 'row' }, a]}
-        // Compact tiles drop the visible name (screen real estate), but the platform identity must
-        // stay reachable — same accessible name a sighted user would read off the full pill.
-        accessibilityLabel={compact ? name : undefined}
-      >
-        <Image source={item.logo} style={compact ? s.pillLogoCompact : s.pillLogo} contentFit="contain" />
-        {compact ? null : (
-          <Text style={[s.pillName, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]} numberOfLines={1}>
-            {name}
-          </Text>
-        )}
+      <Animated.View style={[s.pill, { flexDirection: rtl ? 'row-reverse' : 'row' }, rowGlow]}>
+        <Image source={item.logo} style={s.pillLogo} contentFit="contain" />
+        <Animated.Text
+          style={[s.pillName, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }, nameGlow]}
+          numberOfLines={1}
+        >
+          {name}
+        </Animated.Text>
       </Animated.View>
     </Appear>
   );
@@ -264,9 +264,6 @@ export default function SearchLoader({
 }) {
   const { t, isRTL } = useI18n();
   const reduced = useReducedMotion();
-  // SSR-safe (starts false, matching the server's width-0 answer — see useAtLeast.ts): pills render
-  // logo-only until the client confirms it's wide enough for labels, never the other way round.
-  const showPillLabels = useAtLeast(LOADER_PILL_LABEL_BREAKPOINT);
   const rtl = isRTL;
 
   // Per-search rotation cursor — with the full roster always shown it only varies the ORDER, so the
@@ -335,13 +332,13 @@ export default function SearchLoader({
         {phase === 'thinking' ? <Dots reduced={reduced} /> : null}
       </View>
 
-      {/* The complete platform roster — logo + Arabic name pills with the traveling highlight.
-          Below LOADER_PILL_LABEL_BREAKPOINT the name drops and pills shrink to a logo-only grid
-          (owner 2026-09-12: "I want them to all show on one screen" on mobile). */}
+      {/* The complete platform roster — logo + Arabic name pills with the traveling highlight, NO
+          box (owner 2026-09-12: "remove those boxes... put the name also" — supersedes the same-day
+          logo-only mobile compact tile; the name always renders now, on every viewport). */}
       {phase === 'searching' && platforms.length > 0 ? (
         <View style={[s.strip, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
           {platforms.map((p, i) => (
-            <PlatformPill key={p.name} item={p} index={i} total={platforms.length} rtl={rtl} reduced={reduced} name={t(p.i18nKey)} compact={!showPillLabels} />
+            <PlatformPill key={p.name} item={p} index={i} total={platforms.length} rtl={rtl} reduced={reduced} name={t(p.i18nKey)} />
           ))}
         </View>
       ) : null}
@@ -356,22 +353,13 @@ const s = StyleSheet.create({
   dots: { flexDirection: 'row', alignItems: 'center', gap: 4, marginHorizontal: 3 },
   thinkDot: { width: 4.5, height: 4.5, borderRadius: 2.5, backgroundColor: colors.muted },
 
-  // Premium, consistent pills: identical height/logo sizes, soft near-neutral fill, hairline-soft
-  // border, generous spacing. backgroundColor/borderColor/glow are ANIMATED per-pill (highlight wave)
-  // from these base values — transforms only, so the wave causes ZERO layout shift.
+  // NO BOX (owner 2026-09-12): the pill has no fill and no border, resting or highlighted — the
+  // logo (a real transparent PNG, #2426) and the name sit directly on the app's own background, so
+  // nothing ever reads as "a box" or "a photo." The highlight is a shadow-only glow (PlatformPill's
+  // rowGlow) plus the name warming from muted to primary — transforms/shadow/color only, so the wave
+  // still causes ZERO layout shift.
   strip: { flexWrap: 'wrap', alignSelf: 'stretch', gap: 9, rowGap: 9 },
-  pill: {
-    alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 11, borderRadius: 14,
-    backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
-  },
-  pillLogo: { width: 18, height: 18, borderRadius: 4, backgroundColor: colors.surface },
-  // Compact (below LOADER_PILL_LABEL_BREAKPOINT): a square logo-only tile, no name text, so ~45
-  // platforms genuinely fit a phone screen without scrolling (owner 2026-09-12). Same tint/border/
-  // glow treatment as the full pill — only the shape and the dropped label differ.
-  pillCompact: {
-    width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
-  },
-  pillLogoCompact: { width: 22, height: 22, borderRadius: 5, backgroundColor: colors.surface },
+  pill: { alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 2 },
+  pillLogo: { width: 18, height: 18, borderRadius: 4 },
   pillName: { fontSize: 12.5, fontWeight: '600', color: colors.body, maxWidth: 150 },
 });
