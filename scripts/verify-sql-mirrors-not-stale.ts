@@ -25,12 +25,24 @@
 //       that changes these objects, so a mirror older than the last migration touching it is
 //       stale-by-construction. This is what would have caught aqar_parse on 08-05.
 //
-// (B) matches on any MENTION, not just a literal CREATE OR REPLACE, because several migrations
-// needle-edit a function body via regexp_replace — 20260805190111 changed aqar_parse without ever
-// spelling out `CREATE OR REPLACE FUNCTION public.aqar_parse`, which is precisely why a
-// CREATE-only heuristic would have missed the real drift.
+// (B) matches on any MENTION IN CODE, not just a literal CREATE OR REPLACE, because several
+// migrations needle-edit a function body via regexp_replace — 20260805190111 changed aqar_parse
+// without ever spelling out `CREATE OR REPLACE FUNCTION public.aqar_parse`, which is precisely why
+// a CREATE-only heuristic would have missed the real drift.
+//
+// COMMENTS ARE STRIPPED FIRST (routine #7, 2026-09-13). Matching the raw body counted a migration
+// that only NAMES the object in prose as having touched it. Measured: 20260913082003 creates
+// resolve_amlakalahsa_locations() and mentions resolve_aqar_locations() once, in a header comment,
+// as the design it copies — zero DDL against it (`create function` count: 0). That alone dated the
+// resolve_aqar_locations mirror stale and failed the suite on a PR that only mirrors migrations.
+//
+// This LOSES NO COVERAGE, which is the only reason it is safe: every rationale above is about a
+// mention in CODE — a regexp_replace needle-edit, a call site, a DDL statement — and all of those
+// survive comment-stripping untouched. Only prose stops counting. Do NOT narrow this further to a
+// CREATE-only match; the header above records exactly why that was wrong.
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
+import { stripSqlComments } from './lib/repairClassifier.ts';
 
 const MIRRORS_DIR = 'sql/mirrors';
 const MIGRATIONS_DIR = 'supabase/migrations';
@@ -87,7 +99,8 @@ for (const file of mirrors) {
   );
   check(`    header carries a Refreshed/Re-verified date`, dates.length > 0);
 
-  const touching = migrations.filter((m) => new RegExp(`\\b${objectName}\\b`).test(m.body));
+  const touching = migrations.filter((m) =>
+    new RegExp(`\\b${objectName}\\b`).test(stripSqlComments(m.body)));
   if (dates.length > 0 && touching.length > 0) {
     const mirrorDate = dates.sort().at(-1)!;
     const newest = touching.map((m) => m.date).sort().at(-1)!;
