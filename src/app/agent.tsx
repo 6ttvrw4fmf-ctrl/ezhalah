@@ -2711,7 +2711,13 @@ export default function Agent() {
     const statusId = pending.statusId;
     searchingAtRef.current[statusId] = Date.now();
     setMsgs((m) => [...m, { id: statusId, role: 'status', phase: 'searching', query: pending.q }]);
-    toBottom();
+    // NO toBottom() here (owner 2026-09-12, mobile: "it shouldn't drag me down... when the
+    // animation happens I notice that in the phone it drags me down"). pinModeRef is already 'none'
+    // (set above), so onGrow() won't re-trigger a scroll either — the platform-checking loader just
+    // appears wherever the page already was; nothing forces the viewport down to meet it. The
+    // request bubble above stays fully visible instead of being yanked past. Results still land
+    // normally afterwards via playListings' own reveal/scroll (unaffected — this removes only the
+    // FIRST, abrupt jump at the moment the loader mounts).
     void (async () => {
       // Fetch the matching subset DURING the loading animation — the network wait hides inside the
       // thinking→searching choreography (no post-network hold: playListings morphs to results as soon

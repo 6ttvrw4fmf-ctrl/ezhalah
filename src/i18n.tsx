@@ -569,6 +569,11 @@ const AR: Record<string, string> = {
   'Matching the filters…': 'نطابق الفلاتر…',
   'Reviewing sites and prices…': 'نراجع المواقع والأسعار…',
   'Preparing the results…': 'نجهز النتائج…',
+  // Live-number variants (owner 2026-09-12) — {count}/{cities}/{districts} are real, derived
+  // figures (loaderScaleStats.ts), never hardcoded; see SEARCH_TITLES's comment in SearchLoader.tsx.
+  'Checking more than {count} properties…': 'نفحص أكثر من {count} عقار…',
+  'Reviewing {count} real-estate platforms…': 'نراجع {count} منصة عقارية…',
+  'Covering more than {cities} cities and {districts} districts…': 'نغطي أكثر من {cities} مدينة و{districts} حي…',
   'Matching the location…': 'نطابق الموقع…',
   'Applying the filters…': 'نطبق الفلاتر…',
   'Sorting results and mixing platforms…': 'نرتب النتائج وننوعها بين المنصات…',
