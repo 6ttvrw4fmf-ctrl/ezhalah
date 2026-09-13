@@ -139,6 +139,17 @@ jobs:
           #           (68 EN + 67 AR), so taking both languages would double every property.
           - { source: remal,        cmd: "python -m scrapers.remal.run --type all" }
           - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all" }
+          # amlakalahsa (owner-approved 2026-09-12, one of 4 new offices from that day's candidate
+          # sweep): single Al-Ahsa office on WordPress + ACF, ~262 active listings across 6 CPTs
+          # (land/home/farm/shop/building/apartment). Full crawl + prune every run, same shape as
+          # azdad — no --type/--pages flag, run.py fetches every listing-bearing CPT itself and
+          # excludes the non-listing `plan` CPT on its own (see scrapers/amlakalahsa/run.py's module
+          # docstring). FOUND MISSING FROM THIS MATRIX 2026-09-13 during a post-launch audit — the
+          # scraper, DB tables, search wiring and detectors were all live and correct, but nothing
+          # was ever scheduled to run it again after the initial launch crawl, so the catalogue
+          # would have gone stale (no new listings, no price updates, no prune of sold/removed ones)
+          # silently forever. This line is that fix.
+          - { source: amlakalahsa, cmd: "python -m scrapers.amlakalahsa.run" }
           # abwbna (owner-instructed 2026-09-06): a DIFFERENT TENANT of the SAME Nuzul SaaS platform
           # aldarim already scrapes (same S3 bucket family, same public JSON API shape). Full crawl +
           # prune, same as aldarim — not a --type flag scraper.
