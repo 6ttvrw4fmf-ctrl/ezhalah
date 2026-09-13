@@ -1,0 +1,19 @@
+# Scraper platforms that deliberately have NO scheduled workflow, each with WHERE the decision is
+# recorded and WHY.
+#
+# Format:  platform | where the retirement/exception is documented | why
+#
+# This file is the ONLY way scripts/verify-every-scraper-has-a-scheduled-workflow.ts may treat a
+# scrapers/<platform>/run.py with no workflow reference as OK instead of a silent onboarding/
+# retirement gap. A platform can leave this list only by either (a) genuinely gaining a schedule
+# (small-sources-sync.yml matrix, or its own bespoke workflow) or (b) staying retired with its
+# entry kept here — never by deleting the row to make the barrier pass.
+#
+# Earned 2026-09-13: amlakalahsa shipped scrapers/amlakalahsa/run.py the same day it was owner-
+# approved (2026-09-12) and was never added to any workflow — it ran zero times via any scheduled
+# path (its 236 production_ready rows came from a one-off manual/backfill run) until the daily
+# engineer found and fixed the gap. This file exists so the NEXT platform can't repeat that silently.
+
+deal      | scrapers/deal/run.py's own header + docs/ARCHITECTURE.md §12 | RETIRED 2026-06-26 (JSON-API experiment against api.dealapp.sa, reverted after 2 runs; header says "DO NOT ADD TO ANY WORKFLOW MATRIX")
+alnokhba  | docs/ARCHITECTURE.md §12                                     | RETIRED 2026-07-14 — alnokhba-services.com's domain lapsed into a parking page (no real listings)
+toor      | .github/workflows/small-sources-sync.yml (inline NOTE)      | RETIRED 2026-07-06 — toor.ooo IP-blocks both datacenter and Saudi-residential-proxy IPs; historical rows kept, scraper code kept for reference only
