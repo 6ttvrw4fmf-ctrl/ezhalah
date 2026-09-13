@@ -41,6 +41,13 @@ const check = (name: string, cond: boolean, detail = '') => {
   if (!cond) failures++;
 };
 
+/**
+ * A mutation proof: `caught` must be the RESULT of running this barrier's own predicate against a
+ * deliberately broken input, never a literal. A guard that cannot be watched going red is prose.
+ */
+const mustCatch = (what: string, caught: boolean, detail = '') =>
+  check(`MUTATION: ${what}`, caught, detail);
+
 const ID = ['-c', 'user.name=t', '-c', 'user.email=t@example.com'];
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', [...ID, ...args], { cwd, encoding: 'utf8' }).trim();
@@ -88,31 +95,31 @@ try {
     baselineChainProblems([step(c2), step(c2), step(c3)], oracle).length === 0);
 
   const rewind = baselineChainProblems([step(c3), step(c1, 'abc1234 stale baseline PR')], oracle);
-  check('MUTATION: a REWIND (newer value is an ancestor of the old one) is caught',
+  mustCatch('a REWIND (newer value is an ancestor of the old one)',
     rewind.length === 1 && rewind[0].includes('MOVED BACKWARDS') && rewind[0].includes('LOWERED'),
     rewind[0]?.slice(0, 90));
-  check('…and the message names the commit that would have introduced it',
-    rewind[0]?.includes('abc1234'));
+  mustCatch('…and the message names the commit that would have introduced it',
+    rewind.length === 1 && rewind[0].includes('abc1234'));
 
   const diverged = baselineChainProblems([step(c3), step(side)], oracle);
-  check('MUTATION: a DIVERGED line is caught, and reported as diverged rather than as a rewind',
+  mustCatch('a DIVERGED line, reported as diverged rather than as a rewind',
     diverged.length === 1
       && diverged[0].includes('MOVED BACKWARDS')
       && diverged[0].includes('diverged line of history'));
 
   const unknown = baselineChainProblems(
     [step(c1), step('0'.repeat(40))], oracle);
-  check('MUTATION: an UNANSWERABLE ancestry question fails closed, never passes',
+  mustCatch('an UNANSWERABLE ancestry question — it fails closed, never passes',
     unknown.length === 1 && unknown[0].includes('was not answered'),
     unknown[0]?.slice(0, 70));
 
   const malformed = baselineChainProblems([step(c1), step('not-a-sha')], oracle);
-  check('MUTATION: a malformed first line is caught before any ancestry question is asked',
+  mustCatch('a malformed first line, before any ancestry question is asked',
     malformed.length === 1 && malformed[0].includes('not a 40-hex commit sha'));
 
-  check('MUTATION: a chain too short to exercise the rule is reported, not silently green',
-    baselineChainProblems([step(c1)], oracle).length === 1
-      && baselineChainProblems([step(c1)], oracle)[0].includes('looked at nothing'));
+  const tooShort = baselineChainProblems([step(c1)], oracle);
+  mustCatch('a chain too short to exercise the rule — reported, not silently green',
+    tooShort.length === 1 && tooShort[0].includes('looked at nothing'));
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
 }
