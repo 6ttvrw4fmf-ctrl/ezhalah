@@ -276,6 +276,15 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     if city_id is None and district_ar in _DISTRICT_IMPLIES_CITY:
         city_ar, city_id = _DISTRICT_IMPLIES_CITY[district_ar]
 
+    # Owner instruction 2026-09-13: for these 3 specific districts, no SPECIFIC city could be
+    # proven anywhere in the fleet (unlike the map above) — owner's call: "under city districts,
+    # we guess we don't know, we just leave it" — assign the honest broad-but-true "الأحساء"
+    # governorate-level city (catalog city_id 3677) and leave district_ar exactly as scraped,
+    # never guessed at a finer grain than we can actually prove.
+    _DISTRICT_KNOWN_ONLY_BROADLY = {"النور", "العقير", "الجرن"}
+    if city_id is None and district_ar in _DISTRICT_KNOWN_ONLY_BROADLY:
+        city_ar, city_id = "الاحساء", 3677
+
     # Owner-confirmed 2026-09-12: this office serves ONLY Al-Ahsa, entirely within the Eastern
     # Province — every one of its listings, without exception. Region is therefore safe to default
     # even when Google's geocode gave no city at all (measured live: 52/262 rows, mostly "ضاحية هجر"
