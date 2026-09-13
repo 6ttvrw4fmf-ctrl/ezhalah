@@ -171,6 +171,13 @@ export function ResultCard({
   const VISIBLE = 6;
   const visible = expanded ? allActive : allActive.slice(0, VISIBLE);
   const overflow = Math.max(0, allActive.length - VISIBLE);
+  // Land listings (amlakalahsa, etc.) legitimately have zero boolean amenities (no elevator/parking/
+  // kitchen on raw land) while still having real street_width/parcel_number in additional_info — that
+  // combo was rendering "No additional features listed" directly above a populated "Additional
+  // Information" panel, which reads as self-contradicting even though the two sections cover different
+  // data. Same filter AdditionalInformationPanel uses below, so the empty-state only fires when BOTH
+  // panels would otherwise be blank. (owner-reported 2026-09-13, found while re-testing amlakalahsa.)
+  const hasAddlInfo = !!listing.additional_info?.some((r) => r && r.label && r.value);
 
   return (
     // Desktop (≥820px): 3 columns side-by-side. Mobile/narrow: STACK vertically (photo on top, then
@@ -343,7 +350,7 @@ export function ResultCard({
               </View>
             ))}
           </View>
-        ) : (
+        ) : hasAddlInfo ? null : (
           <Text style={card.noFeat}>{t('No additional features listed')}</Text>
         )}
         {overflow > 0 ? (
