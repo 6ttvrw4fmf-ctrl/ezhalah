@@ -203,6 +203,27 @@ const dismissAuthPopup = async (windowMs = 4000) => {
   await page.waitForFunction(() => !document.querySelector('[data-testid="signin-card"]'), { timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(250);
 };
+// COOKIE CONSENT card (owner 2026-09-13 rule): the card must appear on EVERY signed-out visit — the
+// component seeds its in-memory consent to null on every mount, so any page.goto/page.reload here
+// brings it back. On DESKTOP it is a corner card (280 px, bottom-right) that does not block the
+// filter form. On MOBILE 390×844 it docks as a full-width bottom sheet spanning ~236 px and covers
+// the bottom half of the form — area inputs and «بحث» sit under it. A `page.click`/`page.fill` on
+// an occluded control fails its actionability check and times out (measured on run 34786968422 —
+// [G] mobile fillOwnerExample's `page.fill('input >> nth=3', '150')` threw exactly this at 5 s).
+// Same shape as `dismissAuthPopup` above: silent if the card is absent, and it never fails a real
+// journey — the smoke's own concern is exercising the app, not proving the banner exists (that is
+// verify-cookie-consent-gating.ts / verify-live-journeys-answer-the-consent-card.ts's job).
+const dismissCookieIfPresent = async (windowMs = 2000) => {
+  const until = Date.now() + windowMs;
+  while (Date.now() < until && !(await page.$('[data-testid="cookie-consent"]'))) {
+    await page.waitForTimeout(150);
+  }
+  const card = await page.$('[data-testid="cookie-consent"]');
+  if (!card) return;
+  await page.click('[data-testid="cookie-allow-all"]').catch(() => {});
+  await page.waitForFunction(() => !document.querySelector('[data-testid="cookie-consent"]'),
+    { timeout: 3000 }).catch(() => {});
+};
 // For ASYNC-rendered suggestion rows only (run 32681927077: «حي النرجس» rendered after the fixed
 // 2200ms wait on a loaded runner and the strict tap threw). Polls for the row, then taps. Static
 // controls keep the strict tap — a missing static control is a real defect, not a render race.
@@ -268,6 +289,7 @@ try {
   // ---- Journey A: the primary CTA must produce results, not a blank page. ----
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
+  await dismissCookieIfPresent(); // owner 2026-09-13: cookie card returns on every visit
   check('home renders', (await body()).includes('تصفية'));
   await dismissAuthPopup(); // a real guest closes the sign-in prompt before searching
 
@@ -336,6 +358,7 @@ try {
 
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(12000);
+  await dismissCookieIfPresent(); // owner 2026-09-13: cookie card returns on every visit
   const afterRefresh = await body();
 
   check('a refresh issues ZERO search/AI requests', searchCalls === 0,
@@ -373,6 +396,7 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
+  await dismissCookieIfPresent(); // owner 2026-09-13: cookie card returns on every visit
   check('[mobile] home renders', (await body()).includes('تصفية'));
   await pickCity('الرياض');
   await tap('بحث');
@@ -382,6 +406,7 @@ try {
   searchCalls = 0;
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(12000);
+  await dismissCookieIfPresent(); // owner 2026-09-13: cookie card returns on every visit
   check('[mobile] a refresh issues ZERO search/AI requests', searchCalls === 0, `${searchCalls} fired`);
   check('[mobile] a refresh does not re-render the previous results', !RESULT_COUNT.test(await body()));
   check('[mobile] a refresh lands on the FILTER HOME', !page.url().includes('/agent'), `url = ${page.url()}`);
@@ -446,6 +471,9 @@ try {
   const fillOwnerExample = async () => {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
+    // Every page.goto reintroduces the cookie card (owner 2026-09-13); on the mobile viewport the
+    // bottom-sheet form occludes the area inputs and «بحث», so answer it before the fill sequence.
+    await dismissCookieIfPresent();
     // Same two-tap deal sequence as journey A above (Buy+Rent combined multi-select, 2026-08-20).
     await tap('إيجار'); await tap('شراء'); await tap('سنوي');
     await pickCity('الرياض');
@@ -544,6 +572,7 @@ try {
   });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
+  await dismissCookieIfPresent(); // owner 2026-09-13: cookie card returns on every visit
   await tap('الوسيط الذكي');
   await page.waitForTimeout(2000);
   await page.click('textarea');
@@ -609,6 +638,7 @@ try {
   });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
+  await dismissCookieIfPresent(); // owner 2026-09-13: cookie card returns on every visit
   await tap('إيجار'); await tap('شراء'); await tap('سنوي');
   await pickCity('الرياض');
   // District suggestion rows render async (same case documented at line 194 for «حي النرجس»),
@@ -808,6 +838,7 @@ try {
   // which is exactly the completion the rule promises — asserted below.
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
+  await dismissCookieIfPresent(); // owner 2026-09-13: cookie card returns on every visit
   await tap('الفلل والبيوت'); await page.waitForTimeout(300);   // Buy + سكني are the defaults
   await tap('دوبلكس'); await page.waitForTimeout(300);
   await pickCity('الهفوف');
@@ -937,6 +968,7 @@ try {
   // than mutating the just-finished journey's state — a clean, independently reproducible scope.
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
+  await dismissCookieIfPresent(); // owner 2026-09-13: cookie card returns on every visit
   await tap('تجاري');
   await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
   await tap('مصنع'); await page.waitForTimeout(300);
