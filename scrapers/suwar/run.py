@@ -68,9 +68,14 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 SITE = "https://suwar.sa"
 REST = f"{SITE}/wp-json/wp/v2"
 PER_PAGE = 100
+# NO User-Agent HERE, deliberately. curl_cffi's `impersonate=` sets a COMPLETE, internally
+# consistent browser header set at the C layer (UA, sec-ch-ua, Accept, …) to match the TLS/JA3
+# fingerprint it presents. Overriding just the UA makes the fingerprint and the header disagree,
+# which is exactly what bot detection looks for: rakez.sa (Cloudflare) answered 403 to every single
+# endpoint with a hardcoded UA and 200 without it, TLS fingerprint otherwise identical (measured
+# 2026-09-14). All 46 sibling scrapers already leave the UA alone; these two were the exception.
+# Accept-Language is safe and stays — it was verified not to be the trigger.
 HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-                   "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
     "Accept-Language": "ar,en;q=0.8",
 }
 
@@ -100,8 +105,8 @@ _FEATURE_COLUMNS: dict[str, str] = {
     "غرفة خادمة": "maid_room",
     "غرفة شغالة": "maid_room",
     "خزان مستقل": "separate_water_meter",
-    "كاميرات مراقبه": "security_cameras",
-    "حوش": "garden",
+    # «كاميرات مراقبه» (CCTV) and «حوش» (yard) have NO column in the shared listing shape and are
+    # deliberately NOT forced into a neighbouring one — they stay verbatim in additional_info.
 }
 
 LAST_FETCH_NOTE = "no pages attempted"
@@ -374,8 +379,8 @@ def map_listing(post: dict, detail: Optional[dict]) -> tuple[Optional[dict], str
         "area_m2": area_m2,
         "bedrooms": bedrooms,
         "bathrooms": bathrooms,
-        "living_rooms": living,
-        "majlis_rooms": majlis,
+        "halls": living,                      # الصالات
+        "reception_rooms_majlis": majlis,     # المجالس
         "price_total": detail.get("price"),
         "price_annual": None,                       # sale-only source; no period is manufactured
         "city": normalize.map_city(city_ar) if city_ar else None,
