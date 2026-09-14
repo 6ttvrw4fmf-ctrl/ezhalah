@@ -13,12 +13,20 @@ the five that never got it: abeea, aqaratikom, hajer, jurash, dealapp.
 
 Hermetic source-lint (no network/DB), mirroring test_no_type_default_fallback.py: for each
 covered scraper this asserts
-  1. the canonical `_pin_sold_inactive` helper exists with the exact pin payload
-     (active=False + missing_count=3, batched over ad_number),
+  1. the canonical `_pin_sold_inactive` helper exists and routes through the ONE shared law,
+     `scrapers/common/sold_pin.pin_source_confirmed_gone`, naming the source field it read,
   2. main() actually CALLS it (a defined-but-never-called helper pins nothing),
   3. the first pin call sits AFTER the first upsert (the upsert is what resets missing_count=0 —
      pinning before it would be immediately undone) and BEFORE prune_unseen (pinned rows must
      already be active=false so prune's active=true scan skips them).
+
+THE PAYLOAD MOVED, AND THAT IS THE POINT (2026-09-14). Until this date each covered scraper
+carried its own byte-identical copy of the pin body, and this file asserted the literal payload in
+each copy. Eleven copies of one law is eleven chances to omit a clause — and one had been omitted
+everywhere but abeea: the per-row EVIDENCE row that makes a deactivation falsifiable. The payload
+now lives once, in `scrapers/common/sold_pin.py`, together with the evidence write; this file
+asserts every platform reaches it and that no platform re-implements it locally, which is strictly
+stronger than asserting a literal eleven times. See `scripts/verify-sold-pin-evidence-law.ts`.
 
 Run: python -m pytest scrapers/common/tests/test_sold_pin_coverage.py -v
 """
@@ -38,11 +46,16 @@ PIN_COVERED = [
     "awal", "eastabha", "satel", "ramzalqasim",
     # the five added in Batch 3 (2026-07-16)
     "abeea", "aqaratikom", "hajer", "jurash", "dealapp",
+    # later arrivals, both publishing تم البيع / تم التأجير in property_status
+    "alta", "amaall",
 ]
 
 # The canonical pin payload — active=false plus the prune 3-strike missing_count so the row can
-# never match auto_recover_false_inactive()'s missing_count=0 trigger.
+# never match auto_recover_false_inactive()'s missing_count=0 trigger. It lives in exactly ONE
+# place now; a platform that spells it out locally is a twelfth copy of the law.
 PIN_PAYLOAD = '{"active": False, "missing_count": 3}'
+SHARED_LAW = SCRAPERS_DIR / "common" / "sold_pin.py"
+SHARED_CALL = "sold_pin.pin_source_confirmed_gone("
 # A CALL site (not the def line): the helper name at start-of-expression, i.e. indented and not
 # preceded by `def `.
 CALL_RE = re.compile(r"^\s*_pin_sold_inactive\(", re.M)
@@ -91,15 +104,37 @@ def test_every_covered_scraper_defines_the_canonical_pin_helper():
             f"scrapers/{name}/run.py lost its _pin_sold_inactive() helper — sold rows there are "
             "again resurrected by the nightly auto_recover_false_inactive() sweep"
         )
-        assert PIN_PAYLOAD in src, (
-            f"scrapers/{name}/run.py: the pin no longer writes the canonical payload "
-            f"{PIN_PAYLOAD} — without missing_count=3 the row still matches the sweep's "
-            "missing_count=0 recover trigger"
+        assert SHARED_CALL in src, (
+            f"scrapers/{name}/run.py: the pin no longer routes through the shared law "
+            f"{SHARED_CALL} — a local copy of the pin is a copy of the law, and the clause that "
+            "goes missing in a copy is the per-row evidence row (measured 2026-09-14: 10 of 11 "
+            "platforms had already lost it, which made every correct sold-pin read as an "
+            "unverified deactivation to mon_detect_unknown_treated_as_dead)"
         )
-        assert '.in_("ad_number"' in src, (
-            f"scrapers/{name}/run.py: the pin must target rows by ad_number (batched .in_ "
-            "update) — that is the only stable per-listing key across all platform tables"
+        assert PIN_PAYLOAD not in src, (
+            f"scrapers/{name}/run.py re-implements the canonical pin payload locally. The payload "
+            "and the evidence write belong together in scrapers/common/sold_pin.py; spelling the "
+            "payload out here is how a platform silently opts out of the evidence half."
         )
+
+
+def test_the_shared_law_still_carries_the_payload_and_the_evidence_write():
+    """The invariant the eleven copies used to assert, asserted ONCE where it now lives."""
+    src = SHARED_LAW.read_text(encoding="utf-8")
+    assert PIN_PAYLOAD in src, (
+        "scrapers/common/sold_pin.py lost the canonical pin payload — without missing_count=3 "
+        "every pinned row again matches auto_recover_false_inactive()'s missing_count=0 trigger "
+        "and resurrects at 05:20 UTC (measured 2026-07-16: 915 rows)"
+    )
+    assert '.in_("ad_number"' in src, (
+        "scrapers/common/sold_pin.py: the pin must target rows by ad_number (batched .in_ "
+        "update) — that is the only stable per-listing key across all platform tables"
+    )
+    assert "ops_stale_inactivation_probe" in src, (
+        "scrapers/common/sold_pin.py no longer writes per-row evidence — a source-confirmed kill "
+        "with no ledger row is indistinguishable in SQL from a crawl that timed out, and "
+        "mon_detect_unknown_treated_as_dead (P1) raises on exactly that"
+    )
 
 
 def test_every_covered_scraper_calls_the_pin_after_upsert_before_prune():

@@ -55,8 +55,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
-
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
 BASE = "https://awaalun.com"
 LIST_API = f"{BASE}/wp-json/wp/v2/rtcl_listing"
 WORKERS = int(os.environ.get("AWAL_WORKERS", "5"))
@@ -478,12 +477,7 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     in its seen set. When a sold listing is later relisted, its next upsert carries active=true
     and the upsert's own missing_count=0 reset applies — the pin is only written for ids that are
     sold THIS crawl."""
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    sold_pin.pin_source_confirmed_gone(table, ad_numbers, oracle="awal.sold_pin.detail_is_sold_class")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────────
