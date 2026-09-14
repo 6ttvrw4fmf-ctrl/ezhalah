@@ -259,8 +259,15 @@ async function runChain(cell) {
     }
     if (!picked) throw new Error(`the app never confirmed the city selection: ${cell.city}`);
     await sleep(800);
-    if (!await tap(cell.group)) throw new Error(`group never rendered: ${cell.group}`);
-    if (!await tap(cell.type)) throw new Error(`type never rendered: ${cell.type}`);
+    // GROUP/TYPE ARE OPTIONAL (2026-09-14, routine #9 — ops_incident #277). Every one of the twelve
+    // default cells narrowed to a SPECIFIC نوع, so this instrument could not drive the UNTYPED shape
+    // at all — the same corpus gap ops_incident #176 found in verify-af-live-truth.ts, standing in
+    // #9's OWN chain driver. That is not academic: the arm-B oracle defect of #277 fires ONLY on the
+    // untyped broad-Commercial request, and it survived here for exactly this reason. A corpus that
+    // always narrows on every axis cannot see a bug that only fires on the unnarrowed case.
+    // Omitting both sends p_types: null — the single most common real search a user makes.
+    if (cell.group && !await tap(cell.group)) throw new Error(`group never rendered: ${cell.group}`);
+    if (cell.type && !await tap(cell.type)) throw new Error(`type never rendered: ${cell.type}`);
     if (!await tap('بحث')) throw new Error('«بحث» never rendered');
 
     // Wait for the app to SETTLE on a terminal state, not for a guessed number of seconds.
@@ -317,16 +324,54 @@ async function runChain(cell) {
       // CLEAN_TO_QUERY['Villa'].rawTypes mapped through EN_TO_AR). Restricting the inversion to
       // CLEAN_MACRO's key set — the clean types, and nothing else — is what makes it single-valued.
       const cleanEn = Object.keys(CLEAN_MACRO).find((k) => EN_TO_AR[k] === vs.type) ?? null;
-      const expected = cleanEn ? (typeArForSelection(cleanEn) ?? []) : null;
+      // «نوع العقار» HAS THREE TIERS, NOT ONE (2026-09-14, routine #9 — ops_incident #277).
+      //
+      // buildSummary() (src/data/search.ts:600-602) fills that line from the narrowest thing the
+      // user actually chose, in three explicit branches: the selected TYPES, else the selected
+      // GROUPS, else the CATEGORY. This check modelled branch 1 only, so as soon as the untyped
+      // cells above became drivable it reported «the summary and the taxonomy disagree about what
+      // was searched» on all four — against a production doing exactly what it ships. That is §41.15's
+      // trap: an oracle that accuses the product for its own imprecision is worse than no oracle.
+      //
+      // NOT WEAKENED. Branch 1 keeps the exact set equality unchanged. Branch 3 gets the assertion
+      // that actually matters there, and that branch 1's form could never have made: the summary is
+      // claiming the WHOLE category, so the request must not be secretly narrower than that claim.
+      // That is the invisible-filter class (PART 1.1 class 3) — «ملخص البحث» saying «تجاري» while
+      // p_types carries one type would be a filter the user was never shown, and it is now caught:
+      //   · every raw type sent must belong to a clean type of that category (or a `both` macro), and
+      //   · the request must span MORE THAN ONE clean type, i.e. it is genuinely un-narrowed.
+      const CATEGORY_AR = { Residential: 'سكني', Commercial: 'تجاري' };   // src/i18n.tsx:204-205
       const sent = first.body.p_types ?? [];
-      const same = expected !== null
-        && expected.length === sent.length
-        && [...expected].sort().every((v, i) => v === [...sent].sort()[i]);
-      eq(name, 'L1 type == L3 p_types (clean label expands to exactly the raw set sent)', !!same,
-        cleanEn === null
-          ? `the app rendered «${vs.type}», which is not a clean type label in the shipped EN_TO_AR map `
-            + '— the summary and the taxonomy disagree about what was searched'
-          : `ui=${vs.type} (${cleanEn}) expands to ${JSON.stringify(expected)}  rpc=${JSON.stringify(sent)}`);
+      const cat = first.body.p_category ?? null;
+      if (cleanEn === null && cat && CATEGORY_AR[cat] === vs.type) {
+        // Branch 3 — the CATEGORY tier. Build raw → the macros of every clean type claiming it.
+        const rawMacros = new Map();
+        const cleanOf = new Map();
+        for (const k of Object.keys(CLEAN_MACRO)) {
+          for (const raw of (typeArForSelection(k) ?? [])) {
+            if (!rawMacros.has(raw)) { rawMacros.set(raw, new Set()); cleanOf.set(raw, new Set()); }
+            rawMacros.get(raw).add(CLEAN_MACRO[k]); cleanOf.get(raw).add(k);
+          }
+        }
+        const foreign = sent.filter((r) => rawMacros.has(r)
+          && !rawMacros.get(r).has(cat) && !rawMacros.get(r).has('both'));
+        const cleanSpan = new Set(sent.flatMap((r) => [...(cleanOf.get(r) ?? [])]));
+        eq(name, 'L1 category tier == L3 (summary claims the whole category; the request is not narrower)',
+          foreign.length === 0 && (first.body.p_types == null || cleanSpan.size > 1),
+          `ui=«${vs.type}» p_category=${cat} p_types=${sent.length} raw spanning ${cleanSpan.size} clean type(s)`
+          + (foreign.length ? `  FOREIGN-MACRO RAWS: ${JSON.stringify(foreign.slice(0, 8))}` : ''));
+      } else {
+        const expected = cleanEn ? (typeArForSelection(cleanEn) ?? []) : null;
+        const same = expected !== null
+          && expected.length === sent.length
+          && [...expected].sort().every((v, i) => v === [...sent].sort()[i]);
+        eq(name, 'L1 type == L3 p_types (clean label expands to exactly the raw set sent)', !!same,
+          cleanEn === null
+            ? `the app rendered «${vs.type}», which is neither a clean type label in the shipped `
+              + `EN_TO_AR map nor the label of the requested p_category (${cat ?? 'null'}) `
+              + '— the summary and the taxonomy disagree about what was searched'
+            : `ui=${vs.type} (${cleanEn}) expands to ${JSON.stringify(expected)}  rpc=${JSON.stringify(sent)}`);
+      }
     }
     eq(name, 'L3 carries the scope key p_tables', Array.isArray(first.body.p_tables) && first.body.p_tables.length > 0,
       `p_tables=${JSON.stringify(first.body.p_tables)}`);
@@ -488,6 +533,16 @@ const DEFAULT_CELLS = [
   { label: 'MOB عرعر/بيع/شقة',        city: 'عرعر', mobile: true, deal: [],                              group: 'الشقق والسكن المشترك', type: 'شقة' },
   { label: 'MOB القطيف/بيع+إيجار/فيلا', city: 'القطيف', mobile: true, deal: ['إيجار'],                    group: 'الفلل والبيوت',        type: 'فيلا' },
   { label: 'MOB الجبيل/إيجار-سنوي/شقة', city: 'الجبيل', mobile: true, deal: ['إيجار', 'شراء', 'سنوي'],    group: 'الشقق والسكن المشترك', type: 'شقة' },
+  // ── THE UNTYPED AXIS (2026-09-14, routine #9 — ops_incident #277) ──────────────────────────────
+  // No نوع picked at all, so the app sends p_types: null. The twelve cells above all narrow, which
+  // is why this instrument could not see the arm-B `both`-macro defect: it fires only here, and only
+  // on the COMMERCIAL side, where p_tables2 carries the category's own kind with «عمارة» in
+  // p_types2. حائل/بيع is the cell that measured it (production 330, oracle 291, extra 39); الهفوف
+  // re-proves it on a CLUSTERED city, where the oracle's three-arm city translation must also hold.
+  { label: 'حائل/بيع/تجاري-broad (untyped, arm-B)',  city: 'حائل',   category: 'تجاري', deal: [] },
+  { label: 'الهفوف/بيع/تجاري-broad (untyped, cluster)', city: 'الهفوف', category: 'تجاري', deal: [] },
+  { label: 'تبوك/بيع+إيجار/سكني-broad (untyped)',     city: 'تبوك',   deal: ['إيجار'] },
+  { label: 'MOB بريدة/بيع/سكني-broad (untyped)',      city: 'بريدة',  mobile: true, deal: [] },
 ];
 
 const CELLS = (process.env.RT_CELLS ? JSON.parse(process.env.RT_CELLS) : DEFAULT_CELLS)
