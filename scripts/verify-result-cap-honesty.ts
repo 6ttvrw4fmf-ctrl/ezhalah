@@ -88,13 +88,11 @@ for (const [trueTotal, shown] of [[9892, 100], [9892, 300], [437, 437], [46, 46]
 }
 
 // ── 5. the shipped wiring uses the module (never a re-derived local rule) ───────────────────────
-// «عرض المزيد» was REDEFINED 2026-09-11 (Task 4), then REVISED the same day, before Task 4's
-// one-tap-drains-everything version ever reached production (Task 4 rev. 2): the FIRST tap on a
-// turn reveals only the next 100-boundary — nextBatchTarget is back in loadMore, not retired — and
-// only a SECOND tap (the turn already past its initial-reveal floor) drains to the true end. The
-// honesty check: loadMore reveals exactly `min(target, mergedLen)` on BOTH the instant-reveal path
-// (a new turn started mid-fetch) and the cascade path — the boundary on a first press, the full
-// merge on a later one — never a re-derived number, never a partial count silently mislabelled whole.
+// «عرض المزيد» reveals via revealTarget() (owner 2026-09-14, superseding the Task 4 drain model): the
+// FIRST tap on a turn reveals the next 100-boundary, the LAST tap reveals up to the 500 cap, and then
+// the button retires. The honesty check: loadMore reveals exactly `min(target, mergedLen)` on BOTH the
+// instant-reveal path (a new turn started mid-fetch) and the cascade path — the boundary on a first
+// press, min(500,total) on the last — never a re-derived number, never a partial count mislabelled whole.
 check('revealTarget decides the reveal target — first tap → 100, last tap → up to 500 (owner 2026-09-14)',
   /const target = revealTarget\(cur, m\.result\.matchTotal \?\? Infinity\);/.test(code));
 check('a first vs. later press is still told apart by the turn\'s OWN reveal state, not new component state',
@@ -252,37 +250,46 @@ mustCatch('`rows ?? []` creeping back into loadMoreListings',
   !/if \(rows === null\) return \{ listings: \[\], nextOffset: offset, hasMore: true, failed: true \};/.test(
     storeSrc.replace('if (rows === null) return { listings: [], nextOffset: offset, hasMore: true, failed: true };', 'const r0 = buildPools(rows ?? []);')));
 
-// ── THE SENTENCE STATES WHAT ONE TAP ACTUALLY REVEALS (owner 2026-09-13) ────────────────────────
-// The Arabic used to end «إذا عرضت لك المزيد بعرض لك كل الإعلانات» — one tap shows ALL — while a tap
-// really advances to the next BROWSE_BATCH boundary clamped to what exists. The owner's second half
-// matters just as much: a hardcoded «100» is wrong in the other direction, because "it would be
-// funny if you say 100 and you would only show him 20". So the number is nextBatchTarget()'s, the
-// same function the button pages with, and these checks pin BOTH failure directions.
+// ── THE SENTENCE STATES WHAT ONE TAP ACTUALLY REVEALS (owner 2026-09-13, extended 2026-09-14) ─────
+// A tap advances to what revealTarget() returns — the next 100-boundary on a FIRST tap, min(500,total)
+// on the LAST tap — always clamped to what exists. Hardcoded numbers are banned in EVERY direction:
+// the old «بعرض لك كل الإعلانات» (one tap shows everything); a fixed «100» ("funny to say 100 and show
+// 20", owner 2026-09-13); AND a fixed «500» (owner 2026-09-14: on a 340-match search the last tap
+// shows 340, not 500). So the number is revealTarget()'s — the same function the button pages with —
+// and these checks pin every failure direction.
 console.log('\nThe «عرض المزيد» sentence states the real next-tap target\n');
 const i18nSrc = readFileSync(join(root, 'src', 'i18n.tsx'), 'utf8');
 const moreKeys = [
+  // first-tap offers
   'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}.',
   'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}, or help you find more precise ones.',
+  // last-tap (500-cap) offers — must state {next} = min(500,total), NEVER a fixed 500
+  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {next} at once. Want me to show more, or help you find more precise ones?',
+  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {next} at once. Want me to show more?',
 ];
 for (const k of moreKeys) {
   const ar = i18nSrc.match(new RegExp(`'${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']*)'`))?.[1] ?? '';
   check(`AR carries the {next} placeholder, not a fixed number: "${k.slice(60, 90)}…"`,
-    ar.includes('{next}') && !/\b100\b/.test(ar), `got: "${ar}"`);
+    ar.includes('{next}') && !/\b(100|500)\b/.test(ar), `got: "${ar}"`);
 }
 check('the retired «بعرض لك كل الإعلانات» one-tap-shows-everything promise is gone from every key',
   !i18nSrc.includes('إذا عرضت لك المزيد بعرض لك كل الإعلانات'));
-check('agent.tsx fills {next} from nextBatchTarget(endShown, endTotal) — the same function the button pages with',
-  /next: nextBatchTarget\(rc\.endShown, rc\.endTotal\)/.test(code));
-// EXECUTED, both directions: the stated number must equal the tap's real reveal target.
-for (const [shown, total] of [[13, 437], [13, 47], [10, 9892], [100, 437], [10, 101]] as const) {
-  const target = nextBatchTarget(shown, total);
-  check(`shown ${shown} of ${total} → the sentence would state ${target} (= what the tap reveals, clamped to what exists)`,
-    target === Math.min((Math.floor(shown / BROWSE_BATCH) + 1) * BROWSE_BATCH, total));
+check('agent.tsx fills {next} from revealTarget(endShown, endTotal) — the same function the button pages with',
+  /next: revealTarget\(rc\.endShown, rc\.endTotal\)/.test(code));
+// EXECUTED, every direction: the stated {next} must equal the tap's real reveal target = revealTarget().
+//   first tap (shown < 100) → the next 100-boundary, clamped to total
+//   last  tap (shown >= 100) → min(500, total) — the owner's 340-not-500 case included
+for (const [shown, total] of [[13, 437], [13, 47], [10, 9892], [100, 437], [100, 9892], [100, 340]] as const) {
+  const want = shown < BROWSE_BATCH ? Math.min(BROWSE_BATCH, total) : Math.min(SECOND_PAGE_CAP, total);
+  check(`shown ${shown} of ${total} → the sentence states ${revealTarget(shown, total)} (= what the tap reveals)`,
+    revealTarget(shown, total) === want);
 }
 mustCatch('a hardcoded 100 standing in for the real target on a 47-match search (the owner\'s "funny" case)',
-  nextBatchTarget(13, 47) !== 100);
+  revealTarget(13, 47) !== 100);
+mustCatch('a hardcoded 500 standing in for a 340-match LAST tap (the owner\'s 2026-09-14 case)',
+  revealTarget(100, 340) !== 500);
 mustCatch('a sentence that promises the whole set on one tap (9,892 matches, one tap ≠ everything)',
-  nextBatchTarget(10, 9892) !== 9892);
+  revealTarget(100, 9892) !== 9892);
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }

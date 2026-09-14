@@ -68,7 +68,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
 
 BASE = "https://abeea.com.sa"
 # Primary discovery (since 2026-07-16): the default WP REST property endpoint. The Yoast property
@@ -785,33 +785,9 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str],
     including a source that contradicts itself — HOLDS. It cannot mask a real sale either: when the
     remaining live twin also flips to Sold/Rented, no live sighting exists that crawl and the pin
     applies normally."""
-    live = set(live_ad_numbers or ())
-    conflicted = sorted(a for a in set(ad_numbers) if a in live)
-    pinnable = [a for a in ad_numbers if a not in live]
-    if conflicted:
-        print(f"{table}: {len(conflicted)} ad_number(s) marked gone on one post but seen LIVE on "
-              f"another THIS crawl — HELD active, not pinned (contradictory source is not "
-              f"authoritative): {', '.join(conflicted[:10])}", flush=True)
-    if not pinnable:
-        return
-    for i in range(0, len(pinnable), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", pinnable[i:i + 200]),
-            what=table + ".sold_pin",
-        )
-    # Durable per-row evidence, so "the SOURCE said gone" is provable in SQL and not only in a CI
-    # log. mon_detect_prune_kill_without_source_verdict() reads this: without it, every correct
-    # sold-pin would read as an unverified deactivation and the barrier would cry wolf on the one
-    # path that is actually well-evidenced. Monitoring must never fail the pin itself.
-    try:
-        rows = [{"source_table": table, "ad_number": a, "verdict": "GONE",
-                 "oracle": "abeea.sold_pin.property_status"} for a in pinnable]
-        for i in range(0, len(rows), 200):
-            db._execute(db.sb().table("ops_stale_inactivation_probe").insert(rows[i:i + 200]),
-                        what="ops_stale_inactivation_probe.insert")
-    except Exception as e:
-        print(f"{table}: could not record sold-pin evidence ({type(e).__name__}: {e})")
+    sold_pin.pin_source_confirmed_gone(table, ad_numbers,
+                                       oracle="abeea.sold_pin.property_status",
+                                       live_ad_numbers=live_ad_numbers)
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────

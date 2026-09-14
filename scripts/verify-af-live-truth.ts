@@ -191,7 +191,7 @@ function diffIds(rpcList, oracleSet) {
 
 // ── ONE journey runner ─────────────────────────────────────────────────────────────────────────
 async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal = [], category = null,
-  group, type, city, district = null, answerAmenityIndex = null, answerBathrooms = null,
+  group = null, type = null, city, district = null, answerAmenityIndex = null, answerBathrooms = null,
   answerFurnished = null, expectZero = false, skipFirst = false, backAndChange = false }) {
   console.log(`\n════════ JOURNEY: ${name} ════════`);
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport });
@@ -263,8 +263,16 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
       await page.type('input >> nth=1', district, { delay: 60 });
       await tap(district);
     }
-    await tap(group);
-    await tap(type);
+    // group/type are OPTIONAL (2026-09-14, routine #10 — ops_incident #176). Every journey in this
+    // corpus used to narrow by a SPECIFIC نوع, so the single most common real search shape — a
+    // Residential or Commercial search with no type picked, which sends `p_types: null` — had ZERO
+    // daily coverage. A corpus that always narrows on every axis cannot see a bug that only fires
+    // on the UNNARROWED case for that axis; that is what hid ops_incident #165 for an unmeasured
+    // period. Passing group:null,type:null drives the untyped search the oracle already knows how
+    // to judge (scripts/lib/afOracleFilter.ts handles a null p_types explicitly, on both the
+    // single-scope and two-scope paths).
+    if (group) await tap(group);
+    if (type) await tap(type);
     await tap('بحث');
     await page.waitForTimeout(14000);
     // scroll to reveal the AF launcher below the result cards
@@ -595,6 +603,15 @@ await runJourney('Residential/Buy/Apartment/Riyadh — SKIP case', {
 });
 await runJourney('Residential/Buy/Apartment/Riyadh — BACK/change-answer case', {
   deal: [], city: 'الرياض', group: 'الشقق والسكن المشترك', type: 'شقة', backAndChange: true,
+});
+
+// THE UNNARROWED AXIS (ops_incident #176). No نوع picked at all — the p_types:null shape that every
+// other journey in this corpus narrows away, and the most common real search a user actually makes.
+await runJourney('Residential/Buy/Riyadh — NO نوع picked (p_types:null)', {
+  deal: [], category: null, city: 'الرياض', group: null, type: null,
+});
+await runJourney('Commercial/Rent-Annual/Riyadh — NO نوع picked (p_types:null, commercial scope)', {
+  deal: ['إيجار', 'شراء', 'سنوي'], category: 'تجاري', city: 'الرياض', group: null, type: null,
 });
 
 await browser.close();

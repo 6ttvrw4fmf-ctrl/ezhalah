@@ -688,10 +688,10 @@ const AR: Record<string, string> = {
   'I showed you the first {n} listings. Want me to show more?': 'عرضت لك أول {n} إعلانات. تبي أعرض لك المزيد؟',
   'I showed you all {n} matching listings.': 'عرضت لك كل النتائج المطابقة ({n} إعلان).',
   // FIRST-100 / 500-cap «عرض المزيد» copy (owner 2026-09-14). Numbers stay Western (100/500/{total}).
-  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to 500 at once. Want me to show more, or help you find more precise ones?':
-    'لسا عندنا لك المزيد! عرضنا لك {shown} من أصل {total} إعلان. «عرض المزيد» الجاية هي الأخيرة — بنعرض لك حتى 500 إعلان دفعة وحدة. أو نحدد طلبك ونوصّلك للي يناسبك بالضبط.',
-  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to 500 at once. Want me to show more?':
-    'لسا عندنا لك المزيد! عرضنا لك {shown} من أصل {total} إعلان. «عرض المزيد» الجاية هي الأخيرة — بنعرض لك حتى 500 إعلان دفعة وحدة.',
+  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {next} at once. Want me to show more, or help you find more precise ones?':
+    'لسا عندنا لك المزيد! عرضنا لك {shown} من أصل {total} إعلان. «عرض المزيد» الجاية هي الأخيرة — بنعرض لك حتى {next} إعلان دفعة وحدة. أو نحدد طلبك ونوصّلك للي يناسبك بالضبط.',
+  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {next} at once. Want me to show more?':
+    'لسا عندنا لك المزيد! عرضنا لك {shown} من أصل {total} إعلان. «عرض المزيد» الجاية هي الأخيرة — بنعرض لك حتى {next} إعلان دفعة وحدة.',
   'That is every matching listing ({n}). For a new search, open the menu and choose Search.':
     'عرضنا لك كل النتائج المتوفرة ({n} إعلان). تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
   'These are the last {shown} I can show you. Want help finding more precise ones? Or open the menu for a new search.':

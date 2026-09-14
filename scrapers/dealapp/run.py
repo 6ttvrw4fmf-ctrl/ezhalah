@@ -62,7 +62,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, http_liveness, normalize  # noqa: E402
+from scrapers.common import db, http_liveness, normalize, sold_pin  # noqa: E402
 from scrapers.dealapp import liveness as dealapp_liveness  # noqa: E402
 
 SOURCE = "Deal App"
@@ -987,12 +987,7 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     Deal App scope: only *sold* ids (SoldOut/OutOfStock availability or a تم البيع/تم التأجير
     badge) are pinned. There is no other deactivation path in this scraper — extreme prices are
     preserved ACTIVE per the owner rule (see the OWNER RULE comment in map_listing)."""
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    sold_pin.pin_source_confirmed_gone(table, ad_numbers, oracle="dealapp.sold_pin.offers_availability")
 
 
 # ── main ─────────────────────────────────────────────────────────────────────────
