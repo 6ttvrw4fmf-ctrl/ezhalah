@@ -108,8 +108,22 @@ failure into a plausible empty value that no type checker and no count-honesty b
 The mechanism already exists — **do not invent a second one.** `src/lib/afProbe.ts` defines
 `PROBE_FAILED` / `isProbeFailure()` / `probeVerdict()`, distinguishing `'unknown'` from
 `'known-empty'`. Use it. A fetch that can fail must return a value the caller can tell apart from
-success and from a genuine zero, and every RPC goes through the `bounded()` timeout wrapper — a call
-with no timeout wedges the loader forever, which reads to a user as a hang, not an error.
+success and from a genuine zero, and every RPC must bound its await — a call with no timeout wedges
+the loader forever, which reads to a user as a hang, not an error.
+
+**That last clause used to read "every RPC goes through the `bounded()` timeout wrapper", and it was
+a claim nobody executed (corrected 2026-09-14, routine #10).** Measured: 16 RPC call sites in
+`src/`, **13 bounded and 3 not** — `loaderActivePlatforms.ts`, `loaderScaleStats.ts` and
+`remote.ts`'s `loc_rel_rank` have no timeout, no AbortSignal and no `withTimeout`. Nothing in the
+repo would have noticed a fourth. A reader consulting this rule for "are our RPCs bounded?" got a
+confident yes from a sentence no check enforced — the PART 1.11 shape in
+`docs/ops/BARRIER_ENGINEER.md`: a pointer reads as coverage. `scripts/verify-every-rpc-call-is-bounded.ts`
+(in `npm test`) now measures it on every PR: the three known sites are a **shrink-only** baseline
+with a ceiling, a NEW unbounded call site is RED, and a baseline entry that has been fixed is RED as
+stale so the ratchet cannot read better than reality. The three remaining sites are
+`ops_incident` #269, owned by their surfaces, not by the barrier. Three mechanisms count as bounded
+because the repo really uses three and all three bound the wait: `bounded()` (src/data/remote.ts),
+`.abortSignal()` (src/data/locations.ts) and `withTimeout()` (the AF probe path).
 
 **Barriers for this class must EXECUTE the function against an injected failure.** Every one of these
 five defects had a barrier over the exact line, and every one of those barriers was a source-TEXT

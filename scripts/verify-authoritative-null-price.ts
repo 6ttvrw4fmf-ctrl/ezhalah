@@ -158,32 +158,55 @@ check(R.evidence_flag_true && R.evidence_flag_defaults_false,
 
 // ---------------------------------------------------------------- source half (who may name it)
 // The sentinel is only safe while it is named exclusively where the SOURCE settled the question.
-const enrich = readFileSync('scrapers/aqar/enrich_residential.py', 'utf8');
-check(/authoritative_no_price\s*=\s*bool\(\s*s_authoritative\s+and\s+s_price\s+is\s+None\s*\)/.test(enrich),
-  'aqar derives authoritative_no_price from the oracle (s_authoritative AND no price)',
-  'scrapers/aqar/enrich_residential.py no longer derives authoritative_no_price from ' +
-  '_structured_price()\'s authoritative flag — it could now blank a price on a read failure');
+//
+// This half reads TEXT rather than executing, for a stated reason: the property is "which LINES of
+// the enricher may name the sentinel", which is a property of the file, not of any one call. It is
+// therefore extracted as a PURE predicate below so the proofs at the bottom can hand it an
+// enricher that names AUTHORITATIVE_NULL unguarded and watch it go red — until 2026-09-14 this half
+// had no proof at all, and it is the gate that stops a FAILED FETCH from blanking a known price.
 
-// Every AUTHORITATIVE_NULL use in the scraper tree must sit behind that flag. Count CODE only —
-// a mention inside a `#` comment is prose, and counting prose as a use is exactly the mistake this
-// repo's other barriers keep having to unlearn.
-const codeLines = enrich
-  .split('\n')
-  .filter((l) => !l.trimStart().startsWith('#'))
-  .filter((l) => l.includes('AUTHORITATIVE_NULL'));
-const importLines = codeLines.filter((l) => /^\s*from\s+scrapers\.common\.db\s+import\b/.test(l));
-const assignments = codeLines.filter((l) => !importLines.includes(l));
-const guarded = assignments.filter((l) => /AUTHORITATIVE_NULL if authoritative_no_price/.test(l));
-check(assignments.length > 0 && guarded.length === assignments.length,
-  `every AUTHORITATIVE_NULL assignment in the aqar enricher is gated on authoritative_no_price ` +
-  `(${guarded.length}/${assignments.length})`,
-  `an AUTHORITATIVE_NULL in scrapers/aqar/enrich_residential.py is NOT gated on ` +
-  `authoritative_no_price (${guarded.length}/${assignments.length} gated) — it could blank a price ` +
-  `the source never retracted`);
-check(!/price_per_meter":\s*\(?AUTHORITATIVE_NULL/.test(enrich),
-  'price_per_meter is never authoritatively blanked (سعر المتر is its own published field)',
-  'price_per_meter is being blanked by the total-price decision — aqar not publishing a TOTAL says ' +
-  'nothing about the per-meter figure');
+/** Violations of the who-may-name-the-sentinel rule, as a pure function of the enricher source. */
+export function sentinelGateProblems(enrich: string): string[] {
+  const out: string[] = [];
+
+  if (!/authoritative_no_price\s*=\s*bool\(\s*s_authoritative\s+and\s+s_price\s+is\s+None\s*\)/.test(enrich)) {
+    out.push('scrapers/aqar/enrich_residential.py no longer derives authoritative_no_price from ' +
+      "_structured_price()'s authoritative flag — it could now blank a price on a read failure");
+  }
+
+  // Every AUTHORITATIVE_NULL use in the scraper tree must sit behind that flag. Count CODE only —
+  // a mention inside a `#` comment is prose, and counting prose as a use is exactly the mistake this
+  // repo's other barriers keep having to unlearn.
+  const codeLines = enrich
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('#'))
+    .filter((l) => l.includes('AUTHORITATIVE_NULL'));
+  const importLines = codeLines.filter((l) => /^\s*from\s+scrapers\.common\.db\s+import\b/.test(l));
+  const assignments = codeLines.filter((l) => !importLines.includes(l));
+  const guarded = assignments.filter((l) => /AUTHORITATIVE_NULL if authoritative_no_price/.test(l));
+  // `assignments.length > 0` is the FAIL-CLOSED half: an enricher that names the sentinel nowhere
+  // means this guard is no longer reading the code it protects, and must read as MISSING — never as
+  // "0 of 0 gated, all clear".
+  if (!(assignments.length > 0 && guarded.length === assignments.length)) {
+    out.push('an AUTHORITATIVE_NULL in scrapers/aqar/enrich_residential.py is NOT gated on ' +
+      `authoritative_no_price (${guarded.length}/${assignments.length} gated) — it could blank a price ` +
+      'the source never retracted');
+  }
+
+  if (/price_per_meter":\s*\(?AUTHORITATIVE_NULL/.test(enrich)) {
+    out.push('price_per_meter is being blanked by the total-price decision — aqar not publishing a ' +
+      'TOTAL says nothing about the per-meter figure');
+  }
+
+  return out;
+}
+
+const enrich = readFileSync('scrapers/aqar/enrich_residential.py', 'utf8');
+const gateProblems = sentinelGateProblems(enrich);
+check(gateProblems.length === 0,
+  'only the SOURCE may name AUTHORITATIVE_NULL: the flag is derived from the oracle, every ' +
+  'assignment is gated on it, and price_per_meter is never blanked by the total-price decision',
+  gateProblems.join(' | '));
 
 check(npmTestRuns(REPO_ROOT, 'verify-authoritative-null-price'),
   'npm test runs this guard',
@@ -192,8 +215,50 @@ check(npmTestRuns(REPO_ROOT, 'verify-authoritative-null-price'),
 console.log('authoritative-null-price: only the SOURCE may blank a known price\n');
 for (const o of ok) console.log(`  ✓ ${o}`);
 for (const p of problems) console.error(`  ✗ ${p}`);
-if (problems.length) {
-  console.error(`\n❌ ${problems.length} check(s) failed — a read failure could blank a valid price.`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MUTATION PROOFS for the SOURCE half. The behavioural half above carries its own mutation inside
+// the Python probe (R.mutation_detected — the pre-fix guard re-created and watched to fail the
+// authoritative case). The source half had none until 2026-09-14: it was a text tripwire over the
+// one gate that stops a read failure from writing NULL over a source-verified price, and nobody had
+// ever watched it go red. These hand the real enricher, mutated, to the real predicate.
+// ─────────────────────────────────────────────────────────────────────────────
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${label}`); return; }
+  mutFail++;
+  console.error(`FAIL  (mutation) BLIND to ${label}`);
+};
+
+// The shipped gated assignment, recovered from the source so the mutants edit REAL code.
+const gatedLine = enrich
+  .split('\n')
+  .find((l) => !l.trimStart().startsWith('#') && /AUTHORITATIVE_NULL if authoritative_no_price/.test(l)) ?? '';
+
+mustCatch('the 2026-08-22 incident re-introduced: an AUTHORITATIVE_NULL written UNCONDITIONALLY, so a blocked fetch blanks a known price',
+  sentinelGateProblems(enrich.replace(gatedLine, gatedLine.replace(/ if authoritative_no_price[^,\n]*/, ''))).length > 0);
+
+mustCatch('the flag surviving in name but stopping being derived from the source oracle (gated on a constant instead)',
+  sentinelGateProblems(enrich.replace(/authoritative_no_price\s*=\s*bool\([^\n]*\)/, 'authoritative_no_price = True')).length > 0);
+
+mustCatch('…and the subtler version: the flag no longer requiring the source to have been READ authoritatively',
+  sentinelGateProblems(enrich.replace(/bool\(\s*s_authoritative\s+and\s+s_price\s+is\s+None\s*\)/, 'bool(s_price is None)')).length > 0);
+
+mustCatch('the per-metre price being blanked by a decision about the TOTAL (سعر المتر is its own published field)',
+  sentinelGateProblems(enrich.replace(gatedLine, `${gatedLine}\n        "price_per_meter": (AUTHORITATIVE_NULL if authoritative_no_price else ppm),`)).length > 0);
+
+mustCatch('the enricher naming the sentinel NOWHERE — an unreadable subject reads as MISSING, never as "0 of 0 gated, all clear"',
+  sentinelGateProblems(enrich.replace(/AUTHORITATIVE_NULL/g, 'None')).length > 0);
+
+mustCatch('…while a COMMENT mentioning AUTHORITATIVE_NULL is still prose, not an ungated assignment (the predicate is not over-broad)',
+  sentinelGateProblems(`${enrich}\n        # AUTHORITATIVE_NULL must never be written on a read failure\n`).length === 0);
+
+mustCatch('…and the enricher as it actually ships is NOT flagged (the predicate is not vacuously red)',
+  sentinelGateProblems(enrich).length === 0);
+
+if (problems.length || mutFail) {
+  if (problems.length) console.error(`\n❌ ${problems.length} check(s) failed — a read failure could blank a valid price.`);
+  if (mutFail) console.error(`❌ ${mutFail} mutation(s) went UNCAUGHT — the source half cannot see the defect it exists for.`);
   process.exit(1);
 }
-console.log('\n✅ authoritative-null-price: passed.');
+console.log('\n✅ authoritative-null-price: passed, and both halves proven to fail on the defect they exist for.');
