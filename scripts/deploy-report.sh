@@ -49,5 +49,12 @@ deploy_report_verdict() {
   if grep -qE 'REFUSING TO DEPLOY|safe-deploy: REFUSED' "$log"; then REFUSED_PRE=yes; fi
   # This fires only AFTER a successful deploy (alias/env/smoke-test/drift checks).
   if grep -q 'REFUSING TO ADVANCE THE BASELINE' "$log"; then POST_FAILED=yes; fi
-  DEPLOY_URL="$(grep -oE 'https://ezhalah-[a-z0-9]+-[a-z0-9-]+\.vercel\.app' "$log" | tail -1)"
+  # `|| true`: matches the same grep-in-a-pipe idiom safe-deploy.sh already uses for PRE_BUNDLE/
+  # DEPLOYED_URL/EMITTED_BUNDLE. Without it, a caller with `pipefail` active (this function's own
+  # caller does not today, but a library must not assume that of every future one) would have a
+  # "no preview URL in this log" result — the ordinary case for a pre-deploy refusal, since nothing
+  # vercel-shaped was ever printed — abort the whole function via `set -e`, before SHIPPED/
+  # REFUSED_PRE/POST_FAILED (already computed above) ever reach the caller. Caught by
+  # scripts/verify-deploy-report.ts running this function under `set -euo pipefail`.
+  DEPLOY_URL="$(grep -oE 'https://ezhalah-[a-z0-9]+-[a-z0-9-]+\.vercel\.app' "$log" | tail -1 || true)"
 }
