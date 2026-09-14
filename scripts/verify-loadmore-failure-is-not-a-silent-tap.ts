@@ -17,15 +17,15 @@
 // place it is usually violated: the fetch layer got it right and the render layer threw the answer
 // away.
 //
-// THE TWO-PRESS RULE (Task 4 rev. 2). A FIRST tap on a turn (still at its initial-reveal floor)
-// fetches and reveals only up to the next 100-boundary (`nextBatchTarget`), leaving any extra
-// already-fetched rows buffered but unrevealed — the chat stays open, offering «عرض المزيد» and/or
-// «خلّنا نحدد الطلب أكثر» again. A LATER tap (revealCount already past that floor) drains every
-// remaining page and finishes the chat exactly like R11.1's small-set completion. Which branch a
-// press takes is read from the turn's OWN reveal state — no separate "have I pressed before" flag.
-// The failure contract is unchanged in both branches: a failure on ANY page tells the user, merges
-// nothing from that failed page, leaves the cursor where it was, and never claims completion for a
-// reveal that did not actually finish.
+// THE TWO-TAP, 500-CAP RULE (owner 2026-09-14, supersedes Task 4 rev. 2's unbounded drain). A press's
+// reveal target comes from `revealTarget(cur, total)`: a FIRST tap (still at the initial-reveal floor)
+// reveals up to the next 100-boundary, leaving any extra fetched rows buffered — the chat stays open,
+// offering «عرض المزيد» and/or «خلّنا نحدد الطلب أكثر» again. The LAST tap (revealCount already past
+// that floor) reveals up to SECOND_PAGE_CAP (500) and the chat COMPLETES: on a ≤500 set that shows
+// everything, on a >500 set it caps at 500 and the terminal Advanced-Filter state takes over. There
+// is no third tap. The failure contract is unchanged in both branches: a failure on ANY page tells
+// the user, merges nothing from that failed page, leaves the cursor where it was, and never claims
+// completion for a reveal that did not actually finish.
 //
 // WHY THIS BARRIER EXECUTES INSTEAD OF GREPPING. AGENTS.md is explicit: all five defects of
 // 2026-09-04 had a source-TEXT tripwire over the exact line, and every one of those tripwires stayed
@@ -41,13 +41,13 @@
 //   2. On `failed`, NOTHING is merged and the cursor is NOT advanced — the next tap retries the
 //      same page rather than skipping real matches — AND completion is NOT claimed.
 //   3. A FIRST press on a large total reveals only the next 100-boundary, buffers the rest, and does
-//      NOT finish the chat — the exact behavior rev. 2 exists to lock in.
+//      NOT finish the chat — the exact behavior the two-tap rule locks in.
 //   4. A FIRST press whose honest total already fits inside the boundary (a small set) still merges,
 //      cascades, shows no error, and DOES finish — there is no dummy second press to force.
 //                                                                 [M-always: `if (true)` → RED]
-//   5. A LATER press (already past the initial floor) drains every remaining page — a genuine
-//      multi-page drain merges BOTH pages, gap-free, and only finishes once the LAST page says
-//      hasMore=false — never after the first of the two.
+//   5. A LAST press (already past the initial floor) reveals up to the 500 cap and FINISHES: a
+//      ≤500 set drains every remaining page gap-free and shows everything; a >500 set caps at 500
+//      and still completes (the terminal Advanced-Filter state takes over — see §CEILING).
 //
 //   node --experimental-strip-types scripts/verify-loadmore-failure-is-not-a-silent-tap.ts
 //   (auto-discovered by npm test — scripts/lib/testRegistry.ts)
@@ -56,17 +56,18 @@ import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
-// The REAL boundary function, not a re-implementation — loadMore now calls this for its first-press
-// target, so the lifted copy must reach the same one this file's own math tests already pin.
-import { nextBatchTarget, drainPageBudget, DRAIN_ROW_BUDGET, LOAD_MORE_PAGE_SIZE, DRAIN_REVEAL_MAX } from '../src/data/resultCount.ts';
-(globalThis as unknown as { __nextBatchTarget: typeof nextBatchTarget }).__nextBatchTarget = nextBatchTarget;
+// The REAL reveal-target function, not a re-implementation — loadMore now calls this for BOTH taps'
+// target (first → the 100-boundary, last → the 500 cap), so the lifted copy reaches the same one this
+// file's own math tests already pin.
+import { revealTarget, drainPageBudget, DRAIN_ROW_BUDGET, LOAD_MORE_PAGE_SIZE, SECOND_PAGE_CAP } from '../src/data/resultCount.ts';
+(globalThis as unknown as { __revealTarget: typeof revealTarget }).__revealTarget = revealTarget;
 // The page backstop is a component-level sibling of loadMore, so the PRELUDE has to supply it — and
 // it must supply the REAL one. Until 2026-09-12 the prelude declared a literal `50`, which is why
 // every drain test here passed while production's own backstop was sized against the wrong page
 // size AND threw away everything it had fetched when it tripped (see §BACKSTOP below).
 (globalThis as unknown as { __drainPages: number }).__drainPages = drainPageBudget(LOAD_MORE_PAGE_SIZE);
-// Same rule for the reveal ceiling: the REAL constant, so §CEILING measures the shipped bound.
-(globalThis as unknown as { __revealMax: number }).__revealMax = DRAIN_REVEAL_MAX;
+// The REAL display cap, so §CEILING measures the shipped bound (owner 2026-09-14: 500).
+(globalThis as unknown as { __cap: number }).__cap = SECOND_PAGE_CAP;
 
 const root = join(import.meta.dirname, '..');
 const AGENT = join(root, 'src/app/agent.tsx');
@@ -126,8 +127,8 @@ const PRELUDE = [
   'const revealCount: any = bus.seedRevealCount != null ? { mid: bus.seedRevealCount } : {};',
   'const loadingMore: any = {};',
   'const initialReveal = (_r: any) => 10;',
-  'const nextBatchTarget = (globalThis as any).__nextBatchTarget;',
-  'const DRAIN_REVEAL_MAX = (globalThis as any).__revealMax;',
+  'const revealTarget = (globalThis as any).__revealTarget;',
+  'const SECOND_PAGE_CAP = (globalThis as any).__cap;',
   'const cascadeIn = (_mid: string, from: number, target: number) => { bus.cascades.push([from, target]); bus.revealedTo = target; };',
   'const setRevealCount = (f: any) => { const next = f({}); bus.revealedTo = next.mid; };',
   'const setLoadingMore = (f: any) => { bus.loading.push(true); void f({}); };',
@@ -320,41 +321,43 @@ check('a failure on the SECOND page of a later-press drain never claims completi
 //   · every drain scenario above queues 2 pages, so the backstop branch was never once executed;
 //   · the PRELUDE declared `MAX_DRAIN_PAGES = 50` as a literal, so even a test that had tripped it
 //     would have been asserting against a number this barrier made up rather than the shipped one.
-// ── §CEILING. ONE PRESS NEVER REVEALS MORE THAN THE PRODUCT CAN RENDER ───────────────────────────
-// MEASURED ON PRODUCTION 2026-09-12, unmodified code: الرياض/إيجار/سنوي (20,782 matching) — press 2
-// drained 40 pages and the RENDERER PROCESS CRASHED while mounting the cards. The list is
-// unvirtualized, so "reveal everything" is not implementable at that size; الخبر's 5,706 rendered
-// fine, so the ceiling sits well under it. A press over the ceiling must reveal exactly the
-// ceiling, keep «عرض المزيد», and NOT finish the search.
+// ── §CEILING. THE LAST TAP REVEALS UP TO 500 AND RETIRES — never more than the product can render ─
+// MEASURED ON PRODUCTION 2026-09-12, unmodified code: الرياض/إيجار/سنوي (20,782 matching) — a press
+// that drained toward "everything" mounted ~20,000 cards and the RENDERER PROCESS CRASHED. The list
+// is unvirtualized, so "reveal everything" is not implementable at that size. The owner's 2026-09-14
+// rule removes the class entirely: the LAST «عرض المزيد» reveals up to SECOND_PAGE_CAP (500) and the
+// chat COMPLETES — the button retires and the terminal state (Advanced Filter, since unseen inventory
+// remains) takes over. 500 sits far under الخبر's 5,706 (which rendered fine), so no mount is ever
+// unrenderable.
 {
-  // A cohort far larger than the ceiling, served in real pages.
+  // A cohort far larger than the cap, served in real pages.
   const pages = Array.from({ length: 40 }, (_, i) => ({
     listings: PAGE(LOAD_MORE_PAGE_SIZE, 100 + i * LOAD_MORE_PAGE_SIZE),
     nextOffset: 100 + (i + 1) * LOAD_MORE_PAGE_SIZE, hasMore: true,
   }));
   const bus = await runLoadMore(AGENT, pages, PAGE(100), { seedRevealCount: 100, matchTotal: 20_782 });
-  check('§CEILING a later press reveals at most DRAIN_REVEAL_MAX new cards',
-    bus.revealedTo === 100 + DRAIN_REVEAL_MAX,
-    `revealedTo ${bus.revealedTo} (expected ${100 + DRAIN_REVEAL_MAX}) — an unbounded reveal is what crashed the tab`);
-  check('§CEILING the search is NOT finished while matches remain beyond the ceiling',
-    bus.completed !== true, `completed: ${bus.completed}`);
-  check('§CEILING bounding the reveal also bounds the FETCH — a tap costs a few RPCs, not 40',
-    bus.fetchCount <= Math.ceil(DRAIN_REVEAL_MAX / LOAD_MORE_PAGE_SIZE) + 1,
-    `fetchCount ${bus.fetchCount} for a ${DRAIN_REVEAL_MAX}-row ceiling at ${LOAD_MORE_PAGE_SIZE} rows/page`);
+  check('§CEILING the last tap on a >500 cohort reveals EXACTLY the 500 cap, never more',
+    bus.revealedTo === SECOND_PAGE_CAP,
+    `revealedTo ${bus.revealedTo} (expected ${SECOND_PAGE_CAP}) — an unbounded reveal is what crashed the tab`);
+  check('§CEILING the chat COMPLETES at the cap — the button retires, the AF/terminal state takes over',
+    bus.completed === true, `completed: ${bus.completed} — the >500 terminal must finish the chat`);
+  check('§CEILING bounding the reveal also bounds the FETCH — a tap costs a page or two, not 40',
+    bus.fetchCount <= Math.ceil(SECOND_PAGE_CAP / LOAD_MORE_PAGE_SIZE) + 1,
+    `fetchCount ${bus.fetchCount} for a ${SECOND_PAGE_CAP}-row cap at ${LOAD_MORE_PAGE_SIZE} rows/page`);
   check('§CEILING nothing is discarded — every fetched row is merged into the buffer',
-    bus.merged.length >= 100 + DRAIN_REVEAL_MAX, `merged ${bus.merged.length}`);
+    bus.merged.length >= SECOND_PAGE_CAP, `merged ${bus.merged.length}`);
 }
 {
-  // A cohort that FITS under the ceiling still drains to the end and finishes — the owner's
-  // 2026-09-11 rule is untouched wherever it is implementable, which is the common case.
+  // A cohort that FITS under the cap still drains to the end across multiple pages and finishes —
+  // the owner's rule is untouched for the common case: 100–500 shows everything on the last tap.
   const bus = await runLoadMore(AGENT,
-    [{ listings: PAGE(400, 100), nextOffset: 500, hasMore: true },
-     { listings: PAGE(120, 500), nextOffset: 620, hasMore: false }],
-    PAGE(100), { seedRevealCount: 100, matchTotal: 620 });
-  check('§CEILING a cohort UNDER the ceiling still drains to the end in one press',
-    bus.merged.length === 620 && bus.revealedTo === 620,
+    [{ listings: PAGE(300, 100), nextOffset: 400, hasMore: true },
+     { listings: PAGE(80, 400), nextOffset: 480, hasMore: false }],
+    PAGE(100), { seedRevealCount: 100, matchTotal: 480 });
+  check('§CEILING a 100–500 cohort still drains to the end across pages in one tap',
+    bus.merged.length === 480 && bus.revealedTo === 480,
     `merged ${bus.merged.length}, revealedTo ${bus.revealedTo}`);
-  check('§CEILING a cohort UNDER the ceiling still FINISHES the search (owner rule intact)',
+  check('§CEILING a 100–500 cohort FINISHES the search with every match shown (owner rule intact)',
     bus.completed === true, `completed: ${bus.completed}`);
 }
 
@@ -413,21 +416,21 @@ check('store.tsx pages at the shared LOAD_MORE_PAGE_SIZE, not a private copy of 
   'PAGE_MORE must be the shared constant so the page size has exactly one definition');
 
 // ── 5. MUTATION PROOFS — each locked behaviour really falls RED ──────────────────────────────────
-// M-always-drain: THE regression this whole rev. 2 file update exists to catch — reverting to Task
-// 4's original "every press drains everything" by hardcoding alreadyExpandedOnce true. Proves the
-// first-press checks above are not vacuous: without the gate, a FIRST press on a 5,000-match search
-// would drain and finish immediately, exactly the behavior the owner asked to delay behind a choice.
-const mAlwaysDrain = mutantOf(agentSrc,
-  'const alreadyExpandedOnce = cur > initialReveal(m.result);',
-  'const alreadyExpandedOnce = true;');
-const alwaysDrainBus = await runLoadMore(
-  mAlwaysDrain,
+// M-first-overreveals: the first-tap boundary is what keeps a FIRST press from mounting a big set at
+// once — `revealTarget(cur, …)` returns the 100-boundary while cur is still under 100. A wiring that
+// reveals past what revealTarget returns reintroduces the over-reveal. Proves §2's first-press checks
+// are not vacuous: without the boundary, a first press on a 5,000-match search reveals past 100.
+const mFirstOverreveals = mutantOf(agentSrc,
+  'const target = revealTarget(cur, m.result.matchTotal ?? Infinity);',
+  'const target = revealTarget(cur, m.result.matchTotal ?? Infinity) + 500;');
+const overrevealBus = await runLoadMore(
+  mFirstOverreveals,
   [{ listings: PAGE(150, 10), nextOffset: 500, hasMore: true }],
   PAGE(10),
   { matchTotal: 5000 },
 );
-mustCatch('M-always-drain — a first press that ignores the gate reveals past the 100-boundary',
-  alwaysDrainBus.revealedTo !== 100, `revealedTo: ${alwaysDrainBus.revealedTo}`);
+mustCatch('M-first-overreveals — a first press revealing past the 100-boundary is caught',
+  overrevealBus.revealedTo !== 100, `revealedTo: ${overrevealBus.revealedTo}`);
 
 // M-drop: the exact pre-fix line. This is the defect, restored.
 const mDrop = mutantOf(agentSrc,
@@ -469,26 +472,26 @@ const unboundedBus = await runLoadMore(mUnbounded, overBudget.map((p) => ({ ...p
 mustCatch('M-unbounded — a drain with no page budget runs past it and is caught',
   unboundedBus.fetchCount > BUDGET, `fetchCount ${unboundedBus.fetchCount} (budget ${BUDGET})`);
 
-// M-unbounded-reveal: THE CRASH, restored — a later press targeting Infinity, exactly the code that
-// mounted ~20,000 cards and killed the renderer on production. Proves §CEILING is not vacuous.
+// M-unbounded-reveal: THE CRASH, restored — remove the 500 cap so a press reveals the whole cohort,
+// exactly the code that mounted ~20,000 cards and killed the renderer. Proves §CEILING is not vacuous.
 const mUnboundedReveal = mutantOf(agentSrc,
-  'const target = alreadyExpandedOnce ? cur + DRAIN_REVEAL_MAX : nextBatchTarget(cur, m.result.matchTotal ?? Infinity);',
-  'const target = alreadyExpandedOnce ? Infinity : nextBatchTarget(cur, m.result.matchTotal ?? Infinity);');
+  'const target = revealTarget(cur, m.result.matchTotal ?? Infinity);',
+  'const target = Infinity;');
 {
   const pages = Array.from({ length: 40 }, (_, i) => ({
     listings: PAGE(LOAD_MORE_PAGE_SIZE, 100 + i * LOAD_MORE_PAGE_SIZE),
     nextOffset: 100 + (i + 1) * LOAD_MORE_PAGE_SIZE, hasMore: true,
   }));
   const bus = await runLoadMore(mUnboundedReveal, pages, PAGE(100), { seedRevealCount: 100, matchTotal: 20_782 });
-  mustCatch('M-unbounded-reveal — a press that reveals the whole cohort blows past the ceiling',
-    (bus.revealedTo ?? 0) > 100 + DRAIN_REVEAL_MAX,
-    `revealedTo ${bus.revealedTo} — the mutant must exceed the ceiling the fix imposes`);
+  mustCatch('M-unbounded-reveal — a press that reveals past the 500 cap blows through the ceiling',
+    (bus.revealedTo ?? 0) > SECOND_PAGE_CAP,
+    `revealedTo ${bus.revealedTo} — the mutant must exceed the ${SECOND_PAGE_CAP} cap the fix imposes`);
 }
 
 // M-no-finish: a successful complete drain that forgets to call setCompleted would leave the user
 // stuck — everything shown, but the composer still live and no New Chat offered.
 const mNoFinish = mutantOf(agentSrc,
-  'if (userChoseShowAllAndFinish) setCompleted(true);',
+  'if (revealIsTerminal) setCompleted(true);',
   'if (false) setCompleted(true);');
 const noFinishBus = await runLoadMore(mNoFinish, [{ listings: PAGE(10, 10), nextOffset: 20, hasMore: false }], PAGE(10));
 mustCatch('M-no-finish — a drain that reached the end but never finishes the chat is caught',

@@ -199,10 +199,14 @@ check('the receipt strings are translated with the owner\'s exact wording',
   // Since 2026-09-05 it comes from the pure `closingNoteKey` (src/data/resultCount.ts) — the old
   // inline wording was blind to `isLatestResults`/`!ageFlow` and promised buttons that were not
   // rendered. EXECUTE the exhausted case instead of grepping for it; the Arabic half is unchanged.
+  // TERMINAL wording changed with the 500-cap rule (owner 2026-09-14): everything-shown now points to
+  // a NEW search from the ☰ menu instead of re-offering the retired «تحديد أكثر». The invariant this
+  // check owns is unchanged — the exhausted state still produces an Arabic sentence that states the
+  // true count {n} — only the exact string moved. cappedAtCap:false is the everything-shown terminal.
   check('the exhausted case has an explicit Arabic all-shown message',
-    closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: false })
-      === 'I showed you all {n} matching listings.'
-    && /'I showed you all \{n\} matching listings\.': 'عرضت لك كل النتائج المطابقة \(\{n\} إعلان\)\.'/.test(i18n),
+    closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: false, lastTapOffer: false, cappedAtCap: false })
+      === 'That is every matching listing ({n}). For a new search, open the menu and choose Search.'
+    && /'That is every matching listing \(\{n\}\)\. For a new search, open the menu and choose Search\.':\s*'عرضنا لك كل النتائج المتوفرة \(\{n\} إعلان\)\. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث»\.'/.test(i18n),
     'agent.tsx / src/i18n.tsx: when nothing is left the user must be told so in Arabic, with the true count');
 }
 // EXECUTED (logic owned by verify-result-cap-honesty.ts; asserted here only where THIS feature reads it):
