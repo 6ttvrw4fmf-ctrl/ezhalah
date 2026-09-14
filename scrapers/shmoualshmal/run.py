@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import time
 import html as ihtml
 import re
 import sys
@@ -221,10 +222,25 @@ def fetch_listings(s: cc.Session) -> list[dict]:
     global LAST_FETCH_NOTE
     LAST_FETCH_NOTE = "no pages attempted"
     for page in range(1, 30):
-        try:
-            r = s.get(f"{REST}/properties?per_page=100&page={page}", timeout=40)
-        except Exception as e:
-            LAST_FETCH_NOTE = f"page {page} raised {type(e).__name__}: {str(e)[:120]}"
+        # RETRY, because a single attempt made this source a coin flip (measured 2026-09-14):
+        # ok on 09-11, failed 09-10/12/13/14, every failure a 40s curl(28) timeout through the
+        # residential proxy — while the exact same URL answers in under a second from a normal
+        # connection and souq24 goes through that same proxy fine on those days. The source was
+        # never down; one flaky hop killed the whole run because nothing tried twice. Every
+        # sibling scraper already retries (sadin 4x, amlakalahsa 3x); this one uniquely did not.
+        r = None
+        last_exc = None
+        for attempt in range(3):
+            try:
+                r = s.get(f"{REST}/properties?per_page=100&page={page}", timeout=40)
+                break
+            except Exception as e:
+                last_exc = e
+                if attempt < 2:
+                    time.sleep(3 * (attempt + 1))
+        if r is None:
+            LAST_FETCH_NOTE = (f"page {page} raised {type(last_exc).__name__} on all 3 attempts: "
+                               f"{str(last_exc)[:110]}")
             break
         if r.status_code != 200:
             LAST_FETCH_NOTE = f"page {page} returned HTTP {r.status_code}"
