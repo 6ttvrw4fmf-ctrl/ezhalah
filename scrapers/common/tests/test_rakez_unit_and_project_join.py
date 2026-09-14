@@ -58,8 +58,10 @@ def _seed(monkeypatch):
 
 
 def _project(pid=66800, city_terms=(566,), ptype="أدوار", status="متاح", photo=True,
-             title="أدوار إرث ( اي كيو ) - الياسمين الرياض", features=()):
+             title="أدوار إرث ( اي كيو ) - الياسمين الرياض", features=(), offer=None):
     terms = [{"taxonomy": "city", "id": t, "name": TREE[t]["name"]} for t in city_terms]
+    if offer:
+        terms.append({"taxonomy": "offer-group", "name": offer})
     if ptype:
         terms.append({"taxonomy": "property-type", "name": ptype})
     if status:
@@ -136,6 +138,33 @@ def test_an_orphan_unit_is_skipped_because_it_can_say_nothing_about_itself():
 def test_the_projects_own_status_gates_its_units(status, ingested):
     row, _ = _map(proj=_project(status=status))
     assert (row is not None) is ingested
+
+
+# ── 3b. OFF-PLAN is not a listing we show ───────────────────────────────────────────────────────
+@pytest.mark.parametrize("offer,ingested", [
+    ("البيع على الخارطة", False),   # "selling on the map" — a drawing, a price and a wait
+    ("Off-plan sales", False),      # the English twin carries it too
+    ("by rakez", True),             # an ordinary marketing group, not a construction signal
+    ("سكف", True),
+    (None, True),                   # untagged → "not stated", and NOT excluded
+])
+def test_an_off_plan_project_contributes_no_listings(offer, ingested):
+    """«البيع على الخارطة» is a SECOND not-yet-built signal, independent of property-status: a
+    project can be «متاح» (available to buy) AND off-plan at the same time. That combination is
+    exactly how 99 listings across 7 projects reached production on 2026-09-14 — the card showed a
+    finished building and a ready price for something that does not physically exist."""
+    row, _ = _map(proj=_project(status="متاح", offer=offer))
+    assert (row is not None) is ingested
+
+
+def test_off_plan_is_checked_on_EITHER_language_record():
+    # The bridge can fail; the English record must still be able to veto.
+    en = _project(offer="Off-plan sales")
+    ar = _project(offer=None)
+    row, _ = R.map_unit(_unit(), en, ar, TREE)
+    assert row is None, "an off-plan tag on the English record alone must still exclude"
+    row2, _ = R.map_unit(_unit(), _project(offer=None), _project(offer="البيع على الخارطة"), TREE)
+    assert row2 is None, "…and on the Arabic record alone"
 
 
 # ── 4. LOCATION BY TREE WALK, catalog-validated at every level ──────────────────────────────────
