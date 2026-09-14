@@ -496,6 +496,15 @@ def main() -> int:
             lost = sorted(k for k, v in bridge.items() if not v)
             print(f"  ⚠ {len(needed) - bridged} project(s) had no reachable Arabic twin after 3 "
                   f"attempts — every unit under them is skipped: {lost[:10]}")
+        # A TOTAL bridge failure is not a shortfall, it is an outage: the REST feed answered but the
+        # HTML bridge did not, so nothing can be typed or located and the run would end 0-rows-ok.
+        # That is the same quiet-empty-success shape the prerequisite guards above refuse, reached
+        # by a different door — and the likeliest way it happens in production is a WAF treating the
+        # CI runner's IP differently from a laptop, which is precisely when nobody is watching.
+        if needed and bridged == 0:
+            raise RuntimeError(
+                f"the Arabic bridge resolved 0 of {len(needed)} projects — REST answered but "
+                f"/ar/project/<id>/ did not, so every unit is untypeable and unlocatable")
 
         for u in units:
             acf = u.get("acf") or {}

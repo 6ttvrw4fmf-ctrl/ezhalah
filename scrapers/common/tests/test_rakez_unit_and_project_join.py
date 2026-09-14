@@ -336,6 +336,47 @@ def test_an_empty_prerequisite_raises_instead_of_upserting_nothing(empty, expect
         f"the note must name which leg broke; got {ended.get('notes')!r}")
 
 
+def test_a_TOTAL_bridge_failure_fails_the_run(monkeypatch):
+    """REST answering while the HTML bridge does not is an outage, not a shortfall: nothing can be
+    typed or located, so the run would end 0-rows-ok. The likeliest cause in production is a WAF
+    treating the CI runner's IP differently from a laptop — exactly when nobody is watching."""
+    monkeypatch.setattr(R, "fetch_units", lambda s: [
+        {"id": 1, "acf": {"unit_project": 66800, "unit_status": "available"}}])
+    monkeypatch.setattr(R, "fetch_city_terms", lambda s: TREE)
+    monkeypatch.setattr(R, "fetch_projects", lambda s, lang="": {66800: _project()})
+    monkeypatch.setattr(R, "arabic_project_id", lambda s, en_id: None)   # bridge is dead
+    monkeypatch.setattr(R.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(R.db, "begin_run", lambda *a, **k: 1, raising=False)
+    ended = {}
+    monkeypatch.setattr(R.db, "end_run", lambda rid, **kw: ended.update(kw) or True, raising=False)
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    assert R.main() == 1
+    assert ended.get("ok") is False
+    assert "Arabic bridge resolved 0" in (ended.get("notes") or ""), ended.get("notes")
+
+
+def test_a_PARTIAL_bridge_failure_does_not_fail_the_run(monkeypatch):
+    # Losing some projects is a shortfall worth printing, not a reason to discard a good run.
+    monkeypatch.setattr(R, "fetch_units", lambda s: [
+        {"id": 1, "acf": {"unit_project": 66800, "unit_status": "available",
+                          "price": 1, "rooms_count": 1, "area": 1, "floor": "first"}},
+        {"id": 2, "acf": {"unit_project": 999, "unit_status": "available"}}])
+    monkeypatch.setattr(R, "fetch_city_terms", lambda s: TREE)
+    # the ARABIC dict is keyed by the TWIN id (66825), which is what the bridge resolves to
+    monkeypatch.setattr(R, "fetch_projects", lambda s, lang="": (
+        {66825: _project(66825)} if lang == "ar" else {66800: _project(), 999: _project(999)}))
+    monkeypatch.setattr(R, "arabic_project_id", lambda s, en_id: 66825 if en_id == 66800 else None)
+    monkeypatch.setattr(R.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(R.db, "begin_run", lambda *a, **k: 1, raising=False)
+    monkeypatch.setattr(R.db, "end_run", lambda rid, **kw: True, raising=False)
+    monkeypatch.setattr(R.db, "upsert_rakez_residential_batch", lambda rows: None, raising=False)
+    monkeypatch.setattr(R.db, "upsert_rakez_commercial_batch", lambda rows: None, raising=False)
+    monkeypatch.setattr(R.db, "retire_superseded_siblings", lambda **kw: 0, raising=False)
+    monkeypatch.setattr(R.db, "prune_unseen", lambda *a, **kw: 0, raising=False)
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    assert R.main() == 0, "a partial bridge loss must not discard the rest of the run"
+
+
 # ── 7. The liveness oracle: UNKNOWN must never kill ─────────────────────────────────────────────
 def test_verify_gone_treats_a_bare_404_as_unknown_not_gone(monkeypatch):
     class _R:
