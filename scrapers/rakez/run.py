@@ -456,8 +456,23 @@ def main() -> int:
         en_projects = fetch_projects(s)
         ar_projects = fetch_projects(s, lang="ar")
         units = fetch_units(s)
+        # FAIL VISIBLY on any empty prerequisite. A unit carries nothing but numbers: its type and
+        # its location come from the project and the location tree. If either of those came back
+        # empty while the units did not, EVERY unit maps to None — a run that looks merely
+        # disappointing (0 rows, ok=true) while actually being a total fetch failure, and one that
+        # then hands prune_unseen an empty seen-set. Each is named separately so the log says which
+        # leg broke instead of "no listings".
         if not units:
             raise RuntimeError(f"REST returned no units — {LAST_FETCH_NOTE}")
+        if not en_projects:
+            raise RuntimeError("fetched units but ZERO projects — every unit would be unmappable "
+                               f"(type and location live on the project). {LAST_FETCH_NOTE}")
+        if not tree:
+            raise RuntimeError("fetched units but ZERO location terms — every unit would be "
+                               f"location-less. {LAST_FETCH_NOTE}")
+        if not ar_projects:
+            raise RuntimeError("fetched units but ZERO Arabic projects — nothing could be typed or "
+                               f"located in Arabic. {LAST_FETCH_NOTE}")
         print(f"Rakez: {len(units)} units, {len(en_projects)} projects, {len(tree)} location terms")
 
         if args.limit_test:

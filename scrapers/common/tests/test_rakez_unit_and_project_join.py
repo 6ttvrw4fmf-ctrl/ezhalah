@@ -305,6 +305,37 @@ def test_a_non_200_from_the_bridge_is_also_retried_then_refused(monkeypatch):
     assert calls["n"] == 3
 
 
+# ── 6c. An empty prerequisite must FAIL the run, not produce a quiet 0-row success ──────────────
+@pytest.mark.parametrize("empty,expect", [
+    ("units", "no units"),
+    ("en_projects", "ZERO projects"),
+    ("tree", "ZERO location terms"),
+    ("ar_projects", "ZERO Arabic projects"),
+])
+def test_an_empty_prerequisite_raises_instead_of_upserting_nothing(empty, expect, monkeypatch,
+                                                                   capsys):
+    """A unit carries only numbers — its type and location live on the project and the tree. If
+    either came back empty while units did not, every unit maps to None: a run that reads as merely
+    disappointing (0 rows, ok=true) while being a total fetch failure, which then hands
+    prune_unseen an empty seen-set."""
+    full_unit = [{"id": 1, "acf": {"unit_project": 66800, "unit_status": "available"}}]
+    monkeypatch.setattr(R, "fetch_units", lambda s: [] if empty == "units" else full_unit)
+    monkeypatch.setattr(R, "fetch_city_terms", lambda s: {} if empty == "tree" else TREE)
+    monkeypatch.setattr(R, "fetch_projects",
+                        lambda s, lang="": ({} if empty == ("ar_projects" if lang else "en_projects")
+                                            else {66800: _project()}))
+    monkeypatch.setattr(R.db, "begin_run", lambda *a, **k: 1, raising=False)
+    ended = {}
+    monkeypatch.setattr(R.db, "end_run",
+                        lambda rid, **kw: ended.update(kw) or True, raising=False)
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    rc = R.main()
+    assert rc == 1, "an empty prerequisite must fail the run"
+    assert ended.get("ok") is False, "and it must be recorded as a FAILED run, not a quiet success"
+    assert expect in (ended.get("notes") or ""), (
+        f"the note must name which leg broke; got {ended.get('notes')!r}")
+
+
 # ── 7. The liveness oracle: UNKNOWN must never kill ─────────────────────────────────────────────
 def test_verify_gone_treats_a_bare_404_as_unknown_not_gone(monkeypatch):
     class _R:
