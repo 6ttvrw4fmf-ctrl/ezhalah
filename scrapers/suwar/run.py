@@ -100,8 +100,8 @@ _FEATURE_COLUMNS: dict[str, str] = {
     "غرفة خادمة": "maid_room",
     "غرفة شغالة": "maid_room",
     "خزان مستقل": "separate_water_meter",
-    "كاميرات مراقبه": "security_cameras",
-    "حوش": "garden",
+    # «كاميرات مراقبه» (CCTV) and «حوش» (yard) have NO column in the shared listing shape and are
+    # deliberately NOT forced into a neighbouring one — they stay verbatim in additional_info.
 }
 
 LAST_FETCH_NOTE = "no pages attempted"
@@ -374,8 +374,8 @@ def map_listing(post: dict, detail: Optional[dict]) -> tuple[Optional[dict], str
         "area_m2": area_m2,
         "bedrooms": bedrooms,
         "bathrooms": bathrooms,
-        "living_rooms": living,
-        "majlis_rooms": majlis,
+        "halls": living,                      # الصالات
+        "reception_rooms_majlis": majlis,     # المجالس
         "price_total": detail.get("price"),
         "price_annual": None,                       # sale-only source; no period is manufactured
         "city": normalize.map_city(city_ar) if city_ar else None,

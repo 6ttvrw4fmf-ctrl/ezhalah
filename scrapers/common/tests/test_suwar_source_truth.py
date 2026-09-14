@@ -204,9 +204,14 @@ def test_plot_and_built_up_are_both_kept_and_area_is_the_plot():
     assert row["additional_info"]["area_built_m2"] == 380, "nothing the source published is lost"
 
 
-def test_rooms_are_read_and_a_silent_field_stays_null():
-    row, _ = R.map_listing(_post(), _detail(text="الغرف / 5 الصالات / 3 دورات المياه / 6"))
-    assert (row["bedrooms"], row["living_rooms"], row["bathrooms"]) == (5, 3, 6)
+def test_rooms_are_read_into_the_REAL_column_names():
+    # `halls` and `reception_rooms_majlis` — NOT `living_rooms`/`majlis_rooms`, which exist only on
+    # the SEARCH INDEX. Writing the index's names broke suwar's first production run with PGRST204
+    # (see test_scraper_rows_only_use_real_columns.py).
+    row, _ = R.map_listing(_post(), _detail(text="الغرف / 5 الصالات / 3 المجالس / 2 دورات المياه / 6"))
+    assert (row["bedrooms"], row["halls"], row["bathrooms"]) == (5, 3, 6)
+    assert row["reception_rooms_majlis"] == 2
+    assert "living_rooms" not in row and "majlis_rooms" not in row
     bare, _ = R.map_listing(_post(), _detail(text="فيلا جميلة"))
     assert bare["bedrooms"] is None and bare["bathrooms"] is None, "silence is NULL, never 0"
 
