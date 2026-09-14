@@ -149,8 +149,8 @@ export function resultCounts(args: {
 
 /** The i18n keys the closing sentence can take. Every key that asks a question requires its button. */
 export type ClosingNoteKey =
-  | 'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?'
-  | 'I showed you the first {shown} of {total} matching listings. Want me to show more?'
+  | 'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}, or help you find more precise ones.'
+  | 'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}.'
   | 'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?'
   | 'I showed you the first {shown} of {total} matching listings.'
   | 'I showed you the first {n} listings. Want me to show more, or help you find more precise ones?'
@@ -172,8 +172,14 @@ export function closingNoteKey(args: {
   const { quoteTotal, offersMore, offersNarrow } = args;
   if (args.endKind === 'more') {
     if (quoteTotal) {
-      if (offersMore && offersNarrow) return 'I showed you the first {shown} of {total} matching listings. Want me to show more, or help you find more precise ones?';
-      if (offersMore) return 'I showed you the first {shown} of {total} matching listings. Want me to show more?';
+      // THE NEXT NUMBER IS STATED, AND IT IS THE REAL ONE (owner 2026-09-13). The Arabic used to end
+      // «إذا عرضت لك المزيد بعرض لك كل الإعلانات» — one tap shows ALL — which is false: a tap advances
+      // to the next BROWSE_BATCH boundary, clamped to what exists. A hardcoded «100» would be just as
+      // wrong in the other direction ("it would be funny if you say 100 and you would only show him
+      // 20"): at trueTotal 47 the tap reveals 47, not 100. The caller passes nextBatchTarget(), the
+      // same function the button itself pages with, so the sentence and the tap can never disagree.
+      if (offersMore && offersNarrow) return 'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}, or help you find more precise ones.';
+      if (offersMore) return 'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}.';
       // No «عرض المزيد» on screen. The counts stay exactly as true as they were; the question goes —
       // but a narrow button that IS rendered still gets its invitation, or the fix would silently
       // retire a working affordance instead of telling the truth about which ones exist.

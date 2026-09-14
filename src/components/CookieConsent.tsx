@@ -18,7 +18,6 @@ import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { colors, radius, font } from '@/theme/tokens';
 import {
   shouldShowCookieBanner,
-  getCookieConsent,
   setCookieConsent,
   type CookieConsent as Consent,
 } from '@/lib/cookieConsent';
@@ -65,7 +64,14 @@ export default function CookieConsent() {
   // ABOVE it rather than under it. Routed through useAtLeast() like every width-gated flag, so the
   // first client render still reproduces the server's (React #418 — see lib/responsive.ts).
   const beside = useAtLeast(DOCK_BREAKPOINT);
-  const [consent, setConsent] = useState<Consent | null>(() => getCookieConsent());
+  // SESSION-ONLY, deliberately not seeded from getCookieConsent() (owner 2026-09-13, permanent):
+  // the cookie card must appear on EVERY signed-out visit and disappear only when the visitor signs
+  // in, mirroring SignInCard's own dismissal (which is also meant to return). Reading the persisted
+  // choice at mount would hide the card on the second visit — the very thing the owner asked to stop.
+  // localStorage is still WRITTEN by choose() so `analyticsAllowed()` keeps the user's real
+  // preference across visits; only the SHOW gate here is per-pageload, and the reload naturally
+  // resets `consent` back to null so the card comes up again.
+  const [consent, setConsent] = useState<Consent | null>(null);
   // The band a THIRD-PARTY docked prompt (Google/Apple One Tap) has reserved — never the combined
   // usePromptInsets(), which now also counts this very card's own rect (ops_incident #152 made this
   // card a member of DOCKED_PROMPT_SELECTOR) and would fold the card's reservation back into itself.

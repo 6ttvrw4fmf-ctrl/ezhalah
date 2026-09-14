@@ -1,13 +1,20 @@
-// THE COOKIE BANNER SHOWS ONCE, TO THE RIGHT VISITOR, AND ITS PROMISE IS KEPT — executed, not grepped.
+// THE COOKIE BANNER SHOWS ON EVERY SIGNED-OUT VISIT, AND ITS PROMISE IS KEPT — executed, not grepped.
 //
-// Guards the pure logic behind src/components/CookieConsent.tsx (owner 2026-09-06). Hermetic: it
-// imports the real functions and runs them, so a change that breaks the gating turns this RED.
+// Guards the pure logic behind src/components/CookieConsent.tsx (owner 2026-09-06, extended
+// 2026-09-13: the card must appear on EVERY refresh, not once per visitor). Hermetic: it imports
+// the real functions and runs them, so a change that breaks the gating turns this RED.
 //
 // What it pins:
-//   1. shouldShowCookieBanner — shown ONLY for a signed-out web visitor who has not chosen, after auth
-//      settles. Every other combination (signed in, already chose, not web, auth not settled) is hidden.
-//   2. Persistence round-trips: a recorded choice is read back, so the card is genuinely once-per-visitor.
-//   3. analyticsAllowed FAILS CLOSED — the switch the future tracker reads is OFF until an explicit
+//   1. shouldShowCookieBanner — shown for a signed-out web visitor after auth settles, whenever the
+//      IN-MEMORY consent for this pageload is null. Every other combination (signed in, dismissed
+//      this pageload, not web, auth not settled) is hidden.
+//   2. THE 2026-09-13 RULE (source-shape check, mutation-proven): CookieConsent.tsx MUST NOT seed
+//      its useState from getCookieConsent() — a reload has to re-show the card. Reverting that one
+//      line is the exact mutation that would restore the old "once per visitor" behavior owner
+//      just banned; the check discovers the initializer's shape and fails on it.
+//   3. Persistence round-trips still work at the LIBRARY level so analyticsAllowed() keeps the
+//      visitor's real preference across visits; the component just does not use it to gate showing.
+//   4. analyticsAllowed FAILS CLOSED — the switch the future tracker reads is OFF until an explicit
 //      (or search-implied) 'all'. This is the honesty half: the "we don't measure without permission"
 //      promise is a code fact, not just banner text.
 //
@@ -64,13 +71,13 @@ mustCatch('hidden before the session restore settles (authChecked=false → no f
 mustCatch('hidden on native (not web)',
   shouldShowCookieBanner({ ...guest, isWeb: false }) === false);
 
-// 3. Persistence round-trips → genuinely once-per-visitor.
+// 3. Persistence round-trips — the LIBRARY still round-trips so analyticsAllowed() keeps the
+// visitor's preference across visits. The COMPONENT is separately pinned in section 5 to not READ
+// this value at mount (owner 2026-09-13: the card must show every refresh).
 localStorage.clear();
 check('no choice recorded initially', getCookieConsent() === null);
 setCookieConsent('all');
-check('"Allow all" persists and reads back', getCookieConsent() === 'all');
-check('recording a choice hides the banner on the next load',
-  shouldShowCookieBanner({ ...guest, consent: getCookieConsent() }) === false);
+check('"Allow all" persists and reads back for analyticsAllowed()', getCookieConsent() === 'all');
 setCookieConsent('necessary');
 check('"Only necessary" persists and reads back', getCookieConsent() === 'necessary');
 check('the key is the documented one', COOKIE_CONSENT_KEY === 'ezhalah:cookieConsent');
@@ -88,7 +95,40 @@ localStorage.setItem(COOKIE_CONSENT_KEY, 'yes-please');
 mustCatch('a corrupt stored value is treated as no-choice, not as consent',
   getCookieConsent() === null && analyticsAllowed() === false);
 
+// 5. THE COMPONENT MUST NOT SEED FROM localStorage AT MOUNT (owner 2026-09-13, permanent).
+// The one-line mutation that would restore the old "once per visitor" rule is passing
+// getCookieConsent() into useState's initializer instead of null. Reading the source shape catches
+// exactly that revert — the file must NOT contain `useState<...>(() => getCookieConsent())` for the
+// consent state, and must initialize it to null.
+{
+  const fs = await import('node:fs');
+  const url = await import('node:url');
+  const path = await import('node:path');
+  const HERE = path.dirname(url.fileURLToPath(import.meta.url));
+  const COMPONENT = path.join(HERE, '..', 'src', 'components', 'CookieConsent.tsx');
+  const src = fs.readFileSync(COMPONENT, 'utf8');
+  // Strip block + line comments before scanning so a comment MENTIONING the mutation
+  // (e.g. "deliberately not seeded from getCookieConsent()") does not trip the check.
+  const stripped = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
+  const seedsFromStorage = /useState[^;]*\(\s*\(\s*\)\s*=>\s*getCookieConsent\s*\(/.test(stripped)
+                        || /useState[^;]*\(\s*getCookieConsent\s*\(\s*\)/.test(stripped);
+  const initializesToNull = /const\s*\[\s*consent\s*,\s*setConsent\s*\][^;]*useState<[^>]*>\(\s*null\s*\)/
+    .test(stripped);
+  check('CookieConsent.tsx does NOT seed useState from getCookieConsent() (owner 2026-09-13)',
+    !seedsFromStorage,
+    'The card is meant to reappear on every refresh; reading the persisted choice at mount hides it.');
+  check('CookieConsent.tsx initializes the in-memory consent to null',
+    initializesToNull,
+    'Expected: const [consent, setConsent] = useState<Consent | null>(null);');
+  // Mutation: a hypothetical source that reintroduces the old seeded pattern MUST trip check 1.
+  const mutated = 'const [consent, setConsent] = useState<Consent | null>(() => getCookieConsent());';
+  mustCatch('a source that seeds from getCookieConsent() is caught',
+    /useState[^;]*\(\s*\(\s*\)\s*=>\s*getCookieConsent\s*\(/.test(mutated));
+}
+
 console.log(failed === 0
-  ? '\n✅ cookie-consent-gating: shows once to signed-out web visitors; analytics stays off until allowed.\n'
+  ? '\n✅ cookie-consent-gating: shows on every signed-out visit; analytics stays off until allowed.\n'
   : `\n❌ cookie-consent-gating: ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);

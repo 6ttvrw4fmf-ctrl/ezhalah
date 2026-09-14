@@ -92,6 +92,12 @@ import { join, extname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { readRestoredFormState } from '../e2e/lib/formRestoreOracle.mjs';
+// One dismissal, one owner (verify-live-journeys-answer-the-consent-card.ts pins this). Every live
+// journey imports the shared helper rather than hand-rolling a private copy — the smoke used to
+// only see the cookie card indirectly (search-auto-dismiss cleared it and localStorage kept it away
+// on later reloads), but after owner rule 2026-09-13 the card returns on every visit, so the smoke
+// is now a live consumer like every other journey and must call THE shared helper here.
+import { dismissCookieConsent } from './lib/liveConsent.ts';
 
 const DIST = new URL('../dist/', import.meta.url).pathname;
 let failed = 0;
@@ -268,6 +274,7 @@ try {
   // ---- Journey A: the primary CTA must produce results, not a blank page. ----
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   check('home renders', (await body()).includes('تصفية'));
   await dismissAuthPopup(); // a real guest closes the sign-in prompt before searching
 
@@ -336,6 +343,7 @@ try {
 
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(12000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   const afterRefresh = await body();
 
   check('a refresh issues ZERO search/AI requests', searchCalls === 0,
@@ -373,6 +381,7 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   check('[mobile] home renders', (await body()).includes('تصفية'));
   await pickCity('الرياض');
   await tap('بحث');
@@ -382,6 +391,7 @@ try {
   searchCalls = 0;
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(12000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   check('[mobile] a refresh issues ZERO search/AI requests', searchCalls === 0, `${searchCalls} fired`);
   check('[mobile] a refresh does not re-render the previous results', !RESULT_COUNT.test(await body()));
   check('[mobile] a refresh lands on the FILTER HOME', !page.url().includes('/agent'), `url = ${page.url()}`);
@@ -446,6 +456,9 @@ try {
   const fillOwnerExample = async () => {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
+    // Every page.goto reintroduces the cookie card (owner 2026-09-13); on the mobile viewport the
+    // bottom-sheet form occludes the area inputs and «بحث», so answer it before the fill sequence.
+    await dismissCookieConsent(page);
     // Same two-tap deal sequence as journey A above (Buy+Rent combined multi-select, 2026-08-20).
     await tap('إيجار'); await tap('شراء'); await tap('سنوي');
     await pickCity('الرياض');
@@ -544,6 +557,7 @@ try {
   });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(5000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   await tap('الوسيط الذكي');
   await page.waitForTimeout(2000);
   await page.click('textarea');
@@ -609,6 +623,7 @@ try {
   });
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   await tap('إيجار'); await tap('شراء'); await tap('سنوي');
   await pickCity('الرياض');
   // District suggestion rows render async (same case documented at line 194 for «حي النرجس»),
@@ -808,6 +823,7 @@ try {
   // which is exactly the completion the rule promises — asserted below.
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   await tap('الفلل والبيوت'); await page.waitForTimeout(300);   // Buy + سكني are the defaults
   await tap('دوبلكس'); await page.waitForTimeout(300);
   await pickCity('الهفوف');
@@ -937,6 +953,7 @@ try {
   // than mutating the just-finished journey's state — a clean, independently reproducible scope.
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
+  await dismissCookieConsent(page); // owner 2026-09-13: cookie card returns on every visit
   await tap('تجاري');
   await tap('الصناعة واللوجستيات'); await page.waitForTimeout(300);
   await tap('مصنع'); await page.waitForTimeout(300);
