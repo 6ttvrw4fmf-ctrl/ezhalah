@@ -17,6 +17,7 @@
 //   node --experimental-strip-types scripts/verify-live-sweep-coverage-contract.ts
 
 import { readFileSync } from 'node:fs';
+import { SECOND_PAGE_CAP as SHIPPED_SECOND_PAGE_CAP } from '../src/data/resultCount.ts';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -116,6 +117,51 @@ check('the «عرض المزيد» journey asserts filter persistence across bat
 check('the «عرض المزيد» journey asserts continuation (pager present while matches remain) + true totals',
   /TRUE-TOTAL/.test(showMore) && /PAGER-MISSING/.test(showMore),
   'the continuation is only honest while a missing pager with matches remaining is a defect');
+
+// ── 1a. THE 500-CAP TERMINAL MUST BE REACHED, AND JUDGED (owner 2026-09-14, PR #2618) ───────────
+//
+// PR #2618 made «عرض المزيد» a TWO-TAP, 500-card affordance: the pager retires at the cap and
+// «تحديد أكثر» becomes the user's forward path. The journey's caller still passed `batches: 2`,
+// which was exactly right under the superseded drain model and silently wrong under this one — the
+// loop ended on the second press and never probed the pager again, so the terminal block was
+// UNREACHABLE for every cohort over the cap. Measured on production 2026-09-14
+// (الرياض/إيجار/سنوي, 20,658 matching): two presses → 500 cards → pager gone → «تحديد أكثر».
+//
+// Nothing in the browser layer asserted any of that. A build that kept offering «عرض المزيد» past
+// 500 (re-opening the ops_incident #212 renderer crash) or retired it with no «تحديد أكثر» (500 of
+// 20,658 shown and no way on) would have read as a clean sweep. So the reachability of the terminal
+// is itself part of the contract, not a tuning knob.
+{
+  const plainCall = runner.match(
+    /showMoreJourney\(\{(?![^}]*\baf:\s*true)[^}]*\bbatches:\s*(\d+)[^}]*\}\)/,
+  );
+  check('the plain «عرض المزيد» journey is configured to REACH the terminal (batches >= 3)',
+    plainCall != null && Number(plainCall[1]) >= 3,
+    plainCall
+      ? `the runner presses ${plainCall[1]}× — the pager retires on press 2, so the terminal state is never probed`
+      : 'could not find the plain showMoreJourney call in the runner');
+
+  check('the «عرض المزيد» journey judges the 500-cap terminal instead of standing down',
+    /CAP-STRANDS-USER/.test(showMore) && /results-narrow/.test(showMore),
+    'a retired pager with inventory unreached is only correct while «تحديد أكثر» is on screen — assert it, do not assume it');
+
+  check('the «عرض المزيد» journey bounds the reveal (the ops_incident #212 mount-crash class)',
+    /CAP-EXCEEDED/.test(showMore),
+    'every other per-batch assertion is happy when cards GROW, so an unbounded reveal passes unless the cap is asserted by number');
+}
+
+// The cap is ONE definition (src/data/resultCount.ts). showmore.mjs is plain ESM and cannot import
+// it, so it MIRRORS the number — and a mirror nothing checks is drift waiting to happen. Compare the
+// mirrored literal against the constant production actually ships, EXECUTED, not grepped: raising or
+// lowering SECOND_PAGE_CAP turns this red until the sweep follows.
+{
+  const mirrored = showMore.match(/^const SECOND_PAGE_CAP = (\d+);/m);
+  check('the sweep mirrors the SHIPPED reveal cap, with no drift',
+    mirrored != null && Number(mirrored[1]) === SHIPPED_SECOND_PAGE_CAP,
+    mirrored
+      ? `e2e/live-sweep/showmore.mjs mirrors ${mirrored[1]} but src/data/resultCount.ts ships ${SHIPPED_SECOND_PAGE_CAP}`
+      : 'showmore.mjs no longer declares the mirrored cap, so nothing pins it to the shipped one');
+}
 
 // ── 1b. THE CLOSING LINE AND THE HEADLINE MUST BE READ THE SAME WAY (2026-09-05) ────────────────
 // The journey used to read the closing line with `.match()` — the FIRST «من أصل|لقينا N إعلان» in
