@@ -32,8 +32,11 @@ _al.to_catalog = lambda city_ar, region_hint=None: (15, 6) if city_ar == "أبه
 # text()'s _load() (which would otherwise hit a live DB) — "حي المعالي" is a real, catalog-confirmed
 # Abha district (verified live 2026-09-11), used below to prove the location-fallback path works.
 _al._CITY["_stub_"] = [(1, 1)]
-_al._DISTRICT_BY_CITY[15] = {_al.norm_ar("حي المعالي")}
-_al._DISTRICT_AR_BY_NORM[_al.norm_ar("حي المعالي")] = "حي المعالي"
+# KEYED WITH norm_district_tok(): loc_catalog_district.district_norm is built with that function,
+# not norm_ar(). A norm_ar()-keyed stub agrees with a norm_ar()-keyed lookup and so stayed green
+# while every «ال»-prefixed district silently stopped resolving in production (2026-09-12 → 09-14).
+_al._DISTRICT_BY_CITY[15] = {_al.norm_district_tok("حي المعالي")}
+_al._DISTRICT_AR_BY_NORM[_al.norm_district_tok("حي المعالي")] = "حي المعالي"
 
 from scrapers.azdad import run  # noqa: E402
 
