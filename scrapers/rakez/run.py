@@ -214,11 +214,21 @@ def arabic_project_id(s: cc.Session, en_id: int) -> Optional[int]:
     EXACT id printed by the source, not a title similarity — the only deterministic bridge this
     site offers, since it exposes no translations field and its term slugs do not align.
     """
-    try:
-        r = s.get(f"{SITE}/ar/project/{en_id}/", timeout=45)
-    except Exception:
-        return None
-    if r.status_code != 200:
+    # RETRIED, because a single miss is not cheap here: a project with no Arabic twin yields no
+    # Arabic property-type, so map_unit() skips EVERY unit under it — one flaky fetch silently
+    # costs ~14 listings, and 274 fetches make that near-certain over a run.
+    r = None
+    for attempt in range(3):
+        try:
+            r = s.get(f"{SITE}/ar/project/{en_id}/", timeout=45)
+            if r.status_code == 200:
+                break
+            r = None
+        except Exception:
+            r = None
+        if attempt < 2:
+            time.sleep(2 * (attempt + 1))
+    if r is None:
         return None
     m = _POSTID.search(r.text)
     if not m:
@@ -465,6 +475,12 @@ def main() -> int:
             time.sleep(0.2)
         bridged = sum(1 for v in bridge.values() if v)
         print(f"  Arabic twin found for {bridged}/{len(needed)} projects")
+        # A missing twin is not cosmetic: those units cannot be typed or located, so they are all
+        # dropped. Say so loudly rather than letting the row count quietly come up short.
+        if bridged < len(needed):
+            lost = sorted(k for k, v in bridge.items() if not v)
+            print(f"  ⚠ {len(needed) - bridged} project(s) had no reachable Arabic twin after 3 "
+                  f"attempts — every unit under them is skipped: {lost[:10]}")
 
         for u in units:
             acf = u.get("acf") or {}

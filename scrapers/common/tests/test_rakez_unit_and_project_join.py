@@ -252,6 +252,59 @@ def test_amenities_from_the_project_are_preserved_verbatim():
     assert "مصعد" in row["additional_info"]["features_ar"]
 
 
+# ── 6b. The Arabic bridge is retried — one flaky fetch costs a whole project ────────────────────
+def test_the_arabic_bridge_retries_before_giving_up(monkeypatch):
+    """A project with no Arabic twin yields no Arabic property-type, so map_unit() drops EVERY unit
+    under it. With 274 bridge fetches per run, a single un-retried miss is near-certain and silently
+    costs ~14 listings."""
+    monkeypatch.setattr(R.time, "sleep", lambda *a, **k: None)
+    calls = {"n": 0}
+
+    class _Flaky:
+        def get(self, url, timeout=None):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise TimeoutError("curl: (28) timed out")
+            class _R:
+                status_code = 200
+                text = '<body class="rtl postid-66825 single-project">'
+            return _R()
+
+    assert R.arabic_project_id(_Flaky(), 66800) == 66825
+    assert calls["n"] == 3, f"expected 3 attempts, made {calls['n']}"
+
+
+def test_the_bridge_still_gives_up_bounded_on_a_dead_project(monkeypatch):
+    monkeypatch.setattr(R.time, "sleep", lambda *a, **k: None)
+    calls = {"n": 0}
+
+    class _Dead:
+        def get(self, url, timeout=None):
+            calls["n"] += 1
+            raise TimeoutError("curl: (28) timed out")
+
+    assert R.arabic_project_id(_Dead(), 66800) is None
+    assert calls["n"] == 3, "must stop after 3 attempts, not loop"
+
+
+def test_a_non_200_from_the_bridge_is_also_retried_then_refused(monkeypatch):
+    # Unlike a REST feed, a 502/503 on this HTML page is worth retrying — it is a page fetch, not
+    # the source deliberately answering a query.
+    monkeypatch.setattr(R.time, "sleep", lambda *a, **k: None)
+    calls = {"n": 0}
+
+    class _FiveHundred:
+        def get(self, url, timeout=None):
+            calls["n"] += 1
+            class _R:
+                status_code = 503
+                text = ""
+            return _R()
+
+    assert R.arabic_project_id(_FiveHundred(), 66800) is None
+    assert calls["n"] == 3
+
+
 # ── 7. The liveness oracle: UNKNOWN must never kill ─────────────────────────────────────────────
 def test_verify_gone_treats_a_bare_404_as_unknown_not_gone(monkeypatch):
     class _R:
