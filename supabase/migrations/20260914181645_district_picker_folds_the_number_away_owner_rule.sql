@@ -40,6 +40,30 @@
 -- whether a code-shaped NAME should also leave the picker is a separate decision, raised separately.
 -- Word-numeral twins (مصيف الاول vs مصيف 1) stay unfolded — owner-held since 20260912172542.
 
+-- ── THE CODE SHAPES CAN NEVER COME BACK THROUGH THE LIVE BRANCH ────────────────────────────────
+-- The 88 planning codes deleted from the catalog below are ALSO written by scrapers onto real
+-- listings (الطائف alone has 111 rows whose district_ar is «حي ج7» etc.), so deleting the curated
+-- rows without this would simply let the live fallback promote the same strings straight back.
+-- «حي ج<n>» survived the 2026-09-11 predicate because it has no 3+ digit run and keeps 3 Arabic
+-- letters once digits are stripped; «حي ج» with no number at all is the same code, and three
+-- scrapers write exactly that. «رقم» means "number" — never a place name.
+CREATE OR REPLACE FUNCTION public.district_ar_looks_bogus(t text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $function$
+  select
+    t ~ 'مخطط'
+    or t ~ '[0-9]{3,}'
+    or length(regexp_replace(t, '[0-9\s\(\)\-\./]', '', 'g')) < 2
+    or length(t) > 40
+    or t in ('حكومي1', 'حكومي', 'هخطط 10.5')
+    -- 6. municipal plan-block code: «حي ج1»…«حي ج44», «حي ج 35», and the bare «حي ج» stub.
+    or t ~ '^\s*حي\s*ج\s*[0-9]*\s*$'
+    -- 7. «حي رقم 1»…«حي رقم 10» and the malformed «(حي رقم (5» — "District No.", a code, not a name.
+    or t ~ '^\s*\(?\s*حي\s*رقم\b'
+$function$;
+
 -- ── THE FOLD, inside the one shared token function ──────────────────────────────────────────────
 -- Appended as the LAST step so it runs after the existing «letter|digit -> letter space digit»
 -- split, which guarantees every digit run is already space-separated: «البصر1» and «البصر 1» reach
@@ -67,6 +91,30 @@ $function$;
 
 -- The expression index baked the OLD function's values; a replaced body does not rebuild it.
 reindex index public.idx_slar_district_tok;
+
+-- ── THE CURATED CATALOG ITSELF, which is where the codes actually came from ─────────────────────
+-- Root cause, established 2026-09-14: src/data/sa-locations.json (the repo's own «official Saudi
+-- hierarchy», docs/LOCATION_SYSTEM.md §6) and loc_catalog_district hold the SAME records — 102 of
+-- 102 numbered districts and 2 of 2 numbered cities match on (city_id, name), zero difference in
+-- either direction. That dataset carries municipal planning codes as if they were place names
+-- («حي ج1» = "C1 Dist.", «مخطط ج1» = "Subdivision Plan 1c", «حي رقم 1» = "No 1 Dist.") and nothing
+-- ever filtered it on the way in. The same 88 rows are deleted from the JSON in this commit.
+delete from public.loc_catalog_district
+ where district_ar ~ '^\s*حي\s*ج\s*[0-9]+\s*$'
+    or (district_ar ~ '^\s*مخطط' and district_ar ~ '[0-9]')
+    or (district_ar ~ 'رقم'      and district_ar ~ '[0-9]');
+
+-- The remainder are REAL names that merely carry a number («حي الورود 1», «حي أبا العبلان2»): the
+-- number goes, the place stays, and the dedup below merges it onto its plain twin where one exists.
+update public.loc_catalog_district
+   set district_ar = btrim(regexp_replace(regexp_replace(district_ar, '([^0-9\s])([0-9])', '\1 \2', 'g'), '\s*[0-9٠-٩]+\s*$', ''))
+ where district_ar ~ '[0-9٠-٩]';
+
+-- Cities: «الفويلق 1» / «الفويلق 2» (region 8, zero listings each). Both city_ids are KEPT — a city
+-- is never merged away, identity stays (city_id); only the label loses its number.
+update public.loc_catalog_city
+   set city_ar = btrim(regexp_replace(city_ar, '\s*[0-9٠-٩]+\s*$', ''))
+ where city_ar ~ '[0-9٠-٩]';
 
 -- Catalog: numbered and plain spellings now share (city_id, token) — keep the lowest district_id,
 -- then re-derive the stored norm with the new fn (plain column, not generated).
@@ -161,6 +209,15 @@ alter table public.loc_canonical_district
 alter table public.loc_canonical_district
   add constraint loc_canonical_district_never_numbered
   check (canonical_district_ar !~ '[0-9٠-٩]');
+
+-- The same structural barrier on the two CURATED tables — this is where the codes entered, so this
+-- is where a future re-import of the upstream dataset has to be stopped.
+alter table public.loc_catalog_district drop constraint if exists loc_catalog_district_never_numbered;
+alter table public.loc_catalog_district
+  add constraint loc_catalog_district_never_numbered check (district_ar !~ '[0-9٠-٩]');
+alter table public.loc_catalog_city drop constraint if exists loc_catalog_city_never_numbered;
+alter table public.loc_catalog_city
+  add constraint loc_catalog_city_never_numbered check (city_ar !~ '[0-9٠-٩]');
 
 -- Display canon: purge rows keyed by dead (pre-fold) tokens — its own refresh only upserts rows
 -- satisfying norm_district_tok(display_ar) = district_norm, so stale keys would linger forever.
@@ -277,7 +334,28 @@ begin
     raise exception 'الطائف still offers % numbered district option(s)', v_opts_rows;
   end if;
 
-  -- 9) card-label contract arms this change touches
+  -- 9) neither curated table can hold a number any more, and the codes are gone from both
+  select count(*) into v_numbered from public.loc_catalog_district where district_ar ~ '[0-9٠-٩]';
+  if v_numbered > 0 then raise exception '% curated district(s) still numbered', v_numbered; end if;
+  select count(*) into v_numbered from public.loc_catalog_city where city_ar ~ '[0-9٠-٩]';
+  if v_numbered > 0 then raise exception '% city name(s) still numbered', v_numbered; end if;
+  if not public.district_ar_looks_bogus('حي ج7')
+  or not public.district_ar_looks_bogus('حي ج')
+  or not public.district_ar_looks_bogus('حي رقم 3')
+  or not public.district_ar_looks_bogus('(حي رقم (5')
+  then
+    raise exception 'the code shapes are not blocked — the live branch will re-promote them';
+  end if;
+  -- …and the predicate must NOT swallow a real place while doing it
+  if public.district_ar_looks_bogus('حي المحمدية')
+  or public.district_ar_looks_bogus('المحمدية')
+  or public.district_ar_looks_bogus('حي جرير')
+  or public.district_ar_looks_bogus('حي الجامعة')
+  then
+    raise exception 'the code predicate over-matches: it is rejecting a real district name';
+  end if;
+
+  -- 10) card-label contract arms this change touches
   select count(*) into v_split from (
     select 1 from public.search_listings_ar
     where production_ready and district_ar is not null
