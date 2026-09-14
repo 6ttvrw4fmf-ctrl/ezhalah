@@ -106,5 +106,45 @@ for (const [entry, arm] of [['[E]', 'armE'], ['[H mobile]', 'armH']] as const) {
 ok('C4 skips are surfaced in the summary, not only inline',
   /\$\{skipped\} SKIPPED/.test(smoke));
 
+// ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
+// Each mutant is a shape this code actually had (M1 is what was live on production's harness), or
+// the one wrong turn the fix invites. All four were also watched RED against the real files on
+// 2026-09-14 and restored; these run the same defects through the same predicates on every CI run,
+// so the proof survives the session that made it.
+const mustCatch = (what: string, caught: boolean) =>
+  ok(`(mutation) catches ${what}`, caught,
+    'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
+
+// M1 — the shipped defect, verbatim: a rapid-cancel entry that taps «بحث» with nothing arming it.
+const SHIPPED_DEFECT = "  const preStopInputsMobile = await visibleInputs();\n  await tap('بحث');\n  await page.waitForTimeout(300);";
+mustCatch('a rapid-cancel entry that taps «بحث» without arming first (the shipped defect)',
+  !/const arm[EH] = await armSearch\(\);\s*\n\s*await tap\('بحث'\)/.test(SHIPPED_DEFECT));
+
+// M2 — the dangerous inversion. Arming must never become a way to quiet a dead control.
+const quietsDeadControl = (o: { armed: boolean; landedOnAgent: boolean }) => (o.armed && o.landedOnAgent ? 'pass' : 'skip');
+mustCatch('a classifier that downgrades a DEAD CONTROL to a skip',
+  quietsDeadControl({ armed: true, landedOnAgent: false })
+    !== classifyRapidCancelEntry({ armed: true, landedOnAgent: false }));
+
+// …and its mirror: an unprimed form filed as a product bug, which is what CI run 34791858611 did.
+const blamesTheApp = (o: { armed: boolean; landedOnAgent: boolean }) => (o.landedOnAgent ? 'pass' : 'defect');
+mustCatch('a classifier that files an UNPRIMED form as a product defect',
+  blamesTheApp({ armed: false, landedOnAgent: false })
+    !== classifyRapidCancelEntry({ armed: false, landedOnAgent: false }));
+
+// M3 — a probe that throws treated as a committed city: the journey would then tap a form the app
+// refuses, which is the original defect reached through the error path.
+const throwsIsCommitted = await armForSubmit(async () => { throw new Error('detached'); }, async () => {}, 1);
+mustCatch('a throwing probe being read as a COMMITTED city',
+  throwsIsCommitted.armed === false);
+
+// M4 — an unprobed form assumed good. A budget of zero must never arm.
+const unprobed = await armForSubmit(async () => true, async () => {}, 0);
+mustCatch('an UNPROBED form being assumed armed', unprobed.armed === false);
+
+// A skip with no reason is PART 9.5's tidy skip — the failure that reads as coverage.
+mustCatch('a not-armed result carrying no reason for the skip',
+  unprobed.reason.length > 0 && never.reason.length > 0);
+
 console.log(failed ? `\n${failed} FAILED` : '\narmed rapid-cancel submit: all checks passed');
 process.exit(failed ? 1 : 0);
