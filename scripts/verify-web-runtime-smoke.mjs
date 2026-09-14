@@ -442,6 +442,14 @@ try {
     }
     return null;
   };
+  // ARM: prove the app's own commit marker is present before tapping «بحث», re-priming the city when
+  // it is not. `onSearch` returns at `if (!citySelected)` with a validation message and fires ZERO
+  // requests, and every keystroke in the city field clears `citySelected`. Verdicts are decided by
+  // scripts/lib/armedSubmit.ts so a barrier can EXECUTE that rule rather than grep it.
+  const armSearch = () => armForSubmit(
+    async () => (await page.locator('[data-testid="selected-city-visual"]').count()) > 0,
+    () => pickCity('الرياض'),
+  );
   // Submit that CONFIRMS a search request left the app, re-tapping when one did not (2026-08-24).
   // Four CI runs failed [H mobile] with a tap that fired nothing while the same build+script+backend
   // passed locally end to end: after Stop's restore the form REHYDRATES citySelected in an effect
@@ -449,9 +457,40 @@ try {
   // the app correctly refuses to search with an unresolved city, exactly once. A real user's second
   // tap succeeds; so does this one. A genuinely wedged app fires nothing in 3 attempts and still
   // fails — and every capture window starts null, so the sig oracle only ever sees THIS submit.
+  //
+  // RE-ARM BETWEEN ATTEMPTS (2026-09-14). Retrying the TAP was never a retry: if the city is
+  // uncommitted, all three taps hit a form the app refuses and the loop spends its whole budget on
+  // three no-ops — the same shape PART 11.2 rule 2 records for a control that unmounts. Measured on
+  // this branch, CI run 34833233410: the BASELINE submit did exactly that, `baselineReq` stayed
+  // null, and all three request-signature oracles downstream ([E], [F], [H mobile]) then failed
+  // comparing against that null while each resubmit had fired a perfectly good request. One null
+  // baseline, seven reported failures, and nothing wrong with the app.
+  // The district twin of pickCity: type → tap the suggestion → CONFIRM the app committed it, using
+  // the app's OWN restored-form oracle (readRestoredFormState's `districts`), not a DOM guess.
+  // Returns false rather than throwing when it cannot commit, so a caller can say so instead of
+  // asserting on a form that is not the one it thinks it primed.
+  const pickDistrict = async (typed, row) => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await page.click('input >> nth=1');
+      await page.fill('input >> nth=1', '');
+      await page.type('input >> nth=1', typed, { delay: 60 });
+      await tapWhenRendered(row).catch(() => {}); // the confirmation below decides; a miss retries
+      const until = Date.now() + 4000;
+      while (Date.now() < until) {
+        const snap = await visibleInputs();
+        if ((snap?.districts || []).length > 0) return true;
+        await page.waitForTimeout(250);
+      }
+    }
+    check(`the district «${row}» was committed before the form was used`, false,
+      'the app never showed it as a committed district after 3 attempts — every assertion below '
+      + 'would be comparing against a form that was never actually primed');
+    return false;
+  };
   const submitSearch = async () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       lastSearchBody = null;
+      await armSearch();
       await tap('بحث');
       const until = Date.now() + 5000;
       while (Date.now() < until) {
@@ -461,15 +500,6 @@ try {
     }
     // leave lastSearchBody null — the request-sig check fails and says exactly why
   };
-  // The rapid-cancel journeys ([E] desktop, [H mobile]) CANNOT use submitSearch: they navigate back
-  // ~300ms after the tap, while submitSearch waits up to 5s for the request to land. So they kept
-  // the bare `tap('بحث')` — and kept the race it was written for. ARM instead of retry: prove the
-  // app's own commit marker is present before tapping (costs no timing), and re-prime when it is
-  // not. Verdicts are decided by scripts/lib/armedSubmit.ts so a barrier can execute that rule.
-  const armSearch = () => armForSubmit(
-    async () => (await page.locator('[data-testid="selected-city-visual"]').count()) > 0,
-    () => pickCity('الرياض'),
-  );
   const fillOwnerExample = async () => {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
@@ -479,9 +509,14 @@ try {
     // Same two-tap deal sequence as journey A above (Buy+Rent combined multi-select, 2026-08-20).
     await tap('إيجار'); await tap('شراء'); await tap('سنوي');
     await pickCity('الرياض');
-    await page.click('input >> nth=1');
-    await page.type('input >> nth=1', 'النرجس', { delay: 60 });
-    await tapWhenRendered('حي النرجس');
+    // CONFIRM THE DISTRICT COMMIT, exactly as pickCity confirms the city. The suggestion row can
+    // render after the tap fires on a loaded runner, and an uncommitted district is not a milder
+    // version of a committed one — it is a DIFFERENT form. Measured, CI run 34833233410:
+    // «[E] rapid-cancel restores city/district/area EXACTLY» failed with
+    // pre=…"النرجس" districts:[] vs post=…"" districts:["حي النرجس"] — the snapshot was taken with
+    // the district still raw text in the input, so the restore, which committed it properly, read
+    // as a mismatch. The app was right and the primed form was wrong.
+    await pickDistrict('النرجس', 'حي النرجس');
     await tap('الشقق والسكن المشترك'); await tap('شقة');
     await tap('3');
     await page.fill('input >> nth=2', '80');

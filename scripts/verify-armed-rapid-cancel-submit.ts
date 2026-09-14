@@ -106,6 +106,20 @@ for (const [entry, arm] of [['[E]', 'armE'], ['[H mobile]', 'armH']] as const) {
 ok('C4 skips are surfaced in the summary, not only inline',
   /\$\{skipped\} SKIPPED/.test(smoke));
 
+// C5 — submitSearch must RE-ARM between attempts. Retrying the tap alone is not a retry: against an
+// uncommitted city all three taps hit a form the app refuses, and the loop spends its whole budget
+// on three no-ops. That is what left `baselineReq` null and turned one unfired baseline into seven
+// reported failures in CI run 34833233410.
+ok('C5 submitSearch re-arms before each tap, not just re-taps',
+  /const submitSearch = async \(\) => \{[\s\S]{0,220}?await armSearch\(\);\s*\n\s*await tap\('بحث'\)/.test(smoke));
+
+// C6 — the district is committed through the app's own oracle before the form is used. An
+// uncommitted district is a DIFFERENT form, not a milder version of the right one.
+ok('C6 the district commit is confirmed, not assumed',
+  /const pickDistrict = async/.test(smoke)
+  && /snap\?\.districts \|\| \[\]\)\.length > 0/.test(smoke)
+  && /await pickDistrict\('النرجس', 'حي النرجس'\)/.test(smoke));
+
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
 // Each mutant is a shape this code actually had (M1 is what was live on production's harness), or
 // the one wrong turn the fix invites. All four were also watched RED against the real files on
@@ -145,6 +159,17 @@ mustCatch('an UNPROBED form being assumed armed', unprobed.armed === false);
 // A skip with no reason is PART 9.5's tidy skip — the failure that reads as coverage.
 mustCatch('a not-armed result carrying no reason for the skip',
   unprobed.reason.length > 0 && never.reason.length > 0);
+
+// M5 — the shipped submitSearch, verbatim: it re-tapped without re-arming, so against an
+// uncommitted city its three attempts were three no-ops and the baseline never fired.
+const RETRY_WITHOUT_REARM = "  const submitSearch = async () => {\n    for (let attempt = 1; attempt <= 3; attempt++) {\n      lastSearchBody = null;\n      await tap('بحث');";
+mustCatch('a submitSearch that re-taps without re-arming (the null-baseline defect)',
+  !/const submitSearch = async \(\) => \{[\s\S]{0,220}?await armSearch\(\);\s*\n\s*await tap\('بحث'\)/.test(RETRY_WITHOUT_REARM));
+
+// M6 — a district "committed" by tapping and hoping. The oracle has to be the app's own answer.
+const DISTRICT_UNCONFIRMED = "    await page.type('input >> nth=1', 'النرجس', { delay: 60 });\n    await tapWhenRendered('حي النرجس');";
+mustCatch('a district tapped without confirming the app committed it',
+  !/await pickDistrict\('النرجس', 'حي النرجس'\)/.test(DISTRICT_UNCONFIRMED));
 
 console.log(failed ? `\n${failed} FAILED` : '\narmed rapid-cancel submit: all checks passed');
 process.exit(failed ? 1 : 0);
