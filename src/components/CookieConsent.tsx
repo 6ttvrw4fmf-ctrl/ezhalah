@@ -30,6 +30,7 @@ import {
   type CookieConsent as Consent,
 } from '@/lib/cookieConsent';
 import { useForeignPromptInsets, dockedEdgeOffset } from '@/lib/bottomPromptInset';
+import { runAfterAnimation } from '@/lib/afterAnimation';
 
 const COPY = {
   ar: {
@@ -131,18 +132,34 @@ export default function CookieConsent() {
   // A soft 220 ms fade+slide-down when the card goes away (from a button tap OR a tap outside),
   // then unmount. `mounted` lingers a beat past `visible` so the exit is visible; `anim` drives
   // opacity 1→0 and translateY 0→12. useNativeDriver=false on web (RNW rAF-drives it there anyway).
+  //
+  // THE UNMOUNT MUST NOT DEPEND ON THE ANIMATION FINISHING. On React Native Web, Animated is driven
+  // by requestAnimationFrame, which browsers suspend for a backgrounded tab, minimised window or OS
+  // power throttling. A .start(cb) that never fires would leave `mounted` true forever — the card
+  // gone visually but the invisible <Animated.View> still occupying its z-index and swallowing
+  // input at the bottom of the app. runAfterAnimation() plays the animation AND drives the unmount
+  // from a setTimeout fallback (320 ms, a hair past the 220 ms animation) so exactly one of the two
+  // paths fires, always. Same rule that fixed the "I press بحث and nothing happens" bug 2026-08-07;
+  // enforced fleet-wide by scripts/verify-nav-not-gated-on-animation.ts.
   const [mounted, setMounted] = useState(visible);
   const anim = useRef(new Animated.Value(visible ? 1 : 0)).current;
   useEffect(() => {
-    if (visible) setMounted(true);
-    Animated.timing(anim, {
-      toValue: visible ? 1 : 0,
-      duration: 220,
-      easing: visible ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
-      useNativeDriver: Platform.OS !== 'web',
-    }).start(({ finished }) => {
-      if (finished && !visible) setMounted(false);
-    });
+    if (visible) {
+      setMounted(true);
+      Animated.timing(anim, {
+        toValue: 1, duration: 220, easing: Easing.out(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start();
+      return;
+    }
+    runAfterAnimation(
+      (onFinished) => Animated.timing(anim, {
+        toValue: 0, duration: 220, easing: Easing.in(Easing.cubic),
+        useNativeDriver: Platform.OS !== 'web',
+      }).start(onFinished),
+      () => setMounted(false),
+      320,
+    );
   }, [visible, anim]);
 
   if (!mounted) return null;
