@@ -98,12 +98,20 @@ import { readRestoredFormState } from '../e2e/lib/formRestoreOracle.mjs';
 // on later reloads), but after owner rule 2026-09-13 the card returns on every visit, so the smoke
 // is now a live consumer like every other journey and must call THE shared helper here.
 import { dismissCookieConsent } from './lib/liveConsent.ts';
+import { armForSubmit, classifyRapidCancelEntry } from './lib/armedSubmit.ts';
 
 const DIST = new URL('../dist/', import.meta.url).pathname;
 let failed = 0;
+let skipped = 0;
 const check = (label, ok, detail = '') => {
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail && !ok ? `\n        ${detail}` : ''}`);
+};
+// A measurement that did not happen is a SKIP, never a pass and never a defect (PART 9.5 / 9.1).
+// It must always carry its reason: an unexplained skip is the failure mode that reads as coverage.
+const skipCheck = (label, reason) => {
+  skipped++;
+  console.log(`SKIP  ${label}\n        ${reason}`);
 };
 
 if (!existsSync(join(DIST, 'index.html'))) {
@@ -453,6 +461,15 @@ try {
     }
     // leave lastSearchBody null — the request-sig check fails and says exactly why
   };
+  // The rapid-cancel journeys ([E] desktop, [H mobile]) CANNOT use submitSearch: they navigate back
+  // ~300ms after the tap, while submitSearch waits up to 5s for the request to land. So they kept
+  // the bare `tap('بحث')` — and kept the race it was written for. ARM instead of retry: prove the
+  // app's own commit marker is present before tapping (costs no timing), and re-prime when it is
+  // not. Verdicts are decided by scripts/lib/armedSubmit.ts so a barrier can execute that rule.
+  const armSearch = () => armForSubmit(
+    async () => (await page.locator('[data-testid="selected-city-visual"]').count()) > 0,
+    () => pickCity('الرياض'),
+  );
   const fillOwnerExample = async () => {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(5000);
@@ -483,9 +500,24 @@ try {
 
   // ---- E: rapid cancel — navigate back the instant the search starts (Stop button removed 2026-09-12). ----
   await fillOwnerExample();
+  const armE = await armSearch();
   await tap('بحث');
   await page.waitForTimeout(300); // land on /agent before navigating back — real user cancel timing
-  check('[E] Filter search landed on /agent before cancellation', page.url().includes('/agent'), `url=${page.url()}`);
+  const verdictE = classifyRapidCancelEntry({ armed: armE.armed, landedOnAgent: page.url().includes('/agent') });
+  if (verdictE !== 'pass') {
+    // Never let an unstarted search cascade into four "failures" about cancel and restore — that is
+    // exactly what CI run 34791858611 reported, with the app behaving correctly throughout.
+    if (verdictE === 'defect') {
+      check('[E] Filter search landed on /agent before cancellation', false,
+        `url=${page.url()} — DEAD CONTROL: the app reported a COMMITTED city (${armE.reason}) and «بحث» still fired nothing`);
+    } else {
+      skipCheck('[E] Filter search landed on /agent before cancellation',
+        `the form was never primed — ${armE.reason}`);
+    }
+    skipCheck('[E] rapid-cancel + exact-restore + untouched-resubmit assertions (4)',
+      'the search never started, so cancellation, restore and resubmit measured nothing here');
+  } else {
+  check('[E] Filter search landed on /agent before cancellation', true);
   await cancelViaNav();
   check('[E] rapid-cancel-via-back lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   check('[E] rapid-cancel shows no results/partial text', !RESULT_COUNT.test(await body()));
@@ -506,6 +538,7 @@ try {
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
   check('[E] the rapid-cancel resubmit still lands a real result count', Number.isFinite(rapidResubmitCount), `count=${rapidResubmitCount}`);
+  }
 
   // ---- F: Stop pressed mid-flight (network artificially slowed), and the late response — which
   // resolves AFTER the user is already back on Filter — must never repopulate results or write history.
@@ -578,9 +611,22 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await fillOwnerExample();
   const preStopInputsMobile = await visibleInputs();
+  const armH = await armSearch();
   await tap('بحث');
   await page.waitForTimeout(300);
-  check('[H mobile] Filter search landed on /agent before cancellation', page.url().includes('/agent'), `url=${page.url()}`);
+  const verdictH = classifyRapidCancelEntry({ armed: armH.armed, landedOnAgent: page.url().includes('/agent') });
+  if (verdictH !== 'pass') {
+    if (verdictH === 'defect') {
+      check('[H mobile] Filter search landed on /agent before cancellation', false,
+        `url=${page.url()} — DEAD CONTROL: the app reported a COMMITTED city (${armH.reason}) and «بحث» still fired nothing`);
+    } else {
+      skipCheck('[H mobile] Filter search landed on /agent before cancellation',
+        `the form was never primed — ${armH.reason}`);
+    }
+    skipCheck('[H mobile] rapid-cancel + exact-restore + untouched-resubmit assertions (4)',
+      'the search never started, so cancellation, restore and resubmit measured nothing here');
+  } else {
+  check('[H mobile] Filter search landed on /agent before cancellation', true);
   await cancelViaNav();
   check('[H mobile] rapid-cancel-via-back lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   check('[H mobile] rapid-cancel shows no results/partial text', !RESULT_COUNT.test(await body()));
@@ -597,6 +643,7 @@ try {
   // the page state: the next failure must explain itself instead of costing another guessing round.
   check('[H mobile] the mobile resubmit still lands a real result count', Number.isFinite(mobResubmitCount),
     `count=${mobResubmitCount} url=${page.url()} body=${(await body()).slice(0, 400).replace(/\n/g, ' | ')}`);
+  }
 
   // ---- Journey I: Advanced Filter reentrancy — a rapid double-tap on «متابعة»/confirm must never
   // downgrade or lose an already-recorded answer (bug-hunt 2026-08-23, fixed in commitGuidedStep's
@@ -980,5 +1027,8 @@ try {
   server.close();
 }
 
+// Skips are printed in the summary, never only inline: a run whose coverage is skips has proven
+// nothing, and the thing that hides that is a summary which only ever counts failures (PART 9.5).
+if (skipped) console.log(`\n${skipped} SKIPPED — measurements that did not happen (reasons above)`);
 console.log(failed ? `\n${failed} FAILED — the built app does not run correctly` : '\nweb runtime smoke passed — the built app runs and survives a refresh');
 process.exit(failed ? 1 : 0);
