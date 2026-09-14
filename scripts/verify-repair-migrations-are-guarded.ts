@@ -295,6 +295,24 @@ const WAIVED: Record<string, string> = {
     + 'attached to both amlakalahsa tables, mutation-proven in-migration against two broken rules) '
     + '— and by the pre-existing mon_detect_amlakalahsa_jafr_dahiya_merge_regressed() which still '
     + 'watches the data this repair corrected',
+  // Same two-migrations-apart shape as the entries above. The repair withdraws 99 راكز units whose
+  // project is tagged «البيع على الخارطة» — off-plan, sold before it is built (owner decision
+  // 2026-09-14, "delete the 99 please"). The repair file itself never reaches a mon_detect_* in
+  // executed SQL because its companion lands ~25 minutes later.
+  //
+  // The companion's detector watches THIS REPAIR SPECIFICALLY, not a class: it counts active rows
+  // in either راكز listing table whose additional_info->project_id is one of the 13 ids known to
+  // carry the tag, which is exactly the set the repair deactivated. Re-assertion is unnecessary
+  // (unlike the muktamel case) because a future crawl CANNOT undo this: an upsert is the only thing
+  // that sets active back to true, scrapers/rakez/run.py now vetoes an off-plan tag on either
+  // language's project record, and the detector runs twice an hour rather than at deploy time.
+  // The companion rosters it via needle-edit, runs it green, and asserts its predicate matches a
+  // non-empty set so it cannot be vacuously green. Open the companion to check this rather than
+  // taking it on trust.
+  '20260914181618_rakez_off_plan_units_are_not_listings.sql':
+    'watched by its companion 20260914190653_rakez_off_plan_resurrection_detector.sql, which '
+    + 'creates mon_detect_rakez_off_plan_resurrection(), needle-edits it into the '
+    + 'mon_run_all_detectors() roster, runs it green, and proves the predicate is not vacuous',
 };
 
 // Enforcement starts here — the day this rule landed.
