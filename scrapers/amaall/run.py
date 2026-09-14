@@ -52,7 +52,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://www.amaall.com"
@@ -390,12 +390,7 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     auto_recover_false_inactive() sweep, which re-activates any active=false row with
     coalesce(missing_count,0)=0 — and the shared batch upsert always writes missing_count=0.
     Measured on alta 2026-09-05: 9 rows marked تم البيع came back active=true within the hour."""
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    sold_pin.pin_source_confirmed_gone(table, ad_numbers, oracle="amaall.sold_pin.property_status")
 
 
 def main() -> int:
