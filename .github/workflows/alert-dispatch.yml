@@ -140,7 +140,14 @@ jobs:
               gh issue comment "$existing" --repo "$REPO" --body-file body.md
               echo "commented #${existing} for ${dedup}"
             else
-              gh issue create --repo "$REPO" --title "$title" --label ezhalah-alert --label "$sev" --body-file body.md
+              # Capture the number of what we just created. `gh issue list` in the ROUTING step
+              # below goes through GitHub's search index, which lags creation by a few seconds, so
+              # that listing cannot see issues this run just filed — every alert issue was therefore
+              # filed unrouted and only picked up an owner label on the NEXT dispatch cycle (up to
+              # ~60 min on the hourly backstop). Recording the number here is what lets the sweep
+              # union them in. Appended, never truncated, so a run filing several is complete.
+              url=$(gh issue create --repo "$REPO" --title "$title" --label ezhalah-alert --label "$sev" --body-file body.md)
+              jq -cn --argjson n "${url##*/}" --arg t "$title" '{number:$n,title:$t}' >> created_issues.jsonl
               echo "created issue for ${dedup}"
             fi
 
@@ -173,8 +180,18 @@ jobs:
           # otherwise never get one, leaving mon_detect_alert_queue_unworked() reporting them all as
           # '(unrouted)' forever. Same idempotent-sweep philosophy this step already documents:
           # backfill by re-deriving, never by a one-off migration.
+          # The worklist is built by scripts/lib/alertRouting.ts routingWorklist(), EXECUTED here
+          # rather than restated in jq. It is the listing PLUS the issues this run just filed, which
+          # `gh issue list` cannot see: that call goes through GitHub's search index, which lags
+          # creation by a few seconds, and this step starts ~1 s after the filing step ends. Before
+          # this union, every alert issue was filed unrouted and only got an owner on the NEXT
+          # dispatch cycle — proven on 2026-09-14 by this workflow's own log, which filed #2646 (P0)
+          # and #2647 at 10:51:28-30 and then routed only the previous cycle's #2641-#2643.
+          # The labelling mechanism below is untouched: still one idempotent sweep, still no
+          # --label on the create call, so there is no create-path/backfill-path skew.
           gh issue list --repo "$REPO" --label ezhalah-alert --state open --limit 200 --json number,title,labels \
-            | jq -c '.[] | {number, title, routed: ([.labels[].name] | map(startswith("routine-")) | any)}' | while read -r issue; do
+            | node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+                scripts/alert-routing-worklist.ts created_issues.jsonl | while read -r issue; do
             num=$(jq -r .number <<<"$issue")
             already=$(jq -r .routed <<<"$issue")
             dedup=$(jq -r '.title | sub("^\\[alert\\] "; "")' <<<"$issue")
