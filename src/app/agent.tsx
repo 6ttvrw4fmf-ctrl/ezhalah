@@ -58,7 +58,7 @@ import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
-import { resultCounts, closingNoteKey, nextBatchTarget, revealTarget, SECOND_PAGE_CAP, drainPageBudget, LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
+import { resultCounts, closingNoteKey, revealTarget, SECOND_PAGE_CAP, drainPageBudget, LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
 import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRowVisible } from '@/lib/afBrowsingGate';
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -1438,11 +1438,9 @@ export default function Agent() {
     if (loadingMore[mid]) return;
     const cur = revealCount[mid] ?? initialReveal(m.result);
     const fetched0 = m.result.listings.length;
-    // FIRST tap for this turn (still at the initial floor) stops at the next 100-boundary; any tap
-    // after that drains to the true end. `nextBatchTarget` clamps to the honest total when known
-    // (`matchTotal`), so a set under 100 still finishes on the first tap — there is no dummy second
-    // press to force when nothing is left to earn it. An unknown total (Infinity) just means "the
-    // plain next hundred," never a fabricated boundary.
+    // Whether the turn has been expanded past its initial floor — the ONLY thing that still tells the
+    // first tap from the last (the reveal target itself now comes from revealTarget below, not a
+    // per-tap flag). Kept because the completion check reads it.
     const alreadyExpandedOnce = cur > initialReveal(m.result);
     // TWO TAPS, MAX 500 (owner 2026-09-14). revealTarget() encodes it: under 100 shown → the next
     // 100-boundary (first tap); at/after 100 → up to the 500 cap (the final tap). Clamped to the true
@@ -3579,10 +3577,12 @@ export default function Agent() {
                             total: rc.endTotal.toLocaleString('en-US'),
                             n: (rc.endKind === 'more' ? rc.endShown : (clientNarrowed ? rc.endShown : rc.endTotal)).toLocaleString('en-US'),
                             // What ONE «عرض المزيد» tap actually reveals, from the SAME function the
-                            // button pages with (nextBatchTarget) — clamped to what exists, so the
-                            // sentence says 47 on a 47-match search and 100 on a 9,892-match one.
-                            // Never a hardcoded 100, never «كل الإعلانات» (owner 2026-09-13).
-                            next: nextBatchTarget(rc.endShown, rc.endTotal).toLocaleString('en-US'),
+                            // button pages with (revealTarget) — the next 100-boundary on a first tap,
+                            // the min(500,total) cap on the last tap — always clamped to what exists.
+                            // So the last-tap sentence says «حتى 340» on a 340-match search and «حتى
+                            // 500» on a 9,892-match one; never a hardcoded 500 (owner 2026-09-14, the
+                            // same "state the real number" rule as the first tap, owner 2026-09-13).
+                            next: revealTarget(rc.endShown, rc.endTotal).toLocaleString('en-US'),
                           },
                         );
                         // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the
