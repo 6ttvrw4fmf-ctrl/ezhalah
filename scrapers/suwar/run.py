@@ -68,9 +68,14 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 SITE = "https://suwar.sa"
 REST = f"{SITE}/wp-json/wp/v2"
 PER_PAGE = 100
+# NO User-Agent HERE, deliberately. curl_cffi's `impersonate=` sets a COMPLETE, internally
+# consistent browser header set at the C layer (UA, sec-ch-ua, Accept, …) to match the TLS/JA3
+# fingerprint it presents. Overriding just the UA makes the fingerprint and the header disagree,
+# which is exactly what bot detection looks for: rakez.sa (Cloudflare) answered 403 to every single
+# endpoint with a hardcoded UA and 200 without it, TLS fingerprint otherwise identical (measured
+# 2026-09-14). All 46 sibling scrapers already leave the UA alone; these two were the exception.
+# Accept-Language is safe and stays — it was verified not to be the trigger.
 HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-                   "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
     "Accept-Language": "ar,en;q=0.8",
 }
 
