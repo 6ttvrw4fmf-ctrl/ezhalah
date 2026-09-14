@@ -277,6 +277,80 @@ mustCatch('age_unknown inverted — UNKNOWN and KNOWN must never resolve to the 
   buildOracleQS({ ...BASE, p_age_unknown: true }).qs.includes('property_age=is.null')
     && buildOracleQS({ ...BASE, p_age_unknown: false }).qs.includes('property_age=not.is.null'));
 
+
+// ── A `both`-MACRO TYPE MUST BE PINNED TO ITS SOURCE-TABLE KIND ON A MIXED-KIND ARM ─────────────
+// Found LIVE on 2026-09-14 (routine #10) by the untyped-category journey ops_incident #176 added to
+// the daily corpus. الرياض / بيع / Residential, from the app's own captured request: production
+// 23,400, this oracle 23,410 — missing 10, extra 0, every one of them «عمارة» (macro `both`) sitting
+// in aldarim_COMMERCIAL_listings on a RESIDENTIAL search.
+//
+// The defect was not that the rule was unknown. afOracleFilter.ts's header records finding this exact
+// shape once before and fixing it by splitting arm A from arm B, on the stated premise that *"scope A
+// reads the category's OWN tables"*. That premise is false for the product's commonest search: with no
+// نوع picked the app sends ONE scope (p_tables2/p_types2 null) and p_tables carrying BOTH kinds, so
+// arm A is not one kind at all. Every journey in the corpus narrowed to a specific نوع, so no
+// `both`-macro type ever reached arm A on a mixed-kind table set and the premise was never tested.
+//
+// It is a FALSE-GREEN mechanism, not merely a false red: had production started leaking
+// commercial-table rows into a Residential search, this oracle would have AGREED with the leak.
+const MACROS = { 'شقة': 'Residential', 'فيلا': 'Residential', 'عمارة': 'both', 'محل': 'Commercial' };
+const MIXED_TABLES = ['aqar_residential_listings', 'aldarim_commercial_listings'];
+const RES_SUFFIX = encodeURIComponent('') + '_residential_listings';
+const enc1 = (t: string) => encodeURIComponent(`"${t}"`);
+
+{
+  // THE DEFECTIVE SHAPE: one scope, mixed-kind tables, a type list containing a `both`-macro type.
+  const untyped = { p_deal: 'بيع', p_category: 'Residential', p_region_ids: [1],
+    p_tables: MIXED_TABLES, p_types: ['شقة', 'عمارة'], p_tables2: null, p_types2: null };
+  const { qs } = buildOracleQS(untyped, { typeMacros: MACROS });
+  check('a `both`-macro type on a MIXED-KIND arm is restricted to the category’s own table kind',
+    qs.includes(`and(type_ar.in.(${enc1('عمارة')}),source_table.like.*${RES_SUFFIX})`), qs);
+  check('…while the category’s own pure type stays unrestricted by table kind',
+    qs.includes(`or=(type_ar.in.(${enc1('شقة')}),`), qs);
+  mustCatch('the pre-2026-09-14 translation: a bare type_ar in-list that lets «عمارة» in from a COMMERCIAL table on a Residential search',
+    !new RegExp(`type_ar=in\\\\.\\\\(${enc1('شقة')},${enc1('عمارة')}\\\\)`).test(qs));
+}
+
+{
+  // THE SAME SHAPE WITH p_types NULL — the other way the app expresses "no نوع picked".
+  const untypedNull = { p_deal: 'بيع', p_category: 'Residential', p_region_ids: [1],
+    p_tables: MIXED_TABLES, p_types: null, p_tables2: null, p_types2: null };
+  const { qs } = buildOracleQS(untypedNull, { typeMacros: MACROS });
+  check('the null-p_types purity list ALSO pins its `both`-macro types to the category’s table kind',
+    qs.includes(`source_table.like.*${RES_SUFFIX}`), qs);
+}
+
+{
+  // NEGATIVE CONTROL 1 — a single-kind arm (the two-scope case this module already handled) must be
+  // BYTE-IDENTICAL to before: no like-clause, no logic tree. An over-broad repair would break the
+  // nine journeys that are currently green, and this is the line that catches it.
+  const singleKind = { p_deal: 'بيع', p_category: 'Residential', p_region_ids: [1],
+    p_tables: ['aqar_residential_listings'], p_types: ['شقة', 'عمارة'], p_tables2: null, p_types2: null };
+  const { qs } = buildOracleQS(singleKind, { typeMacros: MACROS });
+  check('a SINGLE-KIND arm is unchanged — plain type_ar=in.(), no kind restriction (not vacuously strict)',
+    qs.includes(`type_ar=in.(${enc1('شقة')},${enc1('عمارة')})`) && !qs.includes('source_table.like'), qs);
+}
+
+{
+  // NEGATIVE CONTROL 2 — no `both`-macro type in play ⇒ nothing to pin, so nothing changes.
+  const noBoth = { p_deal: 'بيع', p_category: 'Residential', p_region_ids: [1],
+    p_tables: MIXED_TABLES, p_types: ['شقة', 'فيلا'], p_tables2: null, p_types2: null };
+  const { qs } = buildOracleQS(noBoth, { typeMacros: MACROS });
+  check('a type list with NO `both`-macro member is unchanged (the repair is scoped to the real case)',
+    qs.includes(`type_ar=in.(${enc1('شقة')},${enc1('فيلا')})`) && !qs.includes('source_table.like'), qs);
+}
+
+{
+  // NEGATIVE CONTROL 3 — the COMMERCIAL direction, which measured CLEAN on production the same day
+  // (2,303 == 2,303). The restriction must follow the requested category, not be hardcoded.
+  const commercial = { p_deal: 'إيجار', p_category: 'Commercial', p_region_ids: [1],
+    p_tables: MIXED_TABLES, p_types: ['محل', 'عمارة'], p_tables2: null, p_types2: null };
+  const { qs } = buildOracleQS(commercial, { typeMacros: MACROS });
+  check('the kind restriction follows the REQUESTED category (Commercial pins to _commercial_listings)',
+    qs.includes('source_table.like.*_commercial_listings') && !qs.includes('source_table.like.*_residential_listings'), qs);
+}
+
+
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
 console.log('\n✓ the independent-oracle translator is logically sound\n');
