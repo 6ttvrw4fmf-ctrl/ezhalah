@@ -1082,23 +1082,37 @@ try {
     // shipped cap. Cumulative-mount safety across the whole sequence is owned by
     // verify-loadmore-cumulative-mount-is-bounded.ts (ops_incident #212, now CLOSED by this cap).
     //
-    // Straddle note: this barrier runs against LIVE production, which may still serve the pre-cap
-    // build until this change deploys. Both checks are written to pass on the pre-cap build (reveal
-    // continues past 500 with «عرض المزيد» still offered) AND the shipped build (reveal stops at 500
-    // and the chat completes) — the honest invariant they share is "revealed everything, or stopped
-    // at a real cap, and the user is never stranded." A partial under-reveal with no forward path
-    // still fails on either build.
-    const cap = revealed >= SECOND_PAGE_CAP;
-    check('4. R10.1.1 — «عرض المزيد» revealed everything remaining, or stopped at the 500 cap',
-      revealed === (landed.total ?? 0) || cap,
+    // THE STRADDLE IS GONE (ops_incident #260, routed here by routine #4 under G.2(d), 2026-09-14).
+    // These two checks were deliberately written to pass on BOTH the pre-cap and post-cap builds
+    // while the cap deploy was in flight. That build has SHIPPED — confirmed by decoding the served
+    // entry bundle, which carries the PR#2618 i18n strings — so the straddle no longer buys
+    // anything and only removes coverage: at revealed===500 the first check passed via its bare
+    // `cap` disjunct and the second via its `revealed === SECOND_PAGE_CAP` disjunct, so NEITHER
+    // asserted anything about the terminal state. A regression that kept offering «عرض المزيد» past
+    // 500 (re-opening the #212 renderer crash) or retired it with no forward path would have passed.
+    //
+    // What the terminal state is, read from the product rather than assumed (src/app/agent.tsx):
+    // «عرض المزيد» renders iff `hasMore`, «تحديد أكثر» iff `canNarrowFurther`. So at the cap with
+    // inventory still unseen, the pager must be RETIRED and the narrow CTA must be OFFERED — that
+    // pair IS the "user is never stranded" invariant, now asserted instead of assumed.
+    const atCap = revealed === SECOND_PAGE_CAP;
+    const moreRemains = revealed < (landed.total ?? 0);
+    check('4. R10.1.1 — «عرض المزيد» revealed everything remaining, or stopped EXACTLY at the 500 cap',
+      revealed === (landed.total ?? 0) || atCap,
       `revealed=${revealed} total=${landed.total} clicks=${clicks} cap=${SECOND_PAGE_CAP}`
-      + (cap ? ' — at the cap, where the chat completes and the AF/terminal takes over (asserted next)' : ''));
-    check('4. R10.1.1 — at the cap the user is never stranded (reveal stopped at the honest cap, or the pager is still offered)',
-      !cap || revealed >= (landed.total ?? 0) || revealed === SECOND_PAGE_CAP
-        || (await page.$$('[data-testid="results-load-more"]')).length > 0,
-      cap
-        ? `revealed ${revealed} of ${landed.total}, not at the ${SECOND_PAGE_CAP} cap and NO «عرض المزيد» remains — ${(landed.total ?? 0) - revealed} eligible listing(s) look unreachable on this turn`
-        : 'the whole set was revealed, so there is no cap case to judge');
+      + (atCap ? ' — exactly at the cap; the terminal state is asserted next' : ''));
+    if (atCap && moreRemains) {
+      const pagerEls = (await page.$$('[data-testid="results-load-more"]')).length;
+      const narrowEls = (await page.$$('[data-testid="results-narrow"]')).length;
+      // The anti-regression for ops_incident #212: the cap exists to stop the unvirtualized list
+      // mounting an unrenderable number of cards. A pager still offered at the cap re-opens it.
+      check('4. R10.1.1 — at the cap the pager is RETIRED (zero «عرض المزيد» anywhere in the DOM)',
+        pagerEls === 0,
+        `revealed=${revealed} of ${landed.total} at the ${SECOND_PAGE_CAP} cap, but ${pagerEls} «عرض المزيد» element(s) remain — pressing again would mount past the only proven-safe size`);
+      check('4. R10.1.1 — at the cap the user is NOT stranded: «تحديد أكثر» offers the forward path',
+        narrowEls > 0,
+        `revealed=${revealed} of ${landed.total} at the cap, pager retired, and NO «تحديد أكثر» — ${(landed.total ?? 0) - revealed} eligible listing(s) are unreachable from this turn`);
+    }
   }
 
   // ── THE VISIBLE SET IS THE FETCHED SET, EXACTLY (owner checklist, 2026-09-06) ──────────────────
