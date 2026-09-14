@@ -98,6 +98,24 @@ export default function CookieConsent() {
     if (searchCount > 0 && consent == null && authChecked && user == null) choose('all');
   }, [searchCount, consent, authChecked, user, choose]);
 
+  // ANY tap on the app (city/district field, «بحث» button, category pill, sidebar, anything at
+  // all outside the card itself) counts as consent — owner rule 2026-09-13: "when he taps on the
+  // button in the filter it goes away, and when it goes away, it means that he agrees". The
+  // listener attaches only while the card is visible, so it never interferes with anything else.
+  // Capture phase + { once: true } → fires exactly once, before the target's own click handler,
+  // so the search/filter/sign-in click still runs normally on the same tap.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !visible) return;
+    const onDocClick = (e: Event) => {
+      const card = document.querySelector('[data-testid="cookie-consent"]');
+      // A click on the card itself is handled by its own onPress — never treat it as an outside tap.
+      if (card && e.target instanceof Node && card.contains(e.target)) return;
+      choose('all');
+    };
+    document.addEventListener('click', onDocClick, { capture: true, once: true });
+    return () => document.removeEventListener('click', onDocClick, true);
+  }, [visible, choose]);
+
   if (!visible) return null;
 
   const c = isRTL ? COPY.ar : COPY.en;

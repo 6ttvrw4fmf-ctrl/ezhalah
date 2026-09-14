@@ -126,6 +126,35 @@ mustCatch('a corrupt stored value is treated as no-choice, not as consent',
   const mutated = 'const [consent, setConsent] = useState<Consent | null>(() => getCookieConsent());';
   mustCatch('a source that seeds from getCookieConsent() is caught',
     /useState[^;]*\(\s*\(\s*\)\s*=>\s*getCookieConsent\s*\(/.test(mutated));
+
+  // 5b. FIRST TAP ANYWHERE ON THE APP COUNTS AS AGREE (owner 2026-09-13). Beyond «بحث», any tap on
+  // a filter field / button / pill / sidebar dismisses the card and records 'all'. The card's own
+  // click has to be excluded so its Allow all / Only necessary buttons still resolve normally.
+  //
+  // Rather than one giant multi-line regex (fragile — braces stop `[^}]*`), assert the three
+  // independent facts the source must carry:
+  //   (a) it attaches a document 'click' listener,
+  //   (b) that listener calls choose('all'),
+  //   (c) it excludes the card's own element via .contains() on the cookie-consent testid.
+  const hasClickListener =
+    /document\s*\.\s*addEventListener\s*\(\s*['"]click['"]/.test(stripped);
+  const callsChooseAll = /choose\s*\(\s*['"]all['"]\s*\)/.test(stripped);
+  const excludesCard = /cookie-consent[\s\S]{0,200}contains\s*\(/.test(stripped);
+  check('CookieConsent.tsx attaches a document click listener',
+    hasClickListener,
+    'Expected document.addEventListener("click", …) inside a useEffect.');
+  check('the click listener records "all" (any tap outside the card = agree)',
+    callsChooseAll,
+    'Expected choose("all") to run on a tap outside the card.');
+  check('the click listener excludes the card itself (its own buttons resolve normally)',
+    excludesCard,
+    'Expected: if (card && card.contains(e.target)) return; using [data-testid="cookie-consent"].');
+
+  // Mutation: a version that forgot to exclude the card would dismiss on the user's own click on
+  // "Allow all" too (harmless there, but on "Only necessary" it would OVERWRITE their choice to 'all').
+  const withoutExclude = 'document.addEventListener("click", () => choose("all"))';
+  mustCatch('a listener that forgets to exclude the card is caught by the "contains" check',
+    !/cookie-consent[\s\S]{0,200}contains\s*\(/.test(withoutExclude));
 }
 
 console.log(failed === 0
