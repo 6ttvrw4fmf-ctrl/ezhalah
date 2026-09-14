@@ -43,7 +43,10 @@ const grab = (re: RegExp, what: string): string => {
   if (!m) { console.error(`FAIL  could not lift ${what}() out of src/data/locations.ts — did it move or get renamed?`); process.exit(1); }
   return m[0];
 };
-const normSrc = grab(/const norm = \(s: string\) =>[\s\S]*?\n {4}\.replace\(\/\[\^\\p\{L\}\\p\{N\}\]\/gu, ''\);/, 'norm');
+// Anchored on norm()'s LAST line, which moved when the trailing-number fold was appended
+// (migration 20260914204035 / owner 2026-09-14). Lifting the real fn is the point — see
+// [[feedback_never-test-a-copy-of-production-code]] — so the anchor follows the source, never the reverse.
+const normSrc = grab(/const norm = \(s: string\) =>[\s\S]*?\n {4}\.replace\(\/\[0-9\]\+\$\/, ''\);/, 'norm');
 const foldSrc = grab(/const fuzzyFold = \(s: string\) =>\n[\s\S]*?;\n/, 'fuzzyFold');
 const edSrc = grab(/function editDistance\(a: string, b: string\): number \{[\s\S]*?\n\}/, 'editDistance');
 const nearSrc = grab(/export function nearbyCityWithListings\([\s\S]*?\n\}/, 'nearbyCityWithListings');
