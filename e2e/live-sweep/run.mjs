@@ -205,13 +205,21 @@ async function main() {
   // §10 requires «عرض المزيد» to be actually clicked in production EVERY run. Riyadh, not a rotated
   // city: the journey needs a cohort big enough to reach the browse cap, and a small city that
   // returns fewer than 10 results would silently skip — which is exactly how this floor would rot.
-  // TWO presses, not three (2026-09-12). Under the owner's Task 4 rev. 2 rule the SECOND press is a
-  // full drain — every remaining page — so presses 1 and 2 are the whole contract and a third press
-  // is not another batch: it is a second drain, costing production up to another DRAIN_ROW_BUDGET
-  // worth of search RPCs for no new assertion. §40.6 is explicit that a certification is not a load
-  // test, and the search RPC is already 64.4% of all database time (§40.1).
-  await run('«عرض المزيد» → batches keep every filter',
-    () => showMoreJourney({ city: RIYADH, deal: 'إيجار', period: 'سنوي', batches: 2 }),
+  // THREE probes, not two (2026-09-14). This was `batches: 2` under the owner's Task 4 rev. 2 rule,
+  // where the second press drained every remaining page and a third press would have been a SECOND
+  // drain — up to another DRAIN_ROW_BUDGET of search RPCs for no new assertion, which §40.6 rightly
+  // forbids (a certification is not a load test; the search RPC is already 64.4% of all database
+  // time, §40.1). PR #2618's 500-card cap retired that model and with it the cost argument: the
+  // whole two-tap sequence now fits inside the 1,500-row page-0 buffer. MEASURED on production
+  // 2026-09-14, الرياض/إيجار/سنوي (20,658 matching): two presses → 500 cards on exactly ONE result
+  // RPC for the entire journey.
+  //
+  // So the third iteration costs the network NOTHING — it finds the pager already retired and reads
+  // the DOM. That read is the whole point: with `batches: 2` the loop ended on the second press and
+  // the terminal block never ran, so the state that now ends EVERY large search — pager gone, 500 of
+  // 20,658 shown, «تحديد أكثر» carrying the user forward — was asserted by nothing in this layer.
+  await run('«عرض المزيد» → batches keep every filter, and the 500-cap terminal offers a way on',
+    () => showMoreJourney({ city: RIYADH, deal: 'إيجار', period: 'سنوي', batches: 3 }),
     () => { done.showMore++; citiesTested.add(RIYADH); });
 
   // AF-SCOPED PAGINATION (owner PERMANENT, 2026-09-04): "the app's actual Load More UI, under an

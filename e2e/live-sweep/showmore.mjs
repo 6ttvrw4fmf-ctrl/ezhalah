@@ -10,17 +10,29 @@
 // text-shaped keys collided across 150 genuinely distinct مكتب cards on a previous run). Nothing
 // here is clicked through to a source platform, so the journey generates ZERO source traffic (§40.6).
 //
-// WHAT "DONE" LOOKS LIKE (owner 2026-09-11, Task 4 rev. 2, PR #2330 — supersedes the 2026-08-29
-// "clean 100-batches all the way down" wording this header carried until 2026-09-12):
-//   · the FIRST press on a turn reveals the next clean 100-boundary only (10 → 100) and leaves both
-//     «عرض المزيد» and «خلّنا نحدد الطلب أكثر» standing;
-//   · a LATER press DRAINS every remaining page and finishes the search (composer locks, actions row
-//     goes) — it is not another hundred.
-// So a healthy الرياض run is 10 → 100 → (drain), NOT 10 → 100 → 200 → 300. This file asserted the
-// superseded shape for a day and reported a false PAGINATION/PAGER-MISSING pair against production
-// on 2026-09-10..12 — but the SAME journey's second finding was real (the drain's page backstop
-// discarded every page it fetched), which is §41.19's lesson exactly: suspect the oracle first, then
-// FINISH the diagnosis.
+// WHAT "DONE" LOOKS LIKE (owner 2026-09-14, PR #2618 — supersedes BOTH the 2026-08-29 "clean
+// 100-batches all the way down" wording and the 2026-09-11 Task-4 rev. 2 "a later press drains
+// every remaining page" model this header carried until 2026-09-14):
+//   · «عرض المزيد» gives at most TWO reveals and never shows more than SECOND_PAGE_CAP (500) cards;
+//   · the FIRST press reveals the 100-boundary (10 → 100) and leaves both «عرض المزيد» and
+//     «خلّنا نحدد الطلب أكثر» standing;
+//   · the SECOND press reveals up to the 500 cap (or the true end) and then the pager RETIRES.
+//     Where inventory remains unreached, «تحديد أكثر» stays on screen as the forward path.
+// So a healthy الرياض run is 10 → 100 → 500 → (pager gone, «تحديد أكثر» offered). Measured on
+// production 2026-09-14, الرياض/إيجار/سنوي (20,658 matching): exactly that, and the whole sequence
+// cost ONE result RPC — 500 sits inside the 1,500-row page-0 buffer, so neither press pages the
+// network.
+//
+// THIS FILE HAS TWICE ASSERTED A SUPERSEDED SHAPE, IN BOTH DIRECTIONS, AND BOTH COST A RUN:
+//   · 2026-09-10..12 it reported a false PAGINATION/PAGER-MISSING pair against production — while
+//     the SAME journey's second finding was real (the drain's page backstop discarded every page it
+//     fetched). §41.19's lesson exactly: suspect the oracle first, then FINISH the diagnosis.
+//   · 2026-09-14 the opposite failure — it went GREEN on a contract it no longer reached. Its
+//     caller passes `batches: 2`, so the loop ended on the second press and never probed the pager a
+//     third time: the entire terminal block below was UNREACHABLE for any cohort over the cap, and
+//     nothing in the daily browser layer asserted the 500-cap terminal at all. A press sequence that
+//     kept offering «عرض المزيد» past 500 (re-opening the ops_incident #212 renderer crash), or a
+//     terminal that retired the pager with no «تحديد أكثر», would both have read as a clean run.
 //
 // A drain over a huge cohort legitimately takes MINUTES (50 pages × 500 rows), so "the card count
 // did not grow inside my wait" is NOT by itself a defect. The discriminator is whether the app is
@@ -109,6 +121,17 @@ async function readCards(page) {
  * Stall is time-based, not poll-based: real drain pages arrived up to ~20s apart, so "the RPC count
  * held still for N polls" would call a healthy drain dead.
  */
+/**
+ * THE REVEAL CAP — mirrors `SECOND_PAGE_CAP` in src/data/resultCount.ts (owner 2026-09-14, PR #2618).
+ *
+ * This file is plain ESM and cannot import the TypeScript module production ships, so the number is
+ * MIRRORED here rather than imported — and a mirror that nothing checks is drift waiting to happen.
+ * `scripts/verify-live-sweep-coverage-contract.ts` imports the real constant and fails if these two
+ * ever disagree, so raising or lowering the shipped cap turns this file RED until it is updated.
+ * Never re-type it from memory; change it only to follow resultCount.ts.
+ */
+const SECOND_PAGE_CAP = 500;
+
 const PRESS_CAP_MS = 260_000;   // a full 50-page drain measured ~200s + the reveal
 const PRESS_STALL_MS = 45_000;  // no new page AND no new card for this long ⇒ the press is over
 async function settlePress(page, searches, before) {
@@ -300,6 +323,10 @@ export async function showMoreJourney(plan) {
             afAsking: !!document.querySelector('[data-testid="af-question-title"]')
               && !!document.querySelector('[data-testid="af-confirm"]'),
             loadMoreButtons: document.querySelectorAll('[data-testid="results-load-more"]').length,
+            // «تحديد أكثر» — the forward path the 500-cap terminal MUST offer when it retires the
+            // pager with inventory still unreached (owner 2026-09-14). Without it the user is
+            // stranded on 500 of 20,658 with no way to narrow and no way on.
+            narrowButtons: document.querySelectorAll('[data-testid="results-narrow"]').length,
             // Does the visible closing sentence still ASK the user to load more?
             promisesMore: /تبي أعرض لك المزيد/.test(txt),
           };
@@ -325,10 +352,26 @@ export async function showMoreJourney(plan) {
           // settle() has already waited for the card count to stop moving before we get here.
           defect(name, 'AF-HOLDS-PAGER-WITH-NO-QUESTION',
             `an Advanced Filter card is open with no question on it while ${n} of ${total0} matches are shown and no «عرض المزيد» is offered — the interview is holding browsing without narrowing`);
+        } else if (num(total0) > n && n >= SECOND_PAGE_CAP) {
+          // THE 500-CAP TERMINAL (owner rule 2026-09-14, PR #2618). The pager legitimately retires
+          // here even though matches remain: «عرض المزيد» reveals at most SECOND_PAGE_CAP cards in
+          // at most two taps, because an unvirtualized list of 20,782 killed production's renderer
+          // on 2026-09-12 (ops_incident #212). So this is NOT the removed lifetime cap — but it is
+          // only correct while the user still has somewhere to GO. Assert that, rather than
+          // standing down: at the cap the closing line must offer «تحديد أكثر» and the button must
+          // actually be on screen (the §42 visible-output contract, in the one state that now ends
+          // every large search).
+          if (st.narrowButtons === 0) {
+            defect(name, 'CAP-STRANDS-USER',
+              `«عرض المزيد» retired at the ${SECOND_PAGE_CAP}-card cap with ${total0} matching, and NO «تحديد أكثر» is on screen — `
+            + `${num(total0) - n} eligible listings are unreachable and the user has no forward path`);
+          } else {
+            note(`${name}: ${n} of ${total0} shown — pager correctly retired at the ${SECOND_PAGE_CAP}-card cap with «تحديد أكثر» offered (owner 2026-09-14)`);
+          }
         } else if (num(total0) > n) {
-          // CONTINUATION CONTRACT (owner 2026-08-29): with no AF interview open, the pager may be
-          // absent ONLY when everything matching is already on screen. Anything else is the exact
-          // lifetime ceiling the owner removed.
+          // CONTINUATION CONTRACT (owner 2026-08-29): with no AF interview open and BELOW the cap,
+          // the pager may be absent ONLY when everything matching is already on screen. Anything
+          // else is the exact lifetime ceiling the owner removed.
           defect(name, 'PAGER-MISSING', `no «عرض المزيد» at ${n} cards while the search found ${total0} — the removed lifetime cap is back`);
         } else {
           note(`${name}: all ${n} matching cards on screen — pager legitimately absent`);
@@ -376,6 +419,16 @@ export async function showMoreJourney(plan) {
       }
       if (st.headline !== total0) {
         defect(name, 'TRUE-TOTAL', `headline moved across «عرض المزيد»: ${total0} → ${st.headline}`);
+      }
+      // THE CAP IS A MOUNT-SAFETY BOUND, NOT A PREFERENCE (owner 2026-09-14; ops_incident #212).
+      // A press that mounts more than SECOND_PAGE_CAP cards re-opens the class that crashed
+      // production's renderer on الرياض/إيجار/سنوي (20,782 unvirtualized cards) — and it does so
+      // silently, because every other assertion in this loop is happy when cards GROW. The tab we
+      // are driving may survive where a user's does not, so the bound is asserted by number and
+      // never inferred from "did it crash".
+      if (n > SECOND_PAGE_CAP) {
+        defect(name, 'CAP-EXCEEDED',
+          `batch ${b} revealed ${n} cards, past the ${SECOND_PAGE_CAP}-card reveal cap — the unvirtualized-mount crash class (ops_incident #212) is back`);
       }
       for (const [k, v0] of Object.entries({ city: state0.city, deal: state0.deal, type: state0.type,
                                              district: state0.district, budget: state0.budget })) {
