@@ -315,6 +315,18 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # MATCH value collapses — `neighborhood` (the card's own display text) keeps every listing's real
     # sub-division name (e.g. "الضاحية الخامس") verbatim, per this repo's standing district_ar=match
     # / neighborhood=card-text split.
+    # THIS LINE IS NOT THE GUARANTEE — see the note below it. `city_ar` above comes from THIS
+    # crawl's geocode blob, and this source omits `pw-map.city` on a large minority of ads, so on
+    # those crawls the test below is False for a listing that IS in الجفر: UNKNOWN read as NO. That
+    # is what reverted 25 of these 32 rows on 2026-09-14, one day after the merge (routine-3).
+    # `_unknown_must_not_overwrite_known` correctly keeps the STORED city, so the row ends up
+    # claiming الجفر with a district الجفر must never carry.
+    #
+    # The invariant is therefore enforced on the stored row instead, by the trigger
+    # zz_amlakalahsa_district_match -> public.amlakalahsa_district_match() (migration
+    # 20260914072254), where the city is known even when the geocode was silent. This expression
+    # stays because it keeps the value correct at the source when the city IS known — but changing
+    # it alone does not change what gets stored, and removing the trigger re-opens the bug.
     district_ar_for_match = (
         "الضاحية" if city_ar == "الجفر" and district_ar and district_ar.startswith("الضاحية")
         else district_ar
