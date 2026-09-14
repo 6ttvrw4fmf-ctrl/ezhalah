@@ -277,6 +277,24 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260913191008_amlakalahsa_jasha_and_marouj_janoubi_detector_extended.sql, '
     + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover "الجشة" '
     + 'and listing 11606266, and self-verifies green',
+  // Re-repair of the 2026-09-13 الجفر/الضاحية merge, which a geocode-silent crawl reverted on 25 of
+  // its 32 rows within a day (routine-3 2026-09-14; a buyer picking الجفر → الضاحية got 7 results,
+  // proven through location_search_candidates_ar). This migration is mostly PREVENTION — the
+  // owner's rule moves out of the scraper, where it silently no-opped whenever the source omitted
+  // pw-map.city, and onto the stored row as a BEFORE INSERT OR UPDATE trigger, where the city is
+  // known even on a crawl that could not geocode it. The UPDATEs are the one-time cleanup of rows
+  // the reverting crawls already wrote. TWO detectors watch it, not one: the pre-existing
+  // mon_detect_amlakalahsa_jafr_dahiya_merge_regressed() (20260913082310) still checks the base
+  // table, the search index and the population floor, and the companion below adds a guard on the
+  // MECHANISM rather than the data, so a disarmed trigger is caught before it costs a row. Open
+  // the companion to verify this reason rather than taking it on trust.
+  '20260914072254_amlakalahsa_jafr_dahiya_collapse_moves_to_the_stored_row.sql':
+    'watched by its companion 20260914072446_jafr_dahiya_collapse_gets_an_executing_barrier.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_district_match_disarmed() '
+    + '(EXECUTING the collapse rule against its four defining cases and asserting the trigger is '
+    + 'attached to both amlakalahsa tables, mutation-proven in-migration against two broken rules) '
+    + '— and by the pre-existing mon_detect_amlakalahsa_jafr_dahiya_merge_regressed() which still '
+    + 'watches the data this repair corrected',
 };
 
 // Enforcement starts here — the day this rule landed.
