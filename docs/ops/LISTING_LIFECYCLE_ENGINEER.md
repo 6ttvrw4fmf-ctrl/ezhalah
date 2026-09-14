@@ -476,6 +476,47 @@ transient blip became a permanent UNKNOWN for that row. An unbelievable read is 
 only an exhausted budget is UNKNOWN, carrying the law's own reason so the evidence row still says
 WHY.
 
+### §4.1b — The SOLD PIN is a DIRECT kill, and it must leave evidence (2026-09-14)
+
+§4.1 is about platforms that deactivate on ABSENCE. This is the opposite case and it had the same
+hole. Eleven scrapers read a real, named, DIRECT removal signal on the listing's own page — satel's
+`property_status` «Rented out», alta/amaall/eastabha's «تم البيع»/«تم التأجير», hajer and jurash's
+status badge, awal's `is-sold` class, ramzalqasim's `availability`, aqaratikom's `is_sold`,
+dealapp's `offers.availability`, abeea's property status — and correctly deactivate on it via a
+`_pin_sold_inactive()` helper that was a byte-identical copy in all eleven files.
+
+**The per-row EVIDENCE write was added to exactly one of those copies (abeea) and nothing carried it
+to the other ten.** Measured over the whole `ops_stale_inactivation_probe` ledger on 2026-09-14: of
+the eleven sold-pin platforms, one had ever written a row. So ten platforms' *best*-evidenced
+deactivations were, in SQL, indistinguishable from a crawl that timed out — and
+`mon_detect_unknown_treated_as_dead` (P1), which asks exactly *was this row set `active = false`
+with no GONE verdict recorded against its ad_number at the time?*, answered "no evidence" for the
+best-evidenced kills in the system. `alert_event` 2682 flagged three satel rows; a DIRECT fetch of
+each listing's own URL from the routine's own egress returned HTTP 200 carrying satel's own
+«Rented out» status on all three. **Every one of those kills was earned; the P1 was caused entirely
+by the absent ledger row.** §8.3 calls this detector the highest-value one in §4 and the one that
+can least afford to cry wolf — and a detector readers learn to dismiss is dark on the day it is
+right.
+
+The repair is the `http_liveness.py` shape applied a second time: **the law lives once**, in
+`scrapers/common/sold_pin.py::pin_source_confirmed_gone()` — the pin payload, the evidence write,
+and abeea's contradictory-source hold (owner, 2026-08-24) — and a platform supplies only what is
+genuinely its own, the `oracle=` string naming WHICH field said gone. All eleven now route through
+it; `scrapers/dealapp/repair.py` inherits it by import.
+
+- `scripts/verify-sold-pin-evidence-law.ts` (in `npm test`) **discovers** sold-pin platforms by
+  shape, so a twelfth copy-paste written tomorrow is RED without anyone registering it, and
+  **executes** `plan_pin()` through `scripts/lib/pythonMutant.ts` against four mutations — the
+  shipped defect (no evidence rows), a second different way (rows with a blank oracle), the
+  contradiction hold removed, and the blank-oracle refusal removed.
+- `scrapers/common/tests/test_sold_pin_records_evidence.py` executes the WRITE path against a stub
+  client, including that a ledger outage can never keep a dead listing on screen.
+- `test_sold_pin_coverage.py` now asserts the payload lives *only* in the shared law, and picked up
+  alta and amaall, which had a sold pin and had never been in its covered list.
+
+**Why the old barrier was green the whole time:** it asserted the pin PAYLOAD in all eleven copies,
+and the payload was never the missing part. That is AGENTS.md's source-TEXT trap in its exact form.
+
 ### §4.2 — What the rest of the ledger actually is (surveyed 2026-09-06)
 
 Every remaining platform was probed read-only, dead cohort against interleaved live controls, and

@@ -48,7 +48,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, http_liveness, normalize
+from scrapers.common import db, http_liveness, normalize, sold_pin
 from scrapers.common.arabic_location import to_catalog
 
 BASE = "https://hajerhouses.com"
@@ -408,12 +408,7 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     rows. When a listing is later relisted, its next upsert carries active=true and the upsert's
     own missing_count=0 reset applies — the pin is only written for ids that are gone THIS
     crawl."""
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    sold_pin.pin_source_confirmed_gone(table, ad_numbers, oracle="hajer.sold_pin.status_badge")
 
 
 def main() -> int:
