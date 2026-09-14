@@ -130,7 +130,13 @@ def fetch_all(s: cc.Session) -> list[dict]:
         r = None
         for attempt in range(3):
             try:
-                r = s.get(f"{REST}/properties?page={page}&per_page={PER_PAGE}&_embed=wp:term",
+                # wp:featuredmedia is NOT optional here. _photos() reads it out of _embedded, and
+                # WP only puts a relation in _embedded if _embed NAMES it — so asking for wp:term
+                # alone shipped 16 listings with zero photos while every one of them had a real
+                # featured image (found 2026-09-14: source publishes featured_media on all 16,
+                # a 594KB JPEG that fetches 200 image/jpeg; our column was NULL).
+                r = s.get(f"{REST}/properties?page={page}&per_page={PER_PAGE}"
+                          f"&_embed=wp:term,wp:featuredmedia",
                           timeout=40)
             except Exception:
                 time.sleep(2 * (attempt + 1))
