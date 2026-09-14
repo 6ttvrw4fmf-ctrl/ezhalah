@@ -4,7 +4,6 @@
 # and the ceiling constant in that file must be raised in the same reviewed diff.
 verify-abeea-identity-supersession.ts
 verify-about-premium-contract.ts
-verify-account-deletion.ts
 verify-adjudication-is-never-undone.ts
 verify-advanced-filter-contract.ts
 verify-af-agent-cta-live.ts
@@ -111,7 +110,6 @@ verify-aqar-trigger-preserves-source-ppm.ts
 verify-aqar-word-price-fallback.ts
 verify-arabic-summary-fallback.ts
 verify-auth-popup.ts
-verify-authoritative-null-price.ts
 verify-bedrooms-source-corroboration.ts
 verify-bottom-prompt-inset.ts
 verify-buy-rent-combined-af-gating.ts
@@ -197,7 +195,6 @@ verify-live-sweep-watch-evidence.ts
 verify-liveness-confirm-budget-fair.ts
 verify-liveness-contract.ts
 verify-liveness-evidence-class.ts
-verify-liveness-kill-cap-denominator.ts
 verify-liveness-registry-mirror.ts
 verify-liveness-scoped-verification-flags.ts
 verify-loader-platforms-match-active.ts
@@ -221,7 +218,6 @@ verify-narrow-cta-count-gate.ts
 verify-narrowing-invariant-probe.ts
 verify-nav-not-gated-on-animation.ts
 verify-new-chat-is-clean.ts
-verify-no-derived-price.ts
 verify-no-english-city-leak.ts
 verify-no-hardcoded-rent-period.ts
 verify-no-invented-city-suggestion.ts
@@ -253,7 +249,6 @@ verify-refine-single-pending-guard.ts
 verify-refresh-restores-filter-search.ts
 verify-region-or-city-arabic-boundary.ts
 verify-region-scoped-city-live.ts
-verify-rent-period-both.ts
 verify-rent-period-toggle-buttons.ts
 verify-rental-period-is-source-truth.ts
 verify-residential-misfile-recovery.ts
