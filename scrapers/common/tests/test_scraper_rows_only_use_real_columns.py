@@ -1,0 +1,156 @@
+"""Every key a scraper writes must be a REAL column of the listing table it writes to.
+
+THE INCIDENT (2026-09-14). suwar's first production run fetched all 167 listings correctly and then
+died on the upsert:
+
+    ✗ {'code': 'PGRST204', 'message': "Could not find the 'living_rooms' column
+       of 'suwar_residential_listings' in the schema cache"}
+
+Three more were wrong in the same row and would have surfaced one redeploy at a time: `majlis_rooms`
+(the column is `reception_rooms_majlis`), `garden` and `security_cameras` (no column exists at all).
+Every one came from reading the SEARCH INDEX's column names — search_listings_ar genuinely has
+`living_rooms` and `majlis_rooms` — and assuming the listing TABLE matched. It does not.
+
+Nothing caught it before production because the scraper's own tests build rows and assert on their
+CONTENT, never on whether the keys are writable, and `_wasalt_batch` passes the dict straight to
+PostgREST. The cost is a whole run: the fetch succeeds, the upsert rejects everything, zero rows land.
+
+So this asserts the row SHAPE against production's real column list — an oracle, read from
+information_schema on 2026-09-14, not a list this repo invented. Adding a column to the shared shape
+means adding it here, which is the point: the two cannot drift silently.
+
+Run: python -m pytest scrapers/common/tests/test_scraper_rows_only_use_real_columns.py -v
+"""
+from __future__ import annotations
+
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
+
+import scrapers.common.arabic_location as _al  # noqa: E402
+
+# The shared listing shape, verbatim from
+#   select column_name from information_schema.columns
+#    where table_name = 'suwar_residential_listings'
+# on production, 2026-09-14 (89 columns). Every *_residential_listings / *_commercial_listings table
+# is created `LIKE abwbna_… INCLUDING ALL`, so they all carry exactly this set.
+LISTING_COLUMNS = {
+    'active', 'ad_number', 'ad_source', 'additional_info', 'additional_number', 'air_conditioner',
+    'apartment_in_project', 'area_m2', 'balcony_terrace', 'bathrooms', 'bedrooms',
+    'building_number', 'car_entrance', 'city', 'city_ar', 'city_id', 'date_added',
+    'deactivated_at', 'deed_area_m2', 'description', 'direction', 'discount_pct', 'district_ar',
+    'driver_room', 'electricity', 'elevator', 'extension', 'floor_number', 'fullparse_done',
+    'furnished', 'halls', 'id', 'image_storage_keys', 'interior_space_m2', 'kitchen',
+    'last_seen_at', 'last_update', 'last_verified_alive_at', 'laundry_room', 'license_expiry',
+    'license_number', 'listing_url', 'maid_room', 'master_bedrooms', 'missing_count',
+    'neighborhood', 'num_apartments', 'optical_fibers', 'outdoor_area_m2', 'parking', 'photo_urls',
+    'plan_parcel', 'price_annual', 'price_original', 'price_per_meter', 'price_total',
+    'private_entrance', 'project_name', 'property_age', 'property_type', 'raw_captured_at',
+    'raw_html_key', 'reception_rooms_majlis', 'rega_location_verified', 'region', 'region_id',
+    'rent_now_pay_later', 'rent_now_pay_later_monthly', 'rent_period', 'reparsed_v2',
+    'residence_type', 'sanitation', 'scraped_at', 'separate_electricity_meter',
+    'separate_water_meter', 'source', 'source_capture', 'special_position', 'special_surface',
+    'street_name', 'street_width_m', 'tenant_category', 'title', 'transaction_type', 'video_url',
+    'views_count', 'villa_on_roof', 'water_supply', 'zip_code',
+}
+
+# The names that were actually wrong, kept as an explicit anti-list so the specific defect cannot
+# come back wearing the same clothes. The right-hand side is the column that DOES exist.
+KNOWN_WRONG = {
+    'living_rooms': 'halls',
+    'majlis_rooms': 'reception_rooms_majlis',
+    'garden': None,             # no column — belongs in additional_info
+    'security_cameras': None,   # no column — belongs in additional_info
+}
+
+
+@pytest.mark.parametrize("bad,right", sorted(KNOWN_WRONG.items()))
+def test_the_names_that_broke_production_are_still_not_columns(bad, right):
+    assert bad not in LISTING_COLUMNS, f"{bad!r} is not a column of the listing tables"
+    if right:
+        assert right in LISTING_COLUMNS, f"{right!r} IS the real column and must exist"
+
+
+# ── the real check: build a row with each scraper and inspect its keys ───────────────────────────
+_MECCA, _RIYADH = 6, 3
+
+
+@pytest.fixture(autouse=True)
+def _seed(monkeypatch):
+    monkeypatch.setitem(_al._CITY, "_stub_", [(1, 1)])
+    for cid, districts in ((_MECCA, ["حي ولي العهد"]), (_RIYADH, ["حي الياسمين"])):
+        monkeypatch.setitem(_al._DISTRICT_BY_CITY, cid,
+                            {_al.norm_district_tok(d) for d in districts})
+        for d in districts:
+            monkeypatch.setitem(_al._DISTRICT_AR_BY_NORM, _al.norm_district_tok(d), d)
+
+
+def _suwar_row(monkeypatch):
+    from scrapers.suwar import run as S
+    monkeypatch.setattr(S, "to_catalog", lambda c, region_hint=None: (_MECCA, 2) if c == "مكة" else (None, None))
+    post = {"id": 1, "link": "https://suwar.sa/property/x/",
+            "title": {"rendered": "مشروع رقم 709 فيلا تمليك الموقع ولي العهد 6"},
+            "content": {"rendered": "<p>وصف</p>"},
+            "_embedded": {"wp:term": [[{"taxonomy": "property_feature", "name": n}
+                                       for n in ("مصعد", "موقف خاص", "غرفة سائق", "خزان مستقل",
+                                                 "كاميرات مراقبه", "حوش")]],
+                          "wp:featuredmedia": [{"source_url": "https://suwar.sa/a.jpg"}]}}
+    detail = {"price": 1200000, "status": "متاح", "address": "مكة, Saudi Arabia",
+              "text": "الغرف / 5 الصالات / 3 المجالس / 2 دورات المياه / 6 المساحة / 300 م"}
+    row, _ = S.map_listing(post, detail)
+    return row
+
+
+def _rakez_row(monkeypatch):
+    from scrapers.rakez import run as R
+    monkeypatch.setattr(R, "to_catalog", lambda n, region_hint=None: (_RIYADH, 1) if n == "الرياض" else (None, None))
+    tree = {443: {"name": "الرياض", "parent": 0},
+            1434: {"name": "شمال الرياض", "parent": 443},
+            566: {"name": "الياسمين", "parent": 1434}}
+    proj = {"id": 66800, "title": {"rendered": "أدوار إرث - الياسمين الرياض"},
+            "_embedded": {"wp:term": [[{"taxonomy": "city", "id": 566, "name": "الياسمين"},
+                                       {"taxonomy": "property-type", "name": "أدوار"},
+                                       {"taxonomy": "property-status", "name": "متاح"},
+                                       {"taxonomy": "feature", "name": "مصعد"}]],
+                          "wp:featuredmedia": [{"source_url": "https://rakez.sa/a.jpg"}]}}
+    unit = {"id": 72544, "link": "https://rakez.sa/en/unit/x/", "title": {"rendered": "ارث"},
+            "acf": {"unit_project": 66800, "unit_status": "available", "price": 1350000,
+                    "rooms_count": 2, "area": 160.49, "floor": "rooftop", "code": "F1",
+                    "description_ar": "مجلس"}}
+    row, _ = R.map_unit(unit, proj, proj, tree)
+    return row
+
+
+@pytest.mark.parametrize("name,build", [("suwar", _suwar_row), ("rakez", _rakez_row)])
+def test_every_key_the_scraper_writes_is_a_real_column(name, build, monkeypatch):
+    row = build(monkeypatch)
+    assert row, f"{name}: the fixture must produce a row, or this test proves nothing"
+    unknown = sorted(set(row) - LISTING_COLUMNS)
+    assert not unknown, (
+        f"{name} writes {unknown}, which {'is' if len(unknown) == 1 else 'are'} not a column of the "
+        f"listing tables. PostgREST rejects the WHOLE batch on an unknown key (PGRST204), so the "
+        f"run fetches everything and stores nothing — exactly what happened to suwar on 2026-09-14.")
+
+
+@pytest.mark.parametrize("name,build", [("suwar", _suwar_row), ("rakez", _rakez_row)])
+def test_the_row_is_not_vacuously_small(name, build, monkeypatch):
+    # A row that lost its fields would trivially satisfy the check above.
+    row = build(monkeypatch)
+    assert len(row) >= 20, f"{name}: only {len(row)} keys — the fixture stopped exercising the mapper"
+    for essential in ("ad_number", "listing_url", "source", "property_type", "transaction_type"):
+        assert essential in row, f"{name} is missing {essential}"
+
+
+def test_the_guard_would_actually_catch_the_original_defect(monkeypatch):
+    # CONTROL: re-introduce the exact key that broke production and watch the rule reject it.
+    row = _suwar_row(monkeypatch)
+    mutated = {**row, "living_rooms": 3}
+    assert sorted(set(mutated) - LISTING_COLUMNS) == ["living_rooms"], (
+        "the check must flag the very key PostgREST rejected, or it is not guarding the incident")

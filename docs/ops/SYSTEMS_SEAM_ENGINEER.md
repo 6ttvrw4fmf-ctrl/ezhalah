@@ -212,6 +212,33 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   about itself: **if the channel is down, this alert cannot be delivered either** — which is exactly
   why `open_alerts` must be read directly and never inferred from a quiet inbox.
 
+- **DELIVERED IS NOT OWNED, AND THE OWNER USED TO ARRIVE A CYCLE LATE (found 2026-09-14, fixed the
+  same run).** `alert-dispatch.yml` files the issue and then, in a separate idempotent sweep, applies
+  the `routine-N-*` owner label. That sweep read its worklist from `gh issue list`, which goes
+  through GitHub's **search index** — and that index lags issue creation by a few seconds while the
+  routing step starts ~1 s after the filing step ends. **So the sweep could never see the issues its
+  own run had just filed**, and every alert issue was filed unrouted and picked up an owner only on
+  the NEXT dispatch cycle (up to ~60 min on the hourly backstop).
+
+  Proven from the workflow's own log rather than inferred: run 34835208275 filed #2646 (**P0**) and
+  #2647 at 10:51:28-30, then at 10:51:31 routed only #2641-#2643 — the *previous* cycle's issues.
+  Two earlier instances match exactly, so it was systematic, not a race. The cost is the one this
+  routine exists to catch: a P0 reached GitHub in 31 s and reached its OWNER an hour later, invisible
+  to that routine's queue and reading as `'(unrouted)'` to `mon_detect_alert_queue_unworked()`
+  meanwhile. **"Delivered is not owned" surviving inside its own fix, one layer down.**
+
+  The repair keeps the sweep's deliberate design — ONE idempotent labelling mechanism, still no
+  `--label` on the create call, so no create-path/backfill-path skew — and corrects only its INPUT:
+  the filing step records what it created and `routingWorklist()`
+  (`scripts/lib/alertRouting.ts`, executed by `scripts/alert-routing-worklist.ts`) unions those in.
+  `scripts/verify-alert-routing-worklist.ts` pins it by **executing the rule against the exact
+  broken world** — a listing that omits a just-created issue — because a grep for the filename would
+  pass against a workflow that wrote the file and never read it. Mutation-proven 6/6 on the rule,
+  and both halves of the real defect were restored and watched to go red.
+
+  **Generalise it:** any sweep that reads back a list it just wrote to is suspect. Ask whether the
+  read path is the same store as the write path, and whether it is eventually consistent.
+
 - **THE P0 DELIVERY SLO — 5 MINUTES (owner decision, 2026-08-28).** **A P0 alert must be delivered
   to its destination within 5 minutes of detection**, measured from `alert_event.created_at` to a
   confirmed delivery (a 2xx recorded in `net._http_response`, or the GitHub issue existing). The

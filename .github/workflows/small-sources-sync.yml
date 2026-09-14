@@ -166,6 +166,17 @@ jobs:
           # Scheduled in the SAME change that adds the scraper — the barrier that caught amlakalahsa
           # shipping unscheduled exists precisely so this is never a follow-up.
           - { source: aqaralsaudia, cmd: "python -m scrapers.aqaralsaudia.run" }
+          # suwar (owner-approved 2026-09-14): سوار العقارية, a Makkah freehold developer, 167
+          # published listings. Scheduled in the SAME change that adds the scraper — the barrier
+          # that caught amlakalahsa shipping unscheduled exists precisely so this is never a
+          # follow-up. It fetches one detail page per listing (~170 GETs, ~2 min), so it needs no
+          # timeout override.
+          - { source: suwar, cmd: "python -m scrapers.suwar.run" }
+          # rakez (owner-approved 2026-09-14): راكز العقارية, a Riyadh-led developer. Its unit
+          # feed is 145 REST pages plus one Arabic-twin page per project (~420 requests, ~6 min).
+          # Scheduled in the SAME change that adds the scraper — the barrier
+          # verify-every-scraper-has-a-scheduled-workflow.ts caught this exact omission before merge.
+          - { source: rakez, cmd: "python -m scrapers.rakez.run" }
           # NOTE: alnokhba is NOT here. Deprecated 2026-07-14 — alnokhba-services.com's domain
           # lapsed into a parking page (HTTP 200, but a domain-resale placeholder, no
           # property-card markup); scrape_runs went from rows_seen=5 (2026-07-07) to

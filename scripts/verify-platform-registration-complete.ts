@@ -73,7 +73,14 @@ function branchesOf(src: string, fnHeader: string): { branches: Branch[]; fallba
     const str = line.match(/return\s+'([^']*)'/);
     const img = line.match(/return\s+<Image source=\{([A-Z0-9_]+)\}/);
     const badge = line.match(/card\.([A-Za-z0-9]+Badge)\]/);
-    const value = str?.[1] ?? img?.[1] ?? badge?.[1];
+    // `return null` is an EXPLICIT outcome — "this platform deliberately shows no badge yet,
+    // the owner is supplying the file" — and it is emphatically NOT the Aqar fallback: it
+    // renders nothing, where falling through renders another company's mark. Without this the
+    // parser saw no branch at all and reported the platform as landing on AQAR_LOGO, which was
+    // the opposite of what the code does. A platform with NO branch still resolves to the
+    // fallback and still fails, which is the guarantee this file actually owns.
+    const none = /return\s+null\s*;/.test(line) ? 'NO_BADGE_BY_DESIGN' : undefined;
+    const value = str?.[1] ?? img?.[1] ?? badge?.[1] ?? none;
     if (tokens.length && value !== undefined) branches.push({ tokens, value });
   }
   const tail = [...body.matchAll(/\n\s*return\s+(?:'([^']*)'|<Image source=\{([A-Z0-9_]+)\})/g)].pop();

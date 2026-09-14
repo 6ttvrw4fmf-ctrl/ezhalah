@@ -997,24 +997,36 @@ cards actually grow · the headline total never moves · المدينة/الحي
 all survive · no HTML entities or `undefined` appear in later batches · the request's predicate does
 not drift (same `p_deal`/`p_rent_period`/`p_cities`/`p_districts`/`p_category`/`p_types`, later
 offset only) · no duplicate `source_table:listing_id` in the served set (§30 identity, never card
-text). **A healthy first page is 10 → 100 cards on exactly ONE pager click. The SECOND press then
-DRAINS — it is not another hundred** (owner 2026-09-11, Task 4 rev. 2, PR #2330, superseding the
-2026-08-29 "clean 100-batches 100 → 200 → 300 …" rule this paragraph described until 2026-09-12, which
-had itself superseded the 2026-08-20 lifetime cap). «خلّنا نحدد الطلب أكثر» is offered alongside,
-never instead of, continued browsing.
+text). **«عرض المزيد» gives at most TWO reveals and never shows more than 500 cards: 10 → 100 on the
+first press, up to `SECOND_PAGE_CAP` (500) or the true end on the second, and then the pager RETIRES**
+(owner 2026-09-14, PR #2618). This supersedes the 2026-09-11 Task 4 rev. 2 "the SECOND press DRAINS
+every remaining page" rule this paragraph described until 2026-09-14, which had itself superseded the
+2026-08-29 "clean 100-batches 100 → 200 → 300 …" shape and, before that, the 2026-08-20 lifetime cap.
+«خلّنا نحدد الطلب أكثر» is offered alongside, never instead of, continued browsing — and at the cap
+it is the user's ONLY forward path, so it must be on screen.
 
-**Two bounds sit on that drain, both earned on production 2026-09-12 (PR #2377), and a run that does
-not know about them will file false defects — or miss real ones:**
-- **`DRAIN_REVEAL_MAX` (2,000) — the reveal ceiling.** The results list is UNVIRTUALIZED, so
-  "reveal every remaining match" is not implementable at scale: الرياض/إيجار/سنوي (20,782 matching)
-  drained 40 pages and **crashed the renderer**, while الخبر's 5,706 rendered fine. A press over the
-  ceiling reveals the ceiling, keeps «عرض المزيد», and is NOT marked finished. Every cohort at or
-  under it still drains and finishes in one press, which is the common case. The owner's rule is kept
-  wherever it CAN hold and stops short of a crash where it cannot — flagged to the owner, not
-  silently redefined; the ceiling value and whether to virtualize the list are owner calls.
-- **`drainPageBudget(LOAD_MORE_PAGE_SIZE)` — the page backstop.** It must never DISCARD what it
-  fetched: it used to `return` past the merge, so الرياض (37,532) pulled 50 pages, showed none of
-  them, and stranded the user at 100 cards permanently.
+**The cap is a mount-safety bound, not a preference (ops_incident #212).** The results list is
+UNVIRTUALIZED, so "reveal every remaining match" is not implementable at scale: الرياض/إيجار/سنوي
+(20,782 matching) drained 40 pages and **crashed the renderer**, while الخبر's 5,706 rendered fine.
+500 sits far under that only-proven-safe mount size AND under the 1,500-row page-0 buffer, so no
+press mounts an unrenderable list and **«عرض المزيد» never pages the network at all** — measured on
+production 2026-09-14, الرياض/إيجار/سنوي (20,658 matching): two presses → 500 cards on exactly ONE
+result RPC for the whole journey. The interim `DRAIN_REVEAL_MAX` (2,000) ceiling and the
+`drainPageBudget(LOAD_MORE_PAGE_SIZE)` page backstop that PR #2377 added on 2026-09-12 are both
+RETIRED by this cap; the backstop's own lesson stands on the record — it used to `return` past the
+merge, so الرياض (37,532) pulled 50 pages, showed none of them, and stranded the user at 100 cards
+permanently. Whether to virtualize the list, and the cap's value, remain owner calls.
+
+**A stale pager model in the HARNESS costs a run in both directions, and has, twice.** On
+2026-09-10..12 `showmore.mjs` asserted the superseded drain shape and filed a false
+PAGINATION/PAGER-MISSING pair against a healthy production. On 2026-09-14 it failed the opposite
+way and went GREEN on a contract it no longer reached: its caller passed `batches: 2`, so the loop
+ended on the second press and never probed the retired pager — the terminal block was UNREACHABLE
+for every cohort over the cap, and a build that kept offering «عرض المزيد» past 500, or retired it
+with no «تحديد أكثر», would have read as a clean sweep. Fixed the same day: `batches: 3`, a
+`CAP-STRANDS-USER` verdict, a per-batch `CAP-EXCEEDED` bound, and the mirrored cap pinned against
+the shipped `SECOND_PAGE_CAP` by `scripts/verify-live-sweep-coverage-contract.ts`. **When the owner
+changes the pager rule, the sweep's model is part of the change.**
 
 **A flat card count is NOT by itself a pagination defect** — a drain is legitimately minutes long with
 nothing on screen until it lands. The discriminator is whether the app is still FETCHING (§41.19's

@@ -44,8 +44,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, normalize  # noqa: E402
-
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
 BASE = "https://alta.com.sa"
 REST = f"{BASE}/wp-json/wp/v2"
 SOURCE = "Alta"
@@ -333,12 +332,7 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     and the upsert's own missing_count=0 reset applies, so the pin only ever describes rows the
     source calls sold on THIS crawl.
     """
-    for i in range(0, len(ad_numbers), 200):
-        db._execute(
-            db.sb().table(table).update({"active": False, "missing_count": 3})
-            .in_("ad_number", ad_numbers[i:i + 200]),
-            what=table + ".sold_pin",
-        )
+    sold_pin.pin_source_confirmed_gone(table, ad_numbers, oracle="alta.sold_pin.property_status")
 
 
 def main() -> int:

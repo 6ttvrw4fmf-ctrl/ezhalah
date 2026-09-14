@@ -98,7 +98,21 @@ check('the pending question is read-and-CLEARED once per turn (it can never go s
 // invariant, not asserting its presence.
 check('the client no longer arms pendingScopeRef from its own retired clarify-or-search gate',
   !/pendingScopeRef\.current = regionOrCityTwin\(turn\.query\.location\);/.test(src));
-check('New Chat inherits no half-answered question', /setMsgs\(\[\]\);\s*\n\s*pendingScopeRef\.current = null;/.test(src));
+// CONSOLIDATED 2026-09-14 (routine #8). This used to pin the literal adjacency
+// `setMsgs([]);\n  pendingScopeRef.current = null;` inside the New Chat handler — which stopped being
+// true the moment BOTH conversation exits started routing through one shared
+// `resetConversationState()`, even though the invariant it names got STRONGER: startFresh (every
+// sidebar reopen, «بحث» hop and `?seed=` link) did NOT clear this ref before, so a half-asked
+// question leaked out of the abandoned chat into the next one. Pin the invariant where it now lives —
+// the one shared list — and let the executing barrier own the behaviour.
+// EXECUTED proof that the reset really nulls it: scripts/verify-conversation-state-never-inherited.ts
+// §A/§B lift the real function out of agent.tsx and run it.
+const conversationReset = src.slice(src.indexOf('const resetConversationState = () => {'),
+  src.indexOf('const resetConversationState = () => {') + 1200);
+check('no conversation exit inherits a half-answered question (cleared in the ONE shared reset)',
+  /pendingScopeRef\.current = null;/.test(conversationReset));
+check('...and both conversation exits (New Chat + startFresh) route through that shared reset',
+  (src.match(/^\s*resetConversationState\(\);$/gm) ?? []).length === 2);
 // RETIRED alongside the same gate: forcedBroad no longer depends on the client's own clarifyQ
 // judgment (locationClarification() has no remaining call site) — it is simply "the server searched
 // with no location", which is exactly what decideAgentTurn's budget-exhausted / hasEnoughToSearch

@@ -141,8 +141,18 @@ check('reopening hydrates from the server when this device no longer holds it',
   /hydrateTranscript\(entryId\)/.test(openSaved));
 check('a restored chat returns WITHOUT running a search', /landAtLatest\(\);\s*\n\s*return;/.test(openSaved));
 const openStatic = src.slice(src.indexOf('const openStatic = async'));
-check('a saved snapshot renders with no network and no loader',
-  /if \(snapshot\) \{[\s\S]{0,400}?return;/.test(openStatic));
+// The invariant is "the snapshot branch returns without touching the network", NOT "the branch is
+// under 400 characters". A `[\s\S]{0,400}?` window made comment length load-bearing: routine #8's
+// 2026-09-14 terminality fix added an explanatory block inside the branch and this went red while the
+// behaviour was untouched. Slice the ACTUAL branch and assert what it does and does not do.
+{
+  const start = openStatic.indexOf('if (snapshot) {');
+  const branch = start < 0 ? '' : openStatic.slice(start, openStatic.indexOf('\n    }', start));
+  const code = branch.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  check('a saved snapshot renders with no network and no loader',
+    start > -1 && /\n\s*return;\s*$/.test(branch) && !/await |runQuery\(|fetch\(|phase: 'searching'/.test(code),
+    JSON.stringify(code.slice(0, 400)));
+}
 
 if (failed) {
   console.error(`\n${failed} check(s) FAILED — a saved chat could re-run its search`);

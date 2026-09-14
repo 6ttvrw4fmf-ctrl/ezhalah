@@ -155,6 +155,34 @@ POLICIES: dict[str, _P] = {
         "while id 8990 (present in the feed earlier the same day, since removed) and a "
         "never-existing id 999999 both answered HTTP 404 rest_post_invalid_id. The status limb is "
         "implemented too so a future draft/trash post cannot read as alive."),
+    "rakez": _P(
+        _pol("rakez", 3, 168), CRAWL_PRESENCE_ONLY,
+        "wp-json unit status: a 404 the API itself attributes to rest_post_invalid_id (the unit was "
+        "deleted at source), OR an HTTP 200 whose acf.unit_status has left 'available' for "
+        "'reserved'/'sold-out' — on this platform a unit stops being purchasable far more often "
+        "than it is deleted. A bare 404, any 401/403/408/429/5xx, an unparseable body, an id "
+        "mismatch and an unrecognised status are all UNKNOWN and hold the strike without "
+        "deactivating.",
+        "Absence from the crawl only SELECTS candidates; scrapers/rakez/run.py::_verify_gone gives "
+        "each at-grace row a DIRECT confirm before prune_unseen may deactivate it. Measured "
+        "2026-09-14 over all 14,319 units: 8,549 available, 4,030 reserved, 1,740 sold-out — the "
+        "status flip is the dominant death signal here, which is why it is read as authoritative "
+        "while a bare 404 is not."),
+    "suwar": _P(
+        _pol("suwar", 3, 168), CRAWL_PRESENCE_ONLY,
+        "wp-json post status: a 404 the API itself attributes to rest_post_invalid_id (post deleted "
+        "at source), or HTTP 200 carrying a status of trash/draft/pending/private/expired. A 404 "
+        "WITHOUT that code, any 401/403/408/429/5xx, an unparseable body, an id mismatch and an "
+        "unrecognised status are all UNKNOWN and hold the strike without deactivating.",
+        "Absence from the crawl only SELECTS candidates; scrapers/suwar/run.py::_verify_gone gives "
+        "each at-grace row a DIRECT confirm before prune_unseen may deactivate it. "
+        "Control-validated live 2026-09-14 against this platform's real retirement behaviour: it "
+        "HARD-DELETES rather than flipping a status — id 22413 (live) answered HTTP 200 "
+        "status=publish, while id 22400 (absent from the feed) and a never-existing id 999999 both "
+        "answered HTTP 404 rest_post_invalid_id. The status limb is implemented too so a future "
+        "draft/trash post cannot read as alive. NOTE this source ALSO states availability in its "
+        "own page markup (<span class=\"status\">غير متاح</span>, 63 of 167 at onboarding); that is "
+        "SOURCE-STATED retirement and deactivates through the scraper, never through this tier."),
     "aqargate": _P(
         _pol("aqargate", 3, 168), CRAWL_PRESENCE_ONLY,
         "wp-json post status: `expired` (and draft/pending/private/trash/future), or a 404 the API "

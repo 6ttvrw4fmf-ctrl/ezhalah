@@ -653,6 +653,15 @@ function SourceBadge({ source }: { source: string }) {
   // would stamp عقار's mark on another company's listing — the misattribution the owner flagged
   // as a legal problem, not a cosmetic one.
   if (s.includes('aqaralsaudia')) return <Image source={AQARALSAUDIA_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // سوار العقارية — NO LOGO ON PURPOSE (owner, 2026-09-14: "don't put any logo, I will add the
+  // logo after"). This branch must EXIST rather than be omitted: the fallback at the end of this
+  // function returns عقار's logo, so a missing branch would stamp another company's mark on سوار's
+  // listings — the misattribution the owner flagged as a legal problem, not a cosmetic one.
+  // Replace `null` with the owner's file when it arrives; nothing else here needs to change.
+  if (s.includes('suwar')) return null;
+  // راكز العقارية — NO LOGO ON PURPOSE, same instruction as سوار (owner, 2026-09-14). This branch
+  // must EXIST rather than be omitted: the fallback below returns عقار's logo.
+  if (s.includes('rakez')) return null;
   if (s.includes('amlakalahsa')) return <Image source={AMLAKALAHSA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -729,6 +738,8 @@ function sourceHost(source: string): string {
   // sa.aqar.fm instead of the office that actually published the ad. Owner flagged this
   // 2026-09-13 as a legal problem, not a cosmetic one.
   if (s.includes('aqaralsaudia')) return 'aqaralsaudia.com';
+  if (s.includes('suwar')) return 'suwar.sa';
+  if (s.includes('rakez')) return 'rakez.sa';
   if (s.includes('amlakalahsa')) return 'amlakalahsa.com';
   if (s.includes('alta')) return 'alta.com.sa';
   if (s.includes('awal')) return 'awaalun.com';
