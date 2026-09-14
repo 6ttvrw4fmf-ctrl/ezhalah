@@ -7,6 +7,7 @@ two days of failures with zero scrape_runs rows. Guard: an unparseable body ends
 import json
 import sys
 import types
+from pathlib import Path
 
 
 class _FakeResp:
@@ -27,6 +28,7 @@ class _FakeSession:
         return _FakeResp(self._body, self._status)
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # stub the scraper's DB module so importing run.py needs no credentials
 sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
 
