@@ -659,6 +659,9 @@ function SourceBadge({ source }: { source: string }) {
   // listings — the misattribution the owner flagged as a legal problem, not a cosmetic one.
   // Replace `null` with the owner's file when it arrives; nothing else here needs to change.
   if (s.includes('suwar')) return null;
+  // راكز العقارية — NO LOGO ON PURPOSE, same instruction as سوار (owner, 2026-09-14). This branch
+  // must EXIST rather than be omitted: the fallback below returns عقار's logo.
+  if (s.includes('rakez')) return null;
   if (s.includes('amlakalahsa')) return <Image source={AMLAKALAHSA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -736,6 +739,7 @@ function sourceHost(source: string): string {
   // 2026-09-13 as a legal problem, not a cosmetic one.
   if (s.includes('aqaralsaudia')) return 'aqaralsaudia.com';
   if (s.includes('suwar')) return 'suwar.sa';
+  if (s.includes('rakez')) return 'rakez.sa';
   if (s.includes('amlakalahsa')) return 'amlakalahsa.com';
   if (s.includes('alta')) return 'alta.com.sa';
   if (s.includes('awal')) return 'awaalun.com';

@@ -1,6 +1,13 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-09-14 (migration 20260914081716_rakez_wiring_into_search): CHANGED.
+--   • md5 of everything below this header block: 5fb92dbf2a54966df41d0401918a9af5
+--     (26,097 chars, replacing 7ed90d5f6343aff0d88aa702260a379b / 24,942).
+--   Two new arms for rakez, anchored on aldarim like suwar's were, so production now reads
+--   aldarim → rakez → suwar → amlakalahsa → aqaralsaudia. Rebuilt by splicing at that anchor and
+--   byte-verified: the body's md5 equals pg_get_viewdef('public.listing_native_location_v1'
+--   ::regclass, true) exactly.
 -- Re-verified 2026-09-14 (migrations 20260913221143_aqaralsaudia_wiring_into_search and
 --   20260914070904_suwar_wiring_into_search): CHANGED, and this mirror had gone stale for BOTH.
 --   • md5 of everything below this header block: 7ed90d5f6343aff0d88aa702260a379b
@@ -242,6 +249,30 @@
             aldarim_commercial_listings.transaction_type
            FROM aldarim_commercial_listings
           WHERE aldarim_commercial_listings.active
+        UNION ALL
+         SELECT 'rakez'::text AS platform,
+            'rakez_residential_listings'::text AS source_table,
+            rakez_residential_listings.id AS listing_id,
+            rakez_residential_listings.city_ar,
+            rakez_residential_listings.city_id,
+            rakez_residential_listings.district_ar,
+            rakez_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            rakez_residential_listings.transaction_type
+           FROM rakez_residential_listings
+          WHERE rakez_residential_listings.active
+        UNION ALL
+         SELECT 'rakez'::text AS platform,
+            'rakez_commercial_listings'::text AS source_table,
+            rakez_commercial_listings.id AS listing_id,
+            rakez_commercial_listings.city_ar,
+            rakez_commercial_listings.city_id,
+            rakez_commercial_listings.district_ar,
+            rakez_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            rakez_commercial_listings.transaction_type
+           FROM rakez_commercial_listings
+          WHERE rakez_commercial_listings.active
         UNION ALL
          SELECT 'suwar'::text AS platform,
             'suwar_residential_listings'::text AS source_table,
