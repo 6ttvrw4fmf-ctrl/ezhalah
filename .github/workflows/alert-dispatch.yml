@@ -147,7 +147,18 @@ jobs:
               # ~60 min on the hourly backstop). Recording the number here is what lets the sweep
               # union them in. Appended, never truncated, so a run filing several is complete.
               url=$(gh issue create --repo "$REPO" --title "$title" --label ezhalah-alert --label "$sev" --body-file body.md)
-              jq -cn --argjson n "${url##*/}" --arg t "$title" '{number:$n,title:$t}' >> created_issues.jsonl
+              # Parse defensively and NEVER let this kill the step. Filing the issue is the
+              # load-bearing act; recording its number is an optimisation that saves the routing
+              # sweep one cycle. Under `set -e` a bad --argjson would abort the whole loop and
+              # every REMAINING alert in this run would go unfiled — trading a one-cycle routing
+              # delay for a total dispatch outage. So on anything unexpected, warn and carry on:
+              # the sweep then picks the issue up next cycle, i.e. exactly the old behaviour.
+              num="${url##*/}"
+              if [ -n "$num" ] && [ -z "${num//[0-9]/}" ]; then
+                jq -cn --argjson n "$num" --arg t "$title" '{number:$n,title:$t}' >> created_issues.jsonl
+              else
+                echo "::warning::could not parse an issue number from '${url}' — routing for this issue falls back to the next dispatch cycle"
+              fi
               echo "created issue for ${dedup}"
             fi
 

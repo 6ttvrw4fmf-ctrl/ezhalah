@@ -136,6 +136,14 @@ check(
   '§2 the created set is APPENDED, never truncated (a run may file several)',
   !/>\s*created_issues\.jsonl/.test(wf.replace(/>>\s*created_issues\.jsonl/g, '')),
 );
+// Recording the number is an OPTIMISATION; filing the issue is the load-bearing act. The step runs
+// under `set -e`, so an unguarded `jq --argjson n "$num"` on unexpected `gh` output would abort the
+// whole loop and leave every REMAINING alert in that run unfiled — trading a one-cycle routing
+// delay for a total dispatch outage. The guard must therefore be numeric AND non-fatal.
+check(
+  '§2 the number parse is guarded, so a surprise from `gh` cannot abort the filing loop',
+  /\[ -z "\$\{num\/\/\[0-9\]\/\}" \]/.test(wf) && /::warning::could not parse an issue number/.test(wf),
+);
 check(
   '§2 the labelling mechanism is still the idempotent sweep, not a --label on create',
   /gh issue create[^\n]*--label ezhalah-alert[^\n]*--label "\$sev"/.test(wf)
