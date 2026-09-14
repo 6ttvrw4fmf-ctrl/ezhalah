@@ -93,7 +93,13 @@ const norm = (s: string) =>
     .replace(/ئ/g, 'ي')
     .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
     .replace(/ء/g, '')
-    .replace(/[^\p{L}\p{N}]/gu, '');
+    .replace(/[^\p{L}\p{N}]/gu, '')
+    // Trailing-number fold — mirrors norm_district_tok (migration 20260914181645, owner 2026-09-14:
+    // «in our district catalog… we don't include numbers. We just match it with ours»). Our picker
+    // now offers «المحمدية» for المحمدية 1/2/3, so a user who types the «المحمدية 2» they read off a
+    // card — in the picker box or to the agent — must still land on it. Separators are already gone
+    // by this line, so the DB's space-separated trailing number is a trailing digit run here.
+    .replace(/[0-9]+$/, '');
 // Drop a leading definite article so "narjis" matches "Al Narjis" / "النرجس".
 const stripAl = (s: string) => s.replace(/^al/, '').replace(/^ال/, '');
 // Drop the district word ("حي" / "District" / "Dist") wherever it sits in a NORMALIZED query —
