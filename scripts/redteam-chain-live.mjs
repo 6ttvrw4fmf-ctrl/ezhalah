@@ -548,6 +548,22 @@ const DEFAULT_CELLS = [
 const CELLS = (process.env.RT_CELLS ? JSON.parse(process.env.RT_CELLS) : DEFAULT_CELLS)
   .filter((c) => !process.env.RT_ONLY || c.label.includes(process.env.RT_ONLY));
 
+// AN EMPTY RUN SET IS A FAILURE, NEVER A CLEAN BILL OF HEALTH (2026-09-14, routine #9).
+// Caught on this very tool, by this very routine, while using it to production-verify its own fix:
+// an RT_ONLY that matched nothing ran zero chains and printed
+//     ──── 0 equalities asserted across 0 chain(s) ────
+//     ✓ every equality held
+// and exited 0. That is a VACUOUS PASS — the shape this routine exists to hunt — and it is worse
+// here than almost anywhere, because the thing being falsely certified is production itself. It
+// nearly laundered a stale checkout into "the fix is verified on main".
+// scripts/run-tests.mjs already fails closed on an empty run set for exactly this reason
+// (AGENTS.md: "an EMPTY run set is itself a failure"); this instrument now does too.
+if (CELLS.length === 0) {
+  console.error(`\n✗ NO CHAINS SELECTED — ${process.env.RT_ONLY ? `RT_ONLY=${JSON.stringify(process.env.RT_ONLY)} matched none of the ${(process.env.RT_CELLS ? JSON.parse(process.env.RT_CELLS) : DEFAULT_CELLS).length} cells` : 'the cell list is empty'}.\n`
+    + '  Zero chains proves nothing. Refusing to exit 0 over an empty run set.\n');
+  process.exit(1);
+}
+
 for (const c of CELLS) {
   await runChain(c);
   await sleep(1500);   // production safety envelope (§40.6): sequential, well under 1.5 searches/s
