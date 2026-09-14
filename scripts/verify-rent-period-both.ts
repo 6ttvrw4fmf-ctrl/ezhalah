@@ -44,20 +44,67 @@ const remote = codeOnly(read('src/data/remote.ts'));
 const diversity = codeOnly(read('src/lib/platformDiversity.ts'));
 const index = codeOnly(read('src/app/index.tsx'));
 const i18n = read('src/i18n.tsx');   // dictionary keys live in a plain object; comments are irrelevant
+// The migration must carry the union branch: the both-branch reuses BOTH existing predicates
+// (payment_monthly for monthly, rent_period_ar/RNPL for annual) rather than inventing a third rule.
+const migrations = readFileSync(join(root, 'supabase/migrations/20260815012506_rent_period_both_monthly_and_annual.sql'), 'utf8');
+
+const SRC: Sources = { search, remote, diversity, index, i18n, migrations };
+
+// The LOAD-BEARING text predicates, named and pure, so the mutation proofs at the bottom can feed
+// them broken sources (added 2026-09-14, routine #10 / R1 — ops_incident #129). Every one of these
+// guards a silent inventory or token loss: no error, no empty state, and until today a green suite.
+//
+// WHAT THE #129 SWEEP FOUND IN THIS FILE. The incident routed the CLASS because "the same file may
+// hold more assertions of the same shape" — an assertion pinning one SPELLING that would go RED on
+// its own correct repair. Swept 2026-09-14, all ~30 assertions: the two known instances are already
+// repaired (line 190 now accepts any identifier as `rentPeriodParam`'s argument rather than pinning
+// `(query)`, and the hand-written period ternary is now asserted ABSENT rather than required), and
+// no third instance remains. What remained was that NONE of it had ever been watched to fail.
+export type Sources = { search: string; remote: string; diversity: string; index: string; i18n: string; migrations: string };
+
+export const TEXT = {
+  admitsBoth: (s: Sources) => /rentPeriod\?:\s*'monthly'\s*\|\s*'annual'\s*\|\s*'both'/.test(s.search),
+  bothIsARealToken: (s: Sources) => /q\.rentPeriod\s*===\s*'both'\s*\)?\s*return\s*'كلاهما'/.test(s.remote),
+  migrationUnionsBothPredicates: (s: Sources) =>
+    /p_rent_period\s*=\s*''كلاهما''\s*and\s*\(\s*s\.payment_monthly\s*=\s*true\s*or\s*s\.rent_period_ar\s*=\s*''سنوي''/.test(s.migrations),
+  combinedWantsMonthly: (s: Sources) => /wantsMonthly\s*=\s*q\.dealCombined\s*\|\|/.test(s.remote),
+  combinedPassesTheDealGate: (s: Sources) => /\(\s*q\.deal\s*===\s*'Rent'\s*\|\|\s*q\.dealCombined\s*\)\s*&&\s*wantsMonthly/.test(s.remote),
+  // COUNTED, not merely matched (repaired 2026-09-14, routine #10). `src/data/search.ts` has TWO
+  // independent price paths that each derive `explicitBoth` (priceFilter ~L887 and the agent cap
+  // ~L1253), and the previous predicate — a bare `.test()` on each half — was satisfied by EITHER
+  // one. It would have stayed GREEN with one of the two paths silently reverted to the ×12
+  // magnitude heuristic. Found by a mutation that failed to bite: gutting the first declaration
+  // left the check green because the second still matched. That is ops_incident #218's shape — a
+  // check whose success sentence ("a 'both' budget is read on the annual basis") is broader than
+  // the set it actually inspects. The invariant is that EVERY path deriving explicitBoth also
+  // consumes it on the annual basis, so count both and require them to agree.
+  budgetStaysOnTheAnnualBasis: (s: Sources) => {
+    const declares = (s.search.match(/explicitBoth\s*=\s*q\.rentPeriod\s*===\s*'both'/g) ?? []).length;
+    const consumes = (s.search.match(/explicitMonthly\s*\|\|\s*explicitAnnual\s*\|\|\s*explicitBoth\s*\?\s*amount/g) ?? []).length;
+    return declares > 0 && declares === consumes;
+  },
+  // ONE derivation of the token: the count path imports it and calls it, and does NOT keep a second
+  // hand-written ternary of its own. The argument's NAME is deliberately not pinned — pinning it is
+  // the defect this very file was routed for (ops_incident #129/#136).
+  countPathHasOneDerivation: (s: Sources) =>
+    /import \{[^}]*\brentPeriodParam\b[^}]*\} from '@\/data\/remote'/.test(s.index)
+    && /const rentPeriodTok: string \| null = rentPeriodParam\([A-Za-z_$][\w$.]*\);/.test(s.index)
+    && !/rentPeriod\s*===\s*'(?:monthly|annual|both)'\s*\?\s*'(?:شهري|سنوي|كلاهما)'/.test(s.index),
+  noBothToNullTrendingGap: (s: Sources) =>
+    !/rentPeriod\s*===\s*'both'\s*\?\s*null\s*:\s*rentPeriod\s*===\s*'monthly'/.test(s.index),
+  mixingOnlyForABothSearch: (s: Sources) =>
+    /mixPeriods\s*=\s*!q\.bothDeals\s*&&\s*q\.deal\s*===\s*'Rent'\s*&&\s*q\.rentPeriod\s*===\s*'both'/.test(s.remote),
+};
 
 // ── 1. the type admits 'both', and the client sends a DISTINCT token (never null) ────────────────
-check("SearchQuery.rentPeriod admits 'both'",
-  /rentPeriod\?:\s*'monthly'\s*\|\s*'annual'\s*\|\s*'both'/.test(search));
+check("SearchQuery.rentPeriod admits 'both'", TEXT.admitsBoth(SRC));
 
 check("rentPeriodParam maps 'both' → 'كلاهما' (a real token, NOT null)",
-  /q\.rentPeriod\s*===\s*'both'\s*\)?\s*return\s*'كلاهما'/.test(remote),
+  TEXT.bothIsARealToken(SRC),
   "returning null here would silently include rows whose source published no period at all");
 
-// The migration must carry the union branch. Search every migration: at least one must define it, and it
-// must be the union of BOTH predicates (payment_monthly for monthly, rent_period_ar/RNPL for annual).
-const migrations = readFileSync(join(root, 'supabase/migrations/20260815012506_rent_period_both_monthly_and_annual.sql'), 'utf8');
 check('migration defines the كلاهما branch as monthly-OR-annual (a true union)',
-  /p_rent_period\s*=\s*''كلاهما''\s*and\s*\(\s*s\.payment_monthly\s*=\s*true\s*or\s*s\.rent_period_ar\s*=\s*''سنوي''/.test(migrations),
+  TEXT.migrationUnionsBothPredicates(SRC),
   'the both-branch must reuse BOTH existing predicates verbatim, not invent a third rule');
 
 check('migration excludes كلاهما from the passthrough branch (no double-match)',
@@ -110,19 +157,18 @@ check("candidate-level period filter has an explicit 'both' branch",
 // Combined mode has NO period selector, so its Rent side accepts Monthly unconditionally and the
 // two monthly-only sources must always be reachable — there is no user action that can re-add them.
 check("resTables treats Buy+Rent COMBINED as wanting monthly (no period selector to ask with)",
-  /wantsMonthly\s*=\s*q\.dealCombined\s*\|\|/.test(remote),
+  TEXT.combinedWantsMonthly(SRC),
   'dropping dealCombined here returns an annual-only pool for every combined search: ~29% of the '
   + 'matching inventory vanishes with no error, no empty state, and a green test suite');
 
 check("resTables' deal gate admits dealCombined, not only a single-deal Rent search",
-  /\(\s*q\.deal\s*===\s*'Rent'\s*\|\|\s*q\.dealCombined\s*\)\s*&&\s*wantsMonthly/.test(remote),
+  TEXT.combinedPassesTheDealGate(SRC),
   'combined mode sends deal=null, so a gate testing only deal===Rent skips the monthly sources '
   + 'even while wantsMonthly is true — the same silent annual-only collapse by the other clause');
 
 // ── 3. one price basis ───────────────────────────────────────────────────────────────────────────
 check("priceFilter reads a 'both' budget on the annual basis (no ×12 heuristic fallthrough)",
-  /explicitBoth\s*=\s*q\.rentPeriod\s*===\s*'both'/.test(search)
-  && /explicitMonthly\s*\|\|\s*explicitAnnual\s*\|\|\s*explicitBoth\s*\?\s*amount/.test(search),
+  TEXT.budgetStaysOnTheAnnualBasis(SRC),
   'falling through to the magnitude heuristic would ×12 a ≤25k budget and silently shrink the ceiling');
 
 check("agentPriceCapAnnual returns a 'both' budget unscaled (already annual)",
@@ -157,7 +203,7 @@ check("the diversity key reads the listing's own rentPeriod",
   /k\s*===\s*'period'\s*\?\s*\(r\.l\.rentPeriod\s*\?\?\s*''\)/.test(diversity));
 
 check("remote.ts turns mixing on only for an actual both-search",
-  /mixPeriods\s*=\s*!q\.bothDeals\s*&&\s*q\.deal\s*===\s*'Rent'\s*&&\s*q\.rentPeriod\s*===\s*'both'/.test(remote));
+  TEXT.mixingOnlyForABothSearch(SRC));
 
 // ── UI + copy (owner 2026-08-19: كلاهما button REMOVED — سنوي/شهري are independent toggles) ────────
 check("the Filter offers ONLY two period buttons (سنوي/شهري) — no third «Both» button in the UI",
@@ -179,23 +225,14 @@ check("both toggle buttons route through togglePeriodButton (one canonical trans
 // second opinion. The executable proof (the real function run over all 180 query shapes, mutation-
 // proven both ways) lives in scripts/verify-rent-period-token-has-one-derivation.ts.
 check("city/district pools use the SAME 'شهري'/'سنوي'/'كلاهما' token as the results RPC, never a bare boolean",
-  /import \{[^}]*\brentPeriodParam\b[^}]*\} from '@\/data\/remote'/.test(index)
-  // 2026-09-06 (production red team): this half used to pin the literal argument `(query)`. That
-  // argument was itself the next defect — `query.rentPeriod` is undefined for every fresh Rent
-  // search, so the count path sent null while the search defaulted to 'annual' and sent 'سنوي'. So
-  // this line, one commit after being rewritten to stop asserting the OLD defect, asserted the NEW
-  // one, and would have gone red on its repair. The invariant is the CALL, not the argument's name;
-  // WHICH input both paths must share is proven by execution in
-  // scripts/verify-count-and-search-share-one-query.ts.
-  && /const rentPeriodTok: string \| null = rentPeriodParam\([A-Za-z_$][\w$.]*\);/.test(index)
-  && !/rentPeriod\s*===\s*'(?:monthly|annual|both)'\s*\?\s*'(?:شهري|سنوي|كلاهما)'/.test(index),
+  TEXT.countPathHasOneDerivation(SRC),
   "a combined search must send the EXACT كلاهما token to Trending too — null would wrongly include "
   + "unpublished-period rows (docs/ARCHITECTURE.md §17). The count path must take that token from "
   + "remote.ts's exported rentPeriodParam(), not re-derive it: two expressions that agree today are "
   + 'a coincidence, not a guarantee.');
 
 check("the old boolean-scoped 'both → null' Trending gap is gone",
-  !/rentPeriod\s*===\s*'both'\s*\?\s*null\s*:\s*rentPeriod\s*===\s*'monthly'/.test(index),
+  TEXT.noBothToNullTrendingGap(SRC),
   'this shape sent a broader, wrong-scope pool to Trending for a combined search — the exact gap this fix closes');
 
 // The owner's copy rule: state the price BASIS, never assert a lease length no source publishes.
@@ -221,7 +258,74 @@ check('the Monthly note is the OWNER-EXACT wording (2026-08-18): «الأسعا�
   /'الأسعار معروضة بالشهر'/.test(i18n));
 check("'Both' and the both-verb are translated", /'Both':\s*'كلاهما'/.test(i18n) && /'to rent monthly or yearly':/.test(i18n));
 
-console.log(failures === 0
-  ? '\n✓ rent-period «both» intact: true union, monthly sources in scope, annual price basis, mixed output\n'
-  : `\n✗ ${failures} check(s) FAILED — the both-period feature is not intact\n`);
-process.exit(failures === 0 ? 0 : 1);
+// ─────────────────────────────────────────────────────────────────────────────
+// MUTATION PROOFS (2026-09-14, routine #10 / R1 — ops_incident #129). Each re-introduces a real,
+// measured regression into a COPY of the REAL source and watches the predicate above go red. Every
+// one of these defects loses inventory or sends the wrong token SILENTLY — no error, no empty state
+// — which is exactly why "the suite is green" was never evidence here.
+//
+// The two EXECUTED blocks above (resTables via liftSearchScope, orderByScope run on real rows) carry
+// their own proof by construction: they run the shipped function and compare its output, so a broken
+// implementation fails them directly. These proofs cover the TEXT half, which had none.
+// ─────────────────────────────────────────────────────────────────────────────
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${label}`); return; }
+  mutFail++;
+  console.error(`FAIL  (mutation) BLIND to ${label}`);
+};
+const withSrc = (patch: Partial<Sources>): Sources => ({ ...SRC, ...patch });
+
+mustCatch("'both' sending NULL instead of the كلاهما token — which stops filtering entirely and sweeps in the 510 rows whose source published NO period",
+  !TEXT.bothIsARealToken(withSrc({ remote: remote.replace(/return\s*'كلاهما'/, 'return null') })));
+
+mustCatch('the RPC both-branch narrowed from a true union to the monthly predicate alone (every annual row silently lost)',
+  !TEXT.migrationUnionsBothPredicates(withSrc({
+    migrations: migrations.replace(/or\s*s\.rent_period_ar\s*=\s*''سنوي''/, '') })));
+
+mustCatch('the dealCombined half of wantsMonthly being dropped — the measured 2026-08-27 collapse: شقة/الرياض 30,632 → 21,862 (−29%) with a green suite',
+  !TEXT.combinedWantsMonthly(withSrc({ remote: remote.replace(/wantsMonthly\s*=\s*q\.dealCombined\s*\|\|/, 'wantsMonthly =') })));
+
+mustCatch("…and the same collapse through the other clause: a deal gate testing only deal==='Rent', which combined mode (deal=null) never satisfies",
+  !TEXT.combinedPassesTheDealGate(withSrc({
+    remote: remote.replace(/\(\s*q\.deal\s*===\s*'Rent'\s*\|\|\s*q\.dealCombined\s*\)\s*&&\s*wantsMonthly/, "q.deal === 'Rent' && wantsMonthly") })));
+
+mustCatch("a 'both' budget falling through to the ×12 magnitude heuristic, halving the user's ceiling — in EITHER of the two price paths, not just the first",
+  !TEXT.budgetStaysOnTheAnnualBasis(withSrc({
+    search: search.replace(/explicitBoth\s*=\s*q\.rentPeriod\s*===\s*'both'/, 'explicitBoth = false') })));
+
+mustCatch('…and the SECOND price path being the one reverted (the case the un-counted predicate was blind to — ops_incident #218 shape)',
+  !TEXT.budgetStaysOnTheAnnualBasis(withSrc({
+    search: search.replace(/(explicitBoth\s*=\s*q\.rentPeriod\s*===\s*'both'[\s\S]*)explicitBoth\s*=\s*q\.rentPeriod\s*===\s*'both'/, '$1explicitBoth = false') })));
+
+mustCatch('…and a THIRD price path arriving that derives explicitBoth but never consumes it on the annual basis',
+  !TEXT.budgetStaysOnTheAnnualBasis(withSrc({
+    search: `${search}\n    const explicitBoth = q.rentPeriod === 'both';\n    return amount * 12;` })));
+
+mustCatch('the count path re-growing a SECOND hand-written derivation of the period token (the ops_incident #129 defect itself)',
+  !TEXT.countPathHasOneDerivation(withSrc({
+    index: `${index}\nconst tok = rentPeriod === 'monthly' ? 'شهري' : rentPeriod === 'both' ? 'كلاهما' : 'سنوي';` })));
+
+mustCatch('…and the count path dropping the shared import so it derives the token alone',
+  !TEXT.countPathHasOneDerivation(withSrc({
+    index: index.replace(/import \{([^}]*)\brentPeriodParam\b([^}]*)\} from '@\/data\/remote'/, "import {$1$2} from '@/data/remote'") })));
+
+mustCatch("the old boolean-scoped 'both → null' Trending gap coming back",
+  !TEXT.noBothToNullTrendingGap(withSrc({
+    index: `${index}\nconst p = rentPeriod === 'both' ? null : rentPeriod === 'monthly' ? 'شهري' : 'سنوي';` })));
+
+mustCatch('period mixing being turned on for searches that never asked for both periods',
+  !TEXT.mixingOnlyForABothSearch(withSrc({
+    remote: remote.replace(/mixPeriods\s*=\s*!q\.bothDeals\s*&&\s*q\.deal\s*===\s*'Rent'\s*&&\s*q\.rentPeriod\s*===\s*'both'/, 'mixPeriods = true') })));
+
+// NEGATIVE CONTROL. A predicate red for everything is as useless as one green for everything, and
+// this is the line that catches an over-broad repair.
+mustCatch('…while the sources as they actually ship pass EVERY one of these predicates (none is vacuously red)',
+  Object.values(TEXT).every((p) => p(SRC)));
+
+if (failures || mutFail) {
+  if (failures) console.error(`\n✗ ${failures} check(s) FAILED — the both-period feature is not intact\n`);
+  if (mutFail) console.error(`✗ ${mutFail} mutation(s) went UNCAUGHT — this guard cannot see the defects it exists for\n`);
+  process.exit(1);
+}
+console.log('\n✓ rent-period «both» intact: true union, monthly sources in scope, annual price basis, mixed output — and proven to fail on each\n');
