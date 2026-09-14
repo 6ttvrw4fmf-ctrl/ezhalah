@@ -197,3 +197,77 @@ export function routineForKind(kind: string): RoutineNumber {
 export function labelForKind(kind: string): string {
   return ROUTINES[routineForKind(kind)].label;
 }
+
+/** One issue as `gh issue list --json number,title,labels` returns it. */
+export type ListedIssue = {
+  number: number;
+  title: string;
+  labels?: ReadonlyArray<{ name: string }>;
+};
+
+/** One issue the CURRENT run just created, as step 5 records it. */
+export type CreatedIssue = { number: number; title: string };
+
+/** An issue the routing sweep must consider, with whether it already carries an owner. */
+export type WorklistItem = { number: number; title: string; routed: boolean };
+
+/**
+ * WHICH ISSUES THE ROUTING SWEEP MUST WALK.
+ *
+ * The sweep used to be exactly `gh issue list --label ezhalah-alert --state open`, and that listing
+ * CANNOT SEE THE ISSUES THE SAME RUN JUST FILED. `gh issue list` goes through GitHub's search
+ * index, which lags issue creation by a few seconds; the routing step starts ~1 s after the filing
+ * step ends. So every alert issue was filed unrouted and only picked up an owner label on the NEXT
+ * dispatch cycle.
+ *
+ * Measured 2026-09-14, three independent instances, all consistent:
+ *   * #2630 filed 08:18 → routed by the 08:24 run
+ *   * #2641/#2642/#2643 filed 10:24 → routed by the 10:51 run
+ *   * #2646 (P0) / #2647 (P1) filed 10:51 → still unrouted at 11:00
+ * The 10:51 run's own log is the proof: it filed #2646/#2647 at 10:51:28-30 and then, at 10:51:31,
+ * routed only #2641-#2643 — the previous cycle's issues.
+ *
+ * The cost is not that the label never arrives (the sweep is idempotent, so it does). It is that
+ * ownership arrives a full dispatch cycle late — up to ~60 min on the hourly backstop. A P0 reaches
+ * GitHub in ~30 s and reaches its OWNER an hour later, and until it does it is invisible to that
+ * routine's queue and reads as '(unrouted)' to mon_detect_alert_queue_unworked(). "Delivered is not
+ * owned" is the exact failure the routing step was written to close; this is that failure surviving
+ * inside the fix, one layer down.
+ *
+ * The repair keeps the sweep's deliberate design intact — ONE idempotent labelling mechanism, no
+ * `--label` on the create call, no create-path/backfill-path skew — and only corrects its INPUT:
+ * the run unions in the issues it just created and the listing has not indexed yet. Everything
+ * else (route on kind, only label when absent, always write back owner_routine) is unchanged.
+ *
+ * Ordering is stable and listed-first so the backfill behaviour a reader expects is unchanged, with
+ * the run's own new issues appended. Deduplicated BY NUMBER: an issue that IS in the listing keeps
+ * the listing's label state, so a just-created issue that GitHub did index is never double-walked
+ * and never has its existing owner label re-derived.
+ */
+export function routingWorklist(
+  listed: ReadonlyArray<ListedIssue>,
+  created: ReadonlyArray<CreatedIssue>,
+): WorklistItem[] {
+  const out: WorklistItem[] = [];
+  const seen = new Set<number>();
+
+  for (const issue of listed) {
+    if (seen.has(issue.number)) continue;
+    seen.add(issue.number);
+    out.push({
+      number: issue.number,
+      title: issue.title,
+      routed: (issue.labels ?? []).some((l) => l.name.startsWith('routine-')),
+    });
+  }
+
+  for (const issue of created) {
+    if (seen.has(issue.number)) continue;
+    seen.add(issue.number);
+    // Freshly created by THIS run: it cannot already carry an owner label, because the only thing
+    // that applies one is the sweep this list is being built for.
+    out.push({ number: issue.number, title: issue.title, routed: false });
+  }
+
+  return out;
+}
