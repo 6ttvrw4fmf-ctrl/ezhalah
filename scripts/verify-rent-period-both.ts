@@ -23,6 +23,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { liftSearchScope } from './lib/liftSearchScope.ts';
+import { orderByScope, type RankedRow } from '../src/lib/platformDiversity.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -128,10 +129,29 @@ check("agentPriceCapAnnual returns a 'both' budget unscaled (already annual)",
   /q\.rentPeriod\s*===\s*'both'\s*\)\s*return\s+amount\s*;/.test(remote));
 
 // ── 4. results actually mix, without displacing platform as the outermost key ────────────────────
-check("orderByScope takes a mixPeriods flag and nests 'period' INSIDE platform",
-  /mixPeriods\s*=\s*false/.test(diversity)
-  && /mixPeriods\s*&&\s*base\.length\s*\?\s*\[\s*base\[0\]\s*,\s*'period'\s*,\s*\.\.\.base\.slice\(1\)\s*\]/.test(diversity),
-  "period must never become the outermost key — platform-first is a PERMANENT owner rule (2026-07-13)");
+// EXECUTED, not grepped (the source-text form of this check broke when the diversity key order was
+// restructured on 2026-09-14 even though the INVARIANT held). Two platforms × two periods, evenly
+// split. With mixPeriods on: periods must alternate (both visibly present, nested), AND platform must
+// stay the outermost key — the period sequence must NOT be a clean AAAA…BBBB that would mean platform
+// got displaced. Runs the REAL orderByScope.
+{
+  type PL = { cleanType?: string | null; rentPeriod?: string | null };
+  const mk = (id: number, platform: string, period: string): RankedRow<PL> => ({
+    l: { cleanType: 'Apartment', rentPeriod: period }, platform,
+    city: 'الرياض', region: 'منطقة الرياض', district: 'حي النرجس', source_table: `${platform}_res`, rank: id,
+  });
+  const rows: RankedRow<PL>[] = [];
+  let id = 1;
+  for (const p of ['aqar', 'wasalt']) for (const per of ['شهري', 'سنوي']) for (let k = 0; k < 4; k++) rows.push(mk(id++, p, per));
+  const mixed = orderByScope(rows, 'city', false, /* mixPeriods */ true);
+  const worst = <T,>(seq: T[]) => { let w = 1, c = 1; for (let i = 1; i < seq.length; i++) { if (seq[i] === seq[i - 1]) c++; else c = 1; if (c > w) w = c; } return w; };
+  check("mixPeriods=true actually alternates periods (both present, nested — not annual-only)",
+    worst(mixed.map((r) => r.l.rentPeriod)) < rows.length,
+    `period streak=${worst(mixed.map((r) => r.l.rentPeriod))}, seq=${mixed.map((r) => r.l.rentPeriod).join('|')}`);
+  check("platform stays the OUTERMOST key — period never displaces it (PERMANENT owner rule 2026-07-13)",
+    worst(mixed.map((r) => r.platform)) === 1,
+    `platform streak=${worst(mixed.map((r) => r.platform))}, seq=${mixed.map((r) => r.platform).join('|')}`);
+}
 
 check("the diversity key reads the listing's own rentPeriod",
   /k\s*===\s*'period'\s*\?\s*\(r\.l\.rentPeriod\s*\?\?\s*''\)/.test(diversity));

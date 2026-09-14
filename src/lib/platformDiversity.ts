@@ -77,7 +77,7 @@ export function platformIdentity(platform: string | null | undefined): string {
 }
 
 // PERMANENT DIVERSITY RULE (owner, 2026-09-14). The first «عرض المزيد» batch (up to 100 shown) must
-// spread across FOUR dimensions to feel curated rather than dumped, in this priority order:
+// spread across FIVE dimensions to feel curated rather than dumped, in this priority order:
 //   1. Platform  (already the outermost key since 2026-07-13 — a big platform can never crowd out a
 //                 smaller one that also matched).
 //   2. Deal      (buy vs rent) — only meaningful when the user asked for BOTH; opts.mixDeals turns it
@@ -85,7 +85,10 @@ export function platformIdentity(platform: string | null | undefined): string {
 //   3. Property type (cleanType) — apartment/villa/land alternate WITHIN each platform's slots. Was
 //                 previously multiType-only (kicked in only when the user picked 2+ types); the owner
 //                 extended it to always-on (2026-09-14) — same rule for a broad search too.
-//   4. Photos    — a leaf preference, not a hard filter. Within an otherwise-identical group, listings
+//   4. District (+ city/region for broader scopes) — spread across the districts of the chosen city.
+//                 Sits BETWEEN property type and photos ("between the third and the fourth", owner
+//                 2026-09-14); it used to be nested directly under platform, ABOVE property type.
+//   5. Photos    — a leaf preference, not a hard filter. Within an otherwise-identical group, listings
 //                 that carry photos come first; no-photo listings are still shown, just later.
 // docs/ARCHITECTURE.md §20 carries the canonical statement. MATCH FIRST still binds — this is only
 // reordering, never adding.
@@ -166,19 +169,30 @@ export function orderByScope<L extends { cleanType?: string | null; rentPeriod?:
   // introduce a period the user didn't ask for. Placed AFTER platform, never before: platform is the
   // outermost diversity key by the owner's PERMANENT rule (2026-07-13), and nesting period inside it still
   // alternates both periods within every platform's own share.
-  const withPeriod = mixPeriods && base.length ? [base[0], 'period', ...base.slice(1)] : base;
-  // Deal-diversity (owner 2026-09-14): when the user asked for BOTH buy AND rent, alternate the two
-  // right after platform so the answer visibly carries each — the same shape mixPeriods uses for
-  // monthly/annual, one level up (deal is a coarser category than period). Off for single-deal
-  // searches by construction, so this cannot pull in a deal the user didn't ask for.
-  const withDeal = opts?.mixDeals && withPeriod.length ? [withPeriod[0], 'deal', ...withPeriod.slice(1)] : withPeriod;
+  // THE OWNER'S FIVE-DIMENSION ORDER (2026-09-14, restated with district): the first «عرض المزيد»
+  // batch diversifies in this exact PRIORITY, outermost → innermost:
+  //   1. platform  2. deal (buy/rent)  3. property type  4. DISTRICT (+ city/region)  5. photos (leaf)
+  //
+  // KEY CHANGE FROM THE 2026-07-13 layout: geography (region/city/district) used to be nested
+  // directly under platform — ABOVE property type. The owner moved it to sit BETWEEN property type
+  // and photos (district is 4th, "between the third and the fourth"). So a الرياض search now leads
+  // platform → type → then spreads across districts, instead of platform → district → type.
+  const head = base.length ? [base[0]] : [];   // ['platform'] (or [] for an unscoped set)
+  const geo = base.slice(1);                    // region/city/district — everything after platform
+  // Coarse deal/period splitter, right after platform. mixDeals (both buy+rent) and mixPeriods
+  // (rent-only, both monthly+annual) are mutually exclusive by construction, so at most one fires;
+  // neither can introduce a deal/period the user didn't ask for (both are gated on the user's own
+  // request upstream). Deal is coarser than period, so when both were ever set it leads.
+  const coarse: string[] = [];
+  if (opts?.mixDeals && head.length) coarse.push('deal');
+  if (mixPeriods && head.length) coarse.push('period');
   // Property-type diversity is now ALWAYS ON (owner 2026-09-14). Was previously only added when the
   // user picked multiple types; a single-type or broad search still benefits — apartment/villa/studio
   // alternate within each platform's slots. `multiType` stays as documented context but no longer
   // gates cleanType inclusion; a single-cleanType set collapses cleanType to a no-op group, so this
   // change never widens the eligible set (MATCH FIRST holds by construction).
   void multiType;
-  const keys = [...withDeal, 'cleanType'];
+  const keys = [...head, ...coarse, 'cleanType', ...geo];
   return interleaveRanked(rows, keys, { preferPhotos: opts?.preferPhotos });
 }
 
