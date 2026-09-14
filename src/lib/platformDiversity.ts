@@ -76,20 +76,53 @@ export function platformIdentity(platform: string | null | undefined): string {
   return DOMAIN_BY_PLATFORM.get(p) ?? p;
 }
 
+// PERMANENT DIVERSITY RULE (owner, 2026-09-14). The first «عرض المزيد» batch (up to 100 shown) must
+// spread across FOUR dimensions to feel curated rather than dumped, in this priority order:
+//   1. Platform  (already the outermost key since 2026-07-13 — a big platform can never crowd out a
+//                 smaller one that also matched).
+//   2. Deal      (buy vs rent) — only meaningful when the user asked for BOTH; opts.mixDeals turns it
+//                 on. Placed right after platform so a "buy-only" or "rent-only" search is unchanged.
+//   3. Property type (cleanType) — apartment/villa/land alternate WITHIN each platform's slots. Was
+//                 previously multiType-only (kicked in only when the user picked 2+ types); the owner
+//                 extended it to always-on (2026-09-14) — same rule for a broad search too.
+//   4. Photos    — a leaf preference, not a hard filter. Within an otherwise-identical group, listings
+//                 that carry photos come first; no-photo listings are still shown, just later.
+// docs/ARCHITECTURE.md §20 carries the canonical statement. MATCH FIRST still binds — this is only
+// reordering, never adding.
+function listingHasPhoto(l: unknown): boolean {
+  return !!l && typeof l === 'object' && Array.isArray((l as { photos?: unknown[] }).photos)
+    && (l as { photos: unknown[] }).photos.length > 0;
+}
+function listingDeal(l: unknown): string {
+  return !!l && typeof l === 'object' && typeof (l as { deal?: unknown }).deal === 'string'
+    ? (l as { deal: string }).deal : '';
+}
 function rankedKey<L extends { cleanType?: string | null; rentPeriod?: string | null }>(r: RankedRow<L>, k: string): string {
   return k === 'platform' ? platformIdentity(r.platform)
     : k === 'city' ? normLocKey(r.city)
     : k === 'region' ? normLocKey(r.region)
     : k === 'district' ? normLocKey(r.district)
     : k === 'cleanType' ? (r.l.cleanType ?? '')
-    : k === 'period' ? (r.l.rentPeriod ?? '') : '';
+    : k === 'period' ? (r.l.rentPeriod ?? '')
+    : k === 'deal' ? listingDeal(r.l) : '';
 }
 
 // Hierarchical round-robin: group by the first key, order groups by size (densest first) then freshness,
 // take one card per group per pass, and recurse with the remaining keys. At the leaf (no keys), it is
-// pure newest-first by the RPC recency rank.
-export function interleaveRanked<L extends { cleanType?: string | null; rentPeriod?: string | null }>(rows: RankedRow<L>[], keys: string[]): RankedRow<L>[] {
-  if (!keys.length) return [...rows].sort((a, b) => a.rank - b.rank);
+// pure newest-first by the RPC recency rank — with a photo-preference tie-break when the caller opts
+// in (owner 2026-09-14: within an otherwise-identical group, photo'd listings come first so the page
+// doesn't lead with empty-frame cards. No-photo listings are still shown, just later — MATCH FIRST.)
+export function interleaveRanked<L extends { cleanType?: string | null; rentPeriod?: string | null }>(rows: RankedRow<L>[], keys: string[], opts?: { preferPhotos?: boolean }): RankedRow<L>[] {
+  if (!keys.length) {
+    if (opts?.preferPhotos) {
+      return [...rows].sort((a, b) => {
+        const ap = listingHasPhoto(a.l) ? 0 : 1;
+        const bp = listingHasPhoto(b.l) ? 0 : 1;
+        return ap - bp || a.rank - b.rank;
+      });
+    }
+    return [...rows].sort((a, b) => a.rank - b.rank);
+  }
   const [k, ...rest] = keys;
   const groups = new Map<string, RankedRow<L>[]>();
   for (const r of rows) {
@@ -98,7 +131,7 @@ export function interleaveRanked<L extends { cleanType?: string | null; rentPeri
     if (!a) { a = []; groups.set(g, a); }
     a.push(r);
   }
-  const lists = [...groups.values()].map((g) => interleaveRanked(g, rest));
+  const lists = [...groups.values()].map((g) => interleaveRanked(g, rest, opts));
   // Densest group leads (Riyadh before a tiny town); ties broken by the freshest listing in the group.
   lists.sort((a, b) => b.length - a.length || a[0].rank - b[0].rank);
   const out: RankedRow<L>[] = [];
@@ -110,7 +143,7 @@ export function interleaveRanked<L extends { cleanType?: string | null; rentPeri
   return out;
 }
 
-export function orderByScope<L extends { cleanType?: string | null; rentPeriod?: string | null }>(rows: RankedRow<L>[], scope: Scope, multiType = false, mixPeriods = false): RankedRow<L>[] {
+export function orderByScope<L extends { cleanType?: string | null; rentPeriod?: string | null }>(rows: RankedRow<L>[], scope: Scope, multiType = false, mixPeriods = false, opts?: { mixDeals?: boolean; preferPhotos?: boolean }): RankedRow<L>[] {
   // Diversity hierarchy per scope — SUPERSEDES the 2026-06-27 geography-first order (Region → cities →
   // districts → platforms) per owner PERMANENT rule 2026-07-13: "Rule 1 filters always win; Rule 2,
   // platform diversity, is the highest-priority tie-break after that — a platform with many matches must
@@ -134,11 +167,19 @@ export function orderByScope<L extends { cleanType?: string | null; rentPeriod?:
   // outermost diversity key by the owner's PERMANENT rule (2026-07-13), and nesting period inside it still
   // alternates both periods within every platform's own share.
   const withPeriod = mixPeriods && base.length ? [base[0], 'period', ...base.slice(1)] : base;
-  // Tier 3 (user rule 2026-06-28): when the user picked MULTIPLE exact types, spread across THOSE types
-  // LAST — after platform. This only re-orders the already-matched set; it never introduces an unpicked
-  // type (the rows were already constrained to the selected types by the raw fetch + matchesType).
-  const keys = multiType ? [...withPeriod, 'cleanType'] : withPeriod;
-  return interleaveRanked(rows, keys);
+  // Deal-diversity (owner 2026-09-14): when the user asked for BOTH buy AND rent, alternate the two
+  // right after platform so the answer visibly carries each — the same shape mixPeriods uses for
+  // monthly/annual, one level up (deal is a coarser category than period). Off for single-deal
+  // searches by construction, so this cannot pull in a deal the user didn't ask for.
+  const withDeal = opts?.mixDeals && withPeriod.length ? [withPeriod[0], 'deal', ...withPeriod.slice(1)] : withPeriod;
+  // Property-type diversity is now ALWAYS ON (owner 2026-09-14). Was previously only added when the
+  // user picked multiple types; a single-type or broad search still benefits — apartment/villa/studio
+  // alternate within each platform's slots. `multiType` stays as documented context but no longer
+  // gates cleanType inclusion; a single-cleanType set collapses cleanType to a no-op group, so this
+  // change never widens the eligible set (MATCH FIRST holds by construction).
+  void multiType;
+  const keys = [...withDeal, 'cleanType'];
+  return interleaveRanked(rows, keys, { preferPhotos: opts?.preferPhotos });
 }
 
 // ── HOW MANY PLATFORMS GENUINELY MATCH THIS SEARCH ────────────────────────────────────────────
