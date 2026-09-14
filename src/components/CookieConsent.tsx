@@ -143,8 +143,15 @@ export default function CookieConsent() {
   // enforced fleet-wide by scripts/verify-nav-not-gated-on-animation.ts.
   const [mounted, setMounted] = useState(visible);
   const anim = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  // Tracks whether the card was EVER shown in this pageload. Guards the exit branch: on the very
+  // first render `visible` is false (authChecked=false), and without this ref the useEffect would
+  // schedule a setMounted(false) via the 320 ms fallback that fires AFTER authChecked flips true
+  // and the card just mounted — unmounting it instantly. (Repro'd live 2026-09-14: card never
+  // rendered on first visit; only shown here on a second render for the fix that lets it show.)
+  const wasVisible = useRef(visible);
   useEffect(() => {
     if (visible) {
+      wasVisible.current = true;
       setMounted(true);
       Animated.timing(anim, {
         toValue: 1, duration: 220, easing: Easing.out(Easing.cubic),
@@ -152,6 +159,8 @@ export default function CookieConsent() {
       }).start();
       return;
     }
+    // Never rose in this pageload → nothing to bring down.
+    if (!wasVisible.current) return;
     runAfterAnimation(
       (onFinished) => Animated.timing(anim, {
         toValue: 0, duration: 220, easing: Easing.in(Easing.cubic),
