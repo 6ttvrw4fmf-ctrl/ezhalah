@@ -205,8 +205,16 @@ check('agent: every live recorded turn names the conversation (ensureChatId on a
   (agent.match(/runQuery\([^)]*run\.ac\.signal, ensureChatId\(\)\)/g) ?? []).length === 3);
 check('agent: a text turn keeps the same identity (recordChatTurn return adopted)',
   /const rid = recordChatTurn\(v\); if \(rid\) chatIdRef\.current = rid;/.test(agent));
+// CONSOLIDATED 2026-09-14 (routine #8). Counting `chatIdRef.current = null;` occurrences worked only
+// while New Chat and startFresh each kept their own copy of the conversation reset — the very
+// duplication that let them drift apart (startFresh had silently stopped clearing `completed`,
+// `pendingScopeRef`, `pendingCityRef` and `lastQueryRef`). There is ONE list now, so the honest form
+// of this check is: the shared reset clears the id, and both exits call it. Counting call sites is
+// strictly stronger than counting assignments — a third exit that forgets to call it is now RED.
+check('agent: the shared conversation reset clears the conversation id',
+  /const resetConversationState = \(\) => \{[\s\S]{0,1200}?chatIdRef\.current = null;/.test(agent));
 check('agent: a fresh chat clears the conversation id (New Chat + startFresh inherit nothing)',
-  (agent.match(/chatIdRef\.current = null;/g) ?? []).length >= 2);
+  (agent.match(/^\s*resetConversationState\(\);$/gm) ?? []).length === 2);
 // 2026-08-30: the capture also carries `completed` (AF narrowed the search to its final set — see
 // verify-completed-chat-state.ts). The invariant pinned here is unchanged: debounced, content-keyed.
 check('agent: capture serializes the settled state, debounced and content-keyed',

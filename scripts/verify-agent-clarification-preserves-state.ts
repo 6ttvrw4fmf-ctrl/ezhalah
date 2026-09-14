@@ -135,7 +135,20 @@ check("a clarification's understanding goes through the SAME merge+certify pipel
   /d\.kind === 'message'[\s\S]{0,900}certifyAfOnMergedState\([\s\S]{0,200}mergeConversationState\(/.test(data),
   "a paused turn and a searching turn must not accumulate state by different rules");
 // Owner rule (PR#832): New Chat inherits NOTHING.
-check("New Chat clears the accumulated state", /lastQueryRef\.current = null;\s*\/\/ …and not the previous conversation's accumulated filters/.test(ui));
+// CONSOLIDATED 2026-09-14 (routine #8): both conversation exits now clear this through one shared
+// `resetConversationState()`, so the comment-anchored line this used to pin no longer sits in the New
+// Chat handler. The rule is unchanged and now covers MORE — startFresh (every sidebar reopen, «بحث»
+// hop, `?seed=` link) did not clear it before, so the abandoned chat's accumulated filters leaked
+// into the next conversation's first turn. Pinned where it lives; EXECUTED in
+// scripts/verify-conversation-state-never-inherited.ts §A/§B, which lifts and runs the real function.
+{
+  const reset = ui.slice(ui.indexOf("const resetConversationState = () => {"),
+    ui.indexOf("const resetConversationState = () => {") + 1200);
+  check("no conversation exit inherits the accumulated state (cleared in the ONE shared reset)",
+    /lastQueryRef\.current = null;/.test(reset));
+  check("...and both exits (New Chat + startFresh) route through it",
+    (ui.match(/^\s*resetConversationState\(\);$/gm) ?? []).length === 2);
+}
 check("a Filter-originated search replaces it too",
   /makeRun\('filter'\);[\s\S]{0,700}?lastQueryRef\.current = null;/.test(ui));
 

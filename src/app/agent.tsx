@@ -2781,6 +2781,41 @@ export default function Agent() {
     })();
   };
 
+  // ONE DEFINITION OF "WHAT BELONGS TO THE CONVERSATION WE ARE LEAVING" (routine #8, 2026-09-14).
+  //
+  // There were TWO hand-maintained copies of this reset — `startFresh()` (every sidebar reopen, every
+  // «بحث» hop, every `?seed=` link) and the New Chat handler — and each one omitted what the other
+  // remembered. Neither omission is visible to tsc: they are statements, not a type, so the only thing
+  // keeping them in agreement was that someone editing one would remember the other. Measured on the
+  // live tree:
+  //   • startFresh forgot `completed` (the composer lock + the whole «عرض المزيد» row), and
+  //     `pendingScopeRef` / `pendingCityRef` / `lastQueryRef` — a half-asked clarifying question and
+  //     the accumulated filters of the chat being abandoned, which the NEXT conversation's first
+  //     `send()` then consumed as if they were its own (send() reads and immediately nulls both refs).
+  //   • New Chat forgot `afCarryRef` — the Advanced-Filter answered-set whose own comment in
+  //     startFresh explains exactly why inheriting it is a bug.
+  // Same mechanism as ops_incident #211 (a hand-written field list re-projecting an optional-field
+  // type): a list a human has to keep complete, where an omission reads as ordinary code.
+  //
+  // So there is ONE list now, and both callers route through it. Anything conversation-scoped added
+  // later is cleared for BOTH paths by construction instead of by memory.
+  // Deliberately NOT here: `lastFilterRef`/`lastSeedRef` (navigation-intent dedup — the effect sets
+  // them immediately BEFORE calling startFresh, so clearing them would re-fire the same navigation)
+  // and `filterOrigin` (screen-instance origin, not conversation state — left exactly as each caller
+  // had it). Lifecycle actions (flushPendingCapture, finalizeReveal, cancelling the in-flight run)
+  // stay with their callers too: they are things to DO on the way out, not state to clear.
+  const resetConversationState = () => {
+    setBusy(false);
+    setStopped(false);
+    setMsgs([]);
+    setCompleted(false);      // terminality is per-conversation — never inherited (see openStatic/openSaved)
+    chatIdRef.current = null; // new conversation → new sidebar chat (a restore re-sets it)
+    afCarryRef.current = null;   // the AF answered-set belongs to the conversation being left
+    pendingScopeRef.current = null; // …and so does a half-answered clarifying question
+    pendingCityRef.current = null;  // …including the plain-city question's subject
+    lastQueryRef.current = null;    // …and the accumulated filters it narrowed
+  };
+
   // Reopening a past search from the sidebar (replay='0') just SHOWS the saved conversation — the
   // request bubble and the results render in their final state with no typewriter replay, no
   // "thinking/searching" beats. It's a history view, not a fresh run. (user request.)
@@ -2835,6 +2870,21 @@ export default function Agent() {
       ]);
       setDoneTyping((d) => ({ ...d, [resultsId]: true }));
       setRevealCount((c) => ({ ...c, [resultsId]: initialReveal(snapshot) }));
+      // DERIVED FROM THESE RESULTS, NEVER INHERITED FROM THE CHAT WE LEFT (see startFresh). There is
+      // no transcript on this path, so terminality is re-established from what is actually on screen,
+      // through the same named gate every live search uses (~1380). Two guards make it honest:
+      //   • `matchTotal != null` — recordHistory (store.tsx) TRUNCATES a snapshot to SNAPSHOT_CAP=20
+      //     cards, and quotableTotal falls back to `listings.length` when no total was recorded, so
+      //     without this a 20-card slice of a 9,892-match search reads as "≤50, finished" and locks
+      //     the chat: the dead end rebuilt out of its own fix. `matchTotal` itself SURVIVES the
+      //     truncation (it rides the `...result` spread), so the honest total is still available
+      //     whenever it was ever known — which is why this guards on the total's PRESENCE and not on
+      //     `hasMore`, the flag that truncation stamps `true` and which would therefore also throw
+      //     away the lock on a genuinely ≤50 chat that merely had more than 20 cards.
+      //   • quotableTotal() — null (⇒ never terminal) whenever the count would overstate.
+      // Together: a genuinely ≤50 saved chat reopens LOCKED, exactly as the owner's 2026-08-30 rule
+      // requires, and a big one reopens with its pager instead of the previous chat's lock.
+      setCompleted(snapshot.matchTotal != null && searchIsFinishedAtThreshold(quotableTotal(snapshot), INTERVIEW_STOP_AT));
       landAtLatest();
       return;
     }
@@ -2862,6 +2912,9 @@ export default function Agent() {
     ]);
     setDoneTyping((d) => ({ ...d, [resultsId]: true }));
     setRevealCount((c) => ({ ...c, [resultsId]: initialReveal(result) }));
+    // Same derivation as the snapshot branch above, on a LIVE result — this replay re-ran the real
+    // search, so it is exactly the input playListings gates on at ~1380 and needs no hasMore guard.
+    setCompleted(searchIsFinishedAtThreshold(quotableTotal(result), INTERVIEW_STOP_AT));
     pinModeRef.current = 'top';
     toTop();
   };
@@ -2918,17 +2971,20 @@ export default function Agent() {
       flushPendingCapture(); // the OLD conversation's last settled state must land before we leave it
       if (runRef.current) runRef.current.cancelled = true; // stop any in-flight previous search
       finalizeReveal();                                    // stop the prior search's drip-reveal/typing
-      setStopped(false);
-      setBusy(false);
-      setMsgs([]);                                         // new search = a clean chat view
-      chatIdRef.current = null;                            // new conversation → new sidebar chat (a restore re-sets it)
+      // THE conversation reset — one shared list, so this path can no longer forget a field the New
+      // Chat path remembers (see resetConversationState above). It clears `completed`, which is why
+      // reopening a chat from the sidebar while the previous one was TERMINAL no longer carries that
+      // chat's lock onto whatever opens next: the sidebar navigates with
+      // router.replace({pathname:'/agent'}) while ALREADY on /agent — same route, same component
+      // instance, nothing remounted — which is the whole reason this function exists at all.
+      // openSaved() re-sets `completed` from the restored transcript immediately after, so a chat
+      // that HAS one is unaffected; its two fallbacks (openStatic, sendGreeting) now derive or leave
+      // it false instead of inheriting it. Before this, a user who had just finished a search — and
+      // since the owner's 2026-09-14 two-tap/500-cap rule EVERY search now finishes — reopened a
+      // legacy, locally-pruned or guest chat into a dead end: locked composer, no «عرض المزيد» row,
+      // thousands of matches unreachable. (routine #8, ops_incident #211's class.)
+      resetConversationState();
       setFilterOrigin(false);                              // default: has a composer, until the `filter` branch below says otherwise
-      // The Advanced Filter carry belongs to the conversation being left. It is only ever WRITTEN on
-      // a «تحديد أكثر» tap, so without this a brand-new search inherited the previous chat's answered
-      // set and opened its first round already believing those questions were resolved — and, since
-      // startAgeFlow now also seeds from the incoming query's own receipt, a stale carry would beat
-      // the receipt that actually describes this search.
-      afCarryRef.current = null;
     };
     // THE GATE (owner 2026-08-16). Params that were in the URL when the DOCUMENT loaded — a refresh,
     // a restored tab, a pasted link — are not a user action, so they must not execute anything. Drop
@@ -3034,13 +3090,12 @@ export default function Agent() {
     runAfterAnimation(
       (onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished),
       () => {
-        setBusy(false);
-        setMsgs([]);
-        pendingScopeRef.current = null; // New Chat inherits nothing — not even a half-answered question
-        setCompleted(false);
-        lastQueryRef.current = null;    // …and not the previous conversation's accumulated filters
-        pendingCityRef.current = null;  // …including the plain-city question's subject
-        chatIdRef.current = null;       // …and not the previous conversation's sidebar identity
+        // New Chat inherits nothing — through the SAME one list every other conversation exit uses
+        // (resetConversationState above). It used to repeat the list here and, doing so, omitted
+        // `afCarryRef`: a New Chat kept the previous conversation's Advanced-Filter answered set and
+        // opened its first round already believing those questions were resolved — the exact bug
+        // startFresh's own comment describes, live on the other path. (routine #8, 2026-09-14.)
+        resetConversationState();
         // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
         // identical to a previous one (otherwise the change-detection would skip it and leave just
         // the greeting).
