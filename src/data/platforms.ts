@@ -41,6 +41,7 @@ export const PLATFORMS: Platform[] = [
   { name: 'Remal', domain: 'remalre.com', brand: 'Remal Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Amaall', domain: 'amaall.com', brand: 'Amaall Real Estate Services', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Amlakalahsa', domain: 'amlakalahsa.com', brand: 'Amlak Al-Ahsa Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Aqaralsaudia', domain: 'aqaralsaudia.com', brand: 'Aqar Al Saudia Real Estate', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   { name: 'Alta', domain: 'alta.com.sa', brand: 'Alta Real Estate Services', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Shmou Al Shmal', domain: 'shmoua-alshmal.com', brand: 'Shmou Al Shmal Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Awal', domain: 'awaalun.com', brand: 'Awal United for Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },

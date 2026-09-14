@@ -537,6 +537,7 @@ const ALOBID_LOGO = require('../../assets/images/alobid.png');
 const ABWBNA_LOGO = require('../../assets/images/abwbna.png');
 const REMAL_LOGO = require('../../assets/images/remal.png');
 const AMAALL_LOGO = require('../../assets/images/amaall.png');
+const AQARALSAUDIA_LOGO = require('../../assets/images/aqaralsaudia.png');
 const AMLAKALAHSA_LOGO = require('../../assets/images/amlakalahsa.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
 const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
@@ -647,6 +648,11 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('abwbna')) return <Image source={ABWBNA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('remal')) return <Image source={REMAL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('amaall')) return <Image source={AMAALL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // Owner supplied this office's own logo 2026-09-13, so it no longer renders bare. It MUST stay
+  // above any bare 'aqar' branch: the slug 'aqaralsaudia' contains 'aqar', and falling through
+  // would stamp عقار's mark on another company's listing — the misattribution the owner flagged
+  // as a legal problem, not a cosmetic one.
+  if (s.includes('aqaralsaudia')) return <Image source={AQARALSAUDIA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('amlakalahsa')) return <Image source={AMLAKALAHSA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -717,6 +723,12 @@ function sourceHost(source: string): string {
   if (s.includes('abwbna')) return 'abwbna.com';
   if (s.includes('remal')) return 'remalre.com';
   if (s.includes('amaall')) return 'amaall.com';
+  // MUST be tested BEFORE any bare 'aqar' branch and before the AQAR default: the slug
+  // 'aqaralsaudia' CONTAINS 'aqar', so without this line every one of this office's
+  // listings is attributed to عقار — a different company — and the card links a user to
+  // sa.aqar.fm instead of the office that actually published the ad. Owner flagged this
+  // 2026-09-13 as a legal problem, not a cosmetic one.
+  if (s.includes('aqaralsaudia')) return 'aqaralsaudia.com';
   if (s.includes('amlakalahsa')) return 'amlakalahsa.com';
   if (s.includes('alta')) return 'alta.com.sa';
   if (s.includes('awal')) return 'awaalun.com';

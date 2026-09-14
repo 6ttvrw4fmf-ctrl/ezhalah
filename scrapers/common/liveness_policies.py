@@ -142,6 +142,19 @@ POLICIES: dict[str, _P] = {
     # would raise a guaranteed P1 liveness_verification_sla from 2026-09-13 (floor 50%, actual ~0%),
     # which LISTING_LIVENESS.md §7 forbids answering with a label change. Promoting it is earned by
     # adding a sweep that verifies the population, not by editing this string.
+    "aqaralsaudia": _P(
+        _pol("aqaralsaudia", 3, 168), CRAWL_PRESENCE_ONLY,
+        "wp-json post status: a 404 the API itself attributes to rest_post_invalid_id (post deleted "
+        "at source), or HTTP 200 carrying a status of trash/draft/pending/private/expired. A 404 "
+        "WITHOUT that code, any 401/403/408/429/5xx, an unparseable body, an id mismatch and an "
+        "unrecognised status are all UNKNOWN and hold the strike without deactivating.",
+        "Absence from the crawl only SELECTS candidates; scrapers/aqaralsaudia/run.py::_verify_gone "
+        "gives each at-grace row a DIRECT confirm before prune_unseen may deactivate it. "
+        "Control-validated live 2026-09-13 against this platform's real retirement behaviour: it "
+        "HARD-DELETES rather than flipping a status — id 9071 (live) answered HTTP 200 status=publish, "
+        "while id 8990 (present in the feed earlier the same day, since removed) and a "
+        "never-existing id 999999 both answered HTTP 404 rest_post_invalid_id. The status limb is "
+        "implemented too so a future draft/trash post cannot read as alive."),
     "aqargate": _P(
         _pol("aqargate", 3, 168), CRAWL_PRESENCE_ONLY,
         "wp-json post status: `expired` (and draft/pending/private/trash/future), or a 404 the API "
