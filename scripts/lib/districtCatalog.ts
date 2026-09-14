@@ -21,7 +21,7 @@
 // just match it with ours, and then in their property card, if they kept a number, we include that
 // number.» So: our list shows «المحمدية»; picking it returns the listings of المحمدية 1/2/3 as well;
 // the card still reads «المحمدية 2» (cards render the platform's raw `neighborhood` column — nothing
-// in src/ reads search_listings_ar). Migration 20260914181645 folds the trailing number inside
+// in src/ reads search_listings_ar). Migration 20260914204035 folds a number at either end inside
 // norm_district_tok(), the one shared token function.
 //
 // THE POSITIVE ASSERTION STILL MATTERS MOST — it has simply moved. The danger is no longer "a real

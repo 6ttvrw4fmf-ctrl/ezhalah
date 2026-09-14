@@ -33,7 +33,7 @@ for (const [rel, label] of FOLDS) {
   check(`${label}: ء dropped`,        /\.replace\(\/ء\/g, ?['"]{2}\)|split\(['"]ء['"]\)\.join\(['"]{2}\)/.test(src));
   check(`${label}: Arabic-Indic digits ٠-٩ → 0-9`, /\[٠-٩\]/.test(src));
 }
-// District-match path only (owner 2026-09-14, migration 20260914181645): our list never shows a
+// District-match path only (owner 2026-09-14, migration 20260914204035): our list never shows a
 // number, so «المحمدية 1/2/3» is one entry «المحمدية» — and a user typing the number they read off
 // a card must still match it. chatSearch normalises CONVERSATION TITLES and translitPlace matches a
 // listing's RAW text against the static catalog json; neither is the district token, so neither
@@ -41,6 +41,7 @@ for (const [rel, label] of FOLDS) {
 {
   const loc = readFileSync(join(root, 'src/data/locations.ts'), 'utf8');
   check('norm (locations): trailing number folded (المحمدية 2 → المحمدية)', /\.replace\(\/\[0-9\]\+\$\/, ?['"]{2}\)/.test(loc));
+  check('norm (locations): LEADING number folded too (1النرجس → النرجس)', /\.replace\(\/\^\[0-9\]\+\/, ?['"]{2}\)/.test(loc));
   for (const [rel, label] of [['src/lib/chatSearch.ts', 'normalizeArabic (chat)'], ['src/lib/translitPlace.ts', 'normAr (landmark)']] as const) {
     check(`${label}: does NOT fold digits (not the district token)`,
       !/\.replace\(\/\[0-9\]\+\$\/, ?['"]{2}\)/.test(readFileSync(join(root, rel), 'utf8')));
@@ -61,6 +62,7 @@ const clientNorm = (s: string) =>
    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
    .replace(/ء/g, '')
    .replace(/[^\p{L}\p{N}]/gu, '')
+   .replace(/^[0-9]+/, '')
    .replace(/[0-9]+$/, '');
 
 const eqPairs: Array<[string, string, string]> = [
@@ -69,6 +71,7 @@ const eqPairs: Array<[string, string, string]> = [
   ['الزهراء1', 'الزهراء ١', 'digit script'],
   ['المحمدية 2', 'المحمدية', 'trailing number folded away'],
   ['البصر1', 'البصر 1', 'missing space + trailing number'],
+  ['1النرجس', 'النرجس', 'number in FRONT — real production data, city 67'],
 ];
 for (const [a, b, why] of eqPairs) {
   const na = clientNorm(a), nb = clientNorm(b);

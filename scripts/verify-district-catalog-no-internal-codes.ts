@@ -10,7 +10,7 @@
 //
 // Owner decision 2026-09-14 («in our district catalog, make sure there are no numbers… we just
 // match it with ours, and then in their property card, if they kept a number, we include that
-// number»): migration 20260914181645 folds a trailing number inside norm_district_tok(), so
+// number»): migration 20260914204035 folds a number (either end) inside norm_district_tok(), so
 // المحمدية 1/2/3 and المحمدية are ONE picker row «المحمدية» carrying all their listings. The full
 // reasoning — and why this file's positive control is now the INVERSE of what it asserted before —
 // is in scripts/lib/districtCatalog.ts's header. Read it before "fixing" a failure here.

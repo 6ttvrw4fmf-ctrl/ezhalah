@@ -61,32 +61,37 @@ AS $function$
     -- 6. municipal plan-block code: «حي ج1»…«حي ج44», «حي ج 35», and the bare «حي ج» stub.
     or t ~ '^\s*حي\s*ج\s*[0-9]*\s*$'
     -- 7. «حي رقم 1»…«حي رقم 10» and the malformed «(حي رقم (5» — "District No.", a code, not a name.
-    or t ~ '^\s*\(?\s*حي\s*رقم\b'
+    --    NO \b HERE: in Postgres ARE, \b is BACKSPACE, not a word boundary (that is \y). Written
+    --    with \b first, this clause silently matched nothing at all and self-test 9 caught it.
+    --    The ^ anchor is what keeps it honest — «حي الرقة» and «حي جرير» are verified non-matches.
+    or t ~ '^\s*\(?\s*حي\s*رقم'
 $function$;
 
 -- ── THE FOLD, inside the one shared token function ──────────────────────────────────────────────
--- Appended as the LAST step so it runs after the existing «letter|digit -> letter space digit»
--- split, which guarantees every digit run is already space-separated: «البصر1» and «البصر 1» reach
--- this rule identically, so the missing-space renderings fold for free instead of needing their own
--- repair. A name that is ONLY a number normalizes to the empty token and is dropped by the
--- refresh's existing `k <> ''` guard.
+-- The number is stripped from EITHER END, and the existing «letter|digit» split is joined by its
+-- mirror «digit|letter» so both ends are reachable. A trailing-only rule was tried first and the
+-- refresh's own guard rejected it: «1النرجس» (city 67, 9 listings) carries its number in FRONT, and
+-- stayed numbered. The splits mean «البصر1», «البصر 1» and «1النرجس» all reach the strip identically,
+-- so the missing-space renderings fold for free rather than needing their own repair. Stripping runs
+-- BEFORE «حي »/«ال» removal so a leading number cannot hide the article behind it. A name that is
+-- ONLY a number normalizes to the empty token and is dropped by the refresh's `k <> ''` guard.
 create or replace function public.norm_district_tok(t text)
  returns text
  language sql
  immutable
 as $function$
-  select btrim(regexp_replace(
-           regexp_replace(regexp_replace(
-             btrim(regexp_replace(
+  select btrim(regexp_replace(regexp_replace(
+           btrim(regexp_replace(regexp_replace(
+             btrim(regexp_replace(regexp_replace(
                replace(
                  translate(
                    regexp_replace(public.normalize_ar(coalesce(t,'')), '[ًٌٍَُِّْٰ]', '', 'g'),
                    'ئ٠١٢٣٤٥٦٧٨٩', 'ي0123456789'),
                  'ء',''),
-               '([ء-ي])([0-9])', '\1 \2', 'g')),
-             '^(حي\s+)+', ''),
-           '^ال', ''),
-         '\s*[0-9]+\s*$', ''));
+               '([ء-ي])([0-9])', '\1 \2', 'g'),
+             '([0-9])([ء-ي])', '\1 \2', 'g')),
+           '^[0-9]+\s*', ''), '\s*[0-9]+$', '')),
+         '^(حي\s+)+', ''), '^ال', ''));
 $function$;
 
 -- The expression index baked the OLD function's values; a replaced body does not rebuild it.
@@ -107,7 +112,7 @@ delete from public.loc_catalog_district
 -- The remainder are REAL names that merely carry a number («حي الورود 1», «حي أبا العبلان2»): the
 -- number goes, the place stays, and the dedup below merges it onto its plain twin where one exists.
 update public.loc_catalog_district
-   set district_ar = btrim(regexp_replace(regexp_replace(district_ar, '([^0-9\s])([0-9])', '\1 \2', 'g'), '\s*[0-9٠-٩]+\s*$', ''))
+   set district_ar = btrim(regexp_replace(regexp_replace(regexp_replace(district_ar, '([^0-9\s])([0-9])', '\1 \2', 'g'), '^\s*[0-9٠-٩]+\s*', ''), '\s*[0-9٠-٩]+\s*$', ''))
  where district_ar ~ '[0-9٠-٩]';
 
 -- Cities: «الفويلق 1» / «الفويلق 2» (region 8, zero listings each). Both city_ids are KEPT — a city
@@ -167,7 +172,7 @@ begin
     where k is not null and k <> ''
   )
   select city_id, k,
-         coalesce(nullif(btrim(regexp_replace(sp, '\s*[0-9٠-٩]+\s*$', '')), ''), sp),
+         coalesce(nullif(btrim(regexp_replace(regexp_replace(sp, '^\s*[0-9٠-٩]+\s*', ''), '\s*[0-9٠-٩]+\s*$', '')), ''), sp),
          case when pref = 0 then 'catalog' else 'live' end, now()
   from ranked where rn = 1;
   get diagnostics n = row_count;
@@ -261,6 +266,7 @@ begin
   or public.norm_district_tok('حي المصيف 2') <> public.norm_district_tok('حي المصيف')
   or public.norm_district_tok('البصر1')      <> public.norm_district_tok('البصر 1')
   or public.norm_district_tok('الزهراء ١')   <> public.norm_district_tok('الزهراء')
+  or public.norm_district_tok('1النرجس')     <> public.norm_district_tok('حي النرجس')
   then
     raise exception 'number fold failed: a numbered sibling did not join its plain name';
   end if;

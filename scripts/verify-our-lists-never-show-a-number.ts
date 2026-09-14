@@ -16,7 +16,7 @@
 // Nothing filtered it on the way in, so every downstream list inherited them — الطائف's district
 // dropdown offered 161 choices of which 42 were plot codes; بقعاء 14 of 22.
 //
-// The database half is guarded structurally by three CHECK constraints (migration 20260914181645),
+// The database half is guarded structurally by three CHECK constraints (migration 20260914204035),
 // asserted below to still be in the committed SQL. THIS half guards the file, because the file is
 // the seed: a future re-import of the upstream dataset is the way this comes back, and it would
 // otherwise arrive silently, in a 3,700-row diff nobody reads line by line.
@@ -62,7 +62,7 @@ for (const [label, rows] of [
 }
 
 // ── the DATABASE half must stay structurally guarded, not just currently clean ───────────────────
-const MIGRATION = 'supabase/migrations/20260914181645_district_picker_folds_the_number_away_owner_rule.sql';
+const MIGRATION = 'supabase/migrations/20260914204035_district_picker_folds_the_number_away_owner_rule.sql';
 const sql = readFileSync(join(ROOT, MIGRATION), 'utf8');
 for (const [table, constraint] of [
   ['loc_canonical_district', 'loc_canonical_district_never_numbered'],

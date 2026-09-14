@@ -44,7 +44,7 @@ const grab = (re: RegExp, what: string): string => {
   return m[0];
 };
 // Anchored on norm()'s LAST line, which moved when the trailing-number fold was appended
-// (migration 20260914181645 / owner 2026-09-14). Lifting the real fn is the point — see
+// (migration 20260914204035 / owner 2026-09-14). Lifting the real fn is the point — see
 // [[feedback_never-test-a-copy-of-production-code]] — so the anchor follows the source, never the reverse.
 const normSrc = grab(/const norm = \(s: string\) =>[\s\S]*?\n {4}\.replace\(\/\[0-9\]\+\$\/, ''\);/, 'norm');
 const foldSrc = grab(/const fuzzyFold = \(s: string\) =>\n[\s\S]*?;\n/, 'fuzzyFold');
