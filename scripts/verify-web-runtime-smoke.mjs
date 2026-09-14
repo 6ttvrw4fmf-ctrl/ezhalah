@@ -98,12 +98,20 @@ import { readRestoredFormState } from '../e2e/lib/formRestoreOracle.mjs';
 // on later reloads), but after owner rule 2026-09-13 the card returns on every visit, so the smoke
 // is now a live consumer like every other journey and must call THE shared helper here.
 import { dismissCookieConsent } from './lib/liveConsent.ts';
+import { armForSubmit, classifyRapidCancelEntry } from './lib/armedSubmit.ts';
 
 const DIST = new URL('../dist/', import.meta.url).pathname;
 let failed = 0;
+let skipped = 0;
 const check = (label, ok, detail = '') => {
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail && !ok ? `\n        ${detail}` : ''}`);
+};
+// A measurement that did not happen is a SKIP, never a pass and never a defect (PART 9.5 / 9.1).
+// It must always carry its reason: an unexplained skip is the failure mode that reads as coverage.
+const skipCheck = (label, reason) => {
+  skipped++;
+  console.log(`SKIP  ${label}\n        ${reason}`);
 };
 
 if (!existsSync(join(DIST, 'index.html'))) {
@@ -434,6 +442,14 @@ try {
     }
     return null;
   };
+  // ARM: prove the app's own commit marker is present before tapping «بحث», re-priming the city when
+  // it is not. `onSearch` returns at `if (!citySelected)` with a validation message and fires ZERO
+  // requests, and every keystroke in the city field clears `citySelected`. Verdicts are decided by
+  // scripts/lib/armedSubmit.ts so a barrier can EXECUTE that rule rather than grep it.
+  const armSearch = () => armForSubmit(
+    async () => (await page.locator('[data-testid="selected-city-visual"]').count()) > 0,
+    () => pickCity('الرياض'),
+  );
   // Submit that CONFIRMS a search request left the app, re-tapping when one did not (2026-08-24).
   // Four CI runs failed [H mobile] with a tap that fired nothing while the same build+script+backend
   // passed locally end to end: after Stop's restore the form REHYDRATES citySelected in an effect
@@ -441,9 +457,40 @@ try {
   // the app correctly refuses to search with an unresolved city, exactly once. A real user's second
   // tap succeeds; so does this one. A genuinely wedged app fires nothing in 3 attempts and still
   // fails — and every capture window starts null, so the sig oracle only ever sees THIS submit.
+  //
+  // RE-ARM BETWEEN ATTEMPTS (2026-09-14). Retrying the TAP was never a retry: if the city is
+  // uncommitted, all three taps hit a form the app refuses and the loop spends its whole budget on
+  // three no-ops — the same shape PART 11.2 rule 2 records for a control that unmounts. Measured on
+  // this branch, CI run 34833233410: the BASELINE submit did exactly that, `baselineReq` stayed
+  // null, and all three request-signature oracles downstream ([E], [F], [H mobile]) then failed
+  // comparing against that null while each resubmit had fired a perfectly good request. One null
+  // baseline, seven reported failures, and nothing wrong with the app.
+  // The district twin of pickCity: type → tap the suggestion → CONFIRM the app committed it, using
+  // the app's OWN restored-form oracle (readRestoredFormState's `districts`), not a DOM guess.
+  // Returns false rather than throwing when it cannot commit, so a caller can say so instead of
+  // asserting on a form that is not the one it thinks it primed.
+  const pickDistrict = async (typed, row) => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await page.click('input >> nth=1');
+      await page.fill('input >> nth=1', '');
+      await page.type('input >> nth=1', typed, { delay: 60 });
+      await tapWhenRendered(row).catch(() => {}); // the confirmation below decides; a miss retries
+      const until = Date.now() + 4000;
+      while (Date.now() < until) {
+        const snap = await visibleInputs();
+        if ((snap?.districts || []).length > 0) return true;
+        await page.waitForTimeout(250);
+      }
+    }
+    check(`the district «${row}» was committed before the form was used`, false,
+      'the app never showed it as a committed district after 3 attempts — every assertion below '
+      + 'would be comparing against a form that was never actually primed');
+    return false;
+  };
   const submitSearch = async () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       lastSearchBody = null;
+      await armSearch();
       await tap('بحث');
       const until = Date.now() + 5000;
       while (Date.now() < until) {
@@ -462,9 +509,14 @@ try {
     // Same two-tap deal sequence as journey A above (Buy+Rent combined multi-select, 2026-08-20).
     await tap('إيجار'); await tap('شراء'); await tap('سنوي');
     await pickCity('الرياض');
-    await page.click('input >> nth=1');
-    await page.type('input >> nth=1', 'النرجس', { delay: 60 });
-    await tapWhenRendered('حي النرجس');
+    // CONFIRM THE DISTRICT COMMIT, exactly as pickCity confirms the city. The suggestion row can
+    // render after the tap fires on a loaded runner, and an uncommitted district is not a milder
+    // version of a committed one — it is a DIFFERENT form. Measured, CI run 34833233410:
+    // «[E] rapid-cancel restores city/district/area EXACTLY» failed with
+    // pre=…"النرجس" districts:[] vs post=…"" districts:["حي النرجس"] — the snapshot was taken with
+    // the district still raw text in the input, so the restore, which committed it properly, read
+    // as a mismatch. The app was right and the primed form was wrong.
+    await pickDistrict('النرجس', 'حي النرجس');
     await tap('الشقق والسكن المشترك'); await tap('شقة');
     await tap('3');
     await page.fill('input >> nth=2', '80');
@@ -483,9 +535,24 @@ try {
 
   // ---- E: rapid cancel — navigate back the instant the search starts (Stop button removed 2026-09-12). ----
   await fillOwnerExample();
+  const armE = await armSearch();
   await tap('بحث');
   await page.waitForTimeout(300); // land on /agent before navigating back — real user cancel timing
-  check('[E] Filter search landed on /agent before cancellation', page.url().includes('/agent'), `url=${page.url()}`);
+  const verdictE = classifyRapidCancelEntry({ armed: armE.armed, landedOnAgent: page.url().includes('/agent') });
+  if (verdictE !== 'pass') {
+    // Never let an unstarted search cascade into four "failures" about cancel and restore — that is
+    // exactly what CI run 34791858611 reported, with the app behaving correctly throughout.
+    if (verdictE === 'defect') {
+      check('[E] Filter search landed on /agent before cancellation', false,
+        `url=${page.url()} — DEAD CONTROL: the app reported a COMMITTED city (${armE.reason}) and «بحث» still fired nothing`);
+    } else {
+      skipCheck('[E] Filter search landed on /agent before cancellation',
+        `the form was never primed — ${armE.reason}`);
+    }
+    skipCheck('[E] rapid-cancel + exact-restore + untouched-resubmit assertions (4)',
+      'the search never started, so cancellation, restore and resubmit measured nothing here');
+  } else {
+  check('[E] Filter search landed on /agent before cancellation', true);
   await cancelViaNav();
   check('[E] rapid-cancel-via-back lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   check('[E] rapid-cancel shows no results/partial text', !RESULT_COUNT.test(await body()));
@@ -506,6 +573,7 @@ try {
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
   check('[E] the rapid-cancel resubmit still lands a real result count', Number.isFinite(rapidResubmitCount), `count=${rapidResubmitCount}`);
+  }
 
   // ---- F: Stop pressed mid-flight (network artificially slowed), and the late response — which
   // resolves AFTER the user is already back on Filter — must never repopulate results or write history.
@@ -578,9 +646,22 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await fillOwnerExample();
   const preStopInputsMobile = await visibleInputs();
+  const armH = await armSearch();
   await tap('بحث');
   await page.waitForTimeout(300);
-  check('[H mobile] Filter search landed on /agent before cancellation', page.url().includes('/agent'), `url=${page.url()}`);
+  const verdictH = classifyRapidCancelEntry({ armed: armH.armed, landedOnAgent: page.url().includes('/agent') });
+  if (verdictH !== 'pass') {
+    if (verdictH === 'defect') {
+      check('[H mobile] Filter search landed on /agent before cancellation', false,
+        `url=${page.url()} — DEAD CONTROL: the app reported a COMMITTED city (${armH.reason}) and «بحث» still fired nothing`);
+    } else {
+      skipCheck('[H mobile] Filter search landed on /agent before cancellation',
+        `the form was never primed — ${armH.reason}`);
+    }
+    skipCheck('[H mobile] rapid-cancel + exact-restore + untouched-resubmit assertions (4)',
+      'the search never started, so cancellation, restore and resubmit measured nothing here');
+  } else {
+  check('[H mobile] Filter search landed on /agent before cancellation', true);
   await cancelViaNav();
   check('[H mobile] rapid-cancel-via-back lands back on the Filter home', page.url() === `${BASE}/` || page.url() === BASE, `url=${page.url()}`);
   check('[H mobile] rapid-cancel shows no results/partial text', !RESULT_COUNT.test(await body()));
@@ -597,6 +678,7 @@ try {
   // the page state: the next failure must explain itself instead of costing another guessing round.
   check('[H mobile] the mobile resubmit still lands a real result count', Number.isFinite(mobResubmitCount),
     `count=${mobResubmitCount} url=${page.url()} body=${(await body()).slice(0, 400).replace(/\n/g, ' | ')}`);
+  }
 
   // ---- Journey I: Advanced Filter reentrancy — a rapid double-tap on «متابعة»/confirm must never
   // downgrade or lose an already-recorded answer (bug-hunt 2026-08-23, fixed in commitGuidedStep's
@@ -980,5 +1062,8 @@ try {
   server.close();
 }
 
+// Skips are printed in the summary, never only inline: a run whose coverage is skips has proven
+// nothing, and the thing that hides that is a summary which only ever counts failures (PART 9.5).
+if (skipped) console.log(`\n${skipped} SKIPPED — measurements that did not happen (reasons above)`);
 console.log(failed ? `\n${failed} FAILED — the built app does not run correctly` : '\nweb runtime smoke passed — the built app runs and survives a refresh');
 process.exit(failed ? 1 : 0);
