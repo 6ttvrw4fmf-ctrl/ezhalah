@@ -1738,7 +1738,12 @@ export async function fetchListingsForQuery(
   // mixPeriods → the user asked for BOTH rent periods, so interleave monthly/annual (nested inside the
   // platform key) instead of letting the denser period own the top of the list. (owner 2026-08-14.)
   const mixPeriods = !q.bothDeals && q.deal === 'Rent' && q.rentPeriod === 'both';
-  const scoped = orderByScope(ranked, scopeOf(q, scope.p_cities, isCountryWideQuery(q)), multiType, mixPeriods);
+  // Owner 2026-09-14 permanent rule (see docs/ARCHITECTURE.md §20 «First-100 diversity»):
+  //   mixDeals → alternate buy/rent when the user asked for BOTH.
+  //   preferPhotos → within an otherwise-identical group, photo'd listings come before no-photo ones.
+  // Both are pure permutations of the already-matched set — never widens the eligible pool.
+  const mixDeals = !!(q.bothDeals || q.dealCombined);
+  const scoped = orderByScope(ranked, scopeOf(q, scope.p_cities, isCountryWideQuery(q)), multiType, mixPeriods, { mixDeals, preferPhotos: true });
   // Diversification (orderByScope) reorders `scoped` away from pure recency, so the true RPC recency
   // rank (r.rank, 0 = newest) must travel WITH each listing — sortListings()'s newest/oldest sort has
   // nothing else to key off once `rows` is just bare Listings. (sort=newest/oldest fix, 2026-07-25.)
