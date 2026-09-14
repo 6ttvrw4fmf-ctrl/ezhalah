@@ -8,7 +8,9 @@
 //
 // This executes the REAL predicates (never a copy) across the 49 / 50 / 51 boundary and proves:
 //   • the completion decision is `<= stopAt` (49 and 50 finish; 51 keeps going),
-//   • a completed chat renders NO actions row — even when `hasMore` is true,
+//   • a completed chat renders NO «عرض المزيد» pager — even when `hasMore` is true (at the ≤50
+//     terminal canNarrowFurther is false too, so nothing shows; the distinct >500 cap terminal,
+//     owner 2026-09-14, keeps only the Advanced-Filter button),
 //   • an un-completed chat with more matches DOES offer the pager (the fix does not over-hide),
 //   • the composer-lock signal and the pager-hidden signal are DERIVED FROM THE SAME predicate, so
 //     they can never disagree the way they did at 50.
@@ -56,11 +58,19 @@ for (const total of [49, 50, 51]) {
     rowVisible === !expectHidden);
 }
 
-// 3. THE FIX ITSELF: a completed chat hides the pager even with matches remaining.
+// 3. THE FIX ITSELF: a completed chat hides «عرض المزيد» even with matches remaining. This holds for
+//    BOTH terminals — the pager is always gone once the chat closes.
 check('completed chat hides «عرض المزيد» even when hasMore is true',
   resultsActionsRowVisible({ hasMore: true, canNarrowFurther: false, afPhase: null, chatCompleted: true }) === false);
-check('completed chat hides the narrow offer too',
-  resultsActionsRowVisible({ hasMore: false, canNarrowFurther: true, afPhase: null, chatCompleted: true }) === false);
+// The ≤50 AF terminal has canNarrowFurther=FALSE by construction (the set is ≤50, not
+// > INTERVIEW_STOP_AT), so a completed chat there shows NOTHING at all — pager and narrow both gone.
+check('the ≤50 terminal (completed, nothing left to narrow) shows no row at all',
+  resultsActionsRowVisible({ hasMore: false, canNarrowFurther: false, afPhase: null, chatCompleted: true }) === false);
+// A DISTINCT terminal (owner 2026-09-14, the >500 browse cap): the chat also completes there, but
+// unseen inventory remains (canNarrowFurther), so «تحديد أكثر» STAYS — only «عرض المزيد» is gone.
+// The completion gate returns canNarrowFurther, so it decouples the AF button from the composer lock.
+check('the >500 cap terminal (completed, still narrowable) KEEPS the Advanced-Filter button',
+  resultsActionsRowVisible({ hasMore: false, canNarrowFurther: true, afPhase: null, chatCompleted: true }) === true);
 
 // 4. NOT OVER-HIDING: an un-completed chat with more matches still offers the pager (>50 keeps browsing).
 check('un-completed chat with more matches still offers «عرض المزيد»',

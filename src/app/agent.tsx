@@ -58,7 +58,7 @@ import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
 import { afActive } from '@/lib/afEvidence';
 import { toLatinDigits } from '@/lib/inputHygiene';
-import { resultCounts, closingNoteKey, nextBatchTarget, drainPageBudget, LOAD_MORE_PAGE_SIZE, DRAIN_REVEAL_MAX } from '@/data/resultCount';
+import { resultCounts, closingNoteKey, nextBatchTarget, revealTarget, SECOND_PAGE_CAP, drainPageBudget, LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
 import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRowVisible } from '@/lib/afBrowsingGate';
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
@@ -1444,14 +1444,15 @@ export default function Agent() {
     // press to force when nothing is left to earn it. An unknown total (Infinity) just means "the
     // plain next hundred," never a fabricated boundary.
     const alreadyExpandedOnce = cur > initialReveal(m.result);
-    // A later press drains — but bounded by DRAIN_REVEAL_MAX, because the list is unvirtualized and
-    // revealing a whole 20,782-match cohort CRASHES the renderer (measured on production
-    // 2026-09-12; see the constant's note). Every cohort that fits under the ceiling still drains
-    // and finishes in one press exactly as the owner's 2026-09-11 rule says; a bigger one reveals
-    // the ceiling, keeps «عرض المزيد» offered and is never marked finished. Bounding the TARGET
-    // also bounds the fetch loop — the same press used to pull 40–50 pages (one tap = 50 search
-    // RPCs against a 2-vCPU instance); it now pulls the four or so it can actually show.
-    const target = alreadyExpandedOnce ? cur + DRAIN_REVEAL_MAX : nextBatchTarget(cur, m.result.matchTotal ?? Infinity);
+    // TWO TAPS, MAX 500 (owner 2026-09-14). revealTarget() encodes it: under 100 shown → the next
+    // 100-boundary (first tap); at/after 100 → up to the 500 cap (the final tap). Clamped to the true
+    // total, so a small set finishes in one tap and never over-promises 500. This supersedes the old
+    // "first tap → 100, later taps drain to DRAIN_REVEAL_MAX and keep offering" model — 500 is a hard
+    // product ceiling and also sits well under the unvirtualised-render crash point, so the drain and
+    // its 2,000-card ceiling are retired. `alreadyExpandedOnce` still tells the two taps apart for the
+    // completion check below; the target itself now comes straight from revealTarget().
+    void alreadyExpandedOnce;
+    const target = revealTarget(cur, m.result.matchTotal ?? Infinity);
     // De-dup against the CLOSURE copy (same data the message holds) so the merge is exact.
     const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
     const add: typeof m.result.listings = [];
@@ -1523,8 +1524,22 @@ export default function Agent() {
       // a first press whose boundary happened to reach the genuine end). Gated on the real numbers,
       // never a bare `true`: a failed or backstop-truncated drain returns above and never reaches
       // this line, so completion can never be claimed for a reveal that did not actually finish.
-      const userChoseShowAllAndFinish = !hasMoreNow && revealTo >= mergedLen;
-      if (userChoseShowAllAndFinish) setCompleted(true);
+      // TERMINAL (owner 2026-09-14): the chat closes — composer locks, «عرض المزيد» retires — the
+      // moment either (a) we reveal up to the 500 cap (the final tap), or (b) we reveal every match
+      // in a set smaller than 500. Both collapse to `revealTo >= min(500, total)`. The old
+      // "no server pages AND buffer drained" condition is kept as a belt-and-braces limb for a
+      // client-narrowed search whose true total is unknown (Infinity), where the cap can't fire.
+      // Gated on the real numbers, never a bare `true`: a failed/backstopped fetch returns above and
+      // never reaches here, so completion is never claimed for a reveal that did not finish.
+      const totalForCap = m.result.matchTotal ?? Infinity;
+      // ONE named terminal gate (the barrier requires every setCompleted to sit behind a named
+      // predicate). Terminal when we reveal up to the 500 cap or the true end (owner 2026-09-14) — OR,
+      // for a client-narrowed search whose true total is unknown (Infinity, so the cap can't fire),
+      // when the server has no more pages and the buffer is fully revealed. The cap arithmetic is
+      // proven honest in verify-result-cap-honesty.ts; this line only wires it to completion.
+      const revealIsTerminal =
+        revealTo >= Math.min(SECOND_PAGE_CAP, totalForCap) || (!hasMoreNow && revealTo >= mergedLen);
+      if (revealIsTerminal) setCompleted(true);
     } finally {
       setLoadingMore((s) => ({ ...s, [mid]: false }));
     }
@@ -3444,7 +3459,12 @@ export default function Agent() {
                         // …AND (owner 2026-08-24) only when a round would actually have something
                         // truthful to ask: afCanNarrow[m.id] is the offer probe's verdict (above).
                         // Absent = not yet resolved ⇒ hidden, never a button that cannot deliver.
-                        const canNarrowFurther = rawTotal > INTERVIEW_STOP_AT && isLatestResults && afCanNarrow[m.id] === true;
+                        // …AND only while there is UNSEEN inventory to narrow into (owner 2026-09-14):
+                        // once every match is on screen (a ≤500 search fully shown), narrowing can
+                        // reveal nothing new, so «تحديد أكثر» retires and the terminal message points
+                        // to a fresh search via ☰. It STAYS in the >500 terminal (shown 500 < total),
+                        // which is the only terminal that keeps the button.
+                        const canNarrowFurther = rawTotal > INTERVIEW_STOP_AT && isLatestResults && shown < trueTotal && afCanNarrow[m.id] === true;
                         // fetching = THIS message's page fetch; cascading = THIS message's card drip.
                         // Only the owning message's button shows the dots (review fix: a global flag
                         // was falsely lighting every visible «عرض المزيد»).
@@ -3498,7 +3518,7 @@ export default function Agent() {
                         // The KEY comes from the pure module that already owns the counts, so the gate and
                         // the sentence can never disagree and one exhaustive test locks both.
                         const moreNoteText = t(
-                          closingNoteKey({ endKind: rc.endKind, quoteTotal, offersMore, offersNarrow }),
+                          closingNoteKey({ endKind: rc.endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer: rc.lastTapOffer, cappedAtCap: rc.cappedAtCap }),
                           {
                             shown: rc.endShown.toLocaleString('en-US'),
                             total: rc.endTotal.toLocaleString('en-US'),

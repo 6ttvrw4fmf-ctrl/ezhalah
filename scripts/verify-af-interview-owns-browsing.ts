@@ -131,28 +131,35 @@ check('an unquotable total is never treated as "finished"',
   searchIsFinishedAtThreshold(null, STOP_AT) === false);
 
 // The narrow offer obeys the same line, in agent.tsx's own expression.
-check('narrowing is offered only ABOVE the threshold (canNarrowFurther > INTERVIEW_STOP_AT)',
-  /const canNarrowFurther = rawTotal > INTERVIEW_STOP_AT && isLatestResults && afCanNarrow\[m\.id\] === true;/.test(agentSrc));
-// ONLY two things may end the flow: the small-result threshold (R11.1), or the user's own explicit
-// «عرض المزيد» show-all-and-finish choice (Task 4, 2026-09-11). R11.2 (no useful questions left)
-// must not, or a 3,000-match cohort with no questions left would be declared finished and lose its
-// pager — the owner's clause 2 exactly. Generalized 2026-09-11 from "exactly one call site" to
-// "every call site is one of the two named, honest gates" — the count is no longer the invariant,
-// the GATE is: every setCompleted(true) in this file must sit directly behind an
-// `if (searchIsFinishedAtThreshold(...))` or an `if (userChoseShowAllAndFinish)`, and those two
-// names are the only things allowed to gate it (clause 4 below independently proves the threshold
-// predicate touches no count/query surface; userChoseShowAllAndFinish is `!hasMoreNow` computed only
-// after a drain that never merely guessed — see loadMore — so neither gate can be satisfied by
-// anything but an honestly-finished reveal).
+// Narrowing needs the total above the small-result line AND unseen inventory to narrow INTO
+// (`shown < trueTotal`, owner 2026-09-14): once everything matching is on screen there is nothing
+// left for «تحديد أكثر» to remove, so the button retires with «عرض المزيد».
+check('narrowing is offered only ABOVE the threshold (canNarrowFurther > INTERVIEW_STOP_AT), and only while inventory is unseen',
+  /const canNarrowFurther = rawTotal > INTERVIEW_STOP_AT && isLatestResults && shown < trueTotal && afCanNarrow\[m\.id\] === true;/.test(agentSrc));
+// ONLY three things may end the flow: the small-result threshold (R11.1); the user's own explicit
+// «عرض المزيد» show-all-and-finish drain (Task 4, 2026-09-11, now the `revealIsTerminal` limb for an
+// unknown-total client-narrowed search); or reaching the 500 display cap on the last «عرض المزيد»
+// (owner 2026-09-14 — the second tap shows up to 500 and the chat closes even when more matches
+// remain, handing the user the Advanced-Filter button). R11.2 (no useful questions left) still must
+// NOT, or a 3,000-match cohort with no questions left would be declared finished and lose its pager
+// BEFORE the cap — the owner's clause 2 exactly. The count is not the invariant, the GATE is: every
+// setCompleted(true) in this file must sit directly behind an `if (searchIsFinishedAtThreshold(...))`
+// or an `if (revealIsTerminal)`, and those are the only names allowed to gate it (clause 4 below
+// independently proves the threshold predicate touches no count/query surface; `revealIsTerminal` is
+// `revealTo >= min(500, total) || (!hasMoreNow && revealTo >= mergedLen)` computed only AFTER a drain
+// that never merely guessed — see loadMore, and the cap arithmetic is proven honest in
+// verify-result-cap-honesty.ts — so no gate can be satisfied by anything but an honestly-finished
+// reveal or the owner's hard 500 ceiling).
 const completedCalls = [...agentCode.matchAll(/setCompleted\(true\)/g)].length;
 // Non-greedy up to the first `))`: today's threshold call sites nest at most one paren inside the
 // predicate's own arguments (`quotableTotal(result)`), and that inner call is followed by `,` — the
 // FIRST `))` in the line is always the predicate's own outer close, never a false-early stop.
-// `userChoseShowAllAndFinish` needs no such care — it is a bare identifier, no nested parens.
-const gatedCompletedCalls = [...agentCode.matchAll(/if \((?:searchIsFinishedAtThreshold\(.*?\)|userChoseShowAllAndFinish)\)\s*setCompleted\(true\);/g)].length;
-check('every completed-trigger is the ≤50 threshold or the explicit show-all choice, and nothing else',
+// `revealIsTerminal` needs no such care — it is a bare identifier, no nested parens.
+const gateRe = () => /if \((?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
+const gatedCompletedCalls = [...agentCode.matchAll(gateRe())].length;
+check('every completed-trigger is the ≤50 threshold or the 500-cap/show-all terminal, and nothing else',
   completedCalls >= 3 && completedCalls === gatedCompletedCalls,
-  `saw ${completedCalls} setCompleted(true) call(s), ${gatedCompletedCalls} directly gated by one of the two named predicates`);
+  `saw ${completedCalls} setCompleted(true) call(s), ${gatedCompletedCalls} directly gated by one of the named predicates`);
 
 // ── 5. CLAUSE 4 — the gate changes no count and no predicate ────────────────────────────────────
 // Structural: the module must not import or mention any search/count/query surface. It decides which
@@ -195,7 +202,7 @@ mustCatch('an off-by-one threshold is caught at the boundary',
 // guard raises completedCalls but not gatedCompletedCalls — the equality check goes red.
 const withUngatedCall = `${agentCode}\nsetCompleted(true);`;
 const ungatedTotal = [...withUngatedCall.matchAll(/setCompleted\(true\)/g)].length;
-const ungatedGated = [...withUngatedCall.matchAll(/if \((?:searchIsFinishedAtThreshold\(.*?\)|userChoseShowAllAndFinish)\)\s*setCompleted\(true\);/g)].length;
+const ungatedGated = [...withUngatedCall.matchAll(gateRe())].length;
 mustCatch('an un-gated completed-trigger (e.g. R11.2) is caught by the gated-count mismatch',
   ungatedTotal !== ungatedGated && ungatedTotal === completedCalls + 1);
 

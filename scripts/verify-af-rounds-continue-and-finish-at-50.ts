@@ -72,15 +72,15 @@ check('a MEASURED "no" after an AF round stays SILENT (no chat bubble, no dangli
   && !/No further truthful narrowing question exists for this scope/.test(agent)
   && !read('src/i18n.tsx').includes("No further truthful narrowing question exists for this scope")
   && /setAfCanNarrow\(\(c\) => \(\{ \.\.\.c, \[m\.id\]: verdict === 'yes' \}\)\);/.test(agent));
-// Generalized 2026-09-11 (owner rule: a plain search or typed AI message landing at <= the
-// threshold finishes cleanly too, not only an AF round; AND the user's own explicit «عرض المزيد»
-// show-all-and-finish choice, Task 4, finishes at ANY total) from "exactly one site" to "every site
-// is one of the two named, honest gates and nothing else" — see
+// Generalized 2026-09-11, extended 2026-09-14 (owner rules: a plain search or typed AI message
+// landing at <= the threshold finishes cleanly too, not only an AF round; AND the reveal hitting the
+// 500 cap or the true end — `revealIsTerminal` — finishes at ANY total) from "exactly one site" to
+// "every site is one of the named, honest gates and nothing else" — see
 // scripts/verify-af-interview-owns-browsing.ts for the call-site-level version of this same check;
 // this one keeps the ORIGINAL intent of this specific check intact: a measured "no more truthful
 // narrowing" verdict must never itself complete the chat.
-const GATED_COMPLETED = /if \((?:searchIsFinishedAtThreshold\(.*?\)|userChoseShowAllAndFinish)\)\s*setCompleted\(true\);/g;
-check('…and does NOT complete the chat (every setCompleted(true) site is the ≤ 50 rule or the explicit show-all choice, never the "no more questions" verdict)',
+const GATED_COMPLETED = /if \((?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
+check('…and does NOT complete the chat (every setCompleted(true) site is the ≤ 50 rule or the 500-cap/show-all terminal, never the "no more questions" verdict)',
   (agent.match(/setCompleted\(true\)/g) ?? []).length >= 1
   && (agent.match(/setCompleted\(true\)/g) ?? []).length === (agent.match(GATED_COMPLETED) ?? []).length);
 check("assessNarrowing returns 'no' ONLY when every probe ANSWERED (ranked && !ranked.probeFailed), else 'unknown'",

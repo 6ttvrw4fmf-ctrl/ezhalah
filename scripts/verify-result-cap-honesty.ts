@@ -1,18 +1,21 @@
-// BROWSE-CONTINUATION HONESTY (owner 2026-08-29 — supersedes the 2026-08-20 lifetime cap this file
-// used to pin; the owner explicitly reversed that decision, so this file now locks the NEW contract
-// with the same rigor it used to lock the old one).
+// BROWSE-CONTINUATION HONESTY (owner 2026-09-14 — re-introduced a DISPLAY CAP, superseding the
+// 2026-08-29 no-lifetime-ceiling decision this file used to pin; the owner explicitly reversed the
+// reversal, so this file now locks the NEW two-tap/500 contract with the same rigor).
 //
-// THE RULE. «عرض المزيد» keeps working while matching listings genuinely exist: batches land on
-// clean 100 boundaries (…→100→200→300) and reach the LAST real match — no lifetime ceiling. The
-// honesty half is unchanged and non-negotiable: the closing message states the TRUE matched total,
-// never a batch size, never a buffer length, and "more" is never offered when nothing more exists.
+// THE RULE. «عرض المزيد» gives at most TWO reveals and never shows more than 500:
+//   first tap → the 100 boundary; last tap → up to 500, then the button retires. A search with ≤500
+//   matches finishes on whichever tap first shows them all; a bigger one caps at 500 and the terminal
+//   state takes over (Advanced Filter if unseen inventory remains, else a new search via the menu).
+// The honesty half is unchanged and non-negotiable: the closing message states the TRUE matched
+// total, never a batch size, never a buffer length, and "more" is never offered when nothing more
+// exists (or when the 500 cap is reached).
 //
 //   node --experimental-strip-types scripts/verify-result-cap-honesty.ts   (runs by existence)
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripTypeScriptTypes } from 'node:module';
-import { BROWSE_BATCH, nextBatchTarget, resultCounts, LOAD_MORE_PAGE_SIZE } from '../src/data/resultCount.ts';
+import { BROWSE_BATCH, SECOND_PAGE_CAP, nextBatchTarget, revealTarget, resultCounts, LOAD_MORE_PAGE_SIZE } from '../src/data/resultCount.ts';
 
 const root = join(import.meta.dirname, '..');
 const code = readFileSync(join(root, 'src', 'app', 'agent.tsx'), 'utf8')
@@ -39,15 +42,20 @@ check('the final batch clamps to the true last match (…→437), never past it'
   nextBatchTarget(400, 437) === 437 && nextBatchTarget(437, 437) === 437);
 check('a small set clamps immediately (23 available → 23)', nextBatchTarget(10, 23) === 23);
 
-// ── 2. NO LIFETIME CEILING — the exact behavior the owner ordered ───────────────────────────────
+// ── 2. TWO TAPS, MAX 500 (owner 2026-09-14 — re-introduced a display cap) ────────────────────────
+// The UI walks with revealTarget(): under 100 → the 100 boundary (first tap); at/after 100 → up to
+// the 500 cap (the LAST tap). A big search stops at 500; a ≤500 search shows everything.
+check('the display cap is 500', SECOND_PAGE_CAP === 500, `got ${SECOND_PAGE_CAP}`);
+check('first tap (10 shown) reveals the first 100', revealTarget(10, 5000) === 100);
+check('the LAST tap (100 shown) reveals up to the 500 cap, never 200/300…', revealTarget(100, 5000) === 500);
+check('there is no third tap — at 500 the target does not advance', revealTarget(500, 5000) === 500);
+check('a ≤500 search finishes on the tap that shows them all (100→340, 10→47)',
+  revealTarget(100, 340) === 340 && revealTarget(10, 47) === 47);
 {
-  // Walk a 2,223-match search the way the UI does: press → boundary → press …
-  let shown = 10;
-  let presses = 0;
-  while (shown < 2223 && presses < 50) { shown = nextBatchTarget(shown, 2223); presses++; }
-  check('a 2,223-match search is walkable to ALL 2,223 (was capped at 100 before)',
-    shown === 2223, `reached ${shown} in ${presses} presses`);
-  check('it takes the honest number of presses (23 boundaries)', presses === 23, `presses=${presses}`);
+  // Walk a 2,223-match search the way the UI does now: it caps at 500 in exactly two taps.
+  let shown = 10; let taps = 0;
+  while (shown < Math.min(SECOND_PAGE_CAP, 2223) && taps < 10) { shown = revealTarget(shown, 2223); taps++; }
+  check('a 2,223-match search shows at most 500, reached in two taps', shown === 500 && taps === 2, `reached ${shown} in ${taps} taps`);
 }
 for (const trueTotal of [0, 7, 99, 100, 101, 200, 201, 437, 9892]) {
   const rc = resultCounts({ trueTotal, shown: trueTotal, fetched: trueTotal, serverMore: false });
@@ -55,13 +63,20 @@ for (const trueTotal of [0, 7, 99, 100, 101, 200, 201, 437, 9892]) {
     rc.endKind === 'all' && rc.endTotal === trueTotal && !rc.hasMore && rc.reachable === trueTotal);
 }
 
-// ── 3. hasMore is exactly "matches remain" — alive at 100/200/300, dead at the end ──────────────
-check('hasMore stays TRUE at 100 shown of 9,892 (the cap used to kill it here)',
+// ── 3. hasMore is exactly "under the cap AND matches remain" — alive at 100, dead at 500 ─────────
+check('hasMore is TRUE at 100 shown of 9,892 (the last tap, up to 500, is still to come)',
   resultCounts({ trueTotal: 9892, shown: 100, fetched: 1500, serverMore: true }).hasMore === true);
-check('hasMore stays TRUE at 1,500 shown when the server has more pages',
-  resultCounts({ trueTotal: 9892, shown: 1500, fetched: 1500, serverMore: true }).hasMore === true);
-check('hasMore goes FALSE only when the last match is on screen',
-  resultCounts({ trueTotal: 9892, shown: 9892, fetched: 9892, serverMore: false }).hasMore === false);
+check('hasMore goes FALSE at the 500 cap — there is no third tap (owner 2026-09-14)',
+  resultCounts({ trueTotal: 9892, shown: 500, fetched: 1500, serverMore: true }).hasMore === false);
+check('at the cap, cappedAtCap is TRUE (more still matches) — the terminal that keeps Advanced Filter',
+  resultCounts({ trueTotal: 9892, shown: 500, fetched: 1500, serverMore: true }).cappedAtCap === true);
+check('everything shown in a ≤500 set → NOT capped (nothing left to narrow into)',
+  resultCounts({ trueTotal: 340, shown: 340, fetched: 340, serverMore: false }).cappedAtCap === false);
+check('the last-tap wording turns on once 100 is shown and more remains, off before that',
+  resultCounts({ trueTotal: 9892, shown: 100, fetched: 1500, serverMore: true }).lastTapOffer === true
+  && resultCounts({ trueTotal: 9892, shown: 20, fetched: 1500, serverMore: true }).lastTapOffer === false);
+check('hasMore goes FALSE when the last match is on screen (small set)',
+  resultCounts({ trueTotal: 340, shown: 340, fetched: 340, serverMore: false }).hasMore === false);
 check('hasMore is never fabricated: nothing buffered and no server pages → false even if total says more',
   resultCounts({ trueTotal: 500, shown: 200, fetched: 200, serverMore: false }).hasMore === false);
 
@@ -80,9 +95,9 @@ for (const [trueTotal, shown] of [[9892, 100], [9892, 300], [437, 437], [46, 46]
 // honesty check: loadMore reveals exactly `min(target, mergedLen)` on BOTH the instant-reveal path
 // (a new turn started mid-fetch) and the cascade path — the boundary on a first press, the full
 // merge on a later one — never a re-derived number, never a partial count silently mislabelled whole.
-check('nextBatchTarget decides the FIRST-press reveal target (rev. 2 — no longer retired)',
-  /nextBatchTarget\(cur, m\.result\.matchTotal \?\? Infinity\)/.test(code));
-check('a first vs. later press is told apart by the turn\'s OWN reveal state, not new component state',
+check('revealTarget decides the reveal target — first tap → 100, last tap → up to 500 (owner 2026-09-14)',
+  /const target = revealTarget\(cur, m\.result\.matchTotal \?\? Infinity\);/.test(code));
+check('a first vs. later press is still told apart by the turn\'s OWN reveal state, not new component state',
   /const alreadyExpandedOnce = cur > initialReveal\(m\.result\);/.test(code));
 check('loadMore reveals exactly min(target, mergedLen) on BOTH the instant and cascade reveal paths',
   /setRevealCount\(\(c\) => \(\{ \.\.\.c, \[mid\]: revealTo \}\)\)/.test(code)
@@ -181,15 +196,16 @@ const mustCatch = (label: string, caught: boolean) => {
   console.error(`  FAIL  BLIND to: ${label}`);
 };
 
-// (a) the old cap sneaking back as a resultCounts ceiling
+// (a) the NO-CAP behaviour sneaking back — hasMore alive past the 500 cap (the owner's reversal)
 {
-  const capped = (a: { trueTotal: number; shown: number; fetched: number; serverMore: boolean }) => {
+  const uncapped = (a: { trueTotal: number; shown: number; fetched: number; serverMore: boolean }) => {
     const r = resultCounts(a);
-    const reachable = Math.min(a.trueTotal, 100);
-    return { ...r, reachable, hasMore: r.hasMore && a.shown < reachable };
+    // the pre-2026-09-14 hasMore: alive while any match remains, no 500 ceiling.
+    return { ...r, hasMore: a.shown < a.trueTotal && (a.shown < a.fetched || a.serverMore) };
   };
-  mustCatch('a min(trueTotal, 100) ceiling re-imposed on reachability',
-    capped({ trueTotal: 9892, shown: 100, fetched: 1500, serverMore: true }).hasMore === false);
+  mustCatch('hasMore left alive past the 500 cap (the no-lifetime-ceiling behaviour the owner reversed)',
+    uncapped({ trueTotal: 9892, shown: 500, fetched: 1500, serverMore: true }).hasMore === true
+    && resultCounts({ trueTotal: 9892, shown: 500, fetched: 1500, serverMore: true }).hasMore === false);
 }
 // (b) boundary math drifting to cur+100 (110/210 instead of 100/200)
 mustCatch('drifted boundaries (10+100=110 instead of completing the hundred)',

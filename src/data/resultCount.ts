@@ -1,20 +1,21 @@
-// THE BROWSE-CONTINUATION RULE (owner 2026-08-29, supersedes the 2026-08-20 lifetime cap), in ONE
-// place so every surface obeys it and one test locks it.
+// THE BROWSE-CONTINUATION RULE (owner 2026-09-14 — re-introduced a DISPLAY CAP, superseding the
+// 2026-08-29 no-lifetime-ceiling decision), in ONE place so every surface obeys it and one test locks it.
 //
-//   «عرض المزيد» keeps working for as long as matching listings genuinely exist. The user browses in
-//   batches of BROWSE_BATCH (100), landing on clean boundaries — first 100, then 101–200, then
-//   201–300 — all the way to the LAST real match. There is no lifetime ceiling: a 9,892-match search
-//   is browsable to 9,892. What was true before stays true: numbers are never faked —
-//     trueTotal =   8 → browse   8, message says all 8
-//     trueTotal = 437 → browse 100 → 200 → 300 → 400 → 437, message always states 437
-//   trueTotal (how many listings actually satisfy the whole search) and the batch size are TWO
-//   different numbers and must never be confused. The closing message states trueTotal — the
-//   authoritative matching count — NOT a batch size and NOT the loaded-array length. See the ban
-//   list in scripts/verify-result-cap-honesty.ts: a hardcoded 100, a page size, a candidate cap or
-//   a loaded length may never stand in for trueTotal.
+//   «عرض المزيد» gives at most TWO reveals and never shows more than 500. The first tap reaches the
+//   100 boundary; the last tap reveals up to the 500 cap and then the button retires. A search with
+//   ≤500 matches finishes on whichever tap first shows them all; a bigger one caps at 500, and the
+//   TERMINAL state takes over — Advanced Filter (if unseen inventory remains, the >500 case) or a new
+//   search from the ☰ menu (everything shown, the ≤500 case).
+//     trueTotal =   8 → one tap shows 8, "that is every matching listing (8)"
+//     trueTotal = 340 → 100 → 340, "that is every matching listing (340)"
+//     trueTotal = 9,892 → 100 → 500, "these are the last 500 I can show — narrow, or a new search"
+//   The honesty half is unchanged: numbers are never faked. trueTotal (how many listings satisfy the
+//   whole search) and the batch size / cap are DIFFERENT numbers and must never be confused. The
+//   closing message states trueTotal (or the honest {shown}=500 at the cap), NEVER a batch size or a
+//   buffer length. See the ban list in scripts/verify-result-cap-honesty.ts.
 //
 // This module is pure (no React, no i18n) so it is trivially unit-tested across every boundary and
-// mutation-proven. agent.tsx consumes it for BOTH the "load more" targets and the closing message.
+// mutation-proven. agent.tsx consumes it for BOTH the reveal targets and the closing message.
 
 export const BROWSE_BATCH = 100;
 
@@ -25,6 +26,24 @@ export function nextBatchTarget(shown: number, available: number, batch = BROWSE
   const s = Math.max(0, Math.floor(shown));
   const boundary = (Math.floor(s / batch) + 1) * batch;
   return Math.min(boundary, Math.max(0, Math.floor(available)));
+}
+
+// THE LAST «عرض المزيد» NEVER REVEALS BEYOND THIS (owner 2026-09-14). «عرض المزيد» gives at most TWO
+// reveals: the first reaches the 100-boundary (nextBatchTarget), the second reveals up to 500 total
+// and STOPS — that second tap is the FINAL one, after which the button is gone and the terminal
+// message + Advanced-Filter path take over. A search with ≤500 matches finishes on whichever tap
+// first shows them all; a bigger one caps here. 500 also sits far under the ~2,000 unvirtualised-
+// render ceiling the old drain had to respect, so it removes the renderer-crash class entirely
+// rather than merely staying under it.
+export const SECOND_PAGE_CAP = 500;
+
+// How many cards ONE «عرض المزيد» tap reveals, given how many are already shown and the true total.
+// Under 100 shown → the next clean 100-boundary; at/after 100 → up to the 500 cap. Both clamped to
+// the true total, so a 47-match search finishes in one tap and never over-promises 500.
+export function revealTarget(shown: number, total: number): number {
+  const s = Math.max(0, Math.floor(shown));
+  const ceiling = s < BROWSE_BATCH ? BROWSE_BATCH : SECOND_PAGE_CAP;
+  return Math.min(ceiling, Math.max(0, Math.floor(total)));
 }
 
 // ── ONE PRESS'S PAGE BUDGET ──────────────────────────────────────────────────────────────────────
@@ -54,29 +73,15 @@ export const LOAD_MORE_PAGE_SIZE = 500;
 /** How many rows ONE «عرض المزيد» press may pull before it stops and hands the choice back. */
 export const DRAIN_ROW_BUDGET = 25_000;
 
-// ── THE REVEAL CEILING — the product physically cannot render an unbounded result set ────────────
-// MEASURED ON PRODUCTION, 2026-09-12, unmodified code. The results list is UNVIRTUALIZED, so a
-// press that reveals its whole matched set mounts one card component per match:
-//     الخبر        5,706 matching → press 2 drains ~10 pages in 82s and reveals all 5,706. Fine.
-//     الرياض/إيجار/سنوي 20,782    → press 2 drains 40 pages and the RENDERER PROCESS CRASHES.
-// The JS heap sat flat at ~195 MB through the entire fetch, so this is not the rows — it is mounting
-// ~20,000 cards at once. A user on the single most common search in the product who presses
-// «عرض المزيد» twice gets a dead tab.
-//
-// So the owner's 2026-09-11 rule — a later press "drains every remaining page and finishes the
-// search" — holds wherever it CAN hold, and stops short of a crash where it cannot. A press reveals
-// at most DRAIN_REVEAL_MAX new cards; if matches remain, «عرض المزيد» stays offered and the search
-// is NOT marked finished, so nothing is lost and the user keeps browsing. Rows already buffered
-// make the next press instant — it reveals from memory before asking the network for anything.
-// Every cohort at or under this ceiling still drains and finishes in ONE press exactly as before,
-// which is the common case.
-//
-// THE NUMBER IS A SAFETY CEILING, NOT A UX PREFERENCE, and it is deliberately conservative: the one
-// size proven to render is 5,706 on a 4-core/16 GB container, and real users are on phones that will
-// give out far earlier. 2,000 keeps a 2.8× margin under the only measured-good point while staying
-// 20× BROWSE_BATCH. The real answer is a virtualized list; until then this is the bound that keeps
-// the tab alive. Revisit it with a measurement, never with a guess.
-export const DRAIN_REVEAL_MAX = 2_000;
+// ── THE REVEAL CEILING is now SECOND_PAGE_CAP (500), defined above ────────────────────────────────
+// An unvirtualized list mounts one card per match, so an unbounded reveal crashes the renderer
+// (measured on production 2026-09-12: الخبر's 5,706 rendered fine; الرياض/إيجار/سنوي's 20,782 killed
+// the tab). The old drain model bounded a single press to a 2,000-card DRAIN_REVEAL_MAX ceiling but
+// left the cumulative mount unbounded across presses (ops_incident #212). The owner's 2026-09-14 cap
+// closes that class outright: «عرض المزيد» reveals at most 500 cards TOTAL and then retires, and 500
+// sits far under the only proven-safe mount size (5,706). Those two production measurements, and the
+// proof that the whole press SEQUENCE stays bounded, now live in
+// scripts/verify-loadmore-cumulative-mount-is-bounded.ts.
 
 /** Pages one press may walk = the row budget over the page size actually used. Never a bare count. */
 export function drainPageBudget(pageSize: number, rowBudget: number = DRAIN_ROW_BUDGET): number {
@@ -94,10 +99,18 @@ export type EndKind =
 
 export type ResultCounts = {
   reachable: number;   // trueTotal — EVERY match is reachable through paging now
-  hasMore: boolean;    // a "load more" affordance is legitimate (matches remain beyond `shown`)
+  hasMore: boolean;    // a "load more" affordance is legitimate (matches remain beyond `shown`, under the 500 cap)
   endKind: EndKind;    // which closing message the truth calls for
   endTotal: number;    // the number the closing message must state (always trueTotal, never a batch)
   endShown: number;    // how many are on screen
+  // TERMINAL because we hit the 500 cap and MORE still matches (owner 2026-09-14) — the state that
+  // keeps the Advanced-Filter button. false when the row simply ran out of matches (everything shown).
+  cappedAtCap: boolean;
+  // The «عرض المزيد» currently offered is the FINAL one — the user has already seen the first 100 and
+  // the next tap reveals up to 500 and ends. Drives the "this is the last «عرض المزيد» — up to 500"
+  // wording. NOT triggered on a small (≤100) search, where the first tap already shows everything and
+  // the plain first-page wording applies.
+  lastTapOffer: boolean;
 };
 
 // trueTotal  — authoritative count of listings matching the WHOLE search (RPC total_count when the
@@ -115,12 +128,19 @@ export function resultCounts(args: {
   const trueTotal = Math.max(0, Math.floor(args.trueTotal));
   const fetched = Math.max(0, Math.floor(args.fetched));
   const shown = Math.min(Math.max(0, Math.floor(args.shown)), trueTotal);
-  // More is legitimate while matches remain beyond what's on screen AND the rows exist to reveal
-  // (buffered, or the server has more pages). No ceiling: this stays true at 100, 200, 300… until
-  // the LAST real match is on screen — and never after (a fabricated "more" would page into nothing).
-  const hasMore = shown < trueTotal && (shown < fetched || args.serverMore);
+  // «عرض المزيد» lives only while shown is under BOTH the 500 cap AND the true total, and the rows to
+  // reveal exist (buffered, or the server still has pages). It retires at exactly 500 — there is no
+  // third tap (owner 2026-09-14). Below 500 it behaves as before: 100 → (last tap) up to 500.
+  const cap = Math.min(SECOND_PAGE_CAP, trueTotal);
+  const hasMore = shown < cap && (shown < fetched || args.serverMore);
   const endKind: EndKind = hasMore ? 'more' : 'all';
-  return { reachable: trueTotal, hasMore, endKind, endTotal: trueTotal, endShown: shown };
+  // Hit the 500 cap with more still matching → the terminal state that keeps Advanced Filter.
+  const cappedAtCap = !hasMore && shown >= SECOND_PAGE_CAP && shown < trueTotal;
+  // The currently-offered «عرض المزيد» is the last one: the first 100 is already on screen, so the
+  // next tap goes to the 500 cap (or the true end) and finishes. A ≤100 search never reaches this —
+  // its one tap shows everything and uses the plain first-page wording.
+  const lastTapOffer = hasMore && shown >= BROWSE_BATCH;
+  return { reachable: trueTotal, hasMore, endKind, endTotal: trueTotal, endShown: shown, cappedAtCap, lastTapOffer };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -157,6 +177,18 @@ export type ClosingNoteKey =
   | 'I showed you the first {n} listings. Want me to show more?'
   | 'I showed you the first {n} listings. Want help finding more precise ones?'
   | 'I showed you the first {n} listings.'
+  // THE FINAL «عرض المزيد» (owner 2026-09-14): once the first 100 is on screen, the next tap is the
+  // last and reveals up to 500. Two variants — with the narrow offer, and without it.
+  | 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to 500 at once. Want me to show more, or help you find more precise ones?'
+  | 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to 500 at once. Want me to show more?'
+  // TERMINAL, everything shown (≤500): no «عرض المزيد», no narrow — start a new search from the menu.
+  | 'That is every matching listing ({n}). For a new search, open the menu and choose Search.'
+  // TERMINAL, capped at 500 with more in the set: keep Advanced Filter (with the narrow offer), or a
+  // new search from the menu. Second variant for when no useful narrowing question remains.
+  | 'These are the last {shown} I can show you. Want help finding more precise ones? Or open the menu for a new search.'
+  | 'These are the last {shown} I can show you. For a new search, open the menu and choose Search.'
+  // RETIRED from closingNoteKey's own returns (the two above replace them, owner 2026-09-14) but kept
+  // as valid ClosingNoteKey values: their i18n rows and a couple of history/CTA barriers still name them.
   | 'I showed you all {n} matching listings. Want help finding more precise ones?'
   | 'I showed you all {n} matching listings.';
 
@@ -168,9 +200,21 @@ export function closingNoteKey(args: {
   offersMore: boolean;
   /** A «خلّنا نحدد الطلب أكثر» button is ACTUALLY RENDERED right now. */
   offersNarrow: boolean;
+  /** The «عرض المزيد» currently shown is the FINAL one (up to 500) — see ResultCounts.lastTapOffer. */
+  lastTapOffer: boolean;
+  /** TERMINAL because the 500 cap was hit with more still matching — see ResultCounts.cappedAtCap. */
+  cappedAtCap: boolean;
 }): ClosingNoteKey {
-  const { quoteTotal, offersMore, offersNarrow } = args;
+  const { quoteTotal, offersMore, offersNarrow, lastTapOffer, cappedAtCap } = args;
   if (args.endKind === 'more') {
+    // THE FINAL «عرض المزيد» — the first 100 is on screen and the next tap reveals up to 500 and ends
+    // (owner 2026-09-14). Only when a «عرض المزيد» is genuinely rendered; the narrow variant follows
+    // whether «تحديد أكثر» is on screen too (offersNarrow), so the sentence never names a missing one.
+    if (offersMore && lastTapOffer) {
+      return offersNarrow
+        ? 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to 500 at once. Want me to show more, or help you find more precise ones?'
+        : 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to 500 at once. Want me to show more?';
+    }
     if (quoteTotal) {
       // THE NEXT NUMBER IS STATED, AND IT IS THE REAL ONE (owner 2026-09-13). The Arabic used to end
       // «إذا عرضت لك المزيد بعرض لك كل الإعلانات» — one tap shows ALL — which is false: a tap advances
@@ -191,10 +235,15 @@ export function closingNoteKey(args: {
     if (offersNarrow) return 'I showed you the first {n} listings. Want help finding more precise ones?';
     return 'I showed you the first {n} listings.';
   }
-  // Everything matching is on screen — there is nothing to page, so only the narrow offer can apply.
-  return offersNarrow
-    ? 'I showed you all {n} matching listings. Want help finding more precise ones?'
-    : 'I showed you all {n} matching listings.';
+  // TERMINAL (endKind 'all'), owner 2026-09-14. Two shapes:
+  //   • capped at 500 with more still matching → keep Advanced Filter (narrow), or a new search.
+  //   • everything shown (≤500) → nothing left to page OR narrow; point to a new search via the menu.
+  if (cappedAtCap) {
+    return offersNarrow
+      ? 'These are the last {shown} I can show you. Want help finding more precise ones? Or open the menu for a new search.'
+      : 'These are the last {shown} I can show you. For a new search, open the menu and choose Search.';
+  }
+  return 'That is every matching listing ({n}). For a new search, open the menu and choose Search.';
 }
 
 /** Does this key ask the user to tap «عرض المزيد»? */

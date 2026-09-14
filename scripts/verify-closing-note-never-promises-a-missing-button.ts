@@ -62,24 +62,49 @@ console.log('\nThe closing sentence never promises a button that is not on scree
 // ── 1. EXHAUSTIVE over the whole input space — enumerated, never sampled ─────────────────────────
 const BOOL = [false, true];
 const KINDS: EndKind[] = ['more', 'all'];
-type State = { endKind: EndKind; quoteTotal: boolean; offersMore: boolean; offersNarrow: boolean };
+// Six inputs now (owner 2026-09-14): lastTapOffer (the final «عرض المزيد», up to 500) and cappedAtCap
+// (terminal at the 500 cap with more still matching) joined the original four.
+type State = { endKind: EndKind; quoteTotal: boolean; offersMore: boolean; offersNarrow: boolean; lastTapOffer: boolean; cappedAtCap: boolean };
 const states: State[] = [];
 for (const endKind of KINDS) for (const quoteTotal of BOOL) for (const offersMore of BOOL) for (const offersNarrow of BOOL)
-  states.push({ endKind, quoteTotal, offersMore, offersNarrow });
+  for (const lastTapOffer of BOOL) for (const cappedAtCap of BOOL)
+    states.push({ endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer, cappedAtCap });
 
-check('the input space is enumerated in full (2 × 2 × 2 × 2)', states.length === 16, `saw ${states.length}`);
+check('the input space is enumerated in full (2 × 2 × 2 × 2 × 2 × 2)', states.length === 64, `saw ${states.length}`);
+// closingNoteKey must be TOTAL over all 64 — never throw, always a key — even on combos the app can't
+// produce (defence against a future refactor that reaches one).
+check('closingNoteKey is total over the whole 64-state space (never throws)',
+  states.every((s) => typeof closingNoteKey(s) === 'string'));
 
-const overPromises = states.filter((s) => {
+// REALIZABLE states only, for the honesty checks: the four booleans are not independent — they are
+// derived from the real gating (agent.tsx + resultCounts), so several combos can never occur and
+// asserting honesty on them would test fiction. Each exclusion names the invariant that forbids it.
+const realizable = (s: State): boolean => {
+  // «عرض المزيد» exists only while there is more to page → endKind 'more'. 'all' never offers it.
+  if (s.offersMore && s.endKind !== 'more') return false;
+  // "this is the last «عرض المزيد»" implies a «عرض المزيد» is actually offered, in the 'more' state.
+  if (s.lastTapOffer && (s.endKind !== 'more' || !s.offersMore)) return false;
+  // cappedAtCap is a TERMINAL fact (hit 500 with more matching) → only in the 'all' state.
+  if (s.cappedAtCap && s.endKind !== 'all') return false;
+  // In the 'all' terminal, «تحديد أكثر» survives ONLY in the >500 (capped) case — canNarrowFurther
+  // gates on `shown < trueTotal`, so an everything-shown (≤500) terminal never renders it.
+  if (s.endKind === 'all' && s.offersNarrow && !s.cappedAtCap) return false;
+  return true;
+};
+const real = states.filter(realizable);
+check('the realizable subset is non-empty and smaller than the full space', real.length > 0 && real.length < 64, `real=${real.length}`);
+
+const overPromises = real.filter((s) => {
   const k = closingNoteKey(s);
   return (keyOffersMore(k) && !s.offersMore) || (keyOffersNarrow(k) && !s.offersNarrow);
 });
-check('NO state produces a sentence offering an action that is not rendered',
+check('NO realizable state produces a sentence offering an action that is not rendered',
   overPromises.length === 0,
   overPromises.map((s) => `${JSON.stringify(s)} → ${closingNoteKey(s)}`).join('\n      '));
 
 // The complement matters too: with the button genuinely on screen the invitation must still be made,
 // or the fix would have silently retired a working affordance instead of telling the truth about it.
-const underPromises = states.filter((s) => {
+const underPromises = real.filter((s) => {
   const k = closingNoteKey(s);
   // 'all' has nothing left to page, so offersMore cannot be honoured there by construction.
   const moreApplies = s.endKind === 'more' && s.offersMore;
@@ -122,7 +147,7 @@ check('agent.tsx derives offersMore from showActionsRow, not from hasMore alone'
 check('agent.tsx derives offersNarrow from showActionsRow, not from canNarrowFurther alone',
   /const offersNarrow = canNarrowFurther && showActionsRow;/.test(agentSrc));
 check('the visible sentence comes from the pure key function, not a second inline copy',
-  /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow \}\)/.test(agentSrc));
+  /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer: rc\.lastTapOffer, cappedAtCap: rc\.cappedAtCap \}\)/.test(agentSrc));
 check('showActionsRow is still the single gate the buttons themselves are rendered behind',
   // Gate hoisted into the pure resultsActionsRowVisible() (owner 2026-09-06, `final=50`); still the
   // single const the Pressables, the spoken note, and offersMore/offersNarrow all derive from.
@@ -133,14 +158,14 @@ check('showActionsRow is still the single gate the buttons themselves are render
 // the actions row is hidden. The sentence must state both numbers and ask for nothing.
 const rc = resultCounts({ trueTotal: 5970, shown: 10, fetched: 1500, serverMore: true });
 check('the measured cohort still legitimately HAS more (the fix did not retire paging)', rc.hasMore);
-const afOpenKey = closingNoteKey({ endKind: rc.endKind, quoteTotal: true, offersMore: false, offersNarrow: false });
+const afOpenKey = closingNoteKey({ endKind: rc.endKind, quoteTotal: true, offersMore: false, offersNarrow: false, lastTapOffer: false, cappedAtCap: false });
 check('with the AF interview open the sentence states 10 of 5,970 and offers nothing',
   afOpenKey === 'I showed you the first {shown} of {total} matching listings.', afOpenKey);
-const afClosedKey = closingNoteKey({ endKind: rc.endKind, quoteTotal: true, offersMore: true, offersNarrow: true });
+const afClosedKey = closingNoteKey({ endKind: rc.endKind, quoteTotal: true, offersMore: true, offersNarrow: true, lastTapOffer: false, cappedAtCap: false });
 check('with the interview closed and both buttons rendered, both offers come back',
   keyOffersMore(afClosedKey) && keyOffersNarrow(afClosedKey), afClosedKey);
 // The superseded-turn half, which needs no Advanced Filter at all to reproduce.
-const staleTurnKey = closingNoteKey({ endKind: 'more', quoteTotal: true, offersMore: false, offersNarrow: false });
+const staleTurnKey = closingNoteKey({ endKind: 'more', quoteTotal: true, offersMore: false, offersNarrow: false, lastTapOffer: false, cappedAtCap: false });
 check('an older results turn (isLatestResults false) also stops promising a retired button',
   !keyOffersMore(staleTurnKey) && !keyOffersNarrow(staleTurnKey), staleTurnKey);
 

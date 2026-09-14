@@ -59,15 +59,18 @@ check('the OLD unconditional-button shape (no canNarrowFurther guard around the 
 // live on الرياض/بيع/فيلا. So this rule is now EXECUTED against that function rather than matched
 // against a source line: the same property, proven instead of spelled.
 check('the closing message drops the "help you find more precise ones?" invitation when the button is not offered',
-  !keyOffersNarrow(closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: false }))
-  && !keyOffersNarrow(closingNoteKey({ endKind: 'more', quoteTotal: true, offersMore: true, offersNarrow: false })),
+  !keyOffersNarrow(closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: false, lastTapOffer: false, cappedAtCap: false }))
+  && !keyOffersNarrow(closingNoteKey({ endKind: 'more', quoteTotal: true, offersMore: true, offersNarrow: false, lastTapOffer: false, cappedAtCap: false })),
   'a ≤25 set must never be invited to narrow further');
+// When «تحديد أكثر» IS on screen at a terminal, that terminal is the 500-cap case (owner 2026-09-14:
+// once everything ≤500 is shown there is nothing to narrow into, so the button only survives while
+// unseen inventory remains — i.e. cappedAtCap). The invitation must still be made there.
 check('…and still makes the invitation when the button IS offered',
-  keyOffersNarrow(closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: true })),
+  keyOffersNarrow(closingNoteKey({ endKind: 'all', quoteTotal: true, offersMore: false, offersNarrow: true, lastTapOffer: false, cappedAtCap: true })),
   'dropping the false offers must not retire the true one');
 check('agent.tsx feeds that function the RENDERED-button booleans, not the raw gates',
   /const offersNarrow = canNarrowFurther && showActionsRow;/.test(ag)
-  && /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow \}\)/.test(ag),
+  && /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer: rc\.lastTapOffer, cappedAtCap: rc\.cappedAtCap \}\)/.test(ag),
   'the pure function can only be as right as the values handed to it');
 
 check("both new ≤25 copy variants have real Arabic translations (no English key leak)",

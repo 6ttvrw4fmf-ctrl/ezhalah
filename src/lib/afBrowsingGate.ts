@@ -111,7 +111,13 @@ export function resultsActionsRowVisible(a: {
   afPhase: AfPhase | null;
   chatCompleted: boolean;
 }): boolean {
-  if (a.chatCompleted) return false;
+  // An open AF interview owns browsing — hide the whole row while it still has something to ask.
   if (afInterviewOwnsBrowsing(a.afPhase)) return false;
+  // TERMINAL / chat closed (owner 2026-09-14): «عرض المزيد» is always gone once the chat closes, but
+  // the Advanced-Filter button stays IF there is still unseen inventory to narrow into — the >500
+  // terminal. `canNarrowFurther` already carries that `shown < trueTotal` gate, so for the ≤500
+  // "everything shown" terminal it is false and the row is empty (only the ☰ new-search hint remains
+  // in the message). This decouples the AF button from the composer lock, which used to hide it too.
+  if (a.chatCompleted) return a.canNarrowFurther;
   return a.hasMore || a.canNarrowFurther;
 }
