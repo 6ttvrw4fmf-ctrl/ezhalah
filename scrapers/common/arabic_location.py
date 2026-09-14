@@ -44,6 +44,38 @@ def norm_ar(s: Optional[str]) -> str:
     return re.sub(r"\s+", " ", s)
 
 
+_TASHKEEL = "ًٌٍَُِّْٰ"
+_AR_DIGITS = str.maketrans("ئ٠١٢٣٤٥٦٧٨٩", "ي0123456789")
+
+
+def norm_district_tok(s: Optional[str]) -> str:
+    """Mirror SQL public.norm_district_tok() — the key `loc_catalog_district.district_norm` is built
+    with, and therefore the ONLY key a catalog district lookup may use.
+
+    norm_ar() mirrors normalize_ar(), which is only the FIRST of this function's eight steps. Using
+    norm_ar() against district_norm silently fails for any district whose name starts with «ال» (the
+    great majority) or carries ء/ئ/tashkeel — see find_district_in_text() for the live regression
+    that caused.
+
+    Steps, in the SQL's own order:
+      1. normalize_ar()            lowercase, أإآٱ→ا, ة→ه, ى→ي, strip tatweel/bidi, collapse spaces
+      2. strip tashkeel            [ًٌٍَُِّْٰ]
+      3. translate                 ئ→ي and ٠-٩ → 0-9
+      4. drop ء
+      5. split letter|digit        «الرحاب2» → «الرحاب 2», so a numbered twin keeps its own identity
+      6. btrim
+      7. strip leading «حي »       one or more
+      8. strip leading «ال»
+    """
+    s = norm_ar(s)
+    for t in _TASHKEEL:
+        s = s.replace(t, "")
+    s = s.translate(_AR_DIGITS).replace("ء", "")
+    s = re.sub(r"([ء-ي])([0-9])", r"\1 \2", s).strip()
+    s = re.sub(r"^(حي\s+)+", "", s)
+    return re.sub(r"^ال", "", s)
+
+
 # English region label → catalog region_id. Scrapers compute English regions today; this lets them
 # pass that as a twin-disambiguation hint without re-deriving. (Curated, 13 stable catalog regions.)
 REGION_EN_TO_ID: dict[str, int] = {
@@ -489,10 +521,13 @@ def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Option
                 continue
             for first in _forms(window[0]):
                 candidate = " ".join([first, *window[1:]])
-                for form in (candidate, f"حي {candidate}"):
-                    n = norm_ar(form)
-                    if n in known:
-                        ar = _DISTRICT_AR_BY_NORM.get(n)
-                        if ar:
-                            return ar
+                # norm_district_tok(), NOT norm_ar(): `known` holds catalog district_norm values, and
+                # district_norm = norm_district_tok(district_ar). norm_ar() mirrors only that
+                # function's first step, so every «ال»-prefixed or hamza-bearing district silently
+                # failed to match — see the note above.
+                n = norm_district_tok(candidate)
+                if n in known:
+                    ar = _DISTRICT_AR_BY_NORM.get(n)
+                    if ar:
+                        return ar
     return None
