@@ -110,6 +110,15 @@ jobs:
           cat /tmp/sweep-${{ matrix.engine }}.log
           echo "SWEEP_STATUS=$status" >> "$GITHUB_ENV"
 
+      # The LIVE half of scripts/verify-journey-ledger-has-no-orphans.ts. It belongs here, next to
+      # the only thing that writes the table, and NOT in `npm test` — the required suite is hermetic,
+      # so a check whose verdict is decided by production's state would fail unrelated diffs.
+      # Runs right after the sweep, so an orphan minted by a rename is caught on the first sweep
+      # after that rename rather than by whoever next reads the rotation and believes it.
+      - name: Journey ledger has no orphaned coverage keys
+        if: steps.gate.outputs.run == 'yes'
+        run: node --experimental-strip-types scripts/verify-journey-ledger-has-no-orphans-live.ts
+
       - name: Report
         if: steps.gate.outputs.run == 'yes' && always()
         run: |
@@ -151,3 +160,36 @@ jobs:
           --workflow journey-sweep.yml
           --status ${{ contains(needs.*.result, 'failure') && 'failure' || (contains(needs.*.result, 'cancelled') && 'cancelled' || 'success') }}
           --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      # ── ATTENDANCE (2026-09-14) ────────────────────────────────────────────────────────────────
+      # Raising an alert is not the same as failing the run, and this job only did the former: a
+      # sweep leg CANCELLED by its 45-minute timeout concluded as neither success nor failure, so
+      # the workflow went GREEN over a matrix leg that never finished — the 2026-09-03 dark-barrier
+      # shape, in the workflow whose whole job is to notice things.
+      #
+      # It matters more now that a live barrier lives here
+      # (verify-journey-ledger-has-no-orphans-live.ts): a check homed in a workflow that cannot go
+      # red is a check that runs nowhere, which is exactly what test-exclusions.txt forbids.
+      #
+      # Parsed with jq, never grepped. A text match that stops matching — because GitHub changes the
+      # shape of toJSON(needs), or a job id gains a character the pattern did not expect — finds
+      # nothing and PASSES, which is failing OPEN: the defect this step exists to close, one level up.
+      - name: Refuse to report a clean run when a sweep leg was cancelled, skipped or failed
+        if: always()
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS"
+          n=$(jq -r 'length' <<<"$RESULTS")
+          if [ "$n" -eq 0 ]; then
+            echo "::error::attendance read ZERO needed jobs — it cannot see the run it is gating"
+            exit 1
+          fi
+          bad=$(jq -r 'to_entries | map(select(.value.result != "success")) | .[] | "\(.key): \(.value.result)"' <<<"$RESULTS")
+          if [ -n "$bad" ]; then
+            echo "::error::a journey sweep job did not succeed — a cancelled or skipped leg is a DARK BARRIER, not a clean run"
+            echo "$bad"
+            exit 1
+          fi
+          echo "all $n journey sweep job(s) concluded success"
