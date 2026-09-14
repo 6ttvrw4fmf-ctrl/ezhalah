@@ -32,8 +32,15 @@ import scrapers.common.arabic_location as _al  # noqa: E402
 # catalog, so find_district_in_text() runs its actual matching logic against KNOWN answers rather
 # than being stubbed into a dumb always-None/always-same-value shape that would stop testing it.
 _al._CITY["_stub_"] = [(1, 1)]
-_al._DISTRICT_BY_CITY[18] = {_al.norm_ar("حي الروضة")}
-_al._DISTRICT_AR_BY_NORM[_al.norm_ar("حي الروضة")] = "حي الروضة"
+# KEYED WITH norm_district_tok(), because that is what production stores: loc_catalog_district
+# .district_norm is a norm_district_tok() of district_ar, NOT a norm_ar(). Seeding this stub with
+# norm_ar() is what let this test stay green through a real outage — find_district_in_text() looked
+# up norm_ar() keys too, so test and code agreed with each other and disagreed with the database,
+# and every «ال»-prefixed Jeddah/Mecca district silently stopped resolving from 2026-09-12 (the
+# identity-fold migration) until 2026-09-14. Feed a barrier what PRODUCTION stores, never a shape
+# this repo picked for its own convenience.
+_al._DISTRICT_BY_CITY[18] = {_al.norm_district_tok("حي الروضة")}
+_al._DISTRICT_AR_BY_NORM[_al.norm_district_tok("حي الروضة")] = "حي الروضة"
 _al.to_catalog = lambda city_ar, region_hint=None: (18, 2) if city_ar == "جدة" else (None, None)
 
 from scrapers.common import normalize  # noqa: E402
