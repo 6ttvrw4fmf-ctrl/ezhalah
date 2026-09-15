@@ -35,6 +35,7 @@ import { join } from 'node:path';
 import {
   liveBundleReading, undeployedDriftProblems, USER_VISIBLE_ROOTS, type DriftReading,
 } from './lib/undeployedDrift.ts';
+import { lastSuccessfulRunHeadSha, repoSlug } from './lib/githubApi.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const SITE = process.env.EZHALAH_SITE_URL || 'https://ezhalah-app.vercel.app';
@@ -119,9 +120,41 @@ try {
   console.log(`  live: unreachable — ${String(e).slice(0, 160)}`);
 }
 
+// ── READING 4: is the RECORD current? ──────────────────────────────────────────────────────────
+// The baseline file is only as good as the recorder that advances it, and on 2026-09-15 that
+// recorder had been unable to advance it since 09-11 (it cannot push to main, so it opens a PR and
+// exits 0; seventeen were open). Asking the deploy pipeline's own run history turns "what the record
+// claims" into a testable claim instead of an axiom. Unreadable → null → reported as UNANSWERED.
+let lastDeploySha: string | null = null;
+let baselineIsBehindLastDeploy: boolean | null = null;
+let changedPathsSinceLastDeploy: string[] | null = null;
+try {
+  lastDeploySha = await lastSuccessfulRunHeadSha(repoSlug(), 'deploy-frontend.yml');
+} catch (e) {
+  console.log(`  deploy history: unreadable — ${String(e).slice(0, 120)}`);
+}
+if (lastDeploySha && baselineSha) {
+  // STRICTLY behind: the recorded floor is an ancestor of a deploy that provably succeeded, and is
+  // not that deploy itself. Equality means the record is current, which is the healthy case.
+  if (lastDeploySha === baselineSha) {
+    baselineIsBehindLastDeploy = false;
+  } else if (git('cat-file', '-e', `${lastDeploySha}^{commit}`) !== null) {
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', baselineSha, lastDeploySha], { cwd: ROOT });
+      baselineIsBehindLastDeploy = true;
+    } catch { baselineIsBehindLastDeploy = false; }
+  }
+  if (baselineIsBehindLastDeploy === true && headSha) {
+    changedPathsSinceLastDeploy =
+      git('diff', '--name-only', `${lastDeploySha}..${headSha}`)?.split('\n').filter(Boolean) ?? null;
+  }
+}
+
 const reading: DriftReading = {
   baselineSha, headSha, baselineIsAncestorOfHead, changedPaths, commitLine, liveEntryBundle,
+  lastDeploySha, baselineIsBehindLastDeploy, changedPathsSinceLastDeploy,
 };
+console.log(`  last deploy     : ${lastDeploySha ?? '(unreadable)'}${baselineIsBehindLastDeploy === true ? '  ← RECORD IS STALE' : ''}`);
 console.log(`  recorded as live: ${baselineSha ?? '(unreadable)'}`);
 console.log(`  head under test : ${headSha ?? '(unreadable)'}`);
 console.log(`  files changed   : ${changedPaths === null ? '(undeterminable)' : changedPaths.length}\n`);
