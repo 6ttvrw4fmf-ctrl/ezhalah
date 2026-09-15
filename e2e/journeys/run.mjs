@@ -12,7 +12,7 @@ import { withPage, settle, bodyText, storedHistory, clickText, clickReason, slee
          findings, skips, skip, passes, classifyRunOutcome, classifyBlockedControl,
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
-         classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
+         classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport, classifyJourneyThrow,
          SELECTED_CITY_MARKER } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
@@ -1460,8 +1460,33 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     // answers "did the sheet win this tap" is whether the TESTED POINT falls inside the sheet's own
     // rect, exactly the two numbers this journey already prints side by side in every finding.
     const winnerIsSheet = !!q && q.height > 0 && cy >= q.top && cy <= q.bottom && cx >= q.left && cx <= q.right;
+    // A BLOCKER LABELLED BY AN ATOMIC CLASS IS NOT IDENTIFIED (ops_incident #262, 2026-09-15).
+    // The label used to be tagName + id + the first two class names. On React Native Web those
+    // classes are ATOMIC and shared — `.css-g5y9jx.r-160h4nu` matches the cookie-consent card AND
+    // ordinary layout wrappers — so the finding named a signature that cannot pick out an element.
+    // That cost a real mis-triage: #262 first recorded the «تصفية» half as a "probable mislabel"
+    // because the coordinates did not match where the card had been seen, and had to withdraw it
+    // once the card turned out to dock at a different edge. Same element, two positions, and a
+    // label too weak to say so.
+    //
+    // So print what actually identifies it against the SERVED bundle, with no deploy required: its
+    // own box, the z-index/position/pointer-events that decide hit-testing, any testid, and a short
+    // text snippet. The card carries its consent copy; a layout wrapper does not.
+    const winnerInfo = (n) => {
+      if (!n) return null;
+      const cs = getComputedStyle(n);
+      const b = n.getBoundingClientRect();
+      const cls = typeof n.className === 'string' && n.className.trim()
+        ? '.' + n.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+      const tid = n.getAttribute && (n.getAttribute('data-testid') || n.getAttribute('id'));
+      const txt = (n.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+      return `<${n.tagName.toLowerCase()}${tid ? '#' + tid : ''}${cls}> `
+        + `${Math.round(b.width)}x${Math.round(b.height)} at ${Math.round(b.left)},${Math.round(b.top)} `
+        + `z=${cs.zIndex} pos=${cs.position} pointer-events=${cs.pointerEvents}`
+        + (txt ? ` text="${txt}"` : ' text=<none>');
+    };
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), sheetNow,
-             winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}${t.className && typeof t.className === 'string' ? '.' + t.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}` : null,
+             winner: winnerInfo(t),
              isSelf: !!t && (t === el || t.contains(el) || el.contains(t)),
              winnerIsSheet };
   }, { s: sel, sheetSel: SHEET_SEL });
@@ -2201,7 +2226,16 @@ for (const [key, fn] of Object.entries(JOURNEYS)) {
       const skipsBefore = skips.length;
       const passesBefore = passes.length;
       console.log(`\n▶ ${key} [${mobile ? 'mobile' : 'desktop'}] run ${i}/${N}`);
-      try { await fn(mobile); } catch (e) { defect(key, 'journey threw', String(e).slice(0, 220)); }
+      // A NETWORK FAILURE IS NOT A PRODUCT DEFECT (PART 9.4). The catch-all is right to treat an
+      // unexplained throw as a finding, but a journey that could not REACH production has measured
+      // nothing about it — that is a skip (§9.5), and filing it as a defect is exactly the
+      // misattribution PART 9 opens with. Only errors the harness has already proven transport
+      // (harness.mjs `isTransportError`, after three bounded attempts) take this door; every other
+      // throw is still a defect, unchanged.
+      try { await fn(mobile); } catch (e) {
+        if (classifyJourneyThrow(e) === 'skip') skip(key, String(e.message || e).slice(0, 220));
+        else defect(key, 'journey threw', String(e).slice(0, 220));
+      }
       ran++;
       // A RUN THAT ASSERTED NOTHING IS NOT A PASS. The verdict used to be a subtraction with no
       // bottom: no finding and no skip meant `pass`, which silently also covered "this journey
