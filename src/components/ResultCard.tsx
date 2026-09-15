@@ -923,8 +923,21 @@ const card = StyleSheet.create({
   hostHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   // The PNG carries its own background and rounded corners — we just size the slot. NO container
   // background here (would bleed through the PNG's transparent margins).
-  // 48×48 with a touch of internal padding feels right after the logo normalizer
-  // (each logo file now has identical 6% built-in margin, so they all visually fill).
+  //
+  // 48×48 — owner 2026-09-15, verbatim: "48x48 is perfect on the property card". This is the
+  // REFERENCE SIZE for the whole app: SearchLoader's pill logo is sized to match it so the same
+  // mark reads the same in the strip and on the card ("make sure the logos are the same size in
+  // terms of the animation when it shows and the property card").
+  //
+  // Note what this slot can and cannot equalise. `contentFit: contain` fits the WIDTH first, and
+  // the 51 logos' own aspect ratios run 0.70:1 to 6.56:1, so a wide mark still renders shorter than
+  // a square one inside any square slot — measured here: remal 48×7, arkaan 48×17, dealapp 48×19,
+  // سوار 48×23, against 48×48 for the 33 square logos. Enlarging the slot does not change that
+  // ratio; it scales every logo equally. The only fix that would truly equalise them is rescaling
+  // each company's artwork, and that is REFUSED by the owner brief recorded in
+  // scripts/verify-platform-logos-are-transparent.ts: "preserve the original brand colors,
+  // PROPORTIONS, and fidelity." So the slot stays square and honest, and consistency is enforced
+  // BETWEEN SURFACES (card ↔ strip) rather than between brands.
   hostBadge: { width: 48, height: 48 },
   thercBadge: { borderRadius: 8, backgroundColor: '#1f5f8b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   aoujBadge: { borderRadius: 8, backgroundColor: '#8b5a1f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
