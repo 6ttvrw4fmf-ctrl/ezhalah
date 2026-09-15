@@ -16,7 +16,8 @@ import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/aut
 import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
 import { restoreChat, persistedOnly, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, type ChatMeta } from '@/lib/chatSync';
-import { mergeOne, pickTranscript, withFreshTranscript } from '@/lib/chatMerge';
+import { mergeOne, pickTranscript, mayPromoteTranscript, withFreshTranscript } from '@/lib/chatMerge';
+import { PROBE_FAILED, isProbeFailure } from '@/lib/afProbe';
 import { buildSyncedName } from '@/lib/nameSync';
 import { identifyUser } from '@/lib/observability';
 import { forgetSupportDraft } from '@/lib/supportDraft';
@@ -513,7 +514,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const key = historyKey(user.sub);
     if (serverMergedRef.current === key) return;
     serverMergedRef.current = key;
-    loadChatMetas().then((rows) => {
+    // `null` from loadChatMetas means the LOAD FAILED — never "this account has no chats" (an empty
+    // account resolves as `[]`). A single transient blip used to strand the whole session on the
+    // local-only list with no retry and no sign anything was missing, because `serverMergedRef` was
+    // already stamped. One bounded retry absorbs the blip; a second failure still degrades to
+    // local-only, which is safe (the push effect stays disarmed, so nothing can overwrite or delete
+    // the server's copy) and the next sign-in tries again.
+    const pull = async () => {
+      const first = await loadChatMetas();
+      if (first) return first;
+      await new Promise((r) => setTimeout(r, 1200));
+      return loadChatMetas();
+    };
+    pull().then((rows) => {
       if (!rows || serverMergedRef.current !== key) return;
       setHistory((h) => {
         const byId = new Map(h.map((it) => [it.id, it] as const));
@@ -901,12 +914,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // A trusted local copy renders instantly. A copy the merge marked STALE must lose to the
         // server's newer one — but if the server has none (legacy chat / offline), the local copy is
         // still the user's conversation and is kept rather than showing them a blank chat.
-        const t = await pickTranscript<PersistedChat>(
+        const picked = await pickTranscript<PersistedChat>(
           entry?.transcript,
           !!(entry as { txStale?: boolean } | undefined)?.txStale,
           async () => {
-            if (!user) return null;
+            if (!user) return null;      // signed out: there is genuinely no server copy to want
             const fetched = await fetchChatTranscript(id);
+            // Propagate UNKNOWN untouched. Mapping a failed read onto `null` here would rebuild the
+            // exact conflation the three-valued return exists to remove (ops_incident #272).
+            if (isProbeFailure(fetched)) return PROBE_FAILED;
             const valid = fetched ? restoreChat(fetched) : null;
             if (!valid) return null;
             // NEVER re-list the fields to keep — strip the one render-only field instead. Rebuilding
@@ -916,8 +932,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return persistedOnly(valid);
           },
         );
+        const t = picked.transcript;
         if (!t) return null;
-        if (t !== entry?.transcript || (entry as { txStale?: boolean } | undefined)?.txStale)
+        // ONLY a verified transcript may be written back, because withFreshTranscript CLEARS
+        // `txStale` — and an entry without that flag is pushable (pushableTranscript above), so
+        // promoting an unverified copy is what overwrote the server's newer conversation. When the
+        // read failed we still RENDER what we hold (better than a blank chat) and change nothing:
+        // the entry stays stale, stays unpushable, and the next open retries the server.
+        if (mayPromoteTranscript(picked) && (t !== entry?.transcript || (entry as { txStale?: boolean } | undefined)?.txStale))
           setHistory((h) => h.map((it) => (it.id === id ? withFreshTranscript(it as never, t, it.tRev ?? Date.now()) as unknown as HistoryItem : it)));
         return t;
       },

@@ -2827,7 +2827,16 @@ export default function Agent() {
     flushPendingCapture(); // leaving the previous chat mid-debounce must not drop its newest turn
     chatIdRef.current = entryId ?? null;
     const entry = entryId ? history.find((h) => h.id === entryId) : undefined;
-    let t: PersistedChat | null = entry?.transcript ?? null;
+    // A STALE local copy must be re-checked against the server, not rendered (owner 2026-08-25,
+    // src/lib/chatMerge.ts). This line used to read `entry?.transcript ?? null` unconditionally, so
+    // a present-but-stale transcript short-circuited the hydrate and the whole `txStale` mechanism
+    // never engaged on the one path that actually opens a saved chat: the merge marked the copy
+    // stale, pickTranscript was ready to prefer the server, and nobody ever asked. The user saw the
+    // SHORTER conversation, and the first new turn cleared the flag (withFreshTranscript, via the
+    // capture effect) and pushed that truncated view over the server's longer one — permanently.
+    // Treating stale as "not held" hands the decision to hydrateTranscript, which owns it.
+    const heldStale = !!(entry as { txStale?: boolean } | undefined)?.txStale;
+    let t: PersistedChat | null = heldStale ? null : (entry?.transcript ?? null);
     if (!t && entryId) t = await hydrateTranscript(entryId).catch(() => null);
     const restored = t ? restoreChat(t) : null;
     if (restored) {
