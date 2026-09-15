@@ -153,7 +153,13 @@ function PlatformPill({
   const { width: winW } = useWindowDimensions();
   const wide = winW >= 720;
   const pillOverride = wide ? { height: 44, gap: 9, paddingHorizontal: 4 } : null;
-  const logoOverride = wide ? { width: 26, height: 26, borderRadius: 6 } : null;
+  // SQUARE, matching ResultCard's hostBadge (48×48) so the same mark reads the same in the strip and
+  // on the card (owner 2026-09-15). Grown 26→34 here and 18→24 on phone: the owner asked for "a bit
+  // bigger… for a laptop let it be bigger than someone opening it from a phone", which is the split
+  // this `wide` flag already expresses. 34 inside the 44-tall wide pill and 24 inside the 34-tall
+  // narrow pill both keep ~10px of breathing room, so the row height and the "perfect on iPhone"
+  // pill geometry are untouched — only the logo grows.
+  const logoOverride = wide ? { width: 34, height: 34, borderRadius: 6 } : null;
   const nameOverride = wide ? { fontSize: 14, maxWidth: 220 } : null;
   const h = useSharedValue(0);
   // LITERAL hex, not the colors.* token (owner theme contract: interpolateColor parses actual color
@@ -398,6 +404,6 @@ const s = StyleSheet.create({
   // pill's own "perfect on iPhone" size. Horizontal gap stays 9 so pills-per-row is unaffected.
   strip: { flexWrap: 'wrap', alignSelf: 'stretch', gap: 9, rowGap: 6 },
   pill: { alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 2 },
-  pillLogo: { width: 18, height: 18, borderRadius: 4 },
+  pillLogo: { width: 24, height: 24, borderRadius: 4 },   // phone size; square like hostBadge (see logoOverride)
   pillName: { fontSize: 12.5, fontWeight: '600', color: colors.body, maxWidth: 150 },
 });
