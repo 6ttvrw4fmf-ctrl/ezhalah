@@ -179,8 +179,8 @@ export type ClosingNoteKey =
   | 'I showed you the first {n} listings.'
   // THE FINAL «عرض المزيد» (owner 2026-09-14): once the first 100 is on screen, the next tap is the
   // last and reveals up to 500. Two variants — with the narrow offer, and without it.
-  | 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {next} at once. Want me to show more, or help you find more precise ones?'
-  | 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {next} at once. Want me to show more?'
+  | 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {rest} at once. Want me to show more, or help you find more precise ones?'
+  | 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {rest} at once. Want me to show more?'
   // TERMINAL, everything shown (≤500): no «عرض المزيد», no narrow — start a new search from the menu.
   | 'That is every matching listing ({n}). For a new search, open the menu and choose Search.'
   // TERMINAL, capped at 500 with more in the set: keep Advanced Filter (with the narrow offer), or a
@@ -212,8 +212,8 @@ export function closingNoteKey(args: {
     // whether «تحديد أكثر» is on screen too (offersNarrow), so the sentence never names a missing one.
     if (offersMore && lastTapOffer) {
       return offersNarrow
-        ? 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {next} at once. Want me to show more, or help you find more precise ones?'
-        : 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {next} at once. Want me to show more?';
+        ? 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {rest} at once. Want me to show more, or help you find more precise ones?'
+        : 'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {rest} at once. Want me to show more?';
     }
     if (quoteTotal) {
       // THE NEXT NUMBER IS STATED, AND IT IS THE REAL ONE (owner 2026-09-13). The Arabic used to end

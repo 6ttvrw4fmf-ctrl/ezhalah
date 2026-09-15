@@ -250,46 +250,59 @@ mustCatch('`rows ?? []` creeping back into loadMoreListings',
   !/if \(rows === null\) return \{ listings: \[\], nextOffset: offset, hasMore: true, failed: true \};/.test(
     storeSrc.replace('if (rows === null) return { listings: [], nextOffset: offset, hasMore: true, failed: true };', 'const r0 = buildPools(rows ?? []);')));
 
-// ── THE SENTENCE STATES WHAT ONE TAP ACTUALLY REVEALS (owner 2026-09-13, extended 2026-09-14) ─────
-// A tap advances to what revealTarget() returns — the next 100-boundary on a FIRST tap, min(500,total)
-// on the LAST tap — always clamped to what exists. Hardcoded numbers are banned in EVERY direction:
-// the old «بعرض لك كل الإعلانات» (one tap shows everything); a fixed «100» ("funny to say 100 and show
-// 20", owner 2026-09-13); AND a fixed «500» (owner 2026-09-14: on a 340-match search the last tap
-// shows 340, not 500). So the number is revealTarget()'s — the same function the button pages with —
-// and these checks pin every failure direction.
+// ── THE SENTENCE STATES THE REAL NUMBER — cumulative on the first tap, REMAINING on the last ──────
+// (owner 2026-09-13 → 2026-09-15). A tap advances to revealTarget(): the next 100-boundary on a FIRST
+// tap, min(500,total) on the LAST. Two DIFFERENT real numbers reach the two messages, never a hardcode:
+//   • FIRST tap → «بعرض لك أول {next}»  — the CUMULATIVE target (revealTarget): 47 on a 47-match
+//     search, 100 on a 9,892-match one. Never a fixed 100 ("funny to say 100 and show 20").
+//   • LAST tap  → «بنعرض لك حتى {rest}» — the REMAINING this tap ADDS on top of the {shown} already on
+//     screen = revealTarget − shown (owner 2026-09-15): 100 shown of 387 → 287, of 9,892 → 400. Never
+//     the cumulative total (which double-counts the 100 already shown), never a fixed 500.
 console.log('\nThe «عرض المزيد» sentence states the real next-tap target\n');
 const i18nSrc = readFileSync(join(root, 'src', 'i18n.tsx'), 'utf8');
-const moreKeys = [
-  // first-tap offers
+const arOf = (k: string) => i18nSrc.match(new RegExp(`'${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']*)'`))?.[1] ?? '';
+const firstTapKeys = [
   'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}.',
   'I showed you the first {shown} of {total} matching listings. Want me to show more? I will show the first {next}, or help you find more precise ones.',
-  // last-tap (500-cap) offers — must state {next} = min(500,total), NEVER a fixed 500
-  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {next} at once. Want me to show more, or help you find more precise ones?',
-  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {next} at once. Want me to show more?',
 ];
-for (const k of moreKeys) {
-  const ar = i18nSrc.match(new RegExp(`'${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']*)'`))?.[1] ?? '';
-  check(`AR carries the {next} placeholder, not a fixed number: "${k.slice(60, 90)}…"`,
+const lastTapKeys = [
+  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {rest} at once. Want me to show more, or help you find more precise ones?',
+  'We still have more for you. Showing {shown} of {total}. This is the last «عرض المزيد» — up to {rest} at once. Want me to show more?',
+];
+for (const k of firstTapKeys) {
+  const ar = arOf(k);
+  check(`first-tap AR carries {next} (cumulative), not a fixed number: "${k.slice(60, 82)}…"`,
     ar.includes('{next}') && !/\b(100|500)\b/.test(ar), `got: "${ar}"`);
+}
+for (const k of lastTapKeys) {
+  const ar = arOf(k);
+  check(`last-tap AR carries {rest} (the remaining), not a fixed number and not {next}: "${k.slice(55, 77)}…"`,
+    ar.includes('{rest}') && !ar.includes('{next}') && !/\b(100|500)\b/.test(ar), `got: "${ar}"`);
 }
 check('the retired «بعرض لك كل الإعلانات» one-tap-shows-everything promise is gone from every key',
   !i18nSrc.includes('إذا عرضت لك المزيد بعرض لك كل الإعلانات'));
-check('agent.tsx fills {next} from revealTarget(endShown, endTotal) — the same function the button pages with',
+check('agent.tsx fills {next} from revealTarget(endShown, endTotal) — the first-tap cumulative target',
   /next: revealTarget\(rc\.endShown, rc\.endTotal\)/.test(code));
-// EXECUTED, every direction: the stated {next} must equal the tap's real reveal target = revealTarget().
-//   first tap (shown < 100) → the next 100-boundary, clamped to total
-//   last  tap (shown >= 100) → min(500, total) — the owner's 340-not-500 case included
-for (const [shown, total] of [[13, 437], [13, 47], [10, 9892], [100, 437], [100, 9892], [100, 340]] as const) {
-  const want = shown < BROWSE_BATCH ? Math.min(BROWSE_BATCH, total) : Math.min(SECOND_PAGE_CAP, total);
-  check(`shown ${shown} of ${total} → the sentence states ${revealTarget(shown, total)} (= what the tap reveals)`,
-    revealTarget(shown, total) === want);
+check('agent.tsx fills {rest} from revealTarget(endShown, endTotal) − endShown — the last-tap remaining',
+  /rest: Math\.max\(0, revealTarget\(rc\.endShown, rc\.endTotal\) - rc\.endShown\)/.test(code));
+// EXECUTED — first-tap {next} = revealTarget (cumulative); last-tap {rest} = revealTarget − shown.
+for (const [shown, total] of [[13, 437], [13, 47], [10, 9892]] as const) {
+  check(`first tap: shown ${shown} of ${total} → «first ${revealTarget(shown, total)}»`,
+    revealTarget(shown, total) === Math.min(BROWSE_BATCH, total));
 }
-mustCatch('a hardcoded 100 standing in for the real target on a 47-match search (the owner\'s "funny" case)',
+for (const [shown, total] of [[100, 387], [100, 9892], [100, 340], [100, 437]] as const) {
+  const rest = Math.max(0, revealTarget(shown, total) - shown);
+  check(`last tap: shown ${shown} of ${total} → «up to ${rest} more» (= min(500,total) − shown)`,
+    rest === Math.min(SECOND_PAGE_CAP, total) - shown);
+}
+mustCatch('a hardcoded 100 standing in for the first-tap target on a 47-match search (the "funny" case)',
   revealTarget(13, 47) !== 100);
-mustCatch('a hardcoded 500 standing in for a 340-match LAST tap (the owner\'s 2026-09-14 case)',
-  revealTarget(100, 340) !== 500);
-mustCatch('a sentence that promises the whole set on one tap (9,892 matches, one tap ≠ everything)',
-  revealTarget(100, 9892) !== 9892);
+mustCatch('the last tap stating the cumulative TOTAL (387) instead of the remaining (287) is a different number',
+  (revealTarget(100, 387) - 100) !== revealTarget(100, 387));
+mustCatch('a hardcoded 500 standing in for a 340-match last tap (remaining is 240, not 500)',
+  (revealTarget(100, 340) - 100) !== 500);
+mustCatch('a last tap claiming it adds the whole set (9,892) when it only adds 400 to reach the cap',
+  (revealTarget(100, 9892) - 100) !== 9892);
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
