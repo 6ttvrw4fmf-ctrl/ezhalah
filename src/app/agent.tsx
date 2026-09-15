@@ -3576,13 +3576,15 @@ export default function Agent() {
                             shown: rc.endShown.toLocaleString('en-US'),
                             total: rc.endTotal.toLocaleString('en-US'),
                             n: (rc.endKind === 'more' ? rc.endShown : (clientNarrowed ? rc.endShown : rc.endTotal)).toLocaleString('en-US'),
-                            // What ONE «عرض المزيد» tap actually reveals, from the SAME function the
-                            // button pages with (revealTarget) — the next 100-boundary on a first tap,
-                            // the min(500,total) cap on the last tap — always clamped to what exists.
-                            // So the last-tap sentence says «حتى 340» on a 340-match search and «حتى
-                            // 500» on a 9,892-match one; never a hardcoded 500 (owner 2026-09-14, the
-                            // same "state the real number" rule as the first tap, owner 2026-09-13).
+                            // {next}: the FIRST-tap cumulative target — "I will show the first {next}"
+                            // — from the SAME function the button pages with (revealTarget), clamped to
+                            // what exists (47 on a 47-match search, 100 on a 9,892-match one).
                             next: revealTarget(rc.endShown, rc.endTotal).toLocaleString('en-US'),
+                            // {rest}: the LAST-tap REMAINING — how many MORE this final tap adds on top
+                            // of the {shown} already on screen = revealTarget − shown (owner 2026-09-15).
+                            // 100 shown of 387 → «حتى 287» (387−100); of 9,892 → «حتى 400» (500−100).
+                            // NOT the cumulative total, which double-counts the 100 already displayed.
+                            rest: Math.max(0, revealTarget(rc.endShown, rc.endTotal) - rc.endShown).toLocaleString('en-US'),
                           },
                         );
                         // Read Aloud closing note (owner request, 2026-08-23: "read the note... and say the
