@@ -86,8 +86,23 @@ def _unit_status(acf: dict) -> str:
 
 
 # The source's own project-level status vocabulary. Only «متاح» contributes units.
-PROJECT_STATUS_OK = {"متاح"}
-PROJECT_STATUS_EXCLUDED = {"قريبا", "وقف التسويق", "تم البيع"}
+PROJECT_STATUS_OK = {"متاح", "Available"}
+PROJECT_STATUS_EXCLUDED = {"قريبا", "وقف التسويق", "تم البيع",
+                           "Soon", "Marketing suspension", "Sold out"}
+
+# OFF-PLAN IS NOT A LISTING WE SHOW (owner, 2026-09-14). «البيع على الخارطة» — literally "selling on
+# the map" — is a unit sold before it is built: a drawing, a price and a wait. The card would show a
+# photo of a finished building and a ready-to-buy price for something that does not physically exist.
+#
+# This is a SECOND not-yet-built signal, independent of property-status. «قريبا»/Soon was already
+# excluded; this one was not, and 99 listings across 7 projects reached production because of it.
+# rakez publishes NO completion field at all — no تسليم, جاهز, مكتمل, قيد الإنشاء, نسبة الإنجاز or
+# سنة البناء anywhere on a project page — so these two tags are the only evidence the source gives
+# about whether a thing exists yet, and both must be honoured.
+#
+# NOTE the tag is sparse: only 13 of 435 projects carry it. It is therefore a floor, not a
+# guarantee — an untagged project is "not stated", not "confirmed built".
+OFFER_GROUP_EXCLUDED = {"البيع على الخارطة", "Off-plan sales"}
 
 # rakez's property-type taxonomy, in its own Arabic wording → our canonical type.
 _TYPE_MAP = {
@@ -354,6 +369,14 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
     statuses = {_clean(t.get("name")) for t in _terms_of(ar_project, "property-status")}
     statuses |= {_clean(t.get("name")) for t in _terms_of(en_project, "property-status")}
     if statuses and not (statuses & PROJECT_STATUS_OK):
+        return None, ""
+
+    # …and so does an off-plan tag, on EITHER language's record. Checked separately from status
+    # because a project can be «متاح» (available to buy) AND «البيع على الخارطة» (not built yet) at
+    # the same time — which is exactly how the 99 got through.
+    offers = {_clean(t.get("name")) for t in _terms_of(ar_project, "offer-group")}
+    offers |= {_clean(t.get("name")) for t in _terms_of(en_project, "offer-group")}
+    if offers & OFFER_GROUP_EXCLUDED:
         return None, ""
 
     raw_type = next((_clean(t.get("name")) for t in _terms_of(ar_project, "property-type")), None)

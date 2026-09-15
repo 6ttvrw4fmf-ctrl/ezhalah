@@ -613,6 +613,53 @@ Things that cost a previous run real time, and are NOT product defects:
       Still OPEN and NOT settled here: whether the ACCUMULATED mount across many presses is safe —
       `ops_incident` #212 (P1, routine #4, `blocked`). Do not pin that from this surface.
 
+22. **NEVER PLAN A `DROP ... CASCADE` FROM ONE HOP OF `pg_depend`** (2026-09-14, this routine, the
+    hard way). Splicing arms into `listing_location_index` requires the `__mig` swap, whose
+    `DROP MATERIALIZED VIEW ... CASCADE` is the documented pattern. The dependents were planned by
+    asking which relations' rewrite rules reference `listing_location_index` — which returns exactly
+    two, `listing_location_canonical` and its `_mv`. Both were captured and restored, and the
+    migration's own guards all passed. **ELEVEN objects were actually dropped**, because
+    `listing_native_location_v1` LEFT JOINs `listing_location_canonical` (last line of its body) and
+    a further chain hangs off v1: v1 → v2 → {`mon_search_index_city_drift`,
+    `platforms_deprecated_status`, `platforms_unsearchable`}, plus `phasea_shadow_resolution`,
+    `buy_location_index`, `rent_location_index`, `location_index_live`, `location_review`,
+    `ops_freshness_by_layer`. A one-level query cannot see a transitive dependent, and the guards
+    could not either: they verified what the migration knew to check.
+
+    **What it cost, and what it did not.** User-facing search and Trending were never affected —
+    `verify-trending-filter-state-live.ts` passed end to end *while the eleven were missing*, because
+    `top_cities_by_deal_ar` / `district_options_ar` / `location_search_candidates_ar` resolve through
+    the name bridges, not through v1/v2. `search_listings_ar`, `active_listing_ids_v2` and both
+    attribute views were untouched. What broke was ops tooling: `search_index_freshness()` failed
+    with `42P01`. **Check the user path FIRST and measure it — do not infer the blast radius from the
+    object list.** A guessed-parameter RPC call returning `[]` looked like an outage and was not.
+
+    **The correct recipe already exists in this repo — use it, do not re-derive it:**
+    `supabase/migrations/20260913221143_aqaralsaudia_wiring_into_search.sql` captures every dependent
+    with `pg_get_viewdef` at the TOP of the migration and replays them verbatim afterwards, naming
+    "v2 and its 3 dependents" explicitly. Its header says why: a hand-copied body "goes stale the
+    moment any other platform lands, and a stale restore silently un-wires whoever was added in
+    between."
+
+    **Restoring: the source matters per object.** `ops_ddl_snapshot` is right for anything that does
+    not enumerate platform tables (v2 and its three dependents select FROM v1 by name, so their text
+    has not moved). It is WRONG for `listing_native_location_v1` — its newest snapshot copy is 14,189
+    chars against a live 26,127, and restoring it would have silently un-wired four platforms.
+    `sql/mirrors/listing_native_location_v1.sql` is the live body, byte-verified; check its md5
+    before use (it was `5fb92dbf2a54966df41d0401918a9af5`, over the file from line 204 with NO
+    trailing newline). Guard every replay with `to_regclass(...) is null` so a stale snapshot can
+    never `CREATE OR REPLACE` over something still alive.
+
+23. **A TIMED-OUT `apply_migration` TOOL CALL IS NOT A ROLLED-BACK TRANSACTION** (2026-09-14). The
+    MCP tool gives up at 60s; the transaction keeps running and commits. Checking immediately after
+    can show the change ABSENT and it still lands seconds later — that is exactly what happened here,
+    producing two committed versions of one migration (20260914111548 and 20260914111726). It was
+    harmless only because the SQL was written idempotently (skip any table already in the view
+    definition, rebuild with CREATE OR REPLACE rather than appending). **Write every splice
+    idempotently, and after a timeout POLL for the object and for `schema_migrations` instead of
+    re-issuing blind.** Both versions must then be mirrored to git — the drift guard compares applied
+    VERSIONS to committed files.
+
 ## Hard safety rails (same as every other engineer — non-negotiable)
 
 Never modify data to make a test pass. Never manufacture attributes, turn UNKNOWN into false,
