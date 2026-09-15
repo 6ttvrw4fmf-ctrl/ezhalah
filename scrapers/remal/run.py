@@ -56,6 +56,7 @@ import html as ihtml
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -65,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 
 BASE = "https://www.remalre.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -148,20 +150,52 @@ def _classes(p: dict, prefix: str) -> list[str]:
     return [c[len(prefix):] for c in (p.get("class_list") or []) if c.startswith(prefix)]
 
 
+LIST_FETCH_ATTEMPTS = 4
+
+
+def _fetch_page(s: cc.Session, page: int, attempts: int = LIST_FETCH_ATTEMPTS):
+    """GET one estate list page, retrying a transient transport failure or 5xx/429 up to
+    `attempts` times before giving up. Mirrors sadin/ramzalqasim's `_fetch_page()` (2026-09-12 /
+    2026-08-26), which exists for exactly this source-flap shape.
+
+    THE INCIDENT THIS FIXES (daily engineer, 2026-09-15, rows_collapse:remal alert 3053): remal's
+    single REST page drew `curl: (28) Connection timed out after 40002 milliseconds` on its
+    ~04:23 UTC cron slot on 4 of the last 6 days (09-10, 09-13, 09-14, 09-15) — a single unretried
+    GET treated a transient network hiccup as "the source is genuinely empty" and failed the whole
+    run with 0 rows, even though every recovering run reads back the same stable 87-post catalogue.
+    Returns (response_or_None, failure_note). failure_note is only meaningful when the response is
+    None — a timeout, a 403 and a genuinely empty source must never read alike."""
+    last_note = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            r = s.get(f"{REST}/estate?per_page=100&page={page}", timeout=40)
+        except Exception as e:
+            last_note = f"page {page} raised {type(e).__name__}: {str(e)[:120]}"
+            if attempt == attempts:
+                return None, last_note
+            time.sleep(0.5 * attempt)
+            continue
+        if r.status_code == 200:
+            return r, ""
+        last_note = f"page {page} returned HTTP {r.status_code}"
+        if r.status_code in TRANSIENT_STATUSES and attempt < attempts:
+            time.sleep(0.5 * attempt)
+            continue
+        return None, last_note
+    return None, last_note
+
+
 def fetch_listings(s: cc.Session) -> list[dict]:
     """Every estate post. An unparseable body ends enumeration and records WHY — a timeout, a 403
-    and a genuinely empty source are three different incidents and must not read alike."""
+    and a genuinely empty source are three different incidents and must not read alike. Each page
+    retries a transient transport failure or 5xx/429 first — see `_fetch_page()`."""
     global LAST_FETCH_NOTE
     LAST_FETCH_NOTE = "no pages attempted"
     out: list[dict] = []
     for page in range(1, 30):
-        try:
-            r = s.get(f"{REST}/estate?per_page=100&page={page}", timeout=40)
-        except Exception as e:
-            LAST_FETCH_NOTE = f"page {page} raised {type(e).__name__}: {str(e)[:120]}"
-            break
-        if r.status_code != 200:
-            LAST_FETCH_NOTE = f"page {page} returned HTTP {r.status_code}"
+        r, fail_note = _fetch_page(s, page)
+        if r is None:
+            LAST_FETCH_NOTE = fail_note
             break
         try:
             batch = r.json()
