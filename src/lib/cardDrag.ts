@@ -74,13 +74,7 @@ export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardD
   const onDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
     dragging = true; moved = false; id = e.pointerId;
-    // Capture is an ENHANCEMENT — it keeps pointermove flowing when the pointer leaves the grip —
-    // never a precondition: onMove/onUp are bound to the grip, so the drag degrades gracefully
-    // without it. setPointerCapture throws NotFoundError whenever there is no ACTIVE pointer with
-    // this id (an untrusted or already-ended pointerdown), and unguarded it threw straight out of
-    // the React handler (Sentry REACT-NATIVE-9, ops_incident #289). The release side at onUp has
-    // always been wrapped; this is the missing half of that pair, not a new tolerance.
-    try { grip.setPointerCapture(id); } catch { /* no active pointer — listeners still track it */ }
+    grip.setPointerCapture(id);
     cancelAnimationFrame(raf);
     clearTimeout(safety);
     grabX = e.clientX - off.x; grabY = e.clientY - off.y;   // respect WHERE they grabbed
