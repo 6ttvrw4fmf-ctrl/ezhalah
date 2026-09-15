@@ -277,6 +277,42 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260913191008_amlakalahsa_jasha_and_marouj_janoubi_detector_extended.sql, '
     + 'which extends mon_detect_amlakalahsa_district_consolidation_regressed() to also cover "الجشة" '
     + 'and listing 11606266, and self-verifies green',
+  // Re-repair of the 2026-09-13 الجفر/الضاحية merge, which a geocode-silent crawl reverted on 25 of
+  // its 32 rows within a day (routine-3 2026-09-14; a buyer picking الجفر → الضاحية got 7 results,
+  // proven through location_search_candidates_ar). This migration is mostly PREVENTION — the
+  // owner's rule moves out of the scraper, where it silently no-opped whenever the source omitted
+  // pw-map.city, and onto the stored row as a BEFORE INSERT OR UPDATE trigger, where the city is
+  // known even on a crawl that could not geocode it. The UPDATEs are the one-time cleanup of rows
+  // the reverting crawls already wrote. TWO detectors watch it, not one: the pre-existing
+  // mon_detect_amlakalahsa_jafr_dahiya_merge_regressed() (20260913082310) still checks the base
+  // table, the search index and the population floor, and the companion below adds a guard on the
+  // MECHANISM rather than the data, so a disarmed trigger is caught before it costs a row. Open
+  // the companion to verify this reason rather than taking it on trust.
+  '20260914072254_amlakalahsa_jafr_dahiya_collapse_moves_to_the_stored_row.sql':
+    'watched by its companion 20260914072446_jafr_dahiya_collapse_gets_an_executing_barrier.sql, '
+    + 'which ships + rosters + self-verifies mon_detect_amlakalahsa_district_match_disarmed() '
+    + '(EXECUTING the collapse rule against its four defining cases and asserting the trigger is '
+    + 'attached to both amlakalahsa tables, mutation-proven in-migration against two broken rules) '
+    + '— and by the pre-existing mon_detect_amlakalahsa_jafr_dahiya_merge_regressed() which still '
+    + 'watches the data this repair corrected',
+  // Same two-migrations-apart shape as the entries above. The repair withdraws 99 راكز units whose
+  // project is tagged «البيع على الخارطة» — off-plan, sold before it is built (owner decision
+  // 2026-09-14, "delete the 99 please"). The repair file itself never reaches a mon_detect_* in
+  // executed SQL because its companion lands ~25 minutes later.
+  //
+  // The companion's detector watches THIS REPAIR SPECIFICALLY, not a class: it counts active rows
+  // in either راكز listing table whose additional_info->project_id is one of the 13 ids known to
+  // carry the tag, which is exactly the set the repair deactivated. Re-assertion is unnecessary
+  // (unlike the muktamel case) because a future crawl CANNOT undo this: an upsert is the only thing
+  // that sets active back to true, scrapers/rakez/run.py now vetoes an off-plan tag on either
+  // language's project record, and the detector runs twice an hour rather than at deploy time.
+  // The companion rosters it via needle-edit, runs it green, and asserts its predicate matches a
+  // non-empty set so it cannot be vacuously green. Open the companion to check this rather than
+  // taking it on trust.
+  '20260914181618_rakez_off_plan_units_are_not_listings.sql':
+    'watched by its companion 20260914190653_rakez_off_plan_resurrection_detector.sql, which '
+    + 'creates mon_detect_rakez_off_plan_resurrection(), needle-edits it into the '
+    + 'mon_run_all_detectors() roster, runs it green, and proves the predicate is not vacuous',
 };
 
 // Enforcement starts here — the day this rule landed.
