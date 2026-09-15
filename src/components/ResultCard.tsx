@@ -538,6 +538,8 @@ const ABWBNA_LOGO = require('../../assets/images/abwbna.png');
 const REMAL_LOGO = require('../../assets/images/remal.png');
 const AMAALL_LOGO = require('../../assets/images/amaall.png');
 const AQARALSAUDIA_LOGO = require('../../assets/images/aqaralsaudia.png');
+const SUWAR_LOGO = require('../../assets/images/suwar.png');
+const RAKEZ_LOGO = require('../../assets/images/rakez.png');
 const AMLAKALAHSA_LOGO = require('../../assets/images/amlakalahsa.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
 const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
@@ -653,15 +655,16 @@ function SourceBadge({ source }: { source: string }) {
   // would stamp عقار's mark on another company's listing — the misattribution the owner flagged
   // as a legal problem, not a cosmetic one.
   if (s.includes('aqaralsaudia')) return <Image source={AQARALSAUDIA_LOGO} style={card.hostBadge} contentFit="contain" />;
-  // سوار العقارية — NO LOGO ON PURPOSE (owner, 2026-09-14: "don't put any logo, I will add the
-  // logo after"). This branch must EXIST rather than be omitted: the fallback at the end of this
-  // function returns عقار's logo, so a missing branch would stamp another company's mark on سوار's
-  // listings — the misattribution the owner flagged as a legal problem, not a cosmetic one.
-  // Replace `null` with the owner's file when it arrives; nothing else here needs to change.
-  if (s.includes('suwar')) return null;
-  // راكز العقارية — NO LOGO ON PURPOSE, same instruction as سوار (owner, 2026-09-14). This branch
-  // must EXIST rather than be omitted: the fallback below returns عقار's logo.
-  if (s.includes('rakez')) return null;
+  // سوار العقارية / راكز العقارية — logos landed 2026-09-15, so these two branches now render the
+  // real mark instead of the deliberate `null` they held while the owner was still supplying the
+  // files. They must keep EXISTING either way: the fallback at the end of this function returns
+  // عقار's logo, so deleting a branch would stamp another company's mark on their listings — the
+  // misattribution the owner flagged as a legal problem, not a cosmetic one.
+  // Same two assets the search-loading strip uses (src/data/loaderPlatforms.ts); that duplication
+  // is deliberate so the card path is never coupled to the loader's, and both must be updated when
+  // an asset is renamed.
+  if (s.includes('suwar')) return <Image source={SUWAR_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('rakez')) return <Image source={RAKEZ_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('amlakalahsa')) return <Image source={AMLAKALAHSA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
