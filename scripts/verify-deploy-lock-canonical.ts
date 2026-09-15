@@ -167,7 +167,15 @@ const ALIAS_CALL_EXEMPT = new Set<string>([SELF]);
 const allFiles: string[] = [];
 const walkAll = (u: URL, rel: string) => {
   for (const e of readdirSync(u, { withFileTypes: true })) {
-    if (['node_modules', '.git', '__pycache__', 'dist', 'build', '.expo'].includes(e.name)) continue;
+    // `.claude` holds agent worktrees — gitignored, untracked COPIES of this repo that concurrent
+    // sessions check out (.gitignore:57). Descending into one lints another session's whole tree and
+    // reports its files as if they were ours: 8 false FAILs on 2026-09-14, every one of them inside
+    // .claude/worktrees/<other session>/supabase/migrations/…_deploy_lock_single_canonical_identity
+    // .sql — the very migration that TEACHES the DB to normalise aliases, so it legitimately
+    // contains acquire_deploy_lock('prod'|'prd'|'Production') as its own fixtures. CI never saw it
+    // (clean checkout, no worktrees), so the red was local-only and would mislead every dev who has
+    // one. This barrier judges THIS checkout; a nested checkout is not part of it.
+    if (['node_modules', '.git', '.claude', '__pycache__', 'dist', 'build', '.expo'].includes(e.name)) continue;
     if (e.isDirectory()) walkAll(new URL(`${e.name}/`, u), `${rel}${e.name}/`);
     else if (SCAN_EXT.test(e.name)) allFiles.push(`${rel}${e.name}`);
   }
