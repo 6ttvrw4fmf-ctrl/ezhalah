@@ -688,6 +688,23 @@ export const isTransportError = (err) => {
   return TRANSPORT_ERRORS.some((code) => s.includes(code));
 };
 
+/**
+ * What should the runner DO with a throw that escaped a journey body?
+ *
+ * 'defect' — the default and the safe direction: an unexplained throw is a finding.
+ * 'skip'   — the journey never reached production, so it measured nothing about it (§9.5). Filing
+ *            that as an Ezhalah defect is PART 9's first and most expensive error, and it happened:
+ *            the 2026-09-15 chromium sweep recorded auth-overlay-clears-controls as «journey threw:
+ *            Navigation … interrupted by another navigation to chrome-error://chromewebdata/»,
+ *            sitting in the DEFECTS list beside six real findings.
+ *
+ * Deliberately narrow. ONLY the `isTransport` flag that gotoOrRetryTransport sets after three
+ * bounded attempts opens this door — never a raw message match, because a product bug must never be
+ * able to talk its way into a skip by mentioning a network string. Pure, so
+ * scripts/verify-transport-failure-is-not-a-journey-defect.ts can EXECUTE the whole truth table.
+ */
+export const classifyJourneyThrow = (err) => (err && err.isTransport === true ? 'skip' : 'defect');
+
 // ── A NETWORK FAILURE IS NOT AN APPLICATION EXCEPTION, EVEN WHEN THE ENGINE REPORTS IT AS ONE ────
 //
 // Eighteen journeys end with `if (bag.pageErrors.length) defect(...)`, on the reasonable premise
@@ -796,10 +813,34 @@ export async function gotoOrRetryTransport(page, url, { timeout = 90_000 } = {})
   } catch (e) {
     if (!isTransportError(e)) throw e;              // a real app/navigation failure — unchanged
     const first = String(e).split('\n')[0];
-    const res = await page.goto(url, { waitUntil: 'load', timeout });
-    note(`TRANSPORT BLIP (not a product defect): the opening navigation to ${url} failed with «${first}» `
-      + `and succeeded on one immediate retry. Counted as neither pass nor defect — see harness.mjs.`);
-    return res;
+    // THE RETRY NEEDS ITS OWN GUARD. This used to be a single unguarded `page.goto`, so when the
+    // SECOND attempt also hit a transport blip the error escaped untyped and the runner's catch-all
+    // recorded it as «journey threw» — i.e. a network failure filed as an Ezhalah defect, PART 9's
+    // first and most expensive error. Measured on the 2026-09-15 chromium sweep:
+    // auth-overlay-clears-controls threw «Navigation to https://ezhalah-app.vercel.app/ is
+    // interrupted by another navigation to chrome-error://chromewebdata/» and landed in the DEFECTS
+    // list beside six real consent-card findings.
+    //
+    // Two bounded extra attempts with a short backoff, and the failure that survives them is thrown
+    // as a TRANSPORT failure so the runner can record it as a SKIP — a measurement that did not
+    // happen (§9.5) — instead of a defect. Deliberately not a bigger timeout: PR #1146's rule.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const res = await page.goto(url, { waitUntil: 'load', timeout });
+        note(`TRANSPORT BLIP (not a product defect): the opening navigation to ${url} failed with `
+          + `«${first}» and succeeded on retry ${attempt}. Neither pass nor defect — see harness.mjs.`);
+        return res;
+      } catch (again) {
+        if (!isTransportError(again)) throw again;  // the retry found a REAL failure — surface it
+        if (attempt === 2) {
+          const err = new Error(`TRANSPORT: ${url} unreachable after 3 attempts — first «${first}», `
+            + `last «${String(again).split('\n')[0]}»`);
+          err.isTransport = true;                   // the runner reads this to skip rather than blame
+          throw err;
+        }
+        await sleep(1500 * attempt);
+      }
+    }
   }
 }
 

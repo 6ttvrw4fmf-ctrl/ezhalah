@@ -12,7 +12,7 @@ import { withPage, settle, bodyText, storedHistory, clickText, clickReason, slee
          findings, skips, skip, passes, classifyRunOutcome, classifyBlockedControl,
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
-         classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
+         classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport, classifyJourneyThrow,
          SELECTED_CITY_MARKER } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
@@ -2226,7 +2226,16 @@ for (const [key, fn] of Object.entries(JOURNEYS)) {
       const skipsBefore = skips.length;
       const passesBefore = passes.length;
       console.log(`\n▶ ${key} [${mobile ? 'mobile' : 'desktop'}] run ${i}/${N}`);
-      try { await fn(mobile); } catch (e) { defect(key, 'journey threw', String(e).slice(0, 220)); }
+      // A NETWORK FAILURE IS NOT A PRODUCT DEFECT (PART 9.4). The catch-all is right to treat an
+      // unexplained throw as a finding, but a journey that could not REACH production has measured
+      // nothing about it — that is a skip (§9.5), and filing it as a defect is exactly the
+      // misattribution PART 9 opens with. Only errors the harness has already proven transport
+      // (harness.mjs `isTransportError`, after three bounded attempts) take this door; every other
+      // throw is still a defect, unchanged.
+      try { await fn(mobile); } catch (e) {
+        if (classifyJourneyThrow(e) === 'skip') skip(key, String(e.message || e).slice(0, 220));
+        else defect(key, 'journey threw', String(e).slice(0, 220));
+      }
       ran++;
       // A RUN THAT ASSERTED NOTHING IS NOT A PASS. The verdict used to be a subtraction with no
       // bottom: no finding and no skip meant `pass`, which silently also covered "this journey
