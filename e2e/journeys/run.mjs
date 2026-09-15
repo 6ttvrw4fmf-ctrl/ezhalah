@@ -2087,6 +2087,90 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   void seen;
 });
 
+/** J28 — A STALE LOCAL TRANSCRIPT MUST BE RE-CHECKED AGAINST THE SERVER, AND AN UNVERIFIED COPY
+ *  MUST NEVER BE PROMOTED (PART 5 shapes 4 + 8; ops_incident #272 and its reachability half).
+ *
+ *  THE SURFACE, and why it had never been driven. `src/lib/chatMerge.ts` marks a carried-over local
+ *  transcript `txStale` when the server reports newer activity for that chat, and store.tsx refuses
+ *  to push a stale copy — that flag is the only thing between a short cached conversation and the
+ *  longer server one it would be written over. Every part of that was unit-tested. Nothing ever
+ *  opened a stale chat in a browser, and the ledger had no row for it.
+ *
+ *  TWO DEFECTS IT PINS, both found 2026-09-15:
+ *   1. REACHABILITY. `openSaved` read `entry?.transcript ?? null` and hydrated only when the
+ *      transcript was ABSENT — so a present-but-stale copy short-circuited the whole mechanism and
+ *      the server was never asked. The user saw the shorter conversation; the first new turn
+ *      cleared the flag and pushed that truncated view up. Asserted here as: opening a stale chat
+ *      ISSUES a user_chats transcript read.
+ *   2. NON-PROMOTION. When that read fails, the held copy may be rendered but must stay marked
+ *      stale (and therefore unpushable). Asserted here as: `txStale` survives on disk.
+ *
+ *  The seeded session carries a deliberately fake JWT, so the real PostgREST read 401s — which is
+ *  exactly the injected failure this journey needs, at the real network layer rather than a stub.
+ *  That makes assertion 2 a genuine production observation, not a simulation.
+ */
+JOURNEYS['stale-transcript-rechecks-server'] = async (mobile) => {
+  const STALE_TX = {
+    v: 1,
+    msgs: [
+      { id: 'sm1', role: 'user', text: 'عقارات الرياض' },
+      { id: 'sm2', role: 'agent', text: 'تم' },
+    ],
+    revealCount: {}, afReceipt: {}, guidedPills: null,
+  };
+  const hist = THREE_CHATS();
+  // h2 «فلل جدة»: this device holds a SHORT copy, and the server reports newer activity for it —
+  // precisely what mergeOne produces on sign-in after the chat was continued on another device.
+  hist[1] = { ...hist[1], transcript: STALE_TX, tRev: hist[1].ts, txStale: true };
+
+  return withPage({ mobile, signedIn: true, history: hist }, async (page, bag) => {
+    const name = `stale-transcript-rechecks-server:${mobile ? 'mobile375' : 'desktop1440'}`;
+    // Registered BEFORE the open so the read cannot be missed. The harness bag only records
+    // /rest/v1/rpc/ calls; this is a PostgREST table read, so it needs its own listener.
+    const reads = [];
+    page.on('request', (r) => {
+      const u = r.url();
+      if (u.includes('/rest/v1/user_chats') && u.includes('transcript')) reads.push(u.slice(0, 160));
+    });
+
+    if (!(await ensureSidebar(page, mobile))) { skip(name, 'mobile sidebar drawer would not open'); return; }
+    const before = await storedHistory(page);
+    if (!(before || []).some((e) => e.id === 'h2' && e.txStale === true)) {
+      skip(name, 'fixture did not survive to disk: no h2 marked txStale to open');
+      return;
+    }
+    if (!(await clickText(page, 'فلل جدة'))) { skip(name, `row not found (${clickReason()})`); return; }
+    await sleep(4000);   // bounded: the read either went out by now or the code never asks at all
+
+    if (reads.length === 0) {
+      defect(name, 'a STALE local transcript was opened WITHOUT consulting the server',
+        'openSaved short-circuited on the present-but-stale copy, so txStale never engaged — the user '
+        + 'is shown the shorter conversation and the next turn pushes it over the server\'s newer one');
+    } else {
+      pass(name, `opening a stale chat re-checked the server (${reads.length} transcript read(s))`);
+    }
+
+    // NON-PROMOTION. The read above fails (fake JWT → 401), so the held copy is unverified: it may
+    // be rendered, but clearing txStale would make it pushable over the server's newer copy.
+    const after = await storedHistory(page);
+    const entry = (after || []).find((e) => e.id === 'h2');
+    if (!entry) {
+      defect(name, 'the opened chat vanished from disk', `${(before || []).length} → ${(after || []).length} rows`);
+    } else if (entry.txStale !== true) {
+      defect(name, 'an UNVERIFIED transcript was PROMOTED (txStale cleared)',
+        'the read failed, so the server copy is unknown — clearing the flag makes this short copy '
+        + 'pushable and the newer server conversation is overwritten on the next meta edit');
+    } else {
+      pass(name, 'a failed re-check left the copy marked stale (still unpushable)');
+    }
+    if ((after || []).length !== (before || []).length) {
+      defect(name, 'opening a stale chat changed the row count',
+        `${(before || []).length} → ${(after || []).length}`);
+    }
+    { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error opening a stale chat', errs.join(' | ')); }
+  });
+};
+
 const engines = ['chromium', 'webkit', 'firefox'].filter(engineAvailable);
 console.log(`ENGINES AVAILABLE HERE: ${engines.join(', ') || 'none'}`);
 console.log(`ENGINE THIS RUN: ${ENGINE}`);
