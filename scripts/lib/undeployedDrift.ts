@@ -72,6 +72,41 @@ export type DriftReading = {
    * at production at all.
    */
   liveEntryBundle: string | null;
+  /**
+   * IS THE RECORD ITSELF CURRENT? — the head sha of the newest SUCCESSFUL production deploy, as the
+   * deploy pipeline's own run history reports it. `null` means that history could not be read, which
+   * is UNKNOWN and therefore a problem, never "there were no deploys".
+   *
+   * WHY THIS READING EXISTS (routine #2, 2026-09-15). `docs/DEPLOY_BASELINE.txt` is advanced by
+   * scripts/record-deploy-baseline.sh, which CANNOT push to main (branch protection + a read-only
+   * GITHUB_TOKEN) and therefore falls back to opening a PR — and then `exit 0`. Nobody merges those
+   * PRs: seventeen `deploy/baseline-*` PRs were open on 2026-09-15, the oldest from 09-11, while the
+   * file still recorded 18fd9974 and production had moved four successful deploys ahead to 07c6104.
+   *
+   * The consequence was not a missed alarm but a FALSE one. This check reported «13 user-visible
+   * file(s) … MERGED AND NOT SHIPPED», naming two new platform launches and a P1 chat-lock repair —
+   * all of which were live. Verified the same morning: the served bundle carried 07c6104's own
+   * values (logoOverride 34×34, pillLogo 24×24) and NOT the 26×26/18×18 they replaced, and a real
+   * anonymous search returned 3,670 rakez and 96 suwar listings. Four separate routines spent a day
+   * reasoning about a blockage that did not exist, and ops_incident #264 stood P1 on it.
+   *
+   * So the stale-record case must be told APART from real unshipped work rather than collapsed into
+   * it. Both still FAIL — a wrong record is dangerous in its own right — but the failure now names
+   * the recorder rather than the innocent commits.
+   */
+  lastDeploySha?: string | null;
+  /**
+   * True when `baselineSha` is strictly behind `lastDeploySha` — i.e. the recorded floor is older
+   * than a deploy that provably succeeded, so the record is stale. `null` = undetermined (which is
+   * not "no"). `undefined` = the caller supplied no corroboration evidence at all.
+   */
+  baselineIsBehindLastDeploy?: boolean | null;
+  /**
+   * The file list from `lastDeploySha..headSha` — the drift question asked against the commit
+   * production DEMONSTRABLY serves rather than against a record known to be stale. Only consulted
+   * when `baselineIsBehindLastDeploy` is true. `null` = undeterminable.
+   */
+  changedPathsSinceLastDeploy?: string[] | null;
 };
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -154,10 +189,60 @@ export function undeployedDriftProblems(r: DriftReading): string[] {
     );
   }
 
+  // ── IS THE RECORD CURRENT? ─────────────────────────────────────────────────────────────────────
+  // Asked BEFORE the drift itself, because a diff computed from a stale floor accuses the wrong
+  // commits. Skipped entirely when the caller supplies no corroboration evidence (`undefined`), so
+  // this predicate stays usable by callers that only have the two shas.
+  const corroborationSupplied = r.lastDeploySha !== undefined || r.baselineIsBehindLastDeploy !== undefined;
+  if (corroborationSupplied) {
+    if (r.lastDeploySha === null) {
+      problems.push(
+        'the production deploy history could not be read, so whether docs/DEPLOY_BASELINE.txt is '
+        + 'still CURRENT is unknown. The record is this check\'s only claim about what users are '
+        + 'served; an unverifiable record is an unanswered question, not a pass.',
+      );
+    } else if (r.lastDeploySha !== null && !SHA.test(r.lastDeploySha)) {
+      problems.push(`the last successful deploy's head is not a 40-hex commit sha: ${JSON.stringify(r.lastDeploySha)}`);
+    }
+    if (r.baselineIsBehindLastDeploy === null) {
+      problems.push(
+        'could not determine whether the recorded baseline is behind the last successful deploy — '
+        + 'an undetermined answer must not read as "the record is current".',
+      );
+    }
+  }
+
+  // THE RECORD IS STALE. Report the recorder, and judge real drift against the commit production
+  // demonstrably serves. Never announce shipped work as unshipped — that is what cost 2026-09-14.
+  if (r.baselineIsBehindLastDeploy === true) {
+    const since = r.changedPathsSinceLastDeploy;
+    const reallyUnshipped = since === null || since === undefined ? null : since.filter(isUserVisible);
+    problems.push(
+      `docs/DEPLOY_BASELINE.txt is STALE: it records ${r.baselineSha} as live, but a production `
+      + `deploy of ${r.lastDeploySha} succeeded after that. The record — not the merged work — is `
+      + 'what is wrong here.'
+      + (reallyUnshipped === null
+        ? '\n      Drift against the actually-deployed commit could not be computed, so whether any '
+          + 'user-visible work is genuinely unshipped remains UNKNOWN.'
+        : reallyUnshipped.length === 0
+          ? '\n      Measured against the actually-deployed commit, NOTHING user-visible is unshipped — '
+            + 'so any "merged and not shipped" reading from the stale floor would have been false.'
+          : `\n      Measured against the actually-deployed commit, ${reallyUnshipped.length} user-visible `
+            + `file(s) are genuinely unshipped: ${reallyUnshipped.slice(0, 12).join(', ')}`
+            + `${reallyUnshipped.length > 12 ? ` … +${reallyUnshipped.length - 12} more` : ''}`)
+      + '\n      Root cause: scripts/record-deploy-baseline.sh cannot push to main (branch protection '
+      + '+ read-only GITHUB_TOKEN), so it opens a deploy/baseline-* PR and exits 0. The floor only '
+      + 'advances when a human merges that PR. Remedy: merge the open deploy/baseline-* PR for '
+      + `${r.lastDeploySha?.slice(0, 7) ?? 'the deployed commit'}, or give the pipeline the `
+      + 'BASELINE_PR_TOKEN secret so it can advance the floor itself. Never edit the baseline by hand '
+      + 'to clear this check.',
+    );
+  }
+
   // ── THE DRIFT ITSELF. ──────────────────────────────────────────────────────────────────────────
   if (r.changedPaths === null) {
     problems.push('the baseline..head file list could not be computed — the drift question was not answered');
-  } else {
+  } else if (r.baselineIsBehindLastDeploy !== true) {
     const visible = r.changedPaths.filter(isUserVisible);
     if (visible.length > 0) {
       const commits = (r.commitLine ?? []).length

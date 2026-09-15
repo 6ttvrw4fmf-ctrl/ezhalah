@@ -87,6 +87,75 @@ check('…and the failure NAMES the unserved commits, so a reader can act withou
 check('…and it names the served commit AND the head, never just "drift"',
   undeployedDriftProblems(REAL).join(' ').includes(A) && undeployedDriftProblems(REAL).join(' ').includes(B));
 
+// ── THE STALE-RECORD CASE, in the exact shape measured on 2026-09-15. ─────────────────────────
+// The floor said 18fd9974 while four production deploys had succeeded past it, the newest 07c6104.
+// Reading the drift off that floor named 13 user-visible files — two platform launches and a P1
+// chat-lock repair — as «MERGED AND NOT SHIPPED». Every one of them was live. The record was wrong,
+// not the work, and the two must not collapse into one verdict.
+const RECORDED = '18fd9974dfb925286f701b098a2d280d409846a9';   // what the file still claimed
+const DEPLOYED = '07c610411ee8a9eda27a9278ad385ad8f48894cf';   // what production provably served
+const HEAD     = '9ca2c353ce1dc6bd9d2cf6d5f9549a94c2d769f3';   // main, 1 scrapers-only commit ahead
+
+/** The world of 2026-09-15: stale floor, and NOTHING user-visible actually unshipped. */
+const STALE_RECORD: DriftReading = {
+  ...HEALTHY,
+  baselineSha: RECORDED,
+  headSha: HEAD,
+  // What the stale floor makes the diff look like — the 13 files, all of them in fact shipped.
+  changedPaths: ['src/components/ResultCard.tsx', 'src/data/platforms.ts', 'src/i18n.tsx',
+                 'src/app/agent.tsx', 'assets/images/rakez.png', 'assets/images/suwar.png'],
+  commitLine: [`${DEPLOYED.slice(0, 7)} suwar column fix + new platform راكز العقارية`],
+  lastDeploySha: DEPLOYED,
+  baselineIsBehindLastDeploy: true,
+  // Against the commit production really serves, only a scrapers/ commit remains.
+  changedPathsSinceLastDeploy: ['scrapers/remal/list.py'],
+};
+mustCatch('THE 2026-09-15 FALSE ALARM: a stale baseline is itself reported as a problem',
+  undeployedDriftProblems(STALE_RECORD).length > 0);
+check('…and it says the RECORD is what is wrong, naming the recorder, not the merged commits',
+  undeployedDriftProblems(STALE_RECORD).join(' ').includes('is STALE')
+  && undeployedDriftProblems(STALE_RECORD).join(' ').includes('record-deploy-baseline.sh'));
+check('…and it does NOT accuse shipped work of being «MERGED AND NOT SHIPPED»',
+  !undeployedDriftProblems(STALE_RECORD).join(' ').includes('MERGED AND NOT SHIPPED'));
+check('…and it states that nothing user-visible is genuinely unshipped, measured against the real deploy',
+  undeployedDriftProblems(STALE_RECORD).join(' ').includes('NOTHING user-visible is unshipped'));
+
+// The stale-record branch must still REPORT genuine drift when there is some. A guard that hides
+// real unshipped work behind "the record is stale" would be strictly worse than the bug it fixes.
+const STALE_RECORD_AND_REAL_DRIFT: DriftReading = {
+  ...STALE_RECORD,
+  changedPathsSinceLastDeploy: ['src/components/ResultCard.tsx', 'scrapers/remal/list.py'],
+};
+mustCatch('a stale record does NOT hide user-visible work that is genuinely unshipped past the real deploy',
+  undeployedDriftProblems(STALE_RECORD_AND_REAL_DRIFT).some((p) => p.includes('genuinely unshipped')));
+check('…and it names the actually-unshipped file rather than the whole stale diff',
+  undeployedDriftProblems(STALE_RECORD_AND_REAL_DRIFT).join(' ').includes('src/components/ResultCard.tsx'));
+
+// THE GUARD MUST NOT NEUTER THE DETECTOR. With corroboration supplied and the record CURRENT, the
+// original 2026-09-12 incident must still be caught exactly as before.
+const CORROBORATED_AND_DRIFTING: DriftReading = {
+  ...REAL,
+  lastDeploySha: A,                    // production's last deploy IS the recorded baseline
+  baselineIsBehindLastDeploy: false,   // the record is current
+  changedPathsSinceLastDeploy: null,   // not consulted on this branch
+};
+mustCatch('THE INCIDENT still caught when the record is corroborated as CURRENT (the guard is not an off-switch)',
+  undeployedDriftProblems(CORROBORATED_AND_DRIFTING).some((p) => p.includes('MERGED AND NOT SHIPPED')));
+
+// Fail CLOSED on unverifiable corroboration, both shapes.
+mustCatch('an UNREADABLE deploy history treated as «the record must be fine»',
+  undeployedDriftProblems({ ...HEALTHY, lastDeploySha: null, baselineIsBehindLastDeploy: null }).length > 0);
+mustCatch('an UNDETERMINED «is the baseline behind the last deploy» read as «the record is current»',
+  undeployedDriftProblems({ ...HEALTHY, lastDeploySha: A, baselineIsBehindLastDeploy: null }).length > 0);
+mustCatch('a last-deploy sha that is prose rather than a commit',
+  undeployedDriftProblems({ ...HEALTHY, lastDeploySha: 'unknown', baselineIsBehindLastDeploy: false }).length > 0);
+
+// BACKWARD COMPATIBILITY: a caller supplying no corroboration at all behaves exactly as before —
+// the new readings are additive, so the predicate cannot start failing on callers that never had them.
+check('a reading with NO corroboration evidence is judged exactly as before (additive, not required)',
+  undeployedDriftProblems(HEALTHY).length === 0
+  && undeployedDriftProblems(REAL).some((p) => p.includes('MERGED AND NOT SHIPPED')));
+
 // ONE user-visible file is enough. A threshold here would be a tolerance, and PART 7 forbids one.
 mustCatch('a SINGLE unserved src/ file (the smallest real regression, not a batch)',
   undeployedDriftProblems({ ...HEALTHY, changedPaths: ['src/components/ResultCard.tsx'] }).length > 0);
