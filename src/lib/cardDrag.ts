@@ -74,12 +74,32 @@ export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardD
   const onDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
     dragging = true; moved = false; id = e.pointerId;
-    grip.setPointerCapture(id);
     cancelAnimationFrame(raf);
     clearTimeout(safety);
     grabX = e.clientX - off.x; grabY = e.clientY - off.y;   // respect WHERE they grabbed
     hist = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
     grip.style.cursor = 'grabbing';
+    // CAPTURE LAST, AND NEVER LET IT ABORT THE INITIALISATION ABOVE (Sentry REACT-NATIVE-9,
+    // 2026-09-15, production Chrome 152 / Mac, handled:no).
+    //
+    // `setPointerCapture` throws NotFoundError (DOMException code 8) whenever `id` is not a
+    // currently-active pointer, and the reported event shows exactly how that happens in the wild:
+    // `isTrusted: false` with a `MouseEvent` as its nativeEvent — a synthetic pointerdown, whose
+    // `pointerId` is not a live pointer at all. React Native Web's responder system and any
+    // programmatic press dispatch one.
+    //
+    // Unguarded and placed FIRST, that throw was the whole bug rather than a stray log line: the
+    // handler had already set `dragging = true` and `id`, but had NOT yet recomputed `grabX/grabY`,
+    // so the state machine was left half-initialised with the grab offset of the PREVIOUS drag. The
+    // very next pointermove then painted `e.clientX - grabX` off that stale origin, jumping the card
+    // instead of tracking the cursor 1:1 — on the sign-in card, the auth modal and «من نحن».
+    //
+    // Capture is an optimisation (it routes later pointer events to the grip even if the cursor
+    // leaves it); losing it degrades the drag, it does not break it, and onUp's
+    // `releasePointerCapture` has always been wrapped for the same reason. So: initialise first,
+    // then try to capture. Both halves are executed and mutation-proven in
+    // scripts/verify-card-drag-survives-a-refused-pointer-capture.ts.
+    try { grip.setPointerCapture(id); } catch { /* synthetic or already-ended pointer — drag still tracks */ }
   };
 
   const onMove = (e: PointerEvent) => {
