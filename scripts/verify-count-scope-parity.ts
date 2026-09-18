@@ -22,7 +22,38 @@ const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`
 
 // ── ONE source for the implied default — remote.ts owns it, everyone imports it. ──
 check("remote.ts exports IMPLIED_CATEGORY_DEFAULT ('Residential', as const)", /export const IMPLIED_CATEGORY_DEFAULT = 'Residential' as const;/.test(remoteSrc));
-check('impliedCategory() itself uses the shared constant (no second literal)', /return effectiveCleanQuery\(q\) \? null : IMPLIED_CATEGORY_DEFAULT;/.test(remoteSrc));
+
+// STATED STRUCTURALLY, NOT AS A SPELLING (ops_incident #305, third instance — found 2026-09-18 by
+// generalising routine-9's grep, whose `/= fn\(ident\)/` shape could not see an argument pinned in
+// a `return` position). This read `/return effectiveCleanQuery\(q\) \? null : IMPLIED_CATEGORY_DEFAULT;/`,
+// pinning `q` — the LOCAL parameter name of `impliedCategory(q: SearchQuery)`. Renaming it to
+// `query` is a correct refactor that leaves the invariant wholly intact and turned this RED.
+// The invariant is about impliedCategory's BODY: it returns the shared constant and holds no second
+// copy of the literal. Asserted over the body, with any argument spelling.
+export const impliedCategoryBody = (rem: string): string | null => {
+  const i = rem.search(/function impliedCategory\s*\(/);
+  if (i < 0) return null;
+  const open = rem.indexOf('{', i);
+  if (open < 0) return null;
+  let d = 0;
+  for (let j = open; j < rem.length; j++) {
+    if (rem[j] === '{') d++;
+    else if (rem[j] === '}' && --d === 0) return rem.slice(open, j + 1);
+  }
+  return null;
+};
+export const impliedCategoryProblems = (rem: string): string[] => {
+  const body = impliedCategoryBody(rem);
+  if (body === null) return ['impliedCategory() could not be located in remote.ts — the derivation this parity check is about is gone or renamed'];
+  const out: string[] = [];
+  if (!/\bIMPLIED_CATEGORY_DEFAULT\b/.test(body))
+    out.push('impliedCategory() does not read the shared IMPLIED_CATEGORY_DEFAULT constant');
+  if (/'Residential'|"Residential"/.test(body))
+    out.push("impliedCategory() carries its own 'Residential' literal — a second copy of the implied default");
+  return out;
+};
+check('impliedCategory() itself uses the shared constant (no second literal)',
+  impliedCategoryProblems(remoteSrc).length === 0);
 // Assert the INTENT — the shared constant is imported from remote.ts — not the exact import list.
 // Pinning the whole line made this fail for an unrelated import change (2026-08-22: Trending moved to
 // rpcAllNarrowingParams), which is noise, not a parity violation.
@@ -65,6 +96,34 @@ check('district_options_ar keeps its p_category (pre-existing, pinned)', /rpc\('
 //    rows (no second category filter, no cross-scope mixing). ──
 check('Top-6 slice reads the (now correctly scoped) pool counts directly', /\.filter\(\(d\) => d\.listingCount > 0\)\.slice\(0, k\)/.test(locSrc));
 check('zero-mark reads the same rows (live full-filter count still wins when present)', /const isEmpty = live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MUTATIONS (ops_incident #305, third instance). Both directions, because the defect repaired here
+// was an INVERSION: the old regex went RED on a correct rename and said nothing about the contract.
+const mustCatch = (what: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${what}`); return; }
+  failed++;
+  console.log(`FAIL  (mutation) did NOT catch ${what}`);
+};
+
+check('NEGATIVE CONTROL — the real shipped remote.ts is NOT flagged',
+  impliedCategoryProblems(remoteSrc).length === 0);
+
+// The rename the OLD regex inverted on. The invariant is untouched by it.
+check('a correct rename of the parameter (q -> query) is NOT reported as a parity violation',
+  impliedCategoryProblems(remoteSrc.replace(
+    /function impliedCategory\(q: SearchQuery\): Macro \| null \{([\s\S]*?)\n\}/,
+    (_m, b) => `function impliedCategory(query: SearchQuery): Macro | null {${b.replace(/\bq\b/g, 'query')}\n}`)).length === 0);
+
+// The drift the check exists for.
+mustCatch("impliedCategory() carrying its OWN 'Residential' literal (a second copy of the default)",
+  impliedCategoryProblems(remoteSrc.replace(/return effectiveCleanQuery\((\w+)\) \? null : IMPLIED_CATEGORY_DEFAULT;/,
+    "return effectiveCleanQuery($1) ? null : 'Residential';")).length > 0);
+mustCatch('impliedCategory() no longer reading the shared constant at all',
+  impliedCategoryProblems(remoteSrc.replace(/return effectiveCleanQuery\((\w+)\) \? null : IMPLIED_CATEGORY_DEFAULT;/,
+    'return null;')).length > 0);
+mustCatch('impliedCategory() gone entirely (a locator that cannot find its subject must read as MISSING, never as healthy)',
+  impliedCategoryProblems(remoteSrc.replace(/function impliedCategory\s*\(/, 'function impliedCategoryRenamedAway(')).length > 0);
 
 console.log(failed === 0 ? '\n✓ all count-scope-parity assertions passed' : `\n✗ ${failed} count-scope-parity assertion(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);
