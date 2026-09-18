@@ -10,16 +10,26 @@
 | # | Engineer | Trigger ID | Daily time (Arizona) | Daily time (UTC) | Model | Scope |
 |---|---|---|---|---|---|---|
 | 1 | ⚡ Daily JUNIOR SCRAPING Engineer | `trig_01NpFaJ1ALUZbZKdKpCdWF16` | 04:00 | 11:00 | claude-sonnet-5 | Daily scraping layer ONLY |
-| 2 | 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit | `trig_01RCVx7ie1T1i5oPC6KzZAKd` | 04:30 | 11:30 | claude-opus-5 | Broad production engineering, **including AI Agent — Advanced Filter moved to routine #5 on 2026-08-23** |
-| 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 05:00 | 12:00 | claude-opus-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope (belongs to routine #5)** |
-| 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 05:30 | 12:30 | claude-opus-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
-| 5 | 🎯 Senior Advanced Filter + Trending Data Integrity Engineer | `trig_01FmaKmMVJgT5VHFj8Mk9q13` | 04:00 | 11:00 | claude-opus-5 | Advanced Filter + Trending Cities/Districts + the data integrity behind every AF predicate, end to end |
-| 6 | 👣 Daily Journey & Persistence Engineer | `trig_011mQL1FvMQiS8bwx2fp76QN` | 03:00 | 10:00 | claude-opus-5 | Real-user journeys: state, navigation, sessions, sidebar/history/Favorites, cross-browser/device — never search matching itself |
+| 2 | 🎖️ Daily SENIOR PRODUCTION Engineer — Deep Audit | `trig_01RCVx7ie1T1i5oPC6KzZAKd` | 04:30 | 11:30 | claude-sonnet-5 | Broad production engineering, **including AI Agent — Advanced Filter moved to routine #5 on 2026-08-23** |
+| 3 | 🛡️ Senior Data Integrity Engineer — Full Scraped Inventory (Normal Filter) | `trig_01Tr6Rb6XPggFXqCf3EKG62y` | 05:00 | 12:00 | claude-sonnet-5 | Full scraped inventory / Normal Filter ONLY, **Advanced Filter explicitly out of scope (belongs to routine #5)** |
+| 4 | 🧪 مهندس اختبار البحث والتطابق اليومي — Search & Matching QA | `trig_016eagxsMuB2cCbMe9DK7JJD` | 05:30 | 12:30 | claude-sonnet-5 | Live production Normal Filter USED AS A REAL USER: matching → diversity → «عرض المزيد» → card click-through, end to end |
+| 5 | 🎯 Senior Advanced Filter + Trending Data Integrity Engineer | `trig_01FmaKmMVJgT5VHFj8Mk9q13` | 04:00 | 11:00 | claude-sonnet-5 | Advanced Filter + Trending Cities/Districts + the data integrity behind every AF predicate, end to end |
+| 6 | 👣 Daily Journey & Persistence Engineer | `trig_011mQL1FvMQiS8bwx2fp76QN` | 03:00 | 10:00 | claude-sonnet-5 | Real-user journeys: state, navigation, sessions, sidebar/history/Favorites, cross-browser/device — never search matching itself |
 | 7 | 🧵 Daily Systems Seam Engineer | `trig_01T5yuLGCj3yDqPDsVrPjNmd` | 03:30 | 10:30 | claude-opus-5 | Cross-system integration integrity: cron→detector→alert, migration→mirror→prod, deploy-claim-vs-served-bundle, RLS, orphaned guarantees |
 | 8 | 🔴 Daily REGRESSION HUNTER | _owner to create_ | 07:00 | 14:00 | claude-opus-5 | **The GAPS BETWEEN owned surfaces**, and fixes that did not hold. Adversarial, cross-boundary, assumes every previous fix is incomplete |
 | 9 | 🔬 Daily PRODUCTION RED TEAM | _owner to create_ | 08:00 | 15:00 | claude-opus-5 | **The AGREEMENT between layers on production**: action = request = RPC params = DB truth = displayed count = returned ids = card evidence. Distrusts every harness |
-| 10 | 🧱 Daily BUG PREVENTION & BARRIER | _owner to create_ | 06:30 | 13:30 | claude-opus-5 | **The VERIFICATION APPARATUS itself**, never the product: barriers that assert the bug, checks with no mutation proof, tests that pass while production is wrong |
-| 11 | ♻️ Daily LISTING LIFECYCLE | _owner to create_ | 07:30 | 14:30 | claude-opus-5 | **A listing AFTER its source confirms it is gone**: inactive → unsearchable → 30 days → deleted, and every way a dead listing can still be seen, counted or resurrected |
+| 10 | 🧱 Daily BUG PREVENTION & BARRIER | _owner to create_ | 06:30 | 13:30 | claude-sonnet-5 | **The VERIFICATION APPARATUS itself**, never the product: barriers that assert the bug, checks with no mutation proof, tests that pass while production is wrong |
+| 11 | ♻️ Daily LISTING LIFECYCLE | _owner to create_ | 07:30 | 14:30 | claude-sonnet-5 | **A listing AFTER its source confirms it is gone**: inactive → unsearchable → 30 days → deleted, and every way a dead listing can still be seen, counted or resurrected |
+
+**Model note (owner, 2026-09-18):** 8 of the 11 moved from `claude-opus-5` to `claude-sonnet-5` to
+cut daily token spend. The 3 that stayed on `claude-opus-5` — #7 Systems Seam, #8 Regression Hunter,
+#9 Production Red Team — are the ones whose job is explicitly adversarial/cross-boundary (assume the
+evidence lies, distrust every harness, hunt the gap between owned surfaces); the other 8 audit known
+data/UI/journey surfaces against a documented rulebook, which Sonnet handles at the same reliability
+for materially less cost. This does NOT change what any routine is required to do: §G.1's
+`FIX → REGRESSION → PERMANENT BARRIER → MUTATION-PROVE → MERGE → DEPLOY/APPLY → PRODUCTION VERIFY`
+chain binds all eleven regardless of model — a downgraded routine still finds, fixes, barriers, and
+ships a bug in the same run, never hands it back as a report item.
 
 **Schedule note (2026-08-23):** routine #5 runs at the SAME 04:00 Arizona slot as routine #1
 (owner's explicit instruction), not staggered 30 minutes like #1–#4 are from each other. It does

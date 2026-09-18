@@ -15,7 +15,7 @@ import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
 import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
 import { restoreChat, persistedOnly, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
-import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, type ChatMeta } from '@/lib/chatSync';
+import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, chatsToDelete, type ChatMeta } from '@/lib/chatSync';
 import { mergeOne, pickTranscript, mayPromoteTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { PROBE_FAILED, isProbeFailure } from '@/lib/afProbe';
 import { buildSyncedName } from '@/lib/nameSync';
@@ -557,6 +557,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // merged local list can never mass-delete the account's server history. Fire-and-forget with the
   // baseline updated per row on success; a failed write simply retries on the next change.
   const syncBaselineRef = useRef<Map<string, string>>(new Map());
+  // WHICH DELETIONS THE USER ACTUALLY ASKED FOR (ops_incident #297).
+  //
+  // The push effect used to derive deletions as a SET DIFFERENCE — every baseline id missing from
+  // the current list. That silently made the sidebar's 50-entry DISPLAY cap a permanent server
+  // delete: the 51st chat pushes the oldest id out of `history`, the diff sees it "missing", and
+  // 1,200 ms later the row is gone from user_chats for good, on every device, with no user action.
+  // The same fired for a merge whose union overflowed 50, and for a server row the merge skipped as
+  // malformed. Local eviction and user deletion are indistinguishable to a set difference, so the
+  // difference can never be the oracle: only INTENT can. Nothing reaches this set except
+  // deleteHistory() and clearHistory().
+  const pendingDeleteRef = useRef<Set<string>>(new Set());
   const syncReadyRef = useRef<string | null>(null);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -573,8 +584,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const key = syncKeyOf(it);
         void upsertChat(it.id, chatMetaOf(it), pushableTranscript(it)).then((ok) => { if (ok) base.set(it.id, key); });
       }
-      const gone = [...base.keys()].filter((id) => !seen.has(id));
-      if (gone.length) void deleteChats(gone).then((ok) => { if (ok) for (const id of gone) base.delete(id); });
+      // Intent, never inference (#297). `seen` is built from a list the 50-cap has already trimmed,
+      // so a baseline id being absent from it means "not currently displayed", which is not the same
+      // claim as "the user deleted it". Only ids the user asked to remove are propagated, and only
+      // when the server is known to hold them. An id the server does not hold needs no delete, so it
+      // is dropped rather than retried forever; a delete that FAILS stays queued and retries on the
+      // next push, exactly as the upserts above do.
+      const { toDelete: gone, forget } = chatsToDelete(base, pendingDeleteRef.current);
+      for (const id of forget) pendingDeleteRef.current.delete(id);
+      if (gone.length) void deleteChats(gone).then((ok) => {
+        if (!ok) return;
+        for (const id of gone) { base.delete(id); pendingDeleteRef.current.delete(id); }
+      });
     }, 1200);
     return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
   }, [history, user]);
@@ -976,7 +997,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return (await fetchListingById(id)) ?? undefined;
       },
       history,
-      clearHistory: () => setHistory([]),
+      // Clearing IS a user-intended deletion of everything currently held, so every id is recorded
+      // before the list is emptied — otherwise #297's intent-driven push would clear the sidebar
+      // locally and leave the server copies behind.
+      clearHistory: () => {
+        for (const it of historyRef.current) pendingDeleteRef.current.add(it.id);
+        setHistory([]);
+      },
       // Toggle/delete write to storage SYNCHRONOUSLY in addition to the React effect — so a refresh
       // immediately after the click can't lose the change (the useEffect persist is async; localStorage
       // is sync). Functional setHistory + the computed next array keep state and storage in lock-step.
@@ -1038,6 +1065,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }),
       deleteHistory: (id) =>
         setHistory((h) => {
+          // The ONE place a single chat is deliberately removed, so the ONE place that may tell the
+          // server to drop it (#297).
+          pendingDeleteRef.current.add(id);
           const next = h.filter((it) => it.id !== id);
           if (user) try {
             if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
