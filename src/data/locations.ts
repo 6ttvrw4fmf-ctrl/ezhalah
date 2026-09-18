@@ -789,22 +789,40 @@ export function districtPoolStatus(cityId: number, deal: Deal | null, category: 
 //     absent from the cluster) is untouched and stays a separate option.
 let _clusterMap: Map<number, string> | null = null;
 let _clusterPromise: Promise<Map<number, string>> | null = null;
+// TRUE once loc_city_cluster has actually been READ. A caller that bakes cluster unions into a cache
+// must consult this before pinning that cache as fresh — see ensureCityFieldIndex below.
+export function clusterMapLoaded(): boolean { return _clusterMap !== null; }
+// A FAILED FETCH IS NOT AN EMPTY ANSWER (AGENTS.md, permanent 2026-09-04) — ops_incident #268.
+// This read used to destructure only `data` and drop `error`, then `(data as any[]) ?? []`. supabase-js
+// NEVER throws, so a 500/offline/aborted select simply RESOLVES `{data:null,error}`: the loop ran zero
+// times, the empty map was written to `_clusterMap`, and that memo is checked first on every later
+// call — so ONE transient blip at boot turned cluster collapse off for the whole session, with no
+// retry even after the network recovered. The user-visible cost is a COUNT→CLICK mismatch, not just a
+// cosmetic one: without the map, applyClusterUnion() is a no-op, so الاحساء advertises its own member
+// count (3,677) while composite_match_city_ids' server-side cluster expansion returns the whole union
+// (4,953) on the click — and Trending lists الاحساء and الهفوف as two rows for one search entity.
+// Clusters remain an ENHANCEMENT: a failure still serves this call an uncollapsed pool rather than
+// blanking Trending. What changes is that the failure is not remembered as truth.
 export async function ensureClusterMap(): Promise<Map<number, string>> {
   if (_clusterMap) return _clusterMap;
   if (_clusterPromise) return _clusterPromise;
-  _clusterPromise = (async () => {
+  const p = (async () => {
     const m = new Map<number, string>();
+    let read = true;
     if (supabase) {
       try {
-        const { data } = await supabase.from('loc_city_cluster').select('city_id,cluster_key');
-        for (const r of ((data as any[]) ?? [])) m.set(r.city_id, r.cluster_key);
-      } catch { /* clusters are an enhancement; if the fetch fails the pool is simply not collapsed */ }
+        const { data, error } = await supabase.from('loc_city_cluster').select('city_id,cluster_key');
+        if (error || !data) throw new Error(`loc_city_cluster: ${error?.message ?? 'resolved without data'}`);
+        for (const r of (data as any[])) m.set(r.city_id, r.cluster_key);
+      } catch { read = false; }
     }
-    _clusterMap = m;
+    // Memoise ONLY a real read. On failure `_clusterMap` stays null, so the next caller retries.
+    if (read) _clusterMap = m;
     _clusterPromise = null;
     return m;
   })();
-  return _clusterPromise;
+  _clusterPromise = p;
+  return p;
 }
 // PURE. Set every clustered option's listingCount to its cluster's union (the sum of the cluster's
 // member counts present in THIS pool) and tag it with clusterKey. Members stay as distinct options.
@@ -927,8 +945,26 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
         // so both surfaces read a truthful count and Trending can present one row per cluster.
         const opts = applyClusterUnion(rawOpts, await ensureClusterMap());
         CITY_FIELD_POOLS.set(key, opts);
-        _cityPoolFetchedAt.set(key, Date.now());
+        // PIN THE FRESHNESS CLOCK ONLY ON A POOL THAT REALLY CARRIES ITS CLUSTER UNIONS
+        // (ops_incident #268). When loc_city_cluster could not be read, applyClusterUnion was a no-op
+        // and every clustered city in this pool advertises its MEMBER count while the click returns
+        // the cluster UNION. Serving it is still right — an uncollapsed pool beats a blank field, and
+        // unclustered cities (nearly all of them) are unaffected — but pinning it as fresh would hold
+        // that mismatch for the full POOL_TTL_MS even after the cluster read recovered. Leaving the
+        // clock unset makes the TTL guard above fall through on the next focus, so the pool is rebuilt
+        // with its unions as soon as the network is back, while this one keeps serving meanwhile.
+        if (clusterMapLoaded()) _cityPoolFetchedAt.set(key, Date.now());
         _cityPoolStatus.set(key, 'ready');
+        // EVICT THE SETTLED PROMISE ON SUCCESS TOO — otherwise POOL_TTL_MS is INERT (ops_incident
+        // #268, found alongside). `_cityFieldPromises` exists to DEDUPE CONCURRENT callers; every
+        // failure path already deletes it, but the success path did not, so the resolved promise
+        // stayed in the map for the life of the tab. The `if (inflight) return inflight` guard above
+        // sits BELOW the TTL check and has no expiry of its own, so once the 30-minute clock lapsed
+        // the stale check fell through and then handed back that same resolved promise — the pool
+        // could never be refetched. The owner added this TTL on 2026-09-11 precisely so a long-lived
+        // session is never more than ~one sync_search_listings_ar cycle behind; it has been serving
+        // first-fetch counts forever instead. Deleting here is what makes the TTL real.
+        _cityFieldPromises.delete(key);
         return opts;
       }
       // RPC settled with an error (data null): record it and evict the promise so the error row's
@@ -1058,6 +1094,10 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal | null, c
         _districtCache.set(key, opts);
         _districtFetchedAt.set(key, Date.now());
         _districtPoolStatus.set(key, 'ready');
+        // Same eviction as ensureCityFieldIndex's success path, for the same reason: the settled
+        // promise left in `_districtPromises` was returned by the `if (inflight)` guard below the TTL
+        // check, so district counts never refreshed either. Both Trending pools shared the defect.
+        _districtPromises.delete(key);
         return opts;
       }
       // RPC settled with an error (data null) — same record-and-evict as ensureCityFieldIndex.
