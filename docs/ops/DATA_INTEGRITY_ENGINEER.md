@@ -948,6 +948,14 @@ arithmetically capable of it before fetching anything.**
   [500M, 600M) because genuine Makkah/Madinah land prices land there, and every one with an archive
   matches its source exactly. The band is an aqar-shaped heuristic; it is not evidence about wasalt.
 
+**Closed out (migration `20260918220610`).** `11939802`, `11939808` and `11939904` were registered in
+`ops_price_source_verified` with the live evidence above — the outcome the detector's own adjudicate
+text asks for ("never repriced and never left hidden"). **No price was changed.** Verified in
+production through the anon path afterwards: `11939802` / `11939808` are `production_ready=true` and
+reachable with their prices intact; `11939904` is registered but stays hidden, because the ungate's
+join on `listing_native_location_v2` correctly refuses to publish a row whose location never
+resolved. `mon_detect_located_row_unreachable()` re-run: **0 raised**, both P1s resolved.
+
 **The standing gap this exposed, and it is the thing actually worth fixing:** while `enrich_ar.py`
 stays on the blocked HTTP path, every newly-scraped wasalt row arrives with `ar_data = NULL`, so the
 §25 oracle is blind to exactly the rows most likely to be questioned — and each one costs a fresh live
