@@ -100,6 +100,14 @@ class BrowserFetcher:
             "--disable-blink-features=AutomationControlled",
             "--no-sandbox",                    # required in the CI container
             "--disable-dev-shm-usage",         # /dev/shm is tiny on runners; without this Chromium crashes
+            # THROUGH A RESIDENTIAL PROXY, FORCE HTTP/1.1. Measured 2026-09-18: with proxy auth
+            # correct, every navigation still died at net::ERR_TIMED_OUT — the same silent
+            # null-route issue #1019 saw for (proxy x chrome-shaped traffic). A browser negotiates
+            # HTTP/2 and QUIC by default and many residential proxies terminate or mangle both,
+            # which surfaces exactly as a connect timeout rather than an error. curl_cffi's
+            # successful shapes were HTTP/1.1, so this makes the browser match them.
+            "--disable-http2",
+            "--disable-quic",
         ]
         # headless=False is LOAD-BEARING (see module docstring). Under xvfb on CI this is still a
         # real browser; flipping it to True is the single change that breaks this module.
