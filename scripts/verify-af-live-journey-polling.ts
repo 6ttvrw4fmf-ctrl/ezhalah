@@ -224,6 +224,37 @@ function journeyFailsClosed(src: string, name: string, sites: [string, string][]
   return p;
 }
 
+/**
+ * THE DISTRICT HALF OF THE SAME JOURNEY (2026-09-18, routine #5).
+ *
+ * TF_SITES above covers the CITY panel, which run #144 caught. The DISTRICT read three blocks later
+ * kept the original shape — focus the field, `waitForTimeout(4000)`, assert on whatever was on
+ * screen — and on 2026-09-18 it reported «Trending Districts rendered» RED for الرياض (desktop,
+ * price 900k + area>=120) and for الدمام (mobile 390x844). BOTH accusations were false. Re-driven at
+ * the identical precondition with a poll, the rows arrived at 2,428 ms and 1,620 ms and
+ * district_options_ar had returned 200 with 230 and 104 rows carrying the narrowing.
+ *
+ * The cause is not "4,000 ms was too short" — the rows beat that budget both times. Selecting the
+ * property type RE-RENDERS the district field, so a click landing mid-render is simply LOST, and
+ * once it is lost no amount of extra waiting helps. That is why this rule demands a re-open inside
+ * the loop and not a bigger sleep: raising a timeout would have left the defect exactly where it was.
+ */
+function trendingDistrictProblems(src: string): string[] {
+  const p: string[] = [];
+  const helper = src.match(/const districtsWhenRendered = async[\s\S]*?\n\s*\};/)?.[0] ?? '';
+  if (!helper) {
+    p.push('no districtsWhenRendered poll — the district panel is read after a fixed sleep, the exact shape that called a correct production broken on 2026-09-18');
+    return p;
+  }
+  if (!/for \(;;\)|while \(/.test(helper)) p.push('districtsWhenRendered does not loop — it is a single read wearing a helper name');
+  if (!/READ_TRENDING_ROWS/.test(helper)) p.push('districtsWhenRendered does not read the trending rows — the read escaped the helper');
+  if (!/district-input/.test(helper)) p.push('districtsWhenRendered never RE-OPENS the field inside the loop — a click swallowed by the property-type re-render is never recovered, and a longer budget cannot fix a lost click');
+  if (!/Date\.now\(\) >= until/.test(helper)) p.push('districtsWhenRendered has no finite budget — a panel that never opens would hang the job instead of failing it');
+  if (!/arrivedMs: null/.test(helper)) p.push('districtsWhenRendered cannot report a non-arrival — the caller cannot tell "never rendered" from "rendered late"');
+  if (!/district\.arrivedMs === null/.test(src)) p.push('the district assertion does not distinguish never-arrived from arrived-late, so it cannot say what was OBSERVED');
+  return p;
+}
+
 // ── the real files must be clean ─────────────────────────────────────────────────────────────────
 const CE = read('verify-af-card-evidence-live.ts');
 const LT = read('verify-af-live-truth.ts');
@@ -265,6 +296,10 @@ const TF_SITES: [string, string][] = [
   const p = journeyFailsClosed(TF, 'verify-trending-live-four-way-truth.ts', TF_SITES);
   check('verify-trending-live-four-way-truth.ts polls for the Trending panel and fails CLOSED', p.length === 0, p.join(' | '));
 }
+{
+  const p = trendingDistrictProblems(TF);
+  check('verify-trending-live-four-way-truth.ts polls for the DISTRICT panel too, and re-opens it', p.length === 0, p.join(' | '));
+}
 
 // ── mutation proofs — each reversion to the bug class must turn this barrier RED ──────────────────
 const mustReject = (label: string, problems: string[], needle: string) =>
@@ -296,6 +331,26 @@ mustReject('the advance poll stops requiring the question to have CHANGED',
 
 mustReject('a round that never advances is silently skipped instead of reported NOT EXERCISED',
   liveTruthProblems(LT.replace(/unexercised\(/g, 'ignore(')), 'NOT EXERCISED');
+
+// ── the district half: every way back to the 2026-09-18 shape must turn this RED ─────────────────
+mustReject('the district panel is read after a fixed sleep again (the 2026-09-18 shape)',
+  trendingDistrictProblems(TF.replace(/const districtsWhenRendered = async[\s\S]*?\n\s*\};/, '')),
+  'read after a fixed sleep');
+
+mustReject('the district poll stops looping (a single read wearing a helper name)',
+  trendingDistrictProblems(TF.replace('for (;;) {', 'if (true) {')), 'does not loop');
+
+mustReject('the district poll stops RE-OPENING the field — the lost click is never recovered',
+  trendingDistrictProblems(TF.replace(`await page.click('[data-testid="district-input"]').catch(() => {});`, '')),
+  'RE-OPENS');
+
+mustReject('the district poll loses its finite budget',
+  trendingDistrictProblems(TF.replace('if (Date.now() >= until) return { rows: [] as { label: string; count: number }[], arrivedMs: null };', '')),
+  'no finite budget');
+
+mustReject('the district check stops telling never-arrived from arrived-late',
+  trendingDistrictProblems(TF.replace('district.arrivedMs === null', 'false')),
+  'what was OBSERVED');
 
 // ── and the fail-closed half, on the journey that proved it was needed ────────────────────────────
 mustReject('the settled read goes back to returning the last state it happened to see',

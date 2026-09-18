@@ -318,11 +318,42 @@ async function runJourney(j: Journey) {
     await tap(group);
     await tap(type);
     await page.waitForTimeout(1500);
-    await page.click('[data-testid="district-input"]').catch(() => {});
-    await page.waitForTimeout(4000);
-    const visibleDistricts = await page.evaluate(READ_TRENDING_ROWS);
+
+    // POLL FOR THE PANEL — NEVER SLEEP-THEN-READ (harness notes 17 and 20, and the rule
+    // scripts/verify-af-live-journey-polling.ts exists to keep). This block used to click the
+    // district input, sleep a flat 4,000 ms, and assert on whatever was on screen at that instant.
+    // On 2026-09-18 that reported «Trending Districts rendered» RED for الرياض and for the الدمام
+    // mobile case, and BOTH accusations were false: re-driven at the identical precondition with a
+    // poll, the rows arrived at 2,428 ms and 1,620 ms, and district_options_ar had returned 200 with
+    // 230 and 104 rows carrying the narrowing. Production was correct; the harness was sampling a
+    // race. Selecting the property type re-renders the field, so a click that lands mid-render is
+    // simply lost — and once it is lost NO amount of extra waiting helps, which is exactly why a
+    // bigger sleep is not the fix. Re-open on each pass instead, and judge on what was OBSERVED.
+    const districtsWhenRendered = async (budgetMs = 25_000) => {
+      const until = Date.now() + budgetMs;
+      const t0 = Date.now();
+      let lastOpen = 0;
+      for (;;) {
+        // Re-focus at most every 2s: focusing an already-open field is a no-op, but it recovers the
+        // one click the re-render swallowed.
+        if (Date.now() - lastOpen > 2_000) {
+          lastOpen = Date.now();
+          await page.click('[data-testid="district-input"]').catch(() => {});
+        }
+        const rows = await page.evaluate(READ_TRENDING_ROWS);
+        if (rows.length > 0) return { rows, arrivedMs: Date.now() - t0 };
+        if (Date.now() >= until) return { rows: [] as { label: string; count: number }[], arrivedMs: null };
+        await page.waitForTimeout(250);
+      }
+    };
+    const district = await districtsWhenRendered();
+    const visibleDistricts = district.rows;
+    // Still a hard failure when the panel genuinely never opens — this is not a route to green, only
+    // a way to stop calling a correct production broken. The detail names what was observed.
     check(`${name}: Trending Districts rendered for ${city}`, visibleDistricts.length > 0,
-      visibleDistricts.map((d) => `${d.label} ${d.count}`).join(' · ') || '(none)');
+      district.arrivedMs === null
+        ? 'the district panel never rendered a single row within 25,000 ms of polling (re-opened every 2s)'
+        : `arrived after ${district.arrivedMs} ms — ` + visibleDistricts.map((d) => `${d.label} ${d.count}`).join(' · '));
 
     // PART 3's PERMANENT RULE: a district's advertised count must be the EXACT count after clicking
     // it — never a wider/unfiltered fallback dressed up as filtered truth. Checking that the number
