@@ -210,6 +210,50 @@ Two things to carry forward:
   margin is 60 seconds. Widening it is a cron change and an owner-visible timing decision, not a
   drive-by.
 
+**A THIRD HAZARD, MEASURED 2026-09-18 AND NOT IN THIS FILE BEFORE: the consumer's minute can fall
+inside a scheduler blackout, and then the sync does not run at all.** This is not the producer/
+consumer ordering problem above and not the DELETE circuit breaker below — it is the sync never
+launching, with every guard green and every barrier passing.
+
+pg_cron on this project runs with `cron.use_background_workers = off`, and it was observed
+launching **nothing** while one long job was in flight. `mon-detectors-and-dispatch` (jobid 38, at
+`29,59 * * * *`) had its median runtime step from 160s to 640s on 2026-09-15, so it occupies the
+scheduler for ~10.7 minutes twice an hour. Measured: between 12:59:00.020 (job 38 start) and
+13:04:23.998 (job 38 end) zero jobs launched; **70 ms after it ended, five queued jobs fired in the
+same millisecond** and normal cadence resumed. Runs-per-day by minute band make the shape plain —
+minutes 9–29 and 39–59 held steady at ~970/day right through, while minutes 0–8 and 30–38 collapsed
+from ~300/day to zero on 2026-09-15.
+
+`sync-search-listings-ar` is at **:36**, inside that window. It last ran 2026-09-15 09:36 — the
+first :36 after the step change — and the served index then sat frozen for three days: 3,520 new
+listings invisible to users, 2,673 stale rows served, 54 of them source-inactive across rakez,
+arkaan and amlakalahsa (`inactive_still_searchable` + `inactive_still_counted`, both correctly
+raised and both unworked).
+
+Three things to carry forward:
+
+1. **`pg_reload_conf()` is NOT the remedy for this shape.** Migration
+   `20260915074113_mon_detect_cron_scheduler_frozen.sql` attributes `cron_scheduler_frozen` to a
+   stale in-memory job list and prescribes that reload. It was run at 2026-09-18 13:05:32 and did
+   not restore jobid 28. A stale job list also cannot explain a blackout that thaws at the exact
+   millisecond a long job finishes, nor one that is confined to 18 minutes of the clock while the
+   other 42 are untouched. Read the **minute band** before accepting either diagnosis.
+2. **The detector was right about the WHAT and wrong about the WHY**, which is the same trap §8.3
+   names: a P0 whose `remedy` field sends every responder down a path that does not work is worse
+   than a P0 with no remedy text. Tracked as `ops_incident` #300 (routed to the cron surface owner);
+   the job-38 slowness itself is `ops_incident` #55.
+3. **`cron.job_run_details.end_time` is PROVISIONAL while a run is in flight — check `status`, not
+   `end_time`.** Job 38's command is four statements, and the row's `end_time` advances as they
+   complete. At 13:38 this routine read `max(end_time) = 13:29:06` for the 13:29 run and concluded
+   the job had finished in 6 seconds — which "falsified" the mechanism above and produced a
+   confident public retraction of a correct finding. The run's final record is
+   `13:29:00 → 13:40:18`, **11m18s**, and every other slot that day measured 10m41s–11m25s. The
+   blackout length equals the job's real duration, every time. A `max(end_time)` with no `status`
+   predicate is not a completion; **`status` would have read `running`.**
+3. **Repairing the data is not closing this.** The out-of-band five-statement sync (§2.3) restores
+   the index in one pass and is fully within this routine's authority, but the index refreezes at
+   the next :36 until #300 is fixed. Report that as a mitigation, never as a fix.
+
 Three properties of this leg that matter more here than anywhere else in the system:
 
 1. **Inactivation is not immediate on the served index.** `location_search_candidates_ar` has **no

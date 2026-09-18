@@ -21,9 +21,32 @@ const idx = readFileSync(join(root, 'src/app/index.tsx'), 'utf8');
 let failed = 0;
 const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); };
 
-// ONE definition of the cohort's Arabic types, shared by search + trending
-check('remote.ts exports cohortTypesAr and rpcFilterParams consumes it (single type-expansion definition)',
-  /export function cohortTypesAr/.test(rem) && /const p_types = cohortTypesAr\(q\);/.test(rem));
+// ONE definition of the cohort's Arabic types, shared by search + trending.
+//
+// STATED STRUCTURALLY, NOT AS A SPELLING (ops_incident #305, the #136 sibling shape, repaired
+// 2026-09-18). This check used to read `/const p_types = cohortTypesAr\(q\);/` — which pins the
+// LOCAL ARGUMENT NAME. Renaming `q` to `query` is a correct refactor that leaves the invariant
+// completely intact and turned this check RED; conversely a genuine SECOND expansion introduced
+// under the spelling `q` would have kept it GREEN. A check that inverts on a rename and is blind
+// to the drift it names is asserting one spelling, not a contract.
+//
+// The invariant is two COUNTABLE facts, which is what is asserted now:
+//   1. there is exactly ONE exported definition of cohortTypesAr  (a second is the drift itself)
+//   2. the RPC's `p_types` is produced BY CALLING it — with any argument spelling
+// `p_types` is kept in the pattern deliberately: unlike `q`, it is not a local name an author may
+// rename. It is the PostgREST parameter name, so it is part of the contract (a different spelling
+// there is PGRST202, not a refactor).
+export const cohortExpansionProblems = (rem: string): string[] => {
+  const out: string[] = [];
+  const defs = (rem.match(/export function cohortTypesAr\b/g) || []).length;
+  if (defs !== 1) out.push(`expected exactly ONE exported cohortTypesAr definition, found ${defs}`);
+  // any identifier or member expression as the argument — `q`, `query`, `queryForPeriod`, `o.q`
+  if (!/\bp_types\s*=\s*cohortTypesAr\s*\(\s*[A-Za-z_$][\w$.]*\s*\)/.test(rem))
+    out.push('p_types is not produced by calling the shared cohortTypesAr() — a second expansion is the drift class itself');
+  return out;
+};
+check('remote.ts defines cohortTypesAr ONCE and builds p_types by calling it (single type-expansion definition)',
+  cohortExpansionProblems(rem).length === 0);
 check('index.tsx derives the trending cohort from cohortTypesAr — never its own expansion',
   // The argument may be `query` or an object DERIVED from it (queryForPeriod normalises the rent
   // period before the count builders read it, 2026-09-11). What this line forbids is index.tsx
@@ -98,6 +121,36 @@ for (const [name, callRe] of readFns) {
   const scoped = (idxCode.match(new RegExp(`${name}\\([\\s\\S]{0,200}?cohortTypes(?:, [\\w.]+)*\\)`, 'g')) || []).length;
   check(`${name}: every call site (${total}) threads cohortTypes (${scoped} scoped, 0 stale-cache-bucket reads)`, total > 0 && scoped === total);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MUTATIONS (ops_incident #305). The predicate above is applied to deliberately broken and
+// deliberately RENAMED copies of the real remote.ts, so both directions are proven: the drift it
+// names is caught, and the correct refactor that used to invert it is not.
+const mustCatch = (what: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${what}`); return; }
+  failed++;
+  console.log(`FAIL  (mutation) did NOT catch ${what}`);
+};
+
+// The shipped source is the negative control: a predicate red for everything guards nothing.
+check('NEGATIVE CONTROL — the real shipped remote.ts is NOT flagged', cohortExpansionProblems(rem).length === 0);
+
+// THE REPAIR, proven: the renames that used to turn this check RED leave it GREEN, because the
+// invariant genuinely survives them. These are the cases the old spelling-pinned regex failed.
+check('a correct rename of the ARGUMENT (q -> query) is NOT reported as drift',
+  cohortExpansionProblems(rem.replace(/\bp_types = cohortTypesAr\(q\)/, 'p_types = cohortTypesAr(query)')).length === 0);
+check('a normalised object passed instead of the raw query is NOT reported as drift',
+  cohortExpansionProblems(rem.replace(/\bp_types = cohortTypesAr\(q\)/, 'p_types = cohortTypesAr(queryForPeriod)')).length === 0);
+
+// THE DRIFT, proven: what the check actually exists to catch.
+mustCatch('the consumer expanding types ITSELF instead of calling the shared definition',
+  cohortExpansionProblems(rem.replace(/\bp_types = cohortTypesAr\(\s*[A-Za-z_$][\w$.]*\s*\)/, 'p_types = typeArForTypes(sel)')).length > 0);
+mustCatch('a SECOND exported cohortTypesAr definition (two copies of the expansion — the drift class)',
+  cohortExpansionProblems(`${rem}\nexport function cohortTypesAr(q2: SearchQuery) { return null; }\n`).length > 0);
+mustCatch('the shared definition deleted entirely',
+  cohortExpansionProblems(rem.replace(/export function cohortTypesAr\b/, 'function cohortTypesAr')).length > 0);
+mustCatch('p_types wired to a hand-rolled literal rather than any call at all',
+  cohortExpansionProblems(rem.replace(/\bp_types = cohortTypesAr\(\s*[A-Za-z_$][\w$.]*\s*\)/, "p_types = ['شقة']")).length > 0);
 
 console.log(failed === 0 ? '\n✓ trending cohort contract holds' : `\n✗ ${failed} assertion(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);
