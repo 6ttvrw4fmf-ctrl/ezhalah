@@ -29,6 +29,9 @@ jobs:
         run: pip install -r scrapers/requirements.txt
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
+      - name: Prove the payload walk picks the right number
+        run: python -m scrapers.wasalt.probe_price --selftest
+
       - name: Probe
         env:
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}

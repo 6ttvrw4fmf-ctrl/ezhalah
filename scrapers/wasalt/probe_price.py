@@ -23,6 +23,25 @@ def _prose(html: str | None) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html or "")).strip()
 
 
+def _find_price_dict(node: object, depth: int = 0) -> dict | None:
+    """Last-resort: any nested dict carrying salePrice, wherever wasalt moved it to."""
+    if depth > 8:
+        return None
+    if isinstance(node, dict):
+        if "salePrice" in node:
+            return node
+        for v in node.values():
+            hit = _find_price_dict(v, depth + 1)
+            if hit is not None:
+                return hit
+    elif isinstance(node, list):
+        for v in node[:40]:
+            hit = _find_price_dict(v, depth + 1)
+            if hit is not None:
+                return hit
+    return None
+
+
 def report(url: str, data: dict | None) -> None:
     print("=" * 78)
     print(url)
@@ -32,22 +51,46 @@ def report(url: str, data: dict | None) -> None:
         print("  !! NO __NEXT_DATA__ — blocked or changed shape. NOT evidence of anything.")
         return
     pp = data.get("props", {}).get("pageProps", {}) or {}
-    # The detail page carries propertyInfo directly; a search page carries it per property.
-    info = pp.get("propertyInfo") or (pp.get("propertyDetail") or {}).get("propertyInfo") or {}
+    # enrich_ar.py reads the detail page from propertyDetailsV3; fall back to a search-shaped
+    # payload, then to a blind walk, so a moved key costs a comment and not another dispatch.
+    pdv = pp.get("propertyDetailsV3") or {}
+    info = pdv.get("propertyInfo") or pp.get("propertyInfo") or _find_price_dict(pp) or {}
     if not info:
-        print(f"  !! no propertyInfo. pageProps keys: {sorted(pp.keys())[:14]}")
+        print(f"  !! no salePrice anywhere. pageProps keys: {sorted(pp.keys())[:14]}")
         return
     for k in ("salePrice", "conversionPrice", "averageSalePricePerSqm", "currencyType",
               "conversionUnit", "expectedRent", "rentFreq", "unitType", "title"):
         if k in info:
             print(f"  {k:24} = {info[k]!r}")
-    attrs = [a for a in (data.get("props", {}).get("pageProps", {}).get("attributes") or [])]
+    attrs = pdv.get("attributes") or data.get("attributes") or []
     if attrs:
-        print(f"  {'attributes':24} = {[(a.get('key'), a.get('value')) for a in attrs]}")
+        print(f"  {'attributes':24} = {[(a.get('key'), a.get('value')) for a in attrs if isinstance(a, dict)]}")
     print(f"  {'description':24} = {_prose(info.get('description'))[:400]}")
 
 
+def _selftest() -> int:
+    """The walk picks WHICH number gets adjudicated, so prove it picks the right one."""
+    real = {"salePrice": 26250000000, "averageSalePricePerSqm": 25000000}
+    # Nested exactly as wasalt nests it, with a decoy dict in front that has no salePrice.
+    payload = {"props": {"pageProps": {"searchFilters": {"maxPrice": 99},
+                                       "propertyDetailsV3": {"propertyInfo": real}}}}
+    pp = payload["props"]["pageProps"]
+    assert _find_price_dict(pp) is real, "walk must return the dict that HAS salePrice"
+    assert _find_price_dict({"a": {"b": {"c": 1}}}) is None, "no salePrice anywhere → None"
+    assert _find_price_dict({"salePrice": 1}) == {"salePrice": 1}, "top-level hit"
+    # A payload deeper than the depth cap must fail CLOSED (None), never a wrong dict.
+    deep = {"salePrice": 7}
+    for _ in range(12):
+        deep = {"x": deep}
+    assert _find_price_dict(deep) is None, "over-deep must return None, not a wrong answer"
+    assert _prose("<p>سعرها 26250000000 ر.س</p>") == "سعرها 26250000000 ر.س"
+    print("probe_price selftest: ok")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return _selftest()
     urls = sys.argv[1:]
     if not urls:
         print(__doc__)
