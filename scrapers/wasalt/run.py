@@ -182,6 +182,32 @@ def session() -> RotatingSession:
     return RotatingSession()
 
 
+# One browser per PROCESS, created on first use and reused for every page in this slice.
+# Launching Chromium per page would dominate the wall clock; the matrix already parallelises by
+# slug/deal, so each process only walks a few dozen pages.
+_BROWSER: Any = None
+
+
+def _browser_fetch_enabled() -> bool:
+    from scrapers.wasalt import browser as _b
+    return _b.browser_enabled()
+
+
+def _browser() -> Any:
+    global _BROWSER
+    if _BROWSER is None:
+        from scrapers.wasalt import browser as _b
+        _BROWSER = _b.BrowserFetcher()
+    return _BROWSER
+
+
+def close_browser() -> None:
+    global _BROWSER
+    if _BROWSER is not None:
+        _BROWSER.close()
+        _BROWSER = None
+
+
 def fetch_page(s: RotatingSession, deal: str, cat: str, slug: str, page: int) -> tuple[int, int, list[dict], bool]:
     """Return (count, total_pages, properties[], valid) for one search page.
 
@@ -193,6 +219,26 @@ def fetch_page(s: RotatingSession, deal: str, cat: str, slug: str, page: int) ->
     url = (f"{BASE}/en/{seg}/search?propertyFor={deal}&countryId=1&type={cat}"
            f"&propertyTypeData={slug}&page={page}")
     _throttle()
+
+    # CLOUDFLARE PATH (WASALT_BROWSER=1). wasalt.sa tightened bot protection on 2026-08-17 and
+    # since then NO http-client shape gets through: issue #1019 proved the proxy is healthy and
+    # that the scraper's own (proxy x chrome124) combination is silently null-routed, while every
+    # other shape reaches the origin and gets a real 403 challenge page that requires executing
+    # JavaScript. Owner chose the browser option 2026-09-18. See scrapers/wasalt/browser.py — in
+    # particular that headless=False is load-bearing, not a style choice.
+    #
+    # The return shape is deliberately IDENTICAL to the http path below, including the `valid`
+    # flag: a challenge shell must stay distinguishable from a genuinely empty category, or the
+    # fail-visibly guard would read a block as "this slug has no listings".
+    if _browser_fetch_enabled():
+        data = _browser().next_data(url)
+        if data is None:
+            print(f"   ⚠ wasalt browser fetch ({slug}/{deal} p{page}) produced no __NEXT_DATA__")
+            return 0, 0, [], False
+        sr = (data.get("props", {}).get("pageProps", {}).get("searchResult") or {})
+        props = [p for p in (sr.get("properties") or []) if isinstance(p, dict)]
+        return int(sr.get("count") or 0), int(sr.get("totalPages") or 0), props, True
+
     for attempt in range(_FETCH_ATTEMPTS):
         try:
             r = s.get(url, timeout=_FETCH_TIMEOUT_S)

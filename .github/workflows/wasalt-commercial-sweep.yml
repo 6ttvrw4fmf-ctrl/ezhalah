@@ -35,14 +35,28 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      # Cloudflare path (issue #1019): wasalt.sa cannot be read by any http client any
+      # more, so this sweep drives a real Chromium. --with-deps pulls the system
+      # libraries Chromium needs on the runner image.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Sweep ${{ matrix.slug }} ${{ matrix.deal }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          # PROXY DELIBERATELY NOT SET (2026-09-18). Measured: a headed Chromium reads
+          # wasalt.sa DIRECT in 4.7s with the challenge cleared, so the metered Saudi
+          # proxy buys nothing here and wasalt now costs zero proxy bandwidth. If the
+          # runner's IP is ever treated differently from a laptop's, set
+          # WASALT_PROXY_URL here again — scrapers/wasalt/browser.py already honours it,
+          # no code change needed.
+          WASALT_BROWSER: "1"
           SCRAPE_MIN_INTERVAL: "0.4"
         run: |
-          exec python -m scrapers.wasalt.run \
+          # headless=False is what clears the Cloudflare challenge (headless is detected
+          # and never clears — measured 2026-09-18). The runner has no display, so the
+          # browser needs a virtual one; xvfb-run supplies it.
+          exec xvfb-run -a python -m scrapers.wasalt.run \
             --type commercial \
             --slug ${{ matrix.slug }} \
             --deal ${{ matrix.deal }} \
