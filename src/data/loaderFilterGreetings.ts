@@ -8,10 +8,19 @@ import { setFilterGreetingsCache, hasFilterGreetingsCache, type FilterGreeting }
 
 let inFlight: Promise<void> | null = null;
 
+// Every RPC await in this codebase must be bounded (AGENTS.md "A FAILED FETCH IS NOT AN EMPTY
+// ANSWER" — an unbounded await leaves the caller hanging forever on a stalled connection, which
+// reaches the user as a silent hang, never an error). This is the SAME timeout-via-AbortController
+// mechanism src/data/locations.ts already uses (`.abortSignal(ctrl.signal)`), applied locally here
+// rather than exporting remote.ts's private bounded() into a shared surface for one call site.
+const RPC_TIMEOUT_MS = 15000; // matches remote.ts's RPC_TIMEOUT_MS default
+
 async function load(): Promise<void> {
   if (!supabase) { setFilterGreetingsCache([]); return; }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), RPC_TIMEOUT_MS);
   try {
-    const { data, error } = await supabase.rpc('ui_filter_greetings_ar');
+    const { data, error } = await supabase.rpc('ui_filter_greetings_ar').abortSignal(ctrl.signal);
     setFilterGreetingsCache(
       !error && Array.isArray(data) && data.length
         ? (data as FilterGreeting[]).filter((g) => g && g.greeting && g.emoji)
@@ -19,6 +28,8 @@ async function load(): Promise<void> {
     );
   } catch {
     setFilterGreetingsCache([]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
