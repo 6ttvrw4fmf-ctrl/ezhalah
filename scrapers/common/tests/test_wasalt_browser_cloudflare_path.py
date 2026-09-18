@@ -253,3 +253,27 @@ def test_close_still_stops_the_driver(monkeypatch):
     f.close()
     assert stopped == [1], "close() must stop the driver it started"
     assert f._pw is None, "close() must clear the driver so a later _ensure can start a fresh one"
+
+
+# ── 7. the post-quantum key share is disabled ────────────────────────────────────────────────────
+def test_post_quantum_key_share_is_disabled():
+    """Measured by wasalt-proxy-diagnostic.yml on 2026-09-18, through the Saudi residential proxy:
+
+        DNS ok -> proxy TCP ok (128ms) -> CONNECT tunnel ok (HTTP/1.1 200 OK, 757ms)
+        -> TLS handshake TIMED OUT at 15,033ms
+
+    and the discriminator, same proxy, same target, same minute:
+
+        curl_cffi impersonating chrome124 -> timed out at 15,002ms
+        curl_cffi NOT impersonating       -> HTTP 403 in 1,737ms   (a REAL response)
+
+    So the exit is healthy (Riyadh, Zain 5G, AS43766) and the tunnel opens; only Chrome-shaped TLS
+    hangs. Chrome 124+ offers a post-quantum key share by default, which pushes the ClientHello past
+    one MTU — mobile-carrier middleboxes drop the fragmented record, and a dropped ClientHello is a
+    HANG, not an error, i.e. exactly the net::ERR_TIMED_OUT this scraper saw 68 times in one run.
+
+    Removing this flag looks like deleting a stale workaround and costs the whole sweep."""
+    assert "PostQuantumKyber" in _ENSURE and "--disable-features=" in _ENSURE, (
+        "the post-quantum key share must stay disabled: a Chrome ClientHello that spans two "
+        "segments is dropped by the carrier and every navigation dies at net::ERR_TIMED_OUT"
+    )

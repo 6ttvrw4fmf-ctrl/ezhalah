@@ -146,6 +146,18 @@ class BrowserFetcher:
             # successful shapes were HTTP/1.1, so this makes the browser match them.
             "--disable-http2",
             "--disable-quic",
+            # SHRINK THE TLS ClientHello. Measured 2026-09-18 by wasalt-proxy-diagnostic.yml:
+            # through the Saudi residential proxy the CONNECT tunnel opens fine (HTTP/1.1 200 OK in
+            # 757ms) and then the TLS HANDSHAKE times out at 15s — but only for Chrome-shaped
+            # clients. curl_cffi with chrome124 impersonation times out identically, while the SAME
+            # proxy with a plain non-impersonated curl completes TLS and returns a real response in
+            # 1.7s. The exit itself is healthy (Riyadh, Zain 5G, AS43766).
+            # Chrome 124+ offers a post-quantum key share by default, which pushes the ClientHello
+            # past one MTU; mobile-carrier middleboxes routinely drop the fragmented record, and a
+            # dropped ClientHello presents as a hang, not an error — i.e. net::ERR_TIMED_OUT.
+            # Disabling it restores a single-segment ClientHello. Unknown feature names are ignored
+            # by Chromium, so naming all three spellings is safe across versions.
+            "--disable-features=PostQuantumKyber,TLS13KyberSupport,X25519MLKEM768",
         ]
         # headless=False is LOAD-BEARING (see module docstring). Under xvfb on CI this is still a
         # real browser; flipping it to True is the single change that breaks this module.
