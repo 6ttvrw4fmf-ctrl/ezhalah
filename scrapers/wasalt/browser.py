@@ -48,13 +48,13 @@ _BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
 # wasalt.sa. A good exit connects in a few seconds, so a 90s wait bought nothing and just spent the
 # budget: 3 attempts x 90s = one slow failure. At ~50% per attempt the arithmetic is
 # 1-(0.5^n): 3 tries = 88%, 6 tries = 98%. Short timeout + more attempts beats a long timeout.
-_NAV_TIMEOUT_MS = int(os.environ.get("WASALT_BROWSER_NAV_TIMEOUT_MS", "30000"))
+_NAV_TIMEOUT_MS = int(os.environ.get("WASALT_BROWSER_NAV_TIMEOUT_MS", "60000"))
 _CHALLENGE_WAIT_MS = int(os.environ.get("WASALT_BROWSER_CHALLENGE_WAIT_MS", "5000"))
 _CHALLENGE_ROUNDS = int(os.environ.get("WASALT_BROWSER_CHALLENGE_ROUNDS", "6"))
 # A residential proxy rotates exits, and a dead exit shows up as ERR_TIMED_OUT. The http path has
 # always had a retry ladder with s.rotate() between attempts; the browser path shipped without one
 # and its first real run came back 2 slices OK / 4 timed out. Same ladder, same reason.
-_ATTEMPTS = int(os.environ.get("WASALT_BROWSER_ATTEMPTS", "6"))
+_ATTEMPTS = int(os.environ.get("WASALT_BROWSER_ATTEMPTS", "4"))
 _BACKOFF_S = float(os.environ.get("WASALT_BROWSER_BACKOFF_S", "1.5"))
 
 # DataImpulse sticky-session ports. 823 is the ROTATING gateway (a new exit per connection); any
@@ -64,6 +64,10 @@ _ROTATING_PORT = int(os.environ.get("WASALT_PROXY_ROTATING_PORT", "823"))
 _STICKY_LO = int(os.environ.get("WASALT_PROXY_STICKY_LO", "10000"))
 _STICKY_HI = int(os.environ.get("WASALT_PROXY_STICKY_HI", "20000"))
 _STICKY = os.environ.get("WASALT_BROWSER_STICKY", "1").strip().lower() not in ("0", "false", "no")
+
+# How many sticky exits to try before giving up on finding one that can reach the origin at all.
+_WARM_ATTEMPTS = int(os.environ.get("WASALT_BROWSER_WARM_ATTEMPTS", "8"))
+_ORIGIN = os.environ.get("WASALT_ORIGIN", "https://wasalt.sa")
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
@@ -155,6 +159,48 @@ class BrowserFetcher:
             "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
         self._ctx.route("**/*", self._route)
 
+    def _warm(self) -> bool:
+        """Prove this exit can actually clear the challenge, before any real page is requested.
+
+        WHY THIS EXISTS. Roughly half the sticky exits cannot reach wasalt.sa at all. Without a
+        warm-up, EVERY page independently gambles on a fresh exit — and a slice fetches several
+        pages, so the failure compounds: measured 9/20 slices even with 6 attempts per page.
+        Hunting for a good exit ONCE per process and then keeping it turns a per-page gamble into a
+        per-run one, and the challenge cookie the warm-up earns is reused by every later page in
+        the same context (so later pages are also faster).
+        """
+        page = self._ctx.new_page()
+        try:
+            page.goto(f"{_ORIGIN}/en", wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
+            for _ in range(_CHALLENGE_ROUNDS):
+                html = page.content()
+                if "__NEXT_DATA__" in html:
+                    return True
+                if not (("Just a moment" in html) or ("_cf_chl_opt" in html)):
+                    # neither a challenge nor a real page — a proxy error shell
+                    return False
+                page.wait_for_timeout(_CHALLENGE_WAIT_MS)
+            return "__NEXT_DATA__" in page.content()
+        except Exception:
+            return False
+        finally:
+            try:
+                page.close()
+            except Exception:
+                pass
+
+    def _ensure_warm(self) -> bool:
+        """Get a context that has PROVEN it can reach wasalt.sa, recycling dead exits."""
+        for attempt in range(_WARM_ATTEMPTS):
+            self._ensure()
+            if self._warm():
+                if attempt:
+                    print(f"   ✓ wasalt browser: working proxy exit found on attempt {attempt + 1}")
+                return True
+            print(f"   ↻ wasalt browser: exit {attempt + 1}/{_WARM_ATTEMPTS} cannot reach wasalt.sa")
+            self._recycle()
+        return False
+
     @staticmethod
     def _route(route, request) -> None:
         if request.resource_type in _BLOCKED_RESOURCE_TYPES:
@@ -165,7 +211,9 @@ class BrowserFetcher:
     def _next_data_once(self, url: str) -> Optional[dict]:
         """One attempt. See next_data() for the retry ladder."""
         try:
-            self._ensure()
+            if not self._ensure_warm():
+                print("   ⚠ wasalt browser: no proxy exit could reach wasalt.sa")
+                return None
         except Exception as e:
             # A browser that never launched is a DIFFERENT failure from a challenge that never
             # cleared, and the caller only sees None for both. Say which, or the next person

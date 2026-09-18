@@ -176,3 +176,59 @@ def test_images_and_fonts_are_blocked_but_scripts_are_not():
     assert "script" not in B._BLOCKED_RESOURCE_TYPES, (
         "blocking scripts would make the Cloudflare challenge unsolvable")
     assert {"image", "font", "media"} <= B._BLOCKED_RESOURCE_TYPES
+
+
+# ── 5. the exit hunt is per-RUN, not per-PAGE — EXECUTED, not grepped ────────────────────────────
+#
+# Roughly half the sticky exits cannot reach wasalt.sa at all. With the hunt buried inside each
+# page fetch, every page re-gambled and a multi-page slice compounded the loss: 11 failed / 6 passed
+# in run 35385249567. _ensure_warm() hunts ONCE and keeps the winner, so the rest of the run reuses
+# a proven exit (and its challenge cookie).
+
+class _StubFetcher:
+    """Executes the REAL _ensure_warm/_next_data_once against scripted warm-up outcomes."""
+
+    def __init__(self, warms):
+        self._warms = list(warms)
+        self.ensures = 0
+        self.recycles = 0
+        self._browser = self._ctx = None
+
+    def _ensure(self):
+        self.ensures += 1
+
+    def _recycle(self):
+        self.recycles += 1
+
+    def _warm(self):
+        return self._warms.pop(0) if self._warms else False
+
+    # the real methods under test
+    _ensure_warm = B.BrowserFetcher._ensure_warm
+
+
+def test_a_dead_exit_is_recycled_and_the_next_one_tried():
+    f = _StubFetcher([False, False, True])
+    assert f._ensure_warm() is True
+    assert f.ensures == 3, "each attempt must build a fresh context"
+    assert f.recycles == 2, "a dead exit must be recycled so the next attempt gets a DIFFERENT one"
+
+
+def test_the_hunt_gives_up_rather_than_looping_forever():
+    f = _StubFetcher([])  # every exit dead
+    assert f._ensure_warm() is False
+    assert f.ensures == B._WARM_ATTEMPTS, "bounded: a total outage must not spin"
+
+
+def test_a_good_exit_is_found_without_wasting_attempts():
+    f = _StubFetcher([True])
+    assert f._ensure_warm() is True
+    assert (f.ensures, f.recycles) == (1, 0), "a working first exit must be kept, not recycled"
+
+
+def test_page_fetch_goes_through_the_warm_hunt_not_bare_ensure():
+    # The whole point of the change: if _next_data_once still called _ensure directly, the hunt
+    # would exist and do nothing.
+    body = _code_only(inspect.getsource(B.BrowserFetcher._next_data_once))
+    assert "_ensure_warm()" in body, "the page fetch must use the proven-exit hunt"
+    assert "self._ensure()" not in body, "bypassing the hunt re-introduces the per-page gamble"
