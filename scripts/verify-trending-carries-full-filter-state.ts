@@ -129,9 +129,23 @@ check('the Trending params carry the search TABLE scope, from searchTableScope(q
   new RegExp(`const cityAfRaw = \\{ \\.\\.\\.rpcAllNarrowingParams\\(${NORMALISED_Q}\\), \\.\\.\\.cityTableScope \\}`).test(index)
   && new RegExp(`= searchTableScope\\(${NORMALISED_Q}\\) \\?\\? \\{\\}`).test(index),
   'without p_tables, Trending counts platform tables the results RPC excludes');
+// STATED STRUCTURALLY, NOT AS A SPELLING (ops_incident #305, the #136 sibling shape, repaired
+// 2026-09-18). This check used to read `/const tableScope = searchTableScope\(q\);/` — pinning BOTH
+// a local variable name (`tableScope`) and a local argument name (`q`). Renaming either is a correct
+// refactor that leaves the invariant intact and turned this check RED; a genuine second copy of the
+// table lists introduced under the same spelling would have kept it GREEN. That is #136 exactly.
+// The invariant is countable: ONE exported resolver, and remote.ts's own results path CALLS it.
+export const sharedTableScopeProblems = (rem: string): string[] => {
+  const out: string[] = [];
+  const defs = (rem.match(/export function searchTableScope\b/g) || []).length;
+  if (defs !== 1) out.push(`expected exactly ONE exported searchTableScope definition, found ${defs}`);
+  // A call with any argument spelling, anywhere OUTSIDE the definition line itself.
+  const calls = (rem.match(/(?<!function )\bsearchTableScope\s*\(\s*[A-Za-z_$][\w$.]*\s*\)/g) || []).length;
+  if (calls < 1) out.push('remote.ts never CALLS searchTableScope — the results path is reading a second copy of the table lists');
+  return out;
+};
 check('searchTableScope is the SHARED resolver, not a second copy of the table lists',
-  /export function searchTableScope/.test(strip(read('src/data/remote.ts')))
-  && /const tableScope = searchTableScope\(q\);/.test(strip(read('src/data/remote.ts'))),
+  sharedTableScopeProblems(strip(read('src/data/remote.ts'))).length === 0,
   'resolveSearchScope and Trending must read ONE definition — a copy is the drift class itself');
 check('isBroadCommercial is stripped before the scope reaches the RPC',
   /isBroadCommercial: _cityScopeFlag/.test(index),
@@ -261,6 +275,35 @@ for (const [label, q, wantMonthly] of [
     `got [${got.join(', ')}]`);
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MUTATIONS (ops_incident #305). The repaired predicate is applied to deliberately broken and
+// deliberately RENAMED copies of the real remote.ts — both directions, because the defect this
+// repair fixes was an INVERSION: red on a correct rename, green on the real drift.
+const mustCatch = (what: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${what}`); return; }
+  failures++;
+  console.error(`FAIL  (mutation) did NOT catch ${what}`);
+};
+const REM = strip(read('src/data/remote.ts'));
+
+check('NEGATIVE CONTROL — the real shipped remote.ts is NOT flagged',
+  sharedTableScopeProblems(REM).length === 0, sharedTableScopeProblems(REM).join('; '));
+
+// The renames the OLD check inverted on. Each leaves the invariant fully intact.
+check('a correct rename of the local variable (tableScope -> scope) is NOT reported as drift',
+  sharedTableScopeProblems(REM.replace(/const tableScope = searchTableScope\(/, 'const scope = searchTableScope(')).length === 0);
+check('a correct rename of the ARGUMENT (q -> query) is NOT reported as drift',
+  sharedTableScopeProblems(REM.replace(/searchTableScope\(q\)/, 'searchTableScope(query)')).length === 0);
+
+// The drift the check exists for.
+mustCatch('the results path inlining the table lists instead of calling the shared resolver',
+  sharedTableScopeProblems(REM.replace(/\bsearchTableScope\s*\(\s*[A-Za-z_$][\w$.]*\s*\)/g,
+    '({ p_tables: RES_TABLES, p_tables2: COM_TABLES })')).length > 0);
+mustCatch('a SECOND exported searchTableScope definition (two copies of the scope rule)',
+  sharedTableScopeProblems(`${REM}\nexport function searchTableScope(q2: SearchQuery) { return null; }\n`).length > 0);
+mustCatch('the shared resolver no longer exported (Trending forced to keep its own copy)',
+  sharedTableScopeProblems(REM.replace(/export function searchTableScope\b/, 'function searchTableScope')).length > 0);
 
 console.log(failures === 0
   ? '\n✓ Trending is built from the full filter state (live honouring: verify-trending-filter-state-live.ts)\n'

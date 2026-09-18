@@ -128,7 +128,6 @@ verify-combined-deal-budget-split.ts
 verify-commercial-misfile-recovery.ts
 verify-completed-chat-state.ts
 verify-count-rpc-parity-live.ts
-verify-count-scope-parity.ts
 verify-data-integrity-contract.ts
 verify-deal-pair-helper-copy.ts
 verify-dealapp-bridge.ts
@@ -287,15 +286,12 @@ verify-taxonomy.ts
 verify-theme-contract.ts
 verify-topbar-signin.ts
 verify-transcript-integrity.ts
-verify-trending-carries-full-filter-state.ts
-verify-trending-cohort-contract.ts
 verify-trending-filter-state-live.ts
 verify-trending-live-four-way-truth.ts
 verify-trending-visuals.ts
 verify-type-and-attribute-fallback.ts
 verify-type-ar-expansion-total.ts
 verify-typewriter-completion-guarantee.ts
-verify-unknown-rent-period-not-annual.ts
 verify-unlocated-fallback-scope-live.ts
 verify-voice-error-classification.ts
 verify-voice-ios-capture-and-stop-loading.ts
