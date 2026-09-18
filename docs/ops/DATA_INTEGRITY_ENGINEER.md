@@ -880,6 +880,16 @@ because `enrich_ar.py` still fetches over plain HTTP and is still Cloudflare-blo
 was silent on precisely the rows under suspicion. **A settled class does not settle a row the oracle
 cannot see.**
 
+**The population, re-measured 2026-09-18** (§25 measured 115 rows; the cohort is now 172):
+
+- **119/172** carry an archived `propertyInfo`. **119/119** stored `price_total` == wasalt's own
+  `salePrice`. **Zero** mismatches.
+- **119/119** of those carry wasalt's own `averageSalePricePerSqm` at the SAME magnitude. **0** show a
+  source per-m² ~1000× smaller — which is precisely what would exist if our total were inflated ×1000.
+  §25's measurement reproduces exactly on the grown cohort.
+- The **53** rows with no archive are **all** from 2026-09-17 — one day, the first browser sweep. That
+  is the `enrich_ar.py` gap below, not a price finding.
+
 **Answered by §27b's rule — ask the source.** Read live from wasalt.sa on 2026-09-18, all four
 corroborants agreeing on every row (`salePrice` == `conversionPrice` == our stored `price_total`;
 wasalt's own `averageSalePricePerSqm` at the SAME magnitude; `currencyType`/`conversionUnit` = SAR;
