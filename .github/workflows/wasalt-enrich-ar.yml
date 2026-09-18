@@ -39,6 +39,12 @@ jobs:
   enrich-ar:
     name: Enrich AR ${{ matrix.table }}
     runs-on: ubuntu-latest
+    # BACKSTOP ONLY. The job now carries its own 2700s (45 min) budget via --max-seconds and stops
+    # cleanly inside this wall; reaching 60 minutes again means the budget itself failed, and should
+    # be investigated rather than raised. Until 2026-09-18 this timeout was the ONLY limit, so the
+    # residential job was simply killed by it on 7 of 12 consecutive runs — GitHub reports a timeout
+    # kill as `cancelled`, db.end_run() never ran, and the errored-row retry pass never executed.
+    # (ops_incident #307; barrier scripts/verify-enrich-ar-stops-before-the-ci-wall.ts.)
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -69,4 +75,5 @@ jobs:
             --workers 6 \
             --max-pending ${{ github.event.inputs.max_pending || 5000 }} \
             --retry-errs ${{ github.event.inputs.retry_errs || 100 }} \
+            --max-seconds 2700 \
             $ALLOW_BACKFILL_FLAG
