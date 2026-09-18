@@ -93,7 +93,7 @@ jobs:
           # listings, and the sweep deliberately re-checks the whole id range (skipping ids would miss
           # reactivated ads). So we cut its bandwidth by cadence instead: every_n_days=2 (owner 2026-07-07).
           # (tmo+cadence restored 2026-07-16 — PR #77 accidentally dropped both overrides.)
-          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150, every_n_days: 2, proxy: true }
+          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150, every_n_days: 2 }
           # NOTE: toor is NOT here. RETIRED 2026-07-06 (owner-approved, commit d5ca9d6):
           # www.toor.ooo IP-blocks datacenter + Saudi-residential-proxy IPs (every detail fetch =
           # exc:Timeout, 0 rows written for weeks), so it was removed from the active pipeline.
@@ -208,8 +208,28 @@ jobs:
           # FALSE: alta, remal, shmoualshmal and amaall all read WASALT_PROXY_URL in their own
           # session() and were silently spending metered Saudi residential bandwidth.
           #
-          # Only sources with `proxy: true` receive it. souq24 keeps it: 24.com.sa serves datacenter
-          # IPs a listing-less shell, so it genuinely needs a Saudi exit.
+          # Only sources with `proxy: true` receive it. NOTHING currently sets it.
+          #
+          # souq24 CAME OFF IT 2026-09-18, and the note that kept it there was wrong on its own
+          # terms. It read "24.com.sa's Cloudflare serves datacenter IPs a listing-less shell".
+          # Measured against the live host that same day: there is no Cloudflare. The response
+          # headers are `Server: nginx` with ZERO Cloudflare fingerprints (no cf-ray, no cf-cache
+          # -- it is a plain Laravel/nginx app), and /properties answers a direct request with
+          # HTTP 200, 161 KB and 18 real /<id>/<slug> listing links.
+          #
+          # Meanwhile the proxy hop is a measured failure for exactly this client shape.
+          # wasalt-proxy-diagnostic.yml, same proxy, same day: the CONNECT tunnel opens fine
+          # (HTTP/1.1 200 OK in 757 ms) and then curl_cffi impersonating chrome124 -- which is
+          # precisely what scrapers/souq24/run.py uses -- TIMES OUT at 15,002 ms, while the same
+          # proxy with a NON-impersonated client returns a real response in 1,737 ms. So a
+          # chrome-shaped TLS handshake through this proxy hangs, and souq24 sends one on every
+          # browse page and every id probe. That is the "browse harvest incomplete: prune
+          # withheld" + 0-row run it has been recording.
+          #
+          # This is the same shape as alta/remal/shmoualshmal below: a stated block that is not a
+          # block, hiding a proxy stall. Same test applies -- if souq24 now fails DIRECT with a
+          # REFUSAL (403, connection reset, or a listing-less shell), the old note was right after
+          # all and `proxy: true` goes back on. A timeout is not a refusal.
           #
           # WHY THE OTHERS WERE TAKEN OFF IT. Measured 2026-09-18: alta, remal and shmoualshmal all
           # answer a DIRECT request in 1-2s (alta.com.sa 0.97s, remalre.com 1.6s,
