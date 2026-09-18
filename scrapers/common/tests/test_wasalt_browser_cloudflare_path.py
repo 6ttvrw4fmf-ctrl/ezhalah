@@ -76,10 +76,11 @@ def test_automation_flag_is_disabled():
 
 
 # ── 3. the proxy, in the shape CHROMIUM wants (not the shape every other client wants) ───────────
-def test_proxy_credentials_are_split_out():
+def test_proxy_credentials_are_split_out(monkeypatch):
     """Chromium rejects inline credentials with ERR_INVALID_AUTH_CREDENTIALS, which reads exactly
     like a Cloudflare block. curl_cffi/requests/httpx all accept the inline form, so this is the
     easy mistake — it cost a CI round on 2026-09-18."""
+    monkeypatch.setattr(B, "_STICKY", False)   # port rewriting is tested separately below
     got = B._playwright_proxy("http://user123:p%40ss@gw.example.com:823")
     assert got == {"server": "http://gw.example.com:823",
                    "username": "user123",
@@ -88,10 +89,37 @@ def test_proxy_credentials_are_split_out():
     assert got["password"] == "p@ss"
 
 
-def test_proxy_accepts_a_bare_host_and_empty():
+def test_proxy_accepts_a_bare_host_and_empty(monkeypatch):
+    monkeypatch.setattr(B, "_STICKY", False)
     assert B._playwright_proxy("gw.example.com:823") == {"server": "http://gw.example.com:823"}
     assert B._playwright_proxy("") is None
     assert B._playwright_proxy("   ") is None
+
+
+# ── sticky sessions: one exit IP for every sub-request of a page ────────────────────────────────
+def test_the_rotating_port_is_swapped_for_a_sticky_one():
+    """A browser issues many sub-requests per page. On the rotating gateway each lands on a
+    different exit, Cloudflare sees a session hopping between IPs and drops it — measured as
+    net::ERR_TIMED_OUT on 15 of 20 slices even WITH a retry ladder. One sticky port == one stable
+    exit, which is what a real browser looks like."""
+    got = B._playwright_proxy(f"http://u:p@gw.example.com:{B._ROTATING_PORT}")
+    port = int(got["server"].rsplit(":", 1)[1])
+    assert port != B._ROTATING_PORT, "the rotating gateway port must not survive"
+    assert B._STICKY_LO <= port <= B._STICKY_HI, f"{port} is outside the plan's sticky range"
+
+
+def test_an_already_sticky_port_is_left_alone():
+    fixed = B._STICKY_LO + 500
+    got = B._playwright_proxy(f"http://u:p@gw.example.com:{fixed}")
+    assert got["server"].endswith(f":{fixed}")
+
+
+def test_each_session_gets_its_own_sticky_exit():
+    """Retries recycle the context, and a retry that reused the same dead exit would spend the
+    ladder for nothing — so successive calls must be able to differ."""
+    ports = {int(B._playwright_proxy(f"http://u:p@gw.example.com:{B._ROTATING_PORT}")
+                 ["server"].rsplit(":", 1)[1]) for _ in range(40)}
+    assert len(ports) > 1, "every session drew the same sticky port — that is not a fresh exit"
 
 
 def test_proxy_server_never_carries_the_credentials():
