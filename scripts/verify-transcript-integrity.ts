@@ -82,14 +82,16 @@ for (const label of ['J3 hard refresh', 'J4 logout→login', 'J6 open from Favor
 // ── JOURNEY 5: localStorage cleared — restore ONLY from the server ───────────────────────────────
 {
   const server = JSON.parse(JSON.stringify(t1));
-  const got = await pickTranscript<any>(undefined, false, async () => server);
+  const got = (await pickTranscript<any>(undefined, false, async () => server)).transcript;
   // Null-safe on purpose: if server restore is ever broken this must report WHICH invariant failed,
   // not die on a TypeError. A barrier that crashes tells you less than one that names the defect.
   check('J5 with no local copy at all, the server copy is USED (not null)', got != null,
     'server restore returned nothing — a user with a cleared cache would see an empty chat');
   eq('J5 …and it carries the whole conversation', got?.msgs?.map((m: any) => m.id) ?? null, ['m1','m2','m3','m4','m5','m6']);
   const none = await pickTranscript<any>(undefined, false, async () => null);
-  check('J5 no local and no server → null (caller falls back), never a crash', none === null);
+  check('J5 no local and no server → null (caller falls back), never a crash', none.transcript === null);
+  check('J5 …and that null is VERIFIED — the server answered, so the caller may act on it',
+    none.verified === true);
 }
 
 // ── JOURNEY 9 (THE DEFECT): stale local cache vs NEWER server transcript ─────────────────────────
@@ -103,7 +105,7 @@ for (const label of ['J3 hard refresh', 'J4 logout→login', 'J6 open from Favor
   );
   check('J9 a newer server meta marks the carried-over local transcript STALE', merged.txStale === true);
   check('J9 …but the local copy is KEPT as an offline fallback, never dropped', merged.transcript !== undefined);
-  const won = await pickTranscript<any>(merged.transcript, !!merged.txStale, async () => serverLong);
+  const won = (await pickTranscript<any>(merged.transcript, !!merged.txStale, async () => serverLong)).transcript;
   eq('J9 THE NEWER SERVER TRANSCRIPT WINS (all 6 turns, not the stale 3)',
     won.msgs.map((m: any) => m.id), ['m1','m2','m3','m4','m5','m6']);
   check('J9 …so the user never sees a truncated conversation', won.msgs.length > localShort.msgs.length);
@@ -115,11 +117,13 @@ for (const label of ['J3 hard refresh', 'J4 logout→login', 'J6 open from Favor
   check('J9 a local copy NEWER than the server is kept whole and not marked stale', !localNewer.txStale);
   let serverAsked = false;
   const kept = await pickTranscript<any>(localNewer.transcript, !!localNewer.txStale, async () => { serverAsked = true; return null; });
-  check('J9 …and the server is not even consulted for it (instant open)', serverAsked === false && kept === localNewer.transcript);
+  check('J9 …and the server is not even consulted for it (instant open)', serverAsked === false && kept.transcript === localNewer.transcript);
   // Server newer BUT has no transcript (legacy chat): stale-marked local must still be shown.
   const fallback = await pickTranscript<any>(merged.transcript, !!merged.txStale, async () => null);
   check('J9 server newer but holds NO transcript → local is still shown, never a blank chat',
-    fallback === merged.transcript);
+    fallback.transcript === merged.transcript);
+  check('J9 …and because the server ANSWERED, that fallback is verified (may clear txStale)',
+    fallback.verified === true);
   check('J9 attaching a fresh transcript clears the stale flag',
     (withFreshTranscript(merged as never, serverLong, 6000) as any).txStale === undefined);
 }
@@ -196,7 +200,7 @@ console.log('\n── mutation proofs ──');
   const stale = { v: 1, msgs: t1.msgs.slice(0, 3) };
   const got = await badPick(stale, true, async () => t1);
   check('MUT-1 restoring `if (held) return held` serves the STALE 3-turn copy → caught',
-    got.msgs.length === 3 && (await pickTranscript<any>(stale, true, async () => t1)).msgs.length === 6);
+    got.msgs.length === 3 && (await pickTranscript<any>(stale, true, async () => t1)).transcript.msgs.length === 6);
 
   // 2. TRANSCRIPT SAVE broken (serialize drops results turns)
   const noResults = { ...t1, msgs: t1.msgs.filter((m) => m.role !== 'results') };
@@ -206,7 +210,7 @@ console.log('\n── mutation proofs ──');
   // 3. SERVER RESTORE broken (fetch returns null while a stale local exists)
   const stillStale = await pickTranscript<any>(stale, true, async () => null);
   check('MUT-3 a dead server fetch falls back to local rather than blanking → caught (and is safe)',
-    stillStale === stale);
+    stillStale.transcript === stale);
 
   // 4. ORDERING broken
   const reordered = { ...t1, msgs: [...t1.msgs].reverse() };

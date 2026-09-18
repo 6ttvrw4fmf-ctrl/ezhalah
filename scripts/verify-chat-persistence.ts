@@ -102,9 +102,18 @@ check('pruning happens ONLY at the serialization boundary — in-memory state ke
 // Re-anchored 2026-08-25: the inline stamp comparison moved into chatMerge.mergeOne() so the pull
 // merge and hydrateTranscript cannot disagree about which copy is newer (they did — see
 // scripts/verify-transcript-integrity.ts for the loss that caused). Executed, not matched.
+// The call was `loadChatMetas().then((rows)` until 2026-09-15, when a bounded one-shot RETRY was
+// introduced between them (a `null` here means the LOAD FAILED, never "this account has no chats",
+// and one blip used to strand the whole session on the local-only list). Matching the two halves
+// separately keeps every load-bearing property this check has always asserted — the metas load
+// feeds the rows merge, precedence comes from mergeOne, and the stamp comparison is not re-derived
+// inline — without pinning the exact call-site spelling, which was never the invariant.
 check('pull: server metas merge after sign-in, via the single shared precedence rule',
-  /loadChatMetas\(\)\.then\(\(rows\)/.test(store) && /mergeOne\(/.test(store)
+  /loadChatMetas\(\)/.test(store) && /\.then\(\(rows\)/.test(store) && /mergeOne\(/.test(store)
   && !/serverStamp\s*>\s*localStamp/.test(store));
+check('pull: a FAILED metas load is retried, never read as an empty account',
+  /const first = await loadChatMetas\(\)/.test(store) && /return loadChatMetas\(\)/.test(store),
+  'a null metas load means the load failed; treating it as "no chats" hides the server history');
 {
   const localOld = { id: 'c', ts: 10, tRev: 10, transcript: { n: 1 } } as never;
   const localNew = { id: 'c', ts: 99, tRev: 99, transcript: { n: 9 } } as never;
