@@ -47,7 +47,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 // `fetches` counts real proxy work; `updated` counts rows written. Nothing here reimplements the
 // deadline — that logic is the imported production function's.
 const HARNESS = String.raw`
-import json, sys, types
+import json, sys, time, types
 
 # Stub scrapers.common.db BEFORE importing the module under test, so no real client is ever built.
 db = types.ModuleType("scrapers.common.db")
@@ -96,6 +96,29 @@ E._region_for = lambda c: 1
 mode = sys.argv[1]
 LOG["pending"] = 25
 budget = 0.0001 if mode == "expired" else 600.0
+
+# DETERMINISM (found 2026-09-18, this barrier itself was flaky ~80% of runs). enrich_table() uses
+# ThreadPoolExecutor(max_workers=4).map(...), which DISPATCHES up to 4 worker threads immediately —
+# each worker's out_of_time() check then races the real OS thread scheduler against a 0.0001s
+# (100-microsecond) window. That race is invisible in production (the real budget is 2700s, so a
+# hundred-microsecond scheduling jitter never matters) but turns this "expired" case into a coin
+# flip under real CI timing: sometimes every worker's check loses the race and 1 row gets fully
+# processed before it sees "out of time", exactly like the ops_incident #307 defect this barrier
+# exists to catch — a FALSE POSITIVE for the fix, not a real regression.
+#
+# THE FIX IS TEST-ONLY. scrapers/wasalt/enrich_ar.py is untouched — its real-world behaviour does
+# not depend on winning a microsecond race. Monkeypatch time.monotonic() so "is the deadline past?"
+# is decided by which CALL NUMBER we are on, never by real wall-clock speed: the FIRST call (inside
+# enrich_table, computing "deadline = monotonic() + max_seconds") returns a baseline; every call
+# after that (every worker thread's out_of_time() check) jumps a million seconds further ahead,
+# so it is ALWAYS past deadline — deterministically, on any machine, under any load.
+if mode == "expired":
+    _clock = [0.0]
+    def _fake_monotonic():
+        _clock[0] += 1_000_000.0
+        return _clock[0]
+    time.monotonic = _fake_monotonic
+
 stats = E.enrich_table("wasalt_residential_listings", 2000, 4, max_seconds=budget)
 print(json.dumps({"stats": stats, "log": LOG}))
 `;
