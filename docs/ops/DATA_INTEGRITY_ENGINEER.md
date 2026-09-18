@@ -921,12 +921,13 @@ arithmetically capable of it before fetching anything.**
   `20260804120000` says so in its own header). 19 wasalt rows trip the >5,000,000 SAR/m² clause; 17 are
   visible because they are registered, these 2 were not yet adjudicated. The alert is the system
   asking for an adjudication, and it worked.
-  Measured on production 2026-09-18 — the registry IS the whole mechanism, with zero exceptions:
+  Measured on production 2026-09-18 **as found, before the close-out below registered the three** —
+  the registry IS the whole mechanism, with zero exceptions:
 
   | trips `price_size_impossible()` | in `ops_price_source_verified` | `production_ready` | rows |
   |---|---|---|---|
   | true | **true** | **true** | 17 |
-  | true | **false** | **false** | 3 (`11939802`, `11939808`, `11939904`) |
+  | true | **false** | **false** | 3 (`11939802`, `11939808`, `11939904`) — now registered, so 0 |
   | false | true | true | 15 |
   | false | false | true | 136 |
   | false | false | false | 1 (`11939901` — location, not price) |
