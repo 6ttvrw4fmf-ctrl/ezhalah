@@ -54,6 +54,33 @@ def browser_enabled() -> bool:
     return os.environ.get("WASALT_BROWSER", "").strip().lower() not in ("", "0", "false", "no")
 
 
+def _playwright_proxy(purl: str) -> Optional[dict]:
+    """Split a user:pass@host:port proxy URL into Playwright's separate-fields shape.
+
+    Every other client in this repo takes credentials inline — curl_cffi, requests and httpx all
+    accept `http://user:pass@host:port` — but Chromium does NOT. Handing it an inline-credential
+    URL as `server` fails with net::ERR_INVALID_AUTH_CREDENTIALS, which reads like a Cloudflare
+    rejection and is not one (cost a CI round on 2026-09-18). Playwright wants
+    {"server": "http://host:port", "username": ..., "password": ...}.
+
+    Credentials are never logged: callers print `server` only.
+    """
+    purl = (purl or "").strip()
+    if not purl:
+        return None
+    from urllib.parse import urlsplit, unquote
+    u = urlsplit(purl if "://" in purl else f"http://{purl}")
+    host = u.hostname or ""
+    if not host:
+        return None
+    server = f"{u.scheme or 'http'}://{host}" + (f":{u.port}" if u.port else "")
+    out: dict[str, str] = {"server": server}
+    if u.username:
+        out["username"] = unquote(u.username)
+    if u.password:
+        out["password"] = unquote(u.password)
+    return out
+
 class BrowserFetcher:
     """One Chromium for the whole run. Launching per page would dominate the wall clock."""
 
@@ -82,9 +109,9 @@ class BrowserFetcher:
             "viewport": {"width": 1366, "height": 900},
             "user_agent": _UA,
         }
-        purl = os.environ.get("WASALT_PROXY_URL", "").strip()
-        if purl:
-            ctx_kwargs["proxy"] = {"server": purl}
+        proxy = _playwright_proxy(os.environ.get("WASALT_PROXY_URL", ""))
+        if proxy:
+            ctx_kwargs["proxy"] = proxy
         self._ctx = self._browser.new_context(**ctx_kwargs)
         self._ctx.add_init_script(
             "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
