@@ -242,6 +242,14 @@ Three things to carry forward:
    names: a P0 whose `remedy` field sends every responder down a path that does not work is worse
    than a P0 with no remedy text. Tracked as `ops_incident` #300 (routed to the cron surface owner);
    the job-38 slowness itself is `ops_incident` #55.
+3. **`cron.job_run_details.end_time` is PROVISIONAL while a run is in flight — check `status`, not
+   `end_time`.** Job 38's command is four statements, and the row's `end_time` advances as they
+   complete. At 13:38 this routine read `max(end_time) = 13:29:06` for the 13:29 run and concluded
+   the job had finished in 6 seconds — which "falsified" the mechanism above and produced a
+   confident public retraction of a correct finding. The run's final record is
+   `13:29:00 → 13:40:18`, **11m18s**, and every other slot that day measured 10m41s–11m25s. The
+   blackout length equals the job's real duration, every time. A `max(end_time)` with no `status`
+   predicate is not a completion; **`status` would have read `running`.**
 3. **Repairing the data is not closing this.** The out-of-band five-statement sync (§2.3) restores
    the index in one pass and is fully within this routine's authority, but the index refreezes at
    the next :36 until #300 is fixed. Report that as a mitigation, never as a fix.
