@@ -61,18 +61,36 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      # Cloudflare path (issue #1019): wasalt.sa cannot be read by any http client any more, so this
+      # enricher drives a real Chromium exactly like wasalt-residential-sweep.yml does.
+      # --with-deps pulls the system libraries Chromium needs on the runner image.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Enrich AR ${{ matrix.table }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Browser + residential proxy, the pair the sweep proved on 2026-09-18: a real browser
+          # supplies the JS execution the challenge demands, the proxy supplies the residential IP
+          # it also demands (a GitHub datacenter IP is refused however real the browser is).
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
           SCRAPE_MIN_INTERVAL: "0.3"
           ALLOW_BACKFILL_FLAG: ${{ (github.event.inputs.allow_backfill == 'true') && '--allow-backfill' || '' }}
         run: |
-          exec python -m scrapers.wasalt.enrich_ar \
+          # headless=False is what clears the Cloudflare challenge (headless is detected and never
+          # clears — measured 2026-09-18). The runner has no display; xvfb-run supplies a virtual one.
+          #
+          # --workers 1: the browser path is single-threaded (Playwright's sync API is thread-bound),
+          # and enrich_ar forces it anyway — passing it here keeps the command honest about what runs.
+          # THROUGHPUT IS NOW TIME-BOUND, NOT ROW-BOUND: a browser fetch is seconds, not milliseconds,
+          # so --limit is just a ceiling on the SELECT and --max-seconds is the real budget. Rows the
+          # budget does not reach are left untouched and picked up by the next run — do NOT raise the
+          # limit or the workers to "catch up"; that only buys metered proxy bandwidth.
+          exec xvfb-run -a python -m scrapers.wasalt.enrich_ar \
             --table ${{ matrix.table }} \
             --limit ${{ github.event.inputs.limit || 2000 }} \
-            --workers 6 \
+            --workers 1 \
             --max-pending ${{ github.event.inputs.max_pending || 5000 }} \
             --retry-errs ${{ github.event.inputs.retry_errs || 100 }} \
             --max-seconds 2700 \
