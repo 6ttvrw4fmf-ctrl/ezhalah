@@ -104,11 +104,20 @@ class BrowserFetcher:
         empty result set. That distinction is the whole point of fetch_page()'s `valid` flag: a
         challenge shell and a genuinely empty category must not look alike.
         """
-        self._ensure()
-        page = self._ctx.new_page()
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
-            html = ""
+            self._ensure()
+        except Exception as e:
+            # A browser that never launched is a DIFFERENT failure from a challenge that never
+            # cleared, and the caller only sees None for both. Say which, or the next person
+            # debugging this is back to guessing (the first CI run of this module hit exactly that).
+            print(f"   ⚠ wasalt browser LAUNCH failed: {type(e).__name__}: {str(e)[:300]}")
+            return None
+        page = self._ctx.new_page()
+        status = None
+        html = ""
+        try:
+            resp = page.goto(url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
+            status = resp.status if resp is not None else None
             for _ in range(_CHALLENGE_ROUNDS):
                 html = page.content()
                 if "__NEXT_DATA__" in html:
@@ -118,9 +127,14 @@ class BrowserFetcher:
                 page.wait_for_timeout(_CHALLENGE_WAIT_MS)
             m = _NEXT_RE.search(html)
             if not m:
+                challenged = ("Just a moment" in html) or ("_cf_chl_opt" in html)
+                print(f"   ⚠ wasalt browser: no __NEXT_DATA__ (http={status} "
+                      f"challenge={'YES' if challenged else 'no'} html={len(html)}B)")
                 return None
             return json.loads(m.group(1))
-        except Exception:
+        except Exception as e:
+            print(f"   ⚠ wasalt browser NAV failed (http={status}): "
+                  f"{type(e).__name__}: {str(e)[:300]}")
             return None
         finally:
             try:
