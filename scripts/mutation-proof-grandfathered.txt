@@ -57,7 +57,6 @@ verify-af-surface-judge.ts
 verify-af-survives-filter-reentry.ts
 verify-af-takes-over-cta.ts
 verify-af-two-option-survival.ts
-verify-af-unknown-count-truthful.ts
 verify-age-filter-gate.ts
 verify-agent-af-intent-coverage.ts
 verify-agent-amenities-certification.ts

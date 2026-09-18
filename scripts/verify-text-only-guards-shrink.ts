@@ -48,14 +48,15 @@ const LIST = join(root, 'scripts/mutation-proof-grandfathered.txt');
 // The ceiling is the MEASURED size on the day this ratchet landed (2026-09-18), and it may only
 // fall. It is set ON the number, not above it: a ceiling with slack is a ratchet that lets the set
 // grow silently up to the slack before anyone hears about it. The first draft of this file guessed
-// 169 against a real 107, which is 62 free additions.
+// 169 against a real 107, which is 62 free additions. It lands at 106: this PR converts
+// verify-af-unknown-count-truthful.ts to execution, which removes it from the set.
 //
 // This is NOT the 180 that ops_incident #136 measured on 2026-09-14, and does not claim to be.
 // That count was taken over 496 barriers with a looser notion of "reads source text"; this one is
 // defined by the two exported predicates below, over 531 barriers, and counts only barriers that
 // read a PRODUCT path and execute nothing. Quote the printed line, never a number from prose —
 // including this paragraph.
-const TEXT_ONLY_UNPROVEN_CEILING = 107;
+const TEXT_ONLY_UNPROVEN_CEILING = 106;
 
 // A path literal that points at PRODUCT code — the thing a barrier is supposed to be a statement
 // about. `scripts/` is deliberately absent: a barrier reading another barrier is apparatus reading
