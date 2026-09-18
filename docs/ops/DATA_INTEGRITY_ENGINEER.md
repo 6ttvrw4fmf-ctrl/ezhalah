@@ -921,6 +921,14 @@ arithmetically capable of it before fetching anything.**
   `20260804120000` says so in its own header). 19 wasalt rows trip the >5,000,000 SAR/m² clause; 17 are
   visible because they are registered, these 2 were not yet adjudicated. The alert is the system
   asking for an adjudication, and it worked.
+  All **4** hidden band rows account cleanly, and the split is why exactly 2 alerts exist and not 4:
+  `11939802` / `11939808` resolve to Makkah (`city_id=6`) and are held false by the price gate alone —
+  located, unreachable, correctly alerting. `11939901` / `11939904` are `production_ready=false` in
+  `listing_native_location_v2` itself with `city_id IS NULL`, so they are hidden for a LOCATION reason
+  and reach users through the unlocated fallback — correctly NOT alerting. (`11939901` trips no clause
+  of `price_size_impossible()` at all.) Registering a price therefore cannot un-hide those two: the
+  §25 ungate joins `listing_native_location_v2` and requires `v.production_ready`, which is exactly
+  the guard that keeps a price adjudication from publishing an unlocated row.
 - `field_integrity` "phone/ID artifact band" on wasalt is a **band coincidence**: 11 rows land in
   [500M, 600M) because genuine Makkah/Madinah land prices land there, and every one with an archive
   matches its source exactly. The band is an aqar-shaped heuristic; it is not evidence about wasalt.
