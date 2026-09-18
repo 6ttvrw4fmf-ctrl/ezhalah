@@ -181,7 +181,8 @@ PRICE_TXT_RE = re.compile(r"(?:السعر|إجمالي\s*سعر\s*البيع)\s*
 # The spec table. On LAND this carries the exact figure; on built property it is «-».
 PRICE_EXACT_RE = re.compile(
     r'<div class="small"[^>]*>\s*إجمالي\s*سعر\s*البيع\s*</div>\s*<div>\s*([\d,.]+)\s*</div>')
-PPM_RE = re.compile(r"سعر\s*المتر\s*للأرض\s*</span>\s*:\s*([\d٠-٩.,]+)")
+PPM_RE = re.compile(
+    r"سعر\s*المتر\s*للأرض\s*</span>\s*:\s*([\d٠-٩][\d٠-٩.,]*)\s*(مليار|مليون|ألف|الف)?")
 
 
 def parse_price_exact(page_html: str) -> Optional[int]:
@@ -200,10 +201,18 @@ def parse_price_exact(page_html: str) -> Optional[int]:
 
 
 def parse_ppm(page_html: str) -> Optional[int]:
-    """«سعر المتر للأرض : 400» — PUBLISHED by the source, never area-derived."""
+    """«سعر المتر للأرض : 400» — PUBLISHED by the source, never area-derived.
+
+    IT CARRIES A MAGNITUDE WORD TOO. Read without it, «9.2 مليون» became 9 — a 9.2-million-riyal
+    per-metre figure stored as nine riyals, a millionfold understatement. Found on
+    ard-llbyaa-fy-hy-bdr, where the source publishes 9.2 مليون/m² and 4.6 مليار total for 500 m²;
+    those two agree with each other exactly (9,200,000 x 500 = 4,600,000,000), so the page is
+    internally consistent and it is OUR reading that was wrong."""
     m = PPM_RE.search(page_html)
-    v = _num(m.group(1)) if m else None
-    return int(round(v)) if v else None
+    if not m:
+        return None
+    v = magnitude(_num(m.group(1)), m.group(2))
+    return v if v else None
 
 
 def parse_price(page_html: str) -> tuple[Optional[int], Optional[str]]:

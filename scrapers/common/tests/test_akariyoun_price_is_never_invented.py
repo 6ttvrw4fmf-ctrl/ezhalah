@@ -112,6 +112,16 @@ def test_the_themes_translation_table_is_not_a_price():
 
 
 # ── price per meter is READ, never derived ───────────────────────────────────────────────────────
+def test_ppm_carries_its_magnitude_word_too():
+    """«9.2 مليون» per m² was stored as 9 — a millionfold understatement — because parse_ppm read
+    the number and dropped the word. Found on a real listing (ard-llbyaa-fy-hy-bdr) where the
+    source publishes 9.2 مليون/m² AND 4.6 مليار total for 500 m²; 9,200,000 x 500 = 4,600,000,000,
+    so the page agrees with itself and only our reading was wrong."""
+    big = LAND.replace('سعر المتر للأرض</span> : 400', 'سعر المتر للأرض</span> : 9.2 مليون')
+    assert parse_ppm(big) == 9_200_000
+    assert parse_ppm(LAND) == 400, "a plain number must still read as itself"
+
+
 def test_ppm_is_read_from_the_source():
     assert parse_ppm(LAND) == 400
     row, _c, _r = map_listing("ard-x", LAND)
