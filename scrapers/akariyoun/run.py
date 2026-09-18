@@ -269,6 +269,17 @@ TYPE_MAP = {
 COMMERCIAL = {"Office", "Shop", "Warehouse", "Factory", "Showroom"}
 
 
+def _fold_ar(t: str) -> str:
+    """أ إ آ ٱ -> ا, ة -> ه, strip tashkeel. «إستراحة» and «استراحه» are the same word."""
+    t = re.sub(r"[\u0623\u0625\u0622\u0671]", "\u0627", t)
+    t = t.replace("\u0629", "\u0647")
+    t = re.sub(r"[\u064b-\u0652\u0640]", "", t)
+    return t.strip()
+
+
+_TYPE_MAP_FOLDED = {_fold_ar(k): v for k, v in TYPE_MAP.items()}
+
+
 def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:
     """(row, category, raw_price_text). row is None when the page is not a real listing."""
     t = _txt(page_html)
@@ -278,7 +289,7 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
     if not ad or not ptype_ar:
         return None, "residential", None
 
-    ptype = TYPE_MAP.get(ptype_ar.group(1).strip())
+    ptype = _TYPE_MAP_FOLDED.get(_fold_ar(ptype_ar.group(1)))
     if not ptype:
         # AMBIGUOUS-MAPPING ASK-FIRST: an unknown Arabic type is skipped loudly, never guessed
         # into the nearest bucket — a wrong type is a wrong search result.
@@ -410,7 +421,10 @@ def main() -> int:
         # PROVE the word-price before storing it. Pilot verifies every row; a full run verifies
         # only where it is cheap to be wrong — a price that cannot be proven becomes NULL.
         val = row.get("price_total") or row.get("price_annual")
-        if val and args.limit:
+        # _raw is None when the figure came from the spec table — already exact to the riyal, so
+        # there is nothing to prove. Probing it anyway threw away a KNOWN price on the first pilot
+        # (ard-llbyaa-fy-hy-alaaoaly, 3,150,000) because the filter answered differently.
+        if val and _raw and args.limit:
             if not verify_price_is_exact(s, sl, int(val)):
                 print(f"   ⚠ {sl}: «{_raw}» did NOT round-trip to {val} — storing price as NULL")
                 row.pop("price_total", None); row.pop("price_annual", None)

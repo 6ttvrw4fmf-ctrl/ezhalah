@@ -1,0 +1,181 @@
+"""عقاريون writes prices as WORDS. Every test here exists because a real listing was mis-read.
+
+akariyoun.sa renders «السعر : 1 مليون» — the theme formats server-side from a translation table and
+never prints digits in the header. Two different truths exist on the page and using the wrong one
+invents a price, which PRICE = SOURCE forbids outright:
+
+  LAND   publishes the exact riyal figure in the spec table («9766912.00») NEXT TO a rounded worded
+         header («9.77 مليون»). Trusting the words writes 9,770,000 against a real 9,766,912 — a
+         3,088 error WE would have created.
+  BUILT  property renders «-» in that cell. Only the words exist, so they are proven against the
+         site's own numeric price filter before any number is stored; a price that cannot be proven
+         is stored NULL, never the approximation.
+
+Run: python -m pytest scrapers/common/tests/test_akariyoun_price_is_never_invented.py -v
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scrapers.akariyoun.run import (  # noqa: E402
+    _fold_ar, _TYPE_MAP_FOLDED, magnitude, map_listing, parse_age,
+    parse_ppm, parse_price, parse_price_exact,
+)
+
+# A land page: rounded words in the header, the EXACT figure in the spec table.
+LAND = """<html><head><title>ارض للبيع في حي الغنامية - Akariyoun</title></head><body>
+<h5 class="prt-price-fix"><span class="badge badge-success">سعر المتر للأرض</span> : 400 </h5>
+<h5 class="prt-price-fix"><span class="badge badge-success">إجمالي سعر البيع</span> : 9.77 مليون </h5>
+<span>الرياض - الغنامية</span> <p>المساحة: 24,417 m²</p>
+<p>رقم الاعلان : 904</p><p>نوع العقار: ارض</p><p>للبيع</p>
+<td><div class="small" style="color: rgb(33, 107, 194)">إجمالي سعر البيع</div> <div>9766912.00</div></td>
+<a href="https://akariyoun.sa/storage/accounts-1/x/1.webp" class="mfp-gallery"><img src="x"></a>
+</body></html>"""
+
+# A built-property page: «-» in the table, so ONLY the words carry the price.
+VILLA = """<html><head><title>فيلا للبيع في حي الغنامية - Akariyoun</title></head><body>
+<h5 class="prt-price-fix"><span class="badge badge-success">السعر</span> : 1 مليون </h5>
+<span>الرياض - الغنامية</span> <p>المساحة: 383 m²</p><p>عدد الغرف: 6 غرفة</p>
+<p>رقم الاعلان : 973</p><p>نوع العقار: فيلا</p><p>للبيع</p>
+<p>عمر العقار : ثمان سنوات إستخدام الأرض : سكني</p>
+<p>رقم القطعة رقم المخطط رقم البلوك 2699 3022 181</p>
+<td><div class="small" style="color: rgb(33, 107, 194)">إجمالي سعر البيع</div> <div>-</div></td>
+<div class="agent-photo"><img src="https://akariyoun.sa/storage/accounts-4252/x/uuid-not-a-photo"></div>
+<img src="https://akariyoun.sa/storage/website/logo-ar-b.webp">
+<a href="https://akariyoun.sa/storage/accounts-5201/x/2.webp" class="mfp-gallery"><img src="t"></a>
+<a href="https://akariyoun.sa/storage/accounts-5199/x/3.webp" class="mfp-gallery"><img src="t"></a>
+</body></html>"""
+
+
+# ── the exact figure always wins over the words ──────────────────────────────────────────────────
+def test_land_uses_the_exact_table_figure_not_the_rounded_words():
+    assert parse_price_exact(LAND) == 9766912
+    row, _cat, raw = map_listing("ard-x", LAND)
+    assert row["price_total"] == 9766912, "the spec table is exact; «9.77 مليون» is rounded"
+    assert row["price_total"] != 9770000, "9,770,000 is the words — a 3,088 error we would invent"
+    assert raw is None, "an exact figure must report NO raw text, so main() does not re-verify it"
+
+
+def test_built_property_has_no_exact_figure_so_the_words_must_be_proven():
+    assert parse_price_exact(VILLA) is None, "«-» is not a price"
+    row, _cat, raw = map_listing("fyla-x", VILLA)
+    assert row["price_total"] == 1000000
+    assert raw, "a worded price MUST surface its raw text so the caller can prove it exact"
+
+
+def test_an_exact_price_is_never_handed_to_the_verifier():
+    """The first pilot NULLed a known-exact 3,150,000 because main() probed it anyway.
+    The contract that prevents it: raw is None ⟺ the figure came from the table."""
+    _row, _cat, raw_land = map_listing("ard-x", LAND)
+    _row2, _cat2, raw_villa = map_listing("fyla-x", VILLA)
+    assert raw_land is None and raw_villa is not None
+
+
+# ── the word arithmetic itself ───────────────────────────────────────────────────────────────────
+def test_magnitude_words():
+    assert magnitude(1, "مليون") == 1_000_000
+    assert magnitude(1.5, "مليون") == 1_500_000
+    assert magnitude(800, "الف") == 800_000
+    assert magnitude(800, "ألف") == 800_000
+    assert magnitude(2, "مليار") == 2_000_000_000
+    assert magnitude(None, "مليون") is None
+
+
+def test_the_themes_translation_table_is_not_a_price():
+    """The page ships `window.trans = {"million": "مليون"}` inside a <script>. If scripts were not
+    stripped before reading text, that word could be picked up as a listing's price."""
+    # Strip the real header price, leaving the word ONLY inside a <script>. If scripts are not
+    # removed before reading text, the fallback text path picks up 999 مليون as this listing's
+    # price. (parse_price prefers the header regex, so the header must be gone for this to bite.)
+    no_header = VILLA.replace(
+        '<h5 class="prt-price-fix"><span class="badge badge-success">السعر</span> : 1 مليون \ue900</h5>',
+        '')
+    poisoned = no_header.replace("<body>", '<body><script>window.trans={"million":"مليون"};'
+                                           'var x="السعر : 999 مليون";</script>')
+    row, _c, _r = map_listing("fyla-x", poisoned)
+    got = row.get("price_total")
+    assert got != 999_000_000, "a price must never come out of a <script> block"
+    assert got is None, "with no published price, the answer is UNKNOWN — never a scraped artefact"
+
+
+# ── price per meter is READ, never derived ───────────────────────────────────────────────────────
+def test_ppm_is_read_from_the_source():
+    assert parse_ppm(LAND) == 400
+    row, _c, _r = map_listing("ard-x", LAND)
+    assert row["price_per_meter"] == 400
+    # 24,417 m² x 400 = 9,766,800, but the published total is 9,766,912. They DIFFER — proof the
+    # total is read from the source and not computed from ppm x area.
+    assert row["price_total"] != row["price_per_meter"] * row["area_m2"]
+
+
+# ── the three parser bugs found on real pages ────────────────────────────────────────────────────
+def test_district_stops_at_the_next_label():
+    """Taking a fixed two words produced «الغنامية السعر» on the very first listing tested."""
+    row, _c, _r = map_listing("fyla-x", VILLA)
+    assert row["neighborhood"] == "الغنامية"
+    row2, _c2, _r2 = map_listing("ard-x", LAND)
+    assert row2["neighborhood"] == "الغنامية", "land reads «سعر المتر» next, not «السعر»"
+
+
+def test_plot_plan_block_are_three_distinct_numbers():
+    """The table prints three HEADERS then three VALUES, so a per-label regex returned the first
+    number for every label — plot == plan == 2699."""
+    row, _c, _r = map_listing("fyla-x", VILLA)
+    ai = row["additional_info"]
+    assert (ai["plot_no"], ai["plan_no"], ai["block_no"]) == ("2699", "3022", "181")
+
+
+def test_the_riyal_icon_glyph_never_reaches_the_stored_text():
+    _row, _c, raw = map_listing("fyla-x", VILLA)
+    assert "" not in raw, "U+E900 is an icon font glyph, not a character"
+
+
+# ── photos are scoped to the gallery, not blocklisted ────────────────────────────────────────────
+def test_photos_come_only_from_the_gallery_anchor():
+    row, _c, _r = map_listing("fyla-x", VILLA)
+    ph = row["photo_urls"]
+    assert len(ph) == 2 and all(u.endswith(".webp") for u in ph)
+    assert not any("accounts-4252" in u for u in ph), "that is the AGENT avatar, not the property"
+    assert not any("/storage/website/" in u for u in ph), "that is the site logo"
+
+
+# ── Arabic orthography: the same word, written differently ───────────────────────────────────────
+def test_alef_and_ta_marbuta_variants_map_to_the_same_type():
+    """«إستراحة» (hamza-under-alef) was skipped as an unmapped type on the first pilot while
+    «استراحة» mapped fine — the same word, one orthographic variant apart."""
+    for variant in ("إستراحة", "استراحة", "استراحه", "اسْتراحة"):
+        assert _TYPE_MAP_FOLDED.get(_fold_ar(variant)) == "Rest House", variant
+    assert _TYPE_MAP_FOLDED.get(_fold_ar("أرض")) == "Residential Land"
+    # ...and through map_listing itself. Asserting only on the dict tested the TABLE, not the code
+    # path: a mutation that reverted map_listing to the unfolded lookup left this file green.
+    for variant in ("إستراحة", "استراحه"):
+        page = VILLA.replace("نوع العقار: فيلا", f"نوع العقار: {variant}")
+        row, _c, _r = map_listing("x", page)
+        assert row is not None and row["property_type"] == "Rest House", variant
+
+
+def test_age_accepts_arabic_word_numerals():
+    assert parse_age("ثمان سنوات") == 8
+    assert parse_age("سنتين") == 2
+    assert parse_age("جديد") == 0
+    assert parse_age("١٢ سنة") == 12
+    assert parse_age(None) is None
+
+
+def test_an_unmapped_type_is_skipped_not_guessed():
+    """AMBIGUOUS-MAPPING ASK-FIRST: a type we do not know must not fall into the nearest bucket."""
+    weird = VILLA.replace("نوع العقار: فيلا", "نوع العقار: قبو")
+    row, _c, _r = map_listing("x", weird)
+    assert row is None
+
+
+# ── source truth: an unmentioned service is UNKNOWN, not absent ───────────────────────────────────
+def test_unmentioned_services_are_null_never_false():
+    row, _c, _r = map_listing("fyla-x", VILLA)
+    assert row["electricity"] is None and row["water_supply"] is None, \
+        "SOURCE IS TRUTH — silent means NULL, never a confirmed 'no'"
