@@ -43,14 +43,19 @@ _NEXT_RE = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
 # merely rendered is not. The challenge is JS, so scripts must never be blocked.
 _BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
 
-_NAV_TIMEOUT_MS = int(os.environ.get("WASALT_BROWSER_NAV_TIMEOUT_MS", "90000"))
+# FAIL FAST, TRY MORE EXITS. Measured 2026-09-18 with sticky sessions on: 9 of 20 slices succeed,
+# and every failure is net::ERR_TIMED_OUT — roughly half the sticky exits simply cannot reach
+# wasalt.sa. A good exit connects in a few seconds, so a 90s wait bought nothing and just spent the
+# budget: 3 attempts x 90s = one slow failure. At ~50% per attempt the arithmetic is
+# 1-(0.5^n): 3 tries = 88%, 6 tries = 98%. Short timeout + more attempts beats a long timeout.
+_NAV_TIMEOUT_MS = int(os.environ.get("WASALT_BROWSER_NAV_TIMEOUT_MS", "30000"))
 _CHALLENGE_WAIT_MS = int(os.environ.get("WASALT_BROWSER_CHALLENGE_WAIT_MS", "5000"))
 _CHALLENGE_ROUNDS = int(os.environ.get("WASALT_BROWSER_CHALLENGE_ROUNDS", "6"))
 # A residential proxy rotates exits, and a dead exit shows up as ERR_TIMED_OUT. The http path has
 # always had a retry ladder with s.rotate() between attempts; the browser path shipped without one
 # and its first real run came back 2 slices OK / 4 timed out. Same ladder, same reason.
-_ATTEMPTS = int(os.environ.get("WASALT_BROWSER_ATTEMPTS", "3"))
-_BACKOFF_S = float(os.environ.get("WASALT_BROWSER_BACKOFF_S", "3"))
+_ATTEMPTS = int(os.environ.get("WASALT_BROWSER_ATTEMPTS", "6"))
+_BACKOFF_S = float(os.environ.get("WASALT_BROWSER_BACKOFF_S", "1.5"))
 
 # DataImpulse sticky-session ports. 823 is the ROTATING gateway (a new exit per connection); any
 # port in the sticky range pins one exit for the session. Values match the plan shown on the
