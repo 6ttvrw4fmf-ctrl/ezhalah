@@ -45,6 +45,11 @@ _BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
 _NAV_TIMEOUT_MS = int(os.environ.get("WASALT_BROWSER_NAV_TIMEOUT_MS", "90000"))
 _CHALLENGE_WAIT_MS = int(os.environ.get("WASALT_BROWSER_CHALLENGE_WAIT_MS", "5000"))
 _CHALLENGE_ROUNDS = int(os.environ.get("WASALT_BROWSER_CHALLENGE_ROUNDS", "6"))
+# A residential proxy rotates exits, and a dead exit shows up as ERR_TIMED_OUT. The http path has
+# always had a retry ladder with s.rotate() between attempts; the browser path shipped without one
+# and its first real run came back 2 slices OK / 4 timed out. Same ladder, same reason.
+_ATTEMPTS = int(os.environ.get("WASALT_BROWSER_ATTEMPTS", "3"))
+_BACKOFF_S = float(os.environ.get("WASALT_BROWSER_BACKOFF_S", "3"))
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
@@ -132,13 +137,8 @@ class BrowserFetcher:
         else:
             route.continue_()
 
-    def next_data(self, url: str) -> Optional[dict]:
-        """Return the page's parsed __NEXT_DATA__, or None if the page never produced one.
-
-        None means "no parseable answer" — the caller must treat that as INVALID, never as an
-        empty result set. That distinction is the whole point of fetch_page()'s `valid` flag: a
-        challenge shell and a genuinely empty category must not look alike.
-        """
+    def _next_data_once(self, url: str) -> Optional[dict]:
+        """One attempt. See next_data() for the retry ladder."""
         try:
             self._ensure()
         except Exception as e:
@@ -176,6 +176,39 @@ class BrowserFetcher:
                 page.close()
             except Exception:
                 pass
+
+    def _recycle(self) -> None:
+        """Tear the context down so the next attempt gets a NEW proxy exit.
+
+        The residential pool hands out a different exit per connection, so recreating the context
+        is the browser equivalent of the http path's s.rotate() — retrying on the same dead exit
+        would just spend the ladder for nothing.
+        """
+        for obj, meth in ((self._ctx, "close"), (self._browser, "close")):
+            if obj is not None:
+                try:
+                    getattr(obj, meth)()
+                except Exception:
+                    pass
+        self._ctx = self._browser = None
+
+    def next_data(self, url: str) -> Optional[dict]:
+        """Return the page's parsed __NEXT_DATA__, or None if no attempt produced one.
+
+        None means "no parseable answer" — the caller must treat that as INVALID, never as an
+        empty result set. That distinction is the whole point of fetch_page()'s `valid` flag: a
+        challenge shell and a genuinely empty category must not look alike.
+        """
+        import time as _t
+        for attempt in range(_ATTEMPTS):
+            data = self._next_data_once(url)
+            if data is not None:
+                return data
+            if attempt < _ATTEMPTS - 1:
+                print(f"   ↻ wasalt browser retry {attempt + 2}/{_ATTEMPTS} on a fresh proxy exit")
+                self._recycle()
+                _t.sleep(_BACKOFF_S * (attempt + 1))
+        return None
 
     def close(self) -> None:
         for obj, meth in ((self._ctx, "close"), (self._browser, "close"), (self._pw, "stop")):
