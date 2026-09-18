@@ -178,57 +178,78 @@ def test_images_and_fonts_are_blocked_but_scripts_are_not():
     assert {"image", "font", "media"} <= B._BLOCKED_RESOURCE_TYPES
 
 
-# ── 5. the exit hunt is per-RUN, not per-PAGE — EXECUTED, not grepped ────────────────────────────
+# ── 6. the driver starts ONCE per process — EXECUTED against a stub playwright ────────────────────
 #
-# Roughly half the sticky exits cannot reach wasalt.sa at all. With the hunt buried inside each
-# page fetch, every page re-gambled and a multi-page slice compounded the loss: 11 failed / 6 passed
-# in run 35385249567. _ensure_warm() hunts ONCE and keeps the winner, so the rest of the run reuses
-# a proven exit (and its challenge cookie).
+# _recycle() drops the browser+context to get a new proxy exit but KEEPS the driver. _ensure() used
+# to call sync_playwright().start() unconditionally, so the first recycle started a SECOND driver in
+# the same thread and Playwright refused it:
+#     "It looks like you are using Playwright Sync API inside the asyncio loop."
+# Chromium then never launched, so every slice reported "no __NEXT_DATA__" and the failure was
+# indistinguishable from a Cloudflare block. Measured in CI as recycling increased: 9/20 -> 6/20 ->
+# 3/20 slices. This test executes the real _ensure/_recycle against a stub driver and counts starts.
 
-class _StubFetcher:
-    """Executes the REAL _ensure_warm/_next_data_once against scripted warm-up outcomes."""
-
-    def __init__(self, warms):
-        self._warms = list(warms)
-        self.ensures = 0
-        self.recycles = 0
-        self._browser = self._ctx = None
-
-    def _ensure(self):
-        self.ensures += 1
-
-    def _recycle(self):
-        self.recycles += 1
-
-    def _warm(self):
-        return self._warms.pop(0) if self._warms else False
-
-    # the real methods under test
-    _ensure_warm = B.BrowserFetcher._ensure_warm
+class _StubPage:
+    def close(self): pass
 
 
-def test_a_dead_exit_is_recycled_and_the_next_one_tried():
-    f = _StubFetcher([False, False, True])
-    assert f._ensure_warm() is True
-    assert f.ensures == 3, "each attempt must build a fresh context"
-    assert f.recycles == 2, "a dead exit must be recycled so the next attempt gets a DIFFERENT one"
+class _StubCtx:
+    def add_init_script(self, *a, **k): pass
+    def route(self, *a, **k): pass
+    def new_page(self): return _StubPage()
+    def close(self): pass
 
 
-def test_the_hunt_gives_up_rather_than_looping_forever():
-    f = _StubFetcher([])  # every exit dead
-    assert f._ensure_warm() is False
-    assert f.ensures == B._WARM_ATTEMPTS, "bounded: a total outage must not spin"
+class _StubBrowser:
+    def new_context(self, **k): return _StubCtx()
+    def close(self): pass
 
 
-def test_a_good_exit_is_found_without_wasting_attempts():
-    f = _StubFetcher([True])
-    assert f._ensure_warm() is True
-    assert (f.ensures, f.recycles) == (1, 0), "a working first exit must be kept, not recycled"
+class _StubChromium:
+    def launch(self, **k): return _StubBrowser()
 
 
-def test_page_fetch_goes_through_the_warm_hunt_not_bare_ensure():
-    # The whole point of the change: if _next_data_once still called _ensure directly, the hunt
-    # would exist and do nothing.
-    body = _code_only(inspect.getsource(B.BrowserFetcher._next_data_once))
-    assert "_ensure_warm()" in body, "the page fetch must use the proven-exit hunt"
-    assert "self._ensure()" not in body, "bypassing the hunt re-introduces the per-page gamble"
+class _StubDriver:
+    def __init__(self): self.chromium = _StubChromium()
+    def stop(self): pass
+
+
+def test_recycling_does_not_start_a_second_playwright_driver(monkeypatch):
+    starts = []
+
+    class _Factory:
+        def start(self):
+            starts.append(1)
+            return _StubDriver()
+
+    import playwright.sync_api as _sa
+    monkeypatch.setattr(_sa, "sync_playwright", lambda: _Factory())
+    monkeypatch.delenv("WASALT_PROXY_URL", raising=False)
+
+    f = B.BrowserFetcher()
+    f._ensure()
+    for _ in range(5):          # what _ensure_warm does while hunting a live exit
+        f._recycle()
+        f._ensure()
+
+    assert starts == [1], (
+        f"sync_playwright().start() ran {len(starts)}x — a second driver in one thread raises "
+        f"'Playwright Sync API inside the asyncio loop' and Chromium never launches"
+    )
+
+
+def test_close_still_stops_the_driver(monkeypatch):
+    # The guard must not turn into a leak: the ONE driver still has to be stopped at the end.
+    stopped = []
+
+    class _D(_StubDriver):
+        def stop(self): stopped.append(1)
+
+    import playwright.sync_api as _sa
+    monkeypatch.setattr(_sa, "sync_playwright", lambda: type("F", (), {"start": lambda s: _D()})())
+    monkeypatch.delenv("WASALT_PROXY_URL", raising=False)
+
+    f = B.BrowserFetcher()
+    f._ensure()
+    f.close()
+    assert stopped == [1], "close() must stop the driver it started"
+    assert f._pw is None, "close() must clear the driver so a later _ensure can start a fresh one"

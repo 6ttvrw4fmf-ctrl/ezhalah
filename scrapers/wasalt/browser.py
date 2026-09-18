@@ -65,9 +65,6 @@ _STICKY_LO = int(os.environ.get("WASALT_PROXY_STICKY_LO", "10000"))
 _STICKY_HI = int(os.environ.get("WASALT_PROXY_STICKY_HI", "20000"))
 _STICKY = os.environ.get("WASALT_BROWSER_STICKY", "1").strip().lower() not in ("0", "false", "no")
 
-# How many sticky exits to try before giving up on finding one that can reach the origin at all.
-_WARM_ATTEMPTS = int(os.environ.get("WASALT_BROWSER_WARM_ATTEMPTS", "8"))
-_ORIGIN = os.environ.get("WASALT_ORIGIN", "https://wasalt.sa")
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
@@ -127,7 +124,14 @@ class BrowserFetcher:
         if self._ctx is not None:
             return
         from playwright.sync_api import sync_playwright  # imported lazily: only this path needs it
-        self._pw = sync_playwright().start()
+        # START THE DRIVER ONCE PER PROCESS. _recycle() drops the browser and context to get a new
+        # proxy exit, but must NOT drop the driver: a second sync_playwright().start() in the same
+        # thread fails with "Playwright Sync API inside the asyncio loop" — the first driver's loop
+        # is still running. That error is what a recycle used to produce, so the browser never
+        # launched at all and the whole slice returned no __NEXT_DATA__. Measured across three CI
+        # runs: the more the code recycled, the worse it got (9/20 -> 6/20 -> 3/20 slices).
+        if self._pw is None:
+            self._pw = sync_playwright().start()
         args = [
             # Without this, navigator.webdriver and the CDP surface give the automation away and
             # Cloudflare serves the challenge forever.
@@ -159,48 +163,6 @@ class BrowserFetcher:
             "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
         self._ctx.route("**/*", self._route)
 
-    def _warm(self) -> bool:
-        """Prove this exit can actually clear the challenge, before any real page is requested.
-
-        WHY THIS EXISTS. Roughly half the sticky exits cannot reach wasalt.sa at all. Without a
-        warm-up, EVERY page independently gambles on a fresh exit — and a slice fetches several
-        pages, so the failure compounds: measured 9/20 slices even with 6 attempts per page.
-        Hunting for a good exit ONCE per process and then keeping it turns a per-page gamble into a
-        per-run one, and the challenge cookie the warm-up earns is reused by every later page in
-        the same context (so later pages are also faster).
-        """
-        page = self._ctx.new_page()
-        try:
-            page.goto(f"{_ORIGIN}/en", wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
-            for _ in range(_CHALLENGE_ROUNDS):
-                html = page.content()
-                if "__NEXT_DATA__" in html:
-                    return True
-                if not (("Just a moment" in html) or ("_cf_chl_opt" in html)):
-                    # neither a challenge nor a real page — a proxy error shell
-                    return False
-                page.wait_for_timeout(_CHALLENGE_WAIT_MS)
-            return "__NEXT_DATA__" in page.content()
-        except Exception:
-            return False
-        finally:
-            try:
-                page.close()
-            except Exception:
-                pass
-
-    def _ensure_warm(self) -> bool:
-        """Get a context that has PROVEN it can reach wasalt.sa, recycling dead exits."""
-        for attempt in range(_WARM_ATTEMPTS):
-            self._ensure()
-            if self._warm():
-                if attempt:
-                    print(f"   ✓ wasalt browser: working proxy exit found on attempt {attempt + 1}")
-                return True
-            print(f"   ↻ wasalt browser: exit {attempt + 1}/{_WARM_ATTEMPTS} cannot reach wasalt.sa")
-            self._recycle()
-        return False
-
     @staticmethod
     def _route(route, request) -> None:
         if request.resource_type in _BLOCKED_RESOURCE_TYPES:
@@ -211,9 +173,7 @@ class BrowserFetcher:
     def _next_data_once(self, url: str) -> Optional[dict]:
         """One attempt. See next_data() for the retry ladder."""
         try:
-            if not self._ensure_warm():
-                print("   ⚠ wasalt browser: no proxy exit could reach wasalt.sa")
-                return None
+            self._ensure()
         except Exception as e:
             # A browser that never launched is a DIFFERENT failure from a challenge that never
             # cleared, and the caller only sees None for both. Say which, or the next person
