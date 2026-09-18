@@ -130,15 +130,15 @@ jobs:
           #                 post states a price, so 15 carry NULL — a SOURCE fact, never inferred.
           #   shmoualshmal   6 posts, all Tabuk. The site publishes NO price at all (it shows
           #                 «اتصل»), so every price column is NULL by design. See each run.py.
-          - { source: alta,         cmd: "python -m scrapers.alta.run --type all" }
-          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all" }
+          - { source: alta,         cmd: "python -m scrapers.alta.run --type all", every_n_days: 2 }
+          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all", every_n_days: 2 }
           # Two more GREEN-audited additions (owner-instructed 2026-09-06).
           #   remal   87 posts -> 84 listings. class_list carries city/type/offer; images bind by
           #           attachment PARENT because the detail page renders OTHER listings' photos.
           #   amaall  135 posts -> 50 listings, ARABIC ONLY: the site publishes every listing twice
           #           (68 EN + 67 AR), so taking both languages would double every property.
-          - { source: remal,        cmd: "python -m scrapers.remal.run --type all" }
-          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all" }
+          - { source: remal,        cmd: "python -m scrapers.remal.run --type all", every_n_days: 2 }
+          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all", every_n_days: 2 }
           # abwbna (owner-instructed 2026-09-06): a DIFFERENT TENANT of the SAME Nuzul SaaS platform
           # aldarim already scrapes (same S3 bucket family, same public JSON API shape). Full crawl +
           # prune, same as aldarim — not a --type flag scraper.
@@ -204,8 +204,17 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "0.3"
           # 24.com.sa's Cloudflare serves datacenter IPs a listing-less shell, so souq24 needs the
-          # Saudi residential proxy from the cloud (reuses the Wasalt proxy secret). Every other
-          # source's scraper ignores this var, so it's harmless to expose matrix-wide.
+          # Saudi residential proxy from the cloud (reuses the Wasalt proxy secret).
+          #
+          # "Every other source's scraper ignores this var, so it's harmless to expose matrix-wide"
+          # — that WAS the comment here and it was FALSE (corrected 2026-09-18). alta, remal,
+          # shmoualshmal and amaall all read WASALT_PROXY_URL in their own session() and have been
+          # silently spending metered Saudi residential bandwidth. They genuinely need A proxy (the
+          # runner's datacenter IP is blocked — measured on alta, six taxonomy requests burned
+          # 3m40s), so they are not moved off it here; instead they drop to every_n_days: 2, the
+          # same lever souq24 already uses. Between them they carry ~180 listings, so the cadence
+          # costs almost nothing and the saving is small — the real spend is wasalt's own crawl.
+          # Before adding a source here, check whether its session() reads WASALT_PROXY_URL.
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
         run: |
           # Per-source cadence (owner 2026-07-07): most small sources run daily (every_n_days unset = 1),
