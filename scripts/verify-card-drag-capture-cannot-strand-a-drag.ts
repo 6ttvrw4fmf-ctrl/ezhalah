@@ -34,12 +34,15 @@
 //   node --experimental-strip-types scripts/verify-card-drag-capture-cannot-strand-a-drag.ts
 //   (discovered automatically by `npm test` — see scripts/lib/testRegistry.ts)
 
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { npmTestRuns } from './lib/testRegistry.ts';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+const SOURCE = join(ROOT, 'src/lib/cardDrag.ts');
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
   if (ok) { console.log(`PASS  ${label}`); return; }
@@ -99,11 +102,52 @@ const move = (x: number, y: number, pointerId = 1) => ({ pointerId, clientX: x, 
 // (`cl + (v - cl) * 0.35` with `v === cl`), so a clamped-to-itself move paints exactly `v`.
 const IDENTITY_CLAMP = (p: { x: number; y: number }) => p;
 
-const attach = (await liftSymbols(
-  join(ROOT, 'src/lib/cardDrag.ts'),
+type Attach = (n: unknown, gr: unknown, o: unknown) => () => void;
+
+/** Lift the REAL `attachCardDrag` out of a file — the shipped one, or a mutated copy of it. */
+const liftAttach = async (file: string): Promise<Attach> => (await liftSymbols(
+  file,
   [{ header: 'export function attachCardDrag(' }],
   ['attachCardDrag'],
-)).attachCardDrag as (n: unknown, gr: unknown, o: unknown) => () => void;
+)).attachCardDrag as Attach;
+
+const attach = await liftAttach(SOURCE);
+
+// ── THE ORACLE, as a function of an implementation ───────────────────────────────────────────────
+// Stated once, applied twice: to the shipped code below, and to a MUTATED COPY OF THE REAL FILE in
+// the mutation-proof section. Never to a hand-written stand-in — a barrier that tests a copy of
+// production code is a test that passes while production breaks (the 2026-08-29 extractPrice case).
+type Problem = { label: string; detail: string };
+function dragProblems(impl: Attach): Problem[] {
+  const out: Problem[] = [];
+  const bad = (label: string, detail: string) => out.push({ label, detail });
+
+  // The Sentry case: a throwing capture must not escape, and must not strand the grab offset.
+  {
+    const s = makeSurface({ captureThrows: NOT_FOUND });
+    impl(s.node, s.grip, { clamp: IDENTITY_CLAMP });
+    let threw: unknown = null;
+    try { s.handlers.pointerdown(down(100, 100)); } catch (e) { threw = e; }
+    if (threw !== null) bad('escape', `pointerdown threw ${String(threw).slice(0, 90)}`);
+    s.handlers.pointermove(move(150, 140));
+    const p = s.painted();
+    if (!p || p.x !== 50 || p.y !== 40) bad('delta', `painted ${JSON.stringify(p)}, expected {"x":50,"y":40}`);
+    if (s.grip.style.cursor !== 'grabbing') bad('cursor', `cursor is ${JSON.stringify(s.grip.style.cursor)}`);
+  }
+  // The stickiness: one throw must not poison the NEXT drag on the same surface.
+  {
+    const s = makeSurface({ captureThrows: NOT_FOUND });
+    impl(s.node, s.grip, { clamp: IDENTITY_CLAMP });
+    try { s.handlers.pointerdown(down(100, 100)); } catch { /* counted above */ }
+    s.handlers.pointermove(move(150, 140));
+    try { s.handlers.pointerup(); } catch { /* counted by E */ }
+    try { s.handlers.pointerdown(down(300, 300)); } catch { /* counted above */ }
+    s.handlers.pointermove(move(320, 330));
+    const p = s.painted();
+    if (!p || p.x !== 70 || p.y !== 70) bad('sticky', `painted ${JSON.stringify(p)}, expected {"x":70,"y":70}`);
+  }
+  return out;
+}
 
 // ── A. THE SENTRY CASE: a throwing capture must not escape the handler ───────────────────────────
 {
@@ -181,6 +225,55 @@ const attach = (await liftSymbols(
     threw === null, `pointerup threw ${String(threw)}`);
   check('E2. release was still attempted', s.releaseCalls.length === 1);
 }
+
+// ── MUTATION PROOF ───────────────────────────────────────────────────────────────────────────────
+// Not a description of a proof — an executable one, and against the REAL FILE rather than a
+// hand-written stand-in. The shipped source is transformed back into the exact pre-fix shape
+// (capture called FIRST and UNGUARDED), lifted, and run through the SAME oracle the checks above
+// use. A barrier that cannot be shown failing against the defect it claims to guard is decoration.
+//
+// Both anchors are asserted to occur EXACTLY once before the edit, so a reformat of cardDrag.ts
+// fails loudly here instead of silently mutating nothing and "proving" the barrier works.
+const GUARDED = '    try { grip.setPointerCapture(id); } catch { /* uncaptured: still tracks while over the grip */ }\n';
+const ANCHOR = '    dragging = true; moved = false; id = e.pointerId;\n';
+
+const mustCatch = (label: string, run: () => Promise<boolean>) => run().then(
+  (caught) => {
+    if (caught) { console.log(`PASS  (mutation) catches ${label}`); return; }
+    failures++;
+    console.error(`FAIL  (mutation) MISSED ${label} — this barrier cannot fail against the defect it guards`);
+  },
+  (e) => { console.log(`PASS  (mutation) catches ${label} (mutant threw: ${String(e).slice(0, 60)})`); },
+);
+
+const occurrences = (hay: string, needle: string) => hay.split(needle).length - 1;
+
+await mustCatch('the pre-fix shape: setPointerCapture called FIRST and unguarded', async () => {
+  const src = readFileSync(SOURCE, 'utf8');
+  if (occurrences(src, GUARDED) !== 1) {
+    throw new Error(`the guarded capture line is not present exactly once in ${SOURCE} — `
+      + `this proof mutates the real file and must be updated with it`);
+  }
+  if (occurrences(src, ANCHOR) !== 1) {
+    throw new Error(`the pointerdown anchor is not present exactly once in ${SOURCE}`);
+  }
+  // Remove the guard, and put the bare call back where it used to be: before grabX/grabY are set.
+  const mutated = src.replace(GUARDED, '').replace(ANCHOR, ANCHOR + '    grip.setPointerCapture(id);\n');
+  const file = join(mkdtempSync(join(tmpdir(), 'ezhalah-carddrag-mutant-')), 'cardDrag.ts');
+  writeFileSync(file, mutated);
+  const problems = dragProblems(await liftAttach(file));
+  // The mutant must be caught on the SPECIFIC shapes this barrier exists for, not merely "somehow".
+  const labels = problems.map((p) => p.label).sort().join(',');
+  const caught = ['escape', 'delta', 'cursor', 'sticky'].every((l) => problems.some((p) => p.label === l));
+  if (!caught) console.error(`      mutant produced only: ${labels || '(nothing)'}`);
+  return caught;
+});
+
+// The mirror direction: the SHIPPED file must produce no problems at all. Without this, a mutation
+// proof that flagged everything unconditionally would still read as green.
+check('the shipped cardDrag.ts produces no problems under the same oracle',
+  dragProblems(attach).length === 0,
+  dragProblems(attach).map((p) => `${p.label}: ${p.detail}`).join('; '));
 
 // ── F. WIRING ────────────────────────────────────────────────────────────────────────────────────
 // Never string-match package.json for this — the registry guard rejects that pattern outright, and
