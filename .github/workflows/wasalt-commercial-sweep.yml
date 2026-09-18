@@ -44,12 +44,19 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          # PROXY DELIBERATELY NOT SET (2026-09-18). Measured: a headed Chromium reads
-          # wasalt.sa DIRECT in 4.7s with the challenge cleared, so the metered Saudi
-          # proxy buys nothing here and wasalt now costs zero proxy bandwidth. If the
-          # runner's IP is ever treated differently from a laptop's, set
-          # WASALT_PROXY_URL here again — scrapers/wasalt/browser.py already honours it,
-          # no code change needed.
+          # BROWSER + PROXY. Measured 2026-09-18, in this order:
+          #   headed Chromium, laptop IP, no proxy   -> 200, challenge cleared, 32 listings
+          #   headed Chromium, RUNNER IP, no proxy   -> 403, challenge NEVER clears (29KB shell)
+          # So a real browser is necessary but not sufficient: Cloudflare also judges the IP, and a
+          # GitHub datacenter IP is refused however real the browser is. That is the same two-factor
+          # shape issue #1019 found, with the factors now being (IP reputation) x (JS execution)
+          # rather than (IP) x (TLS fingerprint).
+          #
+          # Real-browser + residential-proxy is the ONE cell #1019 never tested — it tried
+          # plain-TLS+proxy, chrome124+proxy, no-impersonate+proxy and chrome124+direct, all of
+          # which either 403 or hang. The browser supplies the JS execution the challenge demands
+          # and the proxy supplies the residential IP it demands.
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
           WASALT_BROWSER: "1"
           SCRAPE_MIN_INTERVAL: "0.4"
         run: |
