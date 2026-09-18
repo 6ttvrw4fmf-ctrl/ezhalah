@@ -1,0 +1,436 @@
+"""عقاريون / Akariyoun — akariyoun.sa. Riyadh-only, Laravel + the "Resido" theme, server-rendered.
+
+RECON, probed live 2026-09-18 BEFORE a line of this was written (the checklist's rule, and the one
+I broke an hour earlier by reading page 1 and reporting "21 listings" for a site that has 274):
+
+  · /properties?page=1..31 — 9 cards a page, page 32 is empty. 274 DISTINCT slugs.
+  · Riyadh only, and the site says so itself: «حاليًا الأعلانات حصريه فقط على مدينة الرياض».
+  · Plain nginx. NO Cloudflare (no cf-ray, no cf-cache), robots.txt allows everything, and a
+    direct request answers in 1-3s. NO PROXY — see the souq24 lesson (PR #3138): a proxy hop we
+    did not need was the entire reason that scraper looked blocked for weeks.
+  · NO related-listings block. A detail page links ZERO other listings, so — unlike remal, where
+    the page shows neighbours and naive scraping put a neighbour's photo on the card — the photos
+    and fields on this page all belong to this listing. Verified by counting cross-links: 0.
+
+★ THE PRICE IS WRITTEN IN WORDS, AND THE WORDS ARE EXACT.
+
+The page renders «السعر : 1 مليون», never digits — the theme ships a translation table
+(`window.trans = {"million": "مليون", "billion": "مليار"}`) and formats server-side. Storing
+1,000,000 off the back of that would be INVENTING a price if the real figure were 1,012,500, which
+PRICE = SOURCE forbids outright.
+
+So it was PROVEN, not assumed, using the site's own numeric price filter
+(/properties?min_price=&max_price= are `<input type="number">`):
+
+    listing shows «1 مليون»    min=max=1,000,000      -> FOUND (1 in band)
+    listing shows «1.5 مليون»  min=max=1,500,000      -> FOUND
+                               1,400,000..1,499,999   -> absent
+                               1,500,001..1,599,999   -> absent
+
+i.e. the rendered words round-trip to an exact figure. `verify_price_is_exact()` below re-runs that
+probe, and the pilot runs it on every listing: if ANY listing's words do not round-trip, its price
+is left NULL rather than guessed. A word we cannot pin is an UNKNOWN, never a number.
+
+FIELDS (all from the detail page, one listing's own markup):
+  السعر : 1 مليون                    -> price_total / price_annual   (word magnitude, see above)
+  غرفة: 6 · عدد الغرف: 6 غرفة        -> bedrooms
+  المساحة: 383 m² · مساحة العقار      -> area_m2
+  نوع العقار: فيلا                    -> property_type
+  للبيع / للإيجار                     -> transaction_type
+  الرياض - الغنامية                   -> city / neighborhood
+  رقم الاعلان : 973                   -> ad_number
+  عمر العقار : ثمان سنوات             -> property_age  (ALSO a word numeral)
+  الواجهة: غربية                      -> direction
+  الحد الغربي شارع 10 20.01م          -> street_width_m (the boundary that IS a street)
+  رقم القطعة / رقم المخطط             -> plan_parcel
+  الخدمات: شبكة الكهرباء/المياه/الصرف -> electricity / water_supply / sanitation
+  المشاهدات                           -> views_count
+  maps?q=<lat>,<lng>                  -> additional_info.lat/lng
+
+PHOTOS come ONLY from `<a class="mfp-gallery" href=...>`. The page also carries the agent's
+avatar (`agent-photo`, a /storage/accounts-NNNN/<uuid> with no numeric filename), the site logos
+(/storage/website/…, logo2.png) and a Google-maps pin icon — none are property photos. Scoping to
+the gallery anchor excludes all of them by construction rather than by a blocklist.
+"""
+from __future__ import annotations
+
+import argparse
+import html
+import re
+import sys
+import time
+from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import unquote
+
+from curl_cffi import requests as cc
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scrapers.common import db, normalize  # noqa: E402
+
+SOURCE = "عقاريون"
+BASE = "https://akariyoun.sa"
+LIST_URL = f"{BASE}/properties"
+MAX_PAGES = 60           # page 32 was empty on 2026-09-18; headroom, the walk stops on an empty page
+_MIN_INTERVAL = 0.35
+_last = 0.0
+
+
+def _throttle() -> None:
+    global _last
+    dt = time.monotonic() - _last
+    if dt < _MIN_INTERVAL:
+        time.sleep(_MIN_INTERVAL - dt)
+    _last = time.monotonic()
+
+
+def session() -> cc.Session:
+    # impersonate OWNS the User-Agent — never set a UA header alongside it (rakez 403'd every
+    # endpoint when we did). No proxy: akariyoun answers a direct request, see the docstring.
+    return cc.Session(impersonate="chrome124")
+
+
+def _get(s: cc.Session, url: str, attempts: int = 3) -> Optional[str]:
+    for i in range(attempts):
+        _throttle()
+        try:
+            r = s.get(url, timeout=40, allow_redirects=True)
+        except Exception:
+            time.sleep(1.5 * (i + 1)); continue
+        if r.status_code == 200:
+            return r.text
+        if r.status_code == 404:
+            return None                      # a real "gone", not a transient failure
+        time.sleep(1.5 * (i + 1))
+    return None
+
+
+# ── text helpers ─────────────────────────────────────────────────────────────────────────────────
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def _txt(h: str) -> str:
+    """Visible text: scripts and styles stripped FIRST, so the theme's translation table
+    (which contains the literal words مليون/ألف) can never be mistaken for a listing's price."""
+    b = re.sub(r"<script.*?</script>", " ", h, flags=re.S)
+    b = re.sub(r"<style.*?</style>", " ", b, flags=re.S)
+    t = html.unescape(re.sub(r"<[^>]+>", " ", b))
+    # The theme draws the riyal symbol with an icon font, so the text carries a Private Use Area
+    # glyph (U+E900) that is not a character — it would otherwise ride along in the price text.
+    t = re.sub(r"[\ue000-\uf8ff]", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _num(v: Optional[str]) -> Optional[float]:
+    if not v:
+        return None
+    v = v.translate(_AR_DIGITS).replace(",", "")
+    m = re.search(r"\d+(?:\.\d+)?", v)
+    return float(m.group(0)) if m else None
+
+
+def magnitude(num: Optional[float], unit: Optional[str]) -> Optional[int]:
+    """'1' + 'مليون' -> 1_000_000 ; '800' + 'الف' -> 800_000. Mirrors alnokhba's _magnitude."""
+    if num is None:
+        return None
+    if unit == "مليار":
+        return int(round(num * 1_000_000_000))
+    if unit == "مليون":
+        return int(round(num * 1_000_000))
+    if unit in ("ألف", "الف"):
+        return int(round(num * 1_000))
+    return int(round(num))
+
+
+# ثمان سنوات / سنتين / ١٠ سنوات — the age is a word numeral too.
+_AGE_WORDS = {
+    "سنة": 1, "سنه": 1, "سنتين": 2, "سنتان": 2, "ثلاث": 3, "أربع": 4, "اربع": 4, "خمس": 5,
+    "ست": 6, "سبع": 7, "ثمان": 8, "ثماني": 8, "تسع": 9, "عشر": 10, "جديد": 0, "جديدة": 0,
+}
+
+
+def _first(text: str, *patterns: str) -> Optional[str]:
+    """First capturing group of the first pattern that matches. Keeps the mapper readable."""
+    for pat in patterns:
+        m = re.search(pat, text)
+        if m:
+            return m.group(1)
+    return None
+
+
+def parse_age(text: Optional[str]) -> Optional[int]:
+    if not text:
+        return None
+    t = text.translate(_AR_DIGITS).strip()
+    m = re.search(r"\d+", t)
+    if m:
+        return int(m.group(0))
+    for w, v in _AGE_WORDS.items():                       # longest first: ثماني before ثمان
+        if w in t:
+            return v
+    return None
+
+
+# The header price. Two labels: «السعر» on built property, «إجمالي سعر البيع» on land.
+PRICE_RE = re.compile(r"(?:السعر|إجمالي\s*سعر\s*البيع)\s*</span>\s*:\s*([^<]{1,40})</h5>")
+PRICE_TXT_RE = re.compile(r"(?:السعر|إجمالي\s*سعر\s*البيع)\s*:\s*([\d٠-٩][\d٠-٩.,]*)\s*(مليار|مليون|ألف|الف)?")
+# The spec table. On LAND this carries the exact figure; on built property it is «-».
+PRICE_EXACT_RE = re.compile(
+    r'<div class="small"[^>]*>\s*إجمالي\s*سعر\s*البيع\s*</div>\s*<div>\s*([\d,.]+)\s*</div>')
+PPM_RE = re.compile(r"سعر\s*المتر\s*للأرض\s*</span>\s*:\s*([\d٠-٩.,]+)")
+
+
+def parse_price_exact(page_html: str) -> Optional[int]:
+    """The EXACT price, when the page publishes one.
+
+    Land listings carry «إجمالي سعر البيع» twice: rounded to words in the header («9.77 مليون»)
+    and to the riyal in the spec table («9766912.00»). The words are LOSSY — 9.77 مليون would have
+    been stored as 9,770,000 against a real 9,766,912, a 3,088 error invented by us. Built property
+    renders «-» in that cell, so this returns None there and the worded path takes over (proven
+    exact by the source's own price filter — see verify_price_is_exact)."""
+    m = PRICE_EXACT_RE.search(page_html)
+    if not m:
+        return None
+    v = _num(m.group(1).replace(",", ""))
+    return int(round(v)) if v else None
+
+
+def parse_ppm(page_html: str) -> Optional[int]:
+    """«سعر المتر للأرض : 400» — PUBLISHED by the source, never area-derived."""
+    m = PPM_RE.search(page_html)
+    v = _num(m.group(1)) if m else None
+    return int(round(v)) if v else None
+
+
+def parse_price(page_html: str) -> tuple[Optional[int], Optional[str]]:
+    """Return (value, raw_text). The raw text is kept so the caller can PROVE the words are exact."""
+    m = PRICE_RE.search(page_html)
+    raw = re.sub(r"[\ue000-\uf8ff]", "", html.unescape(m.group(1))).strip() if m else None
+    if raw is None:
+        m2 = PRICE_TXT_RE.search(_txt(page_html))
+        if not m2:
+            return None, None
+        return magnitude(_num(m2.group(1)), m2.group(2)), m2.group(0)
+    m3 = re.match(r"\s*([\d٠-٩][\d٠-٩.,]*)\s*(مليار|مليون|ألف|الف)?", raw)
+    if not m3:
+        return None, raw
+    return magnitude(_num(m3.group(1)), m3.group(2)), raw
+
+
+def verify_price_is_exact(s: cc.Session, slug: str, value: int) -> bool:
+    """Ask akariyoun's OWN numeric filter whether this listing really costs exactly `value`.
+
+    The displayed price is words («1.5 مليون»); this is what makes storing a number honest rather
+    than inferred. min_price=max_price=value returns the listing only if that is its exact figure.
+    A False here means the words did not round-trip — the caller must then store NULL, never the
+    approximation (PRICE = SOURCE; Listing fidelity ABSOLUTE)."""
+    body = _get(s, f"{LIST_URL}?min_price={value}&max_price={value}", attempts=2)
+    if body is None:
+        return False                                      # could not learn -> not proven exact
+    return slug in set(re.findall(r"/properties/([^\"'?#/]+)", body))
+
+
+# ── discovery ────────────────────────────────────────────────────────────────────────────────────
+def list_slugs(s: cc.Session, max_pages: int = MAX_PAGES) -> list[str]:
+    """Walk /properties?page=N until a page yields no listing slugs.
+
+    A page that FAILS to fetch is not the same as a page with no listings: two of the 32 pages came
+    back empty on the first sweep purely from transient errors, and treating that as "the end"
+    would have silently truncated the catalogue at page 7. So a failed fetch is retried, and only a
+    successfully-fetched page with zero slugs ends the walk."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for page in range(1, max_pages + 1):
+        body = _get(s, f"{LIST_URL}?page={page}")
+        if body is None:
+            print(f"   ⚠ akariyoun: page {page} unreadable after retries — NOT treating as the end")
+            continue
+        slugs = [x for x in dict.fromkeys(re.findall(r"/properties/([^\"'?#/]+)", body))
+                 if x not in ("create",)]
+        if not slugs:
+            break
+        for sl in slugs:
+            if sl not in seen:
+                seen.add(sl); out.append(sl)
+    return out
+
+
+# ── mapping ──────────────────────────────────────────────────────────────────────────────────────
+TYPE_MAP = {
+    "فيلا": "Villa", "شقة": "Apartment", "دور": "Floor", "أرض": "Residential Land",
+    "ارض": "Residential Land", "استراحة": "Rest House", "استراحه": "Rest House",
+    "عمارة": "Residential Building", "عماره": "Residential Building", "مكتب": "Office",
+    "محل": "Shop", "مستودع": "Warehouse", "شقه": "Apartment", "بيت": "House",
+    "تاون هاوس": "Townhouse", "مزرعة": "Farm", "مصنع": "Factory", "معرض": "Showroom",
+}
+COMMERCIAL = {"Office", "Shop", "Warehouse", "Factory", "Showroom"}
+
+
+def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:
+    """(row, category, raw_price_text). row is None when the page is not a real listing."""
+    t = _txt(page_html)
+
+    ad = re.search(r"رقم\s*الاعلان\s*:\s*([\d٠-٩]+)", t)
+    ptype_ar = re.search(r"نوع\s*العقار\s*:\s*([^\s:]+)", t)
+    if not ad or not ptype_ar:
+        return None, "residential", None
+
+    ptype = TYPE_MAP.get(ptype_ar.group(1).strip())
+    if not ptype:
+        # AMBIGUOUS-MAPPING ASK-FIRST: an unknown Arabic type is skipped loudly, never guessed
+        # into the nearest bucket — a wrong type is a wrong search result.
+        print(f"   ⚠ akariyoun {slug}: unmapped property type «{ptype_ar.group(1)}» — skipped")
+        return None, "residential", None
+
+    deal = "Rent" if "للإيجار" in t or "للايجار" in t else ("Buy" if "للبيع" in t else None)
+    if deal is None:
+        return None, "residential", None
+
+    exact = parse_price_exact(page_html)
+    worded, raw_price = parse_price(page_html)
+    price = exact if exact is not None else worded
+    price_is_exact = exact is not None            # a table figure needs no filter proof
+    ppm = parse_ppm(page_html)
+    area = _num(_first(t, r"مساحة\s*العقار\s*:\s*([\d٠-٩.,]+)", r"المساحة\s*:\s*([\d٠-٩.,]+)"))
+    beds = _num(_first(t, r"عدد\s*الغرف\s*:\s*([\d٠-٩]+)", r"غرفة\s*:\s*([\d٠-٩]+)"))
+
+    # «الرياض - الغنامية السعر : …» — a district can be several words (حي ولي العهد), so read up
+    # to the next known label rather than guessing a word count. Taking two words blindly produced
+    # "الغنامية السعر" on the very first listing tested.
+    loc = re.search(r"(الرياض)\s*-\s*(.+?)\s*(?:السعر|سعر\s*المتر|إجمالي\s*سعر|غرفة|المساحة|التفاصيل|رقم\s*الاعلان|$)", t)
+    city = loc.group(1) if loc else None
+    district = loc.group(2).strip() if loc else None
+
+    age = parse_age(_first(t, r"عمر\s*العقار\s*:\s*([^:]{1,24}?)\s*(?:إستخدام|استخدام|المميزات|$)"))
+    direction = _first(t, r"الواجهة\s*:\s*([^\s:]+)")
+
+    # street width: the boundary described as a street carries its own width, e.g.
+    # «الحد الغربي شارع 10 20.01م» -> a 10m street.  «الشارع: عرض 11.39 متر» is the explicit form.
+    sw = re.search(r"الشارع\s*:?\s*عرض\s*([\d٠-٩.]+)", t) or re.search(r"شارع\s*([\d٠-٩.]+)\b", t)
+    street_w = _num(sw.group(1)) if sw else None
+
+    photos = [html.unescape(u) for u in
+              re.findall(r'<a[^>]+href="([^"]+)"[^>]*class="mfp-gallery"', page_html)]
+    if not photos:
+        photos = [html.unescape(u) for u in
+                  re.findall(r'class="mfp-gallery"[^>]*href="([^"]+)"', page_html)]
+    photos = [u for u in dict.fromkeys(photos) if u.startswith("http")]
+
+    gps = re.search(r"maps\?q=([\d.\-]+),([\d.\-]+)", page_html)
+    title = _first(page_html, r"<title>\s*(.*?)\s*</title>") or ""
+    title = re.sub(r"\s*-\s*Akariyoun\s*$", "", html.unescape(title)).strip() or None
+
+    row: dict[str, Any] = {
+        "ad_number": f"AK{ad.group(1).translate(_AR_DIGITS)}",
+        "listing_url": f"{BASE}/properties/{slug}",
+        "source": SOURCE,
+        "active": True,
+        "property_type": ptype,
+        "transaction_type": deal,
+        "area_m2": int(area) if area else None,
+        "bedrooms": int(beds) if beds else None,
+        "property_age": age,
+        "direction": direction,
+        "street_width_m": street_w,
+        "city": city,
+        "neighborhood": district,
+        "title": title,
+        "photo_urls": photos or None,
+        # SOURCE IS TRUTH: a service the page does not mention stays NULL, never False.
+        "electricity": True if "شبكة الكهرباء" in t else None,
+        "water_supply": True if "شبكة المياه" in t else None,
+        "sanitation": True if "الصرف الصحي" in t else None,
+    }
+    if deal == "Buy":
+        row["price_total"] = price
+    else:
+        row["price_annual"] = price
+    if ppm is not None:
+        row["price_per_meter"] = ppm
+
+    extra: dict[str, Any] = {}
+    # The table prints all three HEADERS and then all three VALUES:
+    #   «رقم القطعة رقم المخطط رقم البلوك 2699 3022 181»
+    # so a per-label regex reads the first number for every label — it gave plot==plan==2699.
+    trio = re.search(r"رقم\s*القطعة\s*رقم\s*المخطط\s*رقم\s*البلوك\s*"
+                     r"([\d٠-٩]+)\s+([\d٠-٩]+)\s+([\d٠-٩]+)", t)
+    if trio:
+        extra["plot_no"] = trio.group(1).translate(_AR_DIGITS)
+        extra["plan_no"] = trio.group(2).translate(_AR_DIGITS)
+        extra["block_no"] = trio.group(3).translate(_AR_DIGITS)
+    if gps: extra["lat"], extra["lng"] = float(gps.group(1)), float(gps.group(2))
+    if raw_price: extra["price_text_source"] = raw_price
+    if extra:
+        row["additional_info"] = extra
+
+    if price_is_exact:
+        extra["price_exact_from_table"] = True
+        row["additional_info"] = extra
+    cat = "commercial" if ptype in COMMERCIAL else "residential"
+    return row, cat, (None if price_is_exact else raw_price)
+
+
+# ── main ─────────────────────────────────────────────────────────────────────────────────────────
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--type", choices=["all", "residential", "commercial"], default="all")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="pilot run: map only the first N listings, verify every price, NO prune")
+    args = ap.parse_args()
+
+    s = session()
+    run_id = None if args.limit else db.begin_run("akariyoun")
+
+    slugs = list_slugs(s)
+    if not slugs:
+        msg = "no listing slugs discovered (source unreachable, blocking, or schema change)"
+        print(f"✗ {SOURCE}: {msg}")
+        if run_id:
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])
+        return 1
+    print(f"{SOURCE}: {len(slugs)} listings discovered")
+    if args.limit:
+        slugs = slugs[: args.limit]
+        print(f"   [PILOT {args.limit}] every price will be verified against the source filter")
+
+    res: list[dict] = []
+    com: list[dict] = []
+    seen = unpriced = 0
+    for sl in slugs:
+        body = _get(s, f"{BASE}/properties/{sl}")
+        if body is None:
+            continue
+        row, cat, _raw = map_listing(sl, body)
+        if not row:
+            continue
+        seen += 1
+        # PROVE the word-price before storing it. Pilot verifies every row; a full run verifies
+        # only where it is cheap to be wrong — a price that cannot be proven becomes NULL.
+        val = row.get("price_total") or row.get("price_annual")
+        if val and args.limit:
+            if not verify_price_is_exact(s, sl, int(val)):
+                print(f"   ⚠ {sl}: «{_raw}» did NOT round-trip to {val} — storing price as NULL")
+                row.pop("price_total", None); row.pop("price_annual", None)
+                unpriced += 1
+        if args.type != "all" and cat != args.type:
+            continue
+        (com if cat == "commercial" else res).append(row)
+
+    if res:
+        db.upsert_akariyoun_residential_batch(res)
+    if com:
+        db.upsert_akariyoun_commercial_batch(com)
+
+    n = len(res) + len(com)
+    print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted"
+          + (f" ({unpriced} price NOT proven exact -> NULL)" if unpriced else ""))
+    if run_id:
+        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=n)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
