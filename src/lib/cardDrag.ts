@@ -74,12 +74,21 @@ export function attachCardDrag(node: HTMLElement, grip: HTMLElement, opts: CardD
   const onDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
     dragging = true; moved = false; id = e.pointerId;
-    grip.setPointerCapture(id);
     cancelAnimationFrame(raf);
     clearTimeout(safety);
     grabX = e.clientX - off.x; grabY = e.clientY - off.y;   // respect WHERE they grabbed
     hist = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
     grip.style.cursor = 'grabbing';
+    // Capture is an OPTIMISATION, never a precondition — so it is attempted LAST and it may fail.
+    // setPointerCapture throws NotFoundError when no ACTIVE pointer carries this id (an untrusted
+    // pointerdown, or a touch the browser cancelled between dispatch and this handler) and
+    // InvalidStateError when the grip is already detached. It used to run FIRST and unguarded, so a
+    // throw aborted the rest of onDown *after* `dragging`/`id` were set: the next pointermove then
+    // painted from the PREVIOUS grab offset and the surface jumped. The release side has always
+    // been guarded (`releasePointerCapture` below) — the asymmetry between the two halves was the
+    // defect. Sentry REACT-NATIVE-9 / ops_incident #289. Without capture the drag still tracks,
+    // because every listener is bound on the grip itself.
+    try { grip.setPointerCapture(id); } catch { /* uncaptured: still tracks while over the grip */ }
   };
 
   const onMove = (e: PointerEvent) => {
