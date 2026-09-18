@@ -69,16 +69,32 @@ const mustCatch = (label: string, caught: boolean, detail = "") =>
 // THE CONTRACT. Every field here belongs to ONE conversation and must not survive into the next.
 // `read` pulls the observed value out of the probe the lifted code wrote into; `dirty` is a value
 // that is unmistakably "the previous conversation's", so a field left untouched is visibly stale.
+//
+// `kind` says WHERE the observed value is read from — a `setX` probe, a ref's `.current`, or (for a
+// generation token) the ref's value compared against what it was BEFORE the reset ran. `cleared`
+// is the per-field predicate. Both replaced a name-suffix heuristic (`endsWith("Ref") ? … : …`) that
+// could only express "null or false or []" and would have silently mis-judged the two fields added
+// on 2026-09-18 whose cleared value is neither (`askCountRef` → 0, `ageFlowTokenRef` → *incremented*).
 const CONVERSATION_SCOPED = [
-  { name: "completed", why: "locks the composer AND withholds the «عرض المزيد» row" },
-  { name: "msgs", why: "the previous conversation's bubbles" },
-  { name: "busy", why: "a spinner owned by a search that is being abandoned" },
-  { name: "stopped", why: "a Stop pressed in the previous conversation" },
-  { name: "chatIdRef", why: "the previous conversation's sidebar identity" },
-  { name: "afCarryRef", why: "the Advanced-Filter answered set (New Chat used to inherit it)" },
-  { name: "pendingScopeRef", why: "a half-answered clarifying question the next send() would consume" },
-  { name: "pendingCityRef", why: "the plain-city question's subject" },
-  { name: "lastQueryRef", why: "the accumulated filters the previous conversation narrowed" },
+  { name: "completed", kind: "probe", cleared: (v: any) => v === false, why: "locks the composer AND withholds the «عرض المزيد» row" },
+  { name: "msgs", kind: "probe", cleared: (v: any) => Array.isArray(v) && v.length === 0, why: "the previous conversation's bubbles" },
+  { name: "busy", kind: "probe", cleared: (v: any) => v === false, why: "a spinner owned by a search that is being abandoned" },
+  { name: "stopped", kind: "probe", cleared: (v: any) => v === false, why: "a Stop pressed in the previous conversation" },
+  { name: "ageFlow", kind: "probe", cleared: (v: any) => v === null, why: "the guided AF card the abandoned conversation had open" },
+  { name: "chatIdRef", kind: "ref", cleared: (v: any) => v === null, why: "the previous conversation's sidebar identity" },
+  { name: "afCarryRef", kind: "ref", cleared: (v: any) => v === null, why: "the Advanced-Filter answered set (New Chat used to inherit it)" },
+  { name: "pendingScopeRef", kind: "ref", cleared: (v: any) => v === null, why: "a half-answered clarifying question the next send() would consume" },
+  { name: "pendingCityRef", kind: "ref", cleared: (v: any) => v === null, why: "the plain-city question's subject" },
+  { name: "lastQueryRef", kind: "ref", cleared: (v: any) => v === null, why: "the accumulated filters the previous conversation narrowed" },
+  // ── added 2026-09-18, ops_incident #319: the rest of what send() consumes, and the second token ──
+  { name: "pendingRefineRef", kind: "ref", cleared: (v: any) => v === null,
+    why: "a pending «نتائج أدق» question — send()'s REFINE INTERCEPT reads it BEFORE recordChatTurn and returns, so the next conversation's FIRST message is swallowed into the abandoned chat's query" },
+  { name: "refineMsgIdRef", kind: "ref", cleared: (v: any) => v === null, why: "the results turn the abandoned refine round was building into" },
+  { name: "saidRef", kind: "ref", cleared: (v: any) => Array.isArray(v) && v.length === 0,
+    why: "everything the user said in the conversation being left, sent to the agent as `attemptTexts`" },
+  { name: "askCountRef", kind: "ref", cleared: (v: any) => v === 0, why: "the abandoned conversation's question budget" },
+  { name: "ageFlowTokenRef", kind: "token", cleared: (v: any, before: any) => v > before,
+    why: "the guided/AF cancellation token — NOT bumped, an in-flight round from the abandoned chat keeps calling setCompleted / startAgeFlow / re-arming afCarryRef" },
 ] as const;
 
 /** Stubs the lifted declarations close over. Everything is recorded; nothing carries logic. */
@@ -91,7 +107,13 @@ const setStopped = rec("stopped");
 const setMsgs = rec("msgs");
 const setCompleted = rec("completed");
 const setFilterOrigin = rec("filterOrigin");
+const setAgeFlow = rec("ageFlow");
 const chatIdRef = { current: "PREVIOUS-CHAT" as unknown };
+const pendingRefineRef = { current: { q: { location: "جدة" }, dim: "budget" } as unknown };
+const refineMsgIdRef = { current: "PREVIOUS-RESULTS-TURN" as unknown };
+const saidRef = { current: ["شقة", "بالقرب من البحر"] as unknown };
+const askCountRef = { current: 3 as unknown };
+const ageFlowTokenRef = { current: 7 };
 const afCarryRef = { current: { msgId: "m", facets: [1], asked: ["a"] } as unknown };
 const pendingScopeRef = { current: "PREVIOUS-TWIN-QUESTION" as unknown };
 const pendingCityRef = { current: "الرياض" as unknown };
@@ -110,22 +132,30 @@ const liftFrom = async (file: string) =>
       { header: "    const startFresh = () => {", endsWith: /^    \};$/ },
     ],
     ["resetConversationState", "startFresh", "probe", "calls",
-     "chatIdRef", "afCarryRef", "pendingScopeRef", "pendingCityRef", "lastQueryRef", "runRef"],
+     "chatIdRef", "afCarryRef", "pendingScopeRef", "pendingCityRef", "lastQueryRef", "runRef",
+     "pendingRefineRef", "refineMsgIdRef", "saidRef", "askCountRef", "ageFlowTokenRef"],
     PRELUDE,
   ) as Record<string, any>;
 
-/** What is STILL the previous conversation's after running `run` on a freshly-lifted module. */
+/** The observed value of one contract field on a lifted module. */
+const observe = (m: Record<string, any>, f: (typeof CONVERSATION_SCOPED)[number]) =>
+  f.kind === "probe" ? m.probe[f.name] : m[f.name].current;
+
+/**
+ * What is STILL the previous conversation's after running `run` on a freshly-lifted module.
+ * Values are snapshotted BEFORE `run` so a generation token can be judged on whether it MOVED —
+ * a token is cancelled by being incremented, never by being nulled.
+ */
 const staleAfter = async (file: string, run: (m: Record<string, any>) => void): Promise<string[]> => {
   const m = await liftFrom(file);
+  const before = new Map(CONVERSATION_SCOPED.map((f) => [f.name, observe(m, f)]));
   run(m);
   const stale: string[] = [];
   for (const f of CONVERSATION_SCOPED) {
-    const got = f.name.endsWith("Ref") ? m[f.name].current : m.probe[f.name];
-    const cleared =
-      f.name === "msgs" ? Array.isArray(got) && got.length === 0
-      : f.name === "completed" || f.name === "busy" || f.name === "stopped" ? got === false
-      : got === null;
-    if (!cleared) stale.push(`${f.name}=${JSON.stringify(got)}`);
+    const got = observe(m, f);
+    if (!(f.cleared as (v: any, b: any) => boolean)(got, before.get(f.name))) {
+      stale.push(`${f.name}=${JSON.stringify(got)}`);
+    }
   }
   return stale;
 };
@@ -143,15 +173,14 @@ console.log("\n── §B: startFresh() — the path the defect lived on — per
   // This is the real conversation exit: every sidebar reopen, every «بحث» hop, every `?seed=` link
   // calls it, and the component is NOT remounted across any of them.
   const m = await liftFrom(AGENT);
+  const before = new Map(CONVERSATION_SCOPED.map((f) => [f.name, observe(m, f)]));
   m.startFresh();
   const stale: string[] = [];
   for (const f of CONVERSATION_SCOPED) {
-    const got = f.name.endsWith("Ref") ? m[f.name].current : m.probe[f.name];
-    const cleared =
-      f.name === "msgs" ? Array.isArray(got) && got.length === 0
-      : f.name === "completed" || f.name === "busy" || f.name === "stopped" ? got === false
-      : got === null;
-    if (!cleared) stale.push(`${f.name}=${JSON.stringify(got)} (${f.why})`);
+    const got = observe(m, f);
+    if (!(f.cleared as (v: any, b: any) => boolean)(got, before.get(f.name))) {
+      stale.push(`${f.name}=${JSON.stringify(got)} (${f.why})`);
+    }
   }
   check("startFresh() clears the whole conversation-scoped set",
     stale.length === 0, `inherited by the next conversation: ${stale.join(" | ")}`);
@@ -285,6 +314,123 @@ console.log("\n── §D: with no transcript to restore from, terminality is DE
     terminal(snapshotOf(9_892, false)) === false && terminal(snapshotOf(12, false)) === false);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// §E — THE CLASS, CLOSED (routine #8, 2026-09-18, ops_incident #319).
+//
+// §A/§B execute the real reset, but only against the contract list above — and THAT LIST IS ITSELF
+// HAND-MAINTAINED. That is the whole class: on 2026-09-12 the hand-written thing was a projection,
+// on 2026-09-14 it was two reset functions, and consolidating them to one left a third hand-written
+// enumeration doing the same job. A field added to agent.tsx tomorrow and not added here would sail
+// through §A, §B and §C exactly as `pendingRefineRef` did for three months.
+//
+// So the contract stops being a list and becomes a DERIVATION from the code itself, in the safe
+// direction — anything new is RED until it is either cleared or declared:
+//
+//   E1. Every `*Ref` that `send()` READS is conversation-scoped unless declared otherwise, because
+//       send() is the first thing the next conversation does. A ref it consumes and the reset does
+//       not clear is, by construction, the previous conversation speaking through the new one.
+//   E2. Every generation token (`useRef(0)`) is a cancellation mechanism; conversation exit must
+//       invalidate it or say why not. This is the half that made the state-clearing non-durable:
+//       ageFlowTokenRef gated timers that re-armed `afCarryRef` AFTER the reset nulled it.
+//
+// Each exemption carries a reason, and the reason is an assertion this file also checks.
+const TURN_SCOPED_EXEMPT: Record<string, string> = {
+  runRef: "the in-flight turn itself — startFresh cancels it explicitly (runRef.current.cancelled = true); §B asserts that, so it is covered, not excused",
+  pinModeRef: "presentational scroll anchoring only; send() OVERWRITES it unconditionally before any read, so nothing of the previous conversation can be observed through it",
+};
+const TOKEN_EXEMPT: Record<string, string> = {
+  voiceStopGenRef: "mic-recording scoped, not conversation scoped: it is bumped by its own start/stop transitions and gates only the 'processing' beat of a recording the user is holding",
+  askCountRef: "not a cancellation token despite its useRef(0) shape — it is a counter, and it is in the CONVERSATION_SCOPED contract above (cleared to 0)",
+};
+
+/** E1 + E2 over a source text, as a predicate so it can be mutation-proven. */
+function uncoveredConversationState(src: string): string[] {
+  const lines = src.split("\n");
+  const body = (header: string): string => {
+    const i = lines.findIndex((l) => l.startsWith(header));
+    if (i < 0) throw new Error(`§E cannot find ${header.trim()} in agent.tsx`);
+    const indent = header.match(/^\s*/)![0];
+    let j = i + 1;
+    while (j < lines.length && lines[j] !== `${indent}};`) j++;
+    return lines.slice(i, j + 1).join("\n");
+  };
+  const sendBody = body("  const send = async (override?: string) => {");
+  // Comments are stripped before asking whether the reset WRITES a field: this block is heavily
+  // commented, and several comments name the very refs being checked (they explain what used to go
+  // wrong with them). Without this, commenting a clear OUT would still read as writing it — which is
+  // precisely the regression M-E1-unwritten reproduces, and it is how this check first passed vacuously.
+  const resetBody = body("  const resetConversationState = () => {")
+    .split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const contract = new Set(CONVERSATION_SCOPED.map((f) => f.name));
+  const problems: string[] = [];
+
+  // E1 — refs send() consumes.
+  const consumed = [...new Set([...sendBody.matchAll(/\b(\w+Ref)\.current/g)].map((m) => m[1]))].sort();
+  for (const r of consumed) {
+    if (contract.has(r) || r in TURN_SCOPED_EXEMPT) continue;
+    problems.push(
+      `E1 ${r}: send() reads it, so the next conversation's FIRST message can see the previous one's value, ` +
+      `but it is neither in resetConversationState()'s contract nor declared turn-scoped in TURN_SCOPED_EXEMPT ` +
+      `(this is exactly how pendingRefineRef/saidRef/askCountRef survived the 2026-09-14 consolidation)`);
+  }
+  // …and a contract field is only really covered if the REAL reset touches it. §A executes that; this
+  // catches the cheaper failure of adding a name here and nowhere else.
+  for (const f of CONVERSATION_SCOPED) {
+    if (f.kind === "probe") continue;
+    if (!new RegExp(`\\b${f.name}\\.current\\s*(=|\\+\\+)`).test(resetBody)) {
+      problems.push(`E1 ${f.name}: declared in this file's contract but resetConversationState() never writes it`);
+    }
+  }
+  // E2 — generation tokens.
+  for (const m of src.matchAll(/^\s*const (\w+) = useRef\(0\);/gm)) {
+    const t = m[1];
+    if (t in TOKEN_EXEMPT) continue;
+    if (!new RegExp(`\\b${t}\\.current\\+\\+|\\b\\+\\+${t}\\.current`).test(resetBody)) {
+      problems.push(
+        `E2 ${t}: a generation token that conversation exit does not invalidate and TOKEN_EXEMPT does not declare — ` +
+        `in-flight work from the ABANDONED conversation can still write into the new one`);
+    }
+  }
+  // E3 — THE EXEMPTIONS THEMSELVES ARE CLAIMS, SO EXECUTE THEM. Without this, a future exemption
+  // could retire a real ref from E1/E2 by asserting something false in a comment, and the comment
+  // would read as coverage — the exact shape this repo names "a pointer reads as coverage"
+  // (docs/ops/BARRIER_ENGINEER.md PART 1.11). `runRef`'s reason is discharged by §B, which watches
+  // startFresh actually cancel it; `askCountRef`'s by §A/§B, which execute the contract it names.
+  // The other two claim properties of the source, so they are checked here.
+  const firstPinLine = sendBody.split("\n").find((l) => l.includes("pinModeRef.current") && !/^\s*\/\//.test(l));
+  if (firstPinLine !== undefined && !/^\s*pinModeRef\.current\s*=[^=]/.test(firstPinLine)) {
+    problems.push(
+      `E3 pinModeRef: TURN_SCOPED_EXEMPT claims send() OVERWRITES it before any read, but send()'s first ` +
+      `use of it is a READ (${firstPinLine.trim()}) — the exemption no longer holds and it must move into the contract`);
+  }
+  // voiceStopGenRef's exemption rests on it invalidating ITSELF at every transition of the recording
+  // it belongs to. That is a shrink-only floor, not a proof: it says the self-invalidation has not
+  // been REDUCED since the exemption was granted — 5 sites: mic start, stop, the X-wins path, cancel
+  // and unmount. It deliberately claims no more than that. If a site disappears, the exemption has to
+  // be re-argued rather than silently inherited.
+  //
+  // The 5 is MEASURED, not eyeballed. A first draft set it to 4 from reading the greps, and
+  // M-E3-voice stayed green while the mutation it exists to catch went through — a floor above the
+  // real count is a check that cannot fail.
+  const VOICE_BUMP_FLOOR = 5;
+  const voiceBumps = (src.match(/voiceStopGenRef\.current\+\+|\+\+voiceStopGenRef\.current/g) ?? []).length;
+  if (voiceBumps < VOICE_BUMP_FLOOR) {
+    problems.push(
+      `E3 voiceStopGenRef: TOKEN_EXEMPT claims it is invalidated by its own recording transitions, but ` +
+      `${voiceBumps} bump site(s) remain of the ${VOICE_BUMP_FLOOR} that justified the exemption — ` +
+      `re-argue it or let conversation exit invalidate the token`);
+  }
+  return problems;
+}
+
+console.log("\n── §E: the contract is DERIVED from send() and from the token declarations, not listed ──");
+{
+  const src = readFileSync(AGENT, "utf8");
+  const problems = uncoveredConversationState(src);
+  check(`every ref send() consumes is cleared or declared, and every generation token is invalidated or declared (${Object.keys(TURN_SCOPED_EXEMPT).length} + ${Object.keys(TOKEN_EXEMPT).length} declared exemptions, each with a reason)`,
+    problems.length === 0, problems.join("\n      "));
+}
+
 console.log("\n── mutation proofs — each re-introduces the REAL defect in a real copy of agent.tsx ──");
 /** Write a deliberately broken copy of agent.tsx and return its path. */
 const mutantAgent = (from: string, to: string): string => {
@@ -353,6 +499,92 @@ const mutantAgent = (from: string, to: string): string => {
   mustCatch("M-hasmore-guard — guarding on `!hasMore` instead would unlock a genuine 34-match chat (owner rule 2026-08-30)",
     (!small.hasMore && searchIsFinishedAtThreshold(quotableTotal(small as never), INTERVIEW_STOP_AT)) === false
     && (small.matchTotal != null && searchIsFinishedAtThreshold(quotableTotal(small as never), INTERVIEW_STOP_AT)) === true);
+}
+
+{
+  // THE DEFECT AS IT SHIPPED (ops_incident #319, live on main until 2026-09-18): the reset never
+  // cleared `pendingRefineRef`, so with a «نتائج أدق» question unanswered in the chat being left,
+  // send()'s REFINE INTERCEPT swallowed the NEXT conversation's first message — before
+  // recordChatTurn, so no sidebar entry was created either, and the agent was never called.
+  const f = mutantAgent(
+    "    pendingRefineRef.current = null; // a «نتائج أدق» question dies with the conversation that asked it",
+    "    // pendingRefineRef.current = null;",
+  );
+  const stale = await staleAfter(f, (m) => m.startFresh());
+  mustCatch("M-refine — a pending «نتائج أدق» question surviving the exit hijacks the next conversation's first message",
+    stale.some((s) => s.startsWith("pendingRefineRef=")), `stale: ${stale.join(", ")}`);
+}
+{
+  // The second half, and the reason clearing alone was never enough: the guided round's OWN token.
+  // Un-bumped, timers from the abandoned conversation keep running — they call setCompleted(true)
+  // and RE-ARM afCarryRef, undoing the reset a few lines after it ran.
+  const f = mutantAgent(
+    "    ageFlowTokenRef.current++;      // every in-flight guided continuation is now superseded",
+    "    // ageFlowTokenRef.current++;",
+  );
+  const stale = await staleAfter(f, (m) => m.startFresh());
+  mustCatch("M-token — an un-bumped guided token lets the abandoned conversation's in-flight round write into the new one",
+    stale.some((s) => s.startsWith("ageFlowTokenRef=")), `stale: ${stale.join(", ")}`);
+}
+{
+  // §E1 is the part that has to survive ME: a ref added to send() next month, by someone who never
+  // reads this file, must be RED rather than silently uncovered. Fed a source where exactly that
+  // happened.
+  const src = readFileSync(AGENT, "utf8");
+  const injected = src.replace(
+    "  const send = async (override?: string) => {",
+    "  const send = async (override?: string) => {\n    const _leak = someBrandNewRef.current;",
+  );
+  const problems = uncoveredConversationState(injected);
+  mustCatch("M-E1-new-ref — a ref added to send() that the reset does not clear is DISCOVERED, not waved through",
+    problems.some((p) => p.startsWith("E1 someBrandNewRef")), JSON.stringify(problems));
+}
+{
+  // §E1's other direction: a name added to this file's contract with no matching write in the real
+  // reset. Without this, the contract could be satisfied by editing the barrier alone.
+  const src = readFileSync(AGENT, "utf8");
+  const injected = src.replace(
+    "    pendingRefineRef.current = null; // a «نتائج أدق» question dies with the conversation that asked it",
+    "    // pendingRefineRef.current = null;",
+  );
+  const problems = uncoveredConversationState(injected);
+  mustCatch("M-E1-unwritten — a contract field the real resetConversationState() never writes is reported",
+    problems.some((p) => p.startsWith("E1 pendingRefineRef") && p.includes("never writes it")), JSON.stringify(problems));
+}
+{
+  // §E2: a new cancellation token, the shape that made the state-clearing non-durable.
+  const src = readFileSync(AGENT, "utf8");
+  const injected = src.replace(
+    "  const ageFlowTokenRef = useRef(0);",
+    "  const ageFlowTokenRef = useRef(0);\n  const someNewFlowTokenRef = useRef(0);",
+  );
+  const problems = uncoveredConversationState(injected);
+  mustCatch("M-E2-new-token — a new generation token nothing invalidates on conversation exit is DISCOVERED",
+    problems.some((p) => p.startsWith("E2 someNewFlowTokenRef")), JSON.stringify(problems));
+
+  // §E3 — the exemptions are claims, so the claims are executed. These two mutations are the reason
+  // the sentence "each exemption's reason is an assertion this file also checks" is true rather than
+  // decorative: break what an exemption asserts and the exemption stops being granted.
+  // Mutated INSIDE send() specifically — `pinModeRef.current = 'bottom';` also appears in the
+  // land-timer block far above it, and a whole-source replace hits that one instead, leaving send()
+  // untouched and the mutation silently vacuous. (It did, on the first run of this proof.)
+  const sendAt = src.indexOf("  const send = async (override?: string) => {");
+  const pinAt = src.indexOf("    pinModeRef.current = 'bottom';", sendAt);
+  const pinRead = src.slice(0, pinAt)
+    + "    if (pinModeRef.current === 'top') toTop();"   // now send() READS it first
+    + src.slice(pinAt + "    pinModeRef.current = 'bottom';".length);
+  mustCatch("M-E3-pin — if send() ever READ pinModeRef before writing it, its exemption is withdrawn",
+    uncoveredConversationState(pinRead).some((p) => p.startsWith("E3 pinModeRef")),
+    JSON.stringify(uncoveredConversationState(pinRead)));
+
+  const voiceStuck = src.replace(/voiceStopGenRef\.current\+\+/, "/* no bump */");
+  mustCatch("M-E3-voice — if voiceStopGenRef's self-invalidation shrinks below the floor that justified its exemption, the exemption is withdrawn",
+    uncoveredConversationState(voiceStuck).some((p) => p.startsWith("E3 voiceStopGenRef")),
+    JSON.stringify(uncoveredConversationState(voiceStuck)));
+  // …and the same predicate reports the real tree clean, so the three mutations above prove
+  // discrimination rather than a rule that flags everything.
+  check("…and §E reports the real tree clean (the mutations prove discrimination, not noise)",
+    uncoveredConversationState(src).length === 0, uncoveredConversationState(src).join(" | "));
 }
 
 if (failed) { console.error(`\n✗ ${failed} check(s) FAILED`); process.exit(1); }

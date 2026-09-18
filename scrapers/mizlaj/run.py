@@ -47,6 +47,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import unquote
 
 from curl_cffi import requests as cc
 
@@ -59,6 +60,8 @@ from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://mizlaj.com.sa"
 MAP_DATA = f"{BASE}/api/guest/listings/map-data"
+SITEMAP = f"{BASE}/sitemap.xml"
+LISTING_URL_RE = re.compile(r"/guest/listings/([^/?#]+)")
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
 # propertyType.code (Arabic type word) → canonical English type. عمارة/ارض get usage-routed below.
@@ -246,8 +249,46 @@ def fetch_map_data(s: cc.Session) -> list[dict]:
             j = r.json()
         except Exception:
             return []
-        return j.get("data") or (j if isinstance(j, list) else [])
+        # 2026-09-18: the endpoint started answering with the OFFICES layer — real-estate agencies,
+        # not properties. Their `slug` ("office-5") looks exactly like a listing slug, so without
+        # this guard the caller fetches /guest/listings/office-5, gets a 404 for every record and
+        # reports a clean "0 listings" run against a source that still publishes 30. Only trust a
+        # payload that says it is the listings layer; anything else is NOT discovery.
+        if isinstance(j, dict):
+            layer = (j.get("layer") or "").strip().lower()
+            if layer and layer != "listings":
+                print(f"   ⚠ mizlaj map-data returned the '{layer}' layer, not listings")
+                return []
+            return j.get("data") or []
+        return j if isinstance(j, list) else []
     return []
+
+
+def fetch_sitemap_slugs(s: cc.Session) -> list[str]:
+    """Discover listing slugs from sitemap.xml — the fallback when map-data stops carrying them.
+
+    The detail parser is unaffected by the map-data change: /guest/listings/<slug> still serves the
+    same Inertia props.listing, and map_listing() already treats the map-data record as an optional
+    fallback for location only, so {} is a valid record. That makes the sitemap a complete
+    substitute for discovery alone.
+    """
+    _throttle()
+    try:
+        r = s.get(SITEMAP, timeout=30)
+    except Exception:
+        return []
+    if r.status_code != 200:
+        return []
+    out, seen = [], set()
+    for loc in re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", r.text):
+        m = LISTING_URL_RE.search(loc)
+        if not m:
+            continue
+        slug = unquote(m.group(1)).strip("/")
+        if slug and slug not in seen:
+            seen.add(slug)
+            out.append(slug)
+    return out
 
 
 def fetch_detail(s: cc.Session, slug: str) -> Optional[dict]:
@@ -548,7 +589,14 @@ def main() -> int:
 
     md_rows = fetch_map_data(s)
     if not md_rows:
-        msg = "map-data returned no listings (source unreachable, blocking, or schema change)"
+        # Discovery fell over, but the source may be perfectly healthy — recover slugs from the
+        # sitemap before declaring the run dead. A failed discovery is not an empty source.
+        slugs = fetch_sitemap_slugs(s)
+        if slugs:
+            print(f"Mizlaj: map-data carried no listings; recovered {len(slugs)} slugs from sitemap.xml")
+            md_rows = [{"slug": sl} for sl in slugs]
+    if not md_rows:
+        msg = "map-data AND sitemap returned no listings (source unreachable, blocking, or schema change)"
         print(f"✗ Mizlaj: {msg}")
         if run_id:
             db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=msg[:300])

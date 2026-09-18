@@ -51,10 +51,25 @@ check('coverage line is OMITTED (not shown empty/null) when not yet resolved',
 console.log('\n── 2. fetchLoaderScaleStats fails CLOSED, never fabricates a number ──');
 const dataSrc = join(root, 'src/data/loaderScaleStats.ts');
 
+// `boundedRpc` comes from the REAL src/data/boundedRpc.ts, read off disk and stripped of its
+// `export` keywords — not a hand-written stand-in. The whole point of lifting the real
+// fetchLoaderScaleStats is that it is the shipped code; substituting a fake bounder here would put
+// a copy back in the middle of it (the 2026-08-29 extractPrice lesson). The file imports nothing,
+// so inlining it is exact. If it ever gains an import this throws rather than lifting something
+// subtly wrong.
+const boundedRpcSrc = readFileSync(join(root, 'src/data/boundedRpc.ts'), 'utf8');
+if (/^\s*import\s/m.test(boundedRpcSrc)) {
+  throw new Error('src/data/boundedRpc.ts gained an import — this prelude inlines it and must be updated');
+}
+if (!/export async function boundedRpc</.test(boundedRpcSrc)) {
+  throw new Error('src/data/boundedRpc.ts no longer declares boundedRpc — this barrier lifts it by name');
+}
+
 const PRELUDE = `
 type LoaderScaleStats = { listingCount: number; cityCount: number; districtCount: number };
 let supabase: any = null;
 const setClient = (c: any) => { supabase = c; };
+${boundedRpcSrc.replace(/^export /gm, '')}
 `;
 
 async function load() {
@@ -69,16 +84,38 @@ async function load() {
   };
 }
 
+// A SHORT CEILING FOR THIS PROCESS ONLY, so the hang case below can be proven in milliseconds
+// instead of the shipped 15 s. boundedRpc reads this at module load, and the prelude inlines it.
+process.env.EXPO_PUBLIC_RPC_TIMEOUT_MS = '150';
+
 const mod = await load();
-const client = (mode: 'rows' | 'error' | 'empty' | 'malformed' | 'throw') => ({
-  rpc: async () => {
+// MODEL THE REAL POSTGREST BUILDER, NOT A CONVENIENT SHAPE.
+//
+// `supabase.rpc(...)` does not return a result — it returns a BUILDER that is thenable and also
+// exposes `.abortSignal()`. This stub used to resolve directly from `rpc()`, which was close enough
+// while the call was bare-awaited, and stopped being close enough the moment the await was bounded
+// (ops_incident #269): `src/data/boundedRpc.ts` calls `.abortSignal()`, and a stub without it threw
+// on the HAPPY path. The barrier was right to go red — it executes the real function, so a stub that
+// drifts from the real client is the barrier lying, not the code failing.
+//
+// Both shapes are provided on purpose, so this stub stays valid for a bare-awaited caller too.
+const client = (mode: 'rows' | 'error' | 'empty' | 'malformed' | 'throw' | 'hang') => {
+  const settle = async () => {
     if (mode === 'throw') throw new Error('network down');
+    // Never settles on its own — the stalled connection ops_incident #269 is about.
+    if (mode === 'hang') return await new Promise(() => {});
     if (mode === 'error') return { data: null, error: { message: 'boom' } };
     if (mode === 'empty') return { data: [], error: null };
     if (mode === 'malformed') return { data: [{ listing_count: 'oops', city_count: 1, district_count: 1 }], error: null };
     return { data: [{ listing_count: 213402, city_count: 359, district_count: 3668 }], error: null };
-  },
-});
+  };
+  return {
+    rpc: () => ({
+      abortSignal: () => settle(),
+      then: (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) => settle().then(res, rej),
+    }),
+  };
+};
 
 mod.setClient(client('rows'));
 check('a real, well-shaped RPC response resolves to a stats object (the happy path actually works)',
@@ -99,6 +136,31 @@ mustCatch('a malformed row (non-numeric count) is treated as failure, not NaN le
 mod.setClient(client('throw'));
 mustCatch('a thrown network error resolves to null (never rejects — the caller has no catch)',
   (await mod.fetchLoaderScaleStats()) === null);
+
+// THE HANG CASE — ops_incident #269, and the one this file could not see before.
+//
+// Every check above injects a client that FAILS. None of them could catch the actual defect, because
+// the defect was not a failure: it was a connection that never answers at all, so the await never
+// settled and «إزهله يبحث» spun forever with no error to fall back from. Failing closed on an error
+// and bounding the WAIT are two different properties, and this file only proved the first.
+//
+// Proven by execution and by the clock: with the ceiling set to 150 ms above, a client that never
+// settles must still resolve — to null, the same safe value as every other failure, so the caller
+// falls back to numberless copy exactly as it already does.
+{
+  mod.setClient(client('hang'));
+  const t0 = Date.now();
+  const raced = await Promise.race([
+    mod.fetchLoaderScaleStats(),
+    new Promise((r) => setTimeout(() => r('STILL-HANGING'), 5_000)),
+  ]);
+  const ms = Date.now() - t0;
+  check('a connection that never answers RESOLVES instead of hanging forever (#269)',
+    raced !== 'STILL-HANGING', `still pending after ${ms}ms — the await is unbounded again`);
+  check('…and it resolves to null, the same safe value every other failure returns',
+    raced === null, `got ${JSON.stringify(raced)}`);
+  check('…bounded by the configured ceiling, not by luck', ms < 4_000, `took ${ms}ms`);
+}
 
 console.log('\n── 3. the copy uses the SAME platform count the pills render, never a second count ──');
 const loaderSrc = readFileSync(join(root, 'src/components/SearchLoader.tsx'), 'utf8');

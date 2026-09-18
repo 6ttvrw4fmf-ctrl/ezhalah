@@ -203,7 +203,8 @@ def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[s
 
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
                  max_pending: int = 5000, allow_backfill: bool = False,
-                 retry_errs: int = 100, err_backoff_hours: float = 24.0) -> dict[str, int]:
+                 retry_errs: int = 100, err_backoff_hours: float = 24.0,
+                 max_seconds: float = 0.0) -> dict[str, int]:
     _load_catalog()
     c = db.sb()
     # Circuit breaker (owner 2026-07-07): steady state is a few brand-new rows/day. A sudden large
@@ -225,10 +226,36 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         q = q.like("ad_number", f"%{shard}")
     rows = q.order("id").limit(limit).execute().data or []
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-fetched rows (cap {limit})", flush=True)
-    stats = {"ok": 0, "empty": 0, "fail": 0}
+    stats = {"ok": 0, "empty": 0, "fail": 0, "skipped": 0}
     lock = threading.Lock()
 
+    # SELF-IMPOSED DEADLINE — stop cleanly instead of being killed at the CI wall.
+    #
+    # WHY (ops_incident #307, root-caused 2026-09-18). ex.map() below walks every row it was handed
+    # with no time budget, so on the residential table the job simply ran until GitHub's
+    # `timeout-minutes: 60` killed it. Measured on run 35367340468: the commercial job finished in
+    # 18 SECONDS (nothing pending) while the residential job ran 16:15:05 → 17:15:11 — exactly 60
+    # minutes — and GitHub reports a timeout kill as `cancelled`, which is why the history reads
+    # "cancelled" rather than "failure". 7 of the last 12 runs died that way.
+    #
+    # Two things that kill does, beyond wasting the runner:
+    #   1. db.end_run() never executes, so the scrape_runs row is left open — the standing
+    #      `run_killed_by_timeout` P1s are this job telling the truth about being killed;
+    #   2. the retry pass below never runs at all, so errored rows are starved every long run.
+    # Rows already written ARE durable (each row is its own UPDATE), so the kill loses no data —
+    # it loses the HONEST ACCOUNTING of what happened, which is the part monitoring depends on.
+    #
+    # A skipped row is left completely untouched (ar_fetched stays false), so it is simply picked up
+    # by the next scheduled run — the same semantics a transient failure already has, but counted
+    # separately because "I ran out of clock" is not "the source failed me".
+    deadline = (time.monotonic() + max_seconds) if max_seconds > 0 else None
+    out_of_time = lambda: deadline is not None and time.monotonic() >= deadline
+
     def work(row: dict) -> None:
+        if out_of_time():
+            with lock:
+                stats["skipped"] += 1
+            return
         sl = _slug(row.get("listing_url"))
         if not sl:
             # No slug → can't fetch; error marker + attempt counter (a later re-capture can refresh
@@ -276,14 +303,21 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(work, rows))
-    print(f"   ✓ {table}: ok={stats['ok']} empty={stats['empty']} fail={stats['fail']}", flush=True)
+    print(f"   ✓ {table}: ok={stats['ok']} empty={stats['empty']} fail={stats['fail']} "
+          f"skipped={stats['skipped']}", flush=True)
+    if stats["skipped"]:
+        print(f"   ⏳ {table}: out of time budget ({max_seconds:.0f}s) — {stats['skipped']} row(s) left "
+              f"pending for the next scheduled run. This is a CLEAN stop, not a failure.", flush=True)
 
     # ── Bounded retry pass over previously-errored rows (runs AFTER the pending pass so brand-new
     # listings always get bandwidth first; its own cap keeps proxy spend flat). Oldest failure
     # first; each definitive re-failure refreshes ar_fetched_at, sending the row to the back of
     # the queue for >=err_backoff_hours. Parked rows are excluded server-side forever.
     retry_rows: list[dict] = []
-    if retry_errs > 0:
+    # The retry pass is deliberately LAST, so brand-new listings get bandwidth first — which also
+    # means it is the first thing a 60-minute kill used to destroy. Skip it honestly when the clock
+    # is already gone rather than opening a query we cannot finish.
+    if retry_errs > 0 and not out_of_time():
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=err_backoff_hours)).isoformat()
         rq = (c.table(table).select("id,ad_number,listing_url,ar_data")
               .eq("active", True).eq("ar_fetched", True)
@@ -329,6 +363,13 @@ def main() -> int:
                          f"proxy spend per run.")
     ap.add_argument("--err-backoff-hours", type=float, default=24.0,
                     help="Minimum hours between two attempts on the same errored row (default 24).")
+    # Must stay comfortably INSIDE the workflow's `timeout-minutes`, which remains the backstop.
+    # 2700s (45 min) under a 60-minute wall leaves room for pip install, the retry pass and end_run.
+    ap.add_argument("--max-seconds", type=float, default=2700.0,
+                    help="Self-imposed wall clock for row processing. On expiry the run stops CLEANLY, "
+                         "finalizes its scrape_runs row and leaves the remainder pending for the next "
+                         "scheduled run, instead of being killed by the CI timeout (ops_incident #307). "
+                         "0 disables the budget (local/one-off backfills).")
     args = ap.parse_args()
     # Own platform name per table, DISTINCT from the real scraper's own 'wasalt' scrape_runs rows —
     # this is backlog-processing throughput (rows_seen = pending backlog at start), not "listings
@@ -339,19 +380,28 @@ def main() -> int:
     run_id = db.begin_run(platform)
     stats = enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
                           args.max_pending, args.allow_backfill,
-                          args.retry_errs, args.err_backoff_hours)
+                          args.retry_errs, args.err_backoff_hours, args.max_seconds)
     aborted = stats.get("aborted", 0)
     ok_count, empty_count, fail_count = stats.get("ok", 0), stats.get("empty", 0), stats.get("fail", 0)
+    skipped = stats.get("skipped", 0)
     attempted = ok_count + empty_count + fail_count
     # ok=False when the circuit breaker fired (0 rows processed despite a real backlog) or when more
     # than half of attempted rows failed — both are the "reports success but does nothing useful"
     # shape this monitoring exists to catch, not a healthy empty-queue run (attempted==0, no pending).
-    run_ok = aborted == 0 and (attempted == 0 or fail_count <= attempted / 2)
+    #
+    # A time-budget skip is NOT counted as a failure (the source never let us down; the clock ran
+    # out), and partial progress under the budget is a healthy run. But skipping work while getting
+    # NOTHING done is the "reports success, did nothing" shape again, so that one is not ok.
+    run_ok = (aborted == 0
+              and (attempted == 0 or fail_count <= attempted / 2)
+              and not (skipped > 0 and attempted == 0))
     db.end_run(
         run_id, ok=run_ok, rows_seen=stats.get("pending_before", 0), rows_upserted=ok_count + empty_count,
         notes=(f"ok={ok_count} empty={empty_count} fail={fail_count} aborted={aborted} "
+               f"skipped_out_of_time={skipped} "
                f"retried={stats.get('retry_attempted', 0)} recovered={stats.get('retry_ok', 0)} "
-               f"limit={args.limit} allow_backfill={args.allow_backfill}"),
+               f"limit={args.limit} max_seconds={args.max_seconds:.0f} "
+               f"allow_backfill={args.allow_backfill}"),
         # allow_empty: unlike a scraper (rows_seen==0 → dead/blocked source, a real problem), this job's
         # rows_seen is the PENDING BACKLOG at start — 0 pending is the ideal steady-state once this fix
         # has been running a while, not a failure. Without this, end_run's RC-B honesty demotion would

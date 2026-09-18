@@ -147,6 +147,42 @@ mustCatch('an UNREADABLE deploy history treated as «the record must be fine»',
   undeployedDriftProblems({ ...HEALTHY, lastDeploySha: null, baselineIsBehindLastDeploy: null }).length > 0);
 mustCatch('an UNDETERMINED «is the baseline behind the last deploy» read as «the record is current»',
   undeployedDriftProblems({ ...HEALTHY, lastDeploySha: A, baselineIsBehindLastDeploy: null }).length > 0);
+
+// ── UNDETERMINED IS NOT "CURRENT" AT THE ACCUSATION SITE EITHER (routine #9, 2026-09-18). ──────
+// The two mutations directly above were the ONLY cover for the undetermined case, and both assert
+// `.length > 0` against HEALTHY — a world with NO user-visible drift. In that world the accusation
+// branch cannot run, so neither mutation could ever observe what the predicate CLAIMS once drift is
+// also present. `baselineIsBehindLastDeploy === null` satisfies `!== true`, so an unverifiable record
+// produced the same flat «MERGED AND NOT SHIPPED» as a record proven CURRENT — the UNKNOWN→NO shape,
+// in the guard built to stop this accusation being false. Measured live on 2026-09-18: 11 commits
+// named, 10 of them provably served by their own discriminators in the served bundle (ops_incident
+// #227). Note the asymmetry these fixtures now close: the `=== true` branch has had exactly this
+// assertion since 2026-09-15, the `=== null` branch had none.
+const UNVERIFIABLE_RECORD_AND_DRIFT: DriftReading = {
+  ...REAL,
+  lastDeploySha: null,                 // a cloud session cannot read the deploy history at all
+  baselineIsBehindLastDeploy: null,    // …so this is UNDETERMINED, not "the record is current"
+};
+mustCatch('THE 2026-09-18 FALSE ACCUSATION: an UNVERIFIABLE record still failing the run',
+  undeployedDriftProblems(UNVERIFIABLE_RECORD_AND_DRIFT).length > 0);
+check('…and it does NOT call the diff «MERGED AND NOT SHIPPED» when nothing corroborated the record',
+  !undeployedDriftProblems(UNVERIFIABLE_RECORD_AND_DRIFT).join(' ').includes('MERGED AND NOT SHIPPED'));
+check('…and it says so in the reader\'s own words: whether the work is unshipped is UNKNOWN',
+  undeployedDriftProblems(UNVERIFIABLE_RECORD_AND_DRIFT).join(' ').includes('UNKNOWN'));
+check('…and NO SIGNAL IS LOST — the files and the commits are still named in full',
+  undeployedDriftProblems(UNVERIFIABLE_RECORD_AND_DRIFT).join(' ').includes('src/store.tsx')
+  && undeployedDriftProblems(UNVERIFIABLE_RECORD_AND_DRIFT).join(' ').includes('A finished chat reopens as a dead end'));
+// The other undetermined shape: the history READ, but the ancestry question unanswered.
+check('an UNDETERMINED ancestry against a readable history is hedged the same way, not accused',
+  !undeployedDriftProblems({ ...REAL, lastDeploySha: A, baselineIsBehindLastDeploy: null })
+    .join(' ').includes('MERGED AND NOT SHIPPED'));
+// AND THE HEDGE IS NOT AN OFF-SWITCH. Both neighbours of `null` must still accuse, or the repair
+// would have bought honesty on one path by going blind on two.
+check('…while a record corroborated CURRENT still accuses (the hedge is not vacuously quiet)',
+  undeployedDriftProblems({ ...REAL, lastDeploySha: A, baselineIsBehindLastDeploy: false })
+    .some((p) => p.includes('MERGED AND NOT SHIPPED')));
+check('…and a caller supplying NO corroboration at all still accuses, exactly as before',
+  undeployedDriftProblems(REAL).some((p) => p.includes('MERGED AND NOT SHIPPED')));
 mustCatch('a last-deploy sha that is prose rather than a commit',
   undeployedDriftProblems({ ...HEALTHY, lastDeploySha: 'unknown', baselineIsBehindLastDeploy: false }).length > 0);
 

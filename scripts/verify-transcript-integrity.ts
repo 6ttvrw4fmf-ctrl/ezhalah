@@ -187,8 +187,14 @@ check('WIRING hydrateTranscript goes through pickTranscript (never a bare `if (h
 check('WIRING txStale never travels to the server meta', /txStale: _x/.test(store));
 check('WIRING a locally captured transcript clears the stale flag', /withFreshTranscript\(/.test(store));
 check('WIRING delete propagates to the server', /deleteChats\(/.test(store));
-check('WIRING deletions only propagate for ids the server was known to hold (no mass wipe)',
-  /\[\.\.\.base\.keys\(\)\]\.filter/.test(store));
+// SECOND BARRIER THAT PINNED THE DEFECT AS CORRECT (ops_incident #297). Like its twin in
+// verify-chat-persistence.ts, this froze `[...base.keys()].filter(...)` under a label about mass
+// wipes — while that very expression deleted every chat the 50-entry display cap had evicted. Two
+// guards over one line, both green, for as long as the defect was live. The assertion now names the
+// property instead of the expression: deletion follows INTENT and is bounded by what the server holds.
+check('WIRING deletions follow user intent, bounded by what the server holds (a display-cap eviction is not a delete)',
+  /chatsToDelete\(base, pendingDeleteRef\.current\)/.test(store)
+  && !/\[\.\.\.base\.keys\(\)\]\.filter/.test(store));
 
 // ── MUTATION PROOFS — each deliberate break must be CAUGHT ───────────────────────────────────────
 // A barrier that cannot fail proves nothing. Each block re-runs a real assertion against mutated
