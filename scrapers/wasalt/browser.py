@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 from typing import Any, Optional
 
@@ -50,6 +51,14 @@ _CHALLENGE_ROUNDS = int(os.environ.get("WASALT_BROWSER_CHALLENGE_ROUNDS", "6"))
 # and its first real run came back 2 slices OK / 4 timed out. Same ladder, same reason.
 _ATTEMPTS = int(os.environ.get("WASALT_BROWSER_ATTEMPTS", "3"))
 _BACKOFF_S = float(os.environ.get("WASALT_BROWSER_BACKOFF_S", "3"))
+
+# DataImpulse sticky-session ports. 823 is the ROTATING gateway (a new exit per connection); any
+# port in the sticky range pins one exit for the session. Values match the plan shown on the
+# dashboard 2026-09-18 ("Sticky range 10000 - 20000").
+_ROTATING_PORT = int(os.environ.get("WASALT_PROXY_ROTATING_PORT", "823"))
+_STICKY_LO = int(os.environ.get("WASALT_PROXY_STICKY_LO", "10000"))
+_STICKY_HI = int(os.environ.get("WASALT_PROXY_STICKY_HI", "20000"))
+_STICKY = os.environ.get("WASALT_BROWSER_STICKY", "1").strip().lower() not in ("0", "false", "no")
 
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
@@ -78,7 +87,18 @@ def _playwright_proxy(purl: str) -> Optional[dict]:
     host = u.hostname or ""
     if not host:
         return None
-    server = f"{u.scheme or 'http'}://{host}" + (f":{u.port}" if u.port else "")
+    port = u.port
+    # STICKY SESSION. A browser issues many sub-requests per page (document, scripts, XHR). On the
+    # ROTATING gateway port each of those lands on a DIFFERENT exit IP, so Cloudflare sees one
+    # session hopping between addresses mid-page and drops it — which is exactly the
+    # net::ERR_TIMED_OUT this scraper hit on 15 of 20 slices even with a retry ladder. DataImpulse
+    # exposes sticky sessions as a port range (10000-20000 on this plan, per the dashboard): one
+    # port == one stable exit for the life of the session, which is what a real browser looks like.
+    #
+    # A curl-style single-request fetch does not care, which is why the http path never needed this.
+    if _STICKY and port == _ROTATING_PORT:
+        port = random.randint(_STICKY_LO, _STICKY_HI)
+    server = f"{u.scheme or 'http'}://{host}" + (f":{port}" if port else "")
     out: dict[str, str] = {"server": server}
     if u.username:
         out["username"] = unquote(u.username)
