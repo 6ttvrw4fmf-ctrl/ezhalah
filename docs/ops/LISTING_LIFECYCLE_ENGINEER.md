@@ -215,28 +215,14 @@ inside a scheduler blackout, and then the sync does not run at all.** This is no
 consumer ordering problem above and not the DELETE circuit breaker below — it is the sync never
 launching, with every guard green and every barrier passing.
 
-pg_cron on this project runs with `cron.use_background_workers = off`. **The scheduler goes silent
-for roughly nine minutes starting at each slot of `mon-detectors-and-dispatch` (jobid 38,
-`29,59 * * * *`) — and the stall does NOT end when that job ends.** Runs-per-day by minute band make
-the shape plain: minutes 9–29 and 39–59 held steady at ~970/day right through, while minutes 0–8 and
-30–38 collapsed from ~300/day to zero on 2026-09-15.
-
-**Do not restate this as "job 38 is slow and blocks the scheduler while it runs." That was this
-file's first answer on 2026-09-18 and it was falsified within the hour, by the routine that wrote
-it.** The appealing evidence was real — between 12:59:00.020 and 13:04:23.998 zero jobs launched,
-and 70 ms after job 38 ended five queued jobs fired in the same millisecond — and it was still the
-wrong conclusion. At 13:29:00.017 job 38 started and finished **successfully in 6.0 seconds**, after
-five minutes of perfectly normal two-jobs-per-minute cadence; from 13:29:06 to 13:38:25 nothing
-launched at all and jobid 28 did not fire at :36. A six-second job cannot block anything for nine
-minutes. Recovery time varies (5.4 min on the 12:59 slot, 9+ min on the 13:29 slot) and does not
-track job duration.
-
-One consequence worth stating because it inverts an obvious remedy: jobid 38's median runtime step
-from 160s to 640s on 2026-09-15 **may be an artifact of this stall rather than its cause** — a wedged
-launcher may record `end_time` late, inflating measured duration, and today's 6s run was recorded
-promptly. If that is right, `ops_incident` #55 (job 38 statement timeouts) is a *separate* problem and
-fixing it would not fix this. The cleanest discriminator is to move jobid 38 off `:29`/`:59` and see
-whether the dead windows move with it — a cron schedule change, and not this routine's call.
+pg_cron on this project runs with `cron.use_background_workers = off`, and it was observed
+launching **nothing** while one long job was in flight. `mon-detectors-and-dispatch` (jobid 38, at
+`29,59 * * * *`) had its median runtime step from 160s to 640s on 2026-09-15, so it occupies the
+scheduler for ~10.7 minutes twice an hour. Measured: between 12:59:00.020 (job 38 start) and
+13:04:23.998 (job 38 end) zero jobs launched; **70 ms after it ended, five queued jobs fired in the
+same millisecond** and normal cadence resumed. Runs-per-day by minute band make the shape plain —
+minutes 9–29 and 39–59 held steady at ~970/day right through, while minutes 0–8 and 30–38 collapsed
+from ~300/day to zero on 2026-09-15.
 
 `sync-search-listings-ar` is at **:36**, inside that window. It last ran 2026-09-15 09:36 — the
 first :36 after the step change — and the served index then sat frozen for three days: 3,520 new
@@ -255,12 +241,15 @@ Three things to carry forward:
 2. **The detector was right about the WHAT and wrong about the WHY**, which is the same trap §8.3
    names: a P0 whose `remedy` field sends every responder down a path that does not work is worse
    than a P0 with no remedy text. Tracked as `ops_incident` #300 (routed to the cron surface owner);
-   the job-38 slowness itself is `ops_incident` #55. Note that this routine then made the *same
-   class* of error in its own first filing — a confident mechanism built on a real correlation — and
-   the only reason it did not stand is that the prediction it implied ("job 28 will not fire at
-   :36 *because* job 38 is still running") was checked against the clock rather than assumed.
-   **Check the minute band and the actual run rows before accepting any mechanism here, including
-   this file's.**
+   the job-38 slowness itself is `ops_incident` #55.
+3. **`cron.job_run_details.end_time` is PROVISIONAL while a run is in flight — check `status`, not
+   `end_time`.** Job 38's command is four statements, and the row's `end_time` advances as they
+   complete. At 13:38 this routine read `max(end_time) = 13:29:06` for the 13:29 run and concluded
+   the job had finished in 6 seconds — which "falsified" the mechanism above and produced a
+   confident public retraction of a correct finding. The run's final record is
+   `13:29:00 → 13:40:18`, **11m18s**, and every other slot that day measured 10m41s–11m25s. The
+   blackout length equals the job's real duration, every time. A `max(end_time)` with no `status`
+   predicate is not a completion; **`status` would have read `running`.**
 3. **Repairing the data is not closing this.** The out-of-band five-statement sync (§2.3) restores
    the index in one pass and is fully within this routine's authority, but the index refreezes at
    the next :36 until #300 is fixed. Report that as a mitigation, never as a fix.
