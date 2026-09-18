@@ -790,16 +790,49 @@ export function appPageErrors(bag, journey) {
   if (hydration.length) note(hydrationNoticeNote(journey, hydration));
   return app;
 }
-export async function gotoOrRetryTransport(page, url, { timeout = 90_000 } = {}) {
+// THE RETRY MUST BE A GENUINELY INDEPENDENT SAMPLE, AND AN IMMEDIATE ONE IS NOT (measured 2026-09-18).
+//
+// The block above always intended "exactly ONE genuinely fresh navigation". It was one navigation,
+// but it was not fresh: it fired microseconds after the failure, so it sampled the SAME egress blip
+// and recovered almost nothing. Measured, over two independent runs against production from this
+// container:
+//
+//   · a 112-journey sweep: 3 journeys failed the opening navigation, 0 recovered on the immediate
+//     retry — and so were filed as «journey threw», i.e. as three Ezhalah defects;
+//   · a 60-navigation probe: 1 first-attempt failure (1.7%), which ALSO failed the immediate retry
+//     and then SUCCEEDED when the same navigation was tried again after a 3 s pause.
+//
+// Across both: 0/4 recovered immediately, 1/1 recovered when spaced. The distribution is the tell —
+// independent failures at ~2-5% would produce many more SINGLE failures than double ones, and the
+// sweep recorded ZERO singles against three doubles. These failures are bursty, so the only retry
+// that carries information is one that lets the burst pass.
+//
+// THIS IS NOT A BIGGER TIMEOUT AND NOT MORE RETRIES (PART 11.2 rule 3). The 90 s budget is
+// unchanged and the retry is still exactly ONE, so the fail-closed property is untouched: a real
+// outage fails both attempts and still reads as a loud defect. Only the SPACING changes.
+export const TRANSPORT_RETRY_PAUSE_MS = 3_000;
+
+export async function gotoOrRetryTransport(
+  page, url, { timeout = 90_000, pauseMs = TRANSPORT_RETRY_PAUSE_MS, pause = sleep } = {},
+) {
   try {
     return await page.goto(url, { waitUntil: 'load', timeout });
   } catch (e) {
     if (!isTransportError(e)) throw e;              // a real app/navigation failure — unchanged
     const first = String(e).split('\n')[0];
-    const res = await page.goto(url, { waitUntil: 'load', timeout });
-    note(`TRANSPORT BLIP (not a product defect): the opening navigation to ${url} failed with «${first}» `
-      + `and succeeded on one immediate retry. Counted as neither pass nor defect — see harness.mjs.`);
-    return res;
+    await pause(pauseMs);                           // let the burst pass — see the note above
+    try {
+      const res = await page.goto(url, { waitUntil: 'load', timeout });
+      note(`TRANSPORT BLIP (not a product defect): the opening navigation to ${url} failed with «${first}» `
+        + `and succeeded on one retry ${pauseMs} ms later. Counted as neither pass nor defect — see harness.mjs.`);
+      return res;
+    } catch (e2) {
+      // PART 11.2 rule 4: the message must distinguish the two shapes. «failed twice, ${pauseMs} ms
+      // apart» is a different fact from a one-off blip, and the reader should not have to infer it.
+      throw new Error(`the opening navigation to ${url} failed TWICE, ${pauseMs} ms apart — `
+        + `egress was down for longer than one burst, or production is genuinely unreachable. `
+        + `first: «${first}» | second: «${String(e2).split('\n')[0]}»`);
+    }
   }
 }
 
