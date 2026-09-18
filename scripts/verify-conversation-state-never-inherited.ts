@@ -391,6 +391,35 @@ function uncoveredConversationState(src: string): string[] {
         `in-flight work from the ABANDONED conversation can still write into the new one`);
     }
   }
+  // E3 — THE EXEMPTIONS THEMSELVES ARE CLAIMS, SO EXECUTE THEM. Without this, a future exemption
+  // could retire a real ref from E1/E2 by asserting something false in a comment, and the comment
+  // would read as coverage — the exact shape this repo names "a pointer reads as coverage"
+  // (docs/ops/BARRIER_ENGINEER.md PART 1.11). `runRef`'s reason is discharged by §B, which watches
+  // startFresh actually cancel it; `askCountRef`'s by §A/§B, which execute the contract it names.
+  // The other two claim properties of the source, so they are checked here.
+  const firstPinLine = sendBody.split("\n").find((l) => l.includes("pinModeRef.current") && !/^\s*\/\//.test(l));
+  if (firstPinLine !== undefined && !/^\s*pinModeRef\.current\s*=[^=]/.test(firstPinLine)) {
+    problems.push(
+      `E3 pinModeRef: TURN_SCOPED_EXEMPT claims send() OVERWRITES it before any read, but send()'s first ` +
+      `use of it is a READ (${firstPinLine.trim()}) — the exemption no longer holds and it must move into the contract`);
+  }
+  // voiceStopGenRef's exemption rests on it invalidating ITSELF at every transition of the recording
+  // it belongs to. That is a shrink-only floor, not a proof: it says the self-invalidation has not
+  // been REDUCED since the exemption was granted — 5 sites: mic start, stop, the X-wins path, cancel
+  // and unmount. It deliberately claims no more than that. If a site disappears, the exemption has to
+  // be re-argued rather than silently inherited.
+  //
+  // The 5 is MEASURED, not eyeballed. A first draft set it to 4 from reading the greps, and
+  // M-E3-voice stayed green while the mutation it exists to catch went through — a floor above the
+  // real count is a check that cannot fail.
+  const VOICE_BUMP_FLOOR = 5;
+  const voiceBumps = (src.match(/voiceStopGenRef\.current\+\+|\+\+voiceStopGenRef\.current/g) ?? []).length;
+  if (voiceBumps < VOICE_BUMP_FLOOR) {
+    problems.push(
+      `E3 voiceStopGenRef: TOKEN_EXEMPT claims it is invalidated by its own recording transitions, but ` +
+      `${voiceBumps} bump site(s) remain of the ${VOICE_BUMP_FLOOR} that justified the exemption — ` +
+      `re-argue it or let conversation exit invalidate the token`);
+  }
   return problems;
 }
 
@@ -532,6 +561,26 @@ const mutantAgent = (from: string, to: string): string => {
   const problems = uncoveredConversationState(injected);
   mustCatch("M-E2-new-token — a new generation token nothing invalidates on conversation exit is DISCOVERED",
     problems.some((p) => p.startsWith("E2 someNewFlowTokenRef")), JSON.stringify(problems));
+
+  // §E3 — the exemptions are claims, so the claims are executed. These two mutations are the reason
+  // the sentence "each exemption's reason is an assertion this file also checks" is true rather than
+  // decorative: break what an exemption asserts and the exemption stops being granted.
+  // Mutated INSIDE send() specifically — `pinModeRef.current = 'bottom';` also appears in the
+  // land-timer block far above it, and a whole-source replace hits that one instead, leaving send()
+  // untouched and the mutation silently vacuous. (It did, on the first run of this proof.)
+  const sendAt = src.indexOf("  const send = async (override?: string) => {");
+  const pinAt = src.indexOf("    pinModeRef.current = 'bottom';", sendAt);
+  const pinRead = src.slice(0, pinAt)
+    + "    if (pinModeRef.current === 'top') toTop();"   // now send() READS it first
+    + src.slice(pinAt + "    pinModeRef.current = 'bottom';".length);
+  mustCatch("M-E3-pin — if send() ever READ pinModeRef before writing it, its exemption is withdrawn",
+    uncoveredConversationState(pinRead).some((p) => p.startsWith("E3 pinModeRef")),
+    JSON.stringify(uncoveredConversationState(pinRead)));
+
+  const voiceStuck = src.replace(/voiceStopGenRef\.current\+\+/, "/* no bump */");
+  mustCatch("M-E3-voice — if voiceStopGenRef's self-invalidation shrinks below the floor that justified its exemption, the exemption is withdrawn",
+    uncoveredConversationState(voiceStuck).some((p) => p.startsWith("E3 voiceStopGenRef")),
+    JSON.stringify(uncoveredConversationState(voiceStuck)));
   // …and the same predicate reports the real tree clean, so the three mutations above prove
   // discrimination rather than a rule that flags everything.
   check("…and §E reports the real tree clean (the mutations prove discrimination, not noise)",
