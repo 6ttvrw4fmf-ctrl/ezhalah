@@ -287,8 +287,6 @@ verify-taxonomy.ts
 verify-theme-contract.ts
 verify-topbar-signin.ts
 verify-transcript-integrity.ts
-verify-trending-carries-full-filter-state.ts
-verify-trending-cohort-contract.ts
 verify-trending-filter-state-live.ts
 verify-trending-live-four-way-truth.ts
 verify-trending-visuals.ts
