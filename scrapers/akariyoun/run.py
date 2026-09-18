@@ -70,6 +70,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 
 SOURCE = "عقاريون"
 BASE = "https://akariyoun.sa"
@@ -259,14 +260,13 @@ def list_slugs(s: cc.Session, max_pages: int = MAX_PAGES) -> list[str]:
 
 
 # ── mapping ──────────────────────────────────────────────────────────────────────────────────────
-TYPE_MAP = {
-    "فيلا": "Villa", "شقة": "Apartment", "دور": "Floor", "أرض": "Residential Land",
-    "ارض": "Residential Land", "استراحة": "Rest House", "استراحه": "Rest House",
-    "عمارة": "Residential Building", "عماره": "Residential Building", "مكتب": "Office",
-    "محل": "Shop", "مستودع": "Warehouse", "شقه": "Apartment", "بيت": "House",
-    "تاون هاوس": "Townhouse", "مزرعة": "Farm", "مصنع": "Factory", "معرض": "Showroom",
-}
-COMMERCIAL = {"Office", "Shop", "Warehouse", "Factory", "Showroom"}
+# TYPES COME FROM THE SHARED CANONICAL MAP (normalize.TYPE_MAP_AR), not a private copy.
+# A private list is a drift hazard: the first full sweep skipped 5 listings as "unmapped" for
+# «غرفة» and «ورشة» — both of which the shared map and known_type_ar have carried all along.
+# Lookup order: normalize.map_type_exact() first, then the same map with Arabic orthography folded,
+# because akariyoun writes «إستراحة» (hamza-under-alef) where the shared map has «استراحة».
+COMMERCIAL_EN = {"Office", "Shop", "Warehouse", "Factory", "Showroom", "Workshop",
+                 "Gas Station", "Commercial Land", "Commercial Building"}
 
 
 def _fold_ar(t: str) -> str:
@@ -277,7 +277,18 @@ def _fold_ar(t: str) -> str:
     return t.strip()
 
 
-_TYPE_MAP_FOLDED = {_fold_ar(k): v for k, v in TYPE_MAP.items()}
+_FOLDED_SHARED = {_fold_ar(k): v for k, v in normalize.TYPE_MAP_AR.items()}
+
+
+def map_type_ar(raw: Optional[str]) -> Optional[str]:
+    """Canonical English type, or None. None means UNKNOWN and the listing is skipped — never
+    bucketed into the nearest guess (AMBIGUOUS-MAPPING ASK-FIRST)."""
+    if not raw:
+        return None
+    hit = normalize.map_type_exact(raw)
+    return hit if hit else _FOLDED_SHARED.get(_fold_ar(raw))
+
+
 
 
 def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:
@@ -289,7 +300,7 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
     if not ad or not ptype_ar:
         return None, "residential", None
 
-    ptype = _TYPE_MAP_FOLDED.get(_fold_ar(ptype_ar.group(1)))
+    ptype = map_type_ar(ptype_ar.group(1))
     if not ptype:
         # AMBIGUOUS-MAPPING ASK-FIRST: an unknown Arabic type is skipped loudly, never guessed
         # into the nearest bucket — a wrong type is a wrong search result.
@@ -334,8 +345,21 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
     title = _first(page_html, r"<title>\s*(.*?)\s*</title>") or ""
     title = re.sub(r"\s*-\s*Akariyoun\s*$", "", html.unescape(title)).strip() or None
 
+    # CANONICAL LOCATION (launch-checklist box 3). city_ar/district_ar/city_id/region_id are what
+    # listing_native_location_v1 reads, and an exact-district search reads THAT — a platform without
+    # them is searchable by city at best. district_ar is catalog-GATED: the page's own district text
+    # is offered to find_district_in_text() and kept only if the catalog recognises it for this
+    # city. An unrecognised district stays NULL (SOURCE IS TRUTH: unknown is not a guess), while
+    # `neighborhood` keeps the source's own wording for the card.
+    city_id, region_id = to_catalog(city) if city else (None, None)
+    district_ar = find_district_in_text(district, city_id) if (district and city_id) else None
+
     row: dict[str, Any] = {
         "ad_number": f"AK{ad.group(1).translate(_AR_DIGITS)}",
+        "city_ar": city,
+        "district_ar": district_ar,
+        "city_id": city_id,
+        "region_id": region_id,
         "listing_url": f"{BASE}/properties/{slug}",
         "source": SOURCE,
         "active": True,
@@ -380,7 +404,7 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
     if price_is_exact:
         extra["price_exact_from_table"] = True
         row["additional_info"] = extra
-    cat = "commercial" if ptype in COMMERCIAL else "residential"
+    cat = "commercial" if ptype in COMMERCIAL_EN else "residential"
     return row, cat, (None if price_is_exact else raw_price)
 
 

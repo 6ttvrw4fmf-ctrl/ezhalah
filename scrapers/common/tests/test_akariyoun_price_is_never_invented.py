@@ -22,10 +22,18 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import scrapers.akariyoun.run as AK  # noqa: E402
 from scrapers.akariyoun.run import (  # noqa: E402
-    _fold_ar, _TYPE_MAP_FOLDED, magnitude, map_listing, parse_age,
+    _fold_ar, magnitude, map_listing, map_type_ar, parse_age,
     parse_ppm, parse_price, parse_price_exact,
 )
+
+# HERMETIC (AGENTS.md, "the required suite is HERMETIC"). map_listing resolves the city/district
+# against the live catalog, which would make every assertion here depend on production — and on a
+# machine with no credentials it does not fail, it HANGS. These tests are about price and parsing,
+# so the catalog is stubbed to fixed values; the catalog's own behaviour is not what is under test.
+AK.to_catalog = lambda city_ar, region_hint=None: (1, 1)
+AK.find_district_in_text = lambda text, city_id: text
 
 # A land page: rounded words in the header, the EXACT figure in the spec table.
 LAND = """<html><head><title>ارض للبيع في حي الغنامية - Akariyoun</title></head><body>
@@ -149,8 +157,7 @@ def test_alef_and_ta_marbuta_variants_map_to_the_same_type():
     """«إستراحة» (hamza-under-alef) was skipped as an unmapped type on the first pilot while
     «استراحة» mapped fine — the same word, one orthographic variant apart."""
     for variant in ("إستراحة", "استراحة", "استراحه", "اسْتراحة"):
-        assert _TYPE_MAP_FOLDED.get(_fold_ar(variant)) == "Rest House", variant
-    assert _TYPE_MAP_FOLDED.get(_fold_ar("أرض")) == "Residential Land"
+        assert map_type_ar(variant) == "Rest House", variant
     # ...and through map_listing itself. Asserting only on the dict tested the TABLE, not the code
     # path: a mutation that reverted map_listing to the unfolded lookup left this file green.
     for variant in ("إستراحة", "استراحه"):
@@ -165,6 +172,16 @@ def test_age_accepts_arabic_word_numerals():
     assert parse_age("جديد") == 0
     assert parse_age("١٢ سنة") == 12
     assert parse_age(None) is None
+
+
+def test_types_come_from_the_shared_canonical_map():
+    """The first full sweep skipped 5 listings as "unmapped" for «غرفة» and «ورشة» — both of which
+    normalize.TYPE_MAP_AR and known_type_ar have carried all along. A private per-scraper type list
+    is a drift hazard; this pins that the shared map is what answers."""
+    assert map_type_ar("غرفة") == "Room"
+    assert map_type_ar("ورشة") == "Workshop"
+    assert map_type_ar("مستودع") == "Warehouse"
+    assert map_type_ar("فيلا") == "Villa"
 
 
 def test_an_unmapped_type_is_skipped_not_guessed():
