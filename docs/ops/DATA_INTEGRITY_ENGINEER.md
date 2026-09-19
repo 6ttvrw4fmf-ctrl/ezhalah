@@ -864,6 +864,123 @@ in bulk on a hunch.
 claim as "unverifiable".* A divide-by-N that lands on pretty numbers is never evidence; the source's
 own per-unit field and its own prose are.
 
+### 25a. The fourth re-investigation (2026-09-18) — same verdict, and the reason it had to be asked again
+
+**Verdict unchanged: wasalt publishes these figures. Nothing was repriced, nothing was backfilled.**
+§25 predicted this run almost exactly ("read this before starting a fourth"), and the trigger was the
+same arithmetic: the cohort had grown to **172** rows (53 at `>= 1e9`, max **360,404,462,610**), and
+the two worst fit a *new* variant of the seduction — the URL slugs
+(`land-3523967-sqm`, `land-72327-sqm`) look like the area with a decimal point deleted, which invites
+reading the price the same way. It is the ÷1000 coincidence wearing a different hat.
+
+**Why §25's oracle could not answer it, and this is the part worth keeping.** §25 settles the class
+against `ar_data`. The two alerting rows (`11939802`, `11939808`) were scraped 2026-09-17 by the new
+browser transport (#3129) and their **`ar_data` is NULL** — as it is for most of that run's rows,
+because `enrich_ar.py` still fetches over plain HTTP and is still Cloudflare-blocked. So the archive
+was silent on precisely the rows under suspicion. **A settled class does not settle a row the oracle
+cannot see.**
+
+**The population, re-measured 2026-09-18** (§25 measured 115 rows; the cohort is now 172). Measured
+TWICE the same day, because the gap below was closed in between — and the second measurement is the
+one that settles it, because it has NO unverified remainder:
+
+- **As found:** only **119/172** carried an archived `propertyInfo`. 119/119 matched, zero mismatches;
+  the **53** rows with no archive were all from 2026-09-17, the first browser sweep.
+- **After `enrich_ar` moved onto the browser transport (#3140, same day): 172/172 carry an archive,
+  0 errored, 0 NULL — and 172/172 stored `price_total` == wasalt's own `salePrice`. ZERO mismatches
+  across the entire cohort.**
+- **172/172** carry wasalt's own `averageSalePricePerSqm` at the SAME magnitude, and **0** rows show a
+  source per-m² ~1000× smaller — which is precisely what would exist if our total were inflated ×1000.
+  That is the whole hypothesis, refuted on every row rather than on a sample.
+
+**Two independent network paths agree to the digit.** The four rows below were read by hand from a
+residential browser at ~22:0x, and re-fetched hours later by the fixed enricher through the metered
+Saudi proxy (`ar_fetched_at` 22:46–23:08). Same `salePrice`, same `averageSalePricePerSqm`, every row.
+A shared parser bug could produce one of those; it cannot produce both.
+
+**Answered by §27b's rule — ask the source.** Read live from wasalt.sa on 2026-09-18, all four
+corroborants agreeing on every row (`salePrice` == `conversionPrice` == our stored `price_total`;
+wasalt's own `averageSalePricePerSqm` at the SAME magnitude; `currencyType`/`conversionUnit` = SAR;
+wasalt's own prose quoting our exact digits):
+
+| row | stored `price_total` | wasalt `salePrice` | wasalt `averageSalePricePerSqm` | wasalt `carpetArea` | our `area_m2` |
+|---|---|---|---|---|---|
+| 11939802 | 24,829,872,186 | 24,829,872,186 | 7,046,000 | `3523.967` | 3523 |
+| 11939808 | 4,183,393,680 | 4,183,393,680 | 5,784,000 | `723.27` | 723 |
+| 11939904 | 76,859,520,864 | 76,859,520,864 | 3,920,702 | `19603.51` | 19603 |
+| 11940462 | 515,413,000 | 515,413,000 | 950,000 | `542.54` | 542 |
+
+e.g. «Land Area: 3523.967 SQM … Price: 24829872186 SAR». The slug theory dies on the same page: the
+title reads `Land 3523.967 SQM`, so the slug merely strips the dot from the **area**, and our
+`area_m2` is that area correctly truncated (§25's known, separate, still-non-urgent precision point).
+
+**The code could not have done it anyway, and this is checkable without any fetch.** `run.py` maps
+`price_total = int(info["salePrice"])` on a JSON-native number — `int()` truncates and cannot inflate.
+#3129 changed only the *transport*: `fetch_page()`'s browser branch returns the identical
+`searchResult.properties[]` shape into the identical `_map()`, and `salePrice` has exactly one reader
+in the whole repo. **Whenever a magnitude bug is alleged, check whether the mapping is even
+arithmetically capable of it before fetching anything.**
+
+**Both open alerts were correct reporting, not bugs:**
+- `located_row_unreachable` on those two rows is **not a `sync_search_listings_ar()` defect.**
+  `enforce_price_size_sanity()` is a BEFORE trigger on `search_listings_ar` that re-forces
+  `production_ready=false` on every upsert for a `price_size_impossible()` row absent from
+  `ops_price_source_verified` — so re-running sync can *never* clear one, by design (migration
+  `20260804120000` says so in its own header). 19 wasalt rows trip the >5,000,000 SAR/m² clause; 17 are
+  visible because they are registered, these 2 were not yet adjudicated. The alert is the system
+  asking for an adjudication, and it worked.
+  Measured on production 2026-09-18 **as found, before the close-out below registered the three** —
+  the registry IS the whole mechanism, with zero exceptions:
+
+  | trips `price_size_impossible()` | in `ops_price_source_verified` | `production_ready` | rows |
+  |---|---|---|---|
+  | true | **true** | **true** | 17 |
+  | true | **false** | **false** | 3 (`11939802`, `11939808`, `11939904`) — now registered, so 0 |
+  | false | true | true | 15 |
+  | false | false | true | 136 |
+  | false | false | false | 1 (`11939901` — location, not price) |
+
+  Every gate-tripping row that is registered is visible; every one that is not is hidden. Nothing
+  else moves the flag. (Read this via MCP, not the anon key — `ops_price_source_verified` is
+  RLS-hidden from `anon` and reads as **0 rows** there, which is not the same as empty. 39 wasalt
+  rows are registered.)
+
+  All **4** hidden band rows account cleanly, and the split is why exactly 2 alerts exist and not 4:
+  `11939802` / `11939808` resolve to Makkah (`city_id=6`) and are held false by the price gate alone —
+  located, unreachable, correctly alerting. `11939901` / `11939904` are `production_ready=false` in
+  `listing_native_location_v2` itself with `city_id IS NULL`, so they are hidden for a LOCATION reason
+  and reach users through the unlocated fallback — correctly NOT alerting. (`11939901` trips no clause
+  of `price_size_impossible()` at all.) Registering a price therefore cannot un-hide those two: the
+  §25 ungate joins `listing_native_location_v2` and requires `v.production_ready`, which is exactly
+  the guard that keeps a price adjudication from publishing an unlocated row.
+- `field_integrity` "phone/ID artifact band" on wasalt is a **band coincidence**: 11 rows land in
+  [500M, 600M) because genuine Makkah/Madinah land prices land there, and every one with an archive
+  matches its source exactly. The band is an aqar-shaped heuristic; it is not evidence about wasalt.
+
+**Closed out (migration `20260918220610`).** `11939802`, `11939808` and `11939904` were registered in
+`ops_price_source_verified` with the live evidence above — the outcome the detector's own adjudicate
+text asks for ("never repriced and never left hidden"). **No price was changed.** Verified in
+production through the anon path afterwards: `11939802` / `11939808` are `production_ready=true` and
+reachable with their prices intact; `11939904` is registered but stays hidden, because the ungate's
+join on `listing_native_location_v2` correctly refuses to publish a row whose location never
+resolved. `mon_detect_located_row_unreachable()` re-run: **0 raised**, both P1s resolved.
+
+**The standing gap this exposed — FIXED the same day (#3140), and that is why the numbers above are
+complete.** While `enrich_ar.py` sat on the blocked HTTP path, every newly-scraped wasalt row arrived
+with `ar_data = NULL`, so the §25 oracle was blind to exactly the rows most likely to be questioned
+and each one cost a fresh live adjudication. Moving it onto `browser.py` — which already existed and
+which `run.py` already used — took the band from 119/172 archived to 172/172 within hours. **The
+lesson outlives the fix: an oracle is only as good as its coverage, and the rows it cannot see are
+selected for being new, which is the same population most likely to be under suspicion.** Until a
+row's archive exists, do not read a NULL `ar_data` as "unverifiable" (§27b): the source answers.
+
+**How to read the source when you need to.** From a session with a browser pane, just open the listing
+and read `__NEXT_DATA__` (`props.pageProps.propertyDetailsV3.propertyInfo`) — wasalt.sa loads fine from
+an ordinary residential connection; the block is specific to the CI proxy × TLS-fingerprint
+combination. From CI or a cloud routine, which has no browser, dispatch
+`.github/workflows/wasalt-price-probe.yml` with the listing URLs (`scrapers/wasalt/probe_price.py` —
+read-only, and deliberately given no database credentials).
+
 ## 27. Three adjudications from run 2026-08-29 — do not re-derive any of them
 
 **27a. A row with a city that is not `production_ready` is served to NOBODY, and now something asks.**

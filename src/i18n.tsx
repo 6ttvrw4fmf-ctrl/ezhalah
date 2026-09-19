@@ -813,8 +813,14 @@ const AR: Record<string, string> = {
   'Sorted by price per m², highest first.': 'مرتّبة بسعر المتر، من الأعلى.',
   'Sorted by bedrooms, most first.': 'مرتّبة بعدد الغرف، من الأكثر.',
 
-  // Filter search → chat (natural-language bubble + result subheading)
-  "I'm looking for {what}{detail} {verb} in {place}{price}": 'ارحب إزهله 👋، أبحث عن {what}{detail} {verb} في {place}{price}',
+  // Filter search → chat (natural-language bubble + result subheading). The opening ROTATES (owner
+  // rule 2026-09-18, src/data/filterGreetingRotation.ts) — {opening} is filled with a random
+  // "{greeting}، إزهله {emoji}، " each search, e.g. "هلا والله، إزهله 💚، ". Only this Arabic value
+  // carries the placeholder: the English key text is unchanged (English still has no greeting
+  // prefix at all — fill() no-ops on a {opening} nothing in the base string references), so an
+  // unused `opening` param passed for an English render is harmless. Everything from "أبحث عن"
+  // onward is the FILTER-GENERATED sentence and must never be touched by this rotation.
+  "I'm looking for {what}{detail} {verb} in {place}{price}": '{opening}أبحث عن {what}{detail} {verb} في {place}{price}',
   '{cat} property': 'عقار {cat}',
   'a property': 'عقار',
   '{cat} properties': 'عقارات {cat}',

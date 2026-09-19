@@ -22,8 +22,17 @@ ERR_MAX_ATTEMPTS the row is parked (ar_data._parked=true) and permanently leaves
 truly-dead listings are owned by the liveness sweep (active=false), which also removes them here.
 The cap keeps the extra metered-proxy spend flat (<=retry_errs detail fetches per run).
 
-Run (local — user's own Saudi IP, free bandwidth):
-  python -m scrapers.wasalt.enrich_ar --table wasalt_residential_listings --limit 800 --workers 6
+TRANSPORT (2026-09-18): wasalt.sa has been unreachable by every http client since Cloudflare
+tightened on 2026-08-17 (issue #1019). Set WASALT_BROWSER=1 and this fetches through
+scrapers/wasalt/browser.py — the real headed Chromium the sweep switched to in PR #3129 — instead of
+curl_cffi. Without it this job kept quietly failing transient, so every row the browser sweep
+captured from 2026-09-17 on had ar_data=NULL while ar_data is the very thing
+docs/ops/DATA_INTEGRITY_ENGINEER.md §25 makes the oracle for adjudicating a suspect wasalt price.
+The browser path runs SINGLE-THREADED (Playwright's sync API is thread-bound) and needs a display —
+`xvfb-run` on CI, because headless=False is what clears the challenge.
+
+Run (local — user's own IP, free bandwidth):
+  WASALT_BROWSER=1 python -m scrapers.wasalt.enrich_ar --table wasalt_residential_listings --limit 800
 Cloud picks up WASALT_PROXY_URL from the env automatically (Saudi residential proxy); --limit bounds
 the metered bandwidth. --shards 10 --shard N runs the GitHub matrix (disjoint slice per job).
 """
@@ -170,17 +179,96 @@ def retry_eligible(ar_data: Any) -> bool:
     return isinstance(ar_data, dict) and "_err" in ar_data and not ar_data.get("_parked")
 
 
-def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[str]]:
-    """Return (ok, ar_data, city_ar, district_ar).
-    ok=False  → transient (network / 429 / 403 block / retries exhausted): leave ar_fetched=false so a
-                later run retries. ok=True with ar_data={'_err':…} → page loaded but no usable payload
-                (404/410/no __NEXT_DATA__): mark done for THIS run; the bounded retry pass re-attempts
-                such rows (oldest-first, >=24h apart) up to ERR_MAX_ATTEMPTS, then parks them."""
+# One Chromium per PROCESS, created on first use and reused for every row in this slice — the same
+# shape scrapers/wasalt/run.py uses, for the same reason (launching Chromium per page would dominate
+# the wall clock). Kept local to this module rather than imported from run.py: these are two separate
+# entrypoints that never share a process, and run.py drags in the whole upsert pipeline.
+_BROWSER: Any = None
+
+
+def _browser_fetch_enabled() -> bool:
+    from scrapers.wasalt import browser as _b
+    return _b.browser_enabled()
+
+
+def _browser() -> Any:
+    global _BROWSER
+    if _BROWSER is None:
+        from scrapers.wasalt import browser as _b
+        _BROWSER = _b.BrowserFetcher()
+    return _BROWSER
+
+
+def close_browser() -> None:
+    global _BROWSER
+    if _BROWSER is not None:
+        _BROWSER.close()
+        _BROWSER = None
+
+
+def _from_next_data(data: dict) -> tuple[bool, dict, Optional[str], Optional[str]]:
+    """Shared tail of BOTH transports: a parsed __NEXT_DATA__ → the tuple fetch_ar returns.
+
+    A wasalt URL whose listing is gone still renders a perfectly parseable Next.js document.
+    MEASURED 2026-09-18 on a bogus slug through the browser: HTTP 200, __NEXT_DATA__ present,
+    `pageProps` carrying nothing but the two Sentry keys, `propertyDetailsV3` null. Without the
+    guard below `_extract({})` returns `{}`, which work() stores as `ar_data = {}` and counts as
+    ok — a vanished listing archived as "wasalt published nothing about this property", which is
+    precisely the false negative the ar_data oracle exists to prevent
+    (docs/ops/DATA_INTEGRITY_ENGINEER.md §25 reads ar_data to adjudicate a suspect price).
+    `nodetail` is DEFINITIVE — the page answered, it just has no listing — so it counts toward the
+    ERR_MAX_ATTEMPTS budget and eventually parks, exactly like the http path's 404.
+
+    The http path could always hit this too (a 200 shell with no propertyDetailsV3); it is fixed
+    here rather than in the browser branch so one guard covers both transports.
+    """
+    pdv = (data.get("props", {}).get("pageProps", {}).get("propertyDetailsV3") or {})
+    if not pdv:
+        return True, {"_err": "nodetail"}, None, None
+    d, city_ar, dist_ar = _extract(pdv)
+    return True, d, city_ar, dist_ar
+
+
+# An `_err` that means "this route answered and there is NO LISTING here" — as opposed to one that
+# means "something went wrong on the way". Only the first kind is evidence of absence, so only the
+# first kind may trigger the /en salvage below. `noNEXT` is deliberately NOT here: a page that is
+# not a Next.js document at all can be a WAF shell, which is evidence of nothing.
+_NO_LISTING_ERRS = {"nodetail", 404, 410}
+
+
+def _fetch_route(route: str, slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[str]]:
+    """Fetch ONE language route of a listing → the tuple fetch_ar returns. `route` is 'ar' or 'en'."""
+    url = f"{BASE}/{route}/property/{slug}"
+
+    # CLOUDFLARE PATH (WASALT_BROWSER=1). wasalt.sa tightened bot protection on 2026-08-17 and no
+    # http client has reached it since (issue #1019; the fix landed for the sweep in PR #3129).
+    # THIS job kept using the blocked http path, so every row the browser sweep captured from
+    # 2026-09-17 on got ar_data=NULL — and ar_data is the oracle
+    # docs/ops/DATA_INTEGRITY_ENGINEER.md §25 tells an adjudicator to consult before concluding a
+    # suspect wasalt price is ours. The oracle was blind on exactly the newest rows, which is why
+    # the ×1000 price alerts of 2026-09-18 (PR #3137) needed a fresh live fetch to settle.
+    #
+    # `next_data()` already carries its own 4-attempt ladder with a fresh proxy exit per retry, so
+    # this is ONE call — wrapping it in the http path's 3-attempt loop would mean 12 navigations
+    # per row. It returns the ALREADY-PARSED dict, so there is no regex/json.loads step here.
+    if _browser_fetch_enabled():
+        _throttle()
+        data = _browser().next_data(url)
+        if data is None:
+            # A BLOCK, NOT A VERDICT. next_data() returns None for "no parseable answer" — a
+            # Cloudflare challenge shell, a dead proxy exit and a navigation timeout all look
+            # identical from here, and NONE of them is evidence about the listing. Recording it
+            # as a definitive `_err` would spend one of the row's ERR_MAX_ATTEMPTS attempts, so a
+            # single blocked day would park rows permanently on the strength of our own outage.
+            # Transient → the row is left completely untouched and the next run retries it.
+            return False, None, None, None
+        return _from_next_data(data)
+
     s = _session()
     for attempt in range(3):
         _throttle()
         try:
-            r = s.get(f"{BASE}/ar/property/{slug}", timeout=30)
+            r = s.get(url, timeout=30)
         except Exception:
             time.sleep(1.5 * (attempt + 1))
             continue
@@ -194,11 +282,49 @@ def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[s
         m = NEXT_RE.search(r.text)
         if not m:
             return True, {"_err": "noNEXT"}, None, None
-        pdv = (json.loads(m.group(1)).get("props", {}).get("pageProps", {})
-               .get("propertyDetailsV3") or {})
-        d, city_ar, dist_ar = _extract(pdv)
-        return True, d, city_ar, dist_ar
+        return _from_next_data(json.loads(m.group(1)))
     return False, None, None, None  # retries exhausted → transient
+
+
+def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[str]]:
+    """Return (ok, ar_data, city_ar, district_ar).
+    ok=False  → transient (network / 429 / 403 block / retries exhausted): leave ar_fetched=false so a
+                later run retries. ok=True with ar_data={'_err':…} → page loaded but no usable payload
+                (404/410/no __NEXT_DATA__): mark done for THIS run; the bounded retry pass re-attempts
+                such rows (oldest-first, >=24h apart) up to ERR_MAX_ATTEMPTS, then parks them.
+
+    /en SALVAGE (2026-09-18). Some listings have NO ARABIC PAGE AT ALL. Measured on ids 11939663 /
+    11939667 / 11939669: `/ar/property/{slug}` answers Next.js `page: "/404"` while
+    `/en/property/{slug}` serves a complete payload. It is NOT a slug mismatch — wasalt publishes
+    the Arabic slug as `propertyInfo.alternateSlug`, and `/ar/property/{alternateSlug}` 404s for
+    these three as well, while the control listing resolves on either slug. Nor is it liveness:
+    the listings are alive, so the liveness sweep will never retire them, and without this they
+    simply burn five attempts and park — permanently absent from the §25 price oracle.
+
+    So when — and only when — /ar says there is no listing, fall back to /en and archive THAT.
+    `salePrice` is language-independent, which is the field the oracle exists to answer on.
+
+    WHAT THE SALVAGE MUST NOT DO: write English into the Arabic columns. `city_ar`/`district_ar`
+    are Arabic-only (the /en payload says 'Jeddah' / 'Al-Fanar'), and `_region_for()` resolves
+    against the Arabic catalog, so a leak here would corrupt both the column and the region
+    lookup. The salvage therefore returns city/district as None — there IS no Arabic city for
+    this listing, and NULL is the honest value (SOURCE IS TRUTH: silent → NULL). The payload is
+    stamped `_lang: "en"` so nothing downstream mistakes an English archive for an Arabic one;
+    its absence keeps meaning Arabic, so no existing row needs rewriting."""
+    ok, d, city_ar, dist_ar = _fetch_route("ar", slug)
+    if not (ok and isinstance(d, dict) and d.get("_err") in _NO_LISTING_ERRS):
+        return ok, d, city_ar, dist_ar
+
+    ok_en, d_en, _, _ = _fetch_route("en", slug)
+    if not ok_en:
+        # The salvage attempt was BLOCKED, not answered. We still do not know whether an English
+        # page exists, so this is our failure, not the listing's — stay transient rather than
+        # spending one of the row's ERR_MAX_ATTEMPTS attempts on our own outage.
+        return False, None, None, None
+    if not isinstance(d_en, dict) or "_err" in d_en:
+        return True, {"_err": "nodetail"}, None, None  # gone on BOTH routes → genuinely absent
+    d_en["_lang"] = "en"
+    return True, d_en, None, None
 
 
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
@@ -206,6 +332,17 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
                  retry_errs: int = 100, err_backoff_hours: float = 24.0,
                  max_seconds: float = 0.0) -> dict[str, int]:
     _load_catalog()
+    # ONE BROWSER, ONE THREAD. Playwright's sync API binds its driver to the thread that started it
+    # (scrapers/wasalt/browser.py:_ensure has the scar tissue — a second start() in one thread dies
+    # with "Playwright Sync API inside the asyncio loop"), so the shared BrowserFetcher cannot be
+    # driven from a pool. The alternatives were a browser per worker — 6 Chromiums and 6 proxy
+    # sessions on one runner, which is both a memory and a bandwidth problem — or a lock around
+    # next_data(), which serializes to exactly this anyway while looking parallel. The http path
+    # keeps its pool; the time budget, not the worker count, is what bounds a browser run.
+    if _browser_fetch_enabled() and workers != 1:
+        print(f"   ⓘ browser transport → --workers {workers} forced to 1 (Playwright's sync API is "
+              f"thread-bound; --max-seconds is what bounds this run)", flush=True)
+        workers = 1
     c = db.sb()
     # Circuit breaker (owner 2026-07-07): steady state is a few brand-new rows/day. A sudden large
     # un-fetched backlog means ar_fetched was reset or a bulk backfill is in play — auto-crawling all of
@@ -301,8 +438,26 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
             with lock:
                 stats["fail"] += 1
 
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        list(ex.map(work, rows))
+    def run_rows(batch: list[dict]) -> None:
+        """workers==1 runs INLINE, never through a pool of one.
+
+        MEASURED 2026-09-18, not assumed: a BrowserFetcher driven from a one-thread pool works on
+        the first pass and then dies on the second with
+        `greenlet.error: cannot switch to a different thread (which happens to have exited)`.
+        Playwright's sync driver is bound to the thread that started it, and this function is
+        called TWICE — once for the pending rows and once for the retry pass — so each call gets a
+        fresh worker thread from a fresh executor. A pool of one looks single-threaded and is not;
+        it would have taken out the errored-row retry pass on every single browser run, which is
+        the one pass that drains rows nobody else revisits.
+        """
+        if workers == 1:
+            for r in batch:
+                work(r)
+            return
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            list(ex.map(work, batch))
+
+    run_rows(rows)
     print(f"   ✓ {table}: ok={stats['ok']} empty={stats['empty']} fail={stats['fail']} "
           f"skipped={stats['skipped']}", flush=True)
     if stats["skipped"]:
@@ -331,8 +486,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     stats["retry_attempted"] = len(retry_rows)
     if retry_rows:
         pre = {k: stats[k] for k in ("ok", "empty", "fail")}
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            list(ex.map(work, retry_rows))
+        run_rows(retry_rows)
         stats["retry_ok"] = stats["ok"] - pre["ok"]
         stats["retry_empty"] = stats["empty"] - pre["empty"]
         stats["retry_fail"] = stats["fail"] - pre["fail"]
@@ -378,9 +532,14 @@ def main() -> int:
     suffix = "commercial" if "commercial" in args.table else "residential"
     platform = f"wasalt_enrich_ar_{suffix}"
     run_id = db.begin_run(platform)
-    stats = enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
-                          args.max_pending, args.allow_backfill,
-                          args.retry_errs, args.err_backoff_hours, args.max_seconds)
+    try:
+        stats = enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
+                             args.max_pending, args.allow_backfill,
+                             args.retry_errs, args.err_backoff_hours, args.max_seconds)
+    finally:
+        # Chromium is a child process, not a socket — leaving it up keeps the runner alive past the
+        # job and can hold the whole step open. finally, so a raise still tears it down.
+        close_browser()
     aborted = stats.get("aborted", 0)
     ok_count, empty_count, fail_count = stats.get("ok", 0), stats.get("empty", 0), stats.get("fail", 0)
     skipped = stats.get("skipped", 0)
