@@ -742,7 +742,14 @@ def main() -> int:
         print(f"   (startup jitter: waited {jittered:.1f}s to spread cloud-matrix load on the shared proxy)")
 
     s = session()
-    run_id = db.begin_run("wasalt")
+    # RUN LABEL (2026-09-19). The full enumeration no longer fits one CI job — measured ~11-18 s/page
+    # through the browser against ~3,300 pages, i.e. 10-16h under a 6h runner ceiling — so
+    # wasalt-enum-liveness.yml shards it one job per slice. Each shard must NOT write a
+    # `platform='wasalt'` row, because liveness.py's coverage guard picks the newest such row and a
+    # single ~3k-row shard would look like a catastrophically partial crawl. Shards write
+    # 'wasalt_enum_shard' instead and `liveness.py --mode enum-rollup` sums them into ONE
+    # 'wasalt' row. The guard itself is deliberately left untouched.
+    run_id = db.begin_run(os.environ.get("WASALT_RUN_LABEL", "").strip() or "wasalt")
     total = 0
     legit_empty = False
     try:

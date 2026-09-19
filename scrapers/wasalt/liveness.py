@@ -49,7 +49,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -673,6 +673,80 @@ def control_ok(live: int, dead: int, failed: int, n: int, min_live: float) -> bo
     return (live / decided) >= min_live
 
 
+SHARD_PLATFORM = "wasalt_enum_shard"
+
+
+def rollup_ok(shards_seen: int, shards_expected: int, rows: int, min_rows: int) -> tuple[bool, str]:
+    """Pure: may these shard runs be published as ONE qualifying enumeration?
+
+    Both conditions are load-bearing and neither implies the other:
+      * EVERY shard must have reported. A missing shard is a whole slice of the catalogue nobody
+        looked at, and every active listing in it would be counted "unseen by the enum" and struck.
+        `needs:` in the workflow already gates on job success, but a job can succeed having written
+        no run row at all, so the count is re-checked here against the DB rather than against CI.
+      * The SUM must still clear the absolute floor, so a set of shards that all ran but returned
+        almost nothing cannot publish a row the coverage guard would then bless.
+
+    Deliberately does NOT re-implement coverage_ok(): the relative-to-median guard downstream is
+    unchanged and is still what decides whether a complete-LOOKING enumeration is trustworthy.
+    This only decides whether the shards ADD UP to one enumeration at all.
+    """
+    if shards_expected <= 0:
+        return False, "shards_expected must be positive — refusing to publish an unbounded rollup"
+    if shards_seen < shards_expected:
+        return False, (f"only {shards_seen}/{shards_expected} shards reported — a missing slice is "
+                       f"a slice nobody enumerated, and every live listing in it would be struck")
+    if rows < min_rows:
+        return False, f"shards summed to {rows} rows < floor {min_rows}"
+    return True, f"{shards_seen}/{shards_expected} shards, {rows} rows"
+
+
+def run_enum_rollup(args) -> int:
+    """Sum this dispatch's shard runs into ONE `platform='wasalt'` scrape_runs row.
+
+    WHY THIS EXISTS. The enumeration used to be one job walking ~3,300 pages; through the browser
+    that is 10-16h against a 6h runner ceiling (measured 2026-09-19 — run 35416642741 died at the
+    330-minute wall, two-thirds through). Sharding it one job per slice is the only way it
+    completes. But run_enum_strike()'s coverage guard reads the single newest `platform='wasalt'`
+    run with rows_seen >= enum_min_rows, and twenty ~3k-row shards would each look like a
+    catastrophically partial crawl.
+
+    Rather than loosen that guard — it is the one thing standing between a partial crawl and
+    mass-deactivating live inventory — the shards publish under a DIFFERENT platform and are rolled
+    up here into the single row the guard already expects. THE GUARD'S CODE IS UNTOUCHED.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=args.enum_window_hours)).isoformat()
+    runs = db._execute(
+        db.sb().table("scrape_runs").select("id, started_at, rows_seen, ok")
+        .eq("platform", SHARD_PLATFORM).gte("started_at", cutoff)
+        .order("started_at", desc=True).limit(200),
+        what="scrape_runs.enum_shards",
+    ).data or []
+    good = [r for r in runs if r.get("ok")]
+    rows = sum(int(r.get("rows_seen") or 0) for r in good)
+    ok, why = rollup_ok(len(good), args.shards_expected, rows, args.enum_min_rows)
+
+    print(f"enum-rollup: {len(good)}/{args.shards_expected} ok shards in the last "
+          f"{args.enum_window_hours}h, {rows} rows summed → {'PUBLISH' if ok else 'REFUSE'} ({why})",
+          flush=True)
+    if args.dry_run:
+        print("  [DRY-RUN] no scrape_runs row written", flush=True)
+        return 0
+    if not ok:
+        # Refusing is not something to hide: record the attempt so the shard set stays auditable,
+        # but NEVER as a row the coverage guard could bless.
+        rid = db.begin_run("wasalt_enum_rollup_refused")
+        db.end_run(rid, ok=False, rows_seen=rows, rows_upserted=0, notes=f"refused: {why}",
+                   allow_empty=True)
+        return 1
+
+    rid = db.begin_run("wasalt")
+    db.end_run(rid, ok=True, rows_seen=rows, rows_upserted=rows,
+               notes=f"enum-rollup of {len(good)} shards ({why})",
+               check_tables=["wasalt_residential_listings", "wasalt_commercial_listings"])
+    return 0
+
+
 def run_enum_strike(args) -> int:
     started = time.time()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -828,7 +902,12 @@ def run_enum_strike(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Wasalt hybrid liveness (HEAD-first, GET-confirm)")
-    ap.add_argument("--mode", default="pilot", choices=["pilot", "enforce", "enum-strike"])
+    ap.add_argument("--mode", default="pilot",
+                    choices=["pilot", "enforce", "enum-strike", "enum-rollup"])
+    ap.add_argument("--shards-expected", type=int, default=20,
+                    help="enum-rollup: how many shard runs MUST have reported before their sum may "
+                         "be published as one enumeration. A missing shard is a slice nobody "
+                         "enumerated, whose live listings would then all be struck.")
     ap.add_argument("--limit", type=int, default=0,
                     help="Cap rows checked (0 = all). pilot defaults to 800 when unset.")
     ap.add_argument("--workers", type=int, default=4, help="Low concurrency; each worker gets its own session.")
@@ -872,6 +951,8 @@ def main() -> int:
               f"(Playwright's sync API is thread-bound)", flush=True)
         args.workers = 1
     try:
+        if args.mode == "enum-rollup":
+            return run_enum_rollup(args)
         if args.mode == "enum-strike":
             return run_enum_strike(args)
         return run_enforce(args) if args.mode == "enforce" else run_pilot(args)
