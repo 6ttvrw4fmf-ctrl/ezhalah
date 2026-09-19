@@ -487,6 +487,22 @@ def main() -> int:
             db.upsert_sadiqeltajer_residential_batch(res)
         if com:
             db.upsert_sadiqeltajer_commercial_batch(com)
+
+        # An ad whose category flipped this run is SUPERSEDED in the table it left. Both of this
+        # platform's verticals are written from one pass, so a listing reclassified from
+        # residential to commercial (or back) would otherwise stay active in BOTH tables and show
+        # twice. This runs before any prune because it reasons from positive evidence — we parsed
+        # and classified the ad this run — rather than from absence, which prune's own guards
+        # deliberately protect against. See db.retire_superseded_siblings.
+        superseded = db.retire_superseded_siblings(
+            res_table="sadiqeltajer_residential_listings",
+            com_table="sadiqeltajer_commercial_listings",
+            res_ads={r["ad_number"] for r in res},
+            com_ads={r["ad_number"] for r in com},
+            source="Sadiq Eltajer")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         n = len(res) + len(com)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(urls), rows_upserted=n,
                              check_tables=["sadiqeltajer_residential_listings",
