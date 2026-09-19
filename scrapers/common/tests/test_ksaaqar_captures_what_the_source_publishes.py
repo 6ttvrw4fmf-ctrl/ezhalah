@@ -171,3 +171,15 @@ def test_city_fallback_recognises_only_real_saudi_cities():
 def test_the_longest_city_name_wins():
     # «المدينة المنورة» must not be read as «المدينة», nor «رأس تنورة» as «تنورة».
     assert parse_city("x", "أرض في المدينة المنورة") == "المدينة المنورة"
+
+
+def test_a_word_numeral_age_is_not_overrun_by_the_next_field():
+    # Two live listings said «سنتين» (2) and «سنة» (1) and were stored as 100 YEARS OLD, because
+    # «حدود وأطوال العقار : 100» follows the age and that label was missing from _LABELS. The value
+    # ran past its own field and took the next one's number.
+    assert parse_age("عمر العقار : سنتين حدود وأطوال العقار : 100 نوع العقار : سكني") == 2
+    assert parse_age("عمر العقار : سنة حدود وأطوال العقار : 100 نوع العقار : تجاري") == 1
+
+
+def test_the_boundaries_label_terminates_the_field_before_it():
+    assert spec("عمر العقار : جديد حدود وأطوال العقار : 100", "عمر العقار") == "جديد"

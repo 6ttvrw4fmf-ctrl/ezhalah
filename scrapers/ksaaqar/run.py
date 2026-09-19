@@ -87,6 +87,11 @@ _LABELS = [
     "رقم رخصة فال", "عدد الغرف", "عدد الصالات", "دورة المياه", "دورات المياه", "عدد الأدوار",
     "عرض الشارع", "واجهة العقار", "عمر العقار", "نوع العقار", "التأثيث", "التكييف", "الحالة",
     "النوع", "المساحة", "الموقع", "الوصف", "السعر", "الحي", "المدينة", "رقم القطعة", "الواجهة",
+    # «حدود وأطوال العقار : 100» sits between «عمر العقار» and «نوع العقار». Missing it let the age
+    # value run past its own field and pick up that 100: two live listings whose own text says
+    # «سنتين» (2) and «سنة» (1) were stored as 100-year-old properties. A label absent from this
+    # list is not a harmless omission — it is the next field's value leaking into this one.
+    "حدود وأطوال العقار", "حدود العقار", "أطوال العقار", "المزايا", "الخدمات",
 ]
 _STOP = "|".join(re.escape(x) for x in sorted(_LABELS, key=len, reverse=True))
 
@@ -185,6 +190,11 @@ def parse_age(text: str) -> Optional[int]:
         return None
     if _AGE_OPEN.search(v):
         return None
+    # A WORD NUMERAL AT THE START WINS over any digit later in the row. «سنتين» is two years; a
+    # digit further along belongs to whatever field follows, not to the age.
+    for w, n in _AGE_WORDS.items():
+        if v.startswith(w):
+            return n
     d = v.translate(_AR_DIGITS)
     m = re.search(r"\d+", d)
     if m:
