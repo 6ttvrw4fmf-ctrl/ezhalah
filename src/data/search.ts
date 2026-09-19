@@ -16,6 +16,8 @@ import { bedroomTokensPure } from '@/lib/roomBedrooms';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { groupMembers, CLEAN_MACRO, SUBGROUPS } from './propertyTypes';
+import { pickFilterGreetingOpening } from './filterGreetingRotation';
+import { primeFilterGreetings } from './loaderFilterGreetings';
 
 // A parsed search. Every field optional — empty fields broaden, never dead-end. (PRD §6.1)
 export type SearchQuery = {
@@ -386,7 +388,14 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
   // so a free-text budget gets the same explanation a filter search does. (PRD §6.2)
   const calcNote = tooLow ? '' : priceCalcNote(q);
 
+  // Fire-and-forget, idempotent — warms the rotation pool for the NEXT call if this is the first
+  // Filter search of the session (this search still uses whatever pickFilterGreetingOpening() has
+  // right now: the fallback on that very first call, the live pool on every one after).
+  primeFilterGreetings();
   const bubble = t("I'm looking for {what}{detail} {verb} in {place}{price}", {
+    // Rotating opening (owner rule 2026-09-18) — the ONLY variable part; everything from "what"
+    // onward is the filter-generated sentence and stays exactly as it already is.
+    opening: pickFilterGreetingOpening(),
     what: whatPhrase,
     detail: detailPhrase,
     verb,
