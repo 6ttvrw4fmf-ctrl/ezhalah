@@ -153,3 +153,21 @@ def test_age_reads_arabic_indic_digits():
     # width is Arabic-Indic on most listings while its room counts are Latin).
     assert parse_age("عمر العقار : ٧ سنوات") == 7
     assert parse_age("عمر العقار : ١٢ سنة") == 12
+
+
+def test_city_survives_the_other_terminators_the_source_prints():
+    # «الدولة: عقارات الرياض انظر الخريطة» — the value is followed by «انظر», not by one of the
+    # spec labels. A terminator list missing it lost the city on 15% of listings.
+    assert parse_city("الدولة: عقارات الرياض انظر الخريطة تم النشر في 24 يوليو") == "الرياض"
+    assert parse_city("الدولة: عقارات جدة الحالة: جديدة") == "جدة"
+
+
+def test_city_fallback_recognises_only_real_saudi_cities():
+    # When «الدولة» is absent, the city is RECOGNISED from a closed set — never inferred.
+    assert parse_city("لا يوجد حقل دولة", "فله للايجار في الطائف") == "الطائف"
+    assert parse_city("لا يوجد حقل دولة", "شقة في حي غير معروف") is None
+
+
+def test_the_longest_city_name_wins():
+    # «المدينة المنورة» must not be read as «المدينة», nor «رأس تنورة» as «تنورة».
+    assert parse_city("x", "أرض في المدينة المنورة") == "المدينة المنورة"
