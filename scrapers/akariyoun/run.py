@@ -42,7 +42,7 @@ FIELDS (all from the detail page, one listing's own markup):
   رقم الاعلان : 973                   -> ad_number
   عمر العقار : ثمان سنوات             -> property_age  (ALSO a word numeral)
   الواجهة: غربية                      -> direction
-  الحد الغربي شارع 10 20.01م          -> street_width_m (the boundary that IS a street)
+  عرض الشارع : 20                    -> street_width_m  («-» = not published -> NULL)
   رقم القطعة / رقم المخطط             -> plan_parcel
   الخدمات: شبكة الكهرباء/المياه/الصرف -> electricity / water_supply / sanitation
   المشاهدات                           -> views_count
@@ -407,9 +407,17 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
     age = parse_age(_first(t, r"عمر\s*العقار\s*:\s*([^:]{1,24}?)\s*(?:إستخدام|استخدام|المميزات|$)"))
     direction = _first(t, r"الواجهة\s*:\s*([^\s:]+)")
 
-    # street width: the boundary described as a street carries its own width, e.g.
-    # «الحد الغربي شارع 10 20.01م» -> a 10m street.  «الشارع: عرض 11.39 متر» is the explicit form.
-    sw = re.search(r"الشارع\s*:?\s*عرض\s*([\d٠-٩.]+)", t) or re.search(r"شارع\s*([\d٠-٩.]+)\b", t)
+    # STREET WIDTH IS «عرض الشارع», AND ONLY THAT. The spec table prints «عرض الشارع 20» when the
+    # seller published it and «عرض الشارع -» when they did not (33 of 60 sampled pages print the
+    # dash), so a missing width is an honest NULL.
+    #
+    # The previous fallback — a bare «شارع N» anywhere in the page text — read the site's own
+    # AD-CREATION FORM, which every listing page carries: «… الشارع 3 اختيار من الخريطة يرجى اختيار
+    # نوع الإعلان الذي تريد إنشاؤه …». That literal 3 is a form default, not this property's street.
+    # It matched on 40 of 40 sampled pages and put street_width_m = 3 on 272 of 276 live listings,
+    # including ones whose own «عرض الشارع» says 15, 20 or 36. A number scraped from page chrome is
+    # invented data (SOURCE IS TRUTH), and it fed the Advanced Filter's street-width question.
+    sw = re.search(r"عرض\s*الشارع\s*:?\s*([\d٠-٩][\d٠-٩.]*)", t)
     street_w = _num(sw.group(1)) if sw else None
 
     photos = [html.unescape(u) for u in

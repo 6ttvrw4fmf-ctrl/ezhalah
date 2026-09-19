@@ -291,3 +291,41 @@ def test_bathrooms_implausible_count_is_unknown():
     # ceiling the honest answer is UNKNOWN, not a number we would have invented.
     assert parse_bathrooms("عدد دورات المياه : 99") is None
     assert parse_bathrooms("عدد دورات المياه : 50") == 50      # ceiling itself still real
+
+
+# ── street width: «عرض الشارع», never the ad-form's own default ───────────────────────────────────
+# Live probe 2026-09-19: 272 of 276 stored listings carried street_width_m = 3, because every
+# عقاريون listing page also renders the site's AD-CREATION FORM, which contains the literal
+# «الشارع 3». A bare «شارع N» fallback matched it on 40 of 40 sampled pages.
+_AD_FORM_CHROME = ("الشارع 3 اختيار من الخريطة يرجى اختيار نوع الإعلان الذي تريد إنشاؤه "
+                   "اعلان بيع اعلان ايجار")
+
+
+def _street(page_text: str):
+    """The real mapper's street-width read, executed — never a copy of it."""
+    row, _c, _r = map_listing("shk-x", VILLA.replace("</body>", f"<p>{page_text}</p></body>"))
+    return row["street_width_m"]
+
+
+def test_street_width_ignores_the_ad_creation_form():
+    assert _street(_AD_FORM_CHROME) is None, \
+        "«الشارع 3» belongs to the site's own ad form — it is not this property's street"
+
+
+def test_street_width_reads_the_published_field():
+    assert _street("كهرباء, مياه عرض الشارع 20 الضمانات ومدة صلاحيتها -") == 20
+
+
+def test_street_width_prefers_the_field_over_the_chrome_on_the_same_page():
+    # Both strings appear on every real page. The published field must win, not the form default.
+    assert _street(f"{_AD_FORM_CHROME} عرض الشارع 15 الضمانات") == 15, \
+        "a page carries both; 3 is the form, 15 is the listing"
+
+
+def test_street_width_unpublished_dash_is_null_never_a_number():
+    assert _street("كهرباء, مياه عرض الشارع - الضمانات ومدة صلاحيتها -") is None, \
+        "«-» means the seller did not publish it — SOURCE IS TRUTH, that is UNKNOWN"
+
+
+def test_street_width_accepts_arabic_indic_digits():
+    assert _street("عرض الشارع ٢٠") == 20
