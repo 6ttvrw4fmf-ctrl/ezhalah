@@ -8,90 +8,81 @@
     "today_pct/active_rows are informational, captured 2026-09-05."
   ],
   "platforms": {
-    "mustqr": {
-      "floor_pct": 27,
-      "today_pct": 30.7,
-      "active_rows": 1204
-    },
-    "souq24": {
-      "floor_pct": 28,
-      "today_pct": 31.8,
-      "active_rows": 44
+    "abeea": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 163
     },
     "abralosol": {
       "floor_pct": 40,
       "today_pct": 43.2,
       "active_rows": 2667
     },
-    "hajer": {
-      "floor_pct": 57,
-      "today_pct": 60.5,
-      "active_rows": 119
+    "abwbna": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 189
     },
-    "fursaghyr": {
-      "floor_pct": 63,
-      "today_pct": 66.7,
-      "active_rows": 18
+    "akariyoun": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 276
     },
-    "rawasidark": {
-      "floor_pct": 67,
-      "today_pct": 70.3,
-      "active_rows": 101
+    "aldarim": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 175
     },
     "alhoshan": {
       "floor_pct": 68,
       "today_pct": 71,
       "active_rows": 31
     },
-    "therc": {
-      "floor_pct": 74,
-      "today_pct": 77.3,
-      "active_rows": 397
-    },
-    "sadin": {
-      "floor_pct": 84,
-      "today_pct": 87.1,
-      "active_rows": 85
-    },
-    "eastabha": {
-      "floor_pct": 85,
-      "today_pct": 88.2,
-      "active_rows": 195
-    },
-    "raghdan": {
-      "floor_pct": 88,
-      "today_pct": 91.9,
-      "active_rows": 405
-    },
-    "dealapp": {
-      "floor_pct": 89,
-      "today_pct": 92.8,
-      "active_rows": 16049
-    },
-    "wasalt": {
-      "floor_pct": 90,
-      "today_pct": 93.3,
-      "active_rows": 51500
-    },
-    "awal": {
-      "floor_pct": 93,
-      "today_pct": 96.1,
-      "active_rows": 51
-    },
-    "eaqartabuk": {
-      "floor_pct": 93,
-      "today_pct": 96.2,
-      "active_rows": 554
-    },
     "alkhaas": {
       "floor_pct": 93,
       "today_pct": 96.7,
       "active_rows": 209
     },
-    "erapulse": {
-      "floor_pct": 95,
-      "today_pct": 98.4,
-      "active_rows": 61
+    "alobid": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 138
+    },
+    "alta": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 7
+    },
+    "amaall": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 36
+    },
+    "amlakalahsa": {
+      "floor_pct": 96,
+      "today_pct": 99.2,
+      "active_rows": 262,
+      "note": "Declared 2026-09-13. Went production-searchable 2026-09-12 without a baseline row. 260 of 262 rows carry an image on the only snapshot taken so far, so the floor follows this file's own today-minus-about-three convention; it is a first observation, not a long trend."
+    },
+    "aouj": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 70
+    },
+    "aqar": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 90584
+    },
+    "aqaratikom": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 136
+    },
+    "aqarcity": {
+      "floor_pct": 96,
+      "today_pct": 99.6,
+      "active_rows": 1784
     },
     "aqargate": {
       "floor_pct": 95,
@@ -103,75 +94,86 @@
       "today_pct": 99,
       "active_rows": 1762
     },
-    "aqarcity": {
-      "floor_pct": 96,
-      "today_pct": 99.6,
-      "active_rows": 1784
-    },
-    "aqar": {
+    "arkaan": {
       "floor_pct": 97,
       "today_pct": 100,
-      "active_rows": 90584
+      "active_rows": 1265
+    },
+    "awal": {
+      "floor_pct": 93,
+      "today_pct": 96.1,
+      "active_rows": 51
+    },
+    "azdad": {
+      "floor_pct": 72,
+      "today_pct": 87.0,
+      "active_rows": 23,
+      "note": "Declared 2026-09-13. Went production-searchable without a baseline row and failed the onboarding gate for days. The floor is deliberately well below today_pct because this platform is TINY and therefore VOLATILE: at 23 active rows a single listing is 4.3 points, and the seven observed snapshots run 76.0 / 76.0 / 76.9 / 78.3 / 79.2 / 86.4 / 87.0. 72 sits one listing below the lowest figure ever observed, so the gate fires on a real capture regression and not on ordinary churn. Raise it once the platform is large enough for a percentage to mean something."
+    },
+    "bahadhabab": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 53
+    },
+    "dealapp": {
+      "floor_pct": 89,
+      "today_pct": 92.8,
+      "active_rows": 16049
+    },
+    "eaqartabuk": {
+      "floor_pct": 93,
+      "today_pct": 96.2,
+      "active_rows": 554
+    },
+    "eastabha": {
+      "floor_pct": 85,
+      "today_pct": 88.2,
+      "active_rows": 195
+    },
+    "erapulse": {
+      "floor_pct": 95,
+      "today_pct": 98.4,
+      "active_rows": 61
+    },
+    "fursaghyr": {
+      "floor_pct": 63,
+      "today_pct": 66.7,
+      "active_rows": 18
     },
     "gathern": {
       "floor_pct": 97,
       "today_pct": 100,
       "active_rows": 29249
     },
-    "muktamel": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 3924
-    },
-    "arkaan": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 1265
-    },
-    "sanadak": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 1087
-    },
-    "aldarim": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 175
-    },
-    "abeea": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 163
-    },
-    "ramzalqasim": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 154
-    },
-    "aqaratikom": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 136
+    "hajer": {
+      "floor_pct": 57,
+      "today_pct": 60.5,
+      "active_rows": 119
     },
     "jazwtn": {
       "floor_pct": 97,
       "today_pct": 100,
       "active_rows": 108
     },
-    "satel": {
+    "jurash": {
       "floor_pct": 97,
       "today_pct": 100,
-      "active_rows": 94
-    },
-    "aouj": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 70
+      "active_rows": 11
     },
     "mizlaj": {
       "floor_pct": 97,
       "today_pct": 100,
       "active_rows": 27
+    },
+    "muktamel": {
+      "floor_pct": 97,
+      "today_pct": 100,
+      "active_rows": 3924
+    },
+    "mustqr": {
+      "floor_pct": 27,
+      "today_pct": 30.7,
+      "active_rows": 1204
     },
     "nowaisiry": {
       "floor_pct": 97,
@@ -183,57 +185,60 @@
       "today_pct": 100,
       "active_rows": 12
     },
-    "jurash": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 11
+    "raghdan": {
+      "floor_pct": 88,
+      "today_pct": 91.9,
+      "active_rows": 405
     },
-    "alta": {
+    "ramzalqasim": {
       "floor_pct": 97,
       "today_pct": 100,
-      "active_rows": 7
+      "active_rows": 154
     },
-    "shmoualshmal": {
-      "floor_pct": 97,
-      "today_pct": 100,
-      "active_rows": 6
+    "rawasidark": {
+      "floor_pct": 67,
+      "today_pct": 70.3,
+      "active_rows": 101
     },
     "remal": {
       "floor_pct": 89,
       "today_pct": 91.7,
       "active_rows": 84
     },
-    "amaall": {
+    "sadin": {
+      "floor_pct": 84,
+      "today_pct": 87.1,
+      "active_rows": 85
+    },
+    "sanadak": {
       "floor_pct": 97,
-      "today_pct": 100.0,
-      "active_rows": 36
+      "today_pct": 100,
+      "active_rows": 1087
     },
-    "abwbna": {
+    "satel": {
       "floor_pct": 97,
-      "today_pct": 100.0,
-      "active_rows": 189
+      "today_pct": 100,
+      "active_rows": 94
     },
-    "alobid": {
+    "shmoualshmal": {
       "floor_pct": 97,
-      "today_pct": 100.0,
-      "active_rows": 138
+      "today_pct": 100,
+      "active_rows": 6
     },
-    "bahadhabab": {
-      "floor_pct": 97,
-      "today_pct": 100.0,
-      "active_rows": 53
+    "souq24": {
+      "floor_pct": 28,
+      "today_pct": 31.8,
+      "active_rows": 44
     },
-    "azdad": {
-      "floor_pct": 72,
-      "today_pct": 87.0,
-      "active_rows": 23,
-      "note": "Declared 2026-09-13. Went production-searchable without a baseline row and failed the onboarding gate for days. The floor is deliberately well below today_pct because this platform is TINY and therefore VOLATILE: at 23 active rows a single listing is 4.3 points, and the seven observed snapshots run 76.0 / 76.0 / 76.9 / 78.3 / 79.2 / 86.4 / 87.0. 72 sits one listing below the lowest figure ever observed, so the gate fires on a real capture regression and not on ordinary churn. Raise it once the platform is large enough for a percentage to mean something."
+    "therc": {
+      "floor_pct": 74,
+      "today_pct": 77.3,
+      "active_rows": 397
     },
-    "amlakalahsa": {
-      "floor_pct": 96,
-      "today_pct": 99.2,
-      "active_rows": 262,
-      "note": "Declared 2026-09-13. Went production-searchable 2026-09-12 without a baseline row. 260 of 262 rows carry an image on the only snapshot taken so far, so the floor follows this file's own today-minus-about-three convention; it is a first observation, not a long trend."
+    "wasalt": {
+      "floor_pct": 90,
+      "today_pct": 93.3,
+      "active_rows": 51500
     }
   }
 }

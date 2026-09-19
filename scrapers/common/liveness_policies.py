@@ -155,6 +155,19 @@ POLICIES: dict[str, _P] = {
         "while id 8990 (present in the feed earlier the same day, since removed) and a "
         "never-existing id 999999 both answered HTTP 404 rest_post_invalid_id. The status limb is "
         "implemented too so a future draft/trash post cannot read as alive."),
+    "akariyoun": _P(
+        _pol("akariyoun", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the listing's OWN url: akariyoun hard-404s a page it no longer serves, so a 404 on that "
+        "url is a real death signal. A 200 that still renders «رقم الاعلان» is LIVE. A 200 without "
+        "it (a shell, a routing change), any 401/403/408/429/5xx, a transport failure, and a row "
+        "whose listing_url we cannot look up are all UNKNOWN and hold the strike without "
+        "deactivating.",
+        "Absence from the crawl only SELECTS candidates; scrapers/akariyoun/run.py::_verify_gone "
+        "gives each at-grace row a DIRECT confirm before prune_unseen may deactivate it. "
+        "Control-validated live 2026-09-18: fyla-llbyaa-fy-hy-alghnamy-6 and ard-llbyaa-fy-hy-bdr "
+        "(both live) answered HTTP 200 carrying the ad number, while this-slug-never-existed-zzz99 "
+        "answered a clean HTTP 404. Unlike the WordPress siblings there is no REST api to attribute "
+        "the 404 to, so the ad-number check on a 200 is what keeps a shell from reading as alive."),
     "rakez": _P(
         _pol("rakez", 3, 168), CRAWL_PRESENCE_ONLY,
         "wp-json unit status: a 404 the API itself attributes to rest_post_invalid_id (the unit was "

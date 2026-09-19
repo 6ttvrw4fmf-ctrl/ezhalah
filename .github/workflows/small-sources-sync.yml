@@ -86,6 +86,9 @@ jobs:
           # run would re-introduce the ~25%-coverage state that kept prune_unseen's coverage guard
           # permanently tripped. scripts/verify-dealapp-crawl-budget.ts fails CI if dealapp
           # reappears in this matrix.
+          # عقاريون — 277 Riyadh listings across 31 pages, one detail fetch each. No proxy: the
+          # site is plain nginx with no Cloudflare and answers a direct request in 1-3s.
+          - { source: akariyoun,   cmd: "python -m scrapers.akariyoun.run --type all", tmo: 45 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
