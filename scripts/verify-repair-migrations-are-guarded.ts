@@ -410,6 +410,30 @@ const WAIVED: Record<string, string> = {
     'watched by its companion 20260914190653_rakez_off_plan_resurrection_detector.sql, which '
     + 'creates mon_detect_rakez_off_plan_resurrection(), needle-edits it into the '
     + 'mon_run_all_detectors() roster, runs it green, and proves the predicate is not vacuous',
+  // Ezhalah-authored parser error: on 2 KSA Aqar rows, «حدود وأطوال العقار» was missing from the
+  // scraper's label list, so «عمر العقار : سنتين حدود وأطوال العقار : 100 ...» captured the age
+  // value «سنتين» all the way through the unknown label and took its 100 as the age. This
+  // migration (a) writes 2 back on the two affected rows and NULLs any remaining 100 on both
+  // ksaaqar tables — no source-derived value from an unrelated system — and (b) is doubly guarded
+  // by the SAME migration's own reasoning:
+  //   1) the parser now (i) knows «حدود وأطوال العقار» as a label AND (ii) prefers a word numeral
+  //      at the START of the age value over any digit later in the row, so «سنتين» reads as 2
+  //      even when a 100 follows. BOTH behaviours are locked by tests in scrapers/ksaaqar/ that
+  //      go red when either is removed — regressing the parser is caught before the value is
+  //      written, not after.
+  //   2) property_age is written every sweep by the scraper's upsert, so a bad value from any
+  //      other cause is overwritten by the source on the next crawl. The migration itself notes
+  //      this: "the next sweep will write the correct 2 and 1 over these rows".
+  // The migration writes NULL to any other age=100 on either table, which is fail-CLOSED — a
+  // corrupted 100 becomes "unknown" and does not survive to a card until the source re-writes
+  // it. Open the migration and the parser tests to verify this rather than taking it on trust.
+  '20260919073453_ksaaqar_two_word_numeral_ages_were_overrun_by_the_next_field.sql':
+    'the parser regression is caught by two RED-if-removed unit tests in scrapers/ksaaqar/ that '
+    + 'lock (i) the «حدود وأطوال العقار» label and (ii) the word-numeral-at-start preference, so '
+    + 'the bug that produced 100 as an age cannot re-enter; and property_age is rewritten by the '
+    + 'source on every sweep, so any other cause of age=100 is overwritten. This migration also '
+    + 'NULLs any remaining 100 on both ksaaqar tables — fail-CLOSED, unknown rather than wrong — '
+    + 'so a corrupted value never reaches a card until the source itself writes a real one',
 };
 
 // Enforcement starts here — the day this rule landed.
