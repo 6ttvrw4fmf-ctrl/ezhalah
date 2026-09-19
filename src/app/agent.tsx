@@ -3379,6 +3379,10 @@ export default function Agent() {
                       lang: rfLang,
                       name: rfName ?? null,
                       count: introTotal.toLocaleString('en-US'),
+                      // stableKey pins the pick to this message. Without it the typewriter
+                      // re-renders (~40 Hz) re-invoke the picker, so the sentence flips
+                      // template mid-typing — the "weird animation glitch" (owner 2026-09-19).
+                      stableKey: m.id,
                     })
                   : m.text;
               return (

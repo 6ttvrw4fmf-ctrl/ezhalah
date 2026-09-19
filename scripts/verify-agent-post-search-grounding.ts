@@ -62,7 +62,7 @@ check("a NULL total falls back to non-numeric text, never a number",
   // pickResultsFoundSentence (the four-pool Results-Found rotation). The invariant is unchanged —
   // introTotal != null gates the count-bearing sentence; the null branch still falls through to
   // m.text. Only the count-bearing branch's identity moved from t('We found {n}…') to the picker.
-  /introTotal != null\s*\n?\s*\? pickResultsFoundSentence\(\{[\s\S]{0,400}?count: introTotal\.toLocaleString\('en-US'\),[\s\S]{0,80}?\}\)\s*\n?\s*: m\.text/.test(ui),
+  /introTotal != null\s*\n?\s*\? pickResultsFoundSentence\(\{[\s\S]{0,400}?count: introTotal\.toLocaleString\('en-US'\),[\s\S]{0,600}?stableKey: m\.id,\s*\n?\s*\}\)\s*\n?\s*: m\.text/.test(ui),
   "when no honest count exists the reply must say something truthful and non-numeric");
 // A second count source is how two numbers describing the SAME search end up on screen.
 check("the intro never quotes result.total (this page's buffer length, <= QUERY_LIMIT)",
