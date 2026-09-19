@@ -88,6 +88,24 @@ const KNOWN_GAPS: { path: string; owner: string; why: string }[] = [
     why: 'claimed by 20260906041438_a_declared_alert_kind_without_an_emitter_is_decoration.sql; '
       + 'its own sibling 20260906041121_routine11_lifecycle_the_last_four_alert_kinds_get_an_emitter.sql '
       + 'names the owning routine in its filename — the alert-kind/emitter roster this session shipped' },
+  // Raised 2026-09-19 while recovering 20260919040825_ui_results_found_rotation — live in production
+  // since 04:08, in no branch, and blocking EVERY frontend deploy (safe-deploy refuses schema drift).
+  // Same shape as the 2026-09-06 entries below/above: the migration was mirrored verbatim
+  // (md5 9a85e6f91a51c7c1920f1e0b94a8e198, 5961 bytes) by a session that does not own the change.
+  //
+  // The barrier is genuinely owed — it is the byte-for-byte lockstep check between the four DB
+  // rotation pools and the baked client copy, exactly as its already-shipped sibling
+  // scripts/verify-filter-greeting-rotation.ts does for ui_filter_greetings (2026-09-18). It is NOT
+  // a superseded placeholder: the authoring session named a real protection it still intends to
+  // write, alongside src/data/loaderResultsFound.ts, which is also not yet in git.
+  //
+  // Routed to routine-7-seam because the protection is a DB-to-client seam: the pools live in
+  // public.ui_results_found, the client bakes a copy, and drift between them is the defect.
+  // This entry must be DELETED, not amended, the moment that session pushes its barrier.
+  { path: 'scripts/verify-results-found-rotation.ts', owner: 'routine-7-seam',
+    why: 'claimed by 20260919040825_ui_results_found_rotation.sql; DB-to-client lockstep for the '
+      + 'Results-Found rotation pools, sibling of the shipped verify-filter-greeting-rotation.ts. '
+      + 'Mirrored by a non-owning session to unblock deploys; delete when the author pushes it' },
   { path: 'scripts/verify-placeholder-price-detector-sees-the-whole-sentinel-set.ts', owner: 'routine-3-data-integrity',
     why: 'claimed by 20260906043755_wasalt_form_default_prices_are_retracted_and_watched.sql '
       + '(ops_incident #63/#65); wasalt placeholder-price detection is price/listing data integrity' },
