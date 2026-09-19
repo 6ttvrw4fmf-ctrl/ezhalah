@@ -707,7 +707,23 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # verification pass. The price_evidence below now makes it visible instead of hiding it: such a
     # row reports origin="spec_table" even though the payload spoke, so the rows affected are
     # queryable rather than theoretical.
-    if transaction_type == "Buy":
+    # PROSE IS A FALLBACK, NOT AN OVERRIDE (fixed 2026-09-19). This block used to run
+    # unconditionally, so on a Buy listing it overwrote the structured price the branch above had
+    # already taken from aqar's RSC payload — contradicting that branch's own comment ("when aqar's
+    # payload speaks, it is the last word in BOTH directions") and inverting the precedence its
+    # sibling scrapers/aqar/enrich.py has always used (`if price is None:` at its line 135).
+    #
+    # It is not a tie-break nicety. aqar renders a DISCOUNTED listing as
+    #     «… إعجاب 60,000,000 §  45,000,000 §  خصم 25 %»
+    # — struck-through original first, real asking price second — and the first pattern that matches
+    # wins, so prose returns the PRE-DISCOUNT figure. Measured live 2026-09-19 on a 12-row sample:
+    # ads 6708444 (payload 45,000,000 / prose 60,000,000, «خصم 25 %») and 6674913 (1,200,000 /
+    # 1,250,000, «خصم 4 %») — 2 of 12. enrich_residential returned the struck-through price for both.
+    # No aqar code recognises «خصم» at all, so the payload is the only thing that knows the real one.
+    #
+    # `not s_authoritative` keeps the OTHER direction too: when aqar states there is no price
+    # (published:false / «طلب تسويق»), that is a source fact and prose must not go hunting for one.
+    if transaction_type == "Buy" and price_total is None and not s_authoritative:
         # Aqar Buy prices show up as "1,200,000 §" / "299,000 §" / sometimes plain "1200000 §".
         # Try several formats; sanity-check that the number is >= 50K SAR (rules out per-meter
         # figures and stray numbers that happen to sit next to the riyal symbol). Searched on
