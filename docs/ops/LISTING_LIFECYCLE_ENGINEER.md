@@ -323,6 +323,34 @@ which was already wrong when it was written — read the table, do not quote thi
 else is soft-inactivation only, which is why a false deactivation on e.g. raghdan or sanadak cannot
 reach a delete. Turning a platform on is a retention-policy change — RED #4, owner decision.
 
+### §2.5a — A `cleanup_deletion_log` ROW IS AN INTENTION, NOT AN OUTCOME (2026-09-19)
+
+The row is written **BEFORE** the delete, so its presence proves only that a delete was *intended*.
+Two rules follow, and both were learned the same day:
+
+1. **Never record a DEACTIVATION in the deletion ledger.** A deactivation's evidence belongs in
+   `ops_stale_inactivation_probe` (and, for a sold/rented pin, via `scrapers/common/sold_pin.py`).
+   Migration `20260919010944` deactivated six wasalt listings on genuinely DIRECT evidence — headed
+   Chromium, `/ar` and `/en`, HTTP 404 on both, probed twice, live control — and then logged it in
+   `cleanup_deletion_log` "matching the shape the cleanup path already writes". The deactivation was
+   earned; the *shape* was a claim that six still-present listings had been permanently destroyed.
+   Measured over the whole ledger: 1,792 rows, **6 false, and all six were those**.
+2. **Nothing may read that ledger as proof a row is gone without checking.**
+   `ops_lifecycle_orphan_after_delete()` did exactly that, so it reported the six as orphans of a
+   delete that never happened — and, because the raw rows legitimately keep their location/index
+   rows and legitimately have no archive row, **the alert could never go green**. Its own `action`
+   text warned the reader about this case ("do NOT delete an orphan row whose raw listing is
+   actually still present: that is a different (and opposite) bug") while the predicate never
+   implemented the distinction it documented. That is §8.3's trap in its exact form: a permanently
+   unclearable P2 is how a detector teaches people to dismiss it.
+
+`ops_lifecycle_ledger_rows_not_deleted(p_inject jsonb)` now draws the line, the orphan arms consult
+it, and the excluded rows are raised as `lifecycle_deletion_log_without_delete` rather than silenced
+(**never silence a barrier to make it green — make it distinguish cases, and prove both
+directions**). The detector self-tests the predicate in both directions on every sweep and raises
+`lifecycle_ledger_predicate_blind` if it stops discriminating; `verify-deletion-ledger-is-not-proof-
+of-a-delete.ts` guards that the self-test still exists.
+
 ### §2.6 The detectors that already watch parts of this chain
 
 `mon_detect_served_after_source_confirmed_gone` (kind `served_after_source_gone`) ·
