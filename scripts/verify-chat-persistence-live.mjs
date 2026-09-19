@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join, extname } from 'node:path';
 import { existsSync, statSync, readFileSync as rf } from 'node:fs';
+import { resultsSentenceSource } from '../e2e/lib/resultsSentence.mjs';
 
 // Same static server as verify-web-runtime-smoke.mjs: Expo static export emits /agent as
 // agent.html — plain python http.server 404s a reload of /agent (harness artifact, not a product
@@ -73,7 +74,12 @@ const tap = async (txt, wait = 900) => {
   return false;
 };
 const body = () => page.innerText('body');
-const counts = async () => (await body()).match(/لقينا [\d,٬،]+ إعلان يطابق طلبك\./g) ?? [];
+// Derived from the shipped pool (2026-09-19, routine #5). This counted occurrences of the retired
+// «لقينا N إعلان يطابق طلبك.», which PR #3186 replaced with a four-pool rotation — so after that
+// morning it counted ZERO results turns on every transcript, and a persistence check that expects
+// the same number before and after a reload passes trivially when that number is always 0.
+const SENTENCE_RE_SRC = resultsSentenceSource();
+const counts = async () => (await body()).match(new RegExp(SENTENCE_RE_SRC, 'g')) ?? [];
 const waitFor = async (fn, ms = 45000) => { const u = Date.now() + ms; while (Date.now() < u) { if (await fn()) return true; await page.waitForTimeout(400); } return false; };
 
 let failed = 0;

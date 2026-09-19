@@ -35,6 +35,7 @@ export const VIEWPORTS = [
 
 /** The property-search RPC. Journeys count these to prove "no search fired" / "no duplicate". */
 import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';
+import { resultsFoundCount, settledSource } from '../lib/resultsSentence.mjs';
 
 export const SEARCH_RPC = '/rpc/location_search_candidates_ar';
 
@@ -316,8 +317,15 @@ export async function dismissAuthInvitation(page, budgetMs = 6000) {
 }
 
 // ── driving a real search ────────────────────────────────────────────────────────────────────────
-/** Every terminal state the results screen can reach. Shared with the live sweep's SETTLED_RE. */
-export const SETTLED_RE = /لقينا|ما لقيت|ما فيه/;
+/**
+ * Every terminal state the results screen can reach — DERIVED from the pool the app ships.
+ *
+ * It used to read `/لقينا|ما لقيت|ما فيه/`. PR #3186 turned the Results-Found sentence into a
+ * rotation, and only 4 of the 10 AR guest templates still contain «لقينا» — so this clock tested
+ * false on ~60% of real settled searches and `runSearch()` threw «the results screen never settled»
+ * at a perfectly healthy production. Derived, not restated: a template added tomorrow extends it.
+ */
+export const SETTLED_RE = new RegExp(settledSource());
 
 /**
  * Type a city and commit it. Returns true only when the APP confirmed the selection (the field
@@ -417,8 +425,22 @@ export async function searchAsGuest(page, { city = 'الرياض', priceMin, pri
   await runSearch(page);
 }
 
-/** The results screen's own state, as the user sees it. */
-export const resultsState = (page) => page.evaluate(() => {
+/**
+ * The results screen's own state, as the user sees it.
+ *
+ * `countChip` is read NODE-SIDE by the derived matcher rather than by a regex inside the page, for
+ * two reasons. The pool alternation carries one capture group PER TEMPLATE, so `m[1]` in the page
+ * would be `undefined` for every template but the first — a silent null dressed as a parse. And
+ * `resultsFoundCount()` picks the LAST sentence by document position, which is what a growing
+ * transcript requires; the retired in-page `.match()` took the first. It is a NUMBER now (it was
+ * the raw «41,330» string); every caller either tests truthiness, compares two of them, or
+ * interpolates, and all three are unaffected.
+ *
+ * null still means "no shipped Results-Found sentence is on this screen" — never "the screen says
+ * zero". journeys.mjs treats that as a defect, which is the correct reading.
+ */
+export const resultsState = async (page) => {
+  const s = await page.evaluate(() => {
   const vis = (e) => {
     const r = e.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return false;
@@ -428,14 +450,17 @@ export const resultsState = (page) => page.evaluate(() => {
   const text = document.body.innerText;
   return {
     url: location.href,
-    countChip: (text.match(/لقينا\s+([\d,٬]+)\s+إعلان/) || [])[1] ?? null,
+    bodyText: text,
     cards: [...document.querySelectorAll('[data-testid^="card-listing-"]')].filter(vis).length,
     firstCard: document.querySelector('[data-testid^="card-listing-"]')?.getAttribute('data-testid') ?? null,
     loadMore: [...document.querySelectorAll('[data-testid="results-load-more"]')].filter(vis).length,
     afCards: [...document.querySelectorAll('[data-testid="af-card"]')].filter(vis).length,
     composers: [...document.querySelectorAll('textarea')].filter(vis).map((e) => e.value),
   };
-});
+  });
+  const { bodyText, ...rest } = s;
+  return { ...rest, countChip: resultsFoundCount(bodyText) };
+};
 
 // ── loading affordances ──────────────────────────────────────────────────────────────────────────
 // A "loader" is anything that says work is in flight. Named explicitly rather than guessed at from

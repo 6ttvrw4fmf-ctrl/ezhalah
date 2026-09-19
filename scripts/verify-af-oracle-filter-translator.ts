@@ -233,10 +233,24 @@ const BASE = { p_deal: 'بيع', p_tables: ['aqar_residential_listings'], p_type
   // RPC, the one failure mode this whole module exists to prevent.
   // p_deal null IS the combined Buy+Rent search (both buttons lit) — BASE carries a deal, so it
   // must be stripped, not merely omitted from the spread.
+  // THE REFUSAL IS ASSERTED BY ITS CONTENT, NOT BY ITS COUNT (routine #10, ops_incident #314).
+  // These two read `unhandled.length > 0` over a fixture built by spreading BASE and overriding one
+  // field. A bare count cannot tell «refused for the reason this line names» from «refused for some
+  // other reason BASE already carried», so it would keep passing for the entire life of a defect on
+  // the branch it claims to cover — the shape that hid ops_incident #299. Executed 2026-09-19: both
+  // fixtures really do reach their own branch, and the control below proves the base alone refuses
+  // nothing, so the non-emptiness is caused by the override rather than inherited.
+  check('BASE alone is fully translated — a refusal below is caused by the override, not inherited',
+    buildOracleQS(BASE).unhandled.length === 0,
+    `BASE already refuses: ${JSON.stringify(buildOracleQS(BASE).unhandled)}`);
   check('a budget under a COMBINED Buy+Rent search is refused, not approximated',
-    buildOracleQS({ ...BASE, p_deal: undefined, p_price_min: 100000 }).unhandled.length > 0);
+    buildOracleQS({ ...BASE, p_deal: undefined, p_price_min: 100000 }).unhandled
+      .some((u) => /combined Buy\+Rent|p_deal null/.test(u)),
+    JSON.stringify(buildOracleQS({ ...BASE, p_deal: undefined, p_price_min: 100000 }).unhandled));
   check('beds_exact and beds_min together (a real OR of two arms) is refused, not silently narrowed',
-    buildOracleQS({ ...BUY, p_beds_exact: [3], p_beds_min: 2 }).unhandled.length > 0);
+    buildOracleQS({ ...BUY, p_beds_exact: [3], p_beds_min: 2 }).unhandled
+      .some((u) => u.includes('p_beds_exact') && u.includes('p_beds_min')),
+    JSON.stringify(buildOracleQS({ ...BUY, p_beds_exact: [3], p_beds_min: 2 }).unhandled));
 
   // Ordering-only params must not narrow anything — p_rotation_seed is sent on EVERY search, so a
   // predicate here would corrupt every single oracle count.

@@ -67,6 +67,7 @@ import { initialReveal } from '../src/lib/initialReveal.ts';
 import { distinctPlatformCount } from '../src/lib/platformDiversity.ts';
 import { INTERVIEW_STOP_AT } from '../src/lib/afRanking.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
+import { resultsFoundCount, resultsSentenceAtStartSource, shippedTemplates } from '../e2e/lib/resultsSentence.mjs';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -202,8 +203,19 @@ const R = {
   /** R9.1.1 — the summary line that sat above the pills is gone too. */
   summaryGone: (occurrences: number) => occurrences === 0,
   /** R9.2.2 — every headline already on screen is still there, in place, unchanged. */
-  nothingAboveRewritten: (before: string[], after: string[]) =>
-    before.length > 0 && before.every((h, i) => after[i] === h),
+  // COMPARED BY COUNT, NOT BY RENDERED STRING (2026-09-19, routine #5) — see the sibling
+  // verify-af-pill-removal-live.ts for the measured evidence. Since PR #3186 the Results-Found
+  // sentence rotates over 40 templates, and an earlier turn's WORDING is re-drawn when the
+  // transcript rebuilds while its COUNT is correctly preserved. The rule this encodes — "a headline
+  // above rewritten in place" — is about the NUMBER an earlier turn quotes, which is what the
+  // mutation proof below replants. The wording re-pick is a rotation-layer finding, reported and
+  // routed separately, never folded in here.
+  nothingAboveRewritten: (before: string[], after: string[]) => {
+    if (before.length === 0) return false;
+    const b = before.map((h) => toNum(h));
+    if (b.some((n) => n == null)) return false;          // unreadable is not evidence — fail loudly
+    return b.every((n, i) => toNum(after[i] ?? '') === n);
+  },
   /** R9.2.2 — exactly one NEW results turn landed below, carrying N0. */
   newTurnLandedWith: (before: string[], after: string[], n0: number | null) =>
     after.length === before.length + 1 && n0 != null && toNum(after[after.length - 1] ?? '') === n0,
@@ -222,7 +234,7 @@ const R = {
   widenedOrHeld: (before: number | null, after: number | null) => before != null && after != null && after >= before,
 };
 
-/** Every «لقينا N إعلان» headline currently rendered, in DOM order, one entry per turn. */
+/** Every results headline currently rendered, in DOM order, one entry per turn. */
 // Product constants restated (src/data/remote.ts QUERY_LIMIT page-0 buffer; the results turn shows the
 // first 10 cards before any «عرض المزيد»). Restated on purpose: importing them would let a product
 // change move the expectation with it.
@@ -238,18 +250,39 @@ const COUNT_CARDS = () => {
   return n;
 };
 
-const READ_HEADLINES = () => {
-  const re = /^لقينا\s+[\d,٬٠-٩]+\s+إعلان/;
+// DERIVED FROM THE SHIPPED POOL, NEVER RESTATED (2026-09-19, routine #5). This file pinned
+// «لقينا N إعلان», retired by PR #3186 the same morning in favour of a four-pool rotation. Measured
+// live that afternoon: on a healthy الرياض/شقة search returning 13,489, the retired regex matched
+// nowhere on the settled page. See e2e/lib/resultsSentence.mjs and the barrier that executes it,
+// scripts/verify-results-sentence-parsers-track-the-pool.ts.
+// ANCHORED: the per-node reader below must not match a wrapper whose innerText merely
+// CONTAINS a headline — see resultsSentenceAtStartSource() for what that costs.
+const SENTENCE_SRC = resultsSentenceAtStartSource();
+
+const READ_HEADLINES = (src: string) => {
+  const re = new RegExp(src);
   const all = [...document.querySelectorAll('div,span,p')].filter((e: any) => re.test((e.innerText || '').trim()));
   // Innermost only: a parent whose innerText is exactly the headline repeats its child. Keeping
   // every innermost match (NOT deduping by text) matters here — the pre-AF turn and the post-removal
   // turn carry the SAME headline text, and a text-deduped list would hide the new turn.
   return all.filter((e) => !all.some((o) => o !== e && e.contains(o))).map((e: any) => (e.innerText || '').trim());
 };
-const digits = (s: string) => s.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[^\d]/g, '');
-const toNum = (s: string): number | null => {
-  const m = s.match(/لقينا\s*([\d,٬٠-٩]+)/);
-  return m ? Number(digits(m[1])) : null;
+/** The count a headline quotes, read through the same pool the app renders from. */
+const toNum = (s: string): number | null => resultsFoundCount(s);
+
+/**
+ * Render a REAL shipped template at a given count — for mutation proofs only.
+ *
+ * A mutant that quotes the WRONG count must still be a sentence the matcher can READ, or the proof
+ * passes for the wrong reason: the check rejects it because it parsed to null, not because the
+ * number disagreed, and a parser that reads nothing would then look mutation-proven. That is the
+ * vacuity this file shipped with until 2026-09-19, when the literal it used («لقينا N إعلان يطابق
+ * طلبك.») stopped being a shipped wording at all. Derived, and self-checked at the call site.
+ */
+const renderSentence = (n: number): string => {
+  const t = shippedTemplates().find((x) => x.lang === 'ar' && !x.hasName);
+  if (!t) throw new Error('no AR guest template in the shipped pool — refusing to mutate blind');
+  return t.template.replace('{count}', n.toLocaleString('en-US')).replace(/\{name\}/g, 'فهد');
 };
 
 // ── the independent oracle (PostgREST over search_listings_ar, never our own RPC) ───────────────
@@ -387,8 +420,8 @@ const waitForSearch = async (countBefore: number, maxMs = 30000) => {
 // simply not rendered yet.
 const waitForHeadlines = async (atLeast: number, maxMs = 40000): Promise<string[]> => {
   const until = Date.now() + maxMs;
-  let hs: string[] = await page.evaluate(READ_HEADLINES);
-  while (hs.length < atLeast && Date.now() < until) { await page.waitForTimeout(700); hs = await page.evaluate(READ_HEADLINES); }
+  let hs: string[] = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
+  while (hs.length < atLeast && Date.now() < until) { await page.waitForTimeout(700); hs = await page.evaluate(READ_HEADLINES, SENTENCE_SRC); }
   return hs;
 };
 const readCard = () => page.evaluate(() => {
@@ -563,7 +596,7 @@ try {
     const n = searches.length;
     await scrollToBottom();
     await page.click('[data-testid="af-pill-0"]');
-    const hs = (await page.evaluate(READ_HEADLINES)).length;
+    const hs = (await page.evaluate(READ_HEADLINES, SENTENCE_SRC)).length;
     check(`trim — removing pill 0 of ${pills} re-ran the search`, await waitForSearch(n, 30000));
     await waitForHeadlines(hs + 1);
     await page.waitForTimeout(2500);
@@ -596,7 +629,7 @@ try {
   }
 
   // ── 3. snapshot the screen before the removal ─────────────────────────────────────────────────
-  headlinesBefore = await page.evaluate(READ_HEADLINES);
+  headlinesBefore = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
   summaryLine = await readSummaryLine();
   const summaryBefore = summaryLine ? await countLeafText(summaryLine) : 0;
   check('the «بناءً على» summary line is rendered above the pill before the removal', !!summaryLine && summaryBefore >= 1, `summary=${JSON.stringify(summaryLine)} occurrences=${summaryBefore}`);
@@ -670,7 +703,7 @@ try {
   summaryAfter = summaryLine ? await countLeafText(summaryLine) : -1;
   check('R9.1.1 — the summary block is gone with its last pill (its text is nowhere on screen, and the pill row is gone)', summaryLine != null && R.summaryGone(summaryAfter) && pillsAfter === 0, `occurrences of ${JSON.stringify(summaryLine)}: ${summaryAfter} · pills=${pillsAfter}`);
 
-  headlinesAfter = await page.evaluate(READ_HEADLINES);
+  headlinesAfter = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
   console.log(`      [diag] headlines after removal: ${JSON.stringify(headlinesAfter)}`);
   check('R9.2.2 — nothing above was rewritten (every earlier headline is still there, in place)', R.nothingAboveRewritten(headlinesBefore, headlinesAfter),
     headlinesBefore.filter((h, i) => headlinesAfter[i] !== h).length ? `changed: ${JSON.stringify(headlinesBefore.filter((h, i) => headlinesAfter[i] !== h))}` : `${headlinesBefore.length} earlier headline(s) intact`);
@@ -723,9 +756,17 @@ try {
   mut('a surviving pill is caught by noPillRemains', !R.noPillRemains(1));
   mut('a surviving summary line is caught by summaryGone', !R.summaryGone(1));
   mut('an earlier headline rewritten in place is caught by nothingAboveRewritten',
-    headlinesBefore.length > 0 && !R.nothingAboveRewritten(headlinesBefore, headlinesAfter.map((h, i) => (i === 0 ? `لقينا ${(N0 ?? 0) + 1} إعلان يطابق طلبك.` : h))));
+    // The mutant must move the NUMBER — a re-worded turn that keeps its count is production's real
+    // behaviour since the rotation shipped, so a wording-only mutant would (correctly) survive.
+    headlinesBefore.length > 0 && !R.nothingAboveRewritten(
+      headlinesBefore, headlinesAfter.map((h, i) => (i === 0 ? renderSentence((toNum(h) ?? 0) + 1) : h))));
   mut('a turn that landed with N1 instead of N0 is caught by newTurnLandedWith',
-    headlinesBefore.length > 0 && !R.newTurnLandedWith(headlinesBefore, [...headlinesBefore, `لقينا ${N1} إعلان يطابق طلبك.`], N0) && !R.newTurnLandedWith(headlinesBefore, headlinesBefore, N0));
+    headlinesBefore.length > 0
+    // The mutant must be READABLE, or this proof passes because the matcher returned null rather
+    // than because the count was wrong — see renderSentence().
+    && toNum(renderSentence(N1 ?? 0)) === (N1 ?? 0)
+    && !R.newTurnLandedWith(headlinesBefore, [...headlinesBefore, renderSentence(N1 ?? 0)], N0)
+    && !R.newTurnLandedWith(headlinesBefore, headlinesBefore, N0));
   mut('a burned question (different title re-offered) is caught by sameQuestionReoffered',
     !!answeredTitle && !R.sameQuestionReoffered(answeredTitle, `${answeredTitle} ✗`) && !R.sameQuestionReoffered(answeredTitle, null));
   mut('a chip that disagrees with the landed count is caught by chipMatchesLanded', N1 != null && !R.chipMatchesLanded(N1 + 1, N1));

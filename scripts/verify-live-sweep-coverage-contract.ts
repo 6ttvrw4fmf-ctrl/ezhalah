@@ -17,6 +17,7 @@
 //   node --experimental-strip-types scripts/verify-live-sweep-coverage-contract.ts
 
 import { readFileSync } from 'node:fs';
+import { shippedTemplates, resultsFoundCount } from '../e2e/lib/resultsSentence.mjs';
 import { SECOND_PAGE_CAP as SHIPPED_SECOND_PAGE_CAP } from '../src/data/resultCount.ts';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -176,23 +177,60 @@ check('the «عرض المزيد» journey asserts continuation (pager present w
 // a product failure.
 //
 // EXECUTED, not asserted about: both readings are run against a synthetic two-message transcript.
+// THE TRANSCRIPT IS BUILT FROM THE SHIPPED POOL, and the journey's OWN closing regex is lifted out
+// of showmore.mjs and EXECUTED against it (routine #10, 2026-09-19). Both halves used to be pinned
+// text: the headline was hand-written as the retired «لقينا N إعلان» — a sentence production has not
+// rendered since PR #3186 — and the reading rule was asserted by grepping showmore.mjs for the
+// literal `[...txt.matchAll(/(?:من أصل|لقينا)`. That pin failed the moment the journey's regex was
+// correctly narrowed to the closing sentence's real wording, and it could never have failed for the
+// thing it names: a closing regex that goes BLIND still contains the text it was grepped for.
+const headlineTemplate = shippedTemplates().find((t) => t.lang === 'ar' && !t.hasName)!.template;
+const headline = (n: string) => headlineTemplate.replace('{count}', n);
 const TRANSCRIPT = [
-  'لقينا 11,254 إعلان', '…cards…', 'عرضت لك أول 13 من أصل 11,254 إعلان مطابق.',
-  'لقينا 5,970 إعلان', '…cards…', 'عرضت لك أول 10 من أصل 5,970 إعلان مطابق.',
+  headline('11,254'), '…cards…', 'عرضت لك أول 13 من أصل 11,254 إعلان مطابق.',
+  headline('5,970'), '…cards…', 'عرضت لك أول 10 من أصل 5,970 إعلان مطابق.',
 ].join('\n');
-const CLOSING_RE = /(?:من أصل|لقينا)\s+([\d,٬]+)\s+إعلان/g;
-const HEADLINE_RE = /لقينا\s+([\d,٬]+)\s+إعلان/g;
-const firstRead = (TRANSCRIPT.match(new RegExp(CLOSING_RE.source)) ?? [])[0];
+
+// The journey's real reader, recovered from its source rather than restated here.
+const closingSrc = /closing: \(\[\.\.\.txt\.matchAll\((\/.+?\/)g\)\]\.pop\(\)/.exec(showMore)?.[1];
+check('the journey\'s closing-line reader can be recovered from showmore.mjs',
+  !!closingSrc, 'the `closing:` reader no longer has the matchAll(...).pop() shape — read it and re-pin it');
+const CLOSING_RE = new RegExp(closingSrc!.slice(1, -1), 'g');
+const firstRead = (TRANSCRIPT.match(new RegExp(CLOSING_RE.source)) ?? [])[1];
 const lastRead = ([...TRANSCRIPT.matchAll(CLOSING_RE)].pop() ?? [])[1];
-const headlineRead = ([...TRANSCRIPT.matchAll(HEADLINE_RE)].pop() ?? [])[1];
+const headlineRead = String(resultsFoundCount(TRANSCRIPT) ?? '');
+check('the shipped closing regex can actually READ the shipped closing sentence',
+  lastRead != null, 'showmore.mjs\'s closing reader matched nothing on a real transcript — it is blind');
 check('MUTATION — the OLD first-match reading really disagrees with the headline (the false defect)',
-  /11,254/.test(String(firstRead)) && headlineRead === '5,970',
-  'if these agreed, the barrier below would prove nothing');
-check('the FIXED last-match reading agrees with the headline on the same transcript',
-  lastRead === headlineRead, `closing=${lastRead} headline=${headlineRead}`);
+  /11,?254/.test(String(firstRead)) && headlineRead === '5970',
+  `if these agreed, the barrier below would prove nothing (first=${firstRead} headline=${headlineRead})`);
 check('the journey reads the closing line LAST-first, the same way visibleState reads the headline',
-  /\[\.\.\.txt\.matchAll\(\/\(\?:من أصل\|لقينا\)/.test(showMore) && /\.pop\(\)/.test(showMore),
-  'a first-match read compares two different messages and accuses production of its own imprecision');
+  String(lastRead).replace(/[,\u066c]/g, '') === headlineRead,
+  `closing=${lastRead} headline=${headlineRead} — a first-match read compares two different messages `
+  + 'and accuses production of its own imprecision');
+
+// MUTATION PROOFS for the three checks above — the two ways this reader has actually broken, each
+// EXECUTED against the same shipped-pool transcript rather than asserted about. Watched red on the
+// real file 2026-09-19 and restored; these keep the proof permanent.
+{
+  const mut = (label: string, caught: boolean) => {
+    if (caught) { console.log(`  ✓ MUTATION caught: ${label}`); return; }
+    check(`MUTATION NOT caught: ${label}`, false);
+  };
+  // (1) A closing regex that goes blind — the retired noun, which the shipped sentence never uses.
+  const blindRe = /لقينا\s+([\d,٬]+)\s+إعلان/g;
+  mut('a closing reader that matches NOTHING on a real transcript',
+    ([...TRANSCRIPT.matchAll(blindRe)].pop() ?? [])[1] === undefined);
+  // (2) The first-match read — the false «TRUE TOTAL» defect of 2026-09-05, which reports the
+  //     PRODUCT for the harness's own imprecision.
+  const realRe = new RegExp(CLOSING_RE.source, 'g');
+  const firstMatch = ([...TRANSCRIPT.matchAll(realRe)].shift() ?? [])[1];
+  mut('a FIRST-match closing read disagreeing with the headline',
+    String(firstMatch).replace(/[,\u066c]/g, '') !== headlineRead);
+  // (3) …and the control: the shipped last-match read agrees, so (2) is not vacuously red.
+  mut('the shipped LAST-match read is NOT flagged (the negative control)',
+    String(lastRead).replace(/[,\u066c]/g, '') === headlineRead);
+}
 
 // The Advanced Filter interview deliberately hides the whole actions row (owner 2026-08-21), so a
 // missing pager THERE is intended. The journey must consult that state before accusing — and must

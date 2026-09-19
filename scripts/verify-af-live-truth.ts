@@ -25,6 +25,7 @@ import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { resultsFoundCount } from '../e2e/lib/resultsSentence.mjs';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: REST_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -281,9 +282,11 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
 
     if (expectZero) {
       const uiTxt = await body();
-      const nonZeroMatch = uiTxt.match(/لقينا\s*([\d,٬]+)\s*إعلان/);
-      const nonZeroCount = nonZeroMatch ? parseInt(nonZeroMatch[1].replace(/[^\d]/g, ''), 10) : null;
-      check(`${name}: UI shows no nonzero result count`, !nonZeroCount, `matched=${nonZeroMatch?.[0] ?? '(none)'}`);
+      // Derived from the shipped pool (2026-09-19, routine #5): this read «لقينا N إعلان», retired
+      // by PR #3186 that morning. On an honest-zero cohort a blind parser reports "no nonzero count"
+      // for the wrong reason — it would pass just as happily on a screen quoting 41,330.
+      const nonZeroCount = resultsFoundCount(uiTxt);
+      check(`${name}: UI shows no nonzero result count`, !nonZeroCount, `read=${nonZeroCount ?? '(no sentence)'}`);
       check(`${name}: result-RPC was captured for this search`, !!lastSearchBody, JSON.stringify(lastSearchBody));
       if (lastSearchBody) {
         const rpcTotal = Number(lastSearchResp?.[0]?.total_count ?? (Array.isArray(lastSearchResp) ? lastSearchResp.length : NaN));
@@ -522,14 +525,16 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     check(`${name}: final search request was captured`, !!lastSearchBody, JSON.stringify(lastSearchBody));
     if (!lastSearchBody) { await ctx.close(); return; }
     const rpcTotal = Number(lastSearchResp?.[0]?.total_count ?? (Array.isArray(lastSearchResp) ? lastSearchResp.length : NaN));
-    const rpcTotalFmt = rpcTotal.toLocaleString('en-US');
     let uiCount = null;
     const until2 = Date.now() + AGENT_TURN_MS;
     while (Date.now() < until2) {
       const t = await body();
-      if (t.includes(`لقينا ${rpcTotalFmt}`) || t.includes(`لقينا ${rpcTotal}`)) { uiCount = rpcTotal; break; }
-      const m = [...t.matchAll(/لقينا\s*([\d,٬]+)/g)];
-      if (m.length) uiCount = parseInt(m[m.length - 1][1].replace(/[^\d]/g, ''), 10);
+      // Derived from the shipped pool (2026-09-19, routine #5). The retired «لقينا N إعلان» shapes
+      // this replaced could not read a single rotated template, and resultsFoundCount() already
+      // takes the LAST sentence by document position — which is what the matchAll(...).pop() here
+      // was reaching for by hand.
+      const read = resultsFoundCount(t);
+      if (read != null) { uiCount = read; if (read === rpcTotal) break; }
       await page.waitForTimeout(500);
     }
     check(`${name}: UI displayed count == result-RPC total_count`, uiCount != null && uiCount === rpcTotal, `ui=${uiCount} rpc=${rpcTotal}`);
