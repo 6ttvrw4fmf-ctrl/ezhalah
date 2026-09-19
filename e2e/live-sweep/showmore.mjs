@@ -211,6 +211,26 @@ async function pager(page) {
   return null;
 }
 
+/**
+ * What a headline reading BEFORE and AFTER a «عرض المزيد» press means — the whole decision, as a
+ * pure function, so a barrier can run it instead of reading the source around it.
+ *
+ * The distinction this exists to keep (ops_incident #348): `before`/`after` come from
+ * resultsFoundCount(), where **null means "no shipped Results-Found template is on this screen"** —
+ * a BLIND read — and never "the count is zero" or "the count changed". Comparing a null to a number
+ * with `!==` and calling the result a moved true total is how ops_incident #331 spent a day
+ * unattributed: production really was rendering a truncated sentence (#347), and the sweep accused
+ * the count instead of the sentence.
+ *
+ * Both cases are still a DEFECT — this narrows the accusation, never the alarm.
+ */
+export function classifyHeadlineAcrossPress(before, after) {
+  if (after === null) return { kind: 'COUNT-UNREADABLE', before, after };
+  if (before === null) return { kind: 'COUNT-UNREADABLE', before, after };
+  if (after !== before) return { kind: 'TRUE-TOTAL', before, after };
+  return { kind: 'OK', before, after };
+}
+
 export async function showMoreJourney(plan) {
   const name = `show-more:${plan.city}/${plan.type ?? 'شقة'}`;
   return withPage(false, async (page, requests) => {
@@ -422,8 +442,29 @@ export async function showMoreJourney(plan) {
           + `${press.pages} result requests were issued and none of them reached the user`);
         }
       }
-      if (st.headline !== total0) {
-        defect(name, 'TRUE-TOTAL', `headline moved across «عرض المزيد»: ${total0} → ${st.headline}`);
+      // NULL IS "UNREADABLE", NOT A VALUE — AND THEY ARE DIFFERENT DEFECTS (2026-09-19, #348).
+      //
+      // `st.headline` comes from resultsFoundCount(), whose contract says it in so many words:
+      // "NULL MEANS NO SHIPPED SENTENCE IS ON THIS SCREEN — it must never be conflated with the
+      // screen says zero… a search that rendered results and whose count could not be read is a
+      // BLIND journey, not a journey with no total."
+      //
+      // This compared `null !== 21384` and reported a MOVED TRUE TOTAL. The underlying production
+      // defect was real — the Results-Found sentence renders truncated mid-emoji after the second
+      // press and is genuinely not any shipped template (ops_incident #347) — so the red was
+      // correct and must STAY red. What was wrong is the accusation it made: "the true total
+      // changed" sent routine #4 looking for a count bug that does not exist, and the finding sat
+      // unattributed for a day (ops_incident #331). Same evidence, right name.
+      {
+        const verdict = classifyHeadlineAcrossPress(total0, st.headline);
+        if (verdict.kind === 'COUNT-UNREADABLE') {
+          defect(name, 'COUNT-UNREADABLE',
+            `after batch ${b} the Results-Found sentence on screen matched NO shipped template, so the `
+          + `displayed count could not be read at all (it was ${total0} before the press). This is not `
+          + `a moved total — the sentence itself is wrong or incomplete. See ops_incident #347.`);
+        } else if (verdict.kind === 'TRUE-TOTAL') {
+          defect(name, 'TRUE-TOTAL', `headline moved across «عرض المزيد»: ${total0} → ${st.headline}`);
+        }
       }
       // THE CAP IS A MOUNT-SAFETY BOUND, NOT A PREFERENCE (owner 2026-09-14; ops_incident #212).
       // A press that mounts more than SECOND_PAGE_CAP cards re-opens the class that crashed
