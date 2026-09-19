@@ -1,7 +1,16 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
--- Re-verified 2026-09-18 (migration 20260918234916_akariyoun_wiring_into_search): CHANGED.
+-- Re-verified 2026-09-19 (migrations 20260918234916_akariyoun_wiring_into_search and
+-- 20260919010751_sql_mirror_expected_catches_up_to_akariyoun_arms): CHANGED, then UNCHANGED.
+--   Date carried 09-18 -> 09-19 because 20260919010751 names this object in EXECUTED SQL, and
+--   verify-sql-mirrors-not-stale (B) requires the mirror be no older than the newest such
+--   migration. NOT a blind re-date — that is the exact remedy that guard's own header calls
+--   worse than the failure. Re-derived from production 2026-09-19:
+--   md5(pg_get_viewdef('public.listing_native_location_v1'::regclass, true))
+--     = 522c0705053f9b2f1806b83520061858 over 27,332 chars — byte-identical to the body below
+--   and to ops_sql_mirror_expected. The body needed no change; only this header sat one day
+--   behind the migration that exists to catch it up.
 --   • md5 of everything below this header block: 522c0705053f9b2f1806b83520061858
 --     (27,332 chars, replacing 5fb92dbf2a54966df41d0401918a9af5 / 26,097).
 --   Two new arms for عقاريون, anchored on aldarim exactly as suwar's and rakez's were, so
