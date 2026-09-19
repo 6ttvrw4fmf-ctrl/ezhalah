@@ -168,6 +168,28 @@ POLICIES: dict[str, _P] = {
         "(both live) answered HTTP 200 carrying the ad number, while this-slug-never-existed-zzz99 "
         "answered a clean HTTP 404. Unlike the WordPress siblings there is no REST api to attribute "
         "the 404 to, so the ad-number check on a 200 is what keeps a shell from reading as alive."),
+    "ksaaqar": _P(
+        _pol("ksaaqar", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the listing's OWN url: ksaaqar.com hard-404s an ad it no longer serves, so a 404 on that "
+        "url is a real death signal. A 200 that still renders the spec block (the «النوع» / "
+        "«رقم رخصة فال» labels) is LIVE. A 200 WITHOUT those labels is a shell or a routing change "
+        "and is UNKNOWN, as are any 401/403/408/429/5xx, a transport failure, and a row whose "
+        "listing_url we cannot look up — all hold the strike without deactivating.",
+        "Absence from the crawl only SELECTS candidates. Control-validated live 2026-09-19: a real "
+        "ad url answered HTTP 200 carrying the spec labels (191,125 bytes), while "
+        "/ad/this-slug-never-existed-zzz99/ answered a clean HTTP 404 with none of them."),
+    "sadiqeltajer": _P(
+        _pol("sadiqeltajer", 3, 168), CRAWL_PRESENCE_ONLY,
+        "«كود الاعلان» ON A 200 — NOT a 404. This source does NOT 404 a removed ad: control-"
+        "validated live 2026-09-19, /ads/this-slug-never-existed-zzz99 answered HTTP **200** with "
+        "3,892 bytes and no «كود الاعلان», while a real ad answered 200 with 233,232 bytes and the "
+        "code present. A policy keyed on 404 would therefore NEVER retire anything here and sold "
+        "listings would stay up forever. So: 200 WITH «كود الاعلان» is LIVE; 200 WITHOUT it is "
+        "GONE; a 404, any 401/403/408/429/5xx, a transport failure and an unlookupable row are all "
+        "UNKNOWN and hold the strike without deactivating.",
+        "Absence from the crawl only SELECTS candidates; the direct confirm above decides. The "
+        "asymmetry with ksaaqar is the point — the death signal was measured per platform, not "
+        "assumed from the sibling."),
     "rakez": _P(
         _pol("rakez", 3, 168), CRAWL_PRESENCE_ONLY,
         "wp-json unit status: a 404 the API itself attributes to rest_post_invalid_id (the unit was "
