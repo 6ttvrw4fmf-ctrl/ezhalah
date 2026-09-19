@@ -316,9 +316,13 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         print(f"   ⚠ akariyoun {slug}: unmapped property type «{ptype_ar.group(1)}» — skipped")
         return None, "residential", None
 
-    deal = "Rent" if "للإيجار" in t or "للايجار" in t else ("Buy" if "للبيع" in t else None)
-    if deal is None:
+    is_rent = ("للإيجار" in t) or ("للايجار" in t)
+    if not (is_rent or "للبيع" in t):
+        # No deal word at all -> UNKNOWN. Never defaulted to Buy: a null/unknown deal is
+        # quarantined out of search by the sync's eligibility predicate, so a guess here would
+        # silently hide the listing rather than mis-file it visibly.
         return None, "residential", None
+    deal = "Rent" if is_rent else "Buy"
 
     exact = parse_price_exact(page_html)
     worded, raw_price = parse_price(page_html)
@@ -373,7 +377,7 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         "source": SOURCE,
         "active": True,
         "property_type": ptype,
-        "transaction_type": deal,
+        "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": int(area) if area else None,
         "bedrooms": int(beds) if beds else None,
         "property_age": age,
@@ -388,10 +392,10 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         "water_supply": True if "شبكة المياه" in t else None,
         "sanitation": True if "الصرف الصحي" in t else None,
     }
-    if deal == "Buy":
-        row["price_total"] = price
-    else:
+    if is_rent:
         row["price_annual"] = price
+    else:
+        row["price_total"] = price
     if ppm is not None:
         row["price_per_meter"] = ppm
 
@@ -516,6 +520,19 @@ def main() -> int:
     if com:
         db.upsert_akariyoun_commercial_batch(com)
 
+    # DUAL-TABLE ROUTING: an ad goes to exactly one of the two tables, decided from its own page.
+    # When that decision changes between runs the ad is written to the new table and the old row
+    # is simply abandoned — the SAME ad then sits live in both, once as residential and once as
+    # commercial. This retires the stale sibling.
+    superseded = 0
+    if not args.limit and args.type == "all":
+        superseded = db.retire_superseded_siblings(
+            res_table="akariyoun_residential_listings",
+            com_table="akariyoun_commercial_listings",
+            res_ads={r["ad_number"] for r in res},
+            com_ads={r["ad_number"] for r in com},
+            source=SOURCE)
+
     # PRUNE — only on a full run, and only with a DIRECT per-row confirm. prune_unseen's own
     # circuit breakers (0-seen, >30% of the table, <8 remaining) sit on top of that, and
     # _verify_gone returning 'unknown' holds the strike rather than deactivating.
@@ -535,9 +552,18 @@ def main() -> int:
     n = len(res) + len(com)
     print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted"
           + (f", {pruned} stale pruned" if pruned else "")
+          + (f", {superseded} superseded sibling(s) retired" if superseded else "")
           + (f" ({unpriced} price NOT proven exact -> NULL)" if unpriced else ""))
     if run_id:
-        db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=n)
+        # end_run's RETURN is the effective health: it can DEMOTE ok=True (a 0-row run, a tripped
+        # floor, a check_tables integrity trip). Discarding it would let this process exit 0 on a
+        # run the database already judged unhealthy — the dealapp #343 shape.
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=n,
+                             notes=f"pruned={pruned} superseded={superseded}",
+                             check_tables=["akariyoun_residential_listings",
+                                           "akariyoun_commercial_listings"])
+        if not healthy:
+            return 1
     return 0
 
 
