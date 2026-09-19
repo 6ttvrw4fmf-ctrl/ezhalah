@@ -298,3 +298,170 @@ def test_http_run_keeps_its_thread_pool(monkeypatch):
     _, threads, peak = _run_enrich(monkeypatch, workers=6, browser=False)
     assert peak > 1 or len(threads) > 1, (
         f"the http path lost its concurrency (peak={peak}, threads={len(threads)})")
+
+
+# ── 5. /en SALVAGE — a listing with NO ARABIC PAGE ──────────────────────────────────────────────
+#
+# Measured 2026-09-18 on ids 11939663 / 11939667 / 11939669: `/ar/property/{slug}` answers Next.js
+# `page: "/404"` while `/en/property/{slug}` serves a complete payload. Not a slug mismatch —
+# wasalt publishes the Arabic slug as propertyInfo.alternateSlug and `/ar/property/{alternateSlug}`
+# 404s for these three too, while the control listing resolves on either slug. Not liveness
+# either: they are alive, so the liveness sweep never retires them, and without the salvage they
+# burn five attempts and park — permanently invisible to the §25 price oracle.
+#
+# THE DANGER THE SALVAGE INTRODUCES is writing English into Arabic columns: the /en payload says
+# city 'Jeddah' / district 'Al-Fanar', and `_region_for()` resolves against the ARABIC catalog, so
+# a leak corrupts the column AND the region lookup. These tests pin the write, not just the return.
+
+EN_PDV = {
+    "id": 5907673,
+    "propertyInfo": {"city": "Jeddah", "district": "Al-Fanar", "salePrice": 1080000,
+                     "alternateSlug": "أرض-540-متر-مربع-غربية-على-شارع-16م-5907673"},
+    "propertyOwner": {"name": "broker", "mobile": "+9665xxxxxxx"},
+}
+
+
+class _RouteBrowser:
+    """next_data() keyed by language route, so /ar and /en can answer differently."""
+
+    def __init__(self, ar, en):
+        self.ar, self.en, self.urls = ar, en, []
+
+    def next_data(self, url):
+        self.urls.append(url)
+        return self.ar if "/ar/property/" in url else self.en
+
+
+@pytest.fixture
+def routes(monkeypatch):
+    monkeypatch.setenv("WASALT_BROWSER", "1")
+    monkeypatch.setattr(E, "_throttle", lambda: None)
+
+    def install(ar, en):
+        stub = _RouteBrowser(ar, en)
+        monkeypatch.setattr(E, "_browser", lambda: stub)
+        return stub
+
+    return install
+
+
+def test_no_arabic_page_falls_back_to_the_english_archive(routes):
+    stub = routes(ar=_next_data(None), en=_next_data(EN_PDV))
+    ok, d, city, dist = E.fetch_ar("land-540-sqm-facing-west-on-16m-width-street-5907673")
+
+    assert ok is True and "_err" not in d, f"salvage failed: {d!r}"
+    assert d["propertyInfo"]["salePrice"] == 1080000, "the oracle's field must survive the salvage"
+    assert d["_lang"] == "en", "an English archive MUST be marked, or it reads as an Arabic one"
+    assert [u.split("/property/")[0][-2:] for u in stub.urls] == ["ar", "en"], stub.urls
+
+
+def test_salvage_never_returns_english_city_or_district(routes):
+    routes(ar=_next_data(None), en=_next_data(EN_PDV))
+    _, _, city, dist = E.fetch_ar("slug")
+    assert city is None and dist is None, (
+        f"English city/district leaked out of the salvage ({city!r}/{dist!r}) — city_ar and "
+        "district_ar are Arabic-only and _region_for() resolves against the Arabic catalog")
+
+
+def test_happy_path_never_pays_for_a_second_fetch(routes):
+    stub = routes(ar=_next_data(LIVE_PDV), en=_next_data(EN_PDV))
+    ok, d, city, _ = E.fetch_ar("slug")
+    assert ok is True and city == "مكة المكرمة"
+    assert "_lang" not in d, "an Arabic archive must NOT be stamped"
+    assert len(stub.urls) == 1, f"the /en route was fetched needlessly: {stub.urls}"
+
+
+def test_gone_on_both_routes_is_still_definitive(routes):
+    routes(ar=_next_data(None), en=_next_data(None))
+    ok, d, _, _ = E.fetch_ar("this-slug-does-not-exist-000000")
+    assert ok is True and d.get("_err") == "nodetail"
+
+
+def test_a_block_during_salvage_is_transient_not_definitive(routes):
+    """The /ar answer was definitive, but the SALVAGE was blocked — we still do not know whether an
+    English page exists, so this must not spend one of the row's ERR_MAX_ATTEMPTS attempts."""
+    routes(ar=_next_data(None), en=None)
+    ok, d, _, _ = E.fetch_ar("slug")
+    assert ok is False, "a blocked salvage was recorded as a definitive answer"
+    assert d is None
+
+
+def test_a_waf_shell_does_not_trigger_the_salvage(monkeypatch):
+    """`noNEXT` means the page was not a Next.js document at all — a WAF shell looks like that, and
+    a shell is evidence of nothing. Only a route that ANSWERED 'no listing here' may salvage."""
+    monkeypatch.delenv("WASALT_BROWSER", raising=False)
+    monkeypatch.setattr(E, "_throttle", lambda: None)
+    calls = []
+    monkeypatch.setattr(E, "_session", lambda: types.SimpleNamespace(
+        get=lambda u, **k: (calls.append(u), types.SimpleNamespace(status_code=200, text="<html>shell"))[1]))
+    ok, d, _, _ = E.fetch_ar("slug")
+    assert ok is True and d == {"_err": "noNEXT"}
+    assert len(calls) == 1, f"a WAF shell triggered an /en salvage: {calls}"
+
+
+def test_http_transport_salvages_on_a_real_404_status(monkeypatch):
+    """The http path reports an /ar 404 as `_err: 404`, not `nodetail` — the salvage must fire on
+    both spellings of 'this route has no listing'."""
+    monkeypatch.delenv("WASALT_BROWSER", raising=False)
+    monkeypatch.setattr(E, "_throttle", lambda: None)
+    body = ('<script id="__NEXT_DATA__" type="application/json">'
+            + __import__("json").dumps(_next_data(EN_PDV)) + '</script>')
+
+    def get(u, **k):
+        if "/ar/property/" in u:
+            return types.SimpleNamespace(status_code=404, text="")
+        return types.SimpleNamespace(status_code=200, text=body)
+
+    monkeypatch.setattr(E, "_session", lambda: types.SimpleNamespace(get=get))
+    ok, d, city, dist = E.fetch_ar("slug")
+    assert ok is True and d.get("_lang") == "en" and d["propertyInfo"]["salePrice"] == 1080000
+    assert city is None and dist is None
+
+
+def test_the_salvaged_row_is_WRITTEN_without_arabic_location_columns(monkeypatch):
+    """End to end through the real work()/enrich_table: assert the UPDATE, not just the return."""
+    writes = []
+    rows = [{"id": 11939663, "ad_number": "WST5907673",
+             "listing_url": "https://wasalt.sa/en/property/land-540-sqm-5907673"}]
+
+    class _Q:
+        def __init__(self): self._head = False; self._retry = False
+        def select(self, *a, **k): self._head = bool(k.get("head")); return self
+        def eq(self, *a): return self
+        def like(self, *a): return self
+        def lt(self, *a): return self
+        def is_(self, *a): return self
+        def order(self, *a): return self
+        def limit(self, n): return self
+        def update(self, u): writes.append(u); return self
+        @property
+        def not_(self): self._retry = True; return self
+        def execute(self):
+            if writes and writes[-1] is not None and self._head is False and self._retry:
+                return types.SimpleNamespace(data=[], count=None)
+            if self._head: return types.SimpleNamespace(data=[], count=len(rows))
+            return types.SimpleNamespace(data=([] if self._retry else list(rows)), count=None)
+
+    monkeypatch.setattr(E, "db", types.SimpleNamespace(
+        sb=lambda: types.SimpleNamespace(table=lambda t: _Q()),
+        begin_run=lambda *a, **k: 1, end_run=lambda *a, **k: None,
+        guard_location_update=lambda *a, **k: None))
+    monkeypatch.setattr(E, "_load_catalog", lambda: None)
+    monkeypatch.setenv("WASALT_BROWSER", "1")
+    monkeypatch.setattr(E, "_throttle", lambda: None)
+    monkeypatch.setattr(E, "_browser", lambda: _RouteBrowser(_next_data(None), _next_data(EN_PDV)))
+    region_calls = []
+    monkeypatch.setattr(E, "_region_for", lambda c: region_calls.append(c) or None)
+
+    stats = E.enrich_table("wasalt_residential_listings", 10, 1, retry_errs=0)
+
+    assert stats["ok"] == 1, f"the salvaged row must count as a success: {stats}"
+    assert len(writes) == 1, writes
+    upd = writes[0]
+    assert upd["ar_fetched"] is True
+    assert upd["ar_data"]["_lang"] == "en"
+    assert upd["ar_data"]["propertyInfo"]["salePrice"] == 1080000
+    assert "city_ar" not in upd, f"ENGLISH CITY WRITTEN TO city_ar: {upd.get('city_ar')!r}"
+    assert "district_ar" not in upd, f"ENGLISH DISTRICT WRITTEN TO district_ar: {upd.get('district_ar')!r}"
+    assert "region_id" not in upd, "region_id resolved from an English city"
+    assert region_calls == [None], f"_region_for was handed {region_calls!r}, not None"
