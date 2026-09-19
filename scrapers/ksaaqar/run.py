@@ -269,12 +269,32 @@ def rent_period_and_annual(price: Optional[int], text: str) -> tuple[Optional[st
 # ── location ─────────────────────────────────────────────────────────────────────────────────────
 # CITY is the one field this source states for every listing: «الدولة : عقارات الرياض». Measured
 # 12/12 on the live sample. The label reads "country" but the value is always a Saudi city.
-_CITY_RE = re.compile(r"الدولة\s*:\s*عقارات\s+([ء-ي][ء-ي\s]{1,24}?)\s*(?=الحالة|النوع|رقم|$)")
+_CITY_RE = re.compile(r"الدولة\s*:\s*عقارات\s+([\u0621-\u064a][\u0621-\u064a\s]{1,24}?)"
+                      r"\s*(?=الحالة|النوع|رقم|انظر|تم\s*النشر|$)")
+
+# FALLBACK when «الدولة» is absent entirely (measured on 15% of listings). Saudi cities are a
+# CLOSED set, so a name found in the listing's own title or text is matched against that set and
+# nothing else — a city cannot be invented here, only recognised. Longest first so
+# «المدينة المنورة» never substring-matches as «المدينة», nor «رأس تنورة» as «تنورة».
+_CITIES = (
+    "المدينة المنورة", "مكة المكرمة", "الخرج", "الرياض", "جدة", "الدمام", "الخبر", "الظهران",
+    "الطائف", "بريدة", "عنيزة", "الرس", "حائل", "تبوك", "أبها", "خميس مشيط", "نجران", "جازان",
+    "الباحة", "سكاكا", "عرعر", "القطيف", "الأحساء", "الهفوف", "المبرز", "ينبع", "رابغ",
+    "الجبيل", "رأس تنورة", "حفر الباطن", "القريات", "بيشة", "وادي الدواسر", "الزلفي", "المجمعة",
+    "شقراء", "الدوادمي", "عفيف", "القويعية", "الأفلاج", "السليل", "ضرماء",
+    "بيش", "صبيا", "أبو عريش", "محايل عسير", "النماص", "بلجرشي", "المذنب", "البكيرية",
+)
+_CITY_FALLBACK_RE = re.compile("|".join(re.escape(c) for c in sorted(_CITIES, key=len, reverse=True)))
 
 
-def parse_city(text: str) -> Optional[str]:
+def parse_city(text: str, title: str = "") -> Optional[str]:
+    """The city the source stated, or None. Never guessed — the fallback RECOGNISES a name from the
+    closed Saudi city set; it does not infer one from a district or a landmark."""
     m = _CITY_RE.search(text)
-    return m.group(1).strip() if m else None
+    if m:
+        return m.group(1).strip()
+    m = _CITY_FALLBACK_RE.search(f"{title} {text[:600]}")
+    return m.group(0) if m else None
 
 
 # DISTRICT candidate — the map line, «… الملقا، الرياض السعودية … انظر الخريطة». It is only a
@@ -417,7 +437,7 @@ def map_listing(post: dict, page_text: str) -> tuple[Optional[dict], str]:
     if not deal:
         return None, category               # no stated deal -> UNKNOWN, never defaulted to Buy
 
-    city_ar = parse_city(page_text)
+    city_ar = parse_city(page_text, title_early)
     if not city_ar:
         return None, category               # unlocatable rows cannot be searched honestly
     city = normalize.map_city(city_ar)
@@ -554,7 +574,7 @@ def main() -> int:
         return 0
     except Exception as e:
         if run_id:
-            db.end_run(run_id, ok=False, error=str(e))
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=str(e)[:300])
         print(f"✗ {SOURCE}: {e}", flush=True)
         return 1
 

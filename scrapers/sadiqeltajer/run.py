@@ -499,7 +499,7 @@ def main() -> int:
         return 0
     except Exception as e:
         if run_id:
-            db.end_run(run_id, ok=False, error=str(e))
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=str(e)[:300])
         print(f"✗ {SOURCE}: {e}", flush=True)
         return 1
 
