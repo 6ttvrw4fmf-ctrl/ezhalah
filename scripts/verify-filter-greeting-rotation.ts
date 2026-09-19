@@ -44,25 +44,26 @@ check('every baked row has a non-empty greeting and emoji (no silent blanks in t
   __testing.BAKED.every((r: { greeting: string; emoji: string }) => r.greeting && r.emoji));
 check('no baked row leaks the retired "إزهله" brand word into the greeting half (safety against a bad edit)',
   __testing.BAKED.every((r: { greeting: string; emoji: string }) => !r.greeting.includes('إزهله')));
-check('a fresh picker call already builds "{greeting}، إزهله {emoji}، " from a REAL baked row (no fallback text)',
-  /، إزهله [^ ]+، $/.test(pickFilterGreetingOpening())
+check('a fresh picker call already builds "{greeting} إزهله {emoji}، " from a REAL baked row (owner rule 2026-09-19: NO comma before the emoji — only after)',
+  / إزهله [^ ]+، $/.test(pickFilterGreetingOpening())
+  && !/، إزهله /.test(pickFilterGreetingOpening())
   && !pickFilterGreetingOpening().startsWith('ارحب إزهله'),
   `got: ${JSON.stringify(pickFilterGreetingOpening())}`);
 
 // Server-side pool OVERRIDES the baked list when a non-empty one arrives.
 setFilterGreetingsCache([{ greeting: 'هلا والله', emoji: '💚' }]);
 check('a non-empty server pool OVERRIDES the baked list (editability without a deploy)',
-  pickFilterGreetingOpening() === 'هلا والله، إزهله 💚، ',
+  pickFilterGreetingOpening() === 'هلا والله إزهله 💚، ',
   `got: ${JSON.stringify(pickFilterGreetingOpening())}`);
 
 // A FAILED / EMPTY fetch must NOT demote the working baked list back to nothing.
 setFilterGreetingsCache([]);
 check('an empty server response NEVER demotes the working baked list — the last-good pool stays',
-  pickFilterGreetingOpening() === 'هلا والله، إزهله 💚، ',
+  pickFilterGreetingOpening() === 'هلا والله إزهله 💚، ',
   `got: ${JSON.stringify(pickFilterGreetingOpening())}`);
 setFilterGreetingsCache(null);
 check('a NULL server response NEVER demotes the working baked list either',
-  pickFilterGreetingOpening() === 'هلا والله، إزهله 💚، ');
+  pickFilterGreetingOpening() === 'هلا والله إزهله 💚، ');
 
 // EXECUTED over many picks: with 2+ distinct rows, no two consecutive picks are identical.
 setFilterGreetingsCache([
@@ -84,7 +85,7 @@ setFilterGreetingsCache([
 // row's opening every time, not fall back.
 setFilterGreetingsCache([{ greeting: 'مرحبا', emoji: '😊' }]);
 check('a single-row pool still returns that row\'s opening on every call (no crash, no fallback)',
-  Array.from({ length: 5 }, () => pickFilterGreetingOpening()).every((p) => p === 'مرحبا، إزهله 😊، '));
+  Array.from({ length: 5 }, () => pickFilterGreetingOpening()).every((p) => p === 'مرحبا إزهله 😊، '));
 
 // ── 2. THE MIGRATION — the deployable artifact itself ───────────────────────────────────────────
 const migration = read('supabase/migrations/20260918214451_ui_filter_greetings_rotation.sql');
@@ -167,7 +168,7 @@ check('the Advanced-Filter/interview bubble never imports the rotation — owner
 // M-no-antirepeat: an immediate-repeat picker (always index 0) — the "never repeat back-to-back"
 // check above must be the thing that actually catches this, proving it is not vacuous.
 {
-  const brokenPicks = Array.from({ length: 50 }, () => 'هلا، إزهله 👋، '); // simulates a picker stuck on row 0
+  const brokenPicks = Array.from({ length: 50 }, () => 'هلا إزهله 👋، '); // simulates a picker stuck on row 0
   const backToBack = brokenPicks.some((p, i) => i > 0 && p === brokenPicks[i - 1]);
   mustCatch('a picker stuck returning the same row every time is caught by the no-repeat check',
     backToBack);
