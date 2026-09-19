@@ -658,6 +658,34 @@ infrastructure asks rather than rediscovered each time:
   the harness header). That is the real client code path for sidebar/persistence — which is
   purely client-side — but it is NOT evidence about server sync, RLS, or a real token.
 
+  **And the bound is WIDER than "no evidence about the server" (measured 2026-09-19, routine #6).**
+  The seeded session carries a deliberately fake JWT, so **every PostgREST read 401s** — which means
+  a signed-in journey cannot perform any *data-backed* journey at all. Measured on production in one
+  run, capturing all `/rest/v1` and `/auth/v1` traffic, signed-out and signed-in side by side:
+
+  | request | signed out | signed in (seeded) |
+  |---|---|---|
+  | `location_index_live` | **200** | **401** |
+  | `rpc/top_cities_by_deal_ar` | **200** | **401** (×4) |
+  | `loc_city_cluster` | **200** | — |
+  | `user_chats` | — | **401** |
+  | `/auth/v1/user` | — | **403** |
+
+  The consequence is concrete and easy to mistake for a product bug: with no location candidates the
+  city autocomplete renders **no suggestion row at all** (exact «الرياض» leaf nodes: 1 signed out,
+  **0** signed in), so `citySelected` can never be set, so «بحث» correctly submits nothing. A probe
+  that reads that as a dead control or as a broken autocomplete is wrong in the expensive direction —
+  the app is behaving exactly as the owner's 2026-07-17 "never guess a location" rule requires, on a
+  fetch that genuinely failed.
+
+  **So: signed-in coverage is real for client-side state** (sidebar, `localStorage` history, theme,
+  favourites) — that is what those journeys legitimately assert — **and is structurally unreachable
+  for anything needing a search, a location suggestion, or a count.** The first concrete cost is
+  recorded: `ops_incident` #271 is fixed, barriered and mutation-proven but cannot meet §G.9's
+  production-verification condition, because reaching its terminal (≤ `INTERVIEW_STOP_AT` = 50) chat
+  state requires running a search while signed in. This is `ops_incident` #29's gap, stated as the
+  measurement rather than as a category.
+
 When you do measure one of these, land it in this table with its date and method, exactly as §40.1
 did — and delete it from this list in the same change.
 
