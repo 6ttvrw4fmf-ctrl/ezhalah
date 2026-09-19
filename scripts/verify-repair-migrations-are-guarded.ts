@@ -48,6 +48,24 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // Second instance of the 20260918220610 shape, and waived for the identical structural reason
+  // rather than by analogy — check it the same way. The UPDATE writes NO source-derived value: it
+  // sets production_ready=true on two rows whose ONLY reason for being false was
+  // enforce_price_size_sanity(), which hides a price_size_impossible() row iff it is absent from
+  // ops_price_source_verified. The same migration adds those evidence rows, so the flag it releases
+  // is derived from state it also wrote, and the repair cannot outlive its own justification:
+  // delete the evidence and the next sync upsert re-fires the trigger and re-hides the row by itself.
+  // The opposite regression — a located row falling back to not-production_ready — is what
+  // mon_detect_located_row_unreachable() already raises P1 on, per row, on the evaluated path; it is
+  // the detector that RAISED these two, it is on the mon_run_all_detectors() roster, and it re-ran
+  // green (0 raised) after this applied.
+  '20260919031619_register_aqar_and_akariyoun_source_published_extreme_prices.sql':
+    'no source-derived value is written: the flag this releases is derived from the '
+    + 'ops_price_source_verified rows the same migration adds, so deleting the evidence makes the '
+    + 'next sync upsert re-fire enforce_price_size_sanity() and re-hide the row by itself. The '
+    + 'opposite regression is already raised P1 per row by mon_detect_located_row_unreachable() — '
+    + 'the detector that raised these two — which is on the mon_run_all_detectors() roster and '
+    + 're-ran green after this applied',
   // The detector for this repair EXISTS and is on the roster — it simply cannot be named inside the
   // migration, because the migration was already applied to production before the barrier flagged
   // it, and editing an applied file to add the reference would put git and the migration history
