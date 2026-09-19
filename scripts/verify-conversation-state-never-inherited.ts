@@ -587,5 +587,132 @@ const mutantAgent = (from: string, to: string): string => {
     uncoveredConversationState(src).length === 0, uncoveredConversationState(src).join(" | "));
 }
 
+// §F — THE POPULATION OF CONVERSATION EXITS IS DISCOVERED, NEVER COUNTED
+// (routine #8, 2026-09-19, ops_incident #341 — the §C follow-up, found by re-attacking §E's own fix.)
+//
+// §C closes with `callSites === 2`. That counts CALLS TO the shared reset, and the invariant this
+// whole file exists for is "every conversation EXIT routes through it". The two propositions come
+// apart in exactly the direction that matters: an exit that calls nothing leaves the count at 2, so
+// that check stays green. §C's other half — handWrittenResets() — only fires on a RUN of >= 2
+// distinct fields from CLEARS within RUN_LINES, so an exit that replaces the transcript and clears
+// nothing else from that list is invisible to BOTH halves. It is silently counted as one of the
+// "lone writes … each legitimate".
+//
+// That is the same shape as the three recurrences above, one level up: §E stopped the CONTRACT being
+// a hand-written list, and left the POPULATION IT IS APPLIED TO a hand-written number. Measured on
+// main at 91f9d6c it is not hypothetical — `stop()`'s filter-origin branch (agent.tsx:1257) replaces
+// the transcript with `setMsgs([])` and routes through nothing, while its own comment claims the next
+// bare /agent "greets fresh, exactly like any other new chat".
+//
+// So the population stops being a number and becomes a DERIVATION. A conversation exit is discovered
+// BY SHAPE — a site that REPLACES the message list (`setMsgs(<value>)`) rather than appending to it
+// (`setMsgs(updater)`) — and every one must be registered below with its kind. A site added tomorrow
+// is RED until someone classifies it, which is the one thing `callSites === 2` could never do.
+//
+// `unadjudicated` is NOT a waiver. It records an exit whose need for the reset is a real open
+// question (stop() navigates AWAY from /agent, so whether its refs survive depends on whether the
+// screen unmounts — undetermined from a static read, and the honest state per §G.9). It is bounded
+// by a SHRINK-ONLY ceiling, so the count can fall and never rise.
+type ExitKind = "shared-reset" | "after-reset" | "unadjudicated";
+const EXIT_REGISTRY: Record<string, { kind: ExitKind; why: string }> = {
+  resetConversationState: {
+    kind: "shared-reset",
+    why: "the shared list itself — this IS the reset every other exit is required to route through",
+  },
+  openSaved: {
+    kind: "after-reset",
+    why: "a RESTORE, not an exit: it writes the transcript of the conversation being ENTERED, and is called only at agent.tsx:3079, immediately after startFresh() → resetConversationState() on the line above it",
+  },
+  openStatic: {
+    kind: "after-reset",
+    why: "openSaved's fallback (agent.tsx:2892) when there is no saved transcript to restore — same position downstream of startFresh() → resetConversationState(), and it DERIVES terminality rather than inheriting it",
+  },
+  stop: {
+    kind: "unadjudicated",
+    why: "ops_incident #341 — the filter-origin branch erases the transcript and router.replace('/')s away without routing through resetConversationState(). Whether the conversation-scoped refs survive depends on whether the agent screen unmounts on that navigation, which a static read cannot settle. Registered so it cannot be forgotten, NOT excused.",
+  },
+};
+const UNADJUDICATED_CEILING = 1; // shrink-only — a new unadjudicated exit is RED
+
+/** Every site that REPLACES the transcript, with the top-level declaration that owns it. */
+function conversationExits(src: string): { line: number; owner: string }[] {
+  const lines = src.split("\n");
+  const out: { line: number; owner: string }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^\s*\/\//.test(l)) continue;                 // a comment is not a code path
+    if (!/setMsgs\(/.test(l)) continue;
+    if (/setMsgs\(\s*\(/.test(l)) continue;           // setMsgs((m) => …) APPENDS — not an exit
+    let owner = "(top level)";
+    for (let j = i; j >= 0; j--) { const m = /^  (?:const|function) (\w+)\b/.exec(lines[j]); if (m) { owner = m[1]; break; } }
+    out.push({ line: i + 1, owner });
+  }
+  return out;
+}
+
+/** §F's verdict over a source text, as a predicate so it can be mutation-proven. */
+function unregisteredExits(src: string): string[] {
+  const problems: string[] = [];
+  const exits = conversationExits(src);
+  if (exits.length === 0) problems.push("F0: no transcript-replacing site found at all — the discovery shape has stopped matching agent.tsx");
+  const owners = [...new Set(exits.map((e) => e.owner))];
+  for (const o of owners) {
+    if (!EXIT_REGISTRY[o])
+      problems.push(`F1 ${o}: replaces the transcript (a conversation exit by shape) but is not in EXIT_REGISTRY — classify it, and route it through resetConversationState() unless you can say why not`);
+  }
+  const unadjudicated = owners.filter((o) => EXIT_REGISTRY[o]?.kind === "unadjudicated");
+  if (unadjudicated.length > UNADJUDICATED_CEILING)
+    problems.push(`F2: ${unadjudicated.length} unadjudicated conversation exits (${unadjudicated.join(", ")}) against a shrink-only ceiling of ${UNADJUDICATED_CEILING}`);
+  // F3 — the one registry claim that is cheaply EXECUTABLE: the `shared-reset` entry must really sit
+  // inside resetConversationState()'s own body. If the reset stops replacing the transcript, every
+  // "after-reset" justification below it is standing on nothing.
+  const lines = src.split("\n");
+  const s = lines.findIndex((l) => l.startsWith("  const resetConversationState = () => {"));
+  let e = s;
+  while (e < lines.length && lines[e] !== "  };") e++;
+  const sharedInside = s >= 0 && exits.some((x) => x.owner === "resetConversationState" && x.line > s && x.line <= e + 1);
+  if (!sharedInside)
+    problems.push("F3 resetConversationState: registered as the shared-reset exit but its body no longer replaces the transcript — the 'after-reset' entries' justification is void");
+  return problems;
+}
+
+console.log("\n── §F: the POPULATION of conversation exits is discovered by shape, never counted ──");
+{
+  const src = readFileSync(AGENT, "utf8");
+  const exits = conversationExits(src);
+  const owners = [...new Set(exits.map((e) => e.owner))];
+  check(`every transcript-replacing site is a CLASSIFIED conversation exit (${exits.length} sites, ${owners.length} owners: ${owners.join(", ")})`,
+    unregisteredExits(src).length === 0, unregisteredExits(src).join("\n      "));
+
+  // M-F1 — a NEW exit that routes through nothing is exactly what `callSites === 2` could not see.
+  // Injected as a sibling top-level declaration that wipes the transcript and calls nothing.
+  const anchor = "  const resetConversationState = () => {";
+  const injected = src.replace(anchor,
+    "  const abandonConversation = () => {\n    setMsgs([]);\n  };\n" + anchor);
+  mustCatch("M-F1-new-exit — a new conversation exit that replaces the transcript and routes through NOTHING is DISCOVERED",
+    unregisteredExits(injected).some((p) => p.startsWith("F1 abandonConversation")),
+    JSON.stringify(unregisteredExits(injected)));
+
+  // M-F1b — and the SAME injection in appending form must NOT be flagged, so §F discriminates an
+  // exit from an ordinary in-conversation append rather than flagging every setMsgs in the file.
+  const appender = src.replace(anchor,
+    "  const appendNotice = () => {\n    setMsgs((m) => [...m, { id: 'x' }]);\n  };\n" + anchor);
+  check("…and the same site in APPENDING form (setMsgs(updater)) is NOT flagged — §F separates an exit from an append",
+    unregisteredExits(appender).length === 0, unregisteredExits(appender).join(" | "));
+
+  // M-F3 — if the shared reset stops wiping the transcript, every "after-reset" entry is unfounded
+  // and §F must say so rather than keep granting them.
+  const resetAt = src.indexOf(anchor);
+  const wipeAt = src.indexOf("    setMsgs([]);", resetAt);
+  const gutted = src.slice(0, wipeAt) + "    /* no wipe */" + src.slice(wipeAt + "    setMsgs([]);".length);
+  mustCatch("M-F3-shared-reset-gutted — if resetConversationState() stops replacing the transcript, the after-reset justifications are withdrawn",
+    unregisteredExits(gutted).some((p) => p.startsWith("F3 resetConversationState")),
+    JSON.stringify(unregisteredExits(gutted)));
+
+  // …and the predicate reports the real tree clean, so the mutations prove discrimination, not noise.
+  check("…and §F reports the real tree clean (the mutations prove discrimination, not noise)",
+    unregisteredExits(src).length === 0, unregisteredExits(src).join(" | "));
+}
+
 if (failed) { console.error(`\n✗ ${failed} check(s) FAILED`); process.exit(1); }
 console.log("\nOK — conversation-scoped state is cleared through one shared list, and terminality is derived or restored, never inherited");

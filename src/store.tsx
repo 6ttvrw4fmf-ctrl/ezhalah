@@ -22,6 +22,7 @@ import { buildSyncedName } from '@/lib/nameSync';
 import { identifyUser } from '@/lib/observability';
 import { forgetSupportDraft } from '@/lib/supportDraft';
 import { LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
+import { truncateGlyphs } from '@/lib/typedReveal';
 
 type DataSource = 'local' | 'supabase';
 
@@ -1026,7 +1027,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Clearing the name (empty input) drops back to auto-titling rather than saving a blank row.
       renameHistory: (id, title) =>
         setHistory((h) => {
-          const clean = (title ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+          // Cap by GLYPH, not by UTF-16 code unit (ops_incident #347): a rename ending on the 120th
+          // code unit could split a surrogate pair, and this value is PERSISTED to the server — so a
+          // ▯ box would be saved into the user's own chat title. No ellipsis: this is a cap on what
+          // the user typed, not a preview of a longer string.
+          const clean = truncateGlyphs((title ?? '').replace(/\s+/g, ' ').trim(), 120, '');
           const next = h.map((it) => {
             if (it.id !== id) return it;
             return clean

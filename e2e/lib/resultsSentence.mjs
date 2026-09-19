@@ -147,3 +147,44 @@ export function settledSource(pool = matchers()) {
   const alts = pool.map(({ re }) => `(?:${re.source})`);
   return `(?:${alts.join('|')}|${ZERO_RE.source})`;
 }
+
+/**
+ * "This node IS a Results-Found sentence" as a REGEX SOURCE STRING — the pool alone, WITHOUT
+ * ZERO_RE.
+ *
+ * Why separate from settledSource(). The AF journeys do not ask "has the search settled?"; they
+ * enumerate the results HEADLINES in the transcript, one per turn, and read each one's count. A
+ * zero-result screen settles the search but quotes no count, so admitting ZERO_RE here would hand
+ * the caller a "headline" it can never turn into a number — which is how a harness ends up
+ * comparing null to an RPC total and reporting the product.
+ *
+ * Source string rather than a function because these predicates run inside `page.evaluate` /
+ * `page.waitForFunction`, where this module cannot be reached. Derived from the same pool as
+ * resultsFoundCount(), so the in-page reader and the node-side one cannot drift.
+ *
+ * Arabic-Indic digits are in the numeric class (templateToRegex admits them) because page text is
+ * tested RAW in the browser, where ar() is not available.
+ */
+export function resultsSentenceSource(pool = matchers()) {
+  return `(?:${pool.map(({ re }) => `(?:${re.source})`).join('|')})`;
+}
+
+/**
+ * The same alternation, ANCHORED to the start of the text being tested — for per-NODE readers.
+ *
+ * THE ANCHOR IS LOAD-BEARING, and that is easy to miss when replacing a hand-written parser
+ * (measured 2026-09-19, routine #5, in the first cut of this very migration). The journeys that
+ * enumerate results headlines walk `document.querySelectorAll('div,span,p')` and ask "is this node a
+ * headline?". The retired regexes were written `/^لقينا\s+[\d,٬]+\s+إعلان/` — and their `^` was not
+ * decoration, it was the LEAF SELECTOR: a wrapper `<div>` whose innerText is the entire transcript
+ * contains the sentence somewhere in the middle, so an UNANCHORED test matches the wrapper and the
+ * reader returns the whole page as one "headline". Downstream that is not a blind parse but a wrong
+ * one: `nothingAboveRewritten` then compares two multi-kilobyte blobs that differ by every card
+ * added since, and reports the product for rewriting a transcript it never touched.
+ *
+ * So a per-node reader wants this; a whole-body reader (`document.body.innerText`) wants the
+ * unanchored `resultsSentenceSource()`.
+ */
+export function resultsSentenceAtStartSource(pool = matchers()) {
+  return `^\\s*${resultsSentenceSource(pool)}`;
+}
