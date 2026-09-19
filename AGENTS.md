@@ -585,6 +585,48 @@ not closed.
 `supabase/migrations/`, commit, and open a PR — this itself touches `supabase/migrations/`, so per
 the daily/senior routine rules it stays OPEN for review, never self-merged by an autonomous run.
 
+## HIDING A LISTING IS A TWO-PART ACT — `active=false` ALONE IS UNDONE WITHIN 24h (2026-09-18)
+
+**If you deliberately deactivate a listing that is still live at source, you must ALSO register it in
+`ops_adjudicated_retraction`, or `auto_recover_false_inactive()` will switch it back on within a
+day.** That job exists to undo accidental inactivations, and its predicate is
+
+```sql
+active = false
+and coalesce(missing_count,0) = 0        -- true for anything still published at source
+and deactivated_at >= now() - 24h        -- true for anything you just did
+and not exists (select 1 from ops_adjudicated_listing j
+                 where j.tbl = <t> and j.listing_id = t.id)   -- the ONLY clause that protects you
+```
+
+A deliberate withdrawal and an accidental flip are **identical** under the first three clauses. The
+adjudication register is what tells them apart, and the function's own comment says so: *"An
+adjudicated row was never struck BECAUSE a decision was recorded about it… must never be
+auto-reactivated (owner, 2026-08-30)."*
+
+`ops_adjudicated_listing` is a VIEW; write to **`ops_adjudicated_retraction`** (`source_table`,
+`listing_id`, `reason`, `evidence` jsonb).
+
+**How this was earned.** The owner said «delete the 99 please» about راكز's «البيع على الخارطة»
+(off-plan) units on 2026-09-14. They were deactivated, a detector was added to watch them, and they
+were **active again the next day**. Three days were then spent suspecting the scraper, which was
+innocent throughout — `map_unit()` was executed against the real live unit 16938 and the real live
+project 16055 and correctly returned `None`. The withdrawal migration had simply never written to the
+register, so the recovery job read an owner decision as an accident. The failure is silent, arrives a
+day late, and looks exactly like a scraper bug.
+
+**Two second-order lessons from the same incident, both already written down and both walked into:**
+
+1. **A detector returning 0 does NOT mean clean.** `mon_raise()` returns 0 when its dedup key is
+   already open, so an all-zero sweep can sit on top of a standing alert — this file already says so
+   under "Read this first", and `mon_detect_rakez_off_plan_resurrection()` had been alerting
+   correctly since 09-15 while its return value read 0. **Read `open_alerts`, not the count.**
+2. **`scraped_at` cannot date a re-upsert.** Nothing writes it after insert — it is a column default.
+   `last_seen_at` is the one that moves. Using `scraped_at` to rule out a re-upsert will mislead you.
+
+The rakez off-plan rows are now adjudicated (`20260918172239`) and stay hidden. They are **kept, not
+deleted** — the owner wants them as the seed of a future off-plan feature, so do not prune them.
+
 ## PLATFORM ACTIVATION IS APPLY-AND-MIRROR IN ONE CHANGE (owner rule, 2026-09-06, permanent)
 
 **A platform-activation migration must land together with every declaration that has to travel with

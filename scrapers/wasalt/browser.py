@@ -184,6 +184,16 @@ class BrowserFetcher:
 
     def _next_data_once(self, url: str) -> Optional[dict]:
         """One attempt. See next_data() for the retry ladder."""
+        data, _status, _n = self._page_once(url)
+        return data
+
+    def _page_once(self, url: str) -> tuple[Optional[dict], Optional[int], int]:
+        """One attempt, reporting (parsed __NEXT_DATA__, HTTP status, bytes).
+
+        The status is NOT redundant with the payload. wasalt answers a dead listing with a REAL
+        HTTP 404 whose body still carries a perfectly parseable __NEXT_DATA__ (`page: "/404"`,
+        propertyDetailsV3 null) — measured 2026-09-19: dead 404/211KB, alive 200/326KB. A liveness
+        verdict needs to tell that apart from a challenge shell, and only the status does it."""
         try:
             self._ensure()
         except Exception as e:
@@ -191,7 +201,7 @@ class BrowserFetcher:
             # cleared, and the caller only sees None for both. Say which, or the next person
             # debugging this is back to guessing (the first CI run of this module hit exactly that).
             print(f"   ⚠ wasalt browser LAUNCH failed: {type(e).__name__}: {str(e)[:300]}")
-            return None
+            return None, None, 0
         page = self._ctx.new_page()
         status = None
         html = ""
@@ -210,12 +220,12 @@ class BrowserFetcher:
                 challenged = ("Just a moment" in html) or ("_cf_chl_opt" in html)
                 print(f"   ⚠ wasalt browser: no __NEXT_DATA__ (http={status} "
                       f"challenge={'YES' if challenged else 'no'} html={len(html)}B)")
-                return None
-            return json.loads(m.group(1))
+                return None, status, len(html)
+            return json.loads(m.group(1)), status, len(html)
         except Exception as e:
             print(f"   ⚠ wasalt browser NAV failed (http={status}): "
                   f"{type(e).__name__}: {str(e)[:300]}")
-            return None
+            return None, status, len(html)
         finally:
             try:
                 page.close()
@@ -254,6 +264,30 @@ class BrowserFetcher:
                 self._recycle()
                 _t.sleep(_BACKOFF_S * (attempt + 1))
         return None
+
+    def page_data(self, url: str) -> tuple[Optional[dict], Optional[int], int]:
+        """next_data() plus the HTTP status and byte count, over the SAME retry ladder.
+
+        `(None, …)` keeps next_data()'s meaning — no parseable answer, which the caller must treat
+        as UNKNOWN and never as a verdict about the listing. A returned dict WITH a 404 status is
+        a different thing entirely: the source answered, and it said the listing is gone.
+        """
+        import time as _t
+        last: tuple[Optional[dict], Optional[int], int] = (None, None, 0)
+        for attempt in range(_ATTEMPTS):
+            data, status, nbytes = self._page_once(url)
+            if data is not None:
+                return data, status, nbytes
+            last = (None, status, nbytes)
+            # A REAL 404 with no parseable body is still the source answering. Retrying it on a
+            # fresh exit only spends the ladder to be told the same thing.
+            if status in (404, 410):
+                return last
+            if attempt < _ATTEMPTS - 1:
+                print(f"   ↻ wasalt browser retry {attempt + 2}/{_ATTEMPTS} on a fresh proxy exit")
+                self._recycle()
+                _t.sleep(_BACKOFF_S * (attempt + 1))
+        return last
 
     def close(self) -> None:
         for obj, meth in ((self._ctx, "close"), (self._browser, "close"), (self._pw, "stop")):
