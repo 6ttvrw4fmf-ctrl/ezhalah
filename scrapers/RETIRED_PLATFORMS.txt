@@ -13,8 +13,33 @@
 # To UN-RETIRE one (owner approval required): remove the slug here in the SAME PR that re-adds
 # the matrix line, referencing the approval in the commit message.
 #
-# toor      — retired 2026-07-06 (owner-approved): toor.ooo IP-blocks datacenter + Saudi-proxy
-#             IPs; every fetch timed out, 0 rows for weeks.
+# toor      — retired 2026-07-06 (owner-approved). THE ORIGINAL REASON IS NO LONGER THE REASON;
+#             re-probed 2026-09-19 at the owner's instruction ("a retirement without a proper
+#             excuse is a failure — if the site is up, turn it back on").
+#
+#             The original note said toor.ooo IP-blocks datacenter + Saudi-proxy IPs and every
+#             fetch timed out. THAT IS FIXED: from a clean egress the sitemap and every detail
+#             page now return HTTP 200 (sitemap_properties_1.xml → 82 URLs, detail ≈1.2 MB), the
+#             same class of recovery that un-retired jazwtn (PR#230) and awal (2026-09-04). So the
+#             transport excuse is dead and must not be cited again.
+#
+#             IT STAYS RETIRED FOR A DIFFERENT, VERIFIED REASON: toor.ooo rebuilt as an SPA and
+#             its public HTML is now a SHELL that serves ONE SAMPLE LISTING for every PropertyId.
+#             Measured 2026-09-19 over six different PropertyIds from the sitemap — all six
+#             returned licence 7201112446 / ref 25316 / area 4944.61 / price 40,000: ONE distinct
+#             listing out of six. The JSON-LD `name` is the literal placeholder «الاسم» ("the
+#             name"), and the CSS classes the old parser anchored on are now randomised
+#             (st__K7lM8n, st__O2pQ3r vs the shipped st__J3hQ4o).
+#
+#             Running scrapers/toor/ as-is would therefore write 82 COPIES OF ONE FABRICATED
+#             LISTING — the invented-data failure PRICE = SOURCE exists to prevent. The real data
+#             moved behind an authenticated API: /api/getProperty*, /api/getPropertyDetails*,
+#             /api/property/<id> all return HTTP 401; only /api/getMediaByProperty/<id> (200, []) 
+#             and /api/getCityInformation/ (200) are public.
+#
+#             TO UN-RETIRE, the blocker is no longer egress — it is auth + a parser rewrite. Do
+#             NOT re-add the matrix line on the strength of "the site loads now": it loads, and it
+#             lies. Verify first that six different PropertyIds yield six DIFFERENT licences.
 # alnokhba  — deprecated 2026-07-14: alnokhba-services.com lapsed into a domain-parking page
 #             (HTTP 200 shell, no listings); 7 straight daily runs of rows_seen=0.
 # muktamel  — paused 2026-07-15: runs on its OWN gated weekly workflow (muktamel-sync.yml), never

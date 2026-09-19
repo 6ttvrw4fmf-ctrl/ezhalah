@@ -99,9 +99,13 @@ jobs:
           # reactivated ads). So we cut its bandwidth by cadence instead: every_n_days=2 (owner 2026-07-07).
           # (tmo+cadence restored 2026-07-16 — PR #77 accidentally dropped both overrides.)
           - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150, every_n_days: 2 }
-          # NOTE: toor is NOT here. RETIRED 2026-07-06 (owner-approved, commit d5ca9d6):
-          # www.toor.ooo IP-blocks datacenter + Saudi-residential-proxy IPs (every detail fetch =
-          # exc:Timeout, 0 rows written for weeks), so it was removed from the active pipeline.
+          # NOTE: toor is NOT here. RETIRED 2026-07-06 (owner-approved, commit d5ca9d6).
+          # THE ORIGINAL REASON (IP-block: every detail fetch exc:Timeout) IS FIXED — re-probed
+          # 2026-09-19, sitemap + details all return HTTP 200 from a clean egress. It stays out for
+          # a DIFFERENT verified reason: toor.ooo is now an SPA whose public HTML serves ONE SAMPLE
+          # LISTING for every PropertyId (6 different ids -> 1 distinct licence/ref), so running it
+          # would write 82 copies of one fabricated listing. The real data is behind an
+          # authenticated API (401). See scrapers/RETIRED_PLATFORMS.txt for the measurement.
           # Historical toor rows are KEPT in the DB (not deleted) and scrapers/toor/ remains in
           # the repo for reference. PR #77 (da19962) accidentally re-added the matrix line on
           # 2026-07-15; re-removed 2026-07-16 and now guarded by scrapers/RETIRED_PLATFORMS.txt +
