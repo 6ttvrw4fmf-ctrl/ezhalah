@@ -15,6 +15,7 @@ import { photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
+import { truncateGlyphs } from '@/lib/typedReveal';
 import saLocations from './sa-locations.json';
 
 // Maps proximity.ts Relationship values to the relationship_group stored in listing_location_relations.
@@ -1137,7 +1138,9 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
     // Source free text → decode HTML escapes before it is shown (Gathern's house_rules stores
     // `&amp;#34;`). No-op for every value without an entity. See src/lib/htmlEntities.ts.
     v = decodeEntities(v);
-    if (v.length > 120) v = v.slice(0, 117) + '…';
+    // Truncate by GLYPH, not by UTF-16 code unit (ops_incident #347). Source free text carries
+    // emoji, and `v.slice(0, 117)` can cut a surrogate pair in half, leaving a ▯ box on the card.
+    v = truncateGlyphs(v, 120);
     seen.add(label);
     out.push({ key, label, value: v });
   }

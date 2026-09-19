@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { resultsSentenceSource } from './lib/resultsSentence.mjs';
 
 // Production-UI parity: drives the real app end-to-end (Filter mode + AI mode) and asserts the
 // results actually render, in Arabic, with the right classification. Real clicks + Playwright
@@ -6,7 +7,11 @@ import { test, expect, type Page } from '@playwright/test';
 // (search only), safe to run against production.
 
 const ARABIC = /[؀-ۿ]/;
-const FOUND = /لقينا[\s\S]*?إعلان/; // "لقينا N إعلان يطابق طلبك" — the results summary line
+// The results summary line, DERIVED from the pool the app ships (src/data/resultsFoundRotation.ts)
+// rather than restated here. The retired /لقينا[\s\S]*?إعلان/ matched 0 of the 10 AR guest
+// templates after PR #3186 turned the sentence into a rotation, so runSearch() below waited out its
+// full 60s and failed against a production that was rendering the count correctly.
+const FOUND = new RegExp(resultsSentenceSource());
 
 async function home(page: Page) {
   await page.goto('/?fresh=e2e', { waitUntil: 'domcontentloaded' });
