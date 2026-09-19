@@ -33,20 +33,36 @@ const mustCatch = (label: string, caught: boolean, detail = '') =>
 
 console.log('\nFilter-search bubble opening rotates; the rest of the sentence never moves\n');
 
-// ── 1. THE PICKER, EXECUTED ─────────────────────────────────────────────────────────────────────
-setFilterGreetingsCache(null);
-check('with no cache loaded yet (the first search of a session), the exact pre-rotation fallback is used',
-  pickFilterGreetingOpening() === __testing.FALLBACK_OPENING,
+// ── 1. THE PICKER, EXECUTED — baked-in list must give a REAL rotation from search #1 ──────────────
+// This is the whole point of the owner's 2026-09-19 rewrite: when a user opens the app and does
+// their FIRST Filter search, they must already see a random one of the 100 openings, never the
+// retired «ارحب إزهله 👋» text. The picker no longer has a fallback string — it uses the baked list
+// at import time, so a fresh module import (i.e. a fresh session) is what's exercised right here.
+check('the baked list carries the full owner-authored pool (100 rows)',
+  __testing.BAKED.length === 100, `got ${__testing.BAKED.length}`);
+check('every baked row has a non-empty greeting and emoji (no silent blanks in the picker output)',
+  __testing.BAKED.every((r: { greeting: string; emoji: string }) => r.greeting && r.emoji));
+check('no baked row leaks the retired "إزهله" brand word into the greeting half (safety against a bad edit)',
+  __testing.BAKED.every((r: { greeting: string; emoji: string }) => !r.greeting.includes('إزهله')));
+check('a fresh picker call already builds "{greeting}، إزهله {emoji}، " from a REAL baked row (no fallback text)',
+  /، إزهله [^ ]+، $/.test(pickFilterGreetingOpening())
+  && !pickFilterGreetingOpening().startsWith('ارحب إزهله'),
   `got: ${JSON.stringify(pickFilterGreetingOpening())}`);
 
-setFilterGreetingsCache([]);
-check('an empty rotation pool (RPC returned zero rows) also falls back — never a blank opening',
-  pickFilterGreetingOpening() === __testing.FALLBACK_OPENING);
-
+// Server-side pool OVERRIDES the baked list when a non-empty one arrives.
 setFilterGreetingsCache([{ greeting: 'هلا والله', emoji: '💚' }]);
-check('a loaded pool builds "{greeting}، إزهله {emoji}، " from the REAL cached row',
+check('a non-empty server pool OVERRIDES the baked list (editability without a deploy)',
   pickFilterGreetingOpening() === 'هلا والله، إزهله 💚، ',
   `got: ${JSON.stringify(pickFilterGreetingOpening())}`);
+
+// A FAILED / EMPTY fetch must NOT demote the working baked list back to nothing.
+setFilterGreetingsCache([]);
+check('an empty server response NEVER demotes the working baked list — the last-good pool stays',
+  pickFilterGreetingOpening() === 'هلا والله، إزهله 💚، ',
+  `got: ${JSON.stringify(pickFilterGreetingOpening())}`);
+setFilterGreetingsCache(null);
+check('a NULL server response NEVER demotes the working baked list either',
+  pickFilterGreetingOpening() === 'هلا والله، إزهله 💚، ');
 
 // EXECUTED over many picks: with 2+ distinct rows, no two consecutive picks are identical.
 setFilterGreetingsCache([
@@ -84,6 +100,21 @@ check('exactly 100 Arabic rows are seeded (the live rotation pool)', arCount ===
 check('exactly 100 English rows are seeded (stored for future English support, per owner instruction)',
   enCount === 100, `saw ${enCount}`);
 
+// The BAKED list must equal the migration's AR rows in the SAME order — otherwise the code shipped
+// and the server-edited-copy shipped different pools, and a user could see two different rotations
+// depending on whether the RPC has resolved yet.
+{
+  const arRowsRe = /\n {2}\('ar', \d+, '([^']*)', '([^']*)'\)/g;
+  const arRows: { greeting: string; emoji: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = arRowsRe.exec(migration)) !== null) arRows.push({ greeting: m[1], emoji: m[2] });
+  const bakedJson = JSON.stringify(__testing.BAKED);
+  const migJson = JSON.stringify(arRows);
+  check('the BAKED list equals the migration\'s AR rows, byte-for-byte, in order (mirror can never drift)',
+    bakedJson === migJson,
+    bakedJson === migJson ? '' : `first differing index shape: BAKED[0]=${JSON.stringify(__testing.BAKED[0])} mig[0]=${JSON.stringify(arRows[0])}`);
+}
+
 // ── 2b. THE FETCH SIDE — loaderFilterGreetings.ts, checked by SHAPE (never imported directly: it
 // pulls in @/lib/supabase, which does not resolve under a plain-Node barrier run — the exact reason
 // loaderActivePlatforms.ts is split from loaderPlatforms.ts in the first place). ─────────────────
@@ -103,7 +134,7 @@ check('search.ts imports the real picker (not a re-derived local rule)',
   /import \{ pickFilterGreetingOpening \} from '\.\/filterGreetingRotation';/.test(searchSrc));
 check('search.ts imports the real loader (primes the pool it reads from)',
   /import \{ primeFilterGreetings \} from '\.\/loaderFilterGreetings';/.test(searchSrc));
-check('filterToChat() primes the pool (so the SECOND search of a session already has it warm)',
+check('filterToChat() still primes the server pool (so a live DB edit reaches users without a deploy)',
   /primeFilterGreetings\(\);/.test(searchSrc));
 {
   const callStart = searchSrc.indexOf("t(\"I'm looking for {what}{detail} {verb} in {place}{price}\", {");
@@ -151,10 +182,10 @@ check('the Advanced-Filter/interview bubble never imports the rotation — owner
   mustCatch('reverting to the old hardcoded prefix is caught (the retired-literal check goes red)',
     mutated.includes("'ارحب إزهله 👋، أبحث عن"));
 }
-// M-empty-fallback-blank: a fallback that returns '' instead of the real pre-rotation line would
-// silently blank the opening — prove the exact-string check on FALLBACK_OPENING would catch it.
-mustCatch('a blank fallback (\'\' instead of the real pre-rotation line) is caught',
-  __testing.FALLBACK_OPENING !== '');
+// M-shrunk-baked: the baked list is what makes a fresh session rotate from search #1 — a mutant that
+// silently ships an empty list would put the picker back where the old fallback line used to be.
+mustCatch('an empty baked list would leave the picker with nothing to rotate on — caught',
+  __testing.BAKED.length > 0);
 
 if (failures) {
   console.error(`\n✗ ${failures} check(s) failed — the greeting rotation drifted from the owner's exact scope.\n`);
