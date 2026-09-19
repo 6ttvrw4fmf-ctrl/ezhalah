@@ -30,6 +30,10 @@ on:
         description: "Max previously-errored rows (ar_data._err) to re-attempt this run — oldest first, >=24h backoff per row, parked after 5 definitive failures. 0 disables (default 100)"
         required: false
         default: "100"
+      err_backoff_hours:
+        description: "Minimum hours between two attempts on the SAME errored row (default 24). Lower it only to exercise the retry pass on demand — e.g. to verify a fetch-path fix against rows that just errored. The backoff exists to keep metered-proxy spend flat, so leave it at 24 for scheduled runs."
+        required: false
+        default: "24"
 
 concurrency:
   group: wasalt-enrich-ar
@@ -39,6 +43,12 @@ jobs:
   enrich-ar:
     name: Enrich AR ${{ matrix.table }}
     runs-on: ubuntu-latest
+    # BACKSTOP ONLY. The job now carries its own 2700s (45 min) budget via --max-seconds and stops
+    # cleanly inside this wall; reaching 60 minutes again means the budget itself failed, and should
+    # be investigated rather than raised. Until 2026-09-18 this timeout was the ONLY limit, so the
+    # residential job was simply killed by it on 7 of 12 consecutive runs — GitHub reports a timeout
+    # kill as `cancelled`, db.end_run() never ran, and the errored-row retry pass never executed.
+    # (ops_incident #307; barrier scripts/verify-enrich-ar-stops-before-the-ci-wall.ts.)
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -55,18 +65,38 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      # Cloudflare path (issue #1019): wasalt.sa cannot be read by any http client any more, so this
+      # enricher drives a real Chromium exactly like wasalt-residential-sweep.yml does.
+      # --with-deps pulls the system libraries Chromium needs on the runner image.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Enrich AR ${{ matrix.table }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Browser + residential proxy, the pair the sweep proved on 2026-09-18: a real browser
+          # supplies the JS execution the challenge demands, the proxy supplies the residential IP
+          # it also demands (a GitHub datacenter IP is refused however real the browser is).
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
           SCRAPE_MIN_INTERVAL: "0.3"
           ALLOW_BACKFILL_FLAG: ${{ (github.event.inputs.allow_backfill == 'true') && '--allow-backfill' || '' }}
         run: |
-          exec python -m scrapers.wasalt.enrich_ar \
+          # headless=False is what clears the Cloudflare challenge (headless is detected and never
+          # clears — measured 2026-09-18). The runner has no display; xvfb-run supplies a virtual one.
+          #
+          # --workers 1: the browser path is single-threaded (Playwright's sync API is thread-bound),
+          # and enrich_ar forces it anyway — passing it here keeps the command honest about what runs.
+          # THROUGHPUT IS NOW TIME-BOUND, NOT ROW-BOUND: a browser fetch is seconds, not milliseconds,
+          # so --limit is just a ceiling on the SELECT and --max-seconds is the real budget. Rows the
+          # budget does not reach are left untouched and picked up by the next run — do NOT raise the
+          # limit or the workers to "catch up"; that only buys metered proxy bandwidth.
+          exec xvfb-run -a python -m scrapers.wasalt.enrich_ar \
             --table ${{ matrix.table }} \
             --limit ${{ github.event.inputs.limit || 2000 }} \
-            --workers 6 \
+            --workers 1 \
             --max-pending ${{ github.event.inputs.max_pending || 5000 }} \
             --retry-errs ${{ github.event.inputs.retry_errs || 100 }} \
+            --err-backoff-hours ${{ github.event.inputs.err_backoff_hours || 24 }} \
+            --max-seconds 2700 \
             $ALLOW_BACKFILL_FLAG
