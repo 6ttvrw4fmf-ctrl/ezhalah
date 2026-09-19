@@ -66,6 +66,7 @@ import { resolvePublicSupabase } from './lib/public-supabase.ts';
 // re-typed number. Raising or lowering it moves this journey's assertion with it.
 import { SECOND_PAGE_CAP } from '../src/data/resultCount.ts';
 import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
+import { resultsFoundCount, resultsSentenceAtStartSource } from '../e2e/lib/resultsSentence.mjs';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -354,12 +355,24 @@ const CLICK_LEAF = (txt: string) => {
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 };
 
-/** Every «لقينا N إعلان» headline currently rendered, oldest first. */
-const READ_HEADLINES = () => {
+// DERIVED FROM THE SHIPPED POOL, NEVER RESTATED (2026-09-19, routine #5). This file pinned
+// «لقينا N إعلان» in FOUR places, and PR #3186 retired that wording the same morning for a
+// four-pool rotation (src/data/resultsFoundRotation.ts). Measured live that afternoon on a healthy
+// الرياض/شقة search returning 13,489: the retired regex matched nowhere on the settled page. One of
+// the four spots (READ_TURN_CARDS) does not merely go blind when it misses — it falls back to
+// counting EVERY card on the page, which silently inflates the newest turn's reveal. See
+// e2e/lib/resultsSentence.mjs and scripts/verify-results-sentence-parsers-track-the-pool.ts.
+// ANCHORED: the per-node reader below must not match a wrapper whose innerText merely
+// CONTAINS a headline — see resultsSentenceAtStartSource() for what that costs.
+const SENTENCE_SRC = resultsSentenceAtStartSource();
+
+/** Every results headline currently rendered, oldest first (any shipped template, any rotation). */
+const READ_HEADLINES = (src: string) => {
+  const re = new RegExp(src);
   const out: string[] = [];
   document.querySelectorAll('div,span,p').forEach((e: any) => {
     const t = (e.innerText || '').trim();
-    if (!/^لقينا\s+[\d,٬٠-٩۰-۹]+\s+إعلان/.test(t)) return;
+    if (!re.test(t)) return;
     if (e.children.length > 2) return;
     if (!out.includes(t)) out.push(t);
   });
@@ -414,11 +427,12 @@ type CardState = ReturnType<typeof READ_CARD>;
  * the previous-turn cards in one move: the returned length IS the newest turn's reveal, and the ids
  * let the run prove the user sees the fetched set exactly — in order, once each.
  */
-const READ_TURN_CARDS = () => {
+const READ_TURN_CARDS = (src: string) => {
+  const re = new RegExp(src);
   let last: Element | null = null;
   document.querySelectorAll('div,span,p').forEach((e: any) => {
     if (e.children.length) return;
-    if (/لقينا\s*[\d,٠-٩۰-۹]+\s*(إعلان|عقار)/.test((e.innerText || '').trim())) last = e;
+    if (re.test((e.innerText || '').trim())) last = e;
   });
   const head = last as Element | null;
   const cards = [...document.querySelectorAll('[data-testid^="card-listing-"]')];
@@ -441,11 +455,8 @@ const COUNT_CARDS = () => {
   return n;
 };
 
-const digits = (s: string) => s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x660)).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x6f0)).replace(/[^\d]/g, '');
-const headlineNum = (h: string | undefined): number | null => {
-  const m = (h ?? '').match(/لقينا\s*([\d,٬٠-٩۰-۹]+)/);
-  return m ? Number(digits(m[1])) : null;
-};
+/** The count a headline quotes, read through the same pool the app renders from. */
+const headlineNum = (h: string | undefined): number | null => resultsFoundCount(h ?? '');
 
 // ── the independent oracle ─────────────────────────────────────────────────────────────────────
 const TYPE_MACROS: Record<string, string> = await (async () => {
@@ -624,7 +635,7 @@ const waitForHeadline = async (total: number | null, timeoutMs = 25_000): Promis
   const until = Date.now() + timeoutMs;
   let last: number | null = null;
   while (Date.now() < until) {
-    const hs: string[] = await page.evaluate(READ_HEADLINES);
+    const hs: string[] = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
     last = headlineNum(hs[hs.length - 1]);
     if (last != null && last === total) return last;
     await page.waitForTimeout(500);
@@ -855,7 +866,7 @@ try {
       check('2. R8.1.1 — the all-skip search carries NO predicate', R.noPredicate(roundEnd.body), `AF keys: ${afKeysOn(roundEnd.body).join(', ') || '(none)'}`);
       check('2. R8.1.2 — the all-skip search total == baseline total', roundEnd.total === baseline.total, `baseline=${baseline.total} after skips=${roundEnd.total}`);
     } else console.log('      [diag] no search fired after the all-skip round — nothing committed, nothing re-searched');
-    const hsAfterSkips: string[] = await page.evaluate(READ_HEADLINES);
+    const hsAfterSkips: string[] = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
     check('2. R8.1.2 — after skipping every question the newest headline is still the baseline number',
       R.chipEquals(headlineNum(hsAfterSkips[hsAfterSkips.length - 1]), baseline.total), `headline=${headlineNum(hsAfterSkips[hsAfterSkips.length - 1])} baseline=${baseline.total}`);
   }
@@ -971,7 +982,7 @@ try {
       }
     }
     if (!btn) break;
-    const shownBefore: number = (await page.evaluate(READ_TURN_CARDS)).length;
+    const shownBefore: number = (await page.evaluate(READ_TURN_CARDS, SENTENCE_SRC)).length;
     await btn.click();
     clicks++;
     // OBSERVE THE REVEAL SETTLING; NEVER SAMPLE A MOVING CASCADE (owner rule, 2026-09-06: the
@@ -986,7 +997,7 @@ try {
     let shown = shownBefore;
     const settled = await settleUntil(
       async () => {
-        const ids: number[] = await page.evaluate(READ_TURN_CARDS);
+        const ids: number[] = await page.evaluate(READ_TURN_CARDS, SENTENCE_SRC);
         const n = ids.length;
         const busy = await page.evaluate(() => { const b = document.querySelector('[data-testid="results-load-more"]') as any; return !!b && (b.getAttribute('aria-disabled') === 'true' || b.disabled === true); });
         const quiet = n > shownBefore && n === shown && !busy;
@@ -1019,7 +1030,7 @@ try {
   // «لقينا … عقار أقرب لطلبك» found-beat it swaps to on completion. (Between 2026-08-31 and
   // 2026-09-06 that headline was «إزهله يدقّق في …»; the owner reverted that redesign, so matching
   // it alone would leave this diagnostic blind to the phase it exists to name.)
-  const absentDiag = clicks > 0 ? '' : await page.evaluate(() => {
+  const absentDiag = clicks > 0 ? '' : await page.evaluate((SRC: string) => {
     const q = (s: string) => document.querySelectorAll(s).length;
     const body = document.body.innerText || '';
     const mining = /ندور لك على الأقرب لطلبك/.test(body)
@@ -1030,8 +1041,9 @@ try {
     // (owner 2026-08-24). So a NEWER results turn that renders nothing would silently retire the
     // pager on the turn the user is actually looking at. Counting the result headlines distinguishes
     // that from a pager the newest turn simply refused to draw.
+    const headRe = new RegExp(SRC);
     const heads = [...document.querySelectorAll('*')]
-      .filter((e) => e.children.length === 0 && /لقينا/.test(e.textContent || ''))
+      .filter((e) => e.children.length === 0 && headRe.test(e.textContent || ''))
       .map((e) => (e.textContent || '').trim());
     // THE DISCRIMINATOR. The closing note («عرضت لك أول …») is rendered by the SAME block as the
     // buttons, and that block bails early on `(m.typing && !doneTyping) || shown < initialReveal(...)`.
@@ -1050,7 +1062,7 @@ try {
            ` · af pills=${q('[data-testid^="af-pill-"]')}` +
            ` · result headlines=${heads.length} [${heads.join(' | ')}]` +
            ` · CLOSING NOTES=${closingNotes.length} [${closingNotes.join(' | ')}]`;
-  }).catch(() => ' · (diagnostic unavailable)');
+  }, SENTENCE_SRC).catch(() => ' · (diagnostic unavailable)');
   check('4. R10.1.1 — «عرض المزيد» was exercised (the button was there to click)', clicks > 0 || (landed.total ?? 0) <= FIRST_PAGE,
     clicks ? `${clicks} click(s), ${pages.length} network page(s) fired (p_offset ${pages.map((p) => p.body.p_offset).join(',') || '— buffer served every click'})` : `no button and total=${landed.total} > ${FIRST_PAGE}${absentDiag}`);
   // THE NETWORK PAGE IS THE POINT. Below the buffer every click is served from page 0 and nothing
@@ -1120,7 +1132,7 @@ try {
   // browser actually rendered on the newest turn and hold them to the rows the backend actually
   // returned, in order — so a duplicate, a skipped row, a missing row, or a stale card left over
   // from an earlier turn is a named failure rather than a number that happens to add up.
-  const turnIds: number[] = clicks > 0 ? await page.evaluate(READ_TURN_CARDS) : [];
+  const turnIds: number[] = clicks > 0 ? await page.evaluate(READ_TURN_CARDS, SENTENCE_SRC) : [];
   if (turnIds.length) {
     const dupes = turnIds.filter((id, i) => turnIds.indexOf(id) !== i);
     check('4. R10.1.1 — no listing is revealed twice on the newest turn',

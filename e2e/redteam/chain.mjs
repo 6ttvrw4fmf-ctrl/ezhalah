@@ -15,6 +15,7 @@
 
 import { chromium, devices } from 'playwright';
 import { parseVisibleState } from '../live-sweep/visibleState.mjs';
+import { settledSource } from '../lib/resultsSentence.mjs';
 
 export const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 const SUPA = 'https://aannarbkwcymrotzwdbo.supabase.co';
@@ -131,8 +132,10 @@ export async function runSearch(page, budgetMs = 45000) {
   const ok = await tap(page, 'بحث');
   if (!ok) return false;
   const settled = await page.waitForFunction(
-    () => /لقينا|ما لقيت|ما فيه/.test(document.body.innerText || ''),
-    null, { timeout: budgetMs },
+    // Derived from the shipped pool (2026-09-19, routine #5) — the retired clock
+    // /لقينا|ما لقيت|ما فيه/ is defeated by 6 of the 10 AR guest templates.
+    (src) => new RegExp(src).test(document.body.innerText || ''),
+    settledSource(), { timeout: budgetMs },
   ).then(() => true).catch(() => false);
   await sleep(1500);
   return settled;

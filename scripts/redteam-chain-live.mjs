@@ -43,6 +43,7 @@ import { dismissCookieConsent } from './lib/liveConsent.ts';
 import { CLEAN_MACRO, EN_TO_AR, typeArForSelection } from '../src/data/propertyTypes.ts';
 import { parseVisibleState } from '../e2e/live-sweep/visibleState.mjs';
 import { setDifferential, differentialIsClean, describeDifferential } from './lib/setDifferential.ts';
+import { settledSource } from '../e2e/lib/resultsSentence.mjs';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
@@ -271,7 +272,10 @@ async function runChain(cell) {
     if (!await tap('بحث')) throw new Error('«بحث» never rendered');
 
     // Wait for the app to SETTLE on a terminal state, not for a guessed number of seconds.
-    await page.waitForFunction(() => /لقينا|ما لقيت|ما فيه/.test(document.body.innerText), null, { timeout: 90000 });
+    // Derived from the shipped pool (2026-09-19, routine #5). The retired clock
+    // /لقينا|ما لقيت|ما فيه/ is defeated by 6 of the 10 AR guest templates, so after PR #3186 it
+    // failed to see a settled search most of the time and judged a half-painted screen.
+    await page.waitForFunction((src) => new RegExp(src).test(document.body.innerText), settledSource(), { timeout: 90000 });
     // …AND THEN WAIT FOR THE CARD CASCADE (§41.4). A terminal headline is not a settled screen: the
     // cards drip in one by one, so a fixed sleep here samples a PARTIAL list. This cost a false
     // product finding on its first run — الطائف/تجاري/محل read 32 cards under a «37» headline with
