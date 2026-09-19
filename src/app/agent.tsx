@@ -25,6 +25,7 @@ import VoiceWaveform from '@/components/VoiceWaveform';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure } from '@/lib/initialReveal';
+import { glyphCount, revealPrefix } from '@/lib/typedReveal';
 import { distinctPlatformCount } from '@/lib/platformDiversity';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
@@ -468,14 +469,21 @@ function runTypewriter(total: number, setN: (n: number) => void, onDone?: () => 
 // short or long sentence both take the same ~5s), making a filter search read as if Ezhalah is
 // writing it out (prototype parity: ezhalah-mobile.jsx Typer). Renders an unstyled <Text> so it
 // inherits the surrounding bubble/reply styling. onDone fires once the full text is shown.
+// THE REVEAL UNIT IS A GLYPH, NEVER A UTF-16 CODE UNIT (ops_incident #347, 2026-09-19). `text.slice`
+// counts code units, so a frame landing inside a surrogate pair renders half an emoji — the ▯ box.
+// Twenty of the forty Results-Found templates end in a non-BMP emoji, and that frame is not always
+// momentary: measured live, the reveal froze one tick short of the end under a 500-card render load
+// and a real user was left looking at «…تطابق بحثك ▯» indefinitely. See src/lib/typedReveal.ts.
 function Typer({ text, onDone }: { text: string; onDone?: () => void }) {
   const [n, setN] = useState(0);
+  // The denominator is the glyph count, so `n` and the slice below agree on what a step is.
+  const total = useMemo(() => glyphCount(text), [text]);
   useEffect(() => {
     setN(0);
-    return runTypewriter(text.length, setN, onDone);
+    return runTypewriter(total, setN, onDone);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
-  return <Text>{text.slice(0, n)}</Text>;
+  return <Text>{revealPrefix(text, n)}</Text>;
 }
 
 // Like Typer, but reveals "Ezhalah! " (styled as the brand) followed by the reply as one continuous
@@ -485,12 +493,17 @@ function Typer({ text, onDone }: { text: string; onDone?: () => void }) {
 function BrandReveal({ brand, text, onDone }: { brand: string; text: string; onDone?: () => void }) {
   const full = brand + text;
   const [n, setN] = useState(0);
+  // Glyph-stepped for the same reason as Typer above (ops_incident #347). Splitting `shown` at
+  // `brand.length` stays correct: `brand` is a literal prefix of `full`, and `shown` is now always a
+  // whole number of glyphs, so the split either lands exactly on the brand boundary or leaves the
+  // (still well-formed) partial brand in the first half.
+  const total = useMemo(() => glyphCount(full), [full]);
   useEffect(() => {
     setN(0);
-    return runTypewriter(full.length, setN, onDone);
+    return runTypewriter(total, setN, onDone);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [full]);
-  const shown = full.slice(0, n);
+  const shown = revealPrefix(full, n);
   return (
     <>
       <Text style={s.brand}>{shown.slice(0, brand.length)}</Text>
