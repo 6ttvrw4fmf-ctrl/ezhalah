@@ -17,8 +17,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import yaml
-
 from scrapers.wasalt.run import SLUGS
 
 WF = Path(__file__).resolve().parents[3] / ".github/workflows/wasalt-enum-liveness.yml"
@@ -29,9 +27,21 @@ def _expected_slices() -> set[tuple[str, str, str]]:
             for t, slugs in SLUGS.items() for slug in slugs for deal in ("sale", "rent")}
 
 
+# Regex rather than a YAML parser on purpose: pulling PyYAML into scrapers/requirements.txt would
+# add a dependency to every scraper CI job's install for one test's convenience, and the matrix
+# lines are a fixed shape this repo writes itself. The pattern is anchored to that shape so a
+# malformed entry fails to match (and trips the count check) rather than being silently skipped.
+_SLICE_RE = re.compile(
+    r"^\s*-\s*\{\s*type:\s*(\w+),\s*slug:\s*([\w-]+),\s*deal:\s*(\w+)\s*\}\s*$", re.M)
+
+
 def _matrix_slices() -> list[dict]:
-    wf = yaml.safe_load(WF.read_text())
-    return wf["jobs"]["enum"]["strategy"]["matrix"]["include"]
+    text = WF.read_text()
+    # scope to the enum job's matrix block so an unrelated future `- { … }` elsewhere can't leak in
+    start = text.index("matrix:", text.index("name: Enum "))
+    end = text.index("\n  rollup:", start)
+    return [{"type": t, "slug": sl, "deal": d}
+            for t, sl, d in _SLICE_RE.findall(text[start:end])]
 
 
 def test_matrix_covers_exactly_the_slices_runpy_knows():
