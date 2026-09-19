@@ -69,6 +69,26 @@ def own_section(page_html: str) -> str:
     b = re.sub(r"<(script|style|nav|header|footer).*?</\1>", " ", own, flags=re.S)
     return re.sub(r"\s+", " ", ihtml.unescape(re.sub(r"<[^>]+>", " ", b))).strip()
 
+# PHOTOS — the ad's own gallery, and ONLY the own gallery. own_section() has already dropped the
+# «اعلانات مشابهة» block, so a similar ad's slides cannot leak in; we still exclude the site's
+# chrome (settings icons, /assets/ logos) by path. The slide markup is
+# `<div class="slide-img"><img src="https://sadiq-eltajer.sa/storage/webp/<hash>.webp">`.
+_PHOTO_RE = re.compile(r'class="slide-img"[^>]*>\s*<img[^>]+src="([^"]+)"', re.S)
+
+
+def photos(page_html: str) -> Optional[list[str]]:
+    """This listing's photo URLs, in page order, deduped. None when the ad has no gallery.
+
+    Reads the RAW html (own_section() strips tags, and the gallery is markup), but slices at
+    «اعلانات مشابهة» itself so a similar ad's slides can never be captured — the same construction
+    that keeps a neighbour's price out."""
+    i = page_html.find(_SIMILAR)
+    own = page_html[:i] if i > 0 else page_html
+    urls = [u for u in dict.fromkeys(_PHOTO_RE.findall(own))
+            if u.startswith("http") and "/storage/" in u
+            and "/settings/" not in u and "/assets/" not in u]
+    return urls or None
+
 
 # ── header: code, price, area ────────────────────────────────────────────────────────────────────
 _CODE_RE = re.compile(r"كود\s*الاعلان\s*:?\s*([\d٠-٩]+)")
@@ -384,6 +404,7 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str]:
         "property_age": parse_age(text),
         "direction": parse_direction(text),
         "street_width_m": parse_street_width(text),
+        "photo_urls": photos(page_html),
     }
     if deal == "Rent":
         row["price_annual"] = price_annual

@@ -160,6 +160,21 @@ def own_price(page_html: str, link: str) -> Optional[int]:
     return None
 
 
+# PHOTOS — the ad's own gallery only. This theme puts the listing's own photos in `.img-box`
+# anchors (the <a href> is the FULL-SIZE image; the <img> inside is a -WxH thumbnail). Related and
+# recent ads use a DIFFERENT class, `.category-img-box`, so anchoring on `img-box"` excludes them by
+# construction — the same page-chrome trap that made every price wrong (see own_price above). Land
+# ads with no gallery yield nothing, which is a correct NULL.
+_PHOTO_RE = re.compile(r'class="img-box"[^>]*>\s*<a[^>]+href="([^"]+)"', re.S)
+
+
+def own_photos(page_html: str) -> Optional[list[str]]:
+    urls = [ihtml.unescape(u) for u in _PHOTO_RE.findall(page_html or "")]
+    urls = [u for u in dict.fromkeys(urls)
+            if u.startswith("http") and re.search(r"\.(?:jpe?g|png|webp)$", u, re.I)]
+    return urls or None
+
+
 _DEAL_RENT = ("للإيجار", "للايجار", "ايجار", "إيجار")
 _DEAL_BUY = ("للبيع", "بيع")
 
@@ -520,6 +535,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "street_width_m": spec_int(page_text, "عرض الشارع", 1, 120),
         "furnished": parse_furnished(page_text),
         "title": title or None,
+        "photo_urls": own_photos(page_html),
     }
     if deal == "Rent":
         row["price_annual"] = price_annual
