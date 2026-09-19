@@ -89,6 +89,7 @@ jobs:
           # عقاريون — 277 Riyadh listings across 31 pages, one detail fetch each. No proxy: the
           # site is plain nginx with no Cloudflare and answers a direct request in 1-3s.
           - { source: akariyoun,   cmd: "python -m scrapers.akariyoun.run --type all", tmo: 45 }
+          - { source: ksaaqar,     cmd: "python -m scrapers.ksaaqar.run --type all", tmo: 90 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
