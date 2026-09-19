@@ -285,8 +285,13 @@ check('the sweep declares ONE shared settle predicate (not a copy per journey)',
   /export const SETTLED_RE/.test(sweep)
   && !/\/لقينا\|ما لقينا\|ما فيه\//.test(sweep + journeys),
   'two hand-maintained copies is how one of them silently rots');
+// 2026-09-19: the shared in-page predicate is now settledSource() — GENERATED from the shipped
+// Results-Found pool rather than hand-written — because the hand-written one could not see 6 of the
+// 10 AR guest templates once the sentence became a rotation. The contract is unchanged and still the
+// point of this check: every journey waits on the ONE shared predicate, never a copy of its own.
 check('every journey waits on that shared predicate',
-  (sweep.match(/SETTLED_RE\.source/g) ?? []).length + (journeys.match(/SETTLED_RE\.source/g) ?? []).length >= 2);
+  (sweep.match(/settledSource\(\)/g) ?? []).length + (journeys.match(/settledSource\(\)/g) ?? []).length >= 2,
+  'a journey that builds its own wait regex is a copy that will rot separately');
 check('the product actually publishes terminal phrasings to check against',
   arabicTerminalPhrases.length >= 6, `found ${arabicTerminalPhrases.length} in src/i18n.tsx`);
 {

@@ -2,9 +2,10 @@
 // six-layer comparison (see sweep.mjs) — clicking the control is never the assertion.
 import {
   BASE, dbCount, assertChain, withPage, setDeal, setPeriod, pickCity, runSearch, tapByText,
-  visibleState, defect, note, num, lastCount, sleep, SETTLED_RE, observeWatch,
+  visibleState, defect, note, num, lastCount, sleep, observeWatch,
   onOneIndex, judgeAdvertisedVsLanded,
 } from './sweep.mjs';
+import { searchSettled, settledSource, resultsFoundCount } from '../lib/resultsSentence.mjs';
 
 const enc = encodeURIComponent;
 
@@ -287,7 +288,11 @@ async function afAnswerRound(page, name, requests, before, served) {
   // Commit this answer, then تخطي the rest of the round so exactly ONE predicate is committed.
   requests.length = 0;
   if (served) served.length = 0;
-  const beforeTurns = await page.evaluate(() => [...document.body.innerText.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].length);
+  // Count Results-Found sentences through the pool-derived source, not one retired phrasing: this
+  // pair of waits is how the harness knows a NEW answer landed, and it counted zero of them from the
+  // moment the sentence became a rotation (PR #3186).
+  const turnRe = settledSource();
+  const beforeTurns = await page.evaluate((src) => [...document.body.innerText.matchAll(new RegExp(src, 'g'))].length, turnRe);
   let advanced = await page.locator('[data-testid="af-confirm"]').first()
     .click({ timeout: 9000 }).then(() => true).catch(() => false);
   if (!advanced) { note(`${name}: «متابعة» not clickable — harness, skipped`); return null; }
@@ -304,8 +309,8 @@ async function afAnswerRound(page, name, requests, before, served) {
       note(`${name}: «تخطي» not clickable at hop ${hop} — harness`); break;
     }
   }
-  await page.waitForFunction((n) => [...document.body.innerText.matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].length > n,
-    beforeTurns, { timeout: 50000 }).catch(() => {});
+  await page.waitForFunction(({ n, src }) => [...document.body.innerText.matchAll(new RegExp(src, 'g'))].length > n,
+    { n: beforeTurns, src: turnRe }, { timeout: 50000 }).catch(() => {});
   await sleep(3500);
 
   const landed = lastCount(await page.evaluate(() => document.body.innerText));
@@ -427,7 +432,7 @@ export async function typedDistrict(plan) {
     // for this watch, not a timeout — wait softly and judge on what the user is left looking at.
     await page.getByText('بحث', { exact: true }).first().click().catch(() => {});
     await page.waitForFunction((src) => new RegExp(src).test(document.body.innerText),
-      SETTLED_RE.source, { timeout: 25000 }).catch(() => {});
+      settledSource(), { timeout: 25000 }).catch(() => {});
     await sleep(2500);
     const ui = await visibleState(page);
     const stillShown = await d.inputValue().catch(() => '');
@@ -438,7 +443,7 @@ export async function typedDistrict(plan) {
     // Same shared predicate: a search that honestly returned zero («ما لقيت …») HAS run. Reading it
     // as "no search" would silently suppress this watch's defect — a false negative, the worse way
     // for a barrier to be wrong.
-    const searchRan = SETTLED_RE.test(body);
+    const searchRan = searchSettled(body);
     // Holding the search while the district is uncommitted is a correct outcome too.
     observeWatch('typed-district-not-dropped');   // the city was offered and the flow completed
     if (stillShown && !searchedDistrict && !warned && searchRan) {
