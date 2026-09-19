@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 import scrapers.ksaaqar.run as K  # noqa: E402
 from scrapers.ksaaqar.run import (  # noqa: E402
     district_candidate, parse_age, parse_area, parse_city, parse_deal, parse_direction,
-    parse_furnished, parse_licence, parse_price, parse_tristate, parse_type_ar,
+    parse_furnished, parse_licence, parse_tristate, parse_type_ar,
     rent_period_and_annual, spec, spec_int,
 )
 
@@ -66,14 +66,11 @@ def test_a_label_value_never_bleeds_into_the_next_label():
 
 
 # ── price ────────────────────────────────────────────────────────────────────────────────────────
-def test_price_is_the_sources_own_figure():
-    assert parse_price(SPEC) == 50000
-
-
-def test_zero_price_is_absence_not_a_free_property():
-    assert parse_price("0.00SAR (قابل للتفاوض)") is None, \
-        "«0.00SAR» is the theme rendering nothing — a stored 0 tops every cheapest-first search"
-    assert parse_price("1,250,000.00SAR") == 1250000
+# The price assertions moved to test_ksaaqar_price_is_the_ads_own_not_the_sidebars.py, which feeds
+# REAL captured page markup. The two tests that lived here asserted a hand-typed «50,000.00SAR»
+# string and were green for the whole time every stored ksaaqar price was a sidebar value — the
+# parser never read the ad's own price at all. A fixture this file wrote itself could not catch
+# that, because the bug was in WHICH element gets read, not in how a number is parsed.
 
 
 # ── rent period: a monthly figure stored as annual is a 12x error ─────────────────────────────────

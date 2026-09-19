@@ -39,6 +39,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 from typing import Any, Optional
 
 from curl_cffi import requests as cc
@@ -116,19 +117,47 @@ def spec_int(text: str, label: str, lo: int = 0, hi: int = 200) -> Optional[int]
     return n if lo <= n <= hi else None
 
 
-# «50,000.00SAR» — the theme always prints 2 decimals. 0.00 is an ABSENT price, never a real one.
-_PRICE_RE = re.compile(r"([\d,]+\.\d{2})\s*SAR")
+# PRICE — read from the ad's OWN card, never from the page.
+#
+# THE BUG THIS REPLACES (found 2026-09-19 by checking stored data, not by running the tests). The
+# old parser searched the WHOLE flattened page for the first «…SAR» string. Every ksaaqar detail
+# page also renders a STATIC sidebar of five unrelated ads in `.price-box` — byte-identical on
+# every page of the site — and those are the only «SAR» strings there, because the ad's own price
+# renders in Arabic as «…ريال». So the parser could never read a real price: it stamped one
+# neighbour's figure onto 685 of 720 priced rows (159 listings all "13,370", 231 all "250,000"),
+# including ads whose own card says «السعر عند الطلب» and have NO published price at all.
+#
+# The ad's own price lives in the share-modal summary card, which carries the ad's own href. We
+# anchor on that href: a figure is only accepted from the card that links to THIS listing, so a
+# neighbour's price can never be borrowed again. No matching card → NULL, never a guess.
+_OWN_CARD_RE = re.compile(
+    r'class="recent-ads-list-title"\s*>\s*<a\s+href="([^"]+)"[^>]*>.*?'
+    r'class="recent-ads-list-price"\s*>(.*?)</div>',
+    re.S,
+)
+# The theme always prints 2 decimals, in SAR or ريال. «0.00» is the theme rendering nothing.
+_MONEY_RE = re.compile(r"([\d٠-٩][\d٠-٩,]*\.\d{2})\s*(?:SAR|ريال|ر\.س)")
 
 
-def parse_price(text: str) -> Optional[int]:
-    m = _PRICE_RE.search(text)
-    if not m:
-        return None
-    try:
-        v = float(m.group(1).replace(",", ""))
-    except ValueError:
-        return None
-    return int(v) if v > 0 else None      # «0.00SAR» = the theme rendering nothing
+def _same_ad(href: str, link: str) -> bool:
+    """Same listing, comparing percent-decoded paths — the href is encoded, the REST link may not be."""
+    return unquote(href or "").rstrip("/") == unquote(link or "").rstrip("/")
+
+
+def own_price(page_html: str, link: str) -> Optional[int]:
+    """This listing's published price, or None. Never another ad's, never a guess."""
+    for href, price_html in _OWN_CARD_RE.findall(page_html or ""):
+        if not _same_ad(href, link):
+            continue
+        m = _MONEY_RE.search(price_html)          # «السعر عند الطلب» has no figure -> None
+        if not m:
+            return None
+        try:
+            v = float(m.group(1).translate(_AR_DIGITS).replace(",", ""))
+        except ValueError:
+            return None
+        return int(v) if v > 0 else None
+    return None
 
 
 _DEAL_RENT = ("للإيجار", "للايجار", "ايجار", "إيجار")
@@ -424,12 +453,13 @@ def fetch_listings(s: cc.Session, limit: int = 0) -> list[dict]:
 
 
 def fetch_detail(s: cc.Session, link: str) -> Optional[str]:
+    """RAW html — the price lives in a specific element, and _txt() throws the DOM away."""
     r = _get(s, link, attempts=3)
-    return _txt(r.text) if r is not None else None
+    return r.text if r is not None else None
 
 
 # ── map ──────────────────────────────────────────────────────────────────────────────────────────
-def map_listing(post: dict, page_text: str) -> tuple[Optional[dict], str]:
+def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str]:
     link = post.get("link")
     if not link or not page_text:
         return None, "residential"
@@ -462,7 +492,7 @@ def map_listing(post: dict, page_text: str) -> tuple[Optional[dict], str]:
         district_ar = (find_district_in_text(cand, city_id) if cand else None) \
             or find_district_in_text(f"{title} {body}", city_id)
 
-    price = parse_price(page_text)
+    price = own_price(page_html, link)
     rent_period, price_annual = (None, None)
     if deal == "Rent":
         rent_period, price_annual = rent_period_and_annual(price, f"{title} {body} {page_text}")
@@ -538,11 +568,12 @@ def main() -> int:
 
         skipped: dict[str, int] = {}
         for i, p in enumerate(posts, 1):
-            text = fetch_detail(s, p["link"])
-            if not text:
+            page_html = fetch_detail(s, p["link"])
+            if not page_html:
                 skipped["detail_unreachable"] = skipped.get("detail_unreachable", 0) + 1
                 continue
-            row, cat = map_listing(p, text)
+            text = _txt(page_html)
+            row, cat = map_listing(p, text, page_html)
             if not row:
                 key = parse_type_ar(text) or "no_type_or_deal_or_city"
                 skipped[key] = skipped.get(key, 0) + 1
