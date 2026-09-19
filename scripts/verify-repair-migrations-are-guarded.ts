@@ -48,6 +48,38 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // The detector for this repair EXISTS and is on the roster — it simply cannot be named inside the
+  // migration, because the migration was already applied to production before the barrier flagged
+  // it, and editing an applied file to add the reference would put git and the migration history
+  // out of sync. That is drift, and it is the thing several other barriers here exist to catch.
+  //
+  // What watches it: mon_detect_wasalt_dead_but_active(), created in 20260919023049 and wired to
+  // mon_run_all_detectors() in 20260919023145 (both applied the same night, minutes after the
+  // repair). It has TWO independent arms, because the obvious guard was the one that failed:
+  //   * ARM A reads the AR ENRICHER's evidence — a listing whose own URL returned no listing on
+  //     BOTH the /ar and /en routes, at least twice, days apart. Independent of the liveness ledger.
+  //   * ARM B reads the liveness ledger — 3+ DIRECT dead verdicts (the policy grace) on a row that
+  //     is still active.
+  // It also raises BLIND rather than 0 when the enricher has not run in 7 days, so a dead evidence
+  // source cannot read as a clean bill of health.
+  //
+  // WHY ARM A EXISTS AT ALL, and why citing the pre-existing detectors would have been the mute
+  // button this file warns about: mon_detect_served_after_source_confirmed_gone and
+  // mon_detect_served_despite_direct_404 both key off the liveness ledger, and wasalt liveness had
+  // written nothing for a month — it ran on the transport wasalt.sa null-routed on 2026-08-17
+  // (issue #1019), so every read was UNKNOWN. Both detectors returned 0 for exactly the reason
+  // there was a problem. Arm A is sourced from the browser transport instead.
+  //
+  // Verified on production the night it landed: the detector is on the roster, returns 0 now, and
+  // its arm-A predicate run without the `active` filter matches all six repaired rows — so it would
+  // have fired on the defect and is silent only because the defect is fixed.
+  '20260919010944_wasalt_deactivate_6_listings_direct_404_on_both_routes.sql':
+    'the guard is mon_detect_wasalt_dead_but_active() (created 20260919023049, wired to the roster '
+    + 'in 20260919023145), which cannot be named inside this migration because this migration was '
+    + 'already applied to production — editing it would desync git from the migration history. The '
+    + 'detector has an enricher-evidence arm deliberately independent of the liveness ledger, '
+    + 'because the pre-existing ledger-based detectors were dark for a month on the blocked '
+    + 'transport and returned 0 for the same reason the defect existed.',
   // NOT the usual two-migrations-minutes-apart shape: this repair ships no companion because it
   // needs none, and the reason is structural rather than "some detector probably covers it".
   //
