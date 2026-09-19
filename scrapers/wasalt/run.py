@@ -780,6 +780,14 @@ def main() -> int:
             notes = f"upserted={total}"
         else:
             notes = "FETCHED 0 ROWS — proxy/network block (fail-visibly guard)"
+            # That label predates the browser path (2026-09-18) and is a guess for it: a browser
+            # attempt can fail at launch, at a Cloudflare challenge that never clears, at a nav
+            # exception (often the proxy/TLS interaction browser.py's docstring documents), or an
+            # unclassified empty shell — see scrapers/wasalt/browser.py's failure classification.
+            # Append whatever it actually tallied so the row says WHICH, not just THAT.
+            if _browser_fetch_enabled():
+                from scrapers.wasalt import browser as _b
+                notes += _b.fail_reasons_summary()
     except Exception as e:
         ok = False
         notes = str(e)[:400]
