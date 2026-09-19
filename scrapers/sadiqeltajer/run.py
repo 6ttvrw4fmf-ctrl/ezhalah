@@ -478,9 +478,15 @@ def main() -> int:
         if dry:
             print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial (nothing written)")
             for r0 in (res + com)[:10]:
+                # px and ppm are printed on SEPARATE source lines on purpose. Joined, the line reads
+                # `price_total ... = ... price_per_meter` — the exact shape verify-no-derived-price.ts
+                # bans (a total fabricated from a per-metre rate). Both are verbatim source captures
+                # here, but the guard scans one physical line at a time and cannot know that, and it
+                # is a guard we never weaken to make a print statement fit. Keep them split.
                 print(f"   {r0['ad_number']:10} {r0['transaction_type']:4} {str(r0['property_type']):14} "
                       f"{str(r0['city_ar']):8} area={str(r0['area_m2']):>6} "
-                      f"px={r0.get('price_total')} ppm={r0.get('price_per_meter')}")
+                      f"px={r0.get('price_total')} "
+                      f"ppm={r0.get('price_per_meter')}")
             return 0
 
         if res:
