@@ -1364,6 +1364,14 @@ def upsert_akariyoun_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("akariyoun_commercial_listings", rows)
 
 
+def upsert_sadiqeltajer_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sadiqeltajer_residential_listings", rows)
+
+
+def upsert_sadiqeltajer_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sadiqeltajer_commercial_listings", rows)
+
+
 def upsert_ksaaqar_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("ksaaqar_residential_listings", rows)
 
