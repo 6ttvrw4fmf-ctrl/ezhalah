@@ -442,6 +442,33 @@ _PPM_RATE_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*[§ر﷼]?\s*/\s*(?:متر|م
 _AREA_TOKEN_RE = re.compile(r"المساحة(?:\s*(?:الكلية|الإجمالية))?\s*:?\s*(\d[\d,]*(?:\.\d+)?)")
 
 
+def _match_window(hay: str, m, pad: int = 45) -> Optional[str]:
+    """The evidence for a prose-scraped price is the text AROUND the number we matched.
+
+    Not the first N characters of the blob we searched: on aqar that blob starts at the nav menu,
+    so a head slice is guaranteed to miss the price and to look like proof anyway. A window keeps
+    the digits plus enough context to see the label beside them (§ / سنوي / شهري), which is what a
+    later adjudication actually needs in order to say "yes, that is the asking price".
+    """
+    if m is None or not hay:
+        return None
+    lo = max(0, m.start() - pad)
+    hi = min(len(hay), m.end() + pad)
+    w = " ".join(hay[lo:hi].split())
+    return (("…" if lo else "") + w + ("…" if hi < len(hay) else "")) or None
+
+
+def _structured_evidence(v):
+    """Evidence for the structured path IS the published number, kept numeric.
+
+    normalize.price_evidence wants "the source's value EXACTLY as published"; for a structured
+    integer field that is the integer, not a sentence about it. Keeping it numeric is what would
+    let mon_detect_price_source_evidence_stale() grow an aqar branch that recomputes the claim,
+    the way its dealapp branch already does off origin='structured'.
+    """
+    return v
+
+
 def parse_price_per_meter(text: str) -> Optional[int]:
     """Extract the listing's سعر المتر from de-tagged page text, or None if the page shows none.
 
@@ -579,6 +606,10 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # and «شهريا» matches the شهري pattern (3 live rows stored installment×12 as price_annual —
     # the installment already has its own home in rent_now_pay_later_monthly).
     price_text = text.split(_AGE_BLOCK_ANCHOR, 1)[0] if _AGE_BLOCK_ANCHOR in text else text
+    # Provenance for price_evidence. Set at whichever branch actually produces the price, so the
+    # evidence can never claim a source it did not come from (see the evidence block below).
+    price_ev_raw: Any = None          # str window (prose) or int (structured payload)
+    price_ev_origin = "spec_table"
     price_text = re.sub(r"ابتداء\S*\s*من\s*\d[\d,]*\s*[§ر﷼]?\s*شهري\w*", " ", price_text)
     # PRICE = SOURCE, layer 2+4 (owner invariant 2026-08-04). Everything below scans price_text,
     # and price_text is NOT the price element — it is the whole pre-«تفاصيل الإعلان» prefix, which
@@ -634,6 +665,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     if s_authoritative:
         if transaction_type == "Rent":
             price_annual = s_price
+            price_ev_raw, price_ev_origin = _structured_evidence(s_price), "structured"
             # The period aqar states for THIS listing: its own enum, else the word it prints next to
             # this listing's published figure. `_period_beside` is anchored on that figure, so a
             # «N شهريا» financing line or a neighbouring listing card can never supply the answer.
@@ -645,10 +677,12 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
                 price_annual = s_price * 12
         else:
             price_total = s_price
+            price_ev_raw, price_ev_origin = _structured_evidence(s_price), "structured"
     else:
         if mp_yr:
             price_annual = N.to_int(mp_yr.group(1))
             rent_period = "annual"
+            price_ev_raw, price_ev_origin = _match_window(price_text, mp_yr), "spec_table"
 
         if not price_annual and mp_mo and not is_rnpl_page:
             # No yearly price, but a "/شهري" figure → this is a genuinely MONTHLY rental. Tag it and
@@ -658,11 +692,21 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             if v:
                 price_annual = v * 12
                 rent_period = "monthly"
+                price_ev_raw, price_ev_origin = _match_window(price_text, mp_mo), "spec_table"
 
     # Anchored to the سعر المتر label — the old any-"N م²" pattern grabbed the AREA token and
     # caused the daily hide/recover flap on big-area land (see parse_price_per_meter above).
     price_per_meter = parse_price_per_meter(text)
 
+    # PRECEDENCE NOTE (observed 2026-09-19, NOT changed here). This block runs OUTSIDE the
+    # `if s_authoritative:` branch above, so on a Buy listing that has BOTH a readable RSC payload
+    # and a «N §» prose price, the prose write lands LAST and wins. The comment at the structured
+    # read says the payload should be "the last word in BOTH directions", so this is a real latent
+    # defect — a payload price of 9,999,999 loses to a prose 2,300,000 today. It is left alone
+    # because correcting it MOVES STORED PRICES, which is not an evidence change and wants its own
+    # verification pass. The price_evidence below now makes it visible instead of hiding it: such a
+    # row reports origin="spec_table" even though the payload spoke, so the rows affected are
+    # queryable rather than theoretical.
     if transaction_type == "Buy":
         # Aqar Buy prices show up as "1,200,000 §" / "299,000 §" / sometimes plain "1200000 §".
         # Try several formats; sanity-check that the number is >= 50K SAR (rules out per-meter
@@ -689,6 +733,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
                 v = N.to_int(mp_total.group(1))
                 if v and v >= 50_000:
                     price_total = v
+                    price_ev_raw, price_ev_origin = _match_window(price_text, mp_total), "spec_table"
                     break
 
     # The bulletproof signal is the internal route URL `/rnpl/seek?id=...` which Aqar
@@ -841,19 +886,30 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
                                     else price_total),
         "price_per_meter":         price_per_meter,
         "rent_period":             rent_period,
-        # PRICE = SOURCE evidence (owner invariant 2026-08-04). aqar publishes no structured price
-        # field — the number lives only in the rendered price slot — so the evidence IS that slot's
-        # text, verbatim. This is what makes a truncation provable from the DB alone: the 48 rows
-        # repaired on 2026-08-04 stored 440 while their own price slot read «440,000», and proving
-        # that needed 600+ live page fetches because no evidence had been kept.
+        # PRICE = SOURCE evidence (owner invariant 2026-08-04). Evidence exists so a stored price can
+        # be adjudicated from the DB alone: the 48 rows repaired on 2026-08-04 stored 440 while their
+        # own price slot read «440,000», and proving that needed 600+ live page fetches.
+        #
+        # FIXED 2026-09-19 — it had stopped doing that, in two ways at once, found while adjudicating
+        # a located_row_unreachable P1 on ad 6876143 (2,300,000,000 over 360 m²):
+        #   • `raw` was `price_text[:120]`, and price_text is NOT the price element — the comment 250
+        #     lines up says so. It is the whole pre-«تفاصيل الإعلان» prefix, so the first 120 chars are
+        #     the nav menu and the H1. Measured on 6876143: the stored evidence read «… تطبيق عقار
+        #     الإعلانات المشاريع الحجوزات الخريطة إضا» and contained no digits at all, while `found`
+        #     said true. Evidence that shows the wrong span is worse than none: it reads as proof.
+        #   • `origin` was hardcoded "spec_table" even when `_structured_price()` supplied the number.
+        #     Since 2026-08-09 the RSC payload is the PRIMARY path and prose is only its fallback, so
+        #     the field named the wrong source on exactly the rows that had the best one.
+        # Both are evidence-only. No parse changed, no price moved.
         # Folded into source_capture["price_evidence"] by db._fold_price_evidence().
         "price_evidence":          N.price_evidence(
-            field="price slot (rendered text)",
-            raw=(price_text or "").strip()[:120] or None,
+            field=("aqar RSC payload price field" if price_ev_origin == "structured"
+                   else "price slot (rendered text)"),
+            raw=price_ev_raw,
             stored=price_total if price_total is not None else price_annual,
             kind="total" if price_total is not None else "annual",
             unit="total",
-            origin="spec_table",
+            origin=price_ev_origin,
             authoritative_absent=authoritative_no_price,
         ),
         "rent_now_pay_later":         rent_now_pay_later,
