@@ -167,7 +167,32 @@ const catalog = new Set(PLATFORM_META_NAMES);
 
 // ── 4. The two sets must be equal — every advertised logo has a live platform, every live
 //       platform is advertised.
-const advertisedButDead = [...catalog].filter((n) => !liveCanon.has(n)).sort();
+// BRAND-ONLY PLATFORMS: advertised in the strip on purpose while returning zero listings.
+//
+// This is a NARROW, NAMED exception to the 2026-08-29 rule, not a loosening of it. The rule's own
+// reasoning still stands — advertising a platform a user can never reach is dishonest to them and
+// unfair to the platform — so a slug only gets in here by an explicit owner decision, recorded with
+// its date and the trade-off the owner was shown. Everything NOT named here is still caught: if
+// aqar or wasalt went cold tomorrow this barrier fails exactly as before.
+//
+// toor — owner decision 2026-09-19. toor.ooo currently serves a BETA with dummy data: its own page
+// carries «نسخة تجريبية (المعلومات الواردة في هذا الموقع, ليست حقيقية…)» and one sample listing is
+// repeated across every PropertyId (30 probed, all licence 7201112446). It therefore returns zero
+// searchable rows, and will keep returning zero until they go live. The owner was shown that the
+// strip reads «إزهله يبحث في المنصات» — a search promise — and chose to keep toor's brand on the
+// list anyway. Recorded here so it reads as a decision, not as drift.
+// Remove this entry the moment toor starts returning rows: at that point it passes on its own and
+// the exception should not outlive the reason for it.
+const BRAND_ONLY: ReadonlyMap<string, string> = new Map([
+  ['toor', 'owner decision 2026-09-19 — brand kept on the list while toor.ooo is a beta serving dummy data (0 searchable rows)'],
+]);
+
+const advertisedButDeadAll = [...catalog].filter((n) => !liveCanon.has(n)).sort();
+const brandOnlyShown = advertisedButDeadAll.filter((n) => BRAND_ONLY.has(n.toLowerCase()));
+const advertisedButDead = advertisedButDeadAll.filter((n) => !BRAND_ONLY.has(n.toLowerCase()));
+for (const n of brandOnlyShown) {
+  console.log(`  ⓘ advertised with zero listings, BY DECISION: ${n} — ${BRAND_ONLY.get(n.toLowerCase())}`);
+}
 
 // A live platform that is NOT advertised is a finding only when nothing excuses it. The excuse is
 // evaluated on the RAW slug (that is what RETIRED_PLATFORMS.txt and the asset filenames use).
@@ -193,7 +218,7 @@ check(
   liveButHidden.length ? `live but hidden: ${liveButHidden.join(', ')}` : '',
 );
 check(
-  `PLATFORM_META set equals the production active set (size ${catalog.size} vs ${liveCanon.size})`,
+  `PLATFORM_META set equals the production active set, allowing ${brandOnlyShown.length} brand-only entr${brandOnlyShown.length === 1 ? 'y' : 'ies'} (size ${catalog.size} vs ${liveCanon.size})`,
   advertisedButDead.length === 0 && liveButHidden.length === 0,
 );
 

@@ -44,7 +44,7 @@ import {
 } from '@/data/loaderPlatforms';
 import { fetchActivePlatformNames } from '@/data/loaderActivePlatforms';
 import { fetchLoaderScaleStats, type LoaderScaleStats } from '@/data/loaderScaleStats';
-import { PILL_STAGGER, highlightStepMs } from '@/lib/searchLoaderTiming';
+import { PILL_STAGGER, highlightStepMs, WAVE_RISE, WAVE_HOLD, WAVE_FALL } from '@/lib/searchLoaderTiming';
 import { buildSearchLoaderTitles, readingDurationMs } from '@/lib/searchLoaderTitles';
 import type { SearchQuery } from '@/data/search';
 import { grouped } from '@/data/search';
@@ -79,9 +79,6 @@ const SEARCH_TITLES = [
 // it quick will make them lost"). The numbers and the contract live in ONE pure module so a barrier
 // can execute them — see lib/searchLoaderTiming.ts and
 // scripts/verify-search-loader-shows-every-platform.ts.
-const WAVE_RISE = 300;
-const WAVE_HOLD = 260;
-const WAVE_FALL = 380;
 
 // Fade (+ slight upward motion) a child into place after `delay`. Reduced motion → fade only.
 function Appear({
@@ -170,10 +167,13 @@ function PlatformPill({
   const nameBase: [string, string] = darkTheme ? ['#c9cbc9', '#2b6f4c'] : ['#34403a', '#1d4a37'];
   useEffect(() => {
     if (reduced) { h.value = 0; return; }
-    // One full sweep takes LOADER_SWEEP_MS regardless of roster size, so the LAST pill is always
-    // reached inside the search floor (agent.tsx SEARCH_MIN_MS ≥ reveal + sweep — executed by
-    // scripts/verify-search-loader-shows-every-platform.ts). highlightStepMs also floors the step so
-    // a small roster reads as a wave, not a strobe. `rest` keeps each pill's phase stable per loop.
+    // The wave reaches pill `index` at `index * step`, so the LAST pill's wait GROWS with the roster
+    // wherever highlightStepMs()'s 180ms readable-step floor binds (every roster above 41). That real
+    // deadline is lastPillLitMs(total) in lib/searchLoaderTiming, and agent.tsx's SEARCH_MIN_MS must
+    // cover it — executed by scripts/verify-search-loader-shows-every-platform.ts. (The comment that
+    // used to sit here claimed one sweep took LOADER_SWEEP_MS "regardless of roster size"; it does
+    // not once the step is floored, and that sentence is why the overrun went unnoticed.)
+    // `rest` keeps each pill's phase stable per loop.
     const step = highlightStepMs(total);
     const lit = WAVE_RISE + WAVE_HOLD + WAVE_FALL;
     const rest = Math.max(260, total * step - lit);

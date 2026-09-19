@@ -380,15 +380,24 @@ const SEARCH_MS = 600;
 // in the animation show clearly, cuz doing it quick will make them lost." The platform roster is the
 // product's primary trust signal — it is the moment the user learns Ezhalah searches the WHOLE Saudi
 // market — and at the old 2.2s floor the pills landed and were gone before any of them could be
-// read. The floor must therefore cover the full reveal AND at least one complete highlight sweep, so
-// every platform is individually lit at least once before the loader may exit:
-//     reveal (LOADER_REVEAL_MS) + one sweep (LOADER_SWEEP_MS = 7.4s) ≤ floor.
+// read. The floor must therefore outlast BOTH the reveal and the highlight wave, so every platform
+// is on screen and individually lit at least once before the loader may exit:
+//     floor ≥ max(lastPillAppearedMs(roster), lastPillLitMs(roster))   [searchLoaderTiming.ts]
 // scripts/verify-search-loader-shows-every-platform.ts executes that arithmetic against the shipped
 // constants, so the two files cannot drift apart silently.
 //
-// 10,000 → 10,600ms later the same day: MAX_ROSTER (searchLoaderTiming.ts) was raised 40→50 with
-// headroom for the platforms still queued in the 40-candidate audit, which raises LOADER_REVEAL_MS
-// to 3,200ms; the floor follows so REVEAL + SWEEP (3,200 + 7,400 = 10,600) still lands inside it.
+// 10,000 → 10,600ms later the same day, when MAX_ROSTER was raised 40→50.
+//
+// CORRECTED 2026-09-19 (the number is unchanged; what it means is not). This comment used to state
+// the contract as `reveal + sweep ≤ floor` with sweep = 7.4s. That was wrong twice over: the reveal
+// and the wave both start at mount and OVERLAP, so the deadline is the later of them rather than
+// their sum; and the wave's real length is (roster−1) × highlightStepMs(roster), which the 180ms
+// readable-step floor pushes past 7.4s for every roster above 41 — as ours has been since abwbna.
+// The two errors pointed opposite ways and nearly cancelled, which is why nothing caught it until the
+// catalogue reached 52. Under the corrected arithmetic 10,600ms genuinely serves up to 56 platforms
+// (the 52nd pill is lit at 9,740ms; a 57th roster would not be lit until 10,640ms). Platform #57
+// therefore needs a real decision — a longer floor, or a wave that lights more than one pill per
+// step — and MAX_ROSTER is the guard that will stop it silently slipping through.
 const SEARCH_MIN_MS = 10600;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
 // fade-out this long — the strip glides away into the results state instead of vanishing in a frame.
