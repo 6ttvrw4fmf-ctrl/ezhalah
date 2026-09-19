@@ -462,6 +462,8 @@ def main() -> int:
     seen = 0
     detail_failed = 0
     unavailable = 0
+    unavailable_ads: dict[str, set[str]] = {"suwar_residential_listings": set(),
+                                            "suwar_commercial_listings": set()}
     try:
         posts = fetch_all(s)
         if not posts:
@@ -480,6 +482,9 @@ def main() -> int:
                 continue
             if not row["active"]:
                 unavailable += 1
+                unavailable_ads[
+                    "suwar_commercial_listings" if cat == "commercial"
+                    else "suwar_residential_listings"].add(row["ad_number"])
             (com_rows if cat == "commercial" else res_rows).append(row)
             seen += 1
             time.sleep(0.25)
@@ -499,6 +504,20 @@ def main() -> int:
             db.upsert_suwar_residential_batch(res_rows)
         if com_rows:
             db.upsert_suwar_commercial_batch(com_rows)
+
+        # «غير متاح» is a POSITIVE source verdict read from the ad's own detail page, so the row it
+        # kills never goes missing from the crawl and keeps missing_count = 0 — which is
+        # auto_recover_false_inactive()'s recovery predicate verbatim. Registering the retraction is
+        # the second half of the two-part act (AGENTS.md); without it every one of these ads was
+        # switched back on at 05:20 the next morning. Measured 2026-09-19: 54 ads flapping daily.
+        retracted = 0
+        for _tbl, _ads in unavailable_ads.items():
+            retracted += db.register_source_retraction(
+                table=_tbl, ad_numbers=_ads, source="Suwar",
+                reason="Source marks this ad «غير متاح» (sold/withdrawn) on its own detail page.",
+                source_signal=('<span class="status">غير متاح</span> read from the listing\'s OWN '
+                               'URL by fetch_detail(); an unreadable page is skipped and never '
+                               'scored, so this is a real read and not a failed fetch.'))
 
         superseded = db.retire_superseded_siblings(
             res_table="suwar_residential_listings",
@@ -522,7 +541,8 @@ def main() -> int:
         healthy = db.end_run(run_id, ok=True, rows_seen=seen,
                              rows_upserted=len(res_rows) + len(com_rows),
                              notes=(f"pruned={pruned} superseded={superseded} "
-                                    f"unavailable={unavailable} detail_failed={detail_failed}"),
+                                    f"unavailable={unavailable} retracted={retracted} "
+                                    f"detail_failed={detail_failed}"),
                              check_tables=["suwar_residential_listings",
                                            "suwar_commercial_listings"])
         return 0 if healthy else 1

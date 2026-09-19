@@ -63,6 +63,8 @@ import { afInterviewOwnsBrowsing, searchIsFinishedAtThreshold, resultsActionsRow
 import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
+import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
+import { primeResultsFound } from '@/data/loaderResultsFound';
 import { screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
@@ -3356,11 +3358,28 @@ export default function Agent() {
               // Same helper the mining overlay quotes (src/data/search.ts) — one definition of "the
               // total we may state", so the interview's closing beat and this headline, describing the
               // SAME search, can never name two different numbers. null ⇒ no honest count ⇒ say nothing.
+              // Prime the DB-side Results-Found pool once — idempotent, fire-and-forget. The baked
+              // pool serves this render; a live DB edit reaches later renders without a deploy.
+              primeResultsFound();
               const introTotal = quotableTotal(m.result);
+              // Results-Found rotation (owner rule 2026-09-19): four pools keyed on (lang, hasName)
+              // via pickResultsFoundSentence. {count} = the exact backend total, formatted here so
+              // digits stay English-locale consistent with the rest of the app. {name} for the
+              // logged-in variants comes from the SAME AuthUser field the account menu already
+              // renders — nameAr for ar, nameEn for en. A guest (or a missing display name) picks
+              // the guest pool and no name substitution runs. The retired fixed sentence
+              // «لقينا {n} إعلان يطابق طلبك.» has no baked/DB fallback: the picker rotates from
+              // search #1.
+              const rfLang: 'ar' | 'en' = getLocale() === 'en' ? 'en' : 'ar';
+              const rfName = rfLang === 'ar' ? (user?.nameAr ?? user?.name) : (user?.nameEn ?? user?.name);
               const introText = introZeroResult
                 ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
                 : introTotal != null
-                  ? t('We found {n} listings matching your search.', { n: introTotal.toLocaleString('en-US') })
+                  ? pickResultsFoundSentence({
+                      lang: rfLang,
+                      name: rfName ?? null,
+                      count: introTotal.toLocaleString('en-US'),
+                    })
                   : m.text;
               return (
                 // ARABIC: the whole assistant response (slogan + summary + intro) sits on the RIGHT,

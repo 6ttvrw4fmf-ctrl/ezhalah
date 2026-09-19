@@ -1072,6 +1072,91 @@ def plan_supersession_evidence(
     return evidence
 
 
+def register_source_retraction(
+    *,
+    table: str,
+    ad_numbers,
+    reason: str,
+    source_signal: str,
+    source: Optional[str] = None,
+) -> int:
+    """Record, in `ops_adjudicated_retraction`, that the SOURCE itself says these ads are gone.
+
+    HIDING A LISTING IS A TWO-PART ACT (AGENTS.md, 2026-09-18). Setting `active = false` is only
+    the first half; without the second the deactivation is undone within 24 hours and the failure
+    is silent, arrives a day late, and looks exactly like a scraper bug.
+
+    The reason is structural, not incidental. `auto_recover_false_inactive()` recovers a row on
+
+        active = false AND coalesce(missing_count, 0) = 0
+                       AND deactivated_at >= now() - 24h
+                       AND not exists (<an adjudication row>)
+
+    A row killed from POSITIVE source evidence — the ad's own page says «غير متاح» / sold /
+    withdrawn — was never ABSENT from the crawl, so nothing ever increments `missing_count`. It
+    therefore matches the first three clauses verbatim, exactly as an accidental flip does, and the
+    adjudication ledger is the ONLY clause that can tell the two apart. This is the third recorded
+    instance of that class: sadin supersession (2026-09-02, guarded by a dedicated clause) and
+    rakez off-plan (2026-09-14, registered by hand three days after the fact) were the first two.
+
+    Measured on suwar, 2026-09-19: 54 ads the source marks «غير متاح» were deactivated by every
+    daily run from 2026-09-15 and reactivated by every 05:20 recovery pass — `marked_inactive = 54`
+    AND `reactivated = 54` on four consecutive days, leaving 54 sold/withdrawn ads `active = true`
+    in the canonical table and one full sync pass away from being served to users.
+
+    Call this for ads whose page was READ and said gone — never for ads merely missing from a
+    crawl. Absence is `prune_unseen`'s business and is never evidence on its own
+    (docs/ops/LISTING_LIVENESS.md: UNKNOWN never deactivates anything).
+
+    Idempotent: re-registering an already-registered ad is a no-op, so a daily run may call it
+    unconditionally. Best-effort — a ledger failure is reported and never blocks the crawl.
+
+    Returns the number of ads registered (0 when there is nothing to do).
+    """
+    ads = sorted({a for a in (ad_numbers or ()) if a})
+    # Nothing to register → return before building a client, so a no-op call needs no credentials
+    # and costs no round trip (same contract as retire_superseded_siblings).
+    if not ads:
+        return 0
+
+    c = sb()
+    now = datetime.now(timezone.utc).isoformat()
+    registered = 0
+    for i in range(0, len(ads), 200):
+        chunk = ads[i:i + 200]
+        q = c.table(table).select("id, ad_number, listing_url").in_("ad_number", chunk)
+        if source:
+            q = q.eq("source", source)
+        found = _execute(q, what=table + ".retraction_select")
+        rows = list(getattr(found, "data", None) or [])
+        if not rows:
+            continue
+        payload = [{
+            "source_table": table,
+            "listing_id": r["id"],
+            "reason": reason,
+            "evidence": {
+                "ad_number": r.get("ad_number"),
+                "listing_url": r.get("listing_url"),
+                "source_signal": source_signal,
+                "registered_by": f"{table} scraper run",
+                "registered_at": now,
+            },
+        } for r in rows]
+        try:
+            _execute(c.table("ops_adjudicated_retraction")
+                     .upsert(payload, on_conflict="source_table,listing_id"),
+                     what="ops_adjudicated_retraction.insert")
+            registered += len(payload)
+        except Exception as e:  # noqa: BLE001 — the ledger may never block the crawl
+            print(f"{table}: could not register source retraction "
+                  f"({type(e).__name__}: {e})", flush=True)
+    if registered:
+        print(f"↪ {table}: registered {registered} source-confirmed retraction(s) so the "
+              f"24h auto-recovery cannot resurrect them", flush=True)
+    return registered
+
+
 def retire_superseded_siblings(
     *,
     res_table: str,

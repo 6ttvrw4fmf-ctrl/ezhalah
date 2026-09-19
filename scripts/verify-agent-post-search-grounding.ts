@@ -58,7 +58,11 @@ console.log("\n── the client quotes ONLY that number, and stays silent when 
 const ui = readFileSync(new URL("../src/app/agent.tsx", import.meta.url), "utf8");
 check("the intro count comes from quotableTotal", /const introTotal = quotableTotal\(m\.result\);/.test(ui));
 check("a NULL total falls back to non-numeric text, never a number",
-  /introTotal != null\s*\n?\s*\? t\('We found \{n\} listings matching your search\.'[\s\S]{0,80}?: m\.text/.test(ui),
+  // Owner rule 2026-09-19: the fixed «We found {n} listings…» sentence was replaced by
+  // pickResultsFoundSentence (the four-pool Results-Found rotation). The invariant is unchanged —
+  // introTotal != null gates the count-bearing sentence; the null branch still falls through to
+  // m.text. Only the count-bearing branch's identity moved from t('We found {n}…') to the picker.
+  /introTotal != null\s*\n?\s*\? pickResultsFoundSentence\(\{[\s\S]{0,400}?count: introTotal\.toLocaleString\('en-US'\),[\s\S]{0,80}?\}\)\s*\n?\s*: m\.text/.test(ui),
   "when no honest count exists the reply must say something truthful and non-numeric");
 // A second count source is how two numbers describing the SAME search end up on screen.
 check("the intro never quotes result.total (this page's buffer length, <= QUERY_LIMIT)",
