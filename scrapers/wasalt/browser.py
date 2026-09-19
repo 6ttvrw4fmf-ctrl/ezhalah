@@ -35,9 +35,36 @@ import json
 import os
 import random
 import re
+from collections import Counter
 from typing import Any, Optional
 
 _NEXT_RE = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
+
+# FAILURE CLASSIFICATION, persisted (2026-09-19, after a daily-engineer run misread a blended 24h
+# average and called a since-recovered Cloudflare-bypass rollout "proxy bandwidth exhaustion").
+# run.py's fail-visibly guard already turns a 0-row run into "FETCHED 0 ROWS — proxy/network
+# block", but that label was written for the OLD http path and is a guess for this one: a browser
+# attempt can fail for launch reasons, a Cloudflare challenge that never clears, a navigation
+# exception (often the proxy/TLS interaction the module docstring documents), or an unclassified
+# empty shell — four different root causes that all look identical from scrape_runs alone. Every
+# `_page_once` failure was already being PRINTED with exactly this detail and nothing else read it
+# — the same gap dealapp's `_record_status_200_no_schema` closed for its own fetch path (see
+# scrapers/dealapp/run.py). Bucket names and counts only, never page content (PDPL, same rule).
+_fail_reasons: Counter = Counter()
+
+
+def _record_failure(reason: str) -> None:
+    _fail_reasons[reason] += 1
+
+
+def fail_reasons_summary(limit: int = 6, max_len: int = 200) -> str:
+    """The failure tally rendered for `scrape_runs.notes`. Empty string when nothing failed."""
+    if not _fail_reasons:
+        return ""
+    total = sum(_fail_reasons.values())
+    items = _fail_reasons.most_common(limit)
+    parts = ",".join(f"{k}={v}" for k, v in items)
+    return f" browser_fail_total={total} browser_fail={parts}"[:max_len]
 
 # Everything the page needs to EXECUTE (document/script/xhr/fetch) is allowed; everything that is
 # merely rendered is not. The challenge is JS, so scripts must never be blocked.
@@ -201,6 +228,7 @@ class BrowserFetcher:
             # cleared, and the caller only sees None for both. Say which, or the next person
             # debugging this is back to guessing (the first CI run of this module hit exactly that).
             print(f"   ⚠ wasalt browser LAUNCH failed: {type(e).__name__}: {str(e)[:300]}")
+            _record_failure("launch_failed")
             return None, None, 0
         page = self._ctx.new_page()
         status = None
@@ -220,11 +248,13 @@ class BrowserFetcher:
                 challenged = ("Just a moment" in html) or ("_cf_chl_opt" in html)
                 print(f"   ⚠ wasalt browser: no __NEXT_DATA__ (http={status} "
                       f"challenge={'YES' if challenged else 'no'} html={len(html)}B)")
+                _record_failure("challenge_shell" if challenged else "no_next_data_unclassified")
                 return None, status, len(html)
             return json.loads(m.group(1)), status, len(html)
         except Exception as e:
             print(f"   ⚠ wasalt browser NAV failed (http={status}): "
                   f"{type(e).__name__}: {str(e)[:300]}")
+            _record_failure(f"nav_exception:{type(e).__name__}")
             return None, status, len(html)
         finally:
             try:
