@@ -104,6 +104,26 @@ check('every template contains {count} (the exact backend total must appear)',
     distinctSeen > 1, `distinct: ${distinctSeen}`);
 }
 
+// stableKey pins the pick across repeat calls (owner-visible bug 2026-09-19: without a stable key,
+// the typewriter animation re-invoked the picker on every tick and the sentence flipped mid-typing).
+{
+  const first = pickResultsFoundSentence({ lang: 'ar', name: null, count: '9,999', stableKey: 'msg-A' });
+  const same40 = Array.from({ length: 40 }, () =>
+    pickResultsFoundSentence({ lang: 'ar', name: null, count: '9,999', stableKey: 'msg-A' })
+  );
+  check('a stableKey pins the pick across every repeat call for the SAME key (no mid-render flip)',
+    same40.every((s) => s === first), `first=${first} distinct=${new Set(same40).size}`);
+  // A DIFFERENT stableKey rotates independently — first pick is fresh, and NOT necessarily equal to
+  // msg-A's pick (over 20 keys we should see at least 2 distinct sentences with a 10-row pool).
+  const twenty = Array.from({ length: 20 }, (_, i) =>
+    pickResultsFoundSentence({ lang: 'ar', name: null, count: '9,999', stableKey: `msg-B-${i}` })
+  );
+  check('a DIFFERENT stableKey does its own fresh pick (per-message rotation, not global freeze)',
+    new Set(twenty).size >= 2, `distinct: ${new Set(twenty).size}`);
+  // Omitting stableKey preserves the old fresh-per-call behavior (the mutation test above already
+  // exercises this — 500 unkeyed picks are not all identical).
+}
+
 // Empty / whitespace name still counts as GUEST (no accidental "يا " with a blank).
 {
   const outEmpty = pickResultsFoundSentence({ lang: 'ar', name: '', count: '1' });
@@ -223,7 +243,7 @@ check('the {name} comes from AuthUser.nameAr / .nameEn (the same field the accou
 // ── 6. NO NEW NAME SOURCE, NO LLM, NO EMAIL-BASED GUESS (owner explicit "do not create a second
 // source for the user's name") ───────────────────────────────────────────────────────────────────
 {
-  const editedBlock = agentSrc.match(/pickResultsFoundSentence\(\{[\s\S]{0,400}?\}\)/)?.[0] ?? '';
+  const editedBlock = agentSrc.match(/pickResultsFoundSentence\(\{[\s\S]{0,800}?\}\)/)?.[0] ?? '';
   check('the call site never feeds an email into the name argument',
     editedBlock !== '' && !/email|user\?\.email|user\?\.sub/.test(editedBlock),
     `block: ${editedBlock}`);
