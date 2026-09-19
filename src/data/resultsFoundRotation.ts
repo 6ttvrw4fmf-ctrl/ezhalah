@@ -97,6 +97,14 @@ export function hasResultsFoundCache(): boolean {
   return cache.length > 0;
 }
 
+// Per-message stability cache. A render inside a React map re-invokes this picker on every re-render
+// (typewriter animations tick ~40 Hz), and without a stable seed a fresh template would be picked on
+// EACH tick, restarting the Typer with a different sentence — the "weird animation glitch" the owner
+// spotted 2026-09-19. Callers that need cross-render stability pass `stableKey` (typically the message
+// id); the first call for a key does the normal rotation, and every subsequent call returns exactly
+// the same string byte-for-byte. Callers that want fresh randomness omit `stableKey`.
+const stableByKey: Map<string, string> = new Map();
+
 /**
  * Pick one Results-Found sentence and fill its placeholders. Synchronous, never falls back to the
  * retired «لقينا {n} إعلان يطابق طلبك.» — the baked pool guarantees a real rotation from search #1.
@@ -106,12 +114,20 @@ export function hasResultsFoundCache(): boolean {
  * - `name` is the user's display name (nameAr for ar, nameEn for en, from the SAME AuthUser field
  *   the account menu renders). Pass `null` / undefined for a guest — the guest pool is picked and
  *   no name substitution ever runs.
+ * - `stableKey` (optional) makes the pick stable across repeat calls with the same key. Pass a
+ *   value that identifies "the same intro sentence" — for the agent's results bubble that is the
+ *   message id — so the sentence stays put across every re-render / typewriter tick.
  */
 export function pickResultsFoundSentence(args: {
   lang: 'ar' | 'en';
   name: string | null | undefined;
   count: string;
+  stableKey?: string;
 }): string {
+  if (args.stableKey != null) {
+    const hit = stableByKey.get(args.stableKey);
+    if (hit != null) return hit;
+  }
   const hasName = !!(args.name && args.name.trim());
   const pool = cache.filter((t) => t.lang === args.lang && t.hasName === hasName);
   // Absolute safety fallback for a caller that hands a lang no pool covers (should never happen —
@@ -125,6 +141,7 @@ export function pickResultsFoundSentence(args: {
   lastIndex[key] = i;
   let out = pool[i].template.split('{count}').join(args.count);
   if (hasName) out = out.split('{name}').join(args.name!.trim());
+  if (args.stableKey != null) stableByKey.set(args.stableKey, out);
   return out;
 }
 
