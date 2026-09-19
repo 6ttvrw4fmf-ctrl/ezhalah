@@ -37,6 +37,29 @@ const HOMES = {
 };
 const SKIP = new Set(['deal', 'muktamel']);
 
+// RESPONDING IS NOT THE SAME AS USABLE, and for toor the difference is stated by toor itself.
+// Its own pages carry a banner reading «نسخة تجريبية (المعلومات الواردة في هذا الموقع, ليست حقيقية
+// وهي تستخدم لأمور التطوير التقني)» — "trial version, the information on this site is NOT REAL, it
+// is used for technical development". That single sentence explains every symptom we measured: one
+// sample listing repeated across 30 PropertyIds, licence 7201112446 on all of them, and a JSON-LD
+// name of «الاسم». The site is a beta running on dummy data.
+//
+// So a plain HTTP 200 from toor must never read as "ready to wire" — it was 200 all along. The
+// signal that toor went REAL is that banner DISAPPEARING. Each entry below is a disqualifier: a
+// marker whose PRESENCE means the platform is still not usable no matter what the status code says.
+// A second page is fetched for the check when the probe URL itself would not carry the banner (the
+// sitemap is XML and never does).
+const DISQUALIFIERS = {
+  toor: {
+    url: 'https://toor.ooo/Platform',
+    marker: 'ليست حقيقية',
+    means: 'toor still self-declares its data as NOT REAL (نسخة تجريبية banner). '
+         + 'Wiring it would publish fabricated properties. When this banner is GONE, '
+         + 'toor has gone live — re-verify six PropertyIds give six different licences, then wire it.',
+  },
+};
+
+
 const slugs = readFileSync(join(root, 'scrapers/RETIRED_PLATFORMS.txt'), 'utf8')
   .split('\n').map(l => l.trim())
   .filter(l => l && !l.startsWith('#'));
@@ -69,8 +92,32 @@ for (const slug of probes) {
 
   const responding = status !== null && status >= 200 && status < 400 && bytes > 500;
   if (responding) {
-    alive++;
-    console.log(`  ●  ${slug.padEnd(12)} RESPONDING  http=${status} ${bytes}b  ${url}`);
+    // Responding is necessary, never sufficient. If this slug has a disqualifier, check it.
+    const dq = DISQUALIFIERS[slug];
+    let stillBlocked = null, dqErr = null;
+    if (dq) {
+      try {
+        const c2 = new AbortController();
+        const t2 = setTimeout(() => c2.abort(), 25000);
+        const r2 = await fetch(dq.url, { signal: c2.signal, redirect: 'follow',
+          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' } });
+        clearTimeout(t2);
+        stillBlocked = (await r2.text()).includes(dq.marker);
+      } catch (e) { dqErr = e.name === 'AbortError' ? 'timeout' : String(e.message || e).slice(0, 50); }
+    }
+    if (dq && stillBlocked === true) {
+      console.log(`  ·  ${slug.padEnd(12)} responding, STILL DISQUALIFIED  http=${status}`);
+      console.log(`       ${dq.means}`);
+    } else if (dq && stillBlocked === false) {
+      alive++;
+      console.log(`  ★  ${slug.padEnd(12)} RESPONDING **AND THE DISQUALIFIER IS GONE**  http=${status}`);
+      console.log(`       «${dq.marker}» no longer appears on ${dq.url} — this platform may have gone live. INVESTIGATE.`);
+    } else if (dq && stillBlocked === null) {
+      console.log(`  ?  ${slug.padEnd(12)} responding, but the disqualifier check FAILED (${dqErr}) — treat as unknown, not clear`);
+    } else {
+      alive++;
+      console.log(`  ●  ${slug.padEnd(12)} RESPONDING  http=${status} ${bytes}b  ${url}`);
+    }
   } else {
     console.log(`  ·  ${slug.padEnd(12)} down        ${err ?? `http=${status} ${bytes}b`}  ${url}`);
   }
@@ -78,10 +125,10 @@ for (const slug of probes) {
 
 console.log('');
 if (alive > 0) {
-  console.log(`⚠  ${alive} retired platform(s) are RESPONDING. That is not permission to un-retire —`);
-  console.log('   it is a prompt to re-read the recorded reason and check whether it still holds.');
-  console.log('   For toor specifically: verify six different PropertyIds return six DIFFERENT');
-  console.log('   licence numbers before believing the site is usable. It responds, and it lies.');
+  console.log(`⚠  ${alive} retired platform(s) cleared every check we know how to run. That is not`);
+  console.log('   permission to un-retire — it is a prompt to LOOK. Re-read the recorded reason,');
+  console.log('   and for any listings source verify that several different listing URLs return');
+  console.log('   DIFFERENT identifiers before believing the site is usable.');
 } else {
   console.log('✅ every retired platform is still genuinely unreachable — the reasons on file hold.');
 }
