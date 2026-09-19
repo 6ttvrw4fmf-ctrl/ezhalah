@@ -176,6 +176,18 @@ def test_alef_and_ta_marbuta_variants_map_to_the_same_type():
         assert row is not None and row["property_type"] == "Rest House", variant
 
 
+def test_an_open_age_bound_is_UNKNOWN_not_the_number():
+    """Live probe 2026-09-19: «اكثر من عشر سنوات» — MORE THAN ten years — was being stored as
+    exactly 10. A customer filtering «10 years or newer» would then be shown properties the source
+    itself says are OLDER. 10 invents a precision the source withheld; 11 invents a different one.
+    The honest answer is UNKNOWN, which the AF reports as «لم يذكر»."""
+    for txt in ("اكثر من عشر سنوات", "أكثر من عشر سنوات", "اكثر من خمس سنوات"):
+        assert parse_age(txt) is None, txt
+    # ...and a plain count must STILL parse — the guard must not swallow ordinary ages.
+    assert parse_age("عشر سنوات") == 10
+    assert parse_age("ثمان سنوات") == 8
+
+
 def test_age_accepts_arabic_word_numerals():
     assert parse_age("ثمان سنوات") == 8
     assert parse_age("سنتين") == 2

@@ -162,8 +162,21 @@ def _first(text: str, *patterns: str) -> Optional[str]:
     return None
 
 
+# «أكثر من عشر سنوات» = MORE THAN ten years. That is an open bound, not the number ten.
+_AGE_OPEN_BOUND = re.compile(r"أكثر\s*من|اكثر\s*من|\+\s*$|فوق\s")
+
+
 def parse_age(text: Optional[str]) -> Optional[int]:
+    """Years, or None. None means UNKNOWN and the AF reports it as «لم يذكر».
+
+    AN OPEN BOUND IS NOT A NUMBER. Live probe 2026-09-19 found «اكثر من عشر سنوات» — MORE THAN ten
+    years — being stored as exactly 10. A customer filtering «10 years or newer» would then be
+    shown properties the source itself says are OLDER. Storing 10 invents a precision the source
+    withheld, and storing 11 invents a different one; the honest answer is UNKNOWN
+    (SOURCE IS TRUTH — silent/unbounded -> NULL, never a manufactured figure)."""
     if not text:
+        return None
+    if _AGE_OPEN_BOUND.search(text):
         return None
     t = text.translate(_AR_DIGITS).strip()
     m = re.search(r"\d+", t)
