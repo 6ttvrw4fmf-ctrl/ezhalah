@@ -226,6 +226,24 @@ check(
     /supabase\.rpc\(\s*['"]loader_active_platforms_ar['"]/.test(runtimeSrc),
 );
 
+// ── 7. Every rostered platform must have an ARABIC NAME to show. عقاريون shipped with a logo, an
+//       i18nKey and a live row in loader_active_platforms_ar — and this barrier went GREEN while the
+//       strip rendered the Latin «Akariyoun» among 48 Arabic names, because "is the roster complete"
+//       and "can the roster be READ" are different questions. A platform with no translation is not
+//       a missing platform, so nothing above could see it.
+//
+//       Scope: this asserts the i18nKey -> Arabic name row in src/i18n.tsx, which is the mapping the
+//       STRIP reads. The card badge resolves separately in listingDisplay.ts/ResultCard.tsx, whose
+//       token spellings deliberately differ from this file's (e.g. 'Al Khaas' carries a space); an
+//       earlier draft of this check asserted those too and falsely accused 8 platforms that ship
+//       correctly today, so it is deliberately NOT asserted here.
+const i18nSrc = readFileSync(new URL('../src/i18n.tsx', import.meta.url).pathname, 'utf8');
+const ARABIC = /[\u0600-\u06FF]/;
+for (const key of [...LOADER_SRC.matchAll(/i18nKey:\s*'([^']+)'/g)].map((m) => m[1])) {
+  const row = new RegExp(`'${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'\\s*:\\s*'([^']+)'`).exec(i18nSrc);
+  check(`i18n.tsx gives "${key}" an Arabic name`, !!row && ARABIC.test(row[1]));
+}
+
 console.log(
   failed
     ? `\n✗ ${failed} check(s) FAILED — loader roster does not match production; the search-loading strip is dishonest`
