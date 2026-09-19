@@ -2087,6 +2087,183 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   void seen;
 });
 
+/** J29 — BOTH EDGES DOCKED AT ONCE (PART 5 shape #13; ops_incident #251 and #202).
+ *
+ *  WHY THIS EXISTS AS ITS OWN JOURNEY, and why `auth-overlay-clears-controls` cannot cover it.
+ *  That journey waits for a REAL One Tap. On Chromium GIS docks at the BOTTOM, on the same edge our
+ *  own consent card uses, so the two-edges state never arises there and the run correctly reports a
+ *  SKIP. WebKit is where GIS happens to dock at the top — and WebKit is not installable in this
+ *  container (PART 11.1/11.5). So the one configuration that has ever actually stranded a control
+ *  was reachable in CI only, on an engine this routine cannot drive, and it stayed a hand-run
+ *  one-off: the ledger's `both-edges-docked-reserve-the-full-band` row is a single 2026-09-13
+ *  adversarial probe that recorded `fail` and was never run again.
+ *
+ *  THE DEFECT IT PINS (ops_incident #251, fixed by MIN_APP_FRACTION in src/lib/bottomPromptInset.ts).
+ *  `promptInsets()` budgeted MAX_INSET_FRACTION — half the viewport, 406 px of 812 — for the TWO
+ *  bands together, while each band is already capped at half on its own. Demand 178 (top) + 272
+ *  (bottom) = 450 > 406, so the tie-break kept the larger band whole and handed the top the
+ *  remainder: 406 − 272 = 134. The app reserved 134 against an overlay reaching 178 and laid 44 px of
+ *  live, tappable controls underneath an opaque z-index:9999 pointer-events:auto sheet.
+ *  Measured on production, both directions: 134 → 8 controls stranded at cy=173; 178 → 0 stranded.
+ *
+ *  THE DEFECT IS ENGINE-INDEPENDENT, which is the whole reason it is drivable here at all: Chromium
+ *  reproduces it exactly once a TOP-docked prompt is present. So this journey INJECTS the WebKit
+ *  container shape — a STATIC gsi iframe inside a `position: fixed` #credential_picker_container —
+ *  rather than waiting for an engine to hand it one. Identity is by origin, exactly as
+ *  DOCKED_PROMPT_SELECTOR asks it, so the app's own selector matches the injected frame and
+ *  promptMeasurementTarget resolves it to the fixed container the compositor actually paints.
+ *
+ *  It asserts the PROPERTY, not the constant: whatever the top overlay's bottom edge is, the app must
+ *  reserve at least that much, and no control may be painted under either overlay. A future viewport,
+ *  a differently-sized sheet or a third dock is covered without editing a number.
+ */
+JOURNEYS['both-edges-docked-clears-controls'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `both-edges-docked-clears-controls:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const SYNTH = '#credential_picker_container[data-synthetic-top-prompt]';
+
+  const READ = `(() => {
+    const ORIGINS = ${JSON.stringify(AUTH_OVERLAY_ORIGINS)};
+    // An element belongs to an OVERLAY — the injected auth prompt or our own consent card — and is
+    // therefore never itself a blocked control.
+    const isOverlay = (el) => {
+      for (let n = el; n; n = n.parentElement) {
+        if (n.id === 'credential_picker_iframe' || n.id === 'credential_picker_container') return true;
+        if (n.getAttribute && n.getAttribute('data-testid') === 'cookie-consent') return true;
+        if (n.tagName === 'IFRAME') { let s = ''; try { s = String(n.src || ''); } catch (e) { s = ''; }
+          if (ORIGINS.some((o) => s.includes(o))) return true; }
+      }
+      return false;
+    };
+    const isCtrl = (e) => { const st = getComputedStyle(e); const r = e.getAttribute('role');
+      return r === 'button' || r === 'link' || st.cursor === 'pointer'; };
+    const vis = (e) => { const r = e.getBoundingClientRect(); if (r.width <= 0 || r.height <= 0) return false;
+      const s = getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.01; };
+    const label = (e) => (e.getAttribute('aria-label') || (e.dataset && e.dataset.testid)
+      || (e.innerText || '').trim().slice(0, 24) || e.tagName).replace(/\\s+/g, ' ');
+    // What the APP reserved on each edge: the full-viewport root's own padding.
+    let reservedTop = 0, reservedBottom = 0;
+    for (const el of document.querySelectorAll('div')) {
+      const rr = el.getBoundingClientRect();
+      if (rr.width < innerWidth - 1 || rr.top > 1) continue;
+      const cs = getComputedStyle(el);
+      const pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
+      if (pt > reservedTop) reservedTop = pt;
+      if (pb > reservedBottom) reservedBottom = pb;
+    }
+    const blocked = [];
+    for (const e of document.querySelectorAll('*')) {
+      if (!vis(e) || !isCtrl(e) || isOverlay(e)) continue;
+      const r = e.getBoundingClientRect();
+      const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+      if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) continue;
+      // PLURAL, per PART 5 #13: elementFromPoint reports a control scrolled out of view as blocked
+      // because its rect still lies under the sheet. The painted stack omits a clipped control
+      // entirely, so a self index below 0 means "painted nowhere here", which is not blocked.
+      const stack = document.elementsFromPoint(cx, cy);
+      const self = stack.indexOf(e);
+      if (self < 0) continue;
+      const over = stack.findIndex((n) => isOverlay(n));
+      if (over >= 0 && over < self) {
+        blocked.push({ label: label(e), at: [Math.round(cx), Math.round(cy)],
+                       box: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] });
+      }
+    }
+    const top = document.querySelector('#credential_picker_container');
+    const tr = top && top.getBoundingClientRect();
+    const card = document.querySelector('[data-testid="cookie-consent"]');
+    const kr = card && card.getBoundingClientRect();
+    return { reservedTop, reservedBottom, blockedCount: blocked.length, blocked: blocked.slice(0, 10),
+             topBox: tr && tr.height > 0 ? [Math.round(tr.x), Math.round(tr.y), Math.round(tr.width), Math.round(tr.height)] : null,
+             cardBox: kr && kr.height > 0 ? [Math.round(kr.x), Math.round(kr.y), Math.round(kr.width), Math.round(kr.height)] : null,
+             vp: { w: innerWidth, h: innerHeight } };
+  })()`;
+
+  await gotoOrRetryTransport(page, BASE + '/');
+  await settle(page);
+  const before = await page.evaluate(READ);
+
+  // The bottom half of "both edges" is our own consent card, and it only docks as a spanning sheet on
+  // a phone — on desktop it is the owner's 280 px corner card, which correctly reserves nothing and
+  // is a different case. Consent also persists once answered. Both are legitimate states and both are
+  // a SKIP with a reason, never a pass (PART 9.5).
+  if (!before.cardBox) {
+    skip(name, 'the cookie consent card is not on screen this run — there is no bottom dock, so "both edges docked" cannot be formed');
+    return;
+  }
+  // MIN_SHEET_SPAN_FRACTION, the same 0.8 src/lib/bottomPromptInset.ts applies.
+  if (before.cardBox[2] < before.vp.w * 0.8) {
+    skip(name, `the consent card is a corner card here (${before.cardBox[2]}px of ${before.vp.w}px), not a docked sheet — it reserves nothing by design and this is not the combined-clamp case`);
+    return;
+  }
+
+  // THE TOP DOCK, in the shape WebKit really serves (ops_incident #202): a STATIC gsi iframe whose
+  // only positioning box is a `position: fixed` #credential_picker_container.
+  await page.evaluate(() => {
+    const box = document.createElement('div');
+    box.id = 'credential_picker_container';
+    box.setAttribute('data-synthetic-top-prompt', '1');
+    Object.assign(box.style, { position: 'fixed', left: '0px', top: '20px', width: '100%',
+                               height: '158px', zIndex: '9999', pointerEvents: 'auto',
+                               background: '#fff', border: '0' });
+    const f = document.createElement('iframe');
+    // The app identifies a prompt with the ATTRIBUTE selector iframe[src*="accounts.google.com/gsi/"],
+    // so the attribute is what has to match — and `srcdoc` takes precedence over `src` for the
+    // document that actually loads. So the frame matches the app's selector while loading NOTHING
+    // from Google. Pointing it at the real endpoint instead fetches real GIS code into a context it
+    // was not served for, and that code throws: the mutation run of this journey recorded
+    // «ReferenceError: gis is not defined» as an uncaught page error, i.e. the journey manufacturing
+    // a defect against the app under test (PART 9.4 — a harness defect I introduced is mine).
+    f.setAttribute('src', 'https://accounts.google.com/gsi/iframe/select?synthetic=journey');
+    f.setAttribute('srcdoc', '<!doctype html><title>synthetic docked prompt</title>');
+    f.setAttribute('sandbox', '');
+    // STATIC on purpose: a static iframe has no positioning box, so an app measuring the IFRAME
+    // instead of its fixed ancestor under-reserves by the wrapper's extra 8px — incident #202.
+    Object.assign(f.style, { position: 'static', width: '100%', height: '150px', border: '0' });
+    box.appendChild(f);
+    document.body.appendChild(box);
+  });
+  // Wait on the CONDITION the app reports — the top reservation appearing — not a fixed sleep
+  // (PART 11.2). It is a bounded poll, and the assertions below stand whether or not it moves.
+  let after = before;
+  for (let i = 0; i < 30; i++) {
+    after = await page.evaluate(READ);
+    if (after.reservedTop > before.reservedTop) break;
+    await sleep(300);
+  }
+  const state = after;
+  await page.evaluate((s) => document.querySelectorAll(s).forEach((n) => n.remove()), SYNTH);
+
+  if (!state.topBox) {
+    defect(name, 'the injected top dock did not survive in the DOM — the measurement never happened',
+      `reservedTop=${state.reservedTop} reservedBottom=${state.reservedBottom} vp=${JSON.stringify(state.vp)}`);
+    return;
+  }
+  const demandTop = state.topBox[1] + state.topBox[3];     // the overlay's own bottom edge
+  const shortfall = demandTop - state.reservedTop;
+
+  if (state.blockedCount) {
+    defect(name, 'with BOTH edges docked, an overlay is sitting on top of an Ezhalah control',
+      `${state.blockedCount} control(s) blocked — ${state.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')}`
+      + `. APP RESERVED top=${state.reservedTop} bottom=${state.reservedBottom}; the top overlay reaches ${demandTop}`
+      + ` (box ${JSON.stringify(state.topBox)}), the card occupies ${JSON.stringify(state.cardBox)}`
+      + `, viewport ${JSON.stringify(state.vp)}. ops_incident #251/#202.`);
+  } else if (shortfall > 1) {
+    // No control happens to sit in the gap right now, but the app is under-reserving, which is the
+    // same defect one layout change away from stranding something. It is a finding on its own.
+    defect(name, 'with BOTH edges docked, the app reserved LESS than the top overlay occupies',
+      `reserved top=${state.reservedTop} but the overlay reaches ${demandTop} — a ${shortfall}px strip of live app`
+      + ` is under an opaque z-index:9999 sheet (0 controls happen to sit in it this run).`
+      + ` bottom reserved=${state.reservedBottom}, card=${JSON.stringify(state.cardBox)},`
+      + ` viewport=${JSON.stringify(state.vp)}. ops_incident #251.`);
+  } else {
+    pass(name, `both edges docked: the app reserved top=${state.reservedTop} (overlay reaches ${demandTop})`
+      + ` and bottom=${state.reservedBottom} (card ${JSON.stringify(state.cardBox)}), and 0 controls are painted under either`);
+  }
+
+  const errs = appPageErrors(bag, name);
+  if (errs.length) defect(name, 'uncaught page error on the both-edges-docked journey', errs[0]);
+});
+
 /** J28 — A STALE LOCAL TRANSCRIPT MUST BE RE-CHECKED AGAINST THE SERVER, AND AN UNVERIFIED COPY
  *  MUST NEVER BE PROMOTED (PART 5 shapes 4 + 8; ops_incident #272 and its reachability half).
  *
