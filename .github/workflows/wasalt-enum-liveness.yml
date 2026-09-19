@@ -57,14 +57,32 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      # Cloudflare path (issue #1019). THE ENUM WAS THE LAST BLOCKED CONSUMER. run.py moved to a
+      # real browser in PR #3129, but only the SWEEP workflow passed WASALT_BROWSER — this step
+      # kept calling the same run.py on the blocked curl_cffi path. Measured in scrape_runs: full
+      # enums of ~105k rows landed on 09-07, 09-09 and 09-11, then 96 rows on 09-13, 09-15, 09-17
+      # and 09-19. So enumeration has been dead since 2026-09-12, which is why the strike step's
+      # coverage guard has (correctly) refused ever since and no wasalt listing has been retired.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Enumerate every slice to exhaustion
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
           SCRAPE_MIN_INTERVAL: "0.3"
         run: |
-          exec python -m scrapers.wasalt.run --all --pages 2000
+          # headless=False clears the challenge; the runner has no display, so xvfb-run supplies one.
+          #
+          # BANDWIDTH, MEASURED 2026-09-19 rather than estimated: a search page through
+          # browser.py's route blocking (image/media/font/stylesheet aborted) is ~894 KB, so a
+          # 2000-page enum is ~1.83 GB/run and ~27.5 GB/month at the 2-day cadence — about 3x the
+          # ~9 GB/month this file's header budgeted for the http enum, and still two orders of
+          # magnitude under the ~700 GB/month that got per-listing liveness disabled. That figure
+          # is a FLOOR: it counts rendered HTML, and scripts are deliberately not blocked because
+          # the challenge needs them. Re-measure before raising --pages or the cadence.
+          exec xvfb-run -a python -m scrapers.wasalt.run --all --pages 2000
 
   strike:
     name: Strike unseen + confirm-flip (3-strike, guarded)
