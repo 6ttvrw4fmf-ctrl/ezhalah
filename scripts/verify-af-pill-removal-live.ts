@@ -47,6 +47,7 @@ import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { awaitAfStep, clickWhenReachable, settleUntil, POST_SEARCH_BUDGET_MS, AGENT_TURN_MS } from './lib/afJourneyPacing.ts';
+import { resultsFoundCount, resultsSentenceAtStartSource } from '../e2e/lib/resultsSentence.mjs';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: SUPABASE_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -131,27 +132,74 @@ const R = {
   /** R9.2.2 — removing a narrowing can only widen or hold. */
   widenedOrHeld: (before: number | null, after: number | null) =>
     before != null && after != null && after >= before,
-  /** R9.2.2 — every headline already on screen is still there, unchanged. */
-  nothingAboveRewritten: (before: string[], after: string[]) =>
-    before.every((h) => after.includes(h)),
+  /**
+   * R9.2.2 — no earlier results turn was rewritten: each one still stands, still quoting the exact
+   * number it quoted before the removal, in the same order, and the new turn is APPENDED below.
+   *
+   * COMPARED BY COUNT, NOT BY RENDERED STRING (2026-09-19, routine #5). This was
+   * `before.every((h) => after.includes(h))`, a string equality that was only ever valid while the
+   * Results-Found sentence had exactly ONE wording. Since PR #3186 it rotates over 40 templates, and
+   * the pick for an earlier turn is re-drawn when the transcript rebuilds — measured live that
+   * afternoon on جدة/فيلا:
+   *
+   *   before: «عندنا 4,118 نتيجة تطابق بحثك ⚡»          · «أبشر طلع لنا 134 نتيجة على بحثك 🏡»
+   *   after:  «يا سلام لقينا 4,118 نتيجة تطابق مواصفات بحثك 🙌» · «تم عندنا 134 نتيجة مطابقة لبحثك ✨»
+   *
+   * Both turns kept their number — 4,118 and 134 — so NOTHING ABOVE WAS REWRITTEN in the sense this
+   * rule protects, which is the one the header and the mutation proof both name: "a headline above
+   * rewritten in place", i.e. an earlier turn silently re-quoting the NEW count. Only the wording
+   * moved, and the wording is not a promise this contract makes.
+   *
+   * That re-pick is a real finding in its own right — PR #3232 pinned the pick per message id the
+   * same morning precisely so a sentence would stay put — but it belongs to the rotation layer, not
+   * to R9.2.2. It is reported separately by this journey and routed to that owner (ops_incident),
+   * never folded into this assertion and never silently dropped.
+   */
+  nothingAboveRewritten: (before: string[], after: string[]) => {
+    const counts = (hs: string[]) => hs.map((h) => resultsFoundCount(h));
+    const b = counts(before);
+    // Unreadable counts are not evidence of anything — fail rather than compare nulls (AGENTS.md,
+    // «A FAILED FETCH IS NOT AN EMPTY ANSWER», one layer up in the parser).
+    if (b.some((n) => n == null)) return false;
+    const a = counts(after);
+    // The earlier turns must be the PREFIX of what is on screen now: same numbers, same order,
+    // nothing removed and nothing re-ordered above the append point.
+    return b.every((n, i) => a[i] === n);
+  },
 };
 
-/** Every «لقينا N إعلان» headline currently rendered, oldest first. */
-const READ_HEADLINES = () => {
+// THE RESULTS-FOUND SENTENCE ROTATES — DERIVE THE MATCHER, NEVER RESTATE IT (2026-09-19, routine #5).
+//
+// This journey pinned «لقينا N إعلان», the wording PR #3186 retired the same morning in favour of a
+// rotation over four pools (src/data/resultsFoundRotation.ts). Measured against production that
+// afternoon: on a healthy الرياض/شقة search whose RPC returned 13,489, the retired regex matched
+// NOWHERE on the settled page, so READ_HEADLINES returned [] — and the two assertions that read it
+// failed while the count layer beside them passed with ui = rpc = anon-replay. The harness accused a
+// correct production, and its own mutation proof failed too, because a mutant cannot be planted in an
+// empty list. A barrier that cannot bite is worse than no barrier: it reads as coverage.
+//
+// The pool-derived matcher lives in e2e/lib/resultsSentence.mjs and is executed against the app's own
+// BAKED array by scripts/verify-results-sentence-parsers-track-the-pool.ts. Adding a template
+// tomorrow extends this journey automatically — there is no second copy of the wording to drift.
+// ANCHORED: the per-node reader below must not match a wrapper whose innerText merely
+// CONTAINS a headline — see resultsSentenceAtStartSource() for what that costs.
+const SENTENCE_SRC = resultsSentenceAtStartSource();
+
+/** Every results headline currently rendered, oldest first (any shipped template, any rotation). */
+const READ_HEADLINES = (src: string) => {
+  const re = new RegExp(src);
   const out: string[] = [];
   document.querySelectorAll('div,span,p').forEach((e: any) => {
     const t = (e.innerText || '').trim();
-    if (!/^لقينا\s+[\d,٬]+\s+إعلان/.test(t)) return;
+    if (!re.test(t)) return;
     if (e.children.length > 2) return;          // innermost node only — parents repeat the text
     if (!out.includes(t)) out.push(t);
   });
   return out;
 };
 
-const toNum = (s: string): number | null => {
-  const m = s.match(/لقينا\s*([\d,٬]+)/);
-  return m ? Number(m[1].replace(/[,٬]/g, '')) : null;
-};
+/** The count a headline quotes, read through the same pool the app renders from. */
+const toNum = (s: string): number | null => resultsFoundCount(s);
 
 const browser = await chromium.launch({
   ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
@@ -244,7 +292,7 @@ const scrollToBottom = async () => {
  */
 const walkOneRound = async (): Promise<boolean> => {
   const before = searches.length;
-  const headlinesAtEntry = (await page.evaluate(READ_HEADLINES) as string[]).length;
+  const headlinesAtEntry = (await page.evaluate(READ_HEADLINES, SENTENCE_SRC) as string[]).length;
   await scrollToBottom();
   const opened = await tap('خلّنا نحدد الطلب أكثر')
     .then(() => true)
@@ -285,7 +333,7 @@ const walkOneRound = async (): Promise<boolean> => {
   // the journey concluded round 1 had left no pills, tried a second round against a turn that had
   // not landed, and reported «the offer was gone». R11.2 was blamed for an animation.
   const landed = await settleUntil(
-    () => page.evaluate(READ_HEADLINES).then((h: string[]) => h.length),
+    () => page.evaluate(READ_HEADLINES, SENTENCE_SRC).then((h: string[]) => h.length),
     (n) => n > headlinesAtEntry,
     POST_SEARCH_BUDGET_MS, (ms) => page.waitForTimeout(ms));
   if (!landed.settled) {
@@ -351,7 +399,7 @@ try {
   // that headline as "changed or vanished" and accuses production of rewriting the transcript above
   // the removal, which it had not done. Wait for the set to stop changing before recording it.
   const headlinesBefore = (await settleUntil(
-    async () => page.evaluate(READ_HEADLINES) as Promise<string[]>,
+    async () => page.evaluate(READ_HEADLINES, SENTENCE_SRC) as Promise<string[]>,
     (() => {
       let prev: string | null = null;
       return (v: string[]) => { const k = JSON.stringify(v); const same = k === prev; prev = k; return same; };
@@ -359,6 +407,21 @@ try {
     POST_SEARCH_BUDGET_MS, (ms) => page.waitForTimeout(ms), 1200)).value;
   const countBefore = preRemoval?.total ?? null;
   console.log(`      [diag] headlines before removal: ${JSON.stringify(headlinesBefore)}`);
+
+  // A BLIND PARSE IS A DEFECT, NEVER A SILENT SKIP (2026-09-19). Two rounds have committed and the
+  // RPC has answered, so the transcript MUST be quoting counts. If it reads as empty, this journey
+  // can no longer see the thing it exists to assert — and both R9.2.2 checks below would then be
+  // judging [] against [], one vacuously green and one red, with the mutation proof unable to plant
+  // a mutant in an empty list. That is precisely how the retired-wording blindness presented on
+  // 2026-09-19. Say so in one line, against the product's own settled screen, instead of letting the
+  // shape be re-diagnosed from first principles a fourth time.
+  check('the transcript\'s results headlines are READABLE (the pool-derived matcher still matches production)',
+    headlinesBefore.length > 0,
+    headlinesBefore.length > 0 ? '' :
+      'read 0 headlines on a settled screen after two committed rounds — the matcher and the shipped '
+      + 'pool (src/data/resultsFoundRotation.ts) have drifted, or the sentence stopped rendering. '
+      + 'This is a HARNESS/pool defect until proven otherwise: check '
+      + 'scripts/verify-results-sentence-parsers-track-the-pool.ts before accusing production.');
 
   // ── 5. remove the FIRST pill ────────────────────────────────────────────────────────────────
   // WHICH PILL, AND WHY IT MATTERS WHICH (owner decision 2026-09-11, ops_incident #155).
@@ -464,12 +527,25 @@ try {
   // would turn a product that never lands a new turn into a non-arrival instead of the red it is.
   // Only the BUDGET is corrected here; the assertion is untouched.
   await settleUntil(
-    () => page.evaluate(READ_HEADLINES).then((h: string[]) => h.length),
+    () => page.evaluate(READ_HEADLINES, SENTENCE_SRC).then((h: string[]) => h.length),
     (n) => n > headlinesBefore.length,
     POST_SEARCH_BUDGET_MS, (ms) => page.waitForTimeout(ms));
-  const headlinesAfter = await page.evaluate(READ_HEADLINES);
+  const headlinesAfter = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
   console.log(`      [diag] headlines after removal: ${JSON.stringify(headlinesAfter)}`);
   const lost = headlinesBefore.filter((h) => !headlinesAfter.includes(h));
+  // THE ROTATION'S OWN STABILITY, REPORTED — NOT ASSERTED HERE (2026-09-19, routine #5).
+  // PR #3232 pinned the Results-Found pick per message id (`stableKey: m.id`) so a sentence would
+  // stop changing under re-render. Measured on this journey, an earlier turn's WORDING is
+  // nevertheless re-drawn when the transcript rebuilds after a pill removal, while its COUNT is
+  // correctly preserved. That is a rotation-layer finding, not an AF-contract one, so it is named
+  // here and routed to its owner rather than failing R9.2.2 — which would put a red on Advanced
+  // Filter every day for a defect that is not Advanced Filter's.
+  if (lost.length) {
+    console.log(`      [diag] ROTATION RE-PICK (not an R9.2.2 failure): ${lost.length} earlier turn(s) `
+      + `kept their count but changed wording — ${JSON.stringify(lost)} → `
+      + `${JSON.stringify(headlinesAfter.slice(0, lost.length))}. `
+      + 'Expected stable per PR #3232 (stableKey: m.id); routed to the rotation owner.');
+  }
   check('R9.2.2 — nothing above was rewritten (every earlier headline is still on screen, unchanged)',
     R.nothingAboveRewritten(headlinesBefore, headlinesAfter),
     lost.length ? `headlines that changed or vanished: ${JSON.stringify(lost)}` : `${headlinesBefore.length} earlier headline(s) intact`);
@@ -580,8 +656,30 @@ try {
     !R.scopeUntouched(preRemoval.body, { ...after.body, p_cities: [...(after.body.p_cities ?? []), '__not_a_city__'] }));
   mut('a count that NARROWED after a removal is caught by widenedOrHeld',
     !R.widenedOrHeld(countBefore, (countBefore ?? 1) - 1));
-  mut('an earlier headline rewritten in place is caught by nothingAboveRewritten',
-    !R.nothingAboveRewritten(headlinesBefore, headlinesAfter.map((h, i) => (i === 0 ? 'لقينا 1 إعلان يطابق طلبك.' : h))));
+  // The mutant is DERIVED from the headline this run actually read, not a wording typed here. A
+  // literal sentence is a second copy of the pool, and on 2026-09-19 the copy this line used
+  // («لقينا 1 إعلان يطابق طلبك.») had been retired from the product that morning. Appending to the
+  // real headline cannot become stale, and — unlike a literal — it is provably different from what
+  // is on screen, so the proof can never go vacuous. The `length > 0` requirement is part of the
+  // assertion, not a guard around it: a mutant cannot be planted in an empty list, so a blind parse
+  // must FAIL this proof rather than pass it by vacuity.
+  // THE MUTANT MUST MOVE THE NUMBER, because the number is what the rule protects. Appending text
+  // to a headline is NOT the defect (the rotation legitimately re-words earlier turns), so a mutant
+  // that only re-words would survive — correctly — and prove nothing. This replants the first
+  // earlier turn quoting the POST-removal count, which is exactly "a headline above rewritten in
+  // place": the transcript retroactively claiming the new answer was always the old one.
+  mut('an earlier headline rewritten in place (its COUNT replaced) is caught by nothingAboveRewritten',
+    headlinesBefore.length > 0 &&
+    !R.nothingAboveRewritten(
+      headlinesBefore,
+      headlinesAfter.map((h, i) => (i === 0 ? (headlinesAfter[headlinesAfter.length - 1] ?? h) : h))));
+  // …and the converse, so this assertion cannot be satisfied by being blind to wording ALONE: a
+  // re-worded earlier turn that KEEPS its number must still pass. That is production's real,
+  // measured behaviour since the rotation shipped, and a check that failed it would be red daily
+  // against a correct AF.
+  mut('a re-WORDED earlier turn that keeps its count is NOT reported as a rewrite',
+    headlinesBefore.length > 0 &&
+    R.nothingAboveRewritten(headlinesBefore, headlinesAfter));
 
   // The DB-truth assertion is the one that must NOT be provable by pure logic — it is only worth
   // anything if the number really comes back from production. So this mutation is a REAL RPC: drop

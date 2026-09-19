@@ -30,6 +30,10 @@ import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
+import { resultsFoundCount, resultsSentenceSource } from '../e2e/lib/resultsSentence.mjs';
+
+/** The Results-Found sentence as an in-browser regex source — derived from the shipped pool. */
+const SENTENCE_SRC = resultsSentenceSource();
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: REST_URL, key: ANON_KEY } = resolvePublicSupabase(process.env);
@@ -380,14 +384,18 @@ async function runJourney(j: Journey) {
     // The assertion is that the number EQUALS the RPC's total_count, and a wrong number is just as
     // stable as a right one — so a real product mismatch still settles here and still fails below.
     let prevHeadline: number | null = null;
-    const READ_HEADLINE = () => {
-      const m = document.body.innerText.match(/لقينا\s*([\d,٬]+)\s*إعلان/);
-      return m ? m[1] : null;
+    // DERIVED FROM THE SHIPPED POOL, NEVER RESTATED (2026-09-19, routine #5). This settle loop read
+    // «لقينا N إعلان», retired by PR #3186 that morning for a four-pool rotation. With the retired
+    // regex the read returned null on EVERY cohort, so `stable` was never true and the loop burned
+    // its whole budget before judging a screen it had never observed settle.
+    const READ_HEADLINE = (src: string) => {
+      const m = document.body.innerText.match(new RegExp(src));
+      return m ? m[0] : null;
     };
     await settleUntil(
       async () => {
-        const raw = await page.evaluate(READ_HEADLINE);
-        const cur = raw ? parseInt(raw.replace(/[^\d]/g, ''), 10) : null;
+        const raw = await page.evaluate(READ_HEADLINE, SENTENCE_SRC);
+        const cur = raw ? resultsFoundCount(raw) : null;
         const stable = !!lastSearch && cur != null && cur === prevHeadline;
         prevHeadline = cur;
         return stable;
@@ -406,12 +414,22 @@ async function runJourney(j: Journey) {
         `p_cities=${JSON.stringify(body.p_cities)}`);
 
       const uiTxt = await page.evaluate(() => document.body.innerText);
-      const m = uiTxt.match(/لقينا\s*([\d,٬]+)\s*إعلان/);
-      const uiCount = m ? parseInt(m[1].replace(/[^\d]/g, ''), 10) : null;
-      if (uiCount != null) {
-        check(`${name}: the displayed result count == the search RPC's total_count`,
-          uiCount === rpcTotal, `ui=${uiCount} rpc=${rpcTotal}`);
-      }
+      const uiCount = resultsFoundCount(uiTxt);
+      // AN UNREADABLE TOTAL IS A DEFECT, NOT A SKIP (2026-09-19, routine #5). This was
+      // `if (uiCount != null) { check(...) }` over a parser pinned to the retired «لقينا N إعلان».
+      // When PR #3186 rotated the sentence the parse returned null on every cohort, the `if` fell
+      // through, and THE UI→RPC COMPARISON — the one layer only a browser can see — stopped running
+      // while this job reported SUCCESS. That is the exact silent-blindness routine #4 had just
+      // fixed in the live sweep; it recurred here because the barrier guarding the class was a
+      // three-file list. The comparison is now unconditional: a screen showing results whose total
+      // cannot be read fails, and says which of the two it is.
+      check(`${name}: the displayed result count == the search RPC's total_count`,
+        uiCount != null && uiCount === rpcTotal,
+        uiCount == null
+          ? `the rendered total could not be READ (rpc=${rpcTotal}). The pool-derived matcher matched `
+            + 'nothing on a settled screen — check scripts/verify-results-sentence-parsers-track-the-pool.ts '
+            + 'before accusing production.'
+          : `ui=${uiCount} rpc=${rpcTotal}`);
 
       // THE LINK THAT WAS UNCHECKABLE BEFORE 2026-09-01.
       //
