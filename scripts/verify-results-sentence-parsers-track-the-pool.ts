@@ -19,12 +19,14 @@
 //
 // Runs offline and hermetically: it reads the repo and executes its own code. No network, no DB.
 
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import {
   shippedTemplates, templateToRegex, resultsFoundCount, matchersFor, searchSettled, settledSource,
+  resultsSentenceSource, resultsSentenceAtStartSource,
 } from '../e2e/lib/resultsSentence.mjs';
 import { __testing } from '../src/data/resultsFoundRotation.ts';
+import { stripComments } from './lib/stripComments.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 let failed = 0;
@@ -110,6 +112,45 @@ check('the in-browser settle source and searchSettled() agree on every template 
 check('an unsettled screen is not mistaken for a settled one',
   !searchSettled('جاري البحث') && !inBrowser.test('جاري البحث'));
 
+// ── 3b. THE POOL-ONLY IN-PAGE SOURCES COVER EVERY TEMPLATE TOO. ─────────────────────────────────
+//
+// FOUND BY A MUTANT SURVIVAL SWEEP (routine #10, 2026-09-19): `resultsSentenceSource()` could be
+// cut to its FIRST template — 1 of 40 — and the entire 479-check suite stayed GREEN. Section 3
+// above exercises `settledSource()` per template, and that read as coverage for all three sources.
+// It is not the same function: settledSource() admits ZERO_RE, so a screen that merely says «ما
+// لقينا نتائج» satisfies it, and the pool half can rot underneath.
+//
+// These two are what the per-NODE readers compile inside the browser — e2e/ui-parity.spec.ts's
+// FOUND, scripts/lib/afOfferLive.ts's HAS_TURN_SRC, and the AF live journeys' headline walkers. A
+// source that covers one template makes all of them blind on the other nine, silently, which is the
+// precise failure this whole file exists to prevent — arriving through the DERIVED path rather than
+// a hand-pinned one.
+{
+  const unanchored = new RegExp(resultsSentenceSource(pool));
+  const atStart = new RegExp(resultsSentenceAtStartSource(pool));
+  const missUnanchored: string[] = [];
+  const missAtStart: string[] = [];
+  for (const t of fromSource) {
+    const rendered = t.template.replace('{count}', '41,330').replace(/\{name\}/g, 'فهد');
+    // Unanchored: the whole-body reader. Anchored: the leaf-node reader, so the sentence IS the node.
+    if (!unanchored.test(`نتائج البحث\n${rendered}\nالضغط على هذا الإعلان`)) missUnanchored.push(t.template);
+    if (!atStart.test(rendered)) missAtStart.push(t.template);
+  }
+  check(`resultsSentenceSource() matches all ${fromSource.length} shipped templates (the in-page whole-body reader)`,
+    missUnanchored.length === 0, missUnanchored.slice(0, 4).join('\n      '));
+  check(`resultsSentenceAtStartSource() matches all ${fromSource.length} shipped templates (the in-page leaf reader)`,
+    missAtStart.length === 0, missAtStart.slice(0, 4).join('\n      '));
+  // Both directions: the pool-only sources must NOT admit a zero-state or an unsettled screen —
+  // that is settledSource()'s job, and conflating them hands a caller a "headline" with no count.
+  check('the pool-only sources do NOT admit an honest-zero screen (that is settledSource\'s job)',
+    !unanchored.test('ما لقينا نتائج') && !atStart.test('ما لقينا نتائج'));
+  check('…nor an unsettled one', !unanchored.test('جاري البحث') && !atStart.test('جاري البحث'));
+  // The ANCHOR is load-bearing: a wrapper node holding the whole transcript must not read as a
+  // headline, or a leaf reader returns the entire page as one "headline".
+  check('the anchored source refuses a wrapper node that merely CONTAINS the sentence',
+    !atStart.test(`ملخص البحث\n${fromSource[0].template.replace('{count}', '41,330')}`));
+}
+
 // ── 4. A count that is absent stays ABSENT — never a zero. ───────────────────────────────────────
 // AGENTS.md: silent → NULL, never unknown → NO. A screen with no sentence must not read as "0 found".
 check('no sentence on screen → null, never 0',
@@ -121,17 +162,209 @@ check('an honest-zero screen states zero without quoting a count',
 check('the retired «لقينا N إعلان» is not required by the matcher',
   resultsFoundCount('لقينا 1,500 إعلان يطابق طلبك.') === null);
 
-// ── 6. THE LIVE SWEEP REALLY USES THIS, and no longer pins a phrasing of its own. ────────────────
-// Reading these files is legitimate here: the claim is about WHICH module they call, which is a fact
-// about the import graph, not about the wording of a regex.
-const RETIRED = /لقينا\\s\+\(\[\\d,٬\]\+\)\\s\+إعلان|لقينا\s+\(\[/;
-for (const rel of ['e2e/live-sweep/visibleState.mjs', 'e2e/live-sweep/sweep.mjs', 'e2e/live-sweep/journeys.mjs']) {
-  const src = readFileSync(join(ROOT, rel), 'utf8');
-  const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  check(`${rel} imports the derived matcher`, /from '\.\.?\/(?:\.\.\/)?lib\/resultsSentence\.mjs'/.test(code));
-  check(`${rel} no longer parses a retired phrasing in live code`,
-    !/matchAll\(\/لقينا/.test(code) && !/match\(\/لقينا/.test(code),
-    'a hand-pinned «لقينا …» parser is back in executable code');
+// ── 6. EVERY BROWSER-DRIVING PARSER OF THIS SENTENCE IS DISCOVERED, NOT LISTED. ──────────────────
+//
+// THIS SECTION WAS A THREE-FILE LIST, AND THE LIST READ AS COVERAGE (routine #5, 2026-09-19).
+// It named e2e/live-sweep/{visibleState,sweep,journeys}.mjs — the files routine #4 had just fixed —
+// so it was green all day on 2026-09-19 while FOUR Advanced-Filter live journeys, none of them on
+// the list, still pinned the retired «لقينا N إعلان» and were red against a correct production:
+//
+//   verify-af-pill-removal-live.ts · verify-af-remove-last-pill-live.ts
+//   verify-af-scope-change-live.ts · verify-af-option-card-truth-live.ts
+//
+// Measured that afternoon on الرياض/شقة: the RPC returned 13,489, the page quoted 13,489, and the
+// retired regex matched NOWHERE — so READ_HEADLINES returned [] and the assertions that read it
+// failed while the count layer beside them passed. Worse, verify-af-option-card-truth-live.ts's
+// READ_TURN_CARDS does not go blind when it misses; it falls back to counting EVERY card on the
+// page, silently inflating the newest turn's reveal. That is a wrong answer, not a missing one.
+//
+// A list cannot cover a class. This discovers the population by SHAPE — every file that drives a
+// real browser — and fails on any member that hand-pins this sentence instead of importing the
+// derived matcher. A fifth journey written tomorrow is covered without anyone editing this file,
+// which is the same rule AGENTS.md pins for the MATCH-FIRST stage registry.
+const rel = (p: string) => p.slice(ROOT.length + 1);
+// THE IN-FILE STRIPPER ONLY REMOVED WHOLE-LINE `//` COMMENTS, and a retired regex quoted inside a
+// JSDoc block therefore read as live code — e2e/lib/resultsSentence.mjs, the DERIVED module itself,
+// was flagged by its own documentation. scripts/lib/stripComments.ts is the shared, block-aware one
+// this repo already requires every source-shape assertion to run first; use it, do not re-roll it.
+
+/**
+ * "This file reaches a real browser itself", as a PURE predicate so the mutation block can execute
+ * it against synthetic sources rather than trust that the walk "would have" found something.
+ *
+ * THE MARKERS ARE SPELLED WITH A ONE-CHARACTER CLASS ON PURPOSE — do not "tidy" them.
+ * A sibling barrier (verify-live-nav-retries-transport-only.ts) discovers the live-browser
+ * population by looking for the playwright import marker in a file's source. This file only ever
+ * MENTIONS that marker; it drives no browser and is hermetic. Writing the marker whole here enlists
+ * this offline barrier into that file's production-browser population, and it fails demanding this
+ * file serve its own build. `playwrigh[t]` matches the real import while not BEING one.
+ *
+ * `@?playwrigh[t](?:/test)?` is the widening that mattered: every miss listed on browserDrivingFiles()
+ * was a `@playwright/test` import, and most of them were `await import(...)` rather than `from`.
+ */
+export const DRIVES_A_BROWSER =
+  /from '@?playwrigh[t](?:\/test)?'|import\('@?playwrigh[t](?:\/test)?'\)|from '\.[^']*liveNav|gotoLiv[e]\(/;
+
+/**
+ * Every file under scripts/ and e2e/ that drives a real browser.
+ *
+ * THE SHAPE SELECTOR WAS ITSELF A NARROW LIST, AND IT READ AS A POPULATION (routine #10,
+ * 2026-09-19). The section above replaced a three-file list with discovery-by-shape, and was green
+ * within the day — while FIVE measured-blind parsers sat outside the shape it discovered, because
+ * the marker was the bare `playwrigh[t]` import spelling and this repo imports `@playwrigh[t]/test`,
+ * usually lazily (the one-character class is load-bearing here too — see DRIVES_A_BROWSER):
+ *
+ *   e2e/guardian/harness.mjs      `await import('@playwright/test')` — SETTLED_RE saw a settled
+ *                                 search on 4 of 10 AR templates, countChip on 0 of 10.
+ *   e2e/ui-parity.spec.ts         `from '@playwright/test'` — FOUND matched 0 of 10, so runSearch()
+ *                                 waited out its full 60s and failed a correct production.
+ *   scripts/prove-rent-basis-live.mjs  lazy import — `shown` read null, so check (a) accused the
+ *                                 served page of quoting the wrong headline.
+ *   e2e/redteam/run.mjs           drives no browser ITSELF; it imports chain.mjs, which does. L5,
+ *                                 the DISPLAYED count, quietly stopped being a layer.
+ *   e2e/live-sweep/showmore.mjs   same transitive shape, carrying a retired alternative.
+ *
+ * So the population is now: files that import playwright UNDER ANY SPELLING, statically or
+ * dynamically, PLUS the transitive closure over local imports — a harness that reaches a browser
+ * through a helper is driving one. Measured: 18 files under the old selector, 48 under this one.
+ */
+const browserDrivingFiles = (): string[] => {
+  const all: string[] = [];
+  const walk = (dir: string) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, ent.name);
+      if (ent.isDirectory()) { if (ent.name !== 'node_modules') walk(p); continue; }
+      if (/\.(ts|mjs)$/.test(ent.name)) all.push(p);
+    }
+  };
+  walk(join(ROOT, 'scripts'));
+  walk(join(ROOT, 'e2e'));
+  const src = new Map(all.map((f) => [f, stripComments(readFileSync(f, 'utf8'))]));
+  const driving = new Set(all.filter((f) => DRIVES_A_BROWSER.test(src.get(f)!)));
+  // A file that imports a browser-driving module is driving a browser through it. Iterate to a
+  // fixed point rather than one hop: run.mjs → chain.mjs is one hop today, two tomorrow.
+  // BOTH import forms. `scripts/prove-rent-basis-live.mjs` reaches a browser through
+  // `await import('../e2e/live-sweep/sweep.mjs')` and carries no `from` for it — a static-only
+  // closure left it outside the population, which the measured-blind ratchet below caught.
+  const localImports = (f: string) => [
+    ...src.get(f)!.matchAll(/from '(\.[^']*)'/g),
+    ...src.get(f)!.matchAll(/\bimport\('(\.[^']*)'\)/g),
+  ].map((m) => resolve(dirname(f), m[1])).filter((p) => src.has(p));
+  // A DOM-READING HELPER OF A BROWSER DRIVER IS DRIVING THE BROWSER, and the closure has to travel
+  // the other way to reach it. scripts/lib/afOfferLive.ts is imported BY four AF live journeys and
+  // imports none of them, so an importer-only closure left it outside — while its `HAS_TURN_SRC`
+  // pinned the retired «لقينا N إعلان», returned false on every real results turn, and made all four
+  // journeys stand down as `reason: 'no-turn'` without testing anything. The edge is bounded by
+  // "reads the DOM": a helper that never touches `document`/`page` is not a parser of the page.
+  const READS_THE_DOM = /document\.|page\.evaluate|innerText|textContent/;
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const f of all) {
+      if (driving.has(f)) continue;
+      const reachesADriver = localImports(f).some((p) => driving.has(p));
+      const isAHelperOfADriver = READS_THE_DOM.test(src.get(f)!)
+        && all.some((d) => driving.has(d) && localImports(d).includes(f));
+      if (reachesADriver || isAHelperOfADriver) { driving.add(f); changed = true; }
+    }
+  }
+  return [...driving].sort();
+};
+
+const IMPORTS_DERIVED = /from '[^']*resultsSentence\.mjs'/;
+
+/** Every regex LITERAL in a source file, as its pattern text. */
+const regexLiterals = (code: string): string[] =>
+  [...code.matchAll(/\/((?:[^/\\\n[]|\\.|\[(?:[^\]\\]|\\.)*\])+)\/[gimsuy]*/g)].map((m) => m[1]);
+
+/**
+ * THE RETIRED RESULTS-FOUND SIGNATURE, judged one regex LITERAL at a time.
+ *
+ * It used to be two whole-file regexes, and the narrower of them missed a real parser: e2e/redteam/
+ * run.mjs read the displayed count with `/لقينا\s+([\d,،]+)/` — «لقينا» bound to a capture with NO
+ * noun after it — and the old RETIRED_PARSER required «إعلان», so L5 (the DISPLAYED count, the one
+ * layer only a browser can see) was blind AND unflagged at the same time. A predicate that asks
+ * "does this FILE contain the retired shape" also cannot separate a retired parser from a
+ * legitimate neighbour two lines above it; a predicate over literals can.
+ *
+ * A literal is a retired Results-Found parser when it invokes «لقينا» AND
+ *   (a) names the retired noun «إعلان», or
+ *   (b) carries a numeric class or capture — it is reading a COUNT off that sentence, or
+ *   (c) is the retired CLOCK, i.e. a bare «لقينا» alternative such as /لقينا|ما لقيت|ما فيه/,
+ *       which 6 of the 10 AR guest templates defeat.
+ *
+ * Two legitimate neighbours are excluded by construction, and both have their own mutation proof
+ * below, because a rule that flagged them would be switched off within a week:
+ *   · the mining phase's owner-authored found-beat «لقينا N عقار أقرب لطلبك» (MiningTransition) —
+ *     it names «عقار», and it is not the results sentence;
+ *   · the honest-zero statements «ما لقينا …», which are hand-written on purpose and covered by
+ *     ZERO_RE rather than by the pool. Every «لقينا» in them is preceded by «ما ».
+ */
+const isRetiredResultsParser = (lit: string): boolean => {
+  if (!lit.includes('لقينا')) return false;
+  if (lit.includes('عقار')) return false;                       // the mining found-beat
+  const bareLoqina = /(?<!ما\s)لقينا/.test(lit);                // not a «ما لقينا» zero statement
+  if (!bareLoqina) return false;
+  const namesRetiredNoun = lit.includes('إعلان');
+  const readsACount = /\\d|٠-٩|\[\d/.test(lit);
+  const isTheClock = /(?<!ما\s)لقينا(\||$)/.test(lit);
+  return namesRetiredNoun || readsACount || isTheClock;
+};
+
+/**
+ * THE PREDICATE, as a pure function — so the mutation block below can execute it against synthetic
+ * files instead of trusting that the loop "would have" caught something. A discovery rule nobody has
+ * watched fail is the same dark barrier this whole file exists to prevent.
+ */
+const pinsRetiredWording = (code: string): boolean =>
+  regexLiterals(code).some(isRetiredResultsParser) && !IMPORTS_DERIVED.test(code);
+
+const offenders: string[] = [];
+let scanned = 0;
+for (const file of browserDrivingFiles()) {
+  const name = rel(file);
+  if (name === rel(join(ROOT, 'scripts', 'verify-results-sentence-parsers-track-the-pool.ts'))) continue;
+  const code = stripComments(readFileSync(file, 'utf8'));
+  scanned++;
+  if (pinsRetiredWording(code)) offenders.push(name);
+}
+check(`every browser-driving parser of the Results-Found sentence is derived (${scanned} file(s) scanned)`,
+  offenders.length === 0,
+  offenders.length
+    ? `these hand-pin the retired wording and do NOT import e2e/lib/resultsSentence.mjs:\n      `
+      + `${offenders.join('\n      ')}\n      `
+      + 'Import { resultsFoundCount, resultsSentenceSource } and delete the private regex. A parser '
+      + 'restated beside the pool goes blind the next time the owner edits a template.'
+    : '');
+// THE FLOOR USED TO BE `scanned >= 10`, AND IT PASSED WHILE THE POPULATION WAS MISSING 30 OF 48.
+// A magic minimum cannot tell a complete population from a fifth of one — it only says the walk is
+// not literally empty. Two assertions replace it, both shrink-only:
+//
+//  (1) a measured SIZE floor, so a selector that narrows again is loud rather than plausible;
+//  (2) the five files whose blindness was MEASURED on production (ops_incident #330) are IN the
+//      population, by name. That is a ratchet over discovery, not a return to the three-file list:
+//      membership is still decided by shape, and these names only pin that the shape did not
+//      shrink back past the evidence that widened it.
+const POPULATION_FLOOR = 40; // measured 48 on 2026-09-19; shrink-only, raise it, never lower it.
+check(`the discovery really found the browser-driving population (${scanned} files)`,
+  scanned >= POPULATION_FLOOR,
+  `only ${scanned} file(s) matched the browser-driving shape (floor ${POPULATION_FLOOR}) — the `
+  + 'selector has narrowed. It was 18 the morning five measured-blind parsers hid outside it.');
+
+const population = new Set(browserDrivingFiles().map(rel));
+const MEASURED_BLIND = [
+  'e2e/guardian/harness.mjs', 'e2e/ui-parity.spec.ts', 'scripts/prove-rent-basis-live.mjs',
+  'e2e/redteam/run.mjs', 'e2e/live-sweep/showmore.mjs', 'scripts/lib/afOfferLive.ts',
+];
+const escaped = MEASURED_BLIND.filter((f) => !population.has(f));
+check('every parser whose blindness was measured on production is inside the population',
+  escaped.length === 0,
+  `outside the browser-driving population: ${escaped.join(', ')} — the discovery shape has narrowed `
+  + 'past the evidence that widened it (ops_incident #330).');
+
+// The sweep's own three files additionally owe the POSITIVE half: they must call the derived module.
+for (const relPath of ['e2e/live-sweep/visibleState.mjs', 'e2e/live-sweep/sweep.mjs', 'e2e/live-sweep/journeys.mjs']) {
+  const code = stripComments(readFileSync(join(ROOT, relPath), 'utf8'));
+  check(`${relPath} imports the derived matcher`, /from '\.\.?\/(?:\.\.\/)?lib\/resultsSentence\.mjs'/.test(code));
 }
 
 // ── 7. THE CLASS GUARD: a blind parse must be a DEFECT, not a silent skip. ──────────────────────
@@ -219,6 +452,92 @@ mustCatch('the raw-placeholder escaping bug (drops every logged-in template) is 
     }
   }
   mustCatch('picking by pool order instead of document position (the 12,118-vs-6,155 misread)', caught);
+}
+
+// M7-M10 — THE DISCOVERY RULE ITSELF, executed against synthetic files. Added 2026-09-19 (routine
+// #5) when this section stopped being a three-file list. Both directions matter: it must flag a real
+// offender, and it must NOT flag the legitimate neighbours, or the next engineer silences it.
+mustCatch('a NEW browser journey that hand-pins the retired «لقينا N إعلان» is flagged',
+  pinsRetiredWording('const re = /^لقينا\\s+[\\d,٬]+\\s+إعلان/;'));
+mustCatch('the retired /لقينا|ما لقيت|ما فيه/ CLOCK is flagged too, not just the count parser',
+  pinsRetiredWording('await page.waitForFunction(() => /لقينا|ما لقيت|ما فيه/.test(t));'));
+mustCatch('a journey that pins nothing and imports the derived matcher is NOT flagged',
+  !pinsRetiredWording(`import { resultsFoundCount } from '../e2e/lib/resultsSentence.mjs';\nconst n = resultsFoundCount(t);`));
+// The mining phase has its own owner-authored found-beat and the zero-states are legitimately
+// hand-written. A rule that flagged those would be turned off within a week.
+mustCatch('the mining found-beat «لقينا N عقار أقرب لطلبك» is NOT mistaken for the results sentence',
+  !pinsRetiredWording('const mining = /لقينا\\s[\\d,٠-٩]+\\sعقار أقرب لطلبك/.test(body);'));
+mustCatch('the honest-zero statement «ما لقينا نتائج» is NOT mistaken for a retired parser',
+  !pinsRetiredWording('const zero = /ما لقينا نتائج/.test(body);'));
+
+// M11-M16 — THE DISCOVERY SHAPE ITSELF (routine #10, 2026-09-19). M7-M10 above prove the predicate
+// judges a file correctly; these prove the right files are HANDED to it. That is the half that was
+// wrong: every mutant below is the exact import spelling that let a measured-blind parser escape.
+//
+// The old selector is executed beside the new one, so each proof states a DIFFERENCE rather than
+// asserting the new one in isolation — a check that only says "the current rule matches" cannot
+// tell you the rule ever changed.
+const OLD_SELECTOR = /from 'playwrigh[t]'|from '\.[^']*liveNav|gotoLiv[e]\(/;
+const widened = (code: string) => DRIVES_A_BROWSER.test(code) && !OLD_SELECTOR.test(code);
+
+mustCatch("a STATIC `from '@playwright/test'` import was invisible to the old selector (ui-parity.spec.ts)",
+  widened("import { test, expect } from '@playwrigh" + "t/test';"));
+mustCatch("a LAZY `await import('@playwright/test')` was invisible too (guardian/harness.mjs, prove-rent-basis-live.mjs)",
+  widened("const { chromium } = await import('@playwrigh" + "t/test');"));
+mustCatch('the bare `playwright` spelling the old selector did find is still found',
+  DRIVES_A_BROWSER.test("import { chromium } from 'playwrigh" + "t';"));
+mustCatch('a file that drives no browser and imports nothing local is NOT enlisted (the negative control)',
+  !DRIVES_A_BROWSER.test("import { readFileSync } from 'node:fs';\nconst n = resultsFoundCount(t);"));
+
+// The transitive half, executed end to end against the real tree: run.mjs reaches a browser only
+// through chain.mjs, and no marker of any spelling appears in run.mjs itself.
+{
+  const runSrc = stripComments(readFileSync(join(ROOT, 'e2e/redteam/run.mjs'), 'utf8'));
+  mustCatch('e2e/redteam/run.mjs carries NO browser marker of its own — only the closure reaches it',
+    !DRIVES_A_BROWSER.test(runSrc) && population.has('e2e/redteam/run.mjs'));
+  // The closure's OTHER direction. afOfferLive.ts imports no driver and carries no marker; four AF
+  // live journeys import IT. An importer-only closure left it outside the population while its
+  // reader was blind, which is how a helper hides.
+  const helperSrc = stripComments(readFileSync(join(ROOT, 'scripts/lib/afOfferLive.ts'), 'utf8'));
+  mustCatch('scripts/lib/afOfferLive.ts is reached only as a DOM-reading helper of a driver',
+    !DRIVES_A_BROWSER.test(helperSrc)
+    && !/from '\.[^']*'/.test(helperSrc.replace(/from '[^']*resultsSentence\.mjs'/, ''))
+    && population.has('scripts/lib/afOfferLive.ts'));
+}
+
+// THE READER'S OWN BLIND SPOT. A retired regex quoted in a JSDoc block is documentation, not a code
+// path — the in-file stripper this barrier shipped with removed only whole-LINE `//` comments, so
+// e2e/lib/resultsSentence.mjs, the derived module itself, was flagged by its own explanation.
+mustCatch('a retired regex quoted inside a /** … */ block is NOT read as a parser',
+  !pinsRetiredWording(stripComments(
+    '/**\n * The retired regexes were written `/^لقينا\\s+[\\d,٬]+\\s+إعلان/` — and their `^` mattered.\n */\nconst x = 1;')));
+// A user-facing MESSAGE that quotes the retired sentence is stale prose, not a blind parser. The
+// whole-file predicate this replaced could not tell the two apart and flagged e2e/guardian/
+// journeys.mjs for a template literal in an assertion message.
+mustCatch('a MESSAGE quoting «لقينا N إعلان» is not mistaken for a parser',
+  !pinsRetiredWording('bad.push(`an impossible budget still claimed «لقينا ${n} إعلان»`);'));
+
+// THE REAL DEFECT, REPLAYED. Each string below is the parser as it actually shipped this morning,
+// copied from the file it shipped in, and each is executed against the sentence production really
+// rendered. A synthetic offender proves the predicate; these prove it against the evidence.
+{
+  const LIVE = 'بحثك رجّع لنا 41,330 نتيجة 🥳';
+  const shipped: Array<[string, string]> = [
+    ['e2e/guardian/harness.mjs countChip', String.raw`(text.match(/لقينا\s+([\d,٬]+)\s+إعلان/) || [])[1] ?? null,`],
+    ['e2e/guardian/harness.mjs SETTLED_RE', String.raw`export const SETTLED_RE = /لقينا|ما لقيت|ما فيه/;`],
+    ['e2e/redteam/run.mjs L5', String.raw`const m = vis.raw.match(/لقينا\s+([\d,،]+)/);`],
+    ['e2e/ui-parity.spec.ts FOUND', String.raw`const FOUND = /لقينا[\s\S]*?إعلان/;`],
+    ['scripts/prove-rent-basis-live.mjs shown', String.raw`const m = text.match(/لقينا\s*([\d,٠-٩]+)/);`],
+    ['scripts/lib/afOfferLive.ts HAS_TURN_SRC', String.raw`.some((e) => /لقينا\s[\d,٠-٩،]+\sإعلان/.test(e.textContent));`],
+  ];
+  for (const [where, code] of shipped) {
+    // Two halves, both required: the parser really is blind against the live sentence, AND the
+    // predicate really does flag it. Either alone is a claim; together they are the defect.
+    const re = /\/(لقينا[^/]*)\//.exec(code);
+    const blind = re ? !new RegExp(re[1]).test(LIVE) : false;
+    mustCatch(`${where}: blind against «${LIVE}» AND flagged by the rule`,
+      blind && pinsRetiredWording(code));
+  }
 }
 
 console.log(failed === 0

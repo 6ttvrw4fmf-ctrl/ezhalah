@@ -68,6 +68,7 @@ import type { SearchQuery } from '../src/data/search.ts';
 import { liftSearchScope } from './lib/liftSearchScope.ts';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { resultsFoundCount, resultsSentenceAtStartSource } from '../e2e/lib/resultsSentence.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -259,22 +260,30 @@ const CLICK_LEAF = (txt: string) => {
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 };
 
-/** Every «لقينا N إعلان» headline currently rendered, oldest first. Digits may be Arabic-Indic. */
-const READ_HEADLINES = () => {
+// DERIVED FROM THE SHIPPED POOL, NEVER RESTATED (2026-09-19, routine #5). This file pinned
+// «لقينا N إعلان», retired by PR #3186 the same morning for a four-pool rotation
+// (src/data/resultsFoundRotation.ts). Measured live that afternoon: on a healthy الرياض/شقة search
+// returning 13,489, the retired regex matched nowhere on the settled page — the harness went blind
+// while production was exactly right. The matcher now comes from e2e/lib/resultsSentence.mjs, which
+// scripts/verify-results-sentence-parsers-track-the-pool.ts executes against the app's own pool.
+// ANCHORED: the per-node reader below must not match a wrapper whose innerText merely
+// CONTAINS a headline — see resultsSentenceAtStartSource() for what that costs.
+const SENTENCE_SRC = resultsSentenceAtStartSource();
+
+/** Every results headline currently rendered, oldest first (any shipped template, any rotation). */
+const READ_HEADLINES = (src: string) => {
+  const re = new RegExp(src);
   const out: string[] = [];
   document.querySelectorAll('div,span,p').forEach((e: any) => {
     const t = (e.innerText || '').trim();
-    if (!/^لقينا\s+[\d٠-٩,٬]+\s+إعلان/.test(t)) return;
+    if (!re.test(t)) return;
     if (e.children.length > 2) return;
     if (!out.includes(t)) out.push(t);
   });
   return out;
 };
-const latinDigits = (s: string) => s.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
-const toNum = (s: string): number | null => {
-  const m = latinDigits(s).match(/لقينا\s*([\d,٬]+)/);
-  return m ? Number(m[1].replace(/[,٬]/g, '')) : null;
-};
+/** The count a headline quotes, read through the same pool the app renders from. */
+const toNum = (s: string): number | null => resultsFoundCount(s);
 
 const browser = await chromium.launch({
   ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
@@ -387,7 +396,7 @@ const newestHeadlineNumber = async (want: number | null, timeoutMs = 25000): Pro
   const until = Date.now() + timeoutMs;
   let last: number | null = null;
   while (Date.now() < until) {
-    const hs = await page.evaluate(READ_HEADLINES);
+    const hs = await page.evaluate(READ_HEADLINES, SENTENCE_SRC);
     last = hs.length ? toNum(hs[hs.length - 1]) : null;
     if (last != null && last === want) return last;
     await page.waitForTimeout(500);
