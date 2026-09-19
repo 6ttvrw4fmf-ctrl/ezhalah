@@ -85,6 +85,16 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'Suwar',        i18nKey: 'Suwar Real Estate',                       logo: require('../../assets/images/suwar.png') },
   { name: 'Rakez',        i18nKey: 'Rakez Real Estate',                       logo: require('../../assets/images/rakez.png') },
   { name: 'Akariyoun',    i18nKey: 'Akariyoun',                               logo: require('../../assets/images/akariyoun.png') },
+  { name: 'KSA Aqar',     i18nKey: 'KSA Aqar Real Estate',                    logo: require('../../assets/images/ksaaqar.png') },
+  { name: 'Sadiq Eltajer', i18nKey: 'Sadiq Eltajer Real Estate',              logo: require('../../assets/images/sadiq-eltajer.png') },
+  // توور — OWNER DECISION 2026-09-19, made with the trade-off stated. toor currently returns ZERO
+  // searchable listings (its site self-declares «نسخة تجريبية … المعلومات … ليست حقيقية» — a beta
+  // serving dummy data, one sample listing repeated across every PropertyId), so it does NOT meet
+  // the 2026-08-29 rule that this strip equals the active-searchable set. The owner chose to keep
+  // toor's brand on the list anyway. It is listed LAST and called out here so the exception is
+  // visible rather than looking like drift, and so that whoever reads
+  // verify-loader-platforms-match-active.ts next finds the reason instead of a mystery.
+  { name: 'Toor',         i18nKey: 'Toor',                                    logo: require('../../assets/images/toor.png') },
 ];
 
 // Ordered SPECIFIC-first token → platform name map, mirroring ResultCard's SourceBadge matching so a
@@ -121,6 +131,15 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['rakez', 'Rakez'],
   ['akariyoun', 'Akariyoun'],
   ['عقاريون', 'Akariyoun'],
+  // MUST stay above the bare 'aqar' token below: the slug 'ksaaqar' CONTAINS 'aqar', so a
+  // specific-first order is what stops عقار's mark being stamped on another company's listing.
+  ['ksaaqar', 'KSA Aqar'],
+  ['عقارات السعودية', 'KSA Aqar'],
+  ['sadiqeltajer', 'Sadiq Eltajer'],
+  ['sadiq-eltajer', 'Sadiq Eltajer'],
+  ['صادق التاجر', 'Sadiq Eltajer'],
+  ['toor', 'Toor'],
+  ['توور', 'Toor'],
   ['aqar', 'Aqar'],
 ];
 

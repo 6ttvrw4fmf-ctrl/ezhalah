@@ -932,6 +932,7 @@ const AR: Record<string, string> = {
   'Alta Real Estate Services':         'ألتا للخدمات العقارية',   // official (alta.com.sa header)
   'Shmou Al Shmal Real Estate':        'شموع الشمال العقارية',    // official (shmoua-alshmal.com header)
   'Azdad Al Aqariah':                  'مكتب ازداد العقارية',      // official (azdadalaqaria.com page title)
+  'Toor':                              'توور',                     // official (toor.ooo <title> «منصة توور»)
   'KSA Aqar Real Estate':              'عقارات السعودية',          // official (ksaaqar.com <title> «عقارات السعودية»)
   'Sadiq Eltajer Real Estate':         'صادق التاجر',              // official (sadiq-eltajer.sa header)
   'Akariyoun':                         'عقاريون',                  // official (akariyoun.sa footer «عقاريون ، جميع الحقوق محفوظة» + tagline «عقاريون إختيارك الاول»; the site's own <title> uses the Latin «Akariyoun»)
