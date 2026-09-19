@@ -29,13 +29,19 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 // silently test the wrong host and report a healthy stranger as the retired platform.
 const HOMES = {
   toor:     'https://www.toor.ooo/sitemap_properties_1.xml',
-  alnokhba: 'https://alnokhba-services.com/',
+  // alnokhba is deliberately absent: REMOVED from the platform list by owner decision 2026-09-19.
+  // It is not a failing source we are waiting on — the company has no website at all
+  // (alnokhba-services.com NXDOMAIN, registry expiry 2026-07-07, and none of six candidate
+  // replacement domains resolve). Nothing to re-probe, so it is not probed; its 6 historical rows
+  // are kept and inactive. It stays in RETIRED_PLATFORMS.txt so the CI guard still keeps the slug
+  // out of every active matrix.
+
   // `deal` is api.dealapp.sa — the SAME site the active dealapp pipeline covers. Probing it would
   // always say "alive" and always be the wrong conclusion, so it is excluded by name, not omitted
   // by accident.
   // `muktamel` is not retired; it runs on its own weekly workflow.
 };
-const SKIP = new Set(['deal', 'muktamel']);
+const SKIP = new Set(['deal', 'muktamel', 'alnokhba']);
 
 // RESPONDING IS NOT THE SAME AS USABLE, and for toor the difference is stated by toor itself.
 // Its own pages carry a banner reading «نسخة تجريبية (المعلومات الواردة في هذا الموقع, ليست حقيقية
