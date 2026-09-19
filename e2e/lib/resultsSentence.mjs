@@ -101,12 +101,18 @@ export function resultsFoundCount(text, pool = matchers()) {
   const t = ar(text);
   let best = null;
   for (const { re } of pool) {
-    // Scan every occurrence and keep the LAST: there is one Results-Found sentence, but a card's own
-    // copy can coincidentally carry a similar shape, and the sentence is appended below the fold.
     const g = new RegExp(re.source, 'g');
     for (const m of t.matchAll(g)) {
       const n = Number(String(m[1]).replace(/[,٬،]/g, ''));
-      if (Number.isFinite(n)) best = { n, at: m.index ?? 0 };
+      const at = m.index ?? 0;
+      // LAST BY DOCUMENT POSITION, never by pool order. A chat transcript accumulates: an Advanced
+      // Filter journey renders a broad Results-Found sentence, then a narrowed one after the answer
+      // commits, and the two are usually DIFFERENT templates. Comparing only within each template
+      // and overwriting across them returns whichever template happens to sit later in the pool —
+      // measured on production 2026-09-19, that read the pre-narrowing 12,118 off a screen whose
+      // current answer was 6,155, and reported the product for the harness's own mistake (§40.7).
+      // The single-phrasing parser this replaced got it right for free, via one .pop().
+      if (Number.isFinite(n) && (best === null || at > best.at)) best = { n, at };
     }
   }
   return best ? best.n : null;

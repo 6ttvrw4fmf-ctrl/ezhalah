@@ -69,6 +69,30 @@ for (const t of fromSource) {
 check(`all ${fromSource.length} templates round-trip a count (${COUNTS.length} renderings each)`,
   misses.length === 0, misses.slice(0, 4).join('\n      '));
 
+// ── 2b. A TRANSCRIPT ACCUMULATES — the LATEST sentence wins, by document position. ──────────────
+// The Advanced Filter path renders a broad Results-Found sentence, then a narrowed one after the
+// answer commits, and the two are usually different templates. Picking by pool order instead of
+// document order reads the stale count and reports the PRODUCT for the harness's own mistake —
+// measured live on 2026-09-19 as «rendered 12,118 vs RPC 6,155» on a healthy search.
+{
+  const guests = fromSource.filter((t) => t.lang === 'ar' && !t.hasName);
+  let wrongOrder = 0;
+  // Every ordered PAIR of distinct templates, so no pool ordering can pass by luck.
+  for (const a of guests) {
+    for (const b of guests) {
+      if (a.template === b.template) continue;
+      const transcript = [
+        a.template.replace('{count}', '12,118'),   // the earlier, broader turn
+        'ملخص البحث',
+        b.template.replace('{count}', '6,155'),    // the later, narrowed turn — this must win
+      ].join('\n');
+      if (resultsFoundCount(transcript, pool) !== 6155) wrongOrder++;
+    }
+  }
+  check(`the LAST sentence by document position wins across all ${guests.length * (guests.length - 1)} template pairs`,
+    wrongOrder === 0, `${wrongOrder} pair(s) returned the earlier count`);
+}
+
 // ── 3. The in-browser clock and the node-side clock are the SAME predicate. ──────────────────────
 // settledSource() is evaluated inside page.waitForFunction, where searchSettled() cannot reach. If
 // the two ever disagree the harness waits on one rule and judges by another.
@@ -125,8 +149,10 @@ check('the page-cap watch is not ticked by a zero screen',
 // Each mutant is the defect as it actually shipped. A proof that cannot fail is not a proof, so the
 // verdict is computed, never a literal.
 console.log('\n  mutation proofs (the defect as it shipped, replayed):');
+let mutantsRun = 0; let mutantsKilled = 0;
 const mustCatch = (label: string, caught: boolean) => {
-  if (caught) { console.log(`    ✓ killed: ${label}`); return; }
+  mutantsRun++;
+  if (caught) { mutantsKilled++; console.log(`    ✓ killed: ${label}`); return; }
   failed++; console.log(`    ✗ SURVIVED: ${label}`);
 };
 
@@ -169,7 +195,34 @@ const namedText = named.template.replace('{count}', '41,330').replace(/\{name\}/
 mustCatch('the raw-placeholder escaping bug (drops every logged-in template) is caught',
   naiveRegex(named.template).test(namedText) === false && templateToRegex(named.template).test(namedText) === true);
 
+// M6 — the pool-order bug this module shipped with for one sweep run: keep the last match seen
+// while iterating templates, rather than the last by document position.
+{
+  const poolOrder = (text: string) => {
+    let best: number | null = null;
+    for (const { re } of pool) {
+      for (const m of text.matchAll(new RegExp(re.source, 'g'))) {
+        const n = Number(String(m[1]).replace(/[,٬،]/g, ''));
+        if (Number.isFinite(n)) best = n;          // overwrite unconditionally — the defect
+      }
+    }
+    return best;
+  };
+  const guests = fromSource.filter((t) => t.lang === 'ar' && !t.hasName);
+  // Find a pair the defect actually gets wrong, then prove the shipped code gets it right.
+  let caught = false;
+  for (const a of guests) {
+    for (const b of guests) {
+      if (a.template === b.template) continue;
+      const transcript = `${a.template.replace('{count}', '12,118')}\n${b.template.replace('{count}', '6,155')}`;
+      if (poolOrder(transcript) !== 6155 && resultsFoundCount(transcript, pool) === 6155) caught = true;
+    }
+  }
+  mustCatch('picking by pool order instead of document position (the 12,118-vs-6,155 misread)', caught);
+}
+
 console.log(failed === 0
-  ? `\n✅ Results-Found parsers track the shipped pool — ${fromSource.length} templates, 5 mutants killed.\n`
+  // Counted, never typed: a hardcoded tally is the same drift this whole barrier exists to stop.
+  ? `\n✅ Results-Found parsers track the shipped pool — ${fromSource.length} templates, ${mutantsKilled}/${mutantsRun} mutants killed.\n`
   : `\n❌ ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);
