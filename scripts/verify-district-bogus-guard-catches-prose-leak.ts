@@ -48,11 +48,23 @@ check('the LATEST defining migration is the prose-leak extension (not the origin
   latest.includes('district_bogus_guard_prose_leak') || latest.includes('20260919171833'));
 
 // ── 1. THE FOUR NEW RULES MUST ALL BE PRESENT, none silently dropped ─────────────────────────────
-check("#1 rule 6: 'مكون' (consisting-of) vocabulary", /or\s+t\s*~\s*'مكون'/.test(sql));
-check("#1 rule 7: 'مساحه'/'مساحة' (area) vocabulary",
-  /or\s+t\s*~\s*'مساحه'/.test(sql) && /or\s+t\s*~\s*'مساحة'/.test(sql));
-check('#1 rule 8: leading/trailing colon', /\^:/.test(sql) && /:\$/.test(sql));
-check('#1 rule 9: emoji surrogate-pair range', /uD83C-\\uDBFF/.test(sql) && /uDC00-\\uDFFF/.test(sql));
+// Named functions, not inline regex tests, so section 6 below can apply the SAME predicate this
+// file uses to a deliberately broken input — an executable mutation proof, not a mention of one.
+// Anchored to `t ~ '...'` (the function's own parameter), not a bare text search — otherwise a
+// self-test block below (which tests the SAME pattern against `canonical_district_ar`, a different
+// variable) would keep matching after the rule itself is stripped, and the mutation proof in
+// section 6b would prove nothing (the exact PART 3.3 shape-4 trap this file's own #3 check names).
+const hasConsistingOfRule = (s: string) => /or\s+t\s*~\s*'مكون'/.test(s);
+const hasAreaRule = (s: string) => /or\s+t\s*~\s*'مساحه'/.test(s) && /or\s+t\s*~\s*'مساحة'/.test(s);
+const hasColonRule = (s: string) => /t\s*~\s*'\^:'/.test(s) && /t\s*~\s*':\$'/.test(s);
+const hasEmojiRule = (s: string) => /t\s*~\s*'\[\\uD83C-\\uDBFF\]/.test(s);
+const hasAllFourNewRules = (s: string) =>
+  hasConsistingOfRule(s) && hasAreaRule(s) && hasColonRule(s) && hasEmojiRule(s);
+
+check("#1 rule 6: 'مكون' (consisting-of) vocabulary", hasConsistingOfRule(sql));
+check("#1 rule 7: 'مساحه'/'مساحة' (area) vocabulary", hasAreaRule(sql));
+check('#1 rule 8: leading/trailing colon', hasColonRule(sql));
+check('#1 rule 9: emoji surrogate-pair range', hasEmojiRule(sql));
 
 // ── 2. THE PRE-EXISTING RULES 1-5 MUST SURVIVE UNTOUCHED — an extension, not a rewrite ───────────
 check('#2 rule 1 (مخطط) still present', /t\s*~\s*'مخطط'/.test(sql));
@@ -110,6 +122,34 @@ check('#5 the scope note names the underlying listing rows as explicitly untouch
       + 'over-catch a merely-unstripped field label',
     !sql.includes(anywhereColon) && sql.includes("t ~ '^:'"));
 }
+
+// ── 6b. EXECUTABLE MUTATION PROOF — apply THIS FILE'S OWN detection predicate (hasAllFourNewRules,
+//        the function contract #1 above is built on) to deliberately broken migration text, not
+//        just to the real committed file. `mustCatch(label, condition)` is the name
+//        verify-new-barriers-are-mutation-proven.ts's ratchet requires for a proof to count as
+//        executable rather than merely described.
+const mustCatch = (label: string, caught: boolean) => check(`#6b mustCatch: ${label}`, caught);
+
+// The real, correct migration must pass — the negative control. A ratchet that rejected everything
+// would prove nothing (PRODUCTION_RED_TEAM_ENGINEER.md's "a rule red for everything guards nothing").
+mustCatch('the real committed migration text is NOT reported broken', hasAllFourNewRules(sql));
+
+// Each rule stripped out ONE AT A TIME — the predicate must notice EVERY omission, not just some.
+mustCatch("stripping the 'مكون' (consisting-of) rule out of the migration text",
+  !hasAllFourNewRules(sql.replace(/or\s+t\s*~\s*'مكون'\n\s*/, '')));
+mustCatch("stripping the 'مساحه'/'مساحة' (area) rule out of the migration text",
+  !hasAllFourNewRules(sql.replace(/or\s+t\s*~\s*'مساحه'\s*or\s+t\s*~\s*'مساحة'\n\s*/, '')));
+mustCatch('stripping the leading/trailing-colon rule out of the migration text',
+  !hasAllFourNewRules(sql.replace(/or\s+t\s*~\s*'\^:'\s*or\s+t\s*~\s*':\$'\n\s*/, '')));
+mustCatch('stripping the emoji-range rule out of the migration text',
+  !hasAllFourNewRules(sql.replace(/or\s+t\s*~\s*'\[\\uD83C-\\uDBFF\][^\n]*\n\s*/, '')));
+
+// The pre-existing (2026-09-11) migration ALONE — the exact state production was in before this
+// fix — must read as NOT having the new rules. This is the actual historical regression this
+// barrier exists to keep closed, not a synthetic string.
+const original = defining.length > 1 ? readFileSync(join(MIG_DIR, defining[0]!), 'utf8') : '';
+mustCatch('the ORIGINAL pre-fix migration (20260911201716) alone does not carry the new rules',
+  defining.length <= 1 || !hasAllFourNewRules(original));
 
 // ── 7. Wired into the suite ────────────────────────────────────────────────────────────────────
 check('#7 this check is discovered by npm test',
