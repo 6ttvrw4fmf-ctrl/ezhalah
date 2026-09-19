@@ -664,8 +664,8 @@ function SourceBadge({ source }: { source: string }) {
   // They MUST stay above the fallback, and ksaaqar MUST stay above any bare 'aqar' branch: the
   // slug 'ksaaqar' contains 'aqar', and falling through would stamp عقار's mark on another
   // company's listing — the misattribution the owner flagged as a legal problem, not cosmetic.
-  if (s.includes('ksaaqar') || s.includes('عقارات السعودية')) return null;
-  if (s.includes('sadiqeltajer') || s.includes('sadiq-eltajer') || s.includes('صادق التاجر')) return null;
+  if (s.includes('ksaaqar') || s.includes('ksa aqar') || s.includes('عقارات السعودية')) return null;
+  if (s.includes('sadiqeltajer') || s.includes('sadiq eltajer') || s.includes('sadiq-eltajer') || s.includes('صادق التاجر')) return null;
   if (s.includes('aqaralsaudia')) return <Image source={AQARALSAUDIA_LOGO} style={card.hostBadge} contentFit="contain" />;
   // سوار العقارية / راكز العقارية — logos landed 2026-09-15, so these two branches now render the
   // real mark instead of the deliberate `null` they held while the owner was still supplying the
@@ -780,8 +780,8 @@ function sourceHost(source: string): string {
   if (s.includes('rawasidark')) return 'rawasi-dark.com';
   // Same ordering rule as SourceBadge: 'ksaaqar' contains 'aqar', and the fallback below is
   // عقار's own domain, so without these two the card would claim another company hosts them.
-  if (s.includes('ksaaqar') || s.includes('عقارات السعودية')) return 'ksaaqar.com';
-  if (s.includes('sadiqeltajer') || s.includes('sadiq-eltajer') || s.includes('صادق التاجر')) return 'sadiq-eltajer.sa';
+  if (s.includes('ksaaqar') || s.includes('ksa aqar') || s.includes('عقارات السعودية')) return 'ksaaqar.com';
+  if (s.includes('sadiqeltajer') || s.includes('sadiq eltajer') || s.includes('sadiq-eltajer') || s.includes('صادق التاجر')) return 'sadiq-eltajer.sa';
   return 'sa.aqar.fm';
 }
 
