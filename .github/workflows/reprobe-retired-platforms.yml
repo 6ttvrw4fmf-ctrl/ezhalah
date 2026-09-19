@@ -1,0 +1,43 @@
+# A RETIREMENT IS A CLAIM WITH AN EXPIRY DATE — this is the only thing that re-checks it.
+#
+# Retiring a platform removes it from every active matrix, and the daily health report only walks
+# the ACTIVE list. From the moment a slug is retired, nothing looks at it again: every other
+# reference to RETIRED_PLATFORMS.txt is a guard that keeps it OUT. toor sat retired for 10 weeks on
+# a reason ("host IP-blocks us") that had stopped being true, and it was found by the owner asking,
+# not by any check. jazwtn and awal both came back the same way — caught by luck.
+#
+# Weekly, not daily: a dead domain does not resurrect hourly, and this must never become noise
+# someone learns to scroll past.
+name: Re-probe retired platforms
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # Mondays 06:17 UTC
+  workflow_dispatch:
+
+jobs:
+  reprobe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: Re-probe every retired platform
+        run: node scripts/reprobe-retired-platforms.mjs
+
+      # ── Failure→alert bridge (issue #1349) ──────────────────────────────────────────────────────
+      # This job runs unattended and WEEKLY, so it is the worst case for a silent red: nobody would
+      # notice for seven days. The step above exits 1 both on a crash and on its real finding — a
+      # platform we wrote off is answering again — and this is the only path from that exit code to a
+      # human. One open P1 per workflow file, auto-resolved by the next clean run.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind ingestion_check_failed
+          --workflow reprobe-retired-platforms.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
