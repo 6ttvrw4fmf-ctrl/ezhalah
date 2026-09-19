@@ -51,6 +51,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from curl_cffi import requests as cc
 
@@ -104,6 +105,22 @@ _seen_exc_kinds: set[tuple[str, str]] = set()
 _seen_exc_lock = threading.Lock()
 
 
+def _pmap(fn, items, workers: int):
+    """map(fn, items) across `workers` threads — but INLINE, on the calling thread, at workers==1.
+
+    NOT a micro-optimisation. Playwright's sync driver is bound to the thread that started it, and
+    this module opens a FRESH ThreadPoolExecutor at four separate call sites, so a "pool of one"
+    hands the browser to a different worker thread each time and the second one dies with
+    `greenlet.error: cannot switch to a different thread (which happens to have exited)` —
+    measured on the AR enricher, 2026-09-18, before the same mistake shipped there (PR #3140).
+    A pool of one looks single-threaded and is not.
+    """
+    if workers <= 1:
+        return [fn(x) for x in items]
+    with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(fn, items))
+
+
 def _note_exc(where: str, exc: BaseException) -> None:
     kind = type(exc).__name__
     key = (where, kind)
@@ -112,6 +129,69 @@ def _note_exc(where: str, exc: BaseException) -> None:
             return
         _seen_exc_kinds.add(key)
     print(f"  (diagnostic) {where}: first {kind} this run — {exc}", file=sys.stderr, flush=True)
+
+
+# ── CLOUDFLARE PATH (WASALT_BROWSER=1) ──────────────────────────────────────────────────────────
+# wasalt.sa has been unreachable by every http client since 2026-08-17 (issue #1019), and THIS
+# module's `_session()` is the blocked shape exactly: curl_cffi impersonate="chrome124" through the
+# Saudi residential proxy. run.py moved to a real browser in PR #3129 and enrich_ar.py in PR #3140;
+# liveness was the third consumer of the blocked transport and nothing listed it.
+#
+# The consequence was not "liveness is a bit stale". Every read came back 403/timeout, which
+# get_verdict() correctly calls 'failed' (transient, never dead), so NO wasalt row could accumulate
+# a strike and NO dead wasalt listing could EVER be retired — they stayed active AND searchable
+# indefinitely. Six such rows were found and repaired by hand on 2026-09-19 (migration
+# 20260919010944); this is the fix that stops the next one.
+_BROWSER: Any = None
+
+
+def _browser_enabled() -> bool:
+    from scrapers.wasalt import browser as _b
+    return _b.browser_enabled()
+
+
+def _browser() -> Any:
+    global _BROWSER
+    if _BROWSER is None:
+        from scrapers.wasalt import browser as _b
+        _BROWSER = _b.BrowserFetcher()
+    return _BROWSER
+
+
+def close_browser() -> None:
+    global _BROWSER
+    if _BROWSER is not None:
+        _BROWSER.close()
+        _BROWSER = None
+
+
+def browser_verdict(url: str):
+    """Browser-transport twin of get_verdict(). Returns (verdict, status, nbytes).
+
+    THE ONE RULE THIS FUNCTION EXISTS TO HOLD: a browser that produced no parseable answer is OUR
+    failure, never the listing's. `page_data()` returns None for a challenge shell, a dead proxy
+    exit and a navigation timeout alike, and none of the three is evidence about the ad. They all
+    map to 'failed' — transient — because the alternative is a blocked run striking every row it
+    touches and, at grace, deactivating live inventory in bulk. That is the single worst outcome
+    this whole module can produce, and it is one wrong branch away.
+
+    Status is load-bearing and is NOT redundant with the payload. Measured 2026-09-19 through a
+    headed Chromium: a dead listing answers HTTP 404 with a parseable __NEXT_DATA__ (`page:"/404"`,
+    propertyDetailsV3 null, 211KB); a live one answers 200 with the payload (326KB). So a returned
+    dict alone cannot decide anything — a 404 carries one too.
+    """
+    data, status, nbytes = _browser().page_data(url)
+    if status in (404, 410):
+        return ("dead", status, nbytes)          # the source answered: it is gone
+    if data is None:
+        return ("failed", status or 0, nbytes)   # no parseable answer → UNKNOWN, never dead
+    if status != 200:
+        return ("failed", status or 0, nbytes)   # 5xx/403/redirect → transient, never dead
+    try:
+        pdv = (data.get("props", {}).get("pageProps", {}) or {}).get("propertyDetailsV3")
+    except Exception:
+        pdv = None
+    return ("live" if pdv else "dead", status, nbytes)
 
 
 def head_status(url: str, tries: int = 3):
@@ -131,6 +211,9 @@ def head_status(url: str, tries: int = 3):
 
 def get_verdict(url: str, tries: int = 3):
     """Return (verdict, status, nbytes). verdict ∈ {'live','dead','failed'} — GET is the ground truth."""
+    if _browser_enabled():
+        _throttle()
+        return browser_verdict(url)
     s = _session()
     for attempt in range(tries):
         try:
@@ -168,6 +251,17 @@ def check_hybrid(row):
     head_code/get_code are carried out (not just the verdict) so a kill can be re-checked later from
     the status that actually caused it — 404 vs 200-without-propertyDetailsV3 are different evidence."""
     tbl, lid, url, cur = row
+    # ponytail: the browser path has no cheap HEAD, so it always pays for the GET. Playwright has
+    # no HEAD primitive, and curl_cffi's HEAD is the blocked transport — a HEAD there returns the
+    # same 403 the GET does, so short-circuiting on it would be worse than useless. The cost is
+    # bounded because only the enum-ABSENT candidates are confirmed (--confirm-limit, default
+    # 1500), not the whole table: ~1500 × ~300KB ≈ 450MB/run, ~7GB/month at the 2-day cadence,
+    # against the ~700GB/month that got per-listing liveness disabled in the first place.
+    # Upgrade path if that ever matters: context.request.head() reuses the browser context's
+    # cf_clearance cookie, which may pass once a navigation has solved the challenge — untested.
+    if _browser_enabled():
+        verdict, st, nbytes = get_verdict(url)
+        return (tbl, lid, cur, verdict, True, nbytes, None, st)
     hc = head_status(url)
     if hc == 200:
         return (tbl, lid, cur, "live", False, 0, hc, None)
@@ -362,8 +456,7 @@ def run_pilot(args) -> int:
     head_agree = 0
     alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
     now_iso = datetime.now(timezone.utc).isoformat()
-    with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-        for tbl, lid, verdict, hc, nbytes in ex.map(check_one, rows):
+    for tbl, lid, verdict, hc, nbytes in _pmap(check_one, rows, args.workers):
             checked += 1
             total_bytes += nbytes
             if hc is not None:
@@ -421,8 +514,7 @@ def run_enforce(args) -> int:
     alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
     dead_rows: list[tuple[str, int, int]] = []  # (tbl, id, cur_missing) — confirmed dead this run
 
-    with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-        for tbl, lid, cur, verdict, used_get, nbytes, _hc, _gc in ex.map(check_hybrid, rows):
+    for tbl, lid, cur, verdict, used_get, nbytes, _hc, _gc in _pmap(check_hybrid, rows, args.workers):
             checked += 1
             total_bytes += nbytes
             if verdict == "live":
@@ -678,8 +770,7 @@ def run_enum_strike(args) -> int:
     elif cohort:
         # 3a) control first — if the checker can't see known-live rows as live, trust nothing.
         c_live = c_dead = c_failed = 0
-        with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-            for _tbl, _lid, _cur, verdict, _g, nbytes, _hc, _gc in ex.map(check_hybrid, control):
+        for _tbl, _lid, _cur, verdict, _g, nbytes, _hc, _gc in _pmap(check_hybrid, control, args.workers):
                 total_bytes += nbytes
                 c_live += verdict == "live"; c_dead += verdict == "dead"; c_failed += verdict == "failed"
         if not control_ok(c_live, c_dead, c_failed, len(control), args.control_min_live):
@@ -693,8 +784,7 @@ def run_enum_strike(args) -> int:
             alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
             dead_ids: dict[str, list[int]] = {t: [] for t in TABLES}
             detail: list[dict] = []
-            with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:
-                for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in ex.map(check_hybrid, cohort):
+            for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in _pmap(check_hybrid, cohort, args.workers):
                     checked += 1
                     total_bytes += nbytes
                     detail.append({
@@ -773,9 +863,21 @@ def main() -> int:
     args = ap.parse_args()
     if args.mode == "pilot" and not args.limit:
         args.limit = 800
-    if args.mode == "enum-strike":
-        return run_enum_strike(args)
-    return run_enforce(args) if args.mode == "enforce" else run_pilot(args)
+    # ONE BROWSER, ONE THREAD. See _pmap(): Playwright's sync driver is bound to the thread that
+    # started it, and this module maps over rows from four separate call sites. Serialising here is
+    # not a throughput regression to apologise for — a browser confirm is seconds either way, and
+    # the cohort is bounded by --confirm-limit.
+    if _browser_enabled() and args.workers != 1:
+        print(f"ⓘ browser transport → --workers {args.workers} forced to 1 "
+              f"(Playwright's sync API is thread-bound)", flush=True)
+        args.workers = 1
+    try:
+        if args.mode == "enum-strike":
+            return run_enum_strike(args)
+        return run_enforce(args) if args.mode == "enforce" else run_pilot(args)
+    finally:
+        # Chromium is a child process, not a socket — an un-closed one can hold the CI step open.
+        close_browser()
 
 
 if __name__ == "__main__":
