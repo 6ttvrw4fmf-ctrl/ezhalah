@@ -32,6 +32,7 @@
 import { chromium, devices } from '@playwright/test';
 import { appendFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { parseVisibleState } from './visibleState.mjs';
+import { resultsFoundCount, settledSource } from '../lib/resultsSentence.mjs';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 const SUPA = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://aannarbkwcymrotzwdbo.supabase.co';
@@ -111,7 +112,8 @@ export const WATCHES = [
 // ── small helpers ────────────────────────────────────────────────────────────────────────────────
 const ar = (s) => String(s ?? '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
 const num = (s) => { const m = ar(s).match(/[\d][\d,٬]*/); return m ? Number(m[0].replace(/[,٬]/g, '')) : null; };
-const lastCount = (text) => num([...String(text).matchAll(/لقينا\s+([\d,٬]+)\s+إعلان/g)].pop()?.[1]);
+// The Results-Found sentence rotates; read it through the pool-derived matcher, never one phrasing.
+const lastCount = (text) => resultsFoundCount(text);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function post(path, body, tries = 4) {
@@ -568,9 +570,16 @@ async function pickCity(page, city) {
 // (proven separately: سكني/بيع/بقعاء returns «لقينا 87 إعلان»). Another §40.7 harness-failure-wearing-
 // a-product-failure's-clothes, and a coverage floor is exactly what it took out.
 //
-// The alternation is derived from the user-facing strings in src/i18n.tsx and PINNED against them by
-// scripts/verify-live-sweep-coverage-contract.ts, so a new zero-state phrasing cannot silently
-// reintroduce the hang. «ما لقينا» needs no branch of its own — it contains «لقينا».
+// 2026-09-19: the same lesson, one layer deeper, and this time the hang was on the SUCCESS side. The
+// «لقينا» branch above stood in for "a result count is on screen" — true while a single fixed
+// sentence was rendered, false the morning the Results-Found sentence became a rotation (PR #3186).
+// Only 4 of the 10 AR guest templates contain «لقينا» at all: «بحثك رجّع لنا 41,330 نتيجة 🥳» is a
+// perfectly settled search this regex could not see, measured on production that day. So the
+// success branch is no longer a phrasing at all — it asks whether any SHIPPED template matched.
+// Both halves are now derived rather than restated; see e2e/lib/resultsSentence.mjs.
+// SETTLED_RE is kept for the ZERO-state half alone: verify-live-sweep-coverage-contract.ts still
+// pins it against every zero phrasing src/i18n.tsx can render. The SUCCESS half now lives in
+// settledSource()/searchSettled(), which are derived from the shipped pool.
 export const SETTLED_RE = /لقينا|ما لقيت|ما فيه/;
 /**
  * Tap a control by its exact Arabic label, scrolling the inner ScrollView to it first.
@@ -659,7 +668,7 @@ const runSearch = async (page) => {
   await sleep(800);
   await search.click();
   await page.waitForFunction((src) => new RegExp(src).test(document.body.innerText),
-    SETTLED_RE.source, { timeout: 70000 });
+    settledSource(), { timeout: 70000 });
   await sleep(2600);
 };
 
@@ -989,9 +998,25 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   if (rendered != null && j.rpc != null && rendered !== j.rpc) {
     defect(name, 'RPC→RENDERED', `page shows ${rendered}, RPC returned ${j.rpc}`); j.ok = false;
   }
+  // A COUNT THE HARNESS CANNOT READ IS A BLIND JOURNEY, NEVER A QUIET PASS (2026-09-19).
+  // `rendered == null` gates BOTH the RPC→RENDERED comparison above and the page-cap watch below, so
+  // a parser that stops matching disables the one layer only a browser can see — and says nothing.
+  // That is exactly what happened when the Results-Found sentence became a rotation: 7 of 8 journeys
+  // compared nothing and the run still printed «RPC→RENDERED MISMATCHES: 0». The floor caught it only
+  // because no journey ticked the watch at all; had one honest zero been in the rotation (it was, the
+  // next run), the whole thing would have read 10/10 while blind. So the silence is now the defect:
+  // a search that returned rows, on a settled screen, must yield a readable total.
+  if (rendered == null && j.rpc > 0 && !ui.zero) {
+    defect(name, 'RPC→RENDERED',
+      `the screen showed results (RPC ${j.rpc}) but no shipped Results-Found sentence could be read — `
+      + 'either the product stopped stating the total (§42) or the pool in src/data/resultsFoundRotation.ts '
+      + 'moved out from under e2e/lib/resultsSentence.mjs. Both are defects; neither may be silent.');
+    j.ok = false;
+  }
   // THE PAGE-CAP WATCH: 1,500 is the RPC page limit and must never be quoted as a match total.
-  // Only a journey that actually rendered a total can judge it.
-  if (rendered != null && j.rpc != null) observeWatch('true-total-never-page-cap');
+  // Only a journey that actually rendered a total can judge it — and a ZERO screen cannot: it can
+  // never display 1,500, so counting it as an observation is watch theatre. Require a real total.
+  if (rendered != null && rendered > 0 && j.rpc != null) observeWatch('true-total-never-page-cap');
   if (rendered === 1500 && j.rpc !== 1500) {
     defect(name, 'RPC→RENDERED', 'page quoted 1,500 — the RPC page cap — as the match total (true-total-never-page-cap)'); j.ok = false;
   }
