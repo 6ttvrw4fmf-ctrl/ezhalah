@@ -108,3 +108,41 @@ export async function deleteAllChats(): Promise<boolean> {
   const { error } = await supabase!.from('user_chats').delete().neq('id', '');
   return !error;
 }
+
+/**
+ * Which chats may the push effect DELETE from the server this cycle, and which requests may it
+ * forget? (ops_incident #297.)
+ *
+ * THE DIFFERENCE WAS NEVER THE ORACLE. The push effect used to derive deletions as
+ * `baseline \ currentlyDisplayed`. That reads "this chat is not on screen" as "the user deleted
+ * this chat", and those are different claims the moment anything other than a deletion can take a
+ * chat off screen — which the sidebar's 50-entry DISPLAY cap does routinely:
+ *
+ *   · hold 50 synced chats and start a 51st — `[next, ...rest].slice(0, 50)` drops the oldest id;
+ *   · sign in where local ∪ server exceeds 50 — the merge slices the union;
+ *   · a server row whose meta the merge skips as malformed — the id never enters the list at all.
+ *
+ * In every one of those the row was still in the baseline, so the diff called it deleted and the
+ * server copy went permanently, on every device, with no user action. A display cap performed a
+ * data deletion.
+ *
+ * So deletion is INTENT-DRIVEN here: `requested` contains only ids that `deleteHistory()` or
+ * `clearHistory()` put there. `displayed` is deliberately NOT a parameter — there is no argument
+ * this function could take it for, and leaving it out is what makes "eviction cannot delete" true
+ * by construction rather than by a condition someone can later relax.
+ *
+ * `forget` is the bookkeeping half: an id the server is not known to hold needs no delete and must
+ * not be retried forever. An id that IS held stays queued until its delete actually succeeds.
+ *
+ * Pure, so scripts/verify-chat-eviction-is-not-a-deletion.ts can execute it.
+ */
+export function chatsToDelete(
+  serverHolds: ReadonlySet<string> | ReadonlyMap<string, unknown>,
+  requested: Iterable<string>,
+): { toDelete: string[]; forget: string[] } {
+  const holds = (id: string) => (serverHolds instanceof Map ? serverHolds.has(id) : (serverHolds as ReadonlySet<string>).has(id));
+  const toDelete: string[] = [];
+  const forget: string[] = [];
+  for (const id of new Set(requested)) (holds(id) ? toDelete : forget).push(id);
+  return { toDelete, forget };
+}

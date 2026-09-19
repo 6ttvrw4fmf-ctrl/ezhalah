@@ -112,18 +112,27 @@ success and from a genuine zero, and every RPC must bound its await — a call w
 the loader forever, which reads to a user as a hang, not an error.
 
 **That last clause used to read "every RPC goes through the `bounded()` timeout wrapper", and it was
-a claim nobody executed (corrected 2026-09-14, routine #10).** Measured: 16 RPC call sites in
+a claim nobody executed (corrected 2026-09-14, routine #10).** Measured then: 16 RPC call sites in
 `src/`, **13 bounded and 3 not** — `loaderActivePlatforms.ts`, `loaderScaleStats.ts` and
-`remote.ts`'s `loc_rel_rank` have no timeout, no AbortSignal and no `withTimeout`. Nothing in the
+`remote.ts`'s `loc_rel_rank` had no timeout, no AbortSignal and no `withTimeout`. Nothing in the
 repo would have noticed a fourth. A reader consulting this rule for "are our RPCs bounded?" got a
 confident yes from a sentence no check enforced — the PART 1.11 shape in
 `docs/ops/BARRIER_ENGINEER.md`: a pointer reads as coverage. `scripts/verify-every-rpc-call-is-bounded.ts`
-(in `npm test`) now measures it on every PR: the three known sites are a **shrink-only** baseline
-with a ceiling, a NEW unbounded call site is RED, and a baseline entry that has been fixed is RED as
-stale so the ratchet cannot read better than reality. The three remaining sites are
-`ops_incident` #269, owned by their surfaces, not by the barrier. Three mechanisms count as bounded
-because the repo really uses three and all three bound the wait: `bounded()` (src/data/remote.ts),
-`.abortSignal()` (src/data/locations.ts) and `withTimeout()` (the AF probe path).
+(in `npm test`) measures it on every PR: the known sites are a **shrink-only** baseline with a
+ceiling, a NEW unbounded call site is RED, and a baseline entry that has been fixed is RED as stale
+so the ratchet cannot read better than reality.
+
+**Closed 2026-09-18 (routine #6, `ops_incident` #269): the count is now 16 call sites, 16 bounded, 0
+unbounded — baseline empty, ceiling 0.** The sentence at the top of this section is, for the first
+time, a measured fact rather than an aspiration. The two search-loading reads went through the new
+`src/data/boundedRpc.ts` rather than `remote.ts`'s `bounded()`, because those modules are
+deliberately import-light (`loaderPlatforms.ts` records why) and importing `remote.ts` would drag the
+whole search layer in behind them; `loc_rel_rank` uses the in-file `bounded()` it sits next to. Keep
+the baseline empty: a name appearing in it again means someone shipped an RPC that can hang.
+
+Three mechanisms count as bounded because the repo really uses three and all three bound the wait:
+`bounded()` (src/data/remote.ts), `.abortSignal()` (src/data/locations.ts and `boundedRpc.ts`) and
+`withTimeout()` (the AF probe path).
 
 **Barriers for this class must EXECUTE the function against an injected failure.** Every one of these
 five defects had a barrier over the exact line, and every one of those barriers was a source-TEXT

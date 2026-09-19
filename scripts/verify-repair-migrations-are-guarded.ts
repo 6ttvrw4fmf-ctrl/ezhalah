@@ -48,6 +48,32 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // NOT the usual two-migrations-minutes-apart shape: this repair ships no companion because it
+  // needs none, and the reason is structural rather than "some detector probably covers it".
+  //
+  // The UPDATE changes NO source-derived value. It sets production_ready=true on two rows whose
+  // ONLY reason for being false was enforce_price_size_sanity() — a BEFORE trigger that hides a
+  // price_size_impossible() row iff it is absent from ops_price_source_verified. The same migration
+  // adds the evidence rows, so the flag it releases is DERIVED from state the migration also wrote.
+  //
+  // That makes the invariant self-restoring in both directions, which is what a detector would
+  // otherwise have to watch for: delete the evidence row and the next sync upsert re-fires the
+  // trigger and re-hides the listing automatically; the repair cannot survive its own justification.
+  // And a regression the other way — the flag falling back to false while the row is still located —
+  // is exactly what mon_detect_located_row_unreachable() already raises P1 on, per row, on the
+  // evaluated path. That detector is what opened this investigation in the first place; it is on the
+  // mon_run_all_detectors() roster and re-ran green (0 raised) after this migration applied.
+  // ops_price_source_verified's own decay is separately watched by
+  // mon_detect_price_source_evidence_stale(), which counts these three as not_recheckable while
+  // ar_data is NULL (live-probe evidence) and will machine-check them once enrich_ar is unblocked.
+  '20260918220610_register_wasalt_land_prices_read_live_from_the_source.sql':
+    'no source-derived value is written: the flag this releases is derived from the '
+    + 'ops_price_source_verified rows the same migration adds, so deleting the evidence makes the '
+    + 'next sync upsert re-fire enforce_price_size_sanity() and re-hide the row by itself. The '
+    + 'opposite regression (located row falls back to not-production_ready) is already raised P1 '
+    + 'per row by mon_detect_located_row_unreachable(), which is on the mon_run_all_detectors() '
+    + 'roster and re-ran green after this applied; evidence decay is watched by '
+    + 'mon_detect_price_source_evidence_stale()',
   // Same companion shape as the entries below: the repair (healing six dealapp rows the
   // enforce_price_size_sanity trigger had sentineled to «غير معروف», owner decision 2026-09-11 /
   // ops_incident #172) and its watcher landed as two migrations nine minutes apart, so the repair
