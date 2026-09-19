@@ -2,8 +2,22 @@
 verify_deletions.py). Same fake-client style as test_cleanup.py — no real DB, no network."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import scrapers.common.verify_deletions as V
 import scrapers.common.cleanup as C
+
+# CALENDAR-DRIFT BUG (found 2026-09-19). _log_row's "in window" default used to be a hardcoded
+# absolute date, "2026-08-20T00:00:00+00:00", picked because it was safely inside a 30-day window
+# on 2026-08-22 (this module's own authoring date). The whole test suite went red exactly 30 days
+# later — not a flake, a time bomb: window_and_sample() filters on `deleted_at >= now() - 30 days`,
+# and by 2026-09-19 that cutoff had caught up to and passed the fixed fixture date, so every "in
+# window" row silently fell OUTSIDE the window and every assertion saw sampled=0/window_total=0.
+# Fix: compute the fixture dates RELATIVE TO "now" so they can never again drift out of range no
+# matter what day the suite runs. _RECENT sits deep inside any real days=30 window; _OLD sits far
+# enough outside that it stays "too old" for centuries, not just today.
+_RECENT = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+_OLD = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
 
 
 class _Res:
@@ -49,16 +63,17 @@ class _Client:
     def table(self, name): return _Table(self, name)
 
 
-def _log_row(i, url="http://x/1", deleted_at="2026-08-20T00:00:00+00:00"):
+def _log_row(i, url="http://x/1", deleted_at=None):
+    deleted_at = deleted_at if deleted_at is not None else _RECENT
     return {"id": i, "platform": "testp", "source_table": "testp_listings", "listing_id": i,
             "listing_url": url, "deleted_at": deleted_at}
 
 
 def test_sample_recent_deletions_respects_platform_and_window():
     client = _Client({"cleanup_deletion_log": [
-        _log_row(1, deleted_at="2026-08-20T00:00:00+00:00"),           # in window
+        _log_row(1, deleted_at=_RECENT),                                # in window
         {**_log_row(2), "platform": "otherplatform"},                   # wrong platform
-        _log_row(3, deleted_at="2026-01-01T00:00:00+00:00"),           # too old
+        _log_row(3, deleted_at=_OLD),                                   # too old
         _log_row(4, url=""),                                            # no url — excluded
     ]})
     rows = V.sample_recent_deletions(client, "testp", days=30, sample=40)
