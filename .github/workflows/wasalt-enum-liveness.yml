@@ -84,15 +84,28 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      # Cloudflare path (issue #1019): the DIRECT confirm below reads listing pages on wasalt.sa,
+      # which no http client has reached since 2026-08-17. --with-deps pulls Chromium's libs.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Enum-strike (guarded)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          # Browser + residential proxy, the pair proven on 2026-09-18: the browser supplies the JS
+          # execution the challenge demands, the proxy the residential IP it also demands. Without
+          # this every confirm returns 403 -> 'failed' -> no strike, which is why no dead wasalt
+          # listing had EVER been retired (six were repaired by hand in migration 20260919010944).
+          WASALT_BROWSER: "1"
           SCRAPE_MIN_INTERVAL: "0.3"
         run: |
-          exec python -m scrapers.wasalt.liveness \
+          # headless=False is what clears the challenge; the runner has no display, so xvfb-run
+          # supplies a virtual one. --workers 1 because Playwright's sync API is thread-bound
+          # (liveness.py forces it anyway; passing it keeps the command honest).
+          exec xvfb-run -a python -m scrapers.wasalt.liveness \
             --mode enum-strike \
             --grace 3 \
+            --workers 1 \
             --confirm-limit ${{ inputs.confirm_limit || '1500' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }}
