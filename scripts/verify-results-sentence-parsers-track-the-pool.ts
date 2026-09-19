@@ -378,6 +378,20 @@ check('the page-cap watch is not ticked by a zero screen',
   /rendered != null && rendered > 0 && j\.rpc != null\) observeWatch\('true-total-never-page-cap'\)/.test(sweepSrc),
   'a zero-result screen cannot display 1,500 — ticking the watch there is theatre');
 
+// ── 7b. THE MATCHER RETURNS A NUMBER — every comparison against it must be numeric. ─────────────
+// resultsFoundCount() returns a parsed number where the retired parser returned the captured STRING.
+// Any consumer still comparing it to a raw «6,155» text reads two renderings of one total as a
+// mismatch and accuses production — which showmore.mjs did on its first run after the change.
+check('resultsFoundCount returns a number, not the captured text',
+  typeof resultsFoundCount('أبشر طلع لنا 6,155 نتيجة على بحثك 🏡') === 'number');
+{
+  const showmore = readFileSync(join(ROOT, 'e2e/live-sweep/showmore.mjs'), 'utf8');
+  const code = showmore.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  check('showmore.mjs compares the closing line to the headline NUMERICALLY',
+    !/st\.closing\s*!==\s*total0/.test(code) && /closingN\s*!==\s*num\(total0\)/.test(code),
+    'a raw-string comparison against the parsed headline is back — it reports «6,155 vs 6155» on a healthy page');
+}
+
 // ── 8. MUTATION PROOFS — watch the barrier go red on the real defect. ───────────────────────────
 // Each mutant is the defect as it actually shipped. A proof that cannot fail is not a proof, so the
 // verdict is computed, never a literal.

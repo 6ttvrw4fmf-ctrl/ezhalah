@@ -404,7 +404,15 @@ export async function showMoreJourney(plan) {
 
         // The closing line must state the search's TRUE total, never a batch size — compared
         // against the headline read the SAME way, off the SAME message.
-        if (st.closing && st.closing !== total0 && num(st.closing) > 0 && num(total0) > 0 && num(st.closing) !== n) {
+        //
+        // COMPARE NUMBERS, NEVER THE RENDERED STRINGS (2026-09-19). `st.closing` is the raw captured
+        // text («6,155») while `total0` is `visibleState.headline`, which is now a parsed number. The
+        // two were both strings until the Results-Found matcher started returning a number, and this
+        // line then reported «closing message quotes 6,155 but the search found 6155» — the same
+        // total, in two renderings, on a healthy production. §40.7 again, and the exact shape this
+        // file's own 2026-09-05 comment above was written about: read both sides the SAME way.
+        const closingN = num(st.closing);
+        if (st.closing && closingN > 0 && num(total0) > 0 && closingN !== num(total0) && closingN !== n) {
           defect(name, 'TRUE-TOTAL', `closing message quotes ${st.closing} but the search found ${total0}`);
         }
         break;
