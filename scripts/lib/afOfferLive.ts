@@ -31,8 +31,13 @@
 //      `reason` says which, so the caller can fail loudly on 'absent' and report NOT VERIFIED on
 //      'no-turn'.
 //
-// Deliberately dependency-free and `page`-typed as `any`: the journeys import Playwright
-// themselves and this file must not pin a second copy of its types.
+// `page` is typed as `any` on purpose: the journeys import Playwright themselves and this file must
+// not pin a second copy of its types. Its one import is e2e/lib/resultsSentence.mjs, which reads the
+// shipped template pool off disk and pulls in no driver — the Results-Found sentence rotates, so a
+// parser of it restated here would go blind the next time the owner edits a template, and this file
+// has already paid that price once (see HAS_TURN_SRC).
+
+import { resultsSentenceAtStartSource } from '../../e2e/lib/resultsSentence.mjs';
 
 /** Find the smallest visible leaf whose trimmed innerText is exactly `txt`, scroll it into view
  *  inside its own scroll container, and hand back a clickable viewport point. Runs in the page. */
@@ -65,10 +70,26 @@ const SCROLL_BOTTOM_SRC = () => {
     .forEach((e: any) => { e.scrollTop = e.scrollHeight; });
 };
 
-/** Has the agent finished this turn — i.e. is there a results headline to hang an offer off? */
-const HAS_TURN_SRC = () =>
+/**
+ * Has the agent finished this turn — i.e. is there a results headline to hang an offer off?
+ *
+ * DERIVED FROM THE SHIPPED POOL, never restated (routine #10, 2026-09-19). It used to be
+ * `/لقينا\s[\d,٠-٩،]+\sإعلان/`, which PR #3186 retired: all ten AR guest templates say «نتيجة»
+ * and none say «إعلان», so this returned false on every real results turn. It fails SILENTLY —
+ * `openAfOffer` then reports `{ opened: false, reason: 'no-turn' }`, which the type below documents
+ * as explicitly NOT a verdict about AF — so the four AF live journeys that import this stood down
+ * on every run instead of testing anything, and reported nothing wrong.
+ *
+ * The source string is passed IN because this function is serialized into the page, where this
+ * module cannot be reached. It is the ANCHORED variant: the reader walks leaf nodes and asks "is
+ * THIS node a headline", so an unanchored test would match a wrapper holding the whole transcript.
+ */
+const HAS_TURN_SRC = (src: string) =>
   [...document.querySelectorAll('div,span,p')]
-    .some((e: any) => e.children.length === 0 && /لقينا\s[\d,٠-٩،]+\sإعلان/.test((e.textContent || '').trim()));
+    .some((e: any) => e.children.length === 0 && new RegExp(src).test((e.textContent || '').trim()));
+
+/** The shipped Results-Found pool, as a regex source the page can compile. */
+const HEADLINE_AT_START = resultsSentenceAtStartSource();
 
 export const AF_OFFER_CTA = 'خلّنا نحدد الطلب أكثر';
 
@@ -99,7 +120,7 @@ export async function openAfOffer(
   while (Date.now() - t0 < timeoutMs) {
     // Re-scroll EVERY iteration: the conversation is still growing while we poll.
     await page.evaluate(SCROLL_BOTTOM_SRC).catch(() => {});
-    if (!sawTurn) sawTurn = await page.evaluate(HAS_TURN_SRC).catch(() => false);
+    if (!sawTurn) sawTurn = await page.evaluate(HAS_TURN_SRC, HEADLINE_AT_START).catch(() => false);
     const box = await page.evaluate(CLICK_LEAF_SRC, AF_OFFER_CTA).catch(() => null);
     if (box) {
       await page.mouse.click(box.x, box.y);
