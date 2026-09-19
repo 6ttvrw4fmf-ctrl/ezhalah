@@ -23,6 +23,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import {
   shippedTemplates, templateToRegex, resultsFoundCount, matchersFor, searchSettled, settledSource,
+  resultsSentenceSource, resultsSentenceAtStartSource,
 } from '../e2e/lib/resultsSentence.mjs';
 import { __testing } from '../src/data/resultsFoundRotation.ts';
 import { stripComments } from './lib/stripComments.ts';
@@ -110,6 +111,45 @@ check('the in-browser settle source and searchSettled() agree on every template 
   clockSplits.length === 0, clockSplits.slice(0, 3).join(' / '));
 check('an unsettled screen is not mistaken for a settled one',
   !searchSettled('جاري البحث') && !inBrowser.test('جاري البحث'));
+
+// ── 3b. THE POOL-ONLY IN-PAGE SOURCES COVER EVERY TEMPLATE TOO. ─────────────────────────────────
+//
+// FOUND BY A MUTANT SURVIVAL SWEEP (routine #10, 2026-09-19): `resultsSentenceSource()` could be
+// cut to its FIRST template — 1 of 40 — and the entire 479-check suite stayed GREEN. Section 3
+// above exercises `settledSource()` per template, and that read as coverage for all three sources.
+// It is not the same function: settledSource() admits ZERO_RE, so a screen that merely says «ما
+// لقينا نتائج» satisfies it, and the pool half can rot underneath.
+//
+// These two are what the per-NODE readers compile inside the browser — e2e/ui-parity.spec.ts's
+// FOUND, scripts/lib/afOfferLive.ts's HAS_TURN_SRC, and the AF live journeys' headline walkers. A
+// source that covers one template makes all of them blind on the other nine, silently, which is the
+// precise failure this whole file exists to prevent — arriving through the DERIVED path rather than
+// a hand-pinned one.
+{
+  const unanchored = new RegExp(resultsSentenceSource(pool));
+  const atStart = new RegExp(resultsSentenceAtStartSource(pool));
+  const missUnanchored: string[] = [];
+  const missAtStart: string[] = [];
+  for (const t of fromSource) {
+    const rendered = t.template.replace('{count}', '41,330').replace(/\{name\}/g, 'فهد');
+    // Unanchored: the whole-body reader. Anchored: the leaf-node reader, so the sentence IS the node.
+    if (!unanchored.test(`نتائج البحث\n${rendered}\nالضغط على هذا الإعلان`)) missUnanchored.push(t.template);
+    if (!atStart.test(rendered)) missAtStart.push(t.template);
+  }
+  check(`resultsSentenceSource() matches all ${fromSource.length} shipped templates (the in-page whole-body reader)`,
+    missUnanchored.length === 0, missUnanchored.slice(0, 4).join('\n      '));
+  check(`resultsSentenceAtStartSource() matches all ${fromSource.length} shipped templates (the in-page leaf reader)`,
+    missAtStart.length === 0, missAtStart.slice(0, 4).join('\n      '));
+  // Both directions: the pool-only sources must NOT admit a zero-state or an unsettled screen —
+  // that is settledSource()'s job, and conflating them hands a caller a "headline" with no count.
+  check('the pool-only sources do NOT admit an honest-zero screen (that is settledSource\'s job)',
+    !unanchored.test('ما لقينا نتائج') && !atStart.test('ما لقينا نتائج'));
+  check('…nor an unsettled one', !unanchored.test('جاري البحث') && !atStart.test('جاري البحث'));
+  // The ANCHOR is load-bearing: a wrapper node holding the whole transcript must not read as a
+  // headline, or a leaf reader returns the entire page as one "headline".
+  check('the anchored source refuses a wrapper node that merely CONTAINS the sentence',
+    !atStart.test(`ملخص البحث\n${fromSource[0].template.replace('{count}', '41,330')}`));
+}
 
 // ── 4. A count that is absent stays ABSENT — never a zero. ───────────────────────────────────────
 // AGENTS.md: silent → NULL, never unknown → NO. A screen with no sentence must not read as "0 found".
