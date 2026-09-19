@@ -74,6 +74,12 @@
       "today_pct": 100,
       "active_rows": 90584
     },
+    "aqaralsaudia": {
+      "floor_pct": 80,
+      "today_pct": 100.0,
+      "active_rows": 16,
+      "note": "Declared 2026-09-19 (routine-3). Went production-searchable without a baseline row (ops_incident #231, filed 2026-09-13, named only wasalt/azdad/amlakalahsa at the time). Only 16 active rows — TINY and volatile like azdad at its own declaration (23 rows): one listing is 6.25 points. Floor set well below the single 100% observation for the same reason azdad's own note gives; raise once the platform is large enough for a percentage to mean something."
+    },
     "aqaratikom": {
       "floor_pct": 97,
       "today_pct": 100,
@@ -190,6 +196,12 @@
       "today_pct": 91.9,
       "active_rows": 405
     },
+    "rakez": {
+      "floor_pct": 93,
+      "today_pct": 96.5,
+      "active_rows": 3908,
+      "note": "Declared 2026-09-19 (routine-3). Went production-searchable without a baseline row and failed the onboarding gate for days (ops_incident #231, filed 2026-09-13, named only wasalt/azdad/amlakalahsa at the time — rakez was undeclared and unnoticed until this run). 3,908 rows is a large enough sample for a percentage to mean something; floor follows this file's own today-minus-about-three convention on a single observation."
+    },
     "ramzalqasim": {
       "floor_pct": 97,
       "today_pct": 100,
@@ -229,6 +241,12 @@
       "floor_pct": 28,
       "today_pct": 31.8,
       "active_rows": 44
+    },
+    "suwar": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 96,
+      "note": "Declared 2026-09-19 (routine-3). Went production-searchable without a baseline row (ops_incident #231). 96 active rows — small enough that a single listing losing its photo is ~1 point, so the floor is set meaningfully below the one observation taken so far rather than following the today-minus-about-three convention verbatim, matching the reasoning already used for azdad (a tiny, volatile platform)."
     },
     "therc": {
       "floor_pct": 74,
