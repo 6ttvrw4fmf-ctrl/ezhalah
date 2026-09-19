@@ -135,6 +135,15 @@ if (alive > 0) {
   console.log('   permission to un-retire — it is a prompt to LOOK. Re-read the recorded reason,');
   console.log('   and for any listings source verify that several different listing URLs return');
   console.log('   DIFFERENT identifiers before believing the site is usable.');
-} else {
-  console.log('✅ every retired platform is still genuinely unreachable — the reasons on file hold.');
+  // EXIT 1 ON A FINDING, not only on a crash. This runs unattended and weekly: a green run's log is
+  // read by nobody, so "a platform we wrote off is answering again" has to be a RED run or it is
+  // not a signal at all. The workflow bridges a red run to alert_event, which is the only path from
+  // here to a human — and the next clean run resolves that row automatically, so a site that
+  // flickers back for one week does not leave a stale alert behind.
+  //
+  // This is the same shape as the defect that let toor sit retired for 10 weeks on a reason that had
+  // stopped being true: the check that would have caught it either did not exist or reported into a
+  // log nobody opens.
+  process.exit(1);
 }
+console.log('✅ every retired platform is still genuinely unreachable — the reasons on file hold.');

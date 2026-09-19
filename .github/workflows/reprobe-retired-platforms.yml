@@ -24,3 +24,20 @@ jobs:
         with: { node-version: '24' }
       - name: Re-probe every retired platform
         run: node scripts/reprobe-retired-platforms.mjs
+
+      # ── Failure→alert bridge (issue #1349) ──────────────────────────────────────────────────────
+      # This job runs unattended and WEEKLY, so it is the worst case for a silent red: nobody would
+      # notice for seven days. The step above exits 1 both on a crash and on its real finding — a
+      # platform we wrote off is answering again — and this is the only path from that exit code to a
+      # human. One open P1 per workflow file, auto-resolved by the next clean run.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind ingestion_check_failed
+          --workflow reprobe-retired-platforms.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
