@@ -48,6 +48,53 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // The two-migrations-minutes-apart shape (see the identical entries below). The repair blanks
+  // EVERY ksaaqar price: its parser read a value from a static sidebar of five unrelated ads that
+  // is byte-identical on every page of the site, so 685 of 720 priced rows shared seven values and
+  // ads that published no price were given one anyway. The repair (20260919091545) had to run
+  // before its watcher could exist, so the repair file itself never reaches a mon_detect_* in
+  // executed SQL.
+  //
+  // What watches the class: mon_detect_price_borrowed_from_chrome(), created in 20260919092122,
+  // rostered into mon_run_all_detectors() in that same migration (the splice RAISES rather than
+  // no-ops if its anchor moved, and reachability is asserted afterwards), and reclassified P0->P1
+  // in 20260919170553 (a full-fleet aggregate belongs on the daily roster, not the 300s fast lane).
+  // It is a SHAPE detector — it fires when ANY platform's price distribution clusters past 15% on
+  // its top value or 50% on its top three, which is exactly what a chrome-borrowed price looks like
+  // and what a real market never does. Thresholds were measured against the live fleet (healthy max
+  // 11.1% / 23.7%), and it was mutation-proven by replaying ksaaqar's pre-repair distribution
+  // (fires, 33.7% / 83.5%) against sadiqeltajer's real 668 rows (silent, 4.3% / 11.4%).
+  //
+  // Deliberately NOT re-asserted the way the fabricated-amenity and price-evidence companions are:
+  // re-running this repair's UPDATE would now BLANK the real prices the fixed sweep has since
+  // written, destroying good data. The standing class detector is the guarantee here, not a
+  // re-assertion. Open 20260919092122 to check this reason rather than taking it on trust.
+  '20260919091545_ksaaqar_every_price_was_the_sidebars_not_the_ads.sql':
+    'watched by its companion 20260919092122_detect_price_borrowed_from_page_chrome_fleet_wide.sql, '
+    + 'which creates mon_detect_price_borrowed_from_chrome(), rosters it into mon_run_all_detectors() '
+    + 'and asserts reachability; a fleet-wide SHAPE detector that fires when a platform price '
+    + 'distribution clusters the way chrome-borrowed values do, mutation-proven on the ksaaqar '
+    + 'pre-repair distribution. Not re-asserted because re-running the blank would now wipe the real '
+    + 'prices the fixed sweep wrote',
+  // Same two-migrations-minutes-apart shape. The repair set two ksaaqar rows from a bogus
+  // property_age=100 (a spec-block overrun: the label «حدود وأطوال العقار» was missing from the
+  // parser, so the age value swallowed the 100 from the adjacent boundaries field) to their true 2,
+  // and NULLed any remaining 100 so the next sweep rewrites the real age. The parser fix is locked
+  // by hermetic tests, but this barrier's thesis is that a parser guard can decay to a weaker rule
+  // and re-corrupt silently, so a runtime watch is required in addition.
+  //
+  // What watches the class: mon_detect_property_age_beyond_ceiling(), created and rostered into
+  // mon_run_all_detectors() in 20260919170952 (the splice RAISES if its anchor moved; reachability
+  // asserted after). It is a fleet-wide SHAPE detector: property_age here is years-since-built, and
+  // across all 96,885 aged active listings the real maximum is 47, so an age past the 80 ceiling is
+  // a parse artifact on any platform, not just ksaaqar. Mutation-checked before shipping — a 100
+  // fires, a real 47 stays silent — and it returns 0 on the repaired fleet. Open 20260919170952 to
+  // check this reason rather than taking it on trust.
+  '20260919073453_ksaaqar_two_word_numeral_ages_were_overrun_by_the_next_field.sql':
+    'watched by its companion 20260919170952_detect_property_age_beyond_plausible_ceiling_fleet_wide.sql, '
+    + 'which creates mon_detect_property_age_beyond_ceiling(), rosters it into mon_run_all_detectors() '
+    + 'and asserts reachability; a fleet-wide SHAPE detector firing on any property_age past 80 (real '
+    + 'fleet max is 47), mutation-checked that 100 fires and 47 does not',
   // Second instance of the 20260918220610 shape, and waived for the identical structural reason
   // rather than by analogy — check it the same way. The UPDATE writes NO source-derived value: it
   // sets production_ready=true on two rows whose ONLY reason for being false was
