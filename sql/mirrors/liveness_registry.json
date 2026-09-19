@@ -186,6 +186,12 @@
     "grace": 3
   },
   {
+    "platform": "ksaaqar",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "mizlaj",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -247,6 +253,12 @@
   },
   {
     "platform": "sadin",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "sadiqeltajer",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3
