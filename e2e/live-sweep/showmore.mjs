@@ -310,7 +310,12 @@ export async function showMoreJourney(plan) {
         const st = await page.evaluate(() => {
           const txt = document.body.innerText;
           return {
-            closing: ([...txt.matchAll(/(?:من أصل|لقينا)\s+([\d,٬]+)\s+إعلان/g)].pop() || [])[1] ?? null,
+            // «عرضت لك أول N من أصل TOTAL إعلان مطابق» (i18n.tsx) — the CLOSING line, a different
+            // sentence family from the rotating Results-Found headline and legitimately
+            // hand-written here. The `لقينا` alternative it used to carry was retired by
+            // PR #3186 and its i18n entries are now unreachable from src/, so it could only
+            // ever match text the app no longer renders. Removed 2026-09-19 (routine #10).
+            closing: ([...txt.matchAll(/من أصل\s+([\d,٬]+)\s+إعلان/g)].pop() || [])[1] ?? null,
             // The Advanced Filter interview deliberately hides the whole actions row while it is
             // open (owner 2026-08-21): the AF card is an absolute overlay and buttons underneath it
             // are unreachable. That is intended product behaviour, not a missing pager.

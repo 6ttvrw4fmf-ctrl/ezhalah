@@ -242,7 +242,7 @@ const G2 = {
     const bad = [];
     if (after.cards > 0) bad.push(`New Chat left ${after.cards} result card(s) on screen`);
     if (after.afCards > 0) bad.push(`New Chat left ${after.afCards} Advanced-Filter card(s) on screen`);
-    if (after.countChip) bad.push(`New Chat left the previous count chip «لقينا ${after.countChip}» on screen`);
+    if (after.countChip) bad.push(`New Chat left the previous Results-Found count (${after.countChip}) on screen`);
     const dirty = after.composers.filter((v) => v.trim().length > 0);
     if (dirty.length) bad.push(`New Chat left text in the composer: ${JSON.stringify(dirty.slice(0, 2))}`);
     if (fired > 0) bad.push(`New Chat fired ${fired} property-search RPC(s) — it must execute nothing`);
@@ -666,7 +666,7 @@ const G8 = {
     if (!said) bad.push(`an impossible budget produced no Arabic no-results statement (expected one of ${JSON.stringify(ZERO_PHRASES)})`);
     if (state.cards > 0) bad.push(`an impossible budget still rendered ${state.cards} result card(s)`);
     if (state.loadMore > 0) bad.push('an impossible budget still offered the «عرض المزيد» pager');
-    if (state.countChip) bad.push(`an impossible budget still claimed «لقينا ${state.countChip} إعلان»`);
+    if (state.countChip) bad.push(`an impossible budget still quoted a Results-Found count of ${state.countChip}`);
     if (ctx.pageErrors.length) bad.push(`uncaught page error on the empty-results screen: ${ctx.pageErrors[0]}`);
     const evidence = { state, said: said ?? null };
     return bad.length ? violated(bad, evidence) : ok(evidence);
