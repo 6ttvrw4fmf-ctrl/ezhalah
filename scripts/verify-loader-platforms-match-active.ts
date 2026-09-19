@@ -99,10 +99,12 @@ if (!Array.isArray(raws)) process.exit(1);
 //
 //   (a) RETIRED / PAUSED platforms (scrapers/RETIRED_PLATFORMS.txt). Retirement KEEPS the historical
 //       rows searchable on purpose ("Historical DB rows and the scrapers/<slug>/ directory are KEPT"),
-//       so they stay live in the view forever. awal, toor and alnokhba have been exactly this for
-//       months and are deliberately absent from PLATFORM_META — the precedent this follows. muktamel
-//       joined them when its own gated weekly workflow started producing rows again; its result-card
-//       logo, domain and display name are all already wired, so nothing renders unbranded.
+//       so they stay live in the view forever while being deliberately absent from PLATFORM_META.
+//       alnokhba is the current example. This carve-out only ever EXCUSES such a platform for being
+//       unadvertised; it never asserts one is unadvertised, which is what keeps it correct as slugs
+//       come and go — awal (un-retired 2026-09-04), muktamel (delisted 2026-09-19, never actually
+//       retired) and toor (advertised by the BRAND_ONLY decision below) are all in PLATFORM_META
+//       today and simply never reach this branch.
 //
 //   (b) Platforms WITH NO BUNDLED LOGO ASSET YET. PLATFORM_META entries carry `logo: require(...)`,
 //       so a platform cannot enter the strip until someone adds its image to assets/images/. The five

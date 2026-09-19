@@ -42,8 +42,30 @@
 #             lies. Verify first that six different PropertyIds yield six DIFFERENT licences.
 # alnokhba  — deprecated 2026-07-14: alnokhba-services.com lapsed into a domain-parking page
 #             (HTTP 200 shell, no listings); 7 straight daily runs of rows_seen=0.
-# muktamel  — paused 2026-07-15: runs on its OWN gated weekly workflow (muktamel-sync.yml), never
-#             the shared matrix; listed here so it cannot re-enter any matrix while paused.
+# muktamel  — NOT RETIRED; delisted 2026-09-19. This is a CORRECTION of stale bookkeeping, not an
+#             un-retirement: muktamel had already stopped being paused, and only this file still
+#             said otherwise. Entry kept, like jazwtn's and awal's, so the history is readable.
+#
+#             WAS listed 2026-07-15 as "paused: runs on its OWN gated weekly workflow
+#             (muktamel-sync.yml), never the shared matrix". The pause ended 2026-09-04/05
+#             (migration 20260904151723_muktamel_liveness_policy_paused_is_not_unsearchable —
+#             "paused was a CADENCE fact", and the registry re-seed that followed). Since then:
+#             platform_registry carries muktamel at status='active'; search_listings_ar carries
+#             4,105 searchable rows (newest last_updated 2026-09-14); it is advertised in the
+#             loading strip (PLATFORM_META, src/data/loaderPlatforms.ts) with a bundled logo; it
+#             holds a registered liveness policy (CRAWL_PRESENCE_ONLY/3/168); and it runs its own
+#             8-shard fleet, muktamel-sharded.yml, on cron. None of that is a paused platform.
+#
+#             WHY IT WENT UNNOTICED FOR TWO WEEKS. Every reference to this file is a guard that
+#             keeps a slug OUT of something, so a live platform listed here can only ever be
+#             excluded from work it belongs in — it fails silently, in the safe-looking direction.
+#             The existing matrix guard could not see it either: it matches `source:` matrix keys,
+#             and muktamel's fleet is keyed on `shard:`. It also made
+#             scripts/reprobe-retired-platforms.mjs skip muktamel — for the wrong reason.
+#
+#             test_retired_platforms_guard.py::test_no_retired_platform_is_live_in_the_liveness_registry
+#             now makes this drift un-mergeable: it fails the moment a slug listed here is also
+#             registered as production-searchable.
 # deal      — deprecated 2026-06-26 (live deprecated_platforms row; experiment reverted
 #             2026-06-24): a 2-run JSON-API experiment against api.dealapp.sa — the SAME site the
 #             active `dealapp` pipeline covers, so running both would double-list dealapp.sa
@@ -74,5 +96,4 @@
 #             (3.83%) already live from other platforms. Nothing is inferred to fill it.
 toor
 alnokhba
-muktamel
 deal

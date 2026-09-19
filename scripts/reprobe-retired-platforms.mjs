@@ -39,9 +39,8 @@ const HOMES = {
   // `deal` is api.dealapp.sa — the SAME site the active dealapp pipeline covers. Probing it would
   // always say "alive" and always be the wrong conclusion, so it is excluded by name, not omitted
   // by accident.
-  // `muktamel` is not retired; it runs on its own weekly workflow.
 };
-const SKIP = new Set(['deal', 'muktamel', 'alnokhba']);
+const SKIP = new Set(['deal', 'alnokhba']);
 
 // RESPONDING IS NOT THE SAME AS USABLE, and for toor the difference is stated by toor itself.
 // Its own pages carry a banner reading «نسخة تجريبية (المعلومات الواردة في هذا الموقع, ليست حقيقية
