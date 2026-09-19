@@ -6,7 +6,7 @@ import { colors, radius, cardShadow } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
-import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish } from '@/lib/arabicText';
+import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
@@ -464,7 +464,10 @@ function arAttrValue(label: string, value: string, locale: string): string {
   // 2026-07-16: abeea.com.sa's street_address is captured in English) is scoped to genuine prose
   // labels only, so a license/plan/parcel number containing a Latin letter is never blanked.
   if (FREE_TEXT_PROSE_LABELS.has(ll)) return arabicOrPlaceholderForFreeText(v, locale, ATTRIBUTE_UNRESOLVED_AR);
-  return v;
+  // A mixed-script value (therc's «5,000 ر.س / yearly») carries an Arabic char, so the free-text
+  // leak guard above rightly passes it through as real source content — and the English period word
+  // rode along with it onto an Arabic card. Closed enum, display-layer only. (2026-09-18)
+  return translateTrailingPeriodWord(v, locale);
 }
 
 // Render Wasalt's "Additional Information" rows on the card. Shows first 4 rows, with a
@@ -484,7 +487,8 @@ function AdditionalInformationPanel({ listing, t, locale }: { listing: Listing; 
       <View style={card.addlGrid}>
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
-            <Text style={card.addlLabel}>{arabicOrPlaceholder(t(r.label), locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
+            {/* The source's own Arabic `key` outranks the placeholder — see attrDisplayLabel. */}
+            <Text style={card.addlLabel}>{attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
             <Text style={card.addlValue} numberOfLines={2}>{arAttrValue(r.label, r.value, locale)}</Text>
           </View>
         ))}

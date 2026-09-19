@@ -1781,9 +1781,13 @@ export async function fetchListingsForQuery(
       let rpcErr: unknown = null;
       try {
         if (supabase) {
-          const { data: boosts, error } = await supabase.rpc('loc_rel_rank', {
-            p_source_tables: st, p_listing_ids: ids, p_intents: intents,
-          });
+          // Bounded (#269): unbounded, a stalled connection left this await pending forever and
+          // the results grid never rendered. On timeout `boosts` is null, every proximityBoost
+          // falls to 0 below, and the search still returns its rows — degraded ordering, never a
+          // hang, and never a wrong or empty result set.
+          const { data: boosts, error } = await bounded<Array<{ source_table: string; listing_id: number; boost: number }>>(
+            supabase.rpc('loc_rel_rank', { p_source_tables: st, p_listing_ids: ids, p_intents: intents }),
+          );
           if (error) rpcErr = error;
           for (const b of (boosts ?? [])) bmap.set(`${b.source_table}:${Number(b.listing_id)}`, Number(b.boost));
           rpcCount = (boosts ?? []).length;

@@ -188,7 +188,19 @@ check('push: the shipped effect uses that predicate, and the activity-stamp diff
   && /new Map\(rows\.map\(\(r\) =>\n\s*\[r\.id, syncKeyOf\(/.test(store));
 check('push: gated on the pull having merged (a not-yet-merged list can never mass-delete server history)',
   /if \(syncReadyRef\.current !== historyKey\(user\.sub\)\) return; \/\/ push only after the pull merged/.test(store));
-check('push: deletions propagate only for ids the server was known to hold', /const gone = \[\.\.\.base\.keys\(\)\]\.filter\(\(id\) => !seen\.has\(id\)\);/.test(store));
+// THIS CHECK USED TO PIN THE DEFECT AS CORRECT (ops_incident #297). Its label claimed "deletions
+// propagate only for ids the server was known to hold" — true, and not the property that mattered.
+// Its regex froze the exact expression
+//     const gone = [...base.keys()].filter((id) => !seen.has(id));
+// which ALSO propagated a deletion for every id the 50-entry display cap had evicted, so a barrier
+// reading as a persistence guarantee was holding a silent data-loss path in place. The label and the
+// assertion have to answer the same question: deletions must follow INTENT, and be bounded by what
+// the server holds. Both halves are asserted, and neither is a frozen expression.
+check('push: deletions follow user INTENT, not "missing from the displayed list" (a 50-cap eviction is not a delete)',
+  /chatsToDelete\(base, pendingDeleteRef\.current\)/.test(store)
+  && !/\[\.\.\.base\.keys\(\)\]\.filter\(\(id\) => !seen\.has\(id\)\)/.test(store));
+check('push: deletion intent is recorded ONLY by the two user-facing removals',
+  (store.match(/pendingDeleteRef\.current\.add\(/g) || []).length === 2);
 check('a transcript the local cache pruned is never nulled on the server (meta-only upsert)',
   /void upsertChat\(it\.id, chatMetaOf\(it\), pushableTranscript\(it\)\)/.test(store));
 const sync = readFileSync(new URL('../src/lib/chatSync.ts', import.meta.url), 'utf8');

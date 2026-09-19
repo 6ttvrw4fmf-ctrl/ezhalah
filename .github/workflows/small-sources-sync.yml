@@ -130,15 +130,15 @@ jobs:
           #                 post states a price, so 15 carry NULL — a SOURCE fact, never inferred.
           #   shmoualshmal   6 posts, all Tabuk. The site publishes NO price at all (it shows
           #                 «اتصل»), so every price column is NULL by design. See each run.py.
-          - { source: alta,         cmd: "python -m scrapers.alta.run --type all" }
-          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all" }
+          - { source: alta,         cmd: "python -m scrapers.alta.run --type all", every_n_days: 2 }
+          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all", every_n_days: 2 }
           # Two more GREEN-audited additions (owner-instructed 2026-09-06).
           #   remal   87 posts -> 84 listings. class_list carries city/type/offer; images bind by
           #           attachment PARENT because the detail page renders OTHER listings' photos.
           #   amaall  135 posts -> 50 listings, ARABIC ONLY: the site publishes every listing twice
           #           (68 EN + 67 AR), so taking both languages would double every property.
-          - { source: remal,        cmd: "python -m scrapers.remal.run --type all" }
-          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all" }
+          - { source: remal,        cmd: "python -m scrapers.remal.run --type all", every_n_days: 2 }
+          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all", every_n_days: 2 }
           # abwbna (owner-instructed 2026-09-06): a DIFFERENT TENANT of the SAME Nuzul SaaS platform
           # aldarim already scrapes (same S3 bucket family, same public JSON API shape). Full crawl +
           # prune, same as aldarim — not a --type flag scraper.
@@ -203,10 +203,49 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "0.3"
-          # 24.com.sa's Cloudflare serves datacenter IPs a listing-less shell, so souq24 needs the
-          # Saudi residential proxy from the cloud (reuses the Wasalt proxy secret). Every other
-          # source's scraper ignores this var, so it's harmless to expose matrix-wide.
-          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          # PROXY IS OPT-IN PER SOURCE (2026-09-18). It used to be set matrix-wide under the
+          # comment "Every other source's scraper ignores this var, so it's harmless" — which was
+          # FALSE: alta, remal, shmoualshmal and amaall all read WASALT_PROXY_URL in their own
+          # session() and were silently spending metered Saudi residential bandwidth.
+          #
+          # Only sources with `proxy: true` receive it. NOTHING currently sets it.
+          #
+          # souq24 CAME OFF IT 2026-09-18, and the note that kept it there was wrong on its own
+          # terms. It read "24.com.sa's Cloudflare serves datacenter IPs a listing-less shell".
+          # Measured against the live host that same day: there is no Cloudflare. The response
+          # headers are `Server: nginx` with ZERO Cloudflare fingerprints (no cf-ray, no cf-cache
+          # -- it is a plain Laravel/nginx app), and /properties answers a direct request with
+          # HTTP 200, 161 KB and 18 real /<id>/<slug> listing links.
+          #
+          # Meanwhile the proxy hop is a measured failure for exactly this client shape.
+          # wasalt-proxy-diagnostic.yml, same proxy, same day: the CONNECT tunnel opens fine
+          # (HTTP/1.1 200 OK in 757 ms) and then curl_cffi impersonating chrome124 -- which is
+          # precisely what scrapers/souq24/run.py uses -- TIMES OUT at 15,002 ms, while the same
+          # proxy with a NON-impersonated client returns a real response in 1,737 ms. So a
+          # chrome-shaped TLS handshake through this proxy hangs, and souq24 sends one on every
+          # browse page and every id probe. That is the "browse harvest incomplete: prune
+          # withheld" + 0-row run it has been recording.
+          #
+          # This is the same shape as alta/remal/shmoualshmal below: a stated block that is not a
+          # block, hiding a proxy stall. Same test applies -- if souq24 now fails DIRECT with a
+          # REFUSAL (403, connection reset, or a listing-less shell), the old note was right after
+          # all and `proxy: true` goes back on. A timeout is not a refusal.
+          #
+          # WHY THE OTHERS WERE TAKEN OFF IT. Measured 2026-09-18: alta, remal and shmoualshmal all
+          # answer a DIRECT request in 1-2s (alta.com.sa 0.97s, remalre.com 1.6s,
+          # shmoua-alshmal.com 2.0s) and NONE of them is behind Cloudflare — their servers are
+          # hcdn / Apache / hcdn. Yet through the proxy every run dies at exactly
+          # `curl: (28) Connection timed out after 40001ms`. A plain Apache host that answers in
+          # 1.6s direct is not the thing timing out; the proxy hop is. The older note here claimed
+          # the runner's datacenter IP was blocked for these hosts ("six taxonomy requests burned
+          # 3m40s on alta") — 3m40s is SLOW, not BLOCKED, and reads like the same proxy-hop stall
+          # rather than a refusal. So the proxy is removed for them and the next scheduled run is
+          # the test: if they come back green, the proxy was the cause and the metered spend was
+          # pure waste; if they fail DIRECT with a refusal (403/connection reset rather than a
+          # timeout), put `proxy: true` back on them and the old note was right.
+          #
+          # Before adding a source here, check whether its session() reads WASALT_PROXY_URL.
+          WASALT_PROXY_URL: ${{ matrix.proxy && secrets.WASALT_PROXY_URL || '' }}
         run: |
           # Per-source cadence (owner 2026-07-07): most small sources run daily (every_n_days unset = 1),
           # but a few (souq24) scrape every N days to cut metered-proxy bandwidth. Skip today when the

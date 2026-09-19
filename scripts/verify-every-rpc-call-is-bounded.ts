@@ -43,18 +43,31 @@ const ROOT = join(import.meta.dirname, '..');
  * ratchet, not the repair. Remove an entry when its call site gains a bound; never add one.
  */
 const UNBOUNDED_BASELINE: ReadonlySet<string> = new Set([
-  // The two search-loading "big database" reads. Both already fail CLOSED on an error (they return
-  // null and the caller falls back to numberless copy — scripts/verify-search-loader-scale-numbers.ts
-  // proves that by execution), but neither bounds the WAIT, so a stalled connection leaves the
-  // await pending rather than degrading.
-  'src/data/loaderActivePlatforms.ts:loader_active_platforms_ar',
-  'src/data/loaderScaleStats.ts:loader_scale_stats_ar',
-  // The relevance-boost read inside the search path.
-  'src/data/remote.ts:loc_rel_rank',
+  // EMPTY, AND THAT IS THE POINT — closed 2026-09-18 (ops_incident #269, routine #6).
+  //
+  // The three entries that used to live here were all fixed in one change, by the surface owner
+  // this barrier routed them to:
+  //   · src/data/loaderActivePlatforms.ts:loader_active_platforms_ar  -> boundedRpc()
+  //   · src/data/loaderScaleStats.ts:loader_scale_stats_ar            -> boundedRpc()
+  //   · src/data/remote.ts:loc_rel_rank                               -> the in-file bounded()
+  //
+  // The first two are the search-loading reads: they already failed CLOSED on an *error*, but an
+  // unbounded await never produces one, so a stalled connection left «إزهله يبحث» spinning with no
+  // recovery — a hang, which reads to a user as a broken app rather than as a degraded one. They now
+  // use src/data/boundedRpc.ts, which exists because those modules are deliberately import-light and
+  // cannot pull remote.ts in behind them.
+  //
+  // LEAVE THIS EMPTY. A new name here is not a normal edit: it means someone shipped an RPC that can
+  // hang, and the ceiling below makes adding one a reviewed source change rather than a quiet append.
 ]);
 
-/** A ceiling, so adding a name is a reviewed source change and not a quiet append. */
-const UNBOUNDED_CEILING = 3;
+/**
+ * A ceiling, so adding a name is a reviewed source change and not a quiet append.
+ *
+ * Now 0: the debt is cleared, so the honest ceiling is "none". Raising this is the reviewable act —
+ * it is the number that stops the baseline being grown instead of the call site being fixed.
+ */
+const UNBOUNDED_CEILING = 0;
 
 const BOUNDING = /\bbounded\s*<?[^(]*\(|\.abortSignal\s*\(|\bwithTimeout\s*\(/;
 

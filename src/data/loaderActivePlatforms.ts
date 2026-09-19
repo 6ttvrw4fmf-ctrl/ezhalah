@@ -7,6 +7,7 @@
 
 import { supabase } from '@/lib/supabase';
 import { normalizeSource } from '@/data/loaderPlatforms';
+import { boundedRpc } from '@/data/boundedRpc';
 
 /**
  * Calls the `loader_active_platforms_ar()` RPC and maps each returned raw platform value
@@ -18,7 +19,8 @@ import { normalizeSource } from '@/data/loaderPlatforms';
 export async function fetchActivePlatformNames(): Promise<Set<string> | null> {
   if (!supabase) return null;
   try {
-    const { data, error } = await supabase.rpc('loader_active_platforms_ar');
+    // Bounded: an unbounded await here never returns, and the loader waits forever (#269).
+    const { data, error } = await boundedRpc<string[]>(supabase.rpc('loader_active_platforms_ar'));
     if (error || !Array.isArray(data)) return null;
     const names = new Set<string>();
     for (const raw of data as string[]) {

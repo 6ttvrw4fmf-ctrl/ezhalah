@@ -994,6 +994,84 @@ def prune_unseen(
     return killed
 
 
+# The verdict a res/com supersession records, and the oracle that names WHY it was recorded.
+#
+# It is deliberately NOT 'GONE'. A supersession is not a statement about the source at all: the
+# listing's own URL is still served, by the ACTIVE sibling row that superseded this copy. Filing it
+# as GONE would put a false source verdict in the one ledger every other detector reads as source
+# truth (`mon_detect_prune_kill_without_source_verdict`, `mon_detect_deletion_clock_without_evidence`
+# and `ops_lifecycle_false_resurrection` all key on verdict = 'GONE'). It is also not 'AMBIGUOUS' —
+# `retire_superseded_siblings` reserves that word for the both-ways case it refuses to touch at all.
+SUPERSESSION_VERDICT = "SUPERSEDED"
+SUPERSESSION_ORACLE = "res_com.sibling_classified_this_run"
+
+
+def plan_supersession_evidence(
+    retired_ads,
+    table: str = "",
+    superseding_table: str = "",
+    rows=None,
+):
+    """Pure: the ledger rows a supersession retirement owes, one per ad actually retired.
+
+    WHY THIS EXISTS (ops_incident #275, measured 2026-09-18)
+    -------------------------------------------------------
+    `retire_superseded_siblings()` wrote `{active: false, deactivated_at}` and nothing else. So an
+    automatic retirement was, in SQL, indistinguishable from a crawl that timed out — and
+    `mon_detect_unknown_treated_as_dead` (P1) asks exactly *was this row set active=false with no
+    verdict recorded against its ad_number at the time?* It therefore counted every automatic
+    supersession as `without_direct_evidence`. Measured across the seven wired platforms: 16
+    retirements in 30 days, every one evidence-free, every one confirmed a genuine supersession by
+    an ACTIVE sibling row holding the same ad_number (sadin 5, amaall 6, dealapp 4, arkaan 1).
+
+    The exclusion the detector already had (migration 20260913144532) reads
+    `ops_res_com_collision_adjudication`, and the only writer of THOSE rows is a human/agent
+    session — so the suppression for an automatic path was, in practice, written by hand or not at
+    all. `docs/ops/LISTING_LIFECYCLE_ENGINEER.md` §8.3 calls that detector the highest-value one in
+    §4 and "the one that can least afford to cry wolf"; a detector readers learn to dismiss is a
+    detector that is dark on the day it is right.
+
+    This is `scrapers/common/sold_pin.py`'s lesson applied to the other automatic kill path: the
+    actor that performs an authoritative deactivation writes the evidence for it, in the same
+    function, so the duty cannot be lost by anyone forgetting.
+
+    Pure and total, so the law can be EXECUTED by a barrier rather than read as text
+    (`scripts/verify-supersession-kill-leaves-evidence.ts` runs it through
+    `scripts/lib/pythonMutant.ts`, which calls positionally — hence the positional signature).
+    """
+    if not superseding_table or not str(superseding_table).strip():
+        # An evidence row that cannot say WHICH table superseded this copy is unfalsifiable later —
+        # the 2026-08-26 aqarcity lesson (254 kills nobody could adjudicate from the record).
+        raise ValueError(
+            "plan_supersession_evidence requires a non-empty superseding_table naming the sibling "
+            "that positively classified the ad this run, e.g. 'arkaan_commercial_listings'"
+        )
+    by_ad = {}
+    for r in (rows or ()):
+        ad = (r or {}).get("ad_number")
+        if ad and ad not in by_ad:
+            by_ad[ad] = r
+    seen, evidence = set(), []
+    for a in retired_ads or ():
+        if not a or a in seen:
+            continue
+        seen.add(a)
+        row = by_ad.get(a) or {}
+        evidence.append({
+            "source_table": table,
+            "listing_id": row.get("id"),
+            "listing_url": row.get("listing_url"),
+            "ad_number": a,
+            "verdict": SUPERSESSION_VERDICT,
+            "oracle": SUPERSESSION_ORACLE,
+            "note": (
+                f"retired because {superseding_table} positively classified this ad_number from "
+                f"the source page during this run; the listing_url is still served by that sibling"
+            ),
+        })
+    return evidence
+
+
 def retire_superseded_siblings(
     *,
     res_table: str,
@@ -1034,6 +1112,9 @@ def retire_superseded_siblings(
       • An ad present in BOTH seen-sets in one run is genuinely ambiguous (the crawl classified
         the same ad two ways) and is left completely untouched, on both sides, for a human.
       • A row already inactive is not rewritten, so `deactivated_at` keeps its original date.
+      • EVERY retired row leaves a per-row `ops_stale_inactivation_probe` verdict of
+        `SUPERSEDED` naming the sibling table that superseded it — see
+        `plan_supersession_evidence`. Not `GONE`: the source still serves the URL.
 
     Returns the number of rows retired (0 when there is nothing to do).
     """
@@ -1062,17 +1143,31 @@ def retire_superseded_siblings(
         ads = sorted(superseding)
         for i in range(0, len(ads), 200):
             chunk = ads[i:i + 200]
-            q = c.table(table).select("ad_number").in_("ad_number", chunk).eq("active", True)
+            q = (c.table(table).select("id, ad_number, listing_url")
+                 .in_("ad_number", chunk).eq("active", True))
             if source:
                 q = q.eq("source", source)
             live = _execute(q, what=table + ".supersede_select")
-            stale = [r["ad_number"] for r in (getattr(live, "data", None) or [])]
+            rows = list(getattr(live, "data", None) or [])
+            stale = [r["ad_number"] for r in rows]
             if not stale:
                 continue
             _execute(c.table(table).update({"active": False, "deactivated_at": now})
                      .in_("ad_number", stale),
                      what=table + ".supersede_update")
             retired += len(stale)
+            # Record WHY each row was retired. Written AFTER the update and best-effort, for the
+            # same reason sold_pin.py gives: monitoring must never be able to keep a superseded
+            # duplicate card on screen. Without this the kill is unfalsifiable from the record and
+            # mon_detect_unknown_treated_as_dead counts it as evidence-free (ops_incident #275).
+            try:
+                evidence = plan_supersession_evidence(stale, table, other, rows)
+                for j in range(0, len(evidence), 200):
+                    _execute(c.table("ops_stale_inactivation_probe").insert(evidence[j:j + 200]),
+                             what="ops_stale_inactivation_probe.supersede_insert")
+            except Exception as e:  # noqa: BLE001 — the ledger may never block the retirement
+                print(f"{table}: could not record supersession evidence "
+                      f"({type(e).__name__}: {e})", flush=True)
             print(f"↪ {table}: retired {len(stale)} row(s) superseded by {other} this run "
                   f"({', '.join(stale[:5])}{'…' if len(stale) > 5 else ''})", flush=True)
     return retired
