@@ -34,6 +34,7 @@ is left NULL rather than guessed. A word we cannot pin is an UNKNOWN, never a nu
 FIELDS (all from the detail page, one listing's own markup):
   السعر : 1 مليون                    -> price_total / price_annual   (word magnitude, see above)
   غرفة: 6 · عدد الغرف: 6 غرفة        -> bedrooms
+  عدد/مجموع دورات المياه : 3         -> bathrooms   (stated TOTAL; per-floor mentions ignored)
   المساحة: 383 m² · مساحة العقار      -> area_m2
   نوع العقار: فيلا                    -> property_type
   للبيع / للإيجار                     -> transaction_type
@@ -186,6 +187,57 @@ def parse_age(text: Optional[str]) -> Optional[int]:
         if w in t:
             return v
     return None
+
+
+# دورة مياه / دورات المياه / دورتين مياه — bathrooms are published in the free-text
+# «عبارة عن» blurb, not the spec table, so there is no single labelled cell to read.
+_BATH = r"دور(?:ة|تين|ات)\s*(?:ال)?مياه"
+# The seller's OWN stated total. Two label words are used in the wild, interchangeably:
+#   «عدد دورات المياه : 3»      «مجموع دورات المياه : 4»
+_BATH_TOTAL = re.compile(r"(?:عدد|مجموع)\s*" + _BATH + r"\s*[:：]?\s*([\d٠-٩]{1,2}|[\u0621-\u064a]+)")
+# A bare mention inside the blurb: «- 3 دورات مياه -». On a multi-storey listing this appears
+# once PER FLOOR, so it is only a total when it occurs exactly once and no label is present.
+# The count may sit BEFORE the phrase («3 دورات مياه») or INSIDE it: «دورتين» is the Arabic dual
+# and means exactly two on its own, with no numeral to capture. A bare singular «دورة مياه» is
+# deliberately NOT read as 1 — it is how a blurb names one room among several
+# («غرفة خادمة مع دورة مياه»), so treating it as the total would undercount the property.
+_BATH_INLINE = re.compile(
+    r"(?:^|[^\u0621-\u064a])(?:([\d٠-٩]{1,2}|[\u0621-\u064a]+)\s*)?"
+    r"دور(ة|تين|ات)\s*(?:ال)?مياه")
+_BATH_WORDS = {
+    "واحد": 1, "واحده": 1, "واحدة": 1, "دورتين": 2, "اثنين": 2, "اثنتين": 2, "ثنتين": 2,
+    "ثلاث": 3, "ثلاثة": 3, "أربع": 4, "اربع": 4, "اربعة": 4, "خمس": 5, "خمسة": 5, "ست": 6,
+    "ستة": 6, "سبع": 7, "سبعة": 7, "ثمان": 8, "ثمانية": 8, "تسع": 9, "تسعة": 9, "عشر": 10,
+}
+
+
+def _bath_num(tok: str) -> Optional[int]:
+    d = tok.translate(_AR_DIGITS)
+    if d.isdigit():
+        n = int(d)
+        return n if 0 < n <= 50 else None     # a 2-digit run that is not a room count
+    return _BATH_WORDS.get(tok)
+
+
+def parse_bathrooms(text: Optional[str]) -> Optional[int]:
+    """Bathroom count, or None for UNKNOWN (the AF then reports «لم يذكر»).
+
+    A PER-FLOOR FIGURE IS NOT THE TOTAL. A 3-storey villa's blurb reads «… 3 دورات مياه …
+    4 دورات مياه … 2 دورات مياه . عدد دورات المياه : 9» — reading the first inline mention
+    stores 3 for a 9-bathroom house. So the seller's own stated TOTAL always wins, and an
+    inline figure is trusted only when it is the single mention on the page.
+
+    Nothing is ever summed: adding the per-floor figures would manufacture a number the source
+    did not state (SOURCE IS TRUTH). Two labels that disagree are likewise UNKNOWN, not a pick.
+    """
+    if not text:
+        return None
+    totals = {n for n in (_bath_num(g) for g in _BATH_TOTAL.findall(text)) if n}
+    if totals:
+        return totals.pop() if len(totals) == 1 else None
+    inline = {n for n in (2 if form == "تين" else _bath_num(tok)
+                          for tok, form in _BATH_INLINE.findall(text)) if n}
+    return inline.pop() if len(inline) == 1 else None
 
 
 # The header price. Two labels: «السعر» on built property, «إجمالي سعر البيع» on land.
@@ -393,6 +445,7 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": int(area) if area else None,
         "bedrooms": int(beds) if beds else None,
+        "bathrooms": parse_bathrooms(t),
         "property_age": age,
         "direction": direction,
         "street_width_m": street_w,

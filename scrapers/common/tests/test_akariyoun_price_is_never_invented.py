@@ -25,7 +25,7 @@ if str(ROOT) not in sys.path:
 import scrapers.akariyoun.run as AK  # noqa: E402
 from scrapers.akariyoun.run import (  # noqa: E402
     _fold_ar, magnitude, map_listing, map_type_ar, parse_age,
-    parse_ppm, parse_price, parse_price_exact,
+    parse_bathrooms, parse_ppm, parse_price, parse_price_exact,
 )
 
 # HERMETIC (AGENTS.md, "the required suite is HERMETIC"). map_listing resolves the city/district
@@ -218,3 +218,76 @@ def test_unmentioned_services_are_null_never_false():
     row, _c, _r = map_listing("fyla-x", VILLA)
     assert row["electricity"] is None and row["water_supply"] is None, \
         "SOURCE IS TRUTH — silent means NULL, never a confirmed 'no'"
+
+
+# ── bathrooms: the stated TOTAL, never a per-floor fragment ───────────────────────────────────────
+# Live probe 2026-09-19: عقاريون publishes bathrooms in the free-text «عبارة عن» blurb on 37 of 75
+# real pages, and the scraper stored 0. These are the exact shapes found on those pages.
+
+# Real page fyla-llaygar-fy-hy-alshaf-4: a 3-storey villa. Reading the FIRST inline mention stores
+# 3 for a house the seller says has 9. This is the case that motivated the parser.
+_VILLA_3_FLOORS = ("عبارة عن : الدور الأرضي : ملحق خارجي - مجلس - مقلط - صالة واسعة - مطبخ - "
+                   "3 دورات مياه الدور الأول : 4 غرف نوم ثلاثة منهم ماستر - صالة - 4 دورات مياه "
+                   "الدور الثاني : 2 غرف نوم ماستر - سطح - 2 دورات مياه . عدد دورات المياه : 9 "
+                   "- مطبخ راكب - 10 مكيفات سبيلت")
+
+
+def test_bathrooms_uses_stated_total_not_the_first_floor():
+    assert parse_bathrooms(_VILLA_3_FLOORS) == 9, \
+        "the seller states 9; 3 is only the ground floor"
+
+
+def test_bathrooms_are_never_summed():
+    # 3+4+2 == 9 here by coincidence of this listing. Prove the 9 comes from the LABEL by removing
+    # the label: with only per-floor fragments left, the honest answer is UNKNOWN, not 9.
+    no_label = _VILLA_3_FLOORS.split("عدد دورات المياه")[0]
+    assert parse_bathrooms(no_label) is None, \
+        "summing per-floor figures would manufacture a total the source never stated"
+
+
+def test_bathrooms_reads_the_second_label_word():
+    # 12 of the 75 real pages use «مجموع» rather than «عدد» — missing it loses a third of coverage.
+    assert parse_bathrooms("مطبخ - 3 دورات مياه الدور الثاني : دورة مياه . مجموع دورات المياه : 4") == 4
+
+
+def test_bathrooms_lone_inline_mention_is_the_total():
+    assert parse_bathrooms("عبارة عن : 2 غرف نوم - صالة - مطبخ - 2 دورة مياه") == 2
+
+
+def test_bathrooms_accepts_the_arabic_dual_and_word_numerals():
+    assert parse_bathrooms("عبارة عن : 2 غرف نوم - صالة - دورتين مياه") == 2
+    assert parse_bathrooms("مجموع دورات المياه : ثلاث") == 3
+
+
+def test_bathrooms_accept_arabic_indic_digits():
+    assert parse_bathrooms("عدد دورات المياه : ٣") == 3
+
+
+def test_bathrooms_silent_page_is_null_never_zero():
+    assert parse_bathrooms("عبارة عن : 3 غرف نوم - صالة - مطبخ") is None, \
+        "SOURCE IS TRUTH — a page that does not mention bathrooms is UNKNOWN, not 'has none'"
+    assert parse_bathrooms("") is None and parse_bathrooms(None) is None
+
+
+def test_bathrooms_conflicting_totals_are_unknown():
+    assert parse_bathrooms("عدد دورات المياه : 3 ... مجموع دورات المياه : 5") is None, \
+        "two disagreeing totals must not be silently picked between"
+
+
+def test_bathrooms_large_apartment_building_total_is_kept():
+    # Real page aamar-llaygar-fy-hy-almsfa: «30 غرفة 20 دورة مياه». 20 is genuinely the total.
+    assert parse_bathrooms("عمارة 30 غرفة 20 دورة مياه سطح واسع عدد دورات المياه : 20") == 20
+
+
+def test_bathrooms_reach_the_row():
+    row, _c, _r = map_listing("fyla-x", VILLA.replace("</body>",
+                              "<p>عدد دورات المياه : 4</p></body>"))
+    assert row["bathrooms"] == 4, "the parsed count must actually be written to the row"
+
+
+def test_bathrooms_implausible_count_is_unknown():
+    # The count pattern reads up to two digits, so a stray figure sitting next to the phrase
+    # («الشارع 60 ... دورات مياه») could otherwise be stored as a room count. Above a plausible
+    # ceiling the honest answer is UNKNOWN, not a number we would have invented.
+    assert parse_bathrooms("عدد دورات المياه : 99") is None
+    assert parse_bathrooms("عدد دورات المياه : 50") == 50      # ceiling itself still real
