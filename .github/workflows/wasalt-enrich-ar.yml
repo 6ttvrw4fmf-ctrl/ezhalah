@@ -30,6 +30,10 @@ on:
         description: "Max previously-errored rows (ar_data._err) to re-attempt this run — oldest first, >=24h backoff per row, parked after 5 definitive failures. 0 disables (default 100)"
         required: false
         default: "100"
+      err_backoff_hours:
+        description: "Minimum hours between two attempts on the SAME errored row (default 24). Lower it only to exercise the retry pass on demand — e.g. to verify a fetch-path fix against rows that just errored. The backoff exists to keep metered-proxy spend flat, so leave it at 24 for scheduled runs."
+        required: false
+        default: "24"
 
 concurrency:
   group: wasalt-enrich-ar
@@ -93,5 +97,6 @@ jobs:
             --workers 1 \
             --max-pending ${{ github.event.inputs.max_pending || 5000 }} \
             --retry-errs ${{ github.event.inputs.retry_errs || 100 }} \
+            --err-backoff-hours ${{ github.event.inputs.err_backoff_hours || 24 }} \
             --max-seconds 2700 \
             $ALLOW_BACKFILL_FLAG

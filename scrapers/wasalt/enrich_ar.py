@@ -229,13 +229,16 @@ def _from_next_data(data: dict) -> tuple[bool, dict, Optional[str], Optional[str
     return True, d, city_ar, dist_ar
 
 
-def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[str]]:
-    """Return (ok, ar_data, city_ar, district_ar).
-    ok=False  → transient (network / 429 / 403 block / retries exhausted): leave ar_fetched=false so a
-                later run retries. ok=True with ar_data={'_err':…} → page loaded but no usable payload
-                (404/410/no __NEXT_DATA__): mark done for THIS run; the bounded retry pass re-attempts
-                such rows (oldest-first, >=24h apart) up to ERR_MAX_ATTEMPTS, then parks them."""
-    url = f"{BASE}/ar/property/{slug}"
+# An `_err` that means "this route answered and there is NO LISTING here" — as opposed to one that
+# means "something went wrong on the way". Only the first kind is evidence of absence, so only the
+# first kind may trigger the /en salvage below. `noNEXT` is deliberately NOT here: a page that is
+# not a Next.js document at all can be a WAF shell, which is evidence of nothing.
+_NO_LISTING_ERRS = {"nodetail", 404, 410}
+
+
+def _fetch_route(route: str, slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[str]]:
+    """Fetch ONE language route of a listing → the tuple fetch_ar returns. `route` is 'ar' or 'en'."""
+    url = f"{BASE}/{route}/property/{slug}"
 
     # CLOUDFLARE PATH (WASALT_BROWSER=1). wasalt.sa tightened bot protection on 2026-08-17 and no
     # http client has reached it since (issue #1019; the fix landed for the sweep in PR #3129).
@@ -281,6 +284,47 @@ def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[s
             return True, {"_err": "noNEXT"}, None, None
         return _from_next_data(json.loads(m.group(1)))
     return False, None, None, None  # retries exhausted → transient
+
+
+def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[str]]:
+    """Return (ok, ar_data, city_ar, district_ar).
+    ok=False  → transient (network / 429 / 403 block / retries exhausted): leave ar_fetched=false so a
+                later run retries. ok=True with ar_data={'_err':…} → page loaded but no usable payload
+                (404/410/no __NEXT_DATA__): mark done for THIS run; the bounded retry pass re-attempts
+                such rows (oldest-first, >=24h apart) up to ERR_MAX_ATTEMPTS, then parks them.
+
+    /en SALVAGE (2026-09-18). Some listings have NO ARABIC PAGE AT ALL. Measured on ids 11939663 /
+    11939667 / 11939669: `/ar/property/{slug}` answers Next.js `page: "/404"` while
+    `/en/property/{slug}` serves a complete payload. It is NOT a slug mismatch — wasalt publishes
+    the Arabic slug as `propertyInfo.alternateSlug`, and `/ar/property/{alternateSlug}` 404s for
+    these three as well, while the control listing resolves on either slug. Nor is it liveness:
+    the listings are alive, so the liveness sweep will never retire them, and without this they
+    simply burn five attempts and park — permanently absent from the §25 price oracle.
+
+    So when — and only when — /ar says there is no listing, fall back to /en and archive THAT.
+    `salePrice` is language-independent, which is the field the oracle exists to answer on.
+
+    WHAT THE SALVAGE MUST NOT DO: write English into the Arabic columns. `city_ar`/`district_ar`
+    are Arabic-only (the /en payload says 'Jeddah' / 'Al-Fanar'), and `_region_for()` resolves
+    against the Arabic catalog, so a leak here would corrupt both the column and the region
+    lookup. The salvage therefore returns city/district as None — there IS no Arabic city for
+    this listing, and NULL is the honest value (SOURCE IS TRUTH: silent → NULL). The payload is
+    stamped `_lang: "en"` so nothing downstream mistakes an English archive for an Arabic one;
+    its absence keeps meaning Arabic, so no existing row needs rewriting."""
+    ok, d, city_ar, dist_ar = _fetch_route("ar", slug)
+    if not (ok and isinstance(d, dict) and d.get("_err") in _NO_LISTING_ERRS):
+        return ok, d, city_ar, dist_ar
+
+    ok_en, d_en, _, _ = _fetch_route("en", slug)
+    if not ok_en:
+        # The salvage attempt was BLOCKED, not answered. We still do not know whether an English
+        # page exists, so this is our failure, not the listing's — stay transient rather than
+        # spending one of the row's ERR_MAX_ATTEMPTS attempts on our own outage.
+        return False, None, None, None
+    if not isinstance(d_en, dict) or "_err" in d_en:
+        return True, {"_err": "nodetail"}, None, None  # gone on BOTH routes → genuinely absent
+    d_en["_lang"] = "en"
+    return True, d_en, None, None
 
 
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
