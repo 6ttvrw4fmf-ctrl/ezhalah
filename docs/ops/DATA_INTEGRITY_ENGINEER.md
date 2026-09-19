@@ -880,15 +880,23 @@ because `enrich_ar.py` still fetches over plain HTTP and is still Cloudflare-blo
 was silent on precisely the rows under suspicion. **A settled class does not settle a row the oracle
 cannot see.**
 
-**The population, re-measured 2026-09-18** (§25 measured 115 rows; the cohort is now 172):
+**The population, re-measured 2026-09-18** (§25 measured 115 rows; the cohort is now 172). Measured
+TWICE the same day, because the gap below was closed in between — and the second measurement is the
+one that settles it, because it has NO unverified remainder:
 
-- **119/172** carry an archived `propertyInfo`. **119/119** stored `price_total` == wasalt's own
-  `salePrice`. **Zero** mismatches.
-- **119/119** of those carry wasalt's own `averageSalePricePerSqm` at the SAME magnitude. **0** show a
+- **As found:** only **119/172** carried an archived `propertyInfo`. 119/119 matched, zero mismatches;
+  the **53** rows with no archive were all from 2026-09-17, the first browser sweep.
+- **After `enrich_ar` moved onto the browser transport (#3140, same day): 172/172 carry an archive,
+  0 errored, 0 NULL — and 172/172 stored `price_total` == wasalt's own `salePrice`. ZERO mismatches
+  across the entire cohort.**
+- **172/172** carry wasalt's own `averageSalePricePerSqm` at the SAME magnitude, and **0** rows show a
   source per-m² ~1000× smaller — which is precisely what would exist if our total were inflated ×1000.
-  §25's measurement reproduces exactly on the grown cohort.
-- The **53** rows with no archive are **all** from 2026-09-17 — one day, the first browser sweep. That
-  is the `enrich_ar.py` gap below, not a price finding.
+  That is the whole hypothesis, refuted on every row rather than on a sample.
+
+**Two independent network paths agree to the digit.** The four rows below were read by hand from a
+residential browser at ~22:0x, and re-fetched hours later by the fixed enricher through the metered
+Saudi proxy (`ar_fetched_at` 22:46–23:08). Same `salePrice`, same `averageSalePricePerSqm`, every row.
+A shared parser bug could produce one of those; it cannot produce both.
 
 **Answered by §27b's rule — ask the source.** Read live from wasalt.sa on 2026-09-18, all four
 corroborants agreeing on every row (`salePrice` == `conversionPrice` == our stored `price_total`;
@@ -957,11 +965,14 @@ reachable with their prices intact; `11939904` is registered but stays hidden, b
 join on `listing_native_location_v2` correctly refuses to publish a row whose location never
 resolved. `mon_detect_located_row_unreachable()` re-run: **0 raised**, both P1s resolved.
 
-**The standing gap this exposed, and it is the thing actually worth fixing:** while `enrich_ar.py`
-stays on the blocked HTTP path, every newly-scraped wasalt row arrives with `ar_data = NULL`, so the
-§25 oracle is blind to exactly the rows most likely to be questioned — and each one costs a fresh live
-adjudication. `browser.py` already exists and `run.py` already uses it. Until then, do not read a NULL
-`ar_data` as "unverifiable" (§27b): the source answers.
+**The standing gap this exposed — FIXED the same day (#3140), and that is why the numbers above are
+complete.** While `enrich_ar.py` sat on the blocked HTTP path, every newly-scraped wasalt row arrived
+with `ar_data = NULL`, so the §25 oracle was blind to exactly the rows most likely to be questioned
+and each one cost a fresh live adjudication. Moving it onto `browser.py` — which already existed and
+which `run.py` already used — took the band from 119/172 archived to 172/172 within hours. **The
+lesson outlives the fix: an oracle is only as good as its coverage, and the rows it cannot see are
+selected for being new, which is the same population most likely to be under suspicion.** Until a
+row's archive exists, do not read a NULL `ar_data` as "unverifiable" (§27b): the source answers.
 
 **How to read the source when you need to.** From a session with a browser pane, just open the listing
 and read `__NEXT_DATA__` (`props.pageProps.propertyDetailsV3.propertyInfo`) — wasalt.sa loads fine from
