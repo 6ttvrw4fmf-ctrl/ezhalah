@@ -258,7 +258,14 @@ const waitForBody = async (re, timeoutMs) => {
   }
   return false;
 };
-const RESULT_COUNT = /لقينا|ما لقينا/;
+// A "results are on screen" signal — any of the 10 rotating AR Results-Found templates (owner rule
+// 2026-09-19, src/data/resultsFoundRotation.ts) plus the "no results" surface. Every AR results
+// template contains the word «نتيجة» (or its plural «نتائج»); «ما لقينا / ما لقيت / ما فيه» handles
+// honest zero. Matching «لقينا» alone (the pre-rotation regex) missed half the pool — five of the
+// ten AR-guest templates ("أبشر، طلع لنا N نتيجة …", "عندنا N نتيجة …" etc.) have no «لقينا» at all.
+// Arabic-only on purpose: the app is Arabic-only in production (memory feedback), and the token
+// "results" leaks into non-results HTML (data-testid attributes, marketing copy) if we widened it.
+const RESULT_COUNT = /نتيجة|نتائج|ما لقينا|ما لقيت|ما فيه/;
 // Input snapshots deliberately EXCLUDE the sign-in card's own phone field (owner 2026-08-29): the
 // card is a floating auth overlay, not filter state — and it legitimately disappears when a
 // journey's own send dismisses it, which would otherwise shift these snapshots mid-journey
@@ -356,7 +363,7 @@ try {
 
   check('a refresh issues ZERO search/AI requests', searchCalls === 0,
     `${searchCalls} search/AI request(s) fired on reload — a refresh must never count as a user search`);
-  check('a refresh does not re-render the previous results', !/لقينا|ما لقينا/.test(afterRefresh));
+  check('a refresh does not re-render the previous results', !RESULT_COUNT.test(afterRefresh));
   // Owner rule 2 (2026-08-16, same day as rule 1): "when i refresh takes me to the filter page …
   // not this here" — an emptied AI chat is a dead end, so the refresh lands on the Filter home.
   check('a refresh lands on the FILTER HOME (owner 2026-08-16 rule 2)',
@@ -422,8 +429,15 @@ try {
   // did. E/F/H-mobile below use browser back as the canonical user path.
   const cancelViaNav = async () => { await page.goBack({ waitUntil: 'domcontentloaded' }); await page.waitForTimeout(600); };
   const landedCount = async () => {
-    const m = [...(await body()).matchAll(/لقينا ([\d,٬،]+) إعلان/g)];
-    return m.length ? parseInt(m[m.length - 1][1].replace(/[^\d]/g, ''), 10) : null;
+    // Results-Found sentence is now a rotation (owner rule 2026-09-19, src/data/resultsFoundRotation
+    // .ts). The 10 AR templates end with «N نتيجة» in various framings — the retired fixed
+    // «لقينا N إعلان» is gone. What every AR template has in common is a formatted digit run
+    // followed by «نتيجة». Take the LAST such match on the page: there is only one Results-Found
+    // sentence, but robustly picking the tail avoids being fooled by any earlier card that happens
+    // to include the same shape. Arabic-only (see RESULT_COUNT note above).
+    const txt = await body();
+    const arMatches = [...txt.matchAll(/([\d,٬،]+)\s*نتيجة/g)];
+    return arMatches.length ? parseInt(arMatches[arMatches.length - 1][1].replace(/[^\d]/g, ''), 10) : null;
   };
   // Poll for the count directly instead of `waitForBody(RESULT_COUNT,...)` + an immediate
   // `landedCount()` read. The result intro line types itself out character-by-character, so the
