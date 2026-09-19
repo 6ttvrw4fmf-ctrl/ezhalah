@@ -596,6 +596,7 @@ const SOURCE_LABELS: Record<string, string> = {
   ramzalqasim: 'Ramz Al Qassim Real Estate Investment', fursaghyr: 'Fursa Ghyr Real Estate', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj Real Estate',
   muktamel: 'Muktamel', aqaratikom: 'Nawait', awal: 'Awal United for Real Estate', alta: 'Alta Real Estate Services', abwbna: 'Abwbna Real Estate', bahadhabab: 'Bahadhabab Real Estate', alobid: 'Alobid Office Real Estate', remal: 'Remal Real Estate', amaall: 'Amaall Real Estate Services', amlakalahsa: 'Amlak Al-Ahsa Real Estate', aqaralsaudia: 'Aqar Al Saudia Real Estate', shmoualshmal: 'Shmou Al Shmal Real Estate', alkhaas: 'Al Khaas', azdad: 'Azdad Al Aqariah',
   abeea: 'Abeea Real Estate', jurash: 'Jurash Real Estate', alnokhba: 'Al Nokhba', dealapp: 'Deal App',
+  ksaaqar: 'KSA Aqar Real Estate', sadiqeltajer: 'Sadiq Eltajer Real Estate',
   erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry Real Estate', october: '1 October Real Estate', gathern: 'Gathern',
 };
 

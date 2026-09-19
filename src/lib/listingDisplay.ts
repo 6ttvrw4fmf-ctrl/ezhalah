@@ -108,6 +108,12 @@ export function sourceName(source: string): string {
   if (s.includes('abralosol')) return 'Abr Al Osol Real Estate';
   if (s.includes('arkaan')) return 'Arkaan Al Aqar';
   if (s.includes('rawasidark')) return 'Rawasi Dark Real Estate';
+  // 'ksaaqar' CONTAINS 'aqar' and the fallback below is عقار's own name, so without these two
+  // every listing of theirs would be labelled AQAR — the misattribution the owner flagged as a
+  // legal problem. Both spellings are matched: the SLUG ('ksaaqar') and the registry NAME
+  // ('KSA Aqar', with a space) — the Al Khaas lesson, where the space-less token alone missed.
+  if (s.includes('ksaaqar') || s.includes('ksa aqar') || s.includes('عقارات السعودية')) return 'KSA Aqar Real Estate';
+  if (s.includes('sadiqeltajer') || s.includes('sadiq eltajer') || s.includes('sadiq-eltajer') || s.includes('صادق التاجر')) return 'Sadiq Eltajer Real Estate';
   return 'AQAR';
 }
 
