@@ -132,23 +132,55 @@ check('a NULL server response NEVER demotes either',
 setResultsFoundCache([...BAKED]);
 
 // ── 3. THE MIGRATION MIRRORS THE BAKED LIST BYTE-FOR-BYTE ────────────────────────────────────────
-const migration = read('supabase/migrations/20260919040825_ui_results_found_rotation.sql');
-check('the migration creates the table', /create table public\.ui_results_found\s*\(/.test(migration));
-check('the migration creates the anon-callable RPC the loader actually calls',
-  /create or replace function public\.ui_results_found_ar\(\)/.test(migration)
-  && /grant execute on function public\.ui_results_found_ar\(\) to anon, authenticated;/.test(migration));
-check('the migration RPC is security definer with an explicit search_path (schema-hijack safe)',
-  /security definer\s*\nset search_path = public/.test(migration));
+// Two migrations: 20260919040825 seeds the table + RPC; 20260919212000 rewrites 21 of those rows
+// to remove every "comma before the emoji" (owner rule 2026-09-19). The prod state is the second
+// migration's UPDATEs applied on top of the first migration's INSERTs, so BAKED must equal that
+// final state — not either file alone.
+const seedMig = read('supabase/migrations/20260919040825_ui_results_found_rotation.sql');
+const recommaMig = read('supabase/migrations/20260919212000_ui_results_found_comma_after_emoji.sql');
+check('the seed migration creates the table', /create table public\.ui_results_found\s*\(/.test(seedMig));
+check('the seed migration creates the anon-callable RPC the loader actually calls',
+  /create or replace function public\.ui_results_found_ar\(\)/.test(seedMig)
+  && /grant execute on function public\.ui_results_found_ar\(\) to anon, authenticated;/.test(seedMig));
+check('the seed migration RPC is security definer with an explicit search_path (schema-hijack safe)',
+  /security definer\s*\nset search_path = public/.test(seedMig));
 
-// Parse the migration's INSERT rows and compare shape-for-shape with BAKED.
+// Parse the seed migration's INSERT rows and the recomma migration's UPDATE rows; the FINAL state
+// is INSERTs with UPDATEs overlaid on the same (lang, has_name, sort_order) keys.
 {
-  const rowRe = /\n {2}\('(ar|en)',\s+(true|false),\s+\d+,\s+'((?:[^'\\]|\\.|'')*)'\)/g;
-  const migRows: ResultsFoundTemplate[] = [];
+  type Row = { lang: 'ar' | 'en'; hasName: boolean; sortOrder: number; template: string };
+  const rows = new Map<string, Row>();
+
+  const insertRe = /\n {2}\('(ar|en)',\s+(true|false),\s+(\d+),\s+'((?:[^'\\]|\\.|'')*)'\)/g;
   let m: RegExpExecArray | null;
-  while ((m = rowRe.exec(migration)) !== null) {
-    migRows.push({ lang: m[1] as 'ar' | 'en', hasName: m[2] === 'true', template: m[3].replace(/''/g, "'") });
+  while ((m = insertRe.exec(seedMig)) !== null) {
+    const r: Row = { lang: m[1] as 'ar' | 'en', hasName: m[2] === 'true', sortOrder: Number(m[3]), template: m[4].replace(/''/g, "'") };
+    rows.set(`${r.lang}|${r.hasName}|${r.sortOrder}`, r);
   }
-  check('the migration seeds exactly 40 rows (10 × 4 pools)', migRows.length === 40, `saw ${migRows.length}`);
+  check('the seed migration seeds exactly 40 rows (10 × 4 pools)', rows.size === 40, `saw ${rows.size}`);
+
+  const updateRe = /update public\.ui_results_found set template = '((?:[^'\\]|\\.|'')*)'\s+where lang='(ar|en)' and has_name=(true|false)\s+and sort_order=(\d+);/g;
+  let updates = 0;
+  while ((m = updateRe.exec(recommaMig)) !== null) {
+    const key = `${m[2]}|${m[3]==='true'}|${Number(m[4])}`;
+    const prior = rows.get(key);
+    if (!prior) continue;
+    rows.set(key, { ...prior, template: m[1].replace(/''/g, "'") });
+    updates++;
+  }
+  check('the recomma migration updates all 40 rows (10 × 4 pools) — self-describing final state',
+    updates === 40, `saw ${updates}`);
+
+  // Owner rule 2026-09-19: no comma may appear BEFORE the terminal emoji in any final template.
+  // A grapheme-safe test: pick the last non-space code unit that isn't a letter/digit/brace-tag —
+  // simpler and stricter, just assert no ASCII "," and no Arabic "،" appears anywhere in each row.
+  const rowList: Row[] = [...rows.values()];
+  const withComma = rowList.filter((r) => r.template.includes(',') || r.template.includes('،'));
+  check('owner rule: no template carries a comma (all commas were BEFORE the emoji, banned)',
+    withComma.length === 0,
+    withComma.slice(0, 3).map((r) => `${r.lang}|${r.hasName}|${r.sortOrder}: ${r.template}`).join(' || '));
+
+  const migRows: ResultsFoundTemplate[] = rowList.map((r) => ({ lang: r.lang, hasName: r.hasName, template: r.template }));
 
   // Sort both by (lang, hasName) to compare — the migration is grouped by pool but not by the same
   // sort order as the picker's baked list; the semantic set is what needs to match.
@@ -157,7 +189,7 @@ check('the migration RPC is security definer with an explicit search_path (schem
       || a.template.localeCompare(b.template)).map((r) => `${r.lang}|${r.hasName}|${r.template}`);
   const bakedNorm = norm([...BAKED]);
   const migNorm = norm(migRows);
-  check('the BAKED list equals the migration\'s rows as a MULTISET (never drift, in any order)',
+  check('the BAKED list equals the migration final state as a MULTISET (never drift, in any order)',
     JSON.stringify(bakedNorm) === JSON.stringify(migNorm),
     bakedNorm.length !== migNorm.length
       ? `sizes differ: baked=${bakedNorm.length} mig=${migNorm.length}`

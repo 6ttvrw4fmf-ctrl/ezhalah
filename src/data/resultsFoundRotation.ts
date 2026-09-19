@@ -26,51 +26,56 @@ export type ResultsFoundTemplate = { lang: 'ar' | 'en'; hasName: boolean; templa
 // Immediately available at import time so a fresh session already rotates from search #1. Order
 // matches the DB rows (lang asc → has_name asc → sort_order asc) and the equality is asserted by
 // scripts/verify-results-found-rotation.ts against the migration file.
+// Owner rule 2026-09-19: NO comma may appear before the emoji anywhere in a template. The emoji
+// terminates each sentence and any comma would be to its LEFT — banned. Every interior "،" / "," that
+// the earlier drafts carried was removed; a "space + emoji" (or "space + {name} + space + emoji" for
+// the logged-in variants) is the only shape allowed. See supabase/migrations/20260919212000_*.sql
+// for the DB update that trims prod's rows byte-for-byte to the same shape.
 const BAKED: readonly ResultsFoundTemplate[] = [
   // AR, guest (has_name = false)
   { lang: 'ar', hasName: false, template: 'لقينا لك {count} نتيجة تطابق بحثك 🎉' },
-  { lang: 'ar', hasName: false, template: 'أبشر، طلع لنا {count} نتيجة على بحثك 🏡' },
-  { lang: 'ar', hasName: false, template: 'يا سلام، لقينا {count} نتيجة تطابق مواصفات بحثك 🙌' },
-  { lang: 'ar', hasName: false, template: 'تم، عندنا {count} نتيجة مطابقة لبحثك ✨' },
+  { lang: 'ar', hasName: false, template: 'أبشر طلع لنا {count} نتيجة على بحثك 🏡' },
+  { lang: 'ar', hasName: false, template: 'يا سلام لقينا {count} نتيجة تطابق مواصفات بحثك 🙌' },
+  { lang: 'ar', hasName: false, template: 'تم عندنا {count} نتيجة مطابقة لبحثك ✨' },
   { lang: 'ar', hasName: false, template: 'بحثك رجّع لنا {count} نتيجة 🥳' },
-  { lang: 'ar', hasName: false, template: 'تم البحث، وطلع لنا {count} نتيجة ✅' },
+  { lang: 'ar', hasName: false, template: 'تم البحث وطلع لنا {count} نتيجة ✅' },
   { lang: 'ar', hasName: false, template: 'لقينا {count} نتيجة تطابق اللي بحثت عنه 🔍' },
-  { lang: 'ar', hasName: false, template: 'تمام، عندنا {count} نتيجة من بحثك الحالي 💯' },
+  { lang: 'ar', hasName: false, template: 'تمام عندنا {count} نتيجة من بحثك الحالي 💯' },
   { lang: 'ar', hasName: false, template: 'عندنا {count} نتيجة تطابق بحثك ⚡' },
-  { lang: 'ar', hasName: false, template: 'تم، لقينا {count} نتيجة حسب مواصفات بحثك 🏡' },
+  { lang: 'ar', hasName: false, template: 'تم لقينا {count} نتيجة حسب مواصفات بحثك 🏡' },
   // AR, logged-in (has_name = true)
   { lang: 'ar', hasName: true,  template: 'لقينا لك {count} نتيجة تطابق بحثك يا {name} 🎉' },
-  { lang: 'ar', hasName: true,  template: 'أبشر يا {name}، طلع لنا {count} نتيجة على بحثك 🏡' },
-  { lang: 'ar', hasName: true,  template: 'يا سلام يا {name}، لقينا {count} نتيجة تطابق مواصفات بحثك 🙌' },
-  { lang: 'ar', hasName: true,  template: 'تم يا {name}، عندنا {count} نتيجة مطابقة لبحثك ✨' },
-  { lang: 'ar', hasName: true,  template: 'لقيناها يا {name}، {count} نتيجة على بحثك 🔎' },
-  { lang: 'ar', hasName: true,  template: 'تمام يا {name}، بحثك رجّع لنا {count} نتيجة 🥳' },
-  { lang: 'ar', hasName: true,  template: 'تم البحث يا {name}، وطلع لنا {count} نتيجة ✅' },
+  { lang: 'ar', hasName: true,  template: 'أبشر يا {name} طلع لنا {count} نتيجة على بحثك 🏡' },
+  { lang: 'ar', hasName: true,  template: 'يا سلام يا {name} لقينا {count} نتيجة تطابق مواصفات بحثك 🙌' },
+  { lang: 'ar', hasName: true,  template: 'تم يا {name} عندنا {count} نتيجة مطابقة لبحثك ✨' },
+  { lang: 'ar', hasName: true,  template: 'لقيناها يا {name} {count} نتيجة على بحثك 🔎' },
+  { lang: 'ar', hasName: true,  template: 'تمام يا {name} بحثك رجّع لنا {count} نتيجة 🥳' },
+  { lang: 'ar', hasName: true,  template: 'تم البحث يا {name} وطلع لنا {count} نتيجة ✅' },
   { lang: 'ar', hasName: true,  template: 'لقينا {count} نتيجة على بحثك الحالي يا {name} 🔍' },
   { lang: 'ar', hasName: true,  template: 'عندنا {count} نتيجة يا {name} تطابق بحثك الحالي 🏘️' },
-  { lang: 'ar', hasName: true,  template: 'لقينا نتائج يا {name}، وعددها {count} 🏡' },
+  { lang: 'ar', hasName: true,  template: 'لقينا نتائج يا {name} وعددها {count} 🏡' },
   // EN, guest
   { lang: 'en', hasName: false, template: 'We found {count} results matching your search 🎉' },
-  { lang: 'en', hasName: false, template: 'Good news, we found {count} results matching your search 🏡' },
-  { lang: 'en', hasName: false, template: 'Search complete, we found {count} results ✅' },
+  { lang: 'en', hasName: false, template: 'Good news we found {count} results matching your search 🏡' },
+  { lang: 'en', hasName: false, template: 'Search complete we found {count} results ✅' },
   { lang: 'en', hasName: false, template: 'Your search returned {count} results 💫' },
   { lang: 'en', hasName: false, template: 'We found {count} results for your current search 🔍' },
-  { lang: 'en', hasName: false, template: 'Done, we found {count} results matching your criteria ⚡' },
-  { lang: 'en', hasName: false, template: 'Good news, we found {count} results matching your criteria 🎯' },
-  { lang: 'en', hasName: false, template: 'Search complete, we found {count} matching results 🙌' },
-  { lang: 'en', hasName: false, template: 'Good news, we found {count} results matching your search ⚡' },
-  { lang: 'en', hasName: false, template: 'Done, we found {count} results based on your search criteria 🏡' },
+  { lang: 'en', hasName: false, template: 'Done we found {count} results matching your criteria ⚡' },
+  { lang: 'en', hasName: false, template: 'Good news we found {count} results matching your criteria 🎯' },
+  { lang: 'en', hasName: false, template: 'Search complete we found {count} matching results 🙌' },
+  { lang: 'en', hasName: false, template: 'Good news we found {count} results matching your search ⚡' },
+  { lang: 'en', hasName: false, template: 'Done we found {count} results based on your search criteria 🏡' },
   // EN, logged-in
-  { lang: 'en', hasName: true,  template: 'We found {count} results matching your search, {name} 🎉' },
-  { lang: 'en', hasName: true,  template: 'Good news, {name}, we found {count} results matching your search 🏡' },
-  { lang: 'en', hasName: true,  template: 'Search complete, {name}, we found {count} results ✅' },
-  { lang: 'en', hasName: true,  template: 'Your search returned {count} results, {name} 💫' },
-  { lang: 'en', hasName: true,  template: 'We found {count} results for your current search, {name} 🔍' },
-  { lang: 'en', hasName: true,  template: 'Done, {name}, we found {count} results matching your criteria ⚡' },
-  { lang: 'en', hasName: true,  template: 'Good news, {name}, we found {count} results matching your criteria 🎯' },
-  { lang: 'en', hasName: true,  template: 'Search complete, {name}, we found {count} matching results 🙌' },
-  { lang: 'en', hasName: true,  template: 'Good news, {name}, we found {count} results matching your search ⚡' },
-  { lang: 'en', hasName: true,  template: 'Done, {name}, we found {count} results based on your search criteria 🏡' },
+  { lang: 'en', hasName: true,  template: 'We found {count} results matching your search {name} 🎉' },
+  { lang: 'en', hasName: true,  template: 'Good news {name} we found {count} results matching your search 🏡' },
+  { lang: 'en', hasName: true,  template: 'Search complete {name} we found {count} results ✅' },
+  { lang: 'en', hasName: true,  template: 'Your search returned {count} results {name} 💫' },
+  { lang: 'en', hasName: true,  template: 'We found {count} results for your current search {name} 🔍' },
+  { lang: 'en', hasName: true,  template: 'Done {name} we found {count} results matching your criteria ⚡' },
+  { lang: 'en', hasName: true,  template: 'Good news {name} we found {count} results matching your criteria 🎯' },
+  { lang: 'en', hasName: true,  template: 'Search complete {name} we found {count} matching results 🙌' },
+  { lang: 'en', hasName: true,  template: 'Good news {name} we found {count} results matching your search ⚡' },
+  { lang: 'en', hasName: true,  template: 'Done {name} we found {count} results based on your search criteria 🏡' },
 ];
 
 // Live cache — starts equal to BAKED so the very first pick already rotates. Loader can override.

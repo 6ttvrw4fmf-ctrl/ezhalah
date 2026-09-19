@@ -147,9 +147,12 @@ export function hasFilterGreetingsCache(): boolean {
 }
 
 /**
- * Builds the opening: "{greeting}، إزهله {emoji}، ". Synchronous and never falls back — the baked
+ * Builds the opening: "{greeting} إزهله {emoji}، ". Synchronous and never falls back — the baked
  * list guarantees a real rotation from the very first Filter search of a session. Never repeats the
  * immediately-previous pick when 2+ rows are available.
+ *
+ * Owner rule 2026-09-19: a comma may ONLY appear AFTER the emoji, never before. The trailing "، "
+ * separates the greeting-with-emoji from the "أبحث ..." filter summary that follows.
  */
 export function pickFilterGreetingOpening(): string {
   const n = cache.length;
@@ -157,7 +160,7 @@ export function pickFilterGreetingOpening(): string {
   if (n > 1 && i === lastIndex) i = (i + 1) % n;
   lastIndex = i;
   const { greeting, emoji } = cache[i];
-  return `${greeting}، إزهله ${emoji}، `;
+  return `${greeting} إزهله ${emoji}، `;
 }
 
 // Test-only export: the baked list itself, so a barrier can assert its exact size and shape.
