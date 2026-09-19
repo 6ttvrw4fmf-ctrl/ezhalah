@@ -544,6 +544,7 @@ const AMAALL_LOGO = require('../../assets/images/amaall.png');
 const AQARALSAUDIA_LOGO = require('../../assets/images/aqaralsaudia.png');
 const SUWAR_LOGO = require('../../assets/images/suwar.png');
 const RAKEZ_LOGO = require('../../assets/images/rakez.png');
+const AKARIYOUN_LOGO = require('../../assets/images/akariyoun.png');
 const AMLAKALAHSA_LOGO = require('../../assets/images/amlakalahsa.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
 const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
@@ -669,6 +670,7 @@ function SourceBadge({ source }: { source: string }) {
   // an asset is renamed.
   if (s.includes('suwar')) return <Image source={SUWAR_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('rakez')) return <Image source={RAKEZ_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('akariyoun') || s.includes('عقاريون')) return <Image source={AKARIYOUN_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('amlakalahsa')) return <Image source={AMLAKALAHSA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;

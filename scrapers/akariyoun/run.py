@@ -417,6 +417,51 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
     return row, cat, (None if price_is_exact else raw_price)
 
 
+# ── liveness ─────────────────────────────────────────────────────────────────────────────────────
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    """Absence from the crawl NEVER deactivates on its own — the source must SAY the ad is gone.
+
+    Control-validated live 2026-09-18 against this platform's real retirement behaviour:
+      · fyla-llbyaa-fy-hy-alghnamy-6 (live)  -> HTTP 200, page carries «رقم الاعلان»
+      · ard-llbyaa-fy-hy-bdr         (live)  -> HTTP 200, page carries «رقم الاعلان»
+      · this-slug-never-existed-zzz99        -> HTTP 404
+
+    akariyoun hard-404s a URL it does not serve, so a 404 is a real signal. But a 404 alone is NOT
+    enough here: this is an HTML site behind a CDN, where a WAF page or a routing change can also
+    answer 404. So 'gone' requires a 404 AND the row's own URL to be known; anything else — a 200
+    that still renders the listing, any 401/403/408/429/5xx, a transport failure, or a 404 for a row
+    whose URL we cannot look up — is UNKNOWN and holds the strike without deactivating.
+
+    Returns ('gone'|'live'|'unknown', evidence). UNKNOWN NEVER KILLS.
+    """
+    try:
+        c = db.sb()
+        url = None
+        for tbl in ("akariyoun_residential_listings", "akariyoun_commercial_listings"):
+            r = (c.table(tbl).select("listing_url").eq("ad_number", ad_number).limit(1).execute())
+            if r.data:
+                url = r.data[0]["listing_url"]
+                break
+    except Exception as e:
+        return "unknown", f"url lookup raised {type(e).__name__}: {str(e)[:80]}"
+    if not url:
+        return "unknown", "no listing_url on file for this ad_number"
+
+    s = session()
+    try:
+        _throttle()
+        resp = s.get(url, timeout=40, allow_redirects=True)
+    except Exception as e:
+        return "unknown", f"probe raised {type(e).__name__}: {str(e)[:80]}"
+    if resp.status_code == 404:
+        return "gone", "HTTP 404 on the listing's own URL — akariyoun hard-404s what it no longer serves"
+    if resp.status_code == 200:
+        if re.search(r"رقم\s*الاعلان", resp.text):
+            return "live", "HTTP 200 and the page still renders the ad number"
+        return "unknown", "HTTP 200 but no ad number — a shell or a routing change, not proof of death"
+    return "unknown", f"HTTP {resp.status_code} — transient, holds the strike"
+
+
 # ── main ─────────────────────────────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -471,8 +516,25 @@ def main() -> int:
     if com:
         db.upsert_akariyoun_commercial_batch(com)
 
+    # PRUNE — only on a full run, and only with a DIRECT per-row confirm. prune_unseen's own
+    # circuit breakers (0-seen, >30% of the table, <8 remaining) sit on top of that, and
+    # _verify_gone returning 'unknown' holds the strike rather than deactivating.
+    pruned = 0
+    if not args.limit and args.type == "all":
+        seen_ads = {r["ad_number"] for r in (res + com)}
+        for tbl, rows in (("akariyoun_residential_listings", res),
+                          ("akariyoun_commercial_listings", com)):
+            if not rows:
+                continue
+            k = db.prune_unseen(tbl, seen_ads, source=SOURCE, grace=3, verify_gone=_verify_gone)
+            if k < 0:
+                print(f"   ⚠ {tbl}: prune guard tripped — kept existing active")
+            else:
+                pruned += k
+
     n = len(res) + len(com)
     print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted"
+          + (f", {pruned} stale pruned" if pruned else "")
           + (f" ({unpriced} price NOT proven exact -> NULL)" if unpriced else ""))
     if run_id:
         db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=n)

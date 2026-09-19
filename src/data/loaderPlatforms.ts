@@ -84,6 +84,7 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'Azdad',        i18nKey: 'Azdad Al Aqariah',                        logo: require('../../assets/images/azdad.png') },
   { name: 'Suwar',        i18nKey: 'Suwar Real Estate',                       logo: require('../../assets/images/suwar.png') },
   { name: 'Rakez',        i18nKey: 'Rakez Real Estate',                       logo: require('../../assets/images/rakez.png') },
+  { name: 'Akariyoun',    i18nKey: 'Akariyoun',                               logo: require('../../assets/images/akariyoun.png') },
 ];
 
 // Ordered SPECIFIC-first token → platform name map, mirroring ResultCard's SourceBadge matching so a
@@ -118,6 +119,8 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['azdad', 'Azdad'],
   ['suwar', 'Suwar'],
   ['rakez', 'Rakez'],
+  ['akariyoun', 'Akariyoun'],
+  ['عقاريون', 'Akariyoun'],
   ['aqar', 'Aqar'],
 ];
 
