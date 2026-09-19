@@ -142,6 +142,27 @@ const WAIVED: Record<string, string> = {
   // no future crawl will ever re-correct these rows, and the ledger's price_before/price_after are
   // the only record of what the source actually published. Open the two companions to check this
   // reason rather than taking it on trust.
+  // Fifth instance of the two-migrations-minutes-apart shape. The repair NULLs property_age on 46
+  // عقاريون listings whose «عمر العقار» reads «اكثر من عشر سنوات» — MORE THAN ten years — which
+  // Ezhalah had stored as exactly 10, so a customer filtering «10 years or newer» was shown homes
+  // the source itself calls older. The 17 rows whose source genuinely says «عشر سنوات» were left
+  // alone; all 63 were re-fetched and read individually first, so this is per-row evidence.
+  //
+  // Like the res_com waiver above, the companion's detector watches THIS REPAIR SPECIFICALLY rather
+  // than a class: mon_detect_akariyoun_open_bound_age_reappears() holds the 46 proven URLs in
+  // akariyoun_open_bound_age_slugs() and fires the moment any of them carries an age again. It also
+  // re-asserts the UPDATE, because the scraper cannot self-heal here — parse_age() correctly returns
+  // None for an open bound, but _unknown_must_not_overwrite_known() DROPS a None key from an upsert
+  // (owner rule 2026-08-09), so a wrong number once stored can only be removed explicitly.
+  //
+  // The companion mutation-proves the detector inside its own migration: it plants an age on a known
+  // open-bound row, asserts the detector fires, then puts the row back and asserts it runs green.
+  // Open that companion to check this reason rather than taking it on trust.
+  '20260919014358_akariyoun_open_bound_ages_are_unknown_not_ten.sql':
+    'watched by its companion 20260919022152_mon_detect_akariyoun_open_bound_age_reappears.sql, '
+    + 'which ships + rosters + mutation-proves mon_detect_akariyoun_open_bound_age_reappears() — a '
+    + 'detector that watches THIS repair (the 46 proven-open-bound URLs it NULLed, held in '
+    + 'akariyoun_open_bound_age_slugs()) — and re-asserts the same UPDATE idempotently',
   '20260905070828_repair_muktamel_raw_monthly_rent_stored_in_price_annual.sql':
     'watched by its companions 20260905071148_barrier_a_whole_platform_monthly_rent_cohort_that_was_'
     + 'never_annualised.sql, which ships + rosters mon_detect_unannualised_rent_cohort(), and '
