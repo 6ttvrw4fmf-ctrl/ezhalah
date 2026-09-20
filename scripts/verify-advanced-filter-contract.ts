@@ -350,6 +350,27 @@ check('the «لقينا N» completion beat is not wired: the mining card is nev
   !/\{ \.\.\.f, to: total \}/.test(agentSrc)
   && /setAgeFlow\(\{ phase: 'mining', from: ageFlowTotalRef\.current, to: null \}\)/.test(agentSrc),
   'setting `to` flips MiningTransition\'s `done`, which draws the checkmark and the sentence the owner removed');
+// THE «تحديد أكثر» PROBE RUNS *WITH* THE SEARCH, NOT AFTER IT (owner 2026-09-20: "once the user
+// clicks Search, the button should show … the user will wait 10 seconds — let the 2.5 be part of
+// that"). The passive effect keys off lastResultsMsg, which does not exist until the search has
+// already returned, so the probe's cost — a scope round trip, a count probe per advanced question,
+// plus one bounded 2.5s retry — used to stack AFTER the wait the user was already serving.
+// Measured A/B on the identical search: button lag after results 2,704ms → 1,200ms.
+check('the narrowing probe is prefetched at every live search site, before the query is awaited',
+  (agentSrc.match(/prefetchNarrowing\(/g) ?? []).length >= 3,   // the three live runQuery sites
+  'a search path that does not prefetch pays the probe cost after its results, and its button pops in late');
+// agentSrc is the RAW file, so a trailing `// …` on the prefetch line sits between the two
+// statements — match to end-of-line rather than assuming whitespace.
+check('every prefetch fires BEFORE its runQuery, never after',
+  /prefetchNarrowing\([^;]*\);[^\n]*\n\s*const result = await runQuery\(/.test(agentSrc));
+check('the effect CLAIMS the prefetched verdict instead of re-probing, and still probes on a miss',
+  /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked\)/.test(agentSrc),
+  'without the key match a stale verdict could be handed to a different search');
+check('a superseded prefetch cannot crash the app as an unhandled rejection',
+  /assessNarrowing\(q, asked\)\.catch\(\(\) => 'unknown' as const\)/.test(agentSrc));
+check('the prefetch is skipped when the button would be hidden anyway (no wasted probes)',
+  /if \(!q \|\| !anyGuidedEligible\(q\)\) return;/.test(agentSrc));
+
 check('the results pills are fed by the deduped facet set (one label per committed answer)',
   /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
   && /facets: dedupedFacets,/.test(agentSrc));

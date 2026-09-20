@@ -61,9 +61,16 @@ check('the dead auto-continue timing knob is gone, not just unused (root-cause r
 // The ONE place a round CAN open is the passive effect + the «تحديد أكثر» tap handler — both outside
 // finishGuided. Confirmed together so "moved the call, not deleted it" cannot pass.
 const passive = agent.slice(agent.indexOf('const assessNarrowing = async'), agent.indexOf('const runRefine = async'));
-check('assessNarrowing is called exactly once in the whole file — the passive button effect, never a second call site',
-  (agent.match(/assessNarrowing\(/g) ?? []).length === 1
-  && /void assessNarrowing\(q, asked\)\.then/.test(passive));
+// TWO call sites since 2026-09-20, both on the SAME passive path: prefetchNarrowing() starts the
+// probe alongside the search, and the effect falls back to an inline call when no prefetch matches.
+// What this check has always been about is that NEITHER is a round re-opening itself — that is
+// asserted directly above (`fin` contains no assessNarrowing at all), and is the rule that matters.
+// Pinning the exact sites keeps a third, unexamined caller from appearing unnoticed.
+check('assessNarrowing has exactly two call sites, both on the passive offer path',
+  (agent.match(/assessNarrowing\(/g) ?? []).length === 2
+  && /afPrefetchRef\.current = \{ key, p: assessNarrowing\(q, asked\)/.test(agent)
+  && /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked\)/.test(agent),
+  'a third caller means something other than the button is deciding whether a round may follow');
 check('opening a new round anywhere in the file requires a Pressable tap (narrow-further button), '
     + 'never a bare timer',
   /onPress={\(\) => \{[\s\S]{0,700}?void startAgeFlow\(q\);/.test(agent));

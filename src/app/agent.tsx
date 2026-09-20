@@ -1908,6 +1908,31 @@ export default function Agent() {
     return 'unknown';
   };
 
+  // START THE "IS THERE A USEFUL QUESTION LEFT?" PROBE *WITH* THE SEARCH, NOT AFTER IT
+  // (owner 2026-09-20: "once the user clicks Search, the button should show … the user will wait
+  // 10 seconds — let the 2.5 be part of that").
+  //
+  // The effect below cannot start it: it keys off lastResultsMsg, which does not exist until the
+  // search has already returned. So the probe's cost — a scope round trip, then a count probe for
+  // every one of the 9 advanced questions, plus one bounded 2.5s retry when a batch comes back
+  // undetermined — was stacked AFTER the search the user was already waiting on, and «تحديد أكثر»
+  // popped in seconds late. Run concurrently it is free: the search is the longer of the two.
+  //
+  // One slot, not a map: searches are sequential, and a superseded search's verdict is simply never
+  // claimed. The key pins the exact (query, asked-set) the effect will ask for, so a stale answer
+  // can never be handed to a different search — on a miss the effect just probes as it always did.
+  const afPrefetchRef = useRef<{ key: string; p: Promise<'yes' | 'no' | 'unknown'> } | null>(null);
+  const afPrefetchKey = (q: SearchQuery, asked: readonly string[]) =>
+    `${JSON.stringify(q)}|${[...asked].sort().join(',')}`;
+  const prefetchNarrowing = (q: SearchQuery | null | undefined, asked: readonly string[] = []) => {
+    if (!q || !anyGuidedEligible(q)) return;   // the button is hidden anyway — do not spend the probes
+    const key = afPrefetchKey(q, asked);
+    if (afPrefetchRef.current?.key === key) return;
+    // `.catch` here, not at the await: an unhandled rejection on a promise nobody claims (a
+    // superseded search) would surface as a crash rather than the 'unknown' this already means.
+    afPrefetchRef.current = { key, p: assessNarrowing(q, asked).catch(() => 'unknown' as const) };
+  };
+
   const afProbedRef = useRef<Record<string, true>>({});
   useEffect(() => {
     const m = lastResultsMsg;
@@ -1922,7 +1947,10 @@ export default function Agent() {
     // PASSIVE: renders the «تحديد أكثر» button and nothing else. Automatic continuation of an
     // interview the user already opened lives in finishGuided (owner 2026-09-04) — this effect
     // never opens the overlay on a plain search turn (owner 2026-08-19 stands).
-    void assessNarrowing(q, asked).then((verdict) => {
+    // Claim the verdict the search already paid for; probe here only if there is no match.
+    const pre = afPrefetchRef.current;
+    const claimed = pre && pre.key === afPrefetchKey(q, asked) ? pre.p : assessNarrowing(q, asked);
+    void claimed.then((verdict) => {
       // owner 2026-09-12: reverses the 2026-09-04 decision to narrate "nothing left" as a chat
       // bubble — too dense/confusing in practice. Silent now: afCanNarrow alone still correctly
       // hides «تحديد أكثر» when exhausted (line ~3418); «عرض المزيد» is untouched by this verdict.
@@ -1953,6 +1981,7 @@ export default function Agent() {
     searchingAtRef.current[statusId] = Date.now();
     setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
     toBottom();
+    prefetchNarrowing(refined, opts?.guided?.asked ?? []);  // runs DURING the search, not after it
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
     // quotableTotal, never `result.total` — that is this page's buffer length (≤ the 1500-row
@@ -2747,6 +2776,7 @@ export default function Agent() {
       const forcedBroad = !turn.query.location;
       saidRef.current = [];
       beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
+      prefetchNarrowing(turn.query);  // runs DURING the search, not after it
       const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
       const reply = forcedBroad
         ? `${getLocale() !== 'en'
@@ -2900,6 +2930,7 @@ export default function Agent() {
       // layer) left the «إزهله يبحث» loader spinning forever with no recovery. Wrapped in try/catch/
       // finally (mirrors loadMore) so the loader ALWAYS clears and a thrown turn shows an inline retry.
       try {
+        prefetchNarrowing(pending.q);  // runs DURING the search, not after it
         const result = await runQuery(pending.q, true, run.ac.signal, ensureChatId());
         if (run.cancelled) return;
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
