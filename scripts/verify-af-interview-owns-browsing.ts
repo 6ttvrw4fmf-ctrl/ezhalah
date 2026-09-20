@@ -157,7 +157,11 @@ const completedCalls = [...agentCode.matchAll(/setCompleted\(true\)/g)].length;
 // `revealIsTerminal` needs no such care — it is a bare identifier, no nested parens.
 const gateRe = () => /if \((?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
 const gatedCompletedCalls = [...agentCode.matchAll(gateRe())].length;
-check('every completed-trigger is the ≤50 threshold or the 500-cap/show-all terminal, and nothing else',
+// The label deliberately names the PREDICATE, not a digit: the threshold moved 25 → 50 → 25 between
+// 2026-09-04 and 2026-09-20 and this label still read "≤50" afterwards (found by routine #9,
+// 2026-09-20). The assertion below never depended on the value — it counts gates, not results — so
+// this was a stale label on a sound check, which is exactly how a reader loses trust in one.
+check('every completed-trigger is the stop-line threshold or the 500-cap/show-all terminal, and nothing else',
   completedCalls >= 3 && completedCalls === gatedCompletedCalls,
   `saw ${completedCalls} setCompleted(true) call(s), ${gatedCompletedCalls} directly gated by one of the named predicates`);
 

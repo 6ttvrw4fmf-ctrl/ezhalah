@@ -905,7 +905,7 @@ export default function Agent() {
   const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
-  // INTERVIEW_STOP_AT (50, owner product rule 2026-09-04 — was 25): the same line at which Advanced
+  // INTERVIEW_STOP_AT (25, owner 2026-09-20 — briefly 50 under the 2026-09-04 rule): the line at which Advanced
   // Filter stops narrowing (R11.1) and the set
   // is by contract the FINAL one, so there is nothing left for a first page to be a preview OF. Gated
   // on quotableTotal() — the honest total, null whenever the RPC count would overstate (client-only
@@ -3590,13 +3590,15 @@ export default function Agent() {
                         const hasMore = rc.hasMore && isLatestResults;
                         // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side).
                         const quoteTotal = !clientNarrowed;
-                        // ≤50 RULE (owner brief 2026-08-19 item 4, threshold raised 25 → 50 by the owner product
-                        // rule of 2026-09-04; the live value is INTERVIEW_STOP_AT in src/lib/afRanking.ts):
+                        // THE STOP-LINE RULE (owner brief 2026-08-19 item 4; the threshold went 25 → 50 on
+                        // 2026-09-04 and back to 25 on 2026-09-20 — never quote a digit here, the live value
+                        // is INTERVIEW_STOP_AT in src/lib/afRanking.ts):
                         // the auto-opening AF intro already
                         // correctly gated on this same threshold (agent.tsx ~1375) — this SEPARATE manual
                         // button did not, and its click path (startAgeFlow → rankQuestions, which itself
-                        // floors on the SAME MIN_TOTAL_TO_SHOW=51 constant) fell through to the plain
-                        // refine-chip flow for any ≤50 scope rather than doing nothing. A ≤50 result set
+                        // floors on the SAME MIN_TOTAL_TO_SHOW constant, INTERVIEW_STOP_AT + 1) fell through
+                        // to the plain refine-chip flow for any at-or-below-the-line scope rather than doing
+                        // nothing. A result set at or below the line
                         // gets ONLY the normal lightweight actions (Load more if genuinely more exists,
                         // FeedbackRow below) — never a "narrow further" prompt when there is nothing
                         // useful left to narrow.
@@ -3624,8 +3626,10 @@ export default function Agent() {
                         // withhold the pager from a user with thousands of matches. The predicate is
                         // now exhaustive over the phase union and fails the BUILD if a new phase is
                         // added without a decision. Behaviour today is identical by construction.
-                        // ONE terminal signal for the composer lock AND the pager (owner 2026-09-06,
-                        // `final=50`): once the AF round narrows to ≤ INTERVIEW_STOP_AT the chat is
+                        // ONE terminal signal for the composer lock AND the pager (owner 2026-09-06; the
+                        // rule was named `final=50` after the stop line OF THAT DAY — the live line is
+                        // INTERVIEW_STOP_AT, never a digit written here):
+                        // once the AF round narrows to ≤ INTERVIEW_STOP_AT the chat is
                         // completed — the composer locks and every match is already revealed, so the
                         // «عرض المزيد» row must be gone too. `completed` gates it here, alongside the
                         // existing interview-owns-browsing and has-something-to-offer clauses.
@@ -3699,7 +3703,7 @@ export default function Agent() {
                                   المزيد» reveals everything up to the cap, so the button needs no count caption. */}
                               {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
                                   «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
-                                  when there is genuinely more than INTERVIEW_STOP_AT=50 left to narrow. */}
+                                  when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
                               {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
                                   user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
                                   the old CTA row must not sit behind it competing for the same decision.
