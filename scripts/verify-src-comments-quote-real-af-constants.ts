@@ -25,9 +25,11 @@
 // that failure mode's seed.
 //
 // ONE PREDICATE, TWO SCOPES — never a second copy. `constantClaims()` / `wrongClaims()` are IMPORTED
-// from the docs barrier, and the constants are IMPORTED from `src/lib/afRanking.ts` and read at run
-// time, never regexed. So a constant added or re-valued tomorrow is covered here for free, and the
-// two halves cannot drift into disagreeing about what an assertion even is.
+// from `scripts/lib/afConstantClaims.ts`, which BOTH barriers import (it was moved out of the docs
+// barrier for this, because importing a `verify-*` script to borrow its predicate executes that
+// script's own checks as a side effect). The constants are IMPORTED from `src/lib/afRanking.ts` and
+// read at run time, never regexed. So a constant added or re-valued tomorrow is covered here for
+// free, and the two halves cannot drift into disagreeing about what an assertion even is.
 //
 // SCOPE — COMMENT LINES IN `src/` ONLY, deliberately. Code is not judged: `const x = 50` is not a
 // claim about `INTERVIEW_STOP_AT`, and a test fixture may legitimately use any number. Only `//`,
