@@ -37,6 +37,7 @@ import argparse
 import html as ihtml
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -404,18 +405,35 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
 
 
 def fetch_catalogue(s: cc.Session, base: str, limit: int = 0) -> list[str]:
-    seen: set[str] = set()
-    for sm in (f"{base}/property-sitemap.xml", f"{base}/wp-sitemap-posts-property-1.xml"):
-        try:
-            r = s.get(sm, timeout=40)
-        except Exception:
-            continue
-        if r.status_code == 200 and "<loc" in r.text:
-            seen |= {u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/property/" in u}
+    """Discover every listing URL from the tenant's own sitemap.
+
+    RETRIED, because an empty catalogue is fatal: `run_platform` raises on it (correctly — a
+    silent zero would look like "the site has no listings" and is exactly how a blocked crawl
+    would present). gudai failed twice on 2026-09-20 with «sitemap returned no /property/ urls»
+    while safera and alhumaidan — the same code, the same host — succeeded in the same minute, so
+    the fetch is intermittently flaky rather than the site being down. One attempt turned that
+    flake into a failed run and a day of stale data.
+
+    Three passes with growing backoff over BOTH sitemap spellings. Only a genuinely empty result
+    after all of them raises, so the fail-loud guard keeps its meaning."""
+    for attempt in range(3):
+        seen: set[str] = set()
+        for sm in (f"{base}/property-sitemap.xml", f"{base}/wp-sitemap-posts-property-1.xml"):
+            try:
+                r = s.get(sm, timeout=40)
+            except Exception:
+                continue
+            if r.status_code == 200 and "<loc" in r.text:
+                seen |= {u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/property/" in u}
+            if seen:
+                break
         if seen:
-            break
-    out = sorted(seen)
-    return out[:limit] if limit else out
+            out = sorted(seen)
+            return out[:limit] if limit else out
+        if attempt < 2:
+            print(f"  sitemap empty (attempt {attempt + 1}/3) — retrying", flush=True)
+            time.sleep(3 * (attempt + 1))
+    return []
 
 
 def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:

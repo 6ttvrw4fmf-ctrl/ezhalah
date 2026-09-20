@@ -174,3 +174,44 @@ def test_every_new_parser_writes_af_columns() -> None:
     assert "rooms_from_phrase" in inspect.getsource(najran.map_listing)
     assert "amenities_from_text" in inspect.getsource(cin.map_units)
     assert "amenities_from_text" in inspect.getsource(fahad.map_listing)
+
+
+# ─────────────────────────────── a flaky sitemap must not fail the run ─────────────────────────
+def test_inblaj_sitemap_fetch_is_retried() -> None:
+    """gudai failed twice on 2026-09-20 with «sitemap returned no /property/ urls» while safera and
+    alhumaidan — same code, same host — succeeded in the same minute. An empty catalogue is fatal
+    by design (a silent zero is indistinguishable from a blocked crawl), so one flaky fetch cost a
+    whole day of stale data. The real fetch function is executed here against a transport that
+    fails once and then succeeds: it must return the URLs, not give up on the first miss."""
+    from scrapers.common import inblaj_platform as ip
+
+    class _R:
+        def __init__(self, ok):
+            self.status_code = 200 if ok else 503
+            self.text = ("<urlset><loc>https://x.inblaj.net/property/a/</loc>"
+                         "<loc>https://x.inblaj.net/property/b/</loc></urlset>") if ok else ""
+
+    class _S:
+        def __init__(self): self.calls = 0
+        def get(self, *_a, **_k):
+            self.calls += 1
+            return _R(self.calls > 2)      # both spellings miss on the first pass
+
+    sess = _S()
+    got = ip.fetch_catalogue(sess, "https://x.inblaj.net")
+    assert len(got) == 2, f"a retried fetch must recover the catalogue, got {got}"
+    assert sess.calls > 2, "it must actually retry, not succeed by luck on the first call"
+
+
+def test_a_truly_empty_sitemap_still_returns_empty() -> None:
+    """The retry must not paper over a real emptiness — run_platform still has to raise on it."""
+    from scrapers.common import inblaj_platform as ip
+
+    class _R:
+        status_code = 404
+        text = ""
+
+    class _S:
+        def get(self, *_a, **_k): return _R()
+
+    assert ip.fetch_catalogue(_S(), "https://x.inblaj.net") == []
