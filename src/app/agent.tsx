@@ -30,7 +30,7 @@ import { distinctPlatformCount } from '@/lib/platformDiversity';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
-import { CardIn, LoadingDots, GoldPulse } from '@/components/CardReveal';
+import { CardIn, LoadingDots, GoldPulse, GoldShineButton } from '@/components/CardReveal';
 
 // Memoized card: during the reveal cascade the list re-renders every ~55ms — already-revealed cards
 // must skip reconciliation or 200+ cards stutter the very animation the cascade exists for (review
@@ -3722,9 +3722,9 @@ export default function Agent() {
                                       clean. Writing it on EVERY tap means a stale carry can never be
                                       read, and two fast taps write the same value. */}
                                   {canNarrowFurther ? (
-                                    // Primary now (owner 2026-09-20): gold + ambient GoldPulse (CardReveal.tsx).
+                                    // Primary (owner 2026-09-20): gold shine + ambient pulse (CardReveal.tsx).
                                     <GoldPulse>
-                                      <Pressable
+                                      <GoldShineButton
                                         testID="results-narrow"
                                         onPress={() => {
                                           const q = m.result.query;
@@ -3735,11 +3735,11 @@ export default function Agent() {
                                           if (q && anyGuidedEligible(q)) void startAgeFlow(q);
                                           else startRefine(q);
                                         }}
-                                        style={({ hovered, pressed }: any) => [s.mBtnPrimary, (hovered || pressed) && s.mBtnPrimaryHover]}
+                                        style={s.mBtnPrimary}
                                         disabled={busy}
                                       >
                                         <Text style={s.mBtnPrimaryTx}>{t('Let’s narrow it down')}</Text>
-                                      </Pressable>
+                                      </GoldShineButton>
                                     </GoldPulse>
                                   ) : null}
                                 </View>
@@ -4194,9 +4194,9 @@ const s = StyleSheet.create({
   // The two actions under the «more than 25» message (owner 2026-09-20: gold primary + white
   // secondary — see the JSX above for which button wears which now).
   mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
-  // PRIMARY = «خلّنا نحدد الطلب أكثر». Gold, not brand green, so it's the one CTA that stands out.
-  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.goldFill, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
-  mBtnPrimaryHover: { backgroundColor: colors.goldFillHover },
+  // PRIMARY = «خلّنا نحدد الطلب أكثر». Layout only — GoldShineButton (CardReveal.tsx) paints the
+  // actual gold gradient + shine sweep + hover/press darken; no flat backgroundColor here anymore.
+  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}) },
   mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: colors.goldOnFill, lineHeight: 18 },
   // SECONDARY = «عرض المزيد». Unchanged definition, just moved onto the demoted button.
   mBtnAlt: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },

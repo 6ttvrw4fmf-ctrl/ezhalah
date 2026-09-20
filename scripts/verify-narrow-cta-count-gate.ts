@@ -44,11 +44,12 @@ check('the manual narrow-CTA count reads matchTotal FIRST, never fetched/listing
 check("canNarrowFurther is gated on (matchTotal-first total) > INTERVIEW_STOP_AT (the exact 25/26 boundary, not >=)",
   !!rawTotalName && new RegExp(`const\\s+canNarrowFurther\\s*=\\s*${rawTotalName}\\s*>\\s*INTERVIEW_STOP_AT`).test(ag));
 
-// The Pressable may sit directly inside the ternary, or (2026-09-20, gold-primary restyle) inside a
-// <GoldPulse> ambient-attention wrapper — either way `canNarrowFurther` must be the ONLY gate between
-// the ternary and the Pressable actually being mounted.
-check("the «Let's narrow it down» Pressable only renders when canNarrowFurther is true",
-  /\{canNarrowFurther\s*\?\s*\(\s*(?:<GoldPulse>\s*)?<Pressable[\s\S]{0,200}?onPress=\{\(\)\s*=>\s*\{\s*const q = m\.result\.query;/.test(ag),
+// The Pressable-equivalent may sit directly inside the ternary, or (2026-09-20, gold-primary
+// restyle) inside a <GoldPulse> ambient-attention wrapper around a <GoldShineButton> (which renders
+// its OWN inner Pressable — see CardReveal.tsx) — either way `canNarrowFurther` must be the ONLY
+// gate between the ternary and the control actually being mounted.
+check("the «Let's narrow it down» control only renders when canNarrowFurther is true",
+  /\{canNarrowFurther\s*\?\s*\(\s*(?:<GoldPulse>\s*)?<(?:Pressable|GoldShineButton)[\s\S]{0,200}?onPress=\{\(\)\s*=>\s*\{\s*const q = m\.result\.query;/.test(ag),
   'the button must not render unconditionally alongside Load More');
 
 check('the OLD unconditional-button shape (no canNarrowFurther guard around the Pressable) is gone',
