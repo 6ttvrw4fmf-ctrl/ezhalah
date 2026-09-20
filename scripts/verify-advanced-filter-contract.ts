@@ -44,7 +44,7 @@ check('the pool contains all five questions and rankQuestions re-ranks it contex
   // INTERVIEW_STOP_AT/MIN_TOTAL_TO_SHOW moved to afRanking.ts (2026-08-22, pure-module extraction);
   // advancedFilters.ts still re-exports them (checked separately below) so every existing importer
   // is unaffected.
-  && /INTERVIEW_STOP_AT = 50/.test(rankingSrc)   // owner product rule 2026-09-04 (was 25)
+  && /INTERVIEW_STOP_AT = 25/.test(rankingSrc)   // owner 2026-09-20 (50 → 25, restoring the original line)
   && /MIN_TOTAL_TO_SHOW = INTERVIEW_STOP_AT \+ 1/.test(rankingSrc)
   && /INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW/.test(advSrc));
 // MECHANISM CHANGE (owner 2026-08-22, «رجوع»): asked-tracking is no longer an incremental

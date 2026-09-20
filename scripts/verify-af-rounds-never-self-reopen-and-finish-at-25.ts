@@ -35,13 +35,13 @@ const read = (rel: string) => readFileSync(join(root, rel), 'utf8');
 console.log('\nAdvanced Filter rounds: never self-reopen, finish at ≤ 50, never repeat, never stale (owner 2026-09-20)\n');
 
 // ── 1. The stop line, EXECUTED ───────────────────────────────────────────────────────────────────
-check(`INTERVIEW_STOP_AT is 50 (got ${INTERVIEW_STOP_AT})`, INTERVIEW_STOP_AT === 50);
-check('MIN_TOTAL_TO_SHOW is the stop line + 1 (a question is asked only ABOVE 50)', MIN_TOTAL_TO_SHOW === 51);
+check(`INTERVIEW_STOP_AT is 25 (got ${INTERVIEW_STOP_AT})`, INTERVIEW_STOP_AT === 25);
+check('MIN_TOTAL_TO_SHOW is the stop line + 1 (a question is asked only ABOVE 25)', MIN_TOTAL_TO_SHOW === 26);
 const FP = 10;
-check('≤ 50 reveals EVERY fetched listing (honestTotal 50 → 50 revealed; 37 → 37) — no «عرض المزيد» on a finished set',
-  initialReveal({ fetched: 50, honestTotal: 50, firstPage: FP, stopAt: INTERVIEW_STOP_AT }) === 50
-  && initialReveal({ fetched: 37, honestTotal: 37, firstPage: FP, stopAt: INTERVIEW_STOP_AT }) === 37);
-check('51 is NOT a finished set: first page only', initialReveal({ fetched: 51, honestTotal: 51, firstPage: FP, stopAt: INTERVIEW_STOP_AT }) === FP);
+check('≤ 25 reveals EVERY fetched listing (honestTotal 25 → 25 revealed; 18 → 18) — no «عرض المزيد» on a finished set',
+  initialReveal({ fetched: 25, honestTotal: 25, firstPage: FP, stopAt: INTERVIEW_STOP_AT }) === 25
+  && initialReveal({ fetched: 18, honestTotal: 18, firstPage: FP, stopAt: INTERVIEW_STOP_AT }) === 18);
+check('26 is NOT a finished set: first page only', initialReveal({ fetched: 26, honestTotal: 26, firstPage: FP, stopAt: INTERVIEW_STOP_AT }) === FP);
 const agent = stripComments(read('src/app/agent.tsx'));
 check('agent.tsx feeds initialReveal the canonical stop line (stopAt: INTERVIEW_STOP_AT), never a retyped number',
   /stopAt: INTERVIEW_STOP_AT/.test(agent) && !/stopAt: 25\b/.test(agent) && !/stopAt: 50\b/.test(agent));
@@ -127,17 +127,17 @@ check('re-showing a step prefers the FRESH resolution whenever the probe ANSWERE
 
 // ── 6. Wired ─────────────────────────────────────────────────────────────────────────────────────
 check('this barrier is discovered and run by npm test (not excluded)',
-  !read('scripts/test-exclusions.txt').includes('verify-af-rounds-continue-and-finish-at-50'));
+  !read('scripts/test-exclusions.txt').includes('verify-af-rounds-never-self-reopen-and-finish-at-25'));
 
 // ── 7. MUTATION PROOFS — each rule above, fed the regression it exists to catch ─────────────────
 const mustCatch = (what: string, caught: boolean) =>
   check(`(mutation) catches ${what}`, caught,
     'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
 
-// The stop line reverted to its pre-2026-09-04 value: a finished 37-result set stops being revealed
-// in full and gets a first page with «عرض المزيد» again.
-mustCatch('the stop line reverted to 25 — a ≤ 50 set is no longer revealed in full',
-  initialReveal({ fetched: 37, honestTotal: 37, firstPage: FP, stopAt: 25 }) !== 37);
+// The stop line moved back up to 50: a 37-result set would start counting as "finished" and be
+// revealed in full, when at the owner's 2026-09-20 line of 25 it is a browsable set with a pager.
+mustCatch('the stop line moved back to 50 — a 37-result set wrongly reads as finished',
+  initialReveal({ fetched: 37, honestTotal: 37, firstPage: FP, stopAt: 50 }) !== FP);
 
 // The canonical constant retyped as a literal at the call site — the shape that drifts the next time
 // the owner moves the line.
