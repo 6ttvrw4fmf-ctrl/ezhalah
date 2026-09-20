@@ -10,6 +10,18 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { windowBetween } from './lib/sourceWindow.ts';
+
+const SIG_FIELDS = ['type', 'typeGroups', 'types', 'detail', 'priceMin', 'priceMax',
+                    'priceMinRent', 'priceMaxRent', 'areaMin', 'areaMax'] as const;
+
+/** PURE, so a proof can hand it a broken `src/app/index.tsx`. Throws if a marker has moved. */
+export function sigFieldProblems(index: string): string[] {
+  const sig = windowBetween(index, 'const districtNarrowingSig', 'const hasDistrictNarrowing',
+                            'src/app/index.tsx');
+  return SIG_FIELDS.filter((f) => !new RegExp(`query\\.${f}\\b`).test(sig))
+    .map((f) => `the narrowing signature does not cover query.${f}`);
+}
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const indexSrc = readFileSync(join(root, 'src/app/index.tsx'), 'utf8');
@@ -114,14 +126,18 @@ check('marking prefers the live full-filter-state count over the scope count', /
 // form would silently read undefined, dropping group changes out of the invalidation signature.
 // Field-by-field, not a contiguous literal: the combined-mode Rent budget (priceMinRent/MaxRent) was
 // inserted into this list on 2026-08-22 and an order-sensitive regex would have rejected the fix.
+// THE WINDOW IS FAIL-CLOSED (repaired 2026-09-20, routine #10). It was
+// `indexSrc.slice(indexSrc.indexOf(START), indexSrc.indexOf(END))`, and a missing END marker reads
+// -1, which `slice` takes as an offset from the end of the string — so the window silently became
+// the whole 200KB screen and every `query.<field>` needle below was found in unrelated source. The
+// sibling guard over this same signature, verify-district-counts-honest.ts, was watched printing
+// `PASS … includes query.priceMinRent` with that field DELETED, under a green 486-check suite. Two
+// guards, one invariant, the same blindness. `windowBetween()` throws instead.
 {
-  const sigBlock = indexSrc.slice(indexSrc.indexOf('const districtNarrowingSig'),
-                                  indexSrc.indexOf('const hasDistrictNarrowing'));
-  for (const f of ['type', 'typeGroups', 'types', 'detail', 'priceMin', 'priceMax',
-                   'priceMinRent', 'priceMaxRent', 'areaMin', 'areaMax']) {
-    check(`counts use the CURRENT filter state — signature covers query.${f}`,
-      new RegExp(`query\\.${f}\\b`).test(sigBlock));
-  }
+  const problems = sigFieldProblems(indexSrc);
+  check('counts use the CURRENT filter state — the narrowing signature covers every field',
+    problems.length === 0);
+  for (const p of problems) console.log(`      ${p}`);
 }
 // The advanced half is SPREAD from AF_PREDICATE_FIELDS (2026-09-01), not re-typed field by field:
 // naming three of the eleven here left a twelfth predicate free to stop invalidating these counts
@@ -160,6 +176,29 @@ check('onSearch carries the summed listingCount of all picked districts', /distr
   const searchSrc = readFileSync(join(root, 'src/data/search.ts'), 'utf8');
   check('SearchQuery carries districtListingCount', /districtListingCount\?: number/.test(searchSrc));
   check('0-results diagnosis uses the real district count, not the empty pool', /distCount === 0[\s\S]{0,400}?widen the area[\s\S]{0,400}?q\.type[\s\S]{0,260}?broaden the type/.test(searchSrc));
+}
+
+// ── MUTATION PROOFS over the narrowing-signature window, against the REAL shipped file ──────────
+{
+  const mustCatch = (what: string, caught: boolean) => {
+    if (!caught) failed++;
+    console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+  };
+  const threw = (mutant: string) => {
+    try { sigFieldProblems(mutant); return false; } catch { return true; }
+  };
+  const RENT_PAIR = 'query.priceMinRent, query.priceMaxRent, ';
+  const END_MARKER = 'const hasDistrictNarrowing = useMemo(';
+  const BLINDED = 'const [hasDistrictNarrowing] = useMemo(';
+
+  mustCatch('the combined-mode Rent budget being dropped from the signature',
+    indexSrc.includes(RENT_PAIR) && sigFieldProblems(indexSrc.replace(RENT_PAIR, '')).length === 2);
+  mustCatch('the window END marker being refactored away — an UNKNOWN, never a green',
+    indexSrc.includes(END_MARKER) && threw(indexSrc.replace(END_MARKER, BLINDED)));
+  mustCatch('the defect AND the blinding refactor together (the 2026-09-20 surviving mutant)',
+    threw(indexSrc.replace(RENT_PAIR, '').replace(END_MARKER, BLINDED)));
+  mustCatch('…while the SHIPPED file is NOT flagged (the predicate is not vacuously red)',
+    sigFieldProblems(indexSrc).length === 0);
 }
 
 console.log(failed === 0 ? '\n✓ all district-field assertions passed' : `\n✗ ${failed} district-field assertion(s) FAILED`);
