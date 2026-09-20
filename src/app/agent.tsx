@@ -895,6 +895,30 @@ export default function Agent() {
   // time instead of a whole grid landing at once. (user request.) revealCount[id] = how many cards
   // are visible so far; absent = show all (used for replayed/history turns that don't type out).
   const REVEAL_STEP_MS = 130; // snappy one-by-one cascade (25 cards ≈ 3s), smooth not distracting
+  // THE CASCADE GREETS, THE SCROLL DELIVERS (owner 2026-09-20).
+  //
+  // REVEAL_STEP_MS was sized for a 25-card set — its own comment says so — and nothing re-sized it
+  // when a turn could hold 400 (AF_REVEAL_MAX). At 130ms/card a full 400 takes ~52s of pure clock,
+  // and the clock runs whether the user is looking or not: measured live, cards were still arriving
+  // a minute after the round ended, so a fast scroller outran them and hit blank space.
+  //
+  // The fix is not a faster clock — a faster clock still animates 390 cards nobody is looking at.
+  // The cascade now plays only for the FIRST screenful, which is the part anyone actually sees
+  // arrive, and everything after that is revealed by SCROLLING: approach the end of what is
+  // revealed and the next chunk appears. Cost is paid only for what the user asks to see, a set of
+  // any size feels identical, and outrunning the reveal is impossible by construction.
+  //
+  // This changes WHEN cards are revealed, never WHICH or in WHAT ORDER: revealCount still walks the
+  // one diversity-ordered list (platform → deal → type → district → photos) up to the SAME target
+  // initialReveal() returns, and «عرض المزيد» still owns everything past that target.
+  const CASCADE_MAX = 12;           // ~1.5s of cascade — a screenful, then hand off to the scroll
+  const SCROLL_REVEAL_CHUNK = 12;   // revealed per trigger; ≥ a screenful so the next one is armed early
+  const SCROLL_REVEAL_SLACK_PX = 1200; // start revealing this far BEFORE the end — never at the edge
+  // A CHUNK ARRIVES CARD BY CARD, NOT AS A BLOCK (owner 2026-09-20: "when he scrolls, it slowly
+  // shows up next, next"). Revealing 12 at once lands a wall of cards in one frame — the thing the
+  // original cascade existed to avoid. Faster than the opening cascade (the user is already moving
+  // and must never catch the edge), slow enough to read as arriving rather than appearing.
+  const SCROLL_STEP_MS = 45;
   // LANDING A COMPLETED ADVANCED FILTER ROUND (owner 2026-08-24): "smoothly scroll the user down so
   // they land around the new result title / selection summary… NOT a harsh jump to the bottom."
   //
@@ -924,7 +948,18 @@ export default function Agent() {
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
   // IS the exact match count. (owner 2026-07-08: never hide a valid match behind the display limit.)
+  // One chunk eases in at a time — onScroll fires every frame and would otherwise start a new
+  // stagger on top of the running one, so cards would arrive in bursts instead of a steady line.
+  const scrollChunkRef = useRef(false);
+  // revealCount, readable SYNCHRONOUSLY. The scroll handler needs the current value to decide the
+  // next chunk; reading the state variable there would see the value from the render that installed
+  // the handler and re-reveal the same cards every scroll.
+  const revealCountRef = useRef<Record<string, number>>({});
   const [revealCount, setRevealCount] = useState<Record<string, number>>({});
+  // Keep the synchronous mirror honest. Every writer goes through setRevealCount, so mirroring on
+  // render covers all of them (cascade, scroll chunk, «عرض المزيد», restore) with one line and no
+  // second source of truth to drift.
+  revealCountRef.current = revealCount;
   const pendingRefineRef = useRef<{ q: SearchQuery; dim: string } | null>(null); // a >25 "refine" question awaiting the user's one-line answer
   const refineMsgIdRef = useRef<string | null>(null); // the results turn the latest runRefine is building
   // Advanced-question overlay (عمر العقار, apartment-only for now) — a transient card shown ON TOP of
@@ -1128,7 +1163,50 @@ export default function Agent() {
     // Gentle one-time scroll: bring the response's top ~80px from the top of the viewport. Keeps the
     // slogan + summary + intro in view with the first cards just below — never the far bottom.
     easeToMsgTop(id, 60);
-    dripRange(id, 0, n, REVEAL_STEP_MS);
+    // Only the first screenful cascades. `n` (the full target) is deliberately NOT lowered — it is
+    // still what maybeRevealOnScroll walks toward, and what resultsRowIsReady measures against.
+    dripRange(id, 0, Math.min(n, CASCADE_MAX), REVEAL_STEP_MS);
+  };
+
+  // Reveal-on-approach. Fires from the ScrollView's onScroll: when the viewport comes within
+  // SCROLL_REVEAL_SLACK_PX of the bottom of what is currently laid out, the newest results turn
+  // reveals its next chunk — up to the target initialReveal() already decided, never past it
+  // («عرض المزيد» owns beyond the target, and still does).
+  //
+  // Guarded three ways, because onScroll fires on every frame: it does nothing while that turn's
+  // opening cascade still owns the reveal (letting both drive would fight over revealCount), nothing
+  // once the target is reached, and nothing if the chunk would not actually raise the count — so a
+  // scroll that changes nothing costs one comparison and no render.
+  const maybeRevealOnScroll = (e: { nativeEvent: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } } }) => {
+    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    if (contentOffset.y + layoutMeasurement.height + SCROLL_REVEAL_SLACK_PX < contentSize.height) return;
+    const m = lastResultsMsg;
+    // `m.typing` is set TRUE when the turn is created and is NEVER cleared — this file tracks the
+    // intro's completion in the separate `doneTyping[id]` map (same expression as the render gate at
+    // the actions row, and as resultsRowIsReady's `introStillTyping`). A bare `m.typing` check here
+    // therefore returns on EVERY scroll forever: live-tested, the cascade stopped at CASCADE_MAX and
+    // scrolling revealed nothing at all.
+    if (!m || (m.typing && !doneTyping[m.id])) return;
+    if (revealActiveRef.current?.id === m.id) return;   // its cascade still owns the reveal
+    if (scrollChunkRef.current) return;                  // a chunk is already easing in
+    const target = initialReveal(m.result, m.afCompleted);
+    const cur = revealCountRef.current[m.id] ?? 0;
+    if (cur >= target) return;                           // target reached — «عرض المزيد» owns the rest
+    const next = Math.min(cur + SCROLL_REVEAL_CHUNK, target);
+    if (next <= cur) return;
+    // Stagger the chunk one card at a time. Deliberately NOT dripRange(): that claims
+    // revealActiveRef and toggles `revealing`, which gates the actions row — flickering it on every
+    // scroll chunk would strobe «عرض المزيد». This only ever raises revealCount, and its timers join
+    // revealTimers so the existing clearReveals()/finalizeReveal() teardown already owns them.
+    scrollChunkRef.current = true;
+    let shown = cur;
+    const step = () => {
+      shown += 1;
+      setRevealCount((c) => ((c[m.id] ?? 0) >= shown ? c : { ...c, [m.id]: shown }));
+      if (shown < next) revealTimers.current.push(setTimeout(step, SCROLL_STEP_MS));
+      else scrollChunkRef.current = false;
+    };
+    revealTimers.current.push(setTimeout(step, 0));
   };
   const startReveal = (id: string, n: number) => {
     setDoneTyping((d) => (d[id] ? d : { ...d, [id]: true }));
@@ -3334,6 +3412,8 @@ export default function Agent() {
           contentContainerStyle={[s.scroll, { paddingBottom: 16 }]}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={onGrow}
+          onScroll={maybeRevealOnScroll}
+          scrollEventThrottle={64}
         >
           <View style={s.col}>
             {(() => { const lastId = msgs[msgs.length - 1]?.id; return msgs.map((m) => {
