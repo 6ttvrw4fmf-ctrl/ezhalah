@@ -1,0 +1,61 @@
+# RAW SOURCE-WINDOW SITES — SHRINK-ONLY.
+#
+# Each row is a barrier that still narrows a product file with the raw idiom
+#     src.slice(src.indexOf(START), src.indexOf(END))
+# whose END argument is a BARE indexOf. When that marker moves, indexOf returns -1, slice reads
+# a negative end as an offset from the end of the string, and the window becomes almost the whole
+# file — so every assertion under it passes against unrelated source. Measured by execution on
+# 2026-09-20: verify-district-counts-honest.ts printed PASS for a field that had been DELETED,
+# and all 486 checks of npm run test:all passed over the live defect.
+#
+# THE FIX IS windowBetween() / windowUpTo() in scripts/lib/sourceWindow.ts — they THROW on a
+# marker that has moved, so the failure is a loud red naming the marker instead of a silent green.
+#
+# Format: <file> | <number of raw sites>. Counts, not line numbers, because line numbers drift on
+# every unrelated edit above them and a baseline that goes stale for innocent reasons is a
+# baseline someone deletes. A count that RISES is RED (a new blind window). A count that FALLS
+# without this file being lowered in the same diff is RED as STALE, so the ledger can never read
+# better than the tree. Fixing a site means editing the barrier AND this row together.
+#
+# Pinned by RAW_SITE_CEILING in scripts/verify-source-windows-fail-closed.ts.
+scripts/verify-account-menu-contract.ts                        | 3
+scripts/verify-adjudication-is-never-undone.ts                 | 3
+scripts/verify-advanced-filter-contract.ts                     | 2
+scripts/verify-af-back-navigation.ts                           | 2
+scripts/verify-af-card-evidence.ts                             | 1
+scripts/verify-af-footer-buttons.ts                            | 1
+scripts/verify-af-full-surface-catalog.ts                      | 3
+scripts/verify-af-multiselect-combining-semantics.ts           | 1
+scripts/verify-af-probe-failure-not-a-verdict.ts               | 1
+scripts/verify-af-rounds-never-self-reopen-and-finish-at-25.ts | 3
+scripts/verify-af-state-never-leaks-into-filter.ts             | 2
+scripts/verify-af-unknown-count-truthful.ts                    | 1
+scripts/verify-agent-user-message-id-telemetry.ts              | 1
+scripts/verify-ai-spend-safety.ts                              | 1
+scripts/verify-amenity-bag-writers-certified.ts                | 1
+scripts/verify-appearance-lifecycle.ts                         | 1
+scripts/verify-auth-popup.ts                                   | 2
+scripts/verify-card-photos-are-browser-renderable.ts           | 1
+scripts/verify-chat-delete-confirmation.ts                     | 2
+scripts/verify-chat-title.ts                                   | 1
+scripts/verify-city-never-rescoped-to-district.ts              | 1
+scripts/verify-filter-stop-cancels-and-restores.ts             | 1
+scripts/verify-google-one-tap.ts                               | 1
+scripts/verify-google-onetap.ts                                | 4
+scripts/verify-history-instant-restore.ts                      | 1
+scripts/verify-journey-settled-count.ts                        | 2
+scripts/verify-live-sweep-coverage-contract.ts                 | 2
+scripts/verify-liveness-kill-cap-denominator.ts                | 1
+scripts/verify-liveness-scoped-verification-flags.ts           | 1
+scripts/verify-mode-switch-indicator-follows-active.ts         | 1
+scripts/verify-no-vercel-bypass.ts                             | 1
+scripts/verify-ppm-searchable-and-filter-safe.ts               | 1
+scripts/verify-refresh-restores-filter-search.ts               | 1
+scripts/verify-saved-search-identity.ts                        | 1
+scripts/verify-scrapers-capture-listing-images.ts              | 2
+scripts/verify-sidebar-drag-handle-scope.ts                    | 1
+scripts/verify-sidebar-light-green-interaction.ts              | 1
+scripts/verify-sidebar-reorder.ts                              | 2
+scripts/verify-transcript-capture-survives-navigation.ts       | 2
+scripts/verify-trending-carries-full-filter-state.ts           | 2
+scripts/verify-typewriter-never-reveals-half-a-glyph.ts        | 1
