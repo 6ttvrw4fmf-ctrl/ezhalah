@@ -678,6 +678,23 @@ def map_listing(it: dict) -> Optional[dict]:
                  or it.get("chalet_title") or it.get("title") or "").strip()
     title = _redact(raw_title)
     # Tag the title as furnished/monthly so search snippets read correctly.
+    #
+    # THIS APPENDS OUR OWN WORDS TO THE SOURCE'S TITLE, AND THE OWNER APPROVED IT (2026-09-20).
+    # `شاليه الواحة` becomes `شاليه الواحة — شاليه مفروشة للإيجار الشهري`. It is written down here
+    # because it reads like a listing-fidelity violation and has now been raised twice: the «مفروشة»
+    # a user sees on a Gathern card comes from THIS LINE, not from the `furnished` attribute.
+    #
+    # The attribute is a separate, non-issue — see `info["furnished"]` below: that key lands in
+    # additional_info (JSONB), `gathern_residential_listings` has NO `furnished` column, and all
+    # 29,846 rows read `furnished IS NULL` in search_listings_ar. We assert nothing there, which is
+    # what SOURCE IS TRUTH wants. Do not "repair" it.
+    #
+    # Offered leave-as-is / drop just «مفروشة» / untouched title, the owner chose LEAVE AS IS:
+    # Gathern is a monthly FURNISHED-rental marketplace and the label tells the user what they are
+    # looking at. The evidence that it is structural rather than a guess: of 29,846 active rows,
+    # 22,711 carry description text, 462 say «مفروش», and ZERO say «غير مفروش» — the platform
+    # carries no unfurnished units. (Deriving `furnished` from that text would NULL 29,384 of them
+    # to recover 462, which is why text-derivation was considered and dropped.)
     type_ar = ev.get("unit_type_ar") or it.get("chalet_category_text") or ""
     if title:
         title = f"{title} — {type_ar} مفروشة للإيجار الشهري".strip(" —") if type_ar else title
