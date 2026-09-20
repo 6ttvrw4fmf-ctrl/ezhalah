@@ -117,7 +117,7 @@ export function sourceName(source: string): string {
   // onboarded 2026-09-20 — each must resolve to its OWN name; the fallback below is عقار's.
   if (s.includes('gudai') || s.includes('غدي')) return 'Gudai Real Estate';
   if (s.includes('safera') || s.includes('سفيرة')) return 'Safera Real Estate';
-  if (s.includes('alhumaidan') || s.includes('الحميدان')) return 'Al Humaidan Investments';
+  if (s.includes('alhumaidan') || s.includes('الحميدان')) return 'Al Humaidan Real Estate Office';
   if (s.includes('aqarnajran') || s.includes('عقار نجران')) return 'Aqar Najran';
   // Matched on the STORED source («Fahad Alshahri»), displayed as the BRAND («مقام الوسام
   // العقارية»). The two differ on purpose — see the i18n entry.
