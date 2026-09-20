@@ -15,7 +15,7 @@
 //   • the composer-lock signal and the pager-hidden signal are DERIVED FROM THE SAME predicate, so
 //     they can never disagree the way they did at 50.
 //
-// Run: node --experimental-strip-types scripts/verify-af-terminal-at-50-no-load-more.ts
+// Run: node --experimental-strip-types scripts/verify-af-terminal-at-25-no-load-more.ts
 
 import {
   searchIsFinishedAtThreshold,
@@ -36,13 +36,13 @@ const mustCatch = (label: string, caught: boolean) => {
 
 console.log(`\nAF terminal at ≤${INTERVIEW_STOP_AT} — the chat finishes, no «عرض المزيد»\n`);
 
-check(`INTERVIEW_STOP_AT is 50 (the owner's stop line)`, INTERVIEW_STOP_AT === 50, String(INTERVIEW_STOP_AT));
+check(`INTERVIEW_STOP_AT is 25 (the owner's stop line)`, INTERVIEW_STOP_AT === 25, String(INTERVIEW_STOP_AT));
 
 // 1. THE COMPLETION DECISION at the exact boundary. This is the SAME predicate finishGuided uses to
 //    setCompleted(true), so proving it here proves the composer lock's boundary.
-check('49 finishes the chat', searchIsFinishedAtThreshold(49, INTERVIEW_STOP_AT) === true);
-check('50 finishes the chat (the exact boundary)', searchIsFinishedAtThreshold(50, INTERVIEW_STOP_AT) === true);
-check('51 does NOT finish — the interview is right to continue', searchIsFinishedAtThreshold(51, INTERVIEW_STOP_AT) === false);
+check('24 finishes the chat', searchIsFinishedAtThreshold(24, INTERVIEW_STOP_AT) === true);
+check('25 finishes the chat (the exact boundary)', searchIsFinishedAtThreshold(25, INTERVIEW_STOP_AT) === true);
+check('26 does NOT finish — the interview is right to continue', searchIsFinishedAtThreshold(26, INTERVIEW_STOP_AT) === false);
 check('an unknown total (client-only narrowing) is NOT treated as finished',
   searchIsFinishedAtThreshold(null, INTERVIEW_STOP_AT) === false);
 
@@ -86,8 +86,8 @@ check('an open interview (asking) hides the row regardless of hasMore',
 
 // ── MUTATIONS ──────────────────────────────────────────────────────────────────────────────────
 // If the completion boundary regressed to `< stopAt`, exactly 50 would no longer finish.
-mustCatch('a `< stopAt` completion boundary (50 not terminal) is caught',
-  searchIsFinishedAtThreshold(50, INTERVIEW_STOP_AT) !== (50 < INTERVIEW_STOP_AT));
+mustCatch('a `< stopAt` completion boundary (25 not terminal) is caught',
+  searchIsFinishedAtThreshold(25, INTERVIEW_STOP_AT) !== (25 < INTERVIEW_STOP_AT));
 // If the pager gate dropped the chatCompleted clause, a completed chat with hasMore would show it.
 mustCatch('dropping the completion gate (pager shows in a completed chat) is caught',
   resultsActionsRowVisible({ hasMore: true, canNarrowFurther: false, afPhase: null, chatCompleted: true }) === false);

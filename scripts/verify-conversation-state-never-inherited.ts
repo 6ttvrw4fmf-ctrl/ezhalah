@@ -490,13 +490,14 @@ const mutantAgent = (from: string, to: string): string => {
   // (a) Drop `matchTotal != null` and a truncated 20-card buffer of a search whose total was never
   //     recorded reads as a finished ≤50 set — the dead end rebuilt out of its own fix.
   const noTotal = { listings: Array.from({ length: 20 }, (_, i) => ({ source: "aqar", id: `L${i}` })), hasMore: true, pageOffset: 0, query: {} };
-  mustCatch("M-untotalled — without the `matchTotal != null` guard a 20-card slice reads as a finished ≤50 chat and locks it",
+  mustCatch("M-untotalled — without the `matchTotal != null` guard a 20-card slice reads as a finished ≤25 chat and locks it",
     searchIsFinishedAtThreshold(quotableTotal(noTotal as never), INTERVIEW_STOP_AT) === true,
     `quotableTotal=${quotableTotal(noTotal as never)}`);
   // (b) The guard this file REJECTED in review: `!hasMore` throws the owner's lock away for every
-  //     ≤50 chat that merely had more than 20 cards, because truncation always stamps hasMore true.
-  const small = { listings: Array.from({ length: 20 }, (_, i) => ({ source: "aqar", id: `L${i}` })), matchTotal: 34, hasMore: true, pageOffset: 0, query: {} };
-  mustCatch("M-hasmore-guard — guarding on `!hasMore` instead would unlock a genuine 34-match chat (owner rule 2026-08-30)",
+  //     ≤25 chat that merely had more than 20 cards, because truncation always stamps hasMore true.
+  //     24 keeps that exact shape at the owner's 2026-09-20 line: finished (≤25) yet truncated (>20).
+  const small = { listings: Array.from({ length: 20 }, (_, i) => ({ source: "aqar", id: `L${i}` })), matchTotal: 24, hasMore: true, pageOffset: 0, query: {} };
+  mustCatch("M-hasmore-guard — guarding on `!hasMore` instead would unlock a genuine 24-match chat (owner rule 2026-08-30)",
     (!small.hasMore && searchIsFinishedAtThreshold(quotableTotal(small as never), INTERVIEW_STOP_AT)) === false
     && (small.matchTotal != null && searchIsFinishedAtThreshold(quotableTotal(small as never), INTERVIEW_STOP_AT)) === true);
 }
