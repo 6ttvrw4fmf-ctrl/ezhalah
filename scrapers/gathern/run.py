@@ -544,6 +544,17 @@ _AMENITY_FLAG_LABELS: dict[str, str] = {
     "elevator": "مصعد",
     "parking": "موقف سيارة",
     "driver_room": "غرفة سائقين",
+    # Added 2026-09-20. «بلكونة» was captured into additional_info.amenities all along and never
+    # promoted to the column the Advanced Filter reads, so balcony_terrace sat at 0 across all
+    # 29,820 live rows while the label itself appears on 1,508 of them — re-measured that day over
+    # the FULL stored corpus, not a sample.
+    #
+    # The 2026-07-26 note above says every other column "has NO corresponding label in the real
+    # data at all". That was re-verified the same way and still holds for kitchen/air_conditioner/
+    # maid_room/private_entrance — Gathern's live label vocabulary carries no مطبخ and no مكيف. It
+    # did NOT hold for بلكونة, which is the shape of `a-guard-that-only-keeps-things-out-never-
+    # rechecks-itself`: an exclusion measured once, correct then, never re-read as the source grew.
+    "balcony_terrace": "بلكونة",
 }
 
 

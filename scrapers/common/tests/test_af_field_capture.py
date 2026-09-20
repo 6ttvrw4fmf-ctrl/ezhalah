@@ -215,3 +215,36 @@ def test_a_truly_empty_sitemap_still_returns_empty() -> None:
         def get(self, *_a, **_k): return _R()
 
     assert ip.fetch_catalogue(_S(), "https://x.inblaj.net") == []
+
+
+# ─────────────────────────── gathern: a published label that reached no column ──────────────────
+def test_gathern_balcony_label_is_mapped() -> None:
+    """«بلكونة» appears on 1,508 of gathern's 29,820 live listings (measured over the FULL stored
+    corpus 2026-09-20) and was captured into additional_info.amenities — but never promoted to
+    balcony_terrace, so the Advanced Filter saw 0 across every row.
+
+    The surrounding 2026-07-26 note claims every unmapped column "has NO corresponding label in the
+    real data at all". Re-measured, that still holds for kitchen/air_conditioner — gathern's live
+    vocabulary carries no مطبخ and no مكيف, so those zeros are HONEST and must stay unmapped rather
+    than be guessed from «تلفزيون» or «انترنت». It did not hold for بلكونة. That asymmetry is the
+    whole point: an exclusion list measured once decays silently as the source grows."""
+    from scrapers.gathern.run import _AMENITY_FLAG_LABELS, _amenity_flags
+
+    assert _AMENITY_FLAG_LABELS.get("balcony_terrace") == "بلكونة"
+
+    # EXECUTE the real mapper against gathern's own verbatim label list.
+    got = _amenity_flags(["إضاءة إضافية", "تلفزيون", "انترنت", "مصعد", "موقف سيارة", "بلكونة"])
+    assert got["balcony_terrace"] is True
+    assert got["elevator"] is True and got["parking"] is True
+
+    # A listing WITHOUT the label must read False, not True — the flags are a closed set over the
+    # labels gathern published for that unit, so absence here is the source's own silence.
+    assert _amenity_flags(["تلفزيون", "انترنت"])["balcony_terrace"] is False
+
+
+def test_gathern_does_not_invent_kitchen_or_ac() -> None:
+    """The honest zeros. gathern publishes no مطبخ / مكيف label, so these columns must stay
+    unmapped — mapping them to a nearby concept would assert a fact the source never published."""
+    from scrapers.gathern.run import _AMENITY_FLAG_LABELS
+    assert "kitchen" not in _AMENITY_FLAG_LABELS
+    assert "air_conditioner" not in _AMENITY_FLAG_LABELS

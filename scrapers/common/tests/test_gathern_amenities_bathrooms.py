@@ -158,20 +158,20 @@ def test_bathrooms_ignores_similar_icon_names():
 #    the real label vocabulary — the other 4 columns have NO corresponding label at all and must stay
 #    untouched rather than guessed. ──
 def test_amenity_flags_true_when_label_present():
-    assert _amenity_flags(_EXPECTED_ITEM0) == {"elevator": True, "parking": False, "driver_room": False}
+    assert _amenity_flags(_EXPECTED_ITEM0) == {"elevator": True, "parking": False, "driver_room": False, "balcony_terrace": False}
 
 
 def test_amenity_flags_all_three_present():
     labels = ["تلفزيون", "مصعد", "موقف سيارة", "غرفة سائقين"]
-    assert _amenity_flags(labels) == {"elevator": True, "parking": True, "driver_room": True}
+    assert _amenity_flags(labels) == {"elevator": True, "parking": True, "driver_room": True, "balcony_terrace": False}
 
 
 def test_amenity_flags_none_present():
-    assert _amenity_flags(["تلفزيون", "انترنت"]) == {"elevator": False, "parking": False, "driver_room": False}
+    assert _amenity_flags(["تلفزيون", "انترنت"]) == {"elevator": False, "parking": False, "driver_room": False, "balcony_terrace": False}
 
 
 def test_amenity_flags_empty_list():
-    assert _amenity_flags([]) == {"elevator": False, "parking": False, "driver_room": False}
+    assert _amenity_flags([]) == {"elevator": False, "parking": False, "driver_room": False, "balcony_terrace": False}
 
 
 def test_amenity_flags_self_checkin_never_becomes_private_entrance():
@@ -179,4 +179,4 @@ def test_amenity_flags_self_checkin_never_becomes_private_entrance():
     # never be conflated. _amenity_flags only ever returns the 3 confidently-mapped keys.
     flags = _amenity_flags(["دخول ذاتي"])
     assert "private_entrance" not in flags
-    assert flags == {"elevator": False, "parking": False, "driver_room": False}
+    assert flags == {"elevator": False, "parking": False, "driver_room": False, "balcony_terrace": False}
