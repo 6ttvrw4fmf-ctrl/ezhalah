@@ -114,6 +114,14 @@ export function sourceName(source: string): string {
   // ('KSA Aqar', with a space) — the Al Khaas lesson, where the space-less token alone missed.
   if (s.includes('ksaaqar') || s.includes('ksa aqar') || s.includes('عقارات السعودية')) return 'KSA Aqar Real Estate';
   if (s.includes('sadiqeltajer') || s.includes('sadiq eltajer') || s.includes('sadiq-eltajer') || s.includes('صادق التاجر')) return 'Sadiq Eltajer Real Estate';
+  // onboarded 2026-09-20 — each must resolve to its OWN name; the fallback below is عقار's.
+  if (s.includes('gudai') || s.includes('غدي')) return 'Gudai Real Estate';
+  if (s.includes('safera') || s.includes('سفيرة')) return 'Safera Real Estate';
+  if (s.includes('alhumaidan') || s.includes('الحميدان')) return 'Al Humaidan Investments';
+  if (s.includes('aqarnajran') || s.includes('عقار نجران')) return 'Aqar Najran';
+  if (s.includes('fahadalshahri') || s.includes('فهد الشهري')) return 'Fahad Alshahri Real Estate';
+  if (s.includes('compoundin') || s.includes('كومباوند')) return 'CompoundIn';
+  if (s.includes('wslnaa') || s.includes('waslna') || s.includes('وصلنا')) return 'Waslna Real Estate';
   return 'AQAR';
 }
 

@@ -545,6 +545,12 @@ const AQARALSAUDIA_LOGO = require('../../assets/images/aqaralsaudia.png');
 const SUWAR_LOGO = require('../../assets/images/suwar.png');
 const RAKEZ_LOGO = require('../../assets/images/rakez.png');
 const AKARIYOUN_LOGO = require('../../assets/images/akariyoun.png');
+// NEUTRAL placeholder for the seven platforms onboarded 2026-09-20 whose own marks the owner is
+// still supplying. It is a plain building glyph and belongs to no company. The branches below MUST
+// exist even while they render this: the fallback at the end of SourceBadge returns عقار's logo,
+// so a missing branch stamps another company's mark on their listings — the misattribution the
+// owner called a legal problem, not a cosmetic one.
+const PLATFORM_PLACEHOLDER_LOGO = require('../../assets/images/platform-placeholder.png');
 const KSAAQAR_LOGO = require('../../assets/images/ksaaqar.png');
 const SADIQELTAJER_LOGO = require('../../assets/images/sadiq-eltajer.png');
 const AMLAKALAHSA_LOGO = require('../../assets/images/amlakalahsa.png');
@@ -683,6 +689,15 @@ function SourceBadge({ source }: { source: string }) {
   // an asset is renamed.
   if (s.includes('suwar')) return <Image source={SUWAR_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('rakez')) return <Image source={RAKEZ_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // ── onboarded 2026-09-20; placeholder mark until the owner supplies each real logo ──────────
+  if (s.includes('gudai') || s.includes('غدي')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('safera') || s.includes('سفيرة')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('alhumaidan') || s.includes('al humaidan') || s.includes('الحميدان')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // MUST stay above any bare 'aqar' branch: 'aqarnajran' CONTAINS 'aqar'.
+  if (s.includes('aqarnajran') || s.includes('aqar najran') || s.includes('عقار نجران')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('fahadalshahri') || s.includes('fahad alshahri') || s.includes('فهد الشهري')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('compoundin') || s.includes('كومباوند')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('wslnaa') || s.includes('waslna') || s.includes('وصلنا')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('akariyoun') || s.includes('عقاريون')) return <Image source={AKARIYOUN_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('amlakalahsa')) return <Image source={AMLAKALAHSA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
@@ -726,6 +741,14 @@ function sourceHost(source: string): string {
   // separator cannot appear in any token, so nothing can match across the join.
   const raw = source.toLowerCase();
   const s = raw + '|' + raw.replace(/\s+/g, '');
+  // onboarded 2026-09-20. 'aqarnajran' MUST precede any bare 'aqar' branch — it contains it.
+  if (s.includes('gudai') || s.includes('غدي')) return 'gudai.inblaj.net';
+  if (s.includes('safera') || s.includes('سفيرة')) return 'safera.inblaj.net';
+  if (s.includes('alhumaidan') || s.includes('الحميدان')) return 'al-humaidan.inblaj.net';
+  if (s.includes('aqarnajran') || s.includes('عقار نجران')) return 'aqarnajran.com';
+  if (s.includes('fahadalshahri') || s.includes('فهد الشهري')) return 'fahadalshahri.com';
+  if (s.includes('compoundin') || s.includes('كومباوند')) return 'compoundin.com';
+  if (s.includes('wslnaa') || s.includes('waslna') || s.includes('وصلنا')) return 'wslnaa.com';
   if (s.includes('wasalt')) return 'wasalt.sa';
   if (s.includes('aldarim')) return 'aldarim.sa';
   if (s.includes('aqargate')) return 'aqargate.com';
