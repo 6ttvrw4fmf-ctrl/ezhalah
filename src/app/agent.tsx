@@ -913,7 +913,19 @@ export default function Agent() {
   // initialReveal() returns, and «عرض المزيد» still owns everything past that target.
   const CASCADE_MAX = 12;           // ~1.5s of cascade — a screenful, then hand off to the scroll
   const SCROLL_REVEAL_CHUNK = 12;   // revealed per trigger; ≥ a screenful so the next one is armed early
-  const SCROLL_REVEAL_SLACK_PX = 1200; // start revealing this far BEFORE the end — never at the edge
+  // FAR ENOUGH AHEAD THAT THE ACTIONS ROW NEVER MOVES UNDER THE USER (owner 2026-09-20, reported:
+  // "whenever I scrolled, the advanced filter doesn't show, it shows later").
+  //
+  // «تحديد أكثر» and «عرض المزيد» render AFTER the cards, so every revealed chunk is inserted ABOVE
+  // them and pushes them down — at ~700px per card, one 12-card chunk moves that row ~8,000px. At a
+  // 1,200px trigger the chunk fired exactly as the row was entering the viewport, so the button the
+  // user was reaching for jumped off-screen: present the whole time, never catchable.
+  //
+  // The reveal must therefore happen while the row is still WELL below the fold, so the shove lands
+  // off-screen and the row is settled by the time it scrolls into view. 2600px is ~3.5 viewports of
+  // warning on a phone — comfortably more than the 1,200px that was landing in view, and still far
+  // short of revealing everything eagerly.
+  const SCROLL_REVEAL_SLACK_PX = 2600;
   // A CHUNK ARRIVES CARD BY CARD, NOT AS A BLOCK (owner 2026-09-20: "when he scrolls, it slowly
   // shows up next, next"). Revealing 12 at once lands a wall of cards in one frame — the thing the
   // original cascade existed to avoid. Faster than the opening cascade (the user is already moving

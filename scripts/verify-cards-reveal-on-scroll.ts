@@ -55,8 +55,16 @@ check('the opening cascade is bounded to about a screenful, not the whole set',
 check('the cascade cannot take longer than ~3s at the shipped step',
   !!CASCADE_MAX && !!STEP && CASCADE_MAX * STEP <= 3000,
   `${CASCADE_MAX} cards × ${STEP}ms = ${(CASCADE_MAX ?? 0) * (STEP ?? 0)}ms`);
-check('the reveal trigger fires BEFORE the edge, never at it (no blank-space window)',
-  !!SLACK && SLACK >= 400, `SCROLL_REVEAL_SLACK_PX=${SLACK}`);
+// THE ACTIONS ROW MUST NOT MOVE UNDER THE USER (owner 2026-09-20: "whenever I scrolled, the
+// advanced filter doesn't show, it shows later"). «تحديد أكثر» and «عرض المزيد» render AFTER the
+// cards, so each revealed chunk is inserted ABOVE them — at ~700px/card a 12-card chunk shoves that
+// row ~8,000px down. At the original 1,200px trigger the chunk fired exactly as the row entered the
+// viewport, so the button the user was reaching for jumped away: present the whole time, never
+// catchable. The trigger must therefore fire while the row is still WELL below the fold.
+check('the reveal fires far enough ahead that the actions row settles OFF-SCREEN, not under the user',
+  !!SLACK && SLACK >= 2000,
+  `SCROLL_REVEAL_SLACK_PX=${SLACK} — below ~2000 the chunk lands as «تحديد أكثر» enters view and `
+  + 'shoves it off-screen; live-measured at 1200 and the button was uncatchable');
 check('each chunk is at least a screenful, so the next trigger is armed before the user arrives',
   !!CHUNK && CHUNK >= 8, `SCROLL_REVEAL_CHUNK=${CHUNK}`);
 
