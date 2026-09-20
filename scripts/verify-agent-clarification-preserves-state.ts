@@ -15,6 +15,7 @@
 // reset unrelated already-understood filters.
 import { readFileSync } from "node:fs";
 import { mergeConversationState, rescuedFields, STICKY_FIELDS } from "../src/lib/conversationState.ts";
+import { resetCallSitesOk, resetCallSiteProblem, RESET_EXITS } from "./lib/conversationExits.ts";
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = "") => {
@@ -146,8 +147,8 @@ check("a clarification's understanding goes through the SAME merge+certify pipel
     ui.indexOf("const resetConversationState = () => {") + 1200);
   check("no conversation exit inherits the accumulated state (cleared in the ONE shared reset)",
     /lastQueryRef\.current = null;/.test(reset));
-  check("...and both exits (New Chat + startFresh) route through it",
-    (ui.match(/^\s*resetConversationState\(\);$/gm) ?? []).length === 2);
+  check(`...and all ${RESET_EXITS.length} exits route through it`,
+    resetCallSitesOk(ui), resetCallSiteProblem(ui));
 }
 check("a Filter-originated search replaces it too",
   /makeRun\('filter'\);[\s\S]{0,700}?lastQueryRef\.current = null;/.test(ui));

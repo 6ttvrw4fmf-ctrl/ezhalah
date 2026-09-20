@@ -40,6 +40,7 @@ import { fileURLToPath } from "node:url";
 import { liftSymbols } from "./lib/liftSymbols.ts";
 import { searchIsFinishedAtThreshold } from "../src/lib/afBrowsingGate.ts";
 import { INTERVIEW_STOP_AT } from "../src/lib/afRanking.ts";
+import { resetCallSitesOk, resetCallSiteProblem, RESET_EXITS } from "./lib/conversationExits.ts";
 
 const AGENT = fileURLToPath(new URL("../src/app/agent.tsx", import.meta.url));
 const SEARCH = fileURLToPath(new URL("../src/data/search.ts", import.meta.url));
@@ -260,15 +261,19 @@ console.log("\n── §C: no exit path re-implements the list (DISCOVERED by sh
     found.length === 0, found.join("\n      "));
   // And the exits really CALL it, rather than merely having stopped clearing by hand.
   //
-  // THREE since 2026-09-20 (routine #6, ops_incident #341): startFresh + the New Chat handler +
-  // stop()'s filter-origin branch, which used to erase the transcript with a hand-written
-  // `setMsgs([]); setBusy(false);` and route through nothing. This number is only a tripwire that
-  // makes a human look when it moves — §F below is the actual guard, because it DERIVES the
-  // population from the source instead of trusting a count. (That is the whole lesson of §F: a
-  // count of calls TO the reset can never see an exit that calls nothing.)
-  const callSites = (src.match(/^\s*resetConversationState\(\);$/gm) ?? []).length;
-  check("all three conversation exits call resetConversationState() (startFresh + New Chat + stop's filter-origin branch)",
-    callSites === 3, `found ${callSites}`);
+  // THE POPULATION LIVES IN ONE PLACE (routine #6, 2026-09-20). This used to be a literal
+  // `callSites === 2`, and so did three other barriers — verify-agent-clarification-preserves-state,
+  // verify-agent-scope-answer and verify-chat-persistence. Adding stop() as a third, CORRECT exit
+  // (ops_incident #341) turned all three red with messages about clarification state, scope answers
+  // and chat persistence, none of which had changed. A guard whose failure message points away from
+  // the edit is one people learn to edit until it is quiet, so the four now import the same
+  // derivation from scripts/lib/conversationExits.ts and it names the exits instead of a digit.
+  //
+  // This remains only a tripwire. §F below is the actual guard: it DERIVES the population from the
+  // source rather than trusting any count — a count of calls TO the reset can never see an exit
+  // that calls nothing, which is exactly how stop() stayed invisible for four recurrences.
+  check(`all ${RESET_EXITS.length} conversation exits call resetConversationState()`,
+    resetCallSitesOk(src), resetCallSiteProblem(src));
 }
 
 console.log("\n── §D: with no transcript to restore from, terminality is DERIVED — never inherited ──");
