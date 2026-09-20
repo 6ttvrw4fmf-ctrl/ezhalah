@@ -37,6 +37,27 @@ WRITERS = sorted(
     p for p in SCRAPERS_DIR.glob("*/run.py") if p.parent.name != "aqar"
 ) + [SCRAPERS_DIR / "aqar" / "enrich_residential.py"]
 
+# SHARED-RUNNER WRITERS (2026-09-20). gudai / safera / alhumaidan are three tenant offices on the
+# ONE inblaj.net WordPress product, so each run.py is a four-line wrapper and the row — including
+# transaction_type — is built in the shared module. Their run.py legitimately contains no
+# transaction_type key, and the per-file scan below reported all three as writers that had stopped
+# writing one.
+#
+# The guarantee is NOT waived for them: the shared module is added to the scanned set instead, so
+# its transaction_type write is held to exactly the same provably-total standard. A wrapper is
+# recognised by the import rather than by name, so a fourth tenant is covered the day it is added
+# and cannot quietly opt out by being new.
+SHARED_RUNNER_MODULES = [SCRAPERS_DIR / "common" / "inblaj_platform.py"]
+
+
+def _delegates_to_shared_runner(tree: ast.AST) -> bool:
+    return any(
+        isinstance(node, ast.ImportFrom)
+        and (node.module or "").startswith("scrapers.common.")
+        and any(a.name == "run_platform" for a in node.names)
+        for node in ast.walk(tree)
+    )
+
 
 def _is_canonical_const(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and node.value in CANONICAL
@@ -106,6 +127,18 @@ def test_every_transaction_type_write_is_total_and_canonical():
                     f"transaction_type value is not provably total/canonical "
                     f"({ast.dump(value)[:120]})"
                 )
+    for path in SHARED_RUNNER_MODULES:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        entries = _deal_entries(tree)
+        if not entries:
+            offenders.append(f"{path.relative_to(REPO_ROOT)}: shared runner writes no transaction_type")
+        for lineno, value in entries:
+            if not _is_total_expr(value, tree):
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{lineno}: "
+                    f"transaction_type value is not provably total/canonical "
+                    f"({ast.dump(value)[:120]})"
+                )
     assert not offenders, (
         "A scraper can emit a transaction_type other than the literal 'Buy'/'Rent' "
         "(None/unknown deals get quarantined out of search by the sync's eligibility "
@@ -115,11 +148,24 @@ def test_every_transaction_type_write_is_total_and_canonical():
 
 
 def test_every_known_writer_still_writes_transaction_type():
-    missing = [
-        str(path.relative_to(REPO_ROOT))
-        for path in WRITERS
-        if not _deal_entries(ast.parse(path.read_text(encoding="utf-8")))
-    ]
+    missing = []
+    delegating = []
+    for path in WRITERS:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if _deal_entries(tree):
+            continue
+        if _delegates_to_shared_runner(tree):
+            delegating.append(str(path.relative_to(REPO_ROOT)))
+            continue
+        missing.append(str(path.relative_to(REPO_ROOT)))
+    # The shared modules those wrappers delegate to must themselves write it.
+    for path in SHARED_RUNNER_MODULES:
+        if not _deal_entries(ast.parse(path.read_text(encoding="utf-8"))):
+            missing.append(str(path.relative_to(REPO_ROOT)) + " (shared runner)")
+    assert delegating, (
+        "no wrapper was recognised as delegating to a shared runner — if the inblaj tenants were "
+        "removed, delete SHARED_RUNNER_MODULES too rather than leaving a vacuous branch"
+    )
     assert not missing, (
         "Writer module no longer writes a transaction_type key — every new row it upserts "
         "would carry NULL deal and be quarantined out of search:\n" + "\n".join(missing)

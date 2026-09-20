@@ -325,7 +325,9 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
         "active": True,
         "title": title,
         "property_type": property_type,
-        "transaction_type": deal,
+        # Total expression, not the bare `deal`: a transaction_type that is not provably Buy/Rent
+        # can reach the index as NULL, and a null deal is quarantined out of search entirely.
+        "transaction_type": "Rent" if deal == "Rent" else "Buy",
         "city": city,
         "city_ar": city_ar,
         "city_id": city_id,

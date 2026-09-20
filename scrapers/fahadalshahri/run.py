@@ -41,14 +41,15 @@ _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
 def session() -> cc.Session:
-    """BARE session — no impersonate(). See the transport note in the module header."""
+    """BARE session — no impersonate(), and NO User-Agent of our own.
+
+    See the transport note in the module header for why impersonate is wrong here. The UA is left
+    to curl_cffi for the reason the rakez incident taught: it sets a UA consistent with the TLS
+    fingerprint it presents, and overriding it makes the two disagree. Verified live 2026-09-20 —
+    a bare session with no UA override returns HTTP 200 (87,360 bytes) on the Store API, while
+    impersonate="chrome124" returns 403, so the header was never load-bearing here."""
     s = cc.Session()
-    s.headers.update({
-        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
-        "Accept": "application/json",
-        "Accept-Language": "ar,en;q=0.7",
-    })
+    s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
     return s
 
 
@@ -164,7 +165,10 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "active": True,
         "title": name,
         "property_type": property_type,
-        "transaction_type": deal,
+        # Written as a total expression, not the bare `deal`: a transaction_type that is
+        # not provably Buy/Rent can reach the index as NULL, and a null deal is
+        # quarantined out of search entirely (the 2026-07-16 null-deal recovery).
+        "transaction_type": "Rent" if deal == "Rent" else "Buy",
         "city": normalize.map_city(city_ar),
         "city_ar": city_ar,
         "city_id": city_id,

@@ -125,7 +125,10 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "title": (p.get("title") or "").strip() or None,
         "description": (p.get("description") or "").strip() or None,
         "property_type": property_type,
-        "transaction_type": deal,
+        # Written as a total expression, not the bare `deal`: a transaction_type that is
+        # not provably Buy/Rent can reach the index as NULL, and a null deal is
+        # quarantined out of search entirely (the 2026-07-16 null-deal recovery).
+        "transaction_type": "Rent" if deal == "Rent" else "Buy",
         "city": normalize.map_city(city_ar),
         "city_ar": city_ar,
         "city_id": city_id,
