@@ -30,14 +30,30 @@ from datetime import datetime, timezone
 
 from scrapers.common import http
 from scrapers.common.db import begin_run, end_run, sb
-from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS
+from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS, looks_closed as _aqar_looks_closed
 
 # ── Per-platform "is this URL genuinely dead?" registry. A platform absent here CANNOT be deleted
 # with require_source_recheck=true (fail-safe). Each entry: (tables, dead_marker_predicate).
 # aqar & wasalt share Aqar's marker/404 semantics (wasalt dead = 404). Add a platform here only after
 # proving its dead-detection is liveness-grade — that is the gate for enabling deletion on it.
-def _aqar_wasalt_markers(body: str) -> bool:
+def _wasalt_markers(body: str) -> bool:
+    # wasalt dead = a real HTTP 404 (handled by verdict()'s status branch, via the browser probe);
+    # these text markers are a vestigial belt-and-suspenders. wasalt has no aqar-style soft-close.
     return any(m in body for m in AQAR_DEAD_MARKERS)
+
+
+def _aqar_dead(body: str) -> bool:
+    """aqar's dead-check MUST match aqar's own liveness looks_dead() (minus the status branch that
+    verdict() already handles), or the cleanup is WEAKER than the signal that inactivated the row.
+
+    aqar SOFT-CLOSES: a sold/rented ad serves HTTP 200 with a «مغلق» badge and its offers node
+    stripped — none of the text DEAD_MARKERS appear. Registering markers-ONLY meant every
+    soft-closed aqar listing re-checked as "live", so the cleanup would have REACTIVATED it into
+    search instead of deleting it. Measured 2026-09-20: the entire oldest eligible cohort (dry-run
+    500/500) was soft-closed yet read "live" by the markers-only check. Reusing aqar liveness's own
+    two-factor looks_closed() (badge markup AND missing offers node — 0/77 false-positive on live
+    in its 2026-08-04 validation) fixes it."""
+    return any(m in body for m in AQAR_DEAD_MARKERS) or _aqar_looks_closed(body)
 
 def _never(body: str) -> bool:
     return False  # 404-only platforms: a delisted unit returns a real HTTP 404; every 200 is treated LIVE
@@ -49,8 +65,8 @@ def _aqarcity_expired(body: str) -> bool:
     return "الإعلان منتهي" in body
 
 PLATFORMS: dict[str, dict] = {
-    "aqar":   {"tables": ["aqar_residential_listings", "aqar_commercial_listings"],     "dead_marker": _aqar_wasalt_markers},
-    "wasalt": {"tables": ["wasalt_residential_listings", "wasalt_commercial_listings"], "dead_marker": _aqar_wasalt_markers},
+    "aqar":   {"tables": ["aqar_residential_listings", "aqar_commercial_listings"],     "dead_marker": _aqar_dead},
+    "wasalt": {"tables": ["wasalt_residential_listings", "wasalt_commercial_listings"], "dead_marker": _wasalt_markers},
     # gathern (monthly rentals): a delisted unit serves a server 404; a live OR merely-booked unit
     # serves 200. So delete ONLY on a hard 404 — a booked-but-listed 200 is never deleted, and a
     # relisted unit that comes back 200 is self-healed. Verified on 8 inactive+2 active URLs 2026-07-27.
@@ -63,6 +79,18 @@ PLATFORMS: dict[str, dict] = {
 DEFAULT_POLICY = {
     "min_inactive_days": 30, "min_missing_count": 3, "require_source_recheck": True,
     "max_delete_per_run": 500, "anomaly_floor": 300, "anomaly_factor": 4, "enabled": False,
+    # DRAIN MODE (2026-09-20). Default OFF, per-platform opt-in. When a platform's deletion-eligible
+    # population sits ABOVE the anomaly/fraction gate as a genuine STANDING backlog (sold/rented
+    # listings that accumulated while the guard aborted every run — see the guard's own "can never
+    # drain" warning), aborting forever is the wrong answer: customers keep clicking dead listings.
+    # With drain_backlog=true the run stops ABORTING on the aggregate gate and instead drips a
+    # normal capped batch (max_delete_per_run), source-re-verifying every single row exactly as a
+    # normal run does — so nothing is deleted that isn't freshly confirmed gone. The protection the
+    # abort provided (catching a scraper regression that mass-inactivates REAL rows) is KEPT as a
+    # rate check: a genuine backlog is flat/shrinking run-over-run, a regression is a sudden SPIKE,
+    # and a spike still aborts even in drain mode. drain_spike_factor is how many times the previous
+    # run's eligible count this run may reach before it is treated as a spike.
+    "drain_backlog": False, "drain_spike_factor": 2.0,
     # Scale-relative mass-deletion guard (2026-08-09). The absolute anomaly_floor cannot notice
     # that a SMALL platform has gone catastrophically wrong: with floor=1000, a 3,000-row platform
     # could have 600 rows (20%) suddenly eligible and still sail through. This guard scales with
@@ -86,11 +114,64 @@ _FREEZE_MIN_SAMPLE = 20
 _FREEZE_MAX_INCONCLUSIVE_RATE = 0.30
 
 
+def _wasalt_browser_probe(url: str) -> tuple[int | None, str]:
+    """Re-check a wasalt listing through the REAL browser transport (scrapers/wasalt/browser.py).
+
+    wasalt.sa has null-routed the curl_cffi+Saudi-proxy shape since 2026-08-17 (issue #1019) — the
+    exact transport the generic _probe() below uses — so a cloud wasalt recheck over that path
+    ALWAYS returns 403/timeout, i.e. "unknown". Every eligible wasalt row would then be skipped
+    (never deleted) and the run's inconclusive-rate freeze would trip: the cleanup could not delete
+    a single genuinely-dead wasalt listing. run.py (#3129), enrich_ar (#3140) and liveness (#3166)
+    were all moved onto the browser for this; the cleanup probe is the last consumer.
+
+    Maps the browser answer onto (status, body) so the shared verdict() logic is unchanged:
+      * a real HTTP 404/410            -> (status, '')  -> verdict 'dead'
+      * HTTP 200 WITH propertyDetailsV3 -> (200, '')     -> verdict 'live' (self-heal)
+      * anything else (block, timeout, 200 we could not parse) -> (None, '') -> verdict 'unknown'
+    A dead wasalt listing returns a real 404 (measured), and a 200 we cannot parse is treated as
+    unknown, never dead — the safe direction."""
+    from scrapers.wasalt import browser as _b
+    data, status, _n = _wasalt_browser().page_data(url)
+    if status in (404, 410):
+        return status, ""
+    if status == 200 and (data or {}).get("props", {}).get("pageProps", {}).get("propertyDetailsV3") is not None:
+        return 200, ""
+    return None, ""
+
+
+def _wasalt_browser_enabled() -> bool:
+    from scrapers.wasalt import browser as _b
+    return _b.browser_enabled()
+
+
+# One Chromium per PROCESS, created on first wasalt recheck and reused for the whole run — launching
+# per row would dominate the wall clock. Closed in run()'s finally. The cleanup loop is
+# single-threaded, so this is safe (Playwright's sync driver is thread-bound).
+_BROWSER = None
+
+
+def _wasalt_browser():
+    global _BROWSER
+    if _BROWSER is None:
+        from scrapers.wasalt import browser as _b
+        _BROWSER = _b.BrowserFetcher()
+    return _BROWSER
+
+
+def _close_wasalt_browser() -> None:
+    global _BROWSER
+    if _BROWSER is not None:
+        _BROWSER.close()
+        _BROWSER = None
+
+
 def _probe(url: str) -> tuple[int | None, str]:
     """Fetch the real listing page and return (status_code, body). Unlike common.http.get (which
     collapses every non-200 to None), this PRESERVES the status so we can tell a 404 (gone) apart
     from a 403/timeout (block) — critical, because we must never delete on a block. Returns
     (None, '') on a network error. Routes wasalt through the Saudi proxy, same as liveness."""
+    if ("wasalt.sa" in url or "wasalt.com" in url) and _wasalt_browser_enabled():
+        return _wasalt_browser_probe(url)
     s = http.session()
     proxies = None
     if "wasalt.sa" in url or "wasalt.com" in url:
@@ -167,6 +248,33 @@ def _count_of(res) -> int:
             "PostgREST returned no exact count — refusing to run a destructive cleanup against an "
             "unmeasured population. Check the count=\"exact\" query.")
     return int(n)
+
+def _recent_eligible_baseline(client, platform: str) -> int | None:
+    """The eligible-count (`candidates`) of this platform's most recent PRIOR cleanup run, or None
+    if there is no history. Drain mode compares against this: a genuine standing backlog is flat or
+    shrinking run-over-run, so it is not a spike; a scraper regression that mass-inactivates real
+    rows shows up as a sudden jump. Aborted runs count — they record the standing total at abort
+    time, which is exactly the baseline a first drain run should measure against."""
+    rows = (client.table("cleanup_runs").select("candidates")
+            .eq("platform", platform).eq("dry_run", False)
+            .order("ran_at", desc=True).limit(1).execute().data or [])
+    if not rows:
+        return None
+    c = rows[0].get("candidates")
+    return int(c) if c is not None else None
+
+
+def _is_spike(eligible_total: int, baseline: int | None, pol: dict) -> bool:
+    """True iff eligible_total is a SUDDEN jump vs the previous run — the shape of a scraper
+    regression, as opposed to a standing backlog being drained. Pure; unit-tested.
+
+    No baseline (never run) → NOT a spike: enabling drain_backlog is the deliberate human decision
+    that this platform's backlog is genuine, and every row is still source-re-verified before
+    deletion. A spike needs the count to reach drain_spike_factor × the previous run's count."""
+    if baseline is None or baseline <= 0:
+        return False
+    return eligible_total > baseline * float(pol.get("drain_spike_factor") or 2.0)
+
 
 def _trailing_median_deleted(client, platform: str) -> float:
     rows = (client.table("cleanup_runs").select("deleted")
@@ -291,36 +399,67 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                       f"normal scheduled cycle. platform_retention_policy untouched.")
                 print(f"ℹ cleanup {platform}: BOUNDED — {stats['note']}", flush=True)
                 cands = _bounded_candidates(client, tables, pol, cutoff, safe_cap) if safe_cap > 0 else []
-            elif eligible_total > thresh:
-                # Report the OTHER gate's verdict in the same breath. The two gates are independent
-                # and are evaluated in sequence, so an operator who reads only "raise anomaly_floor"
-                # can raise it, re-run, and abort a second time on the fraction guard with a message
-                # that then blames "a partial crawl or source outage" — a misleading conclusion when
-                # the backlog has already been proven to be genuine delistings. aqarcity 2026-08-16
-                # is exactly that case: 419 eligible clears neither the floor (408) nor the 10% cap
-                # (261 of 2,611 rows). Naming both here makes it ONE owner decision, not two.
-                if frac_applies and eligible_total > frac_cap:
-                    also = (f" ALSO NOTE: raising anomaly_floor alone would NOT unblock this run — "
-                            f"{eligible_total} is {100.0 * eligible_total / platform_rows:.1f}% of "
-                            f"{platform_rows} rows and the mass-inactivation guard caps it at "
-                            f"{100.0 * pol['max_eligible_frac']:.0f}%, so the next run would abort "
-                            f"on that guard instead. Both gates need an owner decision together.")
-                else:
+            elif eligible_total > thresh or (frac_applies and eligible_total > frac_cap):
+                # OVER AN AGGREGATE GATE. Two ways forward: the historical ABORT (a spike, or drain
+                # not enabled), or DRAIN a capped batch (a genuine standing backlog, opt-in).
+                over_anomaly = eligible_total > thresh
+                over_frac = frac_applies and eligible_total > frac_cap
+                baseline = _recent_eligible_baseline(client, platform)
+                spike = _is_spike(eligible_total, baseline, pol)
+
+                if pol.get("drain_backlog") and not spike:
+                    # DRAIN: the backlog is standing (flat/shrinking vs last run), not a fresh
+                    # regression. Do NOT abort — drip a normal capped batch, oldest-first, with the
+                    # full per-row source re-verification, self-heal, unknown-skip and
+                    # inconclusive-rate freeze all still in force below. This is what makes the
+                    # system drain a legitimate backlog on its own instead of waiting for a human
+                    # who never comes (the guard's own "can never drain" warning).
+                    safe_cap = min(int(pol["max_delete_per_run"]), eligible_total)
+                    gates = ", ".join(g for g, on in
+                                      (("anomaly", over_anomaly), ("fraction", over_frac)) if on)
+                    stats["note"] = (
+                        f"drain mode: eligible_total={eligible_total} over {gates} gate but NOT a "
+                        f"spike (baseline={baseline}, factor={pol.get('drain_spike_factor')}); "
+                        f"draining <= {safe_cap} this run (source-verified per row), "
+                        f"remaining_after_this_run={max(0, eligible_total - safe_cap)}.")
+                    print(f"ℹ cleanup {platform}: DRAIN — {stats['note']}", flush=True)
+                    cands = _bounded_candidates(client, tables, pol, cutoff, safe_cap)
+                elif over_anomaly:
+                    # Report the OTHER gate's verdict in the same breath. The two gates are
+                    # independent and evaluated in sequence, so an operator who reads only "raise
+                    # anomaly_floor" can raise it, re-run, and abort a second time on the fraction
+                    # guard with a message that then blames "a partial crawl or source outage" — a
+                    # misleading conclusion when the backlog has already been proven to be genuine
+                    # delistings. aqarcity 2026-08-16 is exactly that case. Naming both here makes it
+                    # ONE owner decision, not two.
                     also = ""
-                _abort(f"anomaly: {eligible_total} eligible > threshold {thresh:.0f} "
-                       f"(floor {pol['anomaly_floor']}, {pol['anomaly_factor']}× median {median:.0f}). "
-                       f"Human review required. NOTE: a STANDING backlog above the floor aborts "
-                       f"every run and can never drain — if {eligible_total} is legitimate "
-                       f"accumulation rather than a spike, raise anomaly_floor above it; do not "
-                       f"force.{also}")
-            elif frac_applies and eligible_total > frac_cap:
-                # Scale guard: a partial crawl, source outage or sitemap collapse shows up as a
-                # large FRACTION of the platform going eligible at once, even when the absolute
-                # count is under the floor.
-                _abort(f"mass-inactivation guard: {eligible_total} eligible is "
-                       f"{100.0 * eligible_total / platform_rows:.1f}% of {platform_rows} rows "
-                       f"(cap {100.0 * pol['max_eligible_frac']:.0f}%). Suspect a partial crawl or "
-                       f"source outage rather than genuine delistings.")
+                    if over_frac:
+                        also = (f" ALSO NOTE: raising anomaly_floor alone would NOT unblock this "
+                                f"run — {eligible_total} is {100.0 * eligible_total / platform_rows:.1f}% "
+                                f"of {platform_rows} rows and the mass-inactivation guard caps it at "
+                                f"{100.0 * pol['max_eligible_frac']:.0f}%, so the next run would abort "
+                                f"on that guard instead. Both gates need an owner decision together.")
+                    spike_note = (f" This IS a spike (eligible {eligible_total} > "
+                                  f"{pol.get('drain_spike_factor')}× last run {baseline}) — drain "
+                                  f"mode aborts on spikes too, suspect a regression."
+                                  if (pol.get("drain_backlog") and spike) else
+                                  (" To let the SYSTEM drip this down, set "
+                                   "platform_retention_policy.drain_backlog=true (each row is still "
+                                   "source-re-verified; a real spike still aborts)."
+                                   if not pol.get("drain_backlog") else ""))
+                    _abort(f"anomaly: {eligible_total} eligible > threshold {thresh:.0f} "
+                           f"(floor {pol['anomaly_floor']}, {pol['anomaly_factor']}× median {median:.0f}). "
+                           f"Human review required.{spike_note}{also}")
+                else:
+                    # Scale guard: a partial crawl, source outage or sitemap collapse shows up as a
+                    # large FRACTION of the platform going eligible at once, even when the absolute
+                    # count is under the floor.
+                    spike_note = (f" This IS a spike vs last run ({baseline}) — suspect a regression."
+                                  if (pol.get("drain_backlog") and spike) else "")
+                    _abort(f"mass-inactivation guard: {eligible_total} eligible is "
+                           f"{100.0 * eligible_total / platform_rows:.1f}% of {platform_rows} rows "
+                           f"(cap {100.0 * pol['max_eligible_frac']:.0f}%). Suspect a partial crawl or "
+                           f"source outage rather than genuine delistings.{spike_note}")
             else:
                 # ── work-set: only now do we pull rows, and only up to the per-run cap ───────────
                 cands = []
@@ -441,6 +580,8 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
     except Exception as e:
         end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=f"error: {e}")
         raise
+    finally:
+        _close_wasalt_browser()  # Chromium is a child process; never leave it holding the CI step open
 
 
 def _days(n):

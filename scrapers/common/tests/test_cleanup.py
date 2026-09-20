@@ -474,3 +474,190 @@ def test_rows_without_a_url_cannot_trigger_the_freeze():
     assert s["rechecked"] == 25 and s["skipped"] == 30      # sample clears the min-sample gate
     assert s["aborted"] is False, "no-URL rows must not be mistaken for inconclusive evidence"
     assert s["deleted"] == 25 and len(c.deleted["testp_listings"]) == 25
+
+
+# ── DRAIN MODE (2026-09-20): a genuine standing backlog must drip out, source-verified, instead of
+# aborting forever — WITHOUT losing the protection against a scraper-regression spike. ────────────
+
+def _drain_pol(**k):
+    k.setdefault("drain_spike_factor", 2.0)
+    return POL(drain_backlog=True, **k)
+
+
+def test_is_spike_pure():
+    p = {"drain_spike_factor": 2.0}
+    assert C._is_spike(25252, 25237, p) is False      # flat standing backlog → drain
+    assert C._is_spike(12000, 25237, p) is False      # shrinking (being drained) → drain
+    assert C._is_spike(60000, 25237, p) is True       # doubled+ → spike → abort
+    assert C._is_spike(5000, None, p) is False         # no history + owner opted in → drain
+    assert C._is_spike(5000, 0, p) is False            # zero baseline → treat as no history
+
+
+def test_drain_off_still_aborts_default_deny():
+    """Without drain_backlog a standing backlog aborts exactly as before (unchanged behaviour)."""
+    c = _install({"testp_listings": [_cand(i) for i in range(400)],
+                  "cleanup_runs": [{"platform": "testp", "dry_run": False, "candidates": 400}]},
+                 POL(anomaly_floor=300), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and s["deleted"] == 0 and c.deleted == {}
+
+
+def test_drain_drips_a_capped_batch_instead_of_aborting():
+    """Backlog of 400 over the floor(300), drain on, baseline flat → drips max_delete_per_run,
+    source-verified, does NOT abort."""
+    c = _install({"testp_listings": [_cand(i) for i in range(400)],
+                  "cleanup_runs": [{"platform": "testp", "dry_run": False, "candidates": 400}]},
+                 _drain_pol(anomaly_floor=300, max_delete_per_run=50), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False, s.get("abort_reason")
+    assert s["deleted"] == 50, s                       # exactly the per-run cap
+    assert len(c.deleted["testp_listings"]) == 50
+    assert "drain mode" in (s["note"] or "")
+
+
+def test_drain_still_self_heals_live_rows_never_deletes_them():
+    """Even while draining, a row the source says is LIVE is reactivated, not deleted."""
+    c = _install({"testp_listings": [_cand(i) for i in range(400)],
+                  "cleanup_runs": [{"platform": "testp", "dry_run": False, "candidates": 400}]},
+                 _drain_pol(anomaly_floor=300, max_delete_per_run=10),
+                 probe=lambda url: (200, "still for sale"))   # every recheck says LIVE
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False
+    assert s["deleted"] == 0 and c.deleted == {}       # nothing deleted
+    assert s["reactivated"] == 10                       # the capped batch was self-healed
+
+
+def test_drain_aborts_on_a_real_spike():
+    """A sudden jump (eligible >> factor × last run) is a regression, not a backlog — drain mode
+    still aborts and deletes nothing, even though every row would recheck 'dead'."""
+    c = _install({"testp_listings": [_cand(i) for i in range(600)],
+                  "cleanup_runs": [{"platform": "testp", "dry_run": False, "candidates": 100}]},
+                 _drain_pol(anomaly_floor=300, drain_spike_factor=2.0), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is True and s["deleted"] == 0 and c.deleted == {}
+    assert "spike" in (s["abort_reason"] or "").lower()
+
+
+def test_drain_bootstraps_with_no_history():
+    """First drain run for an opted-in platform (no prior cleanup_runs) is NOT treated as a spike —
+    enabling drain_backlog is the human decision; each row is still source-verified."""
+    c = _install({"testp_listings": [_cand(i) for i in range(400)]},
+                 _drain_pol(anomaly_floor=300, max_delete_per_run=25), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False and s["deleted"] == 25
+
+
+def test_drain_inconclusive_freeze_still_applies():
+    """If the source/proxy degrades mid-drain (many 'unknown' rechecks), the run-level freeze must
+    still fire and delete nothing — drain does not weaken the inconclusive-evidence guard."""
+    c = _install({"testp_listings": [_cand(i) for i in range(400)],
+                  "cleanup_runs": [{"platform": "testp", "dry_run": False, "candidates": 400}]},
+                 _drain_pol(anomaly_floor=300, max_delete_per_run=50), probe=lambda url: (403, ""))
+    s = C.run("testp", force=True)
+    assert s["deleted"] == 0 and c.deleted == {}       # frozen — a degraded source can't delete
+    assert s["aborted"] is True
+
+
+def test_drain_over_fraction_gate_also_drips():
+    """Over the 10% mass-inactivation guard (not just the floor) but not a spike → still drains."""
+    # 600 rows, 400 eligible: 400 > 10% of 600 (=60) trips the fraction guard; floor set high so it
+    # is the fraction gate, not the anomaly gate, that would abort.
+    rows = ([_cand(i) for i in range(400)]
+            + [{"id": 1000 + i, "ad_number": f"L{i}", "listing_url": f"http://x/{1000+i}",
+                "missing_count": 0, "last_seen_at": "2026-09-19T00:00:00+00:00", "active": True}
+               for i in range(200)])
+    c = _install({"testp_listings": rows,
+                  "cleanup_runs": [{"platform": "testp", "dry_run": False, "candidates": 400}]},
+                 _drain_pol(anomaly_floor=100000, max_delete_per_run=30), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] is False, s.get("abort_reason")
+    assert s["deleted"] == 30
+
+
+# ── wasalt browser probe (2026-09-20): cloud rechecks must go through the browser, not curl_cffi,
+# because wasalt.sa null-routes curl_cffi+proxy (issue #1019). Without this every wasalt recheck is
+# 'unknown' and nothing dead is ever deleted. ─────────────────────────────────────────────────────
+
+_REAL_PROBE = C._probe   # captured at import, before any _install test rebinds C._probe
+
+
+class _FakeBrowser:
+    def __init__(self, answer): self.answer = answer; self.closed = False
+    def page_data(self, url): return self.answer          # (data, status, nbytes)
+    def close(self): self.closed = True
+
+
+def _with_browser(monkey, answer):
+    import scrapers.wasalt.browser as B
+    monkey.setattr(B, "browser_enabled", lambda: True)
+    fb = _FakeBrowser(answer)
+    monkey.setattr(B, "BrowserFetcher", lambda: fb)
+    C._BROWSER = None
+    return fb
+
+
+def test_wasalt_probe_uses_browser_and_maps_status(monkeypatch):
+    live_data = {"props": {"pageProps": {"propertyDetailsV3": {"id": 1}}}}
+    # a real 404 → dead
+    _with_browser(monkeypatch, (None, 404, 0))
+    assert _REAL_PROBE("https://wasalt.sa/en/property/x-1") == (404, "")
+    # 200 with propertyDetailsV3 → live (200, "")
+    _with_browser(monkeypatch, (live_data, 200, 900))
+    assert _REAL_PROBE("https://wasalt.sa/en/property/x-2") == (200, "")
+    # a block/timeout (no data, no clean status) → unknown (None, "")
+    _with_browser(monkeypatch, (None, None, 0))
+    assert _REAL_PROBE("https://wasalt.sa/en/property/x-3") == (None, "")
+    # a 200 we could NOT parse (no propertyDetailsV3) → unknown, never dead
+    _with_browser(monkeypatch, ({"props": {"pageProps": {}}}, 200, 30000))
+    assert _REAL_PROBE("https://wasalt.sa/en/property/x-4") == (None, "")
+    C._BROWSER = None
+
+
+def test_wasalt_probe_verdicts_end_to_end(monkeypatch):
+    """The mapped (status, body) must drive verdict() to the right delete/self-heal decision."""
+    dm = C.PLATFORMS["wasalt"]["dead_marker"]
+    _with_browser(monkeypatch, (None, 404, 0))
+    st, body = _REAL_PROBE("https://wasalt.sa/en/property/gone")
+    assert C.verdict(st, body, dm) == "dead"
+    live_data = {"props": {"pageProps": {"propertyDetailsV3": {"id": 1}}}}
+    _with_browser(monkeypatch, (live_data, 200, 900))
+    st, body = _REAL_PROBE("https://wasalt.sa/en/property/alive")
+    assert C.verdict(st, body, dm) == "live"
+    _with_browser(monkeypatch, (None, 403, 0))
+    st, body = _REAL_PROBE("https://wasalt.sa/en/property/blocked")
+    assert C.verdict(st, body, dm) == "unknown"
+    C._BROWSER = None
+
+
+# ── aqar soft-close (2026-09-20): the cleanup dead-check must match aqar's OWN liveness, or a
+# soft-closed (sold/rented) listing re-checks as "live" and gets RESURRECTED into search. ──────────
+
+_AQAR_CLOSED_BODY = '<html>… <span class="badge status">مغلق</span> … no offers node …</html>'
+_AQAR_LIVE_BODY = '<html>… "offers": {"price":"500000"} … price 500000 ريال …</html>'
+
+
+def test_aqar_soft_closed_is_dead_not_live():
+    dm = C.PLATFORMS["aqar"]["dead_marker"]
+    # a real 200 soft-closed page (مغلق badge + no offers node) MUST verdict 'dead' (delete),
+    # not 'live' (which would reactivate a sold listing back into search).
+    assert C.verdict(200, _AQAR_CLOSED_BODY, dm) == "dead"
+    # a genuinely live aqar listing (offers node present) stays 'live' → self-heal, never deleted.
+    assert C.verdict(200, _AQAR_LIVE_BODY, dm) == "live"
+
+
+def test_aqar_deadcheck_matches_aqar_liveness():
+    """The cleanup's aqar dead-check must agree with aqar liveness's own looks_dead on a 200 body —
+    they were allowed to diverge and the cleanup's was weaker (markers-only)."""
+    from scrapers.aqar.liveness import looks_dead
+    dm = C.PLATFORMS["aqar"]["dead_marker"]
+    for body in (_AQAR_CLOSED_BODY, _AQAR_LIVE_BODY, "<html>ordinary live page 500000 ريال</html>"):
+        cleanup_dead = C.verdict(200, body, dm) == "dead"
+        assert cleanup_dead == looks_dead(200, body), f"divergence on: {body[:40]}"
+
+
+def test_wasalt_deadcheck_does_not_borrow_aqar_soft_close():
+    """wasalt must NOT inherit aqar's مغلق soft-close rule — a live wasalt listing whose text
+    happens to contain مغلق (e.g. gated compound) must not be judged dead. wasalt dead = 404."""
+    dm = C.PLATFORMS["wasalt"]["dead_marker"]
+    assert C.verdict(200, _AQAR_CLOSED_BODY, dm) == "live"   # 200 + مغلق badge but NOT aqar → live
+    assert C.verdict(404, "", dm) == "dead"                    # wasalt dead is the real 404
