@@ -60,6 +60,27 @@ function LoadDot({ index, color, reduced }: { index: number; color: string; redu
   return <Animated.View style={[s.dot, { backgroundColor: color }, a]} />;
 }
 
+// Ambient "look at me" pulse for the encouraged-action gold CTA (owner 2026-09-20: «خلّنا نحدد
+// الطلب أكثر» should draw the eye — "subtle flashing/pulsing... tasteful and smooth, not aggressive
+// blinking"). Same calm machinery as LoadDot above (EASE_OUT, withRepeat/withSequence, reduced-motion
+// → static), but a slower cadence and a much smaller opacity swing: LoadDot signals "working right
+// now" over ~300ms bursts, this signals "idle, but worth a look" over a much longer breathing cycle
+// so it never reads as urgent, broken, or attention-hostile while it sits on screen.
+export function GoldPulse({ children }: { children: React.ReactNode }) {
+  const reduced = useReducedMotion();
+  const v = useSharedValue(1);
+  useEffect(() => {
+    if (reduced) { v.value = 1; return; }
+    v.value = withRepeat(withSequence(
+      withTiming(0.82, { duration: 1400, easing: EASE_OUT }),
+      withTiming(1, { duration: 1400, easing: EASE_OUT }),
+    ), -1, false);
+    return () => cancelAnimation(v);
+  }, [v, reduced]);
+  const a = useAnimatedStyle(() => ({ opacity: v.value }));
+  return <Animated.View style={a}>{children}</Animated.View>;
+}
+
 const s = StyleSheet.create({
   // height matches the button label's line so the text↔dots swap causes zero size change.
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, height: 18 },

@@ -30,7 +30,7 @@ import { distinctPlatformCount } from '@/lib/platformDiversity';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
-import { CardIn, LoadingDots } from '@/components/CardReveal';
+import { CardIn, LoadingDots, GoldPulse } from '@/components/CardReveal';
 
 // Memoized card: during the reveal cascade the list re-renders every ~55ms — already-revealed cards
 // must skip reconciliation or 200+ cards stutter the very animation the cascade exists for (review
@@ -3701,19 +3701,17 @@ export default function Agent() {
                               {showActionsRow ? (
                                 <View testID="results-actions" style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
                                   {hasMore ? (
-                                    // Active state = calm pulsing dots (owner 2026-07-09: the button must
-                                    // visibly work, not sit static) — while THIS message's page fetches or
-                                    // its new cards cascade in. Fixed min-size → zero layout shift on swap.
-                                    // Disabled during any reveal or a live turn (never two drips at once).
+                                    // Secondary now (owner 2026-09-20: gold primary is the narrow
+                                    // button below). Dots go colors.primary — the fill is white now.
                                     <Pressable
                                       testID="results-load-more"
-                                      style={({ hovered, pressed }: any) => [s.mBtnPrimary, (hovered || pressed) && !fetching && !revealing && s.mBtnPrimaryHover]}
+                                      style={s.mBtnAlt}
                                       disabled={fetching || revealing || busy}
                                       onPress={() => loadMore(m)}
                                     >
                                       {fetching || cascading
-                                        ? <LoadingDots />
-                                        : <Text style={s.mBtnPrimaryTx}>{t('Load more')}</Text>}
+                                        ? <LoadingDots color={colors.primary} />
+                                        : <Text style={s.mBtnAltTx}>{t('Load more')}</Text>}
                                     </Pressable>
                                   ) : null}
                                   {/* SEED THE CARRY (owner 2026-08-24) before the round opens: this
@@ -3724,22 +3722,25 @@ export default function Agent() {
                                       clean. Writing it on EVERY tap means a stale carry can never be
                                       read, and two fast taps write the same value. */}
                                   {canNarrowFurther ? (
-                                    <Pressable
-                                      testID="results-narrow"
-                                      onPress={() => {
-                                        const q = m.result.query;
-                                        const carried = guidedPills?.msgId === m.id ? guidedPills : null;
-                                        afCarryRef.current = q
-                                          ? { msgId: m.id, originQ: carried?.baseQ ?? q, facets: carried?.facets ?? [], asked: carried?.asked ?? [] }
-                                          : null;
-                                        if (q && anyGuidedEligible(q)) void startAgeFlow(q);
-                                        else startRefine(q);
-                                      }}
-                                      style={s.mBtnAlt}
-                                      disabled={busy}
-                                    >
-                                      <Text style={s.mBtnAltTx}>{t('Let’s narrow it down')}</Text>
-                                    </Pressable>
+                                    // Primary now (owner 2026-09-20): gold + ambient GoldPulse (CardReveal.tsx).
+                                    <GoldPulse>
+                                      <Pressable
+                                        testID="results-narrow"
+                                        onPress={() => {
+                                          const q = m.result.query;
+                                          const carried = guidedPills?.msgId === m.id ? guidedPills : null;
+                                          afCarryRef.current = q
+                                            ? { msgId: m.id, originQ: carried?.baseQ ?? q, facets: carried?.facets ?? [], asked: carried?.asked ?? [] }
+                                            : null;
+                                          if (q && anyGuidedEligible(q)) void startAgeFlow(q);
+                                          else startRefine(q);
+                                        }}
+                                        style={({ hovered, pressed }: any) => [s.mBtnPrimary, (hovered || pressed) && s.mBtnPrimaryHover]}
+                                        disabled={busy}
+                                      >
+                                        <Text style={s.mBtnPrimaryTx}>{t('Let’s narrow it down')}</Text>
+                                      </Pressable>
+                                    </GoldPulse>
                                   ) : null}
                                 </View>
                               ) : afReceipt[m.id] ? (
@@ -4190,12 +4191,14 @@ const s = StyleSheet.create({
   // "Show more" pill, centered under the cards — neutral, never a "load best" CTA. (user request.)
   showMore: { alignSelf: 'center', marginTop: 14, paddingVertical: 9, paddingHorizontal: 22, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
   showMoreTxt: { fontSize: 13, fontWeight: '700', color: colors.primary },
-  // The two actions under the «more than 25» message: primary (show all) + outline (refine). (user 2026-06-27.)
+  // The two actions under the «more than 25» message (owner 2026-09-20: gold primary + white
+  // secondary — see the JSX above for which button wears which now).
   mBtnRow: { flexWrap: 'wrap', gap: 8, marginTop: 2 },
-  // minWidth + centered content: the text↔dots swap never changes the button's size (no layout shift).
-  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.selFill, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
-  mBtnPrimaryHover: { backgroundColor: colors.dark },
-  mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: '#fff', lineHeight: 18 },
+  // PRIMARY = «خلّنا نحدد الطلب أكثر». Gold, not brand green, so it's the one CTA that stands out.
+  mBtnPrimary: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, backgroundColor: colors.goldFill, minWidth: 118, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transitionProperty: 'background-color', transitionDuration: '150ms' } as any) : {}) },
+  mBtnPrimaryHover: { backgroundColor: colors.goldFillHover },
+  mBtnPrimaryTx: { fontSize: 13, fontWeight: '700', color: colors.goldOnFill, lineHeight: 18 },
+  // SECONDARY = «عرض المزيد». Unchanged definition, just moved onto the demoted button.
   mBtnAlt: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
   mBtnAltTx: { fontSize: 13, fontWeight: '700', color: colors.primary },
   // Clickable refine answer chips (district/budget/beds/type) under a «more precise» question. (user 2026-06-27.)
