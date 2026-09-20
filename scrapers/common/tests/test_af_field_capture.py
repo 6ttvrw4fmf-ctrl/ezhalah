@@ -1,0 +1,155 @@
+"""Advanced-Filter field capture for the seven platforms onboarded 2026-09-19/20.
+
+The owner's report: "they don't show in the advanced filter". Measured on production, every one of
+the 303 live listings was dropped by any amenity question — furnished/elevator/kitchen/parking/
+age/direction/license each had ZERO non-NULL values across all seven platforms, while bedrooms had
+191 and bathrooms 181. It was never a filter bug: the filter reads real columns and the columns
+were empty, because each parser was reading these facts and filing them in `additional_info`
+(which nothing can search) or not reading them at all.
+
+Four distinct defects, all locked below:
+  1. gudai/safera print «عدد الغرف: 7» but `_BED_RE` only matched «غرف النوم», so bedrooms was NULL
+     on every row while bathrooms parsed fine from «الحمامات» — the asymmetry that exposed it.
+  2. «مؤثثة: لا», «عام الاكتمال: 2021» and «رقم الترخيص» were on the page and never written.
+  3. compoundin stamped EVERY unit on a compound with unit #1's amenity chip (one un-anchored
+     page-wide regex).
+  4. fahadalshahri says «مصعد مؤسس» — an elevator shaft that has been PREPARED. Reading that as
+     elevator=True publishes a fixture the property does not have.
+
+Every fixture below is verbatim source text captured from the live sites on 2026-09-20, not text
+this repo invented (a barrier that supplies its own input proves nothing).
+
+Run: python -m pytest scrapers/common/tests/test_af_field_capture.py -v
+"""
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[3]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from scrapers.common import normalize  # noqa: E402
+
+
+# ─────────────────────────────── SOURCE IS TRUTH: the three outcomes ───────────────────────────
+def test_named_amenity_is_true() -> None:
+    got = normalize.amenities_from_text("المرافق: مصعد، مواقف سيارات، مدخل خاص")
+    assert got["elevator"] is True and got["parking"] is True and got["private_entrance"] is True
+
+
+def test_silence_stays_null_never_false() -> None:
+    """The single most important assertion here. A source that does not mention an elevator has
+    NOT said there is no elevator. Turning that silence into False would publish a claim the
+    source never made, and would wrongly drop the listing from a «بدون مصعد» search."""
+    got = normalize.amenities_from_text("شقة واسعة بموقع مميز قريبة من الخدمات")
+    assert got == {}, f"silence must yield no keys at all, got {got}"
+    for col in ("elevator", "kitchen", "parking", "furnished"):
+        assert col not in got
+
+
+def test_explicit_negation_is_false() -> None:
+    """«غير مؤثثة» IS the source speaking — that is False, not NULL. Verbatim from gudai."""
+    assert normalize.amenities_from_text("غير مؤثثة")["furnished"] is False
+    assert normalize.amenities_from_text("بدون مصعد")["elevator"] is False
+
+
+def test_prepared_but_absent_stays_null() -> None:
+    """fahadalshahri, verbatim: «مسبح ومصعد مؤسس و3 أدوار». A prepared shaft is not an elevator.
+    Neither yes nor no was stated, so the column must stay NULL."""
+    got = normalize.amenities_from_text("بتشطيب مودرن ومسبح ومصعد مؤسس و3 أدوار بتصميم عائلي")
+    assert "elevator" not in got, f"«مصعد مؤسس» must not claim an elevator, got {got}"
+
+
+def test_appliance_is_not_a_room() -> None:
+    """compoundin's chip, verbatim: «Furnished · Kitchen · Washing Machine». A washing machine is
+    an appliance; laundry_room is a room. Mapping one to the other would invent a room."""
+    got = normalize.amenities_from_text("Furnished · Kitchen · Washing Machine")
+    assert got["furnished"] is True and got["kitchen"] is True
+    assert "laundry_room" not in got
+
+
+# ─────────────────────────────── the Saudi layout idiom ────────────────────────────────────────
+def test_rooms_idiom_is_read() -> None:
+    """aqarnajran «تفاصيل إضافية», verbatim."""
+    got = normalize.rooms_from_phrase("3 غرف وصالة ومطبخ مع تشطيب راقٍ، موقع هادئ وقريب من المدارس")
+    assert got["bedrooms"] == 3 and got["halls"] == 1
+
+
+def test_prose_mentioning_rooms_is_not_a_bedroom_count() -> None:
+    for prose in ("قريب من المدارس والخدمات",
+                  "موقع هادئ ومساحة 320 متر",
+                  "شقة مميزة في برج سكني"):
+        assert "bedrooms" not in normalize.rooms_from_phrase(prose), prose
+
+
+# ─────────────────────────────── completion year → age ─────────────────────────────────────────
+def test_completion_year_becomes_age() -> None:
+    """gudai «عام الاكتمال: 2021». property_age is stored in YEARS fleet-wide (verified against
+    aqar, whose live values run 0-16), so the source's own year is restated, not guessed."""
+    assert normalize.age_from_completion_year("2021", this_year=2026) == 5
+    assert normalize.age_from_completion_year("٢٠٢١", this_year=2026) == 5
+
+
+def test_age_conversion_refuses_nonsense() -> None:
+    for bad in ("", "قريباً", "20211", "1799", "abcd", None):
+        assert normalize.age_from_completion_year(bad, this_year=2026) is None
+    # a year in the FUTURE is not an age
+    assert normalize.age_from_completion_year("2030", this_year=2026) is None
+
+
+def test_stated_age_still_goes_through_the_fleet_parser() -> None:
+    """safera prose, verbatim: «العمر : 16 سنه»."""
+    assert normalize.parse_property_age("16 سنه") == 16
+
+
+# ─────────────────────────────── the parsers actually call this ────────────────────────────────
+def test_inblaj_reads_the_label_the_template_prints() -> None:
+    """Verbatim «تفاصيل العقار» block from gudai.inblaj.net, 2026-09-20. The old pattern only knew
+    «غرف النوم» and returned None here, which is how 0 of 6 gudai rows had a bedroom count."""
+    from scrapers.common import inblaj_platform as ip
+    block = ("تفاصيل العقار نوع العرض: للبيع نوع العقار: منزل المدينة: الرياض الحي: العليا "
+             "عام الاكتمال: 2021 المساحة: 700 م2 عدد الغرف: 7 الحمامات: 4 مؤثثة: لا المرافق: مصعد")
+    assert ip._BED_RE.search(block).group(1) == "7"
+    assert ip._BATH_RE.search(block).group(1) == "4"
+    assert ip._FURN_RE.search(block).group(1) == "لا"
+    assert ip._YEAR_RE.search(block).group(1) == "2021"
+
+
+@pytest.mark.parametrize("label", ["عدد الغرف", "مؤثثة", "عام الاكتمال"])
+def test_new_labels_are_in_the_stop_set(label: str) -> None:
+    """`_label()` reads "<name> : <value>" up to the NEXT known field name. A label missing from
+    that closed set lets the preceding field swallow this row's value."""
+    from scrapers.common import inblaj_platform as ip
+    assert label in ip._FIELD_NAMES
+
+
+def test_compoundin_pairs_chips_per_unit_not_page_wide() -> None:
+    """Defect 3. The fix must pair chips with units BY POSITION and, when the counts disagree,
+    write no amenities at all rather than attach them to the wrong unit."""
+    import inspect
+    from scrapers.compoundin import run as cin
+    src = inspect.getsource(cin.map_units)
+    assert "unit_chips" in src and "len(chips) == len(units)" in src, \
+        "per-unit chip pairing (with a count guard) must be present"
+    assert not re.search(r"amenities_en[\"']?\s*:\s*\(lambda m", src), \
+        "the page-wide first-match lambda must be gone"
+
+
+def test_every_new_parser_writes_af_columns() -> None:
+    """Coverage: a parser that stops calling the shared helper silently returns to all-NULL, which
+    is exactly the state the owner reported. Assert each one still routes through it."""
+    import inspect
+    from scrapers.common import inblaj_platform
+    from scrapers.aqarnajran import run as najran
+    from scrapers.compoundin import run as cin
+    from scrapers.fahadalshahri import run as fahad
+    assert "amenities_from_text" in inspect.getsource(inblaj_platform.map_listing)
+    assert "furnished" in inspect.getsource(inblaj_platform.map_listing)
+    assert "rooms_from_phrase" in inspect.getsource(najran.map_listing)
+    assert "amenities_from_text" in inspect.getsource(cin.map_units)
+    assert "amenities_from_text" in inspect.getsource(fahad.map_listing)

@@ -178,6 +178,14 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "area_m2": _num(_AREA_RE.search(blob)),
         "street_width_m": _num(_STREET_W_RE.search(blob)),
         "photo_urls": imgs[:20] or None,
+        # This template has no labelled spec rows at all — every fact lives in the marketing prose
+        # («مواقف سيارات، بلكونة ومطبخ أمريكي، مع غرفتي ماستر»), which is why all 5 listings carried
+        # NULL for every Advanced-Filter column. Only amenities the text NAMES are written, negations
+        # are honoured, and a fixture the source says is merely PREPARED («مصعد مؤسس») stays NULL.
+        # Room COUNTS are deliberately not read from this prose: it describes them per floor
+        # («الدور الأول يضم … 3 غرف نوم» + «الملحق … 3 غرف نوم»), so any single number would be a
+        # guess about the whole property (ambiguous-mapping ask-first).
+        **normalize.amenities_from_text(blob),
     }
     if deal == "Rent":
         rent_period, price_annual = normalize.rent_period_and_annual(price, blob)

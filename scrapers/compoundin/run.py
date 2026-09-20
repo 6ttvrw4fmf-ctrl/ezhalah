@@ -194,8 +194,27 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     if cm:
         compound_name = plain(cm.group(1))
 
+    # PER-UNIT amenity chips. The old code searched the WHOLE page with one un-anchored regex, so
+    # every unit on a compound was stamped with unit #1's amenities. The chips appear once per unit
+    # card in document order, so they pair with _UNIT_RE's matches BY POSITION — and only when the
+    # two counts agree. If they ever disagree the page layout has changed, and the honest response
+    # is to write no amenities at all rather than risk attaching them to the wrong unit.
+    units = _UNIT_RE.findall(page_html)
+    chips = re.findall(r'cin-unit-card__amenities">([^<]*)<', page_html)
+    unit_chips = chips if len(chips) == len(units) else [None] * len(units)
+
+    # Compound-level facilities, published as schema.org LocationFeatureSpecification. These are
+    # genuinely shared by every unit in the compound, so they may be written onto each unit row.
+    # Only «Air Conditioning» has a column on the platform tables — Gym/Pool/CCTV/Playground have
+    # none, so they are deliberately NOT invented into some other field.
+    ld_features = {f.strip().lower()
+                   for f in re.findall(r'"name":\s*"([^"]+)",\s*"value":\s*true', page_html)}
+    compound_ac = True if any("air condition" in f for f in ld_features) else None
+    pcm = re.search(r'"postalCode":\s*"?(\d{4,6})', page_html)
+    postal = pcm.group(1) if pcm else None
+
     rows: list[dict] = []
-    for utype, subtitle, specs, price, uid in _UNIT_RE.findall(page_html):
+    for idx, (utype, subtitle, specs, price, uid) in enumerate(units):
         spec = plain(specs)
         type_ar = _TYPE_EN_AR.get(plain(utype).lower())
         if not type_ar:
@@ -225,13 +244,28 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
             # Platform-level statement, not a per-listing token: see the module header.
             "rent_period": "annual" if amount else None,
             "photo_urls": photos(page_html),
+            "zip_code": postal,
             "additional_info": {k: v for k, v in {
                 "type_en": plain(utype), "unit_subtitle": plain(subtitle),
                 "compound": compound_name, "unit_id": uid,
-                "amenities_en": (lambda m: plain(m.group(1)) if m else None)(
-                    re.search(r'cin-unit-card__amenities">([^<]*)<', page_html)),
+                "amenities_en": plain(unit_chips[idx]) if unit_chips[idx] else None,
+                "compound_facilities_en": ", ".join(sorted(ld_features)) or None,
             }.items() if v is not None},
         })
+
+        chip = unit_chips[idx]
+        if chip:
+            # «Furnished · Kitchen · Living Room» — the unit's OWN statement about itself.
+            for col, val in normalize.amenities_from_text(chip).items():
+                rows[-1][col] = val
+            # "Living Room" is a room, so it belongs in halls, not in the amenity map.
+            if re.search(r"living\s*room", chip, re.I):
+                rows[-1]["halls"] = 1
+            # NOTE: "Washing Machine" is deliberately NOT mapped to laundry_room — an appliance is
+            # not a room, and guessing the two are the same would publish a claim the source
+            # never made (ambiguous-mapping ask-first).
+        if compound_ac:
+            rows[-1]["air_conditioner"] = True
     return rows, ("" if rows else "no_units")
 
 

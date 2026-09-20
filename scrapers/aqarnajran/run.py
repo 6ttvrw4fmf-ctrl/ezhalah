@@ -196,6 +196,23 @@ def map_listing(post: dict) -> tuple[Optional[dict], str, str]:
         "area_m2": area,
         "photo_urls": photos(post),
     }
+
+    # The «تفاصيل إضافية» cell is this template's only structured-ish field: «3 غرف وصالة ومطبخ مع
+    # تشطيب راقٍ، موقع هادئ وقريب من المدارس». It was read and filed in additional_info, where the
+    # Advanced Filter cannot see it, so all 39 rows carried bedrooms=NULL. The leading «N غرف …
+    # وصالة» is the Saudi layout idiom and is read as the bedroom count; prose that merely mentions
+    # rooms matches nothing and stays NULL. Amenities the cell NAMES are written; the rest stay NULL.
+    extra = field(text, "تفاصيل إضافية")
+    if extra:
+        for k, v in normalize.rooms_from_phrase(extra).items():
+            row.setdefault(k, v)
+        for col, val in normalize.amenities_from_text(extra).items():
+            row.setdefault(col, val)
+    # Some listings use explicit table rows instead of the packed cell.
+    for label, col in (("الغرف", "bedrooms"), ("دورات المياه", "bathrooms")):
+        v = normalize.to_int(field(text, label) or "")
+        if v is not None:
+            row[col] = v
     if deal == "Rent":
         # The period is stated IN the price cell («4,500 ريال شهريًا»); read from that cell so a
         # «سنوي» elsewhere in the description cannot set the period for a monthly rent.

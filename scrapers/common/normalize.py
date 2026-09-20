@@ -7,7 +7,7 @@ canonical names the app's search engine knows.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Any, Optional
 
 
 # Arabic property-type words → canonical English types (must match the app's TYPES list
@@ -641,6 +641,114 @@ def parse_property_age(raw) -> Optional[int]:
         return None
     n = int(m.group(1))
     return n if _AGE_MIN <= n <= _AGE_MAX else None
+
+
+# ── Amenity + room phrasing shared by the small-platform parsers (2026-09-20) ────────────────────
+# The newly onboarded sites print their facts as prose or as one packed cell («المرافق: مصعد، مواقف»,
+# «3 غرف وصالة ومطبخ», "Furnished · Kitchen") rather than as one labelled field per fact. Each parser
+# was reading those cells and filing them in `additional_info`, so the Advanced Filter — which reads
+# real columns — saw NULL and dropped every one of those listings from any amenity question.
+# One token map here, used by every such parser, so a word learned once is learned fleet-wide.
+#
+# SOURCE IS TRUTH: a token PRESENT sets True. A token ABSENT sets NOTHING — silence stays NULL and
+# is never turned into a "no" (that would publish a claim the source never made). An explicit
+# negation («غير مؤثثة», «بدون مصعد», «لا يوجد مصعد») is itself a source statement, so it sets False.
+_AMENITY_TOKENS: dict[str, tuple[str, ...]] = {
+    "elevator":         ("مصعد", "المصعد", "elevator", "lift"),
+    "kitchen":          ("مطبخ", "المطبخ", "kitchen"),
+    "air_conditioner":  ("مكيف", "مكيفات", "تكييف", "مكيفة", "air conditioning", "air conditioner", "a/c"),
+    "parking":          ("موقف", "مواقف", "مواقف سيارات", "كراج", "جراج", "parking", "car park"),
+    "maid_room":        ("غرفة خادمة", "غرفه خادمه", "غرفة شغالة", "maid room", "maid's room"),
+    "driver_room":      ("غرفة سائق", "غرفه سائق", "driver room", "driver's room"),
+    "laundry_room":     ("غرفة غسيل", "غرفه غسيل", "غسيل", "laundry"),
+    "balcony_terrace":  ("بلكونة", "بلكونه", "شرفة", "شرفه", "تراس", "balcony", "terrace"),
+    "private_entrance": ("مدخل خاص", "مدخل مستقل", "private entrance"),
+    "car_entrance":     ("مدخل سيارة", "مدخل سياره", "مدخل سيارات"),
+    "optical_fibers":   ("ألياف بصرية", "الياف بصرية", "فايبر", "fiber optic", "optical fiber"),
+    "furnished":        ("مفروش", "مفروشة", "مؤثثة", "مؤثث", "furnished"),
+}
+
+# «غير مؤثثة» / «بدون مصعد» / «لا يوجد مصعد» — the negator sits BEFORE the token.
+_NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "un", "no ")
+
+# …and some qualifiers sit AFTER it and mean the thing is NOT there. «مصعد مؤسس» is an elevator
+# SHAFT that has been prepared — there is no elevator (seen on fahadalshahri, 2026-09-20). Reading
+# that as elevator=True publishes a fixture the listing does not have, so these suppress the token
+# entirely: the source has not said yes and has not said no, so the column stays NULL.
+_PREPARED_ONLY = ("مؤسس", "مؤسسة", "مهيأ", "مهيا", "تأسيس", "prepared for", "roughed")
+
+
+def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
+    """Map one free-text amenity blob to {column: bool}. Only columns the source actually mentions
+    appear in the result — an absent amenity is NOT reported as False, because the source saying
+    nothing is not the source saying no.
+
+    >>> amenities_from_text("المرافق: مصعد، مواقف سيارات")["elevator"]
+    True
+    >>> amenities_from_text("غير مؤثثة")["furnished"]
+    False
+    >>> "elevator" in amenities_from_text("شقة واسعة")
+    False
+    """
+    if not raw:
+        return {}
+    t = _norm_ar(str(raw)).lower()
+    out: dict[str, bool] = {}
+    for col, tokens in _AMENITY_TOKENS.items():
+        for tok in tokens:
+            k = _norm_ar(tok).lower()
+            for m in re.finditer(re.escape(k), t):
+                before = t[max(0, m.start() - 12):m.start()]
+                after = t[m.end():m.end() + 14]
+                if any(_norm_ar(q) in after for q in _PREPARED_ONLY):
+                    break          # "prepared for X" is not X — leave the column NULL
+                out[col] = not any(n.strip() and n.strip() in before for n in _NEGATORS)
+                break
+            if col in out:
+                break
+    return out
+
+
+# «3 غرف وصالة ومطبخ», «غرفتين وصالة» — the Saudi listing idiom for a unit's layout. The leading
+# count is the BEDROOM count; «صالة» is one hall. Anything that does not match this exact shape
+# returns nothing rather than a guess.
+_ROOMS_PHRASE_RE = re.compile(r"([\d٠-٩]{1,2})\s*غرف(?:ة|ه)?\s*(?:نوم\s*)?(?=\s*(?:و\s*)?(?:صال|مجلس|حمام|دورة|مطبخ|،|,|$))")
+
+
+def rooms_from_phrase(raw: Optional[str]) -> dict[str, Any]:
+    """Read «N غرف وصالة ومطبخ» into real columns. Returns {} when the phrase is not present —
+    a description that merely mentions rooms in passing must not become a bedroom count."""
+    if not raw:
+        return {}
+    t = re.sub(r"\s+", " ", str(raw))
+    out: dict[str, Any] = {}
+    m = _ROOMS_PHRASE_RE.search(t)
+    if m:
+        n = to_int(m.group(1))
+        if n is not None and 1 <= n <= 20:
+            out["bedrooms"] = n
+    if re.search(r"\bوصال(?:ة|ه)\b|\bصال(?:ة|ه)\b", t):
+        out["halls"] = 1
+    return out
+
+
+def age_from_completion_year(raw, *, this_year: int) -> Optional[int]:
+    """«عام الاكتمال: 2021» states a COMPLETION YEAR; the fleet stores `property_age` in YEARS
+    (verified against aqar, whose values are 0-16). Restating the source's own year as an age is
+    arithmetic, not inference — but it is time-dependent, so it is recomputed on every scrape
+    rather than stored once. `this_year` is passed in so the conversion stays testable.
+    Returns None for anything that is not a plausible 4-digit completion year."""
+    if raw is None:
+        return None
+    s = str(raw).translate(_TRANS).strip()
+    m = re.match(r"^(\d{4})$", s)
+    if not m:
+        return None
+    y = int(m.group(1))
+    if not (1900 <= y <= this_year):
+        return None
+    age = this_year - y
+    return age if _AGE_MIN <= age <= _AGE_MAX else None
 
 
 # ── PRICE = SOURCE evidence (owner invariant, 2026-08-04) ────────────────────────────────────────
