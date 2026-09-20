@@ -110,6 +110,15 @@ FRAC_GUARD_MIN_ROWS = 500
 # protection enough. _FREEZE_MAX_INCONCLUSIVE_RATE is the ceiling above which the run's evidence
 # is treated as untrustworthy as a whole. Healthy production runs measure ~0% inconclusive, so
 # there is a wide margin between normal and this ceiling — it is not a hair trigger.
+# WRITE BATCH SIZE. Each delete fires trg_archive_hard_delete, which archives the whole row as
+# jsonb — and a wasalt row carries a large ar_data blob, so archiving is ~16 ms/row (aqar/gathern
+# have no ar_data and are far cheaper). At 200/batch that is ~3.4 s of trigger work in ONE delete
+# statement, which tips over PostgREST's 8 s statement_timeout under load — a real wasalt drain run
+# 57014'd on 2026-09-20 (500 rows deleted safely, but the job exited 1). 50/batch is ~0.8 s: a 4x+
+# safety margin against the timeout on the slowest table, at the cost of a few more round-trips on
+# the cheap ones. Keep it well under what makes the slowest archive trigger approach 8 s.
+_WRITE_CHUNK = int(os.environ.get("CLEANUP_WRITE_CHUNK", "50"))
+
 _FREEZE_MIN_SAMPLE = 20
 _FREEZE_MAX_INCONCLUSIVE_RATE = 0.30
 
@@ -549,14 +558,14 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
 
                 if not dry_run:
                     for t, ids in to_reactivate.items():   # self-heal a wrongly-inactive live listing
-                        for i in range(0, len(ids), 200):
-                            client.table(t).update({"active": True, "missing_count": 0}).in_("id", ids[i:i + 200]).execute()
+                        for i in range(0, len(ids), _WRITE_CHUNK):
+                            client.table(t).update({"active": True, "missing_count": 0}).in_("id", ids[i:i + _WRITE_CHUNK]).execute()
                     if log_rows:
-                        for i in range(0, len(log_rows), 200):
-                            client.table("cleanup_deletion_log").insert(log_rows[i:i + 200]).execute()
+                        for i in range(0, len(log_rows), _WRITE_CHUNK):
+                            client.table("cleanup_deletion_log").insert(log_rows[i:i + _WRITE_CHUNK]).execute()
                     for t, ids in to_delete.items():
-                        for i in range(0, len(ids), 200):
-                            chunk = ids[i:i + 200]
+                        for i in range(0, len(ids), _WRITE_CHUNK):
+                            chunk = ids[i:i + _WRITE_CHUNK]
                             client.table(t).delete().in_("id", chunk).execute()
                             # Count per COMMITTED chunk, never in one lump at the end. A statement
                             # timeout mid-loop (57014) leaves some chunks deleted and some not; a
