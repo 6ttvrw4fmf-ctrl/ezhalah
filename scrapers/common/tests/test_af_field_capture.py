@@ -65,6 +65,27 @@ def test_prepared_but_absent_stays_null() -> None:
     assert "elevator" not in got, f"«مصعد مؤسس» must not claim an elevator, got {got}"
 
 
+def test_neighbourhood_amenity_is_not_this_property_s() -> None:
+    """The third not-a-yes-and-not-a-no case (2026-09-20). Listing prose is full of proximity
+    claims about the STREET: verbatim from wslnaa, «قريب من مستشفى السرطان للأطفال ومقابل كمباوند
+    معهد الإدارة» and «بالقرب من مركز الملك فهد». Reading amenities out of descriptions is what
+    lifted wslnaa from 0 to 35 listings with a filter answer, but a naive scan would also read
+    «قريب من مواقف» as "this unit has parking" — a claim about someone else's building. The
+    proximity phrase suppresses the token entirely: neither yes nor no, so the column stays NULL."""
+    assert normalize.amenities_from_text(
+        "قريب من مستشفى السرطان للأطفال ومقابل كمباوند معهد الإدارة") == {}
+    assert "parking" not in normalize.amenities_from_text("الموقع مميز وقريب من مواقف عامة")
+    assert "elevator" not in normalize.amenities_from_text("بجوار برج فيه مصعد")
+
+
+def test_the_property_s_own_amenity_still_reads() -> None:
+    """The guard must not swallow the real thing. Both verbatim from the live sources."""
+    assert normalize.amenities_from_text(
+        "يتوفر مدخل للمبنى ومواقف أمامية وخلفية")["parking"] is True
+    assert normalize.amenities_from_text(
+        "قسم الرجال: خيمة مشب – مجلس – مطبخ – مقلط – صالة – 3 دورات مياه")["kitchen"] is True
+
+
 def test_appliance_is_not_a_room() -> None:
     """compoundin's chip, verbatim: «Furnished · Kitchen · Washing Machine». A washing machine is
     an appliance; laundry_room is a room. Mapping one to the other would invent a room."""

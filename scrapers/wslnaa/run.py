@@ -124,6 +124,12 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "active": True,
         "title": (p.get("title") or "").strip() or None,
         "description": (p.get("description") or "").strip() or None,
+        # The tRPC payload carries no amenity fields at all, so the description is the ONLY place
+        # wslnaa states them («يتوفر مدخل للمبنى ومواقف أمامية وخلفية»). 47 of its 58 listings had
+        # nothing for any Advanced-Filter question before this. Proximity prose about the
+        # NEIGHBOURHOOD («قريب من مستشفى السرطان», «مقابل كمباوند معهد الإدارة») is suppressed by
+        # amenities_from_text, so a nearby hospital never becomes this unit's feature.
+        **normalize.amenities_from_text(p.get("description")),
         "property_type": property_type,
         # Written as a total expression, not the bare `deal`: a transaction_type that is
         # not provably Buy/Rent can reach the index as NULL, and a null deal is
