@@ -40,6 +40,19 @@ export const lightColors = {
   whatsApp: '#25d366',
   onFill: '#ffffff', // text/icons ON solid green fills — white in BOTH themes
   selFill: '#2f7247', // SELECTED control fill (white text) — deeper than dark-theme primary
+  // ENCOURAGED-ACTION gold (owner 2026-09-20, SHINY revision): the results-row "narrow it down"
+  // CTA. A flat fill read as dull, so this is a diagonal metallic gradient (light highlight → deep
+  // base, GoldShineButton in CardReveal.tsx) plus a periodic light sweep across it. Same values in
+  // both themes — like whatsApp/onFill above, gold reads clearly against both a light and a neutral
+  // charcoal-dark ground, so it needs no per-theme lift. goldOnFill is dark text ON the gold fill
+  // specifically — NEVER `ink`/`onFill`, both of which flip per theme and per other fills
+  // respectively; gold needs dark text regardless of which app theme is active, checked against
+  // both gradient stops (dark text stays high-contrast across the whole light→deep range).
+  goldLight: '#ffd966', // gradient highlight (top-left) — bright, warm
+  goldDeep: '#c8860d', // gradient base (bottom-right) — rich amber-gold
+  goldLightHover: '#f0c94a', // both stops deepen slightly on hover/press
+  goldDeepHover: '#a86f08',
+  goldOnFill: '#2a1d06',
   danger: '#c0392b', // destructive text/icons
   dangerBg: '#fbe8e6', // destructive tinted fill
   dangerLine: '#f3cfca', // destructive tinted border
@@ -94,6 +107,11 @@ export const darkColors: Record<PaletteKey, string> = {
   whatsApp: '#25d366',
   onFill: '#ffffff',
   selFill: '#2f7247', // selected control fill — brand green as ACCENT
+  goldLight: '#ffd966',
+  goldDeep: '#c8860d',
+  goldLightHover: '#f0c94a',
+  goldDeepHover: '#a86f08',
+  goldOnFill: '#2a1d06',
   danger: '#e46a5e',
   dangerBg: '#3a1e19',
   dangerLine: '#562a23',
