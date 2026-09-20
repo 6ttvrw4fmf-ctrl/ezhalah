@@ -175,6 +175,49 @@ check('every claimed state is judged (fixed, verifying, resolved)',
 check('a row citing nothing at all is not invented into a problem',
   citationProblems([row(1, 'resolved', null)], nonePresent).length === 0);
 
+// ── THE EXTRACTOR MUST NOT INVENT A PHANTOM (repaired 2026-09-20, routine #10) ───────────────────
+// A guard that cries wolf is not a stricter guard. Two extractor bugs reported CORRECT citations as
+// phantoms, kept incident-citation-guard.yml red, and left a P1 `barrier_check_failed` alert open
+// and unacknowledged from 2026-09-14 to 2026-09-20 — six days in which the workflow's red said
+// nothing a reader could act on, and during which two GENUINE phantoms (#140, #55) sat in the same
+// list unnoticed. Both directions are proven: the false positives are gone AND the real shapes are
+// still found. Fed the verbatim production citations, not strings invented for the test.
+const ARTEFACTS = (s: string) => citedArtifacts(s).map((a) => `${a.kind}:${a.name}`);
+
+check('a .tsx citation survives intact — ordered alternation put `ts` first and truncated it, '
+  + 'inventing src/app/agent.ts (incident #260, whose citation was right all along)',
+  ARTEFACTS("render conditions in src/app/agent.tsx (load-more iff hasMore)")
+    .join() === 'path:src/app/agent.tsx');
+check('…and a real .ts citation is still extracted (the repair is not a silencer)',
+  ARTEFACTS('scripts/verify-x.ts and src/data/remote.ts').join()
+    === 'path:scripts/verify-x.ts,path:src/data/remote.ts');
+check('a `mon_detect_*` GLOB is prose, not a claim that a function named `mon_detect_` exists '
+  + '(incident #335, likewise correct all along)',
+  ARTEFACTS('the standing migration-drift-guard.yml + mon_detect_* continue watching this class')
+    .length === 0);
+check('…nor is a bare trailing-underscore prefix',
+  ARTEFACTS('covered by mon_detect_ and friends').length === 0);
+check('…while a fully spelled detector is still extracted (the direction that must keep working)',
+  ARTEFACTS('covered by mon_detect_price_fidelity() on the twice-hourly roster').join()
+    === 'fn:mon_detect_price_fidelity');
+
+mustCatch('a phantom .tsx file — the repair widened the alphabet, never the verdict',
+  citationProblems([row(1, 'resolved', 'src/app/nope.tsx')], nonePresent).length === 1);
+mustCatch('the two GENUINE phantoms this repair must keep catching (#140 stale rename, #55 never '
+  + 'landed on main)',
+  citationProblems([row(140, 'resolved', 'scripts/verify-af-terminal-at-50-no-load-more.ts'),
+                    row(55, 'resolved', 'scripts/verify-search-index-single-writer.ts')],
+                   nonePresent).length === 2);
+
+// STATED, NOT IMPLIED AWAY: `DBFN` recognises only `mon_*`, so a barrier cited as any other SQL
+// object — `enforce_price_size_sanity()` (#324), `tg_archive_hard_deleted_listing` (#134) — yields
+// NO artefact and is therefore neither verified nor flagged. Measured 2026-09-20: 2 of 177
+// claimed-with-citation incidents are in that state. Widening the reader to "any identifier" would
+// manufacture false positives out of prose, which is the defect just repaired above, so the gap is
+// recorded (ops_incident #364) rather than closed by guesswork.
+check('the narrow-DBFN gap is recorded rather than silently tolerated',
+  citedArtifacts('enforce_price_size_sanity() + ops_price_source_verified').length === 0);
+
 console.log(failed === 0
   ? '\n✅ citation predicate proven in both directions\n'
   : `\n❌ ${failed} failure(s)\n`);
