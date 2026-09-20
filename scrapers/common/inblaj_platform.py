@@ -436,6 +436,19 @@ def fetch_catalogue(s: cc.Session, base: str, limit: int = 0) -> list[str]:
     return []
 
 
+def skip_note(skipped: dict[str, int]) -> Optional[str]:
+    """Render the per-reason skip tally for scrape_runs.notes; None when nothing was skipped.
+
+    Named (not inlined) so a barrier can execute the REAL function rather than a retyped copy.
+    Ordered by descending count so the dominant reason leads, and capped at the 300 chars the
+    rest of this fleet uses for notes.
+    """
+    if not skipped:
+        return None
+    body = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda kv: (-kv[1], kv[0])))
+    return ("skipped: " + body)[:300]
+
+
 def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -494,7 +507,17 @@ def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
         n = len(res) + len(com)
+        # PERSIST THE SKIP BREAKDOWN — it is the only thing separating an honest empty run from a
+        # parser that quietly dropped everything, and printing it to stdout threw it away.
+        # Measured 2026-09-20: alhumaidan reported ok=true, rows_seen=3, rows_upserted=0 across four
+        # daily runs with notes NULL. That is CORRECT — all three of the office's ads are «تم الإيجار»
+        # / «تم البيع» (transacted, still displayed), which this module skips by design. But from the
+        # database, which is what every dashboard and every later investigation actually reads, it was
+        # indistinguishable from a broken parser, and it cost a full investigation to tell apart.
+        # `ok` deliberately stays True: a site whose whole catalogue is sold out is healthy, not failing.
+        note = skip_note(skipped)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(urls), rows_upserted=n,
+                             notes=note,
                              check_tables=[f"{slug}_residential_listings",
                                            f"{slug}_commercial_listings"])
         if not healthy:
