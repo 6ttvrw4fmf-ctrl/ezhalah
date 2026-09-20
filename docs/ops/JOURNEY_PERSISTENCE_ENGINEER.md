@@ -682,7 +682,9 @@ infrastructure asks rather than rediscovered each time:
   favourites) — that is what those journeys legitimately assert — **and is structurally unreachable
   for anything needing a search, a location suggestion, or a count.** The first concrete cost is
   recorded: `ops_incident` #271 is fixed, barriered and mutation-proven but cannot meet §G.9's
-  production-verification condition, because reaching its terminal (≤ `INTERVIEW_STOP_AT` = 50) chat
+  production-verification condition, because reaching its terminal (≤ `INTERVIEW_STOP_AT` = 25 —
+  corrected 2026-09-20; PR #3383 returned the stop line to 25, and `src/lib/afRanking.ts` is the
+  live value) chat
   state requires running a search while signed in. This is `ops_incident` #29's gap, stated as the
   measurement rather than as a category.
 

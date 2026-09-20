@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { mergeOne, withFreshTranscript } from '../src/lib/chatMerge.ts';
 import { serializeChat, restoreChat, sameTranscript, TRANSCRIPT_LISTING_CAP, TRANSCRIPT_FIRST_PAGE, LOCAL_TRANSCRIPT_ENTRIES } from '../src/lib/chatTranscript.ts';
+import { resetCallSitesOk, resetCallSiteProblem, RESET_EXITS } from './lib/conversationExits.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => {
@@ -234,8 +235,8 @@ check('agent: a text turn keeps the same identity (recordChatTurn return adopted
 // strictly stronger than counting assignments — a third exit that forgets to call it is now RED.
 check('agent: the shared conversation reset clears the conversation id',
   /const resetConversationState = \(\) => \{[\s\S]{0,1200}?chatIdRef\.current = null;/.test(agent));
-check('agent: a fresh chat clears the conversation id (New Chat + startFresh inherit nothing)',
-  (agent.match(/^\s*resetConversationState\(\);$/gm) ?? []).length === 2);
+check(`agent: a fresh chat clears the conversation id (all ${RESET_EXITS.length} exits inherit nothing)`,
+  resetCallSitesOk(agent), resetCallSiteProblem(agent));
 // 2026-08-30: the capture also carries `completed` (AF narrowed the search to its final set — see
 // verify-completed-chat-state.ts). The invariant pinned here is unchanged: debounced, content-keyed.
 check('agent: capture serializes the settled state, debounced and content-keyed',
