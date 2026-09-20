@@ -37,6 +37,7 @@ import argparse
 import html as ihtml
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -78,7 +79,11 @@ def visible_text(page_html: str) -> str:
 _FIELD_NAMES = ("نوع العرض", "نوع العقار", "نوع الأرض", "نوع الايجار", "نوع الإيجار",
                 "المساحة", "المدينة", "الحي", "العنوان", "المرافق", "الوصف", "نظرة عامة",
                 "المميزات", "السعر", "غرف النوم", "دورات المياه", "الحمامات", "ترخيص",
-                "المنطقة", "Playlist")
+                "المنطقة", "Playlist",
+                # Added 2026-09-20 with the Advanced-Filter capture fix. These are real rows in the
+                # variant-A «تفاصيل العقار» table; leaving them out of the stop-set let a preceding
+                # label swallow the next row's value (e.g. «المساحة» ran on into «عدد الغرف 7»).
+                "عدد الغرف", "مؤثثة", "عام الاكتمال", "العمر")
 
 
 def _label(text: str, *names: str) -> Optional[str]:
@@ -205,7 +210,17 @@ def parse_price(text: str) -> Optional[int]:
 
 
 _AREA_RE = re.compile(r"المساحة\s*:?\s*([\d٠-٩][\d٠-٩,\.]*)\s*م")
-_BED_RE = re.compile(r"غرف\s*النوم\s*:?\s*([\d٠-٩]+)")
+# Variant A prints «عدد الغرف: 7»; only «غرف النوم» was matched, so every gudai/safera row
+# stored bedrooms=NULL while bathrooms parsed fine from «الحمامات» — the asymmetry that gave
+# the bug away. Both spellings are the source's own, so both are read.
+_BED_RE = re.compile(r"(?:غرف\s*النوم|عدد\s*الغرف)\s*:?\s*([\d٠-٩]+)")
+# «مؤثثة: نعم/لا» is a real tri-state: «لا» is the source SAYING no, not staying silent.
+# The colon is required — the summary chip above prints a bare «غير مؤثثة» and matching that
+# loosely would read the negation as the label's value.
+_FURN_RE = re.compile(r"مؤثثة\s*:\s*(نعم|لا)")
+# «عام الاكتمال: 2021» (a completion YEAR) and, in variant B's prose, «العمر : 16 سنه».
+_YEAR_RE = re.compile(r"عام\s*الاكتمال\s*:?\s*([\d٠-٩]{4})")
+_AGE_RE = re.compile(r"العمر\s*:?\s*([\d٠-٩]{1,3})\s*سن")
 _BATH_RE = re.compile(r"(?:دورات\s*المياه|الحمامات|حمامات)\s*:?\s*([\d٠-٩]+)")
 
 
@@ -338,7 +353,31 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
         "bedrooms": _int_of(_BED_RE, text),
         "bathrooms": _int_of(_BATH_RE, text),
         "photo_urls": photos(page_html),
+        # license_number was already parsed but filed only in additional_info, where the Advanced
+        # Filter cannot see it. It is a first-class column on every platform table — write it there.
+        "license_number": license_number,
     }
+
+    # «مؤثثة: نعم/لا» — tri-state, and only when the source states one of the two.
+    fm = _FURN_RE.search(text)
+    if fm:
+        row["furnished"] = fm.group(1) == "نعم"
+
+    # Age: the source's own «العمر : 16 سنه» first, then «عام الاكتمال: 2021» restated as an age.
+    am = _AGE_RE.search(text)
+    age = normalize.parse_property_age(am.group(1).translate(_AR_DIGITS)) if am else None
+    if age is None:
+        ym = _YEAR_RE.search(text)
+        if ym:
+            age = normalize.age_from_completion_year(
+                ym.group(1).translate(_AR_DIGITS), this_year=datetime.now(timezone.utc).year)
+    if age is not None:
+        row["property_age"] = age
+
+    # «المرافق: مصعد، مواقف» — one packed cell the parser already read and then discarded. Only the
+    # amenities the source NAMES are written; the rest stay NULL (silence is not a "no").
+    for col, val in normalize.amenities_from_text(_label(text, "المرافق")).items():
+        row[col] = val
 
     if deal == "Rent":
         rent_period, price_annual = normalize.rent_period_and_annual(price, text)
