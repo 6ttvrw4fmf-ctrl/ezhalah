@@ -135,6 +135,27 @@ const run = async () => {
       const u = r.url();
       if (u.startsWith(RPC_ORIGIN) && u.includes('/rest/v1/rpc/')) afRpcs.push(u.split('/rpc/')[1].split('?')[0]);
     });
+    // OBSERVE WHETHER THE COUNT PROBES ANSWERED — do not infer it from what rendered
+    // (ops_incident #340, 2026-09-20). These two RPCs are the ONLY inputs to probeVerdict(); if they
+    // all come back 2xx then the verdict cannot have been 'unknown', so «the round closed on an
+    // UNKNOWN» is not an available explanation for an empty round. Recorded from the real responses,
+    // and from requestfailed so a dropped connection counts as a failure rather than as silence.
+    const COUNT_RPCS = /(apartment_guided_counts_ar|property_age_option_counts_ar)/;
+    let probeOk = 0; let probeBad = 0;
+    const probeLog: string[] = [];
+    page.on('response', (res) => {
+      const u = res.url();
+      if (!u.startsWith(RPC_ORIGIN) || !COUNT_RPCS.test(u)) return;
+      const name = u.split('/rpc/')[1].split('?')[0];
+      if (res.status() >= 200 && res.status() < 300) probeOk++; else probeBad++;
+      probeLog.push(`${name}:${res.status()}`);
+    });
+    page.on('requestfailed', (r) => {
+      const u = r.url();
+      if (!u.startsWith(RPC_ORIGIN) || !COUNT_RPCS.test(u)) return;
+      probeBad++;
+      probeLog.push(`${u.split('/rpc/')[1].split('?')[0]}:FAILED(${r.failure()?.errorText ?? '?'})`);
+    });
     try {
       await gotoLive(page, BASE, { timeout: 90_000 });
       await page.waitForTimeout(2500);
@@ -170,6 +191,8 @@ const run = async () => {
       let ctaReturned = false;
       let refineChipsAppeared = false;
 
+      // Only probes fired AFTER the tap belong to the round; the results turn fires its own pair.
+      const probeOkBefore = probeOk, probeBadBefore = probeBad, probeLogBefore = probeLog.length;
       if (ctaOffered) {
         await cta.last().click();
         // Sample across the whole window: a card that opens and then closes itself is NOT a pass,
@@ -213,8 +236,18 @@ const run = async () => {
         }
       }
 
+      const roundOk = probeOk - probeOkBefore;
+      const roundBad = probeBad - probeBadBefore;
+      const roundLog = probeLog.slice(probeLogBefore);
+      // null when the round issued no count RPC at all — nothing was observed, so nothing is claimed.
+      const countProbesAnswered = (roundOk + roundBad) === 0 ? null : roundBad === 0;
+      if (ctaOffered) {
+        console.log(`      [probes] ${j.name}: ${roundOk} ok / ${roundBad} failed after the tap`
+          + `${roundLog.length ? ` — ${roundLog.join(', ')}` : ' — none issued'}`);
+      }
       const o: AfCtaObservation = {
         ctaOffered, cardEverAppeared, loadingEverAppeared, ctaReturned, refineChipsAppeared,
+        countProbesAnswered,
         journey: j.name,
       };
       const verdict = judgeAfCta(o);
