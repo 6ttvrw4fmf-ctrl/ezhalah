@@ -144,8 +144,6 @@ verify-detector-roster-edits-are-guarded.ts
 verify-device-truth.ts
 verify-devices-contract.ts
 verify-district-contradicts-source-detector.ts
-verify-district-counts-honest.ts
-verify-district-field.ts
 verify-district-orthography-match.ts
 verify-district-rehydration.ts
 verify-district-source-truth-live.ts
