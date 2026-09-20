@@ -2509,9 +2509,30 @@ for (const f of findings) console.log(`  · [${f.journey}] ${f.what}: ${f.detail
 // harness.mjs's registerJourneys() header for the three orphan rows that made this necessary.
 console.log(`LEDGER KEYS OWNED BY THIS RUNNER: ${registerJourneys(Object.keys(JOURNEYS))}`);
 
-// A journey that never executed is recorded as `skip`, never as `pass`.
-for (const [k, v] of Object.entries(perJourney)) {
-  const verb = v.failed ? 'fail' : v.skipped === v.runs ? 'skip' : 'pass';
-  await ledgerRecord(k, verb, `${v.failed}/${v.runs} failed, ${v.skipped} skipped; engines=${engines.join('+')}`);
+// A SINGLE-JOURNEY DEV RUN IS NOT COVERAGE, AND MUST NOT MINT A PERMANENT ROW.
+//
+// JOURNEY_ONLY exists to develop one journey (see this file's header). Writing its result to the
+// ledger anyway has a cost that is invisible from here and lands on someone else: a journey being
+// DEVELOPED is by definition not committed to main yet, so the row it mints is an ORPHAN to
+// verify-journey-ledger-has-no-orphans-live.ts — which runs at the end of every leg of the
+// scheduled per-engine sweep. The author sees a green local run; the next scheduled sweep goes red
+// on an unrelated engine, for a key nothing in main produces.
+//
+// That is not hypothetical. On 2026-09-20 this routine developed `agent-round-trip-is-a-fresh-
+// conversation` with JOURNEY_ONLY at 10:53, and the firefox leg of run 35502346590 failed at
+// 11:00:30 naming exactly those two keys — while its own sweep reported DEFECTS: 0 and every
+// journey passed. The sweep was clean; the ledger was not, because of a dev run.
+//
+// The full sweep is unaffected: ONLY is empty there, so every row is written exactly as before.
+if (ONLY) {
+  console.log(`\nLEDGER: skipped — JOURNEY_ONLY=${ONLY} is a development run, not coverage. `
+    + `A row for a journey that is not on main yet is an orphan, and the scheduled per-engine sweep `
+    + `fails on it. Run the full sweep to record coverage.`);
+} else {
+  // A journey that never executed is recorded as `skip`, never as `pass`.
+  for (const [k, v] of Object.entries(perJourney)) {
+    const verb = v.failed ? 'fail' : v.skipped === v.runs ? 'skip' : 'pass';
+    await ledgerRecord(k, verb, `${v.failed}/${v.runs} failed, ${v.skipped} skipped; engines=${engines.join('+')}`);
+  }
 }
 process.exit(findings.length ? 1 : 0);
