@@ -60,13 +60,34 @@ check('stop() reads run.origin captured before runRef is cleared', /const wasFil
 const bubbleTextIdx = stopFn.search(/text:\s*tr\("I've stopped the search/);
 check('the filter branch is reached BEFORE the generic "I\'ve stopped the search" bubble',
   bubbleTextIdx > 0 && stopFn.indexOf('if (wasFilterOrigin)') < bubbleTextIdx);
+// THE BRANCH IS EXTRACTED BY BRACE MATCHING, NOT BY A CHARACTER BUDGET (routine #6, 2026-09-20).
+// This used to be `[\s\S]{0,2200}?` on both the return check and the extraction below. A 2200-char
+// ceiling is a silent dependency on how much PROSE the branch carries: documenting the branch
+// (ops_incident #341) pushed it past the cap, the match returned undefined, `filterBranch` became
+// the empty string — and FOUR checks went red naming router.replace, lastFilterRef, the erase and
+// the spinner, none of which had changed. The failure direction was safe here, but the shape is the
+// dangerous one: had the cap been generous instead of tight, an empty extraction would have made
+// every `!/…/.test(filterBranch)` check pass vacuously. Brace matching has no budget to outgrow.
+const braceBody = (src: string, opener: RegExp): string => {
+  const m = opener.exec(src);
+  if (!m) return '';
+  let i = src.indexOf('{', m.index); if (i < 0) return '';
+  let depth = 0;
+  for (let j = i; j < src.length; j++) {
+    if (src[j] === '{') depth++;
+    else if (src[j] === '}') { depth--; if (depth === 0) return src.slice(i + 1, j); }
+  }
+  return '';                                   // unbalanced — report empty and let the checks fail
+};
+const filterBranch = braceBody(stopFn, /if \(wasFilterOrigin\) \{/);
+check('the filter branch was extracted at all (a vacuous empty body must never read as a pass)',
+  filterBranch.trim().length > 0);
 check('the filter branch returns (never falls through to the chat-stop message)',
-  /if \(wasFilterOrigin\) \{[\s\S]{0,2200}?return;\s*\n\s*\}/.test(stopFn));
+  /\breturn;/.test(filterBranch));
 
 // 3) Requirements 1-6, read directly off the filter branch. `code` strips `//` line comments so a
 //    check like "no setQuery call" isn't fooled by this branch's own prose explaining the design
 //    (which necessarily mentions setQuery when describing why it's absent).
-const filterBranch = (stopFn.match(/if \(wasFilterOrigin\) \{([\s\S]{0,2200}?)return;\s*\n\s*\}/) ?? [, ''])[1];
 const code = (s: string) => s.replace(/\/\/[^\n]*/g, '');
 check('1. cancels the active run for real: run.cancelled + run.ac.abort() before the branch runs',
   /run\.cancelled = true;/.test(stopFn) && /run\.ac\.abort\(\)/.test(stopFn));
@@ -81,8 +102,20 @@ check('3c. clears lastFilterRef/lastSeedRef so an identical resubmitted filter i
   /lastFilterRef\.current = undefined/.test(filterBranch) && /lastSeedRef\.current = undefined/.test(filterBranch));
 check('4/5. never renders partial results or a completion message on this path (no results/agent bubble appended)',
   !/role:\s*'results'/.test(filterBranch) && !/text:\s*tr\(/.test(filterBranch));
-check('5b. the conversation is erased, not frozen/annotated as a completed turn', /setMsgs\(\[\]\)/.test(filterBranch));
-check('6. never leaves busy=true (no infinite spinner) once this path is taken', /setBusy\(false\)/.test(filterBranch));
+// 5b/6 — ASSERTED THROUGH THE SHARED RESET, not against an inline pair (ops_incident #341).
+// These pinned `setMsgs([])` and `setBusy(false)` as literal text inside the branch. That is the
+// hand-written reset this repo has now paid for four times (#211/#271/#319/#341): the branch is a
+// conversation EXIT, so erasing the transcript is the shared reset's job, and a check that demands
+// the two calls INLINE actively rewards forgetting the other twelve. The invariant is unchanged and
+// the check is strictly stronger — the branch must route through resetConversationState(), and that
+// function must really do both things. Where the calls live is no longer the assertion.
+const resetBody = braceBody(agent, /const resetConversationState = \(\) => \{/);
+check('5b/6a. the filter branch routes through the shared conversation reset',
+  /^\s*resetConversationState\(\);\s*$/m.test(code(filterBranch)));
+check('5b. …and that reset erases the conversation, not freezes/annotates it as a completed turn',
+  resetBody.trim().length > 0 && /setMsgs\(\[\]\)/.test(resetBody));
+check('6. …and that reset never leaves busy=true (no infinite spinner) once this path is taken',
+  resetBody.trim().length > 0 && /setBusy\(false\)/.test(resetBody));
 
 // 4) The chat path is UNCHANGED — same message, same screen, no navigation.
 const chatBranch = stopFn.slice(stopFn.indexOf('setStopped(true)'));

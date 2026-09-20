@@ -29,6 +29,7 @@
 
 import { readFileSync } from 'node:fs';
 import { regionOrCityChoice, scopedLocation } from '../src/lib/regionOrCityAnswer.ts';
+import { resetCallSitesOk, resetCallSiteProblem, RESET_EXITS } from './lib/conversationExits.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean) => {
@@ -111,8 +112,8 @@ const conversationReset = src.slice(src.indexOf('const resetConversationState = 
   src.indexOf('const resetConversationState = () => {') + 1200);
 check('no conversation exit inherits a half-answered question (cleared in the ONE shared reset)',
   /pendingScopeRef\.current = null;/.test(conversationReset));
-check('...and both conversation exits (New Chat + startFresh) route through that shared reset',
-  (src.match(/^\s*resetConversationState\(\);$/gm) ?? []).length === 2);
+check(`...and all ${RESET_EXITS.length} conversation exits route through that shared reset`,
+  resetCallSitesOk(src), resetCallSiteProblem(src));
 // RETIRED alongside the same gate: forcedBroad no longer depends on the client's own clarifyQ
 // judgment (locationClarification() has no remaining call site) — it is simply "the server searched
 // with no location", which is exactly what decideAgentTurn's budget-exhausted / hasEnoughToSearch
