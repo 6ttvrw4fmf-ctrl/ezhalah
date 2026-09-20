@@ -556,8 +556,16 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                             client.table("cleanup_deletion_log").insert(log_rows[i:i + 200]).execute()
                     for t, ids in to_delete.items():
                         for i in range(0, len(ids), 200):
-                            client.table(t).delete().in_("id", ids[i:i + 200]).execute()
-                stats["deleted"] = sum(len(v) for v in to_delete.values())
+                            chunk = ids[i:i + 200]
+                            client.table(t).delete().in_("id", chunk).execute()
+                            # Count per COMMITTED chunk, never in one lump at the end. A statement
+                            # timeout mid-loop (57014) leaves some chunks deleted and some not; a
+                            # total computed afterwards is never reached, so the failure path would
+                            # report deleted=0 over rows that are genuinely gone (run 49535,
+                            # 2026-09-20: 1 of 500 deleted, reported as 0).
+                            stats["deleted"] += len(chunk)
+                else:
+                    stats["deleted"] = sum(len(v) for v in to_delete.values())
 
         client.table("cleanup_runs").insert({k: stats[k] for k in
             ("platform", "dry_run", "candidates", "rechecked", "deleted", "reactivated", "skipped", "aborted", "abort_reason", "note")}).execute()
@@ -578,7 +586,25 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                   f"came back LIVE ({fp:.1f}%) → reactivated, NOT deleted", flush=True)
         return stats
     except Exception as e:
-        end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=f"error: {e}")
+        # An UNCONTROLLED death must leave the same audit trail a controlled abort leaves.
+        # cleanup_deletion_log is written BEFORE the delete (DELETION_SAFETY.md §1), so a run that
+        # dies in the delete loop has already published N claims that listings were permanently
+        # destroyed. Without a cleanup_runs row there is nothing in the cleanup audit surface to
+        # explain them, and the reader sees the platform's last action as whatever succeeded
+        # before. Measured 2026-09-20: of every cleanup:* run in 30 days, run 49535 was the only
+        # one with no cleanup_runs row — every controlled abort wrote one, only the timeout did
+        # not. Reporting 0/0 here was the second half of the same silence: 1 of 500 rows really
+        # had been deleted.
+        stats["aborted"] = True
+        stats["abort_reason"] = f"run failed before completion: {e}"
+        try:
+            client.table("cleanup_runs").insert({k: stats[k] for k in
+                ("platform", "dry_run", "candidates", "rechecked", "deleted", "reactivated",
+                 "skipped", "aborted", "abort_reason", "note")}).execute()
+        except Exception as audit_err:      # never let the audit write mask the original failure
+            print(f"✗ cleanup {platform}: could not record the failed run: {audit_err}", flush=True)
+        end_run(run_id, ok=False, rows_seen=stats["candidates"], rows_upserted=stats["deleted"],
+                notes=f"error: {e}")
         raise
     finally:
         _close_wasalt_browser()  # Chromium is a child process; never leave it holding the CI step open

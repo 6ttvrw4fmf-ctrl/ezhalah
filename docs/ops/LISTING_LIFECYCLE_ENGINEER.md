@@ -179,7 +179,8 @@ Writers into the inactive state:
                                    statement_timeout 900s)
   → listing_native_location_v1 → listing_native_location_v2   (per-listing derived stores)
   → listing_location_index
-  → sync_search_listings_ar()      pg_cron jobid 28 'sync-search-listings-ar', minute :36
+  → sync_search_listings_ar()      pg_cron jobid 28 'sync-search-listings-ar', minute :22
+                                   (was :36 until 2026-09-18 — see the THIRD hazard below)
                                    *** STEP 1 OF 5 *** (see below)
   → search_listings_ar             THE SERVED INDEX
 ```
@@ -204,11 +205,31 @@ Two things to carry forward:
   when it starts *before the producer begins* — and the message asserts only the first ("the sync
   started while the matview refresh it reads was still running"). What actually happened was the
   second. Tracked as `ops_incident` #219.
-- **The current gap is correct but thin.** The producer starts at :20 carrying
+- **The gap described here as "correct but thin" is GONE, and the inversion is back (measured
+  2026-09-20, routine #11).** The paragraph used to read: *the producer starts at :20 carrying
   `statement_timeout 900s`, so its worst permitted finish is :35, one minute before the consumer at
-  :36. Observed refresh durations are 60–264s, so real margin is ~11 minutes — but the *permitted*
-  margin is 60 seconds. Widening it is a cron change and an owner-visible timing decision, not a
-  drive-by.
+  :36.* That was true until 2026-09-18, when the consumer was moved **:36 → :22** to escape the
+  scheduler blackout in the THIRD hazard below. The gap is now **2 minutes**, the permitted margin
+  is **negative**, and the inversion is no longer theoretical: over 7 days the producer ran 168
+  times and exceeded 2 minutes on **17 of them (10%, max 6m47s)**, and **5 of 80** consumer runs
+  since the move started while the producer was still refreshing.
+
+  **This is the clearest example in this file of a repair moving a defect rather than removing it**,
+  and of why both constraints have to be satisfied at once: the consumer must start after the
+  producer can no longer be running (bound on the 900s `statement_timeout`, not the average) **and**
+  sit outside every scheduler-hog window. :36 satisfied the first and violated the second; :22
+  satisfies the second and violates the first.
+
+  **Do not fix this from routine #11.** It is a cron scheduling change on routine-7-seam's surface,
+  and `ops_incident` **#354** (P0, filed 2026-09-20) already owns it with the reasons either
+  direction is wrong — moving job 28 later walks it back into the blackout band of #322, and moving
+  job 17 earlier breaks its deliberate ordering after the location resolvers at :10/:12/:14/:16.
+  Routine #11's contribution is the **aliveness** half, which #354 did not measure: when the sync
+  reads a pre-refresh snapshot its DELETE leg evaluates "absent from `listing_native_location_v2`"
+  against the OLD aliveness snapshot, so a listing deactivated in that hour is not removed and
+  stays searchable a full extra cycle. Measured 2026-09-20: **zero** deactivations were pending in
+  any of the three overlap windows that day, so the cost that day was zero — and per §7.1 that zero
+  means the protection **was not exercised**, never that it works.
 
 **A THIRD HAZARD, MEASURED 2026-09-18 AND NOT IN THIS FILE BEFORE: the consumer's minute can fall
 inside a scheduler blackout, and then the sync does not run at all.** This is not the producer/
@@ -350,6 +371,44 @@ it, and the excluded rows are raised as `lifecycle_deletion_log_without_delete` 
 directions**). The detector self-tests the predicate in both directions on every sweep and raises
 `lifecycle_ledger_predicate_blind` if it stops discriminating; `verify-deletion-ledger-is-not-proof-
 of-a-delete.ts` guards that the self-test still exists.
+
+### §2.5b — A CLEANUP RUN THAT DIES MUST STILL RECORD ITSELF (2026-09-20)
+
+§2.5a says a `cleanup_deletion_log` row is an INTENTION, not an outcome. This is the other half:
+**when the intention is never completed, something has to say so** — and until this date nothing did.
+
+`scrape_runs` **49535** (`cleanup:wasalt`, 09:31:14 → 10:21:46, `ok=false`) took a Postgres
+statement timeout (`57014`) inside the delete loop. The ledger is written *before* the delete, so by
+then the run had published **500 claims of permanent destruction**. It deleted **1**. Because the
+`cleanup_runs` insert sits *after* the loop and the `except` handler called only `end_run()`, the
+run left **no row in `cleanup_runs` at all**, and reported `rows_seen=0, rows_upserted=0` over a row
+that really had been destroyed.
+
+**The shape worth remembering: the audit table was complete for every case except the one that went
+wrong.** Measured over every `cleanup:*` run in the preceding 30 days, 49535 was the ONLY one
+without a run row — every *controlled* abort (anomaly guard, fraction gate, health gate, the
+inconclusive-evidence freeze) wrote one, because an abort is a planned exit down the happy path.
+Only the uncontrolled death skipped it. A reader of `cleanup_runs` therefore saw wasalt's last
+action as the clean dry run that preceded it. `run()`'s own docstring already promised *"the full
+audit trail (`cleanup_deletion_log` + `cleanup_runs`) is written exactly as for a normal run"* — a
+guarantee nothing executed, which is `AGENTS.md`'s "a pointer reads as coverage" in the prose layer.
+
+Three things to carry forward:
+
+1. **`cleanup.py`'s failure path now writes the run row** with `aborted=true` and the error, and the
+   delete count accumulates per **committed chunk** — a total computed after the loop sits on a line
+   the failure path never reaches, so a partial delete was being reported as zero.
+2. **The code fix cannot cover a SIGKILL/OOM/runner-loss**, where no Python handler runs at all.
+   That is why `mon_detect_cleanup_run_unrecorded` (kind `lifecycle_cleanup_run_unrecorded`,
+   migration `20260920144833`) exists as well as the fix, keyed **per run** so a second occurrence
+   cannot fold into an open alert and read as zero.
+   `scripts/verify-cleanup-run-death-leaves-a-record.ts` executes the real `run()` against a delete
+   that raises; the pytest half is path-filtered to `scrapers/**`, which is why the guarantee also
+   sits in the required suite.
+3. **Do not repair the surviving claims by deleting either side.** Those rows are still legitimately
+   deletion-eligible, and the sanctioned deleter owns completing it with its own fresh per-row DIRECT
+   re-probe. Rows still present are **not** orphans, and deleting them to make the ledger true is the
+   opposite bug (§2.5a). `ops_incident` #369.
 
 ### §2.6 The detectors that already watch parts of this chain
 
