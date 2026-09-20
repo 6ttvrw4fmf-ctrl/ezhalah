@@ -30,14 +30,30 @@ from datetime import datetime, timezone
 
 from scrapers.common import http
 from scrapers.common.db import begin_run, end_run, sb
-from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS
+from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS, looks_closed as _aqar_looks_closed
 
 # ── Per-platform "is this URL genuinely dead?" registry. A platform absent here CANNOT be deleted
 # with require_source_recheck=true (fail-safe). Each entry: (tables, dead_marker_predicate).
 # aqar & wasalt share Aqar's marker/404 semantics (wasalt dead = 404). Add a platform here only after
 # proving its dead-detection is liveness-grade — that is the gate for enabling deletion on it.
-def _aqar_wasalt_markers(body: str) -> bool:
+def _wasalt_markers(body: str) -> bool:
+    # wasalt dead = a real HTTP 404 (handled by verdict()'s status branch, via the browser probe);
+    # these text markers are a vestigial belt-and-suspenders. wasalt has no aqar-style soft-close.
     return any(m in body for m in AQAR_DEAD_MARKERS)
+
+
+def _aqar_dead(body: str) -> bool:
+    """aqar's dead-check MUST match aqar's own liveness looks_dead() (minus the status branch that
+    verdict() already handles), or the cleanup is WEAKER than the signal that inactivated the row.
+
+    aqar SOFT-CLOSES: a sold/rented ad serves HTTP 200 with a «مغلق» badge and its offers node
+    stripped — none of the text DEAD_MARKERS appear. Registering markers-ONLY meant every
+    soft-closed aqar listing re-checked as "live", so the cleanup would have REACTIVATED it into
+    search instead of deleting it. Measured 2026-09-20: the entire oldest eligible cohort (dry-run
+    500/500) was soft-closed yet read "live" by the markers-only check. Reusing aqar liveness's own
+    two-factor looks_closed() (badge markup AND missing offers node — 0/77 false-positive on live
+    in its 2026-08-04 validation) fixes it."""
+    return any(m in body for m in AQAR_DEAD_MARKERS) or _aqar_looks_closed(body)
 
 def _never(body: str) -> bool:
     return False  # 404-only platforms: a delisted unit returns a real HTTP 404; every 200 is treated LIVE
@@ -49,8 +65,8 @@ def _aqarcity_expired(body: str) -> bool:
     return "الإعلان منتهي" in body
 
 PLATFORMS: dict[str, dict] = {
-    "aqar":   {"tables": ["aqar_residential_listings", "aqar_commercial_listings"],     "dead_marker": _aqar_wasalt_markers},
-    "wasalt": {"tables": ["wasalt_residential_listings", "wasalt_commercial_listings"], "dead_marker": _aqar_wasalt_markers},
+    "aqar":   {"tables": ["aqar_residential_listings", "aqar_commercial_listings"],     "dead_marker": _aqar_dead},
+    "wasalt": {"tables": ["wasalt_residential_listings", "wasalt_commercial_listings"], "dead_marker": _wasalt_markers},
     # gathern (monthly rentals): a delisted unit serves a server 404; a live OR merely-booked unit
     # serves 200. So delete ONLY on a hard 404 — a booked-but-listed 200 is never deleted, and a
     # relisted unit that comes back 200 is self-healed. Verified on 8 inactive+2 active URLs 2026-07-27.

@@ -627,3 +627,37 @@ def test_wasalt_probe_verdicts_end_to_end(monkeypatch):
     st, body = _REAL_PROBE("https://wasalt.sa/en/property/blocked")
     assert C.verdict(st, body, dm) == "unknown"
     C._BROWSER = None
+
+
+# ── aqar soft-close (2026-09-20): the cleanup dead-check must match aqar's OWN liveness, or a
+# soft-closed (sold/rented) listing re-checks as "live" and gets RESURRECTED into search. ──────────
+
+_AQAR_CLOSED_BODY = '<html>… <span class="badge status">مغلق</span> … no offers node …</html>'
+_AQAR_LIVE_BODY = '<html>… "offers": {"price":"500000"} … price 500000 ريال …</html>'
+
+
+def test_aqar_soft_closed_is_dead_not_live():
+    dm = C.PLATFORMS["aqar"]["dead_marker"]
+    # a real 200 soft-closed page (مغلق badge + no offers node) MUST verdict 'dead' (delete),
+    # not 'live' (which would reactivate a sold listing back into search).
+    assert C.verdict(200, _AQAR_CLOSED_BODY, dm) == "dead"
+    # a genuinely live aqar listing (offers node present) stays 'live' → self-heal, never deleted.
+    assert C.verdict(200, _AQAR_LIVE_BODY, dm) == "live"
+
+
+def test_aqar_deadcheck_matches_aqar_liveness():
+    """The cleanup's aqar dead-check must agree with aqar liveness's own looks_dead on a 200 body —
+    they were allowed to diverge and the cleanup's was weaker (markers-only)."""
+    from scrapers.aqar.liveness import looks_dead
+    dm = C.PLATFORMS["aqar"]["dead_marker"]
+    for body in (_AQAR_CLOSED_BODY, _AQAR_LIVE_BODY, "<html>ordinary live page 500000 ريال</html>"):
+        cleanup_dead = C.verdict(200, body, dm) == "dead"
+        assert cleanup_dead == looks_dead(200, body), f"divergence on: {body[:40]}"
+
+
+def test_wasalt_deadcheck_does_not_borrow_aqar_soft_close():
+    """wasalt must NOT inherit aqar's مغلق soft-close rule — a live wasalt listing whose text
+    happens to contain مغلق (e.g. gated compound) must not be judged dead. wasalt dead = 404."""
+    dm = C.PLATFORMS["wasalt"]["dead_marker"]
+    assert C.verdict(200, _AQAR_CLOSED_BODY, dm) == "live"   # 200 + مغلق badge but NOT aqar → live
+    assert C.verdict(404, "", dm) == "dead"                    # wasalt dead is the real 404
