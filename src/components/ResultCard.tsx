@@ -543,6 +543,13 @@ const REMAL_LOGO = require('../../assets/images/remal.png');
 const AMAALL_LOGO = require('../../assets/images/amaall.png');
 const AQARALSAUDIA_LOGO = require('../../assets/images/aqaralsaudia.png');
 const SUWAR_LOGO = require('../../assets/images/suwar.png');
+const GUDAI_LOGO = require('../../assets/images/gudai.png');
+const SAFERA_LOGO = require('../../assets/images/safera.png');
+const ALHUMAIDAN_LOGO = require('../../assets/images/alhumaidan.png');
+const AQARNAJRAN_LOGO = require('../../assets/images/aqarnajran.png');
+const FAHADALSHAHRI_LOGO = require('../../assets/images/fahadalshahri.png');
+const COMPOUNDIN_LOGO = require('../../assets/images/compoundin.png');
+const WSLNAA_LOGO = require('../../assets/images/wslnaa.png');
 const RAKEZ_LOGO = require('../../assets/images/rakez.png');
 const AKARIYOUN_LOGO = require('../../assets/images/akariyoun.png');
 // NEUTRAL placeholder for the seven platforms onboarded 2026-09-20 whose own marks the owner is
@@ -690,14 +697,14 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('suwar')) return <Image source={SUWAR_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('rakez')) return <Image source={RAKEZ_LOGO} style={card.hostBadge} contentFit="contain" />;
   // ── onboarded 2026-09-20; placeholder mark until the owner supplies each real logo ──────────
-  if (s.includes('gudai') || s.includes('غدي')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('safera') || s.includes('سفيرة')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alhumaidan') || s.includes('al humaidan') || s.includes('الحميدان')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('gudai') || s.includes('غدي')) return <Image source={GUDAI_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('safera') || s.includes('سفيرة')) return <Image source={SAFERA_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('alhumaidan') || s.includes('al humaidan') || s.includes('الحميدان')) return <Image source={ALHUMAIDAN_LOGO} style={card.hostBadge} contentFit="contain" />;
   // MUST stay above any bare 'aqar' branch: 'aqarnajran' CONTAINS 'aqar'.
-  if (s.includes('aqarnajran') || s.includes('aqar najran') || s.includes('عقار نجران')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('fahadalshahri') || s.includes('fahad alshahri') || s.includes('فهد الشهري')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('compoundin') || s.includes('كومباوند')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('wslnaa') || s.includes('waslna') || s.includes('وصلنا')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('aqarnajran') || s.includes('aqar najran') || s.includes('عقار نجران')) return <Image source={AQARNAJRAN_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('fahadalshahri') || s.includes('fahad alshahri') || s.includes('فهد الشهري')) return <Image source={FAHADALSHAHRI_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('compoundin') || s.includes('كومباوند')) return <Image source={COMPOUNDIN_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('wslnaa') || s.includes('waslna') || s.includes('وصلنا')) return <Image source={WSLNAA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('akariyoun') || s.includes('عقاريون')) return <Image source={AKARIYOUN_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('amlakalahsa')) return <Image source={AMLAKALAHSA_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;

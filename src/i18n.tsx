@@ -940,7 +940,10 @@ const AR: Record<string, string> = {
   'Sadiq Eltajer Real Estate':         'صادق التاجر',              // official (sadiq-eltajer.sa header)
   'Gudai Real Estate':                   'غدي للعقار',
   'Safera Real Estate':                  'سفيرة العقارات',
-  'Al Humaidan Investments':             'الحميدان للاستثمارات',
+  // Owner-confirmed 2026-09-20, and verbatim on the office's own homepage: «مكتب الحميدان
+  // العقاري». We were showing «الحميدان للاستثمارات». db `source` stays "Al Humaidan" — it is
+  // the join key on every stored row — and the domain stays al-humaidan.inblaj.net.
+  'Al Humaidan Real Estate Office':      'مكتب الحميدان العقاري',
   'Aqar Najran':                         'عقار نجران',
   // The BRAND is «مقام الوسام العقارية», not the owner's personal name. Confirmed from two
   // independent places: the site's own <title> — «عقارات في السعودية | مقام الوسام العقارية |
