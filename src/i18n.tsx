@@ -939,7 +939,13 @@ const AR: Record<string, string> = {
   'Safera Real Estate':                  'سفيرة العقارات',
   'Al Humaidan Investments':             'الحميدان للاستثمارات',
   'Aqar Najran':                         'عقار نجران',
-  'Fahad Alshahri Real Estate':          'فهد الشهري العقارية',
+  // The BRAND is «مقام الوسام العقارية», not the owner's personal name. Confirmed from two
+  // independent places: the site's own <title> — «عقارات في السعودية | مقام الوسام العقارية |
+  // Fahadalshahri» — and the logo the owner supplied, which reads مقام الوسام العقارية.
+  // The DOMAIN stays fahadalshahri.com (that is where the listing lives and where the card
+  // sends the user), and db `source` stays "Fahad Alshahri" — it is the join key on every
+  // stored row, so renaming it would orphan them. Only the DISPLAY name changes.
+  'Maqam Al Wisam Real Estate':          'مقام الوسام العقارية',
   'CompoundIn':                          'كومباوند إن',
   'Waslna Real Estate':                  'وصلنا',
   'Akariyoun':                         'عقاريون',                  // official (akariyoun.sa footer «عقاريون ، جميع الحقوق محفوظة» + tagline «عقاريون إختيارك الاول»; the site's own <title> uses the Latin «Akariyoun»)

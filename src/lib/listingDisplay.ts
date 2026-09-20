@@ -119,7 +119,9 @@ export function sourceName(source: string): string {
   if (s.includes('safera') || s.includes('سفيرة')) return 'Safera Real Estate';
   if (s.includes('alhumaidan') || s.includes('الحميدان')) return 'Al Humaidan Investments';
   if (s.includes('aqarnajran') || s.includes('عقار نجران')) return 'Aqar Najran';
-  if (s.includes('fahadalshahri') || s.includes('فهد الشهري')) return 'Fahad Alshahri Real Estate';
+  // Matched on the STORED source («Fahad Alshahri»), displayed as the BRAND («مقام الوسام
+  // العقارية»). The two differ on purpose — see the i18n entry.
+  if (s.includes('fahadalshahri') || s.includes('فهد الشهري')) return 'Maqam Al Wisam Real Estate';
   if (s.includes('compoundin') || s.includes('كومباوند')) return 'CompoundIn';
   if (s.includes('wslnaa') || s.includes('waslna') || s.includes('وصلنا')) return 'Waslna Real Estate';
   return 'AQAR';
