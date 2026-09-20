@@ -96,7 +96,7 @@ for (const [trueTotal, shown] of [[9892, 100], [9892, 300], [437, 437], [46, 46]
 check('revealTarget decides the reveal target — first tap → 100, last tap → up to 500 (owner 2026-09-14)',
   /const target = revealTarget\(cur, m\.result\.matchTotal \?\? Infinity\);/.test(code));
 check('a first vs. later press is still told apart by the turn\'s OWN reveal state, not new component state',
-  /const alreadyExpandedOnce = cur > initialReveal\(m\.result\);/.test(code));
+  /const alreadyExpandedOnce = cur > initialReveal\(m\.result, m\.afCompleted\);/.test(code));
 check('loadMore reveals exactly min(target, mergedLen) on BOTH the instant and cascade reveal paths',
   /setRevealCount\(\(c\) => \(\{ \.\.\.c, \[mid\]: revealTo \}\)\)/.test(code)
   && /cascadeIn\(mid, cur, revealTo\)/.test(code)

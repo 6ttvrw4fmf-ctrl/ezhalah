@@ -89,8 +89,13 @@ console.log('\n── C. the copy the owner restored ──');
 check('the searching line and the honest from-count subline are both present',
   /Finding the closest match for you/.test(mining)
   && /Going through \{count\} properties to pull out the best fit/.test(mining));
-check('the «لقينا N عقار أقرب لطلبك» completion beat is back',
-  /We found \{count\} properties closest to your request/.test(mining));
+// THE BEAT IS NOT RENDERED ANY MORE (owner 2026-09-20, reversing the 2026-09-06 restoration this
+// check was written for). The STRING still lives in MiningTransition — the component keeps its
+// `done` branch so the decision can be reversed a fourth time without a rewrite — so asserting the
+// copy exists would be vacuous: it would pass while nothing can ever display it. What decides the
+// user-visible behaviour is agent.tsx, which no longer hands the card a `to`, so `done` never flips.
+check('the completion beat is NOT wired — agent.tsx never sets `to`, so `done` never flips',
+  !/\{ \.\.\.f, to: total \}/.test(readFileSync(join(root, 'src/app/agent.tsx'), 'utf8')));
 check('reduced motion renders the static composition (no drifting fragments)',
   /useReducedMotion/.test(mining) && /!reduced && !done \?/.test(mining));
 

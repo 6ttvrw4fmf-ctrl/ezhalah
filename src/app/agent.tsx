@@ -135,7 +135,12 @@ type GuidedFacet = { id: string; keys: string[]; labels: string[] };
 type ChatMsg =
   | { id: string; role: 'user'; text: string; typing?: boolean }
   | { id: string; role: 'agent'; text: string; typing?: boolean; greeting?: boolean; refine?: RefinePrompt; refineDone?: boolean }
-  | { id: string; role: 'results'; text: string; result: SearchResult; typing?: boolean; slogan?: string; summary?: string }
+  | { id: string; role: 'results'; text: string; result: SearchResult; typing?: boolean; slogan?: string; summary?: string;
+      /** This turn was produced by a COMPLETED Advanced Filter round — it reveals up to AF_REVEAL_MAX
+       *  instead of the first-screen width (owner 2026-09-20). Carried ON the message, not in state:
+       *  the reveal is computed inside playListings BEFORE setGuidedPills lands, so reading it from
+       *  React state would race and silently fall back to a 10-card first screen. */
+      afCompleted?: boolean }
   // `query` + `resultSources` feed the search-loading animation's platform strip (which real
   // platforms to show while searching); they never affect the search itself. `exiting` tells the
   // loader to fade out softly just before the morph to results (owner v4: no hard cut).
@@ -913,8 +918,8 @@ export default function Agent() {
   // reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 50, so a ≤50 set is always
   // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
   // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
-  const initialReveal = (r: SearchResult | undefined | null): number =>
-    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings) });
+  const initialReveal = (r: SearchResult | undefined | null, afCompleted = false): number =>
+    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings), afCompleted });
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
@@ -1136,7 +1141,7 @@ export default function Agent() {
   };
   const markTyped = (id: string) => {
     const msg = msgs.find((m) => m.id === id);
-    startReveal(id, msg?.role === 'results' ? initialReveal(msg.result) : 0);
+    startReveal(id, msg?.role === 'results' ? initialReveal(msg.result, msg.afCompleted) : 0);
   };
   // Cancel any pending one-by-one reveals (on unmount, or when a new turn starts).
   const clearReveals = () => { revealTimers.current.forEach(clearTimeout); revealTimers.current = []; };
@@ -1359,7 +1364,7 @@ export default function Agent() {
 
   // Shared "found" choreography: the typed reply ("answer respond") → a held "Ezhalah is searching…"
   // beat → the results header + cards. `statusId` is the thinking bubble we morph into the reply.
-  const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string) => {
+  const playListings = async (run: Run, statusId: string, summary: string, result: SearchResult, messageText?: string, afCompleted = false) => {
     // 1) SEARCHING phase: status bubble shows the slogan + summary. Slogan language follows the
     // user's MESSAGE text (English message → English slogan) instead of the UI locale, so users
     // who chat in one language and have their UI in the other still get the matching slogan.
@@ -1394,7 +1399,7 @@ export default function Agent() {
     setMsgs((m) =>
       m.map((x) =>
         x.id === statusId
-          ? { id: statusId, role: 'results', text: resultDone(getLocale()), result, typing: true, slogan, summary }
+          ? { id: statusId, role: 'results', text: resultDone(getLocale()), result, typing: true, slogan, summary, afCompleted }
           : x,
       ),
     );
@@ -1407,7 +1412,7 @@ export default function Agent() {
     // Cards start appearing NOW — one by one, while the intro text is still typing above (owner
     // 2026-07-09: show the first card as soon as valid listings are ready; don't hold them hostage
     // to the typewriter). The more-message + feedback row still wait for the text (doneTyping).
-    beginCardDrip(statusId, initialReveal(result));
+    beginCardDrip(statusId, initialReveal(result, afCompleted));
     // A RESULTS TURN THAT ALREADY SHOWS EVERY MATCH IS A FINISHED SEARCH (owner rule 2026-09-11,
     // generalizing R11.1 to every entry point this shared renderer serves — plain Filter search,
     // a typed AI-Agent message, a refine chip — not just an Advanced Filter round). initialReveal's
@@ -1480,12 +1485,12 @@ export default function Agent() {
     const q = m.result.query;
     if (runRef.current) return; // a real turn is mid-flight — never start a cascade under it (review fix)
     if (loadingMore[mid]) return;
-    const cur = revealCount[mid] ?? initialReveal(m.result);
+    const cur = revealCount[mid] ?? initialReveal(m.result, m.afCompleted);
     const fetched0 = m.result.listings.length;
     // Whether the turn has been expanded past its initial floor — the ONLY thing that still tells the
     // first tap from the last (the reveal target itself now comes from revealTarget below, not a
     // per-tap flag). Kept because the completion check reads it.
-    const alreadyExpandedOnce = cur > initialReveal(m.result);
+    const alreadyExpandedOnce = cur > initialReveal(m.result, m.afCompleted);
     // TWO TAPS, MAX 500 (owner 2026-09-14). revealTarget() encodes it: under 100 shown → the next
     // 100-boundary (first tap); at/after 100 → up to the 500 cap (the final tap). Clamped to the true
     // total, so a small set finishes in one tap and never over-promises 500. This supersedes the old
@@ -1883,7 +1888,7 @@ export default function Agent() {
       // through this one call — one writer, so the store can never hold a round this screen never ran.
       writeFilterStore({ ...refined, afFacets: opts.guided.facets });
     }
-    await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label);
+    await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label, !!opts?.guided);
     if (run.cancelled) return;
     void promptSignupSoon(run);
     // NO toBottom() here (owner 2026-08-24). It fired while the new turn's cards were still
@@ -2234,16 +2239,26 @@ export default function Agent() {
         // skipping to the end — that is the only outcome. Whether ANOTHER round is worth offering is
         // still decided by assessNarrowing (unchanged) through the PASSIVE effect above it feeds,
         // which only toggles the «تحديد أكثر» button visibility; opening a new round is a tap, always.
+        // NO COMPLETION BEAT (owner 2026-09-20, shown the card and asked for it gone: "remove this
+        // bro no need for it ... if user selects or clicks skip its fine"). REVERSES the 2026-09-06
+        // restoration of the «لقينا N عقار أقرب لطلبك» tick: `to` is never handed to the card, so
+        // MiningTransition's `done` never flips, no checkmark and no sentence are ever drawn, and the
+        // overlay is dismissed the moment the results are ready instead of holding ~1.1s on a
+        // celebration the user did not ask for. Applies to EVERY ending — answers committed or every
+        // question skipped — because the owner named both.
+        //
+        // WHAT IS DELIBERATELY KEPT: the searching animation still covers the re-search. Dropping it
+        // too would leave the user on the old screen with no sign anything is happening for the few
+        // seconds the RPC takes, which is the one thing worse than a beat that lingers.
+        //
+        // `to: null` is not a new state: MiningTransition already renders exactly this whenever the
+        // count would overstate (its own header calls out "`done` never flips ⇒ no beat at all"), so
+        // this removes a call site rather than teaching the card a new shape. The 1.4s floor stays —
+        // it stops the card flashing up and vanishing when the search returns almost instantly.
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
-        timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
-        // RESTORED 2026-09-06 (owner rejected the 2026-08-31 direct hand-off along with the redesign
-        // it belonged to): `to` landing swaps the card's copy to the «لقينا N عقار أقرب لطلبك» beat,
-        // and the overlay then holds ~1.1s so that sentence is actually readable before the results
-        // are revealed. A 450ms seal was right for a card that said nothing on completion; it is too
-        // short to read a sentence.
         timers.push(setTimeout(() => {
           if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
-        }, wait + 1100));
+        }, wait));
         timers.push(setTimeout(() => {
           if (!stillMining()) return;
           // LAND ON THE NEW TURN (owner 2026-08-24): the old cards stay exactly where they are, and the
@@ -2937,6 +2952,11 @@ export default function Agent() {
         { id: resultsId, role: 'results', text: sub, result: snapshot },
       ]);
       setDoneTyping((d) => ({ ...d, [resultsId]: true }));
+      // NOT afCompleted-aware on purpose: a snapshot restored from the sidebar carries no record of
+      // whether an AF round produced it (afCompleted lives on the live ChatMsg, not in the saved
+      // snapshot), so a reopened AF chat reveals the first-screen width and pages the rest through
+      // «عرض المزيد» exactly as it does today. Nothing is hidden; only the no-tapping allowance is
+      // not re-granted. Persisting it would mean widening the transcript schema — a separate change.
       setRevealCount((c) => ({ ...c, [resultsId]: initialReveal(snapshot) }));
       // DERIVED FROM THESE RESULTS, NEVER INHERITED FROM THE CHAT WE LEFT (see startFresh). There is
       // no transcript on this path, so terminality is re-established from what is actually on screen,
@@ -3518,7 +3538,7 @@ export default function Agent() {
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
-                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result))).map((l, i) => (
+                        {m.result.listings.slice(0, revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result, m.afCompleted))).map((l, i) => (
                           // CardIn = soft mount-in (fade + slight rise). Keyed by source:id (ids are
                           // only unique per source table — matches the de-dup identity), so cards
                           // already on screen NEVER re-animate — only newly-revealed ones enter softly.
@@ -3541,7 +3561,7 @@ export default function Agent() {
                           ألقى نتائج أدق» asks ONE clarifying question then re-searches. */}
                       {(() => {
                         const fetched = m.result.listings.length;
-                        const shown = revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result));
+                        const shown = revealCount[m.id] ?? (m.typing ? 0 : initialReveal(m.result, m.afCompleted));
                         const serverMore = !!m.result.hasMore; // the DB still has more matching pages to fetch
                         // Show once this page's cards are on screen. Gate on (typing && !doneTyping) — the SAME
                         // condition the cards use — NOT on `m.typing` alone: a live results message keeps typing=true
@@ -3563,7 +3583,7 @@ export default function Agent() {
                         if (!resultsRowIsReady({
                           introStillTyping: !!(m.typing && !doneTyping[m.id]),
                           shown,
-                          initialReveal: initialReveal(m.result),
+                          initialReveal: initialReveal(m.result, m.afCompleted),
                           cascadeStarted: !!dripStartedRef.current[m.id],
                           cascadeRunningForThisTurn: revealing && revealActiveRef.current?.id === m.id,
                         })) return null;

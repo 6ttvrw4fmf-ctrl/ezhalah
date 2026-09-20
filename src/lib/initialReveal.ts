@@ -10,14 +10,39 @@
 // than reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 50, so a ≤50 set is always
 // fully buffered on page 0: revealing `fetched` IS revealing every match, and resultCounts() then
 // reports hasMore=false on its own. Larger sets keep the first-page preview untouched.
+// AFTER AN ADVANCED FILTER ROUND, STOP MAKING THE USER TAP (owner 2026-09-20): "if user does
+// Advanced Filter still there is a lot of listing just show him all up to 400". A user who has just
+// answered (or deliberately skipped) a round of questions has already told us what they want — asking
+// them to press «عرض المزيد» to see the consequence of their own answers is the same complaint the
+// 2026-08-30 rule above fixed for small sets, one size up. So an AF-completed turn reveals up to
+// AF_REVEAL_MAX instead of the first-screen width.
+//
+// IT IS AN ALLOWANCE, NOT A CEILING. Above it the turn keeps its «عرض المزيد» (and «تحديد أكثر» when
+// a truthful question remains) exactly as before — nothing is hidden, it is only the TAPPING that is
+// removed for the first 400.
+//
+// IT DOES NOT FINISH THE CHAT. Completion stays where it is — the ≤ INTERVIEW_STOP_AT rule (R11.1)
+// alone, checked separately in agent.tsx. Revealing 400 cards says "here is everything you asked
+// for", never "this conversation is over" (owner 2026-09-20, asked explicitly).
+//
+// WHY THE ORDER SURVIVES IT. The reveal is a COUNT, never a re-sort: rows arrive already ordered by
+// the five-dimension diversity the owner's permanent rule requires (platform → deal → type →
+// district → photos, src/lib/platformDiversity.ts, applied to the whole fetched set — not just the
+// first screen), on top of the RPC's own platform round-robin. Revealing 400 walks further down that
+// one list, so match-first and every diversity tier hold exactly as they do at 10.
+export const AF_REVEAL_MAX = 400;
+
 export function initialReveal(args: {
   fetched: number; honestTotal: number | null; firstPage: number; stopAt: number;
   /** Distinct platforms with a genuine match in this result set (see distinctPlatformCount). */
   platforms?: number;
+  /** TRUE when this results turn was produced by a completed Advanced Filter round. */
+  afCompleted?: boolean;
 }): number {
   const fetched = Math.max(0, Math.floor(args.fetched));
   const { honestTotal, firstPage, stopAt } = args;
   if (honestTotal != null && honestTotal <= stopAt) return fetched;
+  if (args.afCompleted) return Math.min(fetched, AF_REVEAL_MAX);
   // THE FIRST SCREEN IS AS WIDE AS THE MARKET (owner PERMANENT rule 2026-09-02).
   // firstPage is a FLOOR, never a cap: reveal max(10, distinct matching platforms) so every platform
   // with a genuine match gets a slot before any platform repeats. Both ordering layers already emit

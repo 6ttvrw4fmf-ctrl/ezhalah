@@ -340,9 +340,16 @@ check('the transition speaks the searching line + the honest from-count, and res
   /Going through \{count\} properties/.test(miningSrc)
   && /Finding the closest match for you/.test(miningSrc)
   && /useReducedMotion/.test(miningSrc));
-check('the completion beat is held long enough to be read (the 450ms direct hand-off was for a card that said nothing)',
-  /wait \+ 1100/.test(agentSrc),
-  'a copy swap the user cannot finish reading is the same as no copy at all');
+// NO COMPLETION BEAT AT ALL (owner 2026-09-20 — shown the card, asked for it gone). This check used
+// to assert `wait + 1100`, the hold that kept «لقينا N عقار أقرب لطلبك» on screen. That hold is gone,
+// and the old assertion would now pass for the WRONG reason: an unrelated `wait + 1100` scroll timer
+// (easeToMsgTop) still lives in the same function, so a bare source match no longer proves anything
+// about the beat. Assert the mechanism instead: the card's `to` — the ONLY thing that flips
+// MiningTransition's `done` and draws the tick — is never handed a value.
+check('the «لقينا N» completion beat is not wired: the mining card is never given a `to`',
+  !/\{ \.\.\.f, to: total \}/.test(agentSrc)
+  && /setAgeFlow\(\{ phase: 'mining', from: ageFlowTotalRef\.current, to: null \}\)/.test(agentSrc),
+  'setting `to` flips MiningTransition\'s `done`, which draws the checkmark and the sentence the owner removed');
 check('the results pills are fed by the deduped facet set (one label per committed answer)',
   /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
   && /facets: dedupedFacets,/.test(agentSrc));
