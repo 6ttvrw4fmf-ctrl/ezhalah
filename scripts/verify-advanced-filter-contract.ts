@@ -346,10 +346,15 @@ check('the transition speaks the searching line + the honest from-count, and res
 // (easeToMsgTop) still lives in the same function, so a bare source match no longer proves anything
 // about the beat. Assert the mechanism instead: the card's `to` — the ONLY thing that flips
 // MiningTransition's `done` and draws the tick — is never handed a value.
-check('the «لقينا N» completion beat is not wired: the mining card is never given a `to`',
-  !/\{ \.\.\.f, to: total \}/.test(agentSrc)
-  && /setAgeFlow\(\{ phase: 'mining', from: ageFlowTotalRef\.current, to: null \}\)/.test(agentSrc),
-  'setting `to` flips MiningTransition\'s `done`, which draws the checkmark and the sentence the owner removed');
+// SUPERSEDED BY THE STRUCTURAL CHECKS FURTHER DOWN (owner 2026-09-20). This used to assert the beat
+// was merely un-triggered — that agent.tsx passed `to: null` and never `{...f, to: total}`. The
+// owner reported seeing the green check again after that, so `to` was deleted outright: the prop,
+// the `done` flag, the checkmark and the found-copy are all gone from MiningTransition. Asserting a
+// `to: null` that no longer exists would now fail for the RIGHT outcome, so the rule moved to
+// "the capability is absent", which is what the MiningTransition block below proves.
+check('the mining card is still opened with only the count it may state',
+  /setAgeFlow\(\{ phase: 'mining', from: ageFlowTotalRef\.current \}\)/.test(agentSrc),
+  'src/app/agent.tsx — `from` is the one number this card may show; it can compute none of its own');
 // THE «تحديد أكثر» PROBE RUNS *WITH* THE SEARCH, NOT AFTER IT (owner 2026-09-20: "once the user
 // clicks Search, the button should show … the user will wait 10 seconds — let the 2.5 be part of
 // that"). The passive effect keys off lastResultsMsg, which does not exist until the search has
@@ -370,6 +375,37 @@ check('a superseded prefetch cannot crash the app as an unhandled rejection',
   /assessNarrowing\(q, asked\)\.catch\(\(\) => 'unknown' as const\)/.test(agentSrc));
 check('the prefetch is skipped when the button would be hidden anyway (no wasted probes)',
   /if \(!q \|\| !anyGuidedEligible\(q\)\) return;/.test(agentSrc));
+
+// SKIP IS HIDDEN ON SCOPE QUESTIONS ONLY (owner 2026-09-20). Skipping «bathrooms» is a usable
+// answer — "I don't care" — and the round carries on. Skipping «what type of property?» is not: the
+// advanced pool cannot be ranked until CATEGORY → GROUP → TYPE resolves, so the round ends having
+// done nothing. Keyed on the question's identity, never on stepIndex: a user who chose their group
+// on the Filter screen never sees that question, so position 0 is already an advanced question.
+check('«تخطي» is hidden on scope questions, and keyed on identity rather than position',
+  /hideSkip=\{isScopeQuestionId\(ageFlow\.question\.id\)\}/.test(agentSrc)
+  && !/hideSkip=\{ageFlow\.stepIndex/.test(agentSrc),
+  'a stepIndex test removes Skip from whatever happens to be first, including a real advanced question');
+check('the card actually branches on it (a prop nothing reads hides nothing)',
+  /\{hideSkip \? null : \(/.test(readFileSync(join(root, 'src/components/AdvancedQuestionCard.tsx'), 'utf8')));
+// Leaving the scope question is still possible, so hiding Skip is never a trap.
+check('«رجوع» and the X survive on a scope question — Skip is hidden, not the way out',
+  /testID="af-back"/.test(readFileSync(join(root, 'src/components/AdvancedQuestionCard.tsx'), 'utf8'))
+  && /onClose=\{onAgeClose\}/.test(agentSrc));
+
+// THE GREEN CHECK IS GONE BY CONSTRUCTION (owner 2026-09-20: "this green check needs to always be
+// gone … it was a mistake"). The beat's trigger was removed first; the owner reported seeing it
+// again, so the CAPABILITY is deleted — no `to` prop, no `done`, no checkmark, no found-copy. There
+// is nothing left to re-trigger: bringing it back now means re-writing it.
+{
+  const mining = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
+  const body = mining.slice(mining.indexOf('export default function MiningTransition'));
+  check('MiningTransition takes no `to` and has no completion state at all',
+    !/to:\s*number \| null/.test(body) && !/const done =/.test(body) && !/'checkmark'/.test(body),
+    'src/components/MiningTransition.tsx — the green check must be unreachable, not merely untriggered');
+  check('…and no caller can hand it one',
+    !/<MiningTransition[^>]*\bto=/.test(agentSrc)
+    && !/phase: 'mining'[^}]*\bto:/.test(agentSrc));
+}
 
 check('the results pills are fed by the deduped facet set (one label per committed answer)',
   /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)

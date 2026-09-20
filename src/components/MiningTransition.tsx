@@ -21,18 +21,17 @@ import { colors, radius, space, font, cardShadow } from '@/theme/tokens';
 //     roster included — reads through again, which is what the owner asked for in the same breath
 //     ("make sure all the platforms show clearly"). The redesign's opaque backdrop existed to hide
 //     exactly that, and hiding it is no longer wanted.
-//   • The «لقينا N عقار» beat is back, and it is still HONEST: `to` is handed in by agent.tsx from
-//     quotableTotal() — the single arbiter of "the number this search may state", which returns null
-//     (⇒ `done` never flips ⇒ no beat at all) whenever the RPC count would overstate. This component
-//     still cannot compute a total of its own, which is the guarantee
-//     scripts/verify-mining-total-honesty.ts actually protects.
+//   • The «لقينا N عقار» completion beat is GONE (owner 2026-09-20, see the note above the component).
+//     This card now only ever says it is searching. It still cannot compute a total of its own —
+//     `from` is handed in by agent.tsx and is the only number it may state — which is the guarantee
+//     scripts/verify-mining-total-honesty.ts actually protects, and that is unchanged.
 //
 // TIMING CONTRACT: this component is pure decoration. It never gates the hand-off — the orchestrator
 // (agent.tsx) drives dismissal with plain setTimeout latches (never an animation callback, per
-// src/lib/afterAnimation.ts's rule), and the animation simply loops until unmounted. `done` flips the
-// copy to the found-count beat; the parent removes the overlay shortly after. If the search resolves
-// instantly the parent still holds ~1.4s so the beat reads as intentional, and if the search is slow
-// the loop keeps playing — the user is never stared at by a frozen screen.
+// src/lib/afterAnimation.ts's rule), and the animation simply loops until unmounted. The parent
+// removes the overlay the moment the results are ready. If the search resolves instantly the parent
+// still holds ~1.4s so the card cannot flash up and vanish, and if the search is slow the loop keeps
+// playing — the user is never stared at by a frozen screen.
 //
 // Reduced motion: no drifting shapes, static copy only.
 
@@ -56,33 +55,30 @@ function Fragment({ x, y, delay, size }: { x: number; y: number; delay: number; 
   return <Reanimated.View style={[st.frag, { width: size, height: size * 0.72 }, a]} />;
 }
 
-export default function MiningTransition({ from, to }: { from: number | null; to: number | null }) {
+// NO COMPLETION STATE AT ALL (owner 2026-09-20: "this green check needs to always be gone … it was
+// a mistake"). The card used to take a `to` count, flip a `done` flag, swap the magnifier for a
+// checkmark and hold on «لقينا N عقار أقرب لطلبك». The owner removed the beat, saw it again, and
+// asked for it to be impossible rather than merely unreachable — so the whole branch is deleted, not
+// just its trigger. There is no `to` prop, no `done`, no checkmark and no found-copy left to reach:
+// re-adding the beat now means re-writing it, which is a review, not an accident.
+export default function MiningTransition({ from }: { from: number | null }) {
   const { t } = useI18n();
   const reduced = useReducedMotion();
-  const done = to != null;
 
-  // The centre "core" breathes gently while searching, then settles when the count lands.
+  // The centre "core" breathes gently for as long as the card is up.
   const pulse = useSharedValue(0);
   useEffect(() => {
     if (reduced) return;
     pulse.value = withRepeat(withTiming(1, { duration: 900, easing: EASE }), -1, true);
   }, [pulse, reduced]);
-  const coreA = useAnimatedStyle(() => ({ transform: [{ scale: done ? 1 : 1 + pulse.value * 0.06 }] }));
-
-  // Copy swap: fade the searching copy out / the found copy in. Timing-only, short.
-  const swap = useSharedValue(0);
-  useEffect(() => {
-    swap.value = withTiming(done ? 1 : 0, { duration: reduced ? 0 : 280, easing: EASE });
-  }, [done, swap, reduced]);
-  const searchTxA = useAnimatedStyle(() => ({ opacity: 1 - swap.value }));
-  const foundTxA = useAnimatedStyle(() => ({ opacity: swap.value, transform: [{ translateY: (1 - swap.value) * 6 }] }));
+  const coreA = useAnimatedStyle(() => ({ transform: [{ scale: 1 + pulse.value * 0.06 }] }));
 
   return (
     <View style={st.overlay} pointerEvents="auto">
       <View style={st.backdrop} />
       <View style={st.card}>
         <View style={st.stage}>
-          {!reduced && !done ? (
+          {!reduced ? (
             <>
               <Fragment x={-92} y={-38} delay={0} size={34} />
               <Fragment x={88} y={-52} delay={260} size={28} />
@@ -93,21 +89,16 @@ export default function MiningTransition({ from, to }: { from: number | null; to
             </>
           ) : null}
           <Reanimated.View style={[st.core, coreA]}>
-            <Ionicons name={done ? 'checkmark' : 'search'} size={22} color={colors.surface} />
+            <Ionicons name="search" size={22} color={colors.surface} />
           </Reanimated.View>
         </View>
         <View style={st.copyBlock}>
-          <Reanimated.View style={[st.copyLayer, searchTxA]} pointerEvents="none">
+          <View style={st.copyLayer} pointerEvents="none">
             <Text style={st.line1}>{t('Finding the closest match for you')}</Text>
             {from != null ? (
               <Text style={st.line2}>{t('Going through {count} properties to pull out the best fit', { count: grouped(from) })}</Text>
             ) : null}
-          </Reanimated.View>
-          <Reanimated.View style={[st.copyLayer, st.copyTop, foundTxA]} pointerEvents="none">
-            {to != null ? (
-              <Text style={st.line1}>{t('We found {count} properties closest to your request', { count: grouped(to) })}</Text>
-            ) : null}
-          </Reanimated.View>
+          </View>
         </View>
       </View>
     </View>

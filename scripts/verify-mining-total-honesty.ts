@@ -127,13 +127,19 @@ check('MiningTransition speaks only counts HANDED to it and cannot invent one lo
   /\{ count: grouped\(from\) \}/.test(mining)
   && !/listings|matchTotal|1500/.test(mining),
   'the overlay must never read a listings buffer, a matchTotal, or a page cap of its own');
-check('the completion beat is gated on the handed total being non-null (no beat when nothing is quotable)',
-  /const done = to != null;/.test(mining)
-  && /to != null \?/.test(mining),
-  'quotableTotal() returns null when no honest number exists — the overlay must then say nothing');
-check('the completion beat quotes the handed `to` and nothing else',
-  !/grouped\((?!to\)|from\))/.test(mining),
-  'grouped() may only be applied to the two handed counts');
+// THERE IS NO COMPLETION BEAT TO GATE ANY MORE (owner 2026-09-20: "this green check needs to always
+// be gone … it was a mistake"). This used to assert the beat only spoke when quotableTotal() had
+// handed it an honest number. The beat is deleted — prop, flag, checkmark and copy — so the honesty
+// question it answered cannot arise: there is no second number for the overlay to state. That is
+// strictly stronger than the gate it replaces, and it is what is asserted now.
+check('there is no completion beat at all — no second number the overlay could state',
+  !/const done =/.test(mining)
+  && !/to != null/.test(mining)
+  && !/closest to your request/.test(mining),
+  'a re-added beat must come back with its quotableTotal gate, and this check reviewed again');
+check('grouped() is applied ONLY to the one handed count',
+  !/grouped\((?!from\))/.test(mining),
+  'grouped() may only be applied to `from`, the single count agent.tsx hands this overlay');
 
 // ── D. MUTATION PROOF (self-checking) ────────────────────────────────────────────────────────────
 // The removed bug, restored in miniature: quoting `total` instead of `matchTotal`. If this ever

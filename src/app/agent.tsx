@@ -991,7 +991,7 @@ export default function Agent() {
     // final search runs behind it. Carries only the two counts it may speak — both handed in from
     // quotableTotal(), never computed in the overlay. Dismissal is driven by plain setTimeout
     // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
-    | { phase: 'mining'; from: number | null; to: number | null }
+    | { phase: 'mining'; from: number | null }
     | null
   >(null);
   // The query accumulates answers as the flow advances; `token` supersedes a stale async fetch when a
@@ -2324,7 +2324,7 @@ export default function Agent() {
     // reverted, and the restored card speaks no selections — but the dedupe rule is the PILLS' own
     // and is unaffected.)
     const dedupedFacets = dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]);
-    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current, to: null });
+    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current });
     const timers = miningTimersRef.current;
     const stillMining = () => ageFlowTokenRef.current === token;
     timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
@@ -4221,7 +4221,7 @@ export default function Agent() {
               pills={afCardPills}
             />
           ) : ageFlow.phase === 'mining' ? (
-            <MiningTransition from={ageFlow.from} to={ageFlow.to} />
+            <MiningTransition from={ageFlow.from} />
           ) : (
             <AdvancedQuestionCard
               titleKey={ageFlow.question.titleKey}
@@ -4238,6 +4238,25 @@ export default function Agent() {
               initialKeys={ageFlow.initialKeys}
               onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
+              // NO SKIP ON A SCOPE QUESTION (owner 2026-09-20). The owner first asked for "the first
+              // question", then for "the first two" — both are the same boundary described by
+              // counting: the opening cards are the CATEGORY → GROUP → TYPE hierarchy, and only
+              // after them do the advanced questions begin.
+              //
+              // The distinction is real, not cosmetic. Skipping «bathrooms» is a usable answer — "I
+              // don't care" — and the interview carries on. Skipping «what type of property?» is
+              // not: the advanced pool cannot be ranked until the scope resolves (see the SCOPE
+              // PREFIX SHORT-CIRCUIT in presentGuided), so the round ends having done nothing, which
+              // is exactly the "he wont understand" the owner described.
+              //
+              // Keyed on isScopeQuestionId, NOT on stepIndex, because the count is not stable: a
+              // user who picked their group on the Filter screen never sees that question, so
+              // stepIndex 0 is already an advanced question and hiding Skip there would remove it
+              // from a question where skipping is perfectly sensible.
+              //
+              // «رجوع» still leaves the interview from the first card and the X still abandons it,
+              // so nobody is ever trapped into answering.
+              hideSkip={isScopeQuestionId(ageFlow.question.id)}
               onBack={onAgeBack}
               onClose={onAgeClose}
               pills={afCardPills}

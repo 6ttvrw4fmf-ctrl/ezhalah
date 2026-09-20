@@ -65,8 +65,12 @@ const importers = readdirSync(join(root, 'src'), { recursive: true, encoding: 'u
     strip(readFileSync(join(root, 'src', f), 'utf8'))));
 check('no src/ module imports the retired sentence builder (it is unreachable, not merely unused)',
   importers.length === 0, `importers: ${importers.join(', ')}`);
-check('the overlay no longer takes the redesign-only props (agent.tsx passes just the two counts)',
-  /<MiningTransition from=\{ageFlow\.from\} to=\{ageFlow\.to\} \/>/.test(agent)
+// ONE count, not two, since 2026-09-20: `to` existed only to flip the completion beat, and the beat
+// is deleted (owner: "this green check needs to always be gone … it was a mistake"). The rule this
+// check protects — the overlay never regains the rejected redesign's props — is unchanged.
+check('the overlay takes only the count it may state (no `to`, and none of the redesign props)',
+  /<MiningTransition from=\{ageFlow\.from\} \/>/.test(agent)
+  && !/<MiningTransition[^>]*\bto=/.test(agent)
   && !/labels=\{ageFlow\.labels\}|type=\{ageFlow\.type\}/.test(agent));
 
 console.log('\n── B. the platform roster reads through — the owner\'s «show clearly» rule ──');
@@ -96,8 +100,10 @@ check('the searching line and the honest from-count subline are both present',
 // user-visible behaviour is agent.tsx, which no longer hands the card a `to`, so `done` never flips.
 check('the completion beat is NOT wired — agent.tsx never sets `to`, so `done` never flips',
   !/\{ \.\.\.f, to: total \}/.test(readFileSync(join(root, 'src/app/agent.tsx'), 'utf8')));
+// `!done` is gone with the completion state; reduced motion is now the only thing gating the
+// drifting fragments, which is what this check was ever about.
 check('reduced motion renders the static composition (no drifting fragments)',
-  /useReducedMotion/.test(mining) && /!reduced && !done \?/.test(mining));
+  /useReducedMotion/.test(mining) && /\{!reduced \? \(/.test(mining));
 
 console.log('\n── D. mutation proofs ──');
 const mustCatch = (what: string, caught: boolean) =>
