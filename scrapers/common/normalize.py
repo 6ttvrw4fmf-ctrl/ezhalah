@@ -677,6 +677,15 @@ _NEGATORS = ("غير", "بدون", "لا يوجد", "لايوجد", "un", "no ")
 # entirely: the source has not said yes and has not said no, so the column stays NULL.
 _PREPARED_ONLY = ("مؤسس", "مؤسسة", "مهيأ", "مهيا", "تأسيس", "prepared for", "roughed")
 
+# …and a third case that is neither yes nor no: the amenity belongs to the NEIGHBOURHOOD, not to
+# the property. Listing prose is full of «قريب من مستشفى السرطان», «مقابل كمباوند معهد الإدارة»,
+# «بالقرب من مركز الملك فهد» (all verbatim from wslnaa, 2026-09-20). A naive scan of that text
+# would read «قريب من مواقف» as "this unit has parking", which is a claim about someone else's
+# building. A proximity phrase before the token suppresses it: the source has told us about the
+# street, not about the unit, so the column stays NULL.
+_PROXIMITY = ("قريب من", "قريبة من", "بالقرب من", "مقابل", "بجوار", "بجانب", "أمام",
+              "close to", "near ", "next to", "opposite")
+
 
 def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
     """Map one free-text amenity blob to {column: bool}. Only columns the source actually mentions
@@ -702,6 +711,9 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
                 after = t[m.end():m.end() + 14]
                 if any(_norm_ar(q) in after for q in _PREPARED_ONLY):
                     break          # "prepared for X" is not X — leave the column NULL
+                near = t[max(0, m.start() - 22):m.start()]
+                if any(_norm_ar(q) in near for q in _PROXIMITY):
+                    break          # the NEIGHBOURHOOD has it, not this property — stay NULL
                 out[col] = not any(n.strip() and n.strip() in before for n in _NEGATORS)
                 break
             if col in out:

@@ -378,6 +378,15 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
     # amenities the source NAMES are written; the rest stay NULL (silence is not a "no").
     for col, val in normalize.amenities_from_text(_label(text, "المرافق")).items():
         row[col] = val
+    # Variant B (safera) has no «المرافق» cell and no spec rows — it writes the whole property out
+    # in the «الوصف» prose instead («قسم الرجال: مجلس – مطبخ – صالة – 3 دورات مياه»). 8 of its 9
+    # listings were blind to every filter question until this. The description is read only up to
+    # the next section heading so a «عروض مشابهه» block can never leak another listing's features
+    # in, and an amenity already stated by «المرافق» is not overwritten by the prose.
+    dm = re.search(r"الوصف\s*(.{20,2500}?)(?=المميزات|عروض مشابهه|احجز|اتصل بنا|$)", text, re.S)
+    if dm:
+        for col, val in normalize.amenities_from_text(dm.group(1)).items():
+            row.setdefault(col, val)
 
     if deal == "Rent":
         rent_period, price_annual = normalize.rent_period_and_annual(price, text)
