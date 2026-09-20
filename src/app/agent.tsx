@@ -1269,12 +1269,35 @@ export default function Agent() {
     if (!hadTurn) return; // cascade halted; cards stay frozen, «عرض المزيد» recovers via bufferMore
 
     if (wasFilterOrigin) {
-      // Erase the cancelled turn rather than freezing/annotating it — if the user opens الوكيل الذكي
+      // Erase the cancelled turn rather than freezing/annotating it — if the user opens الوسيط الذكي
       // again later, a dangling "بحث..." bubble from a search that (from their side) never completed
       // would contradict "it should feel like the search never completed". A bare `/agent` (no
       // filter/seed) then greets fresh, exactly like any other new chat.
-      setMsgs([]);
-      setBusy(false);
+      //
+      // THROUGH THE SHARED RESET, not a hand-written pair (ops_incident #341, the FOURTH recurrence
+      // of #211/#271/#319's class). This is a conversation EXIT: the transcript is erased and the
+      // user is sent to another route, so every conversation-scoped ref must die with it —
+      // chatIdRef, afCarryRef, pendingRefineRef/refineMsgIdRef, pendingScopeRef/pendingCityRef,
+      // lastQueryRef, saidRef/askCountRef, `completed`, and the ageFlowTokenRef bump that
+      // invalidates any guided round still in flight from the search just cancelled.
+      //
+      // MEASURED, because the honest answer used to be "undetermined" (routine #6, 2026-09-20):
+      // the agent screen DOES unmount on this router.replace('/'), so today every one of those refs
+      // is re-initialised by the remount anyway. Evidence: on production, Chromium, fresh context,
+      // 4/4 across both viewports, the greeting on the next /agent is TYPED FRESH (its paragraph
+      // grows 0 → 141 chars over ~1.5 s) rather than appearing whole — which only happens when
+      // sendGreeting() runs, which only happens when greetedRef is false, which only happens on a
+      // new component instance. So this call is a NO-OP on today's build.
+      //
+      // It is here because the invariant it upholds must not be a property of the router. Nothing
+      // enforces "leaving to a different route tears this screen down" — the sidebar path already
+      // navigates to /agent while ON /agent precisely BECAUSE the instance is reused, and a future
+      // tab navigator, keep-alive, or shared-layout change would make that true here too, silently,
+      // with the user landing in the abandoned chat. An exit that routes through the reset is
+      // correct under BOTH regimes; one that relies on unmounting is correct only by accident.
+      // (The hand-written `setMsgs([]); setBusy(false);` this replaces are both inside the shared
+      // reset — this branch loses nothing it used to do, and gains the fourteen clears it forgot.)
+      resetConversationState();
       // The just-cancelled filter's JSON is still sitting in lastFilterRef (set by the param-consuming
       // effect before sendFilter ran). Without clearing it, resubmitting the SAME filter unchanged would
       // match `filter !== lastFilterRef.current` as false and the effect would silently no-op — the
