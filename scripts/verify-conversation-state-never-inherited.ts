@@ -258,10 +258,17 @@ console.log("\n── §C: no exit path re-implements the list (DISCOVERED by sh
   const { found, loneWrites } = handWrittenResets(src);
   check(`every conversation-exit clears state through the ONE shared reset — no second hand-written list (${loneWrites} lone writes outside it, each legitimate)`,
     found.length === 0, found.join("\n      "));
-  // And the two exits really CALL it, rather than merely having stopped clearing by hand.
+  // And the exits really CALL it, rather than merely having stopped clearing by hand.
+  //
+  // THREE since 2026-09-20 (routine #6, ops_incident #341): startFresh + the New Chat handler +
+  // stop()'s filter-origin branch, which used to erase the transcript with a hand-written
+  // `setMsgs([]); setBusy(false);` and route through nothing. This number is only a tripwire that
+  // makes a human look when it moves — §F below is the actual guard, because it DERIVES the
+  // population from the source instead of trusting a count. (That is the whole lesson of §F: a
+  // count of calls TO the reset can never see an exit that calls nothing.)
   const callSites = (src.match(/^\s*resetConversationState\(\);$/gm) ?? []).length;
-  check("both conversation exits call resetConversationState() (startFresh + the New Chat handler)",
-    callSites === 2, `found ${callSites}`);
+  check("all three conversation exits call resetConversationState() (startFresh + New Chat + stop's filter-origin branch)",
+    callSites === 3, `found ${callSites}`);
 }
 
 console.log("\n── §D: with no transcript to restore from, terminality is DERIVED — never inherited ──");
@@ -611,10 +618,20 @@ const mutantAgent = (from: string, to: string): string => {
 // is RED until someone classifies it, which is the one thing `callSites === 2` could never do.
 //
 // `unadjudicated` is NOT a waiver. It records an exit whose need for the reset is a real open
-// question (stop() navigates AWAY from /agent, so whether its refs survive depends on whether the
-// screen unmounts — undetermined from a static read, and the honest state per §G.9). It is bounded
-// by a SHRINK-ONLY ceiling, so the count can fall and never rise.
-type ExitKind = "shared-reset" | "after-reset" | "unadjudicated";
+// question. It is bounded by a SHRINK-ONLY ceiling, so the count can fall and never rise.
+//
+// THE CEILING IS NOW 0 (routine #6, 2026-09-20). stop() was the one entry, registered
+// `unadjudicated` because whether its refs survive depended on whether the agent screen unmounts on
+// `router.replace('/')` — which a static read cannot settle. It was settled by MEASUREMENT on
+// production (Chromium, fresh context per rep, 4/4 across 375px and 1440px): the greeting on the
+// next /agent is typed fresh, its paragraph growing 0 → 141 chars, which happens only when
+// sendGreeting() runs, which happens only when greetedRef is false, which happens only on a new
+// component instance. The screen DOES unmount, so the live symptom never reproduced.
+//
+// stop() was fixed anyway, and that is the point worth keeping: correctness that depends on the
+// router tearing a screen down is correctness by accident. It now routes through the shared reset,
+// so it is `routes-through-reset` — a kind whose claim F4 below EXECUTES rather than believes.
+type ExitKind = "shared-reset" | "after-reset" | "routes-through-reset" | "unadjudicated";
 const EXIT_REGISTRY: Record<string, { kind: ExitKind; why: string }> = {
   resetConversationState: {
     kind: "shared-reset",
@@ -629,11 +646,11 @@ const EXIT_REGISTRY: Record<string, { kind: ExitKind; why: string }> = {
     why: "openSaved's fallback (agent.tsx:2892) when there is no saved transcript to restore — same position downstream of startFresh() → resetConversationState(), and it DERIVES terminality rather than inheriting it",
   },
   stop: {
-    kind: "unadjudicated",
-    why: "ops_incident #341 — the filter-origin branch erases the transcript and router.replace('/')s away without routing through resetConversationState(). Whether the conversation-scoped refs survive depends on whether the agent screen unmounts on that navigation, which a static read cannot settle. Registered so it cannot be forgotten, NOT excused.",
+    kind: "routes-through-reset",
+    why: "ops_incident #341 — the filter-origin branch erases the transcript and router.replace('/')s away. It used to do that with a hand-written `setMsgs([]); setBusy(false);` and route through nothing; since 2026-09-20 it calls resetConversationState(). F4 executes that claim against the source.",
   },
 };
-const UNADJUDICATED_CEILING = 1; // shrink-only — a new unadjudicated exit is RED
+const UNADJUDICATED_CEILING = 0; // shrink-only — ANY unadjudicated exit is now RED
 
 /** Every site that REPLACES the transcript, with the top-level declaration that owns it. */
 function conversationExits(src: string): { line: number; owner: string }[] {
@@ -674,7 +691,31 @@ function unregisteredExits(src: string): string[] {
   const sharedInside = s >= 0 && exits.some((x) => x.owner === "resetConversationState" && x.line > s && x.line <= e + 1);
   if (!sharedInside)
     problems.push("F3 resetConversationState: registered as the shared-reset exit but its body no longer replaces the transcript — the 'after-reset' entries' justification is void");
+  // F4 — a `routes-through-reset` entry is a CLAIM ABOUT CODE, so execute it against the code.
+  //
+  // This one has to be derived from the REGISTRY, not from the discovered owners, and the reason is
+  // the whole shape of the fix: an exit that correctly delegates to the shared reset no longer
+  // contains `setMsgs(<value>)` at all, so it drops out of `conversationExits()` by construction.
+  // Iterating discovery here would check nothing and read as coverage — the exact PART 1.11 failure
+  // this file keeps being rewritten to avoid. If stop() ever stops calling the reset, F4 goes red
+  // whether or not it went back to clearing by hand.
+  for (const [name, entry] of Object.entries(EXIT_REGISTRY)) {
+    if (entry.kind !== "routes-through-reset") continue;
+    const b = ownerBody(lines, name);
+    if (!b) { problems.push(`F4 ${name}: registered as routes-through-reset but no top-level \`const ${name} = \` was found in agent.tsx`); continue; }
+    if (!b.some((l) => /^\s*resetConversationState\(\);\s*$/.test(l) && !/^\s*\/\//.test(l)))
+      problems.push(`F4 ${name}: registered as routes-through-reset but its body never calls resetConversationState() — it is a conversation exit routing through nothing again (ops_incident #341)`);
+  }
   return problems;
+}
+
+/** The body lines of a top-level `const <name> = …` in agent.tsx, by the same 2-space shape F3 uses. */
+function ownerBody(lines: string[], name: string): string[] | null {
+  const s = lines.findIndex((l) => new RegExp(`^  const ${name} = `).test(l));
+  if (s < 0) return null;
+  let e = s + 1;
+  while (e < lines.length && lines[e] !== "  };") e++;
+  return lines.slice(s, Math.min(e + 1, lines.length));
 }
 
 console.log("\n── §F: the POPULATION of conversation exits is discovered by shape, never counted ──");
@@ -709,6 +750,24 @@ console.log("\n── §F: the POPULATION of conversation exits is discovered by
   mustCatch("M-F3-shared-reset-gutted — if resetConversationState() stops replacing the transcript, the after-reset justifications are withdrawn",
     unregisteredExits(gutted).some((p) => p.startsWith("F3 resetConversationState")),
     JSON.stringify(unregisteredExits(gutted)));
+
+  // M-F4 — THE REGRESSION OF THE ACTUAL FIX (ops_incident #341). Take the real tree and delete
+  // stop()'s call to the shared reset — nothing else. The result is the exact pre-fix defect in its
+  // most deniable form: stop() no longer clears by hand EITHER, so §C's lone-write scan sees
+  // nothing, §F's discovery does not even list stop as an owner, and every other check in this file
+  // stays green. F4 is the only thing standing between that edit and a silent merge.
+  const stopBody = ownerBody(src.split("\n"), "stop");
+  const stopCallLine = (stopBody ?? []).find((l) => /^\s*resetConversationState\(\);\s*$/.test(l));
+  check("…the real tree's stop() really does carry the call F4 is about to remove (the mutation is meaningful)",
+    !!stopCallLine, `stop() body had no resetConversationState() call to remove`);
+  const unrouted = src.replace(
+    "      resetConversationState();\n      // The just-cancelled filter's JSON is still sitting in lastFilterRef",
+    "      /* mutation: stop() routes through nothing */\n      // The just-cancelled filter's JSON is still sitting in lastFilterRef");
+  check("…and that mutation actually changed the file (a no-op replace would prove nothing)",
+    unrouted !== src, "the M-F4 anchor no longer matches agent.tsx — re-anchor it rather than deleting the mutation");
+  mustCatch("M-F4-stop-unrouted — stop() silently dropping its call to the shared reset is CAUGHT, though it clears nothing by hand and owns no discovered exit",
+    unregisteredExits(unrouted).some((p) => p.startsWith("F4 stop")),
+    JSON.stringify(unregisteredExits(unrouted)));
 
   // …and the predicate reports the real tree clean, so the mutations prove discrimination, not noise.
   check("…and §F reports the real tree clean (the mutations prove discrimination, not noise)",
