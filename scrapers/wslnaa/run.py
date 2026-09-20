@@ -178,9 +178,18 @@ def fetch_one(s: cc.Session, slug: str) -> Optional[dict]:
     if r.status_code != 200:
         return None
     try:
-        return r.json()[0]["result"]["data"]["json"]
+        p = r.json()[0]["result"]["data"]["json"]
     except (ValueError, KeyError, IndexError, TypeError):
         return None
+    # The tRPC payload OMITS `slug` for the building-level combination offers (numeric slugs
+    # 540001, 570001-570005 — "الجزء السكني بالكامل", "3 فتحات تجارية متجاورة", …). `listing_url`
+    # is an f-string over p["slug"], so a missing key rendered the LITERAL text "None" and six
+    # live cards pointed at /properties/None → «العقار غير موجود». The slug we just asked for is
+    # authoritative (it came from the site's own sitemap and the page serves fine at it), so
+    # carry it through rather than trusting the response to echo it back.
+    if not p.get("slug"):
+        p["slug"] = slug
+    return p
 
 
 def main() -> int:

@@ -713,6 +713,25 @@ def guard_location_update(fields: dict[str, Any], *, table: str, ref: str = "") 
     return fields
 
 
+_UNUSABLE_URL_RE = re.compile(r"/(None|null|undefined|NaN)/?$|=(None|null|undefined)$")
+
+
+def _reject_unusable_listing_url(r: dict[str, Any], *, table: str) -> None:
+    """A `listing_url` that ends in a language literal is never source truth — it is an f-string
+    over an id/slug the source did not supply, rendered as the text "None"/"undefined". wslnaa
+    shipped six of them (2026-09-20): the API omits `slug` on its building-level combination
+    offers, so every card linked to /properties/None → «العقار غير موجود», which reads to the
+    user as OUR bug, not the source's. Unlike a placeholder location there is nothing safe to
+    salvage — nulling the column leaves a card with nowhere to go and keeps the defect silent —
+    so this RAISES and fails the run. Always a programming error, never data."""
+    url = r.get("listing_url")
+    if isinstance(url, str) and _UNUSABLE_URL_RE.search(url.strip()):
+        raise ValueError(
+            f"{table}: refusing to write a fabricated listing_url {url!r} "
+            f"(ad_number={r.get('ad_number')}) — the source did not supply this id/slug"
+        )
+
+
 def _reject_placeholder_location(r: dict[str, Any], *, table: str) -> None:
     """Backstop for the upsert helpers below (`_wasalt_batch` + the 3 dedicated `upsert_*`
     functions) — every row THOSE specific functions handle passes through here before the actual
@@ -743,6 +762,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         _sanitize_ints(r)
         _ensure_capture(r)
         _reject_placeholder_location(r, table=table)
+        _reject_unusable_listing_url(r, table=table)
         seen[r["ad_number"]] = r
     # SOURCE IS TRUTH across a BATCH, not just a row (owner rule 2026-08-09, see
     # `_unknown_must_not_overwrite_known`). That guard drops a None/unread key from each row so a
