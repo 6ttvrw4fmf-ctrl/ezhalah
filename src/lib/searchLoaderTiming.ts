@@ -33,6 +33,12 @@ export const PILL_FADE = 260;
  *
  * 40 → 50 on 2026-09-06 (abwbna's onboarding took the catalogue to 41, past the old ceiling).
  *
+ * 56 → 112 on 2026-09-20, when seven small platforms took the catalogue to 59. Not a nudge: the
+ * wave now lights PILL_GROUP pills per step (owner decision — see PILL_GROUP), which halves the
+ * tail's wait, so the honest ceiling of the SAME 10,600ms floor moved. Derived exactly as before,
+ * and the grouping is why it lands on an even number: pills 111 and 112 share a step, both lit at
+ * 10,460ms, while a 113th would start a new step and not be lit until 10,640ms.
+ *
  * 50 → 56 on 2026-09-19, when the ksaaqar / sadiqeltajer / toor logos took the catalogue to 52 and
  * this barrier failed. Investigating that failure showed the ceiling had been computed from a model
  * that did not match the animation (see everyPlatformSeen below): the OLD arithmetic added REVEAL and
@@ -43,7 +49,7 @@ export const PILL_FADE = 260;
  * floor. So 56 is the real ceiling of the owner's ten seconds, and platform #57 needs a decision
  * (a longer floor, or a wave that lights more than one pill per step) rather than a nudged constant.
  */
-export const MAX_ROSTER = 56;
+export const MAX_ROSTER = 112;
 /** Every pill is on screen by this point, worst case. */
 export const LOADER_REVEAL_MS = (MAX_ROSTER - 1) * PILL_STAGGER + PILL_FADE;
 /**
@@ -70,6 +76,26 @@ export const WAVE_FALL = 380;
 /** A pill counts as SEEN once the wave has risen on it and held it lit. */
 export const WAVE_LIT_MS = WAVE_RISE + WAVE_HOLD;
 
+/**
+ * How many pills the travelling wave lights AT ONCE.
+ *
+ * OWNER DECISION 2026-09-19. The wave used to light exactly one pill per step, so the tail's wait
+ * was (roster−1) × 180ms and the catalogue could not grow past 56 without either breaking the
+ * owner's ten seconds or leaving the last platforms unlit. Offered the choice, the owner kept the
+ * ten seconds and took the wider wave: "2 pills at a time".
+ *
+ * Each pill is still lit for its full WAVE_RISE + WAVE_HOLD + WAVE_FALL (940ms) — the wave gets
+ * WIDER, not faster, so no platform gets less time on screen than before. What changes is that the
+ * front of the wave advances two pills per step instead of one, which halves the tail's wait and
+ * takes the ceiling from 56 platforms to 111 at the same 10,600ms floor.
+ */
+export const PILL_GROUP = 2;
+
+/** When the wave reaches pill `index` — pills share a step in groups of PILL_GROUP. */
+export function waveDelayMs(index: number, step: number): number {
+  return Math.floor(Math.max(0, index) / PILL_GROUP) * step;
+}
+
 /** How long one pill waits before the wave reaches it. Never faster than a readable step. */
 export function highlightStepMs(roster: number): number {
   return Math.max(180, Math.round(LOADER_SWEEP_MS / Math.max(1, roster)));
@@ -88,7 +114,7 @@ export function lastPillAppearedMs(roster: number): number {
  * from the shipped step function instead of from that constant.
  */
 export function lastPillLitMs(roster: number): number {
-  return Math.max(0, roster - 1) * highlightStepMs(roster) + WAVE_LIT_MS;
+  return waveDelayMs(Math.max(0, roster - 1), highlightStepMs(roster)) + WAVE_LIT_MS;
 }
 
 /**

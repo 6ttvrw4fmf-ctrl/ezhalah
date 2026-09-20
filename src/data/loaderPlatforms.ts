@@ -95,6 +95,19 @@ export const PLATFORM_META: LoaderPlatform[] = [
   // visible rather than looking like drift, and so that whoever reads
   // verify-loader-platforms-match-active.ts next finds the reason instead of a mystery.
   { name: 'Toor',         i18nKey: 'Toor',                                    logo: require('../../assets/images/toor.png') },
+  // ── onboarded 2026-09-20 ──────────────────────────────────────────────────────────────────────
+  // These seven share the NEUTRAL placeholder asset while the owner supplies their real marks.
+  // A placeholder is deliberate, not laziness: the alternative — omitting them — makes the strip
+  // under-claim what Ezhalah searches, and reusing ANOTHER platform's logo is the misattribution
+  // the owner called a legal problem. Swap each require() as a real file lands; nothing else here
+  // or in ResultCard.tsx needs to change.
+  { name: 'Gudai',                 i18nKey: 'Gudai Real Estate',                       logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Safera',                i18nKey: 'Safera Real Estate',                      logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Al Humaidan',           i18nKey: 'Al Humaidan Investments',                 logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Aqar Najran',           i18nKey: 'Aqar Najran',                             logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Fahad Alshahri',        i18nKey: 'Fahad Alshahri Real Estate',              logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'CompoundIn',            i18nKey: 'CompoundIn',                              logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Waslna',                i18nKey: 'Waslna Real Estate',                      logo: require('../../assets/images/platform-placeholder.png') },
 ];
 
 // Ordered SPECIFIC-first token → platform name map, mirroring ResultCard's SourceBadge matching so a
@@ -135,6 +148,24 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   // specific-first order is what stops عقار's mark being stamped on another company's listing.
   ['ksaaqar', 'KSA Aqar'],
   ['عقارات السعودية', 'KSA Aqar'],
+  ['gudai', 'Gudai'],
+  ['غدي', 'Gudai'],
+  ['safera', 'Safera'],
+  ['سفيرة', 'Safera'],
+  ['alhumaidan', 'Al Humaidan'],
+  ['al humaidan', 'Al Humaidan'],
+  ['الحميدان', 'Al Humaidan'],
+  ['aqarnajran', 'Aqar Najran'],
+  ['aqar najran', 'Aqar Najran'],
+  ['عقار نجران', 'Aqar Najran'],
+  ['fahadalshahri', 'Fahad Alshahri'],
+  ['fahad alshahri', 'Fahad Alshahri'],
+  ['فهد الشهري', 'Fahad Alshahri'],
+  ['compoundin', 'CompoundIn'],
+  ['كومباوند', 'CompoundIn'],
+  ['waslna', 'Waslna'],
+  ['wslnaa', 'Waslna'],
+  ['وصلنا', 'Waslna'],
   ['sadiqeltajer', 'Sadiq Eltajer'],
   ['sadiq-eltajer', 'Sadiq Eltajer'],
   ['صادق التاجر', 'Sadiq Eltajer'],

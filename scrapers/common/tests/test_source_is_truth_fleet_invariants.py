@@ -169,7 +169,13 @@ def test_no_writer_derives_a_total_from_area_and_per_metre_rate():
 PERIOD_DEFAULT_ALLOWLIST = {
     "alnokhba", "awal", "deal", "jazwtn", "nowaisiry", "toor",
 }
-SINGLE_PERIOD_PLATFORMS = {"gathern", "aqarmonthly"}   # short-stay marketplaces, one period by design
+# compoundin added 2026-09-20. Its entire catalogue is ANNUAL compound rent, and that is the
+# platform's own statement rather than our inference: every unit page carries "Pay your annual rent
+# in easy monthly installments with Ejari" beside an RNPL badge, and the unit price itself carries
+# no period label of its own — so there is no per-listing token to read and nothing is being
+# overridden. Consistent with the standing RNPL→ANNUAL reading. If compoundin ever lists a monthly
+# contract, this entry is what must be revisited.
+SINGLE_PERIOD_PLATFORMS = {"gathern", "aqarmonthly", "compoundin"}   # short-stay marketplaces, one period by design
 
 # Matched on ONE line only: `\s+` spanning newlines turns an assignment followed by an unrelated
 # `if` on the next statement into a false positive.

@@ -44,7 +44,7 @@ import {
 } from '@/data/loaderPlatforms';
 import { fetchActivePlatformNames } from '@/data/loaderActivePlatforms';
 import { fetchLoaderScaleStats, type LoaderScaleStats } from '@/data/loaderScaleStats';
-import { PILL_STAGGER, highlightStepMs, WAVE_RISE, WAVE_HOLD, WAVE_FALL } from '@/lib/searchLoaderTiming';
+import { PILL_STAGGER, highlightStepMs, waveDelayMs, PILL_GROUP, WAVE_RISE, WAVE_HOLD, WAVE_FALL } from '@/lib/searchLoaderTiming';
 import { buildSearchLoaderTitles, readingDurationMs } from '@/lib/searchLoaderTitles';
 import type { SearchQuery } from '@/data/search';
 import { grouped } from '@/data/search';
@@ -167,7 +167,8 @@ function PlatformPill({
   const nameBase: [string, string] = darkTheme ? ['#c9cbc9', '#2b6f4c'] : ['#34403a', '#1d4a37'];
   useEffect(() => {
     if (reduced) { h.value = 0; return; }
-    // The wave reaches pill `index` at `index * step`, so the LAST pill's wait GROWS with the roster
+    // The wave reaches pill `index` at waveDelayMs(index, step) — pills share a step in groups of
+    // PILL_GROUP (owner 2026-09-19: keep the ten seconds, widen the wave). The LAST pill's wait grows
     // wherever highlightStepMs()'s 180ms readable-step floor binds (every roster above 41). That real
     // deadline is lastPillLitMs(total) in lib/searchLoaderTiming, and agent.tsx's SEARCH_MIN_MS must
     // cover it — executed by scripts/verify-search-loader-shows-every-platform.ts. (The comment that
@@ -176,8 +177,11 @@ function PlatformPill({
     // `rest` keeps each pill's phase stable per loop.
     const step = highlightStepMs(total);
     const lit = WAVE_RISE + WAVE_HOLD + WAVE_FALL;
-    const rest = Math.max(260, total * step - lit);
-    h.value = withDelay(index * step, withRepeat(withSequence(
+    // One full pass advances PILL_GROUP pills per step, so a loop is ceil(total / PILL_GROUP)
+    // steps long — not `total` steps. Using the old length here would leave a dead gap at the end
+    // of every loop exactly as long as the grouping saved.
+    const rest = Math.max(260, Math.ceil(total / PILL_GROUP) * step - lit);
+    h.value = withDelay(waveDelayMs(index, step), withRepeat(withSequence(
       withTiming(1, { duration: WAVE_RISE, easing: EASE_OUT }),
       withTiming(1, { duration: WAVE_HOLD }),
       withTiming(0, { duration: WAVE_FALL, easing: EASE_OUT }),

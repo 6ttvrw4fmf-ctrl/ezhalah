@@ -190,6 +190,66 @@ POLICIES: dict[str, _P] = {
         "Absence from the crawl only SELECTS candidates; the direct confirm above decides. The "
         "asymmetry with ksaaqar is the point — the death signal was measured per platform, not "
         "assumed from the sibling."),
+    # ── 2026-09-19 batch: seven small platforms ────────────────────────────────────────────────
+    # The inblaj.net trio (gudai/safera/alhumaidan) share a PARSER, not a death signal — each was
+    # control-validated on its own host.
+    "gudai": _P(
+        _pol("gudai", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the listing's OWN /property/ url. WordPress hard-404s a deleted post, so a 404 there is a "
+        "real death signal. A 200 that still renders the detail block («تفاصيل العقار» on this "
+        "theme variant) is LIVE; a 200 WITHOUT it is a shell or a theme change and is UNKNOWN, as "
+        "are any 401/403/408/429/5xx, a transport failure and an unlookupable row.",
+        "Absence from the crawl only SELECTS candidates. Tenant of the inblaj.net WordPress "
+        "product; theme variant A (labelled, colon-separated)."),
+    "safera": _P(
+        _pol("safera", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the listing's OWN /property/ url; a deleted post 404s. On this tenant the detail block is "
+        "«نظرة عامة» (theme variant B: no colons, and a «عروض مشابهه» tail), so THAT is the marker "
+        "a 200 must carry to read as LIVE. Same UNKNOWN set as its siblings.",
+        "Absence from the crawl only SELECTS candidates. The marker differs from gudai's because "
+        "the THEME differs — the same product does not imply the same page."),
+    "alhumaidan": _P(
+        _pol("alhumaidan", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the listing's OWN /property/ url; a deleted post 404s, and a 200 must carry the detail "
+        "block to read as LIVE. SEPARATELY from liveness, a title containing «تم الإيجار» / «تم "
+        "البيع» is a TRANSACTED ad the office still displays: the scraper never ingests it, so it "
+        "never becomes a row this policy has to retire.",
+        "All 3 of this office's listings were «تم الإيجار» at onboarding, so it contributes 0 "
+        "active rows today. That is its inventory, not a fault."),
+    "aqarnajran": _P(
+        _pol("aqarnajran", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the post's own url: a removed wp/v2 post 404s (control-validated live 2026-09-19 — "
+        "/this-never-existed-xyz/ answered a clean 404 while a real post answered 200). A 200 "
+        "without the «البند/التفاصيل» table is a shell and is UNKNOWN, as are any "
+        "401/403/408/429/5xx, a transport failure and an unlookupable row.",
+        "Absence from the REST listing only SELECTS candidates; the direct confirm decides."),
+    "fahadalshahri": _P(
+        _pol("fahadalshahri", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the product's own url: a removed WooCommerce product 404s (control-validated live "
+        "2026-09-19). *** A 403 IS NOT DEATH ON THIS PLATFORM *** — the Store API and the site "
+        "answer a BARE session and return 403 to curl_cffi's impersonated TLS fingerprint. A 403 "
+        "here means the fingerprint, and is UNKNOWN. So are 401/408/429/5xx, a transport failure "
+        "and an unlookupable row.",
+        "Same shape as amlakalahsa: the working transport is the bare one, and 'fixing' a 403 by "
+        "adding impersonation is how this source gets misread as blocked."),
+    "compoundin": _P(
+        _pol("compoundin", 3, 168), CRAWL_PRESENCE_ONLY,
+        "«This compound is no longer listed» ON A 200 — NOT a 404. Control-validated live "
+        "2026-09-19: a delisted compound answers HTTP **200** with that sentence in its <h1> and a "
+        "strip of OTHER compounds beneath it, and 62 of the 129 compounds in the sitemap are in "
+        "that state right now. A policy keyed on 404 would never retire anything here. So: 200 "
+        "WITHOUT that sentence AND carrying unit cards is LIVE; 200 WITH it is GONE; a 404, any "
+        "401/403/408/429/5xx, a transport failure and an unlookupable row are UNKNOWN.",
+        "Rows are UNITS, not compounds, so one delisted compound retires every unit that belonged "
+        "to it — which is correct: the units went with it."),
+    "wslnaa": _P(
+        _pol("wslnaa", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the tRPC record itself: /api/trpc/properties.bySlug returns status, active and deletedAt "
+        "as FIELDS, so death is data here, not an HTTP code. status <> 'available', active false, "
+        "or a non-null deletedAt is GONE. A transport failure, any non-200, and an unparseable "
+        "body are UNKNOWN and hold the strike without deactivating.",
+        "The served HTML carries no listing values at all, so the API is not an optimisation here "
+        "— it is the only source of truth this platform has."),
     "rakez": _P(
         _pol("rakez", 3, 168), CRAWL_PRESENCE_ONLY,
         "wp-json unit status: a 404 the API itself attributes to rest_post_invalid_id (the unit was "

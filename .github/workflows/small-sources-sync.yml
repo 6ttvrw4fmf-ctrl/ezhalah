@@ -91,6 +91,20 @@ jobs:
           - { source: akariyoun,   cmd: "python -m scrapers.akariyoun.run --type all", tmo: 45 }
           - { source: ksaaqar,     cmd: "python -m scrapers.ksaaqar.run --type all", tmo: 90 }
           - { source: sadiqeltajer, cmd: "python -m scrapers.sadiqeltajer.run --type all", tmo: 90 }
+          # ── onboarded 2026-09-20 ──────────────────────────────────────────────────────────────
+          # gudai / safera / alhumaidan are three tenant offices of ONE inblaj.net WordPress
+          # product and share scrapers/common/inblaj_platform.py, but each runs as its own source
+          # so one office being down never hides another, and each keeps its own run ledger.
+          - { source: gudai,         cmd: "python -m scrapers.gudai.run --type all", tmo: 20 }
+          - { source: safera,        cmd: "python -m scrapers.safera.run --type all", tmo: 20 }
+          - { source: alhumaidan,    cmd: "python -m scrapers.alhumaidan.run --type all", tmo: 20 }
+          - { source: aqarnajran,    cmd: "python -m scrapers.aqarnajran.run --type all", tmo: 20 }
+          - { source: fahadalshahri, cmd: "python -m scrapers.fahadalshahri.run --type all", tmo: 20 }
+          # compoundin walks 129 compound pages and emits one row per UNIT, so it is the slowest
+          # of this batch by page count even though its row count is small.
+          - { source: compoundin,    cmd: "python -m scrapers.compoundin.run --type all", tmo: 45 }
+          # wslnaa makes one tRPC call per slug (59) on top of the sitemap fetch.
+          - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }

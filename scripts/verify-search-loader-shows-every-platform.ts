@@ -32,8 +32,8 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  LOADER_REVEAL_MS, LOADER_SWEEP_MS, MAX_ROSTER, WAVE_LIT_MS,
-  everyPlatformSeen, highlightStepMs, lastPillAppearedMs, lastPillLitMs,
+  LOADER_REVEAL_MS, LOADER_SWEEP_MS, MAX_ROSTER, WAVE_LIT_MS, PILL_GROUP,
+  everyPlatformSeen, highlightStepMs, lastPillAppearedMs, lastPillLitMs, waveDelayMs,
 } from '../src/lib/searchLoaderTiming.ts';
 
 
@@ -100,11 +100,18 @@ check('SearchLoader takes its stagger and its highlight step from lib/searchLoad
   /from '@\/lib\/searchLoaderTiming'/.test(loaderSrc)
   && /const step = highlightStepMs\(total\);/.test(loaderSrc)
   && /WAVE_RISE, WAVE_HOLD, WAVE_FALL/.test(loaderSrc)
+  && /withDelay\(waveDelayMs\(index, step\)/.test(loaderSrc)
+  && /Math\.ceil\(total \/ PILL_GROUP\) \* step/.test(loaderSrc)
   && /delay=\{index \* \(reduced \? 25 : PILL_STAGGER\)\}/.test(loaderSrc),
   'a local copy of either number divorces the wave from the floor this barrier checks');
 check('no second, private copy of the timing constants survives in the component',
   !/const (PILL_STAGGER|PILL_FADE|LOADER_SWEEP_MS|LOADER_REVEAL_MS|WAVE_RISE|WAVE_HOLD|WAVE_FALL)\s*=/.test(loaderSrc),
   'two sources for one number is how the sweep and the floor drifted apart in the first place');
+
+// The grouped wave is the owner's answer to the 56-platform ceiling, so it is asserted, not assumed.
+check(`the wave lights ${PILL_GROUP} pills per step, which is what lifts the ceiling to ${MAX_ROSTER}`,
+  PILL_GROUP >= 2 && waveDelayMs(1, 180) === 0 && waveDelayMs(2, 180) === 180,
+  `waveDelayMs(1)=${waveDelayMs(1, 180)} waveDelayMs(2)=${waveDelayMs(2, 180)}`);
 
 console.log('\n── D. mutation proofs ──');
 const mustCatch = (what: string, caught: boolean) =>
@@ -134,8 +141,16 @@ mustCatch('the pre-2026-09-19 model (phases added, nominal sweep) — it must no
 
 // A pill that is technically "reached" but never actually held lit is not seen. The envelope is part
 // of the deadline, so a predicate that ignores it must fail.
+// A regression to one-pill-per-step is the specific way this ceiling comes back. Proven where it
+// MATTERS — at the shipped ceiling: an ungrouped wave must NOT be able to serve MAX_ROSTER, which
+// is exactly what makes the grouping load-bearing rather than decorative.
+const ungroupedLit = (roster: number) =>
+  Math.max(0, roster - 1) * highlightStepMs(roster) + WAVE_LIT_MS;
+mustCatch('a wave that reverts to ONE pill per step (the 56-platform ceiling returning)',
+  ungroupedLit(MAX_ROSTER) > SEARCH_MIN_MS);
+
 mustCatch('a deadline that forgets the wave still has to RISE and HOLD on the last pill',
-  !everyPlatformSeen((ROSTER - 1) * highlightStepMs(ROSTER) + WAVE_LIT_MS - 1, ROSTER));
+  !everyPlatformSeen(waveDelayMs(ROSTER - 1, highlightStepMs(ROSTER)) + WAVE_LIT_MS - 1, ROSTER));
 
 // A roster that outgrows the reveal budget.
 mustCatch('a catalogue that outgrows the reveal budget',

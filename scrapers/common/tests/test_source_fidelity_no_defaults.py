@@ -63,7 +63,13 @@ PERIOD_DEFAULT_ALLOWLIST = {
     "ramzalqasim", "toor",
 }
 # Platforms whose ENTIRE catalogue is one period by construction (short-stay marketplaces).
-SINGLE_PERIOD_PLATFORMS = {"gathern", "aqarmonthly"}
+# compoundin added 2026-09-20. Its entire catalogue is ANNUAL compound rent, and that is the
+# platform's own statement rather than our inference: every unit page carries "Pay your annual rent
+# in easy monthly installments with Ejari" beside an RNPL badge, and the unit price itself carries
+# no period label of its own — so there is no per-listing token to read and nothing is being
+# overridden. Consistent with the standing RNPL→ANNUAL reading. If compoundin ever lists a monthly
+# contract, this entry is what must be revisited.
+SINGLE_PERIOD_PLATFORMS = {"gathern", "aqarmonthly", "compoundin"}
 
 _HARDCODED_PERIOD_RE = re.compile(r'"rent_period"\s*:\s*"(annual|monthly)"\s*if\b')
 
