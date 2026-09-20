@@ -101,13 +101,13 @@ export const PLATFORM_META: LoaderPlatform[] = [
   // under-claim what Ezhalah searches, and reusing ANOTHER platform's logo is the misattribution
   // the owner called a legal problem. Swap each require() as a real file lands; nothing else here
   // or in ResultCard.tsx needs to change.
-  { name: 'Gudai',                 i18nKey: 'Gudai Real Estate',                       logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Safera',                i18nKey: 'Safera Real Estate',                      logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Al Humaidan',           i18nKey: 'Al Humaidan Investments',                 logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Aqar Najran',           i18nKey: 'Aqar Najran',                             logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Maqam Al Wisam',        i18nKey: 'Maqam Al Wisam Real Estate',              logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'CompoundIn',            i18nKey: 'CompoundIn',                              logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Waslna',                i18nKey: 'Waslna Real Estate',                      logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Gudai',                 i18nKey: 'Gudai Real Estate',                       logo: require('../../assets/images/gudai.png') },
+  { name: 'Safera',                i18nKey: 'Safera Real Estate',                      logo: require('../../assets/images/safera.png') },
+  { name: 'Al Humaidan',           i18nKey: 'Al Humaidan Real Estate Office',        logo: require('../../assets/images/alhumaidan.png') },
+  { name: 'Aqar Najran',           i18nKey: 'Aqar Najran',                             logo: require('../../assets/images/aqarnajran.png') },
+  { name: 'Maqam Al Wisam',        i18nKey: 'Maqam Al Wisam Real Estate',              logo: require('../../assets/images/fahadalshahri.png') },
+  { name: 'CompoundIn',            i18nKey: 'CompoundIn',                              logo: require('../../assets/images/compoundin.png') },
+  { name: 'Waslna',                i18nKey: 'Waslna Real Estate',                      logo: require('../../assets/images/wslnaa.png') },
 ];
 
 // Ordered SPECIFIC-first token → platform name map, mirroring ResultCard's SourceBadge matching so a

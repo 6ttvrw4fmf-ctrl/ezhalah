@@ -201,7 +201,7 @@ const backToStartCancels = (src: string) =>
   // The actions-row visibility moved into the pure resultsActionsRowVisible() gate (owner 2026-09-06,
   // `final=50`), but agent.tsx still feeds it the interview phase — so cancelling the round (phase → null)
   // still restores the row. Assert the phase is passed to that gate (afInterviewOwnsBrowsing now lives
-  // inside it and is proven in verify-af-terminal-at-50-no-load-more.ts).
+  // inside it and is proven in verify-af-terminal-at-25-no-load-more.ts).
   && /resultsActionsRowVisible\(\{[\s\S]{0,220}?afPhase: ageFlow\?\.phase \?\? null/.test(src)
   && /ageFlowStepsRef\.current = \[\];/.test(cancelBranch(src))
   && /syncGuidedFromSteps\(0\);/.test(cancelBranch(src))

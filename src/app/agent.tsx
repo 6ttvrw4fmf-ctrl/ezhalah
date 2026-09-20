@@ -902,9 +902,6 @@ export default function Agent() {
   // delay also clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s), so the
   // first move already reads the settled height of the thing being landed on.
   const LAND_PASSES_MS = [1400, 3200];
-  // Beat between a round's count landing and the NEXT round's card opening (owner 2026-09-04): long
-  // enough to read «لقينا N عقار أقرب لطلبك», short enough that the interview reads as one flow.
-  const AF_NEXT_ROUND_DELAY_MS = 900;
   const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
@@ -2205,25 +2202,15 @@ export default function Agent() {
         // initialReveal (honestTotal ≤ stopAt ⇒ reveal all fetched — no «عرض المزيد»), the composer
         // is replaced by «محادثة جديدة», and the transcript is saved in that state.
         if (searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
-        // ROUNDS CONTINUE AUTOMATICALLY WHILE TRUTHFUL QUESTIONS REMAIN (owner product rule
-        // 2026-09-04, supersedes the 2026-08-24 "continuing is a manual tap" wording for a round the
-        // user has already opened; the 2026-08-19 "never auto-open on a plain search turn" rule is
-        // untouched — this only continues an interview the user started). After the count lands,
-        // the SAME assessment the offer button uses decides: 'yes' → the next round opens on the
-        // narrowed cohort with every answered AND skipped question carried (never re-asked; Back and
-        // pill-removal keep working through the same carry); 'no' → the offer effect says so and
-        // shows the genuine results; 'unknown' → the button stays, nothing is asserted.
-        const continueQ = q; const continueGuided = guided;
-        if (total != null && total > INTERVIEW_STOP_AT && continueGuided && msgId) {
-          void assessNarrowing(continueQ, continueGuided.asked).then((verdict) => {
-            if (!stillMining() || verdict !== 'yes') return;
-            timers.push(setTimeout(() => {
-              if (ageFlowTokenRef.current !== token) return;
-              afCarryRef.current = { msgId, originQ: continueGuided.baseQ, facets: continueGuided.facets, asked: continueGuided.asked };
-              void startAgeFlow(continueQ);
-            }, Math.max(0, 1400 - (Date.now() - startedAt)) + 1100 + AF_NEXT_ROUND_DELAY_MS));
-          });
-        }
+        // A ROUND NEVER RE-OPENS ITSELF (owner 2026-09-20 — REVERSES the 2026-09-04 "rounds continue
+        // automatically" rule quoted below in git history). That rule popped a brand-new round of
+        // DIFFERENT questions onto the screen on a timer, with no tap from the user — indistinguishable
+        // from a stray popup, and it fired even when the round that just finished was mostly Skips.
+        // Skip means "not this question", never "ask me something else on your own initiative". A
+        // round ends here, full stop, whether it finished by running out of questions or by the user
+        // skipping to the end — that is the only outcome. Whether ANOTHER round is worth offering is
+        // still decided by assessNarrowing (unchanged) through the PASSIVE effect above it feeds,
+        // which only toggles the «تحديد أكثر» button visibility; opening a new round is a tap, always.
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
         timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
         // RESTORED 2026-09-06 (owner rejected the 2026-08-31 direct hand-off along with the redesign

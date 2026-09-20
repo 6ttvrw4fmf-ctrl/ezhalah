@@ -99,6 +99,11 @@ import { readRestoredFormState } from '../e2e/lib/formRestoreOracle.mjs';
 // is now a live consumer like every other journey and must call THE shared helper here.
 import { dismissCookieConsent } from './lib/liveConsent.ts';
 import { armForSubmit, classifyRapidCancelEntry } from './lib/armedSubmit.ts';
+// THE STOP LINE IS IMPORTED, NEVER RETYPED (2026-09-20). This journey hardcoded `50` in four
+// places; when the owner moved the line to 25 the app behaved correctly and this file failed,
+// asserting a rule that no longer existed. Every other AF barrier already imports it for exactly
+// this reason — see scripts/verify-af-rounds-never-self-reopen-and-finish-at-25.ts.
+import { INTERVIEW_STOP_AT } from '../src/lib/afRanking.ts';
 
 const DIST = new URL('../dist/', import.meta.url).pathname;
 let failed = 0;
@@ -915,7 +920,7 @@ try {
   // source-adjudicated 6/6 against hajerhouses' own «دورات المياه») and a scope ABOVE the new stop
   // line (measured 2026-09-04: base 231, every bathroom rung 48). The previous fixture,
   // Factory/RentAnnual/الرياض, is 33 rows — a FINISHED set under the 50 rule, so the interview
-  // correctly no longer opens there. This one also lands ≤ 50 after its single answer (231 → 48),
+  // correctly no longer opens there. This one also lands low after its single answer (231 → 48-50),
   // which is exactly the completion the rule promises — asserted below.
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(4000);
@@ -925,7 +930,7 @@ try {
   await pickCity('الهفوف');
   await tap('بحث');
   const jStart = await waitForCount(45000);
-  check('[J] 1-question scope (Duplex/Buy/الهفوف) lands with a real start count ABOVE the 50 stop line', Number.isFinite(jStart) && jStart > 50, `start=${jStart}`);
+  check(`[J] 1-question scope (Duplex/Buy/الهفوف) lands with a real start count ABOVE the ${INTERVIEW_STOP_AT} stop line`, Number.isFinite(jStart) && jStart > INTERVIEW_STOP_AT, `start=${jStart}`);
 
   let jOpened = false;
   for (let i = 0; i < 6 && !jOpened; i++) {
@@ -1000,14 +1005,22 @@ try {
     check('[J] the closed interview lands on a genuinely narrowed, non-null result',
       !jFinalOpen && Number.isFinite(jFinal) && jFinal < jStart,
       `answered=${jAnswered ?? '(none)'} start=${jStart} final=${jFinal}`);
-    // THE 50 RULE, END TO END (owner 2026-09-04; rendering restyled 2026-09-05): a round that lands
-    // at ≤ 50 FINISHES the chat — every remaining listing is revealed with no «عرض المزيد», and the
+    // THE STOP-LINE RULE, END TO END (owner 2026-09-04; rendering restyled 2026-09-05; the line
+    // itself moved 50 → 25 on 2026-09-20): a round that lands at or below it FINISHES the chat — every remaining listing is revealed with no «عرض المزيد», and the
     // composer LOCKS in place (owner request 2026-09-05: no replacement card): the same box goes
     // readOnly with the closed-chat placeholder «أُغلقت هذه المحادثة…» pointing at the ☰, and the
-    // send arrow becomes a disabled lock. Asserted only when the landed count really is ≤ 50 (DB
-    // truth today is 48; if inventory grows past 50 the interview is right to keep going and this
-    // block simply does not apply — it never demands a completion the data does not owe).
-    if (Number.isFinite(jFinal) && jFinal <= 50) {
+    // send arrow becomes a disabled lock. Asserted only when the landed count really is at or below
+    // the line — if the scope lands above it the interview is right to keep going and this block
+    // does not apply; it never demands a completion the data does not owe. That is now the LIVE
+    // case: this scope landed at exactly 50, which was terminal at the old line and is a browsable
+    // set at 25, so the block SKIPS LOUDLY below rather than vanishing from the log.
+    if (Number.isFinite(jFinal) && jFinal > INTERVIEW_STOP_AT) {
+      skipCheck(`[J] the ≤ ${INTERVIEW_STOP_AT} completion assertions`,
+        `this scope landed at ${jFinal}, above the ${INTERVIEW_STOP_AT} stop line, so the interview is `
+        + 'right to keep going and owes no completion. Not a regression — but this journey is no longer '
+        + 'exercising the completion rule end to end, and wants a scope that lands at or below the line.');
+    }
+    if (Number.isFinite(jFinal) && jFinal <= INTERVIEW_STOP_AT) {
       // Assert the PAGER specifically, by its testid — not the substring «عرض المزيد» in the body.
       // That phrase is ALSO the label of the per-card "See more" details expander
       // (t('See more') === t('Load more') === «عرض المزيد»; ResultCard.tsx renders it for any Wasalt
@@ -1015,7 +1028,7 @@ try {
       // toggles whenever a Wasalt listing was in the ≤50 set — nothing to do with pagination. The
       // owner's rule is about the pagination loop; `results-load-more` is exactly that control.
       const loadMorePager = await page.locator('[data-testid="results-load-more"]:visible').count();
-      check('[J] ≤ 50 → no «عرض المزيد» pager is offered — every remaining listing is already revealed',
+      check(`[J] ≤ ${INTERVIEW_STOP_AT} → no «عرض المزيد» pager is offered — every remaining listing is already revealed`,
         loadMorePager === 0, `final=${jFinal} pager=${loadMorePager}`);
       // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11 — supersedes the "locked composer" look
       // asserted here until the same day): this whole journey is Filter-originated (started via
@@ -1035,10 +1048,10 @@ try {
         if (composerEls === 0) break;
         await page.waitForTimeout(1_000);
       }
-      check('[J] ≤ 50, Filter-origin → once the reveal settles, there is NO composer at all (not even a locked one)',
+      check(`[J] ≤ ${INTERVIEW_STOP_AT}, Filter-origin → once the reveal settles, there is NO composer at all (not even a locked one)`,
         composerEls === 0, `composerEls=${composerEls}`);
     } else if (Number.isFinite(jFinal)) {
-      console.log(`NOTE  [J] landed at ${jFinal} (> 50) — completion assertions not owed; the interview is right to continue`);
+      console.log(`NOTE  [J] landed at ${jFinal} (> ${INTERVIEW_STOP_AT}) — completion assertions not owed; the interview is right to continue`);
     }
   }
 

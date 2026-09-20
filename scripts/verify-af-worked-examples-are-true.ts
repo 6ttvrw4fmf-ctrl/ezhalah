@@ -111,10 +111,11 @@ const mustCatch = (what: string, caught: boolean) =>
 // The two real sentences that were live and false in this repo until today, in the canonical form.
 // These are the regression: if the escape clause or the fraction ever changes such that they become
 // true again, that is a deliberate product move and this file says so out loud.
-mustCatch('the real 2026-09-04 casualty «at N=50, k=47 does not qualify» (true at 25, false at 50)',
-  claimIsWrong({ total: 50, count: 47, qualifies: false, file: 'x', line: 1 }) !== null);
-mustCatch('the real 2026-09-04 casualty «at N=50, k=45 is the LAST qualifying answer» (k=46 would be rejected)',
-  claimIsWrong({ total: 50, count: 46, qualifies: false, file: 'x', line: 1 }) !== null);
+mustCatch('the real 2026-09-20 casualty «[N=51, k=50 -> qualifies]» (true at 50, false at 25) — the '
+    + 'exact sentence this barrier caught in afRanking.ts the day the owner moved the line back',
+  claimIsWrong({ total: 51, count: 50, qualifies: true, file: 'x', line: 1 }) !== null);
+mustCatch('the mirror of it: «at N=26, k=25 does NOT qualify» — it does, by the escape clause, at 25',
+  claimIsWrong({ total: 26, count: 25, qualifies: false, file: 'x', line: 1 }) !== null);
 
 // Both directions, so the checker is not simply failing everything or passing everything.
 mustCatch('a TRUE claim being falsely reported as wrong (exactly 10% removed qualifies)',
