@@ -661,3 +661,84 @@ def test_wasalt_deadcheck_does_not_borrow_aqar_soft_close():
     dm = C.PLATFORMS["wasalt"]["dead_marker"]
     assert C.verdict(200, _AQAR_CLOSED_BODY, dm) == "live"   # 200 + مغلق badge but NOT aqar → live
     assert C.verdict(404, "", dm) == "dead"                    # wasalt dead is the real 404
+
+
+# ── A run that DIES mid-delete must still leave an audit trail ────────────────────────────────
+# Earned 2026-09-20 by cleanup run 49535 (cleanup:wasalt). It wrote 500 pre-delete rows into
+# cleanup_deletion_log, deleted 1, then took a Postgres statement timeout (57014) in the delete
+# loop. Because the cleanup_runs insert sits AFTER the loop and the except handler called only
+# end_run(), the run left NO row in cleanup_runs — of every cleanup:* run in the preceding 30
+# days it was the only one without one, and every CONTROLLED abort wrote one. The cleanup audit
+# surface therefore showed wasalt's last action as the clean dry run that preceded it, while 499
+# claims of permanent deletion sat unexplained in the deletion ledger. end_run also reported
+# rows_seen=0, rows_upserted=0 over a row that really had been destroyed.
+
+class _DeleteTimeoutClient(_Client):
+    """Deletes normally for `allow_chunks` chunks, then raises the way postgrest surfaces a
+    statement timeout. cleanup_deletion_log has already committed by then, exactly as in prod."""
+    def __init__(self, rows, allow_chunks=0):
+        super().__init__(rows)
+        self.allow_chunks, self.delete_chunks = allow_chunks, 0
+
+    def table(self, name):
+        t = _Table(self, name)
+        real = t.execute
+
+        def execute():
+            if t._op and t._op[0] == "delete":
+                if self.delete_chunks >= self.allow_chunks:
+                    raise RuntimeError(
+                        "{'code': '57014', 'message': 'canceling statement due to statement timeout'}")
+                self.delete_chunks += 1
+            return real()
+
+        t.execute = execute
+        return t
+
+
+def _run_killed_mid_delete():
+    """Two tables → two delete chunks; the first commits, the second times out. Returns the
+    killer client after C.run() has raised."""
+    rows = {"testp_listings": [_cand(1)], "testp_other": [_cand(2)]}
+    c = _install(rows, POL(anomaly_floor=100), probe=lambda url: (404, ""),
+                 tables=("testp_listings", "testp_other"))
+    killer = _DeleteTimeoutClient(c.rows, allow_chunks=1)
+    C.sb = lambda: killer
+    raised = None
+    try:
+        C.run("testp", force=True)
+    except Exception as e:      # the original failure must still propagate to the caller
+        raised = e
+    assert raised is not None, "the underlying failure must never be swallowed"
+    assert "57014" in str(raised)
+    return killer
+
+
+def test_run_killed_mid_delete_still_writes_its_cleanup_runs_row():
+    killer = _run_killed_mid_delete()
+    runs = killer.inserted.get("cleanup_runs")
+    assert runs, ("a cleanup run that dies mid-delete must still record itself in cleanup_runs — "
+                  "otherwise its pre-delete deletion-ledger claims have nothing explaining them")
+    row = runs[0]
+    assert row["aborted"] is True
+    assert "57014" in (row["abort_reason"] or ""), "the run row must name why it died"
+
+
+def test_run_killed_mid_delete_reports_the_TRUE_partial_delete_count():
+    killer = _run_killed_mid_delete()
+    # one table's chunk committed before the timeout, the other never ran
+    assert len(killer.deleted) == 1, "exactly one table's delete should have committed"
+    runs = killer.inserted.get("cleanup_runs")
+    assert runs, "no cleanup_runs row was written at all, so no count was reported"
+    row = runs[0]
+    assert row["deleted"] == 1, (
+        f"the audit row must report the rows actually deleted, got {row['deleted']}. Reporting 0 "
+        "hides a real destruction; reporting 2 claims one that never happened.")
+
+
+def test_pre_delete_ledger_claims_are_still_written_when_the_delete_dies():
+    """Guards the direction that must NOT change: the ledger is written BEFORE the delete on
+    purpose (DELETION_SAFETY.md §1). Suppressing it on failure would turn the committed delete
+    into an UNLEDGERED HARD DELETE, which is strictly worse."""
+    killer = _run_killed_mid_delete()
+    assert killer.inserted.get("cleanup_deletion_log"), "pre-delete claims must still be recorded"

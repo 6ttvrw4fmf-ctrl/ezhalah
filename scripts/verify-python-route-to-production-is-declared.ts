@@ -108,6 +108,11 @@ const DECLARED: Record<string, Verdict> = {
   'verify-aqarmonthly-district-suffix-guard.ts': 'offline-safe',
   'verify-authoritative-null-price.ts': 'offline-safe',
   'verify-cleanup-anomaly-gate.ts': 'offline-safe',
+  // Measured 2026-09-20 (routine #11, run 49535): normal exit 0, blackhole exit 0. It spawns python
+  // into scrapers.common.tests.test_cleanup, whose _install() swaps C.sb for a fake client before
+  // cleanup.run() is ever called, so no real client is constructed and the verdict cannot depend on
+  // production being reachable.
+  'verify-cleanup-run-death-leaves-a-record.ts': 'offline-safe',
   // Measured 2026-09-18 (routine #4, ops_incident #307): normal exit 0, blackhole exit 0. Its python
   // harness replaces scrapers.common.db in sys.modules BEFORE importing the enricher, so no client is
   // ever constructed and the verdict cannot depend on production being reachable.
