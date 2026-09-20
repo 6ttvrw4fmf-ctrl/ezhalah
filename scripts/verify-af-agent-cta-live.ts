@@ -18,7 +18,7 @@ import { chromium } from 'playwright';
 import { gotoLive } from './lib/liveNav.ts';
 import { judgeAfCta, type AfCtaObservation } from './lib/afOfferAgreement.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import { AGENT_TURN_MS } from './lib/afJourneyPacing.ts';
+import { AGENT_TURN_MS, awaitFirstResultsSettled } from './lib/afJourneyPacing.ts';
 
 const BASE = 'https://ezhalah-app.vercel.app';
 // Self-sufficient endpoint (verify-live-checks-self-sufficient.ts §4b): the committed public
@@ -141,7 +141,27 @@ const run = async () => {
       await page.click('text=الوسيط الذكي', { timeout: 30_000 });
       await page.waitForTimeout(1500);
       for (const m of j.say) await say(page, m);
-      await page.waitForTimeout(6000);
+      // OBSERVE THE TURN, NEVER TIME IT (harness note 20; ops_incident #340, 2026-09-20). This was
+      // `await page.waitForTimeout(6000)` — a typed number standing in for the searching beat, and
+      // 4,450 ms SHORTER than the beat it stood in for (SEARCH_MIN_MS 10,000 + LOADER_EXIT_MS 450).
+      // Measured on production: after those 6,000 ms elapsed the reveal cascade was still mounting
+      // cards and the body text went on growing ~7,300 chars, so both the CTA read and the click
+      // below landed mid-cascade. The beat barrier could not see it — it only discovers literal
+      // waits >= 8,000 ms, and 6,000 sits beneath its floor.
+      const arrival = await awaitFirstResultsSettled(
+        () => page.locator('[data-testid^="card-listing-"]').count(),
+        async () => (await page.locator('[data-testid="results-actions"]').count()) > 0,
+        (ms) => page.waitForTimeout(ms),
+      );
+      if (!arrival.settled) {
+        // Never judge a screen we did not watch arrive. NOT EXERCISED still FAILS the run — a check
+        // that could not certify must never read green — but it is labelled for what it is.
+        failures.push(`${j.name}: NOT EXERCISED — the first results turn never settled; `
+          + 'the CTA was never read against a screen that had stopped changing.');
+        report.push(`SKIP  ${j.name} — results turn never settled (cards=${arrival.cards})`);
+        continue;
+      }
+      console.log(`      [settled] ${j.name}: ${arrival.cards} cards held still before the CTA was read`);
 
       const cta = page.locator('[data-testid="results-narrow"]');
       const ctaOffered = (await cta.count()) > 0;

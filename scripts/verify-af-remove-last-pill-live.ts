@@ -58,7 +58,7 @@ import { chromium } from 'playwright';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import { AGENT_TURN_MS, describeLoad, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
+import { AGENT_TURN_MS, awaitFirstResultsSettled, describeLoad, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
 
 /** Marks an abort raised because a card was never OBSERVED, so the catch does not double-report it. */
 const UNOBSERVED_ABORT = '[unobserved]';
@@ -516,7 +516,21 @@ try {
   const n0 = searches.length;
   await tap('بحث');
   check('the baseline search landed', await waitForSearch(n0, 40000), `${searches.length} request(s)`);
-  await page.waitForTimeout(6000);
+  // OBSERVE THE TURN, NEVER TIME IT (harness note 20; ops_incident #338/#340, 2026-09-20). This was
+  // `await page.waitForTimeout(6000)` — 5,050 ms SHORTER than the live searching beat, so the reveal
+  // cascade was still mounting cards when the journey resumed. The card-count reads further down
+  // (cardsDelta / expectedFirstPage, the ones that produced #338's reproducible «14 where
+  // initialReveal() computed 15») were therefore sampling a race, not measuring the product.
+  // Registered-and-forbidden by verify-af-live-journeys-outlast-the-search-beat.ts §3b.
+  {
+    const arrival = await awaitFirstResultsSettled(
+      () => page.locator('[data-testid^="card-listing-"]').count(),
+      async () => (await page.locator('[data-testid="results-actions"]').count()) > 0,
+      (ms) => page.waitForTimeout(ms),
+    );
+    check('the baseline results turn SETTLED before anything read it',
+      arrival.settled, `cards=${arrival.cards} — never held still; every read below would be a race`);
+  }
   B0 = searches[searches.length - 1]?.body ?? null;
   N0 = searches[searches.length - 1]?.total ?? null;
   check('B0 — the pre-AF request carries NO AF predicate (nothing to restore would be vacuous)',
