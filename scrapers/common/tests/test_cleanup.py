@@ -742,3 +742,23 @@ def test_pre_delete_ledger_claims_are_still_written_when_the_delete_dies():
     into an UNLEDGERED HARD DELETE, which is strictly worse."""
     killer = _run_killed_mid_delete()
     assert killer.inserted.get("cleanup_deletion_log"), "pre-delete claims must still be recorded"
+
+
+def test_write_chunk_is_small_enough_for_the_slow_archive_trigger():
+    """Each delete fires trg_archive_hard_delete (jsonb archive of the whole row; ~16ms/row on
+    wasalt because of its ar_data blob). At 200/batch that is ~3.4s in one statement and 57014'd a
+    real wasalt drain against PostgREST's 8s timeout. Keep the write chunk small enough for a wide
+    margin on the slowest table — a regression back to a big batch reintroduces the timeout."""
+    assert C._WRITE_CHUNK <= 100, (
+        f"_WRITE_CHUNK={C._WRITE_CHUNK}: at ~16ms/row the archive trigger makes a delete batch this "
+        "big approach the 8s statement_timeout on wasalt. Keep it <= 100.")
+
+
+def test_deletes_are_actually_chunked_by_write_chunk(monkeypatch):
+    """More candidates than _WRITE_CHUNK must still all be deleted (proves the loop chunks, not
+    that it silently drops the tail)."""
+    n = C._WRITE_CHUNK * 2 + 7
+    c = _install({"testp_listings": [_cand(i) for i in range(n)]},
+                 POL(max_delete_per_run=n + 100, anomaly_floor=n + 100), probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["deleted"] == n and len(c.deleted["testp_listings"]) == n

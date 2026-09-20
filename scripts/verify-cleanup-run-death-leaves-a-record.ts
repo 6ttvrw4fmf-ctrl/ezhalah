@@ -131,8 +131,8 @@ const mustCatch = (label: string, caught: boolean) => {
 // chunk that DID commit into an UNLEDGERED HARD DELETE, which is strictly worse than a stale claim.
 {
   const m = run(mutate(
-    '                    if log_rows:\n                        for i in range(0, len(log_rows), 200):',
-    '                    if False:\n                        for i in range(0, len(log_rows), 200):'));
+    '                    if log_rows:\n                        for i in range(0, len(log_rows), _WRITE_CHUNK):',
+    '                    if False:\n                        for i in range(0, len(log_rows), _WRITE_CHUNK):'));
   mustCatch('pre-delete ledger claims being suppressed when the delete dies',
     m[TESTS[2]].startsWith('RED'));
 }
