@@ -2239,16 +2239,26 @@ export default function Agent() {
         // skipping to the end — that is the only outcome. Whether ANOTHER round is worth offering is
         // still decided by assessNarrowing (unchanged) through the PASSIVE effect above it feeds,
         // which only toggles the «تحديد أكثر» button visibility; opening a new round is a tap, always.
+        // NO COMPLETION BEAT (owner 2026-09-20, shown the card and asked for it gone: "remove this
+        // bro no need for it ... if user selects or clicks skip its fine"). REVERSES the 2026-09-06
+        // restoration of the «لقينا N عقار أقرب لطلبك» tick: `to` is never handed to the card, so
+        // MiningTransition's `done` never flips, no checkmark and no sentence are ever drawn, and the
+        // overlay is dismissed the moment the results are ready instead of holding ~1.1s on a
+        // celebration the user did not ask for. Applies to EVERY ending — answers committed or every
+        // question skipped — because the owner named both.
+        //
+        // WHAT IS DELIBERATELY KEPT: the searching animation still covers the re-search. Dropping it
+        // too would leave the user on the old screen with no sign anything is happening for the few
+        // seconds the RPC takes, which is the one thing worse than a beat that lingers.
+        //
+        // `to: null` is not a new state: MiningTransition already renders exactly this whenever the
+        // count would overstate (its own header calls out "`done` never flips ⇒ no beat at all"), so
+        // this removes a call site rather than teaching the card a new shape. The 1.4s floor stays —
+        // it stops the card flashing up and vanishing when the search returns almost instantly.
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
-        timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
-        // RESTORED 2026-09-06 (owner rejected the 2026-08-31 direct hand-off along with the redesign
-        // it belonged to): `to` landing swaps the card's copy to the «لقينا N عقار أقرب لطلبك» beat,
-        // and the overlay then holds ~1.1s so that sentence is actually readable before the results
-        // are revealed. A 450ms seal was right for a card that said nothing on completion; it is too
-        // short to read a sentence.
         timers.push(setTimeout(() => {
           if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
-        }, wait + 1100));
+        }, wait));
         timers.push(setTimeout(() => {
           if (!stillMining()) return;
           // LAND ON THE NEW TURN (owner 2026-08-24): the old cards stay exactly where they are, and the
