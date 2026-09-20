@@ -1,19 +1,22 @@
-// THE ADVANCED FILTER NARROWS IN ROUNDS UNTIL ≤ 50 OR NOTHING TRUTHFUL REMAINS (owner product rule
-// 2026-09-04), and it never repeats an answered or skipped question, never invents one, and never
-// shows a stale selection.
+// A ROUND FINISHES ON ≤ 50 OR NOTHING TRUTHFUL REMAINING, AND NEVER RE-OPENS ITSELF (owner
+// 2026-09-20 — REVERSES the 2026-09-04 "rounds continue automatically" rule this file used to pin;
+// see git history for that rule's own reasoning). It never repeats an answered or skipped question,
+// never invents one, and never shows a stale selection.
 //
-//   > 50 results  → keep offering NEW certified, unasked questions in rounds, automatically, using
-//                   different unanswered fields, until ≤ 50 or genuinely nothing truthful is left.
-//   ≤ 50 results  → stop, reveal every remaining listing (no «عرض المزيد»), finish the chat
-//                   (composer replaced by «محادثة جديدة»).
-//   > 50, nothing → say so out loud and show the genuine results — never guess, never lock the chat.
-//   skipped       → stays skipped for the whole AF session; answered → never re-asked; Back and
-//                   pill-removal keep working through the same carry.
-//   the card      → its selection reflects the CURRENT question only (stale-state fix).
+//   any round    → ends the moment it runs out of questions OR the user skips to the end. Full stop,
+//                  always — a round can never re-open a new one on its own, on a timer or otherwise.
+//                  Skip means "not this question", never "ask me something else on your own
+//                  initiative" — a round that was mostly Skips is not an exception.
+//   ≤ 50 results → additionally: reveal every remaining listing (no «عرض المزيد»), finish the chat
+//                  (composer replaced by «محادثة جديدة»).
+//   > 50 results → the PASSIVE assessNarrowing effect (unchanged) decides whether «تحديد أكثر»
+//                  shows; tapping it is the ONLY way a new round can ever open.
+//   skipped      → stays skipped for the whole AF session; answered → never re-asked; Back and
+//                  pill-removal keep working through the same carry.
+//   the card     → its selection reflects the CURRENT question only (stale-state fix).
 //
 // Executes the pure modules where a pure module exists (afRanking, initialReveal, afSteps) and pins
-// the executable shape of agent.tsx / the card elsewhere, comments stripped first. The behaviour is
-// production-proven on the exact 2026-09-04 journey (Riyadh → Buy → Residential → apartments).
+// the executable shape of agent.tsx / the card elsewhere, comments stripped first.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { INTERVIEW_STOP_AT, MIN_TOTAL_TO_SHOW } from '../src/lib/afRanking.ts';
@@ -29,7 +32,7 @@ const check = (label: string, ok: boolean, why = '') => {
 const root = join(import.meta.dirname, '..');
 const read = (rel: string) => readFileSync(join(root, rel), 'utf8');
 
-console.log('\nAdvanced Filter rounds: continue while truthful, finish at ≤ 50, never repeat, never stale (owner 2026-09-04)\n');
+console.log('\nAdvanced Filter rounds: never self-reopen, finish at ≤ 50, never repeat, never stale (owner 2026-09-20)\n');
 
 // ── 1. The stop line, EXECUTED ───────────────────────────────────────────────────────────────────
 check(`INTERVIEW_STOP_AT is 50 (got ${INTERVIEW_STOP_AT})`, INTERVIEW_STOP_AT === 50);
@@ -43,23 +46,27 @@ const agent = stripComments(read('src/app/agent.tsx'));
 check('agent.tsx feeds initialReveal the canonical stop line (stopAt: INTERVIEW_STOP_AT), never a retyped number',
   /stopAt: INTERVIEW_STOP_AT/.test(agent) && !/stopAt: 25\b/.test(agent) && !/stopAt: 50\b/.test(agent));
 
-// ── 2. ≤ 50 completes the chat; > 50 continues through the ONE shared assessment ────────────────
+// ── 2. ≤ 50 completes the chat; a round NEVER re-opens itself, at any total ─────────────────────
 const fin = agent.slice(agent.indexOf('const finishGuided = '), agent.indexOf('const startAgeFlow = '));
 check('finishGuided exists', fin.length > 200);
 check('R11.1: a round landing at ≤ INTERVIEW_STOP_AT completes the chat (composer → «محادثة جديدة»)',
   /if \(searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(fin));
-check('> INTERVIEW_STOP_AT: the SAME assessment the offer button uses decides whether a round follows',
-  /total > INTERVIEW_STOP_AT && continueGuided && msgId/.test(fin)
-  && /assessNarrowing\(continueQ, continueGuided\.asked\)/.test(fin));
-check("only a 'yes' verdict continues — 'no' and 'unknown' never open a round (nothing is invented)",
-  /if \(!stillMining\(\) \|\| verdict !== 'yes'\) return;/.test(fin));
-check('the next round CARRIES the origin, every committed facet and every answered-or-skipped id (no repeats)',
-  /afCarryRef\.current = \{ msgId, originQ: continueGuided\.baseQ, facets: continueGuided\.facets, asked: continueGuided\.asked \};/.test(fin)
-  && /void startAgeFlow\(continueQ\);/.test(fin));
-check('the continuation is bound to the round token — a superseded flow can never auto-open a round',
-  /if \(ageFlowTokenRef\.current !== token\) return;\s*afCarryRef\.current = \{ msgId/.test(fin));
-check('the continuation waits for the count to land and read (AF_NEXT_ROUND_DELAY_MS), it does not pre-empt the results',
-  /AF_NEXT_ROUND_DELAY_MS/.test(fin) && /const AF_NEXT_ROUND_DELAY_MS = \d+;/.test(agent));
+check('finishGuided never calls startAgeFlow — a round cannot open the next one itself',
+  !/startAgeFlow/.test(fin));
+check('finishGuided never calls assessNarrowing — deciding whether MORE narrowing is worth offering '
+    + 'belongs solely to the passive button effect, never to the flow that just finished',
+  !/assessNarrowing/.test(fin));
+check('the dead auto-continue timing knob is gone, not just unused (root-cause removal, not a stray flag)',
+  !/AF_NEXT_ROUND_DELAY_MS/.test(agent));
+// The ONE place a round CAN open is the passive effect + the «تحديد أكثر» tap handler — both outside
+// finishGuided. Confirmed together so "moved the call, not deleted it" cannot pass.
+const passive = agent.slice(agent.indexOf('const assessNarrowing = async'), agent.indexOf('const runRefine = async'));
+check('assessNarrowing is called exactly once in the whole file — the passive button effect, never a second call site',
+  (agent.match(/assessNarrowing\(/g) ?? []).length === 1
+  && /void assessNarrowing\(q, asked\)\.then/.test(passive));
+check('opening a new round anywhere in the file requires a Pressable tap (narrow-further button), '
+    + 'never a bare timer',
+  /onPress={\(\) => \{[\s\S]{0,700}?void startAgeFlow\(q\);/.test(agent));
 
 // ── 3. > 50 with nothing truthful left is SILENT, but never a completion ────────────────────────
 // Owner reversal 2026-09-12/13: the 2026-09-04 decision to SPEAK a "nothing left" verdict as a chat
@@ -151,10 +158,19 @@ mustCatch('an UNGATED setCompleted(true) site locking the chat outside the ≤ 5
     return total !== gated;
   })());
 
-// The round losing its carry: round N+1 re-asks everything round N already asked.
-mustCatch('the next round dropping the answered-or-skipped carry (questions repeat)',
-  !/afCarryRef\.current = \{ msgId, originQ: continueGuided\.baseQ, facets: continueGuided\.facets, asked: continueGuided\.asked \};/
-    .test(fin.replace('asked: continueGuided.asked }', 'asked: [] }')));
+// THE REGRESSION THIS FILE EXISTS TO CATCH NOW: the exact 2026-09-04 auto-continue call, verbatim,
+// re-added inside finishGuided. If it comes back, two of the §2 checks must fail on it.
+{
+  const reintroduced = fin.replace(
+    'const wait = Math.max(0, 1400 - (Date.now() - startedAt));',
+    "if (total != null && total > INTERVIEW_STOP_AT && guided && msgId) { "
+      + "void assessNarrowing(q, guided.asked).then((verdict) => { if (verdict === 'yes') void startAgeFlow(q); }); } "
+      + 'const wait = Math.max(0, 1400 - (Date.now() - startedAt));',
+  );
+  mustCatch('the 2026-09-04 auto-continue call reintroduced into finishGuided',
+    reintroduced !== fin
+    && !(!/startAgeFlow/.test(reintroduced) && !/assessNarrowing/.test(reintroduced)));
+}
 
 // The card keyed on the title alone — the stale-selection defect, verbatim.
 mustCatch('the card selection keyed on titleKey alone (a re-shown tier keeps the old selection)',
