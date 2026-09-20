@@ -1350,6 +1350,68 @@ def end_run(
     return effective_ok
 
 
+# --- 2026-09-19 batch: seven small platforms onboarded in one pass -------------------------------
+# غدي / سفيرة / الحميدان are three tenant offices of one inblaj.net WordPress product and share a
+# parser (scrapers/common/inblaj_platform.py), but each keeps its OWN tables, registry row and run
+# ledger — a shared parser is not a shared platform.
+def upsert_gudai_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("gudai_residential_listings", rows)
+
+
+def upsert_gudai_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("gudai_commercial_listings", rows)
+
+
+def upsert_safera_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("safera_residential_listings", rows)
+
+
+def upsert_safera_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("safera_commercial_listings", rows)
+
+
+def upsert_alhumaidan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alhumaidan_residential_listings", rows)
+
+
+def upsert_alhumaidan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alhumaidan_commercial_listings", rows)
+
+
+def upsert_aqarnajran_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqarnajran_residential_listings", rows)
+
+
+def upsert_aqarnajran_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aqarnajran_commercial_listings", rows)
+
+
+def upsert_fahadalshahri_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("fahadalshahri_residential_listings", rows)
+
+
+def upsert_fahadalshahri_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("fahadalshahri_commercial_listings", rows)
+
+
+def upsert_wslnaa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wslnaa_residential_listings", rows)
+
+
+def upsert_wslnaa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wslnaa_commercial_listings", rows)
+
+
+# CompoundIn lists residential compounds only; its commercial table exists for schema symmetry with
+# every other platform (and so the shared retire/prune helpers can address it) but is never written.
+def upsert_compoundin_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("compoundin_residential_listings", rows)
+
+
+def upsert_compoundin_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("compoundin_commercial_listings", rows)
+
+
 def upsert_aldarim_residential_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Aldarim residential rows into their own table (source='Aldarim')."""
     _wasalt_batch("aldarim_residential_listings", rows)
