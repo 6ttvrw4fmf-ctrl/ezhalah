@@ -90,6 +90,27 @@ jobs:
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node e2e/live-sweep/run.mjs
+      # ── #347: THE SENTENCE THE USER IS LEFT LOOKING AT (routine #4, 2026-09-20) ────────────────
+      # The sweep's own show-more journey asserts the pager's behaviour and the closing line's
+      # numbers. It does NOT assert that the Results-Found sentence is a WHOLE shipped template —
+      # and on 2026-09-19 it was not: after the second press it froze one glyph short and rendered
+      # "…تطابق بحثك ▯" for 90s+, which is also why ops_incident #331 read that journey's headline
+      # as null. Twenty of the forty templates end in a non-BMP emoji, so the broken frame is
+      # common, not exotic.
+      #
+      # `continue-on-error: false` on purpose — this is a user-visible rendering defect, and the
+      # job's existing failure→alert bridge is what carries it to a human. It runs AFTER the sweep
+      # so a red here can never mask a sweep finding.
+      - name: The Results-Found sentence survives the 500-card mount (#347)
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url || 'https://ezhalah-app.vercel.app' }}
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: >-
+          node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON
+          scripts/verify-results-sentence-renders-whole-live.ts
+
       - name: Upload the journey journal
         if: always()
         uses: actions/upload-artifact@v4
@@ -125,3 +146,27 @@ jobs:
           --workflow live-search-sweep.yml
           --status ${{ contains(needs.*.result, 'failure') && 'failure' || (contains(needs.*.result, 'cancelled') && 'cancelled' || 'success') }}
           --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      # ── THE GATE (routine #4, 2026-09-20) ──────────────────────────────────────────────────────
+      # Added when this workflow became the HOME of a declared live barrier
+      # (verify-results-sentence-renders-whole-live.ts). Until then `alert` only REPORTED: it bridged
+      # the result to alert_event and always exited 0. That is the 2026-09-03 dark-barrier shape that
+      # verify-live-check-workflow-attendance.ts exists to forbid — the `sweep` job carries
+      # `timeout-minutes: 75`, and a job CANCELLED by its own timeout is neither `success` nor
+      # `failure`, so every step behind it reads «skipped» and the run does not go red. A barrier
+      # homed here could then stop executing entirely with nothing turning a single colour.
+      #
+      # Report FIRST, gate AFTER, so failing the run can never cost the alert row that reaches a
+      # human. Ordering is the whole design: the bridge step above is what notifies, this is what
+      # refuses to call a non-success run fine.
+      - name: Gate — a sweep that is not «success» turns this run red
+        run: |
+          printf '%s\n' '${{ toJSON(needs) }}'
+          if ! printf '%s' '${{ toJSON(needs) }}' | grep -q '"result": *"success"'; then
+            echo "no needed job reported success — refusing to report this run as healthy"
+            exit 1
+          fi
+          if printf '%s' '${{ toJSON(needs) }}' | grep -qE '"result": *"(failure|cancelled|skipped)"'; then
+            echo "a needed job did not reach success — failing so the barrier cannot go dark"
+            exit 1
+          fi

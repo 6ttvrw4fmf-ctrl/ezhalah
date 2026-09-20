@@ -84,9 +84,24 @@ export type IncidentRow = {
  */
 export type ExistenceTest = (a: Artifact) => boolean | null;
 
-const QUALIFIED = /(?:scripts|e2e|scrapers|supabase|sql|src)\/[A-Za-z0-9_./-]+\.(?:ts|tsx|mjs|cjs|py|sql)/g;
+// `tsx` BEFORE `ts`, AND a non-alphanumeric lookahead (repaired 2026-09-20, routine #10).
+// JS alternation is ordered: with `ts` first, `src/app/agent.tsx` matched `…agent.ts` and STOPPED,
+// so the extractor invented a file that has never existed and reported incident #260 — whose
+// citation is correct and names `src/app/agent.tsx` — as a phantom. That false red kept
+// incident-citation-guard.yml failing and a P1 `barrier_check_failed` alert open from 2026-09-14 to
+// 2026-09-20, unacknowledged. A guard that cries wolf is not a stricter guard; it is a guard people
+// learn to scroll past, and the obvious way to make it green is to delete it. The lookahead makes
+// the ordering belt-and-braces rather than load-bearing.
+const QUALIFIED =
+  /(?:scripts|e2e|scrapers|supabase|sql|src)\/[A-Za-z0-9_./-]+\.(?:tsx|ts|mjs|cjs|py|sql)(?![A-Za-z0-9])/g;
 const BARE = /\b(?:verify-[A-Za-z0-9_.-]+?\.(?:ts|mjs)|test_[A-Za-z0-9_]+\.py)\b/g;
-const DBFN = /\b(mon_[a-z0-9_]+)\b/g;
+// A GLOB IS NOT A CITATION OF ONE OBJECT (same repair, same day). `\b(mon_[a-z0-9_]+)\b` read the
+// prose `mon_detect_*` — "the detectors continue watching this class" — as a claim that a function
+// literally named `mon_detect_` exists, and reported incident #335 as a phantom. It is not a claim
+// about one function at all. A token that ends in `_`, or that is immediately followed by `*`, is a
+// prefix; the guard must not manufacture a name out of it. A fully spelled `mon_detect_x` is
+// unaffected, which is the direction that has to keep working and is proven below.
+const DBFN = /\bmon_[a-z0-9_]*/g;
 
 /**
  * Extracts every artefact a free-text citation names, de-duplicated and in a stable order.
@@ -111,7 +126,13 @@ export function citedArtifacts(citation: string): Artifact[] {
     rest = rest.split(m).join(' ');
   }
   for (const m of rest.match(BARE) ?? []) push('bare', m);
-  for (const m of rest.match(DBFN) ?? []) push('fn', m);
+  for (const m of rest.matchAll(DBFN)) {
+    const name = m[0];
+    // `mon_detect_*` / `mon_detect_` are PREFIXES, not names. See the DBFN header: reading one as a
+    // function is how a correct incident was reported as citing something that does not exist.
+    if (name.endsWith('_') || rest[m.index + name.length] === '*') continue;
+    push('fn', name);
+  }
   return out;
 }
 

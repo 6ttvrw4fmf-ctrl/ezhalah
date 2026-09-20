@@ -902,13 +902,10 @@ export default function Agent() {
   // delay also clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s), so the
   // first move already reads the settled height of the thing being landed on.
   const LAND_PASSES_MS = [1400, 3200];
-  // Beat between a round's count landing and the NEXT round's card opening (owner 2026-09-04): long
-  // enough to read «لقينا N عقار أقرب لطلبك», short enough that the interview reads as one flow.
-  const AF_NEXT_ROUND_DELAY_MS = 900;
   const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
-  // INTERVIEW_STOP_AT (50, owner product rule 2026-09-04 — was 25): the same line at which Advanced
+  // INTERVIEW_STOP_AT (25, owner 2026-09-20 — briefly 50 under the 2026-09-04 rule): the line at which Advanced
   // Filter stops narrowing (R11.1) and the set
   // is by contract the FINAL one, so there is nothing left for a first page to be a preview OF. Gated
   // on quotableTotal() — the honest total, null whenever the RPC count would overstate (client-only
@@ -1272,12 +1269,35 @@ export default function Agent() {
     if (!hadTurn) return; // cascade halted; cards stay frozen, «عرض المزيد» recovers via bufferMore
 
     if (wasFilterOrigin) {
-      // Erase the cancelled turn rather than freezing/annotating it — if the user opens الوكيل الذكي
+      // Erase the cancelled turn rather than freezing/annotating it — if the user opens الوسيط الذكي
       // again later, a dangling "بحث..." bubble from a search that (from their side) never completed
       // would contradict "it should feel like the search never completed". A bare `/agent` (no
       // filter/seed) then greets fresh, exactly like any other new chat.
-      setMsgs([]);
-      setBusy(false);
+      //
+      // THROUGH THE SHARED RESET, not a hand-written pair (ops_incident #341, the FOURTH recurrence
+      // of #211/#271/#319's class). This is a conversation EXIT: the transcript is erased and the
+      // user is sent to another route, so every conversation-scoped ref must die with it —
+      // chatIdRef, afCarryRef, pendingRefineRef/refineMsgIdRef, pendingScopeRef/pendingCityRef,
+      // lastQueryRef, saidRef/askCountRef, `completed`, and the ageFlowTokenRef bump that
+      // invalidates any guided round still in flight from the search just cancelled.
+      //
+      // MEASURED, because the honest answer used to be "undetermined" (routine #6, 2026-09-20):
+      // the agent screen DOES unmount on this router.replace('/'), so today every one of those refs
+      // is re-initialised by the remount anyway. Evidence: on production, Chromium, fresh context,
+      // 4/4 across both viewports, the greeting on the next /agent is TYPED FRESH (its paragraph
+      // grows 0 → 141 chars over ~1.5 s) rather than appearing whole — which only happens when
+      // sendGreeting() runs, which only happens when greetedRef is false, which only happens on a
+      // new component instance. So this call is a NO-OP on today's build.
+      //
+      // It is here because the invariant it upholds must not be a property of the router. Nothing
+      // enforces "leaving to a different route tears this screen down" — the sidebar path already
+      // navigates to /agent while ON /agent precisely BECAUSE the instance is reused, and a future
+      // tab navigator, keep-alive, or shared-layout change would make that true here too, silently,
+      // with the user landing in the abandoned chat. An exit that routes through the reset is
+      // correct under BOTH regimes; one that relies on unmounting is correct only by accident.
+      // (The hand-written `setMsgs([]); setBusy(false);` this replaces are both inside the shared
+      // reset — this branch loses nothing it used to do, and gains the fourteen clears it forgot.)
+      resetConversationState();
       // The just-cancelled filter's JSON is still sitting in lastFilterRef (set by the param-consuming
       // effect before sendFilter ran). Without clearing it, resubmitting the SAME filter unchanged would
       // match `filter !== lastFilterRef.current` as false and the effect would silently no-op — the
@@ -2205,25 +2225,15 @@ export default function Agent() {
         // initialReveal (honestTotal ≤ stopAt ⇒ reveal all fetched — no «عرض المزيد»), the composer
         // is replaced by «محادثة جديدة», and the transcript is saved in that state.
         if (searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
-        // ROUNDS CONTINUE AUTOMATICALLY WHILE TRUTHFUL QUESTIONS REMAIN (owner product rule
-        // 2026-09-04, supersedes the 2026-08-24 "continuing is a manual tap" wording for a round the
-        // user has already opened; the 2026-08-19 "never auto-open on a plain search turn" rule is
-        // untouched — this only continues an interview the user started). After the count lands,
-        // the SAME assessment the offer button uses decides: 'yes' → the next round opens on the
-        // narrowed cohort with every answered AND skipped question carried (never re-asked; Back and
-        // pill-removal keep working through the same carry); 'no' → the offer effect says so and
-        // shows the genuine results; 'unknown' → the button stays, nothing is asserted.
-        const continueQ = q; const continueGuided = guided;
-        if (total != null && total > INTERVIEW_STOP_AT && continueGuided && msgId) {
-          void assessNarrowing(continueQ, continueGuided.asked).then((verdict) => {
-            if (!stillMining() || verdict !== 'yes') return;
-            timers.push(setTimeout(() => {
-              if (ageFlowTokenRef.current !== token) return;
-              afCarryRef.current = { msgId, originQ: continueGuided.baseQ, facets: continueGuided.facets, asked: continueGuided.asked };
-              void startAgeFlow(continueQ);
-            }, Math.max(0, 1400 - (Date.now() - startedAt)) + 1100 + AF_NEXT_ROUND_DELAY_MS));
-          });
-        }
+        // A ROUND NEVER RE-OPENS ITSELF (owner 2026-09-20 — REVERSES the 2026-09-04 "rounds continue
+        // automatically" rule quoted below in git history). That rule popped a brand-new round of
+        // DIFFERENT questions onto the screen on a timer, with no tap from the user — indistinguishable
+        // from a stray popup, and it fired even when the round that just finished was mostly Skips.
+        // Skip means "not this question", never "ask me something else on your own initiative". A
+        // round ends here, full stop, whether it finished by running out of questions or by the user
+        // skipping to the end — that is the only outcome. Whether ANOTHER round is worth offering is
+        // still decided by assessNarrowing (unchanged) through the PASSIVE effect above it feeds,
+        // which only toggles the «تحديد أكثر» button visibility; opening a new round is a tap, always.
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
         timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? { ...f, to: total } : f)); }, wait));
         // RESTORED 2026-09-06 (owner rejected the 2026-08-31 direct hand-off along with the redesign
@@ -3580,13 +3590,15 @@ export default function Agent() {
                         const hasMore = rc.hasMore && isLatestResults;
                         // Quote an exact match total ONLY when it is trustworthy (whole filter ran server-side).
                         const quoteTotal = !clientNarrowed;
-                        // ≤50 RULE (owner brief 2026-08-19 item 4, threshold raised 25 → 50 by the owner product
-                        // rule of 2026-09-04; the live value is INTERVIEW_STOP_AT in src/lib/afRanking.ts):
+                        // THE STOP-LINE RULE (owner brief 2026-08-19 item 4; the threshold went 25 → 50 on
+                        // 2026-09-04 and back to 25 on 2026-09-20 — never quote a digit here, the live value
+                        // is INTERVIEW_STOP_AT in src/lib/afRanking.ts):
                         // the auto-opening AF intro already
                         // correctly gated on this same threshold (agent.tsx ~1375) — this SEPARATE manual
                         // button did not, and its click path (startAgeFlow → rankQuestions, which itself
-                        // floors on the SAME MIN_TOTAL_TO_SHOW=51 constant) fell through to the plain
-                        // refine-chip flow for any ≤50 scope rather than doing nothing. A ≤50 result set
+                        // floors on the SAME MIN_TOTAL_TO_SHOW constant, INTERVIEW_STOP_AT + 1) fell through
+                        // to the plain refine-chip flow for any at-or-below-the-line scope rather than doing
+                        // nothing. A result set at or below the line
                         // gets ONLY the normal lightweight actions (Load more if genuinely more exists,
                         // FeedbackRow below) — never a "narrow further" prompt when there is nothing
                         // useful left to narrow.
@@ -3614,8 +3626,10 @@ export default function Agent() {
                         // withhold the pager from a user with thousands of matches. The predicate is
                         // now exhaustive over the phase union and fails the BUILD if a new phase is
                         // added without a decision. Behaviour today is identical by construction.
-                        // ONE terminal signal for the composer lock AND the pager (owner 2026-09-06,
-                        // `final=50`): once the AF round narrows to ≤ INTERVIEW_STOP_AT the chat is
+                        // ONE terminal signal for the composer lock AND the pager (owner 2026-09-06; the
+                        // rule was named `final=50` after the stop line OF THAT DAY — the live line is
+                        // INTERVIEW_STOP_AT, never a digit written here):
+                        // once the AF round narrows to ≤ INTERVIEW_STOP_AT the chat is
                         // completed — the composer locks and every match is already revealed, so the
                         // «عرض المزيد» row must be gone too. `completed` gates it here, alongside the
                         // existing interview-owns-browsing and has-something-to-offer clauses.
@@ -3689,7 +3703,7 @@ export default function Agent() {
                                   المزيد» reveals everything up to the cap, so the button needs no count caption. */}
                               {/* «عرض المزيد» ALWAYS pages the next 100 (buffer reveal, then real DB fetch when spent);
                                   «خلّنا نحدد الطلب أكثر» asks ONE clarifying question then re-searches — but only
-                                  when there is genuinely more than INTERVIEW_STOP_AT=50 left to narrow. */}
+                                  when there is genuinely more than INTERVIEW_STOP_AT=25 left to narrow. */}
                               {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
                                   user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
                                   the old CTA row must not sit behind it competing for the same decision.

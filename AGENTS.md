@@ -627,6 +627,26 @@ day late, and looks exactly like a scraper bug.
 The rakez off-plan rows are now adjudicated (`20260918172239`) and stay hidden. They are **kept, not
 deleted** — the owner wants them as the seed of a future off-plan feature, so do not prune them.
 
+**The rule is now CHECKED, and one clause above is stated too strongly (routine-8, 2026-09-20).**
+`scripts/verify-deliberate-deactivation-is-adjudicated.ts` (in `npm test`) discovers every migration
+whose executed SQL sets `active = false` on a listing table — by shape, never from a list anyone has
+to remember to extend — and fails unless the recovery job can tell it from an accident. It would have
+failed the rakez migration at PR time. Two corrections it encodes, both measured:
+
+1. **`missing_count` is a second protecting clause, not a decoration.** The comment above calls the
+   register "the ONLY clause that protects you"; the live function's `coalesce(missing_count,0) = 0`
+   protects a row too. This matters in the dangerous direction: `20260919010944` deactivated six
+   wasalt listings proven 404 on both language routes, and the only thing keeping them dead is a
+   `missing_count = 3` its own comment justifies as *monitoring consistency* — tidiness, not
+   survival. Anyone "cleaning up" that line returns six 404s to search. **Still always register:** an
+   adjudication is a decision that persists, a strike count is a number the next re-scrape may reset.
+2. **A companion migration rescues only if no 05:20 UTC recovery run falls in between.** Protection
+   five minutes later (`20260919230553` → `20260919231035`) is a real rescue; four days later is the
+   rakez incident. The barrier measures the gap in recovery runs, not in hours or in file adjacency.
+
+Measured the day the barrier landed: of the three deactivating migrations that followed this rule,
+the register was used **zero** times — two survived on a side effect, one on an owner reversal.
+
 ## PLATFORM ACTIVATION IS APPLY-AND-MIRROR IN ONE CHANGE (owner rule, 2026-09-06, permanent)
 
 **A platform-activation migration must land together with every declaration that has to travel with

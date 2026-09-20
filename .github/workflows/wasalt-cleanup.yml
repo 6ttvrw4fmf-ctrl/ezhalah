@@ -38,7 +38,10 @@ concurrency:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 180 min (was 60): the re-check drives a real browser per candidate (~15-20s each through the
+    # Cloudflare path), so a drain batch of ~500 needs ~2.5h. 60 min cancelled the first drain
+    # dry-run mid-recheck (2026-09-20). Still far under GitHub's 6h ceiling.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -2368,6 +2368,98 @@ for (const e of ['webkit', 'firefox']) {
     + `saw that workflow's result has no evidence about ${e}.`);
 }
 
+/** LEAVING THE AGENT AND COMING BACK GIVES A GENUINELY NEW CONVERSATION (ops_incident #341).
+ *
+ *  WHY THIS EXISTS. stop()'s filter-origin branch erases the transcript and router.replace('/')s
+ *  away. Whether the conversation-scoped refs it used to skip (chatIdRef, afCarryRef,
+ *  pendingRefineRef, saidRef, askCountRef, `completed`, the ageFlowTokenRef bump) survived that
+ *  navigation depended entirely on whether the agent screen UNMOUNTS — which a static read cannot
+ *  settle, and which #341 therefore recorded as UNDETERMINED for five days. stop() now routes
+ *  through resetConversationState() so it is correct either way (barrier: §F4 of
+ *  verify-conversation-state-never-inherited.ts), but the navigation model itself is load-bearing
+ *  for more than that one branch and nothing was watching it. This watches it.
+ *
+ *  THE ORACLE IS THE TYPING, NOT THE PRESENCE. A greeting being on screen does NOT discriminate:
+ *  if the screen persisted, `msgs` still holds the greeting from the previous visit, so the text is
+ *  there either way and an innerText check passes in both worlds. The greeting is TYPED (agent.tsx's
+ *  Typer), so a fresh conversation reveals it progressively — measured on production 2026-09-20,
+ *  Chromium, fresh context per rep, 4/4 across both viewports: the paragraph grows 0 → 141 chars
+ *  over ~1.5 s. A persisted screen would show it whole on the first sample. That growth is the only
+ *  thing separating "a new conversation" from "the one I abandoned, still sitting here".
+ *
+ *  IF THIS EVER GOES RED, read it as "the navigation model changed", not as "the greeting broke".
+ *  A tab navigator, a keep-alive, or a shared layout would all make the screen persist. That is a
+ *  legitimate product change — and it is exactly the change under which stop()'s pre-#341 code
+ *  would have stranded the user in the abandoned chat. So: re-verify the conversation exits still
+ *  reset (§F4 covers stop; startFresh and New Chat have their own), then re-oracle this journey on
+ *  whatever the new model makes observable. Do not simply widen it until it is quiet.
+ */
+JOURNEYS['agent-round-trip-is-a-fresh-conversation'] = async (mobile) => withPage({ mobile }, async (page) => {
+  const name = `agent-round-trip-is-a-fresh-conversation:${mobile ? 'mobile375' : 'desktop1440'}`;
+  // THE FULL LITERALS, NOT A HAND-TYPED PREFIX. The first draft matched on «أنا إزهله», which is a
+  // SUBSTRING of the greeting rather than a string in src/ — so a reworded greeting would have left
+  // this journey skipping at «no greeting on the first visit» forever, quietly, which is PART 9.5's
+  // exact failure. verify-e2e-targets-still-exist-in-the-product.ts caught it. Both variants the
+  // app can send are declared whole so that barrier can check them; the prefix is DERIVED, so a
+  // rename turns the suite red at the renaming PR instead of turning this journey into a no-op.
+  const GREETINGS = [
+    'أنا إزهله، مساعدك العقاري في المملكة العربية السعودية. أخبرني بما تبحث عنه وسأجد لك الإعلانات.',
+    'أنا إزهله، أساعد فقط في العقارات داخل المملكة العربية السعودية. أخبرني بما تبحث عنه، أو اضغط «تصفية» في الأعلى للبحث بالتفاصيل.',
+  ];
+  const PREFIXES = GREETINGS.map((g) => g.slice(0, 9));
+  // The greeting is TYPED, so the paragraph is a PREFIX of its literal for most of the reveal —
+  // length of the line that starts with it is the only thing that can be read mid-animation.
+  const greetLen = async () => {
+    const b = await bodyText(page).catch(() => '');
+    for (const pre of PREFIXES) {
+      const i = b.indexOf(pre);
+      if (i >= 0) return (b.slice(i).split('\n')[0] || '').length;
+    }
+    return 0;
+  };
+
+  await gotoOrRetryTransport(page, `${BASE}/`);
+  await settle(page);
+  await sleep(3000);
+  // Enter through the UI, the way a person does. A direct /agent deep link is deliberately sent
+  // Home (src/lib/webRefreshRoute.ts, owner 2026-08-16), so goto() would measure the wrong screen.
+  if (!(await clickText(page, 'الوسيط الذكي', { exact: false }))) {
+    skip(name, `the agent tab was not clickable (${clickReason()})`); return;
+  }
+  await sleep(5000);
+  if (!page.url().includes('/agent')) { skip(name, `the agent tab did not land on /agent (${page.url()})`); return; }
+  if (!(await greetLen())) { skip(name, 'no greeting on the first visit — nothing to compare a return against'); return; }
+
+  if (!(await clickText(page, 'تصفية', { exact: false }))) {
+    skip(name, `«تصفية» was not clickable, so the round trip never happened (${clickReason()})`); return;
+  }
+  await sleep(2500);
+  if (page.url().includes('/agent')) { skip(name, 'still on /agent after «تصفية» — the trip did not leave'); return; }
+
+  if (!(await clickText(page, 'الوسيط الذكي', { exact: false }))) {
+    skip(name, `the agent tab was not clickable on the way back (${clickReason()})`); return;
+  }
+  // Sample from the instant of return: a fresh conversation starts at 0 and grows.
+  const samples = [];
+  for (let i = 0; i < 24; i++) { samples.push(await greetLen()); await sleep(150); }
+  const first = samples[0], max = Math.max(...samples);
+
+  if (!page.url().includes('/agent')) { skip(name, 'the return leg did not land on /agent'); return; }
+  if (max === 0) {
+    defect(name, 'returning to the agent showed NO greeting at all',
+      `the round trip landed on /agent but no greeting ever appeared (24 samples over ~3.6s, all 0). `
+      + `A blank chat with no greeting is what ops_incident #341 predicted for a screen that persisted `
+      + `with greetedRef still true — check the conversation exits before touching this journey.`);
+  } else if (!(first < max)) {
+    defect(name, 'the greeting was NOT typed fresh on return — the conversation was inherited, not new',
+      `the greeting paragraph was already ${first} chars on the first sample and peaked at ${max}, so it `
+      + `was never re-typed: the agent screen kept its previous instance across the round trip. Every `
+      + `conversation-scoped ref survived with it. samples=[${samples.slice(0, 12).join(',')}]`);
+  } else {
+    pass(name, `the round trip produced a genuinely new conversation (greeting typed fresh, ${first} → ${max} chars)`);
+  }
+});
+
 let ran = 0;
 const perJourney = {};
 for (const [key, fn] of Object.entries(JOURNEYS)) {
@@ -2402,6 +2494,7 @@ for (const [key, fn] of Object.entries(JOURNEYS)) {
   }
 }
 
+
 console.log(`\n${'═'.repeat(90)}`);
 console.log(`JOURNEYS RUN: ${ran} on ${ENGINE} in ${Math.round((Date.now() - t0) / 1000)}s`);
 console.log(`REPRODUCTION RATIOS (failed/runs):`);
@@ -2416,9 +2509,30 @@ for (const f of findings) console.log(`  · [${f.journey}] ${f.what}: ${f.detail
 // harness.mjs's registerJourneys() header for the three orphan rows that made this necessary.
 console.log(`LEDGER KEYS OWNED BY THIS RUNNER: ${registerJourneys(Object.keys(JOURNEYS))}`);
 
-// A journey that never executed is recorded as `skip`, never as `pass`.
-for (const [k, v] of Object.entries(perJourney)) {
-  const verb = v.failed ? 'fail' : v.skipped === v.runs ? 'skip' : 'pass';
-  await ledgerRecord(k, verb, `${v.failed}/${v.runs} failed, ${v.skipped} skipped; engines=${engines.join('+')}`);
+// A SINGLE-JOURNEY DEV RUN IS NOT COVERAGE, AND MUST NOT MINT A PERMANENT ROW.
+//
+// JOURNEY_ONLY exists to develop one journey (see this file's header). Writing its result to the
+// ledger anyway has a cost that is invisible from here and lands on someone else: a journey being
+// DEVELOPED is by definition not committed to main yet, so the row it mints is an ORPHAN to
+// verify-journey-ledger-has-no-orphans-live.ts — which runs at the end of every leg of the
+// scheduled per-engine sweep. The author sees a green local run; the next scheduled sweep goes red
+// on an unrelated engine, for a key nothing in main produces.
+//
+// That is not hypothetical. On 2026-09-20 this routine developed `agent-round-trip-is-a-fresh-
+// conversation` with JOURNEY_ONLY at 10:53, and the firefox leg of run 35502346590 failed at
+// 11:00:30 naming exactly those two keys — while its own sweep reported DEFECTS: 0 and every
+// journey passed. The sweep was clean; the ledger was not, because of a dev run.
+//
+// The full sweep is unaffected: ONLY is empty there, so every row is written exactly as before.
+if (ONLY) {
+  console.log(`\nLEDGER: skipped — JOURNEY_ONLY=${ONLY} is a development run, not coverage. `
+    + `A row for a journey that is not on main yet is an orphan, and the scheduled per-engine sweep `
+    + `fails on it. Run the full sweep to record coverage.`);
+} else {
+  // A journey that never executed is recorded as `skip`, never as `pass`.
+  for (const [k, v] of Object.entries(perJourney)) {
+    const verb = v.failed ? 'fail' : v.skipped === v.runs ? 'skip' : 'pass';
+    await ledgerRecord(k, verb, `${v.failed}/${v.runs} failed, ${v.skipped} skipped; engines=${engines.join('+')}`);
+  }
 }
 process.exit(findings.length ? 1 : 0);

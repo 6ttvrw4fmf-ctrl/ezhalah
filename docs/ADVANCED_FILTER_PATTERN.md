@@ -72,16 +72,29 @@ count time (`property_age_option_counts_ar`) and search time
 is not null and s.property_age between …))` clause). Unknown-age is disclosed as a caption
 («العمر غير معروف لـ N من العقارات المطابقة»), never as a selectable option.
 
-## Thresholds (config constants in `advancedFilters.ts`)
+## Thresholds (config constants in `src/lib/afRanking.ts`)
+
+**Corrected 2026-09-20 (routine #5).** This table described the ORIGINAL age-question prototype and
+had drifted on all three rows — the names, the values, and the file. The constants were extracted
+into the pure `src/lib/afRanking.ts` on 2026-08-22 (so barriers could EXECUTE `scoreQuestion()`
+rather than grep it), `MIN_TOTAL_TO_SHOW` became derived (`INTERVIEW_STOP_AT + 1`), and the owner
+reversed the two-option rule on 2026-08-26 (contract R5.4.1). A reader consulting this table for
+"when is a question skipped?" got three confident wrong answers. `verify-docs-quote-real-af-constants.ts`
+now executes every number below against the module on every PR.
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `MIN_TOTAL_TO_SHOW` | 150 | Skip the whole question if the scope has < 150 total matching listings (not worth asking). Natural gap in real Buy/Rent × city data sits between ~112 and ~192–653. |
-| `MIN_REAL_BUCKET_COUNT` | 5 | An option is only offered if its bucket has ≥ 5 listings. (Counts are already strict, so this is the true per-bucket signal.) |
-| `MIN_OPTIONS_TO_SHOW` | 2 | If < 2 real options qualify, fall back to the plain refine-chip flow (a "choice" of 0–1 isn't a question). |
+| `INTERVIEW_STOP_AT` | 25 | The stop line. Above it AF may offer another round; at/below it the interview ends. (Briefly 50 from 2026-09-04; PR #3383 returned it to 25.) |
+| `MIN_TOTAL_TO_SHOW` | 26 | `= INTERVIEW_STOP_AT + 1`. Skip the whole question if the scope has fewer total matching listings — not worth asking. Derived, never typed. |
+| `MIN_REAL_OPTION_COUNT` | 5 | An option is only offered if its bucket has ≥ 5 listings. (Counts are already strict, so this is the true per-bucket signal.) Was called `MIN_REAL_BUCKET_COUNT` in the prototype. |
+| `MIN_OPTIONS_SINGLE` | 1 | A single-select question survives with even ONE real narrowing option — owner correction 2026-08-26, contract R5.4.1, superseding the prototype's `MIN_OPTIONS_TO_SHOW = 2`. |
+| `MIN_OPTIONS_MULTI` | 1 | Same floor for multi-select; `minOptionsFor()` is UNIFORM across both arities. |
+| `MEANINGFUL_NARROWING_FRACTION` | 0.1 | An option must remove ≥ 10% of the current set, OR land at/under `INTERVIEW_STOP_AT`. The one predicate shared by the offer gate and the ask gate. |
+| `AF_ROUND_MAX_QUESTIONS` | 4 | Count cap per round — never a quality filter; `scoreQuestion()` alone decides WHICH questions get asked. |
 
-Re-validate these two data-grounded numbers (`150`, `5`) against live distributions before reusing
-for a *different* advanced field — they were tuned for age specifically.
+Re-validate the data-grounded numbers (`MIN_REAL_OPTION_COUNT`, `MEANINGFUL_NARROWING_FRACTION`)
+against live distributions before reusing for a *different* advanced field — they were tuned for age
+specifically.
 
 ## Failure fallback (never freeze, never error)
 

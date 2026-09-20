@@ -76,36 +76,36 @@ check(`MEANINGFUL_NARROWING_FRACTION is the owner's 10% (got ${MEANINGFUL_NARROW
   'src/lib/afRanking.ts — the owner set this threshold on 2026-08-24 and extended it to the ask gate '
   + 'on 2026-08-25; changing it needs their decision');
 
-check(`INTERVIEW_STOP_AT is 50 (got ${INTERVIEW_STOP_AT}) — owner product rule 2026-09-04 (was 25)`,
-  INTERVIEW_STOP_AT === 50,
-  'src/lib/afRanking.ts — the round target and this gate\'s "finishes the job" clause both hang off it; '
-  + 'above 50 rounds continue while truthful questions remain, at ≤50 the interview finishes and reveals all');
+check(`INTERVIEW_STOP_AT is 25 (got ${INTERVIEW_STOP_AT}) — owner 2026-09-20 (50 → 25)`,
+  INTERVIEW_STOP_AT === 25,
+  'src/lib/afRanking.ts — this gate\'s "finishes the job" clause hangs off it; above 25 a question may '
+  + 'be asked and «تحديد أكثر» may be offered, at ≤25 the interview finishes and reveals all');
 
-// "Example at N=50: an option yielding <=45 qualifies; one yielding 47 does not." Exactly 10% must
-// qualify — the boundary is `>=`, so 50→45 is the last qualifying answer, not the first rejected one.
-// (Owner's original worked example was at N=50 with a 25 target; re-expressed at N=100 for the 50
-// target — same inclusive 10% boundary: 100→90 is the last qualifying answer, 100→94 is not.)
+// Exactly 10% must qualify — the boundary is `>=`. Expressed at N=100 so the fraction is isolated
+// from the ≤ INTERVIEW_STOP_AT escape clause below (90 and 94 are both far above 25, so only the
+// fraction can decide them): 100→90 is the last qualifying answer, 100→94 is not.
 check('N=100, best option yields 90 (exactly 10% removed) ⇒ OFFERED',
   offersMeaningfulNarrowing(100, opts(90, 99)) === true,
   'the 10% boundary is inclusive; a `>` here would silently drop the owner\'s own worked example');
 check('N=100, best option yields 94 (6% removed) ⇒ HIDDEN — a round that moves 100→94 is not worth a tap',
   offersMeaningfulNarrowing(100, opts(94, 99)) === false);
 
-// "Example at N=27: an option yielding 24 qualifies" — it both clears 10% and finishes the job.
-check('N=52, best option yields 49 ⇒ OFFERED',
-  offersMeaningfulNarrowing(52, opts(49)) === true);
+// "Example at N=27: an option yielding 24 qualifies" — it both clears 10% (3 of 27) and finishes
+// the job (24 ≤ 25). BOTH clauses fire, which is the common case.
+check('N=27, best option yields 24 ⇒ OFFERED',
+  offersMeaningfulNarrowing(27, opts(24)) === true);
 
 // THE SECOND CLAUSE ALONE. 26→25 removes 3.8% — well under the fraction — but it lands AT the target,
 // which is the entire point of the round. Only 26/27-sized sets can isolate this clause, which is
 // exactly why it is easy to delete by accident.
-check('N=51, best option yields 50 (only 2% removed, but it lands AT the ≤50 target) ⇒ OFFERED',
-  offersMeaningfulNarrowing(51, opts(50)) === true,
+check('N=26, best option yields 25 (only 3.8% removed, but it lands AT the ≤25 target) ⇒ OFFERED',
+  offersMeaningfulNarrowing(26, opts(25)) === true,
   'the `|| o.count <= INTERVIEW_STOP_AT` clause: finishing the job always qualifies, however small the step');
 
 // ── 2. The gate's own floor and its no-op guard ──────────────────────────────────────────────────
 check('at exactly INTERVIEW_STOP_AT results nothing is ever offered, however good the option',
-  offersMeaningfulNarrowing(50, opts(1)) === false,
-  'the ≤50 hide is `total <= INTERVIEW_STOP_AT`; a `<` would offer a round on an already-finished set');
+  offersMeaningfulNarrowing(25, opts(1)) === false,
+  'the ≤25 hide is `total <= INTERVIEW_STOP_AT`; a `<` would offer a round on an already-finished set');
 check('below the target either — the button is gone, only «عرض المزيد» remains',
   offersMeaningfulNarrowing(10, opts(1)) === false);
 check('a no-op option (count === total, 100% of the set already has it) never earns an offer',
