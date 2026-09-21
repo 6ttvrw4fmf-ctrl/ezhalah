@@ -623,3 +623,60 @@ def test_named_utility_features_are_true_and_absent_ones_stay_null():
     assert (row["electricity"], row["water_supply"], row["sanitation"]) == (True, True, True)
     bare, _, _ = _plain(21243, BODY_21243, TITLE_21243, meta_price=1100)
     assert not {"electricity", "water_supply", "sanitation"} & set(bare), "silence is NULL, never False"
+
+
+# ── the card's district text is the SOURCE's text, not its label (2026-09-21) ──────────────────────
+# `content.rendered` for post 21147, byte-for-byte as /wp/v2/عقارات served it on 2026-09-21 — the
+# listing a real-user test found on the live card reading «الموقع: حي الورود – الأحساء». The label
+# sits in its own <strong> inside a maps link, so html_text() and _location_line() both run on it.
+RAW_21147 = (
+    "<p class=\"PDq2pG_selectionAnchorContainer\" data-start=\"388\" data-end=\"535\"><strong data-start=\"388\" data-end=\"418\">أرض سكنية للبيع في الأحساء تقع في حي الورود، بمساحة 367.5م²<br />\n"
+    "</strong>تقع في حي الورود، وتتميز بموقع مناسب داخل الحي وواجهة شرقية على شارع بعرض 15 مترًا، بمساحة إجمالية تبلغ <strong data-start=\"523\" data-end=\"534\">367.5م²</strong>.</p>\n"
+    "<h4 data-start=\"537\" data-end=\"554\">تفاصيل الأرض</h4>\n"
+    "<ul data-start=\"555\" data-end=\"768\">\n"
+    "<li data-start=\"555\" data-end=\"588\"><a href=\"https://maps.app.goo.gl/Sgv2cXPAfkXpvzQaA\" target=\"_blank\" rel=\"noopener\"><strong data-start=\"557\" data-end=\"568\">الموقع:</strong> حي الورود – الأحساء</a></li>\n"
+    "<li data-start=\"589\" data-end=\"616\"><strong data-start=\"591\" data-end=\"606\">نوع العقار:</strong> أرض سكنية</li>\n"
+    "<li data-start=\"617\" data-end=\"639\"><strong data-start=\"619\" data-end=\"631\">المساحة:</strong> 367.5م²</li>\n"
+    "<li data-start=\"640\" data-end=\"665\"><strong data-start=\"642\" data-end=\"657\">رقم القطعة:</strong> 202/2/ص</li>\n"
+    "<li data-start=\"666\" data-end=\"690\"><strong data-start=\"668\" data-end=\"683\">رقم المخطط:</strong> 1100/4</li>\n"
+    "<li data-start=\"691\" data-end=\"717\"><strong data-start=\"693\" data-end=\"708\">عرض الشارع:</strong> 15 مترًا</li>\n"
+    "<li data-start=\"718\" data-end=\"738\"><strong data-start=\"720\" data-end=\"732\">الواجهة:</strong> شرقية</li>\n"
+    "<li data-start=\"739\" data-end=\"768\"><strong data-start=\"741\" data-end=\"755\">سعر البيع:</strong> 245,000 ريال</li>\n"
+    "</ul>\n"
+    "<h4 data-start=\"770\" data-end=\"805\">فرصة تملك أرض سكنية في الأحساء</h4>\n"
+    "<p data-start=\"806\" data-end=\"945\">تُعد الأرض خيارًا مناسبًا للراغبين في <strong data-start=\"844\" data-end=\"884\">تملك أرض سكنية في حي الورود بالأحساء</strong>، سواء بهدف بناء مسكن خاص أو للاستفادة من موقعها ضمن المنطقة.</p>\n"
+    "<p data-start=\"947\" data-end=\"974\"><strong data-start=\"947\" data-end=\"974\">سعر البيع: 245,000 ريال</strong></p>\n"
+    "<p data-start=\"976\" data-end=\"1097\">للاستفسار عن تفاصيل <strong data-start=\"996\" data-end=\"1030\">الأرض السكنية للبيع في الأحساء</strong> أو معرفة المزيد من المعلومات، يمكن التواصل مع <strong data-start=\"1077\" data-end=\"1096\">السدرة العقارية</strong>.</p>\n"
+)
+TITLE_21147 = "أرض سكنية للبيع في الأحساء بمساحة 367.5م²"
+
+
+def test_the_card_shows_the_sources_location_text_without_its_label(monkeypatch):
+    """MUTATION: return the whole matched line from _location_line (the pre-fix `line.strip()`)
+    and every assertion on `neighborhood` below fails — that line IS the card text. Only the label
+    and its colon go; the source's dash, city and punctuation stay exactly as written."""
+    seen = []
+    monkeypatch.setattr(R, "find_district_in_text", lambda text, cid: seen.append(text) or None)
+    row, _, why = R.map_listing(_post(21147, RAW_21147, TITLE_21147, types=(107,), city=(122,)),
+                                TERMS, {})
+    assert why == "" and row["neighborhood"] == "حي الورود – الأحساء", row and row["neighborhood"]
+    assert row["city_id"] == 3677 and row["price_total"] == 245000
+    # The district lookup reads the same line — it gets the place names, never the label words.
+    assert "حي الورود – الأحساء" in seen and not any("الموقع" in (t or "") for t in seen), seen
+
+    # Every live label form, each against its own verbatim line (21243 «الموقع الاستراتيجي»,
+    # 21210 «الموقع الجغرافي», 21257 «المنطقة», 21174 «الموقع:» with NO space after the colon).
+    assert R._location_line(BODY_21243) == "مدينة الخبر – حي الأمواج ."
+    assert R._location_line(BODY_21210) == "القويعية – منطقة الرياض."
+    assert R._location_line("المنطقة: القصيم – الفويلق.") == "القصيم – الفويلق."
+    assert R._location_line("الموقع:لبخة التابعة للرياض") == "لبخة التابعة للرياض"
+    assert R._location_line("الموقع:") is None, "a bare label states no location"
+
+
+def test_a_colon_inside_the_unlabelled_value_does_not_cut_it():
+    """_location_line now hands _loc_segments the value WITHOUT its label, so the old unconditional
+    `split(":", 1)[-1]` would cut at a colon in the value itself. The value below is 21153's own
+    location value plus its own «رقم المخطط: 3374» line, joined. MUTATION: split unconditionally →
+    the candidates collapse to [«3374»]."""
+    cands, _ = R._loc_segments("غرب عين دار – الاحساء (رقم المخطط: 3374)")
+    assert cands[:2] == ["غرب عين دار", "الاحساء"], cands

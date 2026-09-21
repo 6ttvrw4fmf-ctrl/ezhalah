@@ -79,11 +79,20 @@ was measured, and three of them CONTRADICT the handoff note this scraper was com
         False for a standalone negator word and drops the ones that fail, back to NULL. It can only
         delete, never invent. The shared helper wants the word-boundary fix centrally (it hits every
         platform: «صغير», «تغيير», «الغير»); this becomes a no-op once that lands.
-  · BEDROOMS are weak here and are left weak. Only id 30135's description matches the shared
-    «N غرف … وصالة» idiom. id 30274 says «3 غرف نوم + غرفة خادمة», which `rooms_from_phrase`'s
-    lookahead does not accept — that is a shared-parser gap, reported centrally rather than forked
-    into a moftah-only regex. «الصالات» is a HALL count and is never read as bedrooms. Bathrooms
-    are published by no field at all → NULL on 13/13.
+  · BEDROOMS / BATHROOMS live in NEITHER the Store API nor wp/v2 (its `meta` is []): the theme
+    renders them from product meta into a `<div class="property-features">` block on the product's
+    OWN page, one item per count — «3 غرف نوم», «3 دورة مياه» — the icons a user sees under the
+    price. Measured 2026-09-21 over all 13 pages: 8 carry the block (7 with both counts, id 30264
+    with bedrooms only), the 5 land/office pages carry none. The same block is repeated on the
+    related-product cards further down each page, so only the block inside the page's own
+    `id="product-<pid>"` section — before the first related card's `data-id` — is read. Each item
+    is «<count> <fixed noun>»: the count must be ONE number (Western or Arabic-Indic digits, or a
+    word numeral); «3+1», «2-3», «2 في كل دور» are ambiguous and stay NULL, never summed or guessed.
+    Dwelling types only. The block OUTRANKS prose: id 30198's block says «4 غرف نوم» where its
+    description lists «3 غرف نوم + غرفة خادمة» — the card shows the source's own count, 4. Where
+    no block exists, the old prose path still applies: only the shared «N غرف … وصالة» idiom
+    (id 30135), and «الصالات» is a HALL count, never bedrooms. A page that fails to load writes no
+    count at all, so a stored one is never erased by a failed fetch.
   · The `description` / `short_description` HTML is pasted from other tools (one carries ChatGPT
     transcript markup, class names and all). It is tag-stripped and entity-unescaped to visible
     text before anything reads it, and it is only ever read for amenities/rooms — never for a price
@@ -182,6 +191,20 @@ _SPEC_BAYUT_REF = "رقم بيوت المرجعي"
 _UTILITY_SPECS = {"الكهرباء": "electricity", "مياه": "water_supply", "الماء": "water_supply",
                   "صرف صحي": "sanitation", "الصرف صحي": "sanitation"}
 _TENANT_SPEC = "نوع السكن"
+
+# A room count only means something on a dwelling. A land plot or office never gets one.
+_DWELLING = {"Apartment", "Villa", "Duplex", "Floor", "Room", "Studio", "Chalet", "Rest House"}
+
+# The theme's counts block (see docstring). Captured with every item complete: items hold only an
+# <img> and a <br>, never a nested div.
+_FEATURES_RE = re.compile(r'class="property-features"[^>]*>((?:\s*<div[^>]*>.*?</div>)*)', re.S)
+_FEATURE_ITEM_RE = re.compile(r"<div[^>]*>(.*?)</div>", re.S)
+# «<count> <fixed noun>» after _norm_ar (ة→ه). The count part is validated by _count() below.
+_COUNT_NOUNS = (("bedrooms", re.compile(r"^(.+?)\s*غرف(?:ه)?\s*(?:ال)?نوم$")),
+                ("bathrooms", re.compile(r"^(.+?)\s*دور(?:ه|ات)\s*(?:ال)?مياه$")))
+_WORD_COUNT = {"واحد": 1, "واحده": 1, "اثنين": 2, "اثنان": 2, "اثنتين": 2, "ثلاث": 3, "ثلاثه": 3,
+               "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6, "سبع": 7, "سبعه": 7,
+               "ثمان": 8, "ثماني": 8, "ثمانيه": 8, "تسع": 9, "تسعه": 9, "عشر": 10, "عشره": 10}
 
 
 def fold(s: Optional[str]) -> Optional[str]:
@@ -394,6 +417,46 @@ def read_location(title: str) -> tuple[Optional[int], Optional[int], Optional[st
     return city_id, region_id, hood
 
 
+def _count(raw: str) -> Optional[int]:
+    """ONE number, or nothing: «3», «٣», «ثلاث». «3+1», «2-3», «2 في كل دور» → None."""
+    raw = raw.strip()
+    n = int(raw) if raw.isdecimal() else _WORD_COUNT.get(raw)   # int() reads «٣» as 3
+    return n if n is not None and 1 <= n <= 20 else None
+
+
+def page_rooms(page: Optional[str], pid: Any) -> dict[str, int]:
+    """{bedrooms, bathrooms} from the product page's own counts block; {} when the page did not
+    load, is not this product's, or carries no block. A count that is not one clear number is left
+    out (NULL), never summed or guessed."""
+    if not page:
+        return {}
+    start = page.find(f'id="product-{pid}"')
+    if start < 0:
+        return {}
+    end = page.find('data-id="', start)         # the related-product cards (same block) start here
+    m = _FEATURES_RE.search(page, start, end if end > 0 else len(page))
+    if not m:
+        return {}
+    out: dict[str, int] = {}
+    for item in _FEATURE_ITEM_RE.findall(m.group(1)):
+        text = normalize._norm_ar(fold(re.sub(r"<[^>]+>", " ", item)) or "")
+        for col, rx in _COUNT_NOUNS:
+            hit = rx.match(text)
+            n = _count(hit.group(1)) if hit else None
+            if n is not None:
+                out[col] = n
+    return out
+
+
+def fetch_page(s: cc.Session, url: Optional[str]) -> Optional[str]:
+    """The product page HTML, or None on any failure (which writes no count, never a NULL)."""
+    try:
+        r = s.get(url, headers={"Accept": "text/html"}, timeout=60)
+    except Exception:                              # noqa: BLE001 - a failed page is just unread
+        return None
+    return r.text if r.status_code == 200 else None
+
+
 def read_area(title: str, sp: dict[str, str]) -> Optional[int]:
     """«المساحة» attribute first, else the title's «مساحة N م²» suffix. Numeric run only."""
     a = num(sp.get(_SPEC_AREA))
@@ -403,9 +466,9 @@ def read_area(title: str, sp: dict[str, str]) -> Optional[int]:
     return a if a and a > 0 else None
 
 
-def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
-    """One Store-API product → (row, category, skip_reason). Returns (None, cat, why) for anything
-    this source has not actually said, never a filled-in guess."""
+def map_listing(p: dict, page: Optional[str] = None) -> tuple[Optional[dict], str, str]:
+    """One Store-API product (+ its page HTML, for the counts block) → (row, category, skip_reason).
+    Returns (None, cat, why) for anything this source has not actually said, never a guess."""
     pid = p.get("id")
     if not pid:
         return None, "residential", "no_product_id"
@@ -474,15 +537,15 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "district_ar": district_ar,
         "neighborhood": hood,
         "area_m2": read_area(title, sp),
-        # No `bathrooms` key: this source publishes no bathroom field anywhere, and a key the source
-        # never spoke to is left OUT rather than written as None — the column stays NULL without
-        # depending on db._unknown_must_not_overwrite_known() to strip it.
         "photo_urls": photos[:20] or None,
     }
-    # «N غرف … وصالة» / «الصالات» — bedrooms and halls only where the source states them in the
-    # shared idiom. «الصالات» is a HALL count and is never read as a bedroom count.
+    # Counts: the page's own block first, then the shared «N غرف … وصالة» prose idiom. A key the
+    # source never spoke to is left OUT, not None. «الصالات» is a HALL count, never bedrooms.
+    if property_type in _DWELLING:
+        row.update(page_rooms(page, pid))
     for k, v in normalize.rooms_from_phrase(" ".join(x for x in (desc, short) if x)).items():
-        row.setdefault(k, v)
+        if k != "bedrooms" or property_type in _DWELLING:
+            row.setdefault(k, v)
     halls = num(sp.get(_SPEC_HALLS))
     if halls is not None:
         row["halls"] = halls
@@ -627,14 +690,18 @@ def main() -> int:
             raise RuntimeError("store API returned no products")
         print(f"{SOURCE}: {len(products)} products discovered "
               f"(tls={s.__dict__.get('_moftah_profile')})", flush=True)
+        pages_read = 0
         for p in products:
-            row, cat, why = map_listing(p)
+            page = fetch_page(s, fold(p.get("permalink"))) if p.get("permalink") else None
+            pages_read += page is not None
+            row, cat, why = map_listing(p, page)
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)
+        print(f"  product pages read for room counts: {pages_read}/{len(products)}")
         notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         if skipped:
             print(f"  skipped (not guessed): {notes}")
@@ -645,7 +712,8 @@ def main() -> int:
                 print(f"   {r0['ad_number']:>9} {r0['transaction_type']:4} "
                       f"{str(r0['property_type']):16} {str(r0['city_ar']):8} "
                       f"d={str(r0['district_ar'])[:14]:14} a={str(r0['area_m2']):>5} "
-                      f"bd={str(r0.get('bedrooms')):>4} pt={r0.get('price_total')} "
+                      f"bd={str(r0.get('bedrooms')):>4} ba={str(r0.get('bathrooms')):>4} "
+                      f"pt={r0.get('price_total')} "
                       f"pa={r0.get('price_annual')} rp={r0.get('rent_period')} "
                       f"ph={len(r0.get('photo_urls') or [])}")
             return 0
