@@ -172,6 +172,12 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 3, test: /^(deletion_spike|mass_inactivation|unverified_inactivation|inactivation)/ },
   { routine: 3, test: /^(stale_|quarantine_growth|prune_|cleanup_evidence_gap)/ },
   { routine: 3, test: /^(served_after_source_gone|deleted_but_source_live|unledgered_hard_delete)/ },
+  // Rows no liveness mechanism reaches, on the tables mark_stale_listings_inactive() skips by name.
+  // It sits with stale_ and served_after_source_gone rather than with routine 11's
+  // unknown_treated_as_dead: nothing has been killed here, and the question — is this active row
+  // still real? — is the same one those two ask. Without this line the kind fell through to the
+  // triage fallback, which would have handed routine 2 a class routine 3 built (2026-09-21).
+  { routine: 3, test: /^liveness_rotation_stranded$/ },
   { routine: 3, test: /^(legacy_|duplex|fabricated_|url_collision|rows_collapse)/ },
   { routine: 3, test: /^(wasalt_annualisation_fabricated|gathern_rating_source_truth)$/ },
   { routine: 3, test: /^(phasea_offregion_pick|discarded_location_resolution|aqar)/ },
