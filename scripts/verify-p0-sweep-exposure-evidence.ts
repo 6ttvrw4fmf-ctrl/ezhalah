@@ -33,14 +33,13 @@
 // fail-safe branch raises, but drop the clause and the limb simply goes quiet again, exactly as it
 // did for three weeks.
 //
-// MUTATION-PROVEN offline (each of these turns this check RED, verified 2026-09-21):
-//   - the evidence clause removed from the predicate (the original defect, restored and watched)
-//   - the missing-key fail-safe branch removed (a stale contract would silently disable the limb)
-//   - the coverage threshold widened toward 0 (quieting the limb instead of fixing the path)
-//   - the 300s SLO or the 40s filing overhead widened in condition (1)
-//   - ops_p0_lane_contract() no longer publishing the coverage key
-//   - the apply-time both-direction proof block deleted
-//   - the predicate re-declared with a different argument list (a new overload, not a replacement)
+// THE PROOF IS EXECUTED, NOT DESCRIBED (§MUTATIONS at the bottom). Every mutation below re-breaks
+// the REAL migration source IN MEMORY and re-runs this file's own predicate against it. Nothing is
+// written to disk: a mutant that cannot be left behind cannot be committed by a concurrent session
+// in this shared working directory. M5 is the reason the checks are scoped to each function's own
+// BODY — it survived the first version of this barrier, because a whole-file text match was
+// satisfied by the PREDICATE's mention of the coverage key after the CONTRACT had stopped
+// publishing it. A surviving mutant found a real hole in the barrier before it merged.
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -81,178 +80,214 @@ function newestDefining(symbol: string): { file: string; sql: string } | null {
   return owning.length > 0 ? owning[owning.length - 1] : null;
 }
 
-const predFile = newestDefining(PREDICATE);
-check(
-  `a committed migration defines ${PREDICATE}()`,
-  predFile !== null,
-  'the predicate decides whether the P0 delivery forecast can fire at all; it cannot live only in '
-    + 'production (migration-drift condition 1)',
-);
-
-const contractFile = newestDefining(CONTRACT);
-check(
-  `a committed migration defines ${CONTRACT}()`,
-  contractFile !== null,
-);
-
-if (predFile === null || contractFile === null) {
-  console.error('\n✗ cannot continue without both definitions\n');
-  process.exit(1);
-}
-
 // Executable SQL only. The rationale comments in these migrations quote the clause text constantly
 // — matching raw file text would let a barrier be satisfied by a COMMENT describing the fix while
-// the code no longer does it. That is the exact "a pointer reads as coverage" shape AGENTS.md
-// records, so the strip is load-bearing rather than tidiness.
+// the code no longer does it. That is the "a pointer reads as coverage" shape AGENTS.md records,
+// so the strip is load-bearing rather than tidiness.
 function executable(sql: string): string {
   return sql.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
 }
 
-// SCOPE EACH CHECK TO ITS OWN FUNCTION BODY. Caught by mutation M5 on the day this shipped: the
-// predicate and the contract are defined in the SAME migration, so a whole-file `includes()` for
-// the coverage key was satisfied by the PREDICATE's mention of it even after the CONTRACT had
-// stopped publishing it — the barrier stayed green over a contract that would have pinned the
-// predicate permanently into its fail-safe branch. This is the same lesson
-// verify-p0-delivery-sla.ts records about its $wire$ block: a barrier satisfied by a token in a
-// different block is not checking what it claims to.
+// SCOPE EACH CHECK TO ITS OWN FUNCTION BODY (see M5 in the header). The predicate and the contract
+// ship in the same migration, so a whole-file match leaks between them.
 function bodyOf(sql: string, symbol: string): string {
   const start = sql.search(
     new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${symbol}\\b`, 'i'));
   if (start < 0) return '';
   const rest = sql.slice(start);
-  // Function bodies here are dollar-quoted with $function$; take up to the closing delimiter.
   const end = rest.indexOf('$function$', rest.indexOf('$function$') + 1);
   return executable(end < 0 ? rest : rest.slice(0, end + '$function$'.length));
 }
 
-const predCode = bodyOf(predFile.sql, PREDICATE);
-const contractCode = bodyOf(contractFile.sql, CONTRACT);
-check(
-  'both function bodies were isolated for checking (not whole-file text)',
-  predCode.length > 0 && contractCode.length > 0
-    && !predCode.includes(`function public.${CONTRACT}`)
-    && !contractCode.includes(`function public.${PREDICATE}`),
-  'the two objects ship in one migration; checks must not leak across them',
-);
+/**
+ * THE RULE, as one pure function over the migration's source text.
+ *
+ * Returns the labels of every property that is VIOLATED — empty means the exemption is
+ * evidence-backed, fail-safe and proven both ways. The real run reports these as check failures;
+ * §MUTATIONS re-runs this same function against deliberately broken source and asserts it speaks
+ * up. One implementation, so the mutation proof is a statement about the code that actually
+ * decides, not about a copy of it.
+ */
+function problems(migrationSql: string): string[] {
+  const out: string[] = [];
+  const bad = (s: string) => out.push(s);
 
-// ---------------------------------------------------------------------------------------------
-// 1. The evidence clause itself.
-check(
-  `the predicate consults ${EVIDENCE_KEY} (evidence), not only the detector-membership proxy`,
-  predCode.includes(EVIDENCE_KEY),
-  'the exemption is back to asserting that lane MEMBERSHIP implies lane COVERAGE. It does not: the '
-    + 'sweep runs the same detectors and wins the raise whenever it observes the condition first. '
-    + 'Measured 2026-09-21: 2 of 2 sweep-born P0s breached while this limb read green.',
-);
+  const predCode = bodyOf(migrationSql, PREDICATE);
+  const contractCode = bodyOf(migrationSql, CONTRACT);
 
-check(
-  'a missing coverage key FAILS SAFE (an unreadable contract raises, never silently exempts)',
-  /not\s*\(\s*p_contract\s*\?\s*'lane_sweep_coverage_ratio'\s*\)/.test(predCode),
-  'every other unreadable branch in this predicate raises; this one must too, or a contract that '
-    + 'loses the key disables the forecast instead of tripping it',
-);
+  if (predCode.length === 0) bad(`${PREDICATE}() is not defined here`);
+  if (contractCode.length === 0) bad(`${CONTRACT}() is not defined here`);
+  if (predCode.includes(`function public.${CONTRACT}`)
+      || contractCode.includes(`function public.${PREDICATE}`)) {
+    bad('the two function bodies could not be isolated from each other');
+  }
+  if (predCode.length === 0 || contractCode.length === 0) return out;
 
-// ---------------------------------------------------------------------------------------------
-// 2. The threshold, and the constants it must not be traded against.
-const thresholdMatch = predCode.match(
-  new RegExp(`${EVIDENCE_KEY}'\\s*\\)\\s*::numeric\\s*<\\s*([0-9.]+)`),
-);
-check(
-  'the starvation threshold is present and has not been widened toward zero',
-  thresholdMatch !== null && Number(thresholdMatch[1]) >= MIN_COVERAGE_THRESHOLD,
-  thresholdMatch
-    ? `found ${thresholdMatch[1]}, expected >= ${MIN_COVERAGE_THRESHOLD}. Lowering this quiets the `
-      + 'limb without making a single P0 arrive sooner. Fix the PATH: slim the sweep, or ask the '
-      + 'OWNER for a re-slot (cron schedule changes are owner-only).'
-    : 'the numeric comparison against the coverage ratio is gone',
-);
+  // --- 1. The evidence clause itself.
+  if (!predCode.includes(EVIDENCE_KEY)) {
+    bad(`the predicate consults ${EVIDENCE_KEY} (evidence), not only the membership proxy`);
+  }
+  if (!/not\s*\(\s*p_contract\s*\?\s*'lane_sweep_coverage_ratio'\s*\)/.test(predCode)) {
+    bad('a missing coverage key FAILS SAFE (an unreadable contract raises)');
+  }
 
-check(
-  `condition (1) still charges the sweep against the ${SLO_SECONDS}s SLO with ${FILING_OVERHEAD_S}s overhead`,
-  new RegExp(`\\+\\s*${FILING_OVERHEAD_S}\\s*>\\s*${SLO_SECONDS}\\b`).test(predCode),
-  'the owner set the 300s SLO and forbade widening it to match a slower reality; the 40s filing '
-    + 'overhead is the other half of the same forecast',
-);
+  // --- 2. The threshold, and the constants it must not be traded against.
+  const thresholdMatch = predCode.match(
+    new RegExp(`${EVIDENCE_KEY}'\\s*\\)\\s*::numeric\\s*<\\s*([0-9.]+)`),
+  );
+  if (thresholdMatch === null || Number(thresholdMatch[1]) < MIN_COVERAGE_THRESHOLD) {
+    bad('the starvation threshold is present and has not been widened toward zero');
+  }
+  if (!new RegExp(`\\+\\s*${FILING_OVERHEAD_S}\\s*>\\s*${SLO_SECONDS}\\b`).test(predCode)) {
+    bad(`condition (1) still charges the sweep against the ${SLO_SECONDS}s SLO `
+      + `with ${FILING_OVERHEAD_S}s overhead`);
+  }
 
-// ---------------------------------------------------------------------------------------------
-// 3. The pre-existing exemption branches must survive. This change ADDS a reason to raise; it must
-//    never become the only reason, which would silently drop the off-lane-detector guard that
-//    20260901104521 shipped.
-for (const [label, needle] of [
-  ['an inactive lane still raises', "'lane_active'"],
-  ['a lane with no runs still raises', "'lane_runs_24h'"],
-  ['a P0-capable detector off the lane still raises', "'p0_capable_detectors'"],
-  ['the lane detector list is still compared', "'lane_detectors'"],
-] as const) {
-  check(label, predCode.includes(needle));
+  // --- 3. The pre-existing exemption branches must survive. This change ADDS a reason to raise; it
+  //        must never become the only one, which would drop the off-lane-detector guard of
+  //        20260901104521.
+  for (const [label, needle] of [
+    ['an inactive lane still raises', "'lane_active'"],
+    ['a lane with no runs still raises', "'lane_runs_24h'"],
+  ] as const) {
+    if (!predCode.includes(needle)) bad(label);
+  }
+  if (!/p_contract\s+is\s+null/.test(predCode)) bad('a null contract still raises');
+
+  // The off-lane-detector guard is asserted as the actual SET COMPARISON, not as the presence of
+  // the key name. Caught by mutation M10 on the day this shipped: swapping the iterated array for
+  // `'[]'::jsonb` neuters the guard completely while both key names survive elsewhere in the body
+  // (in the jsonb_typeof shape checks), so a token test read the defect as healthy. The guard is
+  // what 20260901104521 shipped; this change adds a reason to raise and must not cost that one.
+  const offLane =
+    /jsonb_array_elements_text\(\s*p_contract->'p0_capable_detectors'\s*\)\s+d[\s\S]{0,120}?not\s*\(\s*p_contract->'lane_detectors'\s*\?\s*d\s*\)/;
+  if (!offLane.test(predCode)) {
+    bad('a P0-capable detector off the lane still raises (the real set comparison, not a mention '
+      + 'of the key)');
+  }
+
+  // --- 4. Same signature — a CREATE OR REPLACE with a different argument list is a NEW OVERLOAD,
+  //        which leaves the old (silent) predicate live and callable alongside it.
+  if (!/p_max_sweep_s\s+numeric/.test(predCode) || !/p_contract\s+jsonb/.test(predCode)) {
+    bad('the predicate keeps its (numeric, jsonb) signature — no accidental second overload');
+  }
+
+  // --- 5. The contract must publish what the predicate reads, or the predicate sits permanently in
+  //        its fail-safe branch and the limb becomes a stuck-open alert — which, per mon_raise()'s
+  //        dedup, is itself a disabled barrier.
+  if (!contractCode.includes(`'${EVIDENCE_KEY}'`)) bad(`${CONTRACT}() publishes ${EVIDENCE_KEY}`);
+  if (!contractCode.includes("'lane_runs_inside_sweeps'")
+      || !contractCode.includes("'lane_runs_expected_inside_sweeps'")) {
+    bad('the contract publishes both terms of the ratio, so a human can audit it');
+  }
+  if (!/jobname\s*=\s*'mon-detectors-and-dispatch'/.test(contractCode)) {
+    bad('the sweep job is resolved by NAME, not a hardcoded jobid');
+  }
+
+  // --- 6. The apply-time EXECUTED proof inside the migration itself.
+  const proof = migrationSql.match(/do \$verify\$[\s\S]*?end \$verify\$/)?.[0] ?? '';
+  if (proof.length === 0 || !proof.includes(`${PREDICATE}(`)) {
+    bad('the migration carries an apply-time block that EXECUTES the predicate');
+  }
+  if (!/if\s+public\.mon_p0_sweep_exposure_should_raise\([^)]*healthy\s*\)\s*then/.test(proof)) {
+    bad('the proof asserts the EXEMPT direction (a healthy, sweep-covering lane must not raise)');
+  }
+  if (!/if\s+not\s+public\.mon_p0_sweep_exposure_should_raise\([^)]*starved\s*\)\s*then/.test(proof)) {
+    bad('the proof asserts the RAISE direction (a starved lane defeats the exemption)');
+  }
+  if (!/mon_p0_sweep_exposure_should_raise\(\s*100\s*,/.test(proof)) {
+    bad('the proof pins condition (1) — a fast sweep cannot breach however starved the lane is');
+  }
+  if (!proof.includes(`${CONTRACT}()`) || !proof.includes(EVIDENCE_KEY)) {
+    bad('the proof checks the LIVE contract really carries the key');
+  }
+
+  return out;
 }
 
-check(
-  'a null contract still raises (fail-safe on a totally unreadable contract)',
-  /p_contract\s+is\s+null/.test(predCode),
-);
+// --- the real tree -------------------------------------------------------------------------------
+const predFile = newestDefining(PREDICATE);
+const contractFile = newestDefining(CONTRACT);
+check(`a committed migration defines ${PREDICATE}()`, predFile !== null,
+  'the predicate decides whether the P0 delivery forecast can fire at all; it cannot live only in '
+  + 'production (migration-drift condition 1)');
+check(`a committed migration defines ${CONTRACT}()`, contractFile !== null);
 
-// ---------------------------------------------------------------------------------------------
-// 4. Same signature — a CREATE OR REPLACE with a different argument list is a NEW OVERLOAD, not a
-//    replacement, and would leave the old (silent) predicate live and callable alongside it.
-check(
-  'the predicate keeps its (numeric, jsonb) signature — no accidental second overload',
-  /p_max_sweep_s\s+numeric/.test(predCode) && /p_contract\s+jsonb/.test(predCode),
-);
+if (predFile === null || contractFile === null) {
+  console.error('\n✗ cannot continue without both definitions\n');
+  process.exit(1);
+}
+// Both objects ship in one migration by design (they are one contract); if that ever splits, the
+// newest definition of each is what production holds, and both must satisfy the rule.
+const REAL = predFile.file === contractFile.file
+  ? predFile.sql
+  : `${predFile.sql}\n${contractFile.sql}`;
 
-// ---------------------------------------------------------------------------------------------
-// 5. The contract must actually publish what the predicate reads, or the predicate sits permanently
-//    in its fail-safe branch and the limb becomes a stuck-open alert — which, per mon_raise()'s
-//    dedup, is itself a disabled barrier.
-check(
-  `${CONTRACT}() publishes ${EVIDENCE_KEY}`,
-  contractCode.includes(`'${EVIDENCE_KEY}'`),
-);
-check(
-  'the contract measures lane runs that started INSIDE a sweep window',
-  contractCode.includes("'lane_runs_inside_sweeps'")
-    && contractCode.includes("'lane_runs_expected_inside_sweeps'"),
-  'the ratio is only trustworthy if both of its terms are published for a human to audit',
-);
-check(
-  'the sweep job is resolved by NAME, not a hardcoded jobid',
-  /jobname\s*=\s*'mon-detectors-and-dispatch'/.test(contractCode),
-  'a re-created sweep job gets a new jobid; a hardcoded one would silently measure nothing and '
-    + 'report perfect coverage',
-);
+const found = problems(REAL);
+check('the exemption is evidence-backed, fail-safe and both-ways proven',
+  found.length === 0,
+  found.length > 0
+    ? `violated:\n      - ${found.join('\n      - ')}\n      `
+      + 'Fix the PATH, never this barrier: slim the sweep, or ask the OWNER for a re-slot '
+      + '(cron schedule changes are owner-only).'
+    : '');
 
-// ---------------------------------------------------------------------------------------------
-// 6. The apply-time EXECUTED proof. This repo's standing lesson is that a source-text tripwire
-//    passes for exactly as long as the defect is live, so the migration must RUN the predicate
-//    against synthetic contracts in both directions rather than merely containing the clause.
-const proof = predFile.sql.match(/do \$verify\$[\s\S]*?end \$verify\$/)?.[0] ?? '';
-check(
-  'the migration carries an apply-time proof block that EXECUTES the predicate',
-  proof.length > 0 && proof.includes(`${PREDICATE}(`),
-);
-check(
-  'the proof asserts the EXEMPT direction (a healthy, sweep-covering lane must not raise)',
-  /if\s+public\.mon_p0_sweep_exposure_should_raise\([^)]*healthy\s*\)\s*then/.test(proof),
-  'without this, a predicate hard-wired to "always raise" would pass — and a permanently-true '
-    + 'barrier is a disabled barrier (mon_raise returns 0 on an already-open key)',
-);
-check(
-  'the proof asserts the RAISE direction (a starved lane must defeat the exemption)',
-  /if\s+not\s+public\.mon_p0_sweep_exposure_should_raise\([^)]*starved\s*\)\s*then/.test(proof),
-  'this is the defect the migration fixes; it must be executed, not described',
-);
-check(
-  'the proof pins condition (1) — a fast sweep cannot breach however starved the lane is',
-  /mon_p0_sweep_exposure_should_raise\(\s*100\s*,/.test(proof),
-);
-check(
-  'the proof checks the LIVE contract really carries the key',
-  proof.includes(`${CONTRACT}()`) && proof.includes(EVIDENCE_KEY),
-);
+// --- §MUTATIONS — executed, not described --------------------------------------------------------
+// Each re-breaks the REAL source in memory and asserts this file's own rule speaks up. `false` is a
+// polarity flag: these are differential proofs, and the negative control below pins that the rule
+// is not simply always-complaining.
+function mutation(label: string, mutate: (s: string) => string, expectCaught = true): void {
+  const mutated = mutate(REAL);
+  if (mutated === REAL) {
+    check(`MUTATION anchor found: ${label}`, false,
+      'the mutation changed nothing — the anchor moved, so this proof silently stopped proving '
+      + 'anything. Update it deliberately.');
+    return;
+  }
+  const caught = problems(mutated).length > 0;
+  check(`MUTATION ${expectCaught ? 'caught' : 'ignored (negative control)'}: ${label}`,
+    caught === expectCaught,
+    expectCaught
+      ? 'the barrier stayed GREEN against a mutant it must catch'
+      : 'the barrier fired on a change that is not a defect — it is over-broad');
+}
+
+mutation('the evidence clause removed (THE ORIGINAL DEFECT restored)', (s) =>
+  s.replace(/\s*or not \(p_contract \? 'lane_sweep_coverage_ratio'\)[\s\S]*?\n         \)\n/,
+    '\n'));
+mutation('only the missing-key fail-safe removed', (s) =>
+  s.replace("      or not (p_contract ? 'lane_sweep_coverage_ratio')\n", ''));
+mutation('the coverage threshold widened toward zero', (s) =>
+  s.replace('::numeric < 0.5', '::numeric < 0.01'));
+mutation('the 300s SLO widened', (s) => s.replace('+ 40 > 300', '+ 40 > 900'));
+mutation('the 40s filing overhead widened', (s) => s.replace('+ 40 > 300', '+ 90 > 300'));
+mutation('the contract stops publishing the coverage key', (s) =>
+  s.replace("'lane_sweep_coverage_ratio', (select case", "'lane_sweep_coverage_DISABLED', (select case"));
+mutation('a ratio term dropped, so the number cannot be audited', (s) =>
+  s.replace("'lane_runs_inside_sweeps',      (select inside_n", "'lane_runs_inside_X',      (select inside_n"));
+mutation('the sweep resolved by hardcoded jobid instead of name', (s) =>
+  s.replace("where jobname = 'mon-detectors-and-dispatch'", 'where jobid = 38'));
+mutation('the predicate re-declared with a different argument list (a NEW overload)', (s) =>
+  s.replace('p_max_sweep_s numeric,', 'p_max_sweep_seconds double precision,'));
+mutation('the off-lane-detector guard dropped from the exemption', (s) =>
+  s.replace(/from jsonb_array_elements_text\(p_contract->'p0_capable_detectors'\) d/g,
+    "from jsonb_array_elements_text('[]'::jsonb) d"));
+mutation('the apply-time proof block deleted', (s) =>
+  s.replace(/do \$verify\$[\s\S]*?end \$verify\$;/, ''));
+mutation('the apply-time proof keeps only the RAISE direction', (s) =>
+  s.replace(/  if public\.mon_p0_sweep_exposure_should_raise\(700, healthy\) then[\s\S]*?end if;\n/,
+    ''));
+
+// NEGATIVE CONTROL. A comment edit inside the migration must NOT trip the rule, or this barrier is
+// just a file-hash and would fire on every unrelated touch — the failure mode that gets a real
+// barrier weakened out of annoyance.
+mutation('a comment reworded (must be ignored)', (s) =>
+  s.replace('-- Systems Seam Engineer, 2026-09-21.',
+    '-- Systems Seam Engineer, 2026-09-21. (reworded)'), false);
 
 console.log(
   failures === 0
-    ? '\n✓ p0-sweep-exposure-evidence: the exemption is evidence-backed, fail-safe and both-ways proven\n'
+    ? '\n✓ p0-sweep-exposure-evidence: evidence-backed, fail-safe, and mutation-proven by execution\n'
     : `\n✗ ${failures} check(s) failed\n`,
 );
 process.exit(failures === 0 ? 0 : 1);
