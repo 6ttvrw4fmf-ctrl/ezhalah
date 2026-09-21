@@ -53,7 +53,7 @@ import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } 
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
 import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
@@ -2294,15 +2294,12 @@ export default function Agent() {
   };
 
   // End of the flow: if the user answered ≥1 step, re-search the accumulated query in ONE combined
-  // turn (runRefine's __guided__ passes it through unchanged) BEHIND the mining transition — the
-  // Ezhalah «digging through the market» beat (owner 2026-08-16). If they skipped everything, close.
+  // turn (runRefine's __guided__ passes it through unchanged). If they skipped everything, close.
   //
-  // TIMING (all plain setTimeout — never an animation callback, per src/lib/afterAnimation.ts):
-  //   finish → mining overlay (from = last known narrowed total) + the search starts immediately
-  //   search resolves → hold until ≥ 1.4s total has played (never artificially longer)
-  //   → swap copy to «لقينا N عقار أقرب لطلبك» → ~1.1s beat → dismiss, revealing the result cards.
-  // A 15s failsafe (and a catch on the search itself) dismisses the overlay even if the turn dies,
-  // so the user can never be trapped behind a stuck animation.
+  // THE TIMING NOTE THAT USED TO SIT HERE described the mining overlay's 1.4s hold, its «لقينا N
+  // عقار» beat and its 15s failsafe. That card was deleted on 2026-09-20 and the beat with it, so
+  // the note is gone rather than left to read as a contract this function no longer honours — a
+  // finished round now hands straight to the thread's own searching turn, on no timer at all.
   const finishGuided = (token: number) => {
     if (ageFlowTokenRef.current !== token) return;
     const q = ageFlowQueryRef.current;
@@ -2349,7 +2346,24 @@ export default function Agent() {
     // The turn the user opened this round FROM becomes history: it trades its action buttons for a
     // read-only receipt of what THIS round committed. buildAfSummary reads the committed facets only,
     // so a skipped question can never appear in it (summary == committed state, permanent rule).
-    if (carry) setAfReceipt((r) => ({ ...r, [carry.msgId]: buildAfSummary(ageFlowFacetsRef.current) }));
+    //
+    // — AND THE SKIPS, IN THE ORDER THE ROUND ASKED (owner 2026-09-20: "you asked about apartment
+    // and then age, and he decided to skip, then he chose الواجهة ... you say: user decided to
+    // skip"). ONE sentence, not two piles, so the card reads as the story of the interview. It is a
+    // record of the ROUND and claims no predicate, which is why a skip may appear in it at all —
+    // summary == committed state remains the permanent rule, and it governs the PILLS, which are
+    // still built by buildAfSummary from the facets alone (see afSummary.ts's header).
+    //
+    // `askedThisRound` subtracts the carry so a second round names only its OWN questions; the
+    // previous round's receipt already named that round's, on its own turn.
+    //
+    // Only a round that COMMITTED something leaves a receipt. A skip-everything round changes
+    // nothing — same query, same cards — so the turn keeps its buttons and the user can open the
+    // interview again from it; replacing them with a receipt would strand them with no way back in.
+    const askedThisRound = [...ageFlowAskedRef.current].filter((id) => !(carry?.asked ?? []).includes(id));
+    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current);
+    const roundCommitted = buildAfSummary(ageFlowFacetsRef.current);
+    if (carry && roundCommitted) setAfReceipt((r) => ({ ...r, [carry.msgId]: roundLog }));
     void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '), {
       guided,
       onFetched: (total) => {
@@ -3788,7 +3802,20 @@ export default function Agent() {
                         // completed — the composer locks and every match is already revealed, so the
                         // «عرض المزيد» row must be gone too. `completed` gates it here, alongside the
                         // existing interview-owns-browsing and has-something-to-offer clauses.
-                        const showActionsRow = resultsActionsRowVisible({
+                        //
+                        // A TURN THAT ALREADY HAS A RECEIPT HAS NO ACTIONS LEFT (owner 2026-09-20:
+                        // "once user finishes with the advanced filter … let this message immediately
+                        // show"). The receipt string is written the instant finishGuided runs, but it
+                        // renders in the `else` of this flag — so until today the origin turn kept its
+                        // «عرض المزيد / خلّنا نحدد الطلب أكثر» row for the whole ~10s the new search
+                        // took, because `chatCompleted` only flips in runRefine's onFetched. The wait
+                        // was never a timer to tune; it was this gate resolving late.
+                        //
+                        // Gating HERE, not by reordering the JSX below, is what keeps the closing note
+                        // honest: `showActionsRow` also feeds `moreNoteText` and the Read-Aloud script,
+                        // so the note drops its «تبي أعرض لك المزيد؟» offer in the same frame the buttons
+                        // go — never promising a button that is not on screen (§42 visible-output contract).
+                        const showActionsRow = !afReceipt[m.id] && resultsActionsRowVisible({
                           hasMore,
                           canNarrowFurther,
                           afPhase: ageFlow?.phase ?? null,
@@ -3924,14 +3951,18 @@ export default function Agent() {
                                   <Text style={[s.afReceiptHead, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                                     {`✓ ${t('Continued with the advanced filter')}`}
                                   </Text>
-                                  {afReceipt[m.id] ? (
-                                    <Text
-                                      testID="af-round-receipt-choices"
-                                      style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}
-                                    >
-                                      {t('Your choices: {summary}', { summary: afReceipt[m.id] })}
-                                    </Text>
-                                  ) : null}
+                                  {/* The round, in the order it happened — answers and skips in ONE
+                                      sentence (see finishGuided). No «اخترت:» label any more: the line now
+                                      mixes both, and the head above already says what this card is.
+                                      Untranslated by design, exactly as buildAfSummary's output always
+                                      was — the builder writes finished Arabic. A receipt stored before
+                                      2026-09-20 is a plain committed-only sentence and still renders. */}
+                                  <Text
+                                    testID="af-round-receipt-choices"
+                                    style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}
+                                  >
+                                    {afReceipt[m.id]}
+                                  </Text>
                                 </View>
                               ) : null}
                             </View>

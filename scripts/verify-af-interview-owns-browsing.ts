@@ -98,16 +98,25 @@ check('every phase in the union is exercised by this barrier',
   `untested: ${declared.filter((p) => !(PHASES as string[]).includes(p)).join(',')}`);
 
 // ── 3. THE CALL SITE really routes through it ───────────────────────────────────────────────────
+// The call gained ONE local conjunct on 2026-09-20 — `!afReceipt[m.id] &&` — so a turn that already
+// holds a completed-round receipt shows the receipt at once instead of waiting for `chatCompleted`
+// to land a whole search later. That conjunct is deliberately NOT inside resultsActionsRowVisible:
+// the receipt is per-message render state, and this module is pure and message-agnostic. What this
+// check owns is unchanged — the PHASE rule still lives in the executable gate, never re-expressed
+// here as a bare `!ageFlow` — so the pattern allows a local conjunct but still requires the call.
 check('agent.tsx routes the actions row through resultsActionsRowVisible with the interview phase (not a bare !ageFlow)',
-  /const showActionsRow = resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(agentSrc),
+  /const showActionsRow = (?:!afReceipt\[m\.id\] && )?resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(agentSrc),
   'the whole point is that the rule is stated where it can be executed');
+check('the interview phase is never re-derived alongside the gate (only the receipt may short-circuit it)',
+  !/const showActionsRow = [^\n]*ageFlow[^\n]*&&[^\n]*resultsActionsRowVisible/.test(agentSrc),
+  'a phase test hoisted out of the gate is the exact duplication this file exists to prevent');
 check('the bare `!ageFlow` gate is gone',
   !/showActionsRow = \(hasMore \|\| canNarrowFurther\) && !ageFlow;/.test(agentSrc));
 // EXECUTED, not grepped: the gate itself refuses an empty row (nothing to page, nothing to ask).
 check('the row still requires something real to offer — an empty row is never rendered',
   resultsActionsRowVisible({ hasMore: false, canNarrowFurther: false, afPhase: null, chatCompleted: false }) === false
   && resultsActionsRowVisible({ hasMore: true, canNarrowFurther: false, afPhase: null, chatCompleted: false }) === true
-  && /const showActionsRow = resultsActionsRowVisible\(\{[\s\S]{0,120}?hasMore,[\s\S]{0,120}?canNarrowFurther,/.test(agentSrc));
+  && /const showActionsRow = (?:!afReceipt\[m\.id\] && )?resultsActionsRowVisible\(\{[\s\S]{0,120}?hasMore,[\s\S]{0,120}?canNarrowFurther,/.test(agentSrc));
 check('the wording still follows the rendered buttons (the 2026-09-05 honesty fix is intact)',
   /const offersMore = hasMore && showActionsRow;/.test(agentSrc)
   && /const offersNarrow = canNarrowFurther && showActionsRow;/.test(agentSrc));

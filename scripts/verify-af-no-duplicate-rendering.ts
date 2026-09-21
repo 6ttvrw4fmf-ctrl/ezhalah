@@ -241,10 +241,19 @@ check(
 }
 
 // ═══ 5. buildAfSummary — final item-level dedup (catches PARTIAL overlap between two facets) ═══════
+// The inline join moved into the shared `joinAr` on 2026-09-20, when buildAfSkipped was added and the
+// two sentences had to be punctuated identically. The invariant is unchanged and is what this still
+// pins: the Set dedup happens BEFORE anything is joined, and the joiner is «، » between with «، و»
+// before the last. Deduping after the join, or a second hand-rolled joiner, both fail here.
 check(
   'buildAfSummary dedupes the fully-rendered item list with a Set before joining into the sentence',
-  /const dedupedItems = \[\.\.\.new Set\(items\)\];/.test(afSummarySrc) &&
-    /return dedupedItems\.slice\(0, -1\)\.join\('، '\) \+ '، و' \+ dedupedItems\[dedupedItems\.length - 1\];/.test(afSummarySrc),
+  /return joinAr\(\[\.\.\.new Set\(items\)\]\);/.test(afSummarySrc) &&
+    /items\.slice\(0, -1\)\.join\('، '\) \+ '، و' \+ items\[items\.length - 1\]/.test(afSummarySrc),
+);
+check(
+  'there is exactly ONE Arabic list joiner, shared by both sentences',
+  (afSummarySrc.match(/\.join\('، '\)/g) ?? []).length === 1,
+  'a second copy is how the choices line and the skips line drift into different punctuation',
 );
 {
   // EXECUTED — the case facet-level dedup CANNOT catch: two DIFFERENT facet bundles (not identical,

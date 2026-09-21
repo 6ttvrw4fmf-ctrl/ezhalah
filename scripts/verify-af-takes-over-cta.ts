@@ -39,10 +39,15 @@ console.log('\nAdvanced Filter takes over the CTA space\n');
 // into a named `showActionsRow` const (Read Aloud's spoken closing note needed the SAME gate, to
 // decide whether it may mention the buttons) — same gate, same semantics, just named. Accept either
 // shape: the definition carrying the exact boolean expression, and the JSX still branching on it.
+// The call gained a local `!afReceipt[m.id] &&` conjunct on 2026-09-20 so a spent turn swaps its
+// buttons for the completed-round receipt at once, instead of waiting for `chatCompleted` to land a
+// whole search later. The rule this check owns is unchanged — the gate is still the executable
+// `resultsActionsRowVisible` and still carries the interview phase — so the pattern tolerates that
+// one conjunct and nothing else.
 check('the pre-AF CTA row is hidden while the AF flow is open',
   // Gate hoisted into the pure resultsActionsRowVisible() (owner 2026-09-06, `final=50`); agent.tsx
   // still feeds it the interview phase, so an open AF flow (phase ≠ null) still hides the row.
-  /const showActionsRow = resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(code)
+  /const showActionsRow = (?:!afReceipt\[m\.id\] && )?resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(code)
   && /\{showActionsRow \? \(/.test(code),
   'without the interview phase in the gate (or a branch that no longer uses it) the two buttons keep rendering underneath the AF overlay');
 
