@@ -78,6 +78,11 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 7, test: /^(alert_queue_unworked|incident_stalled)$/ },
   { routine: 7, test: /^(cron_|migration_drift|sql_mirror_drift|deploy_lock_misuse)/ },
   { routine: 7, test: /^(detector_|orphaned_detector|unresolvable_|monitoring_watchdog)/ },
+  // The auto-remediation loop (2026-09-21) — run_remediation()'s escalation when a safe fix keeps
+  // failing (remediation_exhausted), the worker-liveness watchdog (remediation_worker_stale), and
+  // the synthetic self-test kind. It is monitoring plumbing this routine already owns; the specific
+  // dead scraper/listing/etc. behind a remediation_exhausted still has its own owner via its own kind.
+  { routine: 7, test: /^remediation_/ },
   { routine: 7, test: /^(registry_orphans|repair_guarantee|loc_rel_|rls_)/ },
   { routine: 7, test: /^(stale_no_remediation_path|frontend_runtime_gate_missing)$/ },
   // ai_cost_health — the DeepSeek spend/cache/model-tier monitors (2026-08-29). Seam work: it is
