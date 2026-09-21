@@ -42,12 +42,31 @@ const DERIVE = [
 // normalize.annualize_rent (monthly→×12 semantics, not a fabricated signal).
 const SANCTIONED = /annualize_rent|\*\s*12\b/;
 
+// BLIND SPOT closed 2026-09-21: every DERIVE pattern needs an ASSIGNMENT to a price-named variable,
+// so a helper that RETURNS the product walked straight past them — `return round(meta_price * area),
+// "per_metre_x_area"` in a resolve_price() whose caller writes row["price_total"], and `return ((ppm
+// * area_m2) if (ppm and area_m2) else None), ppm` in a parse_price(). Any `return` that multiplies a
+// rate-named operand by an area-named one (either order) is that shape. ppm × area belongs to the
+// SEARCH/DISPLAY layer only (owner 2026-09-03: price_total_effective + derivedTotalFromPerMeter).
+const TIMES = /([\w.'"\[\]()]+)\s*\*(?!\*)\s*([\w.'"\[\]()]+)/g; // the two operands around one `*`
+const RATE_NAME = /ppm|rate|met(?:er|re)|price/i;
+const AREA_NAME = /area|space|sqm|size/i;
+
+/** The code part of a line, or '' when it can never STORE a price: a comment, an `a = b = None`
+ *  reset, a module CONSTANT (a regex/label table, e.g. `_PRICE_ATTR_RE = re.compile(r'…content=…')`)
+ *  or a print (output only). An f-string keeps only its {expressions} — its text is prose. */
+function codeOf(line: string): string {
+  const code = line.split('#')[0];
+  if (/=\s*None\s*$/.test(code) || /^\s*_?[A-Z][A-Z0-9_]*\s*=(?!=)/.test(code) || /^\s*print\(/.test(code)) return '';
+  return code.replace(/\b[rR]?[fF][rR]?(["'])(?:\\.|(?!\1).)*\1/g, (s) => (s.match(/\{[^{}]*\}/g) ?? []).join(' '));
+}
+
 /** True iff this ONE line of python derives a price signal. Pure, so a proof can feed it a mutant. */
 export function derivesAPrice(line: string): boolean {
-  const code = line.split('#')[0];
-  if (!code.trim()) return false;
-  if (/=\s*None\s*$/.test(code)) return false; // chained `a = b = c = None` resets, not derivations
-  return DERIVE.some((rx) => rx.test(code)) && !SANCTIONED.test(code);
+  const code = codeOf(line);
+  const returnsRateTimesArea = /^\s*return\b/.test(code) && [...code.matchAll(TIMES)].some(([, a, b]) =>
+    (RATE_NAME.test(a) && AREA_NAME.test(b)) || (AREA_NAME.test(a) && RATE_NAME.test(b)));
+  return (DERIVE.some((rx) => rx.test(code)) && !SANCTIONED.test(code)) || returnsRateTimesArea;
 }
 
 for (const f of pyFiles) {
@@ -79,8 +98,7 @@ const proseOffenders: string[] = [];
 
 /** True iff this ONE line assigns a listing price out of prose. Pure, for the proofs below. */
 export function assignsPriceFromProse(line: string): boolean {
-  const code = line.split('#')[0];
-  if (/=\s*None\s*$/.test(code)) return false;
+  const code = codeOf(line);
   return PRICE_ASSIGN.test(code) && PROSE_SRC.test(code);
 }
 
@@ -137,9 +155,7 @@ const ppmOffenders: string[] = [];
 
 /** True iff this ONE line stores a per-m² rate as the total/annual price. Pure, for the proofs. */
 export function storesPpmAsTotal(line: string): boolean {
-  const code = line.split('#')[0];
-  if (/=\s*None\s*$/.test(code)) return false;   // `a = b = c = None` resets, not a derivation
-  return PPM_AS_TOTAL.test(code);
+  return PPM_AS_TOTAL.test(codeOf(line));
 }
 
 for (const f of pyFiles) {
@@ -188,6 +204,18 @@ mustCatch('…and annual fabricated from a per-metre rate',
   derivesAPrice('    row["price_annual"] = row["price_per_meter"] * area_m2'));
 mustCatch('…and a per-metre rate fabricated by division anywhere on the line',
   derivesAPrice('        price_per_meter = total_price / float(area)'));
+// The two RETURN shapes that walked past every assignment pattern (verbatim, found 2026-09-21).
+mustCatch('a helper RETURNING rate × area for its caller to store as price_total (resolve_price)',
+  derivesAPrice('        return round(meta_price * area), "per_metre_x_area"'));
+mustCatch('…and the conditional-tuple return shape (parse_price)',
+  derivesAPrice('    return ((ppm * area_m2) if (ppm and area_m2) else None), ppm'));
+mustCatch('…and the mirror order, area × rate, through wrapped operands',
+  derivesAPrice('    return float(row["area_m2"]) * float(row["price_per_meter"])'));
+// A real, faithful return from the fleet — october annualizes a stated rent — mutated into the shape.
+const realReturnLine = readFileSync(join(root, 'october/run.py'), 'utf8')
+  .split('\n').find((l) => /return round\(price \* periods\)/.test(l)) ?? '';
+mustCatch('a real october return line mutated into price × area',
+  derivesAPrice(realReturnLine.replace('periods', 'area')));
 
 mustCatch('a price assigned out of the DESCRIPTION (the 47 aqar rows that stored a rental income as the sale price)',
   assignsPriceFromProse('    row["price_total"] = _extract_price(description)'));
@@ -211,6 +239,16 @@ mustCatch('…and a reset (`a = b = c = None`) is not mistaken for a derivation'
 mustCatch('…and a COMMENT describing the banned shape is prose, not an offence',
   !derivesAPrice('    x = 1  # never: price_per_meter = price_total / area')
   && !assignsPriceFromProse('    x = 1  # never read price from the description'));
+mustCatch('…and the REAL october return (price × periods — not an area) is NOT flagged',
+  realReturnLine !== '' && !derivesAPrice(realReturnLine));
+// The two false positives found 2026-09-21: output and a regex CONSTANT never store a price.
+mustCatch('…and a debug print / f-string naming both price fields is NOT flagged',
+  !derivesAPrice(`        print(f"[dbg] price_total={row['price_total']} price_per_meter={row['price_per_meter']}")`)
+  && !derivesAPrice('    msg = f"price_total={total} price_per_meter={ppm}"'));
+mustCatch('…while a derivation INSIDE an f-string\'s {expression} is still caught',
+  derivesAPrice('    return f"{ppm * area}"'));
+mustCatch('…and a regex CONSTANT matching a content= attribute is NOT a prose price',
+  !assignsPriceFromProse(`_PRICE_ATTR_RE = re.compile(r'<meta[^>]+itemprop="price"[^>]+content="([\\d.,]+)"')`));
 
 if (failed || mutFail) {
   if (failed) console.error(`\n✗ ${failed} price-fidelity assertion(s) FAILED`);
