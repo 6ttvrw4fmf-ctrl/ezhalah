@@ -250,6 +250,29 @@ Report `INCIDENTS WORKED / RESOLVED / HANDED OFF / BLOCKED` in your §G.8 block.
 severity SLA (P0 4h, P1 24h, P2 72h, P3 14d), so an unworked queue is attributable rather than
 anonymous. Full contract: `docs/ops/AUTONOMOUS_INCIDENT_LOOP.md`.
 
+**Your ALERT queue too, not only incidents (owner, 2026-09-21).** Detectors raise into `alert_event`;
+a filed alert nobody claimed is the same failure as an unworked incident. Immediately after the
+incident queue, read your open alerts and work them the same way:
+
+```sql
+select id, severity, kind, dedup_key, created_at, last_affirmed_at, detail
+  from alert_event
+ where owner_routine = '<your routine slug>' and resolved_at is null
+ order by severity, created_at;
+```
+
+For each: if it is a real problem, drive it to a fix (§G.1) and let its detector's self-heal resolve
+it, or `incident_open()` it if the fix will span runs; if the condition is already gone, **run its
+detector so it self-resolves** — never hand-resolve an alert, which hides a detector that stopped; if
+it is a false positive, record why and route it to routine-10. **Acknowledge each by self-assigning
+its GitHub issue** (that stamps `acknowledged_at`; an unacknowledged queue is what
+`mon_detect_alert_queue_unworked()` escalates system-wide to a single P0 once the oldest passes 14
+days). A serious alert you leave open beyond its SLA is promoted into your incident queue
+automatically by `promote_aged_alerts_to_incidents()` — so ignoring `alert_event` does not make the
+work disappear, it reappears as an incident with your name on it. Report
+`ALERTS WORKED / RESOLVED / ACKED` in your §G.8 block. Resolution of either an alert or its incident
+comes ONLY from production evidence that the condition is gone — never from having looked at it.
+
 ### §G.2b — "A HUMAN COULD APPROVE THIS" IS NOT A REASON TO ASK (owner, 2026-09-04)
 
 The six reasons above are the whole list, and they are about the NATURE of the change, not about who
