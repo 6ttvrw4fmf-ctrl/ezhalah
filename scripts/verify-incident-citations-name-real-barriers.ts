@@ -32,7 +32,7 @@ import { join } from 'node:path';
 import { loadRegistry } from './lib/testRegistry.ts';
 import { liveHalfProblems } from './lib/liveHalf.ts';
 import {
-  citedArtifacts, citationProblems, CLAIMED_STATES,
+  citedArtifacts, citationProblems, CLAIMED_STATES, treeMentionTest,
   type Artifact, type IncidentRow,
 } from './lib/barrierCitations.ts';
 
@@ -209,14 +209,94 @@ mustCatch('the two GENUINE phantoms this repair must keep catching (#140 stale r
                     row(55, 'resolved', 'scripts/verify-search-index-single-writer.ts')],
                    nonePresent).length === 2);
 
-// STATED, NOT IMPLIED AWAY: `DBFN` recognises only `mon_*`, so a barrier cited as any other SQL
-// object — `enforce_price_size_sanity()` (#324), `tg_archive_hard_deleted_listing` (#134) — yields
-// NO artefact and is therefore neither verified nor flagged. Measured 2026-09-20: 2 of 177
-// claimed-with-citation incidents are in that state. Widening the reader to "any identifier" would
-// manufacture false positives out of prose, which is the defect just repaired above, so the gap is
-// recorded (ops_incident #364) rather than closed by guesswork.
-check('the narrow-DBFN gap is recorded rather than silently tolerated',
-  citedArtifacts('enforce_price_size_sanity() + ops_price_source_verified').length === 0);
+// ── THE FOURTH SHAPE: A BARRIER CITED AS SOMETHING OTHER THAN `mon_*` (incident #364) ───────────
+// Until 2026-09-21 `DBFN` recognised `mon_*` and nothing else, so a barrier cited as any other
+// database object yielded NO artefact and was neither verified nor flagged — the check read as
+// covering citations it had never looked at. The previous version of this file asserted that gap as
+// a passing check (`…length === 0`), which is BARRIER_ENGINEER.md PART 1.2 in miniature: a
+// predicate that would pass on a version of the code that has the bug, because it WAS the bug.
+//
+// The rejected repair — "any identifier followed by ()" — manufactures phantoms out of camelCase
+// prose. Snake_case is the shape that distinguishes, and the widening was MEASURED against the real
+// queue before it was written: 85 distinct tokens over the 193 claimed-state citations live on
+// 2026-09-21, all 85 resolving. Every fixture below is a VERBATIM production citation.
+
+// #324 — a constraint function and a table, the two shapes that were completely invisible.
+check('a non-mon database object IS extracted now (incident #324, verbatim)',
+  ARTEFACTS('enforce_price_size_sanity() + ops_price_source_verified (existing barrier); '
+    + 'verified against production').join()
+    === 'symbol:enforce_price_size_sanity,symbol:ops_price_source_verified');
+
+// #134 — a TRIGGER cited as the barrier, plus the table it writes to.
+check('a trigger citation IS extracted now (incident #134, verbatim)',
+  ARTEFACTS('tg_archive_hard_deleted_listing propagates to listings_arabic_locations '
+    + '(migration 20260911141903)').join()
+    === 'symbol:tg_archive_hard_deleted_listing,symbol:listings_arabic_locations');
+
+// #233 — a pytest FUNCTION inside a file: the file is the path, the function is the symbol, and
+// neither swallows the other. Asserted as a set; extraction order is not part of the contract.
+const py = ARTEFACTS('scrapers/common/tests/test_retire_superseded_siblings.py (shape discovery) '
+  + 'and mon_detect_res_com_collision_repair_regression() (reads retired_side)');
+check('a path, a mon_ function and a bare symbol coexist without swallowing each other (#233)',
+  py.length === 3
+  && py.includes('path:scrapers/common/tests/test_retire_superseded_siblings.py')
+  && py.includes('fn:mon_detect_res_com_collision_repair_regression')
+  && py.includes('symbol:retired_side'));
+
+// THE CRYING-WOLF CONTROLS. A guard people learn to scroll past is a guard that gets deleted; these
+// are the shapes the rejected "any identifier" repair would have invented phantoms out of.
+check('camelCase prose written with parens is NOT a claim (the rejected repair\'s false positive)',
+  ARTEFACTS('citedArtifacts() returns the artefacts and probeVerdict() reads them').length === 0);
+check('ordinary English prose yields no symbol',
+  ARTEFACTS('verified against production; the fix is green and nothing was loosened').length === 0);
+check('a `mon_detect_*` glob is STILL prose under the widened reader (incident #335 stays fixed)',
+  ARTEFACTS('the standing migration-drift-guard.yml + mon_detect_* continue watching').length === 0);
+check('`mon_` names stay in DBFN\'s lane and are NOT downgraded to the weaker symbol test',
+  ARTEFACTS('mon_unverified_inactivation_counts(interval) + mon_detect_unverified_inactivation()')
+    .every((a) => a.startsWith('fn:')));
+check('a bare filename is not ALSO read as a symbol (test_x.py yields one artefact, not two)',
+  ARTEFACTS('mutation-proven in test_sold_pin_records_evidence.py').join()
+    === 'bare:test_sold_pin_records_evidence.py');
+
+// M8 — the defect itself: a closed incident whose cited barrier is a database object nobody built.
+mustCatch('a resolved incident citing a TRIGGER that does not exist (the #364 hole)',
+  citationProblems([row(1, 'resolved', 'tg_nobody_ever_created_this')], nonePresent).length === 1);
+mustCatch('…and a constraint-function citation that names nothing',
+  citationProblems([row(1, 'resolved', 'enforce_a_rule_nobody_wrote()')], nonePresent).length === 1);
+
+// M9 — the symbol limb obeys the same UNKNOWN rule as every other limb. An unlistable tree must
+// never resolve to "absent" (a false phantom) OR to "present" (the hole re-opened).
+mustCatch('a symbol whose existence could not be DETERMINED being resolved either way',
+  citationProblems([row(1, 'resolved', 'tg_some_trigger')], () => null)
+    .some((p) => p.includes('COULD NOT BE DETERMINED')));
+
+// NEGATIVE CONTROL, on the REAL tree rather than a stub: every symbol the production queue actually
+// cites resolves. This is the measurement that authorised the widening, executed rather than quoted
+// — if the reader ever starts inventing names out of these citations, this line goes red first.
+const REAL_CITATIONS = [
+  'enforce_price_size_sanity() + ops_price_source_verified (existing barrier)',
+  'tg_archive_hard_deleted_listing propagates to listings_arabic_locations; snapshotted to '
+    + 'ops_orphan_location_repair; requires a cleanup_deletion_log row',
+  'mon_detect_res_com_collision_repair_regression() (reads retired_side, every platform)',
+  'a new P2 deduplicated_copy_flood fires if de-duplication ever dominates a day',
+  'reads evidence_fetched_at and row_captured_at; alert kind barrier_check_failed on alert_event',
+];
+const mention = treeMentionTest(ROOT);
+const unresolved = REAL_CITATIONS.flatMap((c) => citedArtifacts(c))
+  .filter((a) => a.kind === 'symbol' && mention(a.name) !== true)
+  .map((a) => a.name);
+check(`every symbol in the real production citations resolves against this checkout `
+  + `(${REAL_CITATIONS.flatMap((c) => citedArtifacts(c)).filter((a) => a.kind === 'symbol').length} symbols)`,
+  unresolved.length === 0, `unresolved: ${unresolved.join(', ')}`);
+
+// …and the same test says NO to a name nothing mentions, so the control above is not vacuous.
+// ASSEMBLED AT RUNTIME, and that is load-bearing rather than cute: `git grep` reads the WORKING
+// TREE, so a literal spelled out here would be found in this very file and the control would pass
+// by describing itself. It did, on the first run of this check — the self-reference is the same
+// shape as a barrier asserting the bug, caught by its own negative control.
+const INVENTED = ['tg', 'no', 'such', 'object', 'exists', 'anywhere', '404'].join('_');
+check('treeMentionTest is not vacuously true — an invented name resolves to false',
+  mention(INVENTED) === false);
 
 console.log(failed === 0
   ? '\n✅ citation predicate proven in both directions\n'
