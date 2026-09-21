@@ -327,6 +327,43 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
   including the subtle one where a single minute is removed and only the wrap-around gap breaks.
   **Fix the SCHEDULE, never the SLO.**
 
+  **"SWEEP DURATION NO LONGER A TERM AT ALL" IS FALSE IN PRODUCTION, AND HAS BEEN SINCE THE
+  DECOUPLING SHIPPED (measured 2026-09-21, routine #7).** The sentence four paragraphs up describes
+  the *schedule*; it does not describe what pg_cron actually runs. The lane's slots are only a
+  promise to start, and this instance does not keep it while the sweep's backend holds the
+  scheduler. Measured over 24 h: **48 sweeps totalling 12,823 s = 14.8 % of the day, and ZERO
+  fast-lane runs started inside any of them** against 82.5 expected from the lane's own cadence —
+  coverage ratio **0.000**. Over 7 days: 10 of 824 expected, **1.2 %**. So for roughly a seventh of
+  the clock the P0 fast lane is dark, and a condition that flips in that window is first observed by
+  the SWEEP, in the sweep's transaction, with `created_at` = transaction start.
+
+  The cost is not theoretical. Of P0s raised since 2026-08-30: **58 born in the lane — avg 28.3 s,
+  worst 249 s, zero breaches**; **3 born in the sweep**, of which the two that outlived their sweep
+  (1166 at 371 s, 4392 at 665 s) **both breached the 300 s SLO**. The third was raised and resolved
+  inside one sweep transaction and never needed delivery.
+
+  This is the same mechanism `mon_detect_cron_starvation_risk()` reports (alert 3844), which names
+  `mon-p0-fast-lane` as a victim of hog 38 at minutes 1,4,7,10,31,34,35,38,40. Worked example, alert
+  4392: sweep started 06:29:00.025 and ran 516.5 s; the alert's `created_at` is 06:29:00.026; the
+  lane's `:31`, `:34` and `:35` slots produced **no run rows at all** — not failures, no rows — and
+  the lane next ran at 06:38, after the sweep committed. Issue filed 06:40:05: **665 s**.
+
+  **LIMB 4 was blind to all of it until 2026-09-21**, because `mon_p0_sweep_exposure_should_raise()`
+  exempted it whenever every P0-capable detector also appeared in `mon_run_p0_detectors()`'s list.
+  That is a set-membership PROXY: the sweep still runs the same detectors, so the raise goes to
+  whichever caller observes the condition first (`mon_raise()` dedups, first observer wins).
+  Migration `20260921104912` makes the exemption carry EVIDENCE instead — `ops_p0_lane_contract()`
+  now publishes `lane_runs_inside_sweeps`, `lane_runs_expected_inside_sweeps` and
+  `lane_sweep_coverage_ratio`, and the exemption is withdrawn when the lane is demonstrably starved.
+  A missing key is unreadable and therefore exposed, like every other branch there. Barrier:
+  `scripts/verify-p0-sweep-exposure-evidence.ts`, mutation-proven 9/9.
+
+  **Do not "fix" this by widening anything.** The 300 s SLO, the 40 s overhead and the 0.5 coverage
+  threshold all stay. The two real remedies are to make the SWEEP faster (routine-3 owns the two
+  detectors that dominate its runtime — GitHub #1348) or to give the lane a slot outside every hog
+  window, which is a **cron schedule change and therefore OWNER-ONLY**. Until one of those happens,
+  LIMB 4 raising is the system telling the truth, not a false positive to be silenced.
+
   **THE DECOUPLING IS NECESSARY BUT NOT SUFFICIENT — GitHub Actions latency is now the dominant
   term, and it is not ours to fix (measured 2026-08-30).** Proving the lane end to end measured the
   destination properly for the first time. The honest figure is `dispatched_at − first_tried` (POST
