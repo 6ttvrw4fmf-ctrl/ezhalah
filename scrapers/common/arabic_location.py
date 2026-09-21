@@ -57,23 +57,29 @@ def norm_district_tok(s: Optional[str]) -> str:
     great majority) or carries ء/ئ/tashkeel — see find_district_in_text() for the live regression
     that caused.
 
-    Steps, in the SQL's own order:
+    Steps, in the SQL's own order (as of migration 20260914204035):
       1. normalize_ar()            lowercase, أإآٱ→ا, ة→ه, ى→ي, strip tatweel/bidi, collapse spaces
       2. strip tashkeel            [ًٌٍَُِّْٰ]
       3. translate                 ئ→ي and ٠-٩ → 0-9
       4. drop ء
-      5. split letter|digit        «الرحاب2» → «الرحاب 2», so a numbered twin keeps its own identity
-      6. btrim
+      5. split letter|digit AND digit|letter   «الرحاب2» → «الرحاب 2», «1النرجس» → «1 النرجس»
+      6. strip a digit run at EITHER END, then btrim — THE NUMBER FOLD (owner rule 2026-09-14: our
+         district list never shows a number). «الهاشمية 1», «الرحاب2», «1النرجس» key exactly like
+         the bare name, so the catalog key has no number to miss on. The card still shows the
+         source's own number; this key only MATCHES. Word numerals («مصيف الاول») stay unfolded.
       7. strip leading «حي »       one or more
-      8. strip leading «ال»
+      8. strip leading «ال», then btrim
+    Mid-name digits are left alone, exactly as in SQL («حي 3 المحمدية» → «3 المحمديه»).
     """
     s = norm_ar(s)
     for t in _TASHKEEL:
         s = s.replace(t, "")
     s = s.translate(_AR_DIGITS).replace("ء", "")
-    s = re.sub(r"([ء-ي])([0-9])", r"\1 \2", s).strip()
+    s = re.sub(r"([ء-ي])([0-9])", r"\1 \2", s)
+    s = re.sub(r"([0-9])([ء-ي])", r"\1 \2", s).strip()
+    s = re.sub(r"\s*[0-9]+$", "", re.sub(r"^[0-9]+\s*", "", s)).strip()
     s = re.sub(r"^(حي\s+)+", "", s)
-    return re.sub(r"^ال", "", s)
+    return re.sub(r"^ال", "", s).strip()
 
 
 # English region label → catalog region_id. Scrapers compute English regions today; this lets them
@@ -90,6 +96,7 @@ _REGION_AR_FOR: dict[int, str] = {}                      # region_id → canonic
 _CID_AR: dict[int, str] = {}                             # catalog city_id → canonical city_ar
 _DISTRICT_BY_CITY: dict[int, set[str]] = {}              # city_id → {district_norm, …} (disambiguation only)
 _DISTRICT_AR_BY_NORM: dict[str, str] = {}                # district_norm → canonical district_ar (catalog spelling)
+_DISTRICT_AR_BY_CITY: dict[tuple[int, str], str] = {}    # (city_id, district_norm) → THAT city's catalog spelling
 
 
 _LOAD_LOCK = threading.Lock()
@@ -123,6 +130,7 @@ def _load() -> None:
                 for r in (c.table("loc_catalog_district").select("city_id,district_norm,district_ar").execute().data or []):
                     _DISTRICT_BY_CITY.setdefault(r["city_id"], set()).add(r["district_norm"])
                     _DISTRICT_AR_BY_NORM.setdefault(r["district_norm"], r["district_ar"])
+                    _DISTRICT_AR_BY_CITY[(r["city_id"], r["district_norm"])] = r["district_ar"]
                 return
             except Exception as e:  # transient network/DB hiccup → clear partials, back off, retry
                 last = e
@@ -132,6 +140,7 @@ def _load() -> None:
                 _CID_AR.clear()
                 _DISTRICT_BY_CITY.clear()
                 _DISTRICT_AR_BY_NORM.clear()
+                _DISTRICT_AR_BY_CITY.clear()
                 time.sleep(1.5 * (attempt + 1))
         if last is not None:
             raise last
@@ -431,7 +440,9 @@ def resolve(
         return dict(empty)
     hint = _hint_to_id(region_hint)
     d_ar = None if is_placeholder(district_ar) else (district_ar or None)
-    d_norm = norm_ar(d_ar) if d_ar else None
+    # norm_district_tok(), NOT norm_ar(): _pick_candidate() tests this against catalog district_norm
+    # keys, and norm_ar() mirrors only the first step of the function that built them.
+    d_norm = norm_district_tok(d_ar) if d_ar else None
 
     def _finish(cid: int, rid: Optional[int], confidence: str) -> dict:
         return {
