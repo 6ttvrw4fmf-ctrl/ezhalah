@@ -27,6 +27,25 @@
 # expired ad and only flips a status field, so "200 means live" would have called every dead ad
 # alive. abeea learned the same lesson the expensive way and 9 rows were wrongly restored.
 #
+# RE-MEASURED FROM CI EGRESS 2026-09-21 (oracle-feasibility-probe.yml run 2, all 23 rows).
+#
+# EVERY ONE OF THE 13 "EGRESS BLOCKED" ROWS IS REACHABLE FROM CI. unreachable=0 on all of them.
+# docs/ops/LISTING_LIVENESS.md 9.4 said exactly this would be true: such a note is a fact about the
+# container that wrote it, never about the platform. Thirteen platforms had been written off on
+# evidence about OUR network. The 2026-09-06 rows below were all measured from a cloud-routine
+# container whose gateway 403s these hosts; where the CI measurement disagrees, CI wins and the row
+# says so.
+#
+# Five rows changed conclusion, and two of those OVERTURN a "do not bother" verdict. That is worth
+# stating plainly: the earlier findings were not sloppy — each was correct about what it tested —
+# but "no signal found among the markers I tried" was written down as "this platform has no signal",
+# and the gap between those two sentences hid a usable oracle on two platforms for fifteen days.
+#
+# NOTHING HERE AUTHORISES A DEACTIVATION. "A marker appears on dead pages and on no live page" is a
+# reason to go write and control-validate a signal against a larger cohort, with an in-run canary.
+# It is not coverage and not permission (LISTING_LIVENESS.md 9.6). A platform leaves this file when
+# its oracle is WIRED, not when a probe says one might exist.
+#
 # format:  platform | probe status (as last measured) | note
 #
 abralosol      | EGRESS BLOCKED                  | 2026-09-06: gateway denies abralosol.com (403 CONNECT). UNKNOWN about our read. Activated 2026-09-03; no inactive rows yet.
@@ -40,15 +59,15 @@ aqaratikom     | NO SIGNAL ON THE LISTING URL     | 2026-09-06 measured: dead an
 aqarmonthly    | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 12/12 HTTP 200 (all redirect, consistently).
 arkaan         | EGRESS BLOCKED                  | 2026-09-06: gateway denies arkaanalaqar.com (403 CONNECT). UNKNOWN about our read. Activated 2026-09-03.
 azdad          | UNPROBED                        | onboarded 2026-09-06 (corrected 40-candidate-audit link); own Next.js + Supabase stack, NOT a Nuzul/Wasalt clone. 25-listing catalogue re-read whole every run. No inactive rows yet — first crawl pending.
-awal           | EGRESS BLOCKED                  | 2026-09-06: gateway denies awaalun.com (403 CONNECT). UNKNOWN about our read.
+awal           | ORACLE POSSIBLE (CI 09-21)      | CI 2026-09-21: REACHABLE — the 09-06 "gateway denies awaalun.com" was our container, not them. 10/10 live HTTP 200, 6 distinct titles, 10 distinct body sizes. «تم البيع» appears on dead pages and on NO live page. Validate against a larger cohort and gate removals on an in-run canary before wiring.
 bahadhabab     | EGRESS BLOCKED, FIX EXISTS      | 2026-09-06: gateway denies BOTH bahadhabab-res.nzl-backend.com and www.bahadhabab-res.com (403 CONNECT). UNKNOWN about our read. Fourth Nuzul SaaS tenant; port aldarim's canary-gated oracle verbatim and control-validate from a reachable egress — see the abwbna row.
-eaqartabuk     | MIXED                           | 2026-09-06: of 3 inactive rows, 2 answered 404 and 1 answered HTTP 200 with a real title; 12/12 controls answered 200. Small cohort; the one live-looking row is a restore candidate once the body question is settled.
+eaqartabuk     | ORACLE POSSIBLE (CI 09-21)      | CI 2026-09-21: the 09-06 MIXED reading reproduced EXACTLY — dead {200:1, 404:2}. 10/10 live 200 with 10 distinct titles. «Not Found» is on dead pages and no live page; «تم البيع» is DISQUALIFIED, present on LIVE pages (the fursaghyr shape, caught here too).
 erapulse       | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 12/12 HTTP 200 (all redirect, consistently).
-fursaghyr      | MIXED + MARKERS ARE FURNITURE   | 2026-09-06: of 8 inactive rows, 2 answered 404 and 6 answered HTTP 200; 12/12 controls answered 200. The 404 limb is sound but covers only a quarter. RULED OUT by positional read (the eastabha/hajer technique) the same day, and the residue is worse than "furniture": «غير متاح» is a REGISTRATION-FORM string («هذا النوع من الحسابات غير متاح للتسجيل حاليًا», plus a fg-unavailable-badge span) that has nothing to do with any listing, and «مؤجر» on a LIVE page sits inside the listing's own DESCRIPTION PROSE («* مؤجرة حاليًا بعقود شهرية» — an advertised feature of a rental investment, not a status). Gating on either would deactivate live inventory. Do not retry with a longer marker list; this platform needs a status FIELD, not a page rule.
-jurash         | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 11/11 HTTP 200 (all redirect, consistently).
+fursaghyr      | ORACLE POSSIBLE (CI 09-21) — the 09-06 ruling was too strong | CI 2026-09-21 CONFIRMS the furniture finding and OVERTURNS the conclusion. «غير متاح» really is furniture — disqualified, present on LIVE pages, exactly as recorded — but «الصفحة غير موجودة» appears on dead pages and on NO live page. The 09-06 note said "do not retry with a longer marker list; this platform needs a status FIELD": that was true of the markers tested and false of the platform. Measured: live 10/10 200 (9 distinct titles), dead {200:7, 404:2}.
+jurash         | ORACLE POSSIBLE (CI 09-21)      | CI 2026-09-21: a dead cohort EXISTS now (3 inactive rows), so the 09-06 "NO DEAD COHORT" is simply out of date. «تم التأجير» is on dead pages and no live page; «تم البيع» AND «مؤجر» are both DISQUALIFIED as furniture. Live 10/10 200, 10 distinct titles.
 october        | NO DEAD COHORT                  | 2026-09-06: no inactive rows. Live controls 12/12 HTTP 200, 12 distinct titles.
-ramzalqasim    | AMBIGUOUS                       | 2026-09-06: of 12 inactive rows, 2 answered 404 and 10 answered 200 — but the LIVE controls share a single title across all 12, so the title discriminates nothing and the 200s cannot be read either way from the surface. Needs a body-level marker before anything is wired.
+ramzalqasim    | ORACLE POSSIBLE (CI 09-21) — the 09-06 ruling was too strong | CI 2026-09-21 REPRODUCES the ambiguity and resolves it. distinct_live_titles=1 exactly as recorded — the title still discriminates nothing — but «Not Found» and «مؤجر» both appear on dead pages and on NO live page. Dead {200:8, 404:2}. A useless title is not the same fact as a useless page.
 rawasidark     | EGRESS BLOCKED                  | 2026-09-06: gateway denies www.rawasi-dark.com (403 CONNECT). UNKNOWN about our read. Activated 2026-09-03; no inactive rows yet.
-sadin          | EGRESS BLOCKED                  | 2026-09-06: every probe failed with `Tunnel connection failed: 403 Forbidden` — this sandbox network policy denies the host at the gateway. UNKNOWN about OUR READ, not evidence the platform lacks a signal. Needs control validation from an egress that can reach it (its own CI runs can).
+sadin          | SOURCE IS DOWN — UNUSABLE READ (CI 09-21) | CI 2026-09-21: HTTP 502 on all 10 live AND all 10 dead. sadin.com.sa has been down since 2026-09-07 (ops_incident #524/#580; its own banner «موقعنا تحت الصيانة حاليًا»). This says NOTHING about whether its page can discriminate — the question is unanswerable while the source is down, and the probe now returns UNUSABLE_READ rather than a verdict. Re-probe when the source returns.
 satel          | NO STATUS SIGNAL FOUND          | 2026-09-06: 12/12 inactive rows answer HTTP 200 with distinct per-listing titles, as do 12/12 controls, and NONE of the 18 candidate sold/rented markers appears on either cohort. 131 inactive rows unexplained by anything on the page. Needs a different source of truth (an API/status field), not a page rule.
 therc          | EGRESS BLOCKED                  | 2026-09-06: gateway denies therc.aqar.digital (403 CONNECT). UNKNOWN about our read. Activated 2026-09-03; lifecycle never instance-proven. Has NO inactive rows yet.
