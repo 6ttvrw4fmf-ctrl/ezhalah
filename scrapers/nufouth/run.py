@@ -26,11 +26,23 @@ load-bearing and none of them are guessable from the HTML:
    for Property»), which is what this app returns for a code it cannot find — it does NOT mean we
    are blocked. Asking for `N1630` returns the full record. Enumeration therefore never reads
    those hrefs; it reads the prefixed codes off the index pages (below).
-3. `/B/<code>` IS NOT A USABLE listing_url. Measured: /B/N1630 and /B/R101 serve 200, while
-   /B/H626, /B/H133, /B/R10045 and /B/N5175 serve HTTP 500 — persistently, on retry. A card
-   pointing there would be a dead link. The URL this scraper stores is the deep link the site
-   itself uses, `/latest-offers/<category>?ads-<CODE>=1`, whose `detailsModal-<CODE>` handler
-   opens the listing; the category page is the one the code was actually discovered on.
+3. listing_url IS THE SITE'S OWN SHARE LINK, `/latest-offers?ads-<CODE>=1` (the ROOT page, no
+   category). Checked cold in a real browser 2026-09-21; what a user lands on:
+   · `/latest-offers?ads-<CODE>=1` → the «تفاصيل العقار» modal opens on that property: code, type,
+     deal, price, rooms, district. N1315 → «شقة 7 … N1315 … الإيجار السنوي 65,000 … بحي حطين»;
+     also R10005 (sale, 2,100,000), H281 (whole-property offer) and N4990. It is the URL the
+     site's own share button builds (openShareModal), and the root page carries a GENERIC handler
+     (every `ads-<X>` param → openDetailsModal(X) → the same get_property_data API this scraper
+     reads), so it serves every code, not just the ~22 cards on that page: the API answered
+     269/269 indexed codes.
+   · `/latest-offers/<category>?ads-<CODE>=1` (stored until 2026-09-21) → the category LIST page,
+     no modal. Its per-code handler calls getElementById('detailsModal-<CODE>'), and that element
+     no longer exists: the site now renders ONE shared #detailsModal on demand.
+   · `/B/<CODE>` → HTTP 500 «استثناء خادم لم يتم اكتشافه» (a Frappe traceback: no featured
+     doc for the property) on 259 of 269 codes, N1315 included; only 10 render.
+   The modal opens on the PROPERTY. A multi-unit ad shows its units as tabs with the first one
+   active (N4990: «مكتب 6», «معرض 1» … «معرض 7») — the same view a user gets clicking the card;
+   the site's JS has no per-unit parameter (`=2` only switches to the specs tab).
 
 ENUMERATION IS COMPLETE, and «عرض المزيد» is a red herring. The four category pages under
 /latest-offers each ship EVERY card in the served HTML; their "load more" button only removes
@@ -123,7 +135,7 @@ API = f"{BASE}/api/method/website_nufouth.www.api.get_property_data"
 
 # The four server-rendered index pages. Every card ships in the HTML (see docstring: the
 # «عرض المزيد» button only unhides `.card-item` nodes), so these four fetches are the whole
-# catalogue. The path is kept per code because it is also the code's working listing_url.
+# catalogue. They are for ENUMERATION only: their `?ads-<CODE>=1` links open no modal (docstring §3).
 INDEX_PATHS = (
     "/latest-offers/buildings-and-lands-for-rent",
     "/latest-offers/commercial-for-rent",
@@ -131,8 +143,8 @@ INDEX_PATHS = (
     "/latest-offers/sales-offers",
 )
 
-# `detailsModal-<CODE>` is the id of the modal the site's own `?ads-<CODE>=1` deep link opens, so
-# scanning for it finds exactly the codes that have a working URL — and it carries the letter
+# Each card ships a stale per-code script naming `detailsModal-<CODE>` (the element itself is gone,
+# docstring §3), so scanning for the string still finds exactly the listed codes — with the letter
 # prefix the /B/ hrefs drop.
 _MODAL_RE = re.compile(r"detailsModal-([HNR]\d{2,6})\b")
 _IMG_SRC_RE = re.compile(r"""src=['"]([^'"]+)['"]""")
@@ -290,8 +302,8 @@ def _amenities(msg: dict, unit: Optional[dict], description: Optional[str]) -> d
 
 
 def fetch_index(s: cc.Session) -> dict[str, str]:
-    """{property_code: listing_url}. The URL is the site's own deep link on the very page the code
-    was found on, because that page is where the code's `detailsModal-<CODE>` lives."""
+    """{property_code: listing_url}. The URL is the site's own share link on the ROOT
+    /latest-offers page, whatever category the code was found on (docstring §3)."""
     found: dict[str, str] = {}
     for path in INDEX_PATHS:
         r = s.get(BASE + path, headers={"Accept": "text/html"}, timeout=60)
@@ -301,7 +313,7 @@ def fetch_index(s: cc.Session) -> dict[str, str]:
         codes = set(_MODAL_RE.findall(r.text))
         print(f"  {path}: {len(codes)} codes", flush=True)
         for c in codes:
-            found.setdefault(c, f"{BASE}{path}?ads-{c}=1")
+            found[c] = f"{BASE}/latest-offers?ads-{c}=1"
     return found
 
 

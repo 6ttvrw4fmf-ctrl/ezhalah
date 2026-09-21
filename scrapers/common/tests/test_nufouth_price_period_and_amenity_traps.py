@@ -139,7 +139,7 @@ N2060_AD = {"name": "ADV-00683", "ad_type": "بيع", "status": "نشط", "annua
             "selling_price": 401000.0, "total_area": 0.0, "custom_sell_property": 0,
             "ad_license_no": "7200863522"}
 
-URL = "https://nufouth.com/latest-offers/commercial-for-rent?ads-N4990=1"
+URL = "https://nufouth.com/latest-offers?ads-N4990=1"
 
 
 def _row(msg, ad, unit, url=URL):
@@ -387,12 +387,41 @@ def test_arabic_indic_digits_parse_as_digits():
     assert R._pos("0") is None and R._pos(0.0) is None and R._pos(None) is None
 
 
+# VERBATIM, live 2026-09-21: the per-code script that /latest-offers/residential-for-rent ships
+# with the N1315 card (شقة, حي حطين, الرياض, 65,000). It is what fetch_index scans for the code —
+# and it is dead: the element it looks up no longer exists on the page.
+N1315_CARD_SCRIPT = (
+    '<script>\ndocument.addEventListener("DOMContentLoaded", function () {\n'
+    '    const params = new URLSearchParams(window.location.search);\n'
+    '    if (params.get("ads-N1315") === "1") {\n'
+    "        const myModal = new bootstrap.Modal(document.getElementById('detailsModal-N1315'));\n"
+    '        myModal.show();\n    }\n});\n</script>')
+
+
+class _IndexSession:
+    """Serves the verbatim N1315 card script on the category page it was found on; the other
+    three index pages answer 200 with no cards."""
+    def get(self, url, **_kw):
+        text = N1315_CARD_SCRIPT if url.endswith("/latest-offers/residential-for-rent") else ""
+        return type("Resp", (), {"status_code": 200, "text": text})()
+
+
 def test_listing_url_is_the_deep_link_not_the_broken_B_path():
-    """/B/<code> serves HTTP 500 for most codes (H626, H133, R10045, N5175 — persistently), so the
-    stored URL is the site's own `?ads-<CODE>=1` deep link."""
+    """Checked cold in a real browser, 2026-09-21, on N1315:
+      · /latest-offers?ads-N1315=1 (the site's own share link) → the «تفاصيل العقار» modal opens:
+        «شقة 7 … كود العقار N1315 … الإيجار السنوي 65,000 … بحي حطين». Also opened for R10005,
+        H281 and N4990; the API behind it answered 269/269 indexed codes.
+      · /latest-offers/residential-for-rent?ads-N1315=1 (stored before) → the category LIST page,
+        no modal: its handler looks up `detailsModal-N1315`, which is no longer on the page.
+      · /B/N1315 → HTTP 500 error page; /B/<code> is 500 on 259 of 269 codes.
+    So the stored URL is the ROOT share link whatever category page found the code."""
+    index = R.fetch_index(_IndexSession())
+    assert index == {"N1315": "https://nufouth.com/latest-offers?ads-N1315=1"}
+    assert "/residential-for-rent" not in index["N1315"] and "/B/" not in index["N1315"]
+    # map_listing stores exactly the URL it is handed; the ad identity is not derived from it.
     row, _ = _row(N4990, N4990_AD, N4990_U1)
     assert row["listing_url"] == URL
-    assert "/B/" not in row["listing_url"] and "ads-N4990=1" in row["listing_url"]
+    assert row["ad_number"] == _row(N4990, N4990_AD, N4990_U1, url="x")[0]["ad_number"]
 
 
 def test_city_and_district_reach_the_row_in_arabic():
