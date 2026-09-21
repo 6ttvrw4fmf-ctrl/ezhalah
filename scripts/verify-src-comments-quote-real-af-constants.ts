@@ -128,15 +128,40 @@ export function commentsOnly(src: string): string {
   return out.join('');
 }
 
-/** Every .ts/.tsx file under src/, discovered — never a list someone must remember to extend. */
+/**
+ * Every .ts/.tsx/.mjs/.cjs file under a code root, discovered — never a list someone must remember
+ * to extend.
+ *
+ * THE CORPUS WIDENED 2026-09-21 (routine #10, ops_incident #367). This barrier shipped on
+ * 2026-09-20 reading `src/` only, beside a sibling reading `docs/` only, and #367 routed the
+ * question its own header raises: a barrier whose NAME states a CLASS and whose SCOPE is one
+ * corpus is PART 1.11 in a new dress — a pointer reading as coverage.
+ *
+ * Measured before widening, with THIS predicate over every other tracked corpus:
+ *
+ *     scrapers/ (368 files) · .github/ (74) · supabase/migrations/ (1,145)  →  ZERO claims
+ *     e2e/ (25 files)  →  2 claims, both correct
+ *     scripts/ (627 files)  →  24 claims, and SEVEN of them wrong
+ *
+ * So the sibling corpus is not "everywhere": it is exactly the TypeScript comment corpora, and the
+ * one nothing read was `scripts/` — the directory the barriers themselves live in, where a stated
+ * constant is trusted most. Two of the seven were live defects rather than narration:
+ * `verify-af-live-truth.ts` justified an 8-attempt bound with "AF_ROUND_MAX_QUESTIONS is 5" (it is
+ * 4), and `verify-af-terminal-at-25-no-load-more.ts` — renamed 50 → 25 — still stated the rule as
+ * the rule as an INTERVIEW_STOP_AT of 50 or fewer in its opening paragraph. Both are fixed here.
+ */
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry);
+    if (entry === 'node_modules' || entry.startsWith('.')) continue;
     if (statSync(p).isDirectory()) sourceFiles(p, out);
-    else if (/\.tsx?$/.test(entry)) out.push(p);
+    else if (/\.(tsx?|mjs|cjs)$/.test(entry)) out.push(p);
   }
   return out;
 }
+
+/** The code corpora this rule covers. `docs/` is its sibling's; nothing else carries a claim. */
+const CODE_ROOTS = ['src', 'scripts', 'e2e'];
 
 const claimsInComments = (src: string): Claim[] => constantClaims(commentsOnly(src), CONSTANTS);
 
@@ -164,13 +189,36 @@ mustPass('CODE is not a claim — a bare number assigned to an unrelated name',
 mustPass('a `//` sequence inside a STRING literal does not open a comment',
   wrongClaims(claimsInComments(`const u = 'https://x/y?INTERVIEW_STOP_AT = ${wrong}';\n`), CONSTANTS));
 
+// ── THE CITATION DISCRIMINATOR (ops_incident #367, added with the scripts/ corpus) ──────────────
+// Widening to scripts/ hits one case that must be DISTINGUISHED rather than punished: a barrier's
+// own header QUOTES the stale sentence it was written to catch. Six such lines exist, all in the
+// two halves of this very rule. Both directions are proven, and the fixtures are the REAL lines.
+mustPass('a barrier QUOTING the defect it catches is a citation, not an assertion (this file\'s own '
+  + 'header, verbatim)',
+  wrongClaims(claimsInComments(
+    '//   src/app/agent.tsx:3702       "more than INTERVIEW_STOP_AT=50 left to narrow"\n'
+    + '//   src/lib/chatTranscript.ts:117 "An AF-completed chat (R11.1, \u2264 INTERVIEW_STOP_AT = 50 rows)"\n'
+    + '//   docs/ops/JOURNEY_PERSISTENCE_ENGINEER.md         "(\u2264 `INTERVIEW_STOP_AT` = 50)"\n'), CONSTANTS));
+
+// …and the exemption is NOT a way to hide a stale claim behind quotation marks. BOTH conditions are
+// required, so removing either one puts the claim back in front of the rule.
+mustCatch('a quoted stale claim on a line that names NO file is still judged',
+  wrongClaims(claimsInComments(`// the rule is "INTERVIEW_STOP_AT = ${wrong}" today\n`), CONSTANTS));
+mustCatch('an UNQUOTED stale claim on a line that names a file is still judged',
+  wrongClaims(claimsInComments(`// src/app/agent.tsx still assumes INTERVIEW_STOP_AT = ${wrong}\n`), CONSTANTS));
+mustCatch('a quoted span that does not CONTAIN the constant does not exempt the claim beside it',
+  wrongClaims(claimsInComments(
+    `// src/app/agent.tsx:1 "the load-more row" is gated on INTERVIEW_STOP_AT = ${wrong}\n`), CONSTANTS));
+
 // The predicate must be able to see a claim at all — a scanner that finds nothing is vacuous.
 check('the comment scan finds real constant claims to judge (not a no-op)',
   claimsInComments(`// INTERVIEW_STOP_AT = ${live} is the line\n`).length > 0);
 
 // ── THE LIVE ASSERTION — every constant claim in every src/ comment quotes the real value ────────
-const files = sourceFiles(join(root, 'src'));
-check('the src/ scan covers a real corpus', files.length >= 20, `${files.length} files`);
+const files = CODE_ROOTS.flatMap((r) => sourceFiles(join(root, r)));
+check(`the code-comment scan covers every code corpus (${CODE_ROOTS.join(', ')})`,
+  files.length >= 400 && CODE_ROOTS.every((r) => files.some((f) => f.includes(`/${r}/`))),
+  `${files.length} files`);
 
 const offenders: string[] = [];
 let claimsSeen = 0;
@@ -182,13 +230,13 @@ for (const f of files) {
   }
 }
 
-check('every afRanking constant named with a value in a src/ comment quotes the REAL value',
+check('every afRanking constant named with a value in a code comment quotes the REAL value',
   offenders.length === 0, offenders.join('\n      '));
-check('the src/ scan actually found constant claims to judge (the barrier is not a no-op)',
+check('the code-comment scan actually found constant claims to judge (the barrier is not a no-op)',
   claimsSeen > 0, `${claimsSeen} claims`);
 
 console.log(offenders.length === 0
-  ? `\n✅ ${claimsSeen} constant claim(s) in src/ comments all match src/lib/afRanking.ts.`
-  : `\n❌ ${offenders.length} stale constant claim(s) in src/ comments.`);
+  ? `\n✅ ${claimsSeen} constant claim(s) in src/ + scripts/ + e2e/ comments all match src/lib/afRanking.ts.`
+  : `\n❌ ${offenders.length} stale constant claim(s) in code comments.`);
 
 process.exit(failures === 0 ? 0 : 1);

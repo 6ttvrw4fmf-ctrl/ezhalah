@@ -69,6 +69,38 @@ export function constantClaims(doc: string, known: Record<string, number>): Clai
   return out;
 }
 
-/** Claims that disagree with the real constant. */
+/**
+ * A QUOTATION OF ANOTHER FILE'S WORDS IS NOT AN ASSERTION ABOUT THE CONSTANT (added 2026-09-21,
+ * routine #10, ops_incident #367).
+ *
+ * This rule is enforced over `docs/` and over `src/` comments, and extending it to the `scripts/`
+ * corpus — where the barriers themselves live, and where a reader trusts a stated constant most —
+ * immediately hits a case the rule must distinguish rather than punish: a barrier's own header
+ * QUOTES the stale sentence it was written to catch. Six such lines exist in the two halves of this
+ * very rule, each of the form
+ *
+ *     //   src/app/agent.tsx:3702       "more than INTERVIEW_STOP_AT=50 left to narrow"
+ *
+ * Judging those is crying wolf at the clearest possible record of what a barrier catches, and a
+ * guard that cries wolf is one somebody later deletes (the six days of red this file's sibling
+ * spent in September are the measured version of that).
+ *
+ * The discriminator is deliberately narrow, and it is TWO conditions, not one: the claim must sit
+ * inside a quoted span (straight double quotes or «…») AND the same line must name a source file.
+ * A bare quoted number is still judged — otherwise the exemption would be a way to hide any stale
+ * claim by putting quotes round it.
+ *
+ * THE COST, STATED RATHER THAN HIDDEN: a genuinely stale claim written inside a quotation on a line
+ * that also names a file is not caught. That shape is a citation by construction, so the residual
+ * risk is a citation that MISQUOTES its source — a different defect from the one this rule is for.
+ */
+export function isCitation(line: string, name: string): boolean {
+  const namesAFile = /[\w/.-]+\.(?:md|tsx?|mjs|cjs|py|sql)\b/.test(line);
+  if (!namesAFile) return false;
+  const quoted = line.match(/"[^"]*"|«[^»]*»/g) ?? [];
+  return quoted.some((q) => q.includes(name));
+}
+
+/** Claims that disagree with the real constant, excluding quoted citations of another file. */
 export const wrongClaims = (claims: Claim[], known: Record<string, number>): Claim[] =>
-  claims.filter((c) => known[c.name] !== c.claimed);
+  claims.filter((c) => known[c.name] !== c.claimed && !isCitation(c.text, c.name));
