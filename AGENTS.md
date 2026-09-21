@@ -120,11 +120,17 @@ confident yes from a sentence no check enforced — the PART 1.11 shape in
 `docs/ops/BARRIER_ENGINEER.md`: a pointer reads as coverage. `scripts/verify-every-rpc-call-is-bounded.ts`
 (in `npm test`) measures it on every PR: the known sites are a **shrink-only** baseline with a
 ceiling, a NEW unbounded call site is RED, and a baseline entry that has been fixed is RED as stale
-so the ratchet cannot read better than reality.
+so the ratchet cannot read better than reality. **It judges each call against its OWN STATEMENT.**
+It used to judge an 18-line neighbourhood, and a neighbourhood is proximity standing in for a
+per-call fact: measured 2026-09-21 by planting the mutant, deleting `.abortSignal(_ac.signal)` from
+one of the two `top_cities_by_deal_ar` awaits in `src/data/locations.ts` left the whole suite GREEN,
+because the retry seven lines below still carried its own.
 
-**Closed 2026-09-18 (routine #6, `ops_incident` #269): the count is now 16 call sites, 16 bounded, 0
-unbounded — baseline empty, ceiling 0.** The sentence at the top of this section is, for the first
-time, a measured fact rather than an aspiration. The two search-loading reads went through the new
+**Closed 2026-09-18 (routine #6, `ops_incident` #269): the baseline is empty and the ceiling is 0.**
+The sentence at the top of this section is, for the first time, a measured fact rather than an
+aspiration. **Read the count the check PRINTS — never a number from this paragraph**; it said "16
+call sites, 16 bounded" and the tree had grown to 18 by 2026-09-21. The two search-loading reads
+went through the new
 `src/data/boundedRpc.ts` rather than `remote.ts`'s `bounded()`, because those modules are
 deliberately import-light (`loaderPlatforms.ts` records why) and importing `remote.ts` would drag the
 whole search layer in behind them; `loc_rel_rank` uses the in-file `bounded()` it sits next to. Keep

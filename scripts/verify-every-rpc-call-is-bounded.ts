@@ -74,14 +74,95 @@ const BOUNDING = /\bbounded\s*<?[^(]*\(|\.abortSignal\s*\(|\bwithTimeout\s*\(/;
 export type Site = { file: string; rpc: string; line: number; bounded: boolean };
 
 /**
+ * Net parenthesis/bracket depth of one line, ignoring strings and line comments.
+ *
+ * Deliberately NOT a general parser: it exists only to find where a call's own statement ends. A
+ * regex literal full of `(` is why `scripts/lib/liftSymbols.ts` refuses to walk braces, and the same
+ * caution applies — so an unresolvable statement is reported UNKNOWN below rather than guessed at.
+ */
+function depth(line: string): number {
+  let d = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === '/' && line[i + 1] === '/') break;
+    if (c === '(' || c === '[') d++;
+    else if (c === ')' || c === ']') d--;
+  }
+  return d;
+}
+
+// THE CAPS EXIST SO AN UNPARSEABLE FILE CANNOT MAKE THIS LOOP FOREVER — they are not the rule.
+// Sized from the tree, not guessed: the two `withTimeout(supabase.rpc('…', { … }), MS)` calls in
+// src/data/remote.ts carry argument objects with long explanatory comments inside them, so their
+// own statements run well past a dozen lines. A first cut at 12 reported BOTH of them as
+// unresolvable — which fails closed, correctly, but on two calls that are properly bounded, and a
+// guard that cries wolf on shipped code is one somebody deletes. Going UP is the direction that
+// could pull in an unrelated bounder, and it only ever walks while an enclosing paren is open, so
+// it stays tight; going DOWN can only ever stay inside the call's own argument list.
+const SPAN_UP_CAP = 40;
+const SPAN_DOWN_CAP = 200;
+
+/**
+ * The STATEMENT the call on line `i` belongs to — upwards while an enclosing paren is still open (a
+ * call passed as an argument to its bounder), downwards while its own parens are open, plus any
+ * chained continuation lines (`.abortSignal(...)` on the next line).
+ *
+ * Returns `null` when the statement cannot be resolved inside the caps. That is UNKNOWN, and
+ * the caller treats it as NOT bounded — never as bounded, which is the direction this whole file is
+ * about.
+ */
+export function statementAround(lines: ReadonlyArray<string>, i: number): string | null {
+  let start = i;
+  for (let up = 0; start > 0 && up <= SPAN_UP_CAP; up++) {
+    const head = lines[start].trimStart();
+    if (depth(lines[start - 1]) > 0 || head.startsWith('.') || head.startsWith(')')) start--;
+    else break;
+  }
+  if (i - start > SPAN_UP_CAP) return null;
+  let end = i;
+  let run = depth(lines.slice(start, i + 1).join('\n'));
+  while (run > 0 && end + 1 < lines.length && end - i < SPAN_DOWN_CAP) { end++; run += depth(lines[end]); }
+  if (run > 0) return null;                       // never closed inside the cap → UNKNOWN
+  while (end + 1 < lines.length && lines[end + 1].trimStart().startsWith('.') && end - i < SPAN_DOWN_CAP) end++;
+  return lines.slice(start, end + 1).join('\n');
+}
+
+/**
  * Find every `.rpc('name', …)` call site and say whether its await is bounded.
  *
- * The window is deliberately generous in BOTH directions and stated rather than tuned: a call may
- * be an ARGUMENT to its bounder (`bounded(supabase.rpc(…))`, `withTimeout(supabase.rpc(…))`), which
- * puts the mechanism on an earlier line, or may be CHAINED after it (`.rpc(…).abortSignal(…)`),
- * which puts it on a later one. A heuristic window is acceptable here only because the verdict is
+ * SCOPED TO THE CALL'S OWN STATEMENT (repaired 2026-09-21, routine #10 — a mutant survived a green
+ * suite). It used to be an 18-line NEIGHBOURHOOD, `lines.slice(i - 6, i + 13)`, and a neighbourhood
+ * is a proximity heuristic standing in for a per-call fact: any `bounded(` / `.abortSignal(` /
+ * `withTimeout(` within six lines above or twelve below satisfied it, wherever it belonged.
+ *
+ * MEASURED, by planting the mutant and running the check: deleting `.abortSignal(_ac.signal)` from
+ * `src/data/locations.ts:908` — a real, shipped RPC await — left this barrier fully GREEN, because
+ * the RETRY of the same RPC seven lines below still carried its own `.abortSignal(...)`. One call
+ * lost its bound and its sibling's bound answered for it. AGENTS.md cites this file as the reason
+ * "every RPC is bounded" is a *measured fact rather than an aspiration*; under the neighbourhood it
+ * was measured only where no bounded sibling happened to be nearby.
+ *
+ * THE OLD HEADER'S OWN JUSTIFICATION IS WHY THIS WENT UNNOTICED, and it is worth quoting because
+ * the reasoning is the defect: *"A heuristic window is acceptable here only because the verdict is
  * compared against an exact, named baseline: if the window ever misreads a site, the SET changes and
- * this check goes red, rather than the number quietly drifting.
+ * this check goes red."* That holds for a misread in the CRYING-WOLF direction. A misread in the
+ * other direction — a genuinely unbounded call read as bounded — leaves the set empty, equal to the
+ * baseline, and green. The argument covered the harmless half of the failure and was written as
+ * though it covered both.
+ *
+ * Both reasons the window was generous still hold and are still honoured, by the STATEMENT rather
+ * than by proximity: a call may be an ARGUMENT to its bounder (`bounded(supabase.rpc(…))`), which
+ * puts the mechanism on an earlier line of the same statement, or CHAINED after it
+ * (`.rpc(…)\n  .abortSignal(…)`), which puts it on a later one. Both are inside the statement span.
+ * Measured on the tree as it ships: 18 of 18 sites bounded under the statement rule, identical to
+ * the neighbourhood's verdict — so this is strictly a narrowing, with no shipped call newly flagged.
  *
  * Pure (takes its files as an argument) so the proofs at the bottom can hand it a broken tree.
  */
@@ -93,8 +174,10 @@ export function rpcSites(files: ReadonlyArray<{ path: string; src: string }>): S
       const m = line.match(/\.rpc[<(]/) ? line.match(/\.rpc\s*(?:<[^>]*>)?\s*\(\s*['"`]([^'"`]+)['"`]/) : null;
       if (!m) return;
       if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) return;
-      const window = lines.slice(Math.max(0, i - 6), i + 13).join('\n');
-      out.push({ file: path, rpc: m[1], line: i + 1, bounded: BOUNDING.test(window) });
+      const stmt = statementAround(lines, i);
+      // An unresolvable statement is UNKNOWN, and UNKNOWN is NOT bounded (AGENTS.md: a failed read
+      // is never an answer). On the tree as it ships this never fires — measured, 18 of 18 resolve.
+      out.push({ file: path, rpc: m[1], line: i + 1, bounded: stmt !== null && BOUNDING.test(stmt) });
     });
   }
   return out;
@@ -198,6 +281,36 @@ const locations = srcFiles.find((f) => f.path === 'src/data/locations.ts')!;
 mustCatch('an AbortSignal being dropped from the city/district RPCs (an unbounded await wearing a familiar shape)',
   boundingProblems(rpcSites([{ path: locations.path, src: locations.src.replace(/\.abortSignal\([^)]*\)/g, '') }]),
     UNBOUNDED_BASELINE).length > 0);
+
+// THE MUTANT THAT SURVIVED A GREEN SUITE (2026-09-21, routine #10 — the repair above).
+//
+// Note the shape of the proof directly above: it strips EVERY `.abortSignal(...)` in the file at
+// once. Under the old 18-line neighbourhood that was the only version of this mutation that could
+// be caught, and it passed for years — while the version that actually happens, ONE call losing its
+// bound in an edit, walked straight through. `top_cities_by_deal_ar` is awaited twice, seven lines
+// apart (the second is a retry without types); deleting the bound from the FIRST left this barrier
+// fully green, because the retry's own `.abortSignal(...)` sat inside the window and answered for
+// it. Executed against the REAL file, mutated in memory — nothing is written to the tree.
+const ONE_BOUND = locations.src.replace(
+  "let res = await supabase.rpc('top_cities_by_deal_ar', args).abortSignal(_ac.signal);",
+  "let res = await supabase.rpc('top_cities_by_deal_ar', args);");
+mustCatch('ONE call losing its bound while a bounded SIBLING sits seven lines below '
+  + '(the mutant that survived the whole suite under the old 18-line neighbourhood)',
+  ONE_BOUND !== locations.src                       // a moved anchor is a failed proof, not a pass
+  && boundingProblems(rpcSites([{ path: locations.path, src: ONE_BOUND }]), UNBOUNDED_BASELINE).length > 0);
+
+// …and the same file UNMUTATED is not flagged, so the proof above is differential rather than a
+// predicate that refuses everything.
+mustCatch('…while the real locations.ts is NOT flagged (this narrowing flags no shipped call)',
+  boundingProblems(rpcSites([locations].map((f) => ({ path: f.path, src: f.src }))), UNBOUNDED_BASELINE).length === 0);
+
+// AN UNRESOLVABLE STATEMENT IS UNKNOWN, AND UNKNOWN IS NOT BOUNDED. The caps exist so a pathological
+// file cannot hang this scan; a call whose statement never closes inside them must read as MISSING,
+// never as "bounded" — AGENTS.md's rule about failed reads, applied to the barrier's own reader.
+mustCatch('a statement that never closes reads as UNBOUNDED, not as bounded',
+  rpcSites(fake('src/data/x.ts',
+    `const r = await bounded(supabase.rpc('never_closes_ar', {\n${'  // ...\n'.repeat(250)}`))
+    .every((s) => !s.bounded));
 
 mustCatch('the baseline being GROWN past its ceiling instead of the call site being fixed',
   boundingProblems(sites, new Set([...UNBOUNDED_BASELINE, 'src/data/x.ts:a', 'src/data/y.ts:b'])).length > 0);
