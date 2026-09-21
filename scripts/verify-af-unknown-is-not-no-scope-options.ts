@@ -105,7 +105,10 @@ check('fetchScopeOptionCounts exists and is typed Record<string, number | null> 
 // and it is what these two checks pin: the bound is the SAME 4s budget, and nothing can return early
 // between the RPC and that line.
 check('a timeout is the repo\'s PROBE_FAILED sentinel inside the feeder — bounded by the same 4s budget, never a bare `return;` and never `null` (null = "the source answered" everywhere else)',
-  /await bounded<[^>]*>\(\s*supabase!\.rpc\('location_search_candidates_ar'[\s\S]*?AGE_COUNT_TIMEOUT_MS,\s*\);\s*if \(error\) return PROBE_FAILED;/.test(feeder)
+  // The budget became a parameter on 2026-09-21 (the search-time prep passes the longer
+  // BACKGROUND_COUNT_TIMEOUT_MS); it DEFAULTS to the card's 4 s, which is what the card still gets.
+  /timeoutMs: number = AGE_COUNT_TIMEOUT_MS/.test(feeder)
+  && /await bounded<[^>]*>\(\s*supabase!\.rpc\('location_search_candidates_ar'[\s\S]*?timeoutMs,\s*\);\s*if \(error\) return PROBE_FAILED;/.test(feeder)
   && !/'timedOut' in result\) return;/.test(feeder) && !/'timedOut' in result\) return null;/.test(feeder));
 // A failure must never be REMEMBERED — otherwise the new settled-count memory would freeze a blank
 // for two minutes, which is exactly the "unknown becomes permanent" defect this file exists for.

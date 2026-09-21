@@ -1,7 +1,7 @@
 import type { SearchQuery } from './search';
 import { hasClientOnlyNarrowing } from './search';
 import { isProbeFailure } from '@/lib/afProbe';
-import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, fetchScopeOptionCounts, type AgeOptionCounts, type GuidedCounts } from './remote';
+import { fetchPropertyAgeOptionCounts, fetchApartmentGuidedCounts, fetchScopeOptionCounts, BACKGROUND_COUNT_TIMEOUT_MS, type AgeOptionCounts, type GuidedCounts } from './remote';
 import { scopeOptionsFromCounts, SCOPE_TOTAL_KEY } from '@/lib/afScopeOptions';
 export { scopeOptionsFromCounts };
 import {
@@ -488,14 +488,14 @@ export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [
 // hiding it would be the silent amputation of a real part of the tree.
 // scopeOptionsFromCounts + SCOPE_TOTAL_KEY live in @/lib/afScopeOptions (pure, barrier-executable).
 
-async function scopeQuestionOptions(tier: ScopeTier, q: SearchQuery): Promise<AdvancedQuestionResult> {
+async function scopeQuestionOptions(tier: ScopeTier, q: SearchQuery, timeoutMs?: number): Promise<AdvancedQuestionResult> {
   const keys = scopeCandidates(tier, q);
   // The UNCHANGED query rides along as an extra candidate so `total` is the REAL scope the user is
   // answering from, measured the same way as every option, rather than the sum of the options.
   const counts = await fetchScopeOptionCounts([
     { key: SCOPE_TOTAL_KEY, query: q },
     ...keys.map((key) => ({ key, query: applyScopeAnswer(tier, q, [key]) })),
-  ]);
+  ], timeoutMs);
   return scopeOptionsFromCounts(keys, counts, (key) => t(key));
 }
 
@@ -526,6 +526,12 @@ export const SCOPE_QUESTIONS: AdvancedQuestion[] = [GROUP_QUESTION, TYPE_QUESTIO
 // `?? SCOPE_QUESTIONS.find(...)`; this is the same union, named once so the Filter screen's carry
 // (@/lib/afCarry) cannot be given half of it.
 export const AF_ALL_QUESTIONS: AdvancedQuestion[] = [...ADVANCED_QUESTIONS, ...SCOPE_QUESTIONS];
+// The same scope options the card resolves, with the BACKGROUND budget — for the search-time prep
+// only (agent.tsx assessNarrowing). Identical candidates, so what it learns is remembered by
+// fetchScopeOptionCounts and the card's own resolveOptions reads it back instantly on the tap.
+export const resolveScopeOptionsInBackground = (tier: ScopeTier, q: SearchQuery): Promise<AdvancedQuestionResult> =>
+  scopeQuestionOptions(tier, q, BACKGROUND_COUNT_TIMEOUT_MS);
+
 export const scopeQuestionFor = (tier: ScopeTier): AdvancedQuestion =>
   tier === SCOPE_GROUP_ID ? GROUP_QUESTION : TYPE_QUESTION;
 

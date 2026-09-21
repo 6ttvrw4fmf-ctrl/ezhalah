@@ -73,7 +73,7 @@ import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
-import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
@@ -1884,7 +1884,10 @@ export default function Agent() {
     const seen = new Set<string>(asked);
     for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
       let res: AdvancedQuestionResult | null = null;
-      try { res = await scopeQuestionFor(tier).resolveOptions(scoped); } catch { res = null; }
+      // resolveScopeOptionsInBackground, not scopeQuestionFor(tier).resolveOptions: the same candidates
+      // with the BACKGROUND budget. This runs behind the reveal with nobody waiting on it, and at the
+      // card's 4 s it was being cut off at exactly 4,000 ms — so nothing was remembered for the tap.
+      try { res = await resolveScopeOptionsInBackground(tier, scoped); } catch { res = null; }
       // UNKNOWN MUST NOT HARDEN INTO NO. A turn showing more than INTERVIEW_STOP_AT matches cannot
       // truthfully have an empty scope, so a failed/timed-out tier count is not a fact.
       if (!res || res.probeFailed) return 'unknown';
