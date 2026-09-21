@@ -24,7 +24,7 @@
 //
 // SO THIS ONE READS PRODUCTION. For every platform table it fetches the `source` value actually
 // present (anon REST, the same key the client uses — the card reads these very rows) and runs the
-// REAL lifted sourceHost over it, asserting:
+// REAL lifted matchers over it (sourceHost, and since 2026-09-20 sourceName + SourceBadge), asserting:
 //   1. sourceHost(live source) === sourceHost(platform slug). The join is the MATCHER, not a name
 //      lookup: two inputs for one platform must produce one identity. That is precisely the
 //      property that broke, and it needs no slug↔brand table (slug 'souq24' vs brand '24 Souq',
@@ -40,7 +40,7 @@
 // .github/workflows/af-live-truth-check.yml with the other production-truth barriers.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { liftSymbols } from './lib/liftSymbols.ts';
+import { liftPlatformMatchers, fallbacksOf } from './lib/platformMatchers.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -55,9 +55,11 @@ const check = (name: string, cond: boolean, detail = '') => {
 };
 
 // ── the REAL matchers, lifted (never re-implemented — a copy would drift from the shipped one) ────
-const rc = await liftSymbols(join(ROOT, 'src/components/ResultCard.tsx'),
-  [{ header: 'function sourceHost' }], ['sourceHost'], '');
-const sourceHost = rc.sourceHost as (s: string) => string;
+// All three: 2026-09-20 عقاريون's badge was right while sourceName and sourceHost fell to Aqar, and
+// this barrier, checking sourceHost alone, could never have seen the name half.
+const matchers = await liftPlatformMatchers(ROOT);
+const sourceHost = matchers.host;
+const FALLBACK = fallbacksOf(matchers);
 
 // ── the platform registry: name → domain ─────────────────────────────────────────────────────────
 const platformsSrc = readFileSync(join(ROOT, 'src/data/platforms.ts'), 'utf8');
@@ -112,6 +114,11 @@ for (const { platform, source, host } of seenSources) {
   if (!FALLBACK_OK.has(platform)) {
     check(`${platform}: does not land on the Aqar fallback`, host !== AQAR_FALLBACK,
       `every ${platform} card would render as Aqar`);
+    for (const k of ['name', 'badge'] as const) {
+      const got = matchers[k](source);
+      check(`${platform}: ${k}("${source}") is its own, not Aqar's`, got !== FALLBACK[k] && got === matchers[k](platform),
+        `${k}("${source}") = ${got}, ${k}("${platform}") = ${matchers[k](platform)}`);
+    }
   }
   // The registry must still agree with whatever that identity is, so a rebrand cannot leave the
   // "hosted on" label pointing at a domain the platform no longer uses.
