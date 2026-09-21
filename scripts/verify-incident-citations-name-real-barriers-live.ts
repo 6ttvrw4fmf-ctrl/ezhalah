@@ -38,16 +38,17 @@
 //
 // MUTATION-PROOF-EXEMPT: this file has no logic of its own to mutate — it fetches, hands the answer
 // to citationProblems() and prints. That predicate lives in scripts/lib/barrierCitations.ts and its
-// hermetic sibling proves it with seven mutations plus five negative controls, including the two
-// that decide this check's honesty: a non-2xx and an RLS-emptied 200 must each read as UNKNOWN
-// rather than as a queue with no phantom citations. A proof duplicated here would exercise nothing
-// this file itself decides.
+// hermetic sibling proves it by mutation in every limb, including the two that decide this check's
+// honesty: a non-2xx and an RLS-emptied 200 must each read as UNKNOWN rather than as a queue with no
+// phantom citations. A proof duplicated here would exercise nothing this file itself decides. (The
+// count of proofs is deliberately not quoted: a number in prose goes stale and then reads as
+// coverage — BARRIER_ENGINEER.md PART 1.11. Run the hermetic half to see the current set.)
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import {
-  citationProblems, bareIndex, committedFunctions,
+  citationProblems, bareIndex, committedFunctions, treeMentionTest,
   type Artifact, type IncidentRow,
 } from './lib/barrierCitations.ts';
 
@@ -108,10 +109,14 @@ console.log('\nEvery closed incident cites a barrier that exists (live half)\n')
 const rows = await readIncidents();
 const bare = bareIndex(ROOT);
 const fns = committedFunctions(ROOT);
+const mentioned = treeMentionTest(ROOT);
 
 const exists = (a: Artifact): boolean | null => {
   if (a.kind === 'path') return existsSync(join(ROOT, a.name));
   if (a.kind === 'bare') return bare.has(a.name);
+  // A non-`mon_` snake_case name (a trigger, a view, a constraint function, a pytest function).
+  // Held to "mentioned somewhere in the checkout", never to a CREATE FUNCTION it may not be.
+  if (a.kind === 'symbol') return mentioned(a.name);
   return fns === null ? null : fns.has(a.name);   // UNKNOWN, never silently true or false
 };
 
