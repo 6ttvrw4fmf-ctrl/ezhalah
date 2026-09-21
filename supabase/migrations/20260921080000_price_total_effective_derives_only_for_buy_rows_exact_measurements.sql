@@ -25,8 +25,7 @@ do $exact$
 declare
   cols   text[] := array['area_m2','price_per_meter','street_width_m','interior_space_m2','outdoor_area_m2'];
   d      record;
-  t      record;
-  alters text;
+  tb     record;
   src    text;
   n      int;
 begin
@@ -65,7 +64,7 @@ begin
   alter table public.search_listings_ar drop column price_total_effective;
 
   -- ── 3. retype every live copy of the measurement columns ──────────────────────────────────────
-  for t in
+  for tb in
     select c.relname, string_agg(format('alter column %I type numeric using %I::numeric', a.attname, a.attname), ', ') as parts
       from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace s on s.oid=c.relnamespace
      where s.nspname='public' and c.relkind='r' and a.attname = any(cols) and not a.attisdropped
@@ -73,7 +72,7 @@ begin
        and c.relname !~ '(backup|_bak)'
      group by c.relname
   loop
-    execute format('alter table public.%I %s', t.relname, t.parts);
+    execute format('alter table public.%I %s', tb.relname, tb.parts);
   end loop;
 
   alter table public.search_listings_ar add column price_total_effective bigint generated always as (
