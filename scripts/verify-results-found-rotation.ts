@@ -237,6 +237,25 @@ check('the intro-text render calls pickResultsFoundSentence with locale, name an
   /pickResultsFoundSentence\(\{[\s\S]{0,400}?lang:[\s\S]{0,120}?name:[\s\S]{0,200}?count: introTotal\.toLocaleString\('en-US'\),/.test(agentSrc));
 check('the retired hardcoded "We found {n} listings matching your search." call is gone',
   !/t\('We found \{n\} listings matching your search\.'/.test(agentSrc));
+
+// THE PIN IS AT THE CALL SITE, AND NOTHING HERE ASSERTED IT (routine #9, 2026-09-21).
+//
+// §2 above proves the PICKER honours a stableKey, and explicitly records that omitting one keeps
+// the old fresh-per-call behaviour. Both are true and neither is the bug PR #3232 fixed, which was
+// that agent.tsx did not PASS one: the typewriter re-renders at ~40 Hz, so the sentence flipped
+// template mid-typing (ops_incident #346, owner-visible). Measured by planting the mutant — deleting
+// `stableKey: m.id,` from src/app/agent.tsx:3607 — this whole file stayed GREEN, with the three-line
+// comment explaining the pin still sitting above the deleted line. A comment is not a code path.
+//
+// The only thing that caught that mutation was verify-agent-post-search-grounding.ts, by accident:
+// `stableKey: m.id,` appears inside a regex whose stated invariant is "a NULL total falls back to
+// non-numeric text, never a number", so its failure message sends the reader hunting a count-honesty
+// bug. Coverage that reports the wrong reason is one loosened regex away from being no coverage, and
+// the assertion belongs in the file that owns the rotation contract.
+const PIN_RE = /pickResultsFoundSentence\(\{[\s\S]{0,600}?stableKey: m\.id,/;
+check('agent.tsx PASSES stableKey: m.id at the call site (the per-message pin, PR #3232)',
+  PIN_RE.test(agentSrc),
+  'without it the picker is re-invoked on every typewriter tick and the sentence flips mid-typing');
 check('the {name} comes from AuthUser.nameAr / .nameEn (the same field the account menu renders)',
   /user\?\.nameAr[\s\S]{0,80}user\?\.nameEn|user\?\.nameEn[\s\S]{0,80}user\?\.nameAr/.test(agentSrc));
 
@@ -275,6 +294,20 @@ mustCatch('an empty baked list would leave the picker with nothing to rotate —
   const guestClean = brokenPool.every((t) => !t.hasName && !t.template.includes('{name}'));
   mustCatch('a guest template containing {name} is caught by the "guest templates never contain {name}" check',
     !guestClean);
+}
+{
+  // THE MUTANT THIS FILE USED TO SURVIVE. The exact edit that re-opens ops_incident #346 is the
+  // deletion of the `stableKey: m.id,` line, with its explanatory comment left in place — which is
+  // how it would really arrive, because the comment reads as documentation of a rule someone else
+  // enforces. Both directions are proven: the real shipped source must still PASS, so the predicate
+  // is not vacuously red.
+  const mutated = agentSrc.replace(/\n *stableKey: m\.id,/, '');
+  mustCatch('deleting `stableKey: m.id` from the agent.tsx call site is caught (the comment above it survives the edit, and must not be what passes)',
+    mutated !== agentSrc && !PIN_RE.test(mutated),
+    mutated === agentSrc ? 'the mutation did not apply — the call site no longer has the shape this proof mutates'
+                         : 'the pin check still matched after the line was deleted');
+  check('MUTATION — …while the real shipped agent.tsx still PASSES the pin check (not vacuously red)',
+    PIN_RE.test(agentSrc));
 }
 
 if (failures) {
