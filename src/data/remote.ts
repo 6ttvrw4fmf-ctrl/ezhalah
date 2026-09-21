@@ -952,8 +952,17 @@ const SCOPE_COUNT_TTL_MS = 120_000;
 const settledScopeCounts = new Map<string, { at: number; n: number }>();
 const inFlightScopeCounts = new Map<string, Promise<number | ProbeFailed>>();
 
+// BACKGROUND BUDGET (2026-09-21). The 4 s AGE_COUNT_TIMEOUT_MS exists because a user is staring at
+// the Advanced Filter card while it loads. The search-time prep (assessNarrowing) has no one waiting
+// on it — it runs behind the card reveal — yet it inherited the same 4 s, and measured on production
+// after the prep stopped competing with the search, the group-tier counts landed at 3.8-4.0 s and
+// were cut off at exactly 4,000 ms. So nothing was remembered, and the tap re-asked and showed blanks.
+// The prep now gets room to finish; the card keeps its 4 s. Still bounded: bounded() aborts at it.
+export const BACKGROUND_COUNT_TIMEOUT_MS = 12000;
+
 export async function fetchScopeOptionCounts(
   candidates: { key: string; query: SearchQuery }[],
+  timeoutMs: number = AGE_COUNT_TIMEOUT_MS,
 ): Promise<Record<string, number | null> | null> {
   if (!supabase || !candidates.length) return null;
   // UNKNOWN IS NOT NO — for SCOPE options too (owner rule 2026-09-04). This used to `return` on a
@@ -1002,7 +1011,7 @@ export async function fetchScopeOptionCounts(
         p_limit: 1,
         p_offset: 0,
       }),
-      AGE_COUNT_TIMEOUT_MS,
+      timeoutMs,
     );
     if (error) return PROBE_FAILED;                // timeout, transport or DB error = never learned
     const n = data && data.length ? Number(data[0].total_count) || 0 : 0;   // empty set = an honest zero

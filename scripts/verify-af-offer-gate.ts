@@ -264,9 +264,12 @@ check('…and it earns an OFFER too — offer and ask agree on it',
     !/if \(nextScopeTier\(.*\)\) \{ setAfCanNarrow/.test(probe) && !/if \(nextScopeTier\(.*\)\) return 'yes'/.test(assess),
     'src/app/agent.tsx offer probe — a tier that resolves to ≤1 option is AUTO-COMMITTED and walked '
     + 'past, so its existence never proves a round follows (الطائف/شهري/الاستراحات والريف, 43 matches)');
+  // 2026-09-21: the probe resolves through resolveScopeOptionsInBackground(tier, scoped) — the SAME
+  // scopeQuestionOptions the card's resolveOptions calls, with the background count budget, since the
+  // probe has nobody waiting on it. Either spelling resolves the tier against the carried scope.
   check('…it RESOLVES each tier instead, against a scope it carries forward itself',
     /nextScopeTier\(scoped, seen\)/.test(assess)
-    && /scopeQuestionFor\(tier\)\.resolveOptions\(scoped\)/.test(assess),
+    && /(?:scopeQuestionFor\(tier\)\.resolveOptions\(scoped\)|resolveScopeOptionsInBackground\(tier, scoped\))/.test(assess),
     'src/app/agent.tsx offer probe — resolving is the only way to know whether a tier is a real '
     + 'question or a scope the user already has');
   check('a tier with a REAL choice (more than one option) is what earns the offer',
