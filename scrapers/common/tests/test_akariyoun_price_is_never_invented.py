@@ -216,7 +216,7 @@ def test_an_unmapped_type_is_skipped_not_guessed():
 # ── source truth: an unmentioned service is UNKNOWN, not absent ───────────────────────────────────
 def test_unmentioned_services_are_null_never_false():
     row, _c, _r = map_listing("fyla-x", VILLA)
-    assert row["electricity"] is None and row["water_supply"] is None, \
+    assert row.get("electricity") is None and row.get("water_supply") is None, \
         "SOURCE IS TRUTH — silent means NULL, never a confirmed 'no'"
 
 

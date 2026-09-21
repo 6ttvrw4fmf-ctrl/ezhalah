@@ -44,7 +44,9 @@ FIELDS (all from the detail page, one listing's own markup):
   الواجهة: غربية                      -> direction
   عرض الشارع : 20                    -> street_width_m  («-» = not published -> NULL)
   رقم القطعة / رقم المخطط             -> plan_parcel
-  الخدمات: شبكة الكهرباء/المياه/الصرف -> electricity / water_supply / sanitation
+  خدمات العقار: كهرباء, مياه, صرف صحي, ألياف ضوئية
+                                      -> electricity / water_supply / sanitation / optical_fibers
+                                         (the property's cell ONLY — see parse_services)
   المشاهدات                           -> views_count
   maps?q=<lat>,<lng>                  -> additional_info.lat/lng
 
@@ -368,6 +370,34 @@ def map_type_ar(raw: Optional[str]) -> Optional[str]:
     return hit if hit else _FOLDED_SHARED.get(_fold_ar(raw))
 
 
+# THE PROPERTY'S SERVICES ARE ITS OWN CELL, NOT THE NEIGHBOURHOOD'S LIST.
+# Every page carries «الخدمات المتوفرة في الحي» — شبكة الكهرباء / شبكة المياه / نظام الصرف الصحي
+# for the DISTRICT, the same template on every listing. The old test for those words anywhere in
+# the page put (True, True, True) on all 280 live rows (2026-09-21), though the property's own
+# «خدمات العقار» said e.g. «كهرباء, مياه» and no sewage. Matched on the label/value <div> pair, never
+# page text: a seller named «… للخدمات العقارية» contains the label and read the wrong spot.
+_SERVICES_CELL = re.compile(r">\s*خدمات\s*العقار\s*</div>\s*<div[^>]*>(.*?)</div>", re.S)
+_SERVICE_COL = {"كهرباء": "electricity", "مياه": "water_supply", "صرف صحي": "sanitation",
+                "ألياف ضوئية": "optical_fibers"}
+
+
+def parse_services(page_html: str) -> dict[str, Any]:
+    """The four flags from «خدمات العقار». Cell not found -> {} (a read failure: keys absent, the
+    stored values survive). Named -> True. The whole cell «لايوجد خدمات» -> False. Anything the
+    cell does not name, or a cell that names a service AND says «لايوجد خدمات», is NULL — written
+    as AUTHORITATIVE_NULL because the source did publish its list, so a stale True must clear."""
+    m = _SERVICES_CELL.search(page_html)
+    if not m:
+        return {}
+    cell = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", m.group(1)))).strip()
+    named = {t.strip() for t in re.split(r"[,،]", cell) if t.strip() and t.strip() != "-"}
+    negated = {t for t in named if t.replace(" ", "") == "لايوجدخدمات"}
+    if negated:
+        value = False if named == negated else db.AUTHORITATIVE_NULL   # self-contradicting -> unknown
+        return {col: value for col in _SERVICE_COL.values()}
+    return {col: (True if ar in named else db.AUTHORITATIVE_NULL) for ar, col in _SERVICE_COL.items()}
+
+
 
 
 def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:
@@ -466,10 +496,7 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         "neighborhood": district,
         "title": title,
         "photo_urls": photos or None,
-        # SOURCE IS TRUTH: a service the page does not mention stays NULL, never False.
-        "electricity": True if "شبكة الكهرباء" in t else None,
-        "water_supply": True if "شبكة المياه" in t else None,
-        "sanitation": True if "الصرف الصحي" in t else None,
+        **parse_services(page_html),
     }
     if is_rent:
         row["price_annual"] = price
