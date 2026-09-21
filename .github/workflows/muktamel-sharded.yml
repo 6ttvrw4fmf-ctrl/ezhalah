@@ -32,17 +32,25 @@
 
 name: Muktamel sharded crawl
 
-# SCHEDULED (2026-09-11, closing alert zero_new_stall:muktamel). muktamel was launched into
-# search on 2026-09-03 (3,900+ active rows) with NO scheduler at all: the old sequential weekly
-# pg_cron job (jobid 14) was paused 2026-07-14 and is hard-locked paused by migration
-# 20260815211103 — deliberately NOT re-enabled here, because the sequential sync mathematically
-# cannot finish the 8,301-id band inside its timeout (that is what killed the one manual run on
-# 09-05: 452 min of work vs a 330-min cap). This fleet was built for exactly that math (header
-# above) and is the thing that should have been scheduled at launch. Weekly, Monday 03:00 UTC —
-# the cadence the paused job had.
+# SCHEDULING LIVES IN pg_cron, NOT HERE — the same as dealapp-sharded.yml, the file this one was
+# modelled on (`on: workflow_dispatch: {}` there too). `gh-muktamel-sharded` dispatches this
+# workflow; see supabase/migrations/20260921023559_muktamel_sharded_crawl_goes_daily.sql.
+#
+# This file carried its own `schedule: '0 3 * * 1'` from 2026-09-11 (closing alert
+# zero_new_stall:muktamel), and migration 20260914041355 then added the pg_cron job three days
+# later without either change knowing about the other. The result fired the full 8-shard fleet
+# TWICE every Monday — 03:00 from GitHub, 03:45 from pg_cron. The GitHub schedule is removed here
+# rather than the pg_cron job because pg_cron is where every other platform's cadence is declared,
+# which is the only place an operator thinks to look.
+#
+# muktamel was launched into search on 2026-09-03 (3,900+ active rows) with NO scheduler at all:
+# the old sequential weekly pg_cron job (jobid 14) was paused 2026-07-14 and is hard-locked paused
+# by migration 20260815211103 — deliberately NOT re-enabled, because the sequential sync
+# mathematically cannot finish the 8,301-id band inside its timeout (that is what killed the one
+# manual run on 09-05: 452 min of work vs a 330-min cap). This fleet was built for exactly that
+# math (header above). Cadence is DAILY as of 2026-09-21 (owner request): the per-run sizing above
+# is per-run, not per-week, and dealapp already runs 12 shards nightly against the same cap.
 on:
-  schedule:
-    - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
       min_id:
