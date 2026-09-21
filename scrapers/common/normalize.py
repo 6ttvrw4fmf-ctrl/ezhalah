@@ -462,6 +462,79 @@ def to_int_numeric(v) -> Optional[int]:
     except (TypeError, ValueError):
         return None
 
+
+# ── MEASUREMENTS (area, per-m² rate, street width) keep EVERY digit the source printed ─────────────
+# Owner 2026-09-21: «we should never ever get this ever ever again». area_m2 etc. were integer columns
+# and every path cut the fraction off (407.56 m² → 407 or 408), so cards showed the wrong size and the
+# ≈ ppm × area total was off by up to 4,834 SAR. These two helpers are the ONLY sanctioned way to turn
+# a source measurement into a stored value; scripts/verify-exact-measurements.ts fails any scraper
+# that routes one through int()/round()/to_int() instead.
+_MEASURE_TRANS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+_MEASURE_TOKEN_RE = re.compile(r"\d[\d.,٫٬]*")
+
+
+def _integral(v: float):
+    return int(v) if v == int(v) else v
+
+
+def measure_num(v):
+    """A MACHINE-formatted measurement (JSON number, API string like "407.56") → int/float, exact.
+
+    The dot is always a decimal point here: 1316.445 stays 1316.445. 0 is a real published value
+    (incident #45: abralosol prints «المساحة 0 م»), so it is returned as 0, not None. A caller whose
+    API uses 0 for "not set" writes `measure_num(v) or None`. Non-numeric, negative, NaN/inf → None."""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        f = float(str(v).strip().translate(_MEASURE_TRANS)) if isinstance(v, str) else float(v)
+    except (TypeError, ValueError):
+        return None
+    if f != f or f in (float("inf"), float("-inf")) or f < 0:
+        return None
+    return _integral(f)
+
+
+def to_measure(raw):
+    """A DISPLAY-text measurement ("407.56 م²", "١٬٢٠٠", "161,891.927", "32.5م") → int/float, exact.
+
+    Reads the FIRST number in the text. Separator rule, measured on 2,600+ live aqar/dealapp captures
+    on 2026-09-21 by checking ppm × area against the published price:
+      • commas AND a dot/٫  → whichever comes LAST is the decimal point, the other groups thousands
+                               ("161,891.927" = 161891.927 — 300 SAR/m² × that = the exact price;
+                               "1.234,56" = 1234.56)
+      • one dot/٫, exactly 3 digits after, nothing else → THOUSANDS ("120.475" = 120,475 m²;
+                               "30٫000" = 30,000 — aqar renders the Arabic decimal mark as grouping)
+      • one dot/٫, 1-2 or 4+ digits after → DECIMAL ("457.5", "183.72")
+      • several dots/٫ → thousands ("2.000.000")
+      • one comma, 1-2 digits after → DECIMAL (Arabic style «364,51» = 364.51; 5000 × it = the price)
+      • commas otherwise → thousands ("1,436")
+    Never rounds, never truncates. None when there is no number."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        return measure_num(raw)
+    m = _MEASURE_TOKEN_RE.search(str(raw).translate(_MEASURE_TRANS))
+    if not m:
+        return None
+    tok = m.group(0).replace("٬", "").rstrip(".,٫")
+    dots = [i for i, ch in enumerate(tok) if ch in ".٫"]
+    commas = [i for i, ch in enumerate(tok) if ch == ","]
+    if commas and dots:
+        cut = max(dots[-1], commas[-1])          # whichever separator comes LAST is the decimal point
+        whole, frac = tok[:cut], tok[cut + 1:]
+        num = re.sub(r"\D", "", whole) + ("." + frac if frac else "")
+    elif len(dots) == 1:
+        frac = tok[dots[0] + 1:]
+        num = tok.replace("٫", ".") if len(frac) != 3 else tok.replace(".", "").replace("٫", "")
+    elif dots:
+        num = re.sub(r"\D", "", tok)
+    elif len(commas) == 1 and 1 <= len(tok) - commas[0] - 1 <= 2:
+        num = tok.replace(",", ".")
+    else:
+        num = tok.replace(",", "")
+    return measure_num(num) if num else None
+
+
 def count_flag(v) -> Optional[bool]:
     """A source COUNT ("how many balconies?") → an amenity tri-state, never a manufactured negative.
 
