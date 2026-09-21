@@ -1,7 +1,7 @@
 // ONCE ADVANCED FILTER NARROWS TO ≤ INTERVIEW_STOP_AT, THE CHAT IS TERMINAL: NO «عرض المزيد».
 //
 // Owner rule (2026-09-06, the `final=50` incident). A round that truthfully narrows the eligible set
-// to INTERVIEW_STOP_AT (50) or fewer FINISHES the chat: the composer locks AND every remaining match
+// to INTERVIEW_STOP_AT or fewer FINISHES the chat: the composer locks AND every remaining match
 // is revealed with no «عرض المزيد» pager. The bug this locks: at exactly 50 the composer locked
 // (setCompleted) but the pager row still rendered — the two terminal signals disagreed, because the
 // pager was gated on `hasMore` alone and never on the completion state.
