@@ -310,8 +310,21 @@ const authSurface = (page) => page.evaluate((phoneSrc) => {
       e.scrollIntoView({ block: 'center' });
       const r = e.getBoundingClientRect();
       if (r.width && r.height && r.top >= 0 && r.bottom <= innerHeight) {
-        const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-        ctaCovered = top ? !!top.closest('[data-testid="signin-card"]') : null;
+        // PLURAL, per PART 5 shape 13 (routine #6, 2026-09-21). `r.top >= 0 && r.bottom <=
+        // innerHeight` bounds the rect against the VIEWPORT, which is not the same question as
+        // whether the CTA is painted: a control clipped out of a shortened scroll container passes
+        // both bounds and is still invisible at that point. The singular form then handed the
+        // verdict to whatever overlay was painted there and reported «the sign-in card is covering
+        // «بحث»» about a CTA the card was nowhere near — the same false positive measured on
+        // tap-targets-meet-44. `null` is already this oracle's UNKNOWN, and an unread point is
+        // exactly that (SOURCE IS TRUTH: silent → NULL, never unknown → NO).
+        const stack = document.elementsFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        const self = stack.indexOf(e);
+        if (!stack.length || self < 0) ctaCovered = null;
+        else {
+          const card = stack.findIndex((n) => n.closest && n.closest('[data-testid="signin-card"]'));
+          ctaCovered = card >= 0 && card < self;
+        }
       }
       break;
     }

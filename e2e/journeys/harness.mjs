@@ -886,15 +886,47 @@ export async function openMobileSidebar(page, { guestOk = false } = {}) {
 // rather than guess a third time).
 //
 // Neither shape is excused. Both still fail the journey.
+//
+// ── AND A THIRD SHAPE: THE CONTROL IS NOT PAINTED THERE AT ALL (routine #6, 2026-09-21) ──────────
+// The two buckets above split «who won this point» correctly and still shared one wrong premise:
+// that the control was PAINTED at the point being probed. A control clipped out of a shortened
+// scroll container keeps its full bounding rect — the rect is layout, the clip is paint — so the
+// probe happily tests a point the user can see nothing at, and whatever overlay IS painted there
+// wins. The singular `document.elementFromPoint` cannot tell that from a genuine cover-up, and
+// PART 5 shape 13 already records the cost, measured: «20 controls blocked» on a Chromium build
+// whose inset was working perfectly.
+//
+// MEASURED HERE, production, 375x812, 2/2 fresh contexts, 2026-09-21, with the One Tap band injected
+// so the consent card lifts to 286-558 and the app root correctly reserves the combined 526 px:
+//   «تصفية»       rect [82,269,106,36], centre (135,287)
+//   «الوسيط الذكي» rect [188,269,106,36], centre (241,287)
+//   elementFromPoint  → <div 375x272 at 0,286 z=38 pos=fixed>   (the consent card)  ⇒ DEFECT
+//   elementsFromPoint → [card, root, root] — the tab is ABSENT, selfIndex -1        ⇒ not painted
+// The app content box is 812 − 526 = 286 px and the tabs' lower half lies past it: clipped, exactly
+// as the reservation intends, and reachable by scrolling. That is the whole of the «تصفية» /
+// «الوسيط الذكي» half of ops_incident #262 — filed 1/2 on 09-14, 09-15 and 09-20 against a product
+// that was behaving correctly.
+//
+// So `paintedHere: false` is a MEASUREMENT, not an excuse, and it is deliberately narrow:
+//  · `false` — the painted stack was read, it is NON-EMPTY, and this control is not in it.
+//  · `null`  — the stack came back EMPTY. That is the #120 WebKit shape (all five points resolving
+//    to nothing) and it must stay a finding; folding it in here would silence twelve real results.
+//  · `undefined` — a caller that does not measure paint at all keeps today's behaviour, byte for
+//    byte, which is why every case §1 of the barrier already pins still reads the same.
 export function classifyTapOwnership(pts) {
   const stolen = {};
   const blind = {};
+  const clipped = {};
   for (const [k, p] of Object.entries(pts || {})) {
-    if (p && p.ownerLabel) stolen[k] = p.ownerLabel;
+    if (p && p.paintedHere === false) {
+      clipped[k] = `the control is not painted at this point — the painted stack there is `
+        + `${p.hitTag || 'an element it could not describe'}, and this control is absent from it `
+        + '(clipped out of view, not covered)';
+    } else if (p && p.ownerLabel) stolen[k] = p.ownerLabel;
     else if (p && p.hitNull) blind[k] = 'the hit test returned no element at all';
     else blind[k] = `the hit test landed on ${(p && p.hitTag) || 'an element it could not describe'}, which is inside no control`;
   }
-  return { stolen, blind };
+  return { stolen, blind, clipped };
 }
 
 // ── A BLOCKED CONTROL IS NOT AUTOMATICALLY ONE TAP'S FAULT ──────────────────────────────────────
