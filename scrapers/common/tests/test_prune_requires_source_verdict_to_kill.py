@@ -270,3 +270,76 @@ def test_aqarcity_unparseable_page_is_unknown_never_gone():
     assert '("notfound", "exists")' not in gone, (
         "'exists' is back on the kill path alongside 'notfound' — the exact pre-fix mapping."
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# THE LIVE VERDICT IS EVIDENCE, AND EVIDENCE MUST BE RECORDED (ops_incident #248, fixed 2026-09-21)
+#
+# A 'live' verdict here is not a convenience for the strike counter. It is the strongest fact this
+# system can obtain about a listing: a DIRECT fetch of that listing's own URL returned an
+# affirmative live answer. LISTING_LIVENESS.md §3 gives that fact its own column,
+# `last_verified_alive_at`, precisely because `last_seen_at` means only "a crawl encountered this
+# row" and says nothing about the source's opinion.
+#
+# The self-heal used to write `missing_count`/`last_seen_at` and stop, so the proof was spent the
+# instant it was obtained and the proven-alive row became indistinguishable from a merely-sighted
+# one. What that cost, measured across the fleet on 2026-09-21: 63 of 67 platforms holding active
+# inventory had never recorded a single verification, while nine of them had already produced real
+# direct verdicts through this very call site (267 LIVE on rakez alone). Every consumer downstream
+# — ops_platform_liveness_coverage, the SLA monitor, mon_detect_liveness_coverage_ramp, and the
+# registry tier itself — therefore read those platforms as having no per-listing revisit at all.
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+def _selfheal_payloads(sink):
+    return [payload for _tbl, payload, _ads in sink if payload.get("missing_count") == 0]
+
+
+def test_live_verdict_stamps_last_verified_alive_at(wired):
+    """THE REGRESSION for #248: a proven-alive row must carry the proof, not just a reset strike."""
+    db.prune_unseen("aqarcity_residential_listings", SEEN, verify_gone=lambda ad: "live")
+    payloads = _selfheal_payloads(wired)
+    assert payloads, "nothing was self-healed, so this test proves nothing — check the fixture"
+    for p in payloads:
+        assert p.get("last_verified_alive_at"), (
+            "a DIRECT fetch of the listing's own URL said ALIVE and the self-heal recorded only "
+            "missing_count/last_seen_at. That discards the one fact last_verified_alive_at exists "
+            "to hold, and every liveness consumer then reports the platform as never verified "
+            "(ops_incident #248)."
+        )
+
+
+def test_the_alive_stamp_is_minted_by_the_contract_not_by_this_module():
+    """The rule 'nothing stamps this column except a direct affirmative read' lives in ONE place.
+
+    db.py must ASK liveness_contract for the patch rather than writing the column name itself —
+    otherwise the rule has two homes and the second one is free to drift (and
+    verify-liveness-registry-mirror.ts's "no scraper writes the column outside the contract" check
+    would be right to call it an offence).
+    """
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "db.py").read_text(encoding="utf-8")
+    code = "\n".join(ln.split("#")[0] for ln in src.splitlines())
+    assert "direct_alive_patch(" in code, (
+        "db.py no longer calls liveness_contract.direct_alive_patch(); the self-heal is either not "
+        "stamping at all, or stamping by hand"
+    )
+    assert '"last_verified_alive_at"' not in code and "'last_verified_alive_at'" not in code, (
+        "db.py writes last_verified_alive_at directly instead of asking the contract for the patch"
+    )
+
+
+def test_unknown_and_gone_verdicts_never_stamp_alive(monkeypatch):
+    """The asymmetry is the whole safety property: only an affirmative live read may stamp.
+
+    A blocked, throttled or unreadable source is UNKNOWN, and UNKNOWN must leave no trace that
+    looks like proof — a confident recent-looking timestamp on inventory nobody could read is
+    worse than the blind spot the column was added to remove (LISTING_LIVENESS.md §3).
+    """
+    monkeypatch.setattr(db, "_execute", lambda q, what=None: q.execute())
+    for verdict in ("unknown", "gone"):
+        sink: list = []
+        monkeypatch.setattr(db, "sb", lambda s=sink: _Client(s, ACTIVE))
+        db.prune_unseen("aqarcity_residential_listings", SEEN, verify_gone=lambda ad: verdict)
+        for _tbl, payload, _ads in sink:
+            assert "last_verified_alive_at" not in payload, (
+                f"a '{verdict}' verdict stamped the row as verified-alive"
+            )

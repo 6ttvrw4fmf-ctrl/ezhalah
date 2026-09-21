@@ -468,3 +468,57 @@ signal — an API, a status endpoint, a sitemap, a feed. Inventing a page-text h
 gap is the fursaghyr mistake (§4.2: «غير متاح» was a registration-form string and «مؤجر» was
 advertising prose; gating on either would have deactivated live inventory). **Report before
 implementing anything risky.**
+
+### 9.6 A TIER IS A MECHANISM. COVERAGE IS EVIDENCE. NEVER READ ONE AS THE OTHER
+
+*(owner rule, 2026-09-21; `ops_incident` #248 / #578. Measured across the whole fleet the day it
+was written.)*
+
+The registry grades **what a platform runs**. `ops_platform_liveness_coverage` measures **what that
+has actually produced**. They answer different questions, and the day this was written the fleet had
+them fused into one wrong answer:
+
+| | platforms | active listings |
+|---|---|---|
+| had ever written a single `last_verified_alive_at` | **4** (aqar, gathern, dealapp, wasalt) | — |
+| had never written one, ever | **63** | **34,763** |
+| ran a real direct oracle but were declared `CRAWL_PRESENCE_ONLY` | **29** | — |
+| had already produced direct verdicts under that false label | **9** | 267 LIVE on rakez alone |
+
+**One discarded patch caused all of it.** `db.prune_unseen()`'s self-heal — the branch reached only
+after an oracle fetched a listing's own URL and read it ALIVE — wrote `{missing_count, last_seen_at}`
+and stopped. §3's whole point is that `last_seen_at` means "a crawl encountered this row" and says
+nothing about the source's opinion, so the strongest evidence this system can obtain was spent at
+the instant it was obtained. `last_verified_alive_at` then stayed NULL no matter how well any oracle
+ran; coverage read 0% everywhere; `CRAWL_PRESENCE_ONLY` looked like the honest tier; and
+`mon_detect_liveness_coverage_ramp` — whose entire job is *"either its liveness job is not running,
+or it is running and writing nothing"* — filters on
+`strategy in ('DIRECT_REVISIT','CANDIDATE_PLUS_DIRECT')` and therefore never looked at one of the 29.
+A self-consistent blind spot: every layer confirmed every other layer, and all of them were wrong.
+
+The two axes are now kept apart deliberately:
+
+* **Mechanism** — the tier, in `liveness_policies.py` / `sql/mirrors/liveness_registry.json` /
+  `ops_liveness_registry`, all three in one change. A platform that hands `verify_gone=` to
+  `prune_unseen` **is** `CANDIDATE_PLUS_DIRECT` by this file's own definition ("an absence signal
+  selects candidates cheaply; each candidate then gets a DIRECT re-fetch"). Declaring it below that
+  is not modesty, it is a false statement that switches monitors off.
+* **Evidence** — has the chain ever produced a verdict in production? Kept in
+  `scrapers/oracle-never-observed.txt` (a shrink-only ledger, `verify-oracle-observation-ledger.ts`)
+  and recomputed every sweep by `mon_detect_oracle_chain_never_observed()`, which raises per platform
+  and clears itself the moment the chain leaves a trace.
+
+**A tier is never a coverage claim, and it is never permission.** 20 of the 29 have still never been
+seen to run: muktamel is the sharp case — 3,864 active listings, 381 already under strike and
+queueing for the oracle, zero verdicts ever. Its alert says so in those words, and distinguishes it
+from the benign case (a small stable catalogue where no candidate has ever reached grace) by
+`under_strike`. Both are **UNPROVEN**; only one is broken; neither is *covered*.
+
+**A tier claim has to be cashed in code, and there are exactly two ways.** Either the platform owns
+`scrapers/<p>/liveness{,_run}.py` calling `direct_alive_patch()` / `verification_patch()`, or its
+`run.py` wires `verify_gone=` into `prune_unseen` **and** `prune_unseen` stamps through the contract.
+`verify-liveness-registry-mirror.ts` §4 asserts the shared branch **separately**, so deleting that
+one stamp un-cashes all 29 claims at once. It asks the stripped source for the spread
+`**direct_alive_patch(...)` that actually reaches the database: an earlier version tested the raw
+file and a planted mutant proved it worthless — deleting both the import and the call left it GREEN,
+because the comment above the self-heal *names* the function. A comment is not a code path.

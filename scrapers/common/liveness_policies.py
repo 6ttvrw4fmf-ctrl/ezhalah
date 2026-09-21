@@ -143,7 +143,7 @@ POLICIES: dict[str, _P] = {
     # which LISTING_LIVENESS.md §7 forbids answering with a label change. Promoting it is earned by
     # adding a sweep that verifies the population, not by editing this string.
     "aqaralsaudia": _P(
-        _pol("aqaralsaudia", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("aqaralsaudia", 3, 168), CANDIDATE_PLUS_DIRECT,
         "wp-json post status: a 404 the API itself attributes to rest_post_invalid_id (post deleted "
         "at source), or HTTP 200 carrying a status of trash/draft/pending/private/expired. A 404 "
         "WITHOUT that code, any 401/403/408/429/5xx, an unparseable body, an id mismatch and an "
@@ -156,7 +156,7 @@ POLICIES: dict[str, _P] = {
         "never-existing id 999999 both answered HTTP 404 rest_post_invalid_id. The status limb is "
         "implemented too so a future draft/trash post cannot read as alive."),
     "akariyoun": _P(
-        _pol("akariyoun", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("akariyoun", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the listing's OWN url: akariyoun hard-404s a page it no longer serves, so a 404 on that "
         "url is a real death signal. A 200 that still renders «رقم الاعلان» is LIVE. A 200 without "
         "it (a shell, a routing change), any 401/403/408/429/5xx, a transport failure, and a row "
@@ -260,7 +260,7 @@ POLICIES: dict[str, _P] = {
     # Three of them do NOT 404 a removed ad (ialqarawi, sakan, gomenassat), so their removals are
     # also gated by an in-run positive control that fails CLOSED.
     "alsidra": _P(
-        _pol("alsidra", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("alsidra", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the post's own wp/v2 REST record: HTTP 404 carrying rest_post_invalid_id (deleted), or a "
         "200 for this id whose status is not publish, whose property_status is «مزاد», or whose "
         "own title/body says it closed (تم البيع/الإيجار…). A 404 without that code, a 401 (a "
@@ -268,7 +268,7 @@ POLICIES: dict[str, _P] = {
         "Measured: 26 of 26 sellable posts read LIVE, 20 of 20 auction posts GONE, a missing id "
         "404 rest_post_invalid_id. WordPress empties its trash to a real 404 within 30 days."),
     "moftah": _P(
-        _pol("moftah", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("moftah", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the product's own WooCommerce Store API record: HTTP 404 carrying "
         "woocommerce_rest_product_invalid_id, or a 200 for this id whose own words carry «مزاد» / "
         "a closed-deal phrase. The CDN's 6,192-byte fingerprint interstitial is a 403 and is "
@@ -277,7 +277,7 @@ POLICIES: dict[str, _P] = {
         "probe runs on the TLS profile session() negotiates (safari/firefox are served, chrome* "
         "is challenged from some networks)."),
     "masar": _P(
-        _pol("masar", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("masar", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the post's own wp/v2/aqar REST record: HTTP 404 carrying rest_post_invalid_id, or a 200 "
         "for this id whose status is not publish or whose own words carry «مزاد» / a closed-deal "
         "phrase. The hcdn challenge page (served with HTTP 200, never JSON), a 401 for a "
@@ -285,7 +285,7 @@ POLICIES: dict[str, _P] = {
         "Measured: 9 of 9 live posts read LIVE; a missing id answers the invalid-id 404. The probe "
         "session clears the hcdn challenge before it asks."),
     "gomenassat": _P(
-        _pol("gomenassat", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("gomenassat", 3, 168), CANDIDATE_PLUS_DIRECT,
         "*** NOT A 404 *** — a deleted offer answers HTTP 200 with «نأسف! هذه الصفحة غير متوفرة». "
         "The offer's OWN purpose badge (offer-header-info .property-badge, never the «عروض أخرى "
         "قريبة» cards) reading تم البيع / تم الإيجار / مزاد is GONE; any other badge is LIVE. "
@@ -294,7 +294,7 @@ POLICIES: dict[str, _P] = {
         "of 8 transacted offers carry their تم البيع/تم الإيجار badge; 10 of 10 live offers carry "
         "للبيع/للإيجار."),
     "sakan": _P(
-        _pol("sakan", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("sakan", 3, 168), CANDIDATE_PLUS_DIRECT,
         "*** NOT A 404 *** — a removed listing 301s to the listings index (/ar/properties/buy, "
         "canonical /ar/properties/…, no SingleFamilyResidence payload). This id's own page whose "
         "«الحالة» has left «فعال», or whose title/description carries an auction/transacted token, "
@@ -305,7 +305,7 @@ POLICIES: dict[str, _P] = {
         "absence-only pruning would retire live inventory here — the probe self-heals them. 30 of "
         "30 live controls read LIVE."),
     "bossbih": _P(
-        _pol("bossbih", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("bossbih", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the node's own /<nid> url: HTTP 404 (Drupal's themed 404 — the status decides, never "
         "whether the page parsed). A 200 carrying data-history-node-id=<nid> is LIVE unless its "
         "own title/description carries RETIRED_TOKENS (retired in place). Any 401/403/429/5xx, a "
@@ -313,7 +313,7 @@ POLICIES: dict[str, _P] = {
         "Measured: the office deletes nodes — 30 of 30 sampled from the 5,295 nids in the live "
         "range the catalogue no longer carries answered 404; 15 of 15 live controls read LIVE."),
     "alshawaf": _P(
-        _pol("alshawaf", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("alshawaf", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the node's own /<nid> url: HTTP 404 (Drupal's themed 404). A 200 that passes "
         "parse_detail's own proof (article node id AND the node block's wa.me link both name this "
         "nid) is LIVE unless its own h1/«العقار» line says مزاد / تم البيع… (closed in place). "
@@ -321,7 +321,7 @@ POLICIES: dict[str, _P] = {
         "Measured: 31 of 31 sampled from the 4,569 nids in the live range the catalogue no longer "
         "carries answered 404; 15 of 15 live controls read LIVE."),
     "ialqarawi": _P(
-        _pol("ialqarawi", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("ialqarawi", 3, 168), CANDIDATE_PLUS_DIRECT,
         "*** NOT A 404 *** — an id the site no longer serves answers HTTP 200 with the HOMEPAGE "
         "(its myCarousel slider, no «رقم العقار»), and a listing taken out of every category "
         "still serves its own page with «القسم» EMPTY; both are GONE. This id's own page with a "
@@ -332,7 +332,7 @@ POLICIES: dict[str, _P] = {
         "empty-category limb the probe would self-heal a delisted row forever, since no index can "
         "reach it again."),
     "aljassim": _P(
-        _pol("aljassim", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("aljassim", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the node's own /<nid> url: HTTP 404 (Drupal's themed 404). A 200 that passes "
         "parse_detail's own proof (the article's data-history-node-id names this nid) is LIVE "
         "unless the crawl's own _AUCTION/_GONE patterns fire on its title/blocks. The hcdn "
@@ -341,7 +341,7 @@ POLICIES: dict[str, _P] = {
         "Measured: 31 of 31 sampled from the 2,468 nids in the live range the catalogue no longer "
         "carries answered 404; 15 of 15 live controls read LIVE."),
     "almotmkenah": _P(
-        _pol("almotmkenah", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("almotmkenah", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the source's own archive banner «هذا الاعلان لم يعد صالح تم نقله للأرشيف» on the ad's "
         "own page, read by THIS run's crawl (scrapers/almotmkenah/run.py::_verify_gone answers "
         "from the run's own per-ad status map). An ad this run did not reach is probed at its OWN "
@@ -351,7 +351,7 @@ POLICIES: dict[str, _P] = {
         "2026-09-21: a live slug with its tail changed and an invented slug both answer HTTP 404; "
         "6 of 6 live ads probed at their own URL read LIVE."),
     "nufouth": _P(
-        _pol("nufouth", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("nufouth", 3, 168), CANDIDATE_PLUS_DIRECT,
         "DATA, not an HTTP code (the wslnaa shape): the property's own API record "
         "(get_property_data) no longer carries this row's ad (by its digits), the ad's status has "
         "left «نشط», the unit (by the hash of its name) is gone from the ad, or the property now "
@@ -363,7 +363,7 @@ POLICIES: dict[str, _P] = {
         "(GONE) and 28 answered 403 (UNKNOWN by law); 25 of 25 live units read LIVE. 2026-09-21: "
         "/B/<code> read «غير موجود» on 13 of 13 gap codes and HTTP 500 on 6 of 6 live codes."),
     "rakez": _P(
-        _pol("rakez", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("rakez", 3, 168), CANDIDATE_PLUS_DIRECT,
         "wp-json unit status: a 404 the API itself attributes to rest_post_invalid_id (the unit was "
         "deleted at source), OR an HTTP 200 whose acf.unit_status has left 'available' for "
         "'reserved'/'sold-out' — on this platform a unit stops being purchasable far more often "
@@ -376,7 +376,7 @@ POLICIES: dict[str, _P] = {
         "status flip is the dominant death signal here, which is why it is read as authoritative "
         "while a bare 404 is not."),
     "suwar": _P(
-        _pol("suwar", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("suwar", 3, 168), CANDIDATE_PLUS_DIRECT,
         "wp-json post status: a 404 the API itself attributes to rest_post_invalid_id (post deleted "
         "at source), or HTTP 200 carrying a status of trash/draft/pending/private/expired. A 404 "
         "WITHOUT that code, any 401/403/408/429/5xx, an unparseable body, an id mismatch and an "
@@ -391,7 +391,7 @@ POLICIES: dict[str, _P] = {
         "own page markup (<span class=\"status\">غير متاح</span>, 63 of 167 at onboarding); that is "
         "SOURCE-STATED retirement and deactivates through the scraper, never through this tier."),
     "aqargate": _P(
-        _pol("aqargate", 3, 168), CRAWL_PRESENCE_ONLY,
+        _pol("aqargate", 3, 168), CANDIDATE_PLUS_DIRECT,
         "wp-json post status: `expired` (and draft/pending/private/trash/future), or a 404 the API "
         "itself attributes to rest_post_invalid_id (post deleted). A 404 WITHOUT that code, any "
         "401/403/408/429/5xx, an unparseable body, an id mismatch and an unrecognised status are all "
@@ -417,8 +417,8 @@ POLICIES: dict[str, _P] = {
     # each of them the day its oracle shipped, and a registry that misdescribes its own evidence is
     # the same failure as a dark detector reading as a clean bill of health.
     **{
-        p: _P(_pol(p, 3, 168), CRAWL_PRESENCE_ONLY, sig,
-              "Absence from the crawl now only SELECTS candidates: scrapers/" + p + "/run.py hands "
+        p: _P(_pol(p, 3, 168), CANDIDATE_PLUS_DIRECT, sig,
+              "Absence from the crawl only SELECTS candidates: scrapers/" + p + "/run.py hands "
               "prune_unseen a verify_gone oracle, so a row at grace gets a DIRECT re-fetch of its "
               "own URL and an affirmative answer before it may be deactivated. Every oracle here "
               "was EITHER control-validated against interleaved known-alive rows, OR — where the "
@@ -427,9 +427,18 @@ POLICIES: dict[str, _P] = {
               "validation inside every run (see that platform's own signal string). And every "
               "UNKNOWN shape "
               "(no answer, 401/403/407/408/429, 5xx, empty body, unresolved redirect) holds the "
-              "strike without deactivating. TIER UNCHANGED and that is honest: the population still "
-              "carries no recent affirmative verification, so these rows are reported as unverified "
-              "— never as verified-alive.")
+              "strike without deactivating. "
+              "TIER CORRECTED 2026-09-21 (ops_incident #248/#578). This block used to end «TIER "
+              "UNCHANGED and that is honest: the population still carries no recent affirmative "
+              "verification», and that sentence was true only because of a DEFECT: prune_unseen's "
+              "self-heal wrote missing_count/last_seen_at and threw the ALIVE verdict away, so no "
+              "oracle on this list could ever record a verification no matter how well it ran. The "
+              "tier grades the MECHANISM — the file's own definition of CANDIDATE_PLUS_DIRECT is "
+              "«an absence signal selects candidates cheaply; each candidate then gets a DIRECT "
+              "re-fetch before anything is deactivated», which is exactly this — and coverage is "
+              "measured separately by pct_verified_in_sla. Whether a given platform's chain has "
+              "actually RUN in production is the second, independent question, tracked in "
+              "scrapers/oracle-never-observed.txt; a mechanism is not a coverage claim.")
         for p, sig in (
             ("abeea", "the listing's own page answering with an affirmative removal; a 200 we cannot "
                       "recognise is UNKNOWN (9 rows were once wrongly restored by a 200-means-alive rule)"),

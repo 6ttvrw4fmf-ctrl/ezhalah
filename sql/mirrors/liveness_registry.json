@@ -1,7 +1,7 @@
 [
   {
     "platform": "abeea",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -19,13 +19,13 @@
   },
   {
     "platform": "akariyoun",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "aldarim",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -43,7 +43,7 @@
   },
   {
     "platform": "aljassim",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -55,7 +55,7 @@
   },
   {
     "platform": "almotmkenah",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -67,13 +67,13 @@
   },
   {
     "platform": "alshawaf",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "alsidra",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -109,7 +109,7 @@
   },
   {
     "platform": "aqaralsaudia",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -121,13 +121,13 @@
   },
   {
     "platform": "aqarcity",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "aqargate",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -169,7 +169,7 @@
   },
   {
     "platform": "bossbih",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -193,7 +193,7 @@
   },
   {
     "platform": "eastabha",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -223,7 +223,7 @@
   },
   {
     "platform": "gomenassat",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -235,19 +235,19 @@
   },
   {
     "platform": "hajer",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "ialqarawi",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "jazwtn",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -265,43 +265,43 @@
   },
   {
     "platform": "masar",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "mizlaj",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "moftah",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "muktamel",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "mustqr",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "nowaisiry",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "nufouth",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -313,13 +313,13 @@
   },
   {
     "platform": "raghdan",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "rakez",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -361,13 +361,13 @@
   },
   {
     "platform": "sakan",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "sanadak",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -385,13 +385,13 @@
   },
   {
     "platform": "souq24",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
   {
     "platform": "suwar",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
