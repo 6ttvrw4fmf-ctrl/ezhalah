@@ -8,7 +8,7 @@
 //
 //   src/lib/afRanking.ts, the narrowing predicate:
 //     "at N=50 a count of 45 is the last qualifying answer, not the first rejected one"
-//     -> at INTERVIEW_STOP_AT = 50 the last qualifying answer is 50, because the escape clause
+//     -> at the then-live stop line of 50 the last qualifying answer is 50, because the escape clause
 //        `count <= INTERVIEW_STOP_AT` admits every k from 0..50. 45 is not a boundary at all.
 //   src/lib/afRanking.ts, the offer gate:
 //     "At N=50 an option yielding 45 qualifies and one yielding 47 does not"

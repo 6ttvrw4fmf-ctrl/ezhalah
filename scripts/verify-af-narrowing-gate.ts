@@ -117,7 +117,7 @@ check(`below MIN_TOTAL_TO_SHOW (${MIN_TOTAL_TO_SHOW}), no question is ever offer
 // thing separating them is the score. UPDATED 2026-08-25: this pair used to be 937/937 vs 60/1,814,
 // and the second assertion used to read "the lopsided one is still INCLUDED" — under the owner's new
 // rule the 1,814 chip (3.2% cut) is dropped, which left that single-select with one option, and
-// MIN_OPTIONS_SINGLE=2 then said one option is not a choice. (That last step no longer holds since
+// the then-live MIN_OPTIONS_SINGLE of 2 then said one option is not a choice. (That last step no longer holds since
 // the owner's 2026-08-26 reversal — MIN_OPTIONS_SINGLE = 1, so a lone survivor IS asked — but the
 // fixture below was already replaced in 2026-08-25 and is unaffected either way.) That is the new
 // rule working, not selectivity creeping back into inclusion: the 60 chip itself survives (see §1).
