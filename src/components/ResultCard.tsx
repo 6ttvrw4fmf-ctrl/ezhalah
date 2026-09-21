@@ -552,8 +552,9 @@ const COMPOUNDIN_LOGO = require('../../assets/images/compoundin.png');
 const WSLNAA_LOGO = require('../../assets/images/wslnaa.png');
 const RAKEZ_LOGO = require('../../assets/images/rakez.png');
 const AKARIYOUN_LOGO = require('../../assets/images/akariyoun.png');
-// NEUTRAL placeholder for the seven platforms onboarded 2026-09-20 whose own marks the owner is
-// still supplying. It is a plain building glyph and belongs to no company. The branches below MUST
+// NEUTRAL placeholder for platforms whose own marks the owner is still supplying — today the eleven
+// onboarded 2026-09-21 (the seven of 2026-09-20 have their real logos). It is a plain building glyph
+// and belongs to no company. The branches below MUST
 // exist even while they render this: the fallback at the end of SourceBadge returns عقار's logo,
 // so a missing branch stamps another company's mark on their listings — the misattribution the
 // owner called a legal problem, not a cosmetic one.
@@ -729,6 +730,20 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('abralosol')) return <Image source={ABRALOSOL_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('arkaan')) return <Image source={ARKAAN_LOGO} style={card.hostBadge} contentFit="contain" />;
   if (s.includes('rawasidark')) return <Image source={RAWASIDARK_LOGO} style={card.hostBadge} contentFit="contain" />;
+  // ── onboarded 2026-09-21: the SAME neutral placeholder for all eleven until the owner supplies
+  // each real logo. LAST on purpose, right above the fallback: no new token can capture an existing
+  // platform's source, and each branch must EXIST — the fallback below is عقار's own logo.
+  if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('moftah') || s.includes('مفتاح العقار')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('masar') || s.includes('مسار المستقبل')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('menassat') || s.includes('منصات')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('sakan')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('bossbih') || s.includes('بوصبيح')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('alshawaf') || s.includes('al shawaf') || s.includes('الشواف')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('alqarawi') || s.includes('القرعاوي')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('almotmkenah') || s.includes('المتمكنة')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('nufouth') || s.includes('نفوذ')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
   return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
 }
 
@@ -821,6 +836,18 @@ function sourceHost(source: string): string {
   if (s.includes('toor') || s.includes('توور')) return 'toor.ooo';
   if (s.includes('ksaaqar') || s.includes('ksa aqar') || s.includes('عقارات السعودية')) return 'ksaaqar.com';
   if (s.includes('sadiqeltajer') || s.includes('sadiq eltajer') || s.includes('sadiq-eltajer') || s.includes('صادق التاجر')) return 'sadiq-eltajer.sa';
+  // onboarded 2026-09-21 — last, right above the fallback, for the same reason as in SourceBadge.
+  if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return 'alsidra.com.sa';
+  if (s.includes('moftah') || s.includes('مفتاح العقار')) return 'moftah-aleaqar.com';
+  if (s.includes('masar') || s.includes('مسار المستقبل')) return 'masaraqarat.com';
+  if (s.includes('menassat') || s.includes('منصات')) return 'gomenassat.com';
+  if (s.includes('sakan')) return 'sa.sakan.co';
+  if (s.includes('bossbih') || s.includes('بوصبيح')) return 'bossbihoffice.com.sa';
+  if (s.includes('alshawaf') || s.includes('al shawaf') || s.includes('الشواف')) return 'alshawaf.com.sa';
+  if (s.includes('alqarawi') || s.includes('القرعاوي')) return 'ialqarawi.com';
+  if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return 'aljassimaqar.com';
+  if (s.includes('almotmkenah') || s.includes('المتمكنة')) return 'almotmkenah.com';
+  if (s.includes('nufouth') || s.includes('نفوذ')) return 'nufouth.com';
   return 'sa.aqar.fm';
 }
 

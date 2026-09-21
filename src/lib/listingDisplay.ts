@@ -126,6 +126,20 @@ export function sourceName(source: string): string {
   if (s.includes('fahadalshahri') || s.includes('فهد الشهري')) return 'Maqam Al Wisam Real Estate';
   if (s.includes('compoundin') || s.includes('كومباوند')) return 'CompoundIn';
   if (s.includes('wslnaa') || s.includes('waslna') || s.includes('وصلنا')) return 'Waslna Real Estate';
+  // onboarded 2026-09-21 — LAST on purpose, so no new token can capture an existing platform's
+  // source. Each tests the stored `source` (the scraper's SOURCE constant) and the slug. Bare «سكن»
+  // is deliberately NOT a token: it is a common word («سكني» = residential); only Latin 'sakan' is.
+  if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return 'Al Sidra Real Estate';
+  if (s.includes('moftah') || s.includes('مفتاح العقار')) return 'Moftah Al Aqar';
+  if (s.includes('masar') || s.includes('مسار المستقبل')) return 'Masar Al Mustaqbal Real Estate';
+  if (s.includes('menassat') || s.includes('منصات')) return 'Menassat Real Estate';
+  if (s.includes('sakan')) return 'Sakan';
+  if (s.includes('bossbih') || s.includes('بوصبيح')) return 'Bossbih Real Estate Office';
+  if (s.includes('alshawaf') || s.includes('al shawaf') || s.includes('الشواف')) return 'Al Shawaf Real Estate Office';
+  if (s.includes('alqarawi') || s.includes('القرعاوي')) return 'Ibrahim Alqarawi Real Estate Investments';
+  if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return 'Al Jassim Real Estate Services';
+  if (s.includes('almotmkenah') || s.includes('المتمكنة')) return 'Almotmkenah Real Estate';
+  if (s.includes('nufouth') || s.includes('نفوذ')) return 'Nufouth Development Real Estate';
   return 'AQAR';
 }
 

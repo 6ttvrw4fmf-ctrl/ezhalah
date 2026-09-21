@@ -68,6 +68,20 @@ export const PLATFORMS: Platform[] = [
   { name: 'Aouj', domain: 'aoujestates.com', brand: 'Aouj Estates', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Abralosol', domain: 'abralosol.com', brand: 'Abr Al Osol Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Arkaan', domain: 'arkaanalaqar.com', brand: 'Arkaan Al Aqar', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // onboarded 2026-09-21. `name` is the EXACT stored db `source` (the scraper's SOURCE constant), so
+  // supports(l.source) resolves these rows by name and verify-platform-registration-complete.ts
+  // runs the card matchers over the real stored strings, not a spelling this file chose.
+  { name: 'Al Sidra', domain: 'alsidra.com.sa', brand: 'Al Sidra Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Moftah', domain: 'moftah-aleaqar.com', brand: 'Moftah Al Aqar', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'مسار المستقبل', domain: 'masaraqarat.com', brand: 'Masar Al Mustaqbal Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'منصات', domain: 'gomenassat.com', brand: 'Menassat Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Sakan Saudi', domain: 'sa.sakan.co', brand: 'Sakan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'مكتب بوصبيح', domain: 'bossbihoffice.com.sa', brand: 'Bossbih Real Estate Office', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Al Shawaf', domain: 'alshawaf.com.sa', brand: 'Al Shawaf Real Estate Office', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Ibrahim Alqarawi', domain: 'ialqarawi.com', brand: 'Ibrahim Alqarawi Real Estate Investments', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Al Jassim', domain: 'aljassimaqar.com', brand: 'Al Jassim Real Estate Services', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Almotmkenah', domain: 'almotmkenah.com', brand: 'Almotmkenah Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'نفوذ', domain: 'nufouth.com', brand: 'Nufouth Development Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'RawasiDark', domain: 'rawasi-dark.com', brand: 'Rawasi Dark Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: '1 October', domain: '1october.com.sa', brand: '1 October Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
