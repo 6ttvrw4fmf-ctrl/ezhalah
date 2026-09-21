@@ -19,7 +19,14 @@ PRODUCTION stores. (Both stubs are fixed to norm_district_tok() in the same chan
 
 So this file pins the MIRROR itself against values taken from the SQL function, and pins the
 end-to-end resolve through the real matching logic. Expected values below were produced by
-`select public.norm_district_tok(t)` on production, 2026-09-14 — they are an oracle, not a guess.
+`select public.norm_district_tok(t)` on production — they are an oracle, not a guess.
+
+RE-READ 2026-09-20. The first oracle was captured on 2026-09-14 BEFORE migration 20260914204035
+(the owner's number fold) replaced the SQL body, so its three numbered rows pinned «محمديه 1» /
+«رحاب 2» — this file stayed green while ASSERTING the drift it exists to catch. Every value is now
+re-read off the post-fold function. Swept against 2,806 production strings (every catalog /
+canonical / display-canon key + all 43 numbered district_ar in the search index): the old mirror
+disagreed with SQL on 46, this one on 0.
 
 Run: python -m pytest scrapers/common/tests/test_norm_district_tok_mirrors_sql.py -v
 """
@@ -38,7 +45,7 @@ sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.d
 
 import scrapers.common.arabic_location as al  # noqa: E402
 
-# input → public.norm_district_tok(input), read off production 2026-09-14.
+# input → public.norm_district_tok(input), read off production 2026-09-20 (after 20260914204035).
 SQL_ORACLE = {
     "حي الروضة": "روضه",
     "حي الرصيفة": "رصيفه",
@@ -47,9 +54,30 @@ SQL_ORACLE = {
     "الشرايع": "شرايع",
     "حي الشرائع": "شرايع",                  # ئ→ي, so both spellings land on ONE token
     "حي النواريه": "نواريه",
-    "المحمدية 1": "محمديه 1",
-    "المحمدية ١": "محمديه 1",               # Arabic-Indic digit folds to ASCII
-    "الرحاب2": "رحاب 2",                    # letter|digit gets a space — the twin keeps its identity
+    # THE NUMBER FOLD (owner 2026-09-14): a digit run at either end folds onto the bare name.
+    "الهاشمية 1": "هاشميه",
+    "الهاشمية": "هاشميه",
+    "المحمدية 1": "محمديه",
+    "المحمدية 2": "محمديه",
+    "المحمدية ١": "محمديه",                 # Arabic-Indic digit folds too
+    "المحمدية": "محمديه",
+    "الرحاب2": "رحاب",                      # attached, no space
+    "الرحاب٢": "رحاب",                      # attached Arabic-Indic — the shape find_district_in_text sees
+    "1النرجس": "نرجس",                      # LEADING number (city 67, real production data)
+    "حي المصيف 2": "مصيف",
+    "حي الورود1": "ورود",
+    "ولي العهد 2": "ولي العهد",
+    "مصيف 1": "مصيف",
+    "مصيف الاول": "مصيف الاول",             # word numerals stay UNFOLDED (owner-held)
+    "حي 3 المحمدية": "3 المحمديه",          # a mid-name digit is not an end — kept, as in SQL
+    "حي 3المحمدية": "3 المحمديه",           # digit|letter split — the only shape that needs it
+    "النسيم 2ب": "نسيم 2 ب",
+    "حي 12": "حي",                          # digits go BEFORE «حي » strip, so the bare word stays
+    "٣": "",                                # number-only → empty key (the refresh drops k = '')
+    # a detached «ال»/«آل» leaves nothing but a space to trim — SQL's outer btrim; the old mirror
+    # had none and returned « هويمل»
+    "حي ال هويمل": "هويمل",
+    "آل قير": "قير",
     "حي حي المصيف": "مصيف",                 # repeated «حي » prefix
     "ولي العهد": "ولي العهد",               # no «ال», no hamza — the one shape the old key got right
     "حي  السبهاني": "سبهاني",
@@ -125,3 +153,20 @@ def test_the_canonical_catalog_spelling_is_returned_not_the_source_substring():
     # A matched district must render identically to every other listing for that place.
     assert al.find_district_in_text("مكة الشرايع", MECCA) == "حي الشرائع"
     assert al.find_district_in_text("النواريه", MECCA) == "حي النوارية"
+
+
+# ── the number fold, end to end: a numbered source name must reach the catalog's (numberless) key ─
+def test_a_numbered_source_name_lands_on_the_folded_catalog_key(monkeypatch):
+    # The catalog stores «المحمدية» (20260914204035 deleted every numbered spelling and forbids them
+    # by CHECK constraint), so a membership test with any numbered source spelling must still hit.
+    key = al.norm_district_tok("المحمدية")
+    for src in ("المحمدية 1", "المحمدية 2", "المحمدية٣", "٣المحمدية", "حي المحمدية 3"):
+        assert al.norm_district_tok(src) == key, src
+    jazan = 10_001  # stub id; the names are جازان's real ones (the migration's own self-test 6)
+    monkeypatch.setitem(al._DISTRICT_BY_CITY, jazan, {key})
+    monkeypatch.setitem(al._DISTRICT_AR_BY_NORM, key, "المحمدية")
+    # An attached Arabic-Indic digit is one letter-run to find_district_in_text, so no digit-free
+    # window exists — before the fold this returned None. A FOLD merges; it never un-resolves:
+    assert al.find_district_in_text("شقة في المحمدية٢", jazan) == "المحمدية"
+    assert al.find_district_in_text("شقة في المحمدية 2", jazan) == "المحمدية"
+    assert al.find_district_in_text("شقة في المحمدية", jazan) == "المحمدية"
