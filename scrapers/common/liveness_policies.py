@@ -344,6 +344,18 @@ POLICIES: dict[str, _P] = {
                         "row's own stored listing_url is used, because 39 of 1,724 rows store another "
                         "listing's URL. Removals are additionally gated by an in-run canary"),
             ("souq24", "a redirect OFF this ad's own path (14/14 dead rows, 0/40 controls), plus 404/410"),
+            ("muktamel", "a redirect OFF this listing's own path — measured from the crawl's own "
+                         "outcome counters, where `redirect_404` fired 84-98 times per shard across "
+                         "all four 2026-09-21 runs while `dead_404` (a bare 404/410 status) fired "
+                         "ZERO times; the URL is /real-estates/<id> with no slug, so the path cannot "
+                         "change for a benign reason. 404/410 is kept as a second limb at no cost. "
+                         "NOT pre-validated against a dead cohort — the host answers 403 CONNECT "
+                         "from our cloud egress — so removals are gated by an in-run canary drawn "
+                         "from ids this same run read as LIVE, failing CLOSED: no control, no "
+                         "removal. `not_available_or_zero_price` is deliberately NOT a death: the "
+                         "measured dead shape is the CONJUNCTION (isAvailable false AND price null) "
+                         "while fetch_one()'s skip gate is a disjunction, and separating them needs "
+                         "the Nuxt payload the signal is not handed"),
             ("mustqr", "a per-id PostgREST read with NO status filter — the row absent from the "
                        "source's own table, or present with a `status` other than «متاح». Identity "
                        "is guaranteed by construction (queried by primary key, and the returned "
@@ -362,7 +374,7 @@ POLICIES: dict[str, _P] = {
         for p in (
             "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "amlakalahsa", "aouj", "aqaratikom",
             "aqarmonthly", "arkaan", "awal", "azdad", "bahadhabab", "eaqartabuk", "erapulse",
-            "fursaghyr", "jurash", "muktamel",
+            "fursaghyr", "jurash",
             "october",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
             "shmoualshmal", "therc",

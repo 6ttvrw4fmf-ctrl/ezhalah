@@ -61,7 +61,18 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // pairs with a RUN-level trust gate a per-row callback cannot see. It is the largest platform here.
 // 26 → 25 later still: azdad onboarded (own Next.js + Supabase stack, a corrected 40-candidate-
 // audit link) — same unevidenced-absence-only shape as every other freshly onboarded platform.
-const RATCHET = 25;
+// 25 → 24: muktamel, after it did the thing this ledger exists to predict. On 2026-09-21 at 04:54
+// it deactivated 94 rows with `missing_count = 3` and no source verdict for a single one of them
+// (alert 4344, `without_direct_evidence: 94`). Its row here read "EGRESS BLOCKED — gateway denies
+// www.muktamel.com (403 CONNECT)", and that reason was about the WRONG READER: the gateway is the
+// cloud agent's, while the oracle runs on the GitHub runner where the very same crawl fetched 435
+// live listings that morning. A platform whose scraper direct-fetches every listing URL was
+// recorded as unable to probe one. The signal was already measured by shipped code: across all
+// four 2026-09-21 shard runs `redirect_404` fired 84-98 times per shard and `dead_404` fired ZERO,
+// so removal on this source is a redirect, on a slugless URL that cannot change path benignly.
+// Wired through the shared law with an in-run canary; `not_available_or_zero_price` deliberately
+// stays UNKNOWN because the measured dead shape is a conjunction and fetch_one's gate is not.
+const RATCHET = 24;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

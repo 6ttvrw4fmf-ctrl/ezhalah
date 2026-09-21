@@ -66,7 +66,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, http_liveness, normalize  # noqa: E402
 
 BASE = "https://www.muktamel.com"
 WORKERS = int(os.environ.get("MUKTAMEL_WORKERS", "8"))
@@ -381,6 +381,108 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict]]:
         return None
     _note("live")
     return listing_id, parsed
+
+
+# ── Liveness oracle: the ONLY thing allowed to kill a muktamel row ───────────────
+# WHY THIS EXISTS (incident: 94 rows deactivated 2026-09-21 04:54 with zero source evidence).
+# `db.prune_unseen` counts a miss for every id this crawl did not return as LIVE, and three misses
+# in a row flipped `active = false`. But `fetch_one` above returns None for SEVEN different
+# reasons, and only two of them are the source saying anything about the listing:
+#
+#   dead_404 / redirect_404                     → the SOURCE removed it          (DEAD)
+#   http_5xx / network_* / no_html_after_retries → we never got an answer          (UNKNOWN)
+#   no_nuxt_payload / unparseable_or_no_offer    → OUR parser failed               (UNKNOWN)
+#   not_available_or_zero_price                  → read, but see the note below    (UNKNOWN)
+#
+# The old code could not tell them apart: all seven were simply "absent from rows_seen". Measured on
+# the 2026-09-21 runs, each shard logged ~85-90 UNKNOWN reads (http_500 51-58, network_Timeout 29,
+# no_html_after_retries 3-5) alongside 84-98 real removals — so roughly half of every shard's miss
+# set was a listing we had failed to read, ageing toward deletion at 30 days. The weekly→daily
+# cadence change (#3429) did not create this; it only made the third strike arrive in three days
+# instead of three weeks. `docs/ops/LISTING_LIVENESS.md` §1-§3: absence is EvidenceKind.ABSENCE, it
+# is a candidate signal and never a verdict, and only a DIRECT fetch of the listing's own URL may
+# kill. `http_liveness.decide()` enforces that half of the law and a caller cannot relax it.
+#
+# THE MEASURED SIGNAL. muktamel expresses removal as a REDIRECT, not a status: across all four
+# 2026-09-21 shard runs `redirect_404` fired 84-98 times per shard while `dead_404` (a bare 404/410
+# status) fired ZERO times. The module docstring records the same fact from the 2026-09-03
+# re-verification — "or redirect to /404". A listing URL here is `/real-estates/<id>` with no slug,
+# so the path cannot change for any benign reason; 404/410 is kept as well because it costs nothing
+# and the shipped fetch path already treats it as terminal.
+#
+# `not_available_or_zero_price` is deliberately NOT a kill. The docstring's measured dead shape is
+# the CONJUNCTION (`isAvailable === false` AND `price === null`), while `fetch_one`'s skip gate is a
+# disjunction — so "available but zero price" lands in the same bucket without being the dead shape,
+# and telling them apart needs the Nuxt payload, which `signal()` is not handed. Holding it as
+# UNKNOWN keeps a withdrawn ad visible a little longer; promoting it unmeasured would kill live ones.
+# Promoting it is a follow-up that needs a probe, not a guess (LISTING_LIVENESS.md §4).
+#
+# No 'live' verdict is returned, so prune_unseen's SELF-HEAL branch never fires — and it does not
+# need to here. This crawl enumerates the whole id band every run rather than reading an index, so a
+# listing the source still serves is re-fetched and re-upserted on the next run, and `db.upsert`
+# already resets `missing_count` to 0 and sets `active = true`. Self-heal exists for platforms whose
+# discovery index is incomplete (the aqarcity sitemap window); muktamel has no index to be missing
+# from. Returning an unmeasured 'live' would instead risk making a genuinely removed row immortal.
+def _liveness_signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+    """muktamel's affirmative removal signal, and nothing else. None == no opinion."""
+    if status in (404, 410):
+        return "gone"
+    if path_changed:
+        # The slugless canonical URL redirected: the site sent this id to /404.
+        return "gone"
+    return None
+
+
+# IN-RUN POSITIVE CONTROL (LISTING_LIVENESS.md §5.4). The signal above rests on "a path change means
+# /404". If the site ever started canonicalising `/real-estates/<id>` to a slugged URL, that premise
+# would invert and every probe would read as a removal — so before any kill, re-fetch an id THIS RUN
+# just confirmed live and require that it does NOT read as gone. A source that cannot testify
+# correctly about a listing we know is alive is not allowed to testify against any other.
+# Fails CLOSED: no control id (validation run, empty crawl) means no removal.
+#
+# The verdict is MEMOISED for the run, the same shape aldarim's `_canary_ok()` uses: "is this source
+# still serving us real listings right now" is a fact about the RUN, not about each row, and
+# `verify_gone` is called once per row at grace — so re-fetching a control for every one of 94 kills
+# would multiply the run's requests for an answer that cannot differ between them. Both directions
+# are cached: a validated oracle stays validated, and a failed control forbids every removal for the
+# rest of the run rather than being re-rolled until it happens to pass.
+_canary_ids: list[int] = []
+_canary_state: dict[str, Any] = {"verdict": None, "reason": "not evaluated"}
+
+
+def _canary() -> tuple[bool, str]:
+    with _outcome_lock:
+        if _canary_state["verdict"] is not None:
+            return _canary_state["verdict"], _canary_state["reason"]
+        ids = list(_canary_ids)[:3]
+        if not ids:
+            ok, why = False, "no known-live control id from this run to validate the oracle against"
+        else:
+            ok, why = False, (f"the oracle read {len(ids)} known-live control id(s) as GONE or "
+                              "unreachable — the removal signal cannot be trusted this run")
+            for listing_id in ids:
+                url = f"{BASE}/real-estates/{listing_id}"
+                try:
+                    r = _session().get(url, timeout=45, allow_redirects=True)
+                except Exception:  # noqa: BLE001 — an unreachable control proves nothing either way
+                    continue
+                landed = str(getattr(r, "url", url) or url)
+                if _liveness_signal(r.status_code, r.text or "",
+                                    landed.rstrip("/") != url.rstrip("/")) != "gone":
+                    ok, why = True, f"control id {listing_id} still reads live"
+                    break
+        _canary_state["verdict"], _canary_state["reason"] = ok, why
+        return ok, why
+
+
+_probe = http_liveness.LivenessProbe(
+    platform="muktamel",
+    signal=_liveness_signal,
+    session=_session,
+    url_for=lambda ad: (f"{BASE}/real-estates/{ad[2:]}"
+                        if ad.startswith("MK") and ad[2:].isdigit() else None),
+    canary=_canary,
+)
 
 
 # ── Parse ───────────────────────────────────────────────────────────────────────
@@ -701,11 +803,15 @@ def main() -> int:
         # passed through so a shard only ever ages out ids it owns (db._ad_shard applied to
         # ad_number="MK<id>" extracts the same <id> this crawl sharded on, by construction above) --
         # a blocked or slow shard therefore prunes nothing outside its own slice, exactly like dealapp.
+        # Arm the oracle's positive control with ids this crawl itself read as LIVE (see _canary).
+        _canary_ids.extend(int(r["ad_number"][2:]) for r in (res + com)
+                           if r.get("ad_number", "")[2:].isdigit())
         pruned = 0
         for tbl, rows_seen in (("muktamel_residential_listings", res),
                                ("muktamel_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Muktamel",
-                                 shards=args.shards, shard=args.shard)
+                                 shards=args.shards, shard=args.shard,
+                                 verify_gone=_probe.verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
