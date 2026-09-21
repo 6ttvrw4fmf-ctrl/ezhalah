@@ -270,31 +270,22 @@ def _utility_flags(utilities: Any) -> dict[str, bool]:
     return flags
 
 
-def _resolve_total(total: Optional[int], meter: Optional[int], area: Optional[int]) -> Optional[int]:
-    """REVERSED 2026-07-28 (owner decision, live evidence superseded the 07-26 conclusion this
-    replaces): fursaghyr.com never displays rea.total_price anywhere on its own listing pages — only
-    a per-m² rate (labeled "السعر"). When total_price genuinely IS populated, it already matches
-    rate×area (REGA's own disclosure payload pre-computes it), so this is effectively "the number a
-    user would calculate themselves from the two figures the site DOES show" — accepted as
-    source-faithful per the owner. But when total_price is missing entirely, the old code left
-    price_total NULL even for a listing with a real, live, displayed price (found live 2026-07-28:
-    ad FG26842, the platform's only active Rent listing, has total_price=null and meter_price=55000
-    — but fursaghyr.com's own page shows "55000 SAR" as THE price for this listing, not a per-m²
-    rate; 55,000 SAR/m² also fails the plausibility gate below, consistent with it being a raw
-    total, not a rate, sitting in the wrong field). Old 07-26 comment ("this synthesis was already
-    unreachable") was a code-only conclusion that didn't hold once a fresh live sample was checked."""
+def _resolve_total(total: Optional[int], meter: Optional[int]) -> Optional[int]:
+    """The total the SOURCE states, or None. Never rate × area.
+
+    fursaghyr.com's rea payload carries `total_price` (stored verbatim) and `meter_price`. Two cases:
+    - `meter_price` >= 50,000 is not a real SAR/m² rate. It is a raw total sitting in the wrong field.
+      Live 2026-07-28: ad FG26842 has total_price=null and meter_price=55000, and the page shows
+      "55000 SAR" as THE price. So it is used as-is, never multiplied.
+    - A plausible rate with no `total_price` stores NO total. From 2026-07-28 this returned
+      meter × area, but owner rule 2026-09-03 says ppm × area is derived only in the SEARCH/DISPLAY
+      layer (search_listings_ar.price_total_effective + derivedTotalFromPerMeter). The rate is kept in
+      price_per_meter, and a sale row shows the labelled ≈ total from there. Owner chose this on
+      2026-09-21 (PR #3450). A rent row with only a rate now shows no price, because display
+      derivation is sale-only. That affected 0 active rows on the day."""
     if total is not None:
         return total
-    if not meter:
-        return None
-    if meter < 50_000 and area:
-        # meter is a plausible per-m² rate → the site's own rate × the site's own area, same
-        # arithmetic REGA's payload does internally when total_price IS present.
-        return meter * area
-    if meter >= 50_000:
-        # meter fails the rate-plausibility gate (too high to be a real SAR/m² price) → it's more
-        # likely already a raw total sitting in the wrong field (FG26842's exact shape) than a
-        # genuine rate — use it directly, don't multiply by area again.
+    if meter and meter >= 50_000:
         return meter
     return None
 
@@ -320,7 +311,12 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
 
     area = _int(rea.get("land_area"))
     meter = _int(rea.get("meter_price"))
-    total = _resolve_total(_int(rea.get("total_price")), meter, area)
+    total = _resolve_total(_int(rea.get("total_price")), meter)
+    # A genuine rate and a null total_price: the source publishes NO total. Send AUTHORITATIVE_NULL,
+    # not None. The upsert drops a None, so the rate × area totals this scraper stored before
+    # PR #3450 would otherwise stay frozen in the table.
+    if total is None and rea.get("total_price") is None and meter and meter < 50_000:
+        total = db.AUTHORITATIVE_NULL
 
     # No magnitude gate (removed 2026-08-09). This DISCARDED THE WHOLE LISTING when the computed
     # magnitude probe fell under 1,000 SAR. The comment above it already recorded the discomfort —
