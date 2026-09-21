@@ -25,7 +25,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildAfSummary } from '../src/lib/afSummary.ts';
+import { buildAfSummary, buildAfSkipped } from '../src/lib/afSummary.ts';
 import { deriveGuided, type GuidedStep } from '../src/lib/afSteps.ts';
 import { resultCounts, closingNoteKey } from '../src/data/resultCount.ts';
 
@@ -126,28 +126,52 @@ check('the receipt is the ELSE branch of the actions row (the two can never rend
   const receipt = block(agent, 'af-round-receipt', '</View>');
   check('the receipt block is present and holds the choices line',
     receipt !== '' && /testID="af-round-receipt-choices"/.test(receipt),
-    'agent.tsx: af-round-receipt must contain the «اختياراتك: …» line');
+    'agent.tsx: af-round-receipt must contain the «اخترت: …» line');
+  // Added 2026-09-20 — the card now carries a SECOND sentence naming the questions the round skipped.
+  // Its own barrier is verify-af-receipt-shows-skips.ts; pinned here too so that removing it does not
+  // quietly shrink this card back to half a record.
+  check('the receipt also holds the skipped line',
+    receipt !== '' && /testID="af-round-receipt-skipped"/.test(receipt),
+    'agent.tsx: a round\'s record must name what it SKIPPED as well as what it committed');
   check('the receipt has nothing to tap (no Pressable, no press handler)',
     receipt !== '' && !/Pressable|onPress|<Tap\b|TouchableOpacity/.test(receipt),
     'agent.tsx: the receipt is a RECORD of a finished round — making it interactive re-opens the fork this rule closes');
-  check('the receipt states the round\'s choices through the shared summary builder',
-    /t\('Your choices: \{summary\}', \{ summary: afReceipt\[m\.id\] \}\)/.test(receipt),
-    'agent.tsx: the choices line must render the stored buildAfSummary() string, never a re-derived one');
+  // The stored value became TWO newline-joined sentences on 2026-09-20 (choices, then skips), so the
+  // choices line renders the first half rather than the whole string. The invariant is unchanged and
+  // is what this still pins: the line renders what was STORED at finish time, never a re-derivation
+  // from live state — a re-derived sentence would drift the moment a pill is removed.
+  check('the receipt states the round\'s choices from the STORED string, never a re-derived one',
+    /const \[chosen = '', skipped = ''\] = afReceipt\[m\.id\]\.split\('\\n'\)/.test(receipt)
+    && /t\('Your choices: \{summary\}', \{ summary: chosen \}\)/.test(receipt)
+    && !/buildAfSummary\(/.test(receipt),
+    'agent.tsx: the choices line must render the stored half, never call the builder at render time');
   check('an empty summary renders NO receipt at all (nothing committed ⇒ nothing to record)',
     /\) : afReceipt\[m\.id\] \? \(/.test(agent),
     'agent.tsx: gating on the summary string means an all-skipped round shows no «اختياراتك: » with an empty tail');
 }
-check('the receipt is written for the ORIGIN turn from the COMMITTED facets only',
-  /setAfReceipt\(\(r\) => \(\{ \.\.\.r, \[carry\.msgId\]: buildAfSummary\(ageFlowFacetsRef\.current\) \}\)\)/.test(agent),
-  'agent.tsx (finishGuided): keyed on carry.msgId = the turn the round was opened FROM; built from facets, which skips never enter');
+check('the receipt is written for the ORIGIN turn, choices from the COMMITTED facets only',
+  /\[carry\.msgId\]: `\$\{roundChoices\}\\n\$\{roundSkipped\}`/.test(agent)
+  && /const roundChoices = buildAfSummary\(ageFlowFacetsRef\.current\)/.test(agent),
+  'agent.tsx (finishGuided): keyed on carry.msgId = the turn the round was opened FROM; the CHOICES half is still built from facets, which skips never enter');
+check('only a round that committed something leaves a receipt at all',
+  /if \(carry && roundChoices\) setAfReceipt/.test(agent),
+  'agent.tsx: a skip-everything round changes nothing, so its turn must keep the buttons — a receipt there leaves the user no way back into the interview');
 check('the receipt strings are translated with the owner\'s exact wording',
   /'Continued with the advanced filter': 'تابع المستخدم باستخدام التصفية المتقدمة'/.test(i18n)
-  && /'Your choices: \{summary\}': 'اختياراتك: \{summary\}'/.test(i18n),
+  && /'Your choices: \{summary\}': 'اخترت: \{summary\}'/.test(i18n)
+  && /'Skipped: \{summary\}': 'تخطيت: \{summary\}'/.test(i18n),
   'src/i18n.tsx: Arabic is the product language — an untranslated key renders the English source string');
 
-// ── 5. EXECUTED: summary == committed state, so a SKIPPED answer can never reach the receipt ─────
+// ── 5. EXECUTED: summary == committed state, so a SKIP never reaches the CHOICES sentence ────────
 // Not a grep: run the real pipeline the receipt is built from (deriveGuided → facets → buildAfSummary)
-// with a skipped question in the middle and prove the skip leaves no trace in the rendered string.
+// with a skipped question in the middle and prove the skip leaves no trace in that sentence.
+//
+// SCOPE NARROWED 2026-09-20, deliberately. The receipt gained a second sentence that DOES name the
+// skipped questions (buildAfSkipped, asserted below and in verify-af-receipt-shows-skips.ts). The
+// permanent rule it would otherwise contradict is about the PILLS sentence — a claim about the live
+// predicate — and buildAfSummary is still the only thing that feeds it. Naming a skip in a record of
+// what the interview DID claims no filter, which is why the two can coexist. What must never happen
+// is the two sentences blurring, so this section now pins BOTH directions.
 {
   type Q = GuidedStep['question'];
   const q = (id: string, apply: (x: any, keys: string[]) => any): Q =>
@@ -175,12 +199,21 @@ check('the receipt strings are translated with the owner\'s exact wording',
   check('a skipped question commits NO facet (the receipt has nothing to print for it)',
     d.facets.length === 2 && !d.facets.some((f) => f.id === 'furnished'),
     `facets=${JSON.stringify(d.facets.map((f) => f.id))}`);
-  check('the receipt string lists both committed answers',
+  check('the CHOICES sentence lists both committed answers',
     summary.includes('+٣') && summary.includes('٣-٥ سنوات'),
     `summary="${summary}"`);
-  check('the receipt string never mentions the SKIPPED answer',
+  check('the CHOICES sentence never mentions the skipped answer\'s VALUE',
     !summary.includes('مفروشة') && !summary.includes('🛋️'),
-    `a skip leaked into the receipt: "${summary}"`);
+    `a skip leaked into the choices sentence: "${summary}"`);
+  // THE OTHER DIRECTION (2026-09-20). The skips sentence names the skipped QUESTION by its noun
+  // — «الفرش» — and never the value the user declined to pick («مفروشة»). Without this pair of
+  // checks the card could satisfy §5 by simply dropping the second sentence again.
+  const skippedIds = d.askedIds.filter((id) => !d.facets.some((f) => f.id === id));
+  const skipTx = buildAfSkipped(skippedIds);
+  check('the SKIPS sentence names the skipped question by its noun, not its declined value',
+    skipTx === 'الفرش 🛋️' && !skipTx.includes('مفروشة'), `skipped="${skipTx}"`);
+  check('the SKIPS sentence names only what was skipped — never an answered question',
+    !skipTx.includes('دورات المياه') && !skipTx.includes('عمر العقار'), skipTx);
   check('a round that skipped everything produces an EMPTY summary (⇒ no receipt renders)',
     buildAfSummary(deriveGuided({} as any, [step(BATH, opts(['3', '+٣']), []), step(FURN, opts(['yes', 'مفروشة']), [])], 2).facets) === '');
 }
@@ -243,6 +276,6 @@ check('the question card is never told where it sits in the round',
   'src/components/AdvancedQuestionCard.tsx: one shared card that never branches on position or question id (design contract §1)');
 
 console.log(failures === 0
-  ? '\n✓ old turns keep their cards and lose their controls; the receipt records only what was committed; every turn still tells the truth about its own count\n'
+  ? '\n✓ old turns keep their cards and lose their controls; the receipt records what the round committed AND what it skipped, without either sentence claiming the other; every turn still tells the truth about its own count\n'
   : `\n✗ ${failures} check(s) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

@@ -650,7 +650,7 @@ export function searchSummary(q: SearchQuery): string {
 }
 
 // AF emoji summary — pure function lives in @/lib/afSummary (zero deps, testable standalone).
-export { buildAfSummary } from '@/lib/afSummary';
+export { buildAfSummary, buildAfSkipped } from '@/lib/afSummary';
 
 // A compact, dot-separated one-liner of what the user asked for — shown right before scraping as a
 // "Looking for: Villa · Rent · Riyadh · SAR 5,000 · 3 beds" confirmation. Empty fields are skipped so

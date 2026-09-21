@@ -53,7 +53,7 @@ import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } 
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
 import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, buildAfSummary, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, buildAfSummary, buildAfSkipped, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
@@ -2294,15 +2294,12 @@ export default function Agent() {
   };
 
   // End of the flow: if the user answered ≥1 step, re-search the accumulated query in ONE combined
-  // turn (runRefine's __guided__ passes it through unchanged) BEHIND the mining transition — the
-  // Ezhalah «digging through the market» beat (owner 2026-08-16). If they skipped everything, close.
+  // turn (runRefine's __guided__ passes it through unchanged). If they skipped everything, close.
   //
-  // TIMING (all plain setTimeout — never an animation callback, per src/lib/afterAnimation.ts):
-  //   finish → mining overlay (from = last known narrowed total) + the search starts immediately
-  //   search resolves → hold until ≥ 1.4s total has played (never artificially longer)
-  //   → swap copy to «لقينا N عقار أقرب لطلبك» → ~1.1s beat → dismiss, revealing the result cards.
-  // A 15s failsafe (and a catch on the search itself) dismisses the overlay even if the turn dies,
-  // so the user can never be trapped behind a stuck animation.
+  // THE TIMING NOTE THAT USED TO SIT HERE described the mining overlay's 1.4s hold, its «لقينا N
+  // عقار» beat and its 15s failsafe. That card was deleted on 2026-09-20 and the beat with it, so
+  // the note is gone rather than left to read as a contract this function no longer honours — a
+  // finished round now hands straight to the thread's own searching turn, on no timer at all.
   const finishGuided = (token: number) => {
     if (ageFlowTokenRef.current !== token) return;
     const q = ageFlowQueryRef.current;
@@ -2349,7 +2346,22 @@ export default function Agent() {
     // The turn the user opened this round FROM becomes history: it trades its action buttons for a
     // read-only receipt of what THIS round committed. buildAfSummary reads the committed facets only,
     // so a skipped question can never appear in it (summary == committed state, permanent rule).
-    if (carry) setAfReceipt((r) => ({ ...r, [carry.msgId]: buildAfSummary(ageFlowFacetsRef.current) }));
+    //
+    // AND WHAT IT SKIPPED (owner 2026-09-20: "when user clicks skip add ... an emoji based on the
+    // questions u did"). Stored as one string, the two sentences separated by a newline, so the
+    // transcript's `Record<string, string>` shape is untouched and a receipt saved before today
+    // still restores — it simply has no second line. The SUMMARY half is unchanged and still
+    // committed-only: summary == committed state stays the permanent rule for the pills, and the
+    // skip half is a record of the ROUND, which claims no predicate (see afSummary.ts's header).
+    //
+    // Only a round that COMMITTED something leaves a receipt. A skip-everything round changes
+    // nothing — same query, same cards — so the turn keeps its buttons and the user can open the
+    // interview again from it; replacing them with a receipt would strand them with no way back in.
+    const askedThisRound = [...ageFlowAskedRef.current].filter((id) => !(carry?.asked ?? []).includes(id));
+    const committedThisRound = new Set(ageFlowFacetsRef.current.map((f) => f.id));
+    const roundChoices = buildAfSummary(ageFlowFacetsRef.current);
+    const roundSkipped = buildAfSkipped(askedThisRound.filter((id) => !committedThisRound.has(id)));
+    if (carry && roundChoices) setAfReceipt((r) => ({ ...r, [carry.msgId]: `${roundChoices}\n${roundSkipped}` }));
     void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '), {
       guided,
       onFetched: (total) => {
@@ -3788,7 +3800,20 @@ export default function Agent() {
                         // completed — the composer locks and every match is already revealed, so the
                         // «عرض المزيد» row must be gone too. `completed` gates it here, alongside the
                         // existing interview-owns-browsing and has-something-to-offer clauses.
-                        const showActionsRow = resultsActionsRowVisible({
+                        //
+                        // A TURN THAT ALREADY HAS A RECEIPT HAS NO ACTIONS LEFT (owner 2026-09-20:
+                        // "once user finishes with the advanced filter … let this message immediately
+                        // show"). The receipt string is written the instant finishGuided runs, but it
+                        // renders in the `else` of this flag — so until today the origin turn kept its
+                        // «عرض المزيد / خلّنا نحدد الطلب أكثر» row for the whole ~10s the new search
+                        // took, because `chatCompleted` only flips in runRefine's onFetched. The wait
+                        // was never a timer to tune; it was this gate resolving late.
+                        //
+                        // Gating HERE, not by reordering the JSX below, is what keeps the closing note
+                        // honest: `showActionsRow` also feeds `moreNoteText` and the Read-Aloud script,
+                        // so the note drops its «تبي أعرض لك المزيد؟» offer in the same frame the buttons
+                        // go — never promising a button that is not on screen (§42 visible-output contract).
+                        const showActionsRow = !afReceipt[m.id] && resultsActionsRowVisible({
                           hasMore,
                           canNarrowFurther,
                           afPhase: ageFlow?.phase ?? null,
@@ -3924,14 +3949,28 @@ export default function Agent() {
                                   <Text style={[s.afReceiptHead, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                                     {`✓ ${t('Continued with the advanced filter')}`}
                                   </Text>
-                                  {afReceipt[m.id] ? (
-                                    <Text
-                                      testID="af-round-receipt-choices"
-                                      style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}
-                                    >
-                                      {t('Your choices: {summary}', { summary: afReceipt[m.id] })}
-                                    </Text>
-                                  ) : null}
+                                  {/* Two sentences, stored as one newline-joined string (see finishGuided):
+                                      what the round COMMITTED, then what it SKIPPED. A receipt written
+                                      before 2026-09-20 has no newline, so `skipped` is undefined and the
+                                      card renders exactly as it always did. */}
+                                  {(() => {
+                                    const [chosen = '', skipped = ''] = afReceipt[m.id].split('\n');
+                                    const line = { writingDirection: (rtl ? 'rtl' : 'ltr') as 'rtl' | 'ltr', textAlign: (rtl ? 'right' : 'left') as 'right' | 'left' };
+                                    return (
+                                      <>
+                                        {chosen ? (
+                                          <Text testID="af-round-receipt-choices" style={[s.afReceiptTx, line]}>
+                                            {t('Your choices: {summary}', { summary: chosen })}
+                                          </Text>
+                                        ) : null}
+                                        {skipped ? (
+                                          <Text testID="af-round-receipt-skipped" style={[s.afReceiptTx, line]}>
+                                            {t('Skipped: {summary}', { summary: skipped })}
+                                          </Text>
+                                        ) : null}
+                                      </>
+                                    );
+                                  })()}
                                 </View>
                               ) : null}
                             </View>

@@ -148,10 +148,15 @@ check('agent.tsx derives offersNarrow from showActionsRow, not from canNarrowFur
   /const offersNarrow = canNarrowFurther && showActionsRow;/.test(agentSrc));
 check('the visible sentence comes from the pure key function, not a second inline copy',
   /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer: rc\.lastTapOffer, cappedAtCap: rc\.cappedAtCap \}\)/.test(agentSrc));
+// The call gained a local `!afReceipt[m.id] &&` conjunct on 2026-09-20 so a spent turn swaps its
+// buttons for the completed-round receipt at once, instead of waiting for `chatCompleted` to land a
+// whole search later. The rule this check owns is unchanged — the gate is still the executable
+// `resultsActionsRowVisible` and still carries the interview phase — so the pattern tolerates that
+// one conjunct and nothing else.
 check('showActionsRow is still the single gate the buttons themselves are rendered behind',
   // Gate hoisted into the pure resultsActionsRowVisible() (owner 2026-09-06, `final=50`); still the
   // single const the Pressables, the spoken note, and offersMore/offersNarrow all derive from.
-  /const showActionsRow = resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(agentSrc));
+  /const showActionsRow = (?:!afReceipt\[m\.id\] && )?resultsActionsRowVisible\(\{[\s\S]{0,240}?afPhase: ageFlow\?\.phase \?\? null/.test(agentSrc));
 
 // ── 5. THE PRODUCTION STATE THAT WAS MEASURED, REPLAYED ─────────────────────────────────────────
 // الرياض/بيع/فيلا + one AF answer: 5,970 matching, 10 shown, buffer holds more, AF interview open so
