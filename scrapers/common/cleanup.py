@@ -194,15 +194,59 @@ def _probe(url: str) -> tuple[int | None, str]:
         return None, ""
 
 
-def verdict(status: int | None, body: str, dead_marker) -> str:
-    """'dead' → safe to delete; 'live' → reactivate; 'unknown' → skip (never delete)."""
+def verdict_detail(status: int | None, body: str, dead_marker) -> tuple[str, str]:
+    """The verdict AND the branch that produced it. ONE decision, stated twice.
+
+    WHY THE REASON EXISTS (2026-09-21). `cleanup_deletion_log.reason` recorded `http_status` and
+    `verdict: dead` and nothing about WHICH branch decided, and for three of the four enabled
+    platforms that is self-explaining — a 404 is the status branch, unambiguously. For **aqar it is
+    not**, because aqar is the one platform whose death signal is a BODY check: it soft-closes with
+    HTTP 200 + a «مغلق» badge, so `verdict()` returns 'dead' on a 200 only via `dead_marker(body)`.
+    Measured 2026-09-21: run 129 permanently deleted **1,825 aqar rows, every one of them on
+    `http_status: 200`** — down a `_aqar_dead()` limb that had been added the previous day — and
+    from the ledger those rows are indistinguishable from what a mis-firing marker would have
+    written. ~22,938 aqar rows remain to drain at 2,000/run.
+
+    This repo has already paid for this exact omission once: on 2026-08-26 the aqarcity oracle was
+    found mapping "real id but unparseable page" to 'gone', and deciding whether 254 same-day
+    deactivations were correct needed a by-hand re-probe of the live source, "because nothing stored
+    said WHICH condition had fired". The fix then was to persist the reason — but only to
+    `ops_stale_inactivation_probe`, the DEACTIVATION ledger. The DELETION ledger, where the action
+    is irreversible, never got it.
+
+    'dead' → safe to delete; 'live' → reactivate; 'unknown' → skip (never delete).
+    """
     if status is None:
-        return "unknown"          # network error / proxy failure
+        return "unknown", "no answer from the source (network error / proxy failure)"
     if status in (404, 410):
-        return "dead"
+        return "dead", f"source returned HTTP {status} for this listing's own URL"
     if status != 200:
-        return "unknown"          # 403 / 429 / 5xx / unfollowed redirect → transient or block
-    return "dead" if dead_marker(body) else "live"
+        # 403 / 429 / 5xx / unfollowed redirect → about US, never about the listing.
+        return "unknown", f"HTTP {status} is about our access or the source's health, not the listing"
+    # NOTE FOR THE NEXT READER — DO NOT "FIX" THE EMPTY-BODY CASE HERE. An empty body falls through
+    # to `dead_marker("")`, which is False for all four enabled platforms, so a 200 with no body
+    # reads 'live'. That looks like the thing `scrapers/common/http_liveness.py` refuses by name
+    # ("a 'live' is refused on an empty body too, so a shell cannot manufacture a verification"),
+    # and it is NOT: `_wasalt_browser_probe()` above deliberately ENCODES its answer as
+    # `(200, '')` — it has already confirmed `propertyDetailsV3` is present and is relying on this
+    # branch to mean self-heal. Returning 'unknown' here instead was tried on 2026-09-21 and
+    # disables wasalt's self-heal entirely, leaving proven-live listings inactive and on the clock
+    # (`test_wasalt_probe_verdicts_end_to_end` catches it). Making the two consistent means moving
+    # wasalt's transport off the empty-body encoding first; it is not a change to this branch.
+    if dead_marker(body):
+        return "dead", f"HTTP 200 carrying this platform's dead marker ({len(body)} bytes)"
+    return "live", (f"HTTP 200 with no dead marker ({len(body)} bytes) — the source still serves it"
+                    if body else "HTTP 200 confirmed live by the platform probe (empty-body encoding)")
+
+
+def verdict(status: int | None, body: str, dead_marker) -> str:
+    """'dead' → safe to delete; 'live' → reactivate; 'unknown' → skip (never delete).
+
+    Thin delegate so the decision cannot exist in two places: a second copy of these branches is a
+    second chance for the ledger's account of a PERMANENT delete to drift from what actually decided
+    it.
+    """
+    return verdict_detail(status, body, dead_marker)[0]
 
 
 # Alert kinds that mean this platform's scraper/liveness signal cannot currently be trusted for
@@ -498,16 +542,21 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                             continue
                         status, body = _probe(url)
                         stats["rechecked"] += 1
-                        v = verdict(status, body, dead_marker)
+                        v, why = verdict_detail(status, body, dead_marker)
                         if v == "unknown":
                             inconclusive += 1
                     else:
                         status, v = None, "dead"     # explicit opt-out (not used by default policy)
+                        why = "require_source_recheck=false — deleted with NO fresh source probe"
                     if v == "dead":
                         to_delete.setdefault(t, []).append(r["id"])
                         age_days = _age_days(r.get("last_seen_at"), now)
+                        # `evidence` names the BRANCH that decided, not just the status. On aqar —
+                        # the one enabled platform whose death signal is a body check — a bare
+                        # `http_status: 200` cannot be told apart from a mis-firing marker after
+                        # the row is gone, and the row is gone permanently. See verdict_detail().
                         reason = {"inactive_days": age_days, "missing_count": r.get("missing_count"),
-                                  "http_status": status, "verdict": "dead"}
+                                  "http_status": status, "verdict": "dead", "evidence": why}
                         if bounded_cap is not None:
                             reason["bounded_run"] = True
                             reason["bounded_cap"] = bounded_cap
