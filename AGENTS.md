@@ -2,6 +2,28 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
+# NOTHING IS LIVE UNTIL YOU HAVE USED IT LIKE A REAL USER (owner, 2026-09-21 — supreme, permanent)
+
+**In the owner's words: "What determines it's live is that you actually test it like a real user.
+Tell this to all the chats, all the agents, all the engineers. This is extremely important."** It
+binds every chat, subagent, workflow and all eleven engineer routines, and overrides any prompt that
+says less.
+
+A merged PR, a green CI, a successful deploy run, a served bundle, a DB row, an RPC result or a
+`curl` is **not** "live". It is evidence that a step ran. A change is live only when you have opened
+**https://ezhalah-app.vercel.app** in a real browser and walked the path a user walks:
+
+1. Search through the real UI (Filter or AI Agent), with the inputs a user would type and tap.
+2. Find the exact thing you changed on the screen: the card, count, label, logo or button.
+3. Click it the way a user would (open the card, press «عرض المزيد», follow the link).
+4. Compare what the user sees with the SOURCE website: price, area, rooms, location, name, link.
+
+Until all four are done and observed, report **PROPAGATION PENDING** or **NOT YET VERIFIED**, never
+"live", "fixed", "done" or "shipped". If the change reaches users only after a sync or cron, wait for
+it and then do the four steps, or say plainly that you have not. Back-end-only work (a scraper, a
+column, a sync) is not exempt: it is live when its effect shows on a real card. How to drive the
+browser from an agent session: `docs/ops/VERIFYING_PRODUCTION.md`.
+
 # Read this first — canonical rules + token efficiency (owner rule, 2026-08-10, confirmed permanent)
 
 **Reading order before any research task: `AGENTS.md` (this file) → `docs/ARCHITECTURE.md` →
