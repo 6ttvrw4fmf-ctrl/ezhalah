@@ -340,7 +340,7 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     area = _num(p.get("floorArea"))
     if area is not None and (area < 5 or area > 1_000_000):  # SANITY guard
         area = None
-    area_m2 = int(area) if area is not None else None
+    area_m2 = normalize.measure_num(area)   # exact: 407.56 stays 407.56 (int() truncated it)
 
     # bedrooms: null for commercial/land or absurd counts
     beds = _int(p.get("beds"))

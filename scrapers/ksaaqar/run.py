@@ -117,6 +117,19 @@ def spec_int(text: str, label: str, lo: int = 0, hi: int = 200) -> Optional[int]
     return n if lo <= n <= hi else None
 
 
+def spec_measure(text: str, label: str, lo: int = 0, hi: int = 200):
+    """spec_int's measurement sibling: the SAME first number, its decimals kept («12.5 م» stays
+    12.5 where spec_int stopped at the dot and kept 12)."""
+    v = spec(text, label)
+    if not v:
+        return None
+    m = re.search(r"\d+(?:[.٫]\d+)?", v.translate(_AR_DIGITS))
+    if not m:
+        return None
+    n = normalize.to_measure(m.group(0))
+    return n if n is not None and lo <= n <= hi else None
+
+
 # PRICE — read from the ad's OWN card, never from the page.
 #
 # THE BUG THIS REPLACES (found 2026-09-19 by checking stored data, not by running the tests). The
@@ -262,15 +275,14 @@ _AREA_RE = re.compile(
     r"([\d٠-٩][\d٠-٩,\.]*)\s*(?:م2|م²|متر\s*مربع|متر|م)")
 
 
-def parse_area(text: str) -> Optional[int]:
+def parse_area(text: str):
     """Square metres, or None. A number without a unit is not an area and is never stored."""
     if not text:
         return None
     for m in _AREA_RE.finditer(text.translate(_AR_DIGITS)):
         raw = m.group(1).replace(",", "").rstrip(".")
-        try:
-            n = int(float(raw))
-        except ValueError:
+        n = normalize.measure_num(raw)   # exact: «163.27 متر مربع» stays 163.27 (int(float()) kept 163)
+        if n is None:
             continue
         if 1 <= n <= 5_000_000:
             return n
@@ -532,7 +544,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "halls": spec_int(page_text, "عدد الصالات", 0, 20),
         "property_age": parse_age(page_text),
         "direction": parse_direction(page_text),
-        "street_width_m": spec_int(page_text, "عرض الشارع", 1, 120),
+        "street_width_m": spec_measure(page_text, "عرض الشارع", 1, 120),
         "furnished": parse_furnished(page_text),
         "title": title or None,
         "photo_urls": own_photos(page_html),

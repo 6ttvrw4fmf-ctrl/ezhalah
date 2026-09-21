@@ -208,6 +208,15 @@ def _num(s: Optional[str]) -> Optional[int]:
         return None
 
 
+def _measure(s: Optional[str]):
+    """_num's measurement sibling: the SAME first number, its decimal fraction kept (_num stops at
+    the dot, so «407.56» became 407)."""
+    if not s:
+        return None
+    m = re.search(r"[\d,]+(?:[.٫]\d+)?", s.replace("٬", ",").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
+    return normalize.to_measure(m.group(0)) if m else None
+
+
 def rem_fields(html_text: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for m in re.finditer(
@@ -343,7 +352,7 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     # publish ONLY the rate, no total appears anywhere on them — so the honest state is a rate with
     # NO total. We must not multiply by the area to manufacture one.
     rate_only = "للمتر" in raw_price
-    price_per_meter = price if rate_only else None
+    price_per_meter = _measure(raw_price) if rate_only else None
 
     # ── rent period: ONLY a token in the REM field table itself (السعر value / any field) ──
     # hajer's REM table has no rental-period field and the price cell carries no period word, so
@@ -368,7 +377,7 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "active": not gone,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": _num(f.get("المساحة")),
+        "area_m2": _measure(f.get("المساحة")),
         "bedrooms": _num(f.get("عدد غرف النوم")),
         "bathrooms": _num(f.get("عدد دورات المياه")),
         # A per-metre rate is never a total and never an annual rent — see `rate_only` above.

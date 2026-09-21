@@ -669,7 +669,7 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
     # ── spec table ──
     specs = _spec_table(body)
     area = _to_float(specs.get("المساحة"))
-    area = round(area) if area else None
+    area = normalize.measure_num(area) or None   # exact: 407.56 stays 407.56, never rounded
     # "عدد الغرف" is a generic total-room-count label, never bedroom-specific — souq24 has no
     # separate bathroom field either (no sibling signal the site distinguishes room types at all).
     # Live-confirmed 2026-07-28: 0/3 sampled pages carry a "غرف النوم" label. Owner decision: null
@@ -684,7 +684,7 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
 
     # price_per_meter: the site's "سعر المتر" cell is reliable for land but for some buildings it
     # echoes the TOTAL price (e.g. ppm==price) — drop those, and leave the rate NULL.
-    ppm = _to_int(specs.get("سعر المتر"))
+    ppm = normalize.to_measure(specs.get("سعر المتر")) or None   # exact: 1,500.50 stays 1500.5
     if ppm and price and ppm >= price:
         ppm = None
     # No price/area fallback: a missing rate stays NULL rather than being fabricated

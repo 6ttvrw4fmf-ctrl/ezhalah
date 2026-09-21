@@ -587,7 +587,8 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
         # NOTE the missing `and area`: this branch must NOT depend on landArea. With it, a land row
         # lacking landArea fell through to the else and stored a per-m² RATE in price_total — a
         # worse breach than the one being removed.
-        price_per_meter = price
+        # The rate keeps its source decimals (to_measure); `price` stays whole-riyal for the routing gate.
+        price_per_meter = normalize.to_measure(offer.get("price")) or None
     else:
         # Everything else: offer.price is the TOTAL. Deriving price_per_meter = price / area would
         # fabricate a rate the source never printed (listing-fidelity rule; aqar PR#216).
@@ -622,7 +623,7 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
         if not isinstance(st, dict):
             continue
         d_en = DIRECTION_EN.get(st.get("direction"))
-        w = _int(st.get("width"))
+        w = normalize.to_measure(st.get("width")) or None   # exact: a 12.5 m street stays 12.5
         if direction is None and d_en:
             direction = d_en
         if street_width is None and w:
@@ -688,7 +689,7 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
         "active": True,
         "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": round(area) if area else None,
+        "area_m2": normalize.measure_num(area) or None,   # exact: 407.56 stays 407.56, never rounded
         "bedrooms": _int(offer.get("bedRoomsCount")) if category == "residential" else None,
         "bathrooms": _int(offer.get("bathroomsCount")),
         "halls": _int(offer.get("hallsCount")),
