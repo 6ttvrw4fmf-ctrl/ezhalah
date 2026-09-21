@@ -1,15 +1,15 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
--- Re-verified 2026-09-21 (migration 20260921180100_eleven_platforms_wiring_into_search):
+-- Re-verified 2026-09-21 (migration 20260921190604_eleven_platforms_wiring_into_search):
 -- CHANGED. Twenty-two arms were added right after the wslnaa commercial arm — alsidra, moftah,
 -- masar, gomenassat, sakan, bossbih, alshawaf, ialqarawi, aljassim, almotmkenah and nufouth, each
 -- residential + commercial — so the body below is genuinely new, not a re-dated copy.
 --   Base: the live body read 2026-09-21 06:30 UTC, md5 dcda0a5ff4fe7942c22bb8d37af5dca0 over
 --   38,407 chars (byte-identical to this file's previous body). The added arms use the exact
 --   rendering pg_get_viewdef produced for #3320's arms — proven by reproducing #3320's live digest
---   from the pre-#3320 body — so the body below is what production renders once 20260921180100
---   applies. 20260921180700 asserts live == this digest at apply time; if it ever disagrees,
+--   from the pre-#3320 body — so the body below is what production renders once 20260921190604
+--   applies. 20260921191349 asserts live == this digest at apply time; if it ever disagrees,
 --   regenerate from pg_get_viewdef, never re-date.
 --   • md5 of everything below this header block: 024fa413d718ee03c6aa13af77894de7
 --   Previous: dcda0a5ff4fe7942c22bb8d37af5dca0 over 38,407 chars.

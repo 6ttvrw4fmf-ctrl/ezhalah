@@ -157,7 +157,7 @@ def test_the_guard_would_actually_catch_the_original_defect(monkeypatch):
 
 
 # ── the eleven platforms onboarded 2026-09-21 ────────────────────────────────────────────────────
-# Their tables (migration 20260921180000) are `LIKE aqar_residential_listings INCLUDING ALL` plus
+# Their tables (migration 20260921185629) are `LIKE aqar_residential_listings INCLUDING ALL` plus
 # city_ar / district_ar / city_id / region_id — read from production's information_schema on
 # 2026-09-21 that is EXACTLY LISTING_COLUMNS above, so the same oracle applies. Rather than a
 # hand-built fixture per platform (which only proves the fixture), this reads every key each
