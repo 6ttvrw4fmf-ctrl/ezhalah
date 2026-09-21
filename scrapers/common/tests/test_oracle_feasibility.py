@@ -14,7 +14,14 @@ reached by people looking at these exact numbers:
 """
 from __future__ import annotations
 
-from scrapers.common.oracle_feasibility import Read, judge, markers_in, probe_platform, title_of
+from scrapers.common.oracle_feasibility import (
+    Read,
+    absence_only_platforms,
+    judge,
+    markers_in,
+    probe_platform,
+    title_of,
+)
 
 
 def _r(cohort, status, body="", ad="A1", moved=False):
@@ -141,10 +148,13 @@ def test_a_row_with_no_stored_url_is_unreachable_not_a_death():
     assert v.verdict == "UNUSABLE_READ"
 
 
-def test_the_runner_discovers_its_worklist_from_the_committed_ledger():
+def test_the_worklist_is_discovered_from_the_committed_ledger():
     """The platform list is DISCOVERED from scrapers/absence-only-prune.txt, so it cannot rot into
-    a hardcoded list that quietly stops covering a platform added to the gap tomorrow."""
-    from scrapers.common.oracle_feasibility_run import absence_only_platforms
+    a hardcoded list that quietly stops covering a platform added to the gap tomorrow.
+
+    It lives in the PURE module, not the runner: reaching it through the runner would drag
+    `requests` into a test that needs no network, which is exactly how this file first failed CI.
+    """
     plats = absence_only_platforms()
     assert len(plats) >= 20, plats
     assert "fursaghyr" in plats and "aqaratikom" in plats and "satel" in plats

@@ -50,7 +50,32 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Iterable, Optional
+
+# THIS MODULE STAYS IMPORT-LIGHT, and that is load-bearing rather than tidy. Everything here is pure:
+# no HTTP client, no database client, nothing needing a network. `oracle_feasibility_run` is the
+# shell that adds `requests` and the Supabase reads on top. Keeping the split means the judgement can
+# be exercised by a test that installs nothing — and the first CI run of this change proved the point
+# the hard way: the ledger reader lived in the RUNNER, so importing it to test it dragged `requests`
+# in, and the hermetic test failed with ModuleNotFoundError on a job that had no reason to need an
+# HTTP library. Same lesson `src/data/loaderPlatforms.ts` records on the TypeScript side.
+_LEDGER = Path(__file__).resolve().parents[1] / "absence-only-prune.txt"
+
+
+def absence_only_platforms() -> list[str]:
+    """The worklist: every platform still pruning on crawl absence alone.
+
+    DISCOVERED from the committed ledger rather than hardcoded, so a platform that joins the gap
+    tomorrow is probed without anyone remembering to extend a list.
+    """
+    out: list[str] = []
+    for line in _LEDGER.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        out.append(line.split("|")[0].strip())
+    return out
 
 # Candidate Arabic/English removal markers seen across Saudi listing platforms. Presence on a LIVE
 # row disqualifies a marker outright — that is the fursaghyr lesson, and it is why both cohorts are

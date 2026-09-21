@@ -24,23 +24,14 @@ from typing import Optional
 
 import requests
 
-from scrapers.common.oracle_feasibility import PlatformVerdict, probe_platform
-
-ROOT = Path(__file__).resolve().parents[2]
-LEDGER = ROOT / "scrapers" / "absence-only-prune.txt"
+from scrapers.common.oracle_feasibility import (
+    PlatformVerdict,
+    absence_only_platforms,
+    probe_platform,
+)
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/124.0 Safari/537.36")
-
-
-def absence_only_platforms() -> list[str]:
-    out: list[str] = []
-    for line in LEDGER.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        out.append(line.split("|")[0].strip())
-    return out
 
 
 def _client():
