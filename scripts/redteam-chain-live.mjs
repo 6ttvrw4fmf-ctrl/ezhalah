@@ -32,6 +32,7 @@
 //
 // A layer this run could not reach is printed as NOT REACHED and counted separately. It is never
 // folded into the passes (PART 7): a rule this run could not reach is not a rule this run proved.
+import { readFileSync } from 'node:fs';
 import { chromium, devices } from 'playwright';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
 import { loadCityScope } from './lib/afOracleLive.ts';
@@ -40,10 +41,17 @@ import { dismissCookieConsent } from './lib/liveConsent.ts';
 // The REAL clean-type → type_ar expansion the app itself ships (src/data/propertyTypes.ts has no
 // imports, so it loads directly under Node's type stripping — no copy, no lift needed). See the
 // L1==L3 assertion below for why a substring test over p_types was wrong.
-import { CLEAN_MACRO, EN_TO_AR, typeArForSelection } from '../src/data/propertyTypes.ts';
+import { CLEAN_MACRO, EN_TO_AR, HIERARCHY, typeArForSelection } from '../src/data/propertyTypes.ts';
 import { parseVisibleState } from '../e2e/live-sweep/visibleState.mjs';
 import { setDifferential, differentialIsClean, describeDifferential } from './lib/setDifferential.ts';
 import { settledSource } from '../e2e/lib/resultsSentence.mjs';
+
+// The GROUP tier of «نوع العقار» is labelled in src/i18n.tsx, not in propertyTypes.ts's EN_TO_AR.
+// i18n.tsx imports React and react-native, so it cannot be imported under Node's type stripping;
+// its shipped table is read as text and looked up by the group names HIERARCHY itself declares —
+// discovery, not a list. Same technique as e2e/lib/resultsSentence.mjs reading the shipped pool.
+const I18N_SRC = readFileSync(new URL('../src/i18n.tsx', import.meta.url), 'utf8');
+const ALL_GROUPS = Object.values(HIERARCHY).flat().map((g) => g.group);
 
 const BASE = 'https://ezhalah-app.vercel.app';
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
@@ -347,7 +355,40 @@ async function runChain(cell) {
       const CATEGORY_AR = { Residential: 'سكني', Commercial: 'تجاري' };   // src/i18n.tsx:204-205
       const sent = first.body.p_types ?? [];
       const cat = first.body.p_category ?? null;
-      if (cleanEn === null && cat && CATEGORY_AR[cat] === vs.type) {
+      // BRANCH 2 — THE GROUP TIER, WHICH THIS FILE HAS NAMED SINCE 2026-09-14 AND NEVER IMPLEMENTED
+      // (routine #9, 2026-09-21). The comment above says «نوع العقار» has three tiers and that
+      // branch 1 was the only one modelled; the 2026-09-14 repair added branch 3 and stopped. So the
+      // first cell that ever picked a GROUP and no TYPE — الجبيل / بيع / «الأراضي السكنية» — was
+      // told «the summary and the taxonomy disagree about what was searched» while every other layer
+      // of that chain agreed exactly (L4 = L5 = L6 = 26, set differential clean, all cards reached).
+      // §41.15 again: an oracle that accuses the product for its own imprecision is worse than none,
+      // and a documented-but-unimplemented branch is the version of that a reader cannot see.
+      //
+      // The group's Arabic label lives in src/i18n.tsx, not in EN_TO_AR, which is why inverting
+      // EN_TO_AR could never resolve it. i18n.tsx imports React and react-native so it cannot be
+      // imported under plain Node; its shipped table is read instead — the same technique
+      // e2e/lib/resultsSentence.mjs already uses to derive matchers from the shipped rotation pool.
+      // The GROUP NAMES are discovered from HIERARCHY, never listed here, so a group added tomorrow
+      // is covered without editing this file.
+      //
+      // NOT WEAKENED: the assertion is the same SET EQUALITY branch 1 makes. typeArForSelection()
+      // expands a group through the app's own CLEAN_TO_TYPE_AR, so a request secretly narrower or
+      // wider than the group the summary names still fails.
+      const groupArLabel = (groupEn) => {
+        const m = I18N_SRC.match(
+          new RegExp(`'${groupEn.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}':\\s*'([^']+)'`));
+        return m ? m[1] : null;
+      };
+      const groupEn = cleanEn === null
+        ? (ALL_GROUPS.find((g) => groupArLabel(g) === vs.type) ?? null)
+        : null;
+      if (groupEn) {
+        const expanded = typeArForSelection(groupEn) ?? [];
+        const same = expanded.length === sent.length
+          && [...expanded].sort().every((v, i) => v === [...sent].sort()[i]);
+        eq(name, 'L1 group == L3 p_types (the group label expands to exactly the raw set sent)', same,
+          `ui=«${vs.type}» (${groupEn}) expands to ${JSON.stringify(expanded)}  rpc=${JSON.stringify(sent)}`);
+      } else if (cleanEn === null && cat && CATEGORY_AR[cat] === vs.type) {
         // Branch 3 — the CATEGORY tier. Build raw → the macros of every clean type claiming it.
         const rawMacros = new Map();
         const cleanOf = new Map();

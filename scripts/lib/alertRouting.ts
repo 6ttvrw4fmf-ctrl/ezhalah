@@ -86,6 +86,14 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   // Explicitly routed rather than left to the #2 fallback, so a cost alert arrives with an owner.
   { routine: 7, test: /^ai_cost_health$/ },
   { routine: 7, test: /^search_index_diverges_from_sync_source$/ },
+  // search_writer_starved (2026-09-21, routine #9 red team, migration 20260921152933). A function
+  // that writes search_listings_ar behind the single-writer advisory lock was REFUSED and returned
+  // without writing, while cron.job_run_details recorded `succeeded`. Measured: jobid 68 (the daily
+  // wasalt rich-attribute sync) and jobid 75 both started at :47, 5.5 ms apart, and 68 lost the
+  // race on 5 of its last 8 daily runs — so the SERVED index kept rich attributes the capture had
+  // already corrected. The finding is a scheduler/plumbing one (two jobs, one lock, one minute),
+  // which is this routine's surface, not a wrong row: the data is right and the writer never ran.
+  { routine: 7, test: /^search_writer_starved$/ },
   // Same detector's SELF-MIRROR limb (2026-09-12). Its oracle is a copy of an expression inside
   // sync_search_listings_ar(), and on 2026-09-03 the two silently stopped agreeing: the owner
   // retired the annual rent-period fallback in the sync and the copy kept predicting it. The
