@@ -101,7 +101,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize as N  # noqa: E402
+from scrapers.common import db, http_liveness, normalize as N  # noqa: E402
 from scrapers.common import arabic_location as AL  # noqa: E402
 
 BASE_WEB = "https://gathern.co"
@@ -354,6 +354,170 @@ def detail_session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     s.headers.update({"Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
     return s
+
+
+# ── SOURCE ORACLE FOR THE PRUNE ───────────────────────────────────────────────────────────────────
+# WHY THIS EXISTS. Both `db.prune_unseen()` call sites below used to run with NO `verify_gone`, so
+# three consecutive crawl misses deactivated a listing on ABSENCE alone — the inference
+# `docs/ops/LISTING_LIVENESS.md` §1–§3 forbids. gathern was the last entry in
+# `scrapers/absence-only-prune.txt` reading "ORACLE EXISTS, NOT WIRED HERE": a DIRECT sweep with a
+# full canary apparatus has lived in `scrapers/gathern/liveness.py` since 2026-08, while run.py kept
+# a second, unevidenced path to the same `active = false`. `LISTING_LIVENESS.md` §4.2 names the fix
+# exactly — "route the prune through the oracle that already exists — inventing nothing" — and warns
+# that on THIS platform the wiring "must go through its canary gate, not through `looks_dead()`
+# alone". gathern is also one of the four delete-ENABLED platforms, so an absence-only kill here
+# feeds the 30-day retention clock toward a permanent, unrecoverable delete. (ops_incident #372.)
+#
+# THE SIGNAL IS NOT NEW AND IS NOT A GUESS. It is `liveness.py::looks_dead`/`classify` verbatim —
+# 404/410 = the unit is gone, 200 = the source still serves it, anything else = no opinion — already
+# in production use by the sweep that writes `last_verified_alive_at`. Nothing is invented here.
+#
+# THE CANARY IS THE LOAD-BEARING PART, AND IT WAS RE-MEASURED BEFORE THIS WAS WIRED. `LISTING_
+# LIVENESS.md` §5.4 records gathern expressing BLOCKING as its own application-rendered 404 rather
+# than a 429 — a 100% false-death rate from datacenter egress on rows its own oracle had just
+# verified alive. Re-measured 2026-09-21 from a cloud-routine egress, 12 dead + 12 known-alive
+# controls interleaved: the dead cohort answered 404 12/12, and so did TEN OF THE TWELVE CONTROLS
+# the crawl itself had seen alive two hours earlier — every 404 a byte-identical 50,511-byte page.
+# An 83% false-death rate. So a bare 404-means-gone oracle here would be WORSE than no oracle, and
+# the canary is what makes this wiring safe rather than what makes it tidy.
+#
+# WHY WIRING IT IS STRICTLY SAFER THAN LEAVING IT. An oracle can only ever WITHHOLD a deactivation
+# that absence alone already performs (`LISTING_LIVENESS.md` §4.1): today three misses kill with no
+# source check at all, and after this change a kill additionally requires a DIRECT 404/410 AND a
+# canary proving the source is still serving real listings this run. On the degraded egress measured
+# above the canary reads 404 and EVERY removal is withheld as UNKNOWN. It fails CLOSED: no canary
+# pool means no removal.
+_ORACLE_UNIT_RE = re.compile(r"/view/\d+/unit/(\d+)")
+
+
+def _oracle_signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+    """gathern's affirmative signals, and nothing else. None == no opinion.
+
+    Mirrors `liveness.py::looks_dead`/`classify` exactly so the crawl and the sweep cannot drift
+    into two different opinions about the same source. The universal law — a 403/429/5xx/timeout is
+    never a death — is applied on top of this by `http_liveness.decide()` and is not restatable here.
+    """
+    if status in (404, 410):
+        return "gone"
+    if status == 200:
+        # Measured 2026-07-21 (77/80) and unchanged since: gathern serves a HARD 404 for a delisted
+        # unit and has no 200-with-dead-marker page, so a 200 is the source still serving it. The
+        # law refuses this on an empty body, so a truncated read cannot manufacture a verification.
+        return "live"
+    return None
+
+
+_oracle_url_memo: dict[str, Optional[str]] = {}
+
+
+def _oracle_url_for(ad_number: str) -> Optional[str]:
+    """THIS listing's own URL, read back from its row, with the identity re-checked.
+
+    gathern's detail path is `/view/<chalet>/unit/<unit>` and the chalet id is NOT derivable from
+    `ad_number` (GTH193856 → unit 193856, but chalet 111024 appears nowhere in it), so unlike
+    aqargate or raghdan the URL cannot be reconstructed and has to be read back.
+
+    A stored `listing_url` is not automatically THIS listing's URL — `LISTING_LIVENESS.md` §4.2
+    lesson 2 measured 39 of 1,724 sanadak rows carrying another listing's page, three of which
+    answered 'live' and would have produced false RESURRECTIONS on someone else's evidence. The unit
+    id in the path must therefore equal this ad_number's own digits; a mismatch returns None, which
+    the probe reports as UNKNOWN. Never a kill on a URL we cannot prove belongs to the row.
+    """
+    if ad_number in _oracle_url_memo:
+        return _oracle_url_memo[ad_number]
+    url: Optional[str] = None
+    unit = (ad_number or "")[3:] if (ad_number or "").upper().startswith("GTH") else ""
+    if unit.isdigit():
+        try:
+            r = (db.sb().table("gathern_residential_listings").select("listing_url")
+                 .eq("ad_number", ad_number).limit(1).execute())
+            stored = (r.data[0].get("listing_url") if r.data else None) or ""
+        except Exception:  # noqa: BLE001 — a failed lookup is UNKNOWN about our read, never a kill
+            stored = ""
+        m = _ORACLE_UNIT_RE.search(stored)
+        if m and m.group(1) == unit:
+            url = stored
+    _oracle_url_memo[ad_number] = url
+    return url
+
+
+# Ad_numbers THIS run's crawl confirmed the source was serving. Armed by the caller immediately
+# before the prune, and NEVER drawn from `last_verified_alive_at`: that is the self-referential pool
+# that deadlocked gathern for five days (ops_incident #168 — a control set that certifies itself
+# cannot detect its own rot). These are fresh crawl observations from this cycle.
+_canary_pool: list[str] = []
+_canary_state: dict[str, Any] = {"verdict": None, "reason": "not evaluated"}
+
+
+def arm_liveness_canaries(ad_numbers) -> None:
+    """Arm the in-run positive control from listings this run already fetched."""
+    _canary_pool.clear()
+    _canary_pool.extend(list(ad_numbers)[:24])
+    _canary_state["verdict"], _canary_state["reason"] = None, "not evaluated"
+
+
+def _canary() -> tuple[bool, str]:
+    """Is the source still serving us real listings RIGHT NOW? (LISTING_LIVENESS.md §5.4.)
+
+    Memoised in BOTH directions for the run: "is this egress being answered truthfully" is a fact
+    about the RUN, not about each row, and `verify_gone` is called once per row at grace — so a
+    validated oracle stays validated, and a FAILED control forbids every removal for the rest of the
+    run rather than being re-rolled until one happens to pass.
+    """
+    if _canary_state["verdict"] is not None:
+        return _canary_state["verdict"], _canary_state["reason"]
+    tried = 0
+    ok, why = False, "no known-live control from this run to validate the oracle against"
+    for ad in _canary_pool:
+        url = _oracle_url_for(ad)
+        if not url:
+            continue
+        tried += 1
+        status, body, _ = _probe.fetch(url)
+        if _oracle_signal(status, body, False) == "live":
+            ok, why = True, f"control {ad} still reads live (HTTP {status})"
+            break
+        if tried >= 3:
+            break
+    if not ok and tried:
+        why = (f"the oracle read {tried} known-live control(s) from this run as GONE or unreachable "
+               "— this source is not answering us truthfully, so its 404s cannot kill")
+    _canary_state["verdict"], _canary_state["reason"] = ok, why
+    return ok, why
+
+
+_oracle_session_memo: list = []
+
+
+def _oracle_session():
+    """ONE reused session, and a throttle, for every probe this oracle makes.
+
+    Both halves matter on gathern specifically, and neither is tidiness:
+
+    * `LivenessProbe.fetch()` calls `session()` once per attempt, so handing it `detail_session`
+      directly would mint a NEW curl_cffi session per probe — no connection reuse across what can
+      be hundreds of probes in one prune.
+    * gathern rate-limits hard: `liveness.py` pins `MIN_INTERVAL` at 1.0 with the note "Gathern
+      429s above ~2 [req/s]". An unthrottled burst is precisely what makes this source start
+      answering with its own application-rendered 404 (§5.4), and on this platform that is
+      indistinguishable from a removal. The canary would then withhold every kill — safe, but the
+      oracle would be useless. Throttling keeps it USEFUL; the canary keeps it HONEST.
+
+    Throttling on acquire is exact here because `fetch()` acquires once per request.
+    """
+    _throttle()
+    if not _oracle_session_memo:
+        _oracle_session_memo.append(detail_session())
+    return _oracle_session_memo[0]
+
+
+_probe = http_liveness.LivenessProbe(
+    platform="gathern",
+    signal=_oracle_signal,
+    session=_oracle_session,
+    url_for=_oracle_url_for,
+    canary=_canary,
+)
 
 
 def fetch_detail(s: cc.Session, listing_url: str) -> dict:
@@ -928,7 +1092,12 @@ def main() -> int:
             print("✗ gathern cross-shard prune ABORTED: union is empty")
             return 1
         run_id = db.begin_run("gathern_prune")
-        pruned = db.prune_unseen("gathern_residential_listings", seen, source=SOURCE)
+        # The union IS this cycle's live observations, so it is the canary pool: every ad in it was
+        # served to one of the shards within the hour. This pass does no crawling of its own, so it
+        # has no other source of a known-live control.
+        arm_liveness_canaries(sorted(seen))
+        pruned = db.prune_unseen("gathern_residential_listings", seen, source=SOURCE,
+                                 verify_gone=_probe.verify_gone)
         if pruned < 0:
             print("⚠ gathern prune guard tripped (collapse/coverage) — kept existing active")
             pruned = 0
@@ -1045,8 +1214,10 @@ def main() -> int:
             print(f"✓ Gathern slice ({slice_label}): {len(rows)} monthly residential units upserted "
                   f"(scanned {scanned} cards) — NO prune (partial run)")
         else:
+            arm_liveness_canaries([r["ad_number"] for r in rows])
             pruned = db.prune_unseen("gathern_residential_listings",
-                                     {r["ad_number"] for r in rows}, source=SOURCE)
+                                     {r["ad_number"] for r in rows}, source=SOURCE,
+                                     verify_gone=_probe.verify_gone)
             if pruned < 0:
                 print("⚠ gathern prune guard tripped (0 scraped or collapse) — kept existing active")
                 pruned = 0

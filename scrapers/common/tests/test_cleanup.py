@@ -762,3 +762,82 @@ def test_deletes_are_actually_chunked_by_write_chunk(monkeypatch):
                  POL(max_delete_per_run=n + 100, anomaly_floor=n + 100), probe=lambda url: (404, ""))
     s = C.run("testp", force=True)
     assert s["deleted"] == n and len(c.deleted["testp_listings"]) == n
+
+
+# ── The ledger of a PERMANENT delete must name the branch that decided it (2026-09-21) ───────────
+# Measured that day: cleanup run 129 permanently deleted 1,825 aqar rows, EVERY ONE on
+# `http_status: 200`. aqar is the only enabled platform whose death signal is a BODY check (it
+# soft-closes with 200 + a «مغلق» badge), so on aqar — and only on aqar — `verdict: dead,
+# http_status: 200` is indistinguishable from what a mis-firing dead_marker would have written, and
+# the row is gone permanently. This repo already paid for exactly this omission once: on 2026-08-26
+# the aqarcity oracle was found mapping "real id but unparseable page" to 'gone', and adjudicating
+# 254 same-day deactivations needed a by-hand re-probe of the live source "because nothing stored
+# said WHICH condition had fired". That fix landed on ops_stale_inactivation_probe — the
+# DEACTIVATION ledger — and never on the DELETION ledger, where the action cannot be undone.
+
+def test_the_two_dead_branches_are_distinguishable_in_the_record():
+    """A 404-dead and a 200-marker-dead must not write the same evidence."""
+    dm = lambda b: b == "DEAD"
+    by_404 = C.verdict_detail(404, "", dm)
+    by_body = C.verdict_detail(200, "DEAD", dm)
+    assert by_404[0] == by_body[0] == "dead"
+    assert by_404[1] and by_body[1], "a dead verdict with no stated evidence is unfalsifiable"
+    assert by_404[1] != by_body[1], (
+        "both routes to a PERMANENT delete write the same evidence string, so the record cannot "
+        "say which one decided — the 2026-08-26 aqarcity lesson, on the irreversible ledger")
+
+
+def test_every_verdict_states_its_branch():
+    dm = lambda b: b == "DEAD"
+    for status, body in ((None, ""), (404, ""), (410, ""), (403, ""), (500, ""),
+                         (200, "DEAD"), (200, "for sale"), (200, "")):
+        v, why = C.verdict_detail(status, body, dm)
+        assert v in ("dead", "live", "unknown")
+        assert why, f"verdict_detail({status}, {body!r}) returned no reason"
+
+
+def test_verdict_delegates_so_the_branches_cannot_drift():
+    """`verdict()` must not keep a second copy of the decision."""
+    dm = lambda b: b == "DEAD"
+    for status, body in ((None, ""), (404, ""), (410, ""), (403, ""), (429, ""), (500, ""),
+                         (200, "DEAD"), (200, "for sale"), (200, "")):
+        assert C.verdict(status, body, dm) == C.verdict_detail(status, body, dm)[0]
+
+
+def test_the_evidence_reaches_the_deletion_ledger_end_to_end():
+    """Executed, not asserted about: run the real run() and read the real log payload.
+
+    The 1,825-row case is the `body_dead` row here — a 200 that only the dead_marker condemned.
+    """
+    verdicts = {"http://x/0": (404, ""), "http://x/1": (200, "DEAD")}
+    c = _install({"testp_listings": [_cand(0), _cand(1)]}, POL(anomaly_floor=1000),
+                 probe=lambda url: verdicts[url])
+    s = C.run("testp", force=True)
+    assert s["deleted"] == 2, s
+    logged = c.inserted.get("cleanup_deletion_log")
+    assert logged, "no audit row was written for a permanent delete"
+    rows = [r for batch in logged for r in (batch if isinstance(batch, list) else [batch])]
+    by_id = {r["listing_id"]: r["reason"] for r in rows}
+    assert set(by_id) == {0, 1}, by_id
+    for lid, reason in by_id.items():
+        assert reason.get("evidence"), (
+            f"listing {lid} was PERMANENTLY DELETED and its ledger row does not say what decided it")
+    assert by_id[0]["evidence"] != by_id[1]["evidence"], (
+        "a 404 delete and a 200-marker delete wrote identical evidence into the ledger")
+    assert "200" in by_id[1]["evidence"] and "marker" in by_id[1]["evidence"], by_id[1]
+
+
+def test_wasalt_empty_body_self_heal_is_preserved():
+    """A REGRESSION GUARD ON THE FIX ITSELF, not on the original defect.
+
+    `_wasalt_browser_probe()` deliberately encodes "200 and propertyDetailsV3 is present" as
+    `(200, '')` and relies on `dead_marker('')` being False to mean self-heal. Tightening the
+    empty-body case to 'unknown' — which is what LISTING_LIVENESS.md §1 says about a body we could
+    not read, and which was tried on 2026-09-21 — silently disables wasalt's self-heal and leaves
+    proven-live listings inactive and ageing on the deletion clock. Making the two consistent means
+    moving wasalt's transport off the empty-body encoding FIRST.
+    """
+    dm = C.PLATFORMS["wasalt"]["dead_marker"]
+    v, why = C.verdict_detail(200, "", dm)
+    assert v == "live", "wasalt's empty-body self-heal encoding was broken"
+    assert why, "even the encoded case must state itself in the record"
