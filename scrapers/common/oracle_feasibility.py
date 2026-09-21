@@ -53,6 +53,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
+from scrapers.common.http_liveness import read_is_unbelievable
+
 # THIS MODULE STAYS IMPORT-LIGHT, and that is load-bearing rather than tidy. Everything here is pure:
 # no HTTP client, no database client, nothing needing a network. `oracle_feasibility_run` is the
 # shell that adds `requests` and the Supabase reads on top. Keeping the split means the judgement can
@@ -121,6 +123,28 @@ class PlatformVerdict:
     why: str = ""
 
 
+def unreadable_reason(r: Read) -> Optional[str]:
+    """Why this read cannot be used as a control — asked of the SHARED LAW, never re-derived.
+
+    `http_liveness.read_is_unbelievable()` is the half of the liveness law no platform may override:
+    no answer, 401/402/403/407/408/429, any 5xx, or an empty body. A read that cannot bear a DEATH
+    verdict cannot bear a "this platform has no signal" verdict either — the second claim is no
+    weaker than the first, and pretending otherwise is the exact defect this whole module exists to
+    prevent.
+
+    MEASURED, in this probe's OWN first run (2026-09-21): sadin answered HTTP 502 on all ten live
+    and all ten dead rows — its site has been down since 09-07 — and the judgement returned
+    NO_SIGNAL_ON_THIS_PAGE, describing a 502 error page as "one shared shell for every id, the
+    aqaratikom shape". That is a failed read rendered as a platform limitation, by the instrument
+    built to catch failed reads rendered as platform limitations. The bug was that `reached` meant
+    only `status is not None`.
+
+    The body is not retained (only its length), so emptiness is reconstructed from `bytes_` — which
+    is the only property of the body the law actually tests.
+    """
+    return read_is_unbelievable(r.status, "x" if r.bytes_ else "")
+
+
 def _count(reads: Iterable[Read]) -> dict[int, int]:
     out: dict[int, int] = {}
     for r in reads:
@@ -154,17 +178,22 @@ def judge(platform: str, reads: list[Read]) -> PlatformVerdict:
     v.unreachable_live = sum(1 for r in live if r.status is None)
     v.unreachable_dead = sum(1 for r in dead if r.status is None)
     v.live_statuses, v.dead_statuses = _count(live), _count(dead)
-    reached_live = [r for r in live if r.status is not None]
+    # READABLE, not merely "answered". A 502 is an answer and proves nothing — see
+    # unreadable_reason(). Judged by the shared law so this can never drift from what the real
+    # liveness path believes.
+    reached_live = [r for r in live if unreadable_reason(r) is None]
     v.distinct_live_titles = len({r.title for r in reached_live if r.title})
     v.distinct_live_bytes = len({r.bytes_ for r in reached_live})
 
     # 1. THE READ ITSELF. Without a live cohort we are reading the network, not the platform.
     #    This is the branch §9.4 exists for: no positive control, no conclusion, in EITHER direction.
     if not reached_live:
+        reasons = sorted({str(unreadable_reason(r)) for r in live}) or ["no live rows were supplied"]
         v.verdict = "UNUSABLE_READ"
-        v.why = (f"not one of {v.live_n} known-live listing(s) could be reached from this egress. "
-                 "That is a fact about our network, never about the platform — re-measure from the "
-                 "egress the job really uses before writing anything down (LISTING_LIVENESS.md §9.4).")
+        v.why = (f"not one of {v.live_n} known-live listing(s) produced a READABLE answer from this "
+                 f"egress ({'; '.join(reasons)}). That is a fact about our network or about the "
+                 "source being down — never about whether its page can discriminate. Re-measure "
+                 "from the egress the job really uses (LISTING_LIVENESS.md §9.4).")
         return v
 
     # 2. THE gathern SIGNATURE. Live rows answering 404 means the source is refusing US, and a
@@ -187,7 +216,7 @@ def judge(platform: str, reads: list[Read]) -> PlatformVerdict:
 
     # 3. MARKERS. A marker on any live row is furniture, not a signal (the fursaghyr lesson).
     live_markers = {m for r in reached_live for m in r.markers}
-    reached_dead = [r for r in dead if r.status is not None]
+    reached_dead = [r for r in dead if unreadable_reason(r) is None]
     dead_markers = {m for r in reached_dead for m in r.markers}
     v.usable_markers = tuple(sorted(dead_markers - live_markers))
     v.disqualified_markers = tuple(sorted(dead_markers & live_markers))
