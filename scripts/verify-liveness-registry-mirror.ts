@@ -223,25 +223,66 @@ if (seedFile) {
 // with no verification rather than three working sweeps that simply never recorded their result.
 //
 // So: a tier-1/tier-2 registry entry is a CLAIM, and the claim has to be cashed in code.
+//
+// THERE ARE TWO WAYS TO CASH IT, because the repo really has two (extended 2026-09-21, ops_incident
+// #248/#578). The original shape assumed a platform owns a dedicated sweep — scrapers/<p>/
+// liveness.py — which is how aqar, gathern, wasalt and dealapp do it. The other 29 tier-2 platforms
+// re-verify through the SHARED path instead: run.py hands `verify_gone=` to db.prune_unseen(), a
+// row at grace gets a direct re-fetch of its own URL, and prune_unseen stamps the ALIVE verdict
+// through the contract. That is the same fact obtained the same way, by shared code rather than
+// copied code, and demanding a per-platform module for it would be demanding duplication.
+//
+// The requirement is not relaxed, it is completed — and the shared branch is asserted SEPARATELY
+// below, so this is strictly stronger than the old rule: deleting the stamp from db.py now
+// un-cashes all 29 claims at once and turns this barrier red, where before nothing looked at it.
+// (That stamp was missing for the whole life of the oracle fleet. Measured 2026-09-21: 63 of 67
+// platforms holding active inventory had never recorded one verification, while nine of them had
+// already produced real direct verdicts through prune_unseen — 267 LIVE on rakez alone.)
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 const STAMPERS = ['direct_alive_patch', 'verification_patch'];
+
+// The shared path, asserted ONCE and by EXECUTION of the rule below rather than by trusting a
+// comment: prune_unseen's self-heal — the branch reached only after an oracle read the listing's
+// own URL as alive — must ask liveness_contract for the stamp.
+//
+// AND IT IS ASKED OF CODE, NOT OF PROSE. The first version of this line tested the raw file, and a
+// planted mutant proved it worthless: deleting both the import and the call left the barrier GREEN,
+// because the explanatory comment above the self-heal names `direct_alive_patch()` and that was
+// enough to satisfy `includes()`. A comment is not a code path — the exact source-TEXT tripwire
+// AGENTS.md says has passed for the entire lifetime of every defect it was meant to catch. So
+// comments and docstrings are stripped first, and what is required is the SPREAD into the update
+// payload (`**direct_alive_patch(...)`), which is the thing that actually reaches the database.
+const dbPyRaw = readFileSync(join(ROOT, 'scrapers', 'common', 'db.py'), 'utf8');
+const dbPy = dbPyRaw.replace(/"""[\s\S]*?"""/g, '').replace(/#[^\n]*/g, '');
+const sharedPathStamps = STAMPERS.some((fn) => new RegExp(`\\*\\*${fn}\\(`).test(dbPy));
+check('db.prune_unseen() records the ALIVE verdicts its oracles obtain',
+  sharedPathStamps,
+  'scrapers/common/db.py never calls ' + STAMPERS.join('() or ') + '(), so every listing an ' +
+  'oracle PROVES alive is self-healed with no record that it was proven — and every platform ' +
+  'that verifies through this shared path (rather than its own liveness module) is making a ' +
+  'tier claim nothing cashes. This is ops_incident #248 exactly.');
+
 for (const r of fromJson.filter((x) => x.strategy !== 'CRAWL_PRESENCE_ONLY')) {
-  const candidates = [
+  const sources = [
     join(ROOT, 'scrapers', r.platform, 'liveness.py'),
     join(ROOT, 'scrapers', r.platform, 'liveness_run.py'),
-  ];
-  const sources = candidates.map((f) => {
+  ].map((f) => {
     try { return readFileSync(f, 'utf8'); } catch { return ''; }
   });
-  check(`${r.platform} has a liveness module`, sources.some((s) => s.length > 0),
-    `neither liveness.py nor liveness_run.py under scrapers/${r.platform}/ — it is registered ` +
-    `${r.strategy}, which is a claim that something re-verifies its listings`);
   const all = sources.join('\n');
-  check(`${r.platform} records its own ALIVE verdicts (last_verified_alive_at)`,
-    STAMPERS.some((fn) => all.includes(`${fn}(`)),
-    `its liveness module never calls ${STAMPERS.join('() or ')}(), so every row it proves alive ` +
-    'is written back with no record that it was proven. ops_platform_liveness_coverage would ' +
-    `read 0% verified for ${r.platform} no matter how well the sweep runs.`);
+  const ownModuleStamps = sources.some((s) => s.length > 0) && STAMPERS.some((fn) => all.includes(`${fn}(`));
+
+  let runPy = '';
+  try { runPy = readFileSync(join(ROOT, 'scrapers', r.platform, 'run.py'), 'utf8'); } catch { /* none */ }
+  const wiresSharedOracle = runPy.includes('verify_gone=') && runPy.includes('prune_unseen');
+
+  check(`${r.platform} cashes its ${r.strategy} claim in code`,
+    ownModuleStamps || (wiresSharedOracle && sharedPathStamps),
+    `it is registered ${r.strategy} — a claim that something re-fetches its listings' own URLs ` +
+    'and records an affirmative answer — and neither route is present: no scrapers/' +
+    `${r.platform}/liveness{,_run}.py calling ${STAMPERS.join('() or ')}(), and no ` +
+    `verify_gone= handed to prune_unseen in scrapers/${r.platform}/run.py. ` +
+    'ops_platform_liveness_coverage would read 0% verified for it no matter what runs.');
 }
 
 // And the column stays the contract's to write. A sweep that sets it by hand can stamp a row it

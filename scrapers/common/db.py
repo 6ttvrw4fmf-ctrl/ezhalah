@@ -22,6 +22,7 @@ from typing import Any, Callable, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
+from scrapers.common.liveness_contract import direct_alive_patch
 from scrapers.common.pii import is_free_text, redact_capture, redact_pii
 from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder
 
@@ -965,8 +966,37 @@ def prune_unseen(
             held = len(ads) - len(confirmed_gone) - len(still_live)
             if still_live:
                 # Self-heal: the source serves it, so it was never missing — only un-indexed.
+                #
+                # AND THE VERDICT IS RECORDED, NOT SPENT (ops_incident #248, fixed 2026-09-21).
+                # This branch is reached ONLY after `verify_gone` made a DIRECT fetch of this
+                # listing's own URL and read an affirmative live answer — which is precisely the
+                # fact `last_verified_alive_at` exists to hold (LISTING_LIVENESS.md §3), and
+                # precisely the branch direct_alive_patch()'s docstring says to call it from. It
+                # used to write `missing_count`/`last_seen_at` and nothing else, so the strongest
+                # evidence this system ever gathers was thrown away at the moment it was obtained:
+                # `last_seen_at` says only "a crawl encountered this row", and the row that was
+                # PROVEN alive became indistinguishable from one merely sighted.
+                #
+                # Measured the day this was fixed, across the whole fleet: 63 of 67 platforms
+                # holding active inventory had never written a single last_verified_alive_at, while
+                # nine of them (abeea, akariyoun, aqarcity, aqargate, hajer, mustqr, raghdan, rakez,
+                # sanadak) had already produced real direct verdicts through THIS call site — 267
+                # LIVE on rakez alone. ops_platform_liveness_coverage therefore read 0% verified for
+                # every one of them, mon_detect_liveness_coverage_ramp skipped them because its
+                # filter is `strategy in ('DIRECT_REVISIT','CANDIDATE_PLUS_DIRECT')`, and the
+                # registry went on calling them CRAWL_PRESENCE_ONLY — "no per-listing revisit
+                # exists" — because nothing in the data contradicted it. A self-consistent blind
+                # spot, all of it downstream of this one discarded patch.
+                #
+                # The stamp stays the contract's to mint: this asks liveness_contract for it rather
+                # than writing the column, so the rule "nothing stamps this except a direct
+                # affirmative read" keeps living in exactly one place (and
+                # verify-liveness-registry-mirror.ts enforces that no scraper writes it directly).
+                _now_iso = datetime.now(timezone.utc).isoformat()
+                _selfheal = {"missing_count": 0, "last_seen_at": _now_iso,
+                             **direct_alive_patch(now_iso=_now_iso)}
                 for i in range(0, len(still_live), 200):
-                    _execute(c.table(table).update({"missing_count": 0, "last_seen_at": datetime.now(timezone.utc).isoformat()})
+                    _execute(c.table(table).update(_selfheal)
                              .in_("ad_number", still_live[i:i + 200]),
                              what=table + ".prune_selfheal")
             if held:

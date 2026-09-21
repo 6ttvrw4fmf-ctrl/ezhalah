@@ -66,6 +66,21 @@ lower a floor (§7). And an "EGRESS BLOCKED" note is a fact about the container 
 about the platform — re-measure from the egress the job really uses (CI), where a cloud routine
 measured an 83% false-death rate on gathern the same day CI got clean 200s.
 
+**A TIER IS A MECHANISM; COVERAGE IS EVIDENCE; NEVER READ ONE AS THE OTHER —
+`docs/ops/LISTING_LIVENESS.md` §9.6 is canonical (2026-09-21).** The registry grades what a platform
+RUNS; `ops_platform_liveness_coverage` measures what that has PRODUCED. Fusing them is how the fleet
+read as uncovered while 29 platforms ran real per-listing oracles. Measured that day: **63 of 67
+platforms holding active inventory (34,763 listings) had never written a single
+`last_verified_alive_at`**, because `prune_unseen()`'s self-heal discarded the ALIVE verdict it had
+just obtained — so coverage read 0% everywhere, `CRAWL_PRESENCE_ONLY` looked honest, and
+`mon_detect_liveness_coverage_ramp` (filter: `strategy in ('DIRECT_REVISIT','CANDIDATE_PLUS_DIRECT')`)
+never looked at one of them. Every layer confirmed every other layer and all of them were wrong.
+A platform handing `verify_gone=` to `prune_unseen` **is** CANDIDATE_PLUS_DIRECT — declaring it lower
+is not modesty, it switches monitors off. Whether its chain has ever actually RUN is the separate
+question: `scrapers/oracle-never-observed.txt` (shrink-only ledger) plus
+`mon_detect_oracle_chain_never_observed()`, which recomputes it from production every sweep. 20 of
+the 29 have still never produced a verdict. **A tier is never a coverage claim and never permission.**
+
 **The daily integrity routine's spec is `docs/ops/DATA_INTEGRITY_ENGINEER.md` — that FILE is the
 source of truth, not the cloud routine's prompt text.** If the two ever differ, update the routine to
 match the file. Read it before any data-fidelity, price, area, location, searchability or Normal

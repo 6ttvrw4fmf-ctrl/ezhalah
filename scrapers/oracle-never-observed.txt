@@ -1,0 +1,76 @@
+# PLATFORMS WHOSE LIVENESS ORACLE HAS NEVER BEEN SEEN TO RUN IN PRODUCTION
+#
+# Every platform listed here HAS a source oracle: its run.py passes `verify_gone=` to
+# db.prune_unseen(), so a row at grace is re-fetched on its own URL and only an affirmative source
+# answer may deactivate it. That is the CANDIDATE_PLUS_DIRECT mechanism, and it is what the liveness
+# registry now declares for them.
+#
+# A MECHANISM IS NOT COVERAGE. The owner's rule, 2026-09-21: "Do not mark a platform as covered
+# merely because code exists. Prove the full chain actually runs." Each platform below has produced
+# ZERO verdict rows in `ops_stale_inactivation_probe` (oracle = 'prune_unseen.verify_gone') — not a
+# single GONE, LIVE or even UNKNOWN. The chain exists and has never been observed to execute. Until
+# it has, the honest word for these platforms is UNPROVEN, never "covered", and this file is where
+# that is said out loud instead of being inferred from a tier label.
+#
+# WHY A PLATFORM CAN SIT HERE INNOCENTLY. The probe fires ONLY for a row that reaches grace
+# (3 consecutive misses) — a small, stable catalogue re-read in full every run may legitimately
+# never produce one, because nothing ever goes missing. So a row in this file is not by itself a
+# defect. What it is, is the ABSENCE OF PROOF, and LISTING_LIVENESS.md §9.3 is explicit that a
+# checker which has not run proves nothing about its listings: they are UNKNOWN. The danger is the
+# other case — an oracle that would throw, 403, or quarantine on its first real candidate, and which
+# nothing will discover until the day it is asked to decide whether a listing may be removed.
+#
+# HOW A PLATFORM LEAVES THIS FILE: produce a real verdict in production. One row in
+# ops_stale_inactivation_probe is enough to move it from UNPROVEN to observed:
+#
+#   select split_part(source_table,'_',1) as platform, verdict, count(*), max(probed_at)
+#     from ops_stale_inactivation_probe
+#    where oracle = 'prune_unseen.verify_gone'
+#    group by 1, 2 order by 1;
+#
+# TWO THINGS KEEP THIS FILE HONEST, and they are deliberately split by what each can see.
+#
+#   scripts/verify-oracle-observation-ledger.ts (offline, in `npm test`) judges the REPO half:
+#     1. every platform listed here really does wire verify_gone= into prune_unseen — a ledger row
+#        for a platform with no oracle is a claim about a mechanism that does not exist;
+#     2. every platform listed here is declared CANDIDATE_PLUS_DIRECT or DIRECT_REVISIT — this file
+#        records an UNPROVEN mechanism, never a missing one (a platform with no oracle at all
+#        belongs in scrapers/absence-only-prune.txt, which is a different gap);
+#     3. the count is a RATCHET. It may fall. Raising it is a deliberate, reviewed edit.
+#
+#   mon_detect_oracle_chain_never_observed() (production, on the detector roster) judges the OTHER
+#   half, which no offline check can see: it recomputes the never-observed set from
+#   ops_stale_inactivation_probe every sweep and raises per platform. So a row that has since been
+#   earned shows up as an alert auto-resolving, and a row missing from this file shows up as an
+#   alert naming a platform nobody wrote down. The file cannot quietly disagree with production.
+#
+# WHY THIS FILE DID NOT EXIST BEFORE (ops_incident #248, #578). db.prune_unseen()'s self-heal wrote
+# {missing_count, last_seen_at} and threw the ALIVE verdict away, so `last_verified_alive_at` stayed
+# NULL on every oracle-guarded platform no matter how well its oracle ran. The registry then read
+# 0% verified everywhere, the CRAWL_PRESENCE_ONLY tier looked correct, and
+# mon_detect_liveness_coverage_ramp — whose filter is `strategy in ('DIRECT_REVISIT',
+# 'CANDIDATE_PLUS_DIRECT')` — never looked at any of them. Fixing the discarded stamp is what made
+# the distinction below measurable at all.
+#
+# format:  platform | active rows | note (measured 2026-09-21)
+#
+aldarim        |    177 | Nuzul SaaS tenant. Canary-gated soft-404 oracle; the canary needs the front end to be rendering real listings that second, so a degraded run yields no verdict rather than a wrong one. This platform has never deactivated a listing.
+aljassim       |     90 | Drupal; a deleted node hard-404s. No candidate has reached grace yet.
+almotmkenah    |     22 | reads its own archive banner, or its own URL's 404.
+alsidra        |     24 | REST record's own invalid-id 404.
+alshawaf       |    986 | Drupal; a deleted node hard-404s.
+aqaralsaudia   |     16 | tiny catalogue, full re-read each run.
+bossbih        |  1,448 | Drupal; a deleted node hard-404s.
+eastabha       |    195 | this listing's OWN slider-property-status ribbon (تأجرت / تم البيع), plus 404/410.
+gomenassat     |    142 | soft-404 («نأسف! هذه الصفحة غير متوفرة») — NOT a 404 status. Canary-gated, fails closed. First scrape run only landed 2026-09-21 and was demoted by an integrity guard, so the crawl itself is not yet healthy here.
+ialqarawi      |  2,565 | an unknown id answers HTTP 200 with the HOMEPAGE; a delisted ad keeps its page with an empty «القسم». Canary-gated. The largest unproven chain after muktamel/sakan.
+jazwtn         |    108 | 404/410 on the listing's own URL (29/31 dead rows, 0/40 controls at wiring time).
+masar          |      1 | wp/v2/aqar REST record: 404 carrying rest_post_invalid_id. Capture itself is failing (curl 28 timeout through the shared proxy, ops_incident #325) — an oracle cannot be exercised by a crawl that never completes.
+mizlaj         |     30 | 404/410 on the listing's own URL. Same proxy dependency as masar (#325).
+moftah         |     13 | REST record's own invalid-id 404.
+muktamel       |  3,864 | THE LARGEST UNPROVEN CHAIN. Redirect OFF the listing's own path; canary-gated from ids the same run read LIVE, failing closed — the host answers 403 CONNECT from cloud egress, so it was never pre-validated against a dead cohort. 94 rows were deactivated here on 2026-09-21 WITHOUT a direct verdict, before the oracle was wired (ops_incident #371).
+nowaisiry      |     22 | 404/410 on the listing's own URL.
+nufouth        |    285 | death is data in its API record, or its own /B/ page, API-gated.
+sakan          |  3,094 | a removed listing 301s to the listings index — NOT a 404 — and the sitemap is not the catalogue (37 of 40 gap-ids redirected, 3 were live «فعال» listings the sitemap omits). Canary-gated. First scrape run landed 2026-09-21 and has not yet completed healthily.
+souq24         |     44 | a redirect OFF this ad's own path (14/14 dead rows, 0/40 controls), plus 404/410. Capture depends on the shared proxy (#325).
+suwar          |     96 | wired with the 2026-09-14 batch; no candidate has reached grace yet.
