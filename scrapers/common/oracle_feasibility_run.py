@@ -47,6 +47,13 @@ def _rows(table: str, active: bool, sample: int) -> list[dict]:
              .select("ad_number, listing_url")
              .eq("active", active)
              .not_.is_("listing_url", "null")
+             # THE ORDER COLUMN MUST BE NON-NULL, and this is not defensive noise —
+             # `order by x desc` puts NULLs FIRST in Postgres. deactivated_at is null on rows
+             # inactivated before that column was populated, so without this the DEAD cohort fills
+             # up with the oldest, least representative rows in the table instead of the ones most
+             # recently confirmed gone, and every verdict would be drawn from the wrong sample while
+             # looking perfectly healthy. scrapers/gathern/liveness.py guards the same way.
+             .not_.is_(order_col, "null")
              .order(order_col, desc=True)
              .limit(sample))
         return q.execute().data or []
