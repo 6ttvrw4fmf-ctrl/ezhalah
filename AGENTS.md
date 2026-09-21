@@ -48,6 +48,24 @@ production-searchable platform must declare a strategy in `scrapers/common/liven
 CI fails. `select * from ops_platform_liveness_coverage;` is the standing answer to "do we have dead
 listings?" — do not re-derive it by hand.
 
+**A PLATFORM IS "COVERED" ONLY WHEN THE CHAIN IS PROVEN TO RUN IN PRODUCTION, AND A CHECKER'S
+SILENCE MUST BE AN ALARM — `docs/ops/LISTING_LIVENESS.md` §9 is canonical (owner, 2026-09-21).**
+The owner's two sentences: *source removes a listing → Ezhalah detects it → safely verifies it →
+deactivates it*; and *if the liveness checker or its scheduled job stops working, Ezhalah must detect
+THAT failure too, instead of silently accumulating stale listings.* Never call a platform covered
+because code, a workflow, a cron row or a green barrier exists — every one of those was true of
+platforms serving dead inventory the day this rule was written. Measured then: wasalt's enumeration
+was dead for SEVEN DAYS while the workflow reported `success` on every run, enumerating 96 rows
+instead of ~105,000, because a job that stops producing runs contributes no row for
+`mon_detect_silent_partial_success()` to compare — **absence cannot be compared, so silence read as
+health** — and because the enum shared a `platform` label with the ordinary crawl, hiding its
+collapse inside that crawl's small-slice median. A liveness job needs its OWN run label and must be
+watched for EXPECTED-BUT-ABSENT runs on its own cadence. A job that did not run proves nothing about
+its listings: they are UNKNOWN, and the response is to fix the checker, never to widen a kill or
+lower a floor (§7). And an "EGRESS BLOCKED" note is a fact about the container that wrote it, not
+about the platform — re-measure from the egress the job really uses (CI), where a cloud routine
+measured an 83% false-death rate on gathern the same day CI got clean 200s.
+
 **The daily integrity routine's spec is `docs/ops/DATA_INTEGRITY_ENGINEER.md` — that FILE is the
 source of truth, not the cloud routine's prompt text.** If the two ever differ, update the routine to
 match the file. Read it before any data-fidelity, price, area, location, searchability or Normal
