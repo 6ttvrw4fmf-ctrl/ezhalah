@@ -44,6 +44,7 @@ export const PLATFORMS: Platform[] = [
   { name: 'Aqaralsaudia', domain: 'aqaralsaudia.com', brand: 'Aqar Al Saudia Real Estate', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   { name: 'Suwar', domain: 'suwar.sa', brand: 'Suwar Real Estate', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   { name: 'Rakez', domain: 'rakez.sa', brand: 'Rakez Real Estate', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'Akariyoun', domain: 'akariyoun.sa', brand: 'Akariyoun', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'KSA Aqar', domain: 'ksaaqar.com', brand: 'KSA Aqar Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Sadiq Eltajer', domain: 'sadiq-eltajer.sa', brand: 'Sadiq Eltajer Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'Alta', domain: 'alta.com.sa', brand: 'Alta Real Estate Services', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
@@ -69,6 +70,15 @@ export const PLATFORMS: Platform[] = [
   { name: 'Arkaan', domain: 'arkaanalaqar.com', brand: 'Arkaan Al Aqar', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'RawasiDark', domain: 'rawasi-dark.com', brand: 'Rawasi Dark Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: '1 October', domain: '1october.com.sa', brand: '1 October Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
+  // 0 rent rows today, but its scraper maps «للإيجار» to Rent — absence is not incapability.
+  // CompoundIn's scraper hardcodes Rent, so it can never produce a Buy row.
+  { name: 'Gudai', domain: 'gudai.inblaj.net', brand: 'Gudai Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Safera', domain: 'safera.inblaj.net', brand: 'Safera Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Aqarnajran', domain: 'aqarnajran.com', brand: 'Aqar Najran', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'Fahadalshahri', domain: 'fahadalshahri.com', brand: 'Maqam Al Wisam Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'CompoundIn', domain: 'compoundin.com', brand: 'CompoundIn', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  { name: 'Waslna', domain: 'wslnaa.com', brand: 'Waslna Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
 ];
 
 const BY_NAME: Record<string, Platform> = Object.fromEntries(PLATFORMS.map((p) => [p.name, p]));

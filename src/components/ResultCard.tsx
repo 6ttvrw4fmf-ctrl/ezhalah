@@ -796,6 +796,8 @@ function sourceHost(source: string): string {
   if (s.includes('alta')) return 'alta.com.sa';
   if (s.includes('awal')) return 'awaalun.com';
   if (s.includes('azdad')) return 'azdadalaqaria.com';
+  // The DB source is Arabic («عقاريون», scrapers/akariyoun/run.py) — the slug alone never matched it.
+  if (s.includes('akariyoun') || s.includes('عقاريون')) return 'akariyoun.sa';
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
   // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.
