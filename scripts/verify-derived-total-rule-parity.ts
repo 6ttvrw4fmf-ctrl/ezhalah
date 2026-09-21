@@ -49,6 +49,7 @@ check('SQL: derives only for SALE rows', /deal_ar\s*=\s*'بيع'/.test(sql));
 check('SQL: refuses when a rent price is published', /price_annual\s+is\s+null/.test(sql));
 check('SQL: requires a real per-metre price', /price_per_meter\s+is\s+not\s+null/.test(sql));
 check('SQL: requires a real area > 0', /area_m2\s*>\s*0/.test(sql));
+check('SQL: rounds only the final product (exact area × exact rate)', /round\(price_per_meter \* area_m2\)/.test(sql));
 check('SQL: a source-published total always wins', /when\s+price_total\s+is\s+not\s+null\s+then\s+price_total/.test(sql));
 
 // ── 2. The bound is the same number on both sides ───────────────────────────────────────────────
@@ -76,6 +77,8 @@ const CASES: Case[] = [
   { name: 'X1 exactly at the bound  -> derives',  deal: 'Buy',  total: null, annual: null, ppm: 1, area: DERIVED_TOTAL_MAX, want: DERIVED_TOTAL_MAX },
   { name: 'X2 one over the bound    -> refuses',  deal: 'Buy',  total: null, annual: null, ppm: 1, area: DERIVED_TOTAL_MAX + 1, want: null },
   { name: 'X3 absurd product (7e12) -> refuses',  deal: 'Buy',  total: null, annual: null, ppm: 1000000, area: 7000000, want: null },
+  // D1: the raghdan card that exposed the integer area (2026-09-21). Exact area in, whole riyals out.
+  { name: 'D1 decimal area, rounded only at the end', deal: 'Buy', total: null, annual: null, ppm: 1228, area: 407.56, want: 500484 },
 ];
 for (const c of CASES) {
   const got = derivedTotalFromPerMeter(c.deal, c.total, c.annual, c.ppm, c.area);
