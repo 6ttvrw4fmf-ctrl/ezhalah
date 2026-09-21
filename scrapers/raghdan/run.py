@@ -642,6 +642,12 @@ def _spec_int(v: Optional[str]) -> Optional[int]:
     return n if n and n > 0 else None
 
 
+def _spec_measure(v: Optional[str]) -> Optional[float]:
+    """_spec_int for a MEASUREMENT («عرض الشارع»): the same number with its decimals; 0 = not stated."""
+    n = normalize.to_measure(v)
+    return n if n and n > 0 else None
+
+
 def _map_type(*candidates: str) -> Optional[str]:
     """Whole string then first token, exact-first then substring — via the SHARED canonical map
     (normalize.map_type) with TYPE_OVERRIDES_AR as the exact-match override layer."""
@@ -750,7 +756,8 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         elif property_type in LAND_TYPES:
             # Buy + land: offers.price is the PER-METER rate. Store it as the rate and leave
             # price_total NULL — the source did not print a total here (see PRICE SEMANTICS above).
-            price_per_meter = raw_price
+            # Read exact from offers.price, not raw_price: a rate keeps its halalas (1228.5 ≠ 1228).
+            price_per_meter = normalize.measure_num(_float(offers.get("price")))
         else:
             # Buy + building/unit: offers.price is the TOTAL. Store it as the total and leave
             # price_per_meter NULL — deriving it would fabricate a rate the source never printed.
@@ -849,7 +856,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "active": True,
         "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": round(area) if area else None,
+        "area_m2": normalize.measure_num(area) if area else None,
         # Both "عدد الغرف" (specs.rooms) and schema.org's numberOfRooms are generic total-room-count
         # fields, never bedroom-specific — raghdan exposes no separate bedroom field, and its
         # REGA-sourced pages never display one either (live-confirmed 2026-07-28: 0/3 sampled pages
@@ -870,7 +877,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         # or advertiser name from an official street name. The «شارع» card carries the same free
         # text with the same ambiguity (live values seen: "رقم 469", "محمد بن عبدالعزيز الدغيثر"),
         # so the same absolute PDPL decision applies. Nothing downstream reads street_name.
-        "street_width_m": _spec_int(sp.get("street_width")),
+        "street_width_m": _spec_measure(sp.get("street_width")),
         "title": title,
         "description": description,
         "photo_urls": _images(ld),

@@ -102,15 +102,14 @@ def ad_code(text: str) -> Optional[str]:
     return m.group(1).translate(_AR_DIGITS) if m else None
 
 
-def parse_area(text: str) -> Optional[int]:
+def parse_area(text: str) -> Optional[float]:
     m = _HEADER_RE.search(text)
     if not m:
         return None
-    try:
-        n = int(float(m.group(2).replace(",", "")))
-    except ValueError:
-        return None
-    return n if 1 <= n <= 5_000_000 else None
+    # Same reading as the old int(float(...)): ',' groups thousands, '.' is the decimal point —
+    # but the fraction is kept (407.56 m² stays 407.56).
+    n = normalize.measure_num(m.group(2).replace(",", ""))
+    return n if n is not None and 1 <= n <= 5_000_000 else None
 
 
 # THIS SOURCE PRICES LAND PER SQUARE METRE, OFTEN WITHOUT SAYING SO. Measured over 117 listings:
@@ -138,11 +137,10 @@ def parse_price(text: str) -> tuple[Optional[int], Optional[int]]:
     p = re.search(r"([\d٠-٩][\d٠-٩,]{2,})\s*ريال", head.translate(_AR_DIGITS))
     if not p:
         return None, None
-    try:
-        n = int(p.group(1).replace(",", ""))
-    except ValueError:
-        return None, None
-    if n <= 0:
+    # The capture is digits and commas only, so this is the same whole number int() gave — the
+    # total stays whole-riyal. measure_num (not int) because the same n is also the per-metre rate.
+    n = normalize.measure_num(p.group(1).replace(",", ""))
+    if not n:
         return None, None
     if _PER_METRE.search(head):
         return None, n
@@ -272,10 +270,10 @@ def parse_bedrooms(text: str) -> Optional[int]:
     return n if 0 < n <= 50 else None
 
 
-_STREET_RE = re.compile(r"شارع\s*[ء-ي]*\s*([\d٠-٩]{1,3})\s*م")
+_STREET_RE = re.compile(r"شارع\s*[ء-ي]*\s*([\d٠-٩]{1,3}(?:[.٫]\d+)?)\s*م")
 
 
-def parse_street_width(text: str) -> Optional[int]:
+def parse_street_width(text: str) -> Optional[float]:
     """From «الواجهة : شارع شرقى 25م» — the listing's OWN frontage row, never the page at large."""
     v = desc(text, "الواجهة")
     if not v:
@@ -283,8 +281,8 @@ def parse_street_width(text: str) -> Optional[int]:
     m = _STREET_RE.search(v.translate(_AR_DIGITS))
     if not m:
         return None
-    n = int(m.group(1))
-    return n if 1 <= n <= 200 else None
+    n = normalize.measure_num(m.group(1).replace("٫", "."))
+    return n if n is not None and 1 <= n <= 200 else None
 
 
 _DIRECTIONS = ("شمالى", "شمالي", "جنوبى", "جنوبي", "شرقى", "شرقي", "غربى", "غربي",

@@ -409,12 +409,12 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
     if not price:
         return None, category
     area = _num(md.get("space") or listing.get("space"))
-    # price_per_meter arrives as a DECIMAL string ("2946.17") — round the float, don't _int()
-    # it (which would strip the dot → 294617). Derive from price/area when absent.
+    # price_per_meter arrives as a DECIMAL string ("2946.17") — keep it exact (measure_num), never
+    # _int() it (which would strip the dot → 294617) nor round it (→ 2946).
     ppm_raw = _num(md.get("price_per_meter") or listing.get("price_per_meter"))
     # Source-published rate only. No price/area fallback — a missing rate stays NULL rather than
     # being fabricated (aqar PR#216, scrapers PR#217).
-    ppm = round(ppm_raw) if ppm_raw else None
+    ppm = normalize.measure_num(ppm_raw) if ppm_raw else None
 
     # ── REGA advertisement (property fields ONLY — never employee PII) ──
     rega = _approved_rega(listing)
@@ -544,11 +544,11 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": round(area) if area else None,
+        "area_m2": normalize.measure_num(area) if area else None,
         "bedrooms": bedrooms,
         "property_age": property_age,
         "direction": direction,
-        "street_width_m": round(street_width) if street_width else None,
+        "street_width_m": normalize.measure_num(street_width) if street_width else None,
         "price_total": price if not is_rent else None,
         "price_annual": price if is_rent else None,
         "price_per_meter": ppm,

@@ -297,6 +297,15 @@ def _num(s: Optional[str]) -> Optional[int]:
         return None
 
 
+def _measure(s: Optional[str]) -> Optional[float]:
+    """_num for a MEASUREMENT: the same first number token, with its decimals (593.5م → 593.5)."""
+    if not s:
+        return None
+    s = str(s).translate(_AR_DIGITS).replace("٬", ",")
+    m = re.search(r"[\d,]+(?:\.\d+)?", s)
+    return (normalize.measure_num(m.group(0).replace(",", "")) or None) if m else None
+
+
 def _amount_from_text(s: Optional[str], *, floor: int) -> Optional[int]:
     """Parse an amount from free Arabic text, honouring magnitude words: '400 ألف ريال' → 400000,
     '1.2 مليون' → 1200000. Plain numbers pass through. Anything under `floor` is discarded as
@@ -439,7 +448,7 @@ def parse_detail(html_text: str) -> dict[str, Any]:
     out["bathrooms"] = _num(_attr("data-bathrooms", html_text))
     size = _attr("data-size", html_text)
     if size:
-        out["area_m2"] = _num(re.sub(r"<[^>]+>", "", up.unquote(size)))
+        out["area_m2"] = _measure(re.sub(r"<[^>]+>", "", up.unquote(size)))
     # Price: trust the numeric data-clean_price when > 0, else parse the display text WITH its
     # ألف/مليون magnitude word (land listings carry clean_price=0 and a "400 ألف ريال" text).
     clean = _num(_attr("data-clean_price", html_text))
@@ -522,7 +531,7 @@ def _content_specs(content: str) -> dict[str, Any]:
     out: dict[str, Any] = {}
     am = re.search(r"(?:المساحة|مساحة|مساحه)\D{0,6}([\d٠-٩,\.]+)\s*(?:م|متر)", txt)
     if am:
-        out["area_m2"] = _num(am.group(1))
+        out["area_m2"] = _measure(am.group(1))
     gm = re.search(r"عمر\D{0,8}([\d٠-٩]+)\s*(?:سنة|سنوات|عام)", txt)
     if gm:
         out["property_age"] = _num(gm.group(1))

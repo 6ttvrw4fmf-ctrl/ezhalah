@@ -514,7 +514,7 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
     area = _num(estate.get("area")) or _num(dmap.get("المنطقة")) or _num(amap.get("مساحة العقار"))
     # Source-published rate only (meter_price / price_of_meters). No price/area fallback:
     # a missing rate stays NULL rather than being fabricated (aqar PR#216, scrapers PR#217).
-    ppm = _int(ad.get("meter_price") or detail.get("price_of_meters"))
+    ppm = normalize.to_measure(ad.get("meter_price") or detail.get("price_of_meters")) or None
 
     # ── faceted property fields ──
     # "عدد الغرف" fallback (REGA authority_details, a generic total-room-count field) removed
@@ -604,7 +604,7 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         "rega_license_issue_date": amap.get("تاريخ اصدار الاعلان") or None,
         "rega_license_end_date": amap.get("تاريخ انتهاء الرخصة") or None,
         "instrument_number": detail.get("instrument_number") or None,
-        "street_width_m": round(street_w) if street_w else None,
+        "street_width_m": normalize.measure_num(street_w) if street_w else None,
         "is_able_financing": bool(ad.get("is_able_financing") or detail.get("is_able_financing")),
         "is_furnished": bool(estate.get("is_furniture")),
         "latitude": _num(estate.get("lat")),
@@ -631,13 +631,13 @@ def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         "active": not sold,
         "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": round(area) if area else None,
+        "area_m2": normalize.measure_num(area) if area else None,
         "bedrooms": bedrooms,
         "bathrooms": bathrooms,
         "halls": halls,
         "property_age": age,
         "direction": direction,
-        "street_width_m": round(street_w) if street_w else None,
+        "street_width_m": normalize.measure_num(street_w) if street_w else None,
         "price_total": price if not is_rent else None,
         "price_annual": price if is_rent else None,
         "price_per_meter": ppm,

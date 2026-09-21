@@ -187,17 +187,19 @@ def _redact(text: Optional[str]) -> Optional[str]:
     return re.sub(r"\s{2,}", " ", t).strip() or None
 
 
-def _first_street_width(v: Any) -> Optional[int]:
+def _first_street_width(v: Any) -> Optional[float]:
     """pw-str is sometimes a COMPOUND value for a corner plot with two frontages — measured live on
     40 of 262 rows, e.g. "15 * 10", "40 * 20", "20 * 8 * مرفق". Feeding that through the generic
     normalize.to_int() (which just strips non-digits) silently concatenated "15 * 10" into the
     integer 1510 — a fabricated, physically-absurd street width, stored on a smallint column with
     no way to tell it apart from a real value. Only the FIRST published number is stored (the
-    plot's primary/main-facing street) — never a naive concatenation of the raw text."""
+    plot's primary/main-facing street) — never a naive concatenation of the raw text. A published
+    fraction («12.5») is kept exactly, never cut to 12; the dot is a decimal point, as it always was
+    here (the old int() kept the part before it)."""
     if not v:
         return None
-    m = re.search(r"\d+", str(v))
-    return int(m.group()) if m else None
+    m = re.search(r"\d+(?:[.٫]\d+)?", str(v))
+    return normalize.measure_num(m.group().replace("٫", ".")) if m else None
 
 
 def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict], str]:
@@ -215,7 +217,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     if not deal:
         return None, "residential"  # a deal we don't recognize is never assumed to be Buy or Rent
 
-    area = normalize.to_int(acf.get("pw-squ"))
+    area = normalize.to_measure(acf.get("pw-squ"))
     # pw-prc is literally the numeral 0 (never blank) on every listing marked "على السوم"
     # (negotiable/price-on-request) — measured live: 18/262 rows, 18/18 of them say "على السوم" in
     # their own description text. to_int(0) faithfully parses that as the integer 0, which would
@@ -244,7 +246,7 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # than blank. normalize.to_int() strips the '-' sign, which would fabricate a positive price
     # from a sentinel, so a leading '-' is rejected before parsing — never coerced into a real value.
     _ppm_raw = str(acf.get("pw-prc-mtr") or "").strip()
-    price_per_meter = normalize.to_int(_ppm_raw) if _ppm_raw and not _ppm_raw.startswith("-") else None
+    price_per_meter = normalize.to_measure(_ppm_raw) if _ppm_raw and not _ppm_raw.startswith("-") else None
 
     district_ar = (acf.get("pw-dis") or "").strip() or None
 
