@@ -16,62 +16,62 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-import time
 from pathlib import Path
 from typing import Optional
 
-import requests
-
+# THE FLEET'S OWN FETCH STACK, not a foreign HTTP client. scrapers/common/http.py says why in its
+# first line: "We use curl_cffi (NOT vanilla requests) because Saudi real-estate sites ... fingerprint
+# TLS handshakes." The first version of this file imported `requests`, which is not in
+# scrapers/requirements.txt at all — so the probe died on its first real run. But the packaging error
+# was the smaller half: a probe that presents a DIFFERENT TLS fingerprint than every real scraper is
+# not measuring what the real jobs see, and this probe exists for no other reason than to measure
+# exactly that. Borrowing the fleet's session makes the measurement representative AND costs no new
+# dependency.
+from scrapers.common import db, http as fleet_http
 from scrapers.common.oracle_feasibility import (
     PlatformVerdict,
     absence_only_platforms,
     probe_platform,
 )
 
-UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
-      "Chrome/124.0 Safari/537.36")
-
-
-def _client():
-    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-    if not url or not key:
-        sys.exit("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are required. Refusing to report a "
-                 "measurement built on a failed read.")
-    return url, key
-
-
 def _rows(table: str, active: bool, sample: int) -> list[dict]:
-    """Rows with a stored listing_url. LIVE = active, most recently seen first (our best
-    'should be alive'). DEAD = inactive with strikes, most recently deactivated first."""
-    url, key = _client()
-    order = "last_seen_at.desc" if active else "deactivated_at.desc"
-    q = (f"{url}/rest/v1/{table}?select=ad_number,listing_url"
-         f"&active=is.{'true' if active else 'false'}"
-         f"&listing_url=not.is.null&order={order}&limit={sample}")
-    r = requests.get(q, headers={"apikey": key, "Authorization": f"Bearer {key}"}, timeout=30)
-    if r.status_code != 200:
-        # A failed read is not an empty cohort. Say so and let the caller mark it unusable.
-        print(f"    ! could not read {table} (HTTP {r.status_code}) — treating cohort as UNREAD",
-              flush=True)
+    """Rows with a stored listing_url, read through the same client every scraper uses.
+
+    LIVE = active, most recently seen first (our best "should be alive").
+    DEAD = inactive, most recently deactivated first (our best "should be gone").
+    """
+    order_col = "last_seen_at" if active else "deactivated_at"
+    try:
+        q = (db.sb().table(table)
+             .select("ad_number, listing_url")
+             .eq("active", active)
+             .not_.is_("listing_url", "null")
+             .order(order_col, desc=True)
+             .limit(sample))
+        return q.execute().data or []
+    except Exception as e:
+        # A FAILED READ IS NOT AN EMPTY COHORT. Say so loudly; judge() will then see a missing
+        # cohort and return UNUSABLE_READ rather than inventing a verdict from nothing.
+        print(f"    ! could not read {table} ({type(e).__name__}: {e}) — cohort UNREAD", flush=True)
         return []
-    return r.json() or []
 
 
 def make_fetch(min_interval: float):
-    s = requests.Session()
-    s.headers.update({"User-Agent": UA, "Accept-Language": "ar,en;q=0.8"})
-    last = [0.0]
+    """One request per URL, through the fleet's own curl_cffi session.
 
+    NO RETRIES, deliberately, and this is the opposite of the usual rule. `fleet_http.get()` retries
+    and returns None on anything that is not 2xx — perfect for a scraper, useless here: this probe
+    must be able to tell a 404 from a 403 from a timeout, and a retry would smear a transient over
+    the one reading it is trying to characterise. So it borrows the SESSION (the fingerprint, the
+    headers, the wasalt proxy routing) and does its own single, honest request.
+    """
     def fetch(u: str) -> tuple[Optional[int], str, bool]:
-        wait = min_interval - (time.time() - last[0])
-        if wait > 0:
-            time.sleep(wait)
-        last[0] = time.time()
+        fleet_http._throttle(u)                     # the fleet's own politeness, per host
+        s = fleet_http.session()
         r = s.get(u, timeout=30, allow_redirects=True)
-        moved = bool(r.history) and (r.url.rstrip("/") != u.rstrip("/"))
+        landed = str(getattr(r, "url", "") or "")
+        moved = bool(landed) and landed.rstrip("/") != u.rstrip("/")
         return r.status_code, r.text, moved
 
     return fetch
@@ -95,7 +95,8 @@ def main() -> int:
     ap.add_argument("--platforms", default="")
     ap.add_argument("--all-absence-only", action="store_true")
     ap.add_argument("--sample", type=int, default=10)
-    ap.add_argument("--min-interval", type=float, default=1.0)
+    ap.add_argument("--min-interval", type=float, default=1.0,
+                    help="kept for compatibility; pacing comes from scrapers/common/http.py")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 

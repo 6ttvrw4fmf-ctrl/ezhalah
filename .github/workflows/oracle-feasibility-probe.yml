@@ -54,6 +54,16 @@ jobs:
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
 
+      # THE ENTRYPOINT MUST IMPORT BEFORE IT IS TRUSTED TO PROBE.
+      # Run 1 of this workflow died in 0.05s on `ModuleNotFoundError: No module named 'requests'`,
+      # having probed nothing — and `npm test` plus the whole python suite had been green, because
+      # the hermetic test imports only the PURE module and nothing anywhere imported the runner. A
+      # green suite over a file nobody loads says nothing about whether it loads. This step is two
+      # seconds and closes that exact gap: a dependency the runner needs and the fleet does not ship
+      # now fails HERE, loudly and instantly, instead of after the probe has been dispatched.
+      - name: The runner imports (a dependency the fleet does not ship must fail here, not mid-probe)
+        run: exec python -c "import scrapers.common.oracle_feasibility_run as m; print('runner imports OK:', m.__name__)"
+
       - name: Measure each platform against its own dead and live cohorts
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
