@@ -286,8 +286,13 @@ console.log('\n§3 the journey uses the classifier and reports what it measured'
     /rect\(x,y,w,h\)=\$\{JSON\.stringify\(c\.rect\)\} viewport=\$\{JSON\.stringify\(vp\)\}/.test(runner));
   check('the probe still reports raw facts (hitNull / ownerLabel), so the verdict stays in one place',
     runner.includes('hitNull: !hit') && runner.includes('ownerLabel: o ?'));
+  // PAINT IS A QUESTION ABOUT `e` AND ITS OWN SUBTREE — never the ownership index. `outer()` walks
+  // to the OUTERMOST control, so a single `findIndex(n => outer(n) === e)` never matches a NESTED
+  // `e` and would silence a real capture as «clipped»; verify-ownership-probes-use-the-painted-
+  // stack.ts scenario E executes that case.
   check('the probe MEASURES paint (paintedHere) rather than inferring it from the bounding rect',
-    runner.includes('paintedHere: stack.length === 0 ? null : self >= 0'));
+    runner.includes('stack.some((n) => n === e || e.contains(n))')
+      && runner.includes('const paintedHere = stack.length === 0 ? null :'));
   check('a clipped point is counted and said out loud in the pass line — a skip is never a silent pass (PART 9.5)',
     runner.includes('clippedPts += Object.keys(clipped).length')
       && runner.includes('not painted — clipped out of view, ownership not asserted there'));
