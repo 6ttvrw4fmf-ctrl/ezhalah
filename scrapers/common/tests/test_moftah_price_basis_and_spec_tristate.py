@@ -374,3 +374,91 @@ def test_spec_table_utilities_street_facade_and_tenant_reach_their_columns():
     assert _row(two)["direction"] is None, "two facade terms are a corner plot, not a diagonal"
     assert "licence" not in row["additional_info"], "a Bayut reference is not a REGA licence"
     assert row["additional_info"]["bayut_reference"] == "87893530"
+
+
+# ── 6. ROOM COUNTS = the page's own counts block, and only this product's ─────────────────────────
+# The Store API and wp/v2 carry no bedroom/bathroom field; the theme renders them from product meta
+# into `property-features` on the product page (and again on every related-product card below it).
+# Fragments copied VERBATIM from the live page of id 30274 on 2026-09-21 (the Riyadh villa at
+# 4,400,000 in حي سدرة), in page order: the product's own wrapper, its block («3 غرف نوم»,
+# «3 دورة مياه»), then the related card for id 30198 with ITS block («4 غرف نوم», «5 دورة مياه»).
+_OWN_WRAPPER_30274 = (
+    '<div id="product-30274" class="single-product-page single-product-content product-design-default '
+    'tabs-location-standard tabs-type-tabs meta-location-add_to_cart reviews-location-tabs '
+    'product-summary-shadow product-no-bg product type-product post-30274 status-publish first instock '
+    'product_cat-79 has-post-thumbnail shipping-taxable product-type-simple">')
+_OWN_BLOCK_30274 = (
+    '<div class="property-features" style="display:flex; justify-content:center; gap:20px; '
+    'margin-top:15px; font-size:14px; direction:rtl;">\n                    <div style="text-align:center;">'
+    '\n                <img loading="lazy" src="https://moftah-aleaqar.com/wp-content/uploads/2025/11/'
+    'غرف-نوم.png" width="24" height="24" alt="غرف نوم"><br>\n                3 غرف نوم\n            </div>'
+    '\n                            <div style="text-align:center;">\n                <img loading="lazy" '
+    'src="https://moftah-aleaqar.com/wp-content/uploads/2025/11/دورات-مياه.png" width="24" height="24" '
+    'alt="دورات مياه"><br>\n                3 دورة مياه\n            </div>\n                    </div>\n')
+_RELATED_CARD_30198 = (
+    '<div class="wd-product wd-hover-standard product-grid-item product type-product post-30198 '
+    'status-publish first instock product_cat-79 product_cat-97 has-post-thumbnail shipping-taxable '
+    'product-type-simple" data-loop="2" data-id="30198">'
+    '<div class="property-features" style="display:flex; justify-content:center; gap:20px; '
+    'margin-top:15px; font-size:14px; direction:rtl;">\n                    <div style="text-align:center;">'
+    '\n                <img src="https://moftah-aleaqar.com/wp-content/uploads/2025/11/غرف-نوم.png" '
+    'width="24" height="24" alt="غرف نوم"><br>\n                4 غرف نوم\n            </div>\n'
+    '                            <div style="text-align:center;">\n                <img '
+    'src="https://moftah-aleaqar.com/wp-content/uploads/2025/11/دورات-مياه.png" width="24" height="24" '
+    'alt="دورات مياه"><br>\n                5 دورة مياه\n            </div>\n                    </div>\n')
+PAGE_30274 = _OWN_WRAPPER_30274 + _OWN_BLOCK_30274 + _RELATED_CARD_30198
+
+
+def test_room_counts_are_read_from_the_page_block_the_user_sees():
+    """THE DEFECT (2026-09-21): 1 of 13 live rows had bedrooms and 0 had bathrooms, while 8 pages
+    show the counts. The Sedra villa's page says «3 غرف نوم» and «3 دورة مياه»."""
+    row = _row_with_page(P_SPEC_TABLE, PAGE_30274)
+    assert (row.get("bedrooms"), row.get("bathrooms")) == (3, 3), (
+        "the page's own «3 غرف نوم / 3 دورة مياه» block was not written to the columns")
+    from scrapers.common.tests import test_scraper_rows_only_use_real_columns as oracle
+    assert not set(row) - set(oracle.LISTING_COLUMNS) - {"price_evidence"}, "PGRST204: a non-column"
+
+
+def test_a_related_cards_counts_never_land_on_this_listing():
+    """Every page repeats the block on its related-product cards. With the product's own block
+    gone, the 30198 card's «4 / 5» is still on the page — and must not become 30274's counts."""
+    row = _row_with_page(P_SPEC_TABLE, _OWN_WRAPPER_30274 + _RELATED_CARD_30198)
+    assert "bedrooms" not in row and "bathrooms" not in row, (
+        "a RELATED listing's room counts were written onto this one")
+    assert R.page_rooms(PAGE_30274, 30198) == {}, "a page that is not this product's must say nothing"
+
+
+def test_a_count_the_page_does_not_state_stays_null():
+    """id 30264's live block carries «2 غرف نوم» and NO bathroom item."""
+    only_beds = _OWN_BLOCK_30274.split('                            <div style="text-align:center;">')[0]
+    page = _OWN_WRAPPER_30274.replace("30274", "30264") + only_beds.replace("3 غرف نوم", "2 غرف نوم")
+    row = _row_with_page(P_TYPE_CONFLICT, page + "</div>\n")
+    assert row.get("bedrooms") == 2
+    assert "bathrooms" not in row, "silence was written as a bathroom count"
+
+
+def test_room_counts_are_written_on_dwellings_only():
+    page = PAGE_30274.replace("product-30274", "product-30066")
+    row = _row_with_page(P_PPM_TRAP, page)
+    assert "bedrooms" not in row and "bathrooms" not in row, "a land plot was given room counts"
+
+
+@pytest.mark.parametrize("stated, beds", [
+    ("٣ غرف نوم", 3),            # Arabic-Indic digit
+    ("ثلاث غرف نوم", 3),          # word numeral
+    ("أربعة غرف نوم", 4),         # word numeral with hamza + ta marbuta
+    ("1+1 غرف نوم", None),        # a sum is not a count (to_int would read 11)
+    ("1-2 غرف نوم", None),        # a range is not a count (to_int would read 12)
+    ("2 في كل دور غرف نوم", None),  # per-floor: never multiplied
+    ("0 غرف نوم", None),          # an unset meta, not a studio
+])
+def test_the_count_is_one_stated_number_or_nothing(stated, beds):
+    page = PAGE_30274.replace("3 غرف نوم", stated, 1)
+    assert R.page_rooms(page, 30274).get("bedrooms") == beds
+    assert R.page_rooms(page, 30274).get("bathrooms") == 3
+
+
+def _row_with_page(p: dict, page: str) -> dict:
+    row, _cat, why = R.map_listing(p, page)
+    assert row is not None, f"id {p['id']} unexpectedly skipped: {why}"
+    return row

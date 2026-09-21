@@ -291,16 +291,26 @@ def resolve_price(
     return None, None, "no_price_published"
 
 
+# The label must OPEN the line (after any emoji/bullet) and carry a colon. Matching «الموقع»
+# anywhere instead picked up 21181's marketing sentence «مميزات الموقع والخدمات: تتميز الأرض
+# بوقوعها في منطقة مأهولة…» as that ad's location, feeding whole clauses to to_catalog and losing a
+# listing that resolves fine without it.
+_LOC_LABEL_RE = re.compile(r"[\s\W]{0,4}(?:الموقع|المنطقة)[^:\n]{0,16}:")
+
+
 def _location_line(body: str) -> Optional[str]:
-    """The ad's own location statement. Both labels occur: «الموقع (الجغرافي/الاستراتيجي):» and,
-    on 21257, «المنطقة:»."""
+    """The ad's own location statement, WITHOUT its label. Both labels occur: «الموقع
+    (الجغرافي/الاستراتيجي):» and, on 21257, «المنطقة:».
+
+    Only the label (and any emoji/bullet before it) is cut: this string is published verbatim as the
+    card's `neighborhood`, and on 2026-09-21 every one of the 20 live cards that carried one read
+    «الموقع: حي الورود – الأحساء» instead of the source's own «حي الورود – الأحساء». The dash, the
+    city and the source's punctuation are kept exactly as written. The label words never reach the
+    district lookup either. A bare label with nothing after it states no location → None."""
     for line in (body or "").split("\n"):
-        # The label must OPEN the line (after any emoji/bullet) and carry a colon. Matching
-        # «الموقع» anywhere instead picked up 21181's marketing sentence
-        # «مميزات الموقع والخدمات: تتميز الأرض بوقوعها في منطقة مأهولة…» as that ad's location,
-        # feeding whole clauses to to_catalog and losing a listing that resolves fine without it.
-        if re.match(r"[\s\W]{0,4}(?:الموقع|المنطقة)[^:\n]{0,16}:", line):
-            return line.strip()
+        m = _LOC_LABEL_RE.match(line)
+        if m:
+            return line[m.end():].strip() or None
     return None
 
 
@@ -327,7 +337,9 @@ def _loc_segments(loc_line: str) -> tuple[list[str], list[str]]:
     A «منطقة X» segment keeps its word so to_catalog can recognise it as a region and return
     (None, region_id); it is used only as a region_hint.
     """
-    seg = loc_line.split(":", 1)[-1]
+    # _location_line already cut the label; only a caller passing the raw line still carries one,
+    # and a colon INSIDE the value («… (رقم المخطط: 123)») must not cut the value itself.
+    seg = loc_line.split(":", 1)[-1] if _LOC_LABEL_RE.match(loc_line) else loc_line
     seg = re.sub(r"التابع(?:ة|ه)?\s*ل|تابع(?:ة|ه)?\s*ل", "|", seg)
     tiered: list[tuple[int, int, str]] = []
     regions: list[str] = []
