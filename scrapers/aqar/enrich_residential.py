@@ -62,6 +62,9 @@ def _flag(html: str, patterns: list[str]) -> bool:
 # change is consuming real thousands-grouped numbers in full. Decimals (".", ٫ U+066B) still
 # terminate the match, truncating toward zero exactly as before (int column).
 _GROUPED_INT = r"(\d{1,3}(?:[,٬]\d{3})+(?!\d)|\d+)"
+# MEASUREMENTS (2026-09-21): the SAME token as _GROUPED_INT plus the fraction it used to cut off
+# ("المساحة 407.56" was stored as 407). Group 1 is the whole token; N.to_measure reads it exactly.
+_GROUPED_MEASURE = rf"({_GROUPED_INT}(?:[.٫]\d+)?)"
 _SEP_RE = re.compile(r"[,٬]")
 
 
@@ -337,6 +340,25 @@ def _int_after_label(html: str, *labels: str) -> Optional[int]:
     return None
 
 
+def _measure_after_label(html: str, *labels: str):
+    """`_int_after_label` for a MEASUREMENT: picks the same number, keeps its decimals."""
+    for lbl in labels:
+        m = re.search(rf"{lbl}[\s:]*?{_GROUPED_MEASURE}", html)
+        if m:
+            return N.to_measure(m.group(1))
+    return None
+
+
+def _measure_after_label_in_spec_table(text: str, *labels: str):
+    """`_int_after_label_in_spec_table` for a MEASUREMENT (same «تفاصيل الإعلان» anchor, decimals kept)."""
+    if not text:
+        return None
+    i = text.find(_AGE_BLOCK_ANCHOR)
+    if i < 0:
+        return None
+    return _measure_after_label(text[i:], *labels)
+
+
 def _int_after_label_in_spec_table(text: str, *labels: str) -> Optional[int]:
     """Like `_int_after_label`, but restricted to Aqar's structured «تفاصيل الإعلان» block (same
     anchor `_property_age_from_text` uses below) — for room-count fields whose Arabic label words
@@ -469,7 +491,7 @@ def _structured_evidence(v):
     return v
 
 
-def parse_price_per_meter(text: str) -> Optional[int]:
+def parse_price_per_meter(text: str):
     """Extract the listing's سعر المتر from de-tagged page text, or None if the page shows none.
 
     Precedence: (1) the number FOLLOWING a سعر المتر label — the canonical spec-row shape every
@@ -480,12 +502,12 @@ def parse_price_per_meter(text: str) -> Optional[int]:
     _sanitize_price stays the single arbiter of hiding."""
     m = _PPM_LABEL_RE.search(text)
     if m:
-        return N.to_int(m.group(1))
+        return N.to_measure(m.group(1))       # exact: «سعر المتر 1,093.74» is 1093.74, never 1093
     m = _PPM_RATE_RE.search(text)
     if m:
-        v = N.to_int(m.group(1))
+        v = N.to_measure(m.group(1))
         ma = _AREA_TOKEN_RE.search(text)
-        area = N.to_int(ma.group(1)) if ma else None
+        area = N.to_measure(ma.group(1)) if ma else None
         if v is not None and (area is None or v != area):
             return v
     return None
@@ -561,9 +583,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # Costs ~nothing in coverage — 89% of rows whose stored capture lacks the spec block still have
     # spec-only fields (bedrooms) populated, i.e. the live page had the table and only the capture
     # was truncated.
-    area_m2           = _int_after_label_in_spec_table(text, r"المساحة\s*(?:الكلية|الإجمالية)?", r"\bالمساحة\b")
-    interior_space_m2 = _int_after_label_in_spec_table(text, r"المساحة\s*الداخلية", r"مساحة\s*البناء")
-    outdoor_area_m2   = _int_after_label_in_spec_table(text, r"المساحة\s*الخارجية", r"مساحة\s*خارجية")
+    area_m2           = _measure_after_label_in_spec_table(text, r"المساحة\s*(?:الكلية|الإجمالية)?", r"\bالمساحة\b")
+    interior_space_m2 = _measure_after_label_in_spec_table(text, r"المساحة\s*الداخلية", r"مساحة\s*البناء")
+    outdoor_area_m2   = _measure_after_label_in_spec_table(text, r"المساحة\s*الخارجية", r"مساحة\s*خارجية")
     # "عدد الغرف" (a generic total-room-count fallback) removed 2026-07-28 — same unconditional-
     # fallback shape as the abeea/muktamel area_m2 bug (PR#259): "غرف النوم" is bedroom-specific and
     # trusted, but silently falling back to a total-room count when it's absent mislabels total
@@ -575,7 +597,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     halls             = _int_after_label_in_spec_table(text, r"صالات", r"صالة", r"غرفة\s*المعيشة", r"المعيشة")
     reception_majlis  = _int_after_label_in_spec_table(text, r"مجالس", r"مجلس")
     property_age      = _property_age_from_text(text)
-    street_width_m    = _int_after_label(text, r"عرض\s*الشارع")
+    street_width_m    = _measure_after_label(text, r"عرض\s*الشارع")
     direction         = _text_after_label(text, r"الواجهة", r"واجهة\s*العقار")
     residence_type    = _text_after_label(text, r"نوع\s*السكن")
     project_name      = _text_after_label(text, r"اسم\s*المشروع")
@@ -583,7 +605,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # ─── Pricing ─────────────────────────────────────────────────────────────
     price_annual: Optional[int] = None
     price_total:  Optional[int] = None
-    price_per_meter: Optional[int] = None
+    price_per_meter = None
     # The listing's billing period. Aqar shows rent as "69,000 §/سنوي" (yearly) OR "5,000 §/شهري"
     # (monthly). We keep the ORIGINAL period so the app can filter "per month" to true monthly rentals
     # instead of converting everything to yearly and losing the distinction.

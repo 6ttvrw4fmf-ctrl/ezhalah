@@ -238,6 +238,12 @@ def _int_of(rx: re.Pattern, text: str) -> Optional[int]:
         return None
 
 
+def _measure_of(rx: re.Pattern, text: str):
+    """`_int_of`'s number for a MEASUREMENT, fraction kept (2026-09-21): «70.31 م2» is 70.31, not 70."""
+    m = rx.search(text)
+    return normalize.measure_num(m.group(1).translate(_AR_DIGITS).replace(",", "")) if m else None
+
+
 _H2_RE = re.compile(r"<h2[^>]*>(.*?)</h2>", re.S)
 _TITLE_TAG_RE = re.compile(r"<title>([^<]+)</title>", re.I)
 _IMG_RE = re.compile(r'<img[^>]+src="([^"]+/wp-content/uploads/[^"]+)"')
@@ -350,7 +356,7 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
         "region_id": region_id,
         "district_ar": district_ar,
         "neighborhood": district_raw,
-        "area_m2": _int_of(_AREA_RE, text),
+        "area_m2": _measure_of(_AREA_RE, text),
         "bedrooms": _int_of(_BED_RE, text),
         "bathrooms": _int_of(_BATH_RE, text),
         "photo_urls": photos(page_html),

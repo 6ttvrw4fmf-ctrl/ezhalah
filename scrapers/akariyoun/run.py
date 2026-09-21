@@ -60,6 +60,7 @@ import html
 import re
 import sys
 import time
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote
@@ -276,8 +277,12 @@ def parse_ppm(page_html: str) -> Optional[int]:
     m = PPM_RE.search(page_html)
     if not m:
         return None
-    v = magnitude(_num(m.group(1)), m.group(2))
-    return v if v else None
+    # A MEASUREMENT (2026-09-21): same token, but never rounded like magnitude() rounds a price —
+    # «1,093.74» stays 1093.74. Decimal keeps «9.2 مليون» exactly 9,200,000 (float gives 9199999.99…).
+    v = _num(m.group(1))
+    if v and m.group(2):
+        v = Decimal(str(v)) * {"مليار": 1_000_000_000, "مليون": 1_000_000, "ألف": 1_000, "الف": 1_000}[m.group(2)]
+    return normalize.measure_num(v) or None
 
 
 def parse_price(page_html: str) -> tuple[Optional[int], Optional[str]]:
@@ -451,7 +456,7 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         "active": True,
         "property_type": ptype,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": int(area) if area else None,
+        "area_m2": normalize.measure_num(area) or None,  # exact (2026-09-21), never int()-truncated
         "bedrooms": int(beds) if beds else None,
         "bathrooms": parse_bathrooms(t),
         "property_age": age,

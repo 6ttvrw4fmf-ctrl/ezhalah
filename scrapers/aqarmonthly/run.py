@@ -296,7 +296,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
     if monthly <= 0:
         return None
     price_annual_val = round(monthly * 12)
-    area_m2_val = N.to_int(g.get("area"))
+    area_m2_val = N.measure_num(g.get("area"))  # API number, exact (2026-09-21): never truncated
 
     imgs = ["https://images.aqar.fm/" + k for k in (g.get("imgs") or []) if k][:30]
 

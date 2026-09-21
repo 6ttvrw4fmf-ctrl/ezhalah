@@ -849,7 +849,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
 
     # ── area / rooms / baths / price-per-meter from the visible spec table ──
     area = _num((_spec_value(html, "المساحة") or "").replace("م²", ""))
-    area_m2 = round(area) if area else None
+    area_m2 = normalize.measure_num(area) or None  # exact (2026-09-21): 1,436.82 m² is 1436.82, never 1437
     # numberOfRooms / "عدد الغرف" are generic total-room-count fields, never bedroom-specific — this
     # was already known for land/commercial/Building (the site reports e.g. 30 "rooms" for a whole
     # عمارة), but the SAME ambiguity holds for Apartment/Villa too: live-confirmed 2026-07-28 on ad
@@ -866,7 +866,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # Source-published «سعر المتر» only. The old price/area fallback fabricated a rate — and
     # because a later gate can null price_total, it left rows showing «سعر المتر ر.س 0» on a
     # price-less card (5 live rows, 2026-07-26). (aqar PR#216, scrapers PR#217.)
-    price_per_meter = (round(ppm) or None) if ppm else None  # round(0.25)→0 is not a rate; store honest NULL
+    price_per_meter = normalize.measure_num(ppm) or None  # exact, 0.25 stays 0.25; 0/absent → honest NULL
 
     # OWNER RULE (2026-07-30, extreme-price verify-then-preserve — RE-AFFIRMED by the owner
     # 2026-08-03: «whatever is in those platforms keep it how it is, even if small to large we are
@@ -908,7 +908,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     lng = geo.get("longitude")
     facade = _spec_value(html, "واجهة العقار") or aprops.get("facing")
     street_w_text = _spec_value(html, "عرض الشارع")
-    street_w = _int(street_w_text) if street_w_text and re.search(r"\d", street_w_text) else None
+    street_w = (normalize.to_measure(street_w_text) or None) if street_w_text and re.search(r"\d", street_w_text) else None
     age_text = _spec_value(html, "عمر العقار")
     rega_no = aprops.get("licenseNumber")
 

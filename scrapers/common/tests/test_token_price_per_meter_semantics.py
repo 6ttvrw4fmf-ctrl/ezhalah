@@ -87,9 +87,13 @@ def test_aqargate_unit_rate_signature_records_ppm():
 # ── 3. dealapp ─────────────────────────────────────────────────────────────────
 def test_dealapp_subhalf_rate_is_null_not_zero():
     src = (SCRAPERS / "dealapp" / "run.py").read_text(encoding="utf-8")
-    assert "price_per_meter = (round(ppm) or None) if ppm else None" in src
-    assert (round(0.39) or None) is None  # the exact live case: «سعر المتر: 0.39 ريال»
-    assert (round(1.6) or None) == 2      # real rates unaffected
+    # 2026-09-21 exact measurements: the rate is stored as published, never round()ed. The live
+    # «سعر المتر: 0.39 ريال» is now 0.39 (round() used to turn it into 0 → NULL); a 0 is still NULL.
+    from scrapers.common.normalize import measure_num
+    assert "price_per_meter = normalize.measure_num(ppm) or None" in src
+    assert (measure_num(0.39) or None) == 0.39
+    assert (measure_num(1.6) or None) == 1.6
+    assert (measure_num(0.0) or None) is None and (measure_num(None) or None) is None
 
 
 # ── 4. hajer ───────────────────────────────────────────────────────────────────

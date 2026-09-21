@@ -180,7 +180,7 @@ def _detail_specs(s: cc.Session, url: str, pid: str) -> dict:
                 out["bathrooms"] = baths
             fs = j.get("floorSize")
             if isinstance(fs, dict):
-                v = N.to_int(fs.get("value"))
+                v = N.measure_num(fs.get("value"))  # exact (2026-09-21): 407.56 stays 407.56
                 if v:
                     out["area_m2"] = v
             offers = j.get("offers") or {}
@@ -200,7 +200,7 @@ def _detail_specs(s: cc.Session, url: str, pid: str) -> dict:
         if "area_m2" not in out:
             a = _AREA.search(win)
             if a:
-                out["area_m2"] = round(float(a.group(1)))
+                out["area_m2"] = N.measure_num(a.group(1))  # exact, never rounded
         if "price" not in out:
             p = _PRICE.search(win)
             if p:
