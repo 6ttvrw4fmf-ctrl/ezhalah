@@ -2,7 +2,7 @@
 //
 // ── OWNER REVERSAL, 2026-08-26 — THIS FILE WAS INVERTED ON PURPOSE ──────────────────────────────
 // Written 2026-08-25, this file pinned reading (a): a single-select left with ONE survivor after
-// `optionNarrowsMeaningfully` filtering DIES on `MIN_OPTIONS_SINGLE = 2`. It recorded reading (b)
+// `optionNarrowsMeaningfully` filtering DIES on a `MIN_OPTIONS_SINGLE` of 2, the value then live. It recorded reading (b)
 // — the question should survive — as an unimplemented OWNER DECISION and promised to go red the
 // moment anyone flipped the constant. It did exactly that, and the owner then made the decision:
 //
@@ -15,7 +15,7 @@
 // So `MIN_OPTIONS_SINGLE` moved 2 → 1 and reading (b) is what ships. This file is NOT deleted and
 // NOT unwired — it is inverted in place and keeps every other protection it had, because the
 // direction it must now fail in is the mirror image of the one it used to guard:
-//   • question starts DYING again (someone "restores" MIN_OPTIONS_SINGLE = 2, or adds a fresh
+//   • question starts DYING again (someone restores the old MIN_OPTIONS_SINGLE of 2, or adds a fresh
 //     arity gate somewhere else) ⇒ §1 red.
 //   • question survives for the WRONG REASON — the lopsided partner ALSO survived, i.e. the gate
 //     stopped filtering ⇒ §2 red. Same non-null, opposite meaning.
