@@ -75,12 +75,10 @@ begin
     into v_con;
 
   if v_pred !~ 'p0_capable_detectors' or v_pred !~ 'lane_runs_24h' then
-    raise exception 'mon_p0_sweep_exposure_should_raise() is not the body this migration was '
-      'written against — re-read the LIVE definition before replacing it';
+    raise exception 'mon_p0_sweep_exposure_should_raise() is not the body this migration was written against — re-read the LIVE definition before replacing it';
   end if;
   if v_con !~ 'sweep_still_has_them' or v_con !~ 'lane_runs_24h' then
-    raise exception 'ops_p0_lane_contract() is not the body this migration was written against — '
-      're-read the LIVE definition before replacing it';
+    raise exception 'ops_p0_lane_contract() is not the body this migration was written against — re-read the LIVE definition before replacing it';
   end if;
   if v_pred ~ 'lane_sweep_coverage_ratio' then
     raise exception 'this migration has already been applied';
