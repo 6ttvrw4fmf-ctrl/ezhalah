@@ -384,7 +384,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str, bool]:
         "active": not gone,
         "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": int(round(area)) if area else None,
+        "area_m2": normalize.measure_num(area) if area else None,   # exact: never rounded
         "bedrooms": bedrooms,
         "bathrooms": baths,
         "parking": parking,

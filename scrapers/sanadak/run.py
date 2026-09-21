@@ -638,7 +638,7 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
         "active": True,
         "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": _int(o.get("lotSize")),
+        "area_m2": normalize.measure_num(o.get("lotSize")) or None,
         # SOURCE-PUBLISHED building age, in literal years (2026-09-03, alert af_mapping_unplumbed
         # #1285). Sanadak's own RSC payload has carried `buildingAge` all along — it was captured
         # into source_capture and then dropped on the floor, so property_age was NULL on 100% of

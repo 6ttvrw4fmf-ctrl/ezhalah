@@ -1,4 +1,4 @@
-"""wasalt's price/area parse must stay on the bare int()/int(float()) path — the ONE refactor that
+"""wasalt's price/area parse must stay on the JSON-number path (int() / measure_num) — the ONE refactor that
 would make the 1000x land-price bug real instead of imaginary.
 
 Why this exists. The «wasalt x1000 land prices» hypothesis has now been raised FOUR times (2026-08-22,
@@ -7,7 +7,7 @@ publishes those figures, and docs/ops/DATA_INTEGRITY_ENGINEER.md §25/§25a sett
 rows of its own archived payload. Nothing in our code inflates anything.
 
 But the reason it CANNOT is a single unguarded implementation detail. run.py maps price with a bare
-`int(info["salePrice"])` on a JSON-native number, and area with `int(float(carpetArea))`. Swap either
+`int(info["salePrice"])` on a JSON-native number, and area with `normalize.measure_num(carpetArea)` (exact since 2026-09-21). Swap either
 for the shared `normalize.to_int()` helper — an entirely reasonable-looking tidy-up, and run.py has a
 comment begging you not to — and a 3-decimal value is read as EUROPEAN DIGIT GROUPING:
 `to_int("3523.967") == 3523967`. On the real Makkah land listing below that turns a 3,523.967 m plot
@@ -81,12 +81,13 @@ def test_a_fractional_price_truncates_and_is_never_multiplied_by_1000():
     assert map_property(fractional, "sale", None)["price_total"] == 24829872
 
 
-def test_area_truncates_and_is_never_multiplied_by_1000():
-    """3523.967 m is 3523 m floored — NOT 3,523,967. This is the assertion that dies first if
-    anyone routes area through to_int()."""
+def test_area_is_exact_and_is_never_multiplied_by_1000():
+    """3523.967 m is stored as 3523.967 — NOT 3,523,967, and (since 2026-09-21, exact measurements)
+    no longer floored to 3523 either. This is the assertion that dies first if anyone routes area
+    through to_int() or to_measure() (both read 3 decimals as thousands grouping)."""
     row = _mapped()
     assert row["area_m2"] is not None, "area did not parse at all — check the builtUpArea key above"
-    assert row["area_m2"] == 3523
+    assert row["area_m2"] == 3523.967
 
 
 def test_price_is_not_derived_from_area_at_all():

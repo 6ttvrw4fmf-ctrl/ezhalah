@@ -376,13 +376,11 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
     # shapes (a float with 3+ decimals would be read as European digit grouping and inflated —
     # the mirror image of the 2026-07-13 price-fidelity bug — and scientific-notation floats would
     # be mangled), and normalize.to_int_numeric() maps 0→None where this code keeps 0. Bare
-    # int()/int(float()) on JSON numbers is the provably-correct parse here; do not "unify" it
-    # without a golden old-vs-new comparison over real Wasalt payloads.
+    # int() on JSON counts is the provably-correct parse here; do not "unify" it without a golden
+    # old-vs-new comparison over real Wasalt payloads. AREA is a measurement: normalize.measure_num
+    # (the JSON-number parse, 0 kept as 0) so a 407.56 m² unit is never cut to 407.
     area = _attr(prop, "builtUpArea") or info.get("builtUpArea") or prop.get("floorSize")
-    try:
-        area_m2 = int(float(area)) if area not in (None, "", "0") else None
-    except (TypeError, ValueError):
-        area_m2 = None
+    area_m2 = normalize.measure_num(area) if area not in (None, "", "0") else None
     def _i(v):
         try: return int(v) if v not in (None, "") else None
         except (TypeError, ValueError): return None

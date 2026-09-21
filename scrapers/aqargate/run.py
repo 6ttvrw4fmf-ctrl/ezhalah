@@ -379,7 +379,7 @@ def map_listing(p: dict, s: Optional[cc.Session] = None) -> tuple[Optional[dict]
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": _int(ar.get("propertyArea")),
+        "area_m2": normalize.measure_num(ar.get("propertyArea")) or None,
         # numberOfRooms is REGA's generic room count, not bedroom-specific — aqargate never exposes
         # a separate bedroom field (unlike wasalt's REGA payload, which carries a distinct
         # noOfBedrooms). Storing it as `bedrooms` mislabels total rooms as bedroom count; owner
@@ -404,7 +404,7 @@ def map_listing(p: dict, s: Optional[cc.Session] = None) -> tuple[Optional[dict]
         # AG52441 offering a 106,474 m² plot for "40 SAR".)
         "price_total": None if (is_rent or ar.get("landTotalPrice") is not None)
                        else _price_int(price),
-        "price_per_meter": _price_int(ar.get("propertyPrice"))
+        "price_per_meter": normalize.measure_num(ar.get("propertyPrice")) or None
             if (not is_rent and ar.get("landTotalPrice") is not None) else None,
         "price_annual": rent_annual,
         "rent_period": rent_period,

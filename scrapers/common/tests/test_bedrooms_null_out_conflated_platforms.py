@@ -93,7 +93,8 @@ def test_mizlaj_number_of_rooms_no_longer_feeds_bedrooms():
 def test_mustqr_rooms_field_no_longer_feeds_bedrooms():
     text = _src("mustqr")
     assert 'bedrooms = _int(p.get("rooms"))' not in text
-    assert re.search(r"bedrooms = None\n\n    area = _int", text)
+    # area now parses via measure_num (exact decimals, 2026-09-21) instead of the truncating _int.
+    assert re.search(r"bedrooms = None\n\n    area = normalize\.measure_num", text)
 
 
 def test_october_specs_bedrooms_no_longer_feeds_beds():

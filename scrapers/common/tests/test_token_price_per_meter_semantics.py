@@ -78,7 +78,8 @@ def test_eastabha_threads_the_rate_through_to_the_row():
 # ── 2. aqargate ────────────────────────────────────────────────────────────────
 def test_aqargate_unit_rate_signature_records_ppm():
     src = (SCRAPERS / "aqargate" / "run.py").read_text(encoding="utf-8")
-    assert '"price_per_meter": _price_int(ar.get("propertyPrice"))' in src
+    # The rate is a measurement: kept exact via measure_num, no longer rounded by _price_int (2026-09-21).
+    assert '"price_per_meter": normalize.measure_num(ar.get("propertyPrice")) or None' in src
     assert 'ar.get("landTotalPrice") is not None' in src, (
         "ppm only under the unit-rate signature (landTotalPrice present on Buy)")
 

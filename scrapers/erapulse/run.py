@@ -364,7 +364,7 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
         elif not rp:
             price_annual = price
 
-    area = _int(p.get("area"))
+    area = N.measure_num(p.get("area")) or None          # JSON number, exact (420.74 stays 420.74)
     # No source per-m² rate → NULL, never sale/area (aqar PR#216, scrapers PR#217).
     ppm = None
 
@@ -374,7 +374,7 @@ def map_listing(p: dict, hood_city: Optional[dict[str, str]] = None) -> tuple[Op
         bedrooms = None
     bathrooms = _int(p.get("bathrooms"))
     age = _int(p.get("age"))
-    street_w = _int(p.get("streetWidth"))
+    street_w = N.to_measure(p.get("streetWidth")) or None   # API string «30»; decimals kept
     parking = bool(p.get("parkingSpaces")) or None
 
     # ── location ──
