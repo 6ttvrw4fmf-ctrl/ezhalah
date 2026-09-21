@@ -48,6 +48,8 @@ const check = (m: string, cond: boolean) => {
   if (cond) console.log(`  ok  ${m}`);
   else { console.error(`  FAIL  ${m}`); failed++; }
 };
+/** An EXECUTABLE proof: the barrier's own predicate, applied to a deliberately broken input. */
+const mustCatch = (what: string, caught: boolean) => check(`(mutation) catches ${what}`, caught);
 
 // ═══ §1 · every singular hit test in the e2e suites is discovered and must be justified ═════════
 //
@@ -133,9 +135,17 @@ console.log('§1 every singular elementFromPoint in e2e/ is discovered by shape 
 // ═══ §2 · the REAL probe body, executed against a stub DOM ══════════════════════════════════════
 console.log('\n§2 the real tap-targets-meet-44 probe, lifted from run.mjs and executed');
 
-/** Lift the journey's own READ string out of the source, so this proves the SHIPPED probe. */
-function liftRead(): string {
-  const src = readFileSync(join(ROOT, 'e2e/journeys/run.mjs'), 'utf8');
+/**
+ * Lift the journey's own READ string out of the source, so this proves the SHIPPED probe.
+ *
+ * `transform` re-breaks that real source IN MEMORY for the mutation proofs in §2b. Nothing on disk
+ * is touched — a mutant that cannot be left behind cannot be committed by a concurrent session,
+ * which matters in this shared working directory.
+ */
+function liftRead(transform?: (s: string) => string): string {
+  const raw = readFileSync(join(ROOT, 'e2e/journeys/run.mjs'), 'utf8');
+  const src = transform ? transform(raw) : raw;
+  if (transform && src === raw) throw new Error('the mutation anchor missed — nothing changed');
   const start = src.indexOf("JOURNEYS['tap-targets-meet-44']");
   if (start < 0) throw new Error('tap-targets-meet-44 not found — the probe could not be lifted');
   const readAt = src.indexOf('const READ = `', start);
@@ -192,8 +202,10 @@ const mkEl = (o: Partial<StubEl> & {
 function runProbe(opts: {
   control: StubEl; root: StubEl; body: StubEl;
   stackAt: (x: number, y: number) => StubEl[];
+  /** Re-break the real run.mjs source in memory — used only by the §2b mutation proofs. */
+  transform?: (s: string) => string;
 }) {
-  const READ = liftRead();
+  const READ = liftRead(opts.transform);
   const doc = {
     body: opts.body,
     documentElement: { scrollWidth: 375, clientWidth: 375 },
@@ -315,6 +327,98 @@ const scene = () => {
       && Object.keys(blind).length === 0);
   check('E · the nested control is correctly measured as PAINTED (its own descendant is on top)',
     c.stolen.centre.paintedHere === true);
+}
+
+// ═══ §2b · MUTATIONS — the real run.mjs source, re-broken in memory and re-executed ════════════
+//
+// The scenarios above assert the probe is right today. These assert this barrier would NOTICE if it
+// stopped being right — the distinction `verify-new-barriers-are-mutation-proven.ts` exists to
+// enforce, and the one a green check cannot make about itself. Each mutant rewrites the REAL
+// `run.mjs` text in memory (never on disk — a mutant that cannot be left behind cannot be committed
+// by a concurrent session in this shared working directory) and runs the result.
+console.log('\n§2b mutations — the real probe, deliberately re-broken');
+{
+  const s = scene();
+  const clippedStack = (_x: number, y: number) => (y >= 286 ? [s.card, s.root] : [s.control, s.root]);
+  const findings = (r: { stolen: Record<string, unknown> }) => {
+    const { stolen, blind } = classifyTapOwnership(r.stolen);
+    return Object.keys(stolen).length + Object.keys(blind).length;
+  };
+
+  // M1 — THE DEFECT ITSELF: go back to the singular top-hit. The clipped tab is filed again, which
+  // is the «تصفية» / «الوسيط الذكي» half of ops_incident #262, filed three times.
+  {
+    const out = runProbe({
+      control: s.control, root: s.root, body: s.body, stackAt: clippedStack,
+      transform: (src) => src.replace(
+        'const paintedHere = stack.length === 0 ? null : stack.some((n) => n === e || e.contains(n));',
+        'const paintedHere = stack.length === 0 ? null : true;'),
+    });
+    mustCatch('reverting to the singular top-hit verdict, so a clipped control is filed as covered (#262)',
+      findings(out.ctrls[0]) === 4);
+  }
+
+  // M2 — THE QUIET DIRECTION: assume nothing is ever painted, which would excuse EVERY point on
+  // every control as «clipped» and turn this journey into a check that cannot fail.
+  {
+    const covered = scene();
+    const out = runProbe({
+      control: covered.control, root: covered.root, body: covered.body,
+      stackAt: () => [covered.card, covered.control, covered.root],
+      transform: (src) => src.replace(
+        'const paintedHere = stack.length === 0 ? null : stack.some((n) => n === e || e.contains(n));',
+        'const paintedHere = stack.length === 0 ? null : false;'),
+    });
+    mustCatch('excusing every point as clipped, which would retire the cover-up finding entirely',
+      findings(out.ctrls[0]) === 0);
+  }
+
+  // M3 — collapsing paint into the OWNERSHIP index. `outer()` walks to the outermost control, so it
+  // never returns a NESTED `e`: scenario E's real capture would be silenced as «clipped».
+  {
+    const n = scene();
+    const wrapper = mkEl({
+      tagName: 'DIV', rect: { x: 60, y: 260, width: 200, height: 60 }, parent: n.root,
+      css: { cursor: 'pointer' }, attrs: { 'aria-label': 'mode-switch-track' },
+    });
+    n.control.parentElement = wrapper;
+    const inner = mkEl({ tagName: 'SPAN', rect: CTRL_RECT, parent: n.control });
+    const out = runProbe({
+      control: n.control, root: n.root, body: n.body,
+      stackAt: () => [inner, n.control, wrapper, n.root],
+      transform: (src) => src.replace(
+        'stack.some((n) => n === e || e.contains(n))',
+        'stack.findIndex((n) => outer(n) === e) >= 0'),
+    });
+    const { stolen, clipped } = classifyTapOwnership(out.ctrls[0].stolen);
+    mustCatch('collapsing paint into the ownership index, silencing a NESTED control\'s real capture',
+      Object.keys(stolen).length === 0 && Object.keys(clipped).length > 0);
+  }
+
+  // M4 — the DISCOVERY half, proven on its own predicate: an unregistered singular call site must be
+  // rejected. Applied to a synthetic corpus so the proof does not depend on the repo's real counts.
+  {
+    const verdict = (found: Record<string, number>, allowed: Record<string, { count: number }>, ceiling: number) => {
+      const total = Object.values(found).reduce((a, b) => a + b, 0);
+      const unregistered = Object.entries(found).filter(([f, n]) => !allowed[f] || allowed[f].count < n);
+      return { ok: unregistered.length === 0 && total <= ceiling, unregistered: unregistered.map(([f]) => f) };
+    };
+    mustCatch('a NEW unregistered singular hit test in a fresh e2e file',
+      !verdict({ 'e2e/journeys/harness.mjs': 1, 'e2e/journeys/newprobe.mjs': 1 }, ALLOWED, SINGULAR_HIT_TEST_CEILING).ok);
+    mustCatch('a SECOND singular hit test sneaking into an already-registered file',
+      !verdict({ 'e2e/journeys/harness.mjs': 2 }, ALLOWED, SINGULAR_HIT_TEST_CEILING).ok);
+    check('…while the repo\'s real, registered state still passes that same predicate',
+      verdict({ 'e2e/journeys/harness.mjs': 1 }, ALLOWED, SINGULAR_HIT_TEST_CEILING).ok);
+  }
+
+  // M5 — the lift itself must fail LOUDLY rather than silently proving nothing. A barrier whose
+  // fixture quietly becomes empty is the «tidy skip» of PART 9.5.
+  {
+    let threw = false;
+    try { liftRead((src) => src.replace("JOURNEYS['tap-targets-meet-44']", "JOURNEYS['renamed-away']")); }
+    catch { threw = true; }
+    mustCatch('the probe being renamed out from under this barrier (the lift fails closed, never green)', threw);
+  }
 }
 
 console.log('\n§3 wiring');
