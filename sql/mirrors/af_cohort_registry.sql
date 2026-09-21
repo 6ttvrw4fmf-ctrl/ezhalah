@@ -1,6 +1,13 @@
 -- MIRROR of the LIVE production TABLE public.af_cohort_registry. NOT a migration — this file is
 -- READ, never applied; the rows below already exist in production and the insert is written
 -- idempotently only so the mirror is a runnable statement rather than a blob.
+-- Re-verified 2026-09-21 (routine #5, the age-gap/decided-source fix): the production ROWS md5,
+--   re-derived with the exact recipe below, = e24bc3e63b85a7d2c84714b03ff5b710 — identical again,
+--   59 rows, 0 disabled, so the registry is UNCHANGED. Re-stamped for the same reason as the
+--   2026-09-02 entry and nothing more: migration 20260921111609 reproduces mon_af_new_listing_
+--   readiness() verbatim, and that function's section B EXECUTES `join public.af_cohort_registry`
+--   inside a format() string — so the staleness barrier correctly sees this table named in newly
+--   executed SQL. It reads the table; it does not change it. NOTHING IN THE BODY WAS EDITED.
 -- Re-verified 2026-09-02 during the AF option-truth certification: the production ROWS md5,
 --   re-derived with the exact recipe below, = e24bc3e63b85a7d2c84714b03ff5b710 — identical to the
 --   value recorded here, 59 rows all enabled, so the registry is UNCHANGED. Re-stamped only
