@@ -34,10 +34,15 @@ def fake_catalog(monkeypatch):
     monkeypatch.setattr(al, "_REGION_AR_FOR", {1: "منطقة الرياض", 6: "منطقة عسير", 8: "منطقة حائل", 10: "منطقة جازان", 12: "منطقة الباحة"})
     monkeypatch.setattr(al, "_CID_AR", {168: "الارطاوية", 9001: "بيش (عسير)", 9002: "بيش (جازان)",
                                        1542: "الباحة", 2693: "الباحة (حائل)", 9101: "طويق (الرياض)", 9102: "طويق (عسير)"})
+    # KEYED WITH norm_district_tok(), the function that builds loc_catalog_district.district_norm in
+    # production («حي الروضة» is stored as «روضه»). This fixture used to hold normalize_ar()-shaped
+    # keys («حي الروضه») — a key production never stores — so it stayed green while resolve()'s
+    # norm_ar() lookup could not match a single «ال» district live.
+    k = al.norm_district_tok
     monkeypatch.setattr(al, "_DISTRICT_BY_CITY", {
-        1542: {"حي الازهر", "حي الروضه"},
-        9101: {"حي مشترك"},
-        9102: {"حي مشترك"},   # SAME district name as 9101 — the adversarial collision case
+        1542: {k("حي الازهر"), k("حي الروضة"), k("حي الشفاء")},
+        9101: {k("حي مشترك")},
+        9102: {k("حي مشترك")},   # SAME district name as 9101 — the adversarial collision case
     })
     yield
 
@@ -61,6 +66,15 @@ def test_ambiguous_twin_disambiguated_by_matching_district():
     assert r["city_id"] == 1542
     assert r["region_id"] == 12
     assert r["confidence"] == "city+district"
+
+
+@pytest.mark.parametrize("district_ar", ["الروضة", "حي الروضة", "الرَّوضة", "حى الروضه", "الشفاء", "الشفا"])
+def test_twin_disambiguated_by_source_spelling_of_an_al_district(district_ar):
+    # The live bug: d_norm was norm_ar(district_ar), which keeps «ال»/«حي »/ء/tashkeel, so it could
+    # never equal a catalog key («روضه», «شفا»). Every spelling a source publishes must reach it.
+    r = al.resolve("الباحه", district_ar=district_ar)
+    assert (r["city_id"], r["confidence"]) == (1542, "city+district")
+    assert r["district_ar"] == district_ar   # the source's own text is passed through, never rewritten
 
 
 def test_ambiguous_twin_with_nonmatching_district_stays_unresolved():

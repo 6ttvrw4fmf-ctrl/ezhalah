@@ -96,6 +96,7 @@ _REGION_AR_FOR: dict[int, str] = {}                      # region_id → canonic
 _CID_AR: dict[int, str] = {}                             # catalog city_id → canonical city_ar
 _DISTRICT_BY_CITY: dict[int, set[str]] = {}              # city_id → {district_norm, …} (disambiguation only)
 _DISTRICT_AR_BY_NORM: dict[str, str] = {}                # district_norm → canonical district_ar (catalog spelling)
+_DISTRICT_AR_BY_CITY: dict[tuple[int, str], str] = {}    # (city_id, district_norm) → THAT city's catalog spelling
 
 
 _LOAD_LOCK = threading.Lock()
@@ -129,6 +130,7 @@ def _load() -> None:
                 for r in (c.table("loc_catalog_district").select("city_id,district_norm,district_ar").execute().data or []):
                     _DISTRICT_BY_CITY.setdefault(r["city_id"], set()).add(r["district_norm"])
                     _DISTRICT_AR_BY_NORM.setdefault(r["district_norm"], r["district_ar"])
+                    _DISTRICT_AR_BY_CITY[(r["city_id"], r["district_norm"])] = r["district_ar"]
                 return
             except Exception as e:  # transient network/DB hiccup → clear partials, back off, retry
                 last = e
@@ -138,6 +140,7 @@ def _load() -> None:
                 _CID_AR.clear()
                 _DISTRICT_BY_CITY.clear()
                 _DISTRICT_AR_BY_NORM.clear()
+                _DISTRICT_AR_BY_CITY.clear()
                 time.sleep(1.5 * (attempt + 1))
         if last is not None:
             raise last
@@ -437,7 +440,9 @@ def resolve(
         return dict(empty)
     hint = _hint_to_id(region_hint)
     d_ar = None if is_placeholder(district_ar) else (district_ar or None)
-    d_norm = norm_ar(d_ar) if d_ar else None
+    # norm_district_tok(), NOT norm_ar(): _pick_candidate() tests this against catalog district_norm
+    # keys, and norm_ar() mirrors only the first step of the function that built them.
+    d_norm = norm_district_tok(d_ar) if d_ar else None
 
     def _finish(cid: int, rid: Optional[int], confidence: str) -> dict:
         return {
