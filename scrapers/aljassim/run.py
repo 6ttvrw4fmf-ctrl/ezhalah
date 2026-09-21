@@ -131,6 +131,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db  # noqa: E402
 from scrapers.common import normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
 BASE = "https://aljassimaqar.com"
@@ -211,7 +212,7 @@ _TITLE_A = re.compile(r'<a\s+href="/(?:index\.php/)?\d+"[^>]*hreflang[^>]*>(.*?)
 _IMG = re.compile(r'<img[^>]*src="([^"]+)"')
 _DATE = re.compile(r"\b(\d{2}/\d{2}/\d{4})\b")
 _AREA = re.compile(r"المساحة\s*([\d,.]+)\s*م")
-_STREET = re.compile(r"شارع\s*([\d\+\.\*/\s]*\d)")
+_STREET = re.compile(r"شارع\s*([\d\+\.\*/\s]*\d)(?:\s*/\s*([^\s\d/]+))?")   # «شارع 50 / شرق»
 _MAPS = re.compile(r'href="(https://www\.google\.com/maps/[^"]+)"')
 _ARTICLE = re.compile(r'<article[^>]*data-history-node-id="(\d+)".*?</article>', re.S)
 _SCHEMA_NAME = re.compile(r'<span[^>]*property="schema:name"[^>]*content="([^"]*)"')
@@ -429,6 +430,7 @@ def parse_index(rec: dict) -> dict:
         "price": parse_price(price_cell),
         "area_raw": a.group(1) if a else None,
         "street_width": st.group(1).strip() if st else None,
+        "street_facade": st.group(2) if st else None,
         "rooms_text": area_txt,
         "district": tags[0] if tags else None,
         "plot": " ".join(tags[1:]).strip() or None,
@@ -685,7 +687,11 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         "bedrooms": bedrooms,
         "bathrooms": bathrooms,
         # Only from the «العمر» fact block, through the shared closed vocabulary; silent → NULL.
-        "property_age": N.parse_property_age(detail.get("age_raw")),
+        "property_age": N.exact_age(detail.get("age_raw")),
+        # Land (44% of stock) is asked ONLY street_width + direction. «شارع 15» → 15; «15*15»,
+        # «12.5 / 21.5» (two streets) and «27.50» (a fraction the int column would truncate) → NULL.
+        "street_width_m": N.one_street_width(ix["street_width"]),
+        "direction": N.one_direction(ix.get("street_facade")),
         "price_total": price_total,
         "price_annual": price_annual,
         "price_per_meter": price_per_meter,
@@ -767,6 +773,48 @@ def _notes(stats: dict, pruned: int = 0) -> str:
             f"detail_failed={stats['detail_failed']} pruned={pruned} skips[{skips}]")[:300]
 
 
+# ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
+# Absence from the index only SELECTS candidates; prune_unseen asks this oracle before it may
+# deactivate anything, through the shared law (scrapers/common/http_liveness.py), so a 403/429/5xx,
+# a timeout or an empty body can never read as a death — which matters doubly here, because this
+# site's hcdn challenge IS a 403 (a 6,192-byte interstitial). The probe session clears it first.
+#
+# MEASURED 2026-09-21 with the whole index in hand: the office DELETES a node — 2,468 nids inside
+# the live range (2706-5263) are not in the catalogue, and 31 of 31 sampled (plus /99999999)
+# answered HTTP 404, the themed 13.7 KB Drupal 404 with no node on it. 12 of 12 interleaved live
+# nids answered 200 and passed parse_detail's own proof (the article's data-history-node-id names
+# this nid). A themed 404 is still a parseable page, so the STATUS decides a death and
+# parse_detail's proof decides a life.
+# An ad closed IN PLACE is GONE too, judged by the crawl's OWN _AUCTION/_GONE patterns over the
+# node's own title and blocks — without that limb a still-served «تم البيع» page would read as
+# alive and self-heal a row the crawl refuses to publish.
+def _probe_session() -> cc.Session:
+    s = session()
+    _solve_challenge(s, f"{BASE}/")
+    return s
+
+
+def _signal_for(nid: str):
+    def _signal(status, body, _moved):
+        if status == 404:
+            return "gone"
+        if status == 200:
+            d = parse_detail(body, nid)
+            if d:
+                own = " ".join([d.get("title") or "", *(d.get("blocks") or [])])
+                return "gone" if (_AUCTION.search(own) or _GONE.search(own)) else "live"
+        return None
+    return _signal
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    nid = ad_number[len(PREFIX):]
+    if not nid.isdigit():
+        return "unknown", f"{ad_number!r} is not a {PREFIX}<nid> ad number"
+    return LivenessProbe(platform=PLATFORM, signal=_signal_for(nid), session=_probe_session,
+                         url_for=lambda _ad: f"{BASE}/{nid}").verify_gone(ad_number)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -810,7 +858,8 @@ def main() -> int:
         pruned = 0
         for tbl, rows_seen in ((f"{PLATFORM}_residential_listings", res),
                                (f"{PLATFORM}_commercial_listings", com)):
-            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,
+                                 verify_gone=_verify_gone)
             if nn < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

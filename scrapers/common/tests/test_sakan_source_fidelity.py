@@ -206,10 +206,26 @@ def test_silence_is_null_never_false():
         assert absent not in row, f"{absent} must stay NULL — the source never mentioned it"
 
 
+def test_the_ad_licence_and_a_cells_diagonal_facade_reach_their_columns():
+    row, _, _ = _row(BUY_URL, BUY)
+    assert row["license_number"] == "7200845864"                     # «رقم ترخيص الإعلان»
+    assert row["additional_info"]["rega_ad_license_number"] == "7200845864"
+    cell = ('<div class="tr"> <span class="fn">واجهة العقار</span> <div> <span class="fn fn--b">'
+            'جنوب شرقي</span> </div> </div>\n')
+    anchor = '<div class="tr"> <span class="fn">حالة التأثيث</span>'
+    row, _, _ = _row(BUY_URL, BUY.replace(anchor, cell + anchor))
+    assert row["direction"] == "جنوب شرق", "the cell's own diagonal option is one facade"
+
+
 def test_explicit_negation_is_false():
-    page = BUY.replace("متفرع من طريق عسفان", "غير مؤثثة")
-    row, _, _ = _row(BUY_URL, page)
+    # The page's own «حالة التأثيث: مؤثث» cell is stripped so the prose negation is the only
+    # statement: with both present the source contradicts itself, and that is NULL (next assert).
+    bare = re.sub(r'<div class="tr"> <span class="fn">حالة التأثيث</span>.*?</div> </div>', "", BUY,
+                  flags=re.S)
+    row, _, _ = _row(BUY_URL, bare.replace("متفرع من طريق عسفان", "غير مؤثثة"))
     assert row.get("furnished") is False
+    row, _, _ = _row(BUY_URL, BUY.replace("متفرع من طريق عسفان", "غير مؤثثة"))
+    assert row.get("furnished") is None, "cell «مؤثث» vs prose «غير مؤثثة» is not a stated fact"
 
 
 def test_prepared_only_stays_null():
@@ -374,6 +390,16 @@ def test_property_age_reads_the_spelled_out_arabic():
     assert row["property_age"] == 7
 
 
+def test_an_open_bound_age_is_unknown_not_its_floor():
+    """«اكثر من عشر سنوات» (3 of 150 live pages, 2026-09-21) is MORE than ten: stored as 10 it would
+    answer «10 years or newer» with a building the source says is older (akariyoun precedent)."""
+    page = BUY + '<div class="tr"><span class="f14">عمر العقار</span>' \
+                 '<span class="f16 f16-700">اكثر من عشر سنوات</span></div></div>'
+    row, _, _ = _row(BUY_URL, page)
+    assert row["property_age"] is None
+    assert row["additional_info"]["spec_table"]["عمر العقار"] == "اكثر من عشر سنوات"
+
+
 # ══ PHOTOS ══════════════════════════════════════════════════════════════════════════════════════
 
 def test_the_published_thumb_is_preferred_over_the_multi_megabyte_original():
@@ -512,3 +538,24 @@ def test_partially_furnished_is_not_furnished():
         "the shared map would say yes — which is why the chip is dropped here"
     row, _, _ = _row(BUY_URL, page)
     assert "furnished" not in row, "«partially furnished» is neither a yes nor a no"
+
+
+_SERVICE = ('<div class="tr"> <span style="color: green; font-size: 22px;">&#10003;</span> '
+            '<span class="f14">خدمة {}</span> </div>\n')
+
+
+def test_service_rows_street_cells_and_no_employee_pii():
+    cells = ('<div class="tr"> <span class="fn">عرض الشارع</span> <div> <span class="fn fn--b">15</span>'
+             ' </div> </div>\n<div class="tr"> <span class="fn">واجهة العقار</span> <div> '
+             '<span class="fn fn--b">شمال</span> </div> </div>\n')
+    page = BUY.replace('<div class="details__aminities--2"',
+                       cells + _SERVICE.format("الكهرباء") + _SERVICE.format("ألياف ضوئية")
+                       + '<div class="details__aminities--2"', 1)
+    row, _cat, why = _row("https://sa.sakan.co/ar/property/details/68195-x", page)
+    assert why == ""
+    assert (row["street_width_m"], row["direction"]) == (15, "شمال")
+    assert (row["electricity"], row["optical_fibers"]) == (True, True)
+    assert "water_supply" not in row, "a service the page never ticked stays NULL"
+    spec = row["additional_info"]["spec_table"]
+    assert not any(k.startswith("خدمة") for k in spec), "a ✓ row is not a label/value pair"
+    assert "0501415141" not in str(row["additional_info"]) and "اسم الموظف المسؤول" not in spec

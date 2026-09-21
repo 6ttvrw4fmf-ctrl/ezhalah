@@ -80,6 +80,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html as _html
+import json
 import re
 import sys
 import time
@@ -92,6 +93,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 
 BASE = "https://masaraqarat.com"
 SOURCE = "مسار المستقبل"
@@ -309,17 +311,23 @@ _BATHS_RE = re.compile(r"(?:([\d٠-٩]{1,2})|(" + _NUM_WORDS_RE + r"))?\s*دور
                        r"\s*(?:ال)?مياه")
 
 
-# «العمر سبع سنوات» (2921). Anchored on the AGE word and nothing else: 2935 says «ضمانات تصل الى
-# 25 سنه», a 25-year WARRANTY, and the shared age vocabulary happily reads «25 سنه» as 25 — so a
-# pattern that matched a bare years-phrase would publish a 25-year-old building that the ad calls
-# brand new. The capture is at most two words so the following «ترخيص/ 7201080329» cannot bleed in.
-_AGE_RE = re.compile(r"(?:العمر|عمر\s*(?:ال)?(?:عقار|مبنى|بناء))\s*[:\-]?\s*"
-                     r"((?:\d{1,3}|[ء-ي]+)(?:\s+[ء-ي]+)?)")
+# «العمر سبع سنوات» (2921) — the anchored reader now lives in normalize.age_from_labelled_prose
+# (shared with ialqarawi); see its comment for the 25-year-WARRANTY trap (2935) it refuses.
+parse_age = normalize.age_from_labelled_prose
 
 
-def parse_age(text: str) -> Optional[int]:
-    m = _AGE_RE.search(text or "")
-    return normalize.parse_property_age(m.group(1)) if m else None
+# The overview's «دور أول» / «دور أرضي» cell → floor_number; a cell naming no single floor → NULL.
+_FLOOR_WORDS = {"ارضي": 0, "أرضي": 0, "اول": 1, "أول": 1, "ثاني": 2, "ثالث": 3, "رابع": 4, "خامس": 5}
+# «واجهة المبنى شرقية», «الواجهة شمالية» — the bearing word right after the facade noun.
+_FACADE_RE = re.compile(r"واجه(?:ة|ه)(?:\s+(?:ال)?مبنى)?\s*:?\s*([ء-ي]+)")
+
+
+def _floor(raw: Optional[str]) -> Optional[int]:
+    hits = {_FLOOR_WORDS[w.removeprefix("ال")] for w in re.findall(r"[ء-ي]+", raw or "")
+            if w.removeprefix("ال") in _FLOOR_WORDS}
+    if hits:
+        return hits.pop() if len(hits) == 1 else None
+    return _count(raw) if raw and re.search(r"[\d٠-٩]", raw) else None
 
 
 def _unit_count(text: str, rx: re.Pattern) -> Optional[int]:
@@ -412,6 +420,7 @@ def map_listing(post: dict, overview: dict[str, str],
                 or _unit_count(body, _BEDS_RE)
                 or normalize.rooms_from_phrase(description).get("bedrooms"))
 
+    street_w, facade = normalize.street_from_prose(body)
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{post['id']}",
         "listing_url": post.get("link") or f"{BASE}/?p={post['id']}",
@@ -436,6 +445,11 @@ def map_listing(post: dict, overview: dict[str, str],
         "bedrooms": bedrooms,
         "bathrooms": _unit_count(body, _BATHS_RE),
         "property_age": parse_age(body),
+        "floor_number": _floor(overview.get("floor")),
+        # «شمالية شارع 15», «الواجهة شمالية الشارع 20 متر» — ONE street in the ad's own prose, else NULL.
+        "street_width_m": street_w,
+        "direction": normalize.one_direction(" ".join(filter(None, (facade, *_FACADE_RE.findall(body))))),
+        "license_number": normalize.ad_licence_from_prose(body),
         "photo_urls": photos[:20] or None,
     }
     if deal == "Rent":
@@ -528,12 +542,52 @@ def fetch_overview(s: cc.Session, post: dict) -> dict[str, str]:
     return parse_overview(r.text) if r else {}
 
 
-# ── local shims for helpers this platform does not have yet ───────────────────────────────────────
-# db.py has no upsert_masar_*_batch pair (adding one would edit a shared file mid-onboarding, which
-# the other engineer does centrally). The shared row writer is called directly with this platform's
-# table names; see the report — the two wrappers and the two tables are still owed.
-def _upsert(table: str, rows: list[dict]) -> None:
-    db._wasalt_batch(table, rows)
+# ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
+# Absence from the posts listing only SELECTS candidates; prune_unseen asks this oracle before it
+# may deactivate anything, through the shared law (scrapers/common/http_liveness.py), so a
+# 401/403/429/5xx, a timeout or an empty body can never read as a death — and the probe session
+# clears the hcdn challenge first, whose interstitial is served with HTTP 200 and is never JSON.
+# The probe re-reads the post's OWN REST record. MEASURED 2026-09-21: a live post answers 200 with
+# its own id and status «publish»; an id the route does not hold answers HTTP 404 with code
+# `rest_post_invalid_id` (153 bytes). So:
+#   · 404 carrying rest_post_invalid_id                                   → GONE
+#   · 200 for THIS id whose status is not «publish», or whose own words (_ad_body) carry the
+#     crawl's own _AUCTION_RE/_CLOSED_RE                                   → GONE
+#   · 200 for this id otherwise                                           → LIVE
+#   · anything else (a 401 for a trashed/draft post, the challenge page) → no opinion
+def _probe_session() -> cc.Session:
+    s = session()
+    solve_challenge(s)
+    return s
+
+
+def _signal_for(pid: int):
+    def _signal(status, body, _moved):
+        if _is_challenge(body):
+            return None
+        try:
+            j = json.loads(body)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(j, dict):
+            return None
+        if status == 404 and j.get("code") == "rest_post_invalid_id":
+            return "gone"
+        if status != 200 or j.get("id") != pid:
+            return None
+        if (j.get("status") or "").lower() != "publish":
+            return "gone"
+        own = _ad_body(j)
+        return "gone" if (_AUCTION_RE.search(own) or _CLOSED_RE.search(own)) else "live"
+    return _signal
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    pid = ad_number[len(PREFIX):]
+    if not pid.isdigit():
+        return "unknown", f"{ad_number!r} is not a {PREFIX}<post id> ad number"
+    return LivenessProbe(platform="masar", signal=_signal_for(int(pid)), session=_probe_session,
+                         url_for=lambda _ad: f"{BASE}/wp-json/wp/v2/aqar/{pid}").verify_gone(ad_number)
 
 
 def main() -> int:
@@ -580,22 +634,34 @@ def main() -> int:
                       f"pt={r0.get('price_total')} pa={r0.get('price_annual')} "
                       f"rp={r0.get('rent_period')} ph={len(r0.get('photo_urls') or [])}")
             return 0
-        if res:
-            _upsert("masar_residential_listings", res)
-        if com:
-            _upsert("masar_commercial_listings", com)
+        db.upsert_masar_residential_batch(res)
+        db.upsert_masar_commercial_batch(com)
         superseded = db.retire_superseded_siblings(
             res_table="masar_residential_listings", com_table="masar_commercial_listings",
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+        # PRUNE — only after a COMPLETE enumeration (a --type run holds the other table's seen-set
+        # empty by construction; --limit never reaches here), and only with the direct confirm
+        # above. prune_unseen's own breakers (0 seen, >30% vanished, <80% re-seen) sit on top.
+        pruned = 0
+        if args.type == "all":
+            for tbl, rows in (("masar_residential_listings", res),
+                              ("masar_commercial_listings", com)):
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=_verify_gone)
+                if n < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += n
         # The skip tally goes into the run row: this source skips MOST of its catalogue for one
         # stated reason (no city in the ad), so an almost-empty run has to say why in the database
         # rather than looking like a broken crawl.
-        notes = "; ".join(f"{k}={v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1])) or None
+        notes = "; ".join(f"{k}={v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         healthy = db.end_run(run_id, ok=True, rows_seen=len(posts),
-                             rows_upserted=len(res) + len(com), notes=notes,
+                             rows_upserted=len(res) + len(com),
+                             notes=f"pruned={pruned}; {notes}"[:300],
                              check_tables=["masar_residential_listings",
                                            "masar_commercial_listings"])
         if not healthy:

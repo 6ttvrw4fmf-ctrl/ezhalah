@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import argparse
 import html as ihtml
+import json
 import re
 import sys
 import urllib.parse
@@ -87,6 +88,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     city_ar_for,
     find_district_in_text,
@@ -124,9 +126,16 @@ TYPE_OVERRIDES = {
 STATUS_DEAL = {"للبيع": "Buy", "للايجار": "Rent", "للإيجار": "Rent"}
 AUCTION_STATUS = "مزاد"
 
-# property_feature terms → amenity columns. كهرباء / مياه / صرف صحي have NO column in the row
-# schema, so they are preserved in additional_info rather than dropped or forced into a neighbour.
-FEATURE_COL = {"مصعد": "elevator", "مكيف": "air_conditioner"}
+# property_feature terms → amenity columns. A NAMED term is the source stating the fact (True);
+# an absent term stays NULL. The full live taxonomy (2026-09-21) is these five terms.
+FEATURE_COL = {"مصعد": "elevator", "مكيف": "air_conditioner", "كهرباء": "electricity",
+               "مياه": "water_supply", "صرف صحي": "sanitation"}
+
+# The ad's own LABELLED facade/street lines — «الواجهة: غربية», «عرض الشارع: 15 مترًا»,
+# «الواجهة والشوارع: تقع الأرض على شارع شمالي بعرض 15 متر». Only a «label:» line whose label names
+# the facade or the street is read; marketing prose («على شارع رئيسي يربط بين أحياء جنوب الرياض»)
+# never is. ONE width / ONE facade across those lines, or NULL (normalize.one_street_width/one_direction).
+_FACADE_LINE = re.compile(r"^\s*([^:\n]{2,30}):(.+)$", re.M)
 
 # An ad that says it already sold/rented is not an offer we may publish.
 CLOSED_RE = re.compile(r"تم\s*البيع|تم\s*الإيجار|تم\s*الايجار|تم\s*التأجير|مباع|محجوز")
@@ -495,6 +504,10 @@ def map_listing(post: dict, terms: dict[str, dict[int, str]], media: dict[int, s
         col = FEATURE_COL.get(feat)
         if col and col not in row:
             row[col] = True
+    facade = " / ".join(m.group(2).strip() for m in _FACADE_LINE.finditer(body)
+                        if re.search(r"واجه|شارع", m.group(1)))
+    row["street_width_m"] = normalize.one_street_width(facade) if facade else None
+    row["direction"] = normalize.one_direction(facade) if facade else None
 
     if deal == "Rent":
         # RENT PERIOD = SOURCE. This install publishes no period field and no «شهري/سنوي» in any
@@ -531,6 +544,10 @@ def map_listing(post: dict, terms: dict[str, dict[int, str]], media: dict[int, s
         # The unrounded published area, when it is fractional — the int column cannot hold it and a
         # per-metre total was computed against it.
         "area_m2_exact": (area_exact if area_exact and area_exact != float(area or 0) else None),
+        "facade_raw": facade[:300] or None,
+        # NOT split into lat/lng: every live post carries the Houzez theme DEFAULT pin
+        # (23.8859,45.0792 = the map centre of Saudi Arabia; 25.68654,-80.431345 = the demo's Miami),
+        # never a real location. Kept verbatim so a real pin can be recognised if one ever appears.
         "geo": _meta1(meta, "fave_property_location"),
         "video_url": _meta1(meta, "fave_video_url"),
         "rooms_prose": " / ".join(room_lines)[:600] or None,
@@ -599,6 +616,56 @@ def _photo_ids(post: dict) -> list[int]:
     return ids
 
 
+# ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
+# Absence from the posts listing only SELECTS candidates; prune_unseen asks this oracle before it
+# may deactivate anything, through the shared law (scrapers/common/http_liveness.py), so a
+# 401/403/429/5xx, a timeout or an empty body can never read as a death.
+# The probe re-reads the post's OWN REST record (the ?rest_route= form — the only one this install
+# serves). MEASURED 2026-09-21: a live post answers 200 with its own id and status «publish»; an id
+# the route does not hold answers HTTP 404 with code `rest_post_invalid_id` (153 bytes). So:
+#   · 404 carrying rest_post_invalid_id                            → GONE (deleted at source)
+#   · 200 for THIS id whose status is not «publish», whose property_status is «مزاد», or whose own
+#     title/body says it closed (CLOSED_RE) — the crawl's first three skips, same constants → GONE
+#   · 200 for this id otherwise                                    → LIVE
+#   · a 404 without that code, a 401 (WordPress answers a trashed/draft post with 401 to a guest —
+#     the law cannot read it as death, and WordPress empties its trash to a real 404 within 30
+#     days), anything unparseable                                   → no opinion
+def _signal_for(pid: int, status_names: dict[int, str]):
+    def _signal(status, body, _moved):
+        try:
+            j = json.loads(body)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(j, dict):
+            return None
+        if status == 404 and j.get("code") == "rest_post_invalid_id":
+            return "gone"
+        if status != 200 or j.get("id") != pid:
+            return None
+        if (j.get("status") or "") != "publish":
+            return "gone"
+        if AUCTION_STATUS in [status_names.get(t) for t in (j.get("property_status") or [])]:
+            return "gone"
+        title = html_text((j.get("title") or {}).get("rendered"))
+        body_txt = html_text((j.get("content") or {}).get("rendered"))
+        return "gone" if (CLOSED_RE.search(title) or CLOSED_RE.search(body_txt)) else "live"
+    return _signal
+
+
+def _make_verify_gone(terms: dict[str, dict[int, str]]):
+    status_names = terms.get("property_status") or {}
+
+    def verify_gone(ad_number: str) -> tuple[str, str]:
+        pid = ad_number[len(PREFIX):]
+        if not pid.isdigit():
+            return "unknown", f"{ad_number!r} is not a {PREFIX}<post id> ad number"
+        return LivenessProbe(platform="alsidra", signal=_signal_for(int(pid), status_names),
+                             session=session,
+                             url_for=lambda _ad: f"{BASE}/?rest_route=/wp/v2/{REST_BASE}/{pid}"
+                             ).verify_gone(ad_number)
+    return verify_gone
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -645,21 +712,32 @@ def main() -> int:
                       f"[{r0['additional_info'].get('price_provenance')}] "
                       f"ph={len(r0.get('photo_urls') or [])}")
             return 0
-        if res:
-            _upsert(RES_TABLE, res)
-        if com:
-            _upsert(COM_TABLE, com)
+        db.upsert_alsidra_residential_batch(res)
+        db.upsert_alsidra_commercial_batch(com)
         superseded = db.retire_superseded_siblings(
             res_table=RES_TABLE, com_table=COM_TABLE,
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+        # PRUNE — only after a COMPLETE enumeration (a --type run holds the other table's seen-set
+        # empty by construction; --limit never reaches here), and only with the direct confirm
+        # above. prune_unseen's own breakers (0 seen, >30% vanished, <80% re-seen) sit on top.
+        pruned = 0
+        if args.type == "all":
+            verify_gone = _make_verify_gone(terms)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if n < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += n
         healthy = db.end_run(run_id, ok=True, rows_seen=len(posts),
                             rows_upserted=len(res) + len(com),
                             check_tables=["alsidra_residential_listings",
                                           "alsidra_commercial_listings"],
-                            notes=notes or None)
+                            notes=f"pruned={pruned} {notes}"[:300])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard", flush=True)
             return 1
@@ -673,18 +751,6 @@ def main() -> int:
                            if skipped else str(e))[:300])
         print(f"✗ {SOURCE}: {e}", flush=True)
         return 1
-
-
-def _upsert(table: str, rows: list[dict[str, Any]]) -> None:
-    """LOCAL STAND-IN for the missing db.upsert_alsidra_{residential,commercial}_batch wrappers.
-
-    Those two public wrappers (and the two tables) are created centrally by the onboarding engineer;
-    this scraper is forbidden from touching scrapers/common/db.py or supabase/migrations/. Every
-    platform's wrapper is a one-line call to the shared private batch writer with its own table
-    name, so this calls that same writer directly and inherits the identical sanitize / price-guard
-    / capture-evidence path. Replace both calls with the public wrappers once they exist.
-    """
-    db._wasalt_batch(table, rows)
 
 
 if __name__ == "__main__":

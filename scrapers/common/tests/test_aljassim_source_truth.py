@@ -678,3 +678,18 @@ def test_the_challenge_solver_reads_the_nonce_the_page_actually_serves():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+@pytest.mark.parametrize("cell,width,facade", [
+    ("المساحة 735م شارع 50 / شرق", 50, "شرق"),       # JSM5259
+    ("المساحة 780م شارع 15", 15, None),
+    ("المساحة 428.83م شارع 15*15", None, None),       # two streets
+    ("أربع غرف شارع 12.5 / 21.5", None, None),        # two widths across a slash
+    ("المساحة 810م شارع 27.50", None, None),          # a fraction the smallint would truncate
+])
+def test_the_index_street_cell_fills_street_width_and_direction(catalog, cell, width, facade):
+    ix = _one(ROW_PER_METRE)
+    st = R._STREET.search(cell)
+    ix.update(street_width=st.group(1).strip(), street_facade=st.group(2))
+    row, _c, why = R.map_listing(ix, {})
+    assert why == "" and (row["street_width_m"], row["direction"]) == (width, facade)

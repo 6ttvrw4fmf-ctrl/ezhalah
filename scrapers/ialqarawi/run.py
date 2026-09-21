@@ -75,9 +75,13 @@ estimated):
     Three categories are unreliable containers rather than types («بلك», «بلك تجاري», «محطات» hold
     أرض/إستراحة/مزرعة/فيلا/محطة وقود side by side), so for those the TITLE's own type word decides,
     and what neither places is skipped as type_unmapped rather than guessed.
-  · NOT CAPTURED, deliberately: `direction` (the prose states a direction PER STREET and most
-    listings open onto two, so "the" facing would be a guess) and «مسطح البناء» (built-up area —
-    no column means exactly that; the raw value is in additional_info).
+  · `direction` ONLY from an explicit «واجهة <جهة>» phrase naming one compass point («واجهة شرقية»,
+    QRW3090). The per-STREET directions («شارع عرض 15م جنوبأ … وشارع عرض 20م شمالا») are never read
+    as the facing: most listings open onto two streets, so "the" facing would be a guess.
+  · `property_age` ONLY from the anchored «العمر 13 سنة» / «عمر العقار 9 سنوات» phrase
+    (normalize.age_from_labelled_prose); «يتجاوز 30 سنه» is an open bound → NULL.
+  · NOT CAPTURED, deliberately: «مسطح البناء» (built-up area — no column means exactly that; the
+    raw value is in additional_info).
 """
 from __future__ import annotations
 
@@ -97,6 +101,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://ialqarawi.com"
 SOURCE = "Ibrahim Alqarawi"
@@ -258,8 +263,11 @@ def parse_money(raw: Optional[str]) -> tuple[Optional[int], Optional[int], str]:
         if _THOUSAND_RE.search(txt) and ppm < 1000 and not grouped:
             ppm *= 1000
         # A rate of a few riyals per metre is a unit this file cannot name (it could be «1 [ألف]
-        # حد المتر»), so it abstains rather than multiplying a guess by the area.
-        if not (10 <= ppm <= 200_000):
+        # حد المتر», QRW2135 — the one live hit of 2,616 on 2026-09-21), so it abstains rather
+        # than multiplying a guess by the area. There is NO upper bound: a large figure in a cell
+        # the office labelled per-metre is still the office's per-metre figure (owner rule: no
+        # plausibility gate on a source-published price; 0 live rows exceed 200,000 today).
+        if ppm < 10:
             return None, None, "ppm_unit_unstated"
         return None, ppm, ""
 
@@ -380,8 +388,9 @@ def rooms_from_prose(text: Optional[str]) -> dict[str, Any]:
     widths = {w for w in _STREET_RE.findall(t)}
     if len(widths) == 1:                      # two frontages of different widths → ambiguous
         w = float(widths.pop().replace(",", "."))
-        if 2 <= w <= 200:
-            out["street_width_m"] = w
+        # A fraction («13.5م») stays NULL: the smallint column would truncate it to 13.
+        if 2 <= w <= 200 and w == int(w):
+            out["street_width_m"] = int(w)
     return out
 
 
@@ -523,6 +532,12 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         "price_per_meter": ppm,
         "photo_urls": detail.get("photos", [])[:20] or None,
     }
+    desc_d = _digits(desc or "")
+    if (age := normalize.age_from_labelled_prose(desc_d)) is not None:
+        row["property_age"] = age
+    facades = re.findall(r"(?=واجه[ةه]\s+(\S+(?:\s+\S+)?))", desc_d)     # lookahead: overlapping
+    if facades and (d := normalize.one_direction(" ".join(facades))):
+        row["direction"] = d
     counts = rooms_from_prose(desc)
     if property_type not in _DWELLING:
         counts.pop("bedrooms", None)     # «غرفتين» in a warehouse ad is not a bedroom count
@@ -630,6 +645,66 @@ def crawl(limit: int = 0, workers: int = 8) -> tuple[list[dict], list[dict], int
     return res, com, len(cards), skipped
 
 
+# ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
+# Absence from the 66 index pages only SELECTS candidates; prune_unseen asks this oracle before it
+# may deactivate anything, through the shared law (scrapers/common/http_liveness.py), so a
+# 403/429/5xx, a timeout or an empty body can never read as a death. That matters here: fetch_index
+# SKIPS a category page that does not answer 200, so a single refused page silently drops a whole
+# category (catid 46 alone is 946 cards) from `seen`.
+#
+# THIS SOURCE DOES NOT 404. MEASURED 2026-09-21 with the full 2,641-card index in hand: 1,132 ids
+# inside the live range (21-3793) are not in the catalogue, and 21 of 21 sampled (plus 99999999)
+# answered HTTP 200 with THE HOMEPAGE — byte-for-byte the size of `/` (134,957), carrying its
+# `myCarousel` slider and no «رقم العقار» field. A wider draw of 120 off-index ids found the second
+# retirement shape: 111 homepage, and 9 still serving their own page with «القسم» EMPTY — the office
+# takes a listing out of every category rather than deleting it, so no index can reach it again.
+# 60 of 60 indexed live listings carry «القسم»; 12 of 12 interleaved live ids answered 200 with a
+# «رقم العقار» equal to the requested id. So: the homepage on this listing's own URL is GONE; its
+# own page with no category is GONE (without that limb the probe would self-heal a delisted row
+# forever, since the crawl can never see it again); the page proving this id WITH a category is
+# LIVE — unless the crawl's own _AUCTION_RE/_SOLD_RE fire on its own title or «تفاصيل العقار», a
+# closed deal the crawl refuses to publish. Anything else — a page that is neither, a challenge, a
+# 500 (the site answers 500 when catid is missing) — has no opinion.
+# Because the death here is a 200, every removal is also gated by an in-run POSITIVE CONTROL (a row
+# this same run mapped must still be served as itself), and it fails CLOSED: no control, no removal.
+_HOMEPAGE_MARK = 'id="myCarousel"'
+
+
+def _signal_for(lid: str):
+    def _signal(status, body, _moved):
+        if status != 200:
+            return None
+        d = parse_detail(body)
+        if not d:
+            return "gone" if _HOMEPAGE_MARK in body else None
+        if _digits(d["fields"].get("رقم العقار", "")).strip() != lid:
+            return None
+        if not d["fields"].get("القسم"):
+            return "gone"
+        own = f"{d.get('title') or ''} {d['fields'].get('تفاصيل العقار') or ''}"
+        return "gone" if (_AUCTION_RE.search(own) or _SOLD_RE.search(own)) else "live"
+    return _signal
+
+
+def _make_verify_gone(control: Optional[dict]):
+    url_for = stored_listing_url(("ialqarawi_residential_listings", "ialqarawi_commercial_listings"))
+
+    def probe(ad_number: str, url_for=url_for, canary=None) -> tuple[str, str]:
+        lid = ad_number[len(PREFIX):]
+        if not lid.isdigit():
+            return "unknown", f"{ad_number!r} is not a {PREFIX}<id> ad number"
+        return LivenessProbe(platform=PLATFORM, signal=_signal_for(lid), session=session,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"], url_for=lambda _ad: control["listing_url"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -653,10 +728,8 @@ def main() -> int:
             print(f"— DRY RUN (nothing written): {len(res)} residential + {len(com)} commercial",
                   file=sys.stderr)
             return 0
-        if res:
-            _upsert("ialqarawi_residential_listings", res)
-        if com:
-            _upsert("ialqarawi_commercial_listings", com)
+        db.upsert_ialqarawi_residential_batch(res)
+        db.upsert_ialqarawi_commercial_batch(com)
         if args.limit:
             print(f"✓ {SOURCE} VALIDATION: {len(res)} res + {len(com)} com upserted (no prune)")
             return 0
@@ -667,9 +740,11 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
         pruned = 0
+        verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
         for tbl, rows in (("ialqarawi_residential_listings", res),
                           ("ialqarawi_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE)
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                verify_gone=verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped — kept existing active rows")
             else:
@@ -690,13 +765,6 @@ def main() -> int:
         import traceback
         traceback.print_exc()
         return 1
-
-
-def _upsert(table: str, rows: list[dict[str, Any]]) -> None:
-    """db.py has no upsert_ialqarawi_*_batch wrapper yet (adding one means editing a shared file
-    another engineer owns this week), so call the shared writer every wrapper delegates to — the
-    price/placeholder/url/SOURCE-IS-TRUTH guards all still run."""
-    db._wasalt_batch(table, rows)
 
 
 if __name__ == "__main__":

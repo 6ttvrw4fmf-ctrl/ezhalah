@@ -38,15 +38,39 @@
       "today_pct": 71,
       "active_rows": 31
     },
+    "aljassim": {
+      "floor_pct": 55,
+      "today_pct": 60.2,
+      "active_rows": 88,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 53 of 88 rows carried photo_urls (the whole catalogue). Floor one-plus listings below today-minus-three: 88 rows, one listing is ~1.1 points."
+    },
     "alkhaas": {
       "floor_pct": 93,
       "today_pct": 96.7,
       "active_rows": 209
     },
+    "almotmkenah": {
+      "floor_pct": 60,
+      "today_pct": 71.4,
+      "active_rows": 21,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 15 of 21 rows carried photo_urls (every live ad; 339 of 361 are archived by the site). TINY: one listing is ~5 points; floor set two listings below the observation."
+    },
     "alobid": {
       "floor_pct": 97,
       "today_pct": 100.0,
       "active_rows": 138
+    },
+    "alshawaf": {
+      "floor_pct": 55,
+      "today_pct": 62.0,
+      "active_rows": 100,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 62 of 100 rows carried photo_urls (the first 100 of 987). Placeholder thumbnails are refused, not published; sample error ~±5 points, so the floor keeps that margin."
+    },
+    "alsidra": {
+      "floor_pct": 90,
+      "today_pct": 96.2,
+      "active_rows": 26,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 25 of 26 rows carried photo_urls (the whole live catalogue). Small: one listing is ~4 points, so the floor sits below the usual today-minus-three."
     },
     "alta": {
       "floor_pct": 97,
@@ -121,6 +145,12 @@
       "today_pct": 100.0,
       "active_rows": 53
     },
+    "bossbih": {
+      "floor_pct": 65,
+      "today_pct": 72.7,
+      "active_rows": 99,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 72 of 99 rows carried photo_urls (the first 99 of 1,485). The office posts many cards with the site placeholder, which the scraper refuses; sample error ~±4.5 points, so the floor keeps that margin."
+    },
     "dealapp": {
       "floor_pct": 89,
       "today_pct": 92.8,
@@ -151,10 +181,22 @@
       "today_pct": 100,
       "active_rows": 29249
     },
+    "gomenassat": {
+      "floor_pct": 95,
+      "today_pct": 98.9,
+      "active_rows": 92,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 91 of 92 rows carried photo_urls (the first 92 mapped of ~145). Floor follows today-minus-about-three."
+    },
     "hajer": {
       "floor_pct": 57,
       "today_pct": 60.5,
       "active_rows": 119
+    },
+    "ialqarawi": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 100,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 100 of 100 rows carried photo_urls (the first 100 of 2,641). A head-of-index sample, so the floor keeps extra margin; re-check against the first snapshot."
     },
     "jazwtn": {
       "floor_pct": 97,
@@ -166,10 +208,22 @@
       "today_pct": 100,
       "active_rows": 11
     },
+    "masar": {
+      "floor_pct": 85,
+      "today_pct": 100.0,
+      "active_rows": 9,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 9 of 9 rows carried photo_urls (the whole catalogue). TINY: one listing is ~11 points; floor set one listing below the observation."
+    },
     "mizlaj": {
       "floor_pct": 97,
       "today_pct": 100,
       "active_rows": 27
+    },
+    "moftah": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 13,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 13 of 13 rows carried photo_urls (the whole catalogue). TINY: one listing is ~8 points; floor set one listing below the observation."
     },
     "muktamel": {
       "floor_pct": 97,
@@ -185,6 +239,12 @@
       "floor_pct": 97,
       "today_pct": 100,
       "active_rows": 20
+    },
+    "nufouth": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 105,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 105 of 105 rows carried photo_urls (units of 70 of 270 properties). Floor follows today-minus-about-three."
     },
     "october": {
       "floor_pct": 97,
@@ -221,6 +281,12 @@
       "floor_pct": 84,
       "today_pct": 87.1,
       "active_rows": 85
+    },
+    "sakan": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 99,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 99 of 99 rows carried photo_urls (the first 99 of 3,160 sitemap URLs). A head-of-sitemap sample, so the floor keeps extra margin; re-check against the first snapshot."
     },
     "sanadak": {
       "floor_pct": 97,

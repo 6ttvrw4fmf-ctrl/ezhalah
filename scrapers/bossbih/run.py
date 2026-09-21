@@ -14,7 +14,8 @@ and there is no JSON-LD. DOM only, keyed off Drupal FIELD MACHINE NAMES (never p
     field-als-r              content="1600000"        the price NUMBER (machine attribute)
     field-wsf-al-qar         prose                    description
     field-al-mr              «العمر 7 سنة»            property age
-    field-shar-rd            «شارع 25*12»             street width — NEVER parsed as a number
+    field-shar-rd            «شارع 15 شرق» / «25*12»  street width + facade: ONE number → street_width_m,
+                                                       two streets («25*12») → NULL, raw always kept
     field-rgm / field-alhrf  «رقم الأرض 1/29» / «حرف ج»  plot no. / block letter
     field-hdwd-watwal-al-qar «الحدود والأطوال: 20*27» plot dimensions
     field-image              a run of `a.lightbox[data-imagelightbox=g]` full-size photo hrefs
@@ -131,6 +132,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
 BASE = "https://bossbihoffice.com.sa"
@@ -657,7 +659,11 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         # Stated per-section on this source, so any single number would be a fragment or a sum.
         "bathrooms": None,
         # Only from the «العمر» field, through the shared closed vocabulary; silence → NULL.
-        "property_age": N.parse_property_age(_label_after(fields.get("al-mr") or "", "العمر")),
+        "property_age": N.exact_age(_label_after(fields.get("al-mr") or "", "العمر")),
+        # Land is asked ONLY street_width + direction; this labelled field («شارع 15 شرق») answers
+        # both. «25*12» (two streets) → NULL width; a compass word only when exactly one is named.
+        "street_width_m": N.one_street_width(_label_after(fields.get("shar-rd") or "", "شارع")),
+        "direction": N.one_direction(fields.get("shar-rd")),
         "price_total": price_total,
         "price_annual": price_annual,
         "price_per_meter": price_per_meter,
@@ -699,12 +705,43 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
     return row, category, ""
 
 
-# scrapers/common/db.py has no bossbih helper yet — upsert_bossbih_{residential,commercial}_batch
-# are added centrally with the tables. Until they land, call the shared batch writer directly: every
-# platform's helper is a one-line alias for exactly this call, so this runs the identical sanitize /
-# guard / upsert path and adds no new behaviour.
 RES_TABLE = "bossbih_residential_listings"
 COM_TABLE = "bossbih_commercial_listings"
+
+
+# ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
+# Absence from the index only SELECTS candidates; prune_unseen asks this oracle before it may
+# deactivate anything, through the shared law (scrapers/common/http_liveness.py), so a 403/429/5xx,
+# a timeout or an empty body can never read as a death.
+#
+# MEASURED 2026-09-21 against the live site, with the full 1,485-card index in hand: the office
+# DELETES a node rather than unpublishing it — 5,295 nids inside the live id range (7738-14517) are
+# not in the catalogue, and 30 of 30 sampled answered HTTP 404 (the themed 12.5 KB Drupal 404, no
+# node id on it; /99999999 the same). 8 of 8 interleaved live nids answered 200 carrying
+# data-history-node-id="<nid>" and the price field; through the real _verify_gone, 15 of 15 live
+# nids read LIVE and 15 of 15 dead-cohort nids read GONE. A themed 404 is still a parseable page, so the
+# STATUS decides a death and the node id decides a life — never "did the page parse".
+# An ad retired IN PLACE (RETIRED_TOKENS in its own title/description — the crawl's own predicate)
+# is GONE too: without that, the oracle would read a still-served «تم البيع» page as alive and
+# self-heal a row the crawl refuses to publish. None carry one today (measured 0/1,485).
+def _signal_for(nid: str):
+    def _signal(status, body, _moved):
+        if status == 404:
+            return "gone"
+        if status == 200 and f'data-history-node-id="{nid}"' in body:
+            d = parse_detail(body)
+            own = f"{d.get('title') or ''} {(d.get('fields') or {}).get('wsf-al-qar') or ''}"
+            return "gone" if any(tok in own for tok in RETIRED_TOKENS) else "live"
+        return None
+    return _signal
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    nid = ad_number[len(PREFIX):]
+    if not nid.isdigit():
+        return "unknown", f"{ad_number!r} is not a {PREFIX}<nid> ad number"
+    return LivenessProbe(platform=PLATFORM, signal=_signal_for(nid), session=session,
+                         url_for=lambda _ad: f"{BASE}/{nid}").verify_gone(ad_number)
 
 
 def main() -> int:
@@ -757,10 +794,8 @@ def main() -> int:
                       f"pa={r0['price_annual']} rp={r0['rent_period']} "
                       f"ph={len(r0.get('photo_urls') or [])}")
             return 0
-        if res:
-            db._wasalt_batch(RES_TABLE, res)
-        if com:
-            db._wasalt_batch(COM_TABLE, com)
+        db.upsert_bossbih_residential_batch(res)
+        db.upsert_bossbih_commercial_batch(com)
         superseded = db.retire_superseded_siblings(
             res_table=RES_TABLE, com_table=COM_TABLE,
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
@@ -773,7 +808,8 @@ def main() -> int:
             # construction — not because the source dropped those ads. prune_unseen's own 0-seen
             # breaker would skip it, but it would also report -1 and demote a perfectly good run.
             for table, rows in ((RES_TABLE, res), (COM_TABLE, com)):
-                pruned = db.prune_unseen(table, {r["ad_number"] for r in rows}, SOURCE)
+                pruned = db.prune_unseen(table, {r["ad_number"] for r in rows}, SOURCE,
+                                         verify_gone=_verify_gone)
                 degraded = degraded or pruned < 0
                 print(f"  {table}: pruned {pruned}")
         # notes carries the skip tally so an empty/thin run says WHY in the database itself.

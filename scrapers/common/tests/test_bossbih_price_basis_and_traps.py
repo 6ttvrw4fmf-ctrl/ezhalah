@@ -516,3 +516,11 @@ def test_a_contact_number_in_the_body_is_redacted_from_the_card_text():
                                  ("als-r2", "list-string", "السعر")], price=400000)
     assert "0504407066" not in (row["description"] or "")
     assert "أرض ممتازة" in row["description"], "redaction must not destroy the listing text"
+
+
+def test_one_street_in_the_street_field_fills_street_width_and_direction():
+    row, _, _ = mapped("أرض للبيع في الاتصالات بالمبرز", fields=(("shar-rd", "string", "شارع 15 شرق"),))
+    assert (row["street_width_m"], row["direction"]) == (15, "شرق")
+    two, _, _ = mapped("أرض للبيع في الاتصالات بالمبرز", fields=(("shar-rd", "string", "شارع 25*12"),))
+    assert (two["street_width_m"], two["direction"]) == (None, None)
+    assert two["additional_info"]["street_width"] == "25*12"

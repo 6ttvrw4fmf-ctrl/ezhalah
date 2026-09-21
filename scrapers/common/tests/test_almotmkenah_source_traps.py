@@ -2142,6 +2142,56 @@ def test_the_four_amenity_outcomes_survive_this_scrapers_call_shape():
     assert normalize.amenities_from_text("قريب من حديقة عامة").get("garden") is None
 
 
+def _live(ad_id: str, **fields):
+    """The fixture's own page, mapped as a live ad (the archive banner lifted), with grid cells
+    optionally overridden to exercise a value the live catalogue can carry."""
+    raw = R.parse_detail(page(ad_id))
+    raw["listing_url"] = FIXTURES[ad_id][1]
+    raw["archived"] = False
+    raw["fields"].update(fields)
+    row, _cat, why = R.map_listing(raw)
+    assert row is not None, why
+    return row
+
+
+def test_a_yes_no_cells_label_is_never_read_as_the_amenity():
+    """«مؤثث: لا» used to reach amenities_from_text as the string «مؤثث: لا», whose label word IS the
+    token → furnished=True for a flat the source says is NOT furnished. MTM181's own cell, «مؤثث:
+    المطابخ راكبه» (the kitchens are fitted), was published as a furnished Building."""
+    assert _live("181").get("furnished") is None
+    assert _live("181", **{"مؤثث": "لا"})["furnished"] is False
+    assert _live("181", **{"مؤثث": "غير مؤثث"})["furnished"] is False
+    assert _live("195").get("furnished") is True                    # «مؤثث: مؤثث ومفروش»
+    assert _live("181")["kitchen"] is True                          # «المطبخ: مركب»
+    assert _live("409", **{"المطبخ": "لا يوجد"})["kitchen"] is False
+    # MTM181's body says «ومطبخ راكب»: a cell saying «لا يوجد» contradicts it → NULL, not a pick.
+    assert _live("181", **{"المطبخ": "لا يوجد"}).get("kitchen") is None
+
+
+def test_the_grids_street_width_and_facade_reach_their_columns():
+    """#3349 again: «عرض الشارع» / «واجهة العقار» went only to additional_info.source_fields, and the
+    AF asks land nothing else. «بويه» (paint) in the facade cell is not a bearing → NULL."""
+    row = _live("195")
+    assert (row["street_width_m"], row["direction"]) == (40, "غرب")
+    row = _live("181")
+    assert (row["street_width_m"], row["direction"]) == (25, None)
+    row = _live("395")                                               # prose: «شارع 15 م شمالي»
+    assert (row["street_width_m"], row["direction"]) == (15, "شمال")
+
+
+def test_bathrooms_are_one_stated_count_or_nothing():
+    """MTM405 says «4 دورات مياة» and then «ماستر بدورة مياة» twice — whether those are among the 4 is
+    not stated, so no number. MTM305 lists five unit layouts, each with its own bathrooms."""
+    assert _live("405")["bathrooms"] is None
+    assert _live("305")["bathrooms"] is None
+    assert R._bathrooms("فيلا دورين ٤ غرف و٤ دورات مياه") == 4
+
+
+def test_the_ads_own_licence_and_villa_age_are_read():
+    assert _live("372")["license_number"] == "7200485896"   # «ترخيص اعلاني رقم : 7200485896»
+    assert _live("405")["property_age"] == 3                 # «عمر الفيلا 3 سنوات»
+
+
 # ── 5. the type table ─────────────────────────────────────────────────────────────────────────────
 
 def test_a_land_block_advertising_villas_is_land():

@@ -430,6 +430,26 @@ def test_a_placeable_listing_maps_with_arabic_location_and_capped_photos():
     assert row["additional_info"]["district_raw"] == "النرجس"
 
 
+def test_floor_street_facade_and_licence_reach_their_columns():
+    """The AF reads real columns; masar printed all four and filed only floor_raw (2026-09-21).
+    «الرياض» is appended only so the ad is placeable — every other word is the ad's own."""
+    row, _c, why = R.map_listing(_post(2693, "شقة للإيجار", "aqar_type-for-rent", BODY_2693),
+                                 {"district": "النرجس", "floor": "دور أول"}, [])
+    assert why == "", why
+    assert row["floor_number"] == 1 and row["additional_info"]["floor_raw"] == "دور أول"
+    assert row["license_number"] == "7200508102"
+    row, _c, why = R.map_listing(_post(2827, "فيلا للبيع", "aqar_type-for-sale", BODY_2827 + " الرياض"),
+                                 {}, [])
+    assert why == "", why
+    assert (row["street_width_m"], row["direction"]) == (20, "شمال")   # «الواجهة شمالية الشارع 20 متر»
+    assert row["license_number"] == "7200671763"
+    row, _c, why = R.map_listing(_post(2921, "شقة للإيجار", "aqar_type-for-rent", BODY_2921 + " الرياض"),
+                                 {}, [])
+    assert why == "", why
+    assert (row["street_width_m"], row["direction"]) == (None, "شرق")  # «واجهة المبنى شرقية», no street
+    assert row["license_number"] == "7201080329"
+
+
 def test_a_buy_row_carries_price_total_and_no_rent_fields():
     body = "فيلا للبيع في حي النرجس بمدينة الرياض المساحة 400 م السعر 2 مليون ريال"
     post = _post(994, "فيلا للبيع", "aqar_type-for-sale", body)

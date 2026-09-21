@@ -21,7 +21,8 @@ SOURCE SHAPE (probed live over all 361 detail pages before any code was written)
 
   · 339 OF 361 ARE ARCHIVED. The detail page carries the source's own verdict as
     `<p class="bg-danger text-danger">هذا الاعلان لم يعد صالح تم نقله للأرشيف.</p>` — "no longer
-    valid, moved to the archive". Those are skipped. That banner is the ONLY status oracle used:
+    valid, moved to the archive". Those are skipped. That banner (and, for an ad the index stops
+    listing, its own URL answering 404 — see _verify_gone) is the ONLY status oracle used:
     prose sold-words are NOT one. Live ad MTM390 («مشروع اربع فلل») says «الدور الأول في كل الفلل
     مباع بالكامل» — only the first floors of a four-villa project are sold, five units remain and
     the ad publishes 890,000 for one of them. A «مباع»/«تم بيع» keyword skip would have deleted a
@@ -95,6 +96,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://almotmkenah.com"
 SOURCE = "Almotmkenah"
@@ -364,6 +366,32 @@ _DWELLING_TYPES = {"Apartment", "Villa", "Duplex", "Studio", "Floor", "Chalet", 
 _AGELESS_TYPES = {"Residential Land", "Commercial Land", "Farm"}
 
 
+# «مؤثث» / «المطبخ» cell values. A negator or a bare «لا» is the source saying no; one of these words
+# is the source saying yes; anything else («المطابخ راكبه» in the مؤثث cell) states neither → NULL.
+_FURNISHED_YES = ("نعم", "مؤثث", "مؤثثة", "مؤثثه", "مفروش", "مفروشة", "مفروشه")
+_KITCHEN_YES = ("نعم", "يوجد", "موجود", "مركب", "راكب", "راكبه", "راكبة")
+
+
+def _stated_yes_no(value: Optional[str], yes: tuple[str, ...]) -> Optional[bool]:
+    words = re.findall(r"[ء-ي]+", value or "")
+    if not words:
+        return None
+    if words[0] in ("لا", "غير", "بدون", "لايوجد"):
+        return False
+    return True if any(w in yes for w in words) else None
+
+
+# «٤ دورات مياه» / «4 دورات مياة» (the source's own ة typo). ONE mention with its own digit count, or
+# NULL: MTM305 lists five unit layouts each with its bathrooms, and MTM405's «4 دورات مياة» is followed by
+# «ماستر بدورة مياة» twice — whether those are among the 4 is not stated, so no number is published.
+_BATH_RE = re.compile(r"(?:([\d٠-٩]{1,2})\s*)?دور(?:ات|تين|تان|ة|ه)\s*(?:ال)?مي(?:اه|اة|ه)")
+
+
+def _bathrooms(description: Optional[str]) -> Optional[int]:
+    hits = _BATH_RE.findall(description or "")
+    return normalize.to_int(hits[0]) if len(hits) == 1 and hits[0] else None
+
+
 def map_listing(raw: dict) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). Anything unprovable is a skip or a NULL, never a guess."""
     fields = raw["fields"]
@@ -401,14 +429,25 @@ def map_listing(raw: dict) -> tuple[Optional[dict], str, str]:
     area_m2 = _area(fields, description)
     figure, ppm, rate_note = _price_from_fields(fields)
 
-    # The field grid states «مؤثث / المطبخ / مرافق» and the body states the rest. Both are this
-    # unit's own prose, so both are read; amenities_from_text keeps silence NULL, «غير مؤثثة»
-    # False, «مصعد مؤسس» NULL and «قريب من حديقة» NULL.
-    amenity_text = "\n".join(t for t in (
-        description,
-        *(f"{k}: {v}" for k, v in fields.items()
-          if k in ("مؤثث", "المطبخ", "مرافق", "نوع الغرف")),
-    ) if t)
+    # The body and the «مرافق / نوع الغرف» VALUES are prose: amenities_from_text keeps silence NULL,
+    # «غير مؤثثة» False, «مصعد مؤسس» NULL and «قريب من حديقة» NULL. «مؤثث» and «المطبخ» are yes/no
+    # CELLS: their label must never reach the prose reader, or «مؤثث: لا» reads the label word as the
+    # amenity and publishes furnished=True (and «مؤثث: المطابخ راكبه», MTM181, a Building, did).
+    amenities = normalize.amenities_from_text("\n".join(
+        t for t in (description, fields.get("مرافق"), fields.get("نوع الغرف")) if t))
+    for col, label, yes in (("furnished", "مؤثث", _FURNISHED_YES), ("kitchen", "المطبخ", _KITCHEN_YES)):
+        said = _stated_yes_no(fields.get(label), yes)
+        if said is not None:
+            if amenities.get(col, said) != said:
+                amenities.pop(col)          # the cell and the body disagree → NULL, not a pick
+            else:
+                amenities[col] = said
+    # Street width + facade: the grid's own «عرض الشارع» / «واجهة العقار» cells (45 and 34 of 361),
+    # else ONE street stated in the body («شارع 15 م شمالي», MTM395). Land answers no other AF question.
+    street_w, facade = (normalize.one_street_width(fields.get("عرض الشارع")),
+                        normalize.one_direction(fields.get("واجهة العقار"), diagonal=True))
+    if street_w is None and facade is None:
+        street_w, facade = normalize.street_from_prose(description)
 
     rooms = normalize.to_int(fields.get("عدد الغرف"))
     row: dict[str, Any] = {
@@ -418,7 +457,7 @@ def map_listing(raw: dict) -> tuple[Optional[dict], str, str]:
         "active": True,
         "title": title,
         "description": description,
-        **normalize.amenities_from_text(amenity_text),
+        **amenities,
         "property_type": property_type,
         "transaction_type": "Rent" if deal == "Rent" else "Buy",
         "city": normalize.map_city(city_ar),
@@ -429,10 +468,17 @@ def map_listing(raw: dict) -> tuple[Optional[dict], str, str]:
         "neighborhood": district_raw or district_ar,
         "area_m2": area_m2,
         "bedrooms": rooms if (rooms and property_type in _DWELLING_TYPES) else None,
-        "bathrooms": None,                     # never published by this source, never inferred
+        "bathrooms": _bathrooms(description) if property_type in _DWELLING_TYPES else None,
+        "street_width_m": street_w,
+        "direction": facade,
+        "license_number": normalize.ad_licence_from_prose(description),
         "floor_number": normalize.to_int(fields.get("رقم الدور")),
+        # The «تاريخ البناء» field, else the ad's own anchored «العمر 3 سنوات» / «عمر العقار: 5 سنوات»
+        # (all 3 aged live ads on 2026-09-21 state it only in prose; the field is empty on all 22).
         "property_age": (None if property_type in _AGELESS_TYPES
-                         else normalize.parse_property_age(fields.get("تاريخ البناء"))),
+                         else normalize.exact_age(fields.get("تاريخ البناء"))
+                         if fields.get("تاريخ البناء")
+                         else normalize.age_from_labelled_prose(raw.get("description"))),
         "photo_urls": raw["photo_urls"] or None,
         "price_per_meter": ppm,
     }
@@ -506,15 +552,36 @@ def fetch_detail(s: cc.Session, url: str) -> Optional[dict]:
     return raw
 
 
+# An ad the index no longer lists is never reached by the crawl, so the per-run map cannot answer
+# for it — and "unknown forever" would keep a deleted ad searchable forever. Such an ad is probed at
+# its OWN stored URL under the shared law. MEASURED 2026-09-21: the site keys an ad on its slug, and
+# a slug it does not have answers HTTP 404 (a live slug with its tail changed, and an invented one,
+# both 404); a served ad page is read by the crawl's own parser, archive banner and all.
+_stored_url = stored_listing_url(("almotmkenah_residential_listings", "almotmkenah_commercial_listings"))
+
+
+def _signal_for(ad_number: str):
+    def _signal(status, body, _moved):
+        if status == 404:
+            return "gone"
+        if status == 200:
+            d = parse_detail(body)
+            if d and f"{PREFIX}{d['ad_id']}" == ad_number:
+                return "gone" if d["archived"] else "live"
+        return None
+    return _signal
+
+
 def _verify_gone(ad_number: str) -> tuple[str, str]:
     """Absence from the crawl never deactivates on its own — the source must say the ad is gone.
 
-    This run already read every one of the 361 ads the index publishes, so the verdict is a lookup
-    rather than a second probe: an ad whose own page carried «هذا الاعلان لم يعد صالح تم نقله
-    للأرشيف» is 'gone', an ad that parsed without it is 'live', and an ad this run never reached (or
-    could not parse) is 'unknown' and holds the strike. UNKNOWN NEVER KILLS.
+    An ad this run READ answers from the run's own map (the archive banner → 'gone', none → 'live').
+    An ad the run never reached is probed directly at its stored URL (see above). UNKNOWN NEVER KILLS.
     """
-    return _STATUS.get(ad_number, ("unknown", "not reached or not parsed by this run"))
+    if ad_number in _STATUS:
+        return _STATUS[ad_number]
+    return LivenessProbe(platform="almotmkenah", signal=_signal_for(ad_number), session=session,
+                         url_for=_stored_url).verify_gone(ad_number)
 
 
 def main() -> int:
@@ -570,12 +637,8 @@ def main() -> int:
                       f"ph={len(r0.get('photo_urls') or [])}")
             return 0
 
-        # NOTE (onboarding): db.py has no upsert_almotmkenah_*_batch yet — adding one is the central
-        # engineer's call, not this scraper's, so the shared writer is called by table name here.
-        if res:
-            db._wasalt_batch("almotmkenah_residential_listings", res)
-        if com:
-            db._wasalt_batch("almotmkenah_commercial_listings", com)
+        db.upsert_almotmkenah_residential_batch(res)
+        db.upsert_almotmkenah_commercial_batch(com)
         superseded = db.retire_superseded_siblings(
             res_table="almotmkenah_residential_listings",
             com_table="almotmkenah_commercial_listings",

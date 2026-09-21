@@ -350,3 +350,27 @@ def test_every_key_written_is_a_real_listing_column():
     for payload in (P_PPM_TRAP, P_RENT_NO_PERIOD, P_SPEC_TABLE, P_TYPE_CONFLICT):
         bad = sorted(set(_row(payload)) - allowed)
         assert not bad, f"id {payload['id']} writes non-columns: {bad}"
+
+
+def test_spec_table_utilities_street_facade_and_tenant_reach_their_columns():
+    p = {**P_SPEC_TABLE, "attributes": [
+        {"name": "الكهرباء", "terms": [{"name": "متوفر"}, {"name": "عداد كهرباء مستقل"}]},
+        {"name": "الماء", "terms": [{"name": "توفر الماء"}]},
+        {"name": "صرف صحي", "terms": [{"name": "غير متوفر"}]},
+        {"name": "عرض الشارع", "terms": [{"name": "15م"}]},
+        {"name": "الواجهة", "terms": [{"name": "جنوب شرقي"}]},
+        {"name": "نوع السكن", "terms": [{"name": "عوائل"}]},
+        {"name": "رقم بيوت المرجعي", "terms": [{"name": "87893530"}]},
+    ]}
+    row = _row(p)
+    assert (row["electricity"], row["separate_electricity_meter"], row["water_supply"],
+            row["sanitation"]) == (True, True, True, False)
+    # «جنوب شرقي» is ONE Woo term — the site's own diagonal option — so it is the diagonal, which
+    # canon_direction_ar() files as «جنوب شرقي». Two terms are two streets and stay NULL.
+    assert (row["street_width_m"], row["direction"], row["tenant_category"]) == (15, "جنوب شرق", "عوائل")
+    two = {**p, "attributes": [a if a["name"] != "الواجهة" else
+                               {"name": "الواجهة", "terms": [{"name": "جنوب"}, {"name": "شرقي"}]}
+                               for a in p["attributes"]]}
+    assert _row(two)["direction"] is None, "two facade terms are a corner plot, not a diagonal"
+    assert "licence" not in row["additional_info"], "a Bayut reference is not a REGA licence"
+    assert row["additional_info"]["bayut_reference"] == "87893530"

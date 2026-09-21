@@ -74,6 +74,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 
 BASE = "https://gomenassat.com"
 SOURCE = "منصات"
@@ -320,6 +321,54 @@ def fetch_detail(s: cc.Session, oid: int) -> Optional[dict]:
     return parse_detail(r.text)
 
 
+# ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
+# Absence from /ar/get_offers only SELECTS candidates; prune_unseen asks this oracle before it may
+# deactivate anything, through the shared law (scrapers/common/http_liveness.py), so a 403/429/5xx,
+# a timeout or an empty body can never read as a death.
+#
+# THIS SOURCE DOES NOT 404. MEASURED 2026-09-21 with all 256 offers in hand: 516 ids inside the live
+# range (32-803) are not offered, and 21 of 21 sampled (plus 99999999) answered HTTP 200 with the
+# soft-404 «نأسف! هذه الصفحة غير متوفرة». The offer's OWN purpose badge — <div class="property-badge">
+# in the offer header, never the «عروض أخرى قريبة» cards below it — decides the rest: 8 of 8
+# «تم البيع»/«تم الإيجار» offers render it as their badge, 10 of 10 live ones render «للبيع» /
+# «للإيجار». So: the soft-404 sentence is GONE; a transacted (or «مزاد») badge is GONE — the same
+# words the crawl skips on sight; any other badge is LIVE; anything else has no opinion. Because the
+# death is a 200, every removal is also gated by an in-run POSITIVE CONTROL (a row this same run
+# mapped must still be served as itself), and it fails CLOSED: no control, no removal.
+_SOFT_404 = "هذه الصفحة غير متوفرة"
+_BADGE = re.compile(r'<div class="offer-header-info">.*?<div class="property-badge">\s*([^<]*?)\s*</div>',
+                    re.S)
+_CLOSED_PURPOSES = ("تم البيع", "تم الإيجار", "تم الايجار")
+
+
+def _signal(status, body, _moved):
+    if status != 200:
+        return None
+    badge = _BADGE.search(body)
+    if badge:
+        purpose = badge.group(1).strip()
+        return "gone" if (purpose in _CLOSED_PURPOSES or "مزاد" in purpose) else "live"
+    return "gone" if _SOFT_404 in body else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    def probe(ad_number: str, canary=None) -> tuple[str, str]:
+        oid = ad_number[len(PREFIX):]
+        if not oid.isdigit():
+            return "unknown", f"{ad_number!r} is not a {PREFIX}<offer id> ad number"
+        return LivenessProbe(platform="gomenassat", signal=_signal, session=session,
+                             url_for=lambda _ad: f"{BASE}/ar/offer/{oid}",
+                             canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -368,14 +417,8 @@ def main() -> int:
                       f"pt={r0.get('price_total')} pa={r0.get('price_annual')} "
                       f"rp={r0.get('rent_period')} ph={len(r0.get('photo_urls') or [])}")
             return 0
-        # db.py has no gomenassat wrapper yet (the tables + the named upsert_gomenassat_*_batch
-        # helpers are another engineer's central change). _wasalt_batch is the shared batch writer
-        # every small platform's wrapper delegates to, so it is called directly here; swap these two
-        # lines for the named wrappers once they land.
-        if res:
-            db._wasalt_batch("gomenassat_residential_listings", res)
-        if com:
-            db._wasalt_batch("gomenassat_commercial_listings", com)
+        db.upsert_gomenassat_residential_batch(res)
+        db.upsert_gomenassat_commercial_batch(com)
         superseded = db.retire_superseded_siblings(
             res_table="gomenassat_residential_listings",
             com_table="gomenassat_commercial_listings",
@@ -383,8 +426,23 @@ def main() -> int:
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+        # PRUNE — only after a COMPLETE enumeration (a --type run holds the other table's seen-set
+        # empty by construction), and only with the direct confirm below. prune_unseen's own
+        # breakers (0 seen, >30% vanished, <80% re-seen) sit on top of that.
+        pruned = 0
+        if args.type == "all":
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in (("gomenassat_residential_listings", res),
+                              ("gomenassat_commercial_listings", com)):
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if n < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += n
         healthy = db.end_run(run_id, ok=True, rows_seen=len(offers),
-                            rows_upserted=len(res) + len(com), notes=notes or None,
+                            rows_upserted=len(res) + len(com),
+                            notes=f"pruned={pruned} {notes}"[:300],
                             check_tables=["gomenassat_residential_listings",
                                           "gomenassat_commercial_listings"])
         if not healthy:

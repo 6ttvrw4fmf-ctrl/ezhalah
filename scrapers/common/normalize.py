@@ -643,6 +643,109 @@ def parse_property_age(raw) -> Optional[int]:
     return n if _AGE_MIN <= n <= _AGE_MAX else None
 
 
+# «العمر سبع سنوات», «عمر العقار 9 سنوات», «العمر : 6 سنوات» — an age stated in PROSE, anchored on
+# the AGE word and nothing else (from masar, 2026-09-20): masar 2935 says «ضمانات تصل الى 25 سنه», a
+# 25-year WARRANTY, and a pattern matching a bare years-phrase would publish a 25-year-old building
+# the ad calls brand new. The capture is at most two words so a following «ترخيص/ 7201080329» cannot
+# bleed in, and it goes through parse_property_age, so «يتجاوز 30 سنه» (an open bound) stays None.
+_LABELLED_AGE_RE = re.compile(r"(?:العمر|عمر\s*(?:ال)?(?:عقار|مبنى|بناء|فيلا|فيله|فله|عمارة|عماره|شقة|شقه))"
+                              r"\s*[:\-]?\s*"
+                              r"((?:[\d٠-٩]{1,3}\+?|[ء-ي]+)(?:\s+[ء-ي]+)?)")
+
+# AN OPEN BOUND IS NOT A NUMBER (akariyoun, 2026-09-19 — 20260919014424): «أكثر من عشر سنوات», «40+»,
+# «فوق 30» say MORE than N, and parse_property_age floors them to N. For the Advanced Filter that is a
+# false answer: «10 years or newer» would match a building the source says is older. The AF age
+# producer (age_source_registry) only trusts a table whose ages are EXACT, so the platforms onboarded
+# since read their age through exact_age(): an open bound is UNKNOWN (NULL), the raw text is kept by
+# the caller. parse_property_age itself is unchanged (its floor rule still serves the older fleet).
+_AGE_OPEN_BOUND = re.compile(r"أكثر\s*من|اكثر\s*من|فوق|يتجاوز|تجاوز|\+")
+
+
+def exact_age(raw) -> Optional[int]:
+    if raw is None or _AGE_OPEN_BOUND.search(str(raw)):
+        return None
+    return parse_property_age(raw)
+
+
+def age_from_labelled_prose(text) -> Optional[int]:
+    m = _LABELLED_AGE_RE.search(str(text or ""))
+    return exact_age(m.group(1)) if m else None
+
+
+# ── Street width + facade, the two Advanced-Filter facts land is asked (2026-09-21) ─────────────
+# Land answers ONLY street_width and direction, so a parser that files «شارع 25» / «الواجهة: غربية»
+# in additional_info leaves every plot invisible to the Advanced Filter (#3349 class). One reader here.
+# ONE value or nothing: «25*12», «30م × 20م», «22-18» are two streets, «شمالية غربية» / «شرق غرب» is
+# two facades (or a diagonal that cannot be told apart from a corner) → None, raw kept by the caller.
+_DIRECTION_CANON = {
+    "شمال": "شمال", "شمالي": "شمال", "شمالية": "شمال", "شماليه": "شمال", "شمالا": "شمال",
+    "جنوب": "جنوب", "جنوبي": "جنوب", "جنوبية": "جنوب", "جنوبيه": "جنوب", "جنوبا": "جنوب",
+    "شرق": "شرق", "شرقي": "شرق", "شرقية": "شرق", "شرقيه": "شرق", "شرقا": "شرق",
+    "غرب": "غرب", "غربي": "غرب", "غربية": "غرب", "غربيه": "غرب", "غربا": "غرب",
+    # the alif-with-hamza typo for the tanween ending («شارع عرض 15م جنوبأ», ialqarawi)
+    "شمالأ": "شمال", "جنوبأ": "جنوب", "شرقأ": "شرق", "غربأ": "غرب",
+}
+
+
+def one_street_width(raw) -> Optional[int]:
+    """The single street width a source cell states, in whole metres. Two numbers, a fraction
+    («13.5» — the smallint column would truncate it) or no number → None. Never rounds."""
+    if raw is None:
+        return None
+    nums = re.findall(r"\d+(?:\.\d+)?", str(raw).translate(_TRANS).replace("٫", "."))
+    if len(nums) != 1:
+        return None
+    w = float(nums[0])
+    return int(w) if w == int(w) and 1 <= w <= 200 else None
+
+
+def one_direction(raw, *, diagonal: bool = False) -> Optional[str]:
+    """The single compass facade a source cell states (شمال/جنوب/شرق/غرب), or None.
+    `diagonal=True` is ONLY for a source's own single-choice facade CELL, where «جنوب شرقي» is one
+    option of eight (sakan, moftah): the cell holding exactly «N/S E/W» returns «جنوب شرق», which
+    canon_direction_ar() files as the diagonal the AF offers. In prose two bearings may be a corner
+    plot, so they stay None there."""
+    if raw is None:
+        return None
+    words = [w for w in re.split(r"[^\w]+", str(raw)) if w]
+    toks = [c for w in words if (c := _DIRECTION_CANON.get(w) or _DIRECTION_CANON.get(w.removeprefix("ال")))]
+    if len(set(toks)) == 1:
+        return toks[0]
+    # Two words and nothing between them: «جنوب، شرقي» is a two-term list (two streets), not a diagonal.
+    if (diagonal and len(toks) == 2 and re.fullmatch(r"\s*\w+\s+\w+\s*", str(raw))
+            and toks[0] in ("شمال", "جنوب") and toks[1] in ("شرق", "غرب")):
+        return " ".join(toks)
+    return None
+
+
+# «شمالية شارع 15», «الواجهة شمالية الشارع 20 متر», «شارع 15 م شمالي», «جنوبية شارع : 18» — ONE street
+# stated in prose (masar, almotmkenah 2026-09-21). A number after «شارع» counts only with a unit or a
+# bearing beside it («شارع 15» alone can be a street's NAME), and a second street → (None, None):
+# «شمالاً: عرض شارع 15 متر … غرباً: عرض شارع 15 متر» is a corner plot, not one facade.
+_BEARING = r"(?:ال)?(?:شمال|جنوب|شرق|غرب)(?:ي(?:ة|ه)?|ا|أ)?"
+_PROSE_STREET_RE = re.compile(
+    rf"(?:(?<![ء-ي])(?P<d1>{_BEARING})\s+)?(?:ال)?شارع\s*:?\s*(?P<w>[\d٠-٩]{{1,3}})(?![\d٠-٩.,٫])"
+    rf"\s*(?P<u>م(?![ء-ي])|متر)?(?:\s*(?P<d2>{_BEARING})(?![ء-ي]))?")
+
+
+def street_from_prose(text) -> tuple[Optional[int], Optional[str]]:
+    hits = [m for m in _PROSE_STREET_RE.finditer(str(text or "")) if m["d1"] or m["u"] or m["d2"]]
+    if len(hits) != 1:
+        return None, None
+    m = hits[0]
+    return one_street_width(m["w"]), one_direction(" ".join(filter(None, (m["d1"], m["d2"]))))
+
+
+# «ترخيص اعلاني رقم : 7200485896», «ترخيص/ 7201080329» — the REGA ad licence stated in PROSE. Anchored
+# on «ترخيص» and one whole 10-digit number: a bare digit grab is the price trap the masar tests guard.
+_AD_LICENCE_RE = re.compile(r"ترخيص\s*(?:(?:ال)?[إا]علان(?:ي|ى)?\s*)?(?:رقم\s*)?[:：/]?\s*([\d٠-٩]{10})(?![\d٠-٩])")
+
+
+def ad_licence_from_prose(text) -> Optional[str]:
+    found = {m.group(1).translate(_TRANS) for m in _AD_LICENCE_RE.finditer(str(text or ""))}
+    return found.pop() if len(found) == 1 else None
+
+
 # ── Amenity + room phrasing shared by the small-platform parsers (2026-09-20) ────────────────────
 # The newly onboarded sites print their facts as prose or as one packed cell («المرافق: مصعد، مواقف»,
 # «3 غرف وصالة ومطبخ», "Furnished · Kitchen") rather than as one labelled field per fact. Each parser
@@ -701,7 +804,26 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
     """
     if not raw:
         return {}
-    t = _norm_ar(str(raw)).lower()
+    seen: dict[str, set[bool]] = {}
+    for clause in _CLAUSE_BREAK_RE.split(str(raw)):
+        for col, val in _amenities_in_clause(clause).items():
+            seen.setdefault(col, set()).add(val)
+    # Two clauses that disagree («مصعد، بدون مصعد») have not stated the fact: NULL, not line order.
+    return {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
+
+
+# A clause break ends a fact. «الشقة غير مؤثثة\nمطبخ مغلق» is two statements, and the «غير» of the
+# first must not reach the «مطبخ» of the second (bossbih, live 2026-09-20: kitchen came back False).
+_CLAUSE_BREAK_RE = re.compile(r"[\n\r،,.;؛|•▫▪+]+|\s-\s")
+
+# A negator counts only as its own word: `_norm_ar` folds «صغيرة» to «صغيره», whose letters ARE «غير»,
+# so «بركة صغيرة موقف خاص» read parking=False (moftah ids 30274/30247, 2026-09-20). It may abut the
+# token («unfurnished», «غيرمؤثث»), so the right edge is a non-word char OR the end of the window.
+_NEGATOR_RES = tuple(re.compile(rf"(?<!\w){re.escape(n.strip())}(?=\W|$)") for n in _NEGATORS)
+
+
+def _amenities_in_clause(raw: str) -> dict[str, bool]:
+    t = _norm_ar(raw).lower()
     out: dict[str, bool] = {}
     for col, tokens in _AMENITY_TOKENS.items():
         for tok in tokens:
@@ -714,7 +836,7 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
                 near = t[max(0, m.start() - 22):m.start()]
                 if any(_norm_ar(q) in near for q in _PROXIMITY):
                     break          # the NEIGHBOURHOOD has it, not this property — stay NULL
-                out[col] = not any(n.strip() and n.strip() in before for n in _NEGATORS)
+                out[col] = not any(r.search(before) for r in _NEGATOR_RES)
                 break
             if col in out:
                 break

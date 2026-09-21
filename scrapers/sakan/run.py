@@ -60,10 +60,12 @@ WHERE EACH FACT ACTUALLY LIVES
     page published are emitted (a _thumb that the HTML never showed is never guessed at).
   · The spec table («ملخص») is a flat label/value grid and is captured WHOLESALE into
     additional_info — نوع العقار الفرعي, عمر العقار, حالة التأثيث, عدد الطوابق, مساحة البناء,
-    رقم المخطط, واجهة العقار, وجود رهن, رقم الترخيص, boundary lengths, and ~35 more. Two of those
-    labels are promoted to real columns (عمر العقار → property_age via parse_property_age, which
-    already reads the spelled-out «سبع سنوات» = 7; حالة التأثيث → furnished) because the Advanced
-    Filter reads columns, not additional_info.
+    رقم المخطط, واجهة العقار, وجود رهن, رقم الترخيص, boundary lengths, and ~35 more. Some of those
+    labels are promoted to real columns because the Advanced Filter reads columns, not
+    additional_info: عمر العقار → property_age via normalize.exact_age (reads «سبع سنوات» = 7; the
+    open bound «اكثر من عشر سنوات» is UNKNOWN, not 10), حالة التأثيث → furnished, عرض الشارع →
+    street_width_m, واجهة العقار → direction, and the «✓ خدمة …» rows → electricity / water_supply /
+    sanitation / optical_fibers. The responsible employee's name and mobile are dropped (PDPL).
   · «رقم العقار الفرعي تجاري/سكني» («نوع العقار») is a LAND-USE classification, not our
     Residential/Commercial category. Category comes from normalize.category_for_type() only.
   · «رقم ترخيص الإعلان» is its own spec-table cell and is ALSO repeated as prose in the
@@ -88,11 +90,8 @@ MEASURED COVERAGE (random 300 of the 3,158, live, through the real parser)
       «طريب» (1), «محائل» (1). All five are honest resolver gaps, not parse failures; adding a
       catalogue alias belongs in the shared resolver, not in this scraper.
 
-SHARED HELPER WRITTEN LOCALLY
-  · scrapers/common/db.py has no upsert_sakan_*_batch pair (another engineer owns that file and
-    the migrations), so `_upsert_batch` below calls the existing generic db._wasalt_batch() with
-    this platform's table names. Nothing is reimplemented — it is the same batching, sanitising
-    and per-key-set grouping every sibling platform goes through.
+WRITES go through db.upsert_sakan_{residential,commercial}_batch; REMOVALS through prune_unseen
+with the direct-confirm oracle below (see LIVENESS).
 """
 from __future__ import annotations
 
@@ -112,6 +111,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
+from scrapers.common.pii import redact_capture  # noqa: E402
 
 BASE = "https://sa.sakan.co"
 SITEMAP = f"{BASE}/ar/pdpmap.xml"
@@ -190,6 +191,14 @@ _AGENCY_RE = re.compile(r'/ar/agency/(\d+)-([^"\'\s<>]+)')
 _AREA_NUM_RE = re.compile(r'([\d,.\u0660-\u0669]+)\s*m²')
 _FEATURES_BLOCK_RE = re.compile(r'details__aminities--2"[^>]*>(.*?)<div class="details__location', re.S)
 _FEATURE_RE = re.compile(r'<span class="fxs fxs--gray">([^<]+)</span>')
+# «✓ خدمة الكهرباء» rows: a green check beside a service name, no value span. The page only ever
+# prints the check (measured 2026-09-21: 110 rows over 30 pages, all green ✓), so each row is the
+# source affirming that service. They are NOT label/value spec pairs — the pair loop would marry the
+# name to the next section heading («مميزات العقار») — so they are read here and skipped there.
+_SERVICE_RE = re.compile(
+    r'<span style="color:\s*green[^"]*">\s*&#10003;\s*</span>\s*<span class="f14">\s*خدمة\s*([^<]+?)\s*</span>')
+_SERVICE_COL = {"الكهرباء": "electricity", "المياه": "water_supply", "الصرف الصحي": "sanitation",
+                "ألياف ضوئية": "optical_fibers"}
 _LICENCE_RE = re.compile(r'رقم\s*(?:ترخيص\s*الإعلان|الترخيص)\s*:?\s*([\d\u0660-\u0669]{6,})')
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
@@ -302,12 +311,15 @@ def parse_page(url: str, page: str) -> dict[str, Any]:
     specs: dict[str, str] = {}
     for chunk in page.split('<div class="tr">')[1:]:
         chunk = chunk[:1200]
+        if _SERVICE_RE.match(chunk.strip()):
+            continue
         lm, vm = _SPEC_LABEL_RE.search(chunk), _SPEC_VALUE_RE.search(chunk)
         if lm and vm:
             label, value = _text(lm.group(1)), _text(vm.group(1))
             if label and value and label not in specs:
                 specs[label] = value
     out["specs"] = specs
+    out["services"] = [_text(x) for x in _SERVICE_RE.findall(page)]
 
     # ── price + period, from the price block ONLY ──────────────────────────────────────────────
     out["price_label"] = out["price_shown"] = out["period_raw"] = None
@@ -381,6 +393,9 @@ def _amenities(p: dict[str, Any], specs: dict[str, str]) -> dict[str, bool]:
         "\n".join(x for x in (p.get("description"), specs.get("حالة التأثيث")) if x))
     chips = [_CHIP_REWRITE.get(c, c) for c in (p.get("features") or []) if c not in _CHIP_DROP]
     struct = normalize.amenities_from_text(", ".join(chips))
+    for svc in p.get("services") or []:            # «✓ خدمة …» rows: affirmative, structured
+        if svc in _SERVICE_COL:
+            struct[_SERVICE_COL[svc]] = True
     out = dict(prose)
     for k, v in struct.items():
         if k in out and out[k] != v:
@@ -481,7 +496,14 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "bedrooms": bedrooms,
         "bathrooms": normalize.to_int(p.get("bathrooms_raw")),
         "photo_urls": (p.get("photos") or [])[:20] or None,
-        "property_age": normalize.parse_property_age(specs.get("عمر العقار")),
+        "property_age": normalize.exact_age(specs.get("عمر العقار")),   # «اكثر من عشر سنوات» → NULL
+        # Labelled cells: «عرض الشارع: 15» → 15; «واجهة العقار: شمال» → شمال, «غير محدد» → NULL, and
+        # the cell's own diagonal «جنوب شرقي» (one option of the site's eight, ~3% live) → «جنوب شرق».
+        "street_width_m": normalize.one_street_width(specs.get("عرض الشارع")),
+        "direction": normalize.one_direction(specs.get("واجهة العقار"), diagonal=True),
+        # The REGA ad licence is a real column (listing_extra_attrs reads it); the card keeps reading
+        # additional_info.rega_ad_license_number below.
+        "license_number": p.get("licence"),
     }
     if deal == "Rent":
         # PERIOD = SOURCE. The token comes from the price block alone («/ شهري», «/ سنوي»); the
@@ -493,7 +515,9 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     else:
         row["price_total"] = price
 
-    row["additional_info"] = {k: v for k, v in {
+    # PDPL: the spec table names the responsible EMPLOYEE and their mobile («اسم الموظف المسؤول»,
+    # «هاتف الموظف المسؤول»), and additional_info is anon-readable — redact_capture drops those keys.
+    row["additional_info"] = redact_capture({k: v for k, v in {
         "type_ar": p.get("type_ar"),
         "city_ar_raw": city_raw if city_raw != city_ar else None,
         "features": p.get("features") or None,
@@ -508,7 +532,8 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "rega_ad_license_number": p.get("licence"),
         "photo_urls_full_res": p.get("photos_full") or None,
         "spec_table": specs or None,
-    }.items() if v is not None}
+        "services": p.get("services") or None,
+    }.items() if v is not None})
     return row, category, ""
 
 
@@ -534,11 +559,63 @@ def fetch_page(s: cc.Session, url: str, *, tries: int = 3) -> Optional[str]:
     return None
 
 
-def _upsert_batch(table: str, rows: list[dict[str, Any]]) -> None:
-    """db.py has no upsert_sakan_*_batch pair (that file is owned centrally), so this reuses the
-    generic batch path every sibling platform already goes through — same sanitisers, same
-    per-key-set grouping, same on_conflict=ad_number."""
-    db._wasalt_batch(table, rows)
+# ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
+# Absence from pdpmap.xml only SELECTS candidates; prune_unseen asks this oracle before it may
+# deactivate anything, through the shared law (scrapers/common/http_liveness.py), so a 403/429/5xx,
+# a timeout or an empty body can never read as a death.
+#
+# THE SITEMAP IS NOT THE CATALOGUE. Measured 2026-09-21 with all 3,160 sitemap urls in hand: of 40
+# ids sampled from the gaps inside the live range, 3 (99224, 94299, 93249) were LIVE «فعال»
+# listings the sitemap does not carry. An absence-only prune would retire exactly such rows; here
+# the probe self-heals them instead.
+# THIS SOURCE DOES NOT 404. The other 37 (and 99999999) answered HTTP 301 to the listings index,
+# /ar/properties/buy — a 533 KB page whose canonical link is /ar/properties/…, with no
+# SingleFamilyResidence payload. 30 of 30 interleaved live urls answered 200 with the payload and a
+# canonical /ar/property/details/<this id>-… (a stale slug 301s to the canonical one, which is
+# still this listing). So: landing on the properties index is GONE; this id's own page is LIVE
+# unless the source's own «الحالة» has left «فعال» or the crawl's own auction/transacted tokens fire
+# on its title/description; anything else has no opinion. Because the death is a page that is not
+# the listing, every removal is also gated by an in-run POSITIVE CONTROL (a row this same run mapped
+# must still be served as itself), and it fails CLOSED: no control, no removal.
+_CANONICAL = re.compile(r'<link rel="canonical" href="https://sa\.sakan\.co/ar/'
+                        r'(?:property/details/(\d+)-|properties/)')
+
+
+def _signal_for(ad_id: str):
+    def _signal(status, body, moved):
+        m = _CANONICAL.search(body) if status == 200 else None
+        if not m:
+            return None
+        if m.group(1) is None:
+            return "gone" if (moved and _LISTING_MARKER not in body) else None
+        if m.group(1) != ad_id or _LISTING_MARKER not in body:
+            return None
+        p = parse_page(f"{BASE}{DETAIL_PATH}{ad_id}-", body)
+        state = (p.get("status") or "").strip()
+        blob = " ".join(x for x in (p.get("title"), p.get("description")) if x)
+        if (state and state != STATUS_LIVE) or any(t in blob for t in _AUCTION_TOKENS + _TRANSACTED_TOKENS):
+            return "gone"
+        return "live"
+    return _signal
+
+
+def _make_verify_gone(control: Optional[dict]):
+    url_for = stored_listing_url(("sakan_residential_listings", "sakan_commercial_listings"))
+
+    def probe(ad_number: str, url_for=url_for, canary=None) -> tuple[str, str]:
+        ad_id = ad_number[len(PREFIX):]
+        if not ad_id.isdigit():
+            return "unknown", f"{ad_number!r} is not a {PREFIX}<id> ad number"
+        return LivenessProbe(platform="sakan", signal=_signal_for(ad_id), session=session,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"], url_for=lambda _ad: control["listing_url"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def main() -> int:
@@ -591,20 +668,32 @@ def main() -> int:
                       f"pt={r0.get('price_total')} pa={r0.get('price_annual')} "
                       f"rp={r0.get('rent_period')} ph={len(r0.get('photo_urls') or [])}")
             return 0
-        if res:
-            _upsert_batch("sakan_residential_listings", res)
-        if com:
-            _upsert_batch("sakan_commercial_listings", com)
+        db.upsert_sakan_residential_batch(res)
+        db.upsert_sakan_commercial_batch(com)
         superseded = db.retire_superseded_siblings(
             res_table="sakan_residential_listings", com_table="sakan_commercial_listings",
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+        # PRUNE — only after a COMPLETE enumeration (a --type run holds the other table's seen-set
+        # empty by construction), and only with the direct confirm above. prune_unseen's own
+        # breakers (0 seen, >30% vanished, <80% re-seen) sit on top of that.
+        pruned = 0
+        if args.type == "all":
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in (("sakan_residential_listings", res),
+                              ("sakan_commercial_listings", com)):
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if n < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += n
         # Pass the tally through even on a healthy run: an empty run must say WHY in the database.
         healthy = db.end_run(run_id, ok=True, rows_seen=len(urls),
                              rows_upserted=len(res) + len(com),
-                             notes=notes[:300] or None,
+                             notes=f"pruned={pruned} {notes}"[:300],
                              check_tables=["sakan_residential_listings",
                                            "sakan_commercial_listings"])
         if not healthy:

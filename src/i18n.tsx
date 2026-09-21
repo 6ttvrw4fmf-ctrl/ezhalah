@@ -950,6 +950,19 @@ const AR: Record<string, string> = {
   'Maqam Al Wisam Real Estate':          'مقام الوسام العقارية',
   'CompoundIn':                          'كومباوند إن',
   'Waslna Real Estate':                  'وصلنا',
+  // onboarded 2026-09-21 — each name read off the site's OWN homepage (fetched 2026-09-21). db `source`
+  // (the join key on every stored row) is unchanged; only the DISPLAY name comes from here.
+  'Al Sidra Real Estate':                'السدرة العقارية',                        // official (alsidra.com.sa <title> «شركة عقارية سعودية | السدرة العقارية | Alsidra»)
+  'Moftah Al Aqar':                      'مفتاح العقار',                           // official (moftah-aleaqar.com og:site_name «مفتاح العقار | افضل وسيط عقاري في السعودية»; meta description «مكتب مفتاح العقار»)
+  'Masar Al Mustaqbal Real Estate':      'مسار المستقبل للتسويق العقاري',          // official (masaraqarat.com <title> + logo alt «مسار المستقبل للتسويق العقاري»)
+  'Menassat Real Estate':                'شركة منصات العقارية',                    // official (gomenassat.com og:site_name + application-name + footer «شركة منصات العقارية»)
+  'Sakan':                               'سكن',                                    // official (sa.sakan.co og:site_name «سكن», heading «سكن | منصتك العقارية»)
+  'Bossbih Real Estate Office':          'مكتب بوصبيح العقاري',                    // official (bossbihoffice.com.sa <title> + og:site_name «مكتب بوصبيح العقاري»)
+  'Al Shawaf Real Estate Office':        'مكتب الشواف العقاري',                    // official (alshawaf.com.sa <title> «العقارات | مكتب الشواف العقاري» + footer)
+  'Ibrahim Alqarawi Real Estate Investments': 'مكتب إبراهيم القرعاوي للإستثمارات العقارية', // official (ialqarawi.com <title>; the office itself is branded with this name)
+  'Al Jassim Real Estate Services':      'مكتب الجاسم للخدمات العقارية',           // official (aljassimaqar.com <title> + og:site_name «مكتب الجاسم للخدمات العقارية»)
+  'Almotmkenah Real Estate':             'المتمكنة للعقارات',                      // official (almotmkenah.com <title> + og:site_name «المتمكنة للعقارات»)
+  'Nufouth Development Real Estate':     'نفوذ التطوير للعقارات وإدارة الأملاك',  // official (nufouth.com page body «نفوذ التطوير للعقارات وإدارة الأملاك»; <title> spells it «وادارة»)
   'Akariyoun':                         'عقاريون',                  // official (akariyoun.sa footer «عقاريون ، جميع الحقوق محفوظة» + tagline «عقاريون إختيارك الاول»; the site's own <title> uses the Latin «Akariyoun»)
   'Awal United for Real Estate':       'أوال المتحدة العقارية', // official (their X @awaalun: «مؤسسة أوال المتحدة العقارية»)
   'Al Khaas':                          'الخاص للاستثمار العقاري',

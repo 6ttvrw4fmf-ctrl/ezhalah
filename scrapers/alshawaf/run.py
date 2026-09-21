@@ -94,6 +94,7 @@ from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     find_district_in_text, norm_district_tok, to_catalog,
 )
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
 BASE = "https://alshawaf.com.sa"
@@ -203,6 +204,10 @@ _WORD_NUM: tuple[tuple[str, str], ...] = (
     ("ستة", "6"), ("ست ", "6 "), ("سبعة", "7"), ("سبع", "7"), ("ثمانية", "8"), ("ثماني", "8"),
     ("ثمان", "8"), ("تسعة", "9"), ("تسع", "9"), ("عشرة", "10"), ("عشر", "10"),
 )
+# A closed deal («تم البيع/الإيجار…», «مباع», «محجوز») or an auction. ONE pattern, read by map_listing
+# (skip) and by the removal oracle (_verify_gone), so the two can never disagree about «closed».
+_CLOSED = re.compile(r"مزاد|تم\s*(?:ال)?(?:بيع|إيجار|ايجار|تأجير|تاجير)|مباع|محجوز")
+
 _ORDINAL_FLOOR: tuple[tuple[str, int], ...] = (
     ("ارضي", 0), ("أرضي", 0), ("الاول", 1), ("الأول", 1), ("الثاني", 2), ("الثالث", 3),
     ("الرابع", 4), ("الخامس", 5), ("السادس", 6), ("السابع", 7), ("الثامن", 8), ("التاسع", 9),
@@ -290,26 +295,6 @@ def session() -> cc.Session:
     s = cc.Session(impersonate="chrome", timeout=40)
     s.headers.update({"Accept-Language": "ar,en;q=0.7"})
     return s
-
-
-def _upsert(table: str, rows: list[dict]) -> None:
-    """Batch upsert through the shared writer.
-
-    `db.upsert_alshawaf_{residential,commercial}_batch` do not exist yet — the platform's tables,
-    registry row and those two one-line wrappers are added centrally, and this onboarding pass is
-    explicitly not allowed to touch scrapers/common/db.py. So the named wrapper is PREFERRED the
-    moment it appears, and until then the same `db._wasalt_batch` it would call is used directly:
-    every guard that protects a write (unknown-must-not-overwrite-known, the per-key-set upsert
-    grouping, PDPL redaction, the placeholder-location and unusable-URL rejections, raw-capture) runs
-    either way, because they all live inside that one function. No write path is bypassed.
-    """
-    if not rows:
-        return
-    named = getattr(db, f"upsert_{PLATFORM}_{'residential' if 'residential' in table else 'commercial'}_batch", None)
-    if named is not None:
-        named(rows)
-        return
-    db._wasalt_batch(table, rows)
 
 
 def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
@@ -662,7 +647,7 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     sold_blob = f"{title_text} {fields.get('العقار', '')} {ix['capture']['title_cell']}"
     if "مزاد" in sold_blob:
         return None, "residential", "auction"
-    if re.search(r"تم\s*(?:ال)?(?:بيع|إيجار|ايجار|تأجير|تاجير)|مباع|محجوز", sold_blob):
+    if _CLOSED.search(sold_blob):             # the removal oracle reads this same pattern
         return None, "residential", "closed_deal"
 
     property_type, type_ar, tsnyf = _property_type(ix["title_lines"])
@@ -740,8 +725,10 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         # that said nothing never becomes a False.
         **N.amenities_from_text(_amenity_text(description)),
         "property_type": property_type,
-        "type_ar": type_ar,
         "transaction_type": transaction_type,
+        # «شقة عوائل» / «شقة عزاب» is the source's own tenant category; the column accepts exactly
+        # these two words (sync_search_listings_ar). Both or neither stated → NULL, never a guess.
+        "tenant_category": _tenant_category(type_ar),
         "city": N.map_city(city_ar) if city_ar else None,
         "city_ar": city_ar,
         "city_id": city_id,
@@ -753,7 +740,7 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         "bathrooms": rooms.get("bathrooms"),
         "halls": rooms.get("halls"),
         # AF columns the source publishes as its own labelled facts.
-        "property_age": N.parse_property_age(fields.get("العمر") or ix["age_raw"]),
+        "property_age": N.exact_age(fields.get("العمر") or ix["age_raw"]),   # «40+»/«فوق 30» → NULL
         "direction": direction,
         "street_width_m": street_w,
         "floor_number": _floor_number(fields.get("الدور")),
@@ -779,6 +766,7 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
             "price_basis_from": basis_from,
             "price_amount_raw": p["raw"],
             "rent_period_stated": False if transaction_type == "Rent" and not rent_period else None,
+            "type_ar": type_ar,                # the source's own type word (no such column)
             "title_qualifier": tsnyf,          # the source's own تصنيف
             "plot_reference": ix["plot"],       # «رقم 544 / د», «بلك 38»
             "dimensions": fields.get("الحدود والأطوال") or ix["dims_raw"],
@@ -789,11 +777,6 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
             "tarkeez_raw": fields.get("التركيز"),
             "rooms_raw": fields.get("الغرف"),
             "floor_raw": fields.get("الدور"),
-            # «شقة عوائل» / «شقة عزاب» IS the source stating a tenant category, but the
-            # tenant_category column's accepted vocabulary is not established anywhere in this repo,
-            # so the source's own word is preserved here rather than guessed into the column.
-            "tenant_category_raw": ("عوائل" if "عوائل" in (type_ar or "")
-                                    else ("عزاب" if "عزاب" in (type_ar or "") else None)),
             "lat": detail.get("lat"),
             "lng": detail.get("lng"),
             "bump_date": ix["bump_date"],        # a REFRESH date, not created_at
@@ -810,6 +793,11 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         }),
     }
     return row, category, ""
+
+
+def _tenant_category(type_ar: str | None) -> str | None:
+    said = [w for w in ("عوائل", "عزاب") if w in (type_ar or "")]
+    return said[0] if len(said) == 1 else None
 
 
 # ── crawl ───────────────────────────────────────────────────────────────────────────────────────
@@ -845,6 +833,46 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
     return res, com, stats["seen"], stats
 
 
+# ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
+# Absence from /table only SELECTS candidates; prune_unseen asks this oracle before it may
+# deactivate anything, through the shared law (scrapers/common/http_liveness.py), so a 403/429/5xx,
+# a timeout or an empty body can never read as a death.
+#
+# MEASURED 2026-09-21 with the full 987-row index in hand: the office DELETES a node — 4,569 nids
+# inside the live range (16718-22273) are not in the catalogue, and 31 of 31 sampled (plus
+# /99999999) answered HTTP 404, the themed 19 KB Drupal 404 with no node on it. 12 of 12
+# interleaved live nids answered 200 and passed parse_detail's own proof (the article's node id AND
+# the node block's wa.me link both name this nid). A themed 404 is still a parseable page, so the
+# STATUS decides a death and parse_detail's proof decides a life.
+# An ad closed IN PLACE is GONE too, judged by the crawl's own words («مزاد», «تم البيع/الإيجار…»,
+# «مباع», «محجوز») on the node's own h1 and «العقار» line — never the related-listings table below
+# it. None carry one today (measured 0/987); without the limb a still-served «تم البيع» page would
+# read as alive and self-heal a row the crawl refuses to publish.
+_H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S)
+
+
+def _signal_for(nid: str):
+    def _signal(status, body, _moved):
+        if status == 404:
+            return "gone"
+        if status == 200:
+            d = parse_detail(body, nid)
+            if d:
+                h1 = _H1.search(body)
+                own = f"{_flat(h1.group(1)) if h1 else ''} {d['fields'].get('العقار', '')}"
+                return "gone" if _CLOSED.search(own) else "live"
+        return None
+    return _signal
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    nid = ad_number[len(PREFIX):]
+    if not nid.isdigit():
+        return "unknown", f"{ad_number!r} is not a {PREFIX}<nid> ad number"
+    return LivenessProbe(platform=PLATFORM, signal=_signal_for(nid), session=session,
+                         url_for=lambda _ad: f"{BASE}/{nid}").verify_gone(ad_number)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -871,8 +899,8 @@ def main() -> int:
     try:
         res, com, seen, stats = crawl(limit=args.limit)
         res, com = _split(res, com)
-        _upsert("alshawaf_residential_listings", res)
-        _upsert("alshawaf_commercial_listings", com)
+        db.upsert_alshawaf_residential_batch(res)
+        db.upsert_alshawaf_commercial_batch(com)
         if args.limit:
             print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial "
                   f"upserted (no prune) — {stats}")
@@ -887,7 +915,8 @@ def main() -> int:
         pruned = 0
         for tbl, rows in (("alshawaf_residential_listings", res),
                           ("alshawaf_commercial_listings", com)):
-            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE)
+            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                 verify_gone=_verify_gone)
             if nn < 0:
                 print(f"⚠ {tbl}: prune guard tripped — kept existing active rows")
             else:

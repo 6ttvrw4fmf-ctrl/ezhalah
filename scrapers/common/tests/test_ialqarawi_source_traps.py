@@ -329,3 +329,19 @@ def test_the_index_only_counts_the_results_section():
             return _Page()
 
     assert len(R.fetch_index(_S(), deal_types=(1,))) == 1
+
+
+def test_age_and_a_single_facade_are_read_only_from_their_anchored_phrases():
+    row, _, _ = mapped(details="فيلا العمر ٤ سنوات واجهة شرقية")                  # QRW567 / QRW3090
+    assert (row["property_age"], row["direction"]) == (4, "شرق")
+    row, _, _ = mapped(details="العمر يتجاوز 30 سنه واجهة شرقية وواجهة غربية ضمان 25 سنه")
+    assert row.get("property_age") is None and row.get("direction") is None
+    row, _, _ = mapped(details="تفتح على شارع عرض 13.5م جنوبأ")
+    assert row.get("street_width_m") is None, "a fraction is not truncated into the smallint"
+
+
+def test_a_labelled_per_metre_figure_has_no_plausibility_ceiling():
+    """Owner rule: no plausibility gate on a source-published price. Only the documented unit
+    ambiguity («1 حد المتر» may be «1 [ألف]») abstains; a large labelled rate is stored as given."""
+    assert R.parse_money("250000 حد المتر") == (None, 250000, "")
+    assert R.parse_money("1 حد المتر") == (None, None, "ppm_unit_unstated")

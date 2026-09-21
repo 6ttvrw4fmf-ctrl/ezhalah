@@ -404,6 +404,9 @@ def test_city_and_district_reach_the_row_in_arabic():
     assert row["ad_number"].startswith("NFZN4990")
     # The REGA advertising licence the source publishes on all 324 units is kept.
     assert row["additional_info"]["ad_license_no"] == "7200762568 "
+    # …and reaches the real column listing_extra_attrs reads, plus the card's own key.
+    assert row["license_number"] == "7200762568"
+    assert row["additional_info"]["rega_ad_license_number"] == "7200762568"
 
 
 
@@ -421,8 +424,23 @@ def test_the_skip_tally_reaches_end_run_so_an_empty_run_says_why(monkeypatch):
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
     monkeypatch.setattr(R.db, "_wasalt_batch", lambda t, rows: None)
     monkeypatch.setattr(R.db, "retire_superseded_siblings", lambda **k: 0)
+    monkeypatch.setattr(R.db, "prune_unseen", lambda *a, **k: 0)
     monkeypatch.setattr(R.db, "end_run", lambda run_id, **k: calls.update(k) or True)
 
     assert R.main() == 0
     assert calls["ok"] is True and calls["rows_upserted"] == 1
     assert "type_unmappedx1" in calls["notes"] and "no_active_adsx1" in calls["notes"]
+
+
+def test_the_apis_labelled_facts_reach_their_af_columns():
+    for prop, frontage, floor, want in (
+        ({"street_width": "15.00", "age_property": 10}, ["شمال"], "الأرضي", (15, "شمال", 10, 0)),
+        ({"street_width": "25.00-15", "age_property": None}, ["شمال", "غرب"], "الفيلا كامله",
+         (None, None, None, None)),                               # two streets / not a floor
+        ({"street_width": "13.5"}, ["جنوب شرقي"], "الثاني", (None, "جنوب شرق", None, 2)),
+    ):
+        msg = {**N5011, "property": {**N5011["property"], **prop}, "frontage": frontage}
+        row, _ = _row(msg, N5011_AD, {**N5011_U, "unit_floor": floor})
+        got = (row["street_width_m"], row["direction"], row["property_age"], row["floor_number"])
+        assert got == want, (prop, frontage, floor)
+        assert row["additional_info"].get("lng") == msg["property"].get("long")

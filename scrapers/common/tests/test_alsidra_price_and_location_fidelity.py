@@ -603,3 +603,23 @@ def test_a_per_metre_figure_with_no_area_publishes_no_price():
 def test_a_region_only_ad_is_skipped_by_map_listing_itself():
     row, _, why = _plain(1, "الموقع: مخطط العدل السليمي.", "أرض ركنية بمخطط 1532")
     assert row is None and why == "city_not_in_catalog"
+
+
+# ── Advanced Filter columns (2026-09-21): land answers ONLY street_width + direction ───────────
+def test_the_labelled_facade_line_fills_street_width_and_direction_once_or_not_at_all():
+    row, _, why = _plain(21243, BODY_21243, TITLE_21243, meta_price=1100)
+    assert why == "" and (row["street_width_m"], row["direction"]) == (16, "غرب")   # SDR21243
+    two, _, _ = _plain(21229, "الواجهة والشوارع: تقع على شارعين بعرض 30م × 20م (واجهة شمالية غربية)",
+                       "ارض سكنية للبيع", meta_price=1100, city=(129,))
+    assert two is not None, _
+    assert (two["street_width_m"], two["direction"]) == (None, None), "two streets / two facades"
+    prose, _, _ = _plain(20404, "مبنى على شارع رئيسي يربط بين أحياء جنوب الرياض بعرض 30 متر",
+                         "ارض سكنية للبيع", meta_price=1100, city=(129,))
+    assert (prose["street_width_m"], prose["direction"]) == (None, None), "unlabelled prose is never read"
+
+
+def test_named_utility_features_are_true_and_absent_ones_stay_null():
+    row, _, _ = _plain(21243, BODY_21243, TITLE_21243, meta_price=1100, feature=(118, 119, 150))
+    assert (row["electricity"], row["water_supply"], row["sanitation"]) == (True, True, True)
+    bare, _, _ = _plain(21243, BODY_21243, TITLE_21243, meta_price=1100)
+    assert not {"electricity", "water_supply", "sanitation"} & set(bare), "silence is NULL, never False"

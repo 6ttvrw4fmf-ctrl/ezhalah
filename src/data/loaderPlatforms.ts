@@ -108,6 +108,21 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'Maqam Al Wisam',        i18nKey: 'Maqam Al Wisam Real Estate',              logo: require('../../assets/images/fahadalshahri.png') },
   { name: 'CompoundIn',            i18nKey: 'CompoundIn',                              logo: require('../../assets/images/compoundin.png') },
   { name: 'Waslna',                i18nKey: 'Waslna Real Estate',                      logo: require('../../assets/images/wslnaa.png') },
+  // ── onboarded 2026-09-21 ──────────────────────────────────────────────────────────────────────
+  // All eleven wear the SAME neutral placeholder until the owner supplies their real marks — never
+  // another company's logo. `name` is the stored db `source` value (the scraper's SOURCE constant),
+  // the same convention as 'Al Khaas' / 'KSA Aqar' / 'Rawasi Dark' above.
+  { name: 'Al Sidra', i18nKey: 'Al Sidra Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Moftah', i18nKey: 'Moftah Al Aqar', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'مسار المستقبل', i18nKey: 'Masar Al Mustaqbal Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'منصات', i18nKey: 'Menassat Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Sakan Saudi', i18nKey: 'Sakan', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'مكتب بوصبيح', i18nKey: 'Bossbih Real Estate Office', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Al Shawaf', i18nKey: 'Al Shawaf Real Estate Office', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Ibrahim Alqarawi', i18nKey: 'Ibrahim Alqarawi Real Estate Investments', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Al Jassim', i18nKey: 'Al Jassim Real Estate Services', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Almotmkenah', i18nKey: 'Almotmkenah Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'نفوذ', i18nKey: 'Nufouth Development Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
 ];
 
 // Ordered SPECIFIC-first token → platform name map, mirroring ResultCard's SourceBadge matching so a
@@ -171,6 +186,32 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['صادق التاجر', 'Sadiq Eltajer'],
   ['toor', 'Toor'],
   ['توور', 'Toor'],
+  // onboarded 2026-09-21. Each covers the slug (what loader_active_platforms_ar() returns), the
+  // table name and the stored source. Bare «سكن» is NOT a token — «سكني» means residential.
+  ['alsidra', 'Al Sidra'],
+  ['al sidra', 'Al Sidra'],
+  ['السدرة', 'Al Sidra'],
+  ['moftah', 'Moftah'],
+  ['مفتاح العقار', 'Moftah'],
+  ['masar', 'مسار المستقبل'],
+  ['مسار المستقبل', 'مسار المستقبل'],
+  ['menassat', 'منصات'],
+  ['منصات', 'منصات'],
+  ['sakan', 'Sakan Saudi'],
+  ['bossbih', 'مكتب بوصبيح'],
+  ['بوصبيح', 'مكتب بوصبيح'],
+  ['alshawaf', 'Al Shawaf'],
+  ['al shawaf', 'Al Shawaf'],
+  ['الشواف', 'Al Shawaf'],
+  ['alqarawi', 'Ibrahim Alqarawi'],
+  ['القرعاوي', 'Ibrahim Alqarawi'],
+  ['aljassim', 'Al Jassim'],
+  ['al jassim', 'Al Jassim'],
+  ['الجاسم', 'Al Jassim'],
+  ['almotmkenah', 'Almotmkenah'],
+  ['المتمكنة', 'Almotmkenah'],
+  ['nufouth', 'نفوذ'],
+  ['نفوذ', 'نفوذ'],
   ['aqar', 'Aqar'],
 ];
 

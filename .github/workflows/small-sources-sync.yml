@@ -105,6 +105,39 @@ jobs:
           - { source: compoundin,    cmd: "python -m scrapers.compoundin.run --type all", tmo: 45 }
           # wslnaa makes one tRPC call per slug (59) on top of the sitemap fetch.
           - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30 }
+          # ── onboarded 2026-09-21: eleven platforms ─────────────────────────────────────────────
+          # Each is its own matrix job, so one source down never hides another and each keeps its
+          # own run ledger. None reads WASALT_PROXY_URL (checked) — no `proxy:` flag. `tmo` is sized
+          # from each scraper's MEASURED cost (pages × (pause + response), response timed live on
+          # 2026-09-21) with >=2x headroom, because a job killed at its limit never reaches
+          # prune_unseen() or end_run() and leaves a dangling scrape_runs row (the dealapp lesson).
+          # The first scrape of each is a manual dispatch with `source: <slug>` (the input above).
+          #   API / REST sources — a handful of calls each:
+          - { source: alsidra,     cmd: "python -m scrapers.alsidra.run --type all", tmo: 20 }
+          - { source: moftah,      cmd: "python -m scrapers.moftah.run --type all", tmo: 20 }
+          - { source: masar,       cmd: "python -m scrapers.masar.run --type all", tmo: 20 }
+          #   aljassim: ~90 detail pages behind an hcdn challenge it solves in-process.
+          - { source: aljassim,    cmd: "python -m scrapers.aljassim.run --type all", tmo: 20 }
+          #   gomenassat: one POST for 256 offers, then ~150 detail pages (transacted ones skipped).
+          - { source: gomenassat,  cmd: "python -m scrapers.gomenassat.run --type all", tmo: 20 }
+          #   nufouth: 4 index pages + one API record per property (~270).
+          - { source: nufouth,     cmd: "python -m scrapers.nufouth.run --type all", tmo: 30 }
+          #   almotmkenah: all 361 index ads are fetched (the ~339 archived ones ARE its removal
+          #   signal), 0.2s apart.
+          - { source: almotmkenah, cmd: "python -m scrapers.almotmkenah.run --type all", tmo: 30 }
+          #   ialqarawi: 66 whole-category pages, then ~2,641 detail pages over 8 worker threads
+          #   (~0.6s each → ~4 min).
+          - { source: ialqarawi,   cmd: "python -m scrapers.ialqarawi.run --type all", tmo: 45 }
+          #   bossbih: 10 index pages + ~1,485 detail pages, sequential, 0.25s pause + ~0.2s
+          #   response → ~11 min.
+          - { source: bossbih,     cmd: "python -m scrapers.bossbih.run --type all", tmo: 60 }
+          #   alshawaf: 26 index pages + ~987 detail pages, sequential, 0.3s pause + ~0.7s
+          #   response → ~17 min.
+          - { source: alshawaf,    cmd: "python -m scrapers.alshawaf.run --type all", tmo: 60 }
+          #   sakan: ~3,160 detail pages (~500 KB each), sequential, 0.35s pause + ~0.7s response →
+          #   ~56 min from a nearby egress; a US runner is slower per page, so 180 keeps >=2x
+          #   headroom over a realistic ~90 min.
+          - { source: sakan,       cmd: "python -m scrapers.sakan.run --type all", tmo: 180 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }

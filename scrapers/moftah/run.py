@@ -109,6 +109,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import re
 import sys
 from pathlib import Path
@@ -119,6 +120,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     city_ar_for, find_district_in_text, to_catalog)
 
@@ -171,7 +173,15 @@ _SPEC_TYPE = "نوع العقار"
 _SPEC_OFFER = "نوع العرض"
 _SPEC_AGE = "عمر العقار"
 _SPEC_HALLS = "الصالات"
-_LICENCE_LABELS = ("رقم الترخيص", "رخصة الاعلان", "رقم الإعلان", "رقم بيوت المرجعي")
+_LICENCE_LABELS = ("رقم الترخيص", "رخصة الاعلان", "رقم الإعلان")
+# A Bayut listing reference, NOT a REGA licence — kept as its own fact, never as «licence».
+_SPEC_BAYUT_REF = "رقم بيوت المرجعي"
+# Utility rows of the spec table («الكهرباء: متوفر», «الماء: توفر الماء», «صرف صحي: متوفر»). A row
+# that says so is the source stating the service (True); «غير متوفر» is a stated no (False); a
+# missing row stays NULL. «عداد كهرباء مستقل» names the separate meter only.
+_UTILITY_SPECS = {"الكهرباء": "electricity", "مياه": "water_supply", "الماء": "water_supply",
+                  "صرف صحي": "sanitation", "الصرف صحي": "sanitation"}
+_TENANT_SPEC = "نوع السكن"
 
 
 def fold(s: Optional[str]) -> Optional[str]:
@@ -239,7 +249,7 @@ def spec_amenity_blob(sp: dict[str, str]) -> str:
     """
     parts = []
     for label, val in sp.items():
-        if label in (_SPEC_AREA, _SPEC_PPM, _SPEC_AGE, _SPEC_HALLS) or label in _LICENCE_LABELS:
+        if label in (_SPEC_AREA, _SPEC_PPM, _SPEC_AGE, _SPEC_HALLS, _SPEC_BAYUT_REF) or label in _LICENCE_LABELS:
             continue                              # numbers and dates are not amenity prose
         parts.append(f"{val} {label}")
         # …and ALSO name-first when the value carries no negator, because some pairs only form the
@@ -286,6 +296,19 @@ def amenities(text: Optional[str]) -> dict[str, bool]:
                 break
         if not real:
             del out[col]
+    return out
+
+
+def utilities(sp: dict[str, str]) -> dict[str, bool]:
+    out: dict[str, bool] = {}
+    for label, col in _UTILITY_SPECS.items():
+        vals = [v.strip() for v in (sp.get(label) or "").split("،") if v.strip()]
+        if any(n in v for v in vals for n in _NEGATORS_AR):
+            out[col] = False
+        elif any(v == "متوفر" or v.startswith("توفر") for v in vals):
+            out.setdefault(col, True)
+    if "عداد كهرباء مستقل" in (sp.get("الكهرباء") or ""):
+        out["separate_electricity_meter"] = True
     return out
 
 
@@ -431,6 +454,15 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         # never mentioned is simply absent here and stays NULL.
         **amenities(" ".join(x for x in (desc, short) if x)),
         **amenities(spec_amenity_blob(sp)),
+        **utilities(sp),
+        # Land is asked ONLY street_width + direction: «عرض الشارع: 15م» → 15; «الواجهة: جنوب» →
+        # جنوب; the single term «شمال شرقي» (MFT30066) is the diagonal → «شمال شرق», while two Woo
+        # terms («جنوب، شرقي» — two streets) and «3 شوارع» stay NULL.
+        "street_width_m": normalize.one_street_width(sp.get("عرض الشارع")),
+        "direction": normalize.one_direction(sp.get("الواجهة"), diagonal=True),
+        "license_number": next((sp[k] for k in ("رقم الترخيص", "رخصة الاعلان") if sp.get(k)), None),
+        # «نوع السكن: عوائل» — the column accepts exactly عوائل/عزاب (sync_search_listings_ar).
+        "tenant_category": (sp.get(_TENANT_SPEC) if sp.get(_TENANT_SPEC) in ("عوائل", "عزاب") else None),
         "property_type": property_type,
         # Written as a total expression, not the bare `deal`: a transaction_type that is not provably
         # Buy/Rent reaches the index as NULL and a null deal is quarantined out of search entirely.
@@ -454,7 +486,7 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
     halls = num(sp.get(_SPEC_HALLS))
     if halls is not None:
         row["halls"] = halls
-    age = normalize.parse_property_age(sp.get(_SPEC_AGE))
+    age = normalize.exact_age(sp.get(_SPEC_AGE))           # «أكثر من 10 سنوات» → NULL
     if age is not None:
         row["property_age"] = age
 
@@ -505,6 +537,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "per_metre_rate_published": bool(ppm),
         "rent_period_published": bool(period) if deal == "Rent" else None,
         "licence": next((sp[k] for k in _LICENCE_LABELS if sp.get(k)), None),
+        "rega_ad_license_number": next((sp[k] for k in ("رقم الترخيص", "رخصة الاعلان") if sp.get(k)), None),
+        "bayut_reference": sp.get(_SPEC_BAYUT_REF),
         "street_width": sp.get("عرض الشارع"),
         "facade": sp.get("الواجهة"),
         "specs": sp or None,
@@ -532,6 +566,46 @@ def fetch_products(s: cc.Session, limit: int = 0) -> list[dict]:
             break
         page += 1
     return out
+
+
+# ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
+# Absence from the Store API listing only SELECTS candidates; prune_unseen asks this oracle before
+# it may deactivate anything, through the shared law (scrapers/common/http_liveness.py), so a
+# 403 (this CDN's fingerprint interstitial), a 429/5xx, a timeout or an empty body can never read
+# as a death. The probe re-reads the product's OWN Store API record, on the TLS profile session()
+# negotiates. MEASURED 2026-09-21: a live product answers 200 with its own id; an id the store does
+# not publish answers HTTP 404 with code `woocommerce_rest_product_invalid_id` (193 bytes). So:
+#   · 404 carrying woocommerce_rest_product_invalid_id                      → GONE
+#   · 200 for THIS id whose own words carry the crawl's _AUCTION_RE/_CLOSED_RE (the same haystack
+#     map_listing builds: name, description, short description, spec values) → GONE
+#   · 200 for this id otherwise                                            → LIVE
+#   · anything else                                                        → no opinion
+def _signal_for(pid: int):
+    def _signal(status, body, _moved):
+        try:
+            p = json.loads(body)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(p, dict):
+            return None
+        if status == 404 and p.get("code") == "woocommerce_rest_product_invalid_id":
+            return "gone"
+        if status != 200 or p.get("id") != pid:
+            return None
+        haystack = " ".join(x for x in (fold(p.get("name")), visible_text(p.get("description")),
+                                        visible_text(p.get("short_description")),
+                                        " ".join(specs(p).values())) if x)
+        return "gone" if (_AUCTION_RE.search(haystack) or _CLOSED_RE.search(haystack)) else "live"
+    return _signal
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    pid = ad_number[len(PREFIX):]
+    if not pid.isdigit():
+        return "unknown", f"{ad_number!r} is not a {PREFIX}<product id> ad number"
+    return LivenessProbe(platform="moftah", signal=_signal_for(int(pid)), session=session,
+                         url_for=lambda _ad: f"{BASE}/wp-json/wc/store/v1/products/{pid}"
+                         ).verify_gone(ad_number)
 
 
 def main() -> int:
@@ -575,24 +649,30 @@ def main() -> int:
                       f"pa={r0.get('price_annual')} rp={r0.get('rent_period')} "
                       f"ph={len(r0.get('photo_urls') or [])}")
             return 0
-        # db.py has no upsert_moftah_* wrapper and this onboarding may not edit shared files, so the
-        # shared batch writer is addressed directly — it is the same function every wrapper calls
-        # (all of _sanitize_price, _unknown_must_not_overwrite_known, _ensure_capture and the
-        # placeholder/URL rejections still run). A one-line wrapper pair belongs in db.py.
-        if res:
-            db._wasalt_batch(RES_TABLE, res)
-        if com:
-            db._wasalt_batch(COM_TABLE, com)
+        db.upsert_moftah_residential_batch(res)
+        db.upsert_moftah_commercial_batch(com)
         superseded = db.retire_superseded_siblings(
             res_table=RES_TABLE, com_table=COM_TABLE,
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+        # PRUNE — only after a COMPLETE enumeration (a --type run holds the other table's seen-set
+        # empty by construction; --limit never reaches here), and only with the direct confirm
+        # above. prune_unseen's own breakers (0 seen, >30% vanished, <80% re-seen) sit on top.
+        pruned = 0
+        if args.type == "all":
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=_verify_gone)
+                if n < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += n
         # An empty or thin run must say WHY in the ledger, not just report a count.
         healthy = db.end_run(run_id, ok=True, rows_seen=len(products),
                              rows_upserted=len(res) + len(com),
-                             notes=(f"skipped: {notes}" if notes else None),
+                             notes=f"pruned={pruned} skipped: {notes or 'none'}"[:300],
                              check_tables=["moftah_residential_listings",
                                            "moftah_commercial_listings"])
         if not healthy:

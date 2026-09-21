@@ -94,17 +94,14 @@ FIELDS WORTH NAMING (the traps)
   contain SPACES and Arabic and must be percent-encoded (verified: the quoted URL returns 200
   image/jpeg). Photos measured on 324/324 units, median 8.
 
-NOT WRITTEN HERE, ON PURPOSE: db.py has no `upsert_nufouth_*_batch` wrapper and this scraper may
-not edit it, so main() calls db._wasalt_batch() — the shared batched upsert every platform's
-one-line wrapper delegates to — with the two nufouth table names, keeping every guard
-(_sanitize_price, _unknown_must_not_overwrite_known, _reject_unusable_listing_url, the
-per-key-set grouping). The central engineer still needs to create the two tables and add the two
-thin wrappers; see the handoff note in the report.
+WRITES go through db.upsert_nufouth_{residential,commercial}_batch; REMOVALS through prune_unseen
+with the record-level oracle above main() (see LIVENESS).
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import sys
 from pathlib import Path
@@ -117,6 +114,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 
 BASE = "https://nufouth.com"
 SOURCE = "نفوذ"
@@ -225,6 +223,25 @@ def _evidence(d: dict[str, Any]) -> dict[str, Any]:
             continue
         out[k] = v
     return out
+
+
+# The API's own labelled facts the Advanced Filter asks (land: street_width + direction; built
+# stock: property_age, floor). Exact values only — «الفيلا كامله» is not a floor, «25.00-15» is two
+# streets, a two-element `frontage` is two streets: all NULL, raw kept in additional_info.
+_FLOOR = {"الأرضي": 0, "الارضي": 0, "الأول": 1, "الاول": 1, "الثاني": 2, "الثالث": 3,
+          "الرابع": 4, "الخامس": 5}
+
+
+def _direction(frontage: Any) -> Optional[str]:
+    """ONE frontage → that facade. The site offers diagonals as their own single choice
+    («شمال غربي»), distinct from a two-street list («شمال», «غرب»), so a lone diagonal element is
+    the source's own «شمال غرب»; any list of two or more is a corner/through plot → NULL."""
+    if not isinstance(frontage, list) or len(frontage) != 1:
+        return None
+    toks = [normalize._DIRECTION_CANON.get(w) for w in str(frontage[0]).split()]
+    if len(toks) == 1 or (len(toks) == 2 and toks[0] in ("شمال", "جنوب") and toks[1] in ("شرق", "غرب")):
+        return " ".join(toks) if None not in toks else None
+    return None
 
 
 def _photo_urls(*fields: Any) -> list[str]:
@@ -377,6 +394,12 @@ def map_listing(msg: dict, ad: dict, unit: Optional[dict],
         "area_m2": area,
         "bedrooms": (_pos((unit or {}).get("no_of_rooms")) if type_ar in _DWELLING_TYPES else None),
         "bathrooms": _pos((unit or {}).get("no_of_bathrooms")),
+        "street_width_m": normalize.one_street_width(prop.get("street_width")),
+        "direction": _direction(msg.get("frontage")),
+        # The site's own «عمر العقار» field, never derived from date_construction_building.
+        "property_age": normalize.exact_age(prop.get("age_property")),
+        "floor_number": _FLOOR.get(((unit or {}).get("unit_floor") or "").strip()),
+        "license_number": str(ad.get("ad_license_no") or "").strip() or None,   # REGA ad licence, 324/324
         "photo_urls": _photo_urls(
             (unit or {}).get("images_unit_main"), (unit or {}).get("images_units"),
             msg.get("images_prop_main"), msg.get("images"))[:20] or None,
@@ -393,6 +416,7 @@ def map_listing(msg: dict, ad: dict, unit: Optional[dict],
         "property_code": code,
         "ad_name": ad.get("name"),
         "ad_license_no": ad.get("ad_license_no"),          # REGA advertising licence, 324/324
+        "rega_ad_license_number": str(ad.get("ad_license_no") or "").strip() or None,   # the card's key
         "owner_brokerage_contract": ad.get("owner_brokerage_contract"),
         "type_ar": type_ar,
         "source_property_type": prop.get("property_type"),
@@ -402,7 +426,7 @@ def map_listing(msg: dict, ad: dict, unit: Optional[dict],
         "date_construction_building": prop.get("date_construction_building"),
         "age_property": prop.get("age_property"),
         "lat": prop.get("lat"),
-        "long": prop.get("long"),
+        "lng": prop.get("long"),                           # listing_rich_attrs reads lat/lng
         "frontage": msg.get("frontage"),
         "units_floors": msg.get("units_floors"),
         # Kept, never promoted to a price: derived سعر المتر (ppm × area reproduces the published
@@ -423,6 +447,96 @@ def map_listing(msg: dict, ad: dict, unit: Optional[dict],
         "virtual_link": prop.get("virtual_link"),
     })
     return row, category, ""
+
+
+# ── LIVENESS ────────────────────────────────────────────────────────────────────────────────────
+# Absence from the four /latest-offers pages only SELECTS candidates; prune_unseen asks this oracle
+# before it may deactivate anything, through the shared law (scrapers/common/http_liveness.py).
+# Death here is DATA, not an HTTP code (the wslnaa shape): the probe re-reads the property's own API
+# record and looks for THIS row's ad and unit in it, by the same identity map_listing mints.
+#   · the ad (by its digits) is absent, or its own `status` has left «نشط»   → GONE
+#   · the unit (by the hash of its name) is absent from that ad             → GONE
+#   · the property answers with NO ads at all («لا يوجد شواغر»)             → GONE
+#   · the ad is «نشط» and carries this unit (or is the whole-property offer) → LIVE
+# MEASURED 2026-09-21: every one of the 270 indexed codes answers 200 with its record; of 36 codes
+# sampled from the gaps between them, 8 answered 200 with a property and ZERO ads (a building whose
+# units are all taken — the GONE limb above) and 28 answered HTTP 403, Frappe's PermissionError for
+# a code it no longer has. THAT 403 CANNOT KILL: the shared law reads every 403 as "about our
+# access", and it is not ours to relax.
+# A property deleted outright is instead retired by its OWN public page, read under the law as a
+# second probe only when the API gave no verdict: /B/<code> answers HTTP 200 with the site's
+# sentence «عذرًا، العقار المطلوب غير موجود.» (MEASURED 2026-09-21: 13 of 13 gap codes; 6 of 6 live
+# codes answer HTTP 500 with the full page, which the law reads as "source broken" → no verdict).
+# That removal is gated, fail-closed, on the API answering THIS code with Frappe's PermissionError
+# at the same moment — two independent channels must disown the property, so a site-wide failure
+# that blanked the page could never retire live stock on its own.
+_AD_NUMBER = re.compile(rf"^{PREFIX}([HNR]\d+)A(\d+)U(P|[0-9a-f]{{8}})$")
+
+
+def _signal_for(code: str, ad_num: str, unit_key: str):
+    def _signal(status, body, _moved):
+        if status != 200:
+            return None
+        try:
+            msg = (json.loads(body) or {}).get("message")
+        except (ValueError, TypeError, AttributeError):
+            return None
+        if not isinstance(msg, dict) or ((msg.get("property") or {}).get("code") or "").strip() != code:
+            return None
+        items = msg.get("ads") or []
+        mine = [i for i in items
+                if re.sub(r"\D", "", ((i or {}).get("ad") or {}).get("name") or "") == ad_num]
+        if not mine:
+            return "gone"
+        if ((mine[0].get("ad") or {}).get("status") or "").strip() != "نشط":
+            return "gone"
+        if unit_key == "P":
+            return "live"
+        keys = {hashlib.sha1(((u or {}).get("name") or "").encode("utf-8")).hexdigest()[:8]
+                for u in (mine[0].get("units") or [])}
+        return "live" if unit_key in keys else "gone"
+    return _signal
+
+
+_NO_SUCH_PROPERTY = "العقار المطلوب غير موجود"
+
+
+def _page_signal_for(code: str):
+    def _signal(status, body, _moved):
+        if status == 200 and _NO_SUCH_PROPERTY in body and f"detailsModal-{code}" not in body:
+            return "gone"
+        return None
+    return _signal
+
+
+def _api_disowns(code: str):
+    """The fail-closed gate on a page-read removal: the API must answer THIS code with Frappe's
+    PermissionError right now. Anything else (a 200, a 5xx, no answer) withholds the removal."""
+    def gate() -> tuple[bool, str]:
+        try:
+            r = session().get(API, params={"property_code": code}, timeout=40)
+        except Exception as e:  # noqa: BLE001 — no answer is never agreement
+            return False, f"the API did not answer for {code} ({type(e).__name__})"
+        if r.status_code == 403 and "PermissionError" in (r.text or ""):
+            return True, ""
+        return False, f"the API answered HTTP {r.status_code} for {code}, not a PermissionError"
+    return gate
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    m = _AD_NUMBER.match(ad_number)
+    if not m:
+        return "unknown", f"{ad_number!r} is not a {PREFIX}<code>A<ad>U<unit> ad number"
+    code, ad_num, unit_key = m.groups()
+    verdict = LivenessProbe(platform="nufouth", signal=_signal_for(code, ad_num, unit_key),
+                            session=session,
+                            url_for=lambda _ad: f"{API}?property_code={quote(code)}").verify_gone(ad_number)
+    if verdict[0] != "unknown":
+        return verdict
+    page = LivenessProbe(platform="nufouth", signal=_page_signal_for(code), session=session,
+                         url_for=lambda _ad: f"{BASE}/B/{quote(code)}",
+                         canary=_api_disowns(code)).verify_gone(ad_number)
+    return page if page[0] == "gone" else verdict
 
 
 def main() -> int:
@@ -486,21 +600,30 @@ def main() -> int:
                       f"rp={r0.get('rent_period')} ph={len(r0.get('photo_urls') or [])}")
             return 0
 
-        # db.py has no upsert_nufouth_* wrapper and this scraper may not edit it, so the shared
-        # batched upsert every wrapper delegates to is called directly — all guards intact.
-        if res:
-            db._wasalt_batch("nufouth_residential_listings", res)
-        if com:
-            db._wasalt_batch("nufouth_commercial_listings", com)
+        db.upsert_nufouth_residential_batch(res)
+        db.upsert_nufouth_commercial_batch(com)
         superseded = db.retire_superseded_siblings(
             res_table="nufouth_residential_listings", com_table="nufouth_commercial_listings",
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+        # PRUNE — only after a COMPLETE enumeration (a --type run holds the other table's seen-set
+        # empty by construction; --limit never reaches here), and only with the direct confirm
+        # above. prune_unseen's own breakers (0 seen, >30% vanished, <80% re-seen) sit on top.
+        pruned = 0
+        if args.type == "all":
+            for tbl, rows in (("nufouth_residential_listings", res),
+                              ("nufouth_commercial_listings", com)):
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=_verify_gone)
+                if n < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += n
         # The skip tally travels to the database so an empty run says WHY, not just "0 rows".
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
-                             notes=notes or None,
+                             notes=f"pruned={pruned} {notes}"[:300],
                              check_tables=["nufouth_residential_listings",
                                            "nufouth_commercial_listings"])
         if not healthy:
