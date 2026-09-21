@@ -72,7 +72,7 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // so removal on this source is a redirect, on a slugless URL that cannot change path benignly.
 // Wired through the shared law with an in-run canary; `not_available_or_zero_price` deliberately
 // stays UNKNOWN because the measured dead shape is a conjunction and fetch_one's gate is not.
-const RATCHET = 24;
+const RATCHET = 23;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {
