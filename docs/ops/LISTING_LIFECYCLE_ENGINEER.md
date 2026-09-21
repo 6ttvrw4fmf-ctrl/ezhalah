@@ -660,7 +660,7 @@ problem but five, and they need different things:
 | **No signal on the listing page** | aqaratikom (5,795-byte shell), ~~mustqr~~ | Dead and live are byte-identical. ~~mustqr's real oracle is the per-id API its scraper already reads~~ — **mustqr WIRED 2026-09-12, see §4.1**; aqaratikom needs its API investigated. |
 | **Dead rows are STILL SERVED** | eastabha, hajer, satel (131 inactive!), fursaghyr | Their deactivated rows answer 200 with real per-listing titles. Either the source keeps pages up after delisting — in which case the oracle needs a body-level sold/rented marker, the aqar «مغلق» shape — or those deactivations were false and these are restore candidates. **A 404 rule here would never fire.** Unanswered. |
 | **No dead cohort at all** | aldarim, abwbna, alhoshan, alkhaas, aqarmonthly, erapulse, jurash, october | These have never deactivated a listing, so a death limb cannot be control-validated: there has been no death to validate against. The prune is unguarded but has never fired. |
-| **A real oracle exists, beside an unevidenced prune** | dealapp, gathern | Both have genuine DIRECT sweeps (`dealapp/liveness.py` with `classify_dealapp` + `environment_is_trustworthy`; `gathern/liveness.py` with `probe`/`classify` and a canary system) AND an absence-only prune in `run.py`. The fix is to route the prune through the oracle that already exists — inventing nothing. **gathern demands the most care of anything in this table**: §5.4 measured it answering blocking with its own 404 at a 100% false-death rate from datacenter egress, and it is one of the four delete-ENABLED platforms. Any wiring there must go through its canary gate, not through `looks_dead()` alone. |
+| **A real oracle exists, beside an unevidenced prune** | ~~dealapp~~, ~~gathern~~ — **class CLOSED 2026-09-21** | Both had genuine DIRECT sweeps (`dealapp/liveness.py` with `classify_dealapp` + `environment_is_trustworthy`; `gathern/liveness.py` with `probe`/`classify` and a canary system) AND an absence-only prune in `run.py`. The fix was to route the prune through the oracle that already exists — inventing nothing. **gathern demanded the most care of anything in this table**: §5.4 measured it answering blocking with its own 404 at a 100% false-death rate from datacenter egress, and it is one of the four delete-ENABLED platforms. Any wiring there had to go through its canary gate, not through `looks_dead()` alone — see §4.2a. |
 
 Three lessons from the 2026-09-06 pair, recorded so they are not paid for twice:
 
@@ -677,6 +677,50 @@ Three lessons from the 2026-09-06 pair, recorded so they are not paid for twice:
    listings THIS run already fetched, and no 'gone' verdict is issued at all unless a canary still
    renders its own listing. It fails CLOSED — no canary means no removal — so the dealapp
    shell-degradation mode (§5.1) produces zero deactivations instead of the whole cohort.
+
+### §4.2a — gathern's second path is closed, and the canary is why (2026-09-21, routine #11)
+
+gathern was the last "ORACLE EXISTS, NOT WIRED HERE" row in `scrapers/absence-only-prune.txt`: a
+tier-1 `DIRECT_REVISIT` platform with a full canary apparatus in `scrapers/gathern/liveness.py`,
+whose `run.py` still reached `active = false` down a **second** path — the full-crawl prune and the
+cross-shard `--prune-from` union, both calling `db.prune_unseen()` with no `verify_gone`. Three
+missed crawls killed with no source check at all, on one of the **four delete-ENABLED platforms**,
+so the clock those kills started ends in a permanent delete.
+
+**The signal was not invented and the wiring adds nothing new.** `_oracle_signal()` in `run.py` is
+`liveness.py::looks_dead`/`classify` verbatim — 404/410 gone, 200 live, everything else no opinion —
+routed through the shared law in `scrapers/common/http_liveness.py`, which applies the universal
+half (a 403/429/5xx/timeout is never a death) that no caller can relax.
+
+**The measurement that decided the DESIGN, not just the wiring.** §5.4 recorded gathern expressing
+blocking as its own application-rendered 404. Re-measured on the day this landed, 12 already-dead
+rows and 12 rows the crawl had served alive two hours earlier, **interleaved**:
+
+| cohort | n | 404 | 200 |
+|---|---:|---:|---:|
+| already deactivated | 12 | **12** | 0 |
+| known alive (`last_seen_at` 2h old) | 12 | **10** | 2 |
+
+An **83% false-death rate**, every 404 a byte-identical 50,511-byte page. So on this platform a bare
+404-means-gone oracle is *worse than none*, and the canary is not tidiness — it is the load-bearing
+part. It is armed from ad_numbers **this run's crawl already saw** (the union seen-set for the
+cross-shard pass, the parsed rows for the full pass), never from `last_verified_alive_at` — the
+self-referential pool that deadlocked gathern for five days (`ops_incident` #168) — and it fails
+CLOSED: no pool, no removal.
+
+**Why wiring it needed no owner decision.** §4.1 lesson 1 in its exact form: *an oracle can only
+WITHHOLD a deactivation that absence alone already performs.* Before, three misses killed with no
+source check; after, a kill additionally requires a DIRECT 404/410 **and** a canary proving the
+source is still answering truthfully. On the degraded egress measured above, every removal is
+withheld as UNKNOWN. Strictly safer in both directions, and revert-only.
+
+`scrapers/common/tests/test_gathern_absence_is_not_death.py` executes the real signal through the
+real law and the real `LivenessProbe` against an injected `fetch` (26 cases), freezes the measurement
+above as `test_the_2026_09_21_blocked_egress_kills_nothing`, and pins the identity check that stops a
+stored `listing_url` for a different unit being probed. Mutation-proven seven ways: either prune site
+losing its oracle (so a half-fix is RED), the canary removed, the signal calling a redirect a removal
+(a mutation the law deliberately does **not** catch, so the platform half is proven too), the
+identity check dropped, a failed canary re-rolled until it passes, and re-arming keeping a stale PASS.
 
 Two standing rules over all ten:
 
