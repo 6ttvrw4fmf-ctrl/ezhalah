@@ -33,10 +33,12 @@
 //   M2 change a sourceHost domain to a different site    -> check 2 fails
 //   M3 revert Al Nokhba's branch to 'alnokhba' only      -> falls to Aqar, check 1 fails
 //   M4 drop one table from RES_TABLES/COM_TABLES         -> check 4 fails
+//   M5 revert akariyoun's name branch to 'akariyoun' only -> source «عقاريون» is AQAR, check 1b fails
+//   M6 delete akariyoun's sourceHost branch               -> «عقاريون» links to sa.aqar.fm, 1b fails
 //
 //   node --experimental-strip-types scripts/verify-platform-registration-complete.ts   (in `npm test`)
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { liftSearchScope } from './lib/liftSearchScope.ts';
 
@@ -86,9 +88,10 @@ function branchesOf(src: string, fnHeader: string): { branches: Branch[]; fallba
   const tail = [...body.matchAll(/\n\s*return\s+(?:'([^']*)'|<Image source=\{([A-Z0-9_]+)\})/g)].pop();
   return { branches, fallback: (tail?.[1] ?? tail?.[2] ?? 'NO_FALLBACK') };
 }
-// First match wins — mirrors the real if-chain exactly.
+// First match wins — mirrors the real if-chain exactly, over the same raw|space-stripped haystack.
 const resolve = (b: Branch[], fb: string, name: string) => {
-  const n = name.toLowerCase();
+  const raw = name.toLowerCase();
+  const n = raw + '|' + raw.replace(/\s+/g, '');
   for (const br of b) if (br.tokens.some((t) => n.includes(t))) return br.value;
   return fb;
 };
@@ -122,6 +125,26 @@ for (const p of PLATFORMS) {
   check(`${p.name}: has an explicit host (not sa.aqar.fm fallback)`, h !== host.fallback,
     `links to ${host.fallback}`);
   check(`${p.name}: has an explicit display name (not "${nameFn.fallback}")`, n !== nameFn.fallback);
+}
+
+// ── 1b. …and the value PRODUCTION STORES resolves too, not only the registry name ────────────────
+// Check 1 feeds each PLATFORMS `name` — a string this repo chose. عقاريون is not in PLATFORMS and
+// its scraper writes source='عقاريون', which no Latin slug matches: all 280 listings wore عقار's
+// name and «sa.aqar.fm» beside their own logo, and this file stayed green (2026-09-20). So every
+// scraper that declares its SOURCE constant is fed through all three matchers verbatim.
+const scraperSources = readdirSync(join(ROOT, 'scrapers'), { withFileTypes: true })
+  .filter((d) => d.isDirectory())
+  .flatMap((d) => readdirSync(join(ROOT, 'scrapers', d.name)).filter((f) => f.endsWith('.py'))
+    .flatMap((f) => [...readFileSync(join(ROOT, 'scrapers', d.name, f), 'utf8')
+      .matchAll(/^SOURCE\s*=\s*["']([^"']+)["']/gm)].map((m) => ({ slug: d.name, source: m[1] }))));
+check('scraper SOURCE constants found', scraperSources.some((x) => x.slug === 'akariyoun'),
+  `got ${scraperSources.length}`);
+for (const { slug, source } of scraperSources) {
+  check(`${slug} (source «${source}»): explicit badge, host and name — not the Aqar fallback`,
+    resolve(badge.branches, badge.fallback, source) !== badge.fallback
+      && resolve(host.branches, host.fallback, source) !== host.fallback
+      && resolve(nameFn.branches, nameFn.fallback, source) !== nameFn.fallback,
+    `badge=${resolve(badge.branches, badge.fallback, source)} host=${resolve(host.branches, host.fallback, source)} name=${resolve(nameFn.branches, nameFn.fallback, source)}`);
 }
 
 // ── 2. The "hosted on" label MUST equal the platform's own registered domain ────────────────────
