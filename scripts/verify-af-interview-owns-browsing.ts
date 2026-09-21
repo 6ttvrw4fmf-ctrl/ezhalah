@@ -155,7 +155,12 @@ const completedCalls = [...agentCode.matchAll(/setCompleted\(true\)/g)].length;
 // predicate's own arguments (`quotableTotal(result)`), and that inner call is followed by `,` — the
 // FIRST `))` in the line is always the predicate's own outer close, never a false-early stop.
 // `revealIsTerminal` needs no such care — it is a bare identifier, no nested parens.
-const gateRe = () => /if \((?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
+// THREE named gates since 2026-09-20. `afRoundEndsChat` was added when the owner ruled that a
+// completed Advanced Filter round ENDS the conversation at any total ("the chat gets closed … you
+// just have to do skip, and that's it"). It is listed BY NAME, not matched loosely, so the ratchet
+// still does its job: a FOURTH trigger — in particular a "nothing left to ask" verdict locking the
+// chat, the 2026-09-12 defect this check exists for — is still a failure.
+const gateRe = () => /if \((?:afRoundEndsChat \|\| )?(?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
 const gatedCompletedCalls = [...agentCode.matchAll(gateRe())].length;
 // The label deliberately names the PREDICATE, not a digit: the threshold moved 25 → 50 → 25 between
 // 2026-09-04 and 2026-09-20 and this label still read "≤50" afterwards (found by routine #9,

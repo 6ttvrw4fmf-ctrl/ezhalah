@@ -49,8 +49,8 @@ check('agent.tsx feeds initialReveal the canonical stop line (stopAt: INTERVIEW_
 // ── 2. ≤ 50 completes the chat; a round NEVER re-opens itself, at any total ─────────────────────
 const fin = agent.slice(agent.indexOf('const finishGuided = '), agent.indexOf('const startAgeFlow = '));
 check('finishGuided exists', fin.length > 200);
-check('R11.1: a round landing at ≤ INTERVIEW_STOP_AT completes the chat (composer → «محادثة جديدة»)',
-  /if \(searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(fin));
+check('a completed round ends the chat — at ANY total since 2026-09-20, with R11.1 still standing behind it',
+  /if \(afRoundEndsChat \|\| searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(fin));
 check('finishGuided never calls startAgeFlow — a round cannot open the next one itself',
   !/startAgeFlow/.test(fin));
 check('finishGuided never calls assessNarrowing — deciding whether MORE narrowing is worth offering '
@@ -93,7 +93,12 @@ check('a MEASURED "no" after an AF round stays SILENT (no chat bubble, no dangli
 // scripts/verify-af-interview-owns-browsing.ts for the call-site-level version of this same check;
 // this one keeps the ORIGINAL intent of this specific check intact: a measured "no more truthful
 // narrowing" verdict must never itself complete the chat.
-const GATED_COMPLETED = /if \((?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
+// THREE named gates since 2026-09-20. `afRoundEndsChat` was added when the owner ruled that a
+// completed Advanced Filter round ENDS the conversation at any total ("the chat gets closed … you
+// just have to do skip, and that's it"). It is listed BY NAME, not matched loosely, so the ratchet
+// still does its job: a FOURTH trigger — in particular a "nothing left to ask" verdict locking the
+// chat, the 2026-09-12 defect this check exists for — is still a failure.
+const GATED_COMPLETED = /if \((?:afRoundEndsChat \|\| )?(?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
 check('…and does NOT complete the chat (every setCompleted(true) site is the ≤ 50 rule or the 500-cap/show-all terminal, never the "no more questions" verdict)',
   (agent.match(/setCompleted\(true\)/g) ?? []).length >= 1
   && (agent.match(/setCompleted\(true\)/g) ?? []).length === (agent.match(GATED_COMPLETED) ?? []).length);

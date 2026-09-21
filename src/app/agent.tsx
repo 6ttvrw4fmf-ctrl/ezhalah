@@ -2348,7 +2348,24 @@ export default function Agent() {
         // ≤ INTERVIEW_STOP_AT — the search is COMPLETE. Every remaining listing is revealed by
         // initialReveal (honestTotal ≤ stopAt ⇒ reveal all fetched — no «عرض المزيد»), the composer
         // is replaced by «محادثة جديدة», and the transcript is saved in that state.
-        if (searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
+        // A COMPLETED ADVANCED FILTER ROUND ENDS THE CONVERSATION (owner 2026-09-20, shown the
+        // 400-card turn and its closing note: "that message should be gone. The chat gets closed. If
+        // you want to make a new chat, click on the top … you just have to do skip, and that's it").
+        //
+        // This WIDENS R11.1. The ≤ INTERVIEW_STOP_AT rule stays exactly as it was — it still ends a
+        // plain search, a typed message and a refine chip — but a round of Advanced Filter now ends
+        // the chat at ANY total, because the interview IS the end of that journey: the user answered
+        // (or skipped) every question the data could truthfully offer, and the set they are looking
+        // at is the answer. The old behaviour left them on a browsable turn whose closing note said
+        // «لسا عندنا لك المزيد … الجاية هي الأخيرة، بنعرض لك حتى 100» — an offer that contradicted
+        // itself and, at 400 of 13,203, could never be satisfied.
+        //
+        // NAMED, not bare, so verify-af-rounds-never-self-reopen-and-finish-at-25.ts's
+        // every-setCompleted-is-gated ratchet still means something: the defect that check exists for
+        // is a "nothing left to ask" VERDICT silently locking the chat (2026-09-12), which this is
+        // not — this fires on a round that actually landed results, never on a probe's opinion.
+        const afRoundEndsChat = true;
+        if (afRoundEndsChat || searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
         // A ROUND NEVER RE-OPENS ITSELF (owner 2026-09-20 — REVERSES the 2026-09-04 "rounds continue
         // automatically" rule quoted below in git history). That rule popped a brand-new round of
         // DIFFERENT questions onto the screen on a timer, with no tap from the user — indistinguishable

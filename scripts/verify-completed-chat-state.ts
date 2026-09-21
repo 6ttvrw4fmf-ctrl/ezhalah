@@ -67,12 +67,19 @@ console.log("\n── a chat completes ONLY at the ≤ 50 threshold or when the 
 // completion site must be one of these named gates; the count itself is no longer pinned to 1 now
 // that more than one entry point legitimately reaches it.
 const trueSites = (agentCode.match(/setCompleted\(true\)/g) ?? []).length;
-const gatedSites = (agentCode.match(/if \((?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g) ?? []).length;
+// `afRoundEndsChat` is the third NAMED gate (owner 2026-09-20: a completed Advanced Filter round
+// ends the conversation at any total). Listed explicitly so the ratchet still fails on a fourth,
+// unexamined trigger — above all a "nothing left to ask" verdict locking the chat, which is the
+// 2026-09-12 defect this check was written for and which remains banned two checks below.
+const gatedSites = (agentCode.match(/if \((?:afRoundEndsChat \|\| )?(?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g) ?? []).length;
 check(`every setCompleted(true) site is gated by the ≤50 threshold or the 500-cap/show-all terminal (found ${trueSites}, ${gatedSites} gated)`,
   trueSites >= 1 && trueSites === gatedSites,
   "an ungated site means a count alone, a no-more-questions verdict, or anything else can lock the composer");
-check("R11.1: the post-round honest total ≤ INTERVIEW_STOP_AT completes, inside finishGuided's onFetched",
-  /onFetched: \(total\) => \{[\s\S]{0,900}?if \(searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(agent));
+// WIDENED 2026-09-20: the round completes the chat at ANY total, with R11.1's threshold still
+// standing behind it as the second arm (and still the ONLY arm for a plain search, a typed message
+// or a refine chip — those paths are untouched and asserted elsewhere in this file).
+check("a completed AF round finishes the chat inside finishGuided's onFetched, R11.1 still behind it",
+  /onFetched: \(total\) => \{[\s\S]{0,2200}?if \(afRoundEndsChat \|\| searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(agent));
 check("R11.2 (revised again 2026-09-12/13, silent this time): a MEASURED 'no' after a committed AF round is neither spoken nor a silent completion",
   !/No further truthful narrowing question exists for this scope/.test(agent)
   && !/noMoreSaidRef/.test(agent)
