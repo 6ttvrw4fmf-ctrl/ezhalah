@@ -98,8 +98,29 @@ const feeder = fnFrom >= 0 && fnTo > fnFrom ? remote.slice(fnFrom, fnTo) : '';
 check('fetchScopeOptionCounts exists and is typed Record<string, number | null> (UNKNOWN is representable)',
   feeder.includes('Promise<Record<string, number | null> | null>'),
   'src/data/remote.ts — a number-only map cannot say "unknown", so it must drop or lie');
-check('a timeout is the repo\'s PROBE_FAILED sentinel inside the feeder — the bare `return;` drop is gone, and it is never `null` (null = "the source answered" everywhere else)',
-  /if \('timedOut' in result\) return PROBE_FAILED;/.test(feeder) && !/if \('timedOut' in result\) return;/.test(feeder) && !/if \('timedOut' in result\) return null;/.test(feeder));
+// 2026-09-21: the probe moved from withTimeout() to bounded(), which ABORTS the abandoned request
+// instead of leaving its count running on the database. bounded() folds a timeout into `error`
+// ({ timeout: true }), so the same `if (error) return PROBE_FAILED;` line now carries both failure
+// kinds. The invariant is unchanged — a timeout is PROBE_FAILED, never null, never a dropped key —
+// and it is what these two checks pin: the bound is the SAME 4s budget, and nothing can return early
+// between the RPC and that line.
+check('a timeout is the repo\'s PROBE_FAILED sentinel inside the feeder — bounded by the same 4s budget, never a bare `return;` and never `null` (null = "the source answered" everywhere else)',
+  /await bounded<[^>]*>\(\s*supabase!\.rpc\('location_search_candidates_ar'[\s\S]*?AGE_COUNT_TIMEOUT_MS,\s*\);\s*if \(error\) return PROBE_FAILED;/.test(feeder)
+  && !/'timedOut' in result\) return;/.test(feeder) && !/'timedOut' in result\) return null;/.test(feeder));
+// A failure must never be REMEMBERED — otherwise the new settled-count memory would freeze a blank
+// for two minutes, which is exactly the "unknown becomes permanent" defect this file exists for.
+{
+  const errAt = feeder.indexOf('if (error) return PROBE_FAILED;');
+  const setAt = feeder.indexOf('settledScopeCounts.set(');
+  check('only a LEARNED count is remembered: the memory is written after the failure exit, exactly once',
+    errAt > 0 && setAt > errAt && (feeder.match(/settledScopeCounts\.set\(/g) ?? []).length === 1,
+    'a PROBE_FAILED written into the memory would pin an option blank for the whole TTL');
+  // mutation: a set placed before the failure exit must be caught
+  const mut = feeder.replace('if (error) return PROBE_FAILED;', 'settledScopeCounts.set(ck, { at: 0, n: 0 });\n    if (error) return PROBE_FAILED;');
+  check('(mutation) catches a failure being remembered',
+    !(mut.indexOf('settledScopeCounts.set(') > mut.indexOf('if (error) return PROBE_FAILED;')
+      && (mut.match(/settledScopeCounts\.set\(/g) ?? []).length === 1));
+}
 check('an RPC error is PROBE_FAILED too, never a silent omission',
   /if \(error\) return PROBE_FAILED;/.test(feeder) && !/if \(error\) return;/.test(feeder));
 check('every candidate is written to the raw map (raw[c.key] = await probe(c)) — no key can be absent',

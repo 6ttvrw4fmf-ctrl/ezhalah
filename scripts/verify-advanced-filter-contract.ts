@@ -347,19 +347,38 @@ check('the mining overlay is gone: no component, no phase, no render, no import'
   && !/phase: 'mining'/.test(agentSrc)
   && !/MiningTransition/.test(agentSrc),
   'a round must hand straight over to the thread\'s own searching turn, with no card on top of it');
-// THE «تحديد أكثر» PROBE RUNS *WITH* THE SEARCH, NOT AFTER IT (owner 2026-09-20: "once the user
-// clicks Search, the button should show … the user will wait 10 seconds — let the 2.5 be part of
-// that"). The passive effect keys off lastResultsMsg, which does not exist until the search has
-// already returned, so the probe's cost — a scope round trip, a count probe per advanced question,
-// plus one bounded 2.5s retry — used to stack AFTER the wait the user was already serving.
-// Measured A/B on the identical search: button lag after results 2,704ms → 1,200ms.
-check('the narrowing probe is prefetched at every live search site, before the query is awaited',
-  (agentSrc.match(/prefetchNarrowing\(/g) ?? []).length >= 3,   // the three live runQuery sites
-  'a search path that does not prefetch pays the probe cost after its results, and its button pops in late');
-// agentSrc is the RAW file, so a trailing `// …` on the prefetch line sits between the two
-// statements — match to end-of-line rather than assuming whitespace.
-check('every prefetch fires BEFORE its runQuery, never after',
-  /prefetchNarrowing\([^;]*\);[^\n]*\n\s*const result = await runQuery\(/.test(agentSrc));
+// THE «تحديد أكثر» PROBE RUNS RIGHT AFTER THE SEARCH — INSIDE THE WAIT, NEVER BESIDE THE QUERY.
+//
+// History, because this check has flipped once already. 2026-09-20 (PR #3420) moved the probe from
+// the passive effect (after the reveal) to BEFORE runQuery, so «تحديد أكثر» would not pop in late.
+// 2026-09-21, measured on production, that was the regression the owner felt as "it was working
+// perfect, idk what happened": the probe prices the group tier with 5 location_search_candidates_ar
+// calls, each a count(*) over() of the whole matched set — each as heavy as the search — and fired
+// beside the search they piled up (~7 at once, plus a retry wave). The same call measured 7-9 s in
+// that pile-up versus 1.2-1.7 s alone; the search slowed and the Advanced Filter opened with blanks.
+//
+// The fix keeps BOTH wins: start it the moment runQuery returns. The user is still watching the
+// loader and the reveal, so it is inside the wait (the owner's "prepare the advanced filter so that
+// the second doesn't count"), and it no longer competes with the query itself. It also prefetches
+// with result.query — the exact query the passive effect claims with — so the key always matches.
+check('the narrowing probe is prefetched at every live search site',
+  (agentSrc.match(/prefetchNarrowing\(result\.query \?\? /g) ?? []).length === 3,
+  'a search path that does not prefetch pays the probe cost after its reveal, and its button pops in late');
+// agentSrc is the RAW file, so trailing `// …` comments sit on these lines — match to end-of-line.
+const afterSearch = /const result = await runQuery\([^\n]*\n(?:\s*if \(run\.cancelled\) return;[^\n]*\n)?\s*(?:if \(!run\.cancelled\) )?prefetchNarrowing\(result\.query \?\? /g;
+check('every prefetch fires AFTER its runQuery returns, never before or beside it',
+  (agentSrc.match(afterSearch) ?? []).length === 3
+  && !/prefetchNarrowing\([^;]*\);[^\n]*\n\s*const result = await runQuery\(/.test(agentSrc),
+  'fired before the query, the 5 group-tier probes compete with the search on one database');
+// mutation proof — the exact 2026-09-20 shape must be caught
+{
+  const mut = agentSrc.replace(
+    /const result = await runQuery\(pending\.q, true, run\.ac\.signal, ensureChatId\(\)\);\n(\s*)if \(run\.cancelled\) return;\n\s*prefetchNarrowing\(result\.query \?\? pending\.q\);[^\n]*\n/,
+    (_m, ind) => `prefetchNarrowing(pending.q);\n${ind}const result = await runQuery(pending.q, true, run.ac.signal, ensureChatId());\n${ind}if (run.cancelled) return;\n`);
+  check('(mutation) catches the probe being moved back beside the search',
+    mut !== agentSrc && !((mut.match(afterSearch) ?? []).length === 3
+      && !/prefetchNarrowing\([^;]*\);[^\n]*\n\s*const result = await runQuery\(/.test(mut)));
+}
 check('the effect CLAIMS the prefetched verdict instead of re-probing, and still probes on a miss',
   /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked\)/.test(agentSrc),
   'without the key match a stale verdict could be handed to a different search');
