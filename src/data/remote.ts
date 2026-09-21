@@ -859,15 +859,33 @@ export type GuidedCounts = {
 
 // De-duped per the comment above fetchPropertyAgeOptionCounts — this is the function RNPL/amenities/
 // bathrooms/furnished all call with identical params in the same Promise.all batch.
-const inFlightGuidedCounts = new Map<string, Promise<GuidedCounts | null>>();
+const inFlightGuidedCounts = new Map<string, Promise<GuidedCounts | null | ProbeFailed>>();
 
-export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<GuidedCounts | null | ProbeFailed> {
+// REMEMBERED, like settledScopeCounts below (same COUNT_MEMORY_TTL_MS) — added 2026-09-21 so the
+// «متابعة» footer's number is ready the instant the card opens, and so is the button's number after
+// the FIRST tap on any option. This function is already called, with the CARD's own exact query,
+// from three places that run BEFORE the user ever sees the card: rankQuestions() resolving every
+// advanced question's options (assessNarrowing's background walk), and the new tap-priming walk in
+// agent.tsx (primeFooterCounts). Without a memory, each of those settled answers was thrown away the
+// instant its promise resolved — dedupeInFlight only joins CONCURRENT callers, never a later one —
+// so the card's own identical call, seconds afterward, paid for the same RPC again. Measured live:
+// 2.9s on every card open. ONLY a LEARNED count is ever remembered (never a failure — see below), and
+// only for COUNT_MEMORY_TTL_MS, so a stale answer can never outlive the data it was measured against.
+const settledGuidedCounts = new Map<string, { at: number; c: GuidedCounts }>();
+
+export async function fetchApartmentGuidedCounts(
+  q: SearchQuery,
+  timeoutMs: number = AGE_COUNT_TIMEOUT_MS,
+): Promise<GuidedCounts | null | ProbeFailed> {
   if (!supabase) return null;
+  const ck = JSON.stringify(q);
+  const hit = settledGuidedCounts.get(ck);
+  if (hit && Date.now() - hit.at < COUNT_MEMORY_TTL_MS) return hit.c;
   const scope = await resolveSearchScope(q);
   if (isProbeFailure(scope)) return PROBE_FAILED;   // scope resolution failed = never learned the answer
   if (!scope) return null;
   const { isBroadCommercial, ...scopeParams } = scope;
-  return dedupeInFlight(inFlightGuidedCounts, JSON.stringify(q), async () => {
+  return dedupeInFlight(inFlightGuidedCounts, ck, async () => {
     if (!supabase) return null;
     const result = await withTimeout(
       supabase.rpc('apartment_guided_counts_ar', {
@@ -886,7 +904,7 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
         // those three, so a future advanced question is carried here for free.
         ...rpcAdvancedFilterParams(q),
       }),
-      AGE_COUNT_TIMEOUT_MS,
+      timeoutMs,
     );
     // UNKNOWN IS NOT NO (owner 2026-08-26): a probe that never completed must not return the
     // same value as a source that answered 'nothing' — see src/lib/afProbe.ts.
@@ -894,7 +912,9 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
     const { data, error } = result;
     if (error) return PROBE_FAILED;               // transport/DB error = never learned the answer
     if (!data || !(data as GuidedCounts[]).length) return null;      // the source answered: nothing
-    return (data as GuidedCounts[])[0];
+    const c = (data as GuidedCounts[])[0];
+    settledGuidedCounts.set(ck, { at: Date.now(), c });   // ONLY a learned answer is ever remembered
+    return c;
   });
 }
 
@@ -948,7 +968,9 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
 // UNKNOWN IS NOT NO: only a LEARNED number is stored. A probe that failed is never remembered, so the
 // next ask retries it instead of freezing a blank. The TTL sits far below the hourly sync, so a
 // remembered count is the answer the database would give if asked again.
-const SCOPE_COUNT_TTL_MS = 120_000;
+// Shared by both remembered-count caches in this file (scope options above, guided counts below):
+// how long a LEARNED answer stays trustworthy before the next ask must re-earn it.
+const COUNT_MEMORY_TTL_MS = 120_000;
 const settledScopeCounts = new Map<string, { at: number; n: number }>();
 const inFlightScopeCounts = new Map<string, Promise<number | ProbeFailed>>();
 
@@ -985,7 +1007,7 @@ export async function fetchScopeOptionCounts(
     // candidate waits for THAT answer instead of paying for a second copy of it.
     const ck = JSON.stringify(query);
     const hit = settledScopeCounts.get(ck);
-    if (hit && Date.now() - hit.at < SCOPE_COUNT_TTL_MS) return Promise.resolve(hit.n);
+    if (hit && Date.now() - hit.at < COUNT_MEMORY_TTL_MS) return Promise.resolve(hit.n);
     return dedupeInFlight(inFlightScopeCounts, ck, () => probeOnce(ck, query));
   };
   const probeOnce = async (ck: string, query: SearchQuery): Promise<number | ProbeFailed> => {

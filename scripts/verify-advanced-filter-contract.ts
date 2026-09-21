@@ -379,11 +379,13 @@ check('every prefetch fires AFTER its runQuery returns, never before or beside i
     mut !== agentSrc && !((mut.match(afterSearch) ?? []).length === 3
       && !/prefetchNarrowing\([^;]*\);[^\n]*\n\s*const result = await runQuery\(/.test(mut)));
 }
+// 2026-09-21: assessNarrowing takes a third argument (`key`) so its background tap-priming walk can
+// detect being superseded — both call sites below still pass exactly afPrefetchKey(q, asked).
 check('the effect CLAIMS the prefetched verdict instead of re-probing, and still probes on a miss',
-  /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked\)/.test(agentSrc),
+  /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked, afPrefetchKey\(q, asked\)\)/.test(agentSrc),
   'without the key match a stale verdict could be handed to a different search');
 check('a superseded prefetch cannot crash the app as an unhandled rejection',
-  /assessNarrowing\(q, asked\)\.catch\(\(\) => 'unknown' as const\)/.test(agentSrc));
+  /assessNarrowing\(q, asked, key\)\.catch\(\(\) => 'unknown' as const\)/.test(agentSrc));
 check('the prefetch is skipped when the button would be hidden anyway (no wasted probes)',
   /if \(!q \|\| !anyGuidedEligible\(q\)\) return;/.test(agentSrc));
 
