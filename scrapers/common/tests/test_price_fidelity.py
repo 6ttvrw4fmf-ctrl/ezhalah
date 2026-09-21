@@ -193,18 +193,15 @@ def test_the_guard_actually_catches_the_shapes_it_must():
         assert not _DERIVE_RE.match(line), f"guard false-positived on: {line!r}"
 
 
-def test_fursaghyr_micro_price_gate_still_judges_magnitude_not_the_bare_rate():
-    """The micro-price gate must keep judging the listing's real MAGNITUDE (source total, or the
-    rate×area fallback when no source total exists), never a bare unmultiplied rate — that would
-    throw away honest cheap land (real shape: FG24914, meter 33 / area 620 → magnitude 20,460).
+def test_fursaghyr_rate_only_row_is_kept_and_never_given_a_derived_total():
+    """A rate-only row is KEPT, and its total is never derived in the scraper.
 
-    REVERSED 2026-07-28 (owner decision): fursaghyr.com never displays rea.total_price on its own
-    pages, only a per-m² rate — so when total_price is missing, price_total now falls back to
-    rate×area (a plausible rate) or the bare rate itself (an implausible one, likely already a raw
-    total in the wrong field — see scrapers/common/tests/test_fursaghyr_total_price_fallback.py for
-    the full fix). This test previously asserted the OLD "never synthesize" behavior (price_total
-    stayed None here) — that assertion is now the opposite of the current, intentional contract.
+    Real shape: FG24914, meter 33 / area 620. REVERSED 2026-09-21 (owner, PR #3450): from 07-28 this
+    asserted price_total == 33 * 620. Owner rule 2026-09-03 derives ppm × area in the search/display
+    layer only. So the scraper stores the rate and sends AUTHORITATIVE_NULL for the total, which
+    clears a previously derived total. See test_fursaghyr_total_price_fallback.py for the full contract.
     """
+    from scrapers.common.db import AUTHORITATIVE_NULL
     from scrapers.fursaghyr.run import map_listing
 
     def item(i, **rea):
@@ -214,10 +211,11 @@ def test_fursaghyr_micro_price_gate_still_judges_magnitude_not_the_bare_rate():
     row, _ = map_listing(item(1, land_area=437.5, meter_price=1052, total_price=460250))
     assert row["price_total"] == 460250
 
-    # rate only, no source total → row KEPT, and price_total = rate×area (owner-approved fallback)
+    # rate only, no source total → row KEPT with its rate, and NO scraper-side total
     row, _ = map_listing(item(2, land_area=620, meter_price=33))
-    assert row is not None, "honest cheap-land row was dropped by the micro-price gate"
-    assert row["price_total"] == 33 * 620, "rate×area fallback should have populated price_total"
+    assert row is not None, "honest cheap-land row was dropped"
+    assert row["price_total"] is AUTHORITATIVE_NULL, "rate × area is derived in search/display only"
+    assert row["price_per_meter"] == 33
 
     # REVERSED AGAIN 2026-08-09: a small magnitude is no longer grounds to DROP the listing. The
     # gate's remaining arm assumed "under 1,000 SAR ⇒ not real", and that premise was tested against
@@ -226,4 +224,4 @@ def test_fursaghyr_micro_price_gate_still_judges_magnitude_not_the_bare_rate():
     # kept and the published magnitude stored as-is (PRICE = SOURCE, 2026-08-03).
     row, _ = map_listing(item(3, land_area=1, meter_price=500))
     assert row is not None, "a small-magnitude row must be KEPT, not dropped"
-    assert row["price_total"] == 500, "the published figure is stored verbatim"
+    assert row["price_per_meter"] == 500, "the published figure is stored verbatim"
