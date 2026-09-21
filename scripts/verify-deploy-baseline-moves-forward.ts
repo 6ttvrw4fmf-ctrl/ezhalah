@@ -25,13 +25,26 @@
 //   node --experimental-strip-types scripts/verify-deploy-baseline-moves-forward.ts
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { baselineChainProblems, type BaselineStep, type AncestryOracle } from './lib/baselineMonotonic.ts';
 
 const root = join(import.meta.dirname, '..');
 const BASELINE = 'docs/DEPLOY_BASELINE.txt';
+const CI_WORKFLOW = '.github/workflows/full-verification-ci.yml';
+
+/**
+ * Does this workflow check the repository out with FULL history? Read from the file, never assumed.
+ *
+ * `fetch-depth: 0` is what makes the chain assertion answerable at all, and it is the fact a shallow
+ * local run leans on when it declines to ask. Every `actions/checkout` step in the file must carry
+ * it: one step without it is one job where this guard would silently stop being able to answer.
+ */
+export function fullHistoryCheckout(src: string): boolean {
+  const steps = src.split(/uses:\s*actions\/checkout/).slice(1);
+  return steps.length > 0 && steps.every((s) => /^[^\n]*\n(?:[^\n]*\n){0,6}?\s*fetch-depth:\s*0\b/.test(s));
+}
 /** How many of the file's most recent recorded values to walk. Enough to span several deploys. */
 const WALK = 8;
 
@@ -52,17 +65,48 @@ const ID = ['-c', 'user.name=t', '-c', 'user.email=t@example.com'];
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', [...ID, ...args], { cwd, encoding: 'utf8' }).trim();
 
-/** Real ancestry, via git. `null` when either sha is not resolvable in this clone. */
+/** Is this checkout SHALLOW — a truncated history that cannot answer an ancestry question? */
+export const isShallow = (cwd: string): boolean =>
+  spawnSync('git', ['rev-parse', '--is-shallow-repository'], { cwd, encoding: 'utf8' })
+    .stdout?.trim() === 'true';
+
+/**
+ * Real ancestry, via git. `null` when the question CANNOT BE ANSWERED in this clone.
+ *
+ * A TRUNCATED HISTORY PRODUCES A CONFIDENT NEGATIVE, AND THAT IS THE DEFECT (2026-09-21, routine
+ * #10). `git merge-base --is-ancestor` exits 1 both when A is genuinely not an ancestor of B and
+ * when the commits joining them lie outside a shallow graft. Both shas still `cat-file -e` fine —
+ * they are recent — so the older code read exit 1 as a definite `false` and reported
+ *
+ *     the baseline MOVED BACKWARDS: 18fd997 -> 53e2ecb … a diverged line of history
+ *
+ * in every cloud-agent session, whose clone is shallow by default (measured: 50 commits). The
+ * baseline had done nothing of the kind. That is AGENTS.md's owner-locked rule — *silent -> NULL,
+ * never unknown -> NO* — violated by a BARRIER's own reader, which is BARRIER_ENGINEER.md PART 1.5,
+ * and the cost is the one this routine cares about most: a check that cries wolf in every agent
+ * session teaches agents to scroll past reds.
+ *
+ * A POSITIVE stays trustworthy in a shallow clone — finding an ancestry path PROVES the relation,
+ * and a missing path cannot manufacture one. Only the negative becomes UNKNOWN.
+ */
 const gitAncestry = (cwd: string): AncestryOracle => (older, newer) => {
   for (const sha of [older, newer]) {
     const ok = spawnSync('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd });
     if (ok.status !== 0) return null;
   }
   const r = spawnSync('git', ['merge-base', '--is-ancestor', older, newer], { cwd });
-  if (r.status === 0) return true;
-  if (r.status === 1) return false;
-  return null; // git itself could not answer
+  return ancestryVerdict(r.status, isShallow(cwd));
 };
+
+/**
+ * `git merge-base --is-ancestor`'s exit status, read honestly. Pure, so both directions are proven
+ * below without building a shallow repository to hold the proof.
+ */
+export function ancestryVerdict(status: number | null, shallow: boolean): boolean | null {
+  if (status === 0) return true;                   // proof of ancestry, shallow or not
+  if (status === 1) return shallow ? null : false; // exit 1 in a shallow clone is UNKNOWN
+  return null;                                     // git itself could not answer
+}
 
 console.log('The recorded production baseline may only ever move forward\n');
 
@@ -124,6 +168,33 @@ try {
   rmSync(sandbox, { recursive: true, force: true });
 }
 
+// ── 2b. THE SHALLOW-CLONE LIMB (2026-09-21, routine #10) ────────────────────────────────────────
+// The defect this replaces was a FABRICATED NEGATIVE: `--is-ancestor` exits 1 both when A really
+// is not an ancestor of B and when the joining commits lie outside a shallow graft, and the old
+// reader turned the second into `false`. Every cloud-agent session was told the baseline had
+// diverged. Proven in both directions on the pure verdict, and the compensating CI fact is proven
+// by execution against the real workflow file rather than assumed.
+console.log('');
+mustCatch('exit 1 in a SHALLOW clone being read as a definite "not an ancestor" (the fabricated '
+  + 'negative every agent session saw)',
+  ancestryVerdict(1, true) === null);
+check('…while exit 1 in a FULL clone is still a real negative (the rule is not softened)',
+  ancestryVerdict(1, false) === false);
+check('a POSITIVE stays trustworthy in a shallow clone — a found path proves the relation',
+  ancestryVerdict(0, true) === true && ancestryVerdict(0, false) === true);
+check('git failing outright is UNKNOWN in either clone',
+  ancestryVerdict(128, false) === null && ancestryVerdict(null, true) === null);
+
+const CI_SRC = readFileSync(join(root, CI_WORKFLOW), 'utf8');
+check('the real CI workflow does check out full history (the skip above is paid for)',
+  fullHistoryCheckout(CI_SRC));
+mustCatch('the CI workflow losing `fetch-depth: 0` — the shallow skip would then be covering nothing',
+  !fullHistoryCheckout(CI_SRC.replace(/fetch-depth:\s*0/g, 'fetch-depth: 1')));
+mustCatch('ONE checkout step of several losing it (a second job quietly going shallow)',
+  !fullHistoryCheckout(CI_SRC.replace(/fetch-depth:\s*0/, 'fetch-depth: 1')));
+mustCatch('a workflow with NO checkout at all reading as "full history"',
+  !fullHistoryCheckout('jobs:\n  x:\n    steps:\n      - run: npm test\n'));
+
 // ── 3. This repository's own recorded baseline history. ─────────────────────────────────────────
 console.log('');
 const commits = git(root, 'log', `-${WALK}`, '--format=%H', '--', BASELINE)
@@ -168,10 +239,32 @@ if (commits.length === 0) {
       + 'begins at the first resolvable value.');
   }
 
-  const problems = baselineChainProblems(tail, gitAncestry(root));
-  check('this repository\'s baseline has only ever moved forward (over every resolvable value)',
-    problems.length === 0);
-  for (const p of problems) console.log(`      ${p}`);
+  // A SHALLOW CLONE CANNOT ANSWER THIS, AND MUST NOT PRETEND EITHER WAY (2026-09-21, routine #10).
+  // Cloud-agent sessions clone shallow by default, so this assertion used to report a FABRICATED
+  // "the baseline MOVED BACKWARDS … a diverged line of history" in every one of them. With the
+  // ancestry oracle fixed it would instead report UNVERIFIED — honest, but still a red decided by
+  // the checkout rather than by the diff, which is the placement defect AGENTS.md records under
+  // "The required suite is HERMETIC".
+  //
+  // So where the history is absent the question is NOT ASKED, loudly — and the skip is paid for by
+  // EXECUTING the compensating fact instead: the workflow that runs `npm test` checks the repo out
+  // with `fetch-depth: 0`, so the real evaluation provably still happens where it decides anything.
+  // Remove that and this goes red everywhere, shallow or not. A skip with nothing behind it would
+  // be Prohibition 1 wearing an environment check.
+  if (isShallow(root)) {
+    console.log('  NOTE: this checkout is SHALLOW, so no ancestry question about the baseline chain '
+      + 'can be answered here. NOT ASKED rather than guessed — the assertion below proves the '
+      + 'required suite runs it against full history.');
+    check('the workflow running `npm test` checks out FULL history (fetch-depth: 0), so the chain '
+      + 'assertion this shallow clone cannot make is still made where it counts',
+      fullHistoryCheckout(readFileSync(join(root, CI_WORKFLOW), 'utf8')),
+      `${CI_WORKFLOW} must check out with fetch-depth: 0`);
+  } else {
+    const problems = baselineChainProblems(tail, gitAncestry(root));
+    check('this repository\'s baseline has only ever moved forward (over every resolvable value)',
+      problems.length === 0);
+    for (const p of problems) console.log(`      ${p}`);
+  }
 }
 
 console.log('');
