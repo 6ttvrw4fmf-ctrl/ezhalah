@@ -60,12 +60,14 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
-/** An artefact a citation names, in one of the three shapes production actually uses. */
+/** An artefact a citation names, in one of the four shapes production actually uses. */
 export type Artifact =
   | { kind: 'path'; name: string }   // repo-relative, e.g. scripts/verify-x.ts
   | { kind: 'bare'; name: string }   // filename only, e.g. verify-x.ts  (incident #179's shape)
-  | { kind: 'fn'; name: string };    // a database function, e.g. mon_detect_x
+  | { kind: 'fn'; name: string }     // a database function, e.g. mon_detect_x
+  | { kind: 'symbol'; name: string };// any other snake_case name a citation asserts exists
 
 /** The incident states that CLAIM permanent cover already exists. A plan is not a claim. */
 export const CLAIMED_STATES = ['fixed', 'verifying', 'resolved'] as const;
@@ -102,13 +104,36 @@ const BARE = /\b(?:verify-[A-Za-z0-9_.-]+?\.(?:ts|mjs)|test_[A-Za-z0-9_]+\.py)\b
 // prefix; the guard must not manufacture a name out of it. A fully spelled `mon_detect_x` is
 // unaffected, which is the direction that has to keep working and is proven below.
 const DBFN = /\bmon_[a-z0-9_]*/g;
+// THE FOURTH SHAPE (closed 2026-09-21, routine #10, ops_incident #364).
+//
+// `DBFN` recognises `mon_*` and nothing else, so a barrier cited as ANY OTHER database object
+// yielded no artefact at all and was therefore neither verified nor flagged. Three real citations
+// sat in that hole: #324 cites `enforce_price_size_sanity() + ops_price_source_verified`, #134
+// cites `tg_archive_hard_deleted_listing` propagating to `listings_arabic_locations`, and #233
+// cites the pytest function `test_retire_superseded_siblings`. A trigger, a view, a constraint
+// function and a test function are all perfectly good permanent barriers; naming one bought a
+// closed incident the appearance of cover with nothing behind it.
+//
+// The rejected repair, recorded on the incident, was "any identifier followed by ()" — that flags
+// `citedArtifacts()` and every other camelCase symbol written with parens, manufacturing phantoms
+// out of prose, which is exactly the defect repaired here the day before. The shape that
+// DISTINGUISHES is snake_case: at least one underscore between two lowercase alphanumeric runs.
+// English prose has no underscores, camelCase has no underscores, and every database object, column,
+// alert kind and pytest function in these citations does.
+//
+// MEASURED BEFORE IT WAS WRITTEN, over the 193 claimed-state citations live in production on
+// 2026-09-21: 85 distinct tokens, and ALL 85 resolve against the checkout. That is the negative
+// control on real data — this widening is green on the queue as it stands and can only go red on a
+// name that appears nowhere, which is the defect class of 2026-09-13.
+const SYMBOL = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g;
 
 /**
  * Extracts every artefact a free-text citation names, de-duplicated and in a stable order.
  *
- * Qualified paths are consumed FIRST and removed from the text before the bare-name and function
- * scans run, so `scripts/verify-x.ts` yields one artefact rather than also yielding the bare
- * `verify-x.ts`, and a path segment can never be mistaken for a database function.
+ * Qualified paths are consumed FIRST and removed from the text, then bare filenames, before the
+ * function and symbol scans run — so `scripts/verify-x.ts` yields one artefact rather than also
+ * yielding the bare `verify-x.ts`, `test_x.py` does not additionally yield the symbol `test_x`, and
+ * a path segment can never be mistaken for a database object.
  */
 export function citedArtifacts(citation: string): Artifact[] {
   const out: Artifact[] = [];
@@ -125,13 +150,22 @@ export function citedArtifacts(citation: string): Artifact[] {
     push('path', m);
     rest = rest.split(m).join(' ');
   }
-  for (const m of rest.match(BARE) ?? []) push('bare', m);
+  for (const m of rest.match(BARE) ?? []) {
+    push('bare', m);
+    rest = rest.split(m).join(' ');
+  }
   for (const m of rest.matchAll(DBFN)) {
     const name = m[0];
     // `mon_detect_*` / `mon_detect_` are PREFIXES, not names. See the DBFN header: reading one as a
     // function is how a correct incident was reported as citing something that does not exist.
     if (name.endsWith('_') || rest[m.index + name.length] === '*') continue;
     push('fn', name);
+  }
+  for (const m of rest.matchAll(SYMBOL)) {
+    // `mon_*` is DBFN's lane and is held to the STRONGER test (a committed CREATE FUNCTION). Taking
+    // it here too would re-admit the `mon_detect_*` glob that DBFN deliberately refuses.
+    if (m[0].startsWith('mon_')) continue;
+    push('symbol', m[0]);
   }
   return out;
 }
@@ -165,7 +199,8 @@ export function citationProblems(rows: IncidentRow[] | null, exists: ExistenceTe
     for (const a of citedArtifacts(row.citation)) {
       const verdict = exists(a);
       if (verdict === true) continue;
-      const what = a.kind === 'fn' ? 'database function' : 'file';
+      const what = a.kind === 'fn' ? 'database function'
+        : a.kind === 'symbol' ? 'name' : 'file';
       problems.push(
         verdict === null
           ? `incident #${row.id} (${row.state}, ${row.owner_routine}) cites the ${what} `
@@ -216,4 +251,56 @@ export function committedFunctions(repoRoot: string): Set<string> | null {
     for (const m of body.matchAll(DEF)) defined.add(m[1].toLowerCase());
   }
   return defined.size === 0 ? null : defined;        // a zero-row catalog is unreadable, not empty
+}
+
+/**
+ * Does this snake_case name appear ANYWHERE in the committed checkout — in a tracked file's
+ * contents, or inside a tracked path? Returns `null` when the question could not be ANSWERED.
+ *
+ * DELIBERATELY WEAKER THAN THE `fn` TEST, AND SAID OUT LOUD RATHER THAN IMPLIED. A `mon_*` citation
+ * is held to a committed `CREATE FUNCTION`; a bare snake_case token cannot be, because the same
+ * shape covers a trigger, a view, a table, a column, an alert kind, a pytest function and a Python
+ * helper, and the reader has no way to know which was meant. Pretending to know would invent
+ * phantoms out of correct citations — the failure this guard spent six days in on 2026-09-14.
+ *
+ * What it DOES check is the claim that actually failed: the four phantoms measured on 2026-09-13
+ * appeared in NO commit on ANY branch. A name nothing in the repository mentions is not a barrier,
+ * whatever kind of object it was supposed to be. Going from "not read at all" to "must exist
+ * somewhere" strictly adds cover and weakens nothing (BARRIER_ENGINEER.md PART 6, Prohibition 1).
+ *
+ * Markdown is excluded from the content search on purpose: a name that appears only in a doc is a
+ * POINTER, and a pointer reading as coverage is PART 1.11, the defect this whole module is about.
+ */
+export function treeMentionTest(repoRoot: string): (name: string) => boolean | null {
+  // Production-only objects are REAL but absent from committed SQL by construction (incident #26).
+  // Judging them missing would report the pre-baseline blind spot as a phantom citation.
+  const productionOnly = new Set<string>();
+  const baseline = join(repoRoot, 'scripts', 'production-only-object-baseline.txt');
+  if (existsSync(baseline)) {
+    for (const line of readFileSync(baseline, 'utf8').split('\n')) {
+      const t = line.trim();
+      if (t && !t.startsWith('#')) productionOnly.add(t.toLowerCase());
+    }
+  }
+
+  const ls = spawnSync('git', ['ls-files'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64e6 });
+  const trackedPaths = ls.error || ls.status !== 0 ? null : ls.stdout;
+
+  const cache = new Map<string, boolean | null>();
+  return (name: string): boolean | null => {
+    if (cache.has(name)) return cache.get(name)!;
+    let verdict: boolean | null;
+    if (productionOnly.has(name)) verdict = true;
+    else if (trackedPaths === null) verdict = null;          // cannot list the tree ⇒ UNKNOWN
+    else if (trackedPaths.includes(name)) verdict = true;    // the name is part of a tracked path
+    else {
+      const r = spawnSync('git', ['grep', '-l', '-I', '-F', '-e', name, '--', ':!*.md'],
+        { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64e6 });
+      // git grep: 0 = found, 1 = no match, anything else (or a spawn error) = the question FAILED.
+      if (r.error || (r.status !== 0 && r.status !== 1)) verdict = null;
+      else verdict = r.status === 0;
+    }
+    cache.set(name, verdict);
+    return verdict;
+  };
 }
