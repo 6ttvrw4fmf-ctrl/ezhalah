@@ -203,7 +203,16 @@ def _price(cell_html: str) -> dict:
     # «على السوم» with no figure (~10% of the catalog) → NULL, never 0.
     if amount is not None and amount > 0:
         out["amount"] = amount
+        out["rate"] = _exact_amount(txt)     # the same figure, fraction kept — price_per_meter only
     return out
+
+
+def _exact_amount(txt: str):
+    """N.to_int's twin for price_per_meter (a MEASUREMENT): the same digits to_int reads, separators,
+    currency words and Arabic marks handled identically, but a 1-2 digit fraction is KEPT
+    («المتر 1,500.50» → 1500.5 where to_int cuts 1500). The price columns keep to_int."""
+    s = re.sub(r"[^\d.,]", "", txt.translate(N._TRANS).replace("٬", "").replace("٫", ".")).replace(",", "")
+    return N.measure_num(s if re.fullmatch(r"\d+\.\d{1,2}", s) else s.replace(".", ""))
 
 
 def _index_rows(page_html: str) -> list[dict]:
@@ -442,7 +451,7 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
     price_total = price_per_meter = price_annual = rent_period = None
     if amount is not None and basis == "per_sqm":
         # PRICE = SOURCE: a per-m² rate is not a total, and area is never used to make one.
-        price_per_meter = amount
+        price_per_meter = p["rate"]
     elif transaction_type == "Rent":
         # PERIOD = SOURCE — only an explicit token the source states ABOUT THIS FIGURE, from the
         # price label or the adjacent body text (see _period_text). Nothing is read from magnitude,
@@ -474,7 +483,8 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         "city": city,
         "region": region,
         "neighborhood": ix["district"],
-        "area_m2": N.to_int(ix["area_raw"]),
+        # Exact: «المساحة 407.56م» → 407.56 (to_int cut it to 407). «المساحة 0 م» stays 0 (incident #45).
+        "area_m2": N.to_measure(ix["area_raw"]),
         # Bedrooms/bathrooms: the facet field exists but is populated on ~11 rows site-wide; both
         # otherwise live only in narrative prose («3 غرف ومجلس», «دورتين مياه»). NULL, not parsed.
         "bedrooms": None,

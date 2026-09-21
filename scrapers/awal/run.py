@@ -148,7 +148,9 @@ LOT_FIELD_RE = re.compile(r"رقم\s*القطع[ةه]\s*:\s*([^\s\n:]+)")
 # Area: "المساحة م² : 600" | "المساحة الإجمالية 1183م" | "مساحة الأرض : 792م" | "مساحة 630م"
 AREA_RE = re.compile(
     r"(?:المساح[ةه]\s*(?:م²|م2)?\s*:?|مساح[ةه]\s*(?:الأرض|الارض|الإجمالي[ةه]|الاجمالي[ةه])?\s*:?)\s*"
-    r"([\d٠-٩][\d٠-٩.,]*)\s*(?:م²|م2|م\b|متر)?"
+    # ٫ + a fraction is the Arabic decimal mark (kept); ٫ + exactly 3 digits is grouping (normalize.to_measure's
+    # rule) and stays outside the capture exactly as before.
+    r"([\d٠-٩][\d٠-٩.,]*(?:٫(?![\d٠-٩]{3}(?![\d٠-٩]))[\d٠-٩]+)?)\s*(?:م²|م2|م\b|متر)?"
 )
 # District from free-text Arar ads: "حي غرناطه" / "بحي القدس" — stop at structural connectors.
 _DIST_STOP = ("رقم", "مساحة", "المساحة", "شارع", "ممر", "مسطح", "هـ", "ح", "ب", "أ", "ج",
@@ -346,7 +348,7 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool
 
     # ── area (always try structured field first, then free-text) ──
     am = AREA_RE.search(content) or AREA_RE.search(own_text)
-    area = _to_float(am.group(1)) if am else None
+    area = _to_float(am.group(1).replace("٫", ".")) if am else None
     if area and area > 5_000_000:  # guard against a swallowed plan/lot number
         area = None
 
@@ -445,7 +447,7 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool
         "active": not gone,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": int(round(area)) if area else None,
+        "area_m2": normalize.measure_num(area) or None,   # exact: 312.75 stays 312.75
         "bedrooms": bedrooms,
         "bathrooms": baths,
         # auction office: explicit prices are essentially never published → leave NULL, never guess.

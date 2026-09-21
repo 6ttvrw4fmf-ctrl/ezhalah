@@ -275,7 +275,7 @@ def map_listing(p: dict, photos: Optional[list[str]] = None) -> tuple[Optional[d
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": _int(specs.get("area")),
+        "area_m2": normalize.measure_num(specs.get("area")) or None,   # exact; 0 = not set, as _int
         # specs.bedrooms IS a real API field, but alhoshan.sa's own front end renders it under the
         # generic label "الغرف" ("Rooms") — confirmed via the site's own embedded i18n dictionary
         # ("specBedrooms":"الغرف"; a second, unused key "bedrooms":"غرف النوم" exists but the

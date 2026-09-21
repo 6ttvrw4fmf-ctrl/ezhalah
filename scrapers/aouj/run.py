@@ -288,8 +288,8 @@ def map_item(o: dict) -> tuple[Optional[dict], str]:
         "active": True,
         "property_type": property_type,
         "transaction_type": transaction_type,
-        # area is m², present on 76/76, sometimes fractional ("10776.24") → truncate, never round up.
-        "area_m2": N.to_int_numeric(o.get("area")),
+        # area is m², present on 76/76, sometimes fractional ("10776.24") → kept exactly, never cut.
+        "area_m2": N.measure_num(o.get("area")) or None,
         # to_int_numeric treats "0" as no-value, which is what this source's "0" means: it appears
         # only on a land row and a tower row (bedrooms AND bathrooms AND rooms all "0"), i.e. the
         # CRM's not-provided sentinel. Storing 0 there would fabricate "this land has zero bedrooms".

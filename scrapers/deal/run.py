@@ -54,6 +54,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db
+from scrapers.common import normalize as N
 
 API = "https://api.dealapp.sa/production"
 HEADERS = {"Accept": "application/json", "Origin": "https://dealapp.sa", "Referer": "https://dealapp.sa/"}
@@ -255,7 +256,7 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": _int(L.get("area")),
+        "area_m2": N.measure_num(L.get("area")) or None,   # exact; 0 = not set, as _int
         "bedrooms": beds_int,
         "price_total": _int(L.get("price")) if not is_rent else None,
         "price_annual": _int(L.get("price")) if is_rent else None,

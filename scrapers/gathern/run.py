@@ -222,6 +222,15 @@ def _num(v: Any) -> Optional[int]:
         return None
 
 
+def _measure(v: Any):
+    """_num's twin for a MEASUREMENT (area): the same cleaning and the same number, its fraction kept —
+    `space` "120.5" → 120.5, never _num's rounded 120. None if not numeric/zero, exactly as _num."""
+    if v in (None, "", 0, "0"):
+        return None
+    s = re.sub(r"[^\d.]", "", str(v).translate(_AR_DIGITS).replace("٫", ".").replace("٬", ""))
+    return N.measure_num(s) or None
+
+
 def _redact(text: Optional[str]) -> Optional[str]:
     """Strip any phone from a card title/description (PDPL belt-and-braces)."""
     if not text:
@@ -903,7 +912,7 @@ def map_listing(it: dict) -> Optional[dict]:
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent",
-        "area_m2": _num(it.get("space")),
+        "area_m2": _measure(it.get("space")),
         "bedrooms": beds,
         "bathrooms": bathrooms,
         "master_bedrooms": masters,
