@@ -1,5 +1,24 @@
-18fd9974dfb925286f701b098a2d280d409846a9
+53e2ecb105444161bd82edf6e026572e06cb8dce
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
+# 2026-09-21  53e2ecb  advanced MANUALLY, AHEAD of its deploy, to clear preflight-verify.sh's
+#   deletion guard. preflight refused on run 35548585451 with exactly one deleted file:
+#   src/components/MiningTransition.tsx — the Advanced-Filter «digging» overlay, deleted on the
+#   owner's explicit instruction after three passes at it ("there is this pop-up that pops up with a
+#   magnifying glass … this needs to be gone, man. I told this 1,000 times"). Two earlier passes had
+#   removed only the card's COMPLETION state (the green checkmark and «لقينا N عقار أقرب لطلبك») and
+#   kept the card; what the owner had been calling "the pop-up" was the card in its SEARCHING state.
+#   Deliberate and reviewed, not data loss.
+#   Verified independently before advancing, the same way the 2026-09-11 entry below was:
+#   `git diff --diff-filter=D --name-only 18fd9974 HEAD -- src/ assets/` names ONLY that one file;
+#   it traces to exactly one commit (53e2ecb, PR #3420); no source file imports or renders it (the
+#   'mining' phase is gone from the ageFlow union and from AfPhase, and the three i18n keys it spoke
+#   are removed with it); the surface it covered is NOT lost, because the searching turn the overlay
+#   was translucent to reveal belongs to the thread (runRefine), not to the card, so a finished round
+#   now hands straight to it. All 7 required checks were green on the merge, and
+#   scripts/verify-af-deep-search-transition.ts was rewritten to assert the ABSENCE so the overlay
+#   cannot return unreviewed. The authoritative live-prod containment check passed on the SAME
+#   refused run: HEAD contains the currently-live production commit (d8ce52c).
+#   This deploy follows immediately; if it fails this line must be reverted to 18fd9974.
 # 2026-09-11  faf768e  advanced MANUALLY, AHEAD of its deploy, to clear preflight-verify.sh's
 #   deletion guard before the FIRST deploy attempt since 3db1802 (2026-09-06, 31 commits/5 days of
 #   concurrent-session work, none of it previously deployed). preflight refused on run 34620128468
