@@ -53,7 +53,7 @@ import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } 
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
 import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, buildAfSummary, buildAfSkipped, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
@@ -2347,21 +2347,23 @@ export default function Agent() {
     // read-only receipt of what THIS round committed. buildAfSummary reads the committed facets only,
     // so a skipped question can never appear in it (summary == committed state, permanent rule).
     //
-    // AND WHAT IT SKIPPED (owner 2026-09-20: "when user clicks skip add ... an emoji based on the
-    // questions u did"). Stored as one string, the two sentences separated by a newline, so the
-    // transcript's `Record<string, string>` shape is untouched and a receipt saved before today
-    // still restores — it simply has no second line. The SUMMARY half is unchanged and still
-    // committed-only: summary == committed state stays the permanent rule for the pills, and the
-    // skip half is a record of the ROUND, which claims no predicate (see afSummary.ts's header).
+    // — AND THE SKIPS, IN THE ORDER THE ROUND ASKED (owner 2026-09-20: "you asked about apartment
+    // and then age, and he decided to skip, then he chose الواجهة ... you say: user decided to
+    // skip"). ONE sentence, not two piles, so the card reads as the story of the interview. It is a
+    // record of the ROUND and claims no predicate, which is why a skip may appear in it at all —
+    // summary == committed state remains the permanent rule, and it governs the PILLS, which are
+    // still built by buildAfSummary from the facets alone (see afSummary.ts's header).
+    //
+    // `askedThisRound` subtracts the carry so a second round names only its OWN questions; the
+    // previous round's receipt already named that round's, on its own turn.
     //
     // Only a round that COMMITTED something leaves a receipt. A skip-everything round changes
     // nothing — same query, same cards — so the turn keeps its buttons and the user can open the
     // interview again from it; replacing them with a receipt would strand them with no way back in.
     const askedThisRound = [...ageFlowAskedRef.current].filter((id) => !(carry?.asked ?? []).includes(id));
-    const committedThisRound = new Set(ageFlowFacetsRef.current.map((f) => f.id));
-    const roundChoices = buildAfSummary(ageFlowFacetsRef.current);
-    const roundSkipped = buildAfSkipped(askedThisRound.filter((id) => !committedThisRound.has(id)));
-    if (carry && roundChoices) setAfReceipt((r) => ({ ...r, [carry.msgId]: `${roundChoices}\n${roundSkipped}` }));
+    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current);
+    const roundCommitted = buildAfSummary(ageFlowFacetsRef.current);
+    if (carry && roundCommitted) setAfReceipt((r) => ({ ...r, [carry.msgId]: roundLog }));
     void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '), {
       guided,
       onFetched: (total) => {
@@ -3949,28 +3951,18 @@ export default function Agent() {
                                   <Text style={[s.afReceiptHead, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                                     {`✓ ${t('Continued with the advanced filter')}`}
                                   </Text>
-                                  {/* Two sentences, stored as one newline-joined string (see finishGuided):
-                                      what the round COMMITTED, then what it SKIPPED. A receipt written
-                                      before 2026-09-20 has no newline, so `skipped` is undefined and the
-                                      card renders exactly as it always did. */}
-                                  {(() => {
-                                    const [chosen = '', skipped = ''] = afReceipt[m.id].split('\n');
-                                    const line = { writingDirection: (rtl ? 'rtl' : 'ltr') as 'rtl' | 'ltr', textAlign: (rtl ? 'right' : 'left') as 'right' | 'left' };
-                                    return (
-                                      <>
-                                        {chosen ? (
-                                          <Text testID="af-round-receipt-choices" style={[s.afReceiptTx, line]}>
-                                            {t('Your choices: {summary}', { summary: chosen })}
-                                          </Text>
-                                        ) : null}
-                                        {skipped ? (
-                                          <Text testID="af-round-receipt-skipped" style={[s.afReceiptTx, line]}>
-                                            {t('Skipped: {summary}', { summary: skipped })}
-                                          </Text>
-                                        ) : null}
-                                      </>
-                                    );
-                                  })()}
+                                  {/* The round, in the order it happened — answers and skips in ONE
+                                      sentence (see finishGuided). No «اخترت:» label any more: the line now
+                                      mixes both, and the head above already says what this card is.
+                                      Untranslated by design, exactly as buildAfSummary's output always
+                                      was — the builder writes finished Arabic. A receipt stored before
+                                      2026-09-20 is a plain committed-only sentence and still renders. */}
+                                  <Text
+                                    testID="af-round-receipt-choices"
+                                    style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}
+                                  >
+                                    {afReceipt[m.id]}
+                                  </Text>
                                 </View>
                               ) : null}
                             </View>
