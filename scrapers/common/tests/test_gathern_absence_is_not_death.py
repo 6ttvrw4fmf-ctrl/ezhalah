@@ -316,3 +316,33 @@ def test_every_prune_call_site_arms_a_canary_first():
         assert len(armed) >= len(prunes), (
             f"{fn.name}() prunes {len(prunes)}x but arms the canary {len(armed)}x — an unarmed "
             "canary withholds every removal, so this prune would silently stop working")
+
+
+def test_the_oracle_reuses_one_throttled_session():
+    """Connection reuse and rate limiting, on a source where a burst LOOKS like a removal.
+
+    gathern 429s above ~2 req/s (`liveness.py` pins MIN_INTERVAL at 1.0) and expresses blocking as
+    its own 404 (§5.4) — so an unthrottled, session-per-request oracle would provoke exactly the
+    response it cannot distinguish from a delisting. The canary keeps that HONEST (every kill would
+    be withheld); throttling is what keeps the oracle USEFUL. `LivenessProbe.fetch()` acquires the
+    session once per request, so throttling on acquire is exactly once per probe.
+    """
+    calls: list[int] = []
+    real_throttle, real_detail = gathern._throttle, gathern.detail_session
+    gathern._oracle_session_memo.clear()
+    try:
+        gathern._throttle = lambda: calls.append(1)  # type: ignore[assignment]
+        gathern.detail_session = lambda: object()    # type: ignore[assignment]
+        first = gathern._oracle_session()
+        for _ in range(4):
+            assert gathern._oracle_session() is first, "a new session was minted per probe"
+        assert len(calls) == 5, f"throttled {len(calls)} times for 5 acquisitions"
+    finally:
+        gathern._throttle, gathern.detail_session = real_throttle, real_detail
+        gathern._oracle_session_memo.clear()
+
+
+def test_the_probe_is_wired_to_the_throttled_session():
+    """Structural: the probe must not be handed the raw session factory."""
+    assert gathern._probe.session is gathern._oracle_session, (
+        "LivenessProbe was given a session factory that does not throttle or reuse")

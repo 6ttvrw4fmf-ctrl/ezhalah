@@ -486,10 +486,35 @@ def _canary() -> tuple[bool, str]:
     return ok, why
 
 
+_oracle_session_memo: list = []
+
+
+def _oracle_session():
+    """ONE reused session, and a throttle, for every probe this oracle makes.
+
+    Both halves matter on gathern specifically, and neither is tidiness:
+
+    * `LivenessProbe.fetch()` calls `session()` once per attempt, so handing it `detail_session`
+      directly would mint a NEW curl_cffi session per probe — no connection reuse across what can
+      be hundreds of probes in one prune.
+    * gathern rate-limits hard: `liveness.py` pins `MIN_INTERVAL` at 1.0 with the note "Gathern
+      429s above ~2 [req/s]". An unthrottled burst is precisely what makes this source start
+      answering with its own application-rendered 404 (§5.4), and on this platform that is
+      indistinguishable from a removal. The canary would then withhold every kill — safe, but the
+      oracle would be useless. Throttling keeps it USEFUL; the canary keeps it HONEST.
+
+    Throttling on acquire is exact here because `fetch()` acquires once per request.
+    """
+    _throttle()
+    if not _oracle_session_memo:
+        _oracle_session_memo.append(detail_session())
+    return _oracle_session_memo[0]
+
+
 _probe = http_liveness.LivenessProbe(
     platform="gathern",
     signal=_oracle_signal,
-    session=detail_session,
+    session=_oracle_session,
     url_for=_oracle_url_for,
     canary=_canary,
 )
