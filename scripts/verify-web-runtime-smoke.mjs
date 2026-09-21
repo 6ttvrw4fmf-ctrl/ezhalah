@@ -600,7 +600,12 @@ try {
   const delayRoute = async (route) => {
     inFlightSeen = true;
     await new Promise((r) => setTimeout(r, 6000));
-    await route.continue();
+    // The page.unroute() below auto-continues every matching request still inside this sleep (the
+    // Filter home fires location_search_candidates_ar count probes after the cancel), so this
+    // continue() can find the route already handled. Uncaught, that rejection killed the whole run
+    // (CI run 35567960105 attempt 1). It can only happen after unroute — after every [F] late-response
+    // assertion — so only that one message is tolerated; anything else still throws.
+    await route.continue().catch((e) => { if (!/Route is already handled/.test(e.message)) throw e; });
   };
   await page.route('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
   await fillOwnerExample();
