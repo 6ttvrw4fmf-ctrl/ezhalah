@@ -1906,15 +1906,33 @@ export default function Agent() {
     return 'unknown';
   };
 
-  // START THE "IS THERE A USEFUL QUESTION LEFT?" PROBE *WITH* THE SEARCH, NOT AFTER IT
-  // (owner 2026-09-20: "once the user clicks Search, the button should show … the user will wait
-  // 10 seconds — let the 2.5 be part of that").
+  // PREPARE ADVANCED FILTER DURING THE WAIT — BUT AFTER THE SEARCH, NEVER BESIDE IT.
   //
-  // The effect below cannot start it: it keys off lastResultsMsg, which does not exist until the
-  // search has already returned. So the probe's cost — a scope round trip, then a count probe for
-  // every one of the 9 advanced questions, plus one bounded 2.5s retry when a batch comes back
-  // undetermined — was stacked AFTER the search the user was already waiting on, and «تحديد أكثر»
-  // popped in seconds late. Run concurrently it is free: the search is the longer of the two.
+  // Owner 2026-09-21: "the wait when the user sits down and waits for the search … should give him
+  // what he wants and also prepare the advanced filter so that the second doesn't count." The user
+  // is still watching the loader and the cards reveal when the search's own query returns, so work
+  // started at THAT moment is still inside the wait they are already serving — and it is alone.
+  //
+  // PR #3420 (2026-09-20) started this probe BEFORE runQuery instead, to get «تحديد أكثر» on screen
+  // sooner. Measured on production 2026-09-21 that was the regression behind "it was working
+  // perfect, idk what happened": for a scope with no group chosen, assessNarrowing prices the group
+  // tier — 1 total + 4 groups = 5 location_search_candidates_ar calls, each a count(*) over() of the
+  // WHOLE matched set, i.e. each as expensive as the search itself. Fired beside the search they
+  // made ~7 heavy calls at once (plus a retry wave of 5 when the 4s timeout gave up on them), and the
+  // very same call measured 7-9 s under that pile-up versus 1.2-1.7 s on its own. The search slowed,
+  // the probes timed out, and the Advanced Filter card opened with blank numbers.
+  //
+  // Starting here also lets the prefetch use `result.query` — the query the passive effect below
+  // claims with — so the key matches exactly instead of hoping the pre-search input normalises the
+  // same way.
+  //
+  // WHY IT STILL LIVES HERE AND NOT IN THE EFFECT BELOW. That effect keys off lastResultsMsg, which
+  // exists only once playListings has finished revealing, so probing from there stacked the whole
+  // cost after the reveal and «تحديد أكثر» popped in late (owner 2026-09-20). Calling this the moment
+  // runQuery returns keeps that win — the probe overlaps the card reveal the user is watching — while
+  // no longer competing with the query itself. The 2026-09-20 note that "run concurrently it is free:
+  // the search is the longer of the two" is what the measurement above disproved: both share one
+  // database, and the probe slowed the search it was riding beside.
   //
   // One slot, not a map: searches are sequential, and a superseded search's verdict is simply never
   // claimed. The key pins the exact (query, asked-set) the effect will ask for, so a stale answer
@@ -1979,9 +1997,9 @@ export default function Agent() {
     searchingAtRef.current[statusId] = Date.now();
     setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
     toBottom();
-    prefetchNarrowing(refined, opts?.guided?.asked ?? []);  // runs DURING the search, not after it
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
+    prefetchNarrowing(result.query ?? refined, opts?.guided?.asked ?? []);  // AFTER the search — see prefetchNarrowing
     // quotableTotal, never `result.total` — that is this page's buffer length (≤ the 1500-row
     // QUERY_LIMIT), so the mining overlay quoted «لقينا 1,500 عقار» on every set larger than a page
     // while the results headline behind it stated the real match total. ONE total for both.
@@ -2802,8 +2820,8 @@ export default function Agent() {
       const forcedBroad = !turn.query.location;
       saidRef.current = [];
       beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
-      prefetchNarrowing(turn.query);  // runs DURING the search, not after it
       const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
+      if (!run.cancelled) prefetchNarrowing(result.query ?? turn.query);  // AFTER the search — see prefetchNarrowing
       const reply = forcedBroad
         ? `${getLocale() !== 'en'
             ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
@@ -2956,9 +2974,9 @@ export default function Agent() {
       // layer) left the «إزهله يبحث» loader spinning forever with no recovery. Wrapped in try/catch/
       // finally (mirrors loadMore) so the loader ALWAYS clears and a thrown turn shows an inline retry.
       try {
-        prefetchNarrowing(pending.q);  // runs DURING the search, not after it
         const result = await runQuery(pending.q, true, run.ac.signal, ensureChatId());
         if (run.cancelled) return;
+        prefetchNarrowing(result.query ?? pending.q);  // AFTER the search — see prefetchNarrowing
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
         if (run.cancelled) return;
         // REMOVED (owner 2026-08-19): the auto-open AF intro popup after a filter search is killed.
