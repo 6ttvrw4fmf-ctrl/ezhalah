@@ -70,7 +70,10 @@ console.log('\nThe AF interview holds browsing only while it is asking; the thre
 // ── 1. CLAUSES 1 & 2 — EXECUTED over the complete state space ───────────────────────────────────
 // The phase list is read out of the module's own type, so a phase added there without a case here
 // is caught by check 2 rather than quietly untested.
-const PHASES: AfPhase[] = ['loading', 'intro', 'asking', 'mining'];
+// 'mining' is gone with the overlay (owner 2026-09-20). The exhaustiveness this list enforces is
+// unchanged — it is still every phase the union declares — and the finished-round state it used to
+// represent is now plain `null`, which clause 2 already covers below.
+const PHASES: AfPhase[] = ['loading', 'intro', 'asking'];
 
 check('clause 1 — every ACTIVE interview phase withholds browsing',
   PHASES.every((p) => afInterviewOwnsBrowsing(p) === true),

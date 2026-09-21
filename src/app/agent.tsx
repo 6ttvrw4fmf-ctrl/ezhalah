@@ -72,7 +72,6 @@ import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESO
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
-import MiningTransition from '@/components/MiningTransition';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
@@ -991,7 +990,6 @@ export default function Agent() {
     // final search runs behind it. Carries only the two counts it may speak — both handed in from
     // quotableTotal(), never computed in the overlay. Dismissal is driven by plain setTimeout
     // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
-    | { phase: 'mining'; from: number | null }
     | null
   >(null);
   // The query accumulates answers as the flow advances; `token` supersedes a stale async fetch when a
@@ -2324,10 +2322,23 @@ export default function Agent() {
     // reverted, and the restored card speaks no selections — but the dedupe rule is the PILLS' own
     // and is unaffected.)
     const dedupedFacets = dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]);
-    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current });
-    const timers = miningTimersRef.current;
+    // NO OVERLAY AT ALL WHEN A ROUND ENDS (owner 2026-09-20, third and final word on this card:
+    // "when the user clicks on what he wants, then there is this pop-up that pops up with a
+    // magnifying glass … this needs to be gone").
+    //
+    // Earlier passes removed the card's COMPLETION state (the green checkmark and «لقينا N عقار»).
+    // That was the wrong half: what the owner has been calling "the pop-up" is the card itself, in
+    // its searching state, magnifier and all. So the round now closes its question card and hands
+    // straight over — setAgeFlow(null), no phase, no timers, no scrim.
+    //
+    // NOTHING IS LOST BY REMOVING IT, which is why this is safe where it would not have been before:
+    // the overlay was translucent ON PURPOSE so "the searching turn behind the card — the platform
+    // roster included — reads through" (the deleted card's own header said so). That searching turn is the
+    // thread's own, rendered by runRefine below and not by this overlay. Taking the card away simply
+    // stops covering it, so the user still watches «نراجع N منصة عقارية» work — they just see it
+    // directly instead of through a scrim.
+    setAgeFlow(null);
     const stillMining = () => ageFlowTokenRef.current === token;
-    timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
     const guided = ageFlowBaseQRef.current
       ? {
           baseQ: carry?.originQ ?? ageFlowBaseQRef.current,
@@ -2375,39 +2386,23 @@ export default function Agent() {
         // skipping to the end — that is the only outcome. Whether ANOTHER round is worth offering is
         // still decided by assessNarrowing (unchanged) through the PASSIVE effect above it feeds,
         // which only toggles the «تحديد أكثر» button visibility; opening a new round is a tap, always.
-        // NO COMPLETION BEAT (owner 2026-09-20, shown the card and asked for it gone: "remove this
-        // bro no need for it ... if user selects or clicks skip its fine"). REVERSES the 2026-09-06
-        // restoration of the «لقينا N عقار أقرب لطلبك» tick: `to` is never handed to the card, so
-        // MiningTransition's `done` never flips, no checkmark and no sentence are ever drawn, and the
-        // overlay is dismissed the moment the results are ready instead of holding ~1.1s on a
-        // celebration the user did not ask for. Applies to EVERY ending — answers committed or every
-        // question skipped — because the owner named both.
-        //
-        // WHAT IS DELIBERATELY KEPT: the searching animation still covers the re-search. Dropping it
-        // too would leave the user on the old screen with no sign anything is happening for the few
-        // seconds the RPC takes, which is the one thing worse than a beat that lingers.
-        //
-        // `to: null` is not a new state: MiningTransition already renders exactly this whenever the
-        // count would overstate (its own header calls out "`done` never flips ⇒ no beat at all"), so
-        // this removes a call site rather than teaching the card a new shape. The 1.4s floor stays —
-        // it stops the card flashing up and vanishing when the search returns almost instantly.
+        // There is no overlay left to dismiss — the card was removed at the top of finishGuided —
+        // so the only thing still owed here is the landing scroll. `startedAt` keeps its old job of
+        // spacing that scroll past the new turn's own card cascade, nothing more.
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
-        timers.push(setTimeout(() => {
-          if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
-        }, wait));
-        timers.push(setTimeout(() => {
+        miningTimersRef.current.push(setTimeout(() => {
           if (!stillMining()) return;
           // LAND ON THE NEW TURN (owner 2026-08-24): the old cards stay exactly where they are, and the
           // thread eases down so the user reads their selection receipt → the new count → the new
           // cards. Never a jump to the bottom.
-          // The delay clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s).
+          // The delay clears the new turn's own card cascade (CASCADE_MAX × REVEAL_STEP_MS ≈ 1.6s).
           // Measured live 2026-08-24: easing sooner read a `msgYRef` that predated the cascade — the
           // ref only refreshes when the message RESIZES, which is exactly what each revealed card
           // does — and landed ~300px short, with the new count line still under the fold.
           if (msgId) for (const d of LAND_PASSES_MS) easeToMsgTop(msgId, d);
         }, wait + 1100));
       },
-    }).catch(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); });
+    });
   };
 
   // Entry point for «خلّنا نحدد الطلب أكثر» (and the auto-open after an eligible Filter search). Build
@@ -3867,7 +3862,7 @@ export default function Agent() {
                               {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
                                   user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
                                   the old CTA row must not sit behind it competing for the same decision.
-                                  `ageFlow` covers every AF phase (loading → intro → asking → mining), so
+                                  `ageFlow` covers every AF phase (loading → intro → asking), so
                                   the row is gone from the tap until the flow closes, and returns by itself
                                   afterwards because closing sets ageFlow back to null. The AF card is an
                                   absolute overlay, so without this gate the two buttons stayed rendered
@@ -4237,8 +4232,6 @@ export default function Agent() {
               onClose={onIntroShowResults}
               pills={afCardPills}
             />
-          ) : ageFlow.phase === 'mining' ? (
-            <MiningTransition from={ageFlow.from} />
           ) : (
             <AdvancedQuestionCard
               titleKey={ageFlow.question.titleKey}

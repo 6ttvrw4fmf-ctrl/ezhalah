@@ -5,7 +5,7 @@
 //
 //   node --experimental-strip-types scripts/verify-advanced-filter-contract.ts   (wired into `npm test`)
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -327,34 +327,26 @@ check('the result-intro count comes from matchTotal via quotableTotal(), never a
 //    owner 2026-09-06: "remove this design … keep it how it was") ─────────────────────────────────
 // The beat is DECORATION: its dismissal is driven by plain setTimeout latches in finishGuided (never
 // an animation callback — src/lib/afterAnimation.ts's rule) and a hard failsafe dismisses it even if
-// the search turn dies. It speaks the searching line, the honest from-count, and — once the search
-// lands — the «لقينا N عقار أقرب لطلبك» beat, whose number is quotableTotal()'s output handed in as
-// `to` (see verify-mining-total-honesty.ts for the honesty half). Reduced motion drops the drift.
-const miningSrc = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
-check('deep-search dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
-  /phase: 'mining'/.test(agentSrc)
-  && /timers\.push\(setTimeout\(/.test(agentSrc)
-  && /15000/.test(agentSrc)
-  && !/\.start\(\s*\(/.test(miningSrc));
-check('the transition speaks the searching line + the honest from-count, and respects reduced motion',
-  /Going through \{count\} properties/.test(miningSrc)
-  && /Finding the closest match for you/.test(miningSrc)
-  && /useReducedMotion/.test(miningSrc));
-// NO COMPLETION BEAT AT ALL (owner 2026-09-20 — shown the card, asked for it gone). This check used
-// to assert `wait + 1100`, the hold that kept «لقينا N عقار أقرب لطلبك» on screen. That hold is gone,
-// and the old assertion would now pass for the WRONG reason: an unrelated `wait + 1100` scroll timer
-// (easeToMsgTop) still lives in the same function, so a bare source match no longer proves anything
-// about the beat. Assert the mechanism instead: the card's `to` — the ONLY thing that flips
-// MiningTransition's `done` and draws the tick — is never handed a value.
-// SUPERSEDED BY THE STRUCTURAL CHECKS FURTHER DOWN (owner 2026-09-20). This used to assert the beat
-// was merely un-triggered — that agent.tsx passed `to: null` and never `{...f, to: total}`. The
-// owner reported seeing the green check again after that, so `to` was deleted outright: the prop,
-// the `done` flag, the checkmark and the found-copy are all gone from MiningTransition. Asserting a
-// `to: null` that no longer exists would now fail for the RIGHT outcome, so the rule moved to
-// "the capability is absent", which is what the MiningTransition block below proves.
-check('the mining card is still opened with only the count it may state',
-  /setAgeFlow\(\{ phase: 'mining', from: ageFlowTotalRef\.current \}\)/.test(agentSrc),
-  'src/app/agent.tsx — `from` is the one number this card may show; it can compute none of its own');
+// The deep-search overlay it described is deleted (see the absence check below). What that rule was
+// really protecting — a hand-off driven by plain timers, never by an animation callback — still
+// applies to the landing scroll that replaced it, so it is asserted there instead.
+check('the round hands over on a plain setTimeout, never an animation callback',
+  /miningTimersRef\.current\.push\(setTimeout\(/.test(agentSrc)
+  && !/\.start\(\s*\(\s*\)\s*=>/.test(agentSrc));
+// THE OVERLAY IS GONE (owner 2026-09-20, final word after three passes at it: "there is this
+// pop-up that pops up with a magnifying glass … this needs to be gone"). Earlier passes removed its
+// COMPLETION state — the green checkmark and «لقينا N عقار» — which was the wrong half: what the
+// owner had been calling "the pop-up" was the card itself, in its searching state. src/components/
+// MiningTransition.tsx is deleted and the 'mining' phase with it.
+//
+// These checks are NOT deleted with it. A barrier that policed a component is the thing that stops
+// it coming back wrong, so each now asserts the ABSENCE — which is strictly stronger than anything
+// it asserted about the component's internals, and fails the moment a mining overlay reappears.
+check('the mining overlay is gone: no component, no phase, no render, no import',
+  !existsSync(join(root, 'src/components/MiningTransition.tsx'))
+  && !/phase: 'mining'/.test(agentSrc)
+  && !/MiningTransition/.test(agentSrc),
+  'a round must hand straight over to the thread\'s own searching turn, with no card on top of it');
 // THE «تحديد أكثر» PROBE RUNS *WITH* THE SEARCH, NOT AFTER IT (owner 2026-09-20: "once the user
 // clicks Search, the button should show … the user will wait 10 seconds — let the 2.5 be part of
 // that"). The passive effect keys off lastResultsMsg, which does not exist until the search has
@@ -396,16 +388,6 @@ check('«رجوع» and the X survive on a scope question — Skip is hidden, no
 // gone … it was a mistake"). The beat's trigger was removed first; the owner reported seeing it
 // again, so the CAPABILITY is deleted — no `to` prop, no `done`, no checkmark, no found-copy. There
 // is nothing left to re-trigger: bringing it back now means re-writing it.
-{
-  const mining = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
-  const body = mining.slice(mining.indexOf('export default function MiningTransition'));
-  check('MiningTransition takes no `to` and has no completion state at all',
-    !/to:\s*number \| null/.test(body) && !/const done =/.test(body) && !/'checkmark'/.test(body),
-    'src/components/MiningTransition.tsx — the green check must be unreachable, not merely untriggered');
-  check('…and no caller can hand it one',
-    !/<MiningTransition[^>]*\bto=/.test(agentSrc)
-    && !/phase: 'mining'[^}]*\bto:/.test(agentSrc));
-}
 
 check('the results pills are fed by the deduped facet set (one label per committed answer)',
   /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)

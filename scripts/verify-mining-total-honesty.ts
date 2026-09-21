@@ -29,7 +29,7 @@
 //
 //   node --experimental-strip-types scripts/verify-mining-total-honesty.ts   (wired into `npm test`)
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 let failures = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -111,35 +111,17 @@ check('the results headline quotes the SAME helper as the overlay',
   /const introTotal = quotableTotal\(m\.result\)/.test(agent),
   'two surfaces describing one search must not compute the total two different ways');
 
-const mining = strip(readFileSync(new URL('../src/components/MiningTransition.tsx', import.meta.url), 'utf8'));
-// THE GUARANTEE THIS BARRIER ACTUALLY PROTECTS: the overlay may speak ONLY numbers HANDED to it —
-// `from` and `to`, both produced by quotableTotal() in agent.tsx (pinned above) — and has no path to
-// a locally-invented total. That is what makes the 1,500-page-cap bug unreachable from here.
+// THE OVERLAY IS GONE (owner 2026-09-20: "there is this pop-up that pops up with a magnifying
+// glass … this needs to be gone"). The checks that stood here read MiningTransition.tsx and proved
+// it could not invent a count of its own. The component is deleted, so the strongest form of that
+// guarantee is simply that there is no overlay to invent one — asserted below.
 //
-// The 2026-08-31 redesign additionally removed the «لقينا N» completion beat entirely, and this
-// check was tightened to "no completion count at all". The owner reverted that redesign on
-// 2026-09-06 ("remove this design … keep it how it was"), so the beat is back — and it is still
-// honest, because `to` IS quotableTotal's output: it is null whenever the RPC count would overstate,
-// and MiningTransition renders the beat only when `to != null`. Asserting "no count at all" would
-// now be asserting a design preference the owner reversed, not the honesty rule. The honesty rule is
-// asserted in full below, and section D still proves the page-cap defect is caught.
-check('MiningTransition speaks only counts HANDED to it and cannot invent one locally',
-  /\{ count: grouped\(from\) \}/.test(mining)
-  && !/listings|matchTotal|1500/.test(mining),
-  'the overlay must never read a listings buffer, a matchTotal, or a page cap of its own');
-// THERE IS NO COMPLETION BEAT TO GATE ANY MORE (owner 2026-09-20: "this green check needs to always
-// be gone … it was a mistake"). This used to assert the beat only spoke when quotableTotal() had
-// handed it an honest number. The beat is deleted — prop, flag, checkmark and copy — so the honesty
-// question it answered cannot arise: there is no second number for the overlay to state. That is
-// strictly stronger than the gate it replaces, and it is what is asserted now.
-check('there is no completion beat at all — no second number the overlay could state',
-  !/const done =/.test(mining)
-  && !/to != null/.test(mining)
-  && !/closest to your request/.test(mining),
-  'a re-added beat must come back with its quotableTotal gate, and this check reviewed again');
-check('grouped() is applied ONLY to the one handed count',
-  !/grouped\((?!from\))/.test(mining),
-  'grouped() may only be applied to `from`, the single count agent.tsx hands this overlay');
+// Everything above this line is untouched and is the part that still matters: quotableTotal() is the
+// single arbiter of "the number this search may state", and the 1,500-row page cap may never be
+// quoted as a match total. That rule outlived the card and is what this file is really for.
+check('there is no mining overlay left to state a count of its own',
+  !existsSync(new URL('../src/components/MiningTransition.tsx', import.meta.url)),
+  'a re-added overlay must come back with its own honesty checks, and this file reviewed again');
 
 // ── D. MUTATION PROOF (self-checking) ────────────────────────────────────────────────────────────
 // The removed bug, restored in miniature: quoting `total` instead of `matchTotal`. If this ever

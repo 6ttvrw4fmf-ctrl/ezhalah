@@ -2,7 +2,7 @@
 //
 // The 2026-08-31 card-pipeline transition this module wrote copy for was removed on the owner's
 // instruction (2026-09-06): «remove this design ... keep it how it was». Nothing imports
-// deepSearchLine() any more — MiningTransition renders the restored «digging» card instead — so this
+// deepSearchLine() any more — the «digging» card that replaced it is itself deleted now — so this
 // file ships as dead weight in the bundle's dependency graph only if something imports it, which
 // scripts/verify-af-deep-search-transition.ts now forbids.
 //

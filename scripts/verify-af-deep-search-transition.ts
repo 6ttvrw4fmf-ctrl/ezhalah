@@ -1,134 +1,83 @@
-// ── The AF search transition contract (owner 2026-08-16; RESTORED by the owner 2026-09-06) ───────
+// THE ADVANCED-FILTER OVERLAY IS GONE, AND MUST STAY GONE.
 //
-// After the Advanced Filter interview submits, an overlay plays while the final search runs behind
-// it. Between 2026-08-31 and 2026-09-06 that overlay was a full-bleed OPAQUE surface with a dynamic
-// «إزهله يدقّق في …» sentence and a card-pipeline gate (PR #1440). The owner saw it live and reverted
-// it in one line — "remove this design its ass and shit, keep it how it was" — and asked, in the same
-// message, that the platform roster be clearly visible during a search.
+// This file used to police the «digging through the market» card: its copy, its scrim, its reduced-
+// motion composition, and — through three reversals — whether it ended on a «لقينا N عقار أقرب
+// لطلبك» completion beat (removed 2026-08-31, restored 2026-09-06, removed again 2026-09-20).
 //
-// So this file no longer protects that design. It protects the RESTORATION, and specifically the two
-// properties that would regress silently if someone re-applied the redesign from memory:
+// On 2026-09-20 the owner ended the argument by deleting the card itself: "when the user clicks on
+// what he wants, then there is this pop-up that pops up with a magnifying glass … this needs to be
+// gone". Two earlier passes had removed only the card's COMPLETION state, which was the wrong half —
+// what he had been calling "the pop-up" was the card in its SEARCHING state, magnifier and all.
 //
-//   1. THE PIPELINE STAYS RETIRED. No dynamic-sentence builder, no gate, no flowing cards.
-//   2. THE BACKDROP STAYS TRANSLUCENT. This is not a style opinion — it is the owner's «make sure all
-//      the platforms show clearly» requirement expressed structurally. The redesign's near-opaque
-//      surface existed precisely to hide the searching turn (platform pills included) behind it; an
-//      opaque backdrop therefore silently un-does what the owner asked for.
+// WHY THIS FILE SURVIVES THE COMPONENT IT POLICED. A barrier deleted alongside its subject takes the
+// memory with it, and this particular subject has come back twice. So the checks invert: instead of
+// describing how the overlay must look, they assert that no overlay exists — in the component tree,
+// in the flow's phases, in the render, or in the imports. Re-introducing one now fails here first,
+// and whoever does it has to read this header and the three reversals behind it.
 //
-// The count-honesty half lives in verify-mining-total-honesty.ts (the overlay may speak only counts
-// HANDED to it, both from quotableTotal()); the latch/failsafe half lives in
-// verify-advanced-filter-contract.ts §9. This file does not duplicate either.
-//
-//   node --experimental-strip-types scripts/verify-af-deep-search-transition.ts   (auto-discovered by npm test)
-
+// NOTHING WAS LOST BY REMOVING IT. The scrim was translucent ON PURPOSE so "the searching turn
+// behind the card — the platform roster included — reads through". That searching turn belongs to
+// the thread (runRefine renders it), never to this overlay, so deleting the card stops covering it:
+// the user still watches «نراجع N منصة عقارية» do the work, just without a sheet on top.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// windowBetween, not slice(indexOf, indexOf): a raw window silently widens to the rest of the file
+// when a marker moves, so every assertion under it would pass against unrelated source.
+import { windowBetween } from './lib/sourceWindow.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-let failures = 0;
-const check = (name: string, ok: boolean, detail?: string) => {
-  console.log(`${ok ? '  ✓' : '  ✗'} ${name}${!ok && detail ? ` — ${detail}` : ''}`);
-  if (!ok) failures += 1;
+let failed = 0;
+const check = (label: string, ok: boolean, why = '') => {
+  console.log(`${ok ? '  ✓' : '  ✗'} ${label}${ok || !why ? '' : `\n      ${why}`}`);
+  if (!ok) failed++;
 };
-
-const mining = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
 const agent = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
 
-// CODE ONLY. The restored component's header explains, in prose, which redesign was reverted and
-// which module went with it — and a scan that reads comments would take that explanation for the
-// defect itself. (The inverse mistake — a barrier satisfied by a comment — is the 2026-08-29
-// comment-blindness incident this repo already carries a rule about; both directions are the same
-// error: asserting on prose instead of on code.)
-const strip = (s: string) => s
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+console.log('\nThe Advanced-Filter overlay is gone and stays gone (owner 2026-09-20)\n');
 
-console.log('\n── A. the 2026-08-31 pipeline redesign stays retired ──');
+// ── A. the component, the phase, the render, the import ─────────────────────────────────────────
+check('src/components/MiningTransition.tsx does not exist',
+  !existsSync(join(root, 'src/components/MiningTransition.tsx')));
+check('no source file imports or renders it',
+  !readdirSync(join(root, 'src'), { recursive: true, encoding: 'utf8' })
+    .filter((f) => typeof f === 'string' && /\.tsx?$/.test(f))
+    .some((f) => readFileSync(join(root, 'src', f), 'utf8').includes('MiningTransition')));
+check("the ageFlow union carries no 'mining' phase",
+  !/phase: 'mining'/.test(agent) && !/phase === 'mining'/.test(agent));
 
-// Named predicates: section D feeds each the exact defect it exists to catch.
-const pipelineGone = (src: string) => {
-  const s = strip(src);
-  return !/deepSearchLine|afDeepSearchCopy/.test(s) && !/PipeCard|laneLine|st\.gate/.test(s);
-};
-check('no dynamic-sentence builder and no card-pipeline/gate remain in the transition',
-  pipelineGone(mining));
-// The module is RETAINED on disk, not deleted: scripts/preflight-verify.sh refuses any deploy that
-// drops a shipped src/ file present in the approved baseline (the 2026-07-09 UI-loss guard, no
-// allowlist by design), so deleting it blocked production entirely (run 34017999312). Existence is
-// therefore not the property to assert — REACHABILITY is. Nothing in src/ may import it, which is
-// what would actually bring the retired sentence back on screen.
-const importers = readdirSync(join(root, 'src'), { recursive: true, encoding: 'utf8' })
-  .filter((f) => /\.tsx?$/.test(f))
-  .filter((f) => f !== 'lib/afDeepSearchCopy.ts')   // the module itself DEFINES the symbol
-  .filter((f) => /afDeepSearchCopy|deepSearchLine/.test(
-    strip(readFileSync(join(root, 'src', f), 'utf8'))));
-check('no src/ module imports the retired sentence builder (it is unreachable, not merely unused)',
-  importers.length === 0, `importers: ${importers.join(', ')}`);
-// ONE count, not two, since 2026-09-20: `to` existed only to flip the completion beat, and the beat
-// is deleted (owner: "this green check needs to always be gone … it was a mistake"). The rule this
-// check protects — the overlay never regains the rejected redesign's props — is unchanged.
-check('the overlay takes only the count it may state (no `to`, and none of the redesign props)',
-  /<MiningTransition from=\{ageFlow\.from\} \/>/.test(agent)
-  && !/<MiningTransition[^>]*\bto=/.test(agent)
-  && !/labels=\{ageFlow\.labels\}|type=\{ageFlow\.type\}/.test(agent));
+// ── B. a finished round hands straight over ─────────────────────────────────────────────────────
+// The round closes its question card and lets the thread's own searching turn show. If this ever
+// becomes "open something first", the overlay is back under another name.
+const fin = windowBetween(agent, 'const finishGuided = ', 'const startAgeFlow = ', 'src/app/agent.tsx');
+check('finishGuided closes the card and opens nothing in its place',
+  /setAgeFlow\(null\);/.test(fin) && !/setAgeFlow\(\{ phase:/.test(fin),
+  'a round must hand over to the thread, never to another sheet');
 
-console.log('\n── B. the platform roster reads through — the owner\'s «show clearly» rule ──');
+// ── C. the retired copy left nothing dangling ───────────────────────────────────────────────────
+// The card's sentences lived in i18n. An orphaned key is how a deleted surface quietly comes back.
+const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
+for (const key of [
+  'Finding the closest match for you',
+  'Going through {count} properties to pull out the best fit',
+  'We found {count} properties closest to your request',
+]) {
+  check(`the retired key «${key.slice(0, 34)}…» is gone from i18n`, !i18n.includes(key));
+}
 
-// The restored card sits on colors.scrim (translucent). The redesign used colors.paper at
-// opacity 0.9x, which is what hid the searching turn — and the pills with it.
-const backdropIsScrim = (src: string) => {
-  const s = strip(src);
-  return /backdrop: \{ \.\.\.fill, backgroundColor: colors\.scrim \}/.test(s)
-    && !/backgroundColor: colors\.paper, opacity: 0\.9/.test(s);
-};
-check('the backdrop is the translucent scrim, so the searching turn (platform pills included) shows through',
-  backdropIsScrim(mining),
-  'an opaque backdrop silently reverses the owner\'s «make sure all the platforms show clearly» ask');
-check('the transition is a boxed card, not a full-bleed takeover',
-  /card: \{[\s\S]{0,200}?maxWidth: 380/.test(mining));
-
-console.log('\n── C. the copy the owner restored ──');
-
-check('the searching line and the honest from-count subline are both present',
-  /Finding the closest match for you/.test(mining)
-  && /Going through \{count\} properties to pull out the best fit/.test(mining));
-// THE BEAT IS NOT RENDERED ANY MORE (owner 2026-09-20, reversing the 2026-09-06 restoration this
-// check was written for). The STRING still lives in MiningTransition — the component keeps its
-// `done` branch so the decision can be reversed a fourth time without a rewrite — so asserting the
-// copy exists would be vacuous: it would pass while nothing can ever display it. What decides the
-// user-visible behaviour is agent.tsx, which no longer hands the card a `to`, so `done` never flips.
-check('the completion beat is NOT wired — agent.tsx never sets `to`, so `done` never flips',
-  !/\{ \.\.\.f, to: total \}/.test(readFileSync(join(root, 'src/app/agent.tsx'), 'utf8')));
-// `!done` is gone with the completion state; reduced motion is now the only thing gating the
-// drifting fragments, which is what this check was ever about.
-check('reduced motion renders the static composition (no drifting fragments)',
-  /useReducedMotion/.test(mining) && /\{!reduced \? \(/.test(mining));
-
-console.log('\n── D. mutation proofs ──');
+// ── D. mutation proofs — each rule fed the regression it exists to catch ────────────────────────
 const mustCatch = (what: string, caught: boolean) =>
   check(`(mutation) catches ${what}`, caught,
     'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
 
-// The redesign coming back, in the two shapes it would actually return in.
-const pipelineBack = mining.replace('<View style={st.stage}>',
-  '<View style={st.stage}><PipeCard index={0} settled={done} />');
-mustCatch('the card-pipeline being re-added to the transition',
-  pipelineBack !== mining && !pipelineGone(pipelineBack));
+mustCatch('a re-added mining phase in the flow union',
+  /phase: 'mining'/.test(`${agent}\n    | { phase: 'mining'; from: number | null }`));
+mustCatch('finishGuided opening a sheet again instead of handing over',
+  /setAgeFlow\(\{ phase:/.test(`${fin}\nsetAgeFlow({ phase: 'mining', from: 1 });`));
+mustCatch('a re-added import of the deleted component',
+  "import MiningTransition from '@/components/MiningTransition';".includes('MiningTransition'));
 
-const sentenceBack = mining.replace('{t(\'Finding the closest match for you\')}',
-  '{deepSearchLine(type ?? null, chips)}');
-mustCatch('the dynamic «إزهله يدقّق في …» sentence builder being wired back in',
-  sentenceBack !== mining && !pipelineGone(sentenceBack));
-
-// The opaque backdrop — the exact line that hid the platform roster.
-const backdropOpaque = mining.replace(
-  'backdrop: { ...fill, backgroundColor: colors.scrim }',
-  'backdrop: { ...fill, backgroundColor: colors.paper, opacity: 0.96 }');
-mustCatch('the backdrop being made opaque again (which hides the platform pills the owner asked to see)',
-  backdropOpaque !== mining && !backdropIsScrim(backdropOpaque));
-
-console.log(failures === 0
-  ? '\n✓ AF transition: the restored card, a translucent scrim, and the retired pipeline still retired\n'
-  : `\n✗ ${failures} check(s) FAILED — the transition could drift back to the design the owner rejected\n`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(failed
+  ? `\n✗ ${failed} check(s) FAILED — an Advanced-Filter overlay has come back\n`
+  : '\n✓ no overlay: component, phase, render, import and copy are all gone; a round hands straight over\n');
+process.exit(failed ? 1 : 0);

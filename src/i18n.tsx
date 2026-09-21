@@ -454,9 +454,6 @@ const AR: Record<string, string> = {
   // the CURRENT result set. Professional, calm, never legal/technical language.
   'Some listings do not mention this detail, so the options reflect what the listings actually state': 'بعض الإعلانات لا تذكر هذه المعلومة، لذلك تعتمد الخيارات على البيانات المتوفرة في الإعلانات.',
   'Options and counts are based on your current search results and update as you narrow down': 'الخيارات والأعداد مبنية على نتائج بحثك الحالية وتُحدَّث مع تضييق البحث.',
-  'Finding the closest match for you': 'ندور لك على الأقرب لطلبك',
-  'Going through {count} properties to pull out the best fit': 'نراجع {count} عقار ونطلع لك الأنسب',
-  'We found {count} properties closest to your request': 'لقينا {count} عقار أقرب لطلبك',
   'Based on: {labels}': 'بناءً على: {labels}',
   'Without: {label}': 'بدون: {label}',
 
