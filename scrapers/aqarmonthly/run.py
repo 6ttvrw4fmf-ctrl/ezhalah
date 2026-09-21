@@ -253,10 +253,10 @@ def _district_from_address(address: str | None, city_id: int | None) -> str | No
     so resolve_slug()'s \\bحي\\s+ regex finds nothing (2026-08-04 audit: ~330/388 aqarmonthly
     null-district search_listings_ar rows, e.g. AQM5946944 address="شارع العمرة, الصحافة, الرياض").
 
-    Catalog-validated against arabic_location's own loaded `_DISTRICT_BY_CITY` (city_id →
-    {district_norm,…}) — UNLIKE resolve_slug()'s «حي X» capture, which stores the raw regex match
-    with no catalog check at all. An uncatalogued/ambiguous candidate is discarded, never stored
-    (never invent/guess a location — canonical rule 3)."""
+    Catalog-validated against arabic_location's own loaded `_DISTRICT_AR_BY_CITY` ((city_id,
+    district_norm) → that city's catalog spelling) — UNLIKE resolve_slug()'s «حي X» capture, which
+    stores the raw regex match with no catalog check at all. An uncatalogued/ambiguous candidate is
+    discarded, never stored (never invent/guess a location — canonical rule 3)."""
     if not address or not city_id:
         return None
     segs = [s.strip() for s in re.split(r"[,،]", address) if s.strip()]
@@ -266,11 +266,16 @@ def _district_from_address(address: str | None, city_id: int | None) -> str | No
     if AL.norm_ar(candidate) == AL.norm_ar(city_seg):
         return None  # district==city shape → source has no real district (honest null, matches
                       # the already-decided gathern district==own-city policy)
-    valid = AL._DISTRICT_BY_CITY.get(city_id, ())
-    for form in (candidate, "حي " + candidate):
-        if AL.norm_ar(form) in valid:
-            return form
-    return None
+    # norm_district_tok(), NOT norm_ar(): catalog district_norm keys are built by that function (it
+    # strips «حي »/«ال», drops ء…), so under norm_ar() «الصحافة» never met its own key «صحافه».
+    catalog_ar = AL._DISTRICT_AR_BY_CITY.get((city_id, AL.norm_district_tok(candidate)))
+    if catalog_ar is None:
+        return None
+    # Source spelling, «حي »-prefixed exactly when THIS city's catalog spelling is — the shape the
+    # old two-form loop returned (candidate, then «حي »+candidate), and what the slug path stores.
+    if AL.norm_ar(catalog_ar).startswith("حي ") and not AL.norm_ar(candidate).startswith("حي "):
+        return "حي " + candidate
+    return candidate
 
 
 def map_listing(g: dict, price: dict) -> dict | None:
