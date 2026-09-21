@@ -17,7 +17,6 @@ verify-af-cohort-questions-certified.ts
 verify-af-compound-predicates.ts
 verify-af-continuous-chat-history.ts
 verify-af-contract-coverage-map.ts
-verify-af-count-belongs-to-selection.ts
 verify-af-count-params-carry-advanced.ts
 verify-af-coverage-cliff-predicate-scope.ts
 verify-af-emoji-summary.ts
@@ -203,7 +202,6 @@ verify-migration-drift-guard-wired.ts
 verify-migration-drift-vs-production.ts
 verify-migration-mirror-integrity.ts
 verify-migration-parity-class-split.ts
-verify-mining-total-honesty.ts
 verify-mixed-period-af-gating.ts
 verify-mobile-composer-keyboard.ts
 verify-mode-switch-costs-no-history.ts
