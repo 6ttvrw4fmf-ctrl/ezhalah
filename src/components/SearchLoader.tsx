@@ -42,7 +42,6 @@ import {
   pickLoaderPlatforms,
   type LoaderPlatform,
 } from '@/data/loaderPlatforms';
-import { fetchActivePlatformNames } from '@/data/loaderActivePlatforms';
 import { fetchLoaderScaleStats, type LoaderScaleStats } from '@/data/loaderScaleStats';
 import { PILL_STAGGER, highlightStepMs, waveDelayMs, PILL_GROUP, WAVE_RISE, WAVE_HOLD, WAVE_FALL } from '@/lib/searchLoaderTiming';
 import { buildSearchLoaderTitles, readingDurationMs } from '@/lib/searchLoaderTitles';
@@ -266,7 +265,7 @@ function PhaseTitle({
     // functional setTitleIdx update above reads the current index without needing it in scope, and
     // including it would restart this effect (and the pending timer) on every single tick.
   }, [phase, reduced, exiting, titles]);
-  // titles can shrink (e.g. scaleStats arrives, or activeNames narrows the roster) between renders —
+  // titles can shrink (e.g. scaleStats arrives) between renders —
   // clamp so a stale index never reads past the current array's end.
   const label = phase === 'thinking' ? t('Ezhalah is thinking…') : titles[Math.min(titleIdx, titles.length - 1)];
 
@@ -317,23 +316,18 @@ export default function SearchLoader({
   if (offsetRef.current == null) offsetRef.current = currentRotation();
   useEffect(() => { bumpRotation(); }, []);
 
-  // ACTIVE-ONLY roster (owner rule 2026-08-29): only platforms with reachable rows in
-  // `search_listings_ar` are advertised, so a scraper that goes cold stops showing without a
-  // deploy. `fetchActivePlatformNames()` resolves once and is cached at the module level via the
-  // usual React state; if it fails, `activeNames` stays null and pickLoaderPlatforms falls back to
-  // the full catalog (safe degradation — see loaderPlatforms.ts). The catalog itself is barrier-
-  // pinned equal to production's active set at CI time (verify-loader-platforms-match-active.ts).
-  const [activeNames, setActiveNames] = useState<Set<string> | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetchActivePlatformNames().then((names) => {
-      if (!cancelled) setActiveNames(names);
-    });
-    return () => { cancelled = true; };
-  }, []);
+  // THE FULL ROSTER, ALWAYS (owner 2026-09-20, reversing the 2026-08-29 active-only rule): "show 59
+  // … whenever I add a new website that number changes and it stays stable … even if it's dead, till
+  // I manually [remove it]". The strip is the catalog in PLATFORM_META, full stop — it no longer
+  // shrinks at runtime when a scraper goes cold. The catalog itself still moves only by a deliberate
+  // edit, and verify-loader-platforms-match-active.ts still checks it against production at CI time.
+  //
+  // Removing the runtime filter also removed its round trip: loader_active_platforms_ar ran on every
+  // search mount, beside the search, measured 0.4-3.7 s (9,004 calls in 9.3 days) — database time
+  // spent competing with the query the user was actually waiting for (2026-09-21).
 
   // The "big database" marketing numbers (owner 2026-09-12) — resolved once per mount, same
-  // null-on-failure/no-guess contract as activeNames above. See loaderScaleStats.ts.
+  // null-on-failure/no-guess contract used across the loader. See loaderScaleStats.ts.
   const [scaleStats, setScaleStats] = useState<LoaderScaleStats | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -343,7 +337,7 @@ export default function SearchLoader({
     return () => { cancelled = true; };
   }, []);
 
-  // Roster is computed once per (query, resultSources, activeNames) and FROZEN — `resultSources`
+  // Roster is computed once per (query, resultSources) and FROZEN — `resultSources`
   // arriving later (as the query resolves) only reorders which pills lead; it must never reshuffle
   // or hide pills already on screen. `query` just gates WHEN the strip mounts (a search is actually
   // underway); its contents do not affect WHICH platforms show. If the active-names fetch resolves
@@ -352,10 +346,10 @@ export default function SearchLoader({
   const frozenRef = useRef<LoaderPlatform[] | null>(null);
   const platforms = useMemo<LoaderPlatform[]>(() => {
     if (frozenRef.current && frozenRef.current.length) return frozenRef.current;
-    const picked = query ? pickLoaderPlatforms(resultSources, offsetRef.current ?? 0, activeNames) : [];
+    const picked = query ? pickLoaderPlatforms(resultSources, offsetRef.current ?? 0) : [];
     if (picked.length) frozenRef.current = picked;
     return picked;
-  }, [query, resultSources, activeNames]);
+  }, [query, resultSources]);
 
   // Soft completion (owner v4): fade the whole block out gently before the results morph in —
   // the loader must never vanish in a single frame.
