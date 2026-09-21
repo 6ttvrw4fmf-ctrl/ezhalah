@@ -719,10 +719,20 @@ export type AgeOptionCounts = {
 // variance while still failing fast in a genuine outage. A timeout is treated identically to an RPC
 // error: fetchPropertyAgeOptionCounts returns null either way.
 const AGE_COUNT_TIMEOUT_MS = 4000;
+//
+// IT CANCELS, NOT JUST STOPS WAITING (2026-09-21). Every caller passes a supabase-js query builder,
+// which is lazy and accepts an AbortSignal. The old body resolved {timedOut} and walked away, leaving
+// the request open and its count running on the database — and every caller then retried once on
+// top of it. Measured on production that meant an abandoned count per timed-out question plus its
+// retry, at exactly the moment the database was already too slow to answer. The timer now aborts
+// the request it gave up on. A plain promise (no abortSignal) keeps the old behaviour.
 function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T | { timedOut: true }> {
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const b = p as PromiseLike<T> & { abortSignal?: (s: AbortSignal) => PromiseLike<T> };
+  const src = ctrl && typeof b.abortSignal === 'function' ? b.abortSignal(ctrl.signal) : p;
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ timedOut: true }), ms);
-    Promise.resolve(p).then((v) => { clearTimeout(timer); resolve(v); },
+    const timer = setTimeout(() => { ctrl?.abort(); resolve({ timedOut: true }); }, ms);
+    Promise.resolve(src).then((v) => { clearTimeout(timer); resolve(v); },
       () => { clearTimeout(timer); resolve({ timedOut: true }); });
   });
 }
@@ -926,6 +936,22 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
 // answers already committed) rides along unchanged, which is what makes the count "exact result
 // count if that option were applied ON TOP OF the current committed state" rather than a bare
 // type total.
+// SETTLED SCOPE COUNTS — "prepare the advanced filter so that the second doesn't count" (owner
+// 2026-09-21). The search-time prefetch (agent.tsx: prefetchNarrowing → assessNarrowing) prices the
+// group tier with exactly the candidates the card asks for when the user taps «خلّنا نحدد الطلب
+// أكثر»; without this memory the tap paid for all five again (measured: a second 5-call wave, 1.2-1.7s
+// each, before the card had its numbers).
+//
+// THE SAME ANSWER, NOT A SECOND SOURCE. The key is the full candidate query and the value is what
+// this very function learned for it from location_search_candidates_ar — the same resolver, the same
+// predicate, only remembered. So "a count surface shares the results scope" still holds.
+// UNKNOWN IS NOT NO: only a LEARNED number is stored. A probe that failed is never remembered, so the
+// next ask retries it instead of freezing a blank. The TTL sits far below the hourly sync, so a
+// remembered count is the answer the database would give if asked again.
+const SCOPE_COUNT_TTL_MS = 120_000;
+const settledScopeCounts = new Map<string, { at: number; n: number }>();
+const inFlightScopeCounts = new Map<string, Promise<number | ProbeFailed>>();
+
 export async function fetchScopeOptionCounts(
   candidates: { key: string; query: SearchQuery }[],
 ): Promise<Record<string, number | null> | null> {
@@ -944,14 +970,28 @@ export async function fetchScopeOptionCounts(
   // Only at the boundary is it translated to `null` for the pure builder (scopeOptionsFromCounts),
   // whose contract is: number = measured, null = UNKNOWN (no number on the card), absent = UNKNOWN.
   const raw: Record<string, number | ProbeFailed> = {};
-  const probe = async ({ key, query }: { key: string; query: SearchQuery }): Promise<number | ProbeFailed> => {
+  const probe = ({ query }: { key: string; query: SearchQuery }): Promise<number | ProbeFailed> => {
+    // Remembered answer first (see SETTLED SCOPE COUNTS above), then join an identical probe that is
+    // already in flight — a tap that lands while the search-time prefetch is still pricing the same
+    // candidate waits for THAT answer instead of paying for a second copy of it.
+    const ck = JSON.stringify(query);
+    const hit = settledScopeCounts.get(ck);
+    if (hit && Date.now() - hit.at < SCOPE_COUNT_TTL_MS) return Promise.resolve(hit.n);
+    return dedupeInFlight(inFlightScopeCounts, ck, () => probeOnce(ck, query));
+  };
+  const probeOnce = async (ck: string, query: SearchQuery): Promise<number | ProbeFailed> => {
     const scope = await resolveSearchScope(query);
     // `!scope` is an unresolvable scope; isProbeFailure() is resolveSearchScope's own RPC failing.
     // Both are "never learned" — and the sentinel is a truthy object, so `!scope` alone would let it
     // through to be spread as scope params below.
     if (isProbeFailure(scope) || !scope) return PROBE_FAILED;
     const { isBroadCommercial, ...scopeParams } = scope;
-    const result = await withTimeout(
+    // bounded(), not withTimeout(): withTimeout only stops WAITING — the request stays open and the
+    // count(*) over() keeps running on the database after the card has already given up on it. With
+    // the retry-once below that doubled the load exactly when the database was already too slow
+    // (measured 2026-09-21: 5 abandoned + 5 retries on top of the search). bounded() aborts the
+    // request at the same 4s, so an answer nobody will read stops costing anything browser-side.
+    const { data, error } = await bounded<{ total_count: number }[]>(
       supabase!.rpc('location_search_candidates_ar', {
         ...scopeParams,
         ...rpcCountFilterParams(query),
@@ -964,12 +1004,10 @@ export async function fetchScopeOptionCounts(
       }),
       AGE_COUNT_TIMEOUT_MS,
     );
-    if ('timedOut' in result) return PROBE_FAILED; // never learned — the caller retries once
-    const { data, error } = result;
-    if (error) return PROBE_FAILED;                // transport/DB error = never learned the answer
-    return data && (data as { total_count: number }[]).length
-      ? Number((data as { total_count: number }[])[0].total_count) || 0
-      : 0;                                         // empty result set = an honest zero
+    if (error) return PROBE_FAILED;                // timeout, transport or DB error = never learned
+    const n = data && data.length ? Number(data[0].total_count) || 0 : 0;   // empty set = an honest zero
+    settledScopeCounts.set(ck, { at: Date.now(), n });   // ONLY a learned number is ever remembered
+    return n;
   };
   await Promise.all(candidates.map(async (c) => { raw[c.key] = await probe(c); }));
   const failed = candidates.filter((c) => isProbeFailure(raw[c.key]));

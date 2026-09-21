@@ -8,6 +8,12 @@ import { supabase } from '@/lib/supabase';
 import { setResultsFoundCache, type ResultsFoundTemplate } from '@/data/resultsFoundRotation';
 
 let inFlight: Promise<void> | null = null;
+// Set only by a load that actually returned rows. The doc below always promised "only the very first
+// call actually starts a request", but `inFlight` is cleared on settle, so every later call started a
+// fresh one — agent.tsx calls this from render, and a single الرياض search was measured firing it ~12
+// times (2026-09-21), each a round trip riding beside the search. A FAILED load leaves this false, so
+// the next call still retries: a failure is never frozen into "no pool" for the rest of the session.
+let loaded = false;
 
 // Every RPC await in this codebase must be bounded (AGENTS.md "A FAILED FETCH IS NOT AN EMPTY
 // ANSWER"). Same 15 s local AbortController pattern loaderFilterGreetings.ts already uses.
@@ -26,6 +32,7 @@ async function load(): Promise<void> {
       .filter((r) => r && r.template && (r.lang === 'ar' || r.lang === 'en'))
       .map((r) => ({ lang: r.lang, hasName: !!r.has_name, template: r.template }));
     setResultsFoundCache(rows);
+    loaded = true;
   } catch {
     setResultsFoundCache([]);
   } finally {
@@ -40,6 +47,6 @@ async function load(): Promise<void> {
  * so a slow fetch never regresses to the retired «لقينا {n} إعلان يطابق طلبك.» wording.
  */
 export function primeResultsFound(): void {
-  if (inFlight) return;
+  if (loaded || inFlight) return;
   inFlight = load().finally(() => { inFlight = null; });
 }
