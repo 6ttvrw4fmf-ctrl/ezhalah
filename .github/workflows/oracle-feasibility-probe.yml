@@ -1,0 +1,77 @@
+# CAN THIS PLATFORM'S PAGE TELL A DEAD AD FROM A LIVE ONE? — asked from the egress the jobs use.
+#
+# Owner, 2026-09-21, items 3 and 5: "Validate the reachable platforms from the actual GitHub Actions
+# environment... Test each platform independently before allowing automated deactivation." And for
+# the hard ones: "do not pretend they are covered. Identify exactly what information is missing...
+# Report back before implementing anything risky."
+#
+# WHY IT MUST RUN HERE AND NOT IN AN AGENT'S CONTAINER. Thirteen rows of
+# scrapers/absence-only-prune.txt read "EGRESS BLOCKED", and LISTING_LIVENESS.md §9.4 says that note
+# is a fact about the container that wrote it, not about the platform. Measured the same day: a
+# cloud-routine egress returned 404 on 10 of 12 gathern listings the crawl had served alive two
+# hours earlier — an 83% false-death rate — while CI got clean 200s on 10/10 canaries. So the
+# question is only answerable from a runner.
+#
+# READ-ONLY. It SELECTs listing rows and fetches public pages. There is no --apply, no write to any
+# listing table, no deactivation and no restore. Its output is a report and a JSON artifact for a
+# human to read, because every measurement failure this probe encodes (aqaratikom's shared shell,
+# satel's distinct-but-meaningless titles, fursaghyr's markers-that-are-furniture, abeea's
+# 200-means-alive) would have passed a naive automated reading of the same numbers.
+#
+# DISPATCH-ONLY, DELIBERATELY. There is nothing to watch on a schedule: this answers a one-off
+# design question per platform, and the answer changes only when a source changes. Putting it on a
+# cron would spend other people's bandwidth to re-learn a fact we already wrote down.
+name: Oracle feasibility probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Comma-separated platform slugs (empty = every platform in scrapers/absence-only-prune.txt)"
+        default: ""
+      sample:
+        description: "Listings per cohort. 10-12 is what the existing measurements in the ledger used."
+        default: "10"
+      min_interval:
+        description: "Seconds between requests. Do not lower without a reason — these are small sites."
+        default: "1.0"
+
+concurrency:
+  group: oracle-feasibility-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+
+      - name: Measure each platform against its own dead and live cohorts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # `exec` so a runner cancellation or timeout reaches python directly instead of killing
+          # the wrapping bash and orphaning it — the rule verify-scrape-run-finalized-on-kill.ts
+          # enforces across all 41 scraper-launching steps.
+          exec python -m scrapers.common.oracle_feasibility_run \
+            ${{ inputs.platforms && format('--platforms {0}', inputs.platforms) || '--all-absence-only' }} \
+            --sample "${{ inputs.sample }}" \
+            --min-interval "${{ inputs.min_interval }}" \
+            --out oracle-feasibility.json
+
+      - name: Keep the measurement
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-feasibility
+          path: oracle-feasibility.json
+          if-no-files-found: warn
