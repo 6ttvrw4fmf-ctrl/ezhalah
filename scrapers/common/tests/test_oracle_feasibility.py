@@ -159,3 +159,41 @@ def test_the_worklist_is_discovered_from_the_committed_ledger():
     assert len(plats) >= 20, plats
     assert "fursaghyr" in plats and "aqaratikom" in plats and "satel" in plats
     assert all(p and " " not in p and not p.startswith("#") for p in plats)
+
+
+def test_a_source_that_is_DOWN_is_an_unusable_read_not_a_platform_limitation():
+    """MEASURED IN THIS PROBE'S OWN FIRST RUN, 2026-09-21, and it was wrong.
+
+    sadin's site has been down since 09-07. The probe fetched ten live and ten dead rows, got HTTP
+    502 on all twenty, and returned NO_SIGNAL_ON_THIS_PAGE — describing a 502 error page as "one
+    shared shell for every id, the aqaratikom shape". A failed read rendered as a platform
+    limitation, by the instrument built to catch failed reads rendered as platform limitations.
+
+    Root cause: `reached` meant `status is not None`, so any answer counted as a read. It now asks
+    http_liveness.read_is_unbelievable() — the same law that governs every real liveness decision,
+    so this can never drift from what the kill path believes.
+    """
+    mk = lambda c: [Read(f"{c}{i}", "u", c, 502, 1500, "Bad Gateway", False, ()) for i in range(10)]
+    v = judge("sadin", mk("live") + mk("dead"))
+    assert v.verdict == "UNUSABLE_READ"
+    assert "502" in v.why and "source is broken" in v.why
+    assert "aqaratikom" not in v.why      # the wrong answer it used to give
+
+
+def test_every_unbelievable_shape_the_law_names_is_refused_as_a_control():
+    """403 (blocked), 429 (throttled), 5xx (source broken) and an empty body each mean we did not
+    read an answer. None of them may support a verdict about the platform's page."""
+    for status, nbytes in ((403, 900), (429, 900), (500, 900), (503, 900), (200, 0)):
+        mk = lambda c: [Read(f"{c}{i}", "u", c, status, nbytes, "", False, ()) for i in range(10)]
+        v = judge("p", mk("live") + mk("dead"))
+        assert v.verdict == "UNUSABLE_READ", f"status={status} bytes={nbytes} -> {v.verdict}"
+
+
+def test_a_404_on_live_rows_is_still_the_gathern_signature_not_an_unusable_read():
+    """The law deliberately does NOT call 404 unbelievable — it is a legitimate death signal. The
+    gathern case (live rows answering 404) must keep its own, more specific diagnosis."""
+    reads = [_r("live", 404, DEAD_404) for _ in range(9)] + [_r("live", 200, LIVE_PAGE)]
+    reads += [_r("dead", 404, DEAD_404) for _ in range(10)]
+    v = judge("gathern", reads)
+    assert v.verdict == "UNUSABLE_READ"
+    assert "KNOWN-LIVE" in v.why          # the specific one, not the generic law message
