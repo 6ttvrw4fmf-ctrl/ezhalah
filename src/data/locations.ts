@@ -737,6 +737,23 @@ const typesKey = (types: string[] | null) => (types && types.length ? [...types]
 // back to overstating — the stale-cache half of the same defect PR #822 fixed for districts.
 // Stable by construction: entries sorted, so {elevator,bath} and {bath,elevator} share one key.
 export type AfParams = Record<string, unknown>;
+
+// THE TABLE-SCOPE KEYS — the frame a count is taken in, never a predicate the user chose.
+//
+// Module scope, and paired with tableScopeOf(), because BOTH pools need them for two different
+// jobs: deciding whether a widening fallback is allowed (they must not count as narrowing), and
+// carrying the scope THROUGH that fallback (it must never be dropped). The city pool held these
+// keys in a local and did the first job only — see the last-resort fallback in
+// ensureCityFieldIndex for the defect that cost.
+export const TABLE_SCOPE_KEYS = ['p_tables', 'p_tables2', 'p_types2'];
+
+/** Just the table-scope keys of an arg/param object — what a widening fallback must keep. */
+export function tableScopeOf(af: AfParams | null): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of TABLE_SCOPE_KEYS) if (af && k in af) out[k] = (af as any)[k];
+  return out;
+}
+
 const afKey = (af: AfParams | null) => {
   if (!af) return '';
   const ks = Object.keys(af).sort();
@@ -902,8 +919,8 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
         // Counting it would pin hasNarrowing permanently true and silently disable all three
         // compat fallbacks below, so an unnarrowed user hitting an older function signature would get
         // a BLANK city field instead of a widened-but-populated one. The scope is not a predicate the
-        // user chose; it is the frame the count is taken in.
-        const TABLE_SCOPE_KEYS = ['p_tables', 'p_tables2', 'p_types2'];
+        // user chose; it is the frame the count is taken in. (TABLE_SCOPE_KEYS is module scope now,
+        // shared with tableScopeOf() — this test and the fallback below must read ONE list.)
         const hasNarrowing = Object.keys(af ?? {}).some((k) => !TABLE_SCOPE_KEYS.includes(k));
         let res = await supabase.rpc('top_cities_by_deal_ar', args).abortSignal(_ac.signal);
         // EVERY fallback below WIDENS the scope, so each is gated on the user not being narrowed:
@@ -921,12 +938,27 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
           const { p_category: _dropped, ...noCat } = args;
           res = await supabase.rpc('top_cities_by_deal_ar', noCat).abortSignal(_ac.signal);
         }
-        // LAST-RESORT FALLBACK, same gate. The deal-only call drops every narrowing, so under an
-        // active filter it would hand back exactly the overstated numbers this fix exists to remove.
-        // No count is strictly better than a wrong one (owner): the field goes empty and
-        // cityPoolStatus reports 'error' instead of showing a fabricated chip.
+        // LAST-RESORT FALLBACK, same gate — it drops the PERIOD, never the TABLE SCOPE.
+        //
+        // It used to send `{ p_deal }` alone, which dropped p_tables/p_tables2/p_types2 as well. That
+        // is the 2026-09-03 الهفوف class verbatim (top_cities_by_deal_ar called with NO p_tables while
+        // the results RPC is called WITH it), reintroduced inside an error path — the worst place for
+        // it, because a fallback looks like a success and nothing downstream records that the number
+        // was taken over a wider frame. `!hasNarrowing` does NOT protect this: by construction it
+        // ignores the scope keys, and p_category/p_types are not in `af` at all, so it is false for a
+        // user who picked a category and a property type. Measured on production 2026-09-21, the two
+        // calls this rung chooses between: scoped (Rent/annual/Residential/شقة) = 25,581 listings in
+        // 107 cities; deal-only = 82,704 in 204. A 3.2x over-promise across 97 phantom cities.
+        //
+        // The district pool has carried its scope through this rung since 2026-09-03 and its comment
+        // says it "mirrors the city pool's rule". It did not — the city pool never had it. If the
+        // retry errors too, data stays null and cityPoolStatus reports 'error': no count is strictly
+        // better than a wrong one (owner), and this rung can no longer return a widened one.
+        // (scripts/verify-count-pool-fallbacks-keep-the-table-scope.ts executes both ladders.)
         if (res.error && periodTok !== null && !hasNarrowing) {
-          res = await supabase.rpc('top_cities_by_deal_ar', { p_deal: dealAr(deal) }).abortSignal(_ac.signal);
+          res = await supabase
+            .rpc('top_cities_by_deal_ar', { p_deal: dealAr(deal), ...tableScopeOf(af) })
+            .abortSignal(_ac.signal);
         }
         data = res.data;
       } finally {

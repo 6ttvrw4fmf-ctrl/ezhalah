@@ -139,7 +139,15 @@ check('locations.ts exports ensureCityFieldIndex/topCitiesByListings/matchCities
 // top_cities_by_deal_ar(p_deal) RPC — verified live the two genuinely differ (Buy vs Rent swap
 // Khobar/Madinah ahead of Dammam/Makkah). Category×Deal (4-way) was ruled out: Category is picked
 // AFTER City/District in this form, so it isn't known yet at this step (owner decision, same date).
-check("locations.ts's city pool fetch is scoped by deal via top_cities_by_deal_ar(p_deal)", /\.rpc\('top_cities_by_deal_ar', \{ p_deal: dealAr\(deal\) \}\)/.test(locationsSrc));
+// ASSERTED AGAINST THE FIRST RUNG, NOT A LITERAL ANYWHERE IN THE FILE (2026-09-21). This read
+// /\.rpc\('top_cities_by_deal_ar', \{ p_deal: dealAr\(deal\) \}\)/ — a shape that existed in exactly
+// one place: the LAST-RESORT fallback, which at the time was the defect (ops_incident #384, it
+// dropped the table scope). So the check that the pool is "scoped by deal" was being satisfied by
+// the one call that was least scoped, and it would have gone red had that call been fixed without
+// this line being looked at. The deal scope is set where the pool's args are BUILT.
+check("locations.ts's city pool fetch is scoped by deal via top_cities_by_deal_ar(p_deal)",
+  /const args: Record<string, unknown> = \{ p_deal: dealAr\(deal\) \};/.test(locationsSrc)
+  && /\.rpc\('top_cities_by_deal_ar', args\)/.test(locationsSrc));
 check('locations.ts no longer reads the global, deal-blind city_listing_counts_ar view for the field pool', !locationsSrc.includes(".from('city_listing_counts_ar')"));
 // 2026-07-20: district_options_ar now also takes p_category — a live scope-divergence check proved
 // Category matters more for districts than cities, so District (unlike City) is Category+Deal aware.
@@ -150,6 +158,14 @@ check('district_options_ar RPC calls now pass p_deal AND p_category (district To
 check('the last-resort district fallback keeps the table scope while it drops the period',
   /p_category: category, \.\.\.\(scope \?\? \{\}\) \}\)/.test(locationsSrc)
   && /Object\.assign\(args, scope \?\? \{\}\);/.test(locationsSrc));
+// 2026-09-21: the CITY counterpart of the rule above, which did not exist until ops_incident #384.
+// The district comment has said since 2026-09-03 that it "mirrors the city pool's rule"; the city
+// pool had no such rule and its last rung sent {p_deal} alone. Text-level here on purpose — this
+// file is a source-shape contract — while the invariant itself is proven BY EXECUTION in
+// scripts/verify-count-pool-fallbacks-keep-the-table-scope.ts, which runs both real ladders
+// against an injected failing client and compares the args each rung actually sent.
+check('the last-resort CITY fallback keeps the table scope while it drops the period',
+  /\.rpc\('top_cities_by_deal_ar', \{ p_deal: dealAr\(deal\), \.\.\.tableScopeOf\(af\) \}\)/.test(locationsSrc));
 
 check('index.tsx no longer imports the old Place-based combined-field helpers (matchLocations/placeLabel/placeTitle/placeSub/placeIcon/placeKey/resolveLocation)', [
   'matchLocations', 'placeLabel', 'placeTitle', 'placeSub', 'placeIcon', 'placeKey', 'resolveLocation',
