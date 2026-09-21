@@ -204,8 +204,11 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   check('offersMeaningfulNarrowing is called in exactly ONE place outside the imports (the offer probe)',
     (noImports.match(/offersMeaningfulNarrowing/g) ?? []).length === 1,
     'a second call site means the fraction has escaped into the round itself (presentGuided/commitGuidedStep)');
+  // 2026-09-21: the probe now captures the SAME survivor as `.find(...)` (was `.some(...)`) so it can
+  // hand the winning question to primeFooterCounts — still exactly `offersMeaningfulNarrowing`, still
+  // the ask gate's own output, so the two gates still cannot disagree.
   check('the probe feeds it rankQuestions\' OWN surviving options, so offer and round cannot disagree',
-    /ranked\.some\(\(r\) => offersMeaningfulNarrowing\(r\.total, r\.options\)\)/.test(agent),
+    /ranked\?\.find\(\(r\) => offersMeaningfulNarrowing\(r\.total, r\.options\)\)/.test(agent),
     'src/app/agent.tsx — probing with anything other than the ask gate\'s output re-splits the two gates');
 
   // Name-agnostic, matching verify-narrow-cta-count-gate.ts: what matters is that the SAME
@@ -231,10 +234,14 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   // and the effect CLAIMS that promise when its key matches, falling back to an inline call when it
   // does not. The rule this check exists for is unchanged and is still exactly what is asserted:
   // the verdict must come from the ONE shared assessment on BOTH paths, never a second walk.
+  // 2026-09-21: assessNarrowing gained a third argument (`key`, the SAME afPrefetchKey both call
+  // sites already compute) so its background tap-priming walk (primeFooterCounts) can tell when a
+  // newer search has superseded it. Both call sites still pass afPrefetchKey(q, asked) — one via the
+  // local `key`, one by recomputing it inline — so the pattern now accepts either spelling.
   check('the offer effect routes through the ONE shared assessment (assessNarrowing), not a private walk',
     assessFrom >= 0
-    && /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked\)/.test(probe)
-    && /afPrefetchRef\.current = \{ key, p: assessNarrowing\(q, asked\)/.test(agent),
+    && /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked, afPrefetchKey\(q, asked\)\)/.test(probe)
+    && /afPrefetchRef\.current = \{ key, p: assessNarrowing\(q, asked, key\)/.test(agent),
     'src/app/agent.tsx — two walks drift; the button must promise exactly the round that finishGuided would continue');
   check('the offer probe exists and only records a verdict (setAfCanNarrow)',
     probeFrom >= 0 && probe.includes('setAfCanNarrow'),
@@ -272,8 +279,10 @@ check('…and it earns an OFFER too — offer and ask agree on it',
     && /(?:scopeQuestionFor\(tier\)\.resolveOptions\(scoped\)|resolveScopeOptionsInBackground\(tier, scoped\))/.test(assess),
     'src/app/agent.tsx offer probe — resolving is the only way to know whether a tier is a real '
     + 'question or a scope the user already has');
+  // 2026-09-21: the branch also kicks off primeFooterCounts (fire-and-forget) before returning —
+  // the yes/no verdict and its threshold (`> 1`, never `>= 1`) are exactly what this check still pins.
   check('a tier with a REAL choice (more than one option) is what earns the offer',
-    /if \(res\.options\.length > 1\) return 'yes';/.test(assess),
+    /if \(res\.options\.length > 1\) \{[\s\S]{0,200}?return 'yes';/.test(assess),
     'src/app/agent.tsx offer probe — `>= 1` would re-admit the auto-commit case this fix removed');
   check('a ≤1-option tier is AUTO-COMMITTED onto the local scope and the walk continues, exactly as presentGuided does',
     /seen\.add\(tier\)/.test(assess)

@@ -87,8 +87,10 @@ check(
 
 // Sibling parity check: fetchApartmentGuidedCounts() must still pass both too (the pattern this fix
 // was modeled on) — catches an accidental regression to THAT call site instead.
+// 2026-09-21: gained a second param (timeoutMs, defaulted) so a background caller can give it a
+// longer budget than the card's own 4s — the signature match now allows an optional trailing arg.
 const guidedMatch = remoteSrc.match(
-  /export async function fetchApartmentGuidedCounts\(q: SearchQuery\): Promise<[^>]*> \{[\s\S]*?\n\}/,
+  /export async function fetchApartmentGuidedCounts\(\s*q: SearchQuery,?[\s\S]{0,80}?\): Promise<[^>]*> \{[\s\S]*?\n\}/,
 );
 check('fetchApartmentGuidedCounts() is still defined (the sibling pattern this fix mirrors)', guidedMatch !== null);
 if (guidedMatch) {
