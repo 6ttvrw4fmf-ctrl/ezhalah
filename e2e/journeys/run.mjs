@@ -825,7 +825,23 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
         for (const [k, x, y] of [['centre', cx, cy], ['left', r.x + 2, cy], ['right', r.right - 2, cy],
                                  ['top', cx, r.y + 2], ['bottom', cx, r.bottom - 2]]) {
           if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
-          const hit = document.elementFromPoint(x, y);
+          // PLURAL, per PART 5 shape 13 — the same form auth-overlay-clears-controls and
+          // both-edges-docked-clears-controls already use, and for the same reason. A bounding rect
+          // is LAYOUT; being painted is not. A control clipped out of a shortened scroll container
+          // still reports its whole rect, so the singular form tests a point the user sees nothing
+          // at and hands the verdict to whatever overlay is painted there. The painted stack omits a
+          // clipped control entirely, which is what makes «absent» distinguishable from «covered».
+          //
+          // PAINT AND OWNERSHIP ARE TWO SEPARATE QUESTIONS, ASKED SEPARATELY. A first version of
+          // this asked both with one index, \`stack.findIndex((n) => outer(n) === e)\`, and that is
+          // wrong for a control NESTED inside another control: \`outer()\` walks to the OUTERMOST
+          // control, so it never returns \`e\` for a nested \`e\`, the index is -1, and a genuine
+          // «a neighbour owns this point» finding would have been silenced as «clipped» — the quiet
+          // direction this whole repair exists to avoid. Paint is a question about \`e\` and its own
+          // subtree; ownership is the existing \`outer(top)\` question, left exactly as it was.
+          const stack = document.elementsFromPoint(x, y);
+          const paintedHere = stack.length === 0 ? null : stack.some((n) => n === e || e.contains(n));
+          const hit = stack.length ? stack[0] : null;
           const o = hit ? outer(hit) : null;
           if (o === e) continue;
           // NAME WHAT IS ACTUALLY THERE. «an element inside no control» is where the diagnosis
@@ -849,6 +865,9 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
             hitNull: !hit,
             hitTag: hit ? desc(hit) : null,
             ownerLabel: o ? (o.getAttribute('aria-label') || o.dataset.testid || 'another control') : null,
+            // false = the stack was read, is NON-EMPTY, and this control is absent from it (clipped).
+            // null  = the stack came back EMPTY — the #120 shape, which stays a finding.
+            paintedHere,
             at: [Math.round(x), Math.round(y)],
           };
         }
@@ -873,6 +892,11 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
   const assess = async (where) => {
     const { ctrls, sw, cw, vp } = await page.evaluate(READ);
     if (!ctrls.length) { defect(name, 'no tap-target-marked control on screen', `${where}: nothing carries data-tap44, so the 44px floor is not applied anywhere here`); return; }
+    // A point where the control is not painted is a MEASUREMENT THAT DID NOT HAPPEN, not a pass
+    // (PART 9.5). It is not a defect either — see classifyTapOwnership — so it is counted and said
+    // out loud in the pass line, which is what keeps a screen whose controls are all clipped from
+    // reading as a clean bill of health.
+    let clippedPts = 0;
     for (const c of ctrls) {
       const who = `${where} «${c.label}»`;
       if (c.afterPos !== 'absolute') {
@@ -892,7 +916,8 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
       // ANOTHER CONTROL is a neighbour capturing the press; a hit test that found no control there
       // is reported as what it is, with the numbers needed to tell an engine artifact from a
       // genuinely unreachable control. Neither is excused — both still fail.
-      const { stolen: taken, blind } = classifyTapOwnership(c.stolen);
+      const { stolen: taken, blind, clipped } = classifyTapOwnership(c.stolen);
+      clippedPts += Object.keys(clipped).length;
       const takenPts = Object.entries(taken);
       if (takenPts.length) {
         defect(name, 'a control no longer owns its own visual area',
@@ -907,7 +932,8 @@ JOURNEYS['tap-targets-meet-44'] = async (mobile) => withPage({ mobile }, async (
       }
     }
     const ok = ctrls.filter((c) => c.hw >= 44 && c.hh >= 44).length;
-    pass(name, `${where}: ${ok}/${ctrls.length} marked controls clear 44px, all boxes still under it, none capturing a neighbour`);
+    pass(name, `${where}: ${ok}/${ctrls.length} marked controls clear 44px, all boxes still under it, none capturing a neighbour`
+      + (clippedPts ? ` (${clippedPts} probed point(s) not painted — clipped out of view, ownership not asserted there)` : ''));
     if (sw > cw + 1) defect(name, 'horizontal overflow at 375px', `${where}: scrollWidth ${sw} > clientWidth ${cw}`);
   };
 

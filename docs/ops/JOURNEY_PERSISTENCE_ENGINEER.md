@@ -179,6 +179,34 @@ old build and passes on the fix, not a unit test standing in for the click. At m
     · **The absence of the prompt is a SKIP, never a pass.** Google suppresses One Tap freely
       (cooldown, no Google session, opt-out), so a green run that never saw an overlay has proven
       nothing about overlays and must not claim otherwise.
+    · **THE PLURAL RULE IS NOW ENFORCED AS A CLASS, because stating it was not enough**
+      (routine #6, 2026-09-21, `ops_incident` #377). The `elementsFromPoint` rule above was written
+      down here and pinned by exactly ONE barrier —
+      `scripts/verify-onetap-attribution-does-not-misblame.ts` — **deliberately scoped to the
+      `onetap-clear-of-controls` journey's own body by name**, with a comment excusing the rest of
+      the file. Two other probes asked the same ownership question with the forbidden singular form
+      for as long as they had existed and nothing in the repo could see them: `tap-targets-meet-44`
+      in `e2e/journeys/run.mjs`, and the CTA-coverage oracle in `e2e/guardian/journeys.mjs`. This is
+      the `AGENTS.md` PART 1.11 shape — **a pointer reads as coverage**.
+      It cost three runs of a P2. `tap-targets-meet-44:mobile375` filed «تصفية» [82,269,106,36] and
+      «الوسيط الذكي» [188,269,106,36] as blocked on 09-14, 09-15 and 09-20, and `ops_incident` #262
+      carried them as a live user-facing condition awaiting an owner decision. Reproduced
+      deterministically on production 2026-09-21, 2/2 fresh contexts, by injecting the One Tap band
+      so the consent card lifts to 286-558 and the root correctly reserves the combined 526 px:
+      `elementFromPoint(135,287)` → the card, filed as a DEFECT; `elementsFromPoint(135,287)` →
+      `[card, root, root]` with **the tab absent**. The app content box is 812 − 526 = 286 px and the
+      tabs' lower half lies past it: **clipped by a reservation doing its job, not covered**, with
+      17 px of the label still visible and `scrollIntoViewIfNeeded` returning immediately.
+      `scripts/verify-ownership-probes-use-the-painted-stack.ts` (in `npm test`) now enforces the
+      class in two halves, because §9.5 is explicit that a source-text tripwire passes for the whole
+      time a defect is live: it **discovers** every `.elementFromPoint(` in `e2e/` by shape against a
+      shrink-only ceiling, so a probe added tomorrow is RED until someone states why the singular
+      form is the right question there — and it **lifts the real probe body out of `run.mjs` and
+      EXECUTES it** against a stub DOM, proving a clipped control yields no finding while a genuinely
+      covered one, a neighbour capture, and an empty stack all still do.
+      The general form, for the next one: **a rect is LAYOUT; being painted is not.** Any probe that
+      decides who owns a point must read the painted stack, whichever journey it happens to live in —
+      scope the rule to the QUESTION the probe asks, never to the file it sits in.
 
 Mutation-prove the important ones — deliberately break the fix, prove the barrier goes red, restore
 it. Before writing a new barrier, check whether an existing one already covers the shape (e.g.
