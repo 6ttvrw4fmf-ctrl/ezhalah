@@ -128,6 +128,7 @@ def test_canary_fails_closed_with_no_control():
     """No known-live control id from this run ⇒ no removal. Fails CLOSED."""
     saved = list(muktamel._canary_ids)
     muktamel._canary_ids.clear()
+    muktamel._canary_state.update(verdict=None, reason="not evaluated")
     try:
         ok, why = muktamel._canary()
         assert ok is False and why, "an empty control set must withhold removals"
@@ -138,6 +139,7 @@ def test_canary_fails_closed_with_no_control():
         assert "withheld" in note
     finally:
         muktamel._canary_ids[:] = saved
+        muktamel._canary_state.update(verdict=None, reason="not evaluated")
         del muktamel._probe.fetch
 
 
@@ -146,7 +148,6 @@ def test_a_working_canary_lets_a_real_removal_through():
     saved = list(muktamel._canary_ids)
     muktamel._canary_ids[:] = [31999]
     try:
-        muktamel._canary = lambda: (True, "control id 31999 still reads live")   # type: ignore[assignment]
         probe = http_liveness.LivenessProbe(
             platform="muktamel", signal=muktamel._liveness_signal,
             session=muktamel._session, url_for=muktamel._probe.url_for,
@@ -155,6 +156,32 @@ def test_a_working_canary_lets_a_real_removal_through():
         assert probe.verify_gone("MK25816")[0] == "gone"
     finally:
         muktamel._canary_ids[:] = saved
+
+
+def test_the_canary_verdict_is_memoised_for_the_run():
+    """The control is a fact about the RUN, so it is read once — and a FAILURE stays failed.
+
+    `verify_gone` is called once per row at grace, so a per-row control would multiply a 94-kill
+    run's requests for an answer that cannot differ between rows. Both directions must stick: a
+    failed control that got re-rolled until it passed would be no control at all.
+    """
+    saved, calls = list(muktamel._canary_ids), []
+    muktamel._canary_ids[:] = [31999]
+    muktamel._canary_state.update(verdict=None, reason="not evaluated")
+    real_session = muktamel._session
+    try:
+        class _R:
+            status_code, text, url = 404, "<html>not found</html>", "https://www.muktamel.com/404"
+        muktamel._session = lambda: type("S", (), {"get": lambda _s, *a, **k: (calls.append(1), _R())[1]})()  # type: ignore[assignment]
+        first = muktamel._canary()
+        assert first[0] is False, "a control reading GONE must withhold removals"
+        for _ in range(5):
+            assert muktamel._canary() == first, "the memoised verdict changed between calls"
+        assert len(calls) == 1, f"the control was re-fetched {len(calls)} times, not memoised"
+    finally:
+        muktamel._session = real_session  # type: ignore[assignment]
+        muktamel._canary_ids[:] = saved
+        muktamel._canary_state.update(verdict=None, reason="not evaluated")
 
 
 def test_every_prune_call_site_passes_the_oracle():

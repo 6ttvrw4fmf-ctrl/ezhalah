@@ -439,24 +439,40 @@ def _liveness_signal(status: Optional[int], body: str, path_changed: bool) -> Op
 # just confirmed live and require that it does NOT read as gone. A source that cannot testify
 # correctly about a listing we know is alive is not allowed to testify against any other.
 # Fails CLOSED: no control id (validation run, empty crawl) means no removal.
+#
+# The verdict is MEMOISED for the run, the same shape aldarim's `_canary_ok()` uses: "is this source
+# still serving us real listings right now" is a fact about the RUN, not about each row, and
+# `verify_gone` is called once per row at grace — so re-fetching a control for every one of 94 kills
+# would multiply the run's requests for an answer that cannot differ between them. Both directions
+# are cached: a validated oracle stays validated, and a failed control forbids every removal for the
+# rest of the run rather than being re-rolled until it happens to pass.
 _canary_ids: list[int] = []
+_canary_state: dict[str, Any] = {"verdict": None, "reason": "not evaluated"}
 
 
 def _canary() -> tuple[bool, str]:
-    ids = list(_canary_ids)
-    if not ids:
-        return False, "no known-live control id from this run to validate the oracle against"
-    for listing_id in ids[:3]:
-        url = f"{BASE}/real-estates/{listing_id}"
-        try:
-            r = _session().get(url, timeout=45, allow_redirects=True)
-        except Exception:  # noqa: BLE001 — an unreachable control proves nothing either way
-            continue
-        landed_changed = str(getattr(r, "url", url) or url).rstrip("/") != url.rstrip("/")
-        if _liveness_signal(r.status_code, r.text or "", landed_changed) != "gone":
-            return True, f"control id {listing_id} still reads live"
-    return False, (f"the oracle read {min(len(ids), 3)} known-live control id(s) as GONE or "
-                   "unreachable — the removal signal cannot be trusted this run")
+    with _outcome_lock:
+        if _canary_state["verdict"] is not None:
+            return _canary_state["verdict"], _canary_state["reason"]
+        ids = list(_canary_ids)[:3]
+        if not ids:
+            ok, why = False, "no known-live control id from this run to validate the oracle against"
+        else:
+            ok, why = False, (f"the oracle read {len(ids)} known-live control id(s) as GONE or "
+                              "unreachable — the removal signal cannot be trusted this run")
+            for listing_id in ids:
+                url = f"{BASE}/real-estates/{listing_id}"
+                try:
+                    r = _session().get(url, timeout=45, allow_redirects=True)
+                except Exception:  # noqa: BLE001 — an unreachable control proves nothing either way
+                    continue
+                landed = str(getattr(r, "url", url) or url)
+                if _liveness_signal(r.status_code, r.text or "",
+                                    landed.rstrip("/") != url.rstrip("/")) != "gone":
+                    ok, why = True, f"control id {listing_id} still reads live"
+                    break
+        _canary_state["verdict"], _canary_state["reason"] = ok, why
+        return ok, why
 
 
 _probe = http_liveness.LivenessProbe(
