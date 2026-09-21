@@ -250,6 +250,118 @@ POLICIES: dict[str, _P] = {
         "body are UNKNOWN and hold the strike without deactivating.",
         "The served HTML carries no listing values at all, so the API is not an optimisation here "
         "— it is the only source of truth this platform has."),
+    # ── 2026-09-21 batch: eleven platforms ─────────────────────────────────────────────────────
+    # All eleven prune ONLY with a verify_gone oracle, routed through the shared law in
+    # scrapers/common/http_liveness.py (a 401/403/429/5xx, a timeout or an empty body can never
+    # read as a death). Every death signal below was measured live on 2026-09-21 against that
+    # platform's own dead cohort (ids inside the live range the catalogue no longer carries) with
+    # interleaved known-live controls; the numbers are in each scraper's LIVENESS block. TIER
+    # UNCHANGED, for the aqargate reason: an at-grace oracle does not verify the population.
+    # Three of them do NOT 404 a removed ad (ialqarawi, sakan, gomenassat), so their removals are
+    # also gated by an in-run positive control that fails CLOSED.
+    "alsidra": _P(
+        _pol("alsidra", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the post's own wp/v2 REST record: HTTP 404 carrying rest_post_invalid_id (deleted), or a "
+        "200 for this id whose status is not publish, whose property_status is «مزاد», or whose "
+        "own title/body says it closed (تم البيع/الإيجار…). A 404 without that code, a 401 (a "
+        "trashed/draft post to a guest), any 403/429/5xx and an unparseable body are UNKNOWN.",
+        "Measured: 26 of 26 sellable posts read LIVE, 20 of 20 auction posts GONE, a missing id "
+        "404 rest_post_invalid_id. WordPress empties its trash to a real 404 within 30 days."),
+    "moftah": _P(
+        _pol("moftah", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the product's own WooCommerce Store API record: HTTP 404 carrying "
+        "woocommerce_rest_product_invalid_id, or a 200 for this id whose own words carry «مزاد» / "
+        "a closed-deal phrase. The CDN's 6,192-byte fingerprint interstitial is a 403 and is "
+        "UNKNOWN, as are 401/429/5xx and an unparseable body.",
+        "Measured: 13 of 13 live products read LIVE; a missing id answers the invalid-id 404. The "
+        "probe runs on the TLS profile session() negotiates (safari/firefox are served, chrome* "
+        "is challenged from some networks)."),
+    "masar": _P(
+        _pol("masar", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the post's own wp/v2/aqar REST record: HTTP 404 carrying rest_post_invalid_id, or a 200 "
+        "for this id whose status is not publish or whose own words carry «مزاد» / a closed-deal "
+        "phrase. The hcdn challenge page (served with HTTP 200, never JSON), a 401 for a "
+        "trashed/draft post, any 403/429/5xx and an unparseable body are UNKNOWN.",
+        "Measured: 9 of 9 live posts read LIVE; a missing id answers the invalid-id 404. The probe "
+        "session clears the hcdn challenge before it asks."),
+    "gomenassat": _P(
+        _pol("gomenassat", 3, 168), CRAWL_PRESENCE_ONLY,
+        "*** NOT A 404 *** — a deleted offer answers HTTP 200 with «نأسف! هذه الصفحة غير متوفرة». "
+        "The offer's OWN purpose badge (offer-header-info .property-badge, never the «عروض أخرى "
+        "قريبة» cards) reading تم البيع / تم الإيجار / مزاد is GONE; any other badge is LIVE. "
+        "Removals are gated by an in-run positive control that fails CLOSED.",
+        "Measured over 516 ids the catalogue no longer offers: 21 of 21 answered the soft-404; 8 "
+        "of 8 transacted offers carry their تم البيع/تم الإيجار badge; 10 of 10 live offers carry "
+        "للبيع/للإيجار."),
+    "sakan": _P(
+        _pol("sakan", 3, 168), CRAWL_PRESENCE_ONLY,
+        "*** NOT A 404 *** — a removed listing 301s to the listings index (/ar/properties/buy, "
+        "canonical /ar/properties/…, no SingleFamilyResidence payload). This id's own page whose "
+        "«الحالة» has left «فعال», or whose title/description carries an auction/transacted token, "
+        "is GONE; this id's own page otherwise is LIVE. Removals are gated by an in-run positive "
+        "control that fails CLOSED.",
+        "THE SITEMAP IS NOT THE CATALOGUE: of 40 ids sampled from the gaps inside the live range, "
+        "37 redirected to the index and 3 were live «فعال» listings pdpmap.xml does not carry, so "
+        "absence-only pruning would retire live inventory here — the probe self-heals them. 30 of "
+        "30 live controls read LIVE."),
+    "bossbih": _P(
+        _pol("bossbih", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the node's own /<nid> url: HTTP 404 (Drupal's themed 404 — the status decides, never "
+        "whether the page parsed). A 200 carrying data-history-node-id=<nid> is LIVE unless its "
+        "own title/description carries RETIRED_TOKENS (retired in place). Any 401/403/429/5xx, a "
+        "transport failure and a 200 for another node are UNKNOWN.",
+        "Measured: the office deletes nodes — 30 of 30 sampled from the 5,295 nids in the live "
+        "range the catalogue no longer carries answered 404; 15 of 15 live controls read LIVE."),
+    "alshawaf": _P(
+        _pol("alshawaf", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the node's own /<nid> url: HTTP 404 (Drupal's themed 404). A 200 that passes "
+        "parse_detail's own proof (article node id AND the node block's wa.me link both name this "
+        "nid) is LIVE unless its own h1/«العقار» line says مزاد / تم البيع… (closed in place). "
+        "Any 401/403/429/5xx, a transport failure and an unproven 200 are UNKNOWN.",
+        "Measured: 31 of 31 sampled from the 4,569 nids in the live range the catalogue no longer "
+        "carries answered 404; 15 of 15 live controls read LIVE."),
+    "ialqarawi": _P(
+        _pol("ialqarawi", 3, 168), CRAWL_PRESENCE_ONLY,
+        "*** NOT A 404 *** — an id the site no longer serves answers HTTP 200 with the HOMEPAGE "
+        "(its myCarousel slider, no «رقم العقار»), and a listing taken out of every category "
+        "still serves its own page with «القسم» EMPTY; both are GONE. This id's own page with a "
+        "category is LIVE unless its title/«تفاصيل العقار» carries the crawl's auction/sold "
+        "words. Removals are gated by an in-run positive control that fails CLOSED.",
+        "Measured over 120 of the 1,132 ids in the live range the catalogue no longer carries: "
+        "111 homepage, 9 uncategorised pages; 60 of 60 indexed listings carry «القسم». Without the "
+        "empty-category limb the probe would self-heal a delisted row forever, since no index can "
+        "reach it again."),
+    "aljassim": _P(
+        _pol("aljassim", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the node's own /<nid> url: HTTP 404 (Drupal's themed 404). A 200 that passes "
+        "parse_detail's own proof (the article's data-history-node-id names this nid) is LIVE "
+        "unless the crawl's own _AUCTION/_GONE patterns fire on its title/blocks. The hcdn "
+        "challenge is a 403 and is UNKNOWN (the probe session clears it first), as are "
+        "401/429/5xx, a transport failure and an unproven 200.",
+        "Measured: 31 of 31 sampled from the 2,468 nids in the live range the catalogue no longer "
+        "carries answered 404; 15 of 15 live controls read LIVE."),
+    "almotmkenah": _P(
+        _pol("almotmkenah", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the source's own archive banner «هذا الاعلان لم يعد صالح تم نقله للأرشيف» on the ad's "
+        "own page, read by THIS run's crawl (scrapers/almotmkenah/run.py::_verify_gone answers "
+        "from the run's own per-ad status map). An ad this run did not reach is probed at its OWN "
+        "stored listing_url under the shared law: HTTP 404 (a slug the site no longer has) or the "
+        "archive banner is GONE, the ad's own page without it is LIVE, anything else UNKNOWN.",
+        "339 of the 361 ads in the index are archived by the site itself; ~22 are live. Measured "
+        "2026-09-21: a live slug with its tail changed and an invented slug both answer HTTP 404; "
+        "6 of 6 live ads probed at their own URL read LIVE."),
+    "nufouth": _P(
+        _pol("nufouth", 3, 168), CRAWL_PRESENCE_ONLY,
+        "DATA, not an HTTP code (the wslnaa shape): the property's own API record "
+        "(get_property_data) no longer carries this row's ad (by its digits), the ad's status has "
+        "left «نشط», the unit (by the hash of its name) is gone from the ad, or the property now "
+        "has no ads at all — GONE. The ad «نشط» with this unit is LIVE. A 403 from that API "
+        "(Frappe's 'no such property') stays UNKNOWN by law; a property deleted outright is then "
+        "retired by its own public page /B/<code> answering 200 «عذرًا، العقار المطلوب غير "
+        "موجود.», gated fail-closed on the API disowning the same code (403 PermissionError).",
+        "Measured: of 36 codes sampled between the 270 indexed ones, 8 answered 200 with zero ads "
+        "(GONE) and 28 answered 403 (UNKNOWN by law); 25 of 25 live units read LIVE. 2026-09-21: "
+        "/B/<code> read «غير موجود» on 13 of 13 gap codes and HTTP 500 on 6 of 6 live codes."),
     "rakez": _P(
         _pol("rakez", 3, 168), CRAWL_PRESENCE_ONLY,
         "wp-json unit status: a 404 the API itself attributes to rest_post_invalid_id (the unit was "

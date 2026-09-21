@@ -154,3 +154,72 @@ def test_the_guard_would_actually_catch_the_original_defect(monkeypatch):
     mutated = {**row, "living_rooms": 3}
     assert sorted(set(mutated) - LISTING_COLUMNS) == ["living_rooms"], (
         "the check must flag the very key PostgREST rejected, or it is not guarding the incident")
+
+
+# ── the eleven platforms onboarded 2026-09-21 ────────────────────────────────────────────────────
+# Their tables (migration 20260921185629) are `LIKE aqar_residential_listings INCLUDING ALL` plus
+# city_ar / district_ar / city_id / region_id — read from production's information_schema on
+# 2026-09-21 that is EXACTLY LISTING_COLUMNS above, so the same oracle applies. Rather than a
+# hand-built fixture per platform (which only proves the fixture), this reads every key each
+# scraper can put in a row literal straight from its syntax tree: the dict literal that carries
+# ad_number + listing_url + source, and every `row["key"] = …` on the variable it is bound to.
+# That is where the suwar defect lived — a wrong key typed into the row literal — and it is
+# checked for every row-shaped literal in the file, not one code path.
+BATCH_2026_09_21 = ("alsidra", "moftah", "masar", "gomenassat", "sakan", "bossbih", "alshawaf",
+                    "ialqarawi", "aljassim", "almotmkenah", "nufouth")
+
+# Keys that never reach PostgREST: db._wasalt_batch pops them into source_capture first
+# (_fold_price_evidence / _fold_images_evidence). Anything else must be a column.
+FOLDED_BEFORE_UPSERT = {"price_evidence", "images_evidence"}
+
+_SCRAPERS = ROOT / "scrapers"
+
+
+def _row_literal_keys(tree) -> set[str]:
+    import ast
+
+    def str_keys(d: ast.Dict) -> set[str]:
+        return {k.value for k in d.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+
+    keys: set[str] = set()
+    row_vars: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict) and {"ad_number", "listing_url", "source"} <= str_keys(node):
+            keys |= str_keys(node)
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict) \
+                and {"ad_number", "listing_url", "source"} <= str_keys(node.value):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            row_vars |= {t.id for t in targets if isinstance(t, ast.Name)}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if (isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name)
+                        and t.value.id in row_vars and isinstance(t.slice, ast.Constant)
+                        and isinstance(t.slice.value, str)):
+                    keys.add(t.slice.value)
+    return keys
+
+
+@pytest.mark.parametrize("platform", BATCH_2026_09_21)
+def test_every_row_literal_key_of_the_2026_09_21_batch_is_a_real_column(platform):
+    import ast
+    tree = ast.parse((_SCRAPERS / platform / "run.py").read_text(encoding="utf-8"))
+    keys = _row_literal_keys(tree)
+    assert {"ad_number", "listing_url", "source", "transaction_type"} <= keys, (
+        f"{platform}: no row literal found — the reader stopped seeing this scraper's rows")
+    unknown = sorted(keys - LISTING_COLUMNS - FOLDED_BEFORE_UPSERT)
+    assert not unknown, (
+        f"{platform} writes {unknown}, which {'is' if len(unknown) == 1 else 'are'} not a column of "
+        f"{platform}_residential_listings / _commercial_listings. PostgREST rejects the WHOLE batch "
+        f"on an unknown key (PGRST204): the run fetches everything and stores nothing — the suwar "
+        f"incident of 2026-09-14. Move the value into additional_info.")
+
+
+def test_the_row_literal_reader_catches_the_suwar_defect():
+    # CONTROL: the static reader must flag the very key that broke production, in both shapes a
+    # scraper writes it — inside the literal, and assigned onto the row afterwards.
+    import ast
+    literal = 'row = {"ad_number": 1, "listing_url": 2, "source": 3, "living_rooms": 4}'
+    later = 'row = {"ad_number": 1, "listing_url": 2, "source": 3}\nrow["majlis_rooms"] = 5'
+    for src, bad in ((literal, "living_rooms"), (later, "majlis_rooms")):
+        assert sorted(_row_literal_keys(ast.parse(src)) - LISTING_COLUMNS) == [bad]

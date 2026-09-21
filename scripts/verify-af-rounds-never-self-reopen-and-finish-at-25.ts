@@ -66,10 +66,13 @@ const passive = agent.slice(agent.indexOf('const assessNarrowing = async'), agen
 // What this check has always been about is that NEITHER is a round re-opening itself — that is
 // asserted directly above (`fin` contains no assessNarrowing at all), and is the rule that matters.
 // Pinning the exact sites keeps a third, unexamined caller from appearing unnoticed.
+// 2026-09-21: assessNarrowing gained a third argument (`key`) for its background tap-priming walk
+// (primeFooterCounts) to detect a superseded search — both call sites still pass exactly
+// afPrefetchKey(q, asked), and the DEFINITION `assessNarrowing = async (` never matches `assessNarrowing(`.
 check('assessNarrowing has exactly two call sites, both on the passive offer path',
   (agent.match(/assessNarrowing\(/g) ?? []).length === 2
-  && /afPrefetchRef\.current = \{ key, p: assessNarrowing\(q, asked\)/.test(agent)
-  && /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked\)/.test(agent),
+  && /afPrefetchRef\.current = \{ key, p: assessNarrowing\(q, asked, key\)/.test(agent)
+  && /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked, afPrefetchKey\(q, asked\)\)/.test(agent),
   'a third caller means something other than the button is deciding whether a round may follow');
 check('opening a new round anywhere in the file requires a Pressable tap (narrow-further button), '
     + 'never a bare timer',

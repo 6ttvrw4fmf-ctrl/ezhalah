@@ -176,6 +176,60 @@ def test_every_new_parser_writes_af_columns() -> None:
     assert "amenities_from_text" in inspect.getsource(fahad.map_listing)
 
 
+def test_a_negator_counts_only_as_its_own_word_and_only_in_its_own_clause() -> None:
+    """Two ways the shared reader turned a STATED amenity into False (2026-09-21 review), both
+    verbatim. «صغيرة» folds to «صغيره», whose letters are «غير» (moftah 30274/30247: «بركة صغيرة موقف
+    خاص لسيارتين»); and bossbih's one-fact-per-line list let «غير مؤثثة» reach the next line's «مطبخ»."""
+    assert normalize.amenities_from_text("بركة صغيرة موقف خاص لسيارتين")["parking"] is True
+    assert normalize.amenities_from_text("غرفة صغيرة ومطبخ")["kitchen"] is True
+    got = normalize.amenities_from_text("▫️الشقة غير مؤثثة\n▫️مطبخ مغلق")
+    assert got["furnished"] is False and got["kitchen"] is True
+    # the real negations still read: standalone, abutting, and the English prefix
+    assert normalize.amenities_from_text("لا يوجد مصعد في العمارة")["elevator"] is False
+    assert normalize.amenities_from_text("unfurnished")["furnished"] is False
+    # a source that says both has not stated the fact
+    assert "elevator" not in normalize.amenities_from_text("مصعد، بدون مصعد")
+
+
+def test_one_street_in_prose_is_read_and_two_are_not() -> None:
+    """masar / almotmkenah prose, verbatim. A number after «شارع» needs a unit or a bearing beside it
+    («شارع 15» alone can be a street NAME), and two streets are a corner plot → nothing."""
+    assert normalize.street_from_prose("شقة للإيجار شمالية شارع 15 مقابل مسجد الحارة") == (15, "شمال")
+    assert normalize.street_from_prose("الواجهة شمالية الشارع 20 متر") == (20, "شمال")
+    assert normalize.street_from_prose("مخطط 3020/د\nشارع 15 م شمالي\nالمساحة 782 م") == (15, "شمال")
+    assert normalize.street_from_prose("شارع 15 مقابل الحديقة") == (None, None)
+    assert normalize.street_from_prose("شمالاً: عرض شارع 15 متر\nغرباً: عرض شارع 15 متر") == (None, None)
+
+
+def test_a_facade_cells_own_diagonal_is_kept_but_prose_bearings_are_not() -> None:
+    assert normalize.one_direction("جنوب شرقي", diagonal=True) == "جنوب شرق"
+    assert normalize.one_direction("جنوب شرقي") is None                  # prose: corner or diagonal?
+    assert normalize.one_direction("جنوب، شرقي", diagonal=True) is None  # two terms = two streets
+    assert normalize.one_direction("شرق غرب", diagonal=True) is None
+    assert normalize.one_direction("جنوبأ") == "جنوب"
+
+
+def test_an_ad_licence_in_prose_is_anchored_on_its_label() -> None:
+    assert normalize.ad_licence_from_prose("ترخيص اعلاني رقم : 7200485896") == "7200485896"
+    assert normalize.ad_licence_from_prose("العمر سبع سنوات ترخيص/ 7201080329") == "7201080329"
+    assert normalize.ad_licence_from_prose("السعر 7201080329 ريال") is None
+
+
+# The 2026-09-21 batch. Land answers ONLY street width + facade, so a parser that files those in
+# additional_info leaves every plot out of the AF (#3349 — almotmkenah shipped exactly that). Code
+# SHAPE, not a comment: the key must be WRITTEN into a row. gomenassat's source publishes neither.
+@pytest.mark.parametrize("slug", ["alsidra", "moftah", "masar", "sakan", "bossbih", "alshawaf",
+                                  "ialqarawi", "aljassim", "almotmkenah", "nufouth"])
+def test_batch_0921_parsers_write_the_street_facts(slug: str) -> None:
+    import ast
+    tree = ast.parse((REPO / "scrapers" / slug / "run.py").read_text(encoding="utf-8"))
+    keys = {k.value for n in ast.walk(tree) if isinstance(n, ast.Dict)
+            for k in n.keys if isinstance(k, ast.Constant)}
+    keys |= {n.slice.value for n in ast.walk(tree) if isinstance(n, ast.Subscript)
+             and isinstance(n.ctx, ast.Store) and isinstance(n.slice, ast.Constant)}
+    assert {"street_width_m", "direction"} <= keys, f"{slug} never writes {'street_width_m', 'direction'} - keys"
+
+
 # ─────────────────────────────── a flaky sitemap must not fail the run ─────────────────────────
 def test_inblaj_sitemap_fetch_is_retried() -> None:
     """gudai failed twice on 2026-09-20 with «sitemap returned no /property/ urls» while safera and

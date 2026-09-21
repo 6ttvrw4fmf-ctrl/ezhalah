@@ -86,14 +86,23 @@ export async function liveResultCountOrUnknown(q: SearchQuery): Promise<number |
   return c ? c.cnt_selected : 0;      // a real answer, including an honest zero
 }
 
-export async function liveResultCount(q: SearchQuery): Promise<number | null> {
-  const c = await fetchApartmentGuidedCounts(q);
+export async function liveResultCount(q: SearchQuery, timeoutMs?: number): Promise<number | null> {
+  const c = await fetchApartmentGuidedCounts(q, timeoutMs);
   // A failed probe is null HERE too, but for a different and already-correct reason: this is the
   // live footer number, and null means "no fresh number, keep showing the last good one". It makes
   // no claim about the scope, so it needs no verdict — unlike the ranking path.
   if (isProbeFailure(c) || !c) return null;
   return c.cnt_selected;
 }
+
+// THE FOOTER'S OWN NUMBER, PRIMED WHILE NOBODY IS WAITING ON IT (owner 2026-09-21: "the correct
+// number next to متابعة should appear immediately, ideally at the same time the rest of the Advanced
+// Filter data appears"). Identical to liveResultCount above — same function, same RPC, same
+// scope-and-predicate — with the BACKGROUND_COUNT_TIMEOUT_MS budget instead of the card's 4s, because
+// nobody is staring at a spinner for it. Whatever it learns is remembered by fetchApartmentGuidedCounts
+// itself, so the card's own later call (still liveResultCount(q), unmodified) finds it already there.
+export const primeLiveResultCount = (q: SearchQuery): Promise<number | null> =>
+  liveResultCount(q, BACKGROUND_COUNT_TIMEOUT_MS);
 
 // ── Questions ────────────────────────────────────────────────────────────────────────────────────
 

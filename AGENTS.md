@@ -2,6 +2,28 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
+# NOTHING IS LIVE UNTIL YOU HAVE USED IT LIKE A REAL USER (owner, 2026-09-21 — supreme, permanent)
+
+**In the owner's words: "What determines it's live is that you actually test it like a real user.
+Tell this to all the chats, all the agents, all the engineers. This is extremely important."** It
+binds every chat, subagent, workflow and all eleven engineer routines, and overrides any prompt that
+says less.
+
+A merged PR, a green CI, a successful deploy run, a served bundle, a DB row, an RPC result or a
+`curl` is **not** "live". It is evidence that a step ran. A change is live only when you have opened
+**https://ezhalah-app.vercel.app** in a real browser and walked the path a user walks:
+
+1. Search through the real UI (Filter or AI Agent), with the inputs a user would type and tap.
+2. Find the exact thing you changed on the screen: the card, count, label, logo or button.
+3. Click it the way a user would (open the card, press «عرض المزيد», follow the link).
+4. Compare what the user sees with the SOURCE website: price, area, rooms, location, name, link.
+
+Until all four are done and observed, report **PROPAGATION PENDING** or **NOT YET VERIFIED**, never
+"live", "fixed", "done" or "shipped". If the change reaches users only after a sync or cron, wait for
+it and then do the four steps, or say plainly that you have not. Back-end-only work (a scraper, a
+column, a sync) is not exempt: it is live when its effect shows on a real card. How to drive the
+browser from an agent session: `docs/ops/VERIFYING_PRODUCTION.md`.
+
 # Read this first — canonical rules + token efficiency (owner rule, 2026-08-10, confirmed permanent)
 
 **Reading order before any research task: `AGENTS.md` (this file) → `docs/ARCHITECTURE.md` →
@@ -25,6 +47,24 @@ never a verdict, and "seen by the crawler" (`last_seen_at`) is a different fact 
 production-searchable platform must declare a strategy in `scrapers/common/liveness_policies.py` or
 CI fails. `select * from ops_platform_liveness_coverage;` is the standing answer to "do we have dead
 listings?" — do not re-derive it by hand.
+
+**A PLATFORM IS "COVERED" ONLY WHEN THE CHAIN IS PROVEN TO RUN IN PRODUCTION, AND A CHECKER'S
+SILENCE MUST BE AN ALARM — `docs/ops/LISTING_LIVENESS.md` §9 is canonical (owner, 2026-09-21).**
+The owner's two sentences: *source removes a listing → Ezhalah detects it → safely verifies it →
+deactivates it*; and *if the liveness checker or its scheduled job stops working, Ezhalah must detect
+THAT failure too, instead of silently accumulating stale listings.* Never call a platform covered
+because code, a workflow, a cron row or a green barrier exists — every one of those was true of
+platforms serving dead inventory the day this rule was written. Measured then: wasalt's enumeration
+was dead for SEVEN DAYS while the workflow reported `success` on every run, enumerating 96 rows
+instead of ~105,000, because a job that stops producing runs contributes no row for
+`mon_detect_silent_partial_success()` to compare — **absence cannot be compared, so silence read as
+health** — and because the enum shared a `platform` label with the ordinary crawl, hiding its
+collapse inside that crawl's small-slice median. A liveness job needs its OWN run label and must be
+watched for EXPECTED-BUT-ABSENT runs on its own cadence. A job that did not run proves nothing about
+its listings: they are UNKNOWN, and the response is to fix the checker, never to widen a kill or
+lower a floor (§7). And an "EGRESS BLOCKED" note is a fact about the container that wrote it, not
+about the platform — re-measure from the egress the job really uses (CI), where a cloud routine
+measured an 83% false-death rate on gathern the same day CI got clean 200s.
 
 **The daily integrity routine's spec is `docs/ops/DATA_INTEGRITY_ENGINEER.md` — that FILE is the
 source of truth, not the cloud routine's prompt text.** If the two ever differ, update the routine to

@@ -104,6 +104,10 @@ def strip_pii_fields(obj: Any) -> Any:
 CONTACT_CHANNEL_KEYS: tuple[str, ...] = (
     "phone", "mobile", "whatsapp", "telegram", "telephone", "email", "e_mail",
     "contactnumber", "contact_number", "responsible_employee_name",
+    # The same channels as Arabic spec-table LABELS (sakan's «اسم الموظف المسؤول» / «هاتف الموظف
+    # المسؤول», 2026-09-21). Written space-free because _is_contact_channel_key strips spaces.
+    # «البريد» alone is deliberately absent: it would also drop «الرمز البريدي» (a postal code).
+    "هاتف", "جوال", "واتس", "اسمالموظف", "البريدالإلكتروني", "البريدالالكتروني", "ايميل", "إيميل",
 )
 
 # Unambiguous Saudi contact numbers standing alone as an entire field value.

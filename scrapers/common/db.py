@@ -1432,6 +1432,99 @@ def upsert_compoundin_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("compoundin_commercial_listings", rows)
 
 
+# --- 2026-09-21 batch: eleven platforms onboarded in one pass ------------------------------------
+# One public pair per platform, exactly like the seven above. Each scraper shipped calling the
+# private _wasalt_batch (or a local stand-in for this pair) because it could not edit this file;
+# they now call these, so every guard in _wasalt_batch still runs and nothing addresses a table by
+# a string built outside this module.
+def upsert_alsidra_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alsidra_residential_listings", rows)
+
+
+def upsert_alsidra_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alsidra_commercial_listings", rows)
+
+
+def upsert_moftah_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("moftah_residential_listings", rows)
+
+
+def upsert_moftah_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("moftah_commercial_listings", rows)
+
+
+def upsert_masar_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("masar_residential_listings", rows)
+
+
+def upsert_masar_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("masar_commercial_listings", rows)
+
+
+def upsert_gomenassat_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("gomenassat_residential_listings", rows)
+
+
+def upsert_gomenassat_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("gomenassat_commercial_listings", rows)
+
+
+def upsert_sakan_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sakan_residential_listings", rows)
+
+
+def upsert_sakan_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sakan_commercial_listings", rows)
+
+
+def upsert_bossbih_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("bossbih_residential_listings", rows)
+
+
+def upsert_bossbih_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("bossbih_commercial_listings", rows)
+
+
+def upsert_alshawaf_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alshawaf_residential_listings", rows)
+
+
+def upsert_alshawaf_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("alshawaf_commercial_listings", rows)
+
+
+def upsert_ialqarawi_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ialqarawi_residential_listings", rows)
+
+
+def upsert_ialqarawi_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ialqarawi_commercial_listings", rows)
+
+
+def upsert_aljassim_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aljassim_residential_listings", rows)
+
+
+def upsert_aljassim_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("aljassim_commercial_listings", rows)
+
+
+def upsert_almotmkenah_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("almotmkenah_residential_listings", rows)
+
+
+def upsert_almotmkenah_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("almotmkenah_commercial_listings", rows)
+
+
+def upsert_nufouth_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nufouth_residential_listings", rows)
+
+
+def upsert_nufouth_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nufouth_commercial_listings", rows)
+
+
 def upsert_aldarim_residential_batch(rows: list[dict[str, Any]]) -> None:
     """Batch upsert Aldarim residential rows into their own table (source='Aldarim')."""
     _wasalt_batch("aldarim_residential_listings", rows)

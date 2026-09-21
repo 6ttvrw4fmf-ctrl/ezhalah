@@ -373,3 +373,98 @@ scheduled, quarantined by a trust gate, blocked proxy, or a probe rate too low f
 | new-table column barrier | `scripts/verify-listing-tables-carry-verification-column.ts` |
 | the column, fleet-wide | migration `20260830183939` |
 | dashboard + monitors | migration `20260830191646` |
+
+---
+
+## 9. THE CHAIN MUST BE PROVEN TO RUN, AND ITS SILENCE MUST BE AN ALARM
+
+**Owner rule, 2026-09-21. This section is canonical and binds every platform, every routine and every
+future onboarding.** It was given after the owner's own family found a dead gathern listing on the
+live site, and after this run measured why.
+
+> **1. Source removes a listing → Ezhalah detects it → safely verifies it → deactivates it.**
+> **2. If the liveness checker or its scheduled job stops working, Ezhalah must detect THAT failure
+>    too, instead of silently accumulating stale listings.**
+>
+> *"Use production evidence and controlled tests. Do not mark a platform as covered merely because
+> code exists. Prove the full chain actually runs."* — the owner, 2026-09-21
+
+### 9.1 "Covered" is a measured claim about PRODUCTION, never about the repository
+
+A platform is **NOT** covered because a scraper has an oracle, because a workflow file exists,
+because a cron row exists, or because a barrier is green. Every one of those was true of platforms
+serving dead inventory on the day this rule was written. A platform is covered only when the whole
+chain is observable in production data:
+
+| link | what proves it, in production |
+|---|---|
+| the job fired | a `cron.job_run_details` row, `status = 'succeeded'` |
+| the job actually DID its work | a `scrape_runs` row whose `rows_seen` is in family with its own history |
+| the source was asked about the listing | an `ops_stale_inactivation_probe` row, or `last_verified_alive_at` moving |
+| the verdict was earned | a DIRECT verdict at full grace, through `liveness_contract.py` |
+| the listing left the user's screen | absent from `search_listings_ar` after one completed refresh+sync cycle |
+
+If any link cannot be shown from production, the honest state is **UNKNOWN**, and it is reported as
+UNKNOWN — never as covered. This is `ENGINEER_ROUTINES.md` §G.9 applied to a platform rather than to
+a bug.
+
+### 9.2 A GREEN JOB THAT DOES NOTHING IS THE DEFAULT FAILURE MODE, NOT AN EDGE CASE
+
+Measured 2026-09-21, and the reason half this rule exists. wasalt's enumeration was **dead for seven
+days** (2026-09-12 → 09-19): the workflow was dispatched on schedule, ran for three and a half hours,
+and reported `conclusion: success` every time — while enumerating **96 rows instead of ~105,000**.
+`run.py` had moved to a real browser in PR #3129 but the enum step still called the transport
+wasalt.sa null-routed on 2026-08-17, so every page came back blocked and the walk ended early.
+
+Nothing alerted. It was found by a human reading `scrape_runs` by hand. Downstream, the strike step's
+coverage guard correctly refused to prune all week — so the guard worked, the job "succeeded", and
+**~3,900 dead listings stayed active and clickable**. Every barrier was green.
+
+**Two specific blind spots this exposed, both now closed — do not reintroduce either:**
+
+1. **Absence cannot be compared.** `mon_detect_silent_partial_success()` measures a platform's
+   last-24h `rows_seen` against its own 18-day median, which is the right question — but its
+   candidate set is *runs that exist*. A job that stops producing runs **entirely** contributes no
+   row, so there is nothing to compare and nothing fires. Silence was indistinguishable from health.
+   **A liveness job must therefore be watched for EXPECTED-BUT-ABSENT runs, on its own declared
+   cadence, not only for short ones.**
+2. **A shared `platform` label hides a collapse inside another job's baseline.** The enum wrote under
+   `platform='wasalt'`, the same bucket as the ordinary crawl, which is sharded into hundreds of
+   small slices (runs of 2, 8, 91, 96 rows are normal there). A 96-row enum was statistically
+   unremarkable against that median. **A job with its own cadence and its own expected volume needs
+   its own run label** — PR #3241 gave the shards `wasalt_enum_shard` and that is the pattern.
+
+### 9.3 What may be concluded from a job that did not run
+
+Nothing about the listings. This is §1 restated at the JOB layer, and it is the same asymmetry:
+
+- A liveness job that did not run, ran short, or could not reach the source leaves every listing it
+  would have touched **UNKNOWN**. It may never strike, deactivate, or start a deletion clock.
+- The correct response to a stalled checker is to **fix the checker**, never to widen a kill, lower a
+  coverage floor, raise a cap, or treat the backlog it created as evidence of death. §7 already
+  forbids that and this section does not soften it.
+- **A restorative write is still never gated** (§0 corollary 2): a job that proves listings alive may
+  run and heal them even while the destructive half stays frozen.
+
+### 9.4 Onboarding a platform, and re-certifying one
+
+Before a platform may be described as covered — in a report, a routine's output, a doc table or
+`ops_platform_liveness_coverage` commentary — the chain in §9.1 must be walked **from the egress the
+job really uses**, which is usually a GitHub Actions runner and is **not** a cloud routine's
+container. Measured the same day: probing gathern from a cloud-routine egress returned 404 on **10 of
+12 listings the crawl had served alive two hours earlier** (an 83% false-death rate), while the CI
+egress got clean HTTP 200 on 10/10 canaries in the same period. **An "EGRESS BLOCKED" note in
+`scrapers/absence-only-prune.txt` is a statement about the container that wrote it, and is not
+evidence about the platform.** Re-measure from CI before believing it.
+
+Each platform is validated and enabled **independently**, with interleaved known-alive controls
+(§4.2 lesson 1), before any automated deactivation is allowed to write.
+
+### 9.5 The genuinely-hard platforms are named, never quietly counted as covered
+
+Where no reliable signal exists on the listing page, the platform is reported as an explicit gap with
+**what information is missing** stated, and the next step is to look for a real source-supported
+signal — an API, a status endpoint, a sitemap, a feed. Inventing a page-text heuristic to close the
+gap is the fursaghyr mistake (§4.2: «غير متاح» was a registration-form string and «مؤجر» was
+advertising prose; gating on either would have deactivated live inventory). **Report before
+implementing anything risky.**

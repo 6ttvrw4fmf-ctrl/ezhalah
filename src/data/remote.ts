@@ -859,15 +859,33 @@ export type GuidedCounts = {
 
 // De-duped per the comment above fetchPropertyAgeOptionCounts — this is the function RNPL/amenities/
 // bathrooms/furnished all call with identical params in the same Promise.all batch.
-const inFlightGuidedCounts = new Map<string, Promise<GuidedCounts | null>>();
+const inFlightGuidedCounts = new Map<string, Promise<GuidedCounts | null | ProbeFailed>>();
 
-export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<GuidedCounts | null | ProbeFailed> {
+// REMEMBERED, like settledScopeCounts below (same COUNT_MEMORY_TTL_MS) — added 2026-09-21 so the
+// «متابعة» footer's number is ready the instant the card opens, and so is the button's number after
+// the FIRST tap on any option. This function is already called, with the CARD's own exact query,
+// from three places that run BEFORE the user ever sees the card: rankQuestions() resolving every
+// advanced question's options (assessNarrowing's background walk), and the new tap-priming walk in
+// agent.tsx (primeFooterCounts). Without a memory, each of those settled answers was thrown away the
+// instant its promise resolved — dedupeInFlight only joins CONCURRENT callers, never a later one —
+// so the card's own identical call, seconds afterward, paid for the same RPC again. Measured live:
+// 2.9s on every card open. ONLY a LEARNED count is ever remembered (never a failure — see below), and
+// only for COUNT_MEMORY_TTL_MS, so a stale answer can never outlive the data it was measured against.
+const settledGuidedCounts = new Map<string, { at: number; c: GuidedCounts }>();
+
+export async function fetchApartmentGuidedCounts(
+  q: SearchQuery,
+  timeoutMs: number = AGE_COUNT_TIMEOUT_MS,
+): Promise<GuidedCounts | null | ProbeFailed> {
   if (!supabase) return null;
+  const ck = JSON.stringify(q);
+  const hit = settledGuidedCounts.get(ck);
+  if (hit && Date.now() - hit.at < COUNT_MEMORY_TTL_MS) return hit.c;
   const scope = await resolveSearchScope(q);
   if (isProbeFailure(scope)) return PROBE_FAILED;   // scope resolution failed = never learned the answer
   if (!scope) return null;
   const { isBroadCommercial, ...scopeParams } = scope;
-  return dedupeInFlight(inFlightGuidedCounts, JSON.stringify(q), async () => {
+  return dedupeInFlight(inFlightGuidedCounts, ck, async () => {
     if (!supabase) return null;
     const result = await withTimeout(
       supabase.rpc('apartment_guided_counts_ar', {
@@ -886,7 +904,7 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
         // those three, so a future advanced question is carried here for free.
         ...rpcAdvancedFilterParams(q),
       }),
-      AGE_COUNT_TIMEOUT_MS,
+      timeoutMs,
     );
     // UNKNOWN IS NOT NO (owner 2026-08-26): a probe that never completed must not return the
     // same value as a source that answered 'nothing' — see src/lib/afProbe.ts.
@@ -894,7 +912,9 @@ export async function fetchApartmentGuidedCounts(q: SearchQuery): Promise<Guided
     const { data, error } = result;
     if (error) return PROBE_FAILED;               // transport/DB error = never learned the answer
     if (!data || !(data as GuidedCounts[]).length) return null;      // the source answered: nothing
-    return (data as GuidedCounts[])[0];
+    const c = (data as GuidedCounts[])[0];
+    settledGuidedCounts.set(ck, { at: Date.now(), c });   // ONLY a learned answer is ever remembered
+    return c;
   });
 }
 
@@ -948,7 +968,9 @@ export async function fetchGuidedLiveCount(q: SearchQuery, amenities: string[], 
 // UNKNOWN IS NOT NO: only a LEARNED number is stored. A probe that failed is never remembered, so the
 // next ask retries it instead of freezing a blank. The TTL sits far below the hourly sync, so a
 // remembered count is the answer the database would give if asked again.
-const SCOPE_COUNT_TTL_MS = 120_000;
+// Shared by both remembered-count caches in this file (scope options above, guided counts below):
+// how long a LEARNED answer stays trustworthy before the next ask must re-earn it.
+const COUNT_MEMORY_TTL_MS = 120_000;
 const settledScopeCounts = new Map<string, { at: number; n: number }>();
 const inFlightScopeCounts = new Map<string, Promise<number | ProbeFailed>>();
 
@@ -985,7 +1007,7 @@ export async function fetchScopeOptionCounts(
     // candidate waits for THAT answer instead of paying for a second copy of it.
     const ck = JSON.stringify(query);
     const hit = settledScopeCounts.get(ck);
-    if (hit && Date.now() - hit.at < SCOPE_COUNT_TTL_MS) return Promise.resolve(hit.n);
+    if (hit && Date.now() - hit.at < COUNT_MEMORY_TTL_MS) return Promise.resolve(hit.n);
     return dedupeInFlight(inFlightScopeCounts, ck, () => probeOnce(ck, query));
   };
   const probeOnce = async (ck: string, query: SearchQuery): Promise<number | ProbeFailed> => {
@@ -1225,7 +1247,7 @@ function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; la
 // A retired platform that starts serving rows again does NOT quietly disappear: the live barrier's
 // MISSING direction reads production's own live platform list, so it goes red and names the table.
 // GENERATED — do not edit by hand.
-const SEARCHABLE_TABLES = ['abeea_commercial_listings', 'abeea_residential_listings', 'abralosol_commercial_listings', 'abralosol_residential_listings', 'abwbna_commercial_listings', 'abwbna_residential_listings', 'akariyoun_commercial_listings', 'akariyoun_residential_listings', 'aldarim_commercial_listings', 'aldarim_residential_listings', 'alhoshan_commercial_listings', 'alhoshan_residential_listings', 'alhumaidan_commercial_listings', 'alhumaidan_residential_listings', 'alkhaas_commercial_listings', 'alkhaas_residential_listings', 'alobid_commercial_listings', 'alobid_residential_listings', 'alta_commercial_listings', 'alta_residential_listings', 'amaall_commercial_listings', 'amaall_residential_listings', 'amlakalahsa_commercial_listings', 'amlakalahsa_residential_listings', 'aouj_commercial_listings', 'aouj_residential_listings', 'aqar_commercial_listings', 'aqar_residential_listings', 'aqaralsaudia_commercial_listings', 'aqaralsaudia_residential_listings', 'aqaratikom_commercial_listings', 'aqaratikom_residential_listings', 'aqarcity_commercial_listings', 'aqarcity_residential_listings', 'aqargate_commercial_listings', 'aqargate_residential_listings', 'aqarmonthly_residential_listings', 'aqarnajran_commercial_listings', 'aqarnajran_residential_listings', 'arkaan_commercial_listings', 'arkaan_residential_listings', 'awal_commercial_listings', 'awal_residential_listings', 'azdad_commercial_listings', 'azdad_residential_listings', 'bahadhabab_commercial_listings', 'bahadhabab_residential_listings', 'compoundin_commercial_listings', 'compoundin_residential_listings', 'dealapp_commercial_listings', 'dealapp_residential_listings', 'eaqartabuk_commercial_listings', 'eaqartabuk_residential_listings', 'eastabha_commercial_listings', 'eastabha_residential_listings', 'erapulse_commercial_listings', 'erapulse_residential_listings', 'fahadalshahri_commercial_listings', 'fahadalshahri_residential_listings', 'fursaghyr_commercial_listings', 'fursaghyr_residential_listings', 'gathern_commercial_listings', 'gathern_residential_listings', 'gudai_commercial_listings', 'gudai_residential_listings', 'hajer_commercial_listings', 'hajer_residential_listings', 'jazwtn_commercial_listings', 'jazwtn_residential_listings', 'jurash_commercial_listings', 'jurash_residential_listings', 'ksaaqar_commercial_listings', 'ksaaqar_residential_listings', 'mizlaj_commercial_listings', 'mizlaj_residential_listings', 'muktamel_commercial_listings', 'muktamel_residential_listings', 'mustqr_commercial_listings', 'mustqr_residential_listings', 'nowaisiry_commercial_listings', 'nowaisiry_residential_listings', 'october_commercial_listings', 'october_residential_listings', 'raghdan_commercial_listings', 'raghdan_residential_listings', 'rakez_commercial_listings', 'rakez_residential_listings', 'ramzalqasim_commercial_listings', 'ramzalqasim_residential_listings', 'rawasidark_commercial_listings', 'rawasidark_residential_listings', 'remal_commercial_listings', 'remal_residential_listings', 'sadin_commercial_listings', 'sadin_residential_listings', 'sadiqeltajer_commercial_listings', 'sadiqeltajer_residential_listings', 'safera_commercial_listings', 'safera_residential_listings', 'sanadak_commercial_listings', 'sanadak_residential_listings', 'satel_commercial_listings', 'satel_residential_listings', 'shmoualshmal_commercial_listings', 'shmoualshmal_residential_listings', 'souq24_commercial_listings', 'souq24_residential_listings', 'suwar_commercial_listings', 'suwar_residential_listings', 'therc_commercial_listings', 'therc_residential_listings', 'wasalt_commercial_listings', 'wasalt_residential_listings', 'wslnaa_commercial_listings', 'wslnaa_residential_listings'];
+const SEARCHABLE_TABLES = ['abeea_commercial_listings', 'abeea_residential_listings', 'abralosol_commercial_listings', 'abralosol_residential_listings', 'abwbna_commercial_listings', 'abwbna_residential_listings', 'akariyoun_commercial_listings', 'akariyoun_residential_listings', 'aldarim_commercial_listings', 'aldarim_residential_listings', 'alhoshan_commercial_listings', 'alhoshan_residential_listings', 'alhumaidan_commercial_listings', 'alhumaidan_residential_listings', 'aljassim_commercial_listings', 'aljassim_residential_listings', 'alkhaas_commercial_listings', 'alkhaas_residential_listings', 'almotmkenah_commercial_listings', 'almotmkenah_residential_listings', 'alobid_commercial_listings', 'alobid_residential_listings', 'alshawaf_commercial_listings', 'alshawaf_residential_listings', 'alsidra_commercial_listings', 'alsidra_residential_listings', 'alta_commercial_listings', 'alta_residential_listings', 'amaall_commercial_listings', 'amaall_residential_listings', 'amlakalahsa_commercial_listings', 'amlakalahsa_residential_listings', 'aouj_commercial_listings', 'aouj_residential_listings', 'aqar_commercial_listings', 'aqar_residential_listings', 'aqaralsaudia_commercial_listings', 'aqaralsaudia_residential_listings', 'aqaratikom_commercial_listings', 'aqaratikom_residential_listings', 'aqarcity_commercial_listings', 'aqarcity_residential_listings', 'aqargate_commercial_listings', 'aqargate_residential_listings', 'aqarmonthly_residential_listings', 'aqarnajran_commercial_listings', 'aqarnajran_residential_listings', 'arkaan_commercial_listings', 'arkaan_residential_listings', 'awal_commercial_listings', 'awal_residential_listings', 'azdad_commercial_listings', 'azdad_residential_listings', 'bahadhabab_commercial_listings', 'bahadhabab_residential_listings', 'bossbih_commercial_listings', 'bossbih_residential_listings', 'compoundin_commercial_listings', 'compoundin_residential_listings', 'dealapp_commercial_listings', 'dealapp_residential_listings', 'eaqartabuk_commercial_listings', 'eaqartabuk_residential_listings', 'eastabha_commercial_listings', 'eastabha_residential_listings', 'erapulse_commercial_listings', 'erapulse_residential_listings', 'fahadalshahri_commercial_listings', 'fahadalshahri_residential_listings', 'fursaghyr_commercial_listings', 'fursaghyr_residential_listings', 'gathern_commercial_listings', 'gathern_residential_listings', 'gomenassat_commercial_listings', 'gomenassat_residential_listings', 'gudai_commercial_listings', 'gudai_residential_listings', 'hajer_commercial_listings', 'hajer_residential_listings', 'ialqarawi_commercial_listings', 'ialqarawi_residential_listings', 'jazwtn_commercial_listings', 'jazwtn_residential_listings', 'jurash_commercial_listings', 'jurash_residential_listings', 'ksaaqar_commercial_listings', 'ksaaqar_residential_listings', 'masar_commercial_listings', 'masar_residential_listings', 'mizlaj_commercial_listings', 'mizlaj_residential_listings', 'moftah_commercial_listings', 'moftah_residential_listings', 'muktamel_commercial_listings', 'muktamel_residential_listings', 'mustqr_commercial_listings', 'mustqr_residential_listings', 'nowaisiry_commercial_listings', 'nowaisiry_residential_listings', 'nufouth_commercial_listings', 'nufouth_residential_listings', 'october_commercial_listings', 'october_residential_listings', 'raghdan_commercial_listings', 'raghdan_residential_listings', 'rakez_commercial_listings', 'rakez_residential_listings', 'ramzalqasim_commercial_listings', 'ramzalqasim_residential_listings', 'rawasidark_commercial_listings', 'rawasidark_residential_listings', 'remal_commercial_listings', 'remal_residential_listings', 'sadin_commercial_listings', 'sadin_residential_listings', 'sadiqeltajer_commercial_listings', 'sadiqeltajer_residential_listings', 'safera_commercial_listings', 'safera_residential_listings', 'sakan_commercial_listings', 'sakan_residential_listings', 'sanadak_commercial_listings', 'sanadak_residential_listings', 'satel_commercial_listings', 'satel_residential_listings', 'shmoualshmal_commercial_listings', 'shmoualshmal_residential_listings', 'souq24_commercial_listings', 'souq24_residential_listings', 'suwar_commercial_listings', 'suwar_residential_listings', 'therc_commercial_listings', 'therc_residential_listings', 'wasalt_commercial_listings', 'wasalt_residential_listings', 'wslnaa_commercial_listings', 'wslnaa_residential_listings'];
 
 // Gathern + Aqar Monthly are MONTHLY-ONLY sources: every listing is a monthly rental. On a monthly
 // search we therefore include ALL their rows — even ones whose raw rent_period is null — because the

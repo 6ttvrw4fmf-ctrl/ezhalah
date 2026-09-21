@@ -73,7 +73,7 @@ import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
-import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
+import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
@@ -1879,7 +1879,30 @@ export default function Agent() {
   //   'yes'     a truthful, certified, unasked question exists for this scope → a round can follow
   //   'no'      MEASURED: nothing certified remains that narrows (never invented — R5 exhaustion)
   //   'unknown' a count could not be determined even after one bounded retry — no verdict earned
-  const assessNarrowing = async (q0: SearchQuery, asked: Iterable<string>): Promise<'yes' | 'no' | 'unknown'> => {
+  // THE FIRST TAP IS INSTANT TOO (owner 2026-09-21: "get the numbers for each single tick ready
+  // ahead of time … when a user does the first search, it already gets involved"). Fire-and-forget,
+  // SERIAL — one candidate at a time, never Promise.all — so this can never recreate the #3420
+  // contention bug (that was N heavy probes at once; this is N light probes, one after another,
+  // spread across the same wait). Also primes the OPENING «متابعة» number (zero ticks) up front —
+  // for a scope tier that call is genuinely new; for an advanced question it lands as a free cache
+  // hit, because rankQuestions already made the identical call to resolve THIS question's own option
+  // counts a moment earlier (see fetchApartmentGuidedCounts's remembered cache, src/data/remote.ts).
+  //
+  // `afPrefetchRef.current?.key !== key` is checked before every hop: the moment a NEWER search
+  // supersedes this one, the walk stops spending database time on a question nobody will see —
+  // reusing the same key the passive effect already uses to decide which verdict to claim, so one
+  // generation signal governs both.
+  const primeFooterCounts = async (
+    question: AdvancedQuestion, scoped: SearchQuery, keys: string[], key: string,
+  ) => {
+    primeLiveResultCount(scoped).catch(() => {});
+    for (const k of keys) {
+      if (afPrefetchRef.current?.key !== key) return;
+      try { await primeLiveResultCount(question.apply(scoped, [k])); } catch { /* best-effort */ }
+    }
+  };
+
+  const assessNarrowing = async (q0: SearchQuery, asked: Iterable<string>, key: string): Promise<'yes' | 'no' | 'unknown'> => {
     let scoped = q0;
     const seen = new Set<string>(asked);
     for (let tier = nextScopeTier(scoped, seen); tier; tier = nextScopeTier(scoped, seen)) {
@@ -1891,7 +1914,10 @@ export default function Agent() {
       // UNKNOWN MUST NOT HARDEN INTO NO. A turn showing more than INTERVIEW_STOP_AT matches cannot
       // truthfully have an empty scope, so a failed/timed-out tier count is not a fact.
       if (!res || res.probeFailed) return 'unknown';
-      if (res.options.length > 1) return 'yes';              // a real scope question follows
+      if (res.options.length > 1) {                          // a real scope question follows
+        primeFooterCounts(scopeQuestionFor(tier), scoped, res.options.map((o) => o.key), key);
+        return 'yes';
+      }
       seen.add(tier);                                        // resolved (auto-commit or open skip) —
       if (res.options.length === 1)                          // never re-asked, same as the walk
         scoped = scopeQuestionFor(tier).apply(scoped, [res.options[0].key]);
@@ -1902,7 +1928,11 @@ export default function Agent() {
     for (let attempt = 0; attempt < 2; attempt++) {
       let ranked: Awaited<ReturnType<typeof rankQuestions>> | null = null;
       try { ranked = await rankQuestions(scoped, seen); } catch { ranked = null; }
-      if (ranked && ranked.some((r) => offersMeaningfulNarrowing(r.total, r.options))) return 'yes';
+      const winner = ranked?.find((r) => offersMeaningfulNarrowing(r.total, r.options));
+      if (winner) {
+        primeFooterCounts(winner.question, scoped, winner.options.map((o) => o.key), key);
+        return 'yes';
+      }
       if (ranked && !ranked.probeFailed) return 'no';         // every probe ANSWERED: nothing narrows
       if (attempt === 0) await new Promise((r) => setTimeout(r, 2500));
     }
@@ -1949,7 +1979,7 @@ export default function Agent() {
     if (afPrefetchRef.current?.key === key) return;
     // `.catch` here, not at the await: an unhandled rejection on a promise nobody claims (a
     // superseded search) would surface as a crash rather than the 'unknown' this already means.
-    afPrefetchRef.current = { key, p: assessNarrowing(q, asked).catch(() => 'unknown' as const) };
+    afPrefetchRef.current = { key, p: assessNarrowing(q, asked, key).catch(() => 'unknown' as const) };
   };
 
   const afProbedRef = useRef<Record<string, true>>({});
@@ -1968,7 +1998,7 @@ export default function Agent() {
     // never opens the overlay on a plain search turn (owner 2026-08-19 stands).
     // Claim the verdict the search already paid for; probe here only if there is no match.
     const pre = afPrefetchRef.current;
-    const claimed = pre && pre.key === afPrefetchKey(q, asked) ? pre.p : assessNarrowing(q, asked);
+    const claimed = pre && pre.key === afPrefetchKey(q, asked) ? pre.p : assessNarrowing(q, asked, afPrefetchKey(q, asked));
     void claimed.then((verdict) => {
       // owner 2026-09-12: reverses the 2026-09-04 decision to narrate "nothing left" as a chat
       // bubble — too dense/confusing in practice. Silent now: afCanNarrow alone still correctly
