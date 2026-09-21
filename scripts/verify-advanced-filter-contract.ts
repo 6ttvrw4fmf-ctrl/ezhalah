@@ -5,7 +5,7 @@
 //
 //   node --experimental-strip-types scripts/verify-advanced-filter-contract.ts   (wired into `npm test`)
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -327,29 +327,68 @@ check('the result-intro count comes from matchTotal via quotableTotal(), never a
 //    owner 2026-09-06: "remove this design … keep it how it was") ─────────────────────────────────
 // The beat is DECORATION: its dismissal is driven by plain setTimeout latches in finishGuided (never
 // an animation callback — src/lib/afterAnimation.ts's rule) and a hard failsafe dismisses it even if
-// the search turn dies. It speaks the searching line, the honest from-count, and — once the search
-// lands — the «لقينا N عقار أقرب لطلبك» beat, whose number is quotableTotal()'s output handed in as
-// `to` (see verify-mining-total-honesty.ts for the honesty half). Reduced motion drops the drift.
-const miningSrc = readFileSync(join(root, 'src/components/MiningTransition.tsx'), 'utf8');
-check('deep-search dismissal is setTimeout-driven with a hard failsafe (never an animation callback)',
-  /phase: 'mining'/.test(agentSrc)
-  && /timers\.push\(setTimeout\(/.test(agentSrc)
-  && /15000/.test(agentSrc)
-  && !/\.start\(\s*\(/.test(miningSrc));
-check('the transition speaks the searching line + the honest from-count, and respects reduced motion',
-  /Going through \{count\} properties/.test(miningSrc)
-  && /Finding the closest match for you/.test(miningSrc)
-  && /useReducedMotion/.test(miningSrc));
-// NO COMPLETION BEAT AT ALL (owner 2026-09-20 — shown the card, asked for it gone). This check used
-// to assert `wait + 1100`, the hold that kept «لقينا N عقار أقرب لطلبك» on screen. That hold is gone,
-// and the old assertion would now pass for the WRONG reason: an unrelated `wait + 1100` scroll timer
-// (easeToMsgTop) still lives in the same function, so a bare source match no longer proves anything
-// about the beat. Assert the mechanism instead: the card's `to` — the ONLY thing that flips
-// MiningTransition's `done` and draws the tick — is never handed a value.
-check('the «لقينا N» completion beat is not wired: the mining card is never given a `to`',
-  !/\{ \.\.\.f, to: total \}/.test(agentSrc)
-  && /setAgeFlow\(\{ phase: 'mining', from: ageFlowTotalRef\.current, to: null \}\)/.test(agentSrc),
-  'setting `to` flips MiningTransition\'s `done`, which draws the checkmark and the sentence the owner removed');
+// The deep-search overlay it described is deleted (see the absence check below). What that rule was
+// really protecting — a hand-off driven by plain timers, never by an animation callback — still
+// applies to the landing scroll that replaced it, so it is asserted there instead.
+check('the round hands over on a plain setTimeout, never an animation callback',
+  /miningTimersRef\.current\.push\(setTimeout\(/.test(agentSrc)
+  && !/\.start\(\s*\(\s*\)\s*=>/.test(agentSrc));
+// THE OVERLAY IS GONE (owner 2026-09-20, final word after three passes at it: "there is this
+// pop-up that pops up with a magnifying glass … this needs to be gone"). Earlier passes removed its
+// COMPLETION state — the green checkmark and «لقينا N عقار» — which was the wrong half: what the
+// owner had been calling "the pop-up" was the card itself, in its searching state. src/components/
+// MiningTransition.tsx is deleted and the 'mining' phase with it.
+//
+// These checks are NOT deleted with it. A barrier that policed a component is the thing that stops
+// it coming back wrong, so each now asserts the ABSENCE — which is strictly stronger than anything
+// it asserted about the component's internals, and fails the moment a mining overlay reappears.
+check('the mining overlay is gone: no component, no phase, no render, no import',
+  !existsSync(join(root, 'src/components/MiningTransition.tsx'))
+  && !/phase: 'mining'/.test(agentSrc)
+  && !/MiningTransition/.test(agentSrc),
+  'a round must hand straight over to the thread\'s own searching turn, with no card on top of it');
+// THE «تحديد أكثر» PROBE RUNS *WITH* THE SEARCH, NOT AFTER IT (owner 2026-09-20: "once the user
+// clicks Search, the button should show … the user will wait 10 seconds — let the 2.5 be part of
+// that"). The passive effect keys off lastResultsMsg, which does not exist until the search has
+// already returned, so the probe's cost — a scope round trip, a count probe per advanced question,
+// plus one bounded 2.5s retry — used to stack AFTER the wait the user was already serving.
+// Measured A/B on the identical search: button lag after results 2,704ms → 1,200ms.
+check('the narrowing probe is prefetched at every live search site, before the query is awaited',
+  (agentSrc.match(/prefetchNarrowing\(/g) ?? []).length >= 3,   // the three live runQuery sites
+  'a search path that does not prefetch pays the probe cost after its results, and its button pops in late');
+// agentSrc is the RAW file, so a trailing `// …` on the prefetch line sits between the two
+// statements — match to end-of-line rather than assuming whitespace.
+check('every prefetch fires BEFORE its runQuery, never after',
+  /prefetchNarrowing\([^;]*\);[^\n]*\n\s*const result = await runQuery\(/.test(agentSrc));
+check('the effect CLAIMS the prefetched verdict instead of re-probing, and still probes on a miss',
+  /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked\)/.test(agentSrc),
+  'without the key match a stale verdict could be handed to a different search');
+check('a superseded prefetch cannot crash the app as an unhandled rejection',
+  /assessNarrowing\(q, asked\)\.catch\(\(\) => 'unknown' as const\)/.test(agentSrc));
+check('the prefetch is skipped when the button would be hidden anyway (no wasted probes)',
+  /if \(!q \|\| !anyGuidedEligible\(q\)\) return;/.test(agentSrc));
+
+// SKIP IS HIDDEN ON SCOPE QUESTIONS ONLY (owner 2026-09-20). Skipping «bathrooms» is a usable
+// answer — "I don't care" — and the round carries on. Skipping «what type of property?» is not: the
+// advanced pool cannot be ranked until CATEGORY → GROUP → TYPE resolves, so the round ends having
+// done nothing. Keyed on the question's identity, never on stepIndex: a user who chose their group
+// on the Filter screen never sees that question, so position 0 is already an advanced question.
+check('«تخطي» is hidden on scope questions, and keyed on identity rather than position',
+  /hideSkip=\{isScopeQuestionId\(ageFlow\.question\.id\)\}/.test(agentSrc)
+  && !/hideSkip=\{ageFlow\.stepIndex/.test(agentSrc),
+  'a stepIndex test removes Skip from whatever happens to be first, including a real advanced question');
+check('the card actually branches on it (a prop nothing reads hides nothing)',
+  /\{hideSkip \? null : \(/.test(readFileSync(join(root, 'src/components/AdvancedQuestionCard.tsx'), 'utf8')));
+// Leaving the scope question is still possible, so hiding Skip is never a trap.
+check('«رجوع» and the X survive on a scope question — Skip is hidden, not the way out',
+  /testID="af-back"/.test(readFileSync(join(root, 'src/components/AdvancedQuestionCard.tsx'), 'utf8'))
+  && /onClose=\{onAgeClose\}/.test(agentSrc));
+
+// THE GREEN CHECK IS GONE BY CONSTRUCTION (owner 2026-09-20: "this green check needs to always be
+// gone … it was a mistake"). The beat's trigger was removed first; the owner reported seeing it
+// again, so the CAPABILITY is deleted — no `to` prop, no `done`, no checkmark, no found-copy. There
+// is nothing left to re-trigger: bringing it back now means re-writing it.
+
 check('the results pills are fed by the deduped facet set (one label per committed answer)',
   /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
   && /facets: dedupedFacets,/.test(agentSrc));

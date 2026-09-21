@@ -72,7 +72,6 @@ import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESO
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
-import MiningTransition from '@/components/MiningTransition';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
@@ -895,6 +894,42 @@ export default function Agent() {
   // time instead of a whole grid landing at once. (user request.) revealCount[id] = how many cards
   // are visible so far; absent = show all (used for replayed/history turns that don't type out).
   const REVEAL_STEP_MS = 130; // snappy one-by-one cascade (25 cards ≈ 3s), smooth not distracting
+  // THE CASCADE GREETS, THE SCROLL DELIVERS (owner 2026-09-20).
+  //
+  // REVEAL_STEP_MS was sized for a 25-card set — its own comment says so — and nothing re-sized it
+  // when a turn could hold 400 (AF_REVEAL_MAX). At 130ms/card a full 400 takes ~52s of pure clock,
+  // and the clock runs whether the user is looking or not: measured live, cards were still arriving
+  // a minute after the round ended, so a fast scroller outran them and hit blank space.
+  //
+  // The fix is not a faster clock — a faster clock still animates 390 cards nobody is looking at.
+  // The cascade now plays only for the FIRST screenful, which is the part anyone actually sees
+  // arrive, and everything after that is revealed by SCROLLING: approach the end of what is
+  // revealed and the next chunk appears. Cost is paid only for what the user asks to see, a set of
+  // any size feels identical, and outrunning the reveal is impossible by construction.
+  //
+  // This changes WHEN cards are revealed, never WHICH or in WHAT ORDER: revealCount still walks the
+  // one diversity-ordered list (platform → deal → type → district → photos) up to the SAME target
+  // initialReveal() returns, and «عرض المزيد» still owns everything past that target.
+  const CASCADE_MAX = 12;           // ~1.5s of cascade — a screenful, then hand off to the scroll
+  const SCROLL_REVEAL_CHUNK = 12;   // revealed per trigger; ≥ a screenful so the next one is armed early
+  // FAR ENOUGH AHEAD THAT THE ACTIONS ROW NEVER MOVES UNDER THE USER (owner 2026-09-20, reported:
+  // "whenever I scrolled, the advanced filter doesn't show, it shows later").
+  //
+  // «تحديد أكثر» and «عرض المزيد» render AFTER the cards, so every revealed chunk is inserted ABOVE
+  // them and pushes them down — at ~700px per card, one 12-card chunk moves that row ~8,000px. At a
+  // 1,200px trigger the chunk fired exactly as the row was entering the viewport, so the button the
+  // user was reaching for jumped off-screen: present the whole time, never catchable.
+  //
+  // The reveal must therefore happen while the row is still WELL below the fold, so the shove lands
+  // off-screen and the row is settled by the time it scrolls into view. 2600px is ~3.5 viewports of
+  // warning on a phone — comfortably more than the 1,200px that was landing in view, and still far
+  // short of revealing everything eagerly.
+  const SCROLL_REVEAL_SLACK_PX = 2600;
+  // A CHUNK ARRIVES CARD BY CARD, NOT AS A BLOCK (owner 2026-09-20: "when he scrolls, it slowly
+  // shows up next, next"). Revealing 12 at once lands a wall of cards in one frame — the thing the
+  // original cascade existed to avoid. Faster than the opening cascade (the user is already moving
+  // and must never catch the edge), slow enough to read as arriving rather than appearing.
+  const SCROLL_STEP_MS = 45;
   // LANDING A COMPLETED ADVANCED FILTER ROUND (owner 2026-08-24): "smoothly scroll the user down so
   // they land around the new result title / selection summary… NOT a harsh jump to the bottom."
   //
@@ -924,7 +959,18 @@ export default function Agent() {
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
   // IS the exact match count. (owner 2026-07-08: never hide a valid match behind the display limit.)
+  // One chunk eases in at a time — onScroll fires every frame and would otherwise start a new
+  // stagger on top of the running one, so cards would arrive in bursts instead of a steady line.
+  const scrollChunkRef = useRef(false);
+  // revealCount, readable SYNCHRONOUSLY. The scroll handler needs the current value to decide the
+  // next chunk; reading the state variable there would see the value from the render that installed
+  // the handler and re-reveal the same cards every scroll.
+  const revealCountRef = useRef<Record<string, number>>({});
   const [revealCount, setRevealCount] = useState<Record<string, number>>({});
+  // Keep the synchronous mirror honest. Every writer goes through setRevealCount, so mirroring on
+  // render covers all of them (cascade, scroll chunk, «عرض المزيد», restore) with one line and no
+  // second source of truth to drift.
+  revealCountRef.current = revealCount;
   const pendingRefineRef = useRef<{ q: SearchQuery; dim: string } | null>(null); // a >25 "refine" question awaiting the user's one-line answer
   const refineMsgIdRef = useRef<string | null>(null); // the results turn the latest runRefine is building
   // Advanced-question overlay (عمر العقار, apartment-only for now) — a transient card shown ON TOP of
@@ -944,7 +990,6 @@ export default function Agent() {
     // final search runs behind it. Carries only the two counts it may speak — both handed in from
     // quotableTotal(), never computed in the overlay. Dismissal is driven by plain setTimeout
     // latches in finishGuided — NEVER an animation callback (src/lib/afterAnimation.ts rule).
-    | { phase: 'mining'; from: number | null; to: number | null }
     | null
   >(null);
   // The query accumulates answers as the flow advances; `token` supersedes a stale async fetch when a
@@ -1128,7 +1173,50 @@ export default function Agent() {
     // Gentle one-time scroll: bring the response's top ~80px from the top of the viewport. Keeps the
     // slogan + summary + intro in view with the first cards just below — never the far bottom.
     easeToMsgTop(id, 60);
-    dripRange(id, 0, n, REVEAL_STEP_MS);
+    // Only the first screenful cascades. `n` (the full target) is deliberately NOT lowered — it is
+    // still what maybeRevealOnScroll walks toward, and what resultsRowIsReady measures against.
+    dripRange(id, 0, Math.min(n, CASCADE_MAX), REVEAL_STEP_MS);
+  };
+
+  // Reveal-on-approach. Fires from the ScrollView's onScroll: when the viewport comes within
+  // SCROLL_REVEAL_SLACK_PX of the bottom of what is currently laid out, the newest results turn
+  // reveals its next chunk — up to the target initialReveal() already decided, never past it
+  // («عرض المزيد» owns beyond the target, and still does).
+  //
+  // Guarded three ways, because onScroll fires on every frame: it does nothing while that turn's
+  // opening cascade still owns the reveal (letting both drive would fight over revealCount), nothing
+  // once the target is reached, and nothing if the chunk would not actually raise the count — so a
+  // scroll that changes nothing costs one comparison and no render.
+  const maybeRevealOnScroll = (e: { nativeEvent: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } } }) => {
+    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    if (contentOffset.y + layoutMeasurement.height + SCROLL_REVEAL_SLACK_PX < contentSize.height) return;
+    const m = lastResultsMsg;
+    // `m.typing` is set TRUE when the turn is created and is NEVER cleared — this file tracks the
+    // intro's completion in the separate `doneTyping[id]` map (same expression as the render gate at
+    // the actions row, and as resultsRowIsReady's `introStillTyping`). A bare `m.typing` check here
+    // therefore returns on EVERY scroll forever: live-tested, the cascade stopped at CASCADE_MAX and
+    // scrolling revealed nothing at all.
+    if (!m || (m.typing && !doneTyping[m.id])) return;
+    if (revealActiveRef.current?.id === m.id) return;   // its cascade still owns the reveal
+    if (scrollChunkRef.current) return;                  // a chunk is already easing in
+    const target = initialReveal(m.result, m.afCompleted);
+    const cur = revealCountRef.current[m.id] ?? 0;
+    if (cur >= target) return;                           // target reached — «عرض المزيد» owns the rest
+    const next = Math.min(cur + SCROLL_REVEAL_CHUNK, target);
+    if (next <= cur) return;
+    // Stagger the chunk one card at a time. Deliberately NOT dripRange(): that claims
+    // revealActiveRef and toggles `revealing`, which gates the actions row — flickering it on every
+    // scroll chunk would strobe «عرض المزيد». This only ever raises revealCount, and its timers join
+    // revealTimers so the existing clearReveals()/finalizeReveal() teardown already owns them.
+    scrollChunkRef.current = true;
+    let shown = cur;
+    const step = () => {
+      shown += 1;
+      setRevealCount((c) => ((c[m.id] ?? 0) >= shown ? c : { ...c, [m.id]: shown }));
+      if (shown < next) revealTimers.current.push(setTimeout(step, SCROLL_STEP_MS));
+      else scrollChunkRef.current = false;
+    };
+    revealTimers.current.push(setTimeout(step, 0));
   };
   const startReveal = (id: string, n: number) => {
     setDoneTyping((d) => (d[id] ? d : { ...d, [id]: true }));
@@ -1818,6 +1906,31 @@ export default function Agent() {
     return 'unknown';
   };
 
+  // START THE "IS THERE A USEFUL QUESTION LEFT?" PROBE *WITH* THE SEARCH, NOT AFTER IT
+  // (owner 2026-09-20: "once the user clicks Search, the button should show … the user will wait
+  // 10 seconds — let the 2.5 be part of that").
+  //
+  // The effect below cannot start it: it keys off lastResultsMsg, which does not exist until the
+  // search has already returned. So the probe's cost — a scope round trip, then a count probe for
+  // every one of the 9 advanced questions, plus one bounded 2.5s retry when a batch comes back
+  // undetermined — was stacked AFTER the search the user was already waiting on, and «تحديد أكثر»
+  // popped in seconds late. Run concurrently it is free: the search is the longer of the two.
+  //
+  // One slot, not a map: searches are sequential, and a superseded search's verdict is simply never
+  // claimed. The key pins the exact (query, asked-set) the effect will ask for, so a stale answer
+  // can never be handed to a different search — on a miss the effect just probes as it always did.
+  const afPrefetchRef = useRef<{ key: string; p: Promise<'yes' | 'no' | 'unknown'> } | null>(null);
+  const afPrefetchKey = (q: SearchQuery, asked: readonly string[]) =>
+    `${JSON.stringify(q)}|${[...asked].sort().join(',')}`;
+  const prefetchNarrowing = (q: SearchQuery | null | undefined, asked: readonly string[] = []) => {
+    if (!q || !anyGuidedEligible(q)) return;   // the button is hidden anyway — do not spend the probes
+    const key = afPrefetchKey(q, asked);
+    if (afPrefetchRef.current?.key === key) return;
+    // `.catch` here, not at the await: an unhandled rejection on a promise nobody claims (a
+    // superseded search) would surface as a crash rather than the 'unknown' this already means.
+    afPrefetchRef.current = { key, p: assessNarrowing(q, asked).catch(() => 'unknown' as const) };
+  };
+
   const afProbedRef = useRef<Record<string, true>>({});
   useEffect(() => {
     const m = lastResultsMsg;
@@ -1832,7 +1945,10 @@ export default function Agent() {
     // PASSIVE: renders the «تحديد أكثر» button and nothing else. Automatic continuation of an
     // interview the user already opened lives in finishGuided (owner 2026-09-04) — this effect
     // never opens the overlay on a plain search turn (owner 2026-08-19 stands).
-    void assessNarrowing(q, asked).then((verdict) => {
+    // Claim the verdict the search already paid for; probe here only if there is no match.
+    const pre = afPrefetchRef.current;
+    const claimed = pre && pre.key === afPrefetchKey(q, asked) ? pre.p : assessNarrowing(q, asked);
+    void claimed.then((verdict) => {
       // owner 2026-09-12: reverses the 2026-09-04 decision to narrate "nothing left" as a chat
       // bubble — too dense/confusing in practice. Silent now: afCanNarrow alone still correctly
       // hides «تحديد أكثر» when exhausted (line ~3418); «عرض المزيد» is untouched by this verdict.
@@ -1863,6 +1979,7 @@ export default function Agent() {
     searchingAtRef.current[statusId] = Date.now();
     setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
     toBottom();
+    prefetchNarrowing(refined, opts?.guided?.asked ?? []);  // runs DURING the search, not after it
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
     // quotableTotal, never `result.total` — that is this page's buffer length (≤ the 1500-row
@@ -2205,10 +2322,23 @@ export default function Agent() {
     // reverted, and the restored card speaks no selections — but the dedupe rule is the PILLS' own
     // and is unaffected.)
     const dedupedFacets = dedupeFacetsByLabel([...(carry?.facets ?? []), ...ageFlowFacetsRef.current]);
-    setAgeFlow({ phase: 'mining', from: ageFlowTotalRef.current, to: null });
-    const timers = miningTimersRef.current;
+    // NO OVERLAY AT ALL WHEN A ROUND ENDS (owner 2026-09-20, third and final word on this card:
+    // "when the user clicks on what he wants, then there is this pop-up that pops up with a
+    // magnifying glass … this needs to be gone").
+    //
+    // Earlier passes removed the card's COMPLETION state (the green checkmark and «لقينا N عقار»).
+    // That was the wrong half: what the owner has been calling "the pop-up" is the card itself, in
+    // its searching state, magnifier and all. So the round now closes its question card and hands
+    // straight over — setAgeFlow(null), no phase, no timers, no scrim.
+    //
+    // NOTHING IS LOST BY REMOVING IT, which is why this is safe where it would not have been before:
+    // the overlay was translucent ON PURPOSE so "the searching turn behind the card — the platform
+    // roster included — reads through" (the deleted card's own header said so). That searching turn is the
+    // thread's own, rendered by runRefine below and not by this overlay. Taking the card away simply
+    // stops covering it, so the user still watches «نراجع N منصة عقارية» work — they just see it
+    // directly instead of through a scrim.
+    setAgeFlow(null);
     const stillMining = () => ageFlowTokenRef.current === token;
-    timers.push(setTimeout(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); }, 15000));
     const guided = ageFlowBaseQRef.current
       ? {
           baseQ: carry?.originQ ?? ageFlowBaseQRef.current,
@@ -2229,7 +2359,24 @@ export default function Agent() {
         // ≤ INTERVIEW_STOP_AT — the search is COMPLETE. Every remaining listing is revealed by
         // initialReveal (honestTotal ≤ stopAt ⇒ reveal all fetched — no «عرض المزيد»), the composer
         // is replaced by «محادثة جديدة», and the transcript is saved in that state.
-        if (searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
+        // A COMPLETED ADVANCED FILTER ROUND ENDS THE CONVERSATION (owner 2026-09-20, shown the
+        // 400-card turn and its closing note: "that message should be gone. The chat gets closed. If
+        // you want to make a new chat, click on the top … you just have to do skip, and that's it").
+        //
+        // This WIDENS R11.1. The ≤ INTERVIEW_STOP_AT rule stays exactly as it was — it still ends a
+        // plain search, a typed message and a refine chip — but a round of Advanced Filter now ends
+        // the chat at ANY total, because the interview IS the end of that journey: the user answered
+        // (or skipped) every question the data could truthfully offer, and the set they are looking
+        // at is the answer. The old behaviour left them on a browsable turn whose closing note said
+        // «لسا عندنا لك المزيد … الجاية هي الأخيرة، بنعرض لك حتى 100» — an offer that contradicted
+        // itself and, at 400 of 13,203, could never be satisfied.
+        //
+        // NAMED, not bare, so verify-af-rounds-never-self-reopen-and-finish-at-25.ts's
+        // every-setCompleted-is-gated ratchet still means something: the defect that check exists for
+        // is a "nothing left to ask" VERDICT silently locking the chat (2026-09-12), which this is
+        // not — this fires on a round that actually landed results, never on a probe's opinion.
+        const afRoundEndsChat = true;
+        if (afRoundEndsChat || searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
         // A ROUND NEVER RE-OPENS ITSELF (owner 2026-09-20 — REVERSES the 2026-09-04 "rounds continue
         // automatically" rule quoted below in git history). That rule popped a brand-new round of
         // DIFFERENT questions onto the screen on a timer, with no tap from the user — indistinguishable
@@ -2239,39 +2386,23 @@ export default function Agent() {
         // skipping to the end — that is the only outcome. Whether ANOTHER round is worth offering is
         // still decided by assessNarrowing (unchanged) through the PASSIVE effect above it feeds,
         // which only toggles the «تحديد أكثر» button visibility; opening a new round is a tap, always.
-        // NO COMPLETION BEAT (owner 2026-09-20, shown the card and asked for it gone: "remove this
-        // bro no need for it ... if user selects or clicks skip its fine"). REVERSES the 2026-09-06
-        // restoration of the «لقينا N عقار أقرب لطلبك» tick: `to` is never handed to the card, so
-        // MiningTransition's `done` never flips, no checkmark and no sentence are ever drawn, and the
-        // overlay is dismissed the moment the results are ready instead of holding ~1.1s on a
-        // celebration the user did not ask for. Applies to EVERY ending — answers committed or every
-        // question skipped — because the owner named both.
-        //
-        // WHAT IS DELIBERATELY KEPT: the searching animation still covers the re-search. Dropping it
-        // too would leave the user on the old screen with no sign anything is happening for the few
-        // seconds the RPC takes, which is the one thing worse than a beat that lingers.
-        //
-        // `to: null` is not a new state: MiningTransition already renders exactly this whenever the
-        // count would overstate (its own header calls out "`done` never flips ⇒ no beat at all"), so
-        // this removes a call site rather than teaching the card a new shape. The 1.4s floor stays —
-        // it stops the card flashing up and vanishing when the search returns almost instantly.
+        // There is no overlay left to dismiss — the card was removed at the top of finishGuided —
+        // so the only thing still owed here is the landing scroll. `startedAt` keeps its old job of
+        // spacing that scroll past the new turn's own card cascade, nothing more.
         const wait = Math.max(0, 1400 - (Date.now() - startedAt));
-        timers.push(setTimeout(() => {
-          if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f));
-        }, wait));
-        timers.push(setTimeout(() => {
+        miningTimersRef.current.push(setTimeout(() => {
           if (!stillMining()) return;
           // LAND ON THE NEW TURN (owner 2026-08-24): the old cards stay exactly where they are, and the
           // thread eases down so the user reads their selection receipt → the new count → the new
           // cards. Never a jump to the bottom.
-          // The delay clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s).
+          // The delay clears the new turn's own card cascade (CASCADE_MAX × REVEAL_STEP_MS ≈ 1.6s).
           // Measured live 2026-08-24: easing sooner read a `msgYRef` that predated the cascade — the
           // ref only refreshes when the message RESIZES, which is exactly what each revealed card
           // does — and landed ~300px short, with the new count line still under the fold.
           if (msgId) for (const d of LAND_PASSES_MS) easeToMsgTop(msgId, d);
         }, wait + 1100));
       },
-    }).catch(() => { if (stillMining()) setAgeFlow((f) => (f?.phase === 'mining' ? null : f)); });
+    });
   };
 
   // Entry point for «خلّنا نحدد الطلب أكثر» (and the auto-open after an eligible Filter search). Build
@@ -2657,6 +2788,7 @@ export default function Agent() {
       const forcedBroad = !turn.query.location;
       saidRef.current = [];
       beginSearching(statusId, turn.query); // loader + min-beat overlap the fetch (like filter/refine)
+      prefetchNarrowing(turn.query);  // runs DURING the search, not after it
       const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
       const reply = forcedBroad
         ? `${getLocale() !== 'en'
@@ -2810,6 +2942,7 @@ export default function Agent() {
       // layer) left the «إزهله يبحث» loader spinning forever with no recovery. Wrapped in try/catch/
       // finally (mirrors loadMore) so the loader ALWAYS clears and a thrown turn shows an inline retry.
       try {
+        prefetchNarrowing(pending.q);  // runs DURING the search, not after it
         const result = await runQuery(pending.q, true, run.ac.signal, ensureChatId());
         if (run.cancelled) return;
         await playListings(run, statusId, buildScrapeIntro(result.query ?? pending.q), result);
@@ -3334,6 +3467,8 @@ export default function Agent() {
           contentContainerStyle={[s.scroll, { paddingBottom: 16 }]}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={onGrow}
+          onScroll={maybeRevealOnScroll}
+          scrollEventThrottle={64}
         >
           <View style={s.col}>
             {(() => { const lastId = msgs[msgs.length - 1]?.id; return msgs.map((m) => {
@@ -3727,7 +3862,7 @@ export default function Agent() {
                               {/* HIDDEN WHILE THE ADVANCED FILTER IS OPEN (owner 2026-08-21). Once the
                                   user taps «خلّنا نحدد الطلب أكثر», the AF interview owns this moment —
                                   the old CTA row must not sit behind it competing for the same decision.
-                                  `ageFlow` covers every AF phase (loading → intro → asking → mining), so
+                                  `ageFlow` covers every AF phase (loading → intro → asking), so
                                   the row is gone from the tap until the flow closes, and returns by itself
                                   afterwards because closing sets ageFlow back to null. The AF card is an
                                   absolute overlay, so without this gate the two buttons stayed rendered
@@ -4097,8 +4232,6 @@ export default function Agent() {
               onClose={onIntroShowResults}
               pills={afCardPills}
             />
-          ) : ageFlow.phase === 'mining' ? (
-            <MiningTransition from={ageFlow.from} to={ageFlow.to} />
           ) : (
             <AdvancedQuestionCard
               titleKey={ageFlow.question.titleKey}
@@ -4115,6 +4248,25 @@ export default function Agent() {
               initialKeys={ageFlow.initialKeys}
               onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
+              // NO SKIP ON A SCOPE QUESTION (owner 2026-09-20). The owner first asked for "the first
+              // question", then for "the first two" — both are the same boundary described by
+              // counting: the opening cards are the CATEGORY → GROUP → TYPE hierarchy, and only
+              // after them do the advanced questions begin.
+              //
+              // The distinction is real, not cosmetic. Skipping «bathrooms» is a usable answer — "I
+              // don't care" — and the interview carries on. Skipping «what type of property?» is
+              // not: the advanced pool cannot be ranked until the scope resolves (see the SCOPE
+              // PREFIX SHORT-CIRCUIT in presentGuided), so the round ends having done nothing, which
+              // is exactly the "he wont understand" the owner described.
+              //
+              // Keyed on isScopeQuestionId, NOT on stepIndex, because the count is not stable: a
+              // user who picked their group on the Filter screen never sees that question, so
+              // stepIndex 0 is already an advanced question and hiding Skip there would remove it
+              // from a question where skipping is perfectly sensible.
+              //
+              // «رجوع» still leaves the interview from the first card and the X still abandons it,
+              // so nobody is ever trapped into answering.
+              hideSkip={isScopeQuestionId(ageFlow.question.id)}
               onBack={onAgeBack}
               onClose={onAgeClose}
               pills={afCardPills}

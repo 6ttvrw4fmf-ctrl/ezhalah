@@ -226,8 +226,15 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   // structural pins below read THAT body; the effect itself must route through it.
   const assessFrom = agent.indexOf('const assessNarrowing = async');
   const assess = assessFrom < 0 ? '' : agent.slice(assessFrom, agent.indexOf('const afProbedRef', assessFrom));
+  // The effect stopped calling assessNarrowing inline on 2026-09-20: the probe is now PREFETCHED
+  // alongside the search (owner — "let the 2.5 be part of" the wait the user is already serving),
+  // and the effect CLAIMS that promise when its key matches, falling back to an inline call when it
+  // does not. The rule this check exists for is unchanged and is still exactly what is asserted:
+  // the verdict must come from the ONE shared assessment on BOTH paths, never a second walk.
   check('the offer effect routes through the ONE shared assessment (assessNarrowing), not a private walk',
-    assessFrom >= 0 && /void assessNarrowing\(q, asked\)/.test(probe),
+    assessFrom >= 0
+    && /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked\)/.test(probe)
+    && /afPrefetchRef\.current = \{ key, p: assessNarrowing\(q, asked\)/.test(agent),
     'src/app/agent.tsx — two walks drift; the button must promise exactly the round that finishGuided would continue');
   check('the offer probe exists and only records a verdict (setAfCanNarrow)',
     probeFrom >= 0 && probe.includes('setAfCanNarrow'),

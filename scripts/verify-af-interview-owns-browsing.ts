@@ -70,7 +70,10 @@ console.log('\nThe AF interview holds browsing only while it is asking; the thre
 // ── 1. CLAUSES 1 & 2 — EXECUTED over the complete state space ───────────────────────────────────
 // The phase list is read out of the module's own type, so a phase added there without a case here
 // is caught by check 2 rather than quietly untested.
-const PHASES: AfPhase[] = ['loading', 'intro', 'asking', 'mining'];
+// 'mining' is gone with the overlay (owner 2026-09-20). The exhaustiveness this list enforces is
+// unchanged — it is still every phase the union declares — and the finished-round state it used to
+// represent is now plain `null`, which clause 2 already covers below.
+const PHASES: AfPhase[] = ['loading', 'intro', 'asking'];
 
 check('clause 1 — every ACTIVE interview phase withholds browsing',
   PHASES.every((p) => afInterviewOwnsBrowsing(p) === true),
@@ -155,7 +158,12 @@ const completedCalls = [...agentCode.matchAll(/setCompleted\(true\)/g)].length;
 // predicate's own arguments (`quotableTotal(result)`), and that inner call is followed by `,` — the
 // FIRST `))` in the line is always the predicate's own outer close, never a false-early stop.
 // `revealIsTerminal` needs no such care — it is a bare identifier, no nested parens.
-const gateRe = () => /if \((?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
+// THREE named gates since 2026-09-20. `afRoundEndsChat` was added when the owner ruled that a
+// completed Advanced Filter round ENDS the conversation at any total ("the chat gets closed … you
+// just have to do skip, and that's it"). It is listed BY NAME, not matched loosely, so the ratchet
+// still does its job: a FOURTH trigger — in particular a "nothing left to ask" verdict locking the
+// chat, the 2026-09-12 defect this check exists for — is still a failure.
+const gateRe = () => /if \((?:afRoundEndsChat \|\| )?(?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
 const gatedCompletedCalls = [...agentCode.matchAll(gateRe())].length;
 // The label deliberately names the PREDICATE, not a digit: the threshold moved 25 → 50 → 25 between
 // 2026-09-04 and 2026-09-20 and this label still read "≤50" afterwards (found by routine #9,

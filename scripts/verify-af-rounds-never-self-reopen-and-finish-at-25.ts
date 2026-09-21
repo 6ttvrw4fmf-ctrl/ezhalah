@@ -49,8 +49,8 @@ check('agent.tsx feeds initialReveal the canonical stop line (stopAt: INTERVIEW_
 // ── 2. ≤ 50 completes the chat; a round NEVER re-opens itself, at any total ─────────────────────
 const fin = agent.slice(agent.indexOf('const finishGuided = '), agent.indexOf('const startAgeFlow = '));
 check('finishGuided exists', fin.length > 200);
-check('R11.1: a round landing at ≤ INTERVIEW_STOP_AT completes the chat (composer → «محادثة جديدة»)',
-  /if \(searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(fin));
+check('a completed round ends the chat — at ANY total since 2026-09-20, with R11.1 still standing behind it',
+  /if \(afRoundEndsChat \|\| searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(fin));
 check('finishGuided never calls startAgeFlow — a round cannot open the next one itself',
   !/startAgeFlow/.test(fin));
 check('finishGuided never calls assessNarrowing — deciding whether MORE narrowing is worth offering '
@@ -61,9 +61,16 @@ check('the dead auto-continue timing knob is gone, not just unused (root-cause r
 // The ONE place a round CAN open is the passive effect + the «تحديد أكثر» tap handler — both outside
 // finishGuided. Confirmed together so "moved the call, not deleted it" cannot pass.
 const passive = agent.slice(agent.indexOf('const assessNarrowing = async'), agent.indexOf('const runRefine = async'));
-check('assessNarrowing is called exactly once in the whole file — the passive button effect, never a second call site',
-  (agent.match(/assessNarrowing\(/g) ?? []).length === 1
-  && /void assessNarrowing\(q, asked\)\.then/.test(passive));
+// TWO call sites since 2026-09-20, both on the SAME passive path: prefetchNarrowing() starts the
+// probe alongside the search, and the effect falls back to an inline call when no prefetch matches.
+// What this check has always been about is that NEITHER is a round re-opening itself — that is
+// asserted directly above (`fin` contains no assessNarrowing at all), and is the rule that matters.
+// Pinning the exact sites keeps a third, unexamined caller from appearing unnoticed.
+check('assessNarrowing has exactly two call sites, both on the passive offer path',
+  (agent.match(/assessNarrowing\(/g) ?? []).length === 2
+  && /afPrefetchRef\.current = \{ key, p: assessNarrowing\(q, asked\)/.test(agent)
+  && /pre\.key === afPrefetchKey\(q, asked\) \? pre\.p : assessNarrowing\(q, asked\)/.test(agent),
+  'a third caller means something other than the button is deciding whether a round may follow');
 check('opening a new round anywhere in the file requires a Pressable tap (narrow-further button), '
     + 'never a bare timer',
   /onPress={\(\) => \{[\s\S]{0,700}?void startAgeFlow\(q\);/.test(agent));
@@ -86,7 +93,12 @@ check('a MEASURED "no" after an AF round stays SILENT (no chat bubble, no dangli
 // scripts/verify-af-interview-owns-browsing.ts for the call-site-level version of this same check;
 // this one keeps the ORIGINAL intent of this specific check intact: a measured "no more truthful
 // narrowing" verdict must never itself complete the chat.
-const GATED_COMPLETED = /if \((?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
+// THREE named gates since 2026-09-20. `afRoundEndsChat` was added when the owner ruled that a
+// completed Advanced Filter round ENDS the conversation at any total ("the chat gets closed … you
+// just have to do skip, and that's it"). It is listed BY NAME, not matched loosely, so the ratchet
+// still does its job: a FOURTH trigger — in particular a "nothing left to ask" verdict locking the
+// chat, the 2026-09-12 defect this check exists for — is still a failure.
+const GATED_COMPLETED = /if \((?:afRoundEndsChat \|\| )?(?:searchIsFinishedAtThreshold\(.*?\)|revealIsTerminal)\)\s*setCompleted\(true\);/g;
 check('…and does NOT complete the chat (every setCompleted(true) site is the ≤ 50 rule or the 500-cap/show-all terminal, never the "no more questions" verdict)',
   (agent.match(/setCompleted\(true\)/g) ?? []).length >= 1
   && (agent.match(/setCompleted\(true\)/g) ?? []).length === (agent.match(GATED_COMPLETED) ?? []).length);

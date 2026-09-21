@@ -215,6 +215,12 @@ export type AdvancedQuestionCardProps = {
   initialKeys?: string[];               // answer to restore when the user came BACK to this question
   onConfirm: (keys: string[]) => void; // commit the selection (empty = no preference) and advance/search
   onSkip: () => void;                   // skip THIS question
+  /** Hide «تخطي» on the FIRST question (owner 2026-09-20: "for the first question remove the skip
+   *  button … cuz if user clicks skip he wont understand"). Skipping question one leaves the round
+   *  with nothing committed and no narrowing to show for itself, which reads as the interview having
+   *  done nothing. Every LATER question keeps Skip — by then the user has context for what skipping
+   *  means. «رجوع» still leaves the interview from here, so this is never a trap. */
+  hideSkip?: boolean;
   onBack: () => void;                   // one question back — from the first question, out of AF entirely
   // The skip-all prop was REMOVED (owner, 2026-08-28): the in-question «عرض النتائج» early-exit is
   // gone — the footer is متابعة / تخطي / رجوع only. The intro card's decline link is separate.
@@ -294,7 +300,7 @@ function OptionRow({ option, selected, selection, first, onPress }: {
 
 export default function AdvancedQuestionCard({
   titleKey, descriptionKey, brandImage, selection, options, unknownCount, progressCur, progressTotal,
-  liveCount, initialKeys, onConfirm, onSkip, onBack, onClose, pills,
+  liveCount, initialKeys, onConfirm, onSkip, hideSkip, onBack, onClose, pills,
 }: AdvancedQuestionCardProps) {
   const { t, isRTL } = useI18n();
   const [sel, setSel] = useState<string[]>(initialKeys ?? []);
@@ -514,17 +520,19 @@ export default function AdvancedQuestionCard({
             <Ionicons name={isRTL ? 'chevron-forward' : 'chevron-back'} size={16} color={colors.dark} />
             <Text style={s.secondaryTxt}>{t('Back')}</Text>
           </Pressable>
-          <Pressable
-            style={({ pressed, hovered, focused }: any) => [
-              s.secondaryBtn,
-              hovered && s.secondaryBtnHover,
-              focused && s.secondaryBtnFocus,
-              pressed && s.secondaryBtnPress,
-            ]}
-            testID="af-skip" onPress={onSkip} hitSlop={8} accessibilityRole="button"
-          >
-            <Text style={s.secondaryTxt}>{t('Skip')}</Text>
-          </Pressable>
+          {hideSkip ? null : (
+            <Pressable
+              style={({ pressed, hovered, focused }: any) => [
+                s.secondaryBtn,
+                hovered && s.secondaryBtnHover,
+                focused && s.secondaryBtnFocus,
+                pressed && s.secondaryBtnPress,
+              ]}
+              testID="af-skip" onPress={onSkip} hitSlop={8} accessibilityRole="button"
+            >
+              <Text style={s.secondaryTxt}>{t('Skip')}</Text>
+            </Pressable>
+          )}
         </View>
       </Reanimated.View>
     </Shell>

@@ -148,7 +148,7 @@ const s = StyleSheet.create({
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.scrim },
   // THEMED like every other card in the app (owner incident 2026-09-04: the sheet body stayed light
   // while the panels inside it went dark). The ground a `colors.surface` panel sits on is
-  // `colors.paper` here exactly as in AdvancedQuestionCard/MiningTransition/the sidebar panel; the
+  // `colors.paper` here exactly as in AdvancedQuestionCard / the sidebar panel; the
   // grab handle is the app's hairline. No raw color may live in this sheet — it all flows through
   // var(--ez-*) so the whole surface re-skins together.
   card: { backgroundColor: colors.paper, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 12, paddingTop: 10 },

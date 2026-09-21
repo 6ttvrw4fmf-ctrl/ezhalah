@@ -7,7 +7,7 @@
 // row under a results turn. That row was gated ONLY on `(hasMore || canNarrowFurther)`. The AF card is
 // an ABSOLUTE overlay (StyleSheet.absoluteFill) drawn on top, so the row kept rendering — and stayed
 // reachable — underneath the flow the user had just opened. `ageFlow` is non-null for every AF phase
-// (loading → intro → asking → mining) and returns to null when the flow closes, so gating on it hides
+// (loading → intro → asking) and returns to null when the flow closes, so gating on it hides
 // the row for exactly the duration of the interview and restores it afterwards with no extra state.
 //
 // This is a FLOW/STATE cleanup only: no AF answer semantics, no Skip semantics, no count logic, and no
@@ -56,7 +56,11 @@ check('the gate wraps BOTH buttons (Load more + the AF launcher)',
   'gating only one leaves the other competing with the AF card');
 
 // ── the flow must still own every phase, and still close back to null ────────────────────────────
-for (const phase of ['loading', 'intro', 'asking', 'mining']) {
+// 'mining' left this list on 2026-09-20 with the overlay itself (owner: the magnifying-glass card
+// "needs to be gone"). A round now closes its card and hands straight to the thread's own searching
+// turn, so there is no fourth phase for the CTA gate to cover — and the gate is not weakened by its
+// absence: the CTA is hidden for every phase that still exists, which is what this loop asserts.
+for (const phase of ['loading', 'intro', 'asking']) {
   check(`ageFlow still models the '${phase}' phase (the gate covers it)`,
     new RegExp(`phase: '${phase}'`).test(code));
 }
