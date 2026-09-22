@@ -1,0 +1,79 @@
+# Dangling migration-reference baseline — the FLOOR, not a list (routine #2, 2026-09-22).
+#
+# Each line is a 14-digit migration version that committed SQL in supabase/migrations/ CITES, but
+# that NO committed migration file carries. A reader handed one of these numbers cannot find the
+# migration it names: not in this repo, and — for thirteen of them — not in production either.
+#
+# WHY THIS IS NOT COSMETIC. Three of these sit inside executable operator guidance, not prose:
+#
+#     raise exception 'table % does not exist - apply 20260921180000 first', r.tbl;
+#     RAISE EXCEPTION 'table % does not exist - apply 20260921180000 first', t;
+#     raise exception 'listing_native_location_v1 was replayed WITHOUT the eleven arms
+#                      - apply 20260921180100 first';
+#
+# Those fire when the eleven-platform migrations are replayed against a database that does not yet
+# carry the tables — a fresh Supabase branch (create_branch applies every migration to an empty DB),
+# or a rebuild. At exactly the moment an operator is debugging a failed replay, the database tells
+# them to go apply a migration that has never existed anywhere. 20260921180000 is not in git and not
+# in supabase_migrations.schema_migrations; the real versions are 20260921185629 / 190604 / 191012 /
+# 191100 / 191139 / 191341 / 191349.
+#
+# HOW THE CLASS GOT HERE. AGENTS.md is explicit: apply_migration mints its own server-side version,
+# and the engineer who applies it owns copying the SQL into `<that timestamp>_<name>.sql`. These
+# files were instead written with hand-picked timestamps and cross-referenced by those invented
+# numbers. The same habit is what produced the 22 open migration_content_parity divergences
+# (ops_incident #538): a mirror written from intent rather than recovered verbatim.
+#
+# WHY THESE ARE BASELINED RATHER THAN FIXED. Editing a committed migration to correct the pointer
+# changes its text, and the content-parity guard compares that text against what production actually
+# executed — so "fixing" these files would CREATE drift condition #5 on files that are byte-exact
+# today. The pointers are historical record. The defect that is worth stopping is the NEXT one, and
+# that is what the check enforces: this floor may only shrink.
+#
+# NINE of these DO exist in production under a differently-named file (20260622225309,
+# 20260623004212, 20260716091411, 20260726110014, 20260803190624, 20260803194308, 20260807164314,
+# 20260809114927, 20260913182248). They are still dangling FOR A READER OF THIS REPO, which is who
+# the citation is for, so they are counted.
+#
+# THREE are a file citing the OTHER half of its own double-prefixed name — 20260717194534_
+# 20260717194500_aqarmonthly_rls_public_read.sql carries both the applied version and the
+# hand-picked one, and only the first names a migration. Same defect, recorded at the filename.
+#
+# EIGHT of these (20260708063551, 20260716114027, 20260716220313, 20260716221230, 20260717194500,
+# 20260717194600, 20260717204200, 20260830210000) were invisible to the first cut of the check,
+# which bounded its regex with `\b`. `_` is a word character, so a citation spelled the way the
+# filename spells it — `<version>_<name>`, the most natural form — did not match at all. See the
+# VERSION_TOKEN comment in the check: the blind spot was found by planting a real mutant, after all
+# five synthetic mutation proofs had passed.
+#
+# scripts/verify-migration-references-resolve.ts
+
+20260622225309
+20260623004212
+20260708063551
+20260716091411
+20260716114027
+20260716220313
+20260716221230
+20260717194500
+20260717194600
+20260717204200
+20260726110014
+20260729130000
+20260803190624
+20260803194308
+20260807164314
+20260809114927
+20260830210000
+20260906170500
+20260906170800
+20260912010600
+20260913041500
+20260913182248
+20260921163024
+20260921180000
+20260921180100
+20260921180200
+20260921180400
+20260921180600
+20260921180700
