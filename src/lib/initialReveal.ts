@@ -32,6 +32,15 @@
 // one list, so match-first and every diversity tier hold exactly as they do at 10.
 export const AF_REVEAL_MAX = 400;
 
+// HOW MANY CARDS THE OPENING CASCADE PLAYS BEFORE HANDING OFF TO THE SCROLL (owner 2026-09-20).
+// A turn ARRIVES with min(initialReveal(...), CASCADE_MAX) cards on screen — about a screenful,
+// ~1.5s of animation — and `maybeRevealOnScroll` walks the rest up to initialReveal()'s target as
+// the user approaches it. Exported because two barriers and a live journey need the real number:
+// re-typing it is how a check ends up asserting a contract production retired (AGENTS.md harness
+// note 21). Live journeys must therefore expect a screenful ON ARRIVAL and scroll to reach the
+// target — asserting the whole first page renders immediately is the PRE-2026-09-20 contract.
+export const CASCADE_MAX = 12;
+
 export function initialReveal(args: {
   fetched: number; honestTotal: number | null; firstPage: number; stopAt: number;
   /** Distinct platforms with a genuine match in this result set (see distinctPlatformCount). */

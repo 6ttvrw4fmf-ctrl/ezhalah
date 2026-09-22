@@ -24,9 +24,10 @@ import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupporte
 import VoiceWaveform from '@/components/VoiceWaveform';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
-import { initialReveal as initialRevealPure } from '@/lib/initialReveal';
+import { initialReveal as initialRevealPure, CASCADE_MAX } from '@/lib/initialReveal';
 import { glyphCount, revealPrefix } from '@/lib/typedReveal';
 import { distinctPlatformCount } from '@/lib/platformDiversity';
+import { newerTurnPending as newerTurnPendingPure } from '@/lib/liveTurn';
 import SearchLoader from '@/components/SearchLoader';
 import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
@@ -910,7 +911,6 @@ export default function Agent() {
   // This changes WHEN cards are revealed, never WHICH or in WHAT ORDER: revealCount still walks the
   // one diversity-ordered list (platform → deal → type → district → photos) up to the SAME target
   // initialReveal() returns, and «عرض المزيد» still owns everything past that target.
-  const CASCADE_MAX = 12;           // ~1.5s of cascade — a screenful, then hand off to the scroll
   const SCROLL_REVEAL_CHUNK = 12;   // revealed per trigger; ≥ a screenful so the next one is armed early
   // FAR ENOUGH AHEAD THAT THE ACTIONS ROW NEVER MOVES UNDER THE USER (owner 2026-09-20, reported:
   // "whenever I scrolled, the advanced filter doesn't show, it shows later").
@@ -1197,6 +1197,22 @@ export default function Agent() {
     // therefore returns on EVERY scroll forever: live-tested, the cascade stopped at CASCADE_MAX and
     // scrolling revealed nothing at all.
     if (!m || (m.typing && !doneTyping[m.id])) return;
+    // AN OUTGOING TURN IS HISTORY, AND HISTORY IS NEVER REWRITTEN (R9.2.2 / R12.3; ops_incident
+    // #338, measured on production 2026-09-22, reproduced 4/4).
+    //
+    // `lastResultsMsg` is "the newest message whose role is 'results'" — and while a NEW turn is
+    // being born it is a 'status' message, so for the whole ~10s searching beat that getter still
+    // points at the turn the user just LEFT. Every other reveal path already knows this: runRefine,
+    // ask() and startFresh each open with finalizeReveal() ("stop the previous search's cards from
+    // drip-revealing now that the user moved on"). This one did not participate in that teardown,
+    // and the app's OWN programmatic scroll during the beat fires onScroll repeatedly — so the
+    // outgoing turn kept revealing into its own grave.
+    //
+    // Measured on الرياض/شراء/شقة: committing one AF answer landed a 2,925 turn showing 24 cards;
+    // tapping ✕ on its pill grew that SAME turn 24 → 30 → 36 → 40 → 47 → 48 during the beat, and
+    // its closing line rewrote itself «عرضت لك أول 24 من أصل 2,925» → «عرضت لك أول 48». The pill
+    // removal was correct on the wire (R9.2.1 held) while the transcript above it was edited.
+    if (newerTurnPending) return;
     if (revealActiveRef.current?.id === m.id) return;   // its cascade still owns the reveal
     if (scrollChunkRef.current) return;                  // a chunk is already easing in
     const target = initialReveal(m.result, m.afCompleted);
@@ -1232,7 +1248,12 @@ export default function Agent() {
     startReveal(id, msg?.role === 'results' ? initialReveal(msg.result, msg.afCompleted) : 0);
   };
   // Cancel any pending one-by-one reveals (on unmount, or when a new turn starts).
-  const clearReveals = () => { revealTimers.current.forEach(clearTimeout); revealTimers.current = []; };
+  // The scroll chunk's staggering timers live in `revealTimers` too (see maybeRevealOnScroll), so a
+  // teardown that clears them mid-chunk leaves `scrollChunkRef` latched TRUE with no `step()` left
+  // alive to ever reset it — and that ref is the "a chunk is already easing in" guard, so scroll
+  // reveal would be dead for the rest of the session. Releasing it here keeps the scroll path inside
+  // the same teardown every other reveal path already participates in.
+  const clearReveals = () => { revealTimers.current.forEach(clearTimeout); revealTimers.current = []; scrollChunkRef.current = false; };
   useEffect(() => clearReveals, []);
   // A new user turn must STOP the previous search's card drip immediately — show whatever that turn
   // had (all of it, so nothing is lost) and kill the pending timers. We never touch any other message.
@@ -1803,6 +1824,11 @@ export default function Agent() {
     for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'results') return msgs[i] as Extract<ChatMsg, { role: 'results' }>;
     return null;
   }, [msgs]);
+
+  // Has the user moved on from `lastResultsMsg`? The derivation is PURE and lives in
+  // src/lib/liveTurn.ts so a barrier executes the real rule instead of a copy of it — see that
+  // file's header for the production measurement this exists for (ops_incident #338).
+  const newerTurnPending = useMemo(() => newerTurnPendingPure(msgs), [msgs]);
 
   // FULL-CONVERSATION CAPTURE (owner 2026-08-25 — ChatGPT-grade persistence). After every settled
   // change to the conversation (a landed turn, a revealed page, a round receipt, a pill removal),

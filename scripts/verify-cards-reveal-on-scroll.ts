@@ -19,7 +19,8 @@
 //      the scroll handler stands down — two writers on revealCount would fight and stutter.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { initialReveal, AF_REVEAL_MAX } from '../src/lib/initialReveal.ts';
+import { initialReveal, AF_REVEAL_MAX, CASCADE_MAX as CASCADE_MAX_SHARED } from '../src/lib/initialReveal.ts';
+import { newerTurnPending } from '../src/lib/liveTurn.ts';
 import { INTERVIEW_STOP_AT } from '../src/lib/afRanking.ts';
 import { stripComments } from './lib/stripComments.ts';
 // windowBetween, not a raw slice(indexOf, indexOf): if a marker moves, a raw window silently
@@ -43,12 +44,20 @@ const num = (name: string): number | null => {
   const m = new RegExp(`const ${name} = (\\d+)`).exec(agent);
   return m ? Number(m[1]) : null;
 };
-const CASCADE_MAX = num('CASCADE_MAX');
+// CASCADE_MAX is IMPORTED, not regexed out of agent.tsx: a live journey needs the same number to
+// know how many cards a turn arrives with, and a re-typed copy is how a check ends up asserting a
+// contract production retired (AGENTS.md harness note 21). agent.tsx must consume that one
+// definition rather than declare its own.
+const CASCADE_MAX: number | null = CASCADE_MAX_SHARED;
 const CHUNK = num('SCROLL_REVEAL_CHUNK');
 const SLACK = num('SCROLL_REVEAL_SLACK_PX');
 const STEP = num('REVEAL_STEP_MS');
 check('CASCADE_MAX, SCROLL_REVEAL_CHUNK and SCROLL_REVEAL_SLACK_PX all exist',
   CASCADE_MAX != null && CHUNK != null && SLACK != null);
+check('agent.tsx imports the shared CASCADE_MAX instead of re-declaring its own',
+  /import \{[^}]*CASCADE_MAX[^}]*\} from '@\/lib\/initialReveal'/.test(agent)
+  && !/const CASCADE_MAX\s*=/.test(agent),
+  'a second copy of the cascade size drifts from the one live journeys import');
 check('the opening cascade is bounded to about a screenful, not the whole set',
   !!CASCADE_MAX && CASCADE_MAX > 0 && CASCADE_MAX <= 40,
   `CASCADE_MAX=${CASCADE_MAX} — a cascade longer than a screenful is animating cards nobody is watching`);
@@ -126,6 +135,50 @@ for (const total of [40, 300, AF_REVEAL_MAX]) {
 check('the walk can never exceed the target even when a chunk would overshoot',
   walk(400, 12, 37).shown === 400 && walk(7, 12, 12).shown === 7);
 
+// ── 4b. EXECUTED: an OUTGOING turn is history, and the scroll never writes to history ──────────
+// ops_incident #338 (production, 2026-09-22, reproduced 4/4). `lastResultsMsg` answers "which turn
+// is newest"; the handler was using it to answer "which turn may I still add cards to?". Those come
+// apart for the whole searching beat, because a turn being BORN is a 'status' message — so the
+// newest 'results' message is the one the user just left. The app's own programmatic scroll during
+// the beat then drove that outgoing turn 24 → 48 cards and rewrote its closing line
+// «عرضت لك أول 24 من أصل 2,925» → «عرضت لك أول 48». R9.2.2: a pill removal rewrites NOTHING above.
+//
+// Executed against the real exported rule, never a copy of it, on the exact message sequences
+// production builds.
+const R = (...roles: string[]) => roles.map((role) => ({ role }));
+const liveCases: { what: string; msgs: { role: string }[]; pending: boolean }[] = [
+  { what: 'a landed turn with nothing after it is LIVE', msgs: R('user', 'results'), pending: false },
+  { what: 'the searching beat of the NEXT turn freezes the one below it (the #338 window)',
+    msgs: R('user', 'results', 'status'), pending: true },
+  { what: 'a pill removal (user bubble + status) freezes the turn below it',
+    msgs: R('user', 'results', 'user', 'status'), pending: true },
+  { what: 'a user bubble alone, before its status lands, already freezes it (no sub-frame hole)',
+    msgs: R('user', 'results', 'user'), pending: true },
+  { what: 'a plain agent bubble does NOT freeze the turn (it has not re-searched yet)',
+    msgs: R('user', 'results', 'agent'), pending: false },
+  { what: 'the newest of several turns is the live one', msgs: R('results', 'status', 'results'), pending: false },
+  { what: 'an empty transcript has no live turn to extend', msgs: [], pending: false },
+];
+for (const c of liveCases) {
+  check(`R9.2.2/R12.3 — ${c.what}`, newerTurnPending(c.msgs) === c.pending,
+    `newerTurnPending(${JSON.stringify(c.msgs.map((m) => m.role))}) = ${newerTurnPending(c.msgs)}, expected ${c.pending}`);
+}
+// A COMMENT IS NOT A CODE PATH (the verify-results-found-rotation lesson): the rule above is inert
+// unless the handler actually consults it, so pin the call site too.
+check('the scroll handler actually consults it (a guard nothing calls guards nothing)',
+  /if \(newerTurnPending\) return;/.test(fn),
+  'maybeRevealOnScroll must stand down once a newer turn has begun');
+check('the derivation is the SHARED pure rule, not a second copy inside agent.tsx',
+  /newerTurnPendingPure\(msgs\)/.test(agent) && /from '@\/lib\/liveTurn'/.test(agent),
+  'a private copy is the drift this surface keeps paying for (AGENTS.md harness note 13)');
+// THE SCROLL PATH MUST PARTICIPATE IN THE SHARED TEARDOWN. Its staggering timers live in
+// `revealTimers`, so a teardown that clears them mid-chunk leaves `scrollChunkRef` latched TRUE with
+// no step() alive to reset it — and that ref is the "a chunk is already easing in" guard, so scroll
+// reveal would be dead for the rest of the session.
+check('clearReveals() releases the scroll-chunk latch it just orphaned the timers of',
+  /const clearReveals = \(\) => \{[^}]*scrollChunkRef\.current = false;[^}]*\};/.test(agent),
+  'clearing the chunk\'s timers without releasing the latch disables scroll-reveal permanently');
+
 // ── 5. MUTATION PROOFS ─────────────────────────────────────────────────────────────────────────
 const mustCatch = (what: string, caught: boolean) =>
   check(`(mutation) catches ${what}`, caught,
@@ -141,6 +194,27 @@ mustCatch('an unclamped chunk overrunning the target',
 // Triggering exactly at the edge is the blank-space window the slack exists to remove.
 mustCatch('a zero-slack trigger (reveal only once the user is already at the bottom)',
   !(0 >= 400));
+
+// ── ops_incident #338: each mutant is the REAL defect, executed, not a regex about it ──────────
+// The pre-fix rule: "the newest 'results' message is always extensible" — exactly what the handler
+// did by consulting lastResultsMsg alone. It must disagree with the shipped rule in the #338 window.
+const preFixRule = (msgs: { role: string }[]) => false; // never pending ⇒ always extensible
+mustCatch('the pre-#338 rule that treats an outgoing turn as still extensible',
+  preFixRule(R('user', 'results', 'status')) !== newerTurnPending(R('user', 'results', 'status')));
+// Dropping 'status' from the walk is the single-token mutation that reopens the measured defect.
+const noStatus = (msgs: { role: string }[]) => {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'results') return false;
+    if (msgs[i].role === 'user') return true;
+  }
+  return false;
+};
+mustCatch('a walk that stops recognising a turn being born (\'status\' dropped)',
+  noStatus(R('user', 'results', 'status')) !== newerTurnPending(R('user', 'results', 'status')));
+// Over-freezing is a defect too — it would kill scroll-reveal behind an ordinary agent bubble.
+const tooEager = (msgs: { role: string }[]) => msgs[msgs.length - 1]?.role !== 'results';
+mustCatch('an over-eager rule that also freezes a turn behind a plain agent bubble',
+  tooEager(R('user', 'results', 'agent')) !== newerTurnPending(R('user', 'results', 'agent')));
 
 console.log(failed
   ? `\n✗ ${failed} check(s) FAILED — the reveal is back on a clock, or the scroll can overrun/fight it\n`

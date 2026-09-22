@@ -63,7 +63,7 @@ import { AGENT_TURN_MS, awaitFirstResultsSettled, describeLoad, readSearchLoad, 
 /** Marks an abort raised because a card was never OBSERVED, so the catch does not double-report it. */
 const UNOBSERVED_ABORT = '[unobserved]';
 import { buildOracleQS } from './lib/afOracleFilter.ts';
-import { initialReveal } from '../src/lib/initialReveal.ts';
+import { initialReveal, CASCADE_MAX } from '../src/lib/initialReveal.ts';
 import { distinctPlatformCount } from '../src/lib/platformDiversity.ts';
 import { INTERVIEW_STOP_AT } from '../src/lib/afRanking.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
@@ -200,6 +200,21 @@ const R = {
    *  app actually computes, so the two can never drift apart again. */
   renderedFirstPage: (delta: number, expected: number | null) =>
     expected != null && Number.isFinite(expected) && delta === expected,
+  /** R9.2.2 / R12.3 — NO EARLIER TURN GAINED OR LOST A CARD ACROSS THE REMOVAL.
+   *  "Nothing above is rewritten" was only ever checked on headline TEXT, so a turn whose card
+   *  count doubled underneath an unchanged headline sailed through — which is exactly what
+   *  ops_incident #338 was: the 2,925 turn went 24 → 48 cards and its own closing line rewrote
+   *  itself «عرضت لك أول 24 من أصل 2,925» → «عرضت لك أول 48», while every assertion here passed. */
+  historyFrozen: (before: number[], after: number[]) =>
+    before.length > 0 && after.length >= before.length
+    && before.every((n, i) => after[i] === n),
+  /** THE ARRIVAL IS A SCREENFUL, NOT THE WHOLE PAGE (owner 2026-09-20, `CASCADE_MAX`).
+   *  A turn ARRIVES with min(initialReveal(...), CASCADE_MAX) cards and the scroll walks the rest.
+   *  Asserting the full first page on arrival is the PRE-2026-09-20 contract, and a harness that
+   *  still asserts it is red on a correct production (AGENTS.md harness note 21). `cascade` is
+   *  IMPORTED from the product, never re-typed. */
+  arrivedWithScreenful: (cards: number, expected: number | null, cascade: number) =>
+    expected != null && Number.isFinite(expected) && cards === Math.min(expected, cascade),
   /** R9.1.1 — the summary line that sat above the pills is gone too. */
   summaryGone: (occurrences: number) => occurrences === 0,
   /** R9.2.2 — every headline already on screen is still there, in place, unchanged. */
@@ -258,6 +273,31 @@ const COUNT_CARDS = () => {
 // ANCHORED: the per-node reader below must not match a wrapper whose innerText merely
 // CONTAINS a headline — see resultsSentenceAtStartSource() for what that costs.
 const SENTENCE_SRC = resultsSentenceAtStartSource();
+
+/** Cards attributed to the results turn whose headline precedes them in document order.
+ *
+ *  A PAGE-WIDE DELTA CANNOT SEE A TURN BEING EDITED (ops_incident #338, production 2026-09-22).
+ *  This journey used to measure the restored turn as `cardsNow - cardsBeforeRemoval` over the whole
+ *  page. That subtraction is only the new turn's size if every OTHER turn held still — and the
+ *  defect this file now catches is precisely one that did not: removing the pill drove the OUTGOING
+ *  turn 24 → 48 cards during the searching beat, so the delta read 36 for a turn that rendered 12,
+ *  and the number was blamed on the new turn for three days. Counting per turn measures each one on
+ *  its own and makes the rewrite visible instead of folding it into someone else's total.
+ *
+ *  Reuses the SAME shipped-sentence regex READ_HEADLINES uses — never a second vocabulary for what
+ *  a results headline looks like (AGENTS.md harness note 13). */
+const READ_TURN_CARD_COUNTS = (src: string) => {
+  const re = new RegExp(src);
+  const all = [...document.querySelectorAll('div,span,p')].filter((e: any) => re.test((e.innerText || '').trim()));
+  const heads = new Set(all.filter((e) => !all.some((o) => o !== e && e.contains(o))));
+  const out: { headline: string; cards: number }[] = [];
+  for (const el of [...document.querySelectorAll('*')] as any[]) {
+    if (heads.has(el)) out.push({ headline: (el.innerText || '').trim(), cards: 0 });
+    const id = el.getAttribute?.('data-testid') || '';
+    if (id.startsWith('card-listing-') && out.length) out[out.length - 1].cards++;
+  }
+  return out;
+};
 
 const READ_HEADLINES = (src: string) => {
   const re = new RegExp(src);
@@ -475,6 +515,8 @@ let headlinesBefore: string[] = [], headlinesAfter: string[] = [];
 let summaryLine: string | null = null, summaryAfter = -1, pillsAfter = -1;
 let replayN2: number = NaN, oracleN2: number | null = null;
 let ROWS2: string[] = [], cardsDelta = -1, expectedFirstPage: number | null = null, platforms2 = -1;
+let turnsBefore: number[] = [], turnsAfter: number[] = [], restoredArrival = -1, restoredWalked = -1;
+let revealTarget: number | null = null;
 
 try {
   console.log(`── scope: ${CITY} · ${GROUP} · ${TYPE} · ${DEAL} · ${MOBILE ? 'MOBILE 390x844' : 'desktop 1440x900'} ──\n`);
@@ -656,6 +698,10 @@ try {
   await scrollToBottom();
   let cardsBeforeRemoval: number = await page.evaluate(COUNT_CARDS);
   for (let i = 0; i < 6; i++) { await page.waitForTimeout(500); const n: number = await page.evaluate(COUNT_CARDS); if (n === cardsBeforeRemoval) break; cardsBeforeRemoval = n; }
+  // Per-turn, so the restored turn is measured on its OWN cards and every earlier turn can be
+  // proven frozen (ops_incident #338 — see READ_TURN_CARD_COUNTS).
+  turnsBefore = (await page.evaluate(READ_TURN_CARD_COUNTS, SENTENCE_SRC)).map((t) => t.cards);
+  console.log(`      [diag] cards per turn before the removal: ${JSON.stringify(turnsBefore)}`);
   await page.click('[data-testid="af-pill-0"]');
   check('R9.2.2 — removing the last pill re-runs the search (a new request was actually sent)', await waitForSearch(nBeforeRemoval, 30000));
   await waitForHeadlines(headlinesBefore.length + 1);
@@ -667,6 +713,9 @@ try {
     let cardsNow: number = await page.evaluate(COUNT_CARDS);
     for (let i = 0; i < 10; i++) { await page.waitForTimeout(600); const n: number = await page.evaluate(COUNT_CARDS); if (n === cardsNow) break; cardsNow = n; }
     cardsDelta = cardsNow - cardsBeforeRemoval;
+    turnsAfter = (await page.evaluate(READ_TURN_CARD_COUNTS, SENTENCE_SRC)).map((t) => t.cards);
+    restoredArrival = turnsAfter[turnsAfter.length - 1] ?? -1;
+    console.log(`      [diag] cards per turn after the removal: ${JSON.stringify(turnsAfter)} (page-wide delta was ${cardsDelta})`);
   }
   check('R10.1.1 — the restored turn\'s page 0 is complete (the app received min(N2, buffer) rows, no short page)',
     R.pageZeroComplete(ROWS2.length, N2, PAGE0_BUFFER), `rows=${ROWS2.length} N2=${N2} buffer=${PAGE0_BUFFER}`);
@@ -674,9 +723,53 @@ try {
   expectedFirstPage = N2 == null ? null : initialReveal({
     fetched: ROWS2.length, honestTotal: N2, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
   });
-  check('R9.2.2 — the restored turn RENDERED exactly the first page of cards under the N0 headline (not the narrowed turn\'s cards, not none)',
-    R.renderedFirstPage(cardsDelta, expectedFirstPage),
-    `new cards=${cardsDelta} expected=${expectedFirstPage ?? '?'} (initialReveal: floor ${FIRST_PAGE}, ${platforms2} matching platform(s), ${ROWS2.length} fetched)`);
+  // THE APP'S OWN TARGET FOR THIS TURN, which is NOT expectedFirstPage. removeGuidedFacet re-enters
+  // runRefine carrying the guided record, and agent.tsx sets `afCompleted = !!opts?.guided` — so the
+  // restored turn is flagged "produced by a completed AF round" even though the removal left ZERO
+  // committed answers, and its target is AF_REVEAL_MAX rather than the first-screen width. Measured
+  // 2026-09-22: scrolling walked it to 108 and climbing, against an expectedFirstPage of 22.
+  // Whether a RETRACTION should still earn the no-tapping allowance is an owner product question
+  // (raised, not decided here — ops_incident #597); this journey asserts the app against the rule
+  // the app actually implements, and would go red the moment that rule changes.
+  revealTarget = N2 == null ? null : initialReveal({
+    fetched: ROWS2.length, honestTotal: N2, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
+    afCompleted: true,
+  });
+  // R9.2.2 / R12.3 — THE TURNS ABOVE ARE HISTORY. This is the assertion ops_incident #338 needed
+  // and did not have: the headline check below compares TEXT, and #338 rewrote a turn's CARDS
+  // (24 → 48) and its closing line underneath an unchanged headline.
+  check('R9.2.2/R12.3 — no EARLIER turn gained or lost a card when the pill was removed (history is not rewritten)',
+    R.historyFrozen(turnsBefore, turnsAfter),
+    `before=${JSON.stringify(turnsBefore)} after=${JSON.stringify(turnsAfter)}`
+    + ' — an earlier turn that grows is the outgoing turn still revealing into its own grave');
+  check('R9.2.2 — the restored turn ARRIVED with a screenful of its own first page under the N0 headline',
+    R.arrivedWithScreenful(restoredArrival, expectedFirstPage, CASCADE_MAX),
+    `arrived with ${restoredArrival}, expected min(${expectedFirstPage ?? '?'}, CASCADE_MAX ${CASCADE_MAX})`
+    + ` (initialReveal: floor ${FIRST_PAGE}, ${platforms2} matching platform(s), ${ROWS2.length} fetched)`);
+  // …and the scroll DELIVERS the rest, walking toward the target and never past it (owner
+  // 2026-09-20). Deliberately not asserting convergence in one breath: `revealTarget` here is the
+  // app's own — computed with afCompleted, because removeGuidedFacet re-enters runRefine with the
+  // guided record and agent.tsx sets `afCompleted = !!opts?.guided`, so a retraction still reveals
+  // up to AF_REVEAL_MAX. Walking 12 → 400 a chunk per scroll is ~33 round trips; this journey
+  // proves the two properties that can go wrong (it MOVES, and it never OVERRUNS) in three, and
+  // leaves the full walk to verify-cards-reveal-on-scroll.ts, which executes it offline.
+  {
+    let walked = restoredArrival;
+    for (let i = 0; i < 3; i++) {
+      await scrollToBottom();
+      await page.waitForTimeout(900);
+      const now = (await page.evaluate(READ_TURN_CARD_COUNTS, SENTENCE_SRC)).map((t) => t.cards);
+      const n = now[now.length - 1] ?? -1;
+      if (n === walked) break;
+      walked = n;
+    }
+    restoredWalked = walked;
+    check('R9.2.2 — scrolling toward the restored turn reveals MORE of it, and never past its target',
+      revealTarget != null && restoredWalked > restoredArrival && restoredWalked <= revealTarget,
+      `arrival ${restoredArrival} → walked ${restoredWalked}, target ${revealTarget ?? '?'}`
+      + ` (CASCADE_MAX ${CASCADE_MAX}; a walk that does not move means scroll-reveal is dead, one that`
+      + ' overruns means the target stopped bounding it)');
+  }
 
   // ── 5. the assertions, on the request the browser actually sent and the turn that landed ──────
   check('R9.2.1 — B2 carries ZERO AF predicates', R.noAfPredicate(B2), `AF predicates on B2: ${afValues(B2)}`);
@@ -763,6 +856,18 @@ try {
     expectedFirstPage != null && !R.renderedFirstPage(expectedFirstPage + 1, expectedFirstPage) && !R.renderedFirstPage(expectedFirstPage - 1, expectedFirstPage));
   mut('a first page sized by the OLD fixed cap of 10 is caught once the scope matches more platforms',
     expectedFirstPage == null || platforms2 <= FIRST_PAGE || !R.renderedFirstPage(FIRST_PAGE, expectedFirstPage));
+  // ── ops_incident #338: the rewrite of an EARLIER turn, and the arrival contract it hid behind ──
+  mut('an earlier turn that GREW while the new turn landed is caught by historyFrozen (the #338 defect)',
+    turnsBefore.length > 0 && !R.historyFrozen(turnsBefore, turnsBefore.map((n, i) => (i === turnsBefore.length - 1 ? n * 2 : n)).concat([restoredArrival])));
+  mut('an earlier turn that SHRANK is caught too (a frozen turn may not lose cards either)',
+    turnsBefore.length > 0 && !R.historyFrozen(turnsBefore, turnsBefore.map((n, i) => (i === 0 ? Math.max(0, n - 1) : n)).concat([restoredArrival])));
+  mut('a turn that arrived with the WHOLE first page is caught (that is the pre-2026-09-20 contract)',
+    expectedFirstPage == null || expectedFirstPage <= CASCADE_MAX
+    || !R.arrivedWithScreenful(expectedFirstPage, expectedFirstPage, CASCADE_MAX));
+  mut('a scroll walk that did not move at all is caught (scroll-reveal dead)',
+    revealTarget != null && !(restoredArrival > restoredArrival && restoredArrival <= revealTarget));
+  mut('a scroll walk that overran the app\'s own target is caught',
+    revealTarget != null && !(revealTarget + 1 > restoredArrival && revealTarget + 1 <= revealTarget));
   if (B_DECOY) mut('a rebuild from an OLDER query (the decoy city) is caught by scopeRestored', !R.scopeRestored(B0, { ...B2, p_cities: B_DECOY.p_cities }));
   mut('a scope key moved by the rebuild is caught by scopeRestored',
     !R.scopeRestored(B0, { ...B2, p_cities: [...(B2?.p_cities ?? []), '__not_a_city__'] }) && !R.scopeRestored(B0, { ...B2, p_deal: `${B2?.p_deal}__mutated__` }));

@@ -37,7 +37,12 @@ check("never reveals more than is buffered", r(7, 25) === 7);
 
 console.log("\n── wiring: every initial-reveal site delegates to the pure function ──");
 const agent = readFileSync(new URL("../src/app/agent.tsx", import.meta.url), "utf8");
-check("agent.tsx imports the pure initialReveal", /import \{ initialReveal as initialRevealPure \} from '@\/lib\/initialReveal';/.test(agent));
+// The ALIAS and the MODULE are what this pins; the rest of the named-import list is not its
+// business. agent.tsx also imports CASCADE_MAX from here since 2026-09-22 (the cascade size moved
+// into the same module so live journeys stop re-typing it), and a literal-string match called that
+// a missing import. Still fails if the alias or the module changes — which is the actual contract.
+check("agent.tsx imports the pure initialReveal",
+  /import \{[^}]*\binitialReveal as initialRevealPure\b[^}]*\} from '@\/lib\/initialReveal';/.test(agent));
 check("the local wrapper feeds it quotableTotal (the honest total) and INTERVIEW_STOP_AT",
   // `platforms:` was added by the 2026-09-02 initial-batch rule (the first screen carries one
   // listing from every matching platform, so FIRST_PAGE became a floor). The guarantee this check
