@@ -1,5 +1,4 @@
 import { test, expect, type Page } from '@playwright/test';
-import { resultsSentenceSource } from './lib/resultsSentence.mjs';
 
 // Production-UI parity: drives the real app end-to-end (Filter mode + AI mode) and asserts the
 // results actually render, in Arabic, with the right classification. Real clicks + Playwright
@@ -11,7 +10,22 @@ const ARABIC = /[؀-ۿ]/;
 // rather than restated here. The retired /لقينا[\s\S]*?إعلان/ matched 0 of the 10 AR guest
 // templates after PR #3186 turned the sentence into a rotation, so runSearch() below waited out its
 // full 60s and failed against a production that was rendering the count correctly.
-const FOUND = new RegExp(resultsSentenceSource());
+//
+// LOADED DYNAMICALLY, AND THAT IS LOAD-BEARING (routine #6, 2026-09-22). Playwright compiles this
+// spec through its CommonJS transform, so a STATIC `import` of e2e/lib/resultsSentence.mjs — a real
+// ESM module that reads `import.meta.url` to find the repo root — is a SyntaxError raised while the
+// FILE is being loaded, not while a test runs: «Cannot use 'import.meta' outside a module». Playwright
+// then reports `Total: 0 tests in 0 files` and exits 1, taking e2e/selector.spec.ts down with it,
+// because one unloadable spec aborts the whole run. That is what happened from 2026-09-20 (PR #3412
+// added the static import) until this fix: ui-parity.yml ran nightly, went red in 63 s, and executed
+// ZERO of its 14 tests. A dynamic import crosses the CJS→ESM boundary the way
+// scripts/verify-results-sentence-renders-whole-live.ts already does for this exact module.
+// Pinned by scripts/verify-playwright-suite-actually-loads.ts, which EXECUTES the listing.
+let FOUND!: RegExp;
+test.beforeAll(async () => {
+  const { resultsSentenceSource } = await import('./lib/resultsSentence.mjs');
+  FOUND = new RegExp(resultsSentenceSource());
+});
 
 async function home(page: Page) {
   await page.goto('/?fresh=e2e', { waitUntil: 'domcontentloaded' });
@@ -142,9 +156,11 @@ test('AI mode — free-text query classifies correctly, replies in Arabic', asyn
   // brief §11: "a screen reader always hears this one sentence for the field") — use that instead.
   const composer = page.getByLabel('اكتب وصف العقار اللي تبحث عنه');
   await expect(composer).toBeVisible();
-  // District-qualified so the agent resolves directly to a search (a bare city that is ALSO a region
-  // — e.g. الرياض — correctly triggers a city-vs-region clarification instead; see the clarification
-  // test below). Verified live: this query returns a full summary + ~986 results.
+  // District-qualified so the agent resolves directly to a search. (This used to add "a bare city
+  // that is ALSO a region — e.g. الرياض — correctly triggers a city-vs-region clarification
+  // instead". That stopped being true on 2026-09-06, when the owner retired the fork: «they mean
+  // city». A bare twin name now resolves straight to the city — see the test below.)
+  // Verified live: this query returns a full summary + ~986 results.
   await composer.fill('أبغى شقة للإيجار السنوي في حي النرجس بالرياض');
   await composer.press('Enter');
 
@@ -158,7 +174,17 @@ test('AI mode — free-text query classifies correctly, replies in Arabic', asyn
   expect(body).toMatch(/للإيجار/);      // deal = Rent
 });
 
-test('AI mode — a city that is also a region asks to disambiguate (no wrong guess)', async ({ page }) => {
+// A BARE TWIN NAME IS THE CITY — owner ruling, 2026-09-06 («they mean city»).
+//
+// This test used to assert the OPPOSITE: that «الرياض» made the agent ask «تقصد مدينة الرياض ولا
+// منطقة الرياض كاملة؟». The owner retired that fork the same day, because the question fired on 8
+// of the 9 biggest destinations and cost every one of them an extra turn;
+// scripts/verify-a-twin-name-is-the-city.ts now pins the question OUT of the edge function. The
+// assertion here was never updated, so it failed every night from 2026-09-06 while production was
+// behaving exactly as ruled — the PART 9.5 shape: a harness aiming at a target the product no
+// longer ships. The invariant is now RESOLUTION, not a question, and both halves are asserted so
+// this cannot decay into a test that passes on a blank page.
+test('AI mode — a bare twin name resolves to the CITY with no extra turn (owner ruling 2026-09-06)', async ({ page }) => {
   test.skip(!ALLOW_PAID_AI, 'paid live-model test — set EZHALAH_ALLOW_PAID_AI=1 to run');
   await labelAgentCallsAsCI(page);
   await home(page);
@@ -167,8 +193,13 @@ test('AI mode — a city that is also a region asks to disambiguate (no wrong gu
   const composer = page.getByLabel('اكتب وصف العقار اللي تبحث عنه');
   await composer.fill('شقة للإيجار في الرياض');
   await composer.press('Enter');
-  // «الرياض» is both a city and a region → the agent must ASK, not silently pick one (anti-guess).
-  await expect(page.getByText(/مدينة الرياض ولا منطقة الرياض/).first()).toBeVisible({ timeout: 60_000 });
+  // POSITIVE half: the turn goes straight to a real search, and the summary names الرياض as the CITY.
+  await expect(page.getByText(FOUND).first()).toBeVisible({ timeout: 60_000 });
+  const body = await page.locator('body').innerText();
+  expect(body).toContain('ملخص البحث');
+  expect(body).toMatch(/المدينة:\s*الرياض/);
+  // NEGATIVE half: the retired question must never come back — that is what the ruling removed.
+  expect(body).not.toMatch(/مدينة الرياض ولا منطقة الرياض/);
 });
 
 // ── Refine-filter permutations: bedrooms, area, price. Each proves the control is applied end-to-end
