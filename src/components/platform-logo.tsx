@@ -1,14 +1,16 @@
 import { Image, type ImageProps } from 'expo-image';
-import { View, useWindowDimensions } from 'react-native';
+import { View } from 'react-native';
 import { platformLogoBounds, platformLogoContrast } from './platform-logo-bounds';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
 import { useResolvedTheme } from '@/lib/appearance';
 
 /** The same transparent slot and optical sizing on every platform surface. */
 export function PlatformLogo({ source }: { source: ImageProps['source'] }) {
-  const { width } = useWindowDimensions();
+  const wide = useAtLeast(PLATFORM_LOGO_BREAKPOINT);
   const theme = useResolvedTheme();
   const themedSource = platformLogoContrast.get(source)?.[theme] ?? source;
-  const unit = width >= 720 ? 32 : 24;
+  const unit = wide ? 32 : 24;
   const frameWidth = unit * 3;
   const frameHeight = unit * 1.5;
   const bounds = platformLogoBounds.get(source);

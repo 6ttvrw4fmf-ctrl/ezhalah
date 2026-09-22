@@ -18,8 +18,10 @@
 // Honors reduce-motion (plain fades; no wave, no pulse, no movement). The message column is
 // LTR-pinned, so RTL is handled manually here (anchor right + row-reverse), like the rest of agent.tsx.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { PlatformLogo } from './platform-logo';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -139,8 +141,7 @@ function PlatformPill({
 }: {
   item: LoaderPlatform; index: number; total: number; rtl: boolean; reduced: boolean; name: string;
 }) {
-  const { width: winW } = useWindowDimensions();
-  const wide = winW >= 720;
+  const wide = useAtLeast(PLATFORM_LOGO_BREAKPOINT);
   const pillOverride = wide ? { height: 56, gap: 9, paddingHorizontal: 4 } : { height: 44 };
   const nameOverride = wide ? { fontSize: 14, maxWidth: 220 } : null;
   const h = useSharedValue(0);
