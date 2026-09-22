@@ -17,6 +17,7 @@
 // So this file answers exactly that question, and pins the field NAME too, because that is the
 // mistake a caller actually makes.
 import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL, resolvePublicSupabase } from './lib/public-supabase.ts';
+import { fetchRetryingSchemaCacheReload } from './lib/postgrestRetry.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => {
@@ -45,7 +46,11 @@ check('an EMPTY secret falls back rather than sending an empty apikey header',
 
 // ── 3. THE LIVE FACT: the committed key actually authenticates, and RLS still applies. ─────────
 const hdrs = (k: string) => ({ apikey: k, Authorization: `Bearer ${k}` });
-const probe = await fetch(
+// The 503/PGRST002 schema-cache reload any function-creating migration triggers is absorbed here,
+// and nothing else is (ops_incident #573). A 401 — the rotation this check exists to catch — is
+// still reported on the FIRST attempt, unretried. Proven in
+// scripts/verify-schema-cache-retry-is-not-fail-open.ts.
+const probe = await fetchRetryingSchemaCacheReload(
   `${PUBLIC_SUPABASE_URL}/rest/v1/search_listings_ar?select=source_table&limit=1`,
   { headers: hdrs(PUBLIC_SUPABASE_ANON_KEY) },
 );

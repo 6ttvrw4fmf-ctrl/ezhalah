@@ -41,6 +41,7 @@
 //
 // Run: node --experimental-strip-types scripts/verify-orphaned-detector-meta-check.ts
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { fetchRetryingSchemaCacheReload } from './lib/postgrestRetry.ts';
 
 const { url: URL_BASE, key: ANON_KEY } = resolvePublicSupabase();
 const RPC = `${URL_BASE}/rest/v1/rpc/mon_orphaned_detectors`;
@@ -90,16 +91,22 @@ export function blindnessOf(a: OrphanAnswers): string[] {
 }
 
 async function orphans(extra?: string[]): Promise<string[]> {
-  const r = await fetch(RPC, {
+  // ONE transient is absorbed, nothing else (ops_incident #573). Applying any function-creating
+  // migration makes PostgREST reload its schema cache and answer 503/PGRST002 for a few seconds —
+  // and because `npm test` is the REQUIRED check on every PR, that reddened every open PR in the
+  // repo, not just the one applying the migration. Every OTHER failure, including a 503 without
+  // that code, still fails on the first attempt exactly as before; an unbroken reload exhausts a
+  // bounded budget and still fails. Proven both ways in
+  // scripts/verify-schema-cache-retry-is-not-fail-open.ts.
+  const { status, ok, body: text } = await fetchRetryingSchemaCacheReload(RPC, {
     method: 'POST',
     headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(extra ? { p_extra_candidates: extra } : {}),
     signal: AbortSignal.timeout(20000),
   });
-  const text = await r.text();
-  if (!r.ok) {
+  if (!ok) {
     throw new Error(
-      `mon_orphaned_detectors(${extra ? JSON.stringify(extra) : ''}) -> HTTP ${r.status}: ` +
+      `mon_orphaned_detectors(${extra ? JSON.stringify(extra) : ''}) -> HTTP ${status}: ` +
         `${text.slice(0, 300)}. A barrier that cannot execute the predicate proves nothing, so this ` +
         `is RED, not a skip.`,
     );
