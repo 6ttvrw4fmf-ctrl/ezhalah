@@ -818,7 +818,7 @@ console.log("\n── §G: an in-flight «عرض المزيد» page fetch may n
   const LOADMORE_PRELUDE = `
 type ChatMsg = any;
 const probe: any = { completed: 0, appended: [] as string[], reveal: [] as unknown[] };
-const world = { epoch: 0, failPage: false };
+const world = { epoch: 0, failPage: false, exitDuringFetch: true };
 const uid = () => 'x' + Math.random().toString(36).slice(2, 6);
 const t = (s: string) => s;
 const runRef = { current: null as any };
@@ -841,7 +841,7 @@ const setCompleted = (_v: boolean) => { probe.completed++; };
 const conversationEpochRef = { get current() { return world.epoch; } };
 // THE EXIT, inside the await: the user tapped another chat while the page was in flight.
 const loadMoreListings = async (_q: any, offset: number) => {
-  world.epoch++;
+  if (world.exitDuringFetch) world.epoch++;
   return { listings: Array.from({ length: 500 }, (_, i) => ({ source: 'aqar', id: 'n' + (offset + i) })),
            nextOffset: offset + 500, hasMore: true, failed: world.failPage };
 };
@@ -878,6 +878,23 @@ const loadMoreListings = async (_q: any, offset: number) => {
   const realFailed = await run(AGENT, true);
   check("…and a FAILED page appends no «تعذّر البحث» bubble into a transcript that never asked for one",
     realFailed.wrote.appended.length === 0, JSON.stringify(realFailed.wrote.appended));
+
+  // AND THE OTHER DIRECTION, which is the whole reason this is a SECOND token rather than a reuse
+  // of ageFlowTokenRef. That ref is bumped ELEVEN times inside one conversation — every Advanced
+  // Filter Back, close, skip and re-tap supersedes the round in flight — so a drain gated on it
+  // would be cancelled by a user closing an AF card mid-fetch, silently losing up to 400 cards they
+  // asked for and leaving «عرض المزيد» offering a page that never arrives. A future "simplification"
+  // that folds the two tokens together passes every check above and fails this one.
+  {
+    const m = await liftLoadMore(AGENT);
+    // The conversation is NOT left; only the guided round is superseded (ageFlowTokenRef++), which
+    // never touches the epoch. The press must complete exactly as it would have.
+    m.world.exitDuringFetch = false;
+    await m.loadMore(pressOf());
+    check("…while a drain that is NOT abandoned still completes in full (the AF token is not this token)",
+      m.probe.reveal.length === 1 && (m.probe.reveal[0] as unknown[])[2] === 500,
+      `reveal=${JSON.stringify(m.probe.reveal)} — an AF card closing mid-fetch must not cancel a page the user asked for`);
+  }
 
   // ── mutation: the exact pre-fix source ──
   const src = readFileSync(AGENT, "utf8");
