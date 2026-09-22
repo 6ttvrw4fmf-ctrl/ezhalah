@@ -178,7 +178,11 @@ const muts: Mut[] = [
       'renderedFirstPage: (delta: number, total: number | null, firstPage: number) => total != null && Number.isFinite(total) && delta === Math.min(total, firstPage),'),
     rule: (s) => pillRules(s).noLocalCap },
   { name: 'M8 stop calling the product and re-derive the first page locally', file: PILL,
-    apply: (s) => s.replace("import { initialReveal } from '../src/lib/initialReveal.ts';", ''),
+    // Matches the import by its SOURCE, not by the exact named-import list: the journey gained
+    // `CASCADE_MAX` alongside `initialReveal` on 2026-09-22 (it needs the product's own cascade size
+    // to know how many cards a turn ARRIVES with), and a literal-string mutant silently stopped
+    // applying — which this file correctly reported as "the pattern drifted, fix the mutant".
+    apply: (s) => s.replace(/import \{[^}]*\} from '\.\.\/src\/lib\/initialReveal\.ts';/, ''),
     rule: (s) => pillRules(s).callsProduct },
   { name: 'M6 stop reporting a non-arrival (silently pass over it)', file: COMBINED,
     apply: (s) => s.replace(/if \(!results\.settled\) \{[\s\S]*?\n  \}\n/, ''),
