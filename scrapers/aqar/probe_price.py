@@ -37,6 +37,47 @@ from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.aqar import enrich_residential as ER  # noqa: E402
 
 TABLE = "aqar_residential_listings"
+
+#: What a lone `null` in this probe's output would destroy.
+#:
+#: `enrich_residential` emits `db.AUTHORITATIVE_NULL` — not None — when aqar ITSELF states a listing
+#: has no price («طلب تسويق», `published:false`). That sentinel is the whole SOURCE IS TRUTH
+#: distinction in one object: "the source says there is no value" versus "we could not read one".
+#: `json.dumps` cannot encode it, so every probe of such a listing died with
+#: `TypeError: Object of type _AuthoritativeNull is not JSON serializable` — and those are precisely
+#: the listings a price dispute is about, so the instrument was broken exactly where it was needed
+#: (found 2026-09-22 adjudicating two extreme price-per-m² rows; the run failed in 21 seconds).
+#:
+#: Encoding it as `null` would have been worse than the crash: the reader could no longer tell an
+#: authoritative absence from a failed read, which is the one question this probe exists to answer.
+#: So it gets its own visible token, and anything else unencodable still raises rather than being
+#: quietly stringified into evidence nobody can trust.
+AUTHORITATIVE_NULL_JSON = "AUTHORITATIVE_NULL"
+
+
+def _json_default(o: Any) -> str:
+    if isinstance(o, db._AuthoritativeNull):
+        return AUTHORITATIVE_NULL_JSON
+    raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
+
+
+def _dump(obj: Any) -> str:
+    return json.dumps(obj, ensure_ascii=False, default=_json_default)
+
+
+def _settled(v: Any) -> Any:
+    """Collapse an authoritative absence onto NULL — but only for COMPARISON, never for output.
+
+    AUTHORITATIVE_NULL and a stored NULL are the same OUTCOME ("this listing has no price"), so the
+    disagreement summary must treat them as equal or it reports the parser and the database as
+    differing precisely when they agree — on the very cohort this probe is most often pointed at.
+    The JSON above keeps them distinct, because there the question is not the outcome but WHO SAID SO.
+    """
+    return None if isinstance(v, db._AuthoritativeNull) else v
+
+
+def _differs(r: dict[str, Any], field: str) -> bool:
+    return _settled(r["parser"].get(field)) != _settled(r["db"].get(field))
 TYPE_TO_SLUG = {v: k for k, v in N.SLUG_TO_TYPE.items()}
 
 # Keys worth reporting if aqar publishes them. Matched as substrings so a renamed field still shows.
@@ -130,15 +171,14 @@ def main() -> int:
                 print(f"  ✗ unfetchable ad={r['ad_number']}", flush=True)
                 return
             results.append(res)
-            print(json.dumps(res, ensure_ascii=False), flush=True)
+            print(_dump(res), flush=True)
 
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
         list(pool.map(work, rows))
 
     # Summary: how often does the parser disagree with what aqar renders / publishes?
     disagree = [r for r in results
-                if r["parser"].get("price_annual") != r["db"].get("price_annual")
-                or r["parser"].get("rent_period") != r["db"].get("rent_period")]
+                if _differs(r, "price_annual") or _differs(r, "rent_period")]
     monthly_rendered = [r for r in results
                         if any("شهري" in s for s in r["aqar_rendered"])]
     no_period_rendered = [r for r in results if not r["aqar_rendered"]]
