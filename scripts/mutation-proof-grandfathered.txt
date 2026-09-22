@@ -12,7 +12,6 @@ verify-af-card-evidence-live.ts
 verify-af-card-evidence.ts
 verify-af-category-single-select.ts
 verify-af-certified-on-merged-state.ts
-verify-af-city-counts-carry-advanced.ts
 verify-af-cohort-questions-certified.ts
 verify-af-compound-predicates.ts
 verify-af-continuous-chat-history.ts

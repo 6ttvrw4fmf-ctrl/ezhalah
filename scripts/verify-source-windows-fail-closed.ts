@@ -49,7 +49,7 @@ const BASELINE = join(root, 'scripts', 'source-window-baseline.txt');
 // The number of raw sites on the day this ratchet was installed. It may only FALL. Raising it means
 // "we shipped another guard that reads the whole file when a marker moves", and that belongs in a
 // reviewed source change, not in an append to a text file.
-const RAW_SITE_CEILING = 63;
+const RAW_SITE_CEILING = 61;
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
