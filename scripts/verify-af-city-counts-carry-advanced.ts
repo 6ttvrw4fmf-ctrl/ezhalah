@@ -27,8 +27,9 @@
 // Deliberately OFFLINE (tracked repo files only), like the other verifiers in `npm test`.
 //
 // Run: node --experimental-strip-types scripts/verify-af-city-counts-carry-advanced.ts
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { npmTestRuns } from './lib/testRegistry.ts';
 
 const root = process.cwd();
 const loc = readFileSync(join(root, 'src/data/locations.ts'), 'utf8');
@@ -101,10 +102,33 @@ check(
 );
 check(
   /if \(res\.error && periodTok !== null && !hasNarrowing\)/.test(loc),
-  'the deal-only fallback is AF-gated (no pre-AF count once answers exist)',
+  'the deal-only fallback is GATED on the user not being narrowed (this checks the gate, not the call)',
   'src/data/locations.ts: the last-resort `{ p_deal }` fallback still runs when advanced answers are ' +
     'present. That call drops every advanced answer, so it returns exactly the overstated numbers ' +
     'this fix removes — silently, because a fallback looks like success.',
+);
+
+// THE CLAIM THIS CHECK USED TO MAKE WAS BIGGER THAN ITS PREDICATE (ops_incident #385).
+//
+// It passed as "the deal-only fallback is AF-gated (no pre-AF count once answers exist)" — a
+// statement about what the fallback DELIVERS. The regex above only sees that a gate is written; it
+// never runs the ladder, so it cannot see what the gated call SENDS. On 2026-09-21 that last rung
+// sent `{ p_deal }` alone, dropping p_tables/p_tables2/p_types2, and this file stayed GREEN for
+// every day the defect was live. `!hasNarrowing` does not protect it either: p_category and p_types
+// live outside `af`, so the gate is FALSE for a user who picked a category and a property type and
+// nothing else — precisely when the last rung fires.
+//
+// The PASS text above is now scoped to what it actually proves. The delivery invariant is proven by
+// EXECUTION in verify-count-pool-fallbacks-keep-the-table-scope.ts, and that citation is ENFORCED
+// rather than written down: a named-but-absent guard is the PART 1.11 defect, and it would leave
+// this file's gate assertion as the only cover over the ladder again.
+check(
+  existsSync(join(root, 'scripts/verify-count-pool-fallbacks-keep-the-table-scope.ts'))
+    && npmTestRuns(root, 'verify-count-pool-fallbacks-keep-the-table-scope'),
+  'the ARGS-level companion that this file CANNOT see still exists and still runs',
+  'scripts/verify-count-pool-fallbacks-keep-the-table-scope.ts is the only check that EXECUTES the ' +
+    'city/district fallback ladders and asserts the args each rung sends. Without it, every fallback ' +
+    'assertion in this file is a source-TEXT tripwire over a path nothing runs (ops_incident #385).',
 );
 
 // ── 5. Every call site passes them ───────────────────────────────────────────────────────────────
