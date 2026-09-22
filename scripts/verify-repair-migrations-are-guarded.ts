@@ -260,6 +260,44 @@ const WAIVED: Record<string, string> = {
     + 'which ships + rosters + mutation-proves mon_detect_akariyoun_open_bound_age_reappears() — a '
     + 'detector that watches THIS repair (the 46 proven-open-bound URLs it NULLed, held in '
     + 'akariyoun_open_bound_age_slugs()) — and re-asserts the same UPDATE idempotently',
+  // The two-migrations-minutes-apart shape again (routine-3 daily audit, ops_incident #589). The
+  // repair NULLs one aqar price: ad 6708117 was SERVED at 25,000,000 SAR over a 5 m2 plot while
+  // aqar itself publishes «طلب تسويق» — price: null, meter_price: null. Proven through the real
+  // production RPC as an anonymous user, where the row was the ONLY result in its Filter cell, and
+  // against the source by read-only probe run 35699759373 from CI egress. Its detector lands 14
+  // minutes later in 20260922074707, so the repair file itself never reaches a mon_detect_* in
+  // executed SQL.
+  //
+  // WHY THE COMPANION DOES NOT RE-ASSERT THE UPDATE, and this is the interesting part. The other
+  // re-asserting waivers above exist because their scrapers cannot self-heal the field. Here the
+  // opposite is true: enrich_residential ALREADY returns db.AUTHORITATIVE_NULL for this exact shape
+  // (owner decision 2026-08-22, ad 6686450 — the grandfathered file two rows down in this same
+  // barrier's NOTE list), and AUTHORITATIVE_NULL is the one value permitted to overwrite a known
+  // price with NULL. So a re-read writes precisely what this repair wrote. Re-asserting would
+  // instead FREEZE the NULL against a source that may republish a price tomorrow — destroying good
+  // data, the same trap the ksaaqar waiver names.
+  //
+  // What watches the class is therefore not the repaired value but the PRECONDITION that let it rot
+  // unseen: this row's last_seen_at was 2026-07-30, three weeks BEFORE that rule shipped, and
+  // nothing had re-read it since — a rule can only act on a row something re-reads.
+  // mon_detect_served_price_never_rechecked() fires on any SERVED, priced row whose source has not
+  // been read in 30 days (4x the longest declared liveness SLA). It discovers platforms from
+  // platform_registry rather than a list, so a platform added tomorrow is covered. Measured on
+  // production the moment it shipped: 6 cohorts, 3,488 served rows, naming aqar_residential at the
+  // exact 166 remaining rows of this cohort — and mutation-proven in the other direction inside a
+  // rolled-back transaction (re-reading them took aqar 166 -> 0; nothing persisted).
+  //
+  // It deliberately does NOT claim those prices are wrong — proving that needs a source fetch, which
+  // SQL cannot do. It claims the checkable, weaker thing. Open 20260922074707 to check this reason
+  // rather than taking it on trust.
+  '20260922073326_repair_aqar_59619_price_source_publishes_no_price.sql':
+    'watched by its companion 20260922074707_mon_detect_served_price_never_rechecked.sql, which '
+    + 'ships + rosters (needle-edit that RAISES if its anchor moved) + asserts reachability for '
+    + 'mon_detect_served_price_never_rechecked() — a detector on the PRECONDITION that hid this bug '
+    + '(a SERVED priced row whose source has not been read in 30 days, so no price rule can have '
+    + 'reached it). Deliberately NOT re-asserted: enrich_residential already returns '
+    + 'AUTHORITATIVE_NULL for this shape, so a re-read rewrites the repair by itself, and freezing '
+    + 'the NULL would destroy a price the source may republish',
   '20260905070828_repair_muktamel_raw_monthly_rent_stored_in_price_annual.sql':
     'watched by its companions 20260905071148_barrier_a_whole_platform_monthly_rent_cohort_that_was_'
     + 'never_annualised.sql, which ships + rosters mon_detect_unannualised_rent_cohort(), and '
