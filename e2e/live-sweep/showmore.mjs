@@ -186,6 +186,13 @@ async function settle(page, { minCards = 1, tries = 40 } = {}) {
  */
 const PAGER_MIN_HEIGHT = 30;
 
+// How "the pager has stopped moving" is measured before a press (see pagerSettleVerdict).
+// 3 identical readings 400ms apart, giving up after 20s — chosen so the wait can never exceed the
+// click's own 20s timeout and turn a settle into a second hang.
+const PAGER_STABLE_SAMPLES = 3;
+const PAGER_SETTLE_INTERVAL_MS = 400;
+const PAGER_SETTLE_MAX_MS = 20_000;
+
 async function pager(page) {
   const hit = await page.evaluate((minH) => {
     const cands = [];
@@ -224,6 +231,43 @@ async function pager(page) {
  *
  * Both cases are still a DEFECT — this narrows the accusation, never the alarm.
  */
+/**
+ * Has the pager stopped moving? — the whole decision, as a PURE function, so a barrier can RUN it
+ * instead of reading the source around it (the shape AGENTS.md keeps warning about: every defect of
+ * 2026-09-04 had a source-TEXT tripwire over the exact line and every one of them stayed green).
+ *
+ * `samples` are pager geometry readings taken at a fixed interval, OLDEST FIRST; a `null` entry
+ * means the pager could not be measured at that moment. Settled = the last `stable` readings are
+ * all present and geometrically identical.
+ *
+ * Deliberately NOT "the last two agree": a reflow driven by images loading routinely pauses for one
+ * interval while the next image decodes, so two equal readings are a common false calm. Three is
+ * what the الرياض/شقة repro needed.
+ */
+export function pagerSettleVerdict(samples, stable = PAGER_STABLE_SAMPLES) {
+  if (!Array.isArray(samples) || samples.length < stable) return { settled: false, reason: 'too-few-samples' };
+  const tail = samples.slice(-stable);
+  if (tail.some((s) => !s)) return { settled: false, reason: 'pager-unmeasurable' };
+  const [first] = tail;
+  const same = tail.every((s) => s.x === first.x && s.y === first.y && s.h === first.h);
+  return same ? { settled: true, reason: 'geometry-stable' } : { settled: false, reason: 'still-moving' };
+}
+
+/** Poll the pager's geometry until pagerSettleVerdict() says it is calm, or the window closes. */
+async function awaitPagerSettled(btn, maxMs = PAGER_SETTLE_MAX_MS) {
+  const t0 = Date.now();
+  const samples = [];
+  let verdict = { settled: false, reason: 'too-few-samples' };
+  while (Date.now() - t0 < maxMs) {
+    const box = await btn.boundingBox().catch(() => null);
+    samples.push(box ? { x: Math.round(box.x), y: Math.round(box.y), h: Math.round(box.height) } : null);
+    verdict = pagerSettleVerdict(samples);
+    if (verdict.settled) break;
+    await sleep(PAGER_SETTLE_INTERVAL_MS);
+  }
+  return { ...verdict, waitedMs: Date.now() - t0, samples: samples.length };
+}
+
 export function classifyHeadlineAcrossPress(before, after) {
   if (after === null) return { kind: 'COUNT-UNREADABLE', before, after };
   if (before === null) return { kind: 'COUNT-UNREADABLE', before, after };
@@ -418,7 +462,29 @@ export async function showMoreJourney(plan) {
         break;
       }
       await btn.scrollIntoViewIfNeeded().catch(() => {});
-      await sleep(400);
+      // Wait for the pager to STOP MOVING before pressing it (2026-09-22). A batch reveals up to 100
+      // cards whose images load and reflow for seconds afterwards, so the button keeps sliding down
+      // the document. `sleep(400)` was not a settle — it was a guess, and on الرياض/شقة batch 2 it
+      // lost: Playwright's actionability check (visible · enabled · STABLE) burned the whole 20s
+      // retrying, reporting `element is not stable` and a card's `data-expoimage` div intercepting
+      // pointer events at the centre it had computed a moment earlier. That filed a PAGER-CLICK
+      // defect against a perfectly healthy pager — the false-red half of the cost this file's own
+      // 2026-09-10..12 note already paid once.
+      //
+      // Proven on production the same day with the page allowed to settle (الرياض/شقة, the exact
+      // cohort that failed): the pager is covered in 0/8 hit-tests at rest, occupies ONE Y position
+      // at rest, and an ordinary trusted click paginates in 71ms then 169ms, 24 → 100 → 500 cards —
+      // the documented SECOND_PAGE_CAP, reached exactly.
+      //
+      // This does NOT weaken the assertion. The click below is still an ordinary trusted click with
+      // the same timeout and the same verdict: a pager that is genuinely covered, genuinely dead, or
+      // still moving after the settle window STILL fails, and still files PAGER-CLICK. All that
+      // changes is that the question is asked of a settled page instead of a reflowing one.
+      const calm = await awaitPagerSettled(btn);
+      if (!calm.settled) {
+        note(`${name}: batch ${b} pager geometry never settled (${calm.reason}) after ${calm.waitedMs}ms `
+           + `over ${calm.samples} samples — pressing anyway; a genuinely blocked pager still fails below`);
+      }
       await btn.click({ timeout: 20000 }).catch((e) => defect(name, 'PAGER-CLICK', `batch ${b}: ${e.message}`));
       const before = n;
       const press = await settlePress(page, searches, before);
