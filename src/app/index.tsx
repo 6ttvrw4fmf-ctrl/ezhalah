@@ -774,11 +774,18 @@ export default function Home() {
   // A NON-EMPTY LIST IS NOT EVIDENCE THAT THIS COHORT HAS LOADED (routine #8, 2026-09-23, #648).
   // The status test used to sit BELOW the length test, so any rows already on screen suppressed the
   // «جاري التحميل…» row — and after a cohort change those rows belong to the cohort the user LEFT,
-  // because nothing clears the list when the pool key changes. OBSERVED IN A REAL BROWSER on
-  // https://ezhalah-app.vercel.app: with فيلا selected and its city pool still loading, the dropdown
-  // showed الرياض 34,324 · جدة 34,293 · الخبر 7,056 · الدمام 6,836 · المدينة المنورة 4,054 ·
-  // مكة المكرمة 4,033 — the previous cohort's numbers, with no loading row and no error row, offered
-  // as the answer. Ordering the status test FIRST replaces them with «جاري التحميل…» (cityZeroRow
+  // because nothing clears the list when the pool key changes.
+  //
+  // OBSERVED IN A REAL BROWSER on https://ezhalah-app.vercel.app, reading the dropdown's OWN
+  // container (a first attempt read the page body and its numbers were a parsing artifact; these are
+  // not). شراء + سكني settled, then the category switched to تجاري with the commercial city pool
+  // held open — the dropdown kept all six residential rows, `loading: false`, `error: false`:
+  //     shown under تجاري   الرياض 42,249 · جدة 29,532 · الدمام 7,664 · الهفوف 7,565 · الخبر 6,253 · مكة 6,153
+  //     commercial truth    الرياض  3,994 · جدة  3,326 · بريدة 1,900 · المدينة 1,667 · الدمام 1,162 · مكة 1,112
+  // الرياض overstated 10.6x and جدة 8.9x; الهفوف and الخبر are not in the commercial top six at all,
+  // while بريدة and المدينة المنورة, which are, were absent. The displayed rows matched
+  // top_cities_by_deal_ar(بيع, Residential) exactly, which is how the reader was confirmed to be
+  // reading the real dropdown. Ordering the status test FIRST replaces them with «جاري التحميل…» (cityZeroRow
   // REPLACES the list in the render below, it does not sit above it), which is the same rule the
   // district live-count effect states in its own words 60 lines up: *"Any relevant filter change
   // invalidates the previous counts IMMEDIATELY (stale numbers are the bug, not a fallback)."*
