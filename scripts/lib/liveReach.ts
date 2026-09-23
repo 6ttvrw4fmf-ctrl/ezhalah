@@ -47,7 +47,7 @@ const NETWORK_CALLS = ['fetch', 'execSync', 'execFileSync', 'spawnSync', 'exec',
  * The text of a call's argument list, starting at the '(' that follows `src.slice(at)`'s callee.
  * Quote-aware so a ')' inside a string does not close the list early. Returns '' if unbalanced.
  */
-function argumentText(src: string, openParen: number): string {
+export function argumentText(src: string, openParen: number): string {
   let depth = 0;
   let quote: string | null = null;
   for (let i = openParen; i < src.length; i++) {
@@ -65,6 +65,28 @@ function argumentText(src: string, openParen: number): string {
     }
   }
   return '';
+}
+
+/**
+ * Every network call's argument text, in source order. Exported because "does this file really
+ * FETCH X, or merely mention X" is the same question for more than one barrier — a second copy of
+ * this walk is the hand-copied-logic class this routine exists to remove. Comments are stripped
+ * first. Used by scripts/lib/prTriggeredLiveChecks.ts to tell a real PostgREST read from a
+ * Playwright `page.route('**\/rest/v1/…')` interception pattern, which names the path and calls
+ * nothing: the first version of that barrier counted the interception as a read and put a
+ * browser-driving check on its own baseline.
+ */
+export function networkCallArguments(source: string): string[] {
+  const src = stripComments(source);
+  const args: string[] = [];
+  for (const call of NETWORK_CALLS) {
+    const re = new RegExp(`(?<![\\w$.])${call}\\s*\\(`, 'g');
+    for (const m of src.matchAll(re)) {
+      const text = argumentText(src, m.index + m[0].length - 1);
+      if (text) args.push(text);
+    }
+  }
+  return args;
 }
 
 /** `const NAME = '…a production host…'` — the identifier a later network call may use. */
