@@ -1,0 +1,56 @@
+# No detector has silently left a detector's CANDIDATE SET (ops_incident #391, routine #10).
+#
+# A detector whose candidate set is filtered before its predicate ever runs is blind to a whole class
+# BY CONSTRUCTION, and reads as a clean bill of health. mon_detect_unresolvable_detector() applies its
+# predicate only to detectors whose source matches `mon_raise`; 239 of 239 were inside that set when
+# this landed, and the day one raises through a wrapper instead, it leaves the population silently and
+# the check keeps reading clean.
+#
+# This job executes mon_detectors_outside_raise_candidate_set() against production through the ANON
+# path — read-only, `stable`, writes nothing, never the service role — and judges three answers: the
+# standing verdict must be empty, an injected wrapper-raiser must be reported, and an injected direct
+# raiser must not be. Its hermetic twin scripts/verify-detector-candidate-set-is-not-blind.ts stays in
+# the required `npm test` and mutation-proves the shared judgement; it also asserts, via
+# liveHalfProblems(), that THIS FILE really invokes the live half — so renaming or removing the step
+# below turns that barrier RED. A split must not be able to decay into a deletion.
+#
+# Excluded from `npm test` because `npm test` is a required status check on every PR and this
+# verdict is decided by production's detector population, not by the diff.
+name: Detector candidate set
+
+on:
+  schedule:
+    - cron: '17 6 * * *' # daily, offset from the other live checks
+  workflow_dispatch:
+
+concurrency:
+  group: detector-candidate-set-check
+  cancel-in-progress: false
+
+jobs:
+  candidate-set:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: No detector has left the raise candidate set
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-detector-candidate-set-is-not-blind-live.ts
+
+      # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
+      # This job runs unattended: a red run notifies nobody, so it has to reach alert_event to reach
+      # a human. One open P1 per workflow file (dedup workflow_failed:detector-candidate-set-check.yml),
+      # and the next green run resolves it. `always()` so a failing run still gets here.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind blind_guard
+          --workflow detector-candidate-set-check.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
