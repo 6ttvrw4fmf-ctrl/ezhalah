@@ -61,9 +61,12 @@ from scrapers.common.arabic_location import to_catalog
 REST = "https://aqaralsaudia.com/wp-json/wp/v2"
 SITE = "https://aqaralsaudia.com"
 PER_PAGE = 100
+# No User-Agent here: `impersonate=` (below) owns it. Setting one separately would put a
+# Chrome UA string on a TLS handshake curl_cffi doesn't shape to match it — exactly the
+# mismatch a WAF/anti-bot layer fingerprints and blocks on (see session()'s comment; found
+# 2026-09-23 while every other curl_cffi-based scraper in this repo already passes
+# `impersonate=`, aqaralsaudia was the one exception, since it was onboarded).
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
     "Accept": "application/json",
 }
 
@@ -99,7 +102,9 @@ def _throttle(min_gap: float = 0.4) -> None:
 
 
 def session() -> cc.Session:
-    s = cc.Session()
+    # impersonate owns the TLS fingerprint AND the matching User-Agent — see the HEADERS comment
+    # above. "chrome124" matches this scraper's original manually-set UA string.
+    s = cc.Session(impersonate="chrome124")
     s.headers.update(HEADERS)
     return s
 
@@ -224,7 +229,7 @@ def deal_from_page(url: Optional[str]) -> Optional[str]:
     out = None
     try:
         _throttle()
-        r = cc.get(url, headers=HEADERS, timeout=30)
+        r = cc.get(url, headers=HEADERS, impersonate="chrome124", timeout=30)
         if r.status_code == 200:
             text = _clean(r.text) or ""
             if re.search(r"للإيجار|للايجار", text):
@@ -276,7 +281,7 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
     for attempt in range(2):
         _throttle()
         try:
-            r = cc.get(f"{REST}/properties/{pid}", headers=HEADERS, timeout=30)
+            r = cc.get(f"{REST}/properties/{pid}", headers=HEADERS, impersonate="chrome124", timeout=30)
         except Exception as e:  # noqa: BLE001 — an unreachable source is never proof of death
             last = f"transport error: {type(e).__name__}"
             time.sleep(2 * (attempt + 1))
