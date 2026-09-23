@@ -73,7 +73,7 @@ function branchesOf(src: string, fnHeader: string): { branches: Branch[]; fallba
     if (!line.includes('includes(')) continue;
     const tokens = [...line.matchAll(/includes\('([^']+)'\)/g)].map((m) => m[1]);
     const str = line.match(/return\s+'([^']*)'/);
-    const img = line.match(/return\s+<Image source=\{([A-Z0-9_]+)\}/);
+    const img = line.match(/return\s+<(?:Image|PlatformLogo) source=\{([A-Z0-9_]+)\}/);
     const badge = line.match(/card\.([A-Za-z0-9]+Badge)\]/);
     // `return null` is an EXPLICIT outcome — "this platform deliberately shows no badge yet,
     // the owner is supplying the file" — and it is emphatically NOT the Aqar fallback: it
@@ -85,7 +85,7 @@ function branchesOf(src: string, fnHeader: string): { branches: Branch[]; fallba
     const value = str?.[1] ?? img?.[1] ?? badge?.[1] ?? none;
     if (tokens.length && value !== undefined) branches.push({ tokens, value });
   }
-  const tail = [...body.matchAll(/\n\s*return\s+(?:'([^']*)'|<Image source=\{([A-Z0-9_]+)\})/g)].pop();
+  const tail = [...body.matchAll(/\n\s*return\s+(?:'([^']*)'|<(?:Image|PlatformLogo) source=\{([A-Z0-9_]+)\})/g)].pop();
   return { branches, fallback: (tail?.[1] ?? tail?.[2] ?? 'NO_FALLBACK') };
 }
 // First match wins — mirrors the real if-chain exactly, over the same raw|space-stripped haystack.
