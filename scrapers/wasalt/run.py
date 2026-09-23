@@ -682,8 +682,21 @@ def upsert(row: dict, main_type: str) -> None:
     db.upsert_wasalt_residential(row)
 
 
-def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[int, int, bool]:
-    """Sweep one type-slug × deal. Returns (upserted, source_count, page1_valid)."""
+def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[int, int, bool, bool]:
+    """Sweep one type-slug × deal. Returns (upserted, source_count, page1_valid, truncated).
+
+    `truncated` is True when the crawl stopped early because a page failed to fetch/parse
+    (fetch_page's valid=False — a bot-wall/proxy shell) rather than because a page was
+    genuinely empty (valid=True, no more properties). Before 2026-09-23 the per-page loop
+    below discarded `valid` for every page after the first, so a mid-crawl proxy hiccup on
+    page 2+ was indistinguishable from "legitimately reached the end of results": both
+    produced empty `props` and both hit the same silent `break`. On a shared proxy pool
+    (six concurrent wasalt_enum_shard jobs, see the module docstring) that let a shard stop
+    after page 1 while still reporting `ok=true` with whatever handful of rows it had
+    upserted — the exact silent_partial_success incident (13 short runs/24h, worst case 1
+    row against baseline median 235). The caller must fold `truncated` into its ok/legit_empty
+    decision so a partial catalogue is reported as a FAILED attempt, never as a small one.
+    """
     count, total_pages, _, page1_valid = fetch_page(s, deal, cat, slug, 1)
     pages = min(max_pages, total_pages or max_pages)
     print(f"\n── WASALT {slug.upper():<16} {deal.upper():<4} {cat.upper():<11} count={count} pages≤{pages}")
@@ -698,13 +711,22 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
         # category.
         print(f"   ✗ page 1 unanswerable after the full retry ladder — abandoning {slug}/{deal} "
               f"rather than re-running the same ladder on the same route")
-        return 0, count, False
+        return 0, count, False, True
     is_commercial = cat == "commercial"
     upserter = db.upsert_wasalt_commercial_batch if is_commercial else db.upsert_wasalt_residential_batch
     upserted = 0
+    truncated = False
     for page in range(1, pages + 1):
-        _, _, props, _ = fetch_page(s, deal, cat, slug, page)
+        _, _, props, valid = fetch_page(s, deal, cat, slug, page)
         if not props:
+            if not valid:
+                # A failed fetch mid-crawl, not a genuine end of results. Stop taking new pages
+                # (re-running fetch_page's own retry ladder across the whole remaining tail would
+                # just re-pay the same cost page after page) but tell the caller this slice is
+                # INCOMPLETE — never let it read as "reached the last page cleanly".
+                print(f"   ✗ page {page} unanswerable — stopping early, slice is INCOMPLETE "
+                      f"({upserted} upserted so far is NOT the full catalogue)")
+                truncated = True
             break
         batch = []
         for prop in props:
@@ -722,8 +744,8 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
                 print(f"   ✗ batch upsert failed (page {page}): {str(e)[:90]}")
         if page % 20 == 0:
             print(f"   [{page}/{pages}] upserted so far: {upserted}")
-    print(f"   ✓ {slug}/{deal}: {upserted} upserted")
-    return upserted, count, page1_valid
+    print(f"   ✓ {slug}/{deal}: {upserted} upserted" + (" (TRUNCATED)" if truncated else ""))
+    return upserted, count, page1_valid, truncated
 
 
 def main() -> int:
@@ -752,29 +774,47 @@ def main() -> int:
     run_id = db.begin_run(os.environ.get("WASALT_RUN_LABEL", "").strip() or "wasalt")
     total = 0
     legit_empty = False
+    any_truncated = False
+    src_count = 0
     try:
         if args.all:
             for cat, slugs in SLUGS.items():
                 for slug in slugs:
                     for deal in ("sale", "rent"):
-                        up, _count, _valid = scrape_slice(s, deal, cat, slug, max_pages=args.pages)
+                        up, _count, _valid, trunc = scrape_slice(s, deal, cat, slug, max_pages=args.pages)
                         total += up
+                        any_truncated = any_truncated or trunc
         else:
-            total, src_count, page1_valid = scrape_slice(s, args.deal, args.type, args.slug, max_pages=args.pages)
+            total, src_count, page1_valid, any_truncated = scrape_slice(
+                s, args.deal, args.type, args.slug, max_pages=args.pages)
             # A single-category run may legitimately be empty: Wasalt itself can carry zero
             # listings for a slug (farm has zero, always has). That is only believable when the
             # app actually answered (page1_valid: parsed __NEXT_DATA__) AND its own count said 0 —
             # a bot-wall/proxy failure produces an unparseable shell (valid=False) and still fails.
             # A valid page claiming count>0 while we upserted 0 is a parse/mapping break: still fails.
-            legit_empty = total == 0 and page1_valid and src_count == 0
+            # A TRUNCATED slice (a page failed mid-crawl) can never be "legitimately empty" either,
+            # even if it stalled on page 1 after a real count>0 answer.
+            legit_empty = total == 0 and page1_valid and src_count == 0 and not any_truncated
         # Fail-visibly guard (owner 2026-07-07): a Wasalt sweep that fetched/upserted ZERO rows is a
         # failure, NOT a healthy empty result — Wasalt has ~59k live listings, so a working sweep always
         # re-sees thousands (upsert refreshes existing rows too). 0 rows means the Saudi residential
         # proxy is down / IP-blocked and the site served an empty/bot-wall shell. Never report ok=true
         # on 0 rows, or the run looks green in scrape_runs while nothing flows into search. Mirrors the
         # toor guard (PR #30). The one exception is the verified-empty single category above (2026-07-21).
-        ok = total > 0 or legit_empty
-        if legit_empty:
+        #
+        # TRUNCATION guard (2026-09-23, silent_partial_success incident): a slice that stopped early
+        # on an unanswerable page is an INCOMPLETE catalogue, never a healthy small one — even when it
+        # upserted rows on the pages it did reach. Without this, a mid-crawl proxy hiccup on page 2+
+        # reported ok=true with whatever handful of rows page 1 yielded, which prune_unseen() then
+        # read as "these are the only listings left" and started inactivating real, still-live rows.
+        ok = (total > 0 or legit_empty) and not any_truncated
+        if any_truncated and total > 0:
+            # Partial data WAS captured before the failure — distinguish this from the plain
+            # zero-row block below, which already carries its own (browser) diagnostics.
+            notes = (f"TRUNCATED mid-crawl for {args.slug}/{args.deal}: upserted={total} of "
+                     f"source-reported count={src_count} — a page failed to fetch/parse before the "
+                     f"catalogue was fully walked (not a legitimate end of results)")
+        elif legit_empty:
             notes = f"source reports 0 listings for {args.slug}/{args.deal} (valid page, empty category)"
         elif ok:
             notes = f"upserted={total}"
