@@ -187,14 +187,35 @@ check('index.tsx placeholder text is "Which city?" (renders أي مدينة؟), 
 // character window here — set when the handler was shorter — was preventing genuine, unrelated
 // commentary from ever growing again. The ASSERTION is unchanged (the Top-6 call must still exist
 // inside onFocus, with the exact args); only the window it may live within is wider.
-check('onFocus with empty text shows the deal+period+category-scoped Top 6 (topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6))', /onFocus=\{\(\) => \{[\s\S]{0,3000}?topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)/.test(indexSrc));
+// RE-POINTED 2026-09-23 (routine #8, ops_incident #648). Every one of these four assertions is
+// UNCHANGED in substance; what moved is where the code lives. The seven pool continuations used to
+// carry an inline copy of the "which list do I show" body each, and each copy re-checked the LIVE
+// TEXT at resolution time and NOT the cohort the pool is keyed on — so a continuation resolving
+// after the user left its cohort wrote the abandoned cohort's ranking and counts. They now route
+// through ONE writer, writeCitySuggestionsForCohort, which re-reads both. So each check below is
+// now TWO assertions instead of one — the call site still reaches the writer, AND the writer still
+// carries the exact scoped call — which is strictly stronger than matching one inline occurrence.
+// (The cohort guard itself is executed, not read, by verify-suggestion-writes-carry-their-cohort.ts.)
+const cityWriter = (() => {
+  const at = indexSrc.indexOf('const writeCitySuggestionsForCohort = (');
+  if (at < 0) return '';
+  const end = indexSrc.indexOf('\n  };', at);
+  return end < 0 ? '' : indexSrc.slice(at, end);
+})();
+check('the one city-suggestion writer exists (every assertion below reads it)', cityWriter.length > 0,
+  'writeCitySuggestionsForCohort not found in index.tsx — re-anchor these checks rather than deleting them');
+check('onFocus with empty text shows the deal+period+category-scoped Top 6 (topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6))',
+  /onFocus=\{\(\) => \{[\s\S]{0,3000}?writeCitySuggestionsForCohort\(cohort, true\)/.test(indexSrc)
+  && /topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)/.test(cityWriter));
 check(
   'REGRESSION (found live in testing): the Top-6-on-focus promise callback re-checks cityTextRef at resolution time before overwriting citySuggestions — without this guard, a keystroke typed right after focus can have its correctly-filtered results silently clobbered back to the stale Top 6 by the async callback resolving a moment later',
-  /if \(!cityTextRef\.current\) setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);/.test(indexSrc) && /cityTextRef\.current = v;/.test(indexSrc),
+  /if \(cityTextRef\.current\) \{[\s\S]{0,260}?\} else if \(showTopWhenEmpty\) \{\s*setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);/.test(cityWriter)
+  && /cityTextRef\.current = v;/.test(indexSrc),
 );
 check(
   'REGRESSION (found live in testing, now also gates on deal AND period change): the deal+period-scoped ensureCityFieldIndex() fetch re-runs the match against cityTextRef once it resolves — without this, a user who types before a slow-connection fetch finishes would see an empty dropdown forever, since nothing else re-triggers matchCitiesByText() once the data actually arrives',
-  /void ensureCityFieldIndex\(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams\)\.then\(\(pool\) => \{[\s\S]{0,700}?if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(effDeal, rentPeriodTok, effCategory, cityTextRef\.current, cohortTypes, cityAfParams\)\);/.test(indexSrc),
+  /void ensureCityFieldIndex\(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams\)\.then\(\(pool\) => \{[\s\S]{0,900}?writeCitySuggestionsForCohort\(cohort, cityFocus\);/.test(indexSrc)
+  && /if \(cityTextRef\.current\) \{[\s\S]{0,200}?setCitySuggestions\(latin \? \[\] : matchCitiesByText\(effDeal, rentPeriodTok, effCategory, cityTextRef\.current, cohortTypes, cityAfParams\)\);/.test(cityWriter),
 );
 check(
   'NEW (owner request 2026-07-20, extended 2026-07-21 to also gate on rent-period change, 2026-08-14 on category, 2026-08-20 on dealCombined via effDeal): flipping Buy<->Rent, Monthly<->Yearly or Residential<->Commercial live-refreshes an already-open Top-6 list instead of leaving a stale ranking on screen',
@@ -205,7 +226,10 @@ check(
   // count refreshes moved to their OWN effect below, which never touches citySelected.
   /\}, \[effDeal, rentPeriodTok, effCategory, cohortTypesSig\]\);/.test(indexSrc)
   && /\}, \[cityAfSig, cityFocus, resumeTick\]\);/.test(indexSrc)
-  && /else if \(cityFocus\) \{\s*setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);/.test(indexSrc),
+  // Both effects hand `cityFocus` to the writer as its showTopWhenEmpty rule (see the re-point note
+  // above), and the writer is the one place that turns that into the Top-6 call.
+  && (indexSrc.match(/writeCitySuggestionsForCohort\(cohort, cityFocus\);/g) ?? []).length >= 2
+  && /else if \(showTopWhenEmpty\) \{\s*setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);/.test(cityWriter),
 );
 check('onChangeText clears citySelected on every keystroke (never silently reuses a stale pick)', /onChangeText=\{\(v\) => \{[\s\S]{0,300}?setCitySelected\(null\)/.test(indexSrc));
 check('onSearch blocks when citySelected is falsy, using CITY_REQUIRED_MSG (never calls the old free-text resolveLocation guessing path)', /if \(!citySelected\) \{[\s\S]{0,600}?setLocMsg\(CITY_REQUIRED_MSG\);[\s\S]{0,600}?return;/.test(indexSrc));
