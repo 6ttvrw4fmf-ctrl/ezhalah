@@ -33,7 +33,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   sidebarIsOpen, SIDEBAR_OPEN_MARKER, SIDEBAR_OPEN_MARKER_GUEST,
-  topDockBandBottom, pickHamburgerRect,
+  topDockBandBottom, pickHamburgerRect, isBottomDocked,
 } from '../e2e/journeys/harness.mjs';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -185,6 +185,44 @@ check('B7 a control far below the band is rejected',
 check('B7 the window is RELATIVE: the same offset from a DIFFERENT band is accepted',
   pickHamburgerRect([{ x: 18, y: 324, width: 34, height: 34 }],
     banded([{ top: 0, bottom: 320, height: 320, width: 375 }])) !== null);
+
+// ── §C — THE SAME CLASS, THE OTHER EDGE: «is this prompt bottom-docked?» ────────────────────────
+// `auth-overlay-clears-controls` decided that with `sheet.bottom < 660 && !mobile`, and the desktop
+// viewport in this harness is 1440x**1000** — so 660 did not mean "not docked to the bottom", it
+// meant "in the top two thirds of the screen". On the composer path that literal guarded a
+// `pass(); return;`, so a prompt resting anywhere above y=660 recorded a PASS having asserted
+// nothing about whether it covered the composer: PART 9.5's «a run that asserted nothing» wearing
+// an explicit pass rather than a skip.
+//
+// Tightening it to the rule `bottomPromptInset()` itself uses is a provable NO-OP on every measured
+// configuration — the desktop corner prompt sits at bottom ~210 and a bottom-docked sheet at ~1000,
+// both far from the 998 boundary — and it closes the gap between them, where a floating prompt used
+// to collect a free pass. Filed as a latent oracle weakness, NOT as a measured live defect: no
+// prompt has been observed at bottom ∈ (660, 998) on desktop, and PART 9.1 forbids filing one
+// without N>=2. It is fixed anyway because the probe is ours and PART 9.4 makes it ours to fix.
+check('C1 a bottom-flush sheet IS bottom-docked (1000px desktop viewport)',
+  isBottomDocked({ top: 856, bottom: 1000, height: 144 }, 1000) === true);
+check('C1 …and within the 2px tolerance, as sub-pixel layout requires',
+  isBottomDocked({ top: 856, bottom: 998, height: 142 }, 1000) === true);
+check('C2 the desktop CORNER prompt is not bottom-docked (the measured shape, bottom ~210)',
+  isBottomDocked({ top: 20, bottom: 210, height: 190 }, 1000) === false);
+check('C3 THE GAP THE OLD 660 LITERAL GAVE A FREE PASS: a prompt at bottom 700 is not docked…',
+  isBottomDocked({ top: 500, bottom: 700, height: 200 }, 1000) === false);
+check('C3 …but one at bottom 999 IS, and the old literal called it "not bottom-docked"',
+  isBottomDocked({ top: 800, bottom: 999, height: 199 }, 1000) === true && 999 >= 660);
+check('C4 mobile: a 144px sheet flush at 812 is bottom-docked',
+  isBottomDocked({ top: 668, bottom: 812, height: 144 }, 812) === true);
+check('C5 a zero-height or absent prompt is never "docked"',
+  isBottomDocked({ top: 0, bottom: 0, height: 0 }, 1000) === false
+  && isBottomDocked(null, 1000) === false);
+check('C6 an unknown viewport height is never "docked" (a failed measurement is not a verdict)',
+  isBottomDocked({ top: 856, bottom: 1000, height: 144 }, 0) === false);
+
+// The journey must actually USE the predicate — a pure function nothing calls is decoration.
+const journeys = readFileSync(join(ROOT, 'e2e/journeys/run.mjs'), 'utf8');
+check('auth-overlay-clears-controls asks isBottomDocked(), not an absolute literal',
+  /isBottomDocked\(sheet, sheet\.vh\)/.test(journeys)
+  && !/sheet\.bottom < 660/.test(journeys));
 
 // The premise: the app really does reserve the band on its root, which is why the bar moves at all.
 const layout = readFileSync(join(ROOT, 'src/app/_layout.tsx'), 'utf8');

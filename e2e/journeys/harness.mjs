@@ -904,6 +904,31 @@ export function pickHamburgerRect(boxes, bandBottom) {
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 }
 
+/** Mirrors `BOTTOM_ANCHOR_TOLERANCE` in src/lib/bottomPromptInset.ts. */
+export const BOTTOM_DOCK_ANCHOR_TOLERANCE = 2;
+
+/**
+ * Is this prompt docked to the BOTTOM of the viewport? The same question — and the same rule —
+ * `bottomPromptInset()` asks, so a journey and the app cannot disagree about what "docked" means.
+ *
+ * WHY IT IS A FUNCTION AND NOT A CONSTANT (routine #6, 2026-09-23, alongside ops_incident #593).
+ * `auth-overlay-clears-controls` decided this with `sheet.bottom < 660 && !mobile` — and the desktop
+ * viewport here is 1440x**1000**, so 660 does not mean "not docked to the bottom", it means "in the
+ * top two thirds of the screen". On the composer path that literal guarded a `pass(); return;`, so a
+ * prompt resting anywhere above y=660 recorded a PASS having asserted nothing about whether it
+ * covered the composer — PART 9.5's «a run that asserted nothing» wearing an explicit pass.
+ *
+ * This is the same CLASS as #593 in the function above and as ops_incident #262 before it: an
+ * absolute viewport literal standing in for a question that is inherently relative. Tightening it
+ * is a provable no-op on every measured configuration — the desktop corner prompt sits at bottom
+ * ~210 and a bottom-docked sheet at ~1000, both far from the 998 boundary — and it closes the gap
+ * between them, where a floating prompt used to collect a free pass.
+ */
+export function isBottomDocked(rect, viewportHeight) {
+  if (!rect || !(viewportHeight > 0) || !(rect.height > 0)) return false;
+  return rect.bottom >= viewportHeight - BOTTOM_DOCK_ANCHOR_TOLERANCE;
+}
+
 export async function openMobileSidebar(page, { guestOk = false } = {}) {
   const isOpen = () => sidebarIsOpen(page, { guestOk });
   if (await isOpen()) return true;
