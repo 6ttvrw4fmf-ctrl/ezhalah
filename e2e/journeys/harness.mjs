@@ -836,25 +836,115 @@ export async function gotoOrRetryTransport(
   }
 }
 
+// ── THE TOP BAR IS NOT AT THE TOP OF THE VIEWPORT (ops_incident #593, routine #6, 2026-09-23) ────
+// This locator used to look for the hamburger in an ABSOLUTE window, `r.y < 80`. That constant is
+// only correct while nothing is docked over the app's top edge — and the app itself moves the whole
+// top bar down whenever something is. `src/app/_layout.tsx:103` applies `paddingTop:
+// promptInset.top` to the root View, which is `topPromptInset()` doing exactly what the owner rule
+// of 2026-09-06 demands («One Tap must never cover, block, or intercept any Ezhalah controls»).
+//
+// So the reservation working PERFECTLY is what hid the control from this probe — the same shape as
+// PART 5 #13 and ops_incident #262, where a clipped-by-a-working-inset control was filed as
+// «blocked»: a hardcoded viewport constant reads a correct app as a broken one.
+//
+// MEASURED on production, Chromium, 375x812, signed out, 2/2 fresh contexts, 2026-09-23, with the
+// WebKit top-dock shape injected (a static gsi iframe inside a fixed #credential_picker_container,
+// 375x158 at 0,20 — the shape ops_incident #202 measured on WebKit):
+//   no dock    → hamburger [18,22,34,34]   → the old locator finds it at (35,39)
+//   top dock   → hamburger [18,174,34,34]  → the old locator returns **null**, 2/2
+//   and clicking the REAL displaced hamburger opened the drawer **2/2**
+// i.e. the drawer was never broken. On WebKit, where One Tap docks to the TOP rather than the
+// bottom, this is why `support-draft-survives-dismiss` and `support-error-copy` — the only two
+// journeys that run SIGNED OUT on mobile (`guestOk: true`, so the only two that ever meet a One Tap
+// prompt) — skipped on every sweep with «the mobile drawer would not open», while Chromium stayed
+// green because its prompt docks to the BOTTOM and leaves the top bar where it was.
+//
+// THE FIX IS TO ASK WHERE THE APP'S CONTENT ACTUALLY STARTS, not to widen the window: a bigger
+// constant would re-break the moment a band is taller than it, and would also let a control from
+// the docked prompt itself win the sort. The band is derived with the SAME two rules
+// `topPromptInset()` uses — docked within TOP_ANCHOR_TOLERANCE, and spanning the viewport — so the
+// probe and the app agree on where the top edge is by construction rather than by coincidence.
+
+/** Mirrors `TOP_ANCHOR_TOLERANCE` in src/lib/bottomPromptInset.ts. */
+export const TOP_DOCK_ANCHOR_TOLERANCE = 32;
+/** Mirrors `MIN_SHEET_SPAN_FRACTION`: a docked SHEET spans the viewport; a corner CARD does not. */
+export const TOP_DOCK_MIN_SPAN_FRACTION = 0.8;
+/** How deep below the content's top edge the top bar sits. The old absolute constant, now relative. */
+export const TOP_BAR_DEPTH = 80;
+
+/**
+ * The y at which the app's own content starts: the bottom of the tallest TOP-docked full-width
+ * prompt, or 0 when nothing is docked up there. PURE, so `verify-journey-mobile-sidebar-oracle.ts`
+ * can EXECUTE it against both engines' measured shapes rather than string-matching it.
+ */
+export function topDockBandBottom(promptRects, viewportWidth) {
+  let band = 0;
+  for (const r of promptRects || []) {
+    if (!r || r.hidden || !(r.height > 0)) continue;
+    if (r.top > TOP_DOCK_ANCHOR_TOLERANCE) continue;               // floating in the page, not docked
+    if (!(r.width >= viewportWidth * TOP_DOCK_MIN_SPAN_FRACTION)) continue;  // a card beside us
+    if (r.bottom > band) band = r.bottom;
+  }
+  return band;
+}
+
+/**
+ * Pick the hamburger out of the candidate boxes, given where the content actually starts. PURE and
+ * exported for the same reason as above. With `bandBottom === 0` this is the original behaviour.
+ */
+export function pickHamburgerRect(boxes, bandBottom) {
+  const lo = (bandBottom > 0 ? bandBottom : 0) - 4;   // sub-pixel slack against the band's edge
+  const hi = (bandBottom > 0 ? bandBottom : 0) + TOP_BAR_DEPTH;
+  const hit = (boxes || [])
+    .filter((b) => b && b.y >= lo && b.y < hi && b.x < 80
+      && b.width >= 18 && b.width <= 70 && b.height >= 18 && b.height <= 70)
+    .sort((a, b) => b.width - a.width);
+  if (!hit.length) return null;
+  const r = hit[0];
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+}
+
 export async function openMobileSidebar(page, { guestOk = false } = {}) {
   const isOpen = () => sidebarIsOpen(page, { guestOk });
   if (await isOpen()) return true;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const rect = await page.evaluate(() => {
+    const seen = await page.evaluate(() => {
       // The hamburger is the LEADING small cursor:pointer box in the top bar (src/app/index.tsx
       // `s.hamb` → setSidebarOpen(true)). Matched on geometry + cursor only: it carries no testID,
       // no aria-label, and no text, and an innerText-emptiness clause measured as unreliable here.
-      const hit = [...document.querySelectorAll('*')]
+      // The DOM is only READ here; which box wins is decided by the pure functions above, so the
+      // decision that was wrong is the one a barrier can execute offline.
+      const boxes = [...document.querySelectorAll('*')]
         .filter((e) => {
           const r = e.getBoundingClientRect();
-          return r.y < 80 && r.x < 80 && r.width >= 18 && r.width <= 70
+          return r.x < 80 && r.width >= 18 && r.width <= 70
             && r.height >= 18 && r.height <= 70 && getComputedStyle(e).cursor === 'pointer';
         })
-        .sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width);
-      if (!hit.length) return null;
-      const r = hit[0].getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        .map((e) => {
+          const r = e.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        });
+      // Resolve each matched prompt to its nearest FIXED ancestor-or-self before measuring — on
+      // WebKit the gsi iframe is `position: static` and the box that actually paints is the
+      // `#credential_picker_container` around it (src/lib/bottomPromptInset.ts, ops_incident #202).
+      const SEL = '#credential_picker_iframe,iframe[src*="accounts.google.com/gsi/"],'
+        + 'iframe[src*="appleid.apple.com"],[data-testid="cookie-consent"]';
+      const prompts = [...document.querySelectorAll(SEL)].map((matched) => {
+        let node = matched;
+        for (let hops = 0; node && hops <= 6; node = node.parentElement, hops++) {
+          if (getComputedStyle(node).position === 'fixed') break;
+        }
+        const el = node || matched;
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        return {
+          top: r.top, bottom: r.bottom, height: r.height, width: r.width,
+          hidden: cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0',
+        };
+      });
+      return { boxes, prompts, viewportWidth: window.innerWidth };
     });
+    const rect = pickHamburgerRect(seen.boxes, topDockBandBottom(seen.prompts, seen.viewportWidth));
     if (!rect) { await sleep(1200); continue; }
     // The centre of the element's OWN getBoundingClientRect, in CSS pixel space — never a position
     // eyeballed off a screenshot, which is captured at devicePixelRatio (PART 9.2 (4)).
