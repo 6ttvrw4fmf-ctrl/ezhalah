@@ -771,16 +771,31 @@ export default function Home() {
   // (ARABIC_ONLY_MSG under the field) and must keep it, unchanged.
   const cityLatin = !!query.location && isLatinOnlyInput(query.location);
   const cityStatus = cityPoolStatus(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams);
-  const cityZeroRow: 'loading' | 'error' | 'empty' | null =
-    citySuggestions.length > 0 || cityLatin ? null
-      : cityStatus !== 'ready' ? cityStatus
-      : query.location ? 'empty' : null;
+  // A NON-EMPTY LIST IS NOT EVIDENCE THAT THIS COHORT HAS LOADED (routine #8, 2026-09-23, #648).
+  // The status test used to sit BELOW the length test, so any rows already on screen suppressed the
+  // «جاري التحميل…» row — and after a cohort change those rows belong to the cohort the user LEFT,
+  // because nothing clears the list when the pool key changes. OBSERVED IN A REAL BROWSER on
+  // https://ezhalah-app.vercel.app: with فيلا selected and its city pool still loading, the dropdown
+  // showed الرياض 34,324 · جدة 34,293 · الخبر 7,056 · الدمام 6,836 · المدينة المنورة 4,054 ·
+  // مكة المكرمة 4,033 — the previous cohort's numbers, with no loading row and no error row, offered
+  // as the answer. Ordering the status test FIRST replaces them with «جاري التحميل…» (cityZeroRow
+  // REPLACES the list in the render below, it does not sit above it), which is the same rule the
+  // district live-count effect states in its own words 60 lines up: *"Any relevant filter change
+  // invalidates the previous counts IMMEDIATELY (stale numbers are the bug, not a fallback)."*
+  // ONE rule, shared by both dropdowns, so the ordering cannot drift apart between them.
+  const zeroRowFor = (
+    latin: boolean, status: 'loading' | 'error' | 'ready', rows: number, whenEmpty: 'empty' | null,
+  ): 'loading' | 'error' | 'empty' | null =>
+    latin ? null
+      : status !== 'ready' ? status   // THIS cohort has not loaded — rows on screen are another cohort's
+      : rows > 0 ? null
+      : whenEmpty;
+  const cityZeroRow = zeroRowFor(cityLatin, cityStatus, citySuggestions.length, query.location ? 'empty' : null);
   const districtLatin = !!districtText && isLatinOnlyInput(districtText);
   const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope) : 'loading';
-  const districtZeroRow: 'loading' | 'error' | 'empty' | null =
-    !citySelected || districtSuggestions.length > 0 || districtLatin ? null
-      : districtStatus !== 'ready' ? districtStatus
-      : 'empty'; // covers both "no districts with listings" (empty focus) and a typed no-match
+  // covers both "no districts with listings" (empty focus) and a typed no-match
+  const districtZeroRow = !citySelected ? null
+    : zeroRowFor(districtLatin, districtStatus, districtSuggestions.length, 'empty');
   // Tap-to-retry for the error row: re-run the ensure (the failed promise was evicted, so this is a
   // real refetch), and keep the box open across the tap — the row press blurs the input, so cancel
   // the pending close and put focus straight back, same pattern as districtOnPress below.

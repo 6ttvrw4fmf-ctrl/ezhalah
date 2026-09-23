@@ -40,6 +40,9 @@
 // continuation added tomorrow is RED until it participates.
 // §C pins that the cohort key covers EVERY argument the pool is keyed on, derived from the real call
 // site's argument list rather than from a list someone has to remember to extend.
+// §D EXECUTES the shared zero-row rule, which is the OTHER half of the same defect and needs no race
+// at all: nothing clears the list when the pool key changes, so rows from the cohort the user left
+// used to suppress «جاري التحميل…». That half was OBSERVED IN A REAL BROWSER on production — see §D.
 //
 //   node --experimental-strip-types scripts/verify-suggestion-writes-carry-their-cohort.ts
 
@@ -279,5 +282,64 @@ check('M-C1 anchor found', thinned !== idxSrc, 'cityCohortSig template changed �
     args.map((a) => SIG_OF[a] ?? a).some((tok) => !sig.includes(tok)), sig.trim());
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// §D — A NON-EMPTY LIST IS NOT EVIDENCE THAT THIS COHORT HAS LOADED.
+//
+// The stale WRITE above is one half. The other half needs no race at all: nothing clears the
+// suggestion list when the pool key changes, and the zero-row derivation used to test the list's
+// LENGTH before the pool's STATUS — so any rows already on screen suppressed «جاري التحميل…», and
+// after a cohort change those rows belong to the cohort the user LEFT.
+//
+// OBSERVED IN A REAL BROWSER on https://ezhalah-app.vercel.app (2026-09-23, routine #8): with فيلا
+// selected and its city pool still loading, the open dropdown showed الرياض 34,324 · جدة 34,293 ·
+// الخبر 7,056 · الدمام 6,836 · المدينة المنورة 4,054 · مكة المكرمة 4,033 — the previous cohort's
+// numbers, with NO loading row and NO error row, offered as the answer. cityZeroRow REPLACES the
+// list in the render, so ordering the status test first is what puts «جاري التحميل…» there instead.
+//
+// This is the same rule the district live-count effect already states 60 lines up — *"Any relevant
+// filter change invalidates the previous counts IMMEDIATELY (stale numbers are the bug, not a
+// fallback)"* — applied to the pool-backed lists it does not cover.
+console.log('\n── §D: a list from another cohort never stands in for one that has not loaded ──');
+{
+  const zero = await liftSymbols(IDX, [{
+    header: '  const zeroRowFor = (',
+    endsWith: /^      : whenEmpty;$/,
+  }], ['zeroRowFor'], '') as { zeroRowFor: (l: boolean, s: string, n: number, w: string | null) => string | null };
+  const z = zero.zeroRowFor;
+
+  check('rows on screen do NOT suppress the loading row while THIS cohort is still loading',
+    z(false, 'loading', 6, null) === 'loading',
+    'six stale rows and a loading pool produced ' + JSON.stringify(z(false, 'loading', 6, null)));
+  check('…nor the error row',
+    z(false, 'error', 6, null) === 'error', JSON.stringify(z(false, 'error', 6, null)));
+  check('a READY cohort with rows shows the rows (the guard discriminates, it does not blank the field)',
+    z(false, 'ready', 6, null) === null, JSON.stringify(z(false, 'ready', 6, null)));
+  check('a READY cohort with no rows still reports the empty case it was given',
+    z(false, 'ready', 0, 'empty') === 'empty' && z(false, 'ready', 0, null) === null);
+  check('Latin input keeps its own hint and no status row, loaded or not',
+    z(true, 'loading', 0, 'empty') === null && z(true, 'ready', 6, null) === null);
+
+  // ── mutation: the pre-fix ordering, restored ──
+  const PRE_FIX = `  const zeroRowFor = (
+    latin: boolean, status: 'loading' | 'error' | 'ready', rows: number, whenEmpty: 'empty' | null,
+  ): 'loading' | 'error' | 'empty' | null =>
+    rows > 0 || latin ? null
+      : status !== 'ready' ? status
+      : whenEmpty;`;
+  const cur = idxSrc.slice(idxSrc.indexOf('  const zeroRowFor = ('));
+  const end = cur.indexOf('      : whenEmpty;') + '      : whenEmpty;'.length;
+  const reordered = idxSrc.replace(cur.slice(0, end), PRE_FIX);
+  check('M-D1 anchor found', reordered !== idxSrc, 'zeroRowFor changed shape — re-anchor M-D1');
+  const dirD = mkdtempSync(join(tmpdir(), 'ezhalah-zerorow-'));
+  const preFile = join(dirD, 'index.tsx');
+  writeFileSync(preFile, reordered);
+  const mutantZero = await liftSymbols(preFile, [{
+    header: '  const zeroRowFor = (', endsWith: /^      : whenEmpty;$/,
+  }], ['zeroRowFor'], '') as { zeroRowFor: (l: boolean, s: string, n: number, w: string | null) => string | null };
+  mustCatch('M-D1-length-before-status — the pre-fix ordering lets another cohort\'s rows stand in for a pool that has not loaded',
+    mutantZero.zeroRowFor(false, 'loading', 6, null) === null,
+    'the reordered predicate returned ' + JSON.stringify(mutantZero.zeroRowFor(false, 'loading', 6, null)));
+}
+
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED`); process.exit(1); }
-console.log('\nOK — every city/district suggestion write names the cohort it was computed for, and the cohort names every value the pool is keyed on');
+console.log('\nOK — every city/district suggestion write names the cohort it was computed for, the cohort names every value the pool is keyed on, and a list from a cohort the user left never stands in for one that has not loaded');
