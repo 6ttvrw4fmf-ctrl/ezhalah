@@ -3992,7 +3992,13 @@ export default function Agent() {
                         // The KEY comes from the pure module that already owns the counts, so the gate and
                         // the sentence can never disagree and one exhaustive test locks both.
                         const moreNoteText = t(
-                          closingNoteKey({ endKind: rc.endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer: rc.lastTapOffer, cappedAtCap: rc.cappedAtCap }),
+                          // `chatClosed` is the ONE fact here that is about the conversation rather
+                          // than this turn: with the composer locked this turn will never gain a
+                          // button, so a button-less note is the end of the road and must name the
+                          // way out (ops_incident #598). In an OPEN chat a button-less older turn
+                          // stays quiet exactly as before — the newest turn below it is where the
+                          // user acts.
+                          closingNoteKey({ endKind: rc.endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer: rc.lastTapOffer, cappedAtCap: rc.cappedAtCap, chatClosed: completed }),
                           {
                             shown: rc.endShown.toLocaleString('en-US'),
                             total: rc.endTotal.toLocaleString('en-US'),
