@@ -45,6 +45,12 @@ const agent = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
 
 let failed = 0;
 const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); };
+/**
+ * The executed mutation proof: `caught` must be the RESULT of running the pre-fix composition and
+ * observing it misbehave. A proof that cannot fail is not a proof — see
+ * scripts/verify-new-barriers-are-mutation-proven.ts, which refuses a literal here.
+ */
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 
 // ── A fake clock, with a `starved` mode that models the condition actually measured live: the main
 //    thread never gives the typewriter's interval a tick, while timeouts still come due. ──────────
@@ -147,9 +153,9 @@ function driveTurn(opts: { bounded: boolean; churnFor: number; thenIdle: number 
 //       watching something that can actually fail. ─────────────────────────────────────────────────
 {
   const r = driveTurn({ bounded: false, churnFor: CHURN_SECONDS, thenIdle: 10_000 });
-  check(`MUTATION PROOF — the pre-fix composition (ceiling cleared by the [text] cleanup) stalls for the whole ${CHURN_SECONDS}s of churn: onDone ${r.during.onDoneCalls}x, ${r.during.n}/${TOTAL} glyphs`,
+  mustCatch(`the pre-fix composition (ceiling cleared by the [text] cleanup) stalling for the whole ${CHURN_SECONDS}s of churn: onDone ${r.during.onDoneCalls}x, ${r.during.n}/${TOTAL} glyphs`,
     r.during.onDoneCalls === 0 && r.during.n === 0);
-  check('…and only pays out once the churn stops — proving the stall is caused by the churn, not by the starved interval alone',
+  mustCatch('…the stall being caused by the CHURN and not by the starved interval alone — it pays out the moment churn stops',
     r.after.onDoneCalls === 1 && r.after.n === TOTAL);
 }
 
