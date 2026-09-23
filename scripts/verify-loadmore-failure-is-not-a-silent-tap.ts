@@ -121,6 +121,12 @@ const PRELUDE = [
   'const uid = () => "m-test";',
   'const t = (k: string) => k;',
   'const runRef = { current: null };',
+  // ops_incident #599: loadMore captures the conversation generation on entry and
+  // re-checks it after the page fetch. A stub that never MOVES it keeps this file's
+  // subject unchanged — the guard is inert, so every case below still exercises the
+  // same drain it always did. That it must be declared at all is the point: the lift
+  // runs the REAL loadMore, so a guard added to production code cannot be invisible here.
+  'const conversationEpochRef = { current: 0 };',
   // Real shape: revealCount[mid] ?? initialReveal(m.result). Seeding it here — not by faking
   // initialReveal's return value — is what lets alreadyExpandedOnce read exactly as it does in the
   // real component: a first press has no entry (falls through to the floor), a later press has one.

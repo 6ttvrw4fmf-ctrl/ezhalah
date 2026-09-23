@@ -96,6 +96,15 @@ const CONVERSATION_SCOPED = [
   { name: "askCountRef", kind: "ref", cleared: (v: any) => v === 0, why: "the abandoned conversation's question budget" },
   { name: "ageFlowTokenRef", kind: "token", cleared: (v: any, before: any) => v > before,
     why: "the guided/AF cancellation token — NOT bumped, an in-flight round from the abandoned chat keeps calling setCompleted / startAgeFlow / re-arming afCarryRef" },
+  // ── added 2026-09-22, ops_incident #599: the THIRD in-flight mechanism, and the reason §G/§H exist ──
+  // The 2026-09-18 comment beside ageFlowTokenRef says "the screen owns TWO independent in-flight
+  // mechanisms". It was counted by hand and it was wrong: `loadMore` (the «عرض المزيد» page fetch),
+  // `openSaved` (the server transcript hydrate) and `openStatic` (a legacy chat's replayed search)
+  // all await and then write conversation state, and none of them held a token. Measured by lifting
+  // the real loadMore and exiting the conversation during its await: setCompleted(true) landed on
+  // the chat the user had just opened. §H is what stops this being a hand count a fourth time.
+  { name: "conversationEpochRef", kind: "token", cleared: (v: any, before: any) => v > before,
+    why: "the conversation generation every async continuation checks — NOT bumped, an in-flight page fetch / hydrate / replay from the abandoned chat lands on the one now on screen" },
 ] as const;
 
 /** Stubs the lifted declarations close over. Everything is recorded; nothing carries logic. */
@@ -115,6 +124,7 @@ const refineMsgIdRef = { current: "PREVIOUS-RESULTS-TURN" as unknown };
 const saidRef = { current: ["شقة", "بالقرب من البحر"] as unknown };
 const askCountRef = { current: 3 as unknown };
 const ageFlowTokenRef = { current: 7 };
+const conversationEpochRef = { current: 4 };
 const afCarryRef = { current: { msgId: "m", facets: [1], asked: ["a"] } as unknown };
 const pendingScopeRef = { current: "PREVIOUS-TWIN-QUESTION" as unknown };
 const pendingCityRef = { current: "الرياض" as unknown };
@@ -134,7 +144,8 @@ const liftFrom = async (file: string) =>
     ],
     ["resetConversationState", "startFresh", "probe", "calls",
      "chatIdRef", "afCarryRef", "pendingScopeRef", "pendingCityRef", "lastQueryRef", "runRef",
-     "pendingRefineRef", "refineMsgIdRef", "saidRef", "askCountRef", "ageFlowTokenRef"],
+     "pendingRefineRef", "refineMsgIdRef", "saidRef", "askCountRef", "ageFlowTokenRef",
+     "conversationEpochRef"],
     PRELUDE,
   ) as Record<string, any>;
 
@@ -779,5 +790,219 @@ console.log("\n── §F: the POPULATION of conversation exits is discovered by
     unregisteredExits(src).length === 0, unregisteredExits(src).join(" | "));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// §G / §H — CLEARING STATE IS NOT DURABLE WHILE SOMETHING THE USER HAS LEFT CAN STILL WRITE TO IT
+// (routine #8, 2026-09-22, ops_incident #599 — the FIFTH recurrence of #211/#271/#319/#341).
+//
+// Everything above verifies the CLEAR half: the one shared list, run for real, with every exit
+// routed through it. That half was correct and complete and the class came back anyway, because the
+// INVALIDATION half — "and nothing the user has left may still write" — was a hand count. The
+// 2026-09-18 repair for #319 states it in agent.tsx in so many words: *"The screen owns TWO
+// independent in-flight mechanisms and conversation exit reached only one"* — and then bumped the
+// second token. There were three.
+//
+// MEASURED on the tree of 2026-09-22, by lifting the REAL loadMore and resolving its page fetch
+// after the conversation ended: it called setCompleted(true). On screen that is the new chat's
+// composer locked and its «عرض المزيد» row withheld — the exact dead-end #211/#271 exist to
+// prevent — and it is DURABLE, because `completed` is a dependency of the capture effect and that
+// effect writes to chatIdRef.current, which by then names the chat the user actually opened.
+//
+// §G EXECUTES that. §H is the part that makes it stop recurring: it DISCOVERS every async
+// continuation in agent.tsx that writes conversation-scoped state after an `await` and fails on any
+// one that does not re-check a generation token first. No allowlist, no registry — a continuation
+// added tomorrow is RED until it participates.
+console.log("\n── §G: an in-flight «عرض المزيد» page fetch may not land on the conversation that replaced it ──");
+{
+  // The real loadMore, lifted, with the conversation ENDING inside its await — which is what the
+  // sidebar does: startFresh() → resetConversationState() → bump, then openSaved() for the new chat.
+  const LOADMORE_PRELUDE = `
+type ChatMsg = any;
+const probe: any = { completed: 0, appended: [] as string[], reveal: [] as unknown[] };
+const world = { epoch: 0, failPage: false, exitDuringFetch: true };
+const uid = () => 'x' + Math.random().toString(36).slice(2, 6);
+const t = (s: string) => s;
+const runRef = { current: null as any };
+const loadingMore: Record<string, boolean> = {};
+const revealCount: Record<string, number> = { 'turn-of-chat-A': 100 };
+const SECOND_PAGE_CAP = 500;
+const MAX_DRAIN_PAGES = 200;
+const initialReveal = (_r: any, _af?: any) => 24;
+const revealTarget = (cur: number, total: number) =>
+  cur < 100 ? Math.min(100, total) : Math.min(SECOND_PAGE_CAP, total);
+const cascadeIn = (mid: string, _f: number, to: number) => { probe.reveal.push(['cascade', mid, to]); };
+const setLoadingMore = (_u: any) => {};
+const setRevealCount = (u: any) => { probe.reveal.push(['instant', typeof u === 'function' ? u({}) : u]); };
+const setMsgs = (u: any) => {
+  // resetConversationState() already ran setMsgs([]) — the transcript on screen is the NEW chat's.
+  const next = typeof u === 'function' ? u([]) : u;
+  if (Array.isArray(next)) for (const m of next) probe.appended.push(String(m.role) + ':' + String(m.text ?? ''));
+};
+const setCompleted = (_v: boolean) => { probe.completed++; };
+const conversationEpochRef = { get current() { return world.epoch; } };
+// THE EXIT, inside the await: the user tapped another chat while the page was in flight.
+const loadMoreListings = async (_q: any, offset: number) => {
+  if (world.exitDuringFetch) world.epoch++;
+  return { listings: Array.from({ length: 500 }, (_, i) => ({ source: 'aqar', id: 'n' + (offset + i) })),
+           nextOffset: offset + 500, hasMore: true, failed: world.failPage };
+};
+`;
+  const liftLoadMore = async (file: string) => await liftSymbols(
+    file,
+    [{ header: "  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {", endsWith: /^  \};$/ }],
+    ["loadMore", "probe", "world"], LOADMORE_PRELUDE,
+  ) as { loadMore: (m: unknown) => Promise<void>; probe: any; world: any };
+
+  /** A SECOND press (cur = 100 ⇒ target 500) on a 37,532-match turn — the drain that reaches the network. */
+  const pressOf = () => ({
+    id: 'turn-of-chat-A', role: 'results',
+    result: { query: { location: "الرياض" }, listings: Array.from({ length: 100 }, (_, i) => ({ source: 'aqar', id: 'a' + i })),
+              matchTotal: 37532, hasMore: true, pageOffset: 100 },
+  });
+
+  const run = async (file: string, failPage = false) => {
+    const m = await liftLoadMore(file);
+    m.world.failPage = failPage;
+    await m.loadMore(pressOf());
+    return { wrote: m.probe, epochMoved: m.world.epoch > 0 };
+  };
+
+  const real = await run(AGENT);
+  check("the lift really exercised the network loop (a press that never awaits would prove nothing)",
+    real.epochMoved, "loadMoreListings was never called — re-check the press fixture's cur/target arithmetic");
+  check("…and after the conversation ended mid-fetch, the drain sets NO terminality on the chat now on screen",
+    real.wrote.completed === 0,
+    `setCompleted called ${real.wrote.completed}× — that is the new chat's composer locked and its «عرض المزيد» row withheld, then persisted by the capture effect`);
+  check("…and reveals nothing into the abandoned turn (R12.3: older turns are read-only history)",
+    real.wrote.reveal.length === 0, JSON.stringify(real.wrote.reveal));
+
+  const realFailed = await run(AGENT, true);
+  check("…and a FAILED page appends no «تعذّر البحث» bubble into a transcript that never asked for one",
+    realFailed.wrote.appended.length === 0, JSON.stringify(realFailed.wrote.appended));
+
+  // AND THE OTHER DIRECTION, which is the whole reason this is a SECOND token rather than a reuse
+  // of ageFlowTokenRef. That ref is bumped ELEVEN times inside one conversation — every Advanced
+  // Filter Back, close, skip and re-tap supersedes the round in flight — so a drain gated on it
+  // would be cancelled by a user closing an AF card mid-fetch, silently losing up to 400 cards they
+  // asked for and leaving «عرض المزيد» offering a page that never arrives. A future "simplification"
+  // that folds the two tokens together passes every check above and fails this one.
+  {
+    const m = await liftLoadMore(AGENT);
+    // The conversation is NOT left; only the guided round is superseded (ageFlowTokenRef++), which
+    // never touches the epoch. The press must complete exactly as it would have.
+    m.world.exitDuringFetch = false;
+    await m.loadMore(pressOf());
+    check("…while a drain that is NOT abandoned still completes in full (the AF token is not this token)",
+      m.probe.reveal.length === 1 && (m.probe.reveal[0] as unknown[])[2] === 500,
+      `reveal=${JSON.stringify(m.probe.reveal)} — an AF card closing mid-fetch must not cancel a page the user asked for`);
+  }
+
+  // ── mutation: the exact pre-fix source ──
+  const src = readFileSync(AGENT, "utf8");
+  const GUARD_LINE = "        if (conversationEpochRef.current !== epoch) return;\n";
+  check("the real tree carries loadMore's epoch check (the mutation below is meaningful)",
+    src.includes(GUARD_LINE), "loadMore's guard is gone or re-indented — re-anchor M-G1 rather than deleting it");
+  const dir = mkdtempSync(join(tmpdir(), "ezhalah-epoch-"));
+  const unguarded = join(dir, "agent.tsx");
+  writeFileSync(unguarded, src.replace(GUARD_LINE, ""));
+  const mutant = await run(unguarded);
+  mustCatch("M-G1-loadmore-unguarded — deleting loadMore's epoch check (the pre-fix source) puts setCompleted back on the next conversation",
+    mutant.wrote.completed > 0, `setCompleted calls: ${mutant.wrote.completed}`);
+
+  // ── mutation: the guard is present but the exit stops bumping, so it can never fire ──
+  const noBump = join(dir, "agent-nobump.tsx");
+  writeFileSync(noBump, src.replace(
+    "    conversationEpochRef.current++; // every in-flight page fetch now belongs to a conversation that ended\n", ""));
+  const stale = await staleAfter(noBump, (m) => m.resetConversationState());
+  mustCatch("M-G2-epoch-never-bumped — a guard the exit never moves is decoration, and §A's contract catches it",
+    stale.some((s) => s.startsWith("conversationEpochRef=")), JSON.stringify(stale));
+}
+
+console.log("\n── §H: EVERY async continuation that writes conversation state re-checks the generation first ──");
+{
+  // Discovered from the source, never listed. `armed` means "downstream of an await with no
+  // generation check since"; a write while armed is a write that can land on another conversation.
+  //
+  // The three tokens that count are the ones a conversation exit actually moves — conversationEpochRef
+  // (resetConversationState bumps it), ageFlowTokenRef (same, and the guided flow's own supersede),
+  // and the per-turn `run.cancelled` flag (startFresh/stop set it before leaving). Anything else is
+  // not an answer to "is this still my conversation?".
+  const WRITER = /\bset(Completed|Msgs|AgeFlow|Revealing|Busy|RevealCount|Stopped|AfReceipt|GuidedPills|DoneTyping)\s*\(|\b(afCarryRef|pendingRefineRef|pendingScopeRef|pendingCityRef|lastQueryRef|chatIdRef|saidRef|askCountRef|lastCapturedRef)\.current\s*=/;
+  const GUARD = /(ageFlowTokenRef|conversationEpochRef)\.current\s*!==|\b(run|r)\.cancelled\b|!stillMining\(\)|if\s*\(!run\b|runRef\.current\s*!==/;
+  const indentOf = (l: string) => (l.match(/^\s*/) as RegExpMatchArray)[0].length;
+
+  /** Unguarded post-await conversation writes, as "fn@line: code". */
+  function unguardedContinuations(src: string): string[] {
+    const lines = src.split("\n");
+    const out: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const head = /^(\s*)(?:const (\w+) = async|async function (\w+))/.exec(lines[i]);
+      if (!head) continue;
+      const name = head[2] ?? head[3];
+      const term = new RegExp(`^${head[1]}\\}(;)?$`);
+      let end = -1;
+      for (let j = i + 1; j < lines.length; j++) if (term.test(lines[j])) { end = j; break; }
+      if (end < 0) continue;
+      let armed = false, armIndent = 0, prev = "";
+      for (let k = i; k <= end; k++) {
+        const bare = lines[k].replace(/\/\/.*$/, ""), tl = bare.trim();
+        if (!tl) continue;
+        // An await inside a branch that RETURNS does not arm what follows the branch. The brace must
+        // close OUTSIDE the await's own block, so loadMore's `if (failed) { …; return; }` — whose
+        // closing brace sits at the await's own depth — correctly leaves the rest armed.
+        if (armed && /^\}/.test(tl) && indentOf(bare) < armIndent && /^return\b/.test(prev)) armed = false;
+        if (armed && GUARD.test(bare)) armed = false;
+        if (armed && WRITER.test(bare)) out.push(`${name}@${k + 1}: ${lines[k].trim().slice(0, 90)}`);
+        if (/\bawait\b/.test(bare)) { armed = true; armIndent = indentOf(bare); }
+        prev = tl;
+      }
+    }
+    return out;
+  }
+
+  const src = readFileSync(AGENT, "utf8");
+  check("no async continuation in agent.tsx writes conversation-scoped state without re-checking the generation",
+    unguardedContinuations(src).length === 0, unguardedContinuations(src).join("\n      "));
+
+  // ── M-H1: the real defect, discovered rather than remembered ──
+  for (const [label, anchor] of [
+    ["loadMore", "        if (conversationEpochRef.current !== epoch) return;\n"],
+    ["openSaved", "    if (conversationEpochRef.current !== epoch) return;\n    const restored = t ? restoreChat(t) : null;"],
+    ["openStatic", "    if (conversationEpochRef.current !== epoch) return;\n    // Soft completion here too"],
+  ] as const) {
+    check(`the real tree carries ${label}'s epoch check (its mutation is meaningful)`,
+      src.includes(anchor), `anchor for ${label} no longer matches — re-anchor it rather than deleting the mutation`);
+    const stripped = src.replace(anchor, anchor.slice(anchor.indexOf("\n") + 1));
+    check(`…and removing it really changed the file (${label})`, stripped !== src, "no-op replace");
+    mustCatch(`M-H1-${label}-unguarded — an await whose writes can land on the next conversation is DISCOVERED`,
+      unguardedContinuations(stripped).some((p) => p.startsWith(`${label}@`)),
+      JSON.stringify(unguardedContinuations(stripped)));
+  }
+
+  // ── M-H2: a continuation that does not exist yet. The guard must be about the SHAPE, not the
+  // three functions this incident happened to name.
+  const injected = src.replace(
+    "  const openSaved = async (",
+    "  const refreshSomething = async (id: string) => {\n" +
+    "    const data = await hydrateTranscript(id);\n" +
+    "    setCompleted(data != null);\n" +
+    "  };\n\n  const openSaved = async (");
+  mustCatch("M-H2-new-continuation — an async writer added tomorrow, in no list anywhere, is RED until it re-checks the generation",
+    unguardedContinuations(injected).some((p) => p.startsWith("refreshSomething@")),
+    JSON.stringify(unguardedContinuations(injected)));
+
+  // ── M-H3: and the SAME injection, guarded, must be accepted — so §H discriminates rather than
+  // flagging every await near a setter.
+  const injectedOk = src.replace(
+    "  const openSaved = async (",
+    "  const refreshSomething = async (id: string) => {\n" +
+    "    const epoch = conversationEpochRef.current;\n" +
+    "    const data = await hydrateTranscript(id);\n" +
+    "    if (conversationEpochRef.current !== epoch) return;\n" +
+    "    setCompleted(data != null);\n" +
+    "  };\n\n  const openSaved = async (");
+  check("…and the same continuation WITH the check is accepted (the mutations prove discrimination, not noise)",
+    unguardedContinuations(injectedOk).length === 0, unguardedContinuations(injectedOk).join(" | "));
+}
+
 if (failed) { console.error(`\n✗ ${failed} check(s) FAILED`); process.exit(1); }
-console.log("\nOK — conversation-scoped state is cleared through one shared list, and terminality is derived or restored, never inherited");
+console.log("\nOK — conversation-scoped state is cleared through one shared list, no in-flight continuation can write into the conversation that replaced it, and terminality is derived or restored, never inherited");
