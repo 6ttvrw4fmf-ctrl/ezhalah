@@ -170,10 +170,11 @@ def test_scrape_slice_does_not_re_run_the_whole_ladder_on_a_dead_route(monkeypat
 
     monkeypatch.setattr(wasalt_run, "fetch_page", dead_route)
 
-    upserted, count, page1_valid = wasalt_run.scrape_slice(
+    upserted, count, page1_valid, truncated = wasalt_run.scrape_slice(
         object(), "sale", "residential", "apartment", max_pages=3)
 
     assert page1_valid is False, "an unanswerable page 1 must still surface as invalid"
+    assert truncated is True, "an unanswerable page 1 aborts the whole slice — that is truncated"
     assert upserted == 0
     assert calls == [1], (
         "page 1 must be fetched EXACTLY ONCE on a dead route — a second call means the full retry "
@@ -196,10 +197,11 @@ def test_a_healthy_slice_still_walks_its_pages(monkeypatch):
 
     monkeypatch.setattr(wasalt_run, "fetch_page", live_route)
 
-    upserted, count, page1_valid = wasalt_run.scrape_slice(
+    upserted, count, page1_valid, truncated = wasalt_run.scrape_slice(
         object(), "sale", "residential", "apartment", max_pages=3)
 
     assert page1_valid is True and count == 7
+    assert truncated is False, "a slice that walked every page cleanly must not read as truncated"
     assert calls == [1, 1, 2, 3], (
         "a healthy slice must still probe page 1 and then walk pages 1..3 — the dead-route bail "
         f"must not short-circuit a working sweep. Got: {calls}"
