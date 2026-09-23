@@ -14,6 +14,7 @@ import os
 import random
 import threading
 import time
+from typing import Optional
 from urllib.parse import urlsplit
 
 from curl_cffi import requests as cc
@@ -91,6 +92,43 @@ def session() -> cc.Session:
         # "dead" and wrongly mark live listings inactive. Aqar URLs ignore the proxy (no env var).
         _local.session = s
     return s
+
+
+# ── TLS-fingerprint negotiation ───────────────────────────────────────────────────────────────────
+# Some hosts block SPECIFIC Chrome fingerprints while serving others. Measured on ialqarawi.com
+# 2026-09-23: chrome116/120/124 each drew an identical 75,193-byte «403 - Forbidden», while
+# chrome (the alias for curl_cffi's newest build), safari17_0, safari15_5, firefox133 and edge101
+# all returned the full 1,143,328-byte catalogue from the SAME IP. So a 403 here is the handshake,
+# not the address and not a dead site — and pinning one profile is a time bomb, because the alias
+# moves with the installed curl_cffi version (0.15.0 locally vs whatever CI resolves).
+# The scraper asks for a profile the host actually serves, and says so loudly when none is.
+IMPERSONATE_ORDER = ("chrome", "safari17_0", "firefox133", "edge101", "safari15_5")
+
+
+def negotiated_session(probe_url: str, *, order: tuple[str, ...] = IMPERSONATE_ORDER,
+                       headers: Optional[dict] = None, timeout: int = 40,
+                       served=lambda r: r.status_code == 200) -> cc.Session:
+    """A session whose TLS fingerprint this host actually answers, chosen by probing it once.
+
+    The chosen profile is recorded on the session as `_impersonate_profile` so a run can log it.
+    Raises RuntimeError naming every profile tried when the host serves none — that message is the
+    difference between "they blocked our handshake" and "the site is gone".
+    """
+    last = ""
+    for prof in order:
+        s = cc.Session(impersonate=prof)   # impersonate OWNS the User-Agent — never set one here
+        if headers:
+            s.headers.update(headers)
+        try:
+            r = s.get(probe_url, timeout=timeout)
+        except Exception as e:             # noqa: BLE001 — any transport error → try the next one
+            last = f"{prof}:{type(e).__name__}"
+            continue
+        if served(r):
+            s.__dict__["_impersonate_profile"] = prof
+            return s
+        last = f"{prof}:HTTP {r.status_code}"
+    raise RuntimeError(f"no TLS profile was served by {probe_url} (tried {', '.join(order)}; last {last})")
 
 
 def _rotate_session() -> cc.Session:
