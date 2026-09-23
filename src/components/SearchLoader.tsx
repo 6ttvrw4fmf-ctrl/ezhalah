@@ -18,8 +18,10 @@
 // Honors reduce-motion (plain fades; no wave, no pulse, no movement). The message column is
 // LTR-pinned, so RTL is handled manually here (anchor right + row-reverse), like the rest of agent.tsx.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { Image } from 'expo-image';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+import { PlatformLogo } from './platform-logo';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -139,23 +141,8 @@ function PlatformPill({
 }: {
   item: LoaderPlatform; index: number; total: number; rtl: boolean; reduced: boolean; name: string;
 }) {
-  // Responsive sizing (owner 2026-09-13): "make the logos a bit bigger on a laptop / big screen…
-  // on iPhone the size is perfect". Wide viewports render the logo, name and pill roughly 40%
-  // bigger and the strip gaps looser so the roster feels present on a big screen; narrow viewports
-  // keep the current "perfect on iPhone" pill and only tighten the strip's row gap slightly so more
-  // pills fit per screen height (owner: "I don't want the user to scroll down to see all of them").
-  // Static pill/pillLogo shape (no backgroundColor, no border) is UNCHANGED — the barrier
-  // scripts/verify-mobile-search-loader-no-drag.ts still binds; sizes are inline overrides only.
-  const { width: winW } = useWindowDimensions();
-  const wide = winW >= 720;
-  const pillOverride = wide ? { height: 44, gap: 9, paddingHorizontal: 4 } : null;
-  // SQUARE, matching ResultCard's hostBadge (48×48) so the same mark reads the same in the strip and
-  // on the card (owner 2026-09-15). Grown 26→34 here and 18→24 on phone: the owner asked for "a bit
-  // bigger… for a laptop let it be bigger than someone opening it from a phone", which is the split
-  // this `wide` flag already expresses. 34 inside the 44-tall wide pill and 24 inside the 34-tall
-  // narrow pill both keep ~10px of breathing room, so the row height and the "perfect on iPhone"
-  // pill geometry are untouched — only the logo grows.
-  const logoOverride = wide ? { width: 34, height: 34, borderRadius: 6 } : null;
+  const wide = useAtLeast(PLATFORM_LOGO_BREAKPOINT);
+  const pillOverride = wide ? { height: 56, gap: 9, paddingHorizontal: 4 } : { height: 44 };
   const nameOverride = wide ? { fontSize: 14, maxWidth: 220 } : null;
   const h = useSharedValue(0);
   // LITERAL hex, not the colors.* token (owner theme contract: interpolateColor parses actual color
@@ -205,7 +192,7 @@ function PlatformPill({
   return (
     <Appear delay={index * (reduced ? 25 : PILL_STAGGER)} reduced={reduced}>
       <Animated.View style={[s.pill, pillOverride, { flexDirection: rtl ? 'row-reverse' : 'row' }, rowGlow]}>
-        <Image source={item.logo} style={[s.pillLogo, logoOverride]} contentFit="contain" />
+        <PlatformLogo source={item.logo} />
         <Animated.Text
           style={[s.pillName, nameOverride, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }, nameGlow]}
           numberOfLines={1}
@@ -402,6 +389,5 @@ const s = StyleSheet.create({
   // pill's own "perfect on iPhone" size. Horizontal gap stays 9 so pills-per-row is unaffected.
   strip: { flexWrap: 'wrap', alignSelf: 'stretch', gap: 9, rowGap: 6 },
   pill: { alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 2 },
-  pillLogo: { width: 24, height: 24, borderRadius: 4 },   // phone size; square like hostBadge (see logoOverride)
   pillName: { fontSize: 12.5, fontWeight: '600', color: colors.body, maxWidth: 150 },
 });

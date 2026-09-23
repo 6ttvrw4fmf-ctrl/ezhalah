@@ -75,3 +75,6 @@ export const SHARE_LABEL_BREAKPOINT = 380;
 // because we need to include the name of each website" — so the name now always renders, every
 // viewport (SearchLoader.tsx). The name stayed here rather than being silently deleted so the next
 // person grepping this file's history finds the reasoning, not just an absence.
+
+/** Platform logos and their loader rows use the larger laptop size at this width. */
+export const PLATFORM_LOGO_BREAKPOINT = 720;
