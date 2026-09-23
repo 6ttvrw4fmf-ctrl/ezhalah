@@ -1,3 +1,4 @@
+import { PlatformLogo } from './platform-logo';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
@@ -644,33 +645,33 @@ function SourceBadge({ source }: { source: string }) {
   // separator cannot appear in any token, so nothing can match across the join.
   const raw = source.toLowerCase();
   const s = raw + '|' + raw.replace(/\s+/g, '');
-  if (s.includes('wasalt')) return <Image source={WASALT_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('aldarim')) return <Image source={ALDARIM_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('aqargate')) return <Image source={AQARGATE_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alhoshan')) return <Image source={ALHOSHAN_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('hajer')) return <Image source={HAJER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('sanadak')) return <Image source={SANADAK_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('eastabha')) return <Image source={EASTABHA_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('aqarcity')) return <Image source={AQARCITY_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('raghdan')) return <Image source={RAGHDAN_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('eaqartabuk')) return <Image source={EAQARTABUK_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('satel')) return <Image source={SATEL_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('sadin')) return <Image source={SADIN_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('toor')) return <Image source={TOOR_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('mustqr')) return <Image source={MUSTQR_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('ramzalqasim')) return <Image source={RAMZALQASIM_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('fursaghyr')) return <Image source={FURSAGHYR_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('jazwtn')) return <Image source={JAZWTN_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('muktamel')) return <Image source={MUKTAMEL_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('mizlaj')) return <Image source={MIZLAJ_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('wasalt')) return <PlatformLogo source={WASALT_LOGO} />;
+  if (s.includes('aldarim')) return <PlatformLogo source={ALDARIM_LOGO} />;
+  if (s.includes('aqargate')) return <PlatformLogo source={AQARGATE_LOGO} />;
+  if (s.includes('alhoshan')) return <PlatformLogo source={ALHOSHAN_LOGO} />;
+  if (s.includes('hajer')) return <PlatformLogo source={HAJER_LOGO} />;
+  if (s.includes('sanadak')) return <PlatformLogo source={SANADAK_LOGO} />;
+  if (s.includes('eastabha')) return <PlatformLogo source={EASTABHA_LOGO} />;
+  if (s.includes('aqarcity')) return <PlatformLogo source={AQARCITY_LOGO} />;
+  if (s.includes('raghdan')) return <PlatformLogo source={RAGHDAN_LOGO} />;
+  if (s.includes('eaqartabuk')) return <PlatformLogo source={EAQARTABUK_LOGO} />;
+  if (s.includes('satel')) return <PlatformLogo source={SATEL_LOGO} />;
+  if (s.includes('sadin')) return <PlatformLogo source={SADIN_LOGO} />;
+  if (s.includes('toor')) return <PlatformLogo source={TOOR_LOGO} />;
+  if (s.includes('mustqr')) return <PlatformLogo source={MUSTQR_LOGO} />;
+  if (s.includes('ramzalqasim')) return <PlatformLogo source={RAMZALQASIM_LOGO} />;
+  if (s.includes('fursaghyr')) return <PlatformLogo source={FURSAGHYR_LOGO} />;
+  if (s.includes('jazwtn')) return <PlatformLogo source={JAZWTN_LOGO} />;
+  if (s.includes('muktamel')) return <PlatformLogo source={MUKTAMEL_LOGO} />;
+  if (s.includes('mizlaj')) return <PlatformLogo source={MIZLAJ_LOGO} />;
   // Batch 7 — text-chips until the user supplies logos.
-  if (s.includes('aqaratikom')) return <Image source={AQARATIKOM_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('shmou al shmal') || s.includes('shmoualshmal')) return <Image source={SHMOUALSHMAL_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('bahadhabab')) return <Image source={BAHADHABAB_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alobid')) return <Image source={ALOBID_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('abwbna')) return <Image source={ABWBNA_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('remal')) return <Image source={REMAL_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('amaall')) return <Image source={AMAALL_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('aqaratikom')) return <PlatformLogo source={AQARATIKOM_LOGO} />;
+  if (s.includes('shmou al shmal') || s.includes('shmoualshmal')) return <PlatformLogo source={SHMOUALSHMAL_LOGO} />;
+  if (s.includes('bahadhabab')) return <PlatformLogo source={BAHADHABAB_LOGO} />;
+  if (s.includes('alobid')) return <PlatformLogo source={ALOBID_LOGO} />;
+  if (s.includes('abwbna')) return <PlatformLogo source={ABWBNA_LOGO} />;
+  if (s.includes('remal')) return <PlatformLogo source={REMAL_LOGO} />;
+  if (s.includes('amaall')) return <PlatformLogo source={AMAALL_LOGO} />;
   // Owner supplied this office's own logo 2026-09-13, so it no longer renders bare. It MUST stay
   // above any bare 'aqar' branch: the slug 'aqaralsaudia' contains 'aqar', and falling through
   // would stamp عقار's mark on another company's listing — the misattribution the owner flagged
@@ -680,13 +681,13 @@ function SourceBadge({ source }: { source: string }) {
   // They MUST stay above the fallback, and ksaaqar MUST stay above any bare 'aqar' branch: the
   // slug 'ksaaqar' contains 'aqar', and falling through would stamp عقار's mark on another
   // company's listing — the misattribution the owner flagged as a legal problem, not cosmetic.
-  if (s.includes('ksaaqar') || s.includes('ksa aqar') || s.includes('عقارات السعودية')) return <Image source={KSAAQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('sadiqeltajer') || s.includes('sadiq eltajer') || s.includes('sadiq-eltajer') || s.includes('صادق التاجر')) return <Image source={SADIQELTAJER_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('ksaaqar') || s.includes('ksa aqar') || s.includes('عقارات السعودية')) return <PlatformLogo source={KSAAQAR_LOGO} />;
+  if (s.includes('sadiqeltajer') || s.includes('sadiq eltajer') || s.includes('sadiq-eltajer') || s.includes('صادق التاجر')) return <PlatformLogo source={SADIQELTAJER_LOGO} />;
   // توور — the owner keeps toor on the platform list for its brand even though it currently
   // returns no listings, so the badge must exist: 'toor' would otherwise fall through to the
   // عقار fallback at the end of this function and stamp another company's mark on it.
-  if (s.includes('toor') || s.includes('توور')) return <Image source={TOOR_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('aqaralsaudia')) return <Image source={AQARALSAUDIA_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('toor') || s.includes('توور')) return <PlatformLogo source={TOOR_LOGO} />;
+  if (s.includes('aqaralsaudia')) return <PlatformLogo source={AQARALSAUDIA_LOGO} />;
   // سوار العقارية / راكز العقارية — logos landed 2026-09-15, so these two branches now render the
   // real mark instead of the deliberate `null` they held while the owner was still supplying the
   // files. They must keep EXISTING either way: the fallback at the end of this function returns
@@ -695,56 +696,56 @@ function SourceBadge({ source }: { source: string }) {
   // Same two assets the search-loading strip uses (src/data/loaderPlatforms.ts); that duplication
   // is deliberate so the card path is never coupled to the loader's, and both must be updated when
   // an asset is renamed.
-  if (s.includes('suwar')) return <Image source={SUWAR_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('rakez')) return <Image source={RAKEZ_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('suwar')) return <PlatformLogo source={SUWAR_LOGO} />;
+  if (s.includes('rakez')) return <PlatformLogo source={RAKEZ_LOGO} />;
   // ── onboarded 2026-09-20; placeholder mark until the owner supplies each real logo ──────────
-  if (s.includes('gudai') || s.includes('غدي')) return <Image source={GUDAI_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('safera') || s.includes('سفيرة')) return <Image source={SAFERA_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alhumaidan') || s.includes('al humaidan') || s.includes('الحميدان')) return <Image source={ALHUMAIDAN_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('gudai') || s.includes('غدي')) return <PlatformLogo source={GUDAI_LOGO} />;
+  if (s.includes('safera') || s.includes('سفيرة')) return <PlatformLogo source={SAFERA_LOGO} />;
+  if (s.includes('alhumaidan') || s.includes('al humaidan') || s.includes('الحميدان')) return <PlatformLogo source={ALHUMAIDAN_LOGO} />;
   // MUST stay above any bare 'aqar' branch: 'aqarnajran' CONTAINS 'aqar'.
-  if (s.includes('aqarnajran') || s.includes('aqar najran') || s.includes('عقار نجران')) return <Image source={AQARNAJRAN_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('fahadalshahri') || s.includes('fahad alshahri') || s.includes('فهد الشهري')) return <Image source={FAHADALSHAHRI_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('compoundin') || s.includes('كومباوند')) return <Image source={COMPOUNDIN_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('wslnaa') || s.includes('waslna') || s.includes('وصلنا')) return <Image source={WSLNAA_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('akariyoun') || s.includes('عقاريون')) return <Image source={AKARIYOUN_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('amlakalahsa')) return <Image source={AMLAKALAHSA_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alta')) return <Image source={ALTA_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('awal')) return <Image source={AWAL_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('azdad')) return <Image source={AZDAD_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('aqarnajran') || s.includes('aqar najran') || s.includes('عقار نجران')) return <PlatformLogo source={AQARNAJRAN_LOGO} />;
+  if (s.includes('fahadalshahri') || s.includes('fahad alshahri') || s.includes('فهد الشهري')) return <PlatformLogo source={FAHADALSHAHRI_LOGO} />;
+  if (s.includes('compoundin') || s.includes('كومباوند')) return <PlatformLogo source={COMPOUNDIN_LOGO} />;
+  if (s.includes('wslnaa') || s.includes('waslna') || s.includes('وصلنا')) return <PlatformLogo source={WSLNAA_LOGO} />;
+  if (s.includes('akariyoun') || s.includes('عقاريون')) return <PlatformLogo source={AKARIYOUN_LOGO} />;
+  if (s.includes('amlakalahsa')) return <PlatformLogo source={AMLAKALAHSA_LOGO} />;
+  if (s.includes('alta')) return <PlatformLogo source={ALTA_LOGO} />;
+  if (s.includes('awal')) return <PlatformLogo source={AWAL_LOGO} />;
+  if (s.includes('azdad')) return <PlatformLogo source={AZDAD_LOGO} />;
   // DB source value is 'Al Khaas' (with a space, confirmed live, 0 exceptions) — 'alkhaas' alone never
   // matched it, so every Al Khaas listing silently fell through to the AQAR default (wrong name/host/
   // logo, found live 2026-07-25). Also match the no-space form in case that ever appears.
-  if (s.includes('al khaas') || s.includes('alkhaas')) return <Image source={ALKHAAS_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('abeea')) return <Image source={ABEEA_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('jurash')) return <Image source={JURASH_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('al nokhba') || s.includes('alnokhba')) return <Image source={ALNOKHBA_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('gathern')) return <Image source={GATHERN_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('al khaas') || s.includes('alkhaas')) return <PlatformLogo source={ALKHAAS_LOGO} />;
+  if (s.includes('abeea')) return <PlatformLogo source={ABEEA_LOGO} />;
+  if (s.includes('jurash')) return <PlatformLogo source={JURASH_LOGO} />;
+  if (s.includes('al nokhba') || s.includes('alnokhba')) return <PlatformLogo source={ALNOKHBA_LOGO} />;
+  if (s.includes('gathern')) return <PlatformLogo source={GATHERN_LOGO} />;
   // 2026-06 batch — text-chips until the user supplies logos.
-  if (s.includes('deal')) return <Image source={DEALAPP_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('souq')) return <Image source={SOUQ24_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('pulse')) return <Image source={ERAPULSE_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('nowaisiry')) return <Image source={NOWAISIRY_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('october')) return <Image source={OCTOBER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('therc')) return <Image source={THERC_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('aouj')) return <Image source={AOUJ_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('abralosol')) return <Image source={ABRALOSOL_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('arkaan')) return <Image source={ARKAAN_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('rawasidark')) return <Image source={RAWASIDARK_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('deal')) return <PlatformLogo source={DEALAPP_LOGO} />;
+  if (s.includes('souq')) return <PlatformLogo source={SOUQ24_LOGO} />;
+  if (s.includes('pulse')) return <PlatformLogo source={ERAPULSE_LOGO} />;
+  if (s.includes('nowaisiry')) return <PlatformLogo source={NOWAISIRY_LOGO} />;
+  if (s.includes('october')) return <PlatformLogo source={OCTOBER_LOGO} />;
+  if (s.includes('therc')) return <PlatformLogo source={THERC_LOGO} />;
+  if (s.includes('aouj')) return <PlatformLogo source={AOUJ_LOGO} />;
+  if (s.includes('abralosol')) return <PlatformLogo source={ABRALOSOL_LOGO} />;
+  if (s.includes('arkaan')) return <PlatformLogo source={ARKAAN_LOGO} />;
+  if (s.includes('rawasidark')) return <PlatformLogo source={RAWASIDARK_LOGO} />;
   // ── onboarded 2026-09-21: the SAME neutral placeholder for all eleven until the owner supplies
   // each real logo. LAST on purpose, right above the fallback: no new token can capture an existing
   // platform's source, and each branch must EXIST — the fallback below is عقار's own logo.
-  if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('moftah') || s.includes('مفتاح العقار')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('masar') || s.includes('مسار المستقبل')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('menassat') || s.includes('منصات')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('sakan')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('bossbih') || s.includes('بوصبيح')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alshawaf') || s.includes('al shawaf') || s.includes('الشواف')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('alqarawi') || s.includes('القرعاوي')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('almotmkenah') || s.includes('المتمكنة')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  if (s.includes('nufouth') || s.includes('نفوذ')) return <Image source={PLATFORM_PLACEHOLDER_LOGO} style={card.hostBadge} contentFit="contain" />;
-  return <Image source={AQAR_LOGO} style={card.hostBadge} contentFit="contain" />;
+  if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('moftah') || s.includes('مفتاح العقار')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('masar') || s.includes('مسار المستقبل')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('menassat') || s.includes('منصات')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('sakan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('bossbih') || s.includes('بوصبيح')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('alshawaf') || s.includes('al shawaf') || s.includes('الشواف')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('alqarawi') || s.includes('القرعاوي')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('almotmkenah') || s.includes('المتمكنة')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('nufouth') || s.includes('نفوذ')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  return <PlatformLogo source={AQAR_LOGO} />;
 }
 
 // Hostname helper for the "Hosted on X" labels. Mirrors SourceBadge's matching. (`sourceName` moved
@@ -1004,24 +1005,6 @@ const card = StyleSheet.create({
   rightColSide: { width: 240, borderLeftWidth: 1, borderLeftColor: colors.fieldLine },     // desktop: side column
   rightColBottom: { width: '100%', borderTopWidth: 1, borderTopColor: colors.fieldLine },  // mobile: below info
   hostHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  // The PNG carries its own background and rounded corners — we just size the slot. NO container
-  // background here (would bleed through the PNG's transparent margins).
-  //
-  // 48×48 — owner 2026-09-15, verbatim: "48x48 is perfect on the property card". This is the
-  // REFERENCE SIZE for the whole app: SearchLoader's pill logo is sized to match it so the same
-  // mark reads the same in the strip and on the card ("make sure the logos are the same size in
-  // terms of the animation when it shows and the property card").
-  //
-  // Note what this slot can and cannot equalise. `contentFit: contain` fits the WIDTH first, and
-  // the 51 logos' own aspect ratios run 0.70:1 to 6.56:1, so a wide mark still renders shorter than
-  // a square one inside any square slot — measured here: remal 48×7, arkaan 48×17, dealapp 48×19,
-  // سوار 48×23, against 48×48 for the 33 square logos. Enlarging the slot does not change that
-  // ratio; it scales every logo equally. The only fix that would truly equalise them is rescaling
-  // each company's artwork, and that is REFUSED by the owner brief recorded in
-  // scripts/verify-platform-logos-are-transparent.ts: "preserve the original brand colors,
-  // PROPORTIONS, and fidelity." So the slot stays square and honest, and consistency is enforced
-  // BETWEEN SURFACES (card ↔ strip) rather than between brands.
-  hostBadge: { width: 48, height: 48 },
   thercBadge: { borderRadius: 8, backgroundColor: '#1f5f8b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   aoujBadge: { borderRadius: 8, backgroundColor: '#8b5a1f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   abralosolBadge: { borderRadius: 8, backgroundColor: '#3f6b4a', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },

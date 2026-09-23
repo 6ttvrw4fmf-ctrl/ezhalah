@@ -947,7 +947,8 @@ const AR: Record<string, string> = {
   // The DOMAIN stays fahadalshahri.com (that is where the listing lives and where the card
   // sends the user), and db `source` stays "Fahad Alshahri" — it is the join key on every
   // stored row, so renaming it would orphan them. Only the DISPLAY name changes.
-  'Maqam Al Wisam Real Estate':          'مقام الوسام العقارية',
+  // Owner-requested display wording (2026-09-22); source identity and domain stay unchanged.
+  'Maqam Al Wisam Real Estate':          'مقام وسام العقارية',
   'CompoundIn':                          'كومباوند إن',
   'Waslna Real Estate':                  'وصلنا',
   // onboarded 2026-09-21 — each name read off the site's OWN homepage (fetched 2026-09-21). db `source`

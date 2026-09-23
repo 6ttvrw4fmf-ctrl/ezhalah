@@ -57,5 +57,4 @@ scripts/verify-sidebar-drag-handle-scope.ts                    | 1
 scripts/verify-sidebar-light-green-interaction.ts              | 1
 scripts/verify-sidebar-reorder.ts                              | 2
 scripts/verify-transcript-capture-survives-navigation.ts       | 2
-scripts/verify-trending-carries-full-filter-state.ts           | 2
 scripts/verify-typewriter-never-reveals-half-a-glyph.ts        | 1
