@@ -1,4 +1,26 @@
 929c937e404480f5bf70ac3ab0c6897e579e5b95
+# 2026-09-23  929c937  RE-PUSHED by routine #9 (production red team) so this PR's required checks
+#   could start at all. The value on line 1 is the PIPELINE'S OWN — nothing here edits the baseline
+#   by hand, which scripts/verify-undeployed-user-visible-drift-live.ts forbids in its own remedy
+#   text. What was stuck is the PR, not the number: a branch pushed with the built-in GITHUB_TOKEN
+#   starts no workflows (GitHub's recursion guard), so this PR and the seven before it
+#   (#3722 #3553 #3486 #3475 #3444 #3425 #3417) each carried ZERO check runs and could never satisfy
+#   branch protection. The floor has therefore sat at 53e2ecb since 2026-09-20 while production moved
+#   ten commits, and the live parity check has been RED on every scheduled run since — a standing red
+#   over a bookkeeping fact, which is how a guard stops being read. The standing repair is the
+#   repository secret BASELINE_PR_TOKEN that record-deploy-baseline.sh's header calls "THE ONE THING
+#   ONLY THE OWNER CAN DO"; it is not set. ops_incident #605.
+#   929c937 was confirmed live by three INDEPENDENT readings before this push, never from this file:
+#     · Vercel deployments API — the only READY production deployment is dpl_5teyK95Sse9DwgCkHC7kuyaVSyCU,
+#       target=production, meta.githubCommitSha = 929c937e404480f5bf70ac3ab0c6897e579e5b95;
+#     · the served HTML of https://ezhalah-app.vercel.app (HTTP 200, 89,158 bytes) references
+#       _expo/static/js/web/entry-a22263ae96899a909e066ccd4e391ca7.js, and
+#       verify-frontend-bundle-matches-source-live.ts confirms that bundle carries current main's
+#       compiled amenity certification;
+#     · Actions run 35831044397 — "Deploy frontend (production)", workflow_dispatch, conclusion
+#       success, head_sha 929c937 — so this SHA reached production through the sanctioned gate.
+#   BEHIND -> CURRENT only. A stale floor makes preflight-verify.sh's containment gate WEAKER, so
+#   advancing it to the commit production actually serves strengthens the gate rather than clearing it.
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # 2026-09-21  53e2ecb  advanced MANUALLY, AHEAD of its deploy, to clear preflight-verify.sh's
 #   deletion guard. preflight refused on run 35548585451 with exactly one deleted file:
