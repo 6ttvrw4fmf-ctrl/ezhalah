@@ -147,7 +147,12 @@ check('agent.tsx derives offersMore from showActionsRow, not from hasMore alone'
 check('agent.tsx derives offersNarrow from showActionsRow, not from canNarrowFurther alone',
   /const offersNarrow = canNarrowFurther && showActionsRow;/.test(agentSrc));
 check('the visible sentence comes from the pure key function, not a second inline copy',
-  /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer: rc\.lastTapOffer, cappedAtCap: rc\.cappedAtCap \}\)/.test(agentSrc));
+  /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer: rc\.lastTapOffer, cappedAtCap: rc\.cappedAtCap, chatClosed: completed \}\)/.test(agentSrc));
+// `chatClosed` must be the CHAT's terminal flag, not a per-turn one (ops_incident #598). Handing it
+// `hasMore`, `isLatestResults` or anything else derived from this turn would put the ☰ hint on every
+// quiet older turn of an open chat — noise — and leave the one turn that needs it silent.
+check('agent.tsx feeds chatClosed from the conversation-level `completed`, never a per-turn flag',
+  /closingNoteKey\(\{[^}]*chatClosed: completed[ ,}]/.test(agentSrc));
 // The call gained a local `!afReceipt[m.id] &&` conjunct on 2026-09-20 so a spent turn swaps its
 // buttons for the completed-round receipt at once, instead of waiting for `chatCompleted` to land a
 // whole search later. The rule this check owns is unchanged — the gate is still the executable
@@ -174,6 +179,68 @@ const staleTurnKey = closingNoteKey({ endKind: 'more', quoteTotal: true, offersM
 check('an older results turn (isLatestResults false) also stops promising a retired button',
   !keyOffersMore(staleTurnKey) && !keyOffersNarrow(staleTurnKey), staleTurnKey);
 
+// ── 5b. A CLOSED CHAT NEVER ENDS ON A DEAD END (ops_incident #598) ───────────────────────────────
+// The mirror image of the rule this file was born for. §42 says never offer a button that is not on
+// screen; it says nothing about the state where NO button is on screen and none ever will be —
+// because until the owner's 2026-09-20 rule («a completed Advanced Filter round ends the chat»)
+// that state could not carry unreached inventory. It can now, and it did:
+//
+//   production, 2026-09-22, الرياض/شراء/شقة + one amenity answer —
+//   «عرضت لك أول 156 من أصل 6,441 إعلان مطابق.», load-more elements anywhere = 0, «تحديد أكثر» = 0.
+//
+// Every count was exactly right. The sentence simply stopped, and 6,285 matching listings read as
+// unreachable from a chat whose composer was locked. The fix names the one path that IS open — the
+// owner's own «افتح القائمة ☰ فوق واختر «بحث»» from the two terminal notes — and changes no number.
+//
+// WHY IT IS GATED ON THE CHAT AND NOT ON THE TURN. A button-less turn in an OPEN chat is ordinary:
+// an older results turn keeps its honest counts and stays quiet because the newest turn below it is
+// where the user acts. Only a closed chat makes a button-less turn the end of the road.
+type ClosedState = State & { chatClosed: boolean };
+const closedStates: ClosedState[] = [];
+for (const s of states) for (const chatClosed of BOOL) closedStates.push({ ...s, chatClosed });
+check('the closed-chat input space is enumerated in full (64 × 2)', closedStates.length === 128, `saw ${closedStates.length}`);
+check('closingNoteKey stays total once chatClosed is in play (never throws)',
+  closedStates.every((s) => typeof closingNoteKey(s) === 'string'));
+
+/** Does this key name a forward path the user can actually take right now? */
+const keyNamesAWayOut = (k: ClosingNoteKey): boolean =>
+  keyOffersMore(k) || keyOffersNarrow(k) || k.includes('open the menu');
+
+// THE RULE. A closed chat + no button + matches the user has not seen ⇒ the sentence must name the
+// menu. `endKind: 'more'` IS "matches remain beyond what is shown" (resultCounts computes it), so
+// the unreached inventory is implied by the state rather than asserted from a second number.
+const strandedStates = closedStates.filter((s) => realizable(s) && s.chatClosed && s.endKind === 'more' && !s.offersMore && !s.offersNarrow);
+check('the stranded state is reachable at all (an empty filter would make the next check vacuous)',
+  strandedStates.length > 0, `stranded states=${strandedStates.length}`);
+const deadEnds = strandedStates.filter((s) => !keyNamesAWayOut(closingNoteKey(s)));
+check('a CLOSED chat with matches still unreached always names a way out',
+  deadEnds.length === 0,
+  deadEnds.map((s) => `${JSON.stringify(s)} → ${closingNoteKey(s)}`).join('\n      '));
+
+// …and it must not leak into an OPEN chat, where the turn below is the forward path and a ☰ hint on
+// every superseded turn would be noise. This is the half a careless fix gets wrong.
+const openQuietStates = closedStates.filter((s) => realizable(s) && !s.chatClosed && s.endKind === 'more' && !s.offersMore && !s.offersNarrow);
+const leaked = openQuietStates.filter((s) => closingNoteKey(s).includes('open the menu'));
+check('an OPEN chat\'s quiet turn is unchanged — no ☰ hint where the newest turn is the way forward',
+  leaked.length === 0, leaked.map((s) => `${JSON.stringify(s)} → ${closingNoteKey(s)}`).join('\n      '));
+
+// The counts survive the new branch: adding a way out may never drop or alter a number.
+check('every closed-chat sentence still states its counts',
+  closedStates.every((s) => numbered(closingNoteKey(s))));
+// …and the new keys are translated, like every other one.
+const closedKeys = [...new Set(closedStates.map((s) => closingNoteKey(s)))];
+const closedUntranslated = closedKeys.filter((k) => !i18nSrc.includes(`'${k}'`));
+check(`all ${closedKeys.length} keys reachable with chatClosed exist in the Arabic table`,
+  closedUntranslated.length === 0, closedUntranslated.join('\n      '));
+
+// The exact production state, replayed end to end.
+const rc598 = resultCounts({ trueTotal: 6441, shown: 156, fetched: 1500, serverMore: true });
+const k598 = closingNoteKey({ endKind: rc598.endKind, quoteTotal: true, offersMore: false, offersNarrow: false, lastTapOffer: rc598.lastTapOffer, cappedAtCap: rc598.cappedAtCap, chatClosed: true });
+check('#598 replayed: 156 of 6,441 in a closed chat now points at the ☰ new search',
+  k598 === 'I showed you the first {shown} of {total} matching listings. For a new search, open the menu and choose Search.', k598);
+check('#598 replayed: and it still promises neither button',
+  !keyOffersMore(k598) && !keyOffersNarrow(k598), k598);
+
 // ── 6. MUTATION PROOFS — the predicate really discriminates ─────────────────────────────────────
 // The pre-fix wording, restored: worded from endKind/canNarrowFurther, blind to what is rendered.
 const preFixKey = (s: State): ClosingNoteKey =>
@@ -195,6 +262,20 @@ mustCatch('the PRE-FIX wording is caught by this barrier (it over-promises)',
 
 mustCatch('a key-classifier that never sees an offer would fail the complement check',
   states.some((s) => keyOffersMore(closingNoteKey(s))) && states.some((s) => keyOffersNarrow(closingNoteKey(s))));
+
+// ops_incident #598: the wording BEFORE this run's fix — identical except that it was blind to
+// `chatClosed` — must be caught by 5b, or 5b is decoration.
+const preFix598 = (s: ClosedState): ClosingNoteKey =>
+  closingNoteKey({ ...s, chatClosed: false });
+const preFix598DeadEnds = strandedStates.filter((s) => !keyNamesAWayOut(preFix598(s)));
+mustCatch('the PRE-FIX closed-chat wording is caught (it left the user with no way out)',
+  preFix598DeadEnds.length > 0,
+  `${preFix598DeadEnds.length} of ${strandedStates.length} stranded state(s) named no forward path before the fix`);
+// The over-correction is caught too: hinting at ☰ on every button-less turn, closed or not.
+const overCorrect = (s: ClosedState): boolean => openQuietStates.includes(s);
+mustCatch('an over-correction that hints ☰ in an OPEN chat would be caught by the leak check',
+  openQuietStates.length > 0 && openQuietStates.every(overCorrect),
+  `${openQuietStates.length} open-chat quiet state(s) are watched for the leak`);
 
 if (failures) {
   console.error(`\n✗ ${failures} check(s) failed — the closing sentence can promise a button that is not there.`);
