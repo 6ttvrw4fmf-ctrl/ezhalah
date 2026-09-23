@@ -998,6 +998,21 @@ export default function Agent() {
   // question set resolved up front, so the progress bar reflects the questions that will actually show.
   const ageFlowQueryRef = useRef<SearchQuery | null>(null);
   const ageFlowTokenRef = useRef(0);
+  // WHICH CONVERSATION AN IN-FLIGHT CONTINUATION BELONGS TO (routine #8, 2026-09-22, ops_incident
+  // #602 — the FIFTH recurrence of the #211/#271/#319/#341 class).
+  //
+  // NOT `ageFlowTokenRef`, which is bumped ELEVEN times inside a single conversation (every AF
+  // Back, close, skip and re-tap supersedes the round in flight). That is the right token for a
+  // guided round and the wrong one for anything else: gating a «عرض المزيد» drain on it would
+  // cancel a legitimate page fetch merely because the user closed an AF card. This one moves for
+  // exactly one reason — the conversation itself ended — so `epoch !== captured` means, precisely,
+  // "the chat this work was started for is gone".
+  //
+  // resetConversationState() is its only writer (see the bump there). Every async continuation that
+  // writes conversation-scoped state after an `await` captures it on entry and re-checks it on the
+  // other side; verify-conversation-state-never-inherited.ts §E/§F discovers those continuations
+  // from the real source and fails on any that does not.
+  const conversationEpochRef = useRef(0);
   const ageFlowChangedRef = useRef(false);
   const ageFlowLabelsRef = useRef<string[]>([]);
   const ageFlowPlanRef = useRef<Array<{ question: AdvancedQuestion; options: AdvancedOption[]; unknownCount: number | null; total: number }>>([]);
@@ -1592,6 +1607,10 @@ export default function Agent() {
   const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {
     const mid = m.id;
     const q = m.result.query;
+    // THE CONVERSATION THIS PRESS BELONGS TO (ops_incident #599). Captured before the first await so
+    // the writes below can be told apart from writes into a chat the user has since left — see
+    // conversationEpochRef's declaration for the measurement.
+    const epoch = conversationEpochRef.current;
     if (runRef.current) return; // a real turn is mid-flight — never start a cascade under it (review fix)
     if (loadingMore[mid]) return;
     const cur = revealCount[mid] ?? initialReveal(m.result, m.afCompleted);
@@ -1645,6 +1664,16 @@ export default function Agent() {
         // so out loud (same wording/posture page 0's own fetch failure uses, src/data/search.ts) —
         // and never claim completion for a reveal that did not actually finish.
         const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, pageOffset);
+        // THE USER LEFT THIS CONVERSATION WHILE THE PAGE WAS IN FLIGHT — every write below belongs
+        // to a chat that no longer exists, and this screen is now showing a different one
+        // (router.replace to the SAME route: same component instance, nothing remounted).
+        // Dropping the pages is the correct outcome and not a loss: the exit already called
+        // flushPendingCapture(), so the abandoned chat is saved with exactly what was on screen when
+        // the user left it, which is the product's own rule for an outgoing turn (finalizeReveal:
+        // "show whatever that turn had … and kill the pending timers"; R12.3: older turns are
+        // read-only history). Returning here also stops the drain from spending the rest of its page
+        // budget on a conversation nobody is looking at. ops_incident #599.
+        if (conversationEpochRef.current !== epoch) return;
         if (failed) {
           setMsgs((prev) => [...prev, { id: uid(), role: 'agent',
             text: t('Loading listings — please try again in a few seconds.') }]);
@@ -3112,6 +3141,22 @@ export default function Agent() {
     // user has left can still write to it, so the invalidation belongs WITH the clear, not beside it.
     ageFlowTokenRef.current++;      // every in-flight guided continuation is now superseded
     setAgeFlow(null);               // …and the card it was driving belongs to the conversation left
+    // AND THE THIRD MECHANISM, which the sentence above ("the screen owns TWO independent in-flight
+    // mechanisms") counted by hand and therefore missed (routine #8, 2026-09-22, ops_incident #599 —
+    // the FIFTH recurrence of this class, and the second time the REPAIR for it was itself a
+    // hand-maintained list).
+    //
+    // `loadMore` — the «عرض المزيد» page fetch — awaits loadMoreListings() and then, on the other
+    // side of that await, writes conversation state unconditionally. Nothing cancelled it: it holds
+    // no token, `runRef` is null throughout by construction (it refuses to start while a turn is in
+    // flight), and clearReveals() only kills timers that already exist. MEASURED by lifting the real
+    // loadMore and exiting the conversation during the await: it called setCompleted(true) — locking
+    // the NEW conversation's composer and retiring its «عرض المزيد» row, then persisting that lock
+    // onto the new chat's saved transcript, because `completed` is a dependency of the capture
+    // effect and that effect writes to chatIdRef.current. It also re-armed revealActiveRef and
+    // setRevealing(true) through cascadeIn (the new chat's Send button becomes Stop with nothing to
+    // stop), and on a failed page appended «تعذّر البحث» into a transcript that never asked for it.
+    conversationEpochRef.current++; // every in-flight page fetch now belongs to a conversation that ended
   };
 
   // Reopening a past search from the sidebar (replay='0') just SHOWS the saved conversation — the
@@ -3125,6 +3170,9 @@ export default function Agent() {
   // with no transcript anywhere (legacy entry) falls back to the snapshot/replay view unchanged.
   const openSaved = async (entryId: string | undefined, q: SearchQuery, override?: { bubble: string; sub: string }) => {
     flushPendingCapture(); // leaving the previous chat mid-debounce must not drop its newest turn
+    // Captured AFTER startFresh() — the sidebar's own handler calls it immediately before this, so
+    // the epoch already names THIS open. See the check below the hydrate. ops_incident #599.
+    const epoch = conversationEpochRef.current;
     chatIdRef.current = entryId ?? null;
     const entry = entryId ? history.find((h) => h.id === entryId) : undefined;
     // A STALE local copy must be re-checked against the server, not rendered (owner 2026-08-25,
@@ -3138,6 +3186,16 @@ export default function Agent() {
     const heldStale = !!(entry as { txStale?: boolean } | undefined)?.txStale;
     let t: PersistedChat | null = heldStale ? null : (entry?.transcript ?? null);
     if (!t && entryId) t = await hydrateTranscript(entryId).catch(() => null);
+    // THE USER OPENED SOMETHING ELSE WHILE THIS ONE WAS HYDRATING (ops_incident #599, the same
+    // mechanism as loadMore's guard). This is the path that reaches the network — a pruned cache, a
+    // new browser, a re-login or a second device — so the window is a real round trip, and the
+    // sidebar is fully live throughout it. Without this check the restore lands on whatever chat is
+    // NOW on screen: setMsgs/setRevealCount/setCompleted rewrite it wholesale while chatIdRef points
+    // at the OTHER entry, and the capture effect then serializes what is on screen and saves it
+    // under that other entry's id — this chat's conversation written over that one, permanently, the
+    // first time the user touches it. Returning leaves the chat they actually chose intact; this one
+    // re-hydrates when it is opened again.
+    if (conversationEpochRef.current !== epoch) return;
     const restored = t ? restoreChat(t) : null;
     if (restored) {
       setMsgs(restored.msgs as unknown as ChatMsg[]);
@@ -3164,6 +3222,9 @@ export default function Agent() {
   };
 
   const openStatic = async (q: SearchQuery, override?: { bubble: string; sub: string }, snapshot?: SearchResult) => {
+    // ops_incident #599 — see the check after runQuery below. The snapshot branch is synchronous and
+    // needs none; the replay branch re-runs a REAL search and is the longest await on this screen.
+    const epoch = conversationEpochRef.current;
     const { bubble, sub } = override ?? filterToChat(q);
     const userId = uid();
     const resultsId = uid();
@@ -3209,6 +3270,11 @@ export default function Agent() {
     pinModeRef.current = 'top';
     toTop();
     const result = await runQuery(q, false); // viewing a saved chat — don't create a new history entry
+    // THE CONVERSATION THIS REPLAY WAS OPENED FOR IS GONE (ops_incident #599). Every setMsgs below
+    // REPLACES the transcript rather than appending to it, so an un-checked landing does not merely
+    // add a stale bubble — it substitutes this legacy chat's replayed search for whatever the user
+    // opened instead, and setCompleted() re-derives that chat's terminality on top of it.
+    if (conversationEpochRef.current !== epoch) return;
     // Soft completion here too (review finding): history replay used to hard-cut the loader in a
     // single frame. Flag `exiting`, give the fade its beat, THEN swap to the final results state.
     // (History stays beat-free otherwise — no min-beat, no typewriter; this is just the fade.)
@@ -3217,6 +3283,7 @@ export default function Agent() {
       { id: resultsId, role: 'status', phase: 'searching', summary: buildScrapeIntro(q), query: q, exiting: true },
     ]);
     await new Promise((r) => setTimeout(r, LOADER_EXIT_MS));
+    if (conversationEpochRef.current !== epoch) return; // …and again across the loader's fade beat
     // Morph into the final results state — all cards at once, no typewriter (history view).
     setMsgs([
       { id: userId, role: 'user', text: bubble },
