@@ -50,7 +50,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: >-
           node scripts/ops/raise-workflow-alert.mjs
-          --kind blind_guard
+          --kind barrier_check_failed
           --workflow detector-candidate-set-check.yml
           --status ${{ job.status }}
           --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
