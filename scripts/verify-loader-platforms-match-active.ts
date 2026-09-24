@@ -185,9 +185,29 @@ const catalog = new Set(PLATFORM_META_NAMES);
 // list anyway. Recorded here so it reads as a decision, not as drift.
 // Remove this entry the moment toor starts returning rows: at that point it passes on its own and
 // the exception should not outlive the reason for it.
+//
+// LOGO-ONLY entries (owner decision 2026-09-24: maskanre, wetheaddress). A PLATFORM_META row flagged
+// `logoOnly: true` is a brand shown in the strip with NO scraper, NO tables and NO rows — ever. The
+// flag lives on the entry itself and is DERIVED here, never hand-listed, so the exemption cannot
+// outlive or drift from the data it excuses. It excuses ONLY the advertised-with-zero-rows direction
+// and only a name NO SOURCE_TOKENS entry maps to: a real, searchable platform cannot be silenced by
+// flagging it (asserted below).
+function parseLogoOnlyNames(src: string): string[] {
+  const start = src.indexOf('export const PLATFORM_META');
+  const body = src.slice(src.indexOf('[', start), src.indexOf('];', start));
+  // Match inside the entry braces, not the line: a logo-only entry written across two lines keeps its exemption.
+  return [...body.matchAll(/\{[^}]*\bname:\s*'([^']+)'[^}]*\blogoOnly:\s*true[^}]*\}/g)].map((m) => m[1]);
+}
+const LOGO_ONLY = parseLogoOnlyNames(LOADER_SRC);
 const BRAND_ONLY: ReadonlyMap<string, string> = new Map([
   ['toor', 'owner decision 2026-09-19 — brand kept on the list while toor.ooo is a beta serving dummy data (0 searchable rows)'],
+  ...LOGO_ONLY.map((n): [string, string] => [n.toLowerCase(),
+    'logoOnly: true in PLATFORM_META — owner decision 2026-09-24: brand shown in the strip, no scraper, no tables, never searchable']),
 ]);
+for (const n of LOGO_ONLY) {
+  check(`logoOnly entry "${n}" is not a searchable platform (no SOURCE_TOKENS entry maps to it)`,
+    !SOURCE_TOKENS.some(([, name]) => name === n), 'a searchable platform cannot be excused by the logo-only flag');
+}
 
 const advertisedButDeadAll = [...catalog].filter((n) => !liveCanon.has(n)).sort();
 const brandOnlyShown = advertisedButDeadAll.filter((n) => BRAND_ONLY.has(n.toLowerCase()));

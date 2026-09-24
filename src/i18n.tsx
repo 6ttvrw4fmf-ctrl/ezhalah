@@ -978,6 +978,47 @@ const AR: Record<string, string> = {
   'Al Jassim Real Estate Services':      'مكتب الجاسم للخدمات العقارية',           // official (aljassimaqar.com <title> + og:site_name «مكتب الجاسم للخدمات العقارية»)
   'Almotmkenah Real Estate':             'المتمكنة للعقارات',                      // official (almotmkenah.com <title> + og:site_name «المتمكنة للعقارات»)
   'Nufouth Development Real Estate':     'نفوذ التطوير للعقارات وإدارة الأملاك',  // official (nufouth.com page body «نفوذ التطوير للعقارات وإدارة الأملاك»; <title> spells it «وادارة»)
+  // onboarded 2026-09-24 (batch 36) — the Arabic name is the scraper's SOURCE constant, i.e. the name the
+  // site itself publishes (measured in each scrapers/<slug>/run.py docstring). db `source` is the join
+  // key on every stored row; only the DISPLAY name comes from here.
+  'Dwelleo': 'دويليو',
+  'Aqalem Hajer Real Estate Services Office': 'مكتب أقاليم هجر للخدمات العقارية',
+  'Sakani': 'سكني',
+  'Shatri Real Estate Development': 'الشاطري للتطوير العقاري',
+  'Alqasem Real Estate': 'القاسم العقارية',
+  'Fkr Alemar': 'فكر الإعمار',
+  'Wadod Real Estate': 'ودود العقارية',
+  'Al Muteb Real Estate': 'آل متعب العقارية',
+  'Al Barrak Real Estate': 'البراك للعقارات',
+  'Al Rifai Real Estate': 'الرفاعي للعقار',
+  'Sodasyat Real Estate': 'سداسيات العقارية',
+  'Hasaad Economic Real Estate': 'حصاد الاقتصادية للعقارات',
+  'Aqar Alriyadh': 'عقار الرياض',
+  'Just Real Estate': 'فقط نقطة العقارية',
+  'Snam Real Estate': 'سنام العقارية',
+  'Jawher Real Estate Brokerage': 'جواهر للوساطة والتسويق العقاري',
+  'Maqar Al Motamad': 'مقر المعتمد',
+  'Senan Real Estate': 'سنان العقارية',
+  'Golden Deal Real Estate': 'الصفقة الذهبية العقارية',
+  '1000 Real Estate': '1000 العقارية',
+  'Yameen Real Estate': 'يمين العقارية',
+  'Ebriza Real Estate': 'إبريزة العقارية',
+  'Eilm Alriyada': 'علم الريادة الإدارية',
+  'Dar Yusuf Real Estate': 'دار يوسف العقارية',
+  'Albdah Real Estate': 'البداح للعقارات',
+  'Eydah': 'الإيضاح',
+  'Tamyaz Real Estate': 'تمايز العقارية',
+  'Hazim': 'حازم',
+  'Villas SA': 'فلل',
+  'Mar Real Estate': 'مار العقارية',
+  'RightCompound': 'رايت كومباوند',                 // transliteration — the site publishes no Arabic name (CompoundIn precedent «كومباوند إن»)
+  'LivingCompound': 'ليفينج كومباوند',              // transliteration — no Arabic name at the source
+  'Azure': 'أزور',                                  // transliteration — no Arabic name at the source
+  'Expat Trusted Housing': 'إكسبات ترستد هاوسينج',  // transliteration — no Arabic name at the source
+  'Flow': 'فلو',                                    // transliteration — no Arabic name at the source
+  // logo-only strip entries (owner decision 2026-09-24): no scraper, no tables, never searchable.
+  'Maskan United': 'مسكن الموحدة',  // maskanre.sa
+  'The Address': 'العنوان',  // wetheaddress.com
   'Akariyoun':                         'عقاريون',                  // official (akariyoun.sa footer «عقاريون ، جميع الحقوق محفوظة» + tagline «عقاريون إختيارك الاول»; the site's own <title> uses the Latin «Akariyoun»)
   'Awal United for Real Estate':       'أوال المتحدة العقارية', // official (their X @awaalun: «مؤسسة أوال المتحدة العقارية»)
   'Al Khaas':                          'الخاص للاستثمار العقاري',

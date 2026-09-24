@@ -51,8 +51,14 @@ const POLICIES = join(ROOT, 'scrapers', 'common', 'liveness_policies.py');
  * fall: a platform leaves by producing a real verdict in production. Raising it is a deliberate,
  * reviewed edit — and it means a newly-wired oracle has joined the unproven set, which is a thing
  * a reviewer should have to look at rather than something a file quietly absorbs.
+ *
+ * RAISED 20 → 44 on 2026-09-24: the 35-platform batch wired 35 new oracles, and the 24 of them that
+ * never stamp db.mark_direct_alive (the other 11 build every row from a direct read of its own
+ * record) will each have active rows, strategy CANDIDATE_PLUS_DIRECT and zero verdicts after their
+ * first scrape — exactly the set mon_detect_oracle_chain_never_observed() raises on. Listing them
+ * is the reviewed decision; each leaves by producing its first verdict in production.
  */
-const RATCHET = 20;
+const RATCHET = 44;
 
 let failures = 0;
 function check(ok: boolean, name: string, detail = ''): void {

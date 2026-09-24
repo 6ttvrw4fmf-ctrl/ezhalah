@@ -508,6 +508,11 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
   impact — it only stops burning ~5.5 GH Actions compute-hours every Monday. Historical rows kept.
   **Re-enable only after the scraper itself is rebuilt** (its enumeration approach needs redesigning,
   not just a longer timeout).
+  **dwelleo — RE-ONBOARDED 2026-09-24 (owner decision).** `scrapers/dwelleo/` is back with the
+  35-platform batch; migration `20260924171203_thirty_five_platforms_registry_and_liveness` flips
+  `platform_cadence.is_active` to true with the note «re-onboarded 2026-09-24 (owner decision)» and
+  inserts its platform_registry / ops_liveness_registry rows (its old tables were dropped, so it
+  starts empty). The 2026-07-15 history below is kept as written.
   **dwelleo, semsar** — `scrapers/dwelleo/` and `scrapers/semsar/` no longer exist in this repo (code
   removed at some point). `scrape_runs` shows dwelleo ran 4 times (last 2026-06-23, 1,540 rows on
   its last successful run) and semsar ran once (2026-06-22, 72 rows) — genuine, working scrapers at

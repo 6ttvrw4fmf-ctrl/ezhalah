@@ -25,7 +25,10 @@
 // name MUST match the `name` in PLATFORMS exactly (so platform(name) resolves allowsRent/allowsBuy).
 // i18nKey is the English source string in the AR dictionary → t(i18nKey) gives the Arabic display name
 // (same label the result card uses). logo is the bundled asset.
-export type LoaderPlatform = { name: string; i18nKey: string; logo: number };
+// logoOnly: the brand is shown in the strip by owner decision while it has NO scraper, NO tables and
+// is NEVER searchable (2026-09-24: maskanre, wetheaddress). verify-loader-platforms-match-active.ts
+// reads this flag as its exemption; nothing else may use it.
+export type LoaderPlatform = { name: string; i18nKey: string; logo: number; logoOnly?: true };
 
 // The catalog of platforms with a bundled logo asset. Kept in lock-step with production's active
 // set (`search_listings_ar.platform`). When a platform goes cold with zero reachable rows, remove
@@ -123,6 +126,47 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'Al Jassim', i18nKey: 'Al Jassim Real Estate Services', logo: require('../../assets/images/aljassim.png') },
   { name: 'Almotmkenah', i18nKey: 'Almotmkenah Real Estate', logo: require('../../assets/images/almotmkenah.png') },
   { name: 'نفوذ', i18nKey: 'Nufouth Development Real Estate', logo: require('../../assets/images/nufouth.png') },
+  // ── onboarded 2026-09-24 (batch 36) ─────────────────────────────────────────────────────────────
+  // All 35 wear the SAME neutral placeholder until the owner supplies their real marks — never
+  // another company's logo. `name` is the stored db `source` (the scraper's SOURCE constant).
+  { name: 'دويليو', i18nKey: 'Dwelleo', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'مكتب أقاليم هجر للخدمات العقارية', i18nKey: 'Aqalem Hajer Real Estate Services Office', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'سكني', i18nKey: 'Sakani', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'الشاطري للتطوير العقاري', i18nKey: 'Shatri Real Estate Development', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'القاسم العقارية', i18nKey: 'Alqasem Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'فكر الإعمار', i18nKey: 'Fkr Alemar', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'ودود العقارية', i18nKey: 'Wadod Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'آل متعب العقارية', i18nKey: 'Al Muteb Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'البراك للعقارات', i18nKey: 'Al Barrak Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'الرفاعي للعقار', i18nKey: 'Al Rifai Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'سداسيات العقارية', i18nKey: 'Sodasyat Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'حصاد الاقتصادية للعقارات', i18nKey: 'Hasaad Economic Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'عقار الرياض', i18nKey: 'Aqar Alriyadh', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'فقط نقطة العقارية', i18nKey: 'Just Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'سنام العقارية', i18nKey: 'Snam Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'جواهر للوساطة والتسويق العقاري', i18nKey: 'Jawher Real Estate Brokerage', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'مقر المعتمد', i18nKey: 'Maqar Al Motamad', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'سنان العقارية', i18nKey: 'Senan Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'الصفقة الذهبية العقارية', i18nKey: 'Golden Deal Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: '1000 العقارية', i18nKey: '1000 Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'يمين العقارية', i18nKey: 'Yameen Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'إبريزة العقارية', i18nKey: 'Ebriza Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'علم الريادة الإدارية', i18nKey: 'Eilm Alriyada', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'دار يوسف العقارية', i18nKey: 'Dar Yusuf Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'البداح للعقارات', i18nKey: 'Albdah Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'الإيضاح', i18nKey: 'Eydah', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'تمايز العقارية', i18nKey: 'Tamyaz Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'حازم', i18nKey: 'Hazim', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'فلل', i18nKey: 'Villas SA', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'مار العقارية', i18nKey: 'Mar Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'RightCompound', i18nKey: 'RightCompound', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'LivingCompound', i18nKey: 'LivingCompound', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Azure', i18nKey: 'Azure', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Expat Trusted Housing', i18nKey: 'Expat Trusted Housing', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Flow', i18nKey: 'Flow', logo: require('../../assets/images/platform-placeholder.png') },
+  // LOGO-ONLY (owner decision 2026-09-24): brand shown in the strip, no scraper, no tables, never searchable.
+  { name: 'Maskanre', i18nKey: 'Maskan United', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
+  { name: 'Wetheaddress', i18nKey: 'The Address', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
 ];
 
 // Ordered SPECIFIC-first token → platform name map, mirroring ResultCard's SourceBadge matching so a
@@ -135,11 +179,13 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['wasalt', 'Wasalt'], ['aldarim', 'Aldarim'], ['aqargate', 'Aqargate'], ['aqarcity', 'Aqarcity'],
   ['aqaratikom', 'Aqaratikom'], ['aqarmonthly', 'Aqar'],
   ['alhoshan', 'Alhoshan'], ['alkhaas', 'Al Khaas'],
+  ['aqalemhajer', 'مكتب أقاليم هجر للخدمات العقارية'], ['مكتب أقاليم هجر للخدمات العقارية', 'مكتب أقاليم هجر للخدمات العقارية'], // 2026-09-24: BEFORE 'hajer', which the slug 'aqalemhajer' contains
   ['hajer', 'Hajer'], ['sanadak', 'Sanadak'], ['eastabha', 'Eastabha'], ['raghdan', 'Raghdan'],
   ['eaqartabuk', 'Eaqartabuk'], ['satel', 'Satel'], ['sadin', 'Sadin'],
   ['mustqr', 'Mustqr'], ['mustaqr', 'Mustqr'], ['ramzalqasim', 'Ramzalqasim'], ['ramzalqassim', 'Ramzalqasim'],
   ['fursaghyr', 'Fursaghyr'], ['jazwtn', 'Jazwtn'], ['jazan', 'Jazwtn'],
   ['mizlaj', 'Mizlaj'], ['abeea', 'Abeea'], ['jurash', 'Jurash'],
+  ['goldendeal', 'الصفقة الذهبية العقارية'], ['الصفقة الذهبية العقارية', 'الصفقة الذهبية العقارية'], // 2026-09-24: BEFORE 'deal', which the slug 'goldendeal' contains
   ['gathern', 'Gathern'], ['dealapp', 'Deal App'], ['deal', 'Deal App'], ['souq', '24 Souq'],
   ['erapulse', 'Era Pulse'], ['pulse', 'Era Pulse'], ['nowaisiry', 'Al Nowaisiry'], ['october', '1 October'],
   ['muktamel', 'Muktamel'], ['arkaan', 'Arkaan'],
@@ -197,6 +243,7 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['مسار المستقبل', 'مسار المستقبل'],
   ['menassat', 'منصات'],
   ['منصات', 'منصات'],
+  ['sakani', 'سكني'], ['سكني', 'سكني'], // 2026-09-24: BEFORE 'sakan', which the slug 'sakani' contains
   ['sakan', 'Sakan Saudi'],
   ['bossbih', 'مكتب بوصبيح'],
   ['بوصبيح', 'مكتب بوصبيح'],
@@ -212,6 +259,69 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['المتمكنة', 'Almotmkenah'],
   ['nufouth', 'نفوذ'],
   ['نفوذ', 'نفوذ'],
+  // onboarded 2026-09-24 (batch 36). Slug + stored source; Arabic sources are matched on the FULL stored string
+  // («فلل», «حازم», «سكني» are whole source values, never bare words inside a title). aqalemhajer,
+  // goldendeal and sakani sit ABOVE the generic 'hajer' / 'deal' / 'sakan' tokens that contain them.
+  ['dwelleo', 'دويليو'],
+  ['دويليو', 'دويليو'],
+  ['shatri', 'الشاطري للتطوير العقاري'],
+  ['الشاطري للتطوير العقاري', 'الشاطري للتطوير العقاري'],
+  ['alqasem', 'القاسم العقارية'],
+  ['القاسم العقارية', 'القاسم العقارية'],
+  ['fkralemar', 'فكر الإعمار'],
+  ['فكر الإعمار', 'فكر الإعمار'],
+  ['wadod', 'ودود العقارية'],
+  ['ودود العقارية', 'ودود العقارية'],
+  ['almuteb', 'آل متعب العقارية'],
+  ['آل متعب العقارية', 'آل متعب العقارية'],
+  ['aalbarrak', 'البراك للعقارات'],
+  ['البراك للعقارات', 'البراك للعقارات'],
+  ['alrifai', 'الرفاعي للعقار'],
+  ['الرفاعي للعقار', 'الرفاعي للعقار'],
+  ['sodasyat', 'سداسيات العقارية'],
+  ['سداسيات العقارية', 'سداسيات العقارية'],
+  ['hasaad', 'حصاد الاقتصادية للعقارات'],
+  ['حصاد الاقتصادية للعقارات', 'حصاد الاقتصادية للعقارات'],
+  ['aqaralriyadh', 'عقار الرياض'],
+  ['عقار الرياض', 'عقار الرياض'],
+  ['justsa', 'فقط نقطة العقارية'],
+  ['فقط نقطة العقارية', 'فقط نقطة العقارية'],
+  ['snam', 'سنام العقارية'],
+  ['سنام العقارية', 'سنام العقارية'],
+  ['jawher', 'جواهر للوساطة والتسويق العقاري'],
+  ['جواهر للوساطة والتسويق العقاري', 'جواهر للوساطة والتسويق العقاري'],
+  ['m3tmd', 'مقر المعتمد'],
+  ['مقر المعتمد', 'مقر المعتمد'],
+  ['senan', 'سنان العقارية'],
+  ['سنان العقارية', 'سنان العقارية'],
+  ['thousand', '1000 العقارية'],
+  ['1000 العقارية', '1000 العقارية'],
+  ['yameen', 'يمين العقارية'],
+  ['يمين العقارية', 'يمين العقارية'],
+  ['ebriza', 'إبريزة العقارية'],
+  ['إبريزة العقارية', 'إبريزة العقارية'],
+  ['eilmalriyada', 'علم الريادة الإدارية'],
+  ['علم الريادة الإدارية', 'علم الريادة الإدارية'],
+  ['daryusuf', 'دار يوسف العقارية'],
+  ['دار يوسف العقارية', 'دار يوسف العقارية'],
+  ['albdah', 'البداح للعقارات'],
+  ['البداح للعقارات', 'البداح للعقارات'],
+  ['eydah', 'الإيضاح'],
+  ['الإيضاح', 'الإيضاح'],
+  ['tamyaz', 'تمايز العقارية'],
+  ['تمايز العقارية', 'تمايز العقارية'],
+  ['hazim', 'حازم'],
+  ['حازم', 'حازم'],
+  ['villassa', 'فلل'],
+  ['فلل', 'فلل'],
+  ['marksa', 'مار العقارية'],
+  ['مار العقارية', 'مار العقارية'],
+  ['rightcompound', 'RightCompound'],
+  ['livingcompound', 'LivingCompound'],
+  ['azure', 'Azure'],
+  ['expattrusted', 'Expat Trusted Housing'],
+  ['expat trusted housing', 'Expat Trusted Housing'],
+  ['flow', 'Flow'],
   ['aqar', 'Aqar'],
 ];
 
