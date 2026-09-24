@@ -171,7 +171,7 @@ def test_city_comes_from_the_url_segment_and_a_region_slug_is_refused():
 def test_district_is_written_only_when_the_catalog_attests_it():
     row = R.map_units(URL, page(U629))[0][0]
     assert row["district_ar"] == "حي المونسية" and row["neighborhood"] == "Al Munsiyah"
-    assert row["zip_code"] == "13422" and round(row["latitude"], 3) == 24.834
+    assert row["zip_code"] == "13422" and round(row["additional_info"]["latitude"], 3) == 24.834
     # A district sentence naming something the catalog does not carry writes NULL, raw text kept.
     row2 = R.map_units(URL, page(U629, dist="The compound is located in the Al Zahra District of Riyadh."))[0][0]
     assert row2["district_ar"] is None and row2["neighborhood"] == "Al Zahra"

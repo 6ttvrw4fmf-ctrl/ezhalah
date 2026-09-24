@@ -246,3 +246,19 @@ def test_main_tallies_every_skip_and_requires_the_site_counter_to_prune(monkeypa
         {"05WmN": ["apartment"], "09zJt": ["apartment"], "46XNr": ["chalet"], "22UzT": ["land"], "AAAAA": ["branch"]},
         10, ["05WmN"]))
     assert R.main() == 0 and calls["prune"] == [] and "complete=False" in calls["end"]["notes"]
+
+
+def test_a_complete_positive_controlled_catalogue_is_the_second_death_limb(monkeypatch):
+    """The law holds the measured Django DEBUG 500 as UNKNOWN; a removal is certified only when
+    THIS run's complete catalogue no longer lists the id AND the in-run control reads live."""
+    from scrapers.common import http_liveness as L
+    monkeypatch.setattr(L.time, "sleep", lambda s: None)
+    monkeypatch.setattr(R, "session", lambda: object())
+    served = {"/property/05WmN/details/": (200, D_05WmN, False), "/property/9/details/": (500, GONE_500, False)}
+    monkeypatch.setattr(L.LivenessProbe, "fetch", lambda self, url: served[url[len(R.BASE):]])
+    control = {"ad_number": "BDH05WmN"}
+    assert R._make_verify_gone(control, frozenset({"05WmN"}), True)("BDH9")[0] == "gone"
+    assert R._make_verify_gone(control, frozenset({"05WmN", "9"}), True)("BDH9")[0] == "unknown"   # still listed
+    assert R._make_verify_gone(control, frozenset({"05WmN"}), False)("BDH9")[0] == "unknown"       # incomplete run
+    assert R._make_verify_gone(None, frozenset({"05WmN"}), True)("BDH9")[0] == "unknown"           # no control → closed
+    assert R._make_verify_gone(control, frozenset({"05WmN"}), True)("BDH05WmN")[0] == "live"

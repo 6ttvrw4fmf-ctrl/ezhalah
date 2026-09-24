@@ -341,8 +341,6 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
             "price_annual": amount,
             # The platform's own statement, not a per-unit token: see the module header.
             "rent_period": "annual" if amount is not None else None,
-            "latitude": facts["lat"],
-            "longitude": facts["lng"],
             "zip_code": facts["postal"],
             "photo_urls": photos(page_html),
             "price_evidence": normalize.price_evidence(
@@ -350,6 +348,7 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
                 kind="annual", origin="structured"),
             "additional_info": {k: v for k, v in {
                 "unit_name": u["name"], "unit_id": u["villa_id"], "compound": facts["name"],
+                "latitude": facts["lat"], "longitude": facts["lng"],
                 "area_raw": a_raw, "unit_meta": u["meta"],
                 "period_statement": "platform: /api/v1/compounds rentPeriod=year; /llms.txt "
                                     "«Prices are ANNUAL rent in Saudi Riyals (SAR), not monthly»",

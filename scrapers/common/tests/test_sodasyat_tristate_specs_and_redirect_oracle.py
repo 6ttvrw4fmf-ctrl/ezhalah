@@ -189,7 +189,7 @@ def test_liveness_signal_reads_only_what_was_measured():
     assert R._signal(200, PAGE_2721, False) == "live"
     assert R._signal(200, "<html>something else</html>", False) is None
     assert R._signal(403, PAGE_2721, False) is None and R._signal(200, "", True) is None
-    assert R._probe.url_for("SDS2721") == "https://sodasyat.sa/single/2721" and R._probe.url_for("SDSx") is None
+    assert R._url_for("SDS2721") == "https://sodasyat.sa/single/2721" and R._url_for("SDSx") is None
 
 
 def _main_with(monkeypatch, search_html, calls):

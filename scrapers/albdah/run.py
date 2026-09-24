@@ -307,14 +307,22 @@ def _signal(status, body, _moved):
     return None
 
 
-def _make_verify_gone(control: Optional[dict]):
+def _make_verify_gone(control: Optional[dict], catalogue: frozenset = frozenset(), complete: bool = False):
     def probe(ad_number: str, canary=None):
         oid = ad_number[len(PREFIX):]
         if not oid:
             return "unknown", f"{ad_number!r} is not a {PREFIX}<id> ad number"
-        return LivenessProbe(platform="albdah", signal=_signal, session=session,
-                             url_for=lambda _ad: f"{BASE}/property/{oid}/details/",
-                             canary=canary).verify_gone(ad_number)
+        verdict, why = LivenessProbe(platform="albdah", signal=_signal, session=session,
+                                     url_for=lambda _ad: f"{BASE}/property/{oid}/details/",
+                                     canary=canary).verify_gone(ad_number)
+        # The law holds every 5xx as «about the source, not the listing», so the measured Django
+        # DEBUG 500 alone never certifies a removal. The second limb: this run's COMPLETE catalogue
+        # (site counter == ids listed), positive-controlled, no longer lists the id.
+        if verdict == "unknown" and complete and oid not in catalogue and canary is not None:
+            ok, cwhy = canary()
+            if ok:
+                return "gone", f"the site's complete catalogue ({len(catalogue)} ids) no longer lists it; {cwhy}"
+        return verdict, why
 
     def canary() -> tuple[bool, str]:
         if not control:
@@ -386,7 +394,7 @@ def main() -> int:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
         pruned = 0
         if args.type == "all" and complete:
-            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None, frozenset(by_id), complete)
             for tbl, rows in (("albdah_residential_listings", res), ("albdah_commercial_listings", com)):
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
                                     verify_gone=verify_gone)

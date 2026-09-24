@@ -217,7 +217,7 @@ def test_identity_title_fallback_and_photos():
 def test_a_published_name_is_the_title_verbatim():
     row, _, _ = _map({**SOLD_46701, "availability_status": "available"})       # documented edit
     assert row["title"] == "عمارة للبيع في موقع مميز على شارعين حي السلامة"
-    assert row["latitude"] == pytest.approx(21.612415335536)
+    assert row["additional_info"]["latitude"] == pytest.approx(21.612415335536)
 
 
 def test_phones_are_stripped_and_the_broker_licence_never_stored_but_the_ad_licence_is():

@@ -300,8 +300,22 @@ def _signal(status, body, path_changed):
     return None
 
 
-_probe = LivenessProbe(platform="sodasyat", signal=_signal, session=session,
-                       url_for=lambda ad: f"{BASE}/single/{ad[len(PREFIX):]}" if ad[len(PREFIX):].isdigit() else None)
+def _url_for(ad: str):
+    return f"{BASE}/single/{ad[len(PREFIX):]}" if ad[len(PREFIX):].isdigit() else None
+
+
+def _make_verify_gone(control):
+    def probe(ad_number: str, canary=None) -> tuple[str, str]:
+        return LivenessProbe(platform="sodasyat", signal=_signal, session=session, url_for=_url_for,
+                             canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def main() -> int:
@@ -367,8 +381,9 @@ def main() -> int:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
         pruned = 0
         if args.type == "all" and complete:
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
             for tbl, rows in (("sodasyat_residential_listings", res), ("sodasyat_commercial_listings", com)):
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE, verify_gone=_probe.verify_gone)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE, verify_gone=verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:

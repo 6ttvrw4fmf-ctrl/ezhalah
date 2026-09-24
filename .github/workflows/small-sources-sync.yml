@@ -138,6 +138,75 @@ jobs:
           #   ~56 min from a nearby egress; a US runner is slower per page, so 180 keeps >=2x
           #   headroom over a realistic ~90 min.
           - { source: sakan,       cmd: "python -m scrapers.sakan.run --type all", tmo: 180 }
+          # ── onboarded 2026-09-24: thirty-five platforms ───────────────────────────────────────
+          # Same shape as the 2026-09-21 batch above: one matrix job per platform, so one source
+          # down never hides another and each keeps its own run ledger. None reads WASALT_PROXY_URL
+          # or SCRAPE_PROXY_URL (grepped all 35 run.py files) — no `proxy:` flag. Every run.py
+          # takes `--type all` (its argparse default) and prunes ONLY on a complete `all` walk.
+          # `tmo` is sized from each scraper's MEASURED cost (its docstring: requests × (pause +
+          # response)) with >=2x headroom, because a job killed at its limit never reaches
+          # prune_unseen() or end_run() and leaves a dangling scrape_runs row (the dealapp lesson).
+          # The first scrape of each is a manual dispatch with `source: <slug>` (the input above).
+          #   dwelleo: RE-ONBOARDED 2026-09-24 (owner decision). 575 API pages + one detail record
+          #   per listing (~11.5k, sequential, ~0.8 s response + SCRAPE_MIN_INTERVAL) — measured
+          #   ~3.7 h for a full detailed walk. 360 is GitHub's hard job cap (6 h), so the headroom
+          #   is ~1.6x, below the 2x rule; run.py's documented fallback is `--no-detail` (~5 min,
+          #   one cover photo, no halls/amenity chips, no direct-alive stamp) if runs get killed at
+          #   the limit. The detailed walk is kept deliberately (listing fidelity over runtime).
+          #   KNOWN, NOT YET TUNED: mon_detect_dangling_scrape_run (migration 20260808062049) flags
+          #   any run still open after 3 h, so every healthy dwelleo run raises a false "dangling"
+          #   alert that self-resolves at end_run — that detector needs a per-platform floor
+          #   (dwelleo >= 6 h) before this line goes live, or the daily alert must be acked.
+          - { source: dwelleo,        cmd: "python -m scrapers.dwelleo.run --type all", tmo: 360 }
+          #   aqalemhajer: 25 index pages (0.5 s pause) + ~1,229 detail pages (0.3 s pause). Its
+          #   docstring records no live wall-clock (coverage was measured offline over saved
+          #   pages): ~27 min at a 1 s response, ~47 min at 2 s from a US runner. 90 (the workflow
+          #   default) keeps >=2x at 2 s; re-size from the first dispatched run's duration.
+          - { source: aqalemhajer,    cmd: "python -m scrapers.aqalemhajer.run --type all", tmo: 90 }
+          #   sakani: 15 API pages + 282 detail records at 1.5 s (measured 740 s dry run).
+          - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 45 }
+          #   API / REST sources whose whole catalogue is one page or a handful of calls:
+          - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20 }
+          - { source: almuteb,        cmd: "python -m scrapers.almuteb.run --type all", tmo: 20 }
+          - { source: aalbarrak,      cmd: "python -m scrapers.aalbarrak.run --type all", tmo: 20 }
+          - { source: aqaralriyadh,   cmd: "python -m scrapers.aqaralriyadh.run --type all", tmo: 20 }
+          - { source: snam,           cmd: "python -m scrapers.snam.run --type all", tmo: 20 }
+          - { source: goldendeal,     cmd: "python -m scrapers.goldendeal.run --type all", tmo: 20 }
+          - { source: yameen,         cmd: "python -m scrapers.yameen.run --type all", tmo: 20 }
+          - { source: tamyaz,         cmd: "python -m scrapers.tamyaz.run --type all", tmo: 20 }
+          - { source: hazim,          cmd: "python -m scrapers.hazim.run --type all", tmo: 20 }
+          #   jawher / m3tmd / senan: one API engine (scrapers/jawher/run.py), 145 / 46 / 82 detail
+          #   records each, 0.4 s apart.
+          - { source: jawher,         cmd: "python -m scrapers.jawher.run --type all", tmo: 20 }
+          - { source: m3tmd,          cmd: "python -m scrapers.m3tmd.run --type all", tmo: 20 }
+          - { source: senan,          cmd: "python -m scrapers.senan.run --type all", tmo: 20 }
+          #   Small HTML catalogues — tens of detail pages at <=1 s each:
+          - { source: alqasem,        cmd: "python -m scrapers.alqasem.run --type all", tmo: 20 }
+          - { source: fkralemar,      cmd: "python -m scrapers.fkralemar.run --type all", tmo: 20 }
+          - { source: wadod,          cmd: "python -m scrapers.wadod.run --type all", tmo: 20 }
+          - { source: alrifai,        cmd: "python -m scrapers.alrifai.run --type all", tmo: 20 }
+          - { source: sodasyat,       cmd: "python -m scrapers.sodasyat.run --type all", tmo: 20 }
+          - { source: hasaad,         cmd: "python -m scrapers.hasaad.run --type all", tmo: 20 }
+          - { source: justsa,         cmd: "python -m scrapers.justsa.run --type all", tmo: 20 }
+          - { source: albdah,         cmd: "python -m scrapers.albdah.run --type all", tmo: 20 }
+          - { source: eydah,          cmd: "python -m scrapers.eydah.run --type all", tmo: 20 }
+          - { source: villassa,       cmd: "python -m scrapers.villassa.run --type all", tmo: 20 }
+          - { source: marksa,         cmd: "python -m scrapers.marksa.run --type all", tmo: 20 }
+          #   thousand: 105 cards + 105 detail pages at 0.5 s (measured 383 s).
+          - { source: thousand,       cmd: "python -m scrapers.thousand.run --type all", tmo: 20 }
+          #   ebriza: 22 API pages + one POST detail per record (207) at 0.7 s.
+          - { source: ebriza,         cmd: "python -m scrapers.ebriza.run --type all", tmo: 20 }
+          #   eilmalriyada: one catalogue call + 283 gallery records at 0.6 s.
+          - { source: eilmalriyada,   cmd: "python -m scrapers.eilmalriyada.run --type all", tmo: 20 }
+          #   daryusuf: 3 REST pages + one page per post (290) at 1.0 s.
+          - { source: daryusuf,       cmd: "python -m scrapers.daryusuf.run --type all", tmo: 30 }
+          #   Compound sites (one row per unit type; the compound page is the unit of work):
+          #   rightcompound walks 254 compound pages at 0.8 s; the other four walk 4-43 pages.
+          - { source: rightcompound,  cmd: "python -m scrapers.rightcompound.run --type all", tmo: 30 }
+          - { source: livingcompound, cmd: "python -m scrapers.livingcompound.run --type all", tmo: 20 }
+          - { source: azure,          cmd: "python -m scrapers.azure.run --type all", tmo: 20 }
+          - { source: expattrusted,   cmd: "python -m scrapers.expattrusted.run --type all", tmo: 20 }
+          - { source: flow,           cmd: "python -m scrapers.flow.run --type all", tmo: 20 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }

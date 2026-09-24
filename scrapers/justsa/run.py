@@ -300,7 +300,18 @@ def _url_for(ad_number: str) -> Optional[str]:
     return f"{BASE}/l/{m.group(1)}" if m else None
 
 
-_probe = LivenessProbe(platform="justsa", signal=_signal, session=session, url_for=_url_for)
+def _make_verify_gone(control):
+    def probe(ad_number: str, canary=None) -> tuple[str, str]:
+        return LivenessProbe(platform="justsa", signal=_signal, session=session, url_for=_url_for,
+                             canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def main() -> int:
@@ -370,10 +381,11 @@ def main() -> int:
         pruned = 0
         # Only after a COMPLETE enumeration (the site's own total agrees), never on --type.
         if args.type == "all" and len(units) >= total:
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
             for tbl, rows in (("justsa_residential_listings", res),
                               ("justsa_commercial_listings", com)):
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
-                                    verify_gone=_probe.verify_gone)
+                                    verify_gone=verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:
