@@ -13,7 +13,7 @@ import { withPage, settle, bodyText, storedHistory, clickText, clickReason, slee
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
-         SELECTED_CITY_MARKER } from './harness.mjs';
+         SELECTED_CITY_MARKER, isBottomDocked } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -1426,7 +1426,8 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
       const r = await page.evaluate((sel) => {
         for (const f of document.querySelectorAll(sel)) {
           const q = f.getBoundingClientRect();
-          if (q.height > 0) return { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height) };
+          if (q.height > 0) return { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height),
+            height: q.height, vh: window.innerHeight, vw: window.innerWidth };
         }
         return null;
       }, SHEET_SEL);
@@ -1507,7 +1508,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     // Desktop's prompt sits in a corner rather than docked, so «بحث» needs no reserved space there —
     // but the mode-switch check below still runs, because a corner prompt on a 1440px viewport can
     // still land on a control near the top edge, and "not bottom-docked" says nothing about that.
-    const desktopCornerPrompt = sheet.bottom < 660 && !mobile;
+    const desktopCornerPrompt = !isBottomDocked(sheet, sheet.vh) && !mobile;
     if (desktopCornerPrompt) pass(name, `desktop prompt is not bottom-docked (${sheet.top}-${sheet.bottom})`);
 
 
@@ -1572,7 +1573,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     await sleep(3500);
     const sheet = await waitForSheet(page);
     if (!sheet) { skip(`${name}/composer`, 'Google never showed the One Tap prompt this run'); return; }
-    if (sheet.bottom < 660 && !mobile) { pass(`${name}/composer`, 'desktop prompt is not bottom-docked'); return; }
+    if (!isBottomDocked(sheet, sheet.vh) && !mobile) { pass(`${name}/composer`, 'desktop prompt is not bottom-docked'); return; }
     const comp = await winnerAt(page, 'composer');
     if (comp.missing) { skip(`${name}/composer`, 'no composer on this screen'); return; }
     if (!comp.isSelf) {
