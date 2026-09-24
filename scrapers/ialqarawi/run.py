@@ -352,6 +352,25 @@ def _parse_million(txt: str, low: str) -> tuple[Optional[int], Optional[int], st
     return None, None, "million_second_term_unit_unstated"
 
 
+# An AREA is not a price, and this is the one place the two grammars must part company.
+# `_to_amount` reads «X.YYY» as thousands-GROUPED, which is right for this office's price cells
+# («3850.000» is 3,850,000 — measured). Applied to an area it silently multiplies by 1000 the one
+# shape a surveyed land area actually takes: metre² to the mm², «361788.431م». Listing QRW3566
+# (أرض زراعية شمال عنيزة) was served at 361,788,431 m² — 362 km², larger than the governorate —
+# because of exactly this, while its own source string says 361788.431 and its own description
+# gives frontages of 316.64 m / 245.70 m / 698.97 m / 504 m.
+#
+# A head of 1-3 digits is canonical grouping; a 4-digit head is this office's «1500.000» = «1500
+# thousand» shorthand. Both are unambiguous and stay. At 5+ digits the token reads equally well as
+# a plain decimal, the two readings differ by 1000x, and NOTHING in the stored capture can settle
+# it (ialqarawi rows carry an auto.v1-fallback source_capture with no raw HTML). So the parser
+# ABSTAINS: honest NULL beats a guess, and area_raw keeps the exact string for a future probe.
+# Measured over the complete vocabulary — all 2,568 ialqarawi rows, 150 separator strings: heads of
+# 1-4 digits are 149 correct rows, and a 5+ digit head has exactly one instance, the defect above.
+# parse_money is deliberately NOT touched: a price is never written to three decimals.
+_AMBIGUOUS_SEPARATOR_RE = re.compile(r"\d{5,}[.,]\d{3}")
+
+
 def parse_area(raw: Optional[str]) -> tuple[Optional[int], str]:
     """«526م» / «600 م الاجمالي» / «25.000» → m². A per-unit or range area is not the listing's."""
     txt = _clean(raw)
@@ -362,6 +381,8 @@ def parse_area(raw: Optional[str]) -> tuple[Optional[int], str]:
     tok = _one_number(txt)
     if not tok:
         return None, "multiple_numbers" if _NUM_RE.search(_strip_units(txt)) else "no_digits"
+    if _AMBIGUOUS_SEPARATOR_RE.fullmatch(tok):
+        return None, "ambiguous_thousands_or_decimal"
     val, _ = _to_amount(tok)
     if val is None or val <= 0:
         return None, "unparseable"

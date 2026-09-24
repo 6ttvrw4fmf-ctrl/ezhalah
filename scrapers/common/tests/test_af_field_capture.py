@@ -218,15 +218,31 @@ def test_an_ad_licence_in_prose_is_anchored_on_its_label() -> None:
 # The 2026-09-21 batch. Land answers ONLY street width + facade, so a parser that files those in
 # additional_info leaves every plot out of the AF (#3349 — almotmkenah shipped exactly that). Code
 # SHAPE, not a comment: the key must be WRITTEN into a row. gomenassat's source publishes neither.
-@pytest.mark.parametrize("slug", ["alsidra", "moftah", "masar", "sakan", "bossbih", "alshawaf",
-                                  "ialqarawi", "aljassim", "almotmkenah", "nufouth"])
-def test_batch_0921_parsers_write_the_street_facts(slug: str) -> None:
+def _keys_written_by(slug: str) -> set:
     import ast
     tree = ast.parse((REPO / "scrapers" / slug / "run.py").read_text(encoding="utf-8"))
     keys = {k.value for n in ast.walk(tree) if isinstance(n, ast.Dict)
             for k in n.keys if isinstance(k, ast.Constant)}
     keys |= {n.slice.value for n in ast.walk(tree) if isinstance(n, ast.Subscript)
              and isinstance(n.ctx, ast.Store) and isinstance(n.slice, ast.Constant)}
+    return keys
+
+
+@pytest.mark.parametrize("slug", ["alsidra", "moftah", "masar", "sakan", "bossbih", "alshawaf",
+                                  "ialqarawi", "aljassim", "almotmkenah", "nufouth"])
+def test_batch_0921_parsers_write_the_street_facts(slug: str) -> None:
+    keys = _keys_written_by(slug)
+    assert {"street_width_m", "direction"} <= keys, f"{slug} never writes {'street_width_m', 'direction'} - keys"
+
+
+# The 2026-09-24 batch: the thirteen whose sources publish a street width / facade (each run.py
+# docstring measures the label; m3tmd and senan write through jawher's engine). The other
+# twenty-two publish neither, like gomenassat above, and are not asserted.
+@pytest.mark.parametrize("slug", ["dwelleo", "aqalemhajer", "sakani", "alqasem", "aalbarrak",
+                                  "sodasyat", "justsa", "jawher", "goldendeal", "ebriza",
+                                  "eilmalriyada", "daryusuf", "villassa"])
+def test_batch_0924_parsers_write_the_street_facts(slug: str) -> None:
+    keys = _keys_written_by(slug)
     assert {"street_width_m", "direction"} <= keys, f"{slug} never writes {'street_width_m', 'direction'} - keys"
 
 

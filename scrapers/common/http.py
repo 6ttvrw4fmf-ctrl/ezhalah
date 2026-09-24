@@ -107,7 +107,8 @@ IMPERSONATE_ORDER = ("chrome", "safari17_0", "firefox133", "edge101", "safari15_
 
 def negotiated_session(probe_url: str, *, order: tuple[str, ...] = IMPERSONATE_ORDER,
                        headers: Optional[dict] = None, timeout: int = 40,
-                       served=lambda r: r.status_code == 200) -> cc.Session:
+                       served=lambda r: r.status_code == 200,
+                       proxies: Optional[dict] = None) -> cc.Session:
     """A session whose TLS fingerprint this host actually answers, chosen by probing it once.
 
     The chosen profile is recorded on the session as `_impersonate_profile` so a run can log it.
@@ -116,7 +117,10 @@ def negotiated_session(probe_url: str, *, order: tuple[str, ...] = IMPERSONATE_O
     """
     last = ""
     for prof in order:
-        s = cc.Session(impersonate=prof)   # impersonate OWNS the User-Agent — never set one here
+        # proxies= (2026-09-24): a host walled through the residential proxy answers a DIFFERENT profile
+        # than it does directly (sakani: chrome → 403 page, safari17_0 → 200), so the probe must ride
+        # the same route the run will use.
+        s = cc.Session(impersonate=prof, proxies=proxies)   # impersonate OWNS the User-Agent — never set one here
         if headers:
             s.headers.update(headers)
         try:

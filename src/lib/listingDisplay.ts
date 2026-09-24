@@ -53,6 +53,7 @@ export function sourceName(source: string): string {
   if (s.includes('aldarim')) return 'Aldarim Real Estate';
   if (s.includes('aqargate')) return 'Aqar Gate';
   if (s.includes('alhoshan')) return 'Al Hoshan';
+  if (s.includes('aqalemhajer') || s.includes('مكتب أقاليم هجر للخدمات العقارية')) return 'Aqalem Hajer Real Estate Services Office'; // 2026-09-24: BEFORE 'hajer', which 'aqalemhajer' contains
   if (s.includes('hajer')) return 'Hajer Houses Real Estate';
   if (s.includes('sanadak')) return 'Sanadak';
   if (s.includes('eastabha')) return 'East Abha Real Estate';
@@ -100,6 +101,7 @@ export function sourceName(source: string): string {
   if (s.includes('jurash')) return 'Jurash Real Estate';
   if (s.includes('al nokhba') || s.includes('alnokhba')) return 'Al Nokhba';
   if (s.includes('gathern')) return 'Gathern';
+  if (s.includes('goldendeal') || s.includes('الصفقة الذهبية العقارية')) return 'Golden Deal Real Estate'; // 2026-09-24: BEFORE 'deal', which 'goldendeal' contains
   if (s.includes('deal')) return 'Deal App';
   if (s.includes('souq')) return '24 Souq';
   if (s.includes('pulse')) return 'Era Pulse';
@@ -133,6 +135,7 @@ export function sourceName(source: string): string {
   if (s.includes('moftah') || s.includes('مفتاح العقار')) return 'Moftah Al Aqar';
   if (s.includes('masar') || s.includes('مسار المستقبل')) return 'Masar Al Mustaqbal Real Estate';
   if (s.includes('menassat') || s.includes('منصات')) return 'Menassat Real Estate';
+  if (s.includes('sakani') || s.includes('سكني')) return 'Sakani'; // 2026-09-24: BEFORE 'sakan', which 'sakani' contains
   if (s.includes('sakan')) return 'Sakan';
   if (s.includes('bossbih') || s.includes('بوصبيح')) return 'Bossbih Real Estate Office';
   if (s.includes('alshawaf') || s.includes('al shawaf') || s.includes('الشواف')) return 'Al Shawaf Real Estate Office';
@@ -140,6 +143,40 @@ export function sourceName(source: string): string {
   if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return 'Al Jassim Real Estate Services';
   if (s.includes('almotmkenah') || s.includes('المتمكنة')) return 'Almotmkenah Real Estate';
   if (s.includes('nufouth') || s.includes('نفوذ')) return 'Nufouth Development Real Estate';
+  // onboarded 2026-09-24 (batch 36) — LAST, same contract as above. Each tests the stored `source` (the
+  // scraper's SOURCE constant) and the slug; Arabic tokens are the WHOLE stored source string.
+  if (s.includes('dwelleo') || s.includes('دويليو')) return 'Dwelleo';
+  if (s.includes('shatri') || s.includes('الشاطري للتطوير العقاري')) return 'Shatri Real Estate Development';
+  if (s.includes('alqasem') || s.includes('القاسم العقارية')) return 'Alqasem Real Estate';
+  if (s.includes('fkralemar') || s.includes('فكر الإعمار')) return 'Fkr Alemar';
+  if (s.includes('wadod') || s.includes('ودود العقارية')) return 'Wadod Real Estate';
+  if (s.includes('almuteb') || s.includes('آل متعب العقارية')) return 'Al Muteb Real Estate';
+  if (s.includes('aalbarrak') || s.includes('البراك للعقارات')) return 'Al Barrak Real Estate';
+  if (s.includes('alrifai') || s.includes('الرفاعي للعقار')) return 'Al Rifai Real Estate';
+  if (s.includes('sodasyat') || s.includes('سداسيات العقارية')) return 'Sodasyat Real Estate';
+  if (s.includes('hasaad') || s.includes('حصاد الاقتصادية للعقارات')) return 'Hasaad Economic Real Estate';
+  if (s.includes('aqaralriyadh') || s.includes('عقار الرياض')) return 'Aqar Alriyadh';
+  if (s.includes('justsa') || s.includes('فقط نقطة العقارية')) return 'Just Real Estate';
+  if (s.includes('snam') || s.includes('سنام العقارية')) return 'Snam Real Estate';
+  if (s.includes('jawher') || s.includes('جواهر للوساطة والتسويق العقاري')) return 'Jawher Real Estate Brokerage';
+  if (s.includes('m3tmd') || s.includes('مقر المعتمد')) return 'Maqar Al Motamad';
+  if (s.includes('senan') || s.includes('سنان العقارية')) return 'Senan Real Estate';
+  if (s.includes('thousand') || s.includes('1000 العقارية')) return '1000 Real Estate';
+  if (s.includes('yameen') || s.includes('يمين العقارية')) return 'Yameen Real Estate';
+  if (s.includes('ebriza') || s.includes('إبريزة العقارية')) return 'Ebriza Real Estate';
+  if (s.includes('eilmalriyada') || s.includes('علم الريادة الإدارية')) return 'Eilm Alriyada';
+  if (s.includes('daryusuf') || s.includes('دار يوسف العقارية')) return 'Dar Yusuf Real Estate';
+  if (s.includes('albdah') || s.includes('البداح للعقارات')) return 'Albdah Real Estate';
+  if (s.includes('eydah') || s.includes('الإيضاح')) return 'Eydah';
+  if (s.includes('tamyaz') || s.includes('تمايز العقارية')) return 'Tamyaz Real Estate';
+  if (s.includes('hazim') || s.includes('حازم')) return 'Hazim';
+  if (s.includes('villassa') || s.includes('فلل')) return 'Villas SA';
+  if (s.includes('marksa') || s.includes('مار العقارية')) return 'Mar Real Estate';
+  if (s.includes('rightcompound')) return 'RightCompound';
+  if (s.includes('livingcompound')) return 'LivingCompound';
+  if (s.includes('azure')) return 'Azure';
+  if (s.includes('expattrusted') || s.includes('expat trusted housing')) return 'Expat Trusted Housing';
+  if (s.includes('flow')) return 'Flow';
   return 'AQAR';
 }
 
