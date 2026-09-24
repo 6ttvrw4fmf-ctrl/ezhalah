@@ -35,6 +35,10 @@ on:
         description: "PILOT ONLY: skip the 4.5h enum and run the strike step against the LAST completed enum (must be <36h old, else the coverage guard refuses). For repeatable pilots."
         type: boolean
         default: false
+      repair_clock_bug_backlog:
+        description: "ONE-TIME (ops_incident, routine #11, 2026-09-24): run --mode repair-clock-bug-backlog instead of the normal enum+strike, to resolve the confirm-eligible backlog the rollup clock bug produced. Structurally cannot deactivate a listing — see run_repair_clock_bug_backlog()'s docstring. Leave false for every ordinary run."
+        type: boolean
+        default: false
 
 concurrency:
   group: wasalt-enum-liveness
@@ -43,7 +47,9 @@ concurrency:
 jobs:
   enum:
     name: Enum ${{ matrix.slug }} ${{ matrix.deal }}
-    if: ${{ !inputs.skip_enum }}      # PILOT skip: run strike against the last completed enum
+    # PILOT skip (run strike against the last completed enum) OR the one-time repair dispatch —
+    # either way the 4.5h enum has no reason to run.
+    if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
     runs-on: ubuntu-latest
     # SHARDED 2026-09-19. This was ONE job walking ~3,300 pages. Through the browser that is
     # 10-16h (measured ~11-18 s/page) against GitHub's 6h hosted-runner ceiling: run 35416642741
@@ -214,4 +220,34 @@ jobs:
             --grace 3 \
             --workers 1 \
             --confirm-limit ${{ inputs.confirm_limit || '1500' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+  repair:
+    name: ONE-TIME — repair the clock-bug backlog (does not touch active)
+    if: ${{ inputs.repair_clock_bug_backlog == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
+      - name: Repair (direct-check every row at grace — can only write missing_count 0 or 1)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
+          SCRAPE_MIN_INTERVAL: "0.3"
+        run: |
+          exec xvfb-run -a python -m scrapers.wasalt.liveness \
+            --mode repair-clock-bug-backlog \
+            --grace 3 \
+            --workers 1 \
             ${{ inputs.dry_run && '--dry-run' || '' }}
