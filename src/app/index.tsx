@@ -322,6 +322,64 @@ export default function Home() {
   const cityAfSig = JSON.stringify(cityAfRaw);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cityAfParams = useMemo(() => cityAfRaw, [cityAfSig]);
+  // THE COHORT A SUGGESTION LIST WAS COMPUTED FOR IS PART OF ITS TRUTH (routine #8, 2026-09-23,
+  // ops_incident #648 — the class behind the onFocus race guard, surviving on a sibling dimension).
+  //
+  // Every city/district pool continuation below already re-checks ONE thing at resolution time: the
+  // LIVE typed text, via cityTextRef/districtTextRef. The guard that put it there says why, in the
+  // onFocus handler's own words: *"Re-check the LIVE text … at resolution time, not the value
+  // captured in this closure at focus time."* It then re-checks exactly one of the six values the
+  // closure captured. The other five — deal, rent period, category, cohort types and the AF/table
+  // scope — ARE the pool's cache key, so a continuation that resolves after the user has left its
+  // cohort writes the ABANDONED cohort's ranking and its «N إعلان» counts, and nothing re-runs to
+  // correct them until the next keystroke or focus.
+  //
+  // Reachable without any network variance, because the pools are promise-cached per key: leave a
+  // slow uncached cohort for one that is already warm (a type chip tapped twice — فيلا, then back to
+  // شقة) and the warm cohort resolves FIRST, correctly, then the abandoned fetch lands on top of it.
+  // MEASURED on production that day, إيجار/سنوي/Residential: a stale فيلا list on a شقة form shows
+  // الرياض 4,090 where the apartment truth is 11,167 and جدة 805 where it is 6,232 — a 2.7x and 7.7x
+  // understatement, ranks 3/4 swapped and المدينة المنورة replaced by الجبيل. The owner's rule for
+  // these numbers (2026-08-13) is that the number beside a location is what selecting it returns
+  // UNDER THE CURRENT SELECTIONS, so a stale-cohort count is wrong data, not a stale nicety.
+  //
+  // The check is the cohort ITSELF, not a monotonic request id: a user who leaves شقة and comes back
+  // to it is owed the in-flight شقة list, which a counter would discard as superseded.
+  const cityCohortSig = `${effDeal ?? ''}|${rentPeriodTok ?? ''}|${effCategory}|${cohortTypesSig}|${cityAfSig}`;
+  const districtCohortSigOf = (cityId: number) =>
+    `${cityId}|${effDeal ?? ''}|${rentPeriodTok ?? ''}|${effCategory}|${cohortTypesSig}|${cityTableScopeSig}`;
+  const cityCohortRef = useRef(cityCohortSig);
+  const districtCohortRef = useRef(citySelected ? districtCohortSigOf(citySelected.cityId) : '');
+  // Declared ABOVE every pool effect on purpose: effects commit in declaration order, so the live
+  // cohort is already updated by the time the effect that starts the new fetch runs.
+  useEffect(() => { cityCohortRef.current = cityCohortSig; }, [cityCohortSig]);
+  useEffect(() => {
+    districtCohortRef.current = citySelected ? districtCohortSigOf(citySelected.cityId) : '';
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [citySelected, effDeal, rentPeriodTok, effCategory, cohortTypesSig, cityTableScopeSig]);
+  // ONE WRITER PER DROPDOWN, so the cohort check cannot be missing at a fifth call site the way the
+  // live-text check was present at all of them and the cohort check at none. `cohort` is captured by
+  // the caller BEFORE it starts the pool load; `showTopWhenEmpty` is that caller's own rule for what
+  // an empty field should show (the mount/narrowing effects show the Top-6 only while the field is
+  // actually open; a retry or a focus always does).
+  const writeCitySuggestionsForCohort = (cohort: string, showTopWhenEmpty: boolean) => {
+    if (cityCohortRef.current !== cohort) return; // the user left this cohort while it was loading
+    if (cityTextRef.current) {
+      const latin = isLatinOnlyInput(cityTextRef.current);
+      setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes, cityAfParams));
+    } else if (showTopWhenEmpty) {
+      setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
+    }
+  };
+  const writeDistrictSuggestionsForCohort = (cityId: number, cohort: string, showTopWhenEmpty: boolean) => {
+    if (districtCohortRef.current !== cohort) return;
+    if (districtTextRef.current) {
+      const latin = isLatinOnlyInput(districtTextRef.current);
+      setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cityId, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes, cityTableScope));
+    } else if (showTopWhenEmpty) {
+      setDistrictSuggestions(topDistrictsForCityId(cityId, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
+    }
+  };
   // «N إعلان» — how many ACTIVE listings this option really has, in the current cohort.
   //
   // The share percentage that used to trail this label («… · 38٪») was REMOVED on owner instruction
@@ -482,6 +540,7 @@ export default function Home() {
   // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
   // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
   useEffect(() => {
+    const cohort = cityCohortSig;
     void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then((pool) => {
       // EDGE CASE (found in testing, generalizes to every deal change too): a fetch can still be
       // pending when the user has already focused AND typed a query — matchCitiesByText() would have
@@ -490,12 +549,7 @@ export default function Home() {
       // Re-run against whatever text is currently live, or — if the field is showing its empty-focus
       // Top-6 — refresh that list too, so flipping Buy↔Rent visibly reorders it (owner request:
       // replay only "when the section first appears or when the rankings change").
-      if (cityTextRef.current) {
-        const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes, cityAfParams));
-      } else if (cityFocus) {
-        setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
-      }
+      writeCitySuggestionsForCohort(cohort, cityFocus);
       // REHYDRATION (bug fix 2026-08-04): returning to this screen after a search REMOUNTS it —
       // query.location persists in the app context (the field still shows the city), but
       // citySelected is local state and comes back null, so pressing Search on an untouched,
@@ -549,13 +603,9 @@ export default function Home() {
   // WITHOUT touching rehydration: this effect never sets citySelected, so it cannot disturb the form.
   useEffect(() => {
     if (!cityFocus && !cityTextRef.current) return;
+    const cohort = cityCohortSig;
     void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then(() => {
-      if (cityTextRef.current) {
-        const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes, cityAfParams));
-      } else if (cityFocus) {
-        setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
-      }
+      writeCitySuggestionsForCohort(cohort, cityFocus);
     });
     // resumeTick (2026-09-11): app resumed from background — re-check with the SAME "field in use"
     // gate above, so a resume while the field is closed stays a no-op (the TTL in locations.ts will
@@ -574,13 +624,9 @@ export default function Home() {
   useEffect(() => {
     if (!citySelected) return;
     const cid = citySelected.cityId;
+    const cohort = districtCohortSigOf(cid);
     void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).then(() => {
-      if (districtTextRef.current) {
-        const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes, cityTableScope));
-      } else if (districtFocus) {
-        setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
-      }
+      writeDistrictSuggestionsForCohort(cid, cohort, districtFocus);
     });
     // resumeTick (2026-09-11): same app-resume refresh as the city effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -726,16 +772,38 @@ export default function Home() {
   // (ARABIC_ONLY_MSG under the field) and must keep it, unchanged.
   const cityLatin = !!query.location && isLatinOnlyInput(query.location);
   const cityStatus = cityPoolStatus(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams);
-  const cityZeroRow: 'loading' | 'error' | 'empty' | null =
-    citySuggestions.length > 0 || cityLatin ? null
-      : cityStatus !== 'ready' ? cityStatus
-      : query.location ? 'empty' : null;
+  // A NON-EMPTY LIST IS NOT EVIDENCE THAT THIS COHORT HAS LOADED (routine #8, 2026-09-23, #648).
+  // The status test used to sit BELOW the length test, so any rows already on screen suppressed the
+  // «جاري التحميل…» row — and after a cohort change those rows belong to the cohort the user LEFT,
+  // because nothing clears the list when the pool key changes.
+  //
+  // OBSERVED IN A REAL BROWSER on https://ezhalah-app.vercel.app, reading the dropdown's OWN
+  // container (a first attempt read the page body and its numbers were a parsing artifact; these are
+  // not). شراء + سكني settled, then the category switched to تجاري with the commercial city pool
+  // held open — the dropdown kept all six residential rows, `loading: false`, `error: false`:
+  //     shown under تجاري   الرياض 42,249 · جدة 29,532 · الدمام 7,664 · الهفوف 7,565 · الخبر 6,253 · مكة 6,153
+  //     commercial truth    الرياض  3,994 · جدة  3,326 · بريدة 1,900 · المدينة 1,667 · الدمام 1,162 · مكة 1,112
+  // الرياض overstated 10.6x and جدة 8.9x; الهفوف and الخبر are not in the commercial top six at all,
+  // while بريدة and المدينة المنورة, which are, were absent. The displayed rows matched
+  // top_cities_by_deal_ar(بيع, Residential) exactly, which is how the reader was confirmed to be
+  // reading the real dropdown. Ordering the status test FIRST replaces them with «جاري التحميل…» (cityZeroRow
+  // REPLACES the list in the render below, it does not sit above it), which is the same rule the
+  // district live-count effect states in its own words 60 lines up: *"Any relevant filter change
+  // invalidates the previous counts IMMEDIATELY (stale numbers are the bug, not a fallback)."*
+  // ONE rule, shared by both dropdowns, so the ordering cannot drift apart between them.
+  const zeroRowFor = (
+    latin: boolean, status: 'loading' | 'error' | 'ready', rows: number, whenEmpty: 'empty' | null,
+  ): 'loading' | 'error' | 'empty' | null =>
+    latin ? null
+      : status !== 'ready' ? status   // THIS cohort has not loaded — rows on screen are another cohort's
+      : rows > 0 ? null
+      : whenEmpty;
+  const cityZeroRow = zeroRowFor(cityLatin, cityStatus, citySuggestions.length, query.location ? 'empty' : null);
   const districtLatin = !!districtText && isLatinOnlyInput(districtText);
   const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope) : 'loading';
-  const districtZeroRow: 'loading' | 'error' | 'empty' | null =
-    !citySelected || districtSuggestions.length > 0 || districtLatin ? null
-      : districtStatus !== 'ready' ? districtStatus
-      : 'empty'; // covers both "no districts with listings" (empty focus) and a typed no-match
+  // covers both "no districts with listings" (empty focus) and a typed no-match
+  const districtZeroRow = !citySelected ? null
+    : zeroRowFor(districtLatin, districtStatus, districtSuggestions.length, 'empty');
   // Tap-to-retry for the error row: re-run the ensure (the failed promise was evicted, so this is a
   // real refetch), and keep the box open across the tap — the row press blurs the input, so cancel
   // the pending close and put focus straight back, same pattern as districtOnPress below.
@@ -743,13 +811,9 @@ export default function Home() {
     clearBlurTimer(cityBlurTimer);
     cityRef.current?.focus();
     setCitySuggestions([]); // fresh [] reference → re-render → the row flips to «جاري التحميل…»
+    const cohort = cityCohortSig;
     void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then(() => {
-      if (cityTextRef.current) {
-        const latin = isLatinOnlyInput(cityTextRef.current);
-        setCitySuggestions(latin ? [] : matchCitiesByText(effDeal, rentPeriodTok, effCategory, cityTextRef.current, cohortTypes, cityAfParams));
-      } else {
-        setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
-      }
+      writeCitySuggestionsForCohort(cohort, true);
     });
   };
   const retryDistrictPool = () => {
@@ -758,13 +822,9 @@ export default function Home() {
     clearBlurTimer(districtBlurTimer);
     districtRef.current?.focus();
     setDistrictSuggestions([]);
+    const cohort = districtCohortSigOf(cid);
     void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).then(() => {
-      if (districtTextRef.current) {
-        const latin = isLatinOnlyInput(districtTextRef.current);
-        setDistrictSuggestions(latin ? [] : matchDistrictsByCityId(cid, effDeal, effCategory, rentPeriodTok, districtTextRef.current, cohortTypes, cityTableScope));
-      } else {
-        setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
-      }
+      writeDistrictSuggestionsForCohort(cid, cohort, true);
     });
   };
 
@@ -1383,9 +1443,14 @@ export default function Home() {
                     // filtered results with stale ones. Re-check the LIVE text via cityTextRef (kept
                     // in sync on every keystroke below) at resolution time, not the value captured in
                     // this closure at focus time.
+                    // BOTH halves of that sentence are now enforced in ONE place: the live text AND
+                    // the live COHORT are re-read inside writeCitySuggestionsForCohort, because the
+                    // deal/period/category/types/scope this callback closed over are the pool's cache
+                    // key and were the one captured value nobody re-checked (2026-09-23, #648).
                     if (!query.location) {
+                      const cohort = cityCohortSig;
                       void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then(() => {
-                        if (!cityTextRef.current) setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
+                        writeCitySuggestionsForCohort(cohort, true);
                       });
                     } else {
                       // P2 fix: the field already holds text (a confirmed pick, or mid-typing
@@ -1574,8 +1639,9 @@ export default function Home() {
                     // re-check the live text via districtTextRef before showing the Top-6.
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
+                      const cohort = districtCohortSigOf(cid);
                       void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).then(() => {
-                        if (!districtTextRef.current) setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope));
+                        writeDistrictSuggestionsForCohort(cid, cohort, true);
                       });
                     } else if (!isLatinOnlyInput(districtTextRef.current)) {
                       // P2 — refocusing mid-typing shows the current matches, not an empty box.
