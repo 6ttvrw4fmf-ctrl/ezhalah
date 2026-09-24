@@ -23,6 +23,45 @@ const N = Number(process.env.JOURNEY_N || 2);
 /** Type like a person: one key at a time, through React's real event path. */
 const typeInto = async (loc, text) => { await loc.click(); await loc.pressSequentially(text, { delay: 60 }); };
 
+/** The TOP dock, in the shape WebKit and Firefox really serve (ops_incident #202): a STATIC gsi
+ *  iframe whose only positioning box is a `position: fixed` #credential_picker_container.
+ *
+ *  ONE definition, two callers. `both-edges-docked-clears-controls` asks whether the HOME screen's
+ *  controls stay clear of it; `support-close-survives-a-top-dock` asks the same of an OVERLAY's own
+ *  dismiss control. Two hand-maintained copies of "what the engines really serve" is precisely the
+ *  drift this repo keeps paying for, so the shape lives here and neither journey owns it.
+ *
+ *  WHY INJECT AT ALL, rather than wait for the real prompt: Google suppresses One Tap freely
+ *  (cooldown, no Google session, opt-out), and PART 5 shape 13 is explicit that its absence is a
+ *  SKIP, never a pass. A barrier that only fires on the days Google feels like showing the prompt
+ *  is not a barrier — ops_incident #670 shipped a dead control behind exactly that gap. */
+const TOP_DOCK_SYNTH = '#credential_picker_container[data-synthetic-top-prompt]';
+const injectTopDockPrompt = (page) => page.evaluate(() => {
+  const box = document.createElement('div');
+  box.id = 'credential_picker_container';
+  box.setAttribute('data-synthetic-top-prompt', '1');
+  Object.assign(box.style, { position: 'fixed', left: '0px', top: '20px', width: '100%',
+                             height: '158px', zIndex: '9999', pointerEvents: 'auto',
+                             background: '#fff', border: '0' });
+  const f = document.createElement('iframe');
+  // The app identifies a prompt with the ATTRIBUTE selector iframe[src*="accounts.google.com/gsi/"],
+  // so the attribute is what has to match — and `srcdoc` takes precedence over `src` for the
+  // document that actually loads. So the frame matches the app's selector while loading NOTHING
+  // from Google. Pointing it at the real endpoint instead fetches real GIS code into a context it
+  // was not served for, and that code throws «ReferenceError: gis is not defined» as an uncaught
+  // page error — the journey manufacturing a defect against the app under test (PART 9.4).
+  f.setAttribute('src', 'https://accounts.google.com/gsi/iframe/select?synthetic=journey');
+  f.setAttribute('srcdoc', '<!doctype html><title>synthetic docked prompt</title>');
+  f.setAttribute('sandbox', '');
+  // STATIC on purpose: a static iframe has no positioning box, so an app measuring the IFRAME
+  // instead of its fixed ancestor under-reserves by the wrapper's extra 8px — incident #202.
+  Object.assign(f.style, { position: 'static', width: '100%', height: '150px', border: '0' });
+  box.appendChild(f);
+  document.body.appendChild(box);
+});
+const removeTopDockPrompt = (page) =>
+  page.evaluate((s) => document.querySelectorAll(s).forEach((n) => n.remove()), TOP_DOCK_SYNTH);
+
 /** Is this text VISIBLE, not merely present in innerText? A CSS-faded toast stays in innerText
  *  (agent.tsx's «شكراً على ملاحظتك» does exactly that), so presence is never the oracle. */
 const visible = async (page, text) => {
@@ -1835,6 +1874,116 @@ JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the support-form path', errs.join(' | ')); }
 });
 
+/** J23 — THE SUPPORT DIALOG'S × MUST SURVIVE A TOP-DOCKED FOREIGN PROMPT (ops_incident #670).
+ *
+ *  THE GAP THIS CLOSES. #670 — a signed-out guest on a phone could not close «المساعدة/تواصل معنا»,
+ *  because Google's One Tap frame docks to the TOP on WebKit and Firefox and painted over the ×  —
+ *  is fixed (centredDialogBox, e5b4a2a) and barriered OFFLINE by verify-bottom-prompt-inset.ts §K.
+ *  In a real browser, though, the only thing that ever exercised it was
+ *  `support-draft-survives-dismiss` running against whatever One Tap happened to do that day.
+ *
+ *  That is not coverage. Google suppresses One Tap freely (cooldown, no Google session, opt-out),
+ *  and PART 5 shape 13 is explicit that the prompt's absence is a SKIP, never a pass. So on any day
+ *  Google declines to show it, #670 could regress and all three engines would report green — which
+ *  is exactly how it shipped in the first place: it was found by accident, in the first WebKit
+ *  sweep after ops_incident #593's drawer fix happened to let that engine reach the step at all.
+ *
+ *  So the dock is INJECTED rather than waited for, which makes the assertion deterministic on every
+ *  engine including Chromium, where the real prompt docks to the bottom and never covered the ×.
+ *
+ *  IT ASSERTS THE USER'S TRUTH, NOT THE GEOMETRY. The offline barrier already pins the arithmetic.
+ *  What no offline check can say is whether the × actually CLOSES the dialog for a person with the
+ *  prompt on screen, so this clicks it for real and waits for the form to be gone. Geometry is
+ *  reported alongside only to tell the two failure shapes apart (PART 11.2 rule 4): a × that is
+ *  COVERED (someone else is painted at its centre) is a different bug from a × that is reachable
+ *  and still does not close the dialog.
+ *
+ *  PLURAL elementsFromPoint, never the singular form — a rect is LAYOUT, being painted is not
+ *  (PART 5 shape 13, enforced as a class by verify-ownership-probes-use-the-painted-stack.ts). */
+JOURNEYS['support-close-survives-a-top-dock'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `support-close-survives-a-top-dock:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const why = await openSupport(page, mobile);
+  if (why) { skip(name, why); return; }
+
+  const x = page.locator('[data-testid="info-modal-close"]').first();
+  if (!(await x.count())) { skip(name, 'the support dialog opened without its × — nothing to test'); return; }
+
+  // Where the × sits with nothing docked, so the move is measurable rather than assumed.
+  const readX = () => page.evaluate(() => {
+    const e = document.querySelector('[data-testid="info-modal-close"]');
+    if (!e) return null;
+    const r = e.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+    const stack = document.elementsFromPoint(cx, cy);
+    const desc = (el) => {
+      const b = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      return `<${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}> `
+        + `${Math.round(b.width)}x${Math.round(b.height)} at ${Math.round(b.x)},${Math.round(b.y)} z=${cs.zIndex}`;
+    };
+    return {
+      top: Math.round(r.y), at: [Math.round(cx), Math.round(cy)],
+      // TRUE  = this control is somewhere in the PAINTED stack at its own centre.
+      // FALSE = the stack was read, is non-empty, and the control is absent from it.
+      painted: stack.some((n) => n === e || e.contains(n)),
+      stackTop: stack.length ? desc(stack[0]) : null,
+      stackLen: stack.length,
+    };
+  });
+
+  const before = await readX();
+  if (!before) { skip(name, 'the × has no box before the dock is injected — nothing to measure'); return; }
+
+  await injectTopDockPrompt(page);
+  // Wait on the CONDITION the app reports — the × being pushed clear of the band — not a fixed
+  // sleep (PART 11.2). Bounded, and the assertions below stand whether or not it ever moves.
+  let after = before;
+  for (let i = 0; i < 30; i++) {
+    after = (await readX()) ?? after;
+    if (after.top !== before.top) break;
+    await sleep(300);
+  }
+
+  if (!(await page.locator(TOP_DOCK_SYNTH).count())) {
+    defect(name, 'the injected top dock did not survive in the DOM — the measurement never happened',
+      `× was at y=${before.top}, now y=${after.top}`);
+    return;
+  }
+
+  // THE USER'S QUESTION: does the × still close the dialog with the prompt on screen? The click's
+  // own error is CAPTURED, never swallowed — that is the fact separating «the click never landed»
+  // from «it landed and the dialog stayed open» (PART 11.2 rule 4, and PR #1146's measured trap).
+  const clickErr = await x.click({ timeout: 10_000 }).then(() => null, (e) => String(e).split('\n')[0]);
+  const closed = await waitSupportClosed(page);
+  await removeTopDockPrompt(page);
+
+  // PAINT IS CHECKED BEFORE THE OUTCOME, AND THAT ORDER IS THE POINT (measured while mutation-
+  // proving this journey, 2026-09-24). Playwright's click() scrolls its target into view first, so
+  // it can reach a control a FINGER cannot — and the mutation run proved it: with the card pushed
+  // to y=-28, above the top of the viewport, `painted` was false and the dialog still closed, so an
+  // outcome-only pass branch reported «ok» on a × no user could see or tap. A control that is
+  // absent from the painted stack at its own centre is unreachable to a person whatever the
+  // automation managed to do to it, so that is a defect first and an outcome question second.
+  if (!after.painted) {
+    defect(name, 'a top-docked auth prompt left the support dialog’s × unreachable to a real finger',
+      `the × is at ${JSON.stringify(after.at)} (y ${before.top} → ${after.top}) and is ABSENT from the `
+      + `painted stack there; topmost is ${after.stackTop} of ${after.stackLen}. The dialog `
+      + `${closed ? 'closed anyway — but only because Playwright scrolls its target into view first, '
+        + 'which a finger does not' : 'did not close'}. `
+      + `${clickErr ? `the CLICK ITSELF FAILED: ${clickErr}` : 'the click resolved without error'}. `
+      + `ops_incident #670.`);
+  } else if (closed) {
+    pass(name, `with a top-docked prompt the × stayed reachable (y ${before.top} → ${after.top}, `
+      + `painted at ${JSON.stringify(after.at)}) and closed the dialog`);
+  } else {
+    defect(name, 'the × is reachable under a top-docked prompt but did not close the dialog',
+      `the × is painted at ${JSON.stringify(after.at)} (y ${before.top} → ${after.top}), topmost is `
+      + `${after.stackTop}. ${clickErr ? `the CLICK ITSELF FAILED: ${clickErr}` : 'the click resolved '
+      + 'without error, so the dialog stayed open on its own'}.`);
+  }
+  bag.ok = true;
+});
+
 /** J21 — THE ERROR STATE MUST NAME THE RIGHT FAILURE.
  *
  *  `sendSupportMessage` has always distinguished a 429 rate limit from a dead connection; the form
@@ -2176,7 +2325,7 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
  */
 JOURNEYS['both-edges-docked-clears-controls'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `both-edges-docked-clears-controls:${mobile ? 'mobile375' : 'desktop1440'}`;
-  const SYNTH = '#credential_picker_container[data-synthetic-top-prompt]';
+  const SYNTH = TOP_DOCK_SYNTH;
 
   const READ = `(() => {
     const ORIGINS = ${JSON.stringify(AUTH_OVERLAY_ORIGINS)};
@@ -2253,32 +2402,10 @@ JOURNEYS['both-edges-docked-clears-controls'] = async (mobile) => withPage({ mob
     return;
   }
 
-  // THE TOP DOCK, in the shape WebKit really serves (ops_incident #202): a STATIC gsi iframe whose
-  // only positioning box is a `position: fixed` #credential_picker_container.
-  await page.evaluate(() => {
-    const box = document.createElement('div');
-    box.id = 'credential_picker_container';
-    box.setAttribute('data-synthetic-top-prompt', '1');
-    Object.assign(box.style, { position: 'fixed', left: '0px', top: '20px', width: '100%',
-                               height: '158px', zIndex: '9999', pointerEvents: 'auto',
-                               background: '#fff', border: '0' });
-    const f = document.createElement('iframe');
-    // The app identifies a prompt with the ATTRIBUTE selector iframe[src*="accounts.google.com/gsi/"],
-    // so the attribute is what has to match — and `srcdoc` takes precedence over `src` for the
-    // document that actually loads. So the frame matches the app's selector while loading NOTHING
-    // from Google. Pointing it at the real endpoint instead fetches real GIS code into a context it
-    // was not served for, and that code throws: the mutation run of this journey recorded
-    // «ReferenceError: gis is not defined» as an uncaught page error, i.e. the journey manufacturing
-    // a defect against the app under test (PART 9.4 — a harness defect I introduced is mine).
-    f.setAttribute('src', 'https://accounts.google.com/gsi/iframe/select?synthetic=journey');
-    f.setAttribute('srcdoc', '<!doctype html><title>synthetic docked prompt</title>');
-    f.setAttribute('sandbox', '');
-    // STATIC on purpose: a static iframe has no positioning box, so an app measuring the IFRAME
-    // instead of its fixed ancestor under-reserves by the wrapper's extra 8px — incident #202.
-    Object.assign(f.style, { position: 'static', width: '100%', height: '150px', border: '0' });
-    box.appendChild(f);
-    document.body.appendChild(box);
-  });
+  // THE TOP DOCK, in the shape WebKit really serves (ops_incident #202). The shape itself lives in
+  // injectTopDockPrompt() at the top of this file — one definition, shared with
+  // `support-close-survives-a-top-dock`, so the two cannot drift apart.
+  await injectTopDockPrompt(page);
   // Wait on the CONDITION the app reports — the top reservation appearing — not a fixed sleep
   // (PART 11.2). It is a bounded poll, and the assertions below stand whether or not it moves.
   let after = before;
