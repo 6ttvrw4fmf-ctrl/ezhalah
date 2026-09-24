@@ -19,9 +19,10 @@ carries the same React trees as the HTML.
 
 THE TRAPS, EACH MEASURED:
 1. STOCK PHOTOS. 86 of 105 cards (and their detail galleries) show ONE Unsplash stock photo
-   (photo-1545324418-cc1a3fa10c00) as the cover — a placeholder, not the unit. Only `/uploads/`
-   paths on the site's own host are photos (19 cards; one fetched: 200 image/webp 25,904 B). Any
-   images.unsplash.com URL is excluded, so those 86 rows honestly carry no photo.
+   (photo-1545324418-cc1a3fa10c00) as the cover; only `/uploads/` paths on the site's own host are
+   the unit's own photos (19 cards; one fetched: 200 image/webp 25,904 B). OWNER DECISION
+   2026-09-24: the cover the site shows IS the listing photo we show — a visitor to 1000.com.sa sees
+   exactly that picture on the card — so it is kept, never excluded (it was excluded at build).
 2. PERIOD IS IN THE UNIT TEXT, NOT THE NUMBER. «6500 ريال / شهرياً» → monthly, ×12 through the
    shared rent_period_and_annual; «75,000 ريال / سنوياً» → annual verbatim. «السعر عند الطلب» is
    the source's own "on request": both price columns NULL, the phrase kept in additional_info.
@@ -109,7 +110,6 @@ DETAIL_PAUSE = 0.5
 TYPE_OVERRIDES: dict[str, str] = {}          # «شقة»/«مكتب» resolve through the shared map as-is
 DWELLING_TYPES = {"Apartment", "Villa", "Duplex", "Studio", "Floor", "Room", "Rest House", "Chalet"}
 RETIRED_TOKENS = ("مزاد", "مباع", "تم البيع", "مؤجر", "تم التأجير", "تم الإيجار", "تم الايجار", "محجوز")
-PLACEHOLDER_HOST = "images.unsplash.com"
 _YES = ("نعم", "يوجد", "متوفر")
 _NO = ("لا", "لايوجد", "لا يوجد", "غير متوفر")
 
@@ -242,7 +242,7 @@ def parse_detail(page_html: str) -> dict:
     m_gal = _GALLERY_RE.search(page_html)
     for u in _IMG_SRC_RE.findall(m_gal.group(1) if m_gal else ""):
         u = _abs(html_mod.unescape(u))
-        if PLACEHOLDER_HOST not in u and u not in photos:                   # trap 1
+        if u not in photos:                                                  # trap 1: kept, as shown
             photos.append(u)
     m_ids = _LISTING_ID_RE.search(page_html)
     return {
@@ -389,7 +389,7 @@ def map_listing(card: dict, detail: Optional[dict]) -> tuple[Optional[dict], str
         rooms = [None, None]                                              # trap 4: the unfilled form
     photos = list(detail.get("photos") or [])
     thumb = card.get("thumb")
-    if not photos and thumb and PLACEHOLDER_HOST not in thumb:
+    if not photos and thumb:
         photos = [_abs(thumb)]
 
     m_proj = _PROJECT_RE.search(title or "")
