@@ -116,11 +116,12 @@ def test_price_on_request_is_null_in_both_columns_and_the_phrase_is_kept():
 
 
 # ── PHOTOS ──────────────────────────────────────────────────────────────────────────────────────
-def test_the_unsplash_stock_photo_is_never_a_listing_photo():
+def test_the_sites_stock_cover_is_kept_as_the_listing_photo():
+    # Owner decision 2026-09-24: the cover 1000.com.sa shows on the card (its Unsplash stock photo on
+    # 86 of 105 listings) is what a visitor sees there, so it is the listing photo here too.
     cards, _ = _cards()
     row, _, _ = R.map_listing(cards["cmnh40o40000210i8x84ezr2n"], R.parse_detail(DETAIL_MONTHLY))
-    assert row["photo_urls"] == []
-    assert "unsplash" not in json.dumps(row["photo_urls"])
+    assert row["photo_urls"] == ["https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=800&q=80"]
 
 
 def test_site_hosted_uploads_are_absolute_and_kept():
