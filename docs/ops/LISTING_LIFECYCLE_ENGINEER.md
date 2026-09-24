@@ -271,6 +271,25 @@ Three things to carry forward:
    `13:29:00 → 13:40:18`, **11m18s**, and every other slot that day measured 10m41s–11m25s. The
    blackout length equals the job's real duration, every time. A `max(end_time)` with no `status`
    predicate is not a completion; **`status` would have read `running`.**
+
+   **The same trap in the OPPOSITE direction, measured 2026-09-24 (routine #11).** Lesson 3 above
+   produced a false RETRACTION of a correct finding; this produced a false FINDING. A fleet-wide
+   "is any inactive row still served?" sweep at 00:23 returned 24 rows (alsidra res 20 + com 4, all
+   deactivated at 00:20:06), and they were filed as an hour of extra exposure caused by the
+   job17(:20)/job28(:22) inversion. That sweep is 69 `query_to_xml` subqueries and it **straddled
+   the 00:22 sync's own DELETE leg**. Re-measured at 00:28:08, after `cron.job_run_details`
+   confirmed the 00:22 run `status = succeeded`: alsidra held **zero** rows in `search_listings_ar`
+   and the fleet-wide count was **zero**. *Read the sync's `status` before trusting any propagation
+   measurement, and never sample the served index between `:20` and `:24`.*
+
+   The real finding was better than the filed one and is worth keeping: `active_listing_ids_v2`
+   **still** carried those 20 rows as active (the `:20` refresh snapshot predates the 00:20:06
+   deactivation) while `search_listings_ar` was already clean — so the matview path did not remove
+   them, **`prune_inactive_from_search()` did**. That is §2.3 property 3's second remover observed
+   covering precisely the aliveness gap the inversion opens, which is the half `ops_incident` #354
+   never measured. It means the inversion's damage is to FRESHNESS, not to serving source-confirmed
+   dead listings. One observation is not a guarantee (§7.1) — but it is the first evidence either
+   way, and it is the reason #354 stays a scheduling defect rather than becoming a §1.1 leak.
 3. **Repairing the data is not closing this.** The out-of-band five-statement sync (§2.3) restores
    the index in one pass and is fully within this routine's authority, but the index refreezes at
    the next :36 until #300 is fixed. Report that as a mitigation, never as a fix.
