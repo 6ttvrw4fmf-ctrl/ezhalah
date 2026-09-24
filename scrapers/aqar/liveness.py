@@ -529,6 +529,7 @@ def main() -> None:
                         batch = list(alive_ids)
                         _run_with_retry(lambda ids=batch: client.table(table)
                                         .update({"last_seen_at": now_iso, "missing_count": 0,
+                                                 "last_liveness_probe_at": now_iso,
                                                  **direct_alive_patch(now_iso=now_iso)})
                                         .in_("id", ids).execute())
                         alive_ids.clear()
@@ -565,6 +566,7 @@ def main() -> None:
     if alive_ids:
         _run_with_retry(lambda ids=list(alive_ids): client.table(table)
                         .update({"last_seen_at": now_iso, "missing_count": 0,
+                                 "last_liveness_probe_at": now_iso,
                                  **direct_alive_patch(now_iso=now_iso)})
                         .in_("id", ids).execute())
 

@@ -219,7 +219,11 @@ def main() -> int:
             pending.append((row, d.action, d.strikes, status))
 
             if args.apply and d.action == "reset":
-                patch = {"missing_count": 0, **verification_patch(d, now_iso=now_iso)}
+                # last_liveness_probe_at = "we LOOKED", whatever the verdict. It is what lets
+                # this sweep's own worklist rotate fairly instead of re-reading the rows it can
+                # never resolve (migration 20260924). Never evidence of life on its own.
+                patch = {"missing_count": 0, "last_liveness_probe_at": now_iso,
+                         **verification_patch(d, now_iso=now_iso)}
                 client.table(TABLE).update(patch).eq("id", row["id"]).execute()
                 stats["verified"] += 1
 
@@ -231,11 +235,13 @@ def main() -> int:
         if args.apply and trusted:
             for row, action, strikes, _status in pending:
                 if action == "strike":
-                    client.table(TABLE).update({"missing_count": strikes}).eq("id", row["id"]).execute()
+                    client.table(TABLE).update({"missing_count": strikes,
+                                                "last_liveness_probe_at": now_iso}).eq("id", row["id"]).execute()
                     stats["struck"] += 1
                 elif action == "deactivate":
                     client.table(TABLE).update(
-                        {"missing_count": strikes, "active": False}).eq("id", row["id"]).execute()
+                        {"missing_count": strikes, "active": False,
+                         "last_liveness_probe_at": now_iso}).eq("id", row["id"]).execute()
                     stats["deactivated"] += 1
 
         # ── Per-row evidence (dealapp_liveness_detail, migration 20260831004139) ──────────────────
