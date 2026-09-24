@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
@@ -18,7 +18,7 @@ import { restoreChat, persistedOnly, LOCAL_TRANSCRIPT_ENTRIES, type PersistedCha
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, chatsToDelete, type ChatMeta } from '@/lib/chatSync';
 import { mergeOne, pickTranscript, mayPromoteTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { PROBE_FAILED, isProbeFailure } from '@/lib/afProbe';
-import { buildSyncedName } from '@/lib/nameSync';
+import { buildSyncedName, type BilingualName } from '@/lib/nameSync';
 import { identifyUser } from '@/lib/observability';
 import { forgetSupportDraft } from '@/lib/supportDraft';
 import { LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
@@ -98,6 +98,15 @@ type AppState = {
   user: AuthUser | null;
   signIn: (u: AuthUser) => void;
   updateUser: (patch: Partial<AuthUser>) => void;
+  // THE ONE WAY A TRANSLITERATION RESULT REACHES THE USER (ops_incident #319/#599/#648 class,
+  // routine #8 2026-09-24). `buildSyncedName()` is a network round trip, so two renames in quick
+  // succession put two continuations in flight and the SLOWER one lands last. Applying it with a
+  // plain `updateUser` therefore reverts the display name — and the avatar initial — to a value the
+  // user has already replaced. The staleness check lives HERE, in the single writer both call sites
+  // route through, rather than in each caller: `synced.name` is the value the patch was computed
+  // for, so a patch whose name is no longer the current one is dropped. A caller cannot forget a
+  // guard it does not have to write.
+  applySyncedName: (synced: BilingualName & { initials?: string }) => void;
   signOut: () => void;
   // Permanently delete the account: delete the auth user on the SERVER, then wipe ALL on-device
   // state (history, parked message, saved language) from both memory AND storage. Distinct from
@@ -328,6 +337,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSignInCardDismissed(false);
   }, [user]);
 
+  // THE SINGLE GUARDED WRITER for a `buildSyncedName()` result — see the context type declaration.
+  // Both continuations that exist (this file's backfill effect below, and AccountMenu's rename) route
+  // through this one function, so the staleness check cannot be present at one call site and absent
+  // at the other. That asymmetry was the defect: this effect carried the check and the rename did
+  // not, so a rename's slower transliteration overwrote a newer name.
+  const applySyncedName = useCallback((synced: BilingualName & { initials?: string }) => {
+    setUser((u) => (u && u.name === synced.name ? { ...u, ...synced } : u));
+  }, []);
+
   // Backfill the missing-script spelling of the user's name (once per name) so both stay synced.
   useEffect(() => {
     const nm = user?.name?.trim();
@@ -335,11 +353,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (nameSyncRef.current === nm) return;
     nameSyncRef.current = nm;
     let cancelled = false;
-    buildSyncedName(nm).then((synced) => {
-      if (!cancelled) setUser((u) => (u && u.name === synced.name ? { ...u, ...synced } : u));
-    });
+    buildSyncedName(nm).then((synced) => { if (!cancelled) applySyncedName(synced); });
     return () => { cancelled = true; };
-  }, [user?.name, user?.nameEn, user?.nameAr]);
+  }, [user?.name, user?.nameEn, user?.nameAr, applySyncedName]);
 
   // Language persistence is auth-gated. A SIGNED-IN user keeps their chosen/detected language across a
   // refresh. A GUEST is ALWAYS Arabic-first on a fresh load — typing an English letter in the filter,
@@ -760,6 +776,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       signIn: (u) => setUser(u),
       updateUser: (patch) => setUser((u) => (u ? { ...u, ...patch } : u)),
+      applySyncedName,
       signOut: () => {
         // Drop the session from MEMORY so the next guest never sees the previous user's chats: clear
         // history, search count, the open chat, and any parked message. This account's OWN saved
