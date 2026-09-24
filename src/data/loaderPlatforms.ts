@@ -113,16 +113,16 @@ export const PLATFORM_META: LoaderPlatform[] = [
   // another company's logo. `name` is the stored db `source` value (the scraper's SOURCE constant),
   // the same convention as 'Al Khaas' / 'KSA Aqar' / 'Rawasi Dark' above.
   { name: 'Al Sidra', i18nKey: 'Al Sidra Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Moftah', i18nKey: 'Moftah Al Aqar', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مسار المستقبل', i18nKey: 'Masar Al Mustaqbal Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'منصات', i18nKey: 'Menassat Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Sakan Saudi', i18nKey: 'Sakan', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مكتب بوصبيح', i18nKey: 'Bossbih Real Estate Office', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Al Shawaf', i18nKey: 'Al Shawaf Real Estate Office', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Ibrahim Alqarawi', i18nKey: 'Ibrahim Alqarawi Real Estate Investments', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Al Jassim', i18nKey: 'Al Jassim Real Estate Services', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Almotmkenah', i18nKey: 'Almotmkenah Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'نفوذ', i18nKey: 'Nufouth Development Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Moftah', i18nKey: 'Moftah Al Aqar', logo: require('../../assets/images/moftah.png') },
+  { name: 'مسار المستقبل', i18nKey: 'Masar Al Mustaqbal Real Estate', logo: require('../../assets/images/masar.png') },
+  { name: 'منصات', i18nKey: 'Menassat Real Estate', logo: require('../../assets/images/gomenassat.png') },
+  { name: 'Sakan Saudi', i18nKey: 'Sakan', logo: require('../../assets/images/sakan.png') },
+  { name: 'مكتب بوصبيح', i18nKey: 'Bossbih Real Estate Office', logo: require('../../assets/images/bossbih.png') },
+  { name: 'Al Shawaf', i18nKey: 'Al Shawaf Real Estate Office', logo: require('../../assets/images/alshawaf.png') },
+  { name: 'Ibrahim Alqarawi', i18nKey: 'Ibrahim Alqarawi Real Estate Investments', logo: require('../../assets/images/ialqarawi.png') },
+  { name: 'Al Jassim', i18nKey: 'Al Jassim Real Estate Services', logo: require('../../assets/images/aljassim.png') },
+  { name: 'Almotmkenah', i18nKey: 'Almotmkenah Real Estate', logo: require('../../assets/images/almotmkenah.png') },
+  { name: 'نفوذ', i18nKey: 'Nufouth Development Real Estate', logo: require('../../assets/images/nufouth.png') },
 ];
 
 // Ordered SPECIFIC-first token → platform name map, mirroring ResultCard's SourceBadge matching so a
