@@ -207,6 +207,18 @@ review PR merges. The cost lands on whoever happens to have a user-facing fix re
 one — rather than on whoever applied the migration. This is `ops_incident` #131/#138 recurring as a
 standing condition.
 
+**Re-checked at 00:05Z: the window had not reopened, it had narrowed — drift grew from six to NINE**
+(`20260923235943`, `20260924000125`, `20260924000205` joined; live migrations 1,304 → 1,307). That is
+the part that makes this a rate problem rather than a backlog: nine applies in about 45 minutes, every
+one correctly mirrored and every mirror correctly awaiting review, means the deploy window is closed
+*by default* rather than by exception.
+
+Nothing here asks for a weaker gate — it is doing exactly what it exists for, and the 2026-08-31
+lesson about treating a merge verb as a query is not one to re-learn. The open question is
+**sequencing**, and it is the owner's to answer: should migration mirror PRs be reviewable faster, or
+should a deploy be able to proceed against a drift set whose every member is already mirrored in an
+open PR? That is policy, not engineering.
+
 ## Coverage ledger
 
 Written this run (`af_` / `trending_` prefixes): `trending_cities.rpc_eq_db_truth.buy_unnarrowed`,
