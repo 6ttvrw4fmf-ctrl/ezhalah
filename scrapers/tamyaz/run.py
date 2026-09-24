@@ -17,16 +17,17 @@ by its own JSON API, called exactly as the page does:
   PRICE / PERIOD. `price` is a bare integer; the UI prints «{price} ر.س» and, for EVERY
   forSale:false row, appends its own CONSTANT perYear = «/ سنة» regardless of what that listing
   actually states — the API objects carry no period field whatsoever (checked all 9 keys) and no
-  per-listing text ever varies. That is a UI-wide template, not "the source's own words for THAT
-  price" (RENT PERIOD = SOURCE), so it is never read as a period here (2026-09-24 review: fixed a
-  builder defect that had stamped rent_period='annual' on every rent row from this boolean alone —
-  the fleet-wide incident's own shape: "11 scrapers hardcoded rent_period='annual' … manufacturing
-  سنوي on rows whose source states no period"). Instead the shared, audited
-  normalize.rent_period_and_annual() reads the listing's OWN title+desc text for a period token;
-  none of the 9 ever states one, so today every rent row is period=NULL with price_annual verbatim
-  (silent → NULL, never a default) — the same behaviour a future listing that DOES write «شهرياً»/
-  «سنوياً» in its own prose would get, sourced instead of templated. A sale stores price_total
-  verbatim.
+  per-listing text ever varies. That is a UI-wide template, not any ONE listing's own words for
+  THAT price, so the shared, audited normalize.rent_period_and_annual() still reads the listing's
+  OWN title+desc first for a period token (a future listing that writes «شهرياً»/«سنوياً» in its
+  own prose wins over the template, same as wadod). OWNER ATTESTATION 2026-09-24 (checked the live
+  site, "those are yearly, they mention it"): when no per-listing text states a period, the site's
+  own universal «/ سنة» template is a platform-level statement — the same class as azure's
+  Paid-Annually-tab-only read and rightcompound's "not monthly" disclaimer — so a silent row now
+  gets rent_period='annual' rather than staying NULL. (2026-09-24 earlier same-day review had first
+  rejected this exact constant as too broad to trust per-listing; the owner's live confirmation is
+  what changes the reading — the constant itself did not change.) Registered in
+  ops_rent_period_single_value_ok + SINGLE_PERIOD_PLATFORMS. A sale stores price_total verbatim.
 
   TRAPS MEASURED ON THE 9:
     · 3 titles say «للاستثمار» (investment showrooms / buildings, forSale:false, 700k–3M) — an
@@ -184,13 +185,14 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     if for_sale:
         row["price_total"] = price
     else:
-        # RENT PERIOD = SOURCE: the UI's «/ سنة» is a constant stamped beside EVERY rent, not this
-        # listing's own words for this price (no period field exists on the API object at all), so
-        # it is never treated as a source statement. Read the period only from the listing's own
-        # title+desc through the shared, audited parser; silent → NULL, price unconverted.
+        # RENT PERIOD: read the listing's OWN title+desc first — that always wins. When silent,
+        # fall back to the site's own universal «/ سنة» template (owner attestation 2026-09-24,
+        # verified live) rather than leaving the row unparked from rent search.
         period, row["price_annual"] = normalize.rent_period_and_annual(price, f"{title or ''} {desc or ''}")
         if period:
             row["rent_period"] = period
+        elif row["price_annual"] is not None:
+            row["rent_period"] = "annual"          # a daily/weekly rate stays unparked (price_annual None too)
     row["additional_info"] = {k: v for k, v in {
         "source_id": pid,
         "type_ar": type_ar,
