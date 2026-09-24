@@ -458,6 +458,7 @@ def test_fetch_json_treats_a_challenge_as_no_answer_and_enumeration_fails_closed
     assert R.fetch_json(s, R.SEARCH, tries=3) is None
     assert len(s.calls) == 3
     import pytest
+from curl_cffi import requests as cc
     with pytest.raises(RuntimeError):
         R.enumerate_rent(_Session([_CHALLENGE]))
     # a real answer after one challenge is read normally
@@ -576,7 +577,18 @@ def test_a_blocked_walk_is_a_failed_run_that_writes_nothing(monkeypatch):
     assert calls["end_run"][0][1]["ok"] is False and "walk aborted" in calls["end_run"][0][1]["notes"]
 
 
-def test_session_asks_for_arabic_json_and_never_sets_a_user_agent():
+def test_session_asks_for_arabic_json_and_never_sets_a_user_agent(monkeypatch):
+    # session() NEGOTIATES the TLS profile against the live catalogue (2026-09-24: through the proxy
+    # only safari17_0 is served the JSON), so the probe is stubbed here — a test never touches the
+    # network — and the headers the negotiated session carries are what is asserted.
+    seen = {}
+    def fake_negotiate(url, *, order, headers=None, served=None, proxies=None, **_):
+        seen.update(url=url, order=order, proxies=proxies)
+        s = cc.Session(impersonate=order[0])
+        s.headers.update(headers or {})
+        return s
+    monkeypatch.setattr(R.http, "negotiated_session", fake_negotiate)
     s = R.session()
     assert s.headers["Accept-Language"] == "ar" and s.headers["Accept"] == "application/json"
     assert "User-Agent" not in s.headers and "user-agent" not in s.headers
+    assert seen["url"].startswith(R.SEARCH) and seen["order"][0] == "safari17_0" and seen["proxies"] == R._PROXIES
