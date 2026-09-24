@@ -55,12 +55,25 @@ check('the returned cleanup clears BOTH the interval and the fallback timeout �
 // and it no longer has an opinion about how the total is counted.
 // Whether the total is counted in glyphs is a different rule with its own barrier —
 // scripts/verify-typewriter-never-reveals-half-a-glyph.ts.
-const componentBody = (name: string, chars: number) => {
-  const at = agent.indexOf(`function ${name}(`);
-  return at < 0 ? '' : agent.slice(at, at + chars);
+// THE WINDOW IS THE FUNCTION, NOT A CHARACTER BUDGET (repaired 2026-09-23, routine #4).
+// This used to slice a fixed 700/1000 characters from `function Typer(`. That is a guess about how
+// long the body happens to be, and it expired the moment the body grew: adding the per-turn
+// hand-off bound (src/lib/revealHandoff.ts, ops_incident #646) pushed `return runTypewriter(` past
+// the 700th character, so both checks went RED while the invariant they NAME — one shared helper,
+// no re-inlined duplicate interval — was fully intact. That is the same failure mode the comment
+// above already records twice: a pin that matches text rather than meaning. A function ends at `}`
+// in column 0 (the terminator idiom scripts/lib/liftSymbols.ts uses on this very file), so the
+// window is now exactly the declaration — it cannot expire, and it cannot bleed into the next
+// function and let `delegates` pass vacuously on a neighbour's call.
+const componentBody = (name: string) => {
+  const lines = agent.split('\n');
+  const start = lines.findIndex((l) => l.startsWith(`function ${name}(`));
+  if (start < 0) return '';
+  const end = lines.findIndex((l, i) => i > start && l === '}');
+  return end < 0 ? '' : lines.slice(start, end + 1).join('\n');
 };
-for (const [name, chars] of [['Typer', 700], ['BrandReveal', 1000]] as const) {
-  const body = componentBody(name, chars);
+for (const name of ['Typer', 'BrandReveal'] as const) {
+  const body = componentBody(name);
   const delegates = /return runTypewriter\(/.test(body);
   const ownTimer = /\bsetInterval\(/.test(body) || /\bsetTimeout\(/.test(body);
   check(`${name} delegates to runTypewriter (no re-inlined duplicate interval that could go unpatched)`,

@@ -26,6 +26,7 @@ import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure, CASCADE_MAX } from '@/lib/initialReveal';
 import { glyphCount, revealPrefix } from '@/lib/typedReveal';
+import { createRevealHandoff } from '@/lib/revealHandoff';
 import { distinctPlatformCount } from '@/lib/platformDiversity';
 import { newerTurnPending as newerTurnPendingPure } from '@/lib/liveTurn';
 import SearchLoader from '@/components/SearchLoader';
@@ -488,13 +489,31 @@ function runTypewriter(total: number, setN: (n: number) => void, onDone?: () => 
 // Twenty of the forty Results-Found templates end in a non-BMP emoji, and that frame is not always
 // momentary: measured live, the reveal froze one tick short of the end under a 500-card render load
 // and a real user was left looking at «…تطابق بحثك ▯» indefinitely. See src/lib/typedReveal.ts.
+// THE HAND-OFF IS BOUNDED PER RENDERED TURN (ops_incident #347 part 3, #339, #323 — routine #4,
+// 2026-09-23). runTypewriter's ceiling is cleared by this effect's own cleanup, so a `text` that
+// changes faster than the ceiling restarted it forever and `onDone` never fired — measured 0 times
+// in 90 s against the real function. `onDone` sets doneTyping, which gates «عرض المزيد», so that
+// stall withheld the only control reaching the rest of the results. See src/lib/revealHandoff.ts.
 function Typer({ text, onDone }: { text: string; onDone?: () => void }) {
   const [n, setN] = useState(0);
   // The denominator is the glyph count, so `n` and the slice below agree on what a step is.
   const total = useMemo(() => glyphCount(text), [text]);
+  const handoff = useMemo(() => createRevealHandoff(), []);
+  // Latest-value refs so the ceiling, armed once on mount, always pays out the CURRENT text's
+  // hand-off rather than the one that happened to be showing when it was armed.
+  const latest = useRef({ total, onDone });
+  latest.current = { total, onDone };
+  useEffect(() => handoff.arm(() => {
+    setN(latest.current.total);
+    latest.current.onDone?.();
+    // Mount-only on purpose: re-arming per `text` IS the defect. eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
   useEffect(() => {
+    // Already handed off: show the text whole. Re-animating from 0 would put the user back on a
+    // half-written sentence after the UI has already moved on.
+    if (handoff.isSettled()) { setN(total); return; }
     setN(0);
-    return runTypewriter(total, setN, onDone);
+    return runTypewriter(total, setN, () => { handoff.settle(); onDone?.(); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
   return <Text>{revealPrefix(text, n)}</Text>;
@@ -512,9 +531,19 @@ function BrandReveal({ brand, text, onDone }: { brand: string; text: string; onD
   // whole number of glyphs, so the split either lands exactly on the brand boundary or leaves the
   // (still well-formed) partial brand in the first half.
   const total = useMemo(() => glyphCount(full), [full]);
+  // Same per-turn hand-off bound as Typer above — identical structure, identical defect class.
+  const handoff = useMemo(() => createRevealHandoff(), []);
+  const latest = useRef({ total, onDone });
+  latest.current = { total, onDone };
+  useEffect(() => handoff.arm(() => {
+    setN(latest.current.total);
+    latest.current.onDone?.();
+    // Mount-only on purpose: re-arming per `full` IS the defect. eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
   useEffect(() => {
+    if (handoff.isSettled()) { setN(total); return; }
     setN(0);
-    return runTypewriter(total, setN, onDone);
+    return runTypewriter(total, setN, () => { handoff.settle(); onDone?.(); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [full]);
   const shown = revealPrefix(full, n);

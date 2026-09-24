@@ -181,6 +181,11 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
 
   // 3 🛡️ Data Integrity — source-truth on listing fields. Broadest; must stay last.
   { routine: 3, test: /price|district|amenity|^rent_period|^manufactured_rent_period/ },
+  // city_duplicate_orphaned_districts (2026-09-23) — a loc_catalog_city row sharing its name/norm
+  // with a twin that holds all the real listings, while it alone owns the district catalog. Location
+  // data truth, this routine's own surface — explicit rather than left to the incidental `^city_`
+  // match below, per this file's own policy that an added detector names its kind here.
+  { routine: 3, test: /^city_duplicate_orphaned_districts$/ },
   { routine: 3, test: /^(field_integrity|city_|region_label|english_|type_|v2_discards)/ },
   { routine: 3, test: /^(deletion_spike|mass_inactivation|unverified_inactivation|inactivation)/ },
   { routine: 3, test: /^(stale_|quarantine_growth|prune_|cleanup_evidence_gap)/ },
