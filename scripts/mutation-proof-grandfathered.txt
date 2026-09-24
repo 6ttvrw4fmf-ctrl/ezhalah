@@ -225,7 +225,6 @@ verify-observability-pdpl-scrub.ts
 verify-observability-web-actually-initializes.ts
 verify-p0-delivery-sla.ts
 verify-paid-ai-jobs-off-peak.ts
-verify-period-price-flip.ts
 verify-phasea-snapshot-staleness-barrier.ts
 verify-photo-preference-and-rotation-live.ts
 verify-platform-diversity-live.ts
