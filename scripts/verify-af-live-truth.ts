@@ -315,6 +315,11 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     if (!offer.opened) {
       check(`${name}: AF launcher present`, false, offer.reason === 'no-turn'
         ? `NOT VERIFIED — no results turn from the agent within ${offer.waitedMs}ms; the launcher could not be looked for`
+        : offer.reason === 'intercepted'
+        // HARNESS, NOT PRODUCT: the launcher was on screen for every one of those attempts and the
+        // reflowing conversation took the click instead. Saying "no launcher rendered" here would be
+        // the false accusation ops_incident #340 was made of (scripts/lib/afOfferLive.ts).
+        ? `NOT VERIFIED — the launcher was present but ${offer.attempts} click(s) landed on «${offer.hit}» instead within ${offer.waitedMs}ms; a harness miss, not an AF verdict`
         : `the turn landed but no launcher rendered within ${offer.waitedMs}ms — not eligible on this scope, or a regression`);
       await ctx.close(); return;
     }

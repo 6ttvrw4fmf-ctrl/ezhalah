@@ -1,0 +1,38 @@
+# UNWITNESSED COORDINATE CLICKS — a SHRINK-ONLY ledger (routine #5, 2026-09-24).
+#
+# Every file here clicks a measured point without asking the page what took the click. That is the
+# defect class `ops_incident` #340 was made of: the Ezhalah chat reflows between the measurement and
+# the click, a stray click lands on a listing card, and the journey's next assertion reports a
+# PRODUCT defect that never happened. Measured on production 2026-09-24, 11 of 24 taps on the
+# Advanced Filter offer missed it this way.
+#
+# The repair is `clickWitnessed()` (scripts/lib/liveClick.ts). A file leaves this ledger by using it,
+# and the ceiling in scripts/verify-live-clicks-are-witnessed.ts comes down with it. Rows may only be
+# REMOVED. A new unwitnessed site is RED, and a row that no longer describes reality is RED as stale.
+#
+# format:  <path> | <owning routine> | <why it is not converted yet>
+#
+# Converted so far: scripts/lib/afOfferLive.ts — the shared Advanced Filter opener, the one site
+# where the class was measured, reproduced and fixed this run (5/5 green on production afterwards).
+
+scripts/lib/afJourneyPacing.ts | routine-5-af-trending | shared AF pacing helpers; convert with the AF journeys below so one change covers the callers
+scripts/verify-af-card-evidence-live.ts | routine-5-af-trending | private tap() copy; its offer tap already goes through the fixed opener, the filter-control taps do not
+scripts/verify-af-live-truth.ts | routine-5-af-trending | private tap() copy
+scripts/verify-af-option-card-truth-live.ts | routine-5-af-trending | private tap() copy
+scripts/verify-af-pill-removal-live.ts | routine-5-af-trending | private tap() copy
+scripts/verify-af-remove-last-pill-live.ts | routine-5-af-trending | private tap() copy
+scripts/verify-af-scope-change-live.ts | routine-5-af-trending | private tap() copy
+scripts/verify-af-stale-predicate-live.ts | routine-5-af-trending | private tap() copy
+scripts/verify-trending-live-four-way-truth.ts | routine-5-af-trending | private tap() copy
+scripts/verify-combined-budget-live.ts | routine-4-search-qa | Normal Filter journey — not this routine's to rewrite
+scripts/verify-chat-persistence-live.mjs | routine-6-journey | persistence journey — not this routine's to rewrite
+scripts/verify-web-runtime-smoke.mjs | routine-2-production | runtime smoke — not this routine's to rewrite
+scripts/redteam-chain-live.mjs | routine-9-red-team | red-team chain — not this routine's to rewrite
+scripts/verify-guardian-oracles-discriminate.ts | routine-9-red-team | guardian oracles — not this routine's to rewrite
+scripts/verify-live-sweep-coverage-contract.ts | routine-4-search-qa | live sweep contract — not this routine's to rewrite
+e2e/guardian/harness.mjs | routine-9-red-team | guardian harness — not this routine's to rewrite
+e2e/journeys/harness.mjs | routine-6-journey | journeys harness — not this routine's to rewrite
+e2e/journeys/run.mjs | routine-6-journey | journeys runner — not this routine's to rewrite
+e2e/live-sweep/sweep.mjs | routine-4-search-qa | live sweep driver — not this routine's to rewrite
+e2e/selector.spec.ts | routine-2-production | selector spec — not this routine's to rewrite
+e2e/sidebar-reorder-journeys.mjs | routine-6-journey | sidebar journeys — not this routine's to rewrite
