@@ -159,10 +159,12 @@ check('NO city owns a district catalog while zero and a same-named twin holds re
   orphans.length === 0,
   orphans.length ? orphans.map((o) => `city_id ${o.dead_city_id} is orphaned — its twin ${o.live_city_id} holds ${o.live_listings} listings`).join('; ') : '');
 
-// ── 3. Regression pin: the CONFIRMED pairs from PR #3813 stay fixed ────────────────────────────────
-// Not "no orphan exists" in general — this names the exact two dead ids and asserts they now own
+// ── 3. Regression pin: the CONFIRMED pairs from PR #3813 and migration 20260924035152 stay fixed ──
+// Not "no orphan exists" in general — this names the exact dead ids and asserts they now own
 // ZERO catalog districts, so a future migration cannot silently re-point the catalog back at them.
-for (const [name, deadId] of [['الدرعية', 828], ['بيشة', 1514]] as const) {
+for (const [name, deadId] of [
+  ['الدرعية', 828], ['بيشة', 1514], ['الحريق', 3158], ['الحرجة', 3383],
+] as const) {
   check(`${name}'s dead twin (city_id ${deadId}) owns zero catalog districts`,
     !citiesWithDistricts.has(deadId), `city_id ${deadId} still owns districts — the 2026-09-23 fix regressed`);
 }
