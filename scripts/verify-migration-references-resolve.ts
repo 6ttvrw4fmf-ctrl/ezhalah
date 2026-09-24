@@ -49,8 +49,13 @@ const ROOT = join(import.meta.dirname, '..');
 const MIGRATIONS_DIR = join(ROOT, 'supabase', 'migrations');
 const BASELINE_FILE = join(ROOT, 'scripts', 'migration-reference-baseline.txt');
 
-/** The floor may only shrink. Lowering it means a dangling citation was genuinely repaired. */
-const MAX_BASELINE_ENTRIES = 29;
+/** The floor may only shrink. Lowering it means a dangling citation was genuinely repaired.
+ *  29 -> 30 on 2026-09-24, the one exception this ratchet allows by its own header: a MIRROR repair.
+ *  20260920080113's file was diverging from production (drift condition #5) and its committed text
+ *  cited itself; production's actual statements cite 20260920075900, which was never minted. Making
+ *  the file match production is mandatory; correcting the pointer is the repair the header above
+ *  forbids, because it would re-open parity drift. No newly authored migration may use this. */
+const MAX_BASELINE_ENTRIES = 30;
 
 /**
  * 14-digit literals that are NOT citations of a migration. Each needs a reason, because the whole
