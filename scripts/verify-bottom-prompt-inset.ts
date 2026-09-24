@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  bottomPromptInset, topPromptInset, promptInsets, promptMeasurementTarget,
+  bottomPromptInset, topPromptInset, promptInsets, promptMeasurementTarget, centredDialogBox,
   ONE_TAP_IFRAME_SELECTOR, AUTH_PROMPT_SELECTOR, OWN_DOCKED_PROMPT_SELECTOR, DOCKED_PROMPT_SELECTOR,
 } from '../src/lib/bottomPromptInset.ts';
 import { npmTestRuns } from './lib/testRegistry.ts';
@@ -695,6 +695,68 @@ const CORNER_CARD = { top: 20, bottom: 200, height: 180, width: 391 };
         .promptMeasurementTarget(f as never, (n: never) => (n as { position: string }).position) !== inner;
     },
   );
+}
+
+// ── §K — A CENTRED DIALOG NEEDS BOTH NUMBERS, AND ONE OF THEM IS A TRAP (ops_incident #670) ─────
+// InfoModal's × is pinned to the card's own top-right. `_layout.tsx` reserves a top-docked prompt's
+// band as the ROOT's paddingTop, which moves everything laid out inside it — and this overlay is
+// not: it resolves against the viewport, so the band passes straight through and the × sits under
+// Google's frame. Measured on production 2026-09-24, 375x812, signed out, 2/2 fresh contexts each,
+// with the WebKit top-dock shape injected into the served bundle:
+//
+//   no fix                         × y 63  | elementsFromPoint → iframe(gsi) on top, × index 3 | click FAILS
+//   paddingTop ONLY (16+178)       × y 152 | iframe STILL on top, × index 3                    | click FAILS
+//   paddingTop AND availH − band   × y 219 | div on top, × index 1                             | click LANDS
+//
+// The middle row is the whole reason this is one function returning two numbers: the card is
+// centred in the overlay's content box, so a card whose maxHeight still assumes the full viewport
+// OVERFLOWS that box and re-centres symmetrically, putting its top back above the padding. A fix
+// applying one half looks like progress and ships a still-dead control.
+const K_SAFE = { top: 0, bottom: 0 };
+const K_VH = 812, K_PAD = 16, K_CHROME = 48, K_BAND = 178;
+
+{
+  const none = centredDialogBox(K_VH, K_PAD, K_SAFE, { top: 0, bottom: 0 }, K_CHROME);
+  check('K1 nothing docked → the original numbers, unchanged',
+    none.paddingTop === 16 && none.availHeight === 812 - 48);
+
+  const docked = centredDialogBox(K_VH, K_PAD, K_SAFE, { top: K_BAND, bottom: 0 }, K_CHROME);
+  check('K2 a top band is added to the overlay padding', docked.paddingTop === 16 + K_BAND);
+  check('K3 …AND removed from the height the card may use (the half-fix trap)',
+    docked.availHeight === 812 - K_BAND - 48,
+    `got ${docked.availHeight}, expected ${812 - K_BAND - 48}`);
+  // The measured geometry: card top = paddingTop + (contentBox − cardHeight)/2, and it must clear
+  // the band. With both halves the card fits its box, so its top IS the padding edge or below.
+  const contentBox = K_VH - docked.paddingTop - K_PAD;
+  const cardH = Math.min(docked.availHeight, 720);
+  check('K4 with both halves the card FITS its content box (so it cannot re-centre upward)',
+    cardH <= contentBox, `card ${cardH} vs box ${contentBox}`);
+  check('K5 …and its top edge clears the band', docked.paddingTop >= K_BAND);
+
+  // The half-fix, executed: padding applied but the card still sized for the whole viewport.
+  const halfCardH = Math.min(812 - 48, 720);
+  check('K6 THE HALF FIX IS CAUGHT: padding alone leaves the card overflowing its box',
+    halfCardH > contentBox, `card ${halfCardH} vs box ${contentBox} — overflow re-centres it upward`);
+
+  const bottomOnly = centredDialogBox(K_VH, K_PAD, K_SAFE, { top: 0, bottom: 271 }, K_CHROME);
+  check('K7 a BOTTOM band costs height but no top padding',
+    bottomOnly.paddingTop === 16 && bottomOnly.availHeight === 812 - 271 - 48);
+  check('K8 safe-area insets still count',
+    centredDialogBox(K_VH, K_PAD, { top: 47, bottom: 34 }, { top: 0, bottom: 0 }, K_CHROME)
+      .availHeight === 812 - 47 - 34 - 48);
+  check('K9 a nonsense band is ignored rather than shrinking the dialog to nothing',
+    centredDialogBox(K_VH, K_PAD, K_SAFE, { top: -50, bottom: NaN } as never, K_CHROME).paddingTop === 16);
+}
+
+// The component must actually USE it — a pure function nothing calls is decoration.
+{
+  const modal = readFileSync(join(ROOT, 'src/components/InfoModal.tsx'), 'utf8');
+  check('K10 InfoModal calls centredDialogBox() for BOTH numbers',
+    /centredDialogBox\(/.test(modal)
+    && /dialogBox\.availHeight/.test(modal)
+    && /dialogBox\.paddingTop/.test(modal));
+  check('K11 …and reads FOREIGN prompt insets, never the combined set (the #163 self-reference trap)',
+    /useForeignPromptInsets\(\)/.test(modal) && !/usePromptInsets\(\)/.test(modal));
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nAll bottom-prompt-inset checks passed.');
