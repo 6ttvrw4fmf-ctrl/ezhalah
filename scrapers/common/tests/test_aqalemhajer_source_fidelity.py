@@ -522,18 +522,22 @@ def test_off_plan_markers_are_skipped_but_proximity_and_approximately_are_not():
     assert R._signal_for("3817")(200, _page(**{"wsf-al-qar": "▪\nقريباً"}), False) == "live"
 
 
-def test_duplex_and_studio_route_to_residential_despite_the_shared_helper():
-    """Reviewer finding 2026-09-24: N.category_for_type("Duplex"/"Studio") answers "Commercial" (the
-    shared helper's residential set is missing both; scrapers/common/normalize.py cannot be edited
-    here), so DWELLING_TYPES must win over it. 58 live دبلكس/دبلكسات/دبلكس وشقة rows would otherwise
-    land in aqalemhajer_commercial_listings and never show under the app's Residential filter."""
+def test_duplex_and_studio_route_to_commercial_like_the_rest_of_the_fleet():
+    """N.category_for_type("Duplex"/"Studio") answers "Commercial" (the shared helper's residential
+    set predates both; scrapers/common/normalize.py cannot be edited here) and this file does NOT
+    route around it — matching every other platform on the shared helper (bossbih's
+    test_every_type_phrase_this_catalogue_publishes_maps_or_is_deliberately_skipped pins the same
+    thing). Not a live-listing gap: the app's Residential filter already recovers rows here via
+    kinds:BOTH + the broad-Residential misfile-recovery path — confirmed live for bossbih (owner
+    decision 2026-09-24, docs/ARCHITECTURE.md §21). A per-platform override here would instead be
+    the one inconsistency in the fleet."""
     from scrapers.common import normalize as N
-    assert N.category_for_type("Duplex").lower() == "commercial"   # the gap this file must route around
+    assert N.category_for_type("Duplex").lower() == "commercial"
     assert N.category_for_type("Studio").lower() == "commercial"
     dup, cat, why = _map(**{"nw-al-qar": "📜\nدبلكس\nسكنية\nصك\nللبيع\nفي\nالدانة"})
-    assert why == "" and dup["property_type"] == "Duplex" and cat == "residential"
+    assert why == "" and dup["property_type"] == "Duplex" and cat == "commercial"
     stu, cat2, why2 = _map(**{"nw-al-qar": "📜\nستوديو\nللبيع\nفي\nالدانة"})
-    assert why2 == "" and stu["property_type"] == "Studio" and cat2 == "residential"
+    assert why2 == "" and stu["property_type"] == "Studio" and cat2 == "commercial"
 
 
 def test_fallback_title_without_a_detail_page_has_no_dangling_fi():

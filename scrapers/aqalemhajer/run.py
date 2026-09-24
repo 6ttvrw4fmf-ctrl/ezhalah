@@ -485,9 +485,11 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
     property_type = map_type(type_phrase)
     if not property_type:
         return None, "residential", "type_unmapped"
-    # DWELLING_TYPES wins over the shared helper: N.category_for_type is missing "Duplex"/"Studio"
-    # from its residential set (reviewer finding 2026-09-24) and cannot be edited here.
-    category = "residential" if property_type in DWELLING_TYPES else N.category_for_type(property_type).lower()
+    # N.category_for_type answers "Commercial" for "Duplex"/"Studio" (its residential set predates
+    # them, shared fleet-wide, cannot be edited here) — matches every other platform on this helper.
+    # The app's Residential filter already recovers these via kinds:BOTH + the broad-Residential
+    # misfile-recovery path (owner decision 2026-09-24, docs/ARCHITECTURE.md §21).
+    category = N.category_for_type(property_type).lower()
     if not deal:
         return None, category, "no_deal_stated"
     transaction_type = "Rent" if deal == "Rent" else "Buy"

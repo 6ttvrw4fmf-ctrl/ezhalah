@@ -1172,25 +1172,28 @@ migration-drift-guard rule in `AGENTS.md`).
 - **In-app browser proxy** proven for all partners (currently Aqar-centric); reconcile the "iframe
   impossible" note.
 - **`scrapers/common/normalize.category_for_type()`'s residential set is missing "Duplex"/"Studio"
-  fleet-wide (found 2026-09-24, not yet decided).** Every "house pattern" scraper that calls this
-  shared helper unqualified gets `Commercial` for these two types, so they physically land in each
-  platform's `*_commercial_listings` table. This is NOT currently a reachability bug: Duplex/Studio
-  are residential-macro clean types with `kinds: BOTH` in `propertyTypes.ts` (dated 2026-07-16,
-  "the latent invisible-listing fix"), and the 2026-07-10 broad-Residential misfile-recovery
-  (`resMisfileTypes`/`attachResScopeB` in `remote.ts`) generically recovers any residential-macro
-  `type_ar` sitting in a commercial table — confirmed live via the real anon-key RPC path for
-  bossbih (133/136 misfiled دوبلكس rows returned in one page of a plain Category=Residential
-  search). `scrapers/common/tests/test_bossbih_price_basis_and_traps.py::
-  test_every_type_phrase_this_catalogue_publishes_maps_or_is_deliberately_skipped` pins this as
-  intentional for bossbih.
-  **The open question:** `scrapers/aqalemhajer/run.py` (built 2026-09-24, batch-36, not yet
-  deployed) took the opposite approach — a per-scraper `DWELLING_TYPES` override so Duplex/Studio
-  store directly as `residential`, bypassing the shared helper — introducing a fleet
-  inconsistency. Needs an owner decision before the next platform is built: either (a) fix
-  `category_for_type()` itself and migrate every affected platform's already-upserted Duplex/Studio
-  rows in one coordinated pass, retiring the frontend `kinds: BOTH` compensation, or (b) keep the
-  frontend-compensation pattern as canonical and revert aqalemhajer's per-scraper override to match
-  every other platform. Do not silently pick one per-platform going forward.
+  fleet-wide (found 2026-09-24).** Every "house pattern" scraper that calls this shared helper
+  unqualified gets `Commercial` for these two types, so they physically land in each platform's
+  `*_commercial_listings` table. **RESOLVED 2026-09-24 (owner decision): this is intentional,
+  fleet-wide, canonical — do NOT route around it per-platform.** It is not a reachability bug:
+  Duplex/Studio are residential-macro clean types with `kinds: BOTH` in `propertyTypes.ts` (dated
+  2026-07-16, "the latent invisible-listing fix"), and the 2026-07-10 broad-Residential
+  misfile-recovery (`resMisfileTypes`/`attachResScopeB` in `remote.ts`) generically recovers any
+  residential-macro `type_ar` sitting in a commercial table — confirmed live via the real anon-key
+  RPC path for bossbih (133/136 misfiled دوبلكس rows returned in one page of a plain
+  Category=Residential search). This same physically-misfiled-but-frontend-compensated pattern is
+  already how a dozen-plus other `kinds: BOTH` types are handled (Rest House, Farm, Agriculture
+  Plot, Residential Land, Bank, Warehouse, Telecom Tower, Hotel, and the المرافق set), so leaving
+  Duplex/Studio on it is consistent with the established architecture, not an exception to it.
+  `scrapers/aqalemhajer/run.py` (batch-36, merged/deployed 2026-09-24) originally shipped a
+  per-scraper `DWELLING_TYPES` override that routed around the shared helper — reverted the same
+  day to match bossbih and every other platform (its 57 already-upserted residential-table
+  Duplex/Studio rows were left as-is; only future scrapes are affected). Both platforms' tests now
+  pin `category == "commercial"` for Duplex/Studio as the intentional, canonical behavior.
+  **If this is ever revisited:** fixing `category_for_type()` itself would require migrating every
+  affected platform's already-upserted rows in one coordinated pass and does not let the frontend
+  `kinds: BOTH` compensation be retired (it is the general reachability safety net for ANY
+  current/future table misfile, not specific to this gap) — so the cost/benefit did not favor it.
 
 **PRD §13 business items — DECIDED 2026-06-09 (don't re-ask these):**
 1. Revenue: **CPC (pay-per-click) first**, subscriptions later. Near-term work = click tracking, not
