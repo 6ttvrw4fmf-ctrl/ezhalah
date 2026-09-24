@@ -667,6 +667,112 @@ it; `scrapers/dealapp/repair.py` inherits it by import.
 **Why the old barrier was green the whole time:** it asserted the pin PAYLOAD in all eleven copies,
 and the payload was never the missing part. That is AGENTS.md's source-TEXT trap in its exact form.
 
+### §4.1d — EVERY WEBSITE GETS CHECKED, AND A ROTATION MUST BE FAIR (owner directive, 2026-09-24)
+
+**The owner's instruction, in his words:** *"Fix this across EVERY website currently connected to
+Ezhalah and every website I add in the future. I do not want Aqar to be the only website getting
+proper listing checks… New websites added in the future must automatically use the same checking
+system. I should not have to manually enable it for each website… Do not just change documentation
+or thresholds. Fix the actual checking capacity/system."*
+
+**What provoked it, measured that day:**
+
+| | active listings | verified inside its own SLA |
+|---|---:|---:|
+| aqar | 97,784 | 94.5% |
+| **wasalt** | 56,643 | **0.0%** |
+| **gathern** | 28,639 | **0.4%** |
+| **dealapp** | 16,899 | **0.3%** |
+| *62 other platforms* | 136,964 | **0.0%** |
+
+234,748 active listings, 92,650 verified in SLA — **92,439 of them aqar. Every other platform
+combined: 211.** Sixty-two platforms sat at exactly zero while three of the four biggest were
+*declared* `DIRECT_REVISIT`.
+
+#### The lesson: a rotation whose head cannot clear is not a capacity problem
+
+gathern's sweep ordered its worklist `last_seen_at asc`. A row it probes and finds **DEAD** moves
+**neither** existing timestamp — `last_seen_at` is a crawl fact and a sweep is not a crawl;
+`last_verified_alive_at` only moves on ALIVE. So a dead row the anomaly cap *correctly* refuses to
+kill keeps its ancient `last_seen_at` and sits at the head of the queue **permanently**.
+
+The run notes are the proof, and they were sitting in `scrape_runs` the whole time: an **identical
+`strike=1461`** on 09-16, 17, 18, 19, 20, 21 and 22. The same ~1,500 rows every run. 27,102 rows
+never looked at once. Oldest `last_seen_at` still **2026-07-27**.
+
+Measured on the live selection:
+
+| | run 2 repeats run 1 | fresh rows reached |
+|---|---:|---:|
+| old ordering | **1,500 / 1,500**, forever | 0 |
+| new ordering | **0** | **1,500** |
+
+> **Throughput was never the binding constraint. A faster loop over a queue whose head cannot clear
+> just re-reads the same rows more often.** Six runs a day of the old ordering would have re-probed
+> the same 1,500 rows six times a day and moved coverage by nothing.
+
+#### `last_liveness_probe_at` is the missing third fact
+
+`20260924020545` adds it to all 143 listing tables. The three facts are now distinct, and conflating
+any two of them is how this failed:
+
+| column | means | evidence class |
+|---|---|---|
+| `last_seen_at` | a crawl encountered this ad in a feed | ABSENCE |
+| `last_liveness_probe_at` | **we LOOKED at this row, whatever we concluded** | none — it is not evidence |
+| `last_verified_alive_at` | the source PROVED it alive on a direct read | DIRECT |
+
+**It is never evidence of life.** A row probed a minute ago and found 404, blocked or timing out
+carries a fresh `last_liveness_probe_at` and is still DEAD or UNKNOWN. It exists so a worklist can
+order `NULLS FIRST` and a probed row drops to the back for a full cycle. Every sweep writes it on
+**every** verdict **including the kills the anomaly cap quarantines** — that last one is the whole
+point, because those are the rows that were stuck.
+
+#### Capacity is added by cadence, never by probing harder
+
+gathern rate-limits detail pages **globally** (429 above ~2 req/s across *all* IPs), so a bigger or
+faster batch buys nothing and risks the block that makes every verdict worthless. The sweep went
+1×/day → **6×/day with the batch size and per-run request rate unchanged**. From measured runs
+(0.79–0.96 rows/s, 1,500 rows in ~29 min): in-run ~0.85 req/s, daily average ~**0.10 req/s**, full
+pass 28,639/9,000 ≈ **3.2 days < the 96h SLA**. One run a day gave a 19-day pass against a 4-day SLA.
+
+#### The crawl is the cheapest honest oracle, and it was being thrown away
+
+`db.mark_direct_alive()` — ~28 scrapers **already** fetch each listing's own detail page every crawl
+and that read was recorded only as `last_seen_at`. It now stamps through
+`liveness_contract.direct_alive_patch()` at **zero extra requests**: there is no new way to get
+blocked because there is no new request. It is consumed in `db._wasalt_batch`, **the single
+chokepoint all 141 `upsert_*` wrappers funnel through**, which is what makes auto-enrolment real
+rather than a promise. A caller cannot relax the law — a row the pipeline concluded is inactive
+never gets a stamp, whatever the call site passed (the `http_liveness.py` shape again).
+
+#### Is the CHECKER running? — a question nothing asked before
+
+`mon_detect_liveness_checking_shortfall` (`20260924020926`) measures the machine, not the inventory.
+Yardstick is the platform's **own** promise: `required_per_day = active / (sla_hours/24)`. Arm 1 is
+**one** fleet alert (62 separate ones would bury the real one); arm 2 is per-platform `STALLED` — a
+checker that was running and stopped, invisible in a fleet total and §9's expected-but-absent shape.
+Cohort discovered from `pg_tables` every sweep, so a website added next month is measured with
+nobody enabling anything. **Clearing it by raising an SLA or lowering a cap is forbidden in its own
+payload** (`LISTING_LIVENESS.md` §7).
+
+#### Two things the barrier caught in its own first run
+
+`scripts/verify-every-platform-is-liveness-checked.ts` discovers its cohort by shape, never a list.
+On its first execution it found a **fourth** direct write path into listing tables that had been
+missed, and that **wasalt's sweep was unwired**. And its own first version was a source-TEXT
+tripwire: `src.includes('last_liveness_probe_at')` passed on a **comment** after every real write had
+been deleted — caught only by mutating it, which is exactly why AGENTS.md insists on the mutation.
+
+#### What is NOT fixed, and must not be reported as fixed
+
+**wasalt — 56,643 listings, the single largest gap — remains at 0%.** Its per-listing liveness is
+deliberately unscheduled: each page is ~400KB through the **metered** Saudi proxy, so daily over 58k
+rows is ~700 GB/month and would blow the DataImpulse plan. The workflow says so in its own header.
+That needs a **lightweight** check built and proven (HEAD, or a range-limited GET — the probe ledger
+already shows a `head=404 get=404` hybrid path), not a switch flipped. Enabling it as-is would trade
+a coverage number for a blown budget and a blocked source.
+
 ### §4.1c — A ONE-WAY ORACLE MAKES AN ALERT CORRECT BEHAVIOUR CANNOT CLEAR (2026-09-23, routine #11)
 
 §4.1b made the sold pin WRITE its evidence. This is the half that was still missing: it wrote only
