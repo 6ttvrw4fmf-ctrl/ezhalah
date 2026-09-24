@@ -393,7 +393,8 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     return row, category, gone
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       seen_ad_numbers: list[str]) -> None:
     """Make source-confirmed SOLD/RENTED rows inactive NOW and survivors of the nightly
     auto_recover_false_inactive() sweep.
 
@@ -407,8 +408,18 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     stuck in on 2026-07-16). prune_unseen() never undoes the pin: it only selects active=true
     rows. When a listing is later relisted, its next upsert carries active=true and the upsert's
     own missing_count=0 reset applies — the pin is only written for ids that are gone THIS
-    crawl."""
-    sold_pin.pin_source_confirmed_gone(table, ad_numbers, oracle="hajer.sold_pin.status_badge")
+    crawl.
+
+    The `seen_ad_numbers` half is what makes this oracle three-valued instead of one-way: the same
+    status field that publishes a removal also publishes the reversal, and until 2026-09-23 the
+    reversal was read, used, and thrown away — leaving ops_lifecycle_false_resurrection() with a
+    GONE latest verdict that no amount of correct behaviour could clear. See scrapers/common/
+    sold_pin.py. It writes evidence only: never active, never missing_count, never
+    last_verified_alive_at.
+    """
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers, oracle="hajer.sold_pin.status_badge", seen_ad_numbers=seen_ad_numbers,
+    )
 
 
 def main() -> int:
@@ -467,10 +478,10 @@ def main() -> int:
         # Pin sold/rented rows immediately after the upserts: gone rows are never upserted here,
         # but without the pin an already-listed row stays active for 3 more crawls (prune's
         # 3-strike) while the site explicitly says gone. See _pin_sold_inactive.
-        if sold_res:
-            _pin_sold_inactive("hajer_residential_listings", sold_res)
-        if sold_com:
-            _pin_sold_inactive("hajer_commercial_listings", sold_com)
+        _pin_sold_inactive("hajer_residential_listings", sold_res,
+                           [r["ad_number"] for r in res])
+        _pin_sold_inactive("hajer_commercial_listings", sold_com,
+                           [r["ad_number"] for r in com])
         # Gone rows are already active=false + missing_count=3 by now; prune_unseen never touches
         # them (it only reads active=true rows), so their absence from the seen set is harmless.
         # verify_gone makes the OTHER path direct too: a row missing from this crawl is re-fetched
