@@ -90,13 +90,26 @@ function executable(sql: string): string {
 
 // SCOPE EACH CHECK TO ITS OWN FUNCTION BODY (see M5 in the header). The predicate and the contract
 // ship in the same migration, so a whole-file match leaks between them.
+// BLIND-GUARD REPAIR, 2026-09-24 (routine-10-barrier). This used to assume the closing tag was the
+// literal `$function$`, and when it could not find one it returned `rest` — THE WHOLE REST OF THE
+// FILE. A definition written with the ordinary `$$` (the style most hand-written migrations in this
+// tree use) therefore un-scoped both symbols and let the predicate's text satisfy the contract's
+// assertions and vice versa, which is the exact leak this function's own header says it prevents.
+// The identical idiom in scripts/verify-nonprice-price-monitor.ts was REPRODUCED the same day: with
+// the P0 phone/ID-price guard deleted from the winning body, that barrier printed PASS on every
+// check. Now the tag is READ rather than assumed, and an unreadable body returns '' — which fails
+// every assertion — instead of the file.
 function bodyOf(sql: string, symbol: string): string {
   const start = sql.search(
     new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${symbol}\\b`, 'i'));
   if (start < 0) return '';
   const rest = sql.slice(start);
-  const end = rest.indexOf('$function$', rest.indexOf('$function$') + 1);
-  return executable(end < 0 ? rest : rest.slice(0, end + '$function$'.length));
+  const tag = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest);
+  if (!tag) return '';                                     // no dollar-quoted body: UNKNOWN, not OK
+  const openAt = tag.index + tag[0].length;
+  const closeAt = rest.indexOf(tag[0], openAt);
+  if (closeAt < 0) return '';                              // unterminated: UNKNOWN, not the file
+  return executable(rest.slice(0, closeAt + tag[0].length));
 }
 
 /**

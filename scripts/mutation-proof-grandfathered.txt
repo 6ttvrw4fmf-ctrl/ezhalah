@@ -104,7 +104,6 @@ verify-aqar-labeled-total-beats-subfloor.ts
 verify-aqar-ppm-card-display.ts
 verify-aqar-price-artifact-write-guard.ts
 verify-aqar-trigger-preserves-source-ppm.ts
-verify-aqar-word-price-fallback.ts
 verify-arabic-summary-fallback.ts
 verify-auth-popup.ts
 verify-bedrooms-source-corroboration.ts
@@ -218,7 +217,6 @@ verify-no-phone-auth.ts
 verify-no-public-test-crash-surface.ts
 verify-no-unsupported-claims.ts
 verify-no-vercel-bypass.ts
-verify-nonprice-price-monitor.ts
 verify-null-category-purity.ts
 verify-numeric-input-dir.ts
 verify-observability-pdpl-scrub.ts
