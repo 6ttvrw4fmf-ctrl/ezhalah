@@ -121,8 +121,21 @@ def session() -> cc.Session:
 
 def fetch_catalogue(s: cc.Session) -> list[dict]:
     """The whole catalogue in one call. Anything but a non-empty JSON array raises: a blocked or
-    changed endpoint must fail the run, never read as an empty source."""
-    r = s.get(f"{API}/recent", timeout=90)
+    changed endpoint must fail the run, never read as an empty source.
+    Through the residential proxy a route can die mid-handshake (2026-09-24: curl 28 connect
+    timeout, then curl 35 TLS error, while a probe minutes later answered 200 on every profile), so
+    a TRANSPORT failure rotates to a fresh connection — wasalt's proven remedy — up to four times."""
+    last = "no attempt"
+    for attempt in range(4):
+        sess = s if attempt == 0 else session()
+        try:
+            r = sess.get(f"{API}/recent", timeout=90)
+            break
+        except Exception as e:  # noqa: BLE001 — a dead proxy route is retried on a fresh connection
+            last = type(e).__name__
+            time.sleep(5.0 * (attempt + 1))
+    else:
+        raise RuntimeError(f"/recent: {last} on four fresh connections")
     if r.status_code != 200:
         raise RuntimeError(f"/recent: HTTP {r.status_code}")
     try:
@@ -142,12 +155,14 @@ def fetch_detail(s: cc.Session, pid: int) -> Optional[dict]:
     HTTP 429 — the host throttles a burst. So: three attempts, backing off 8 s then 16 s; the miss
     reason is kept in DETAIL_MISSES so the run notes say what happened."""
     status, body = None, ""
+    sess = s
     for attempt in range(3):
         try:
-            r = s.get(f"{API}/recent/{pid}", timeout=45)
+            r = sess.get(f"{API}/recent/{pid}", timeout=45)
             status, body = r.status_code, r.text
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — a transport failure retries on a FRESH connection
             status, body = None, f"{type(e).__name__}"
+            sess = session()
         if status == 200:
             try:
                 j = r.json()

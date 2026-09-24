@@ -143,7 +143,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import http, db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
@@ -197,13 +197,17 @@ _PROXIES = {"http": _PROXY, "https": _PROXY} if _PROXY else None
 
 
 def session() -> cc.Session:
-    # Through the Saudi residential proxy the gateway RESETS a post-quantum ClientHello (the fleet's
-    # measured gotcha, docs/ops/VERIFYING_PRODUCTION.md; wasalt pins chrome124 for the same reason):
-    # the 2026-09-24 re-crawl through the proxy with the newest «chrome» alias died as an SSLError /
-    # a 90 s connect timeout. Pre-PQ chrome124 when proxied; the site's own measured profile otherwise.
-    s = cc.Session(impersonate="chrome124" if _PROXY else "chrome", proxies=_PROXIES)   # impersonate OWNS the User-Agent — never set one
-    s.headers.update({"Accept": "application/json", "Accept-Language": "ar"})
-    return s
+    # MEASURED 2026-09-24 (probe from GitHub through the residential proxy): the catalogue answers
+    # ONE fingerprint per route — chrome124 and chrome drew the Cloudflare page (403), safari17_0 was
+    # served the JSON (200); from a laptop every profile answered. A 403 here is the handshake, not
+    # the address (fleet rule), so the profile is NEGOTIATED against the catalogue itself, never
+    # pinned, and the proxy — when set — is part of the negotiation. impersonate OWNS the User-Agent.
+    return http.negotiated_session(
+        f"{SEARCH}?filter[marketplace_purpose]=rent&page[size]=1&page[number]=1",
+        order=("safari17_0", "chrome124", "chrome", "firefox133", "edge101", "safari15_5"),
+        headers={"Accept": "application/json", "Accept-Language": "ar"},
+        served=lambda r: r.status_code == 200 and "json" in (r.headers.get("content-type") or ""),
+        proxies=_PROXIES)
 
 
 def fetch_json(s: cc.Session, url: str, params: Optional[dict] = None, *,
