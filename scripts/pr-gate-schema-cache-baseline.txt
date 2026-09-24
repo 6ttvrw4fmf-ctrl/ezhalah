@@ -1,0 +1,23 @@
+# PR-GATING LIVE CHECKS THAT DO NOT YET SURVIVE A SCHEMA-CACHE RELOAD.
+#
+# Routine #10, 2026-09-23. A workflow with a `pull_request` trigger blocks a contributor's merge.
+# When such a check reads PostgREST without scripts/lib/postgrestRetry.ts, any session applying a
+# function-creating migration opens a PGRST002 window that fails somebody else's unrelated diff —
+# measured that evening on two PRs at once, 96 seconds after migration 20260923233010, with four
+# such migrations landing from three concurrent sessions inside twelve minutes.
+#
+# THIS LIST MAY ONLY SHRINK. Its size is pinned by PR_GATE_UNPROTECTED_CEILING in
+# scripts/verify-pr-gates-survive-schema-cache-reload.ts, so adding a name is a reviewed source
+# change and never a quiet append. A NEW unprotected PR gate is RED. A row the tree has outgrown is
+# RED as STALE, so the ledger can never read better than reality.
+#
+# SHRINK IT BY ADOPTING THE DRIVER, NEVER BY REMOVING THE TRIGGER. Dropping `pull_request` from a
+# workflow would empty this file and lose the per-PR coverage that is the whole point; that is the
+# prohibited act wearing this ratchet's syntax.
+#
+# Format:  check filename | the pull_request-triggered workflow that runs it | what its reads are
+#
+# verify-p0-fast-lane-detection.ts is NOT here: it is the one that actually bit, and it was repaired
+# in the same change rather than baselined. Its reproduction is in that file's header.
+
+verify-af-independent-oracle.ts | .github/workflows/af-oracle-pr-check.yml | two fetches: a PostgREST count with Prefer/Range headers, and an RPC read via r.json(). It carries its own 3x retry for ANY failure (see its exclusion row), which is both shorter and less discriminating than the driver's PGRST002-only ~30s budget — converting it means threading the driver's Probe through two differently-shaped readers, which is a change worth making on its own rather than riding this one
