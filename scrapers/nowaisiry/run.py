@@ -230,20 +230,14 @@ def _map_type(text: str) -> str:
     return "Residential Land"  # the catalog is overwhelmingly plots
 
 
-def _area(text: str) -> Optional[int]:
-    """Parse "المساحة : 455 متر" / "10,000 متر مربع" / "318.21 متر" / "10532,5 متر" → int m²."""
+def _area(text: str) -> Optional[float]:
+    """Parse "المساحة : 455 متر" / "10,000 متر مربع" / "318.21 متر" / "10532,5 متر" → exact m²
+    (455 / 10000 / 318.21 / 10532.5 — the source's decimals are kept, never dropped)."""
     m = AREA_RE.search(text) or AREA_FALLBACK_RE.search(text)
     if not m:
         return None
-    raw = m.group(1).translate(_TRANS).strip()
-    # Comma = thousands separator EXCEPT a lone trailing ",5" decimal ("10532,5"). Drop "."/","
-    # decimals; keep the integer part. Then strip any non-digits left.
-    raw = re.sub(r"[.,]\d{1,2}$", "", raw)   # drop a trailing decimal (.21 / ,5)
-    digits = re.sub(r"[^\d]", "", raw)        # remove remaining thousands separators
-    if not digits:
-        return None
-    n = int(digits)
-    return n if 0 < n < 5_000_000 else None
+    n = N.to_measure(m.group(1))
+    return n if n and 0 < n < 5_000_000 else None
 
 
 def _price(text: str) -> Optional[int]:

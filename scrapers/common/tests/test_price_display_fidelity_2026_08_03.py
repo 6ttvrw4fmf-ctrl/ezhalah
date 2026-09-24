@@ -95,7 +95,9 @@ def test_aqarcity_land_rent_uses_the_displayed_annual_not_the_ld_per_meter():
     assert row is not None and category == "residential"
     assert row["transaction_type"] == "Rent"
     assert row["price_annual"] == 50115, row["price_annual"]
-    assert row["price_per_meter"] == 20  # the rounded per-metre rate, kept in its own column
+    # the source's exact per-metre rate, kept in its own column — it used to be rounded to 20
+    # (exact measurements, 2026-09-21: price_per_meter keeps source decimals).
+    assert row["price_per_meter"] == 19.5
     assert row["price_total"] is None
 
 

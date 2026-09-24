@@ -126,6 +126,16 @@ def _to_int(v: Any) -> Optional[int]:
     return n if n > 0 else None
 
 
+def _to_measure(v: Any):
+    """_to_int's twin for the AREA: the same gate and the same number, its fraction kept ("312.5" → 312.5)."""
+    if v is None:
+        return None
+    s = str(v).strip().replace(",", "")
+    if not s or not re.fullmatch(r"\d+(\.\d+)?", s):
+        return None
+    return normalize.measure_num(s) or None
+
+
 def fetch_all(s: cc.Session) -> list[dict]:
     """Every post, with terms embedded. One page covers this site; the loop is for safety only."""
     out: list[dict] = []
@@ -371,7 +381,7 @@ def map_listing(post: dict) -> tuple[Optional[dict], str]:
 
     pm = post.get("property_meta") or {}
     price = _to_int(pm.get("REAL_HOMES_property_price"))
-    area = _to_int(pm.get("REAL_HOMES_property_size"))
+    area = _to_measure(pm.get("REAL_HOMES_property_size"))
     bedrooms = _to_int(pm.get("REAL_HOMES_property_bedrooms"))
     bathrooms = _to_int(pm.get("REAL_HOMES_property_bathrooms"))
 

@@ -120,7 +120,9 @@ def parse_deal(text: str, title: str) -> Optional[str]:
 
 
 _MONEY_RE = re.compile(r"([\d٠-٩][\d٠-٩,\.]*)\s*(?:ريال|ر\.س|SAR)")
-_AREA_RE = re.compile(r"([\d٠-٩][\d٠-٩,\.]*)\s*(?:متر|م²|م2)")
+# ٫ + a fraction is the Arabic decimal mark and belongs to the area: «٤٥٠٫٥ متر» is 450.5, not the «٥» after
+# the mark. ٫ + exactly 3 digits is grouping (normalize.to_measure's rule) and stays outside, as before.
+_AREA_RE = re.compile(r"([\d٠-٩][\d٠-٩,\.]*(?:٫(?![\d٠-٩]{3}(?![\d٠-٩]))[\d٠-٩]+)?)\s*(?:متر|م²|م2)")
 
 
 def _num(m: Optional[re.Match]) -> Optional[int]:
@@ -131,6 +133,13 @@ def _num(m: Optional[re.Match]) -> Optional[int]:
         return n if n > 0 else None
     except ValueError:
         return None
+
+
+def _measure(m: Optional[re.Match]):
+    """_num's twin for the AREA: the same captured number, its fraction kept ("٤٥٠.٥ متر" → 450.5)."""
+    if not m:
+        return None
+    return normalize.measure_num(m.group(1).translate(_AR_DIGITS).replace(",", "").replace("٫", ".")) or None
 
 
 def map_listing(post: dict) -> tuple[Optional[dict], str, str]:
@@ -174,7 +183,7 @@ def map_listing(post: dict) -> tuple[Optional[dict], str, str]:
 
     price_cell = field(text, "السعر") or ""
     price = _num(_MONEY_RE.search(price_cell))
-    area = _num(_AREA_RE.search(field(text, "المساحة") or ""))
+    area = _measure(_AREA_RE.search(field(text, "المساحة") or ""))
 
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{post['id']}",

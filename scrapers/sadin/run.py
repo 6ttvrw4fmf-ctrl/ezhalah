@@ -166,6 +166,16 @@ def _num(s: Optional[str]) -> Optional[int]:
     return int(m.group(0)) if m else None
 
 
+def _measure(s: Optional[str]):
+    """`_num`'s token for a MEASUREMENT (area, street width), fraction kept (2026-09-21): «125.5 م²» is
+    125.5, never 125. Same two searches as `_num`, each widened by an optional trailing decimal."""
+    if not s:
+        return None
+    t = str(s).translate(normalize._TRANS).replace("٬", ",")
+    m = re.search(r"\d{1,3}(?:[,.]\d{3})+(?!\d)(?:[.٫]\d+)?", t) or re.search(r"\d+(?:[.٫]\d+)?", t.replace(",", ""))
+    return normalize.to_measure(m.group(0)) if m else None
+
+
 def _redact(text: Optional[str]) -> Optional[str]:
     """Strip phones / wa.me / contact blocks from free text (PDPL)."""
     if not text:
@@ -330,7 +340,7 @@ def parse_catalog_cards(html: str, cards: dict[str, dict]) -> None:
         for val, lab in re.findall(r"<li>.*?<b>([\d,٬\.]+)</b>\s*<span>([^<]*)</span>", b, re.S):
             lab = lab.strip()
             if "م²" in lab or "م2" in lab or "متر" in lab:
-                area = _num(val)
+                area = _measure(val)
             elif "نوم" in lab or "غرف" in lab or "غرفة" in lab:
                 beds = _num(val)
             elif "حمام" in lab or "دورات" in lab:
@@ -638,7 +648,7 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     baths = card.get("baths")
     area = card.get("area")
     if area is None:
-        area = _num(_dd_field(html, "المساحة"))  # redesign detail dt/dd, e.g. "500 م²"
+        area = _measure(_dd_field(html, "المساحة"))  # redesign detail dt/dd, e.g. "500 م²"
     floors = _num(_li_field(html, "عدد الطوابق"))
     kitchens = _num(_li_field(html, "عدد المطابخ"))
     halls = _num(_li_field(html, "عدد الصالات"))
@@ -672,9 +682,9 @@ def map_listing(pid: str, html: str, card: dict, is_rent: bool) -> tuple[Optiona
     # Street frontage / width from description (e.g. "على شارع … بعرض 16م").
     sw = None
     if desc_raw:
-        sm = re.search(r"بعرض\s*([\d]{1,3})\s*م", desc_raw.translate(normalize._TRANS))
+        sm = re.search(r"بعرض\s*(\d{1,3}(?:[.٫]\d+)?)\s*م", desc_raw.translate(normalize._TRANS))
         if sm:
-            sw = _num(sm.group(1))
+            sw = _measure(sm.group(1))
 
     # Licences — old inline rows first, then the redesign's dt/dd labels (رخصة فال / تاريخ الإصدار /
     # تاريخ الانتهاء).

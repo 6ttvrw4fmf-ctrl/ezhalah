@@ -281,7 +281,7 @@ def map_listing(p: dict, images: Optional[dict[int, list[str]]] = None) -> tuple
     m = PRICE_RE.search(text) or PRICE_LOOSE.search(text)
     price = normalize.to_int(m.group(1)) if m else None
     m = AREA_RE.search(text)
-    area = normalize.to_int_numeric(m.group(1)) if m else None
+    area = (normalize.to_measure(m.group(1)) or None) if m else None
     m = BEDS_RE.search(text)
     beds = normalize.to_int(m.group(1)) if m else None
 

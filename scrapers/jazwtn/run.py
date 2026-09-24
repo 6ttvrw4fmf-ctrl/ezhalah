@@ -537,7 +537,8 @@ def map_listing(body: str, url: str, featured: Optional[str]) -> tuple[Optional[
         area = _to_float(am2.group(1)) if am2 else None
 
     # ── per-m² price (lowest tier) + total ──
-    per_m_vals = [v for v in (_to_int(m.group(1)) for m in PER_M_RE.finditer(txt)) if v and v >= 50]
+    # to_measure, not _to_int: «850.5 ريال للمتر» stays 850.5 (to_int truncated it to 850).
+    per_m_vals = [v for v in (normalize.to_measure(m.group(1)) for m in PER_M_RE.finditer(txt)) if v and v >= 50]
     price_per_meter = min(per_m_vals) if per_m_vals else None
 
     price_total = None
@@ -621,7 +622,7 @@ def map_listing(body: str, url: str, featured: Optional[str]) -> tuple[Optional[
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": int(round(area)) if area else None,
+        "area_m2": normalize.measure_num(area) or None,   # exact: 407.56 stays 407.56, never rounded
         "bedrooms": bedrooms,
         "bathrooms": baths,
         "price_total": price_total if not is_rent else None,

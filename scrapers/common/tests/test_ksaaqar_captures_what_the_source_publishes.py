@@ -92,7 +92,8 @@ def test_no_period_token_leaves_the_price_as_published():
 # ── area: a number WITH a unit, never prose ───────────────────────────────────────────────────────
 def test_area_reads_every_shape_the_source_uses():
     assert parse_area("📐 مساحة الأرض: 525م²") == 525
-    assert parse_area("• المساحة: 163.27 متر مربع") == 163
+    # 163.27, not 163: measurements keep every source decimal (owner 2026-09-21; area_m2 is numeric now).
+    assert parse_area("• المساحة: 163.27 متر مربع") == 163.27
     assert parse_area("مساحة ٢٠٠م² الموقع: حي طويق") == 200
     assert parse_area("♻️المساحة / 620 م") == 620
     assert parse_area("مساحة الأرض الإجمالية: 1,200 م²") == 1200

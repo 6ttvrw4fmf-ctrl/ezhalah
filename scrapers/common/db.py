@@ -376,10 +376,25 @@ def upsert_wasalt_residential(row: dict[str, Any]) -> None:
 # price_per_meter of 90,533,352,829) used to make the WHOLE batch upsert fail with 22003, dropping
 # every row in it. We null the offending FIELD instead of losing the batch — the listing still saves.
 _INT2_COLS = frozenset({"bedrooms", "bathrooms", "master_bedrooms", "halls",
-                        "reception_rooms_majlis", "property_age", "street_width_m"})
-_INT4_COLS = frozenset({"area_m2", "interior_space_m2", "outdoor_area_m2", "price_per_meter",
-                        "rent_now_pay_later_monthly", "missing_count"})
+                        "reception_rooms_majlis", "property_age"})
+_INT4_COLS = frozenset({"rent_now_pay_later_monthly", "missing_count"})
 _INT8_COLS = frozenset({"price_annual", "price_total"})
+# MEASUREMENTS are numeric columns (migration 20260921…_exact_measurements) and keep every digit the
+# source printed — 407.56 m² is stored as 407.56, never 407 or 408 (owner 2026-09-21: «never ever
+# again»). They must NEVER rejoin an integer set above; test_exact_measurements.py asserts it.
+_MEASURE_COLS = frozenset({"area_m2", "interior_space_m2", "outdoor_area_m2", "price_per_meter",
+                           "street_width_m"})
+
+
+def _sanitize_measures(r: dict[str, Any]) -> None:
+    """Measurement columns: exact numbers in, exact numbers out. A numeric string is read as a machine
+    value ("407.56" → 407.56); bool, non-numeric, negative, NaN/inf → NULL for that field only, the
+    same one-bad-value-never-fails-the-batch rule as _sanitize_ints. Nothing is ever rounded."""
+    from scrapers.common.normalize import measure_num
+    for c in _MEASURE_COLS:
+        v = r.get(c)
+        if v is not None:
+            r[c] = measure_num(v)
 
 
 def _sanitize_ints(r: dict[str, Any]) -> None:
@@ -430,6 +445,7 @@ def _sanitize_ints(r: dict[str, Any]) -> None:
                 continue
             if isinstance(v, int) and not (0 <= v <= hi):
                 r[c] = None  # overflow OR negative — both impossible for a count/area/price
+    _sanitize_measures(r)   # every caller of this also gets exact measurements
 
 
 # Free-text columns that can carry a contact detail. PDPL: a broker's phone number, WhatsApp handle

@@ -37,7 +37,6 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 BASE = "https://fahadalshahri.com"
 SOURCE = "Fahad Alshahri"
 PREFIX = "FAS"
-_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
 def session() -> cc.Session:
@@ -111,14 +110,11 @@ _STREET_W_RE = re.compile(r"شارع\s*([\d٠-٩][\d٠-٩,\.]*)\s*(?:متر|م)(
 _DISTRICT_RE = re.compile(r"(حي\s+[ء-ي][ء-ي\s]{2,30}?)(?=\s*[,،.\-–—]|\s+(?:على|مساحة|قريب|تتكون|إذا|فلة|مكونة)|$)")
 
 
-def _num(m: Optional[re.Match]) -> Optional[int]:
+def _num(m: Optional[re.Match]) -> Optional[float]:
+    """A measurement capture → its exact value («407.56» stays 407.56, «1,200» → 1200). 0/none → None."""
     if not m:
         return None
-    try:
-        n = int(float(m.group(1).translate(_AR_DIGITS).replace(",", "")))
-        return n if n > 0 else None
-    except ValueError:
-        return None
+    return normalize.to_measure(m.group(1)) or None
 
 
 def map_listing(p: dict) -> tuple[Optional[dict], str, str]:

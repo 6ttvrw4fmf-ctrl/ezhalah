@@ -237,7 +237,9 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
             "region_id": region_id,
             "district_ar": district_ar,
             "neighborhood": district_en,      # raw English; never displayed
-            "area_m2": _int(_SQM_RE.search(spec).group(1)) if _SQM_RE.search(spec) else None,
+            # exact: "85.5 sqm" stays 85.5 (not _int's 85); a non-number or 0 → None, as _int
+            "area_m2": (normalize.measure_num(_SQM_RE.search(spec).group(1).replace(",", "")) or None
+                        if _SQM_RE.search(spec) else None),
             "bedrooms": _int(_BED_RE.search(spec).group(1)) if _BED_RE.search(spec) else None,
             "bathrooms": _int(_BATH_RE.search(spec).group(1)) if _BATH_RE.search(spec) else None,
             "price_annual": amount,

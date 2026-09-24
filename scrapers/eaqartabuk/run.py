@@ -186,11 +186,14 @@ def _area_from_text(html: Optional[str]) -> Optional[float]:
     if not html:
         return None
     txt = re.sub(r"<[^>]+>", " ", str(html)).translate(normalize._TRANS)
-    for pat in (r"(?:المساحة|مساحة|مسطح)\s*(?:الأرض|الارض|البناء|الكلية)?\s*[:\-]?\s*([\d][\d.,]*)",
-                r"([\d][\d.,]*)\s*(?:م2|م²|متر\s*مربع|متر)"):
+    # ٫ + a fraction is the Arabic decimal mark: «٤٠٧٫٥٦ م2» is 407.56, never 407 or the «56». ٫ + exactly
+    # 3 digits is grouping (normalize.to_measure's rule) and stays outside the capture, as before.
+    frac = r"(?:٫(?!\d{3}(?!\d))\d+)?"
+    for pat in (r"(?:المساحة|مساحة|مسطح)\s*(?:الأرض|الارض|البناء|الكلية)?\s*[:\-]?\s*([\d][\d.,]*" + frac + ")",
+                r"([\d][\d.,]*" + frac + r")\s*(?:م2|م²|متر\s*مربع|متر)"):
         for m in re.finditer(pat, txt):
             try:
-                val = float(m.group(1).replace(",", ""))
+                val = float(m.group(1).replace(",", "").replace("٫", "."))
             except ValueError:
                 continue
             if 50 <= val <= 10_000_000:
@@ -508,7 +511,7 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": round(area) if area else None,
+        "area_m2": normalize.measure_num(area) or None,   # exact: 796.5 stays 796.5
         "bedrooms": beds,
         "bathrooms": _int(meta.get("bathrooms")),
         "price_total": price_total,

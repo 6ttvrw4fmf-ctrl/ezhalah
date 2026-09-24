@@ -290,7 +290,7 @@ def map_object(o: dict) -> Optional[tuple[dict, str]]:
         "city": city,
         "region": N.region_for_city(city),
         "neighborhood": district,
-        "area_m2": _positive_int(o.get("area")),
+        "area_m2": N.measure_num(o.get("area")) or None,   # 0 = unpublished (see _positive_int); exact
         # NOT PUBLISHED by this source in any structured field — prose is never mined for them.
         "bedrooms": None,
         "bathrooms": None,

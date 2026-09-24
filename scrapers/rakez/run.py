@@ -160,6 +160,15 @@ def _to_int(v: Any) -> Optional[int]:
     return n if n > 0 else None
 
 
+def _to_measure(v: Any) -> Optional[float]:
+    """_to_int()'s sibling for a MEASUREMENT: the same number, decimals kept («160.49» → 160.49)."""
+    if v is None or v is False or v is True:
+        return None
+    s = re.sub(r"[,\s]", "", str(v).translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
+    m = re.match(r"^(\d+(?:\.\d+)?)$", s)
+    return (normalize.measure_num(m.group(1)) or None) if m else None
+
+
 def _paged(s: cc.Session, path: str, note: str, extra: str = "") -> list[dict]:
     """Every page of a REST collection, with the retry every sibling scraper learned to need."""
     global LAST_FETCH_NOTE
@@ -388,7 +397,7 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
     city_ar, city_id, region_id, district_ar = resolve_location(city_term_ids, tree)
 
     price = _to_int(acf.get("price"))
-    area = _to_int(acf.get("area"))
+    area = _to_measure(acf.get("area"))
     bedrooms = _to_int(acf.get("rooms_count"))
     floor_number = _floor_number(acf.get("floor"))
 

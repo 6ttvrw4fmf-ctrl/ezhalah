@@ -59,6 +59,8 @@ def test_ordinary_positive_values_untouched():
 
 
 def test_overflow_protection_still_intact():
-    r = {"price_per_meter": 90_533_352_829}  # the original 22003 incident value (int4 col)
+    # price_per_meter was the original 22003 incident column; it is numeric since 2026-09-21 (exact
+    # measurements) and cannot overflow, so the int4 guard is proven on an int4 column that remains.
+    r = {"rent_now_pay_later_monthly": 90_533_352_829}
     db._sanitize_ints(r)
-    assert r["price_per_meter"] is None
+    assert r["rent_now_pay_later_monthly"] is None

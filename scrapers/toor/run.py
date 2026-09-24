@@ -548,7 +548,7 @@ def map_listing(body: str, url: str, sitemap_image: Optional[str] = None) -> tup
     facade = _spec_value(body, "الواجهة")
     handover = _spec_value(body, "الإفراغ")  # often "فوري"
     street_w_text = _spec_value(body, "عرض الشارع الرئيسي")
-    street_w = _int(street_w_text) if street_w_text else None
+    street_w = (normalize.to_measure(street_w_text) or None) if street_w_text else None
 
     # ── geo (page meta) ──
     icbm = ICBM_RE.search(body)
@@ -597,7 +597,7 @@ def map_listing(body: str, url: str, sitemap_image: Optional[str] = None) -> tup
         "active": True,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": round(area) if area else None,
+        "area_m2": normalize.measure_num(area) if area else None,
         "bedrooms": beds,
         "bathrooms": baths,
         "property_age": _age_to_int(age_text),

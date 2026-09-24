@@ -247,6 +247,12 @@ def _to_int(v: Any) -> Optional[int]:
     return n if n else None
 
 
+def _to_measure(v: Any):
+    """_to_int's measurement sibling: the same first number, every source decimal kept (214.44 m²
+    stays 214.44). 0 stays "not set" exactly as _to_int treats it."""
+    return normalize.to_measure(v) or None
+
+
 def _redact(text: Optional[str]) -> Optional[str]:
     if not text:
         return text
@@ -441,7 +447,7 @@ def _feature_fields(slugs: set[str]) -> dict[str, Any]:
     if len(dirs) == 1:
         out["direction"] = dirs.pop()
 
-    widths = {int(m.group(1)) for s in slugs if (m := WIDTH_SLUG_RE.fullmatch(s))}
+    widths = {normalize.measure_num(m.group(1)) for s in slugs if (m := WIDTH_SLUG_RE.fullmatch(s))}
     widths = {w for w in widths if 1 <= w <= 200}
     if len(widths) == 1:
         out["street_width_m"] = widths.pop()
@@ -464,15 +470,15 @@ def _map_type(type_text: str) -> tuple[str, bool]:
     return canon, (canon in COMMERCIAL_TYPES)
 
 
-def _select_area(is_land: bool, items: dict[str, str]) -> Optional[int]:
+def _select_area(is_land: bool, items: dict[str, str]):
     """Pick the right size field from the Houzez detail-wrap items — LIVING/BUILT size (Property
     Size / Size) for non-land listings, LAND size (Land Area) for land listings. A villa/apartment
     page can print BOTH; the field the correct kind isn't in must never win (found live 2026-07-28:
     villa ABRE151 stored 360 m² [Land Area] while the page's own Property Size was 510 m² — 29%
     too low, wrong kind of area)."""
     if is_land:
-        return _to_int(items.get("Land Area") or items.get("Property Size") or items.get("Size"))
-    return _to_int(items.get("Property Size") or items.get("Size") or items.get("Land Area"))
+        return _to_measure(items.get("Land Area") or items.get("Property Size") or items.get("Size"))
+    return _to_measure(items.get("Property Size") or items.get("Size") or items.get("Land Area"))
 
 
 def _district_from(slug: str, title: str) -> Optional[str]:
@@ -571,7 +577,7 @@ def map_listing(body: str, url: str,
     if not area:
         dm = re.search(r"Area\s*:\s*([\d,.]+)\s*m", ld.get("description") or "", re.I)
         if dm:
-            area = _to_int(dm.group(1))
+            area = _to_measure(dm.group(1))
 
     # ── bedrooms / bathrooms / halls (units only) ──
     bedrooms = baths = halls = None
@@ -586,9 +592,9 @@ def map_listing(body: str, url: str,
     # Source-published "Price per meter" only — no price/area fallback, so a listing that does
     # not print a rate keeps NULL rather than a fabricated one (aqar PR#216, scrapers PR#217).
     ppm = None
-    pm = re.search(r"[Pp]rice per meter\s*:\s*([\d,]+)", ld.get("description") or "")
+    pm = re.search(r"[Pp]rice per meter\s*:\s*([\d,]+(?:[.٫]\d+)?)", ld.get("description") or "")
     if pm:
-        cand = _to_int(pm.group(1))
+        cand = _to_measure(pm.group(1))
         if cand and cand >= 50:
             ppm = cand
 

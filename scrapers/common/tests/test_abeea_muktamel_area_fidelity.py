@@ -40,7 +40,8 @@ def test_abeea_land_listing_prefers_land_area():
 
 
 def test_abeea_non_land_falls_back_to_size_when_property_size_missing():
-    assert abeea_select_area(False, {"Size": "112.12"}) == 112
+    # 112.12, not 112: measurements keep every source decimal (owner 2026-09-21; area_m2 is numeric now).
+    assert abeea_select_area(False, {"Size": "112.12"}) == 112.12
 
 
 def test_abeea_non_land_falls_back_to_land_area_when_nothing_else_present():

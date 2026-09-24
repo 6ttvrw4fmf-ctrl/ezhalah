@@ -237,9 +237,9 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
     # ── specs. A missing label means the source omitted the whole block → NULL, never 0.
     specs = {k.strip(): v.strip() for k, v in _SPEC.findall(body)}
     fs = ld.get("floorSize") or {}
-    area = N.to_int(fs.get("value")) if fs.get("unitCode") in (None, "MTK") else None
+    area = N.measure_num(fs.get("value")) if fs.get("unitCode") in (None, "MTK") else None
     if area is None:
-        area = N.to_int(specs.get("المساحة"))
+        area = N.to_measure(specs.get("المساحة"))
     bedrooms = N.to_int_numeric(ld.get("numberOfRooms")) or N.to_int(specs.get("غرف"))
     bathrooms = N.to_int(specs.get("حمام"))
 
@@ -258,7 +258,8 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
     if per_meter:
         # The source published a RATE, not a total. Storing it as a total (or multiplying by the
         # area to manufacture one) is the exact confusion the price-fidelity rule forbids.
-        price_per_meter = price
+        # Read exact from offers.price, not the whole-riyal `price`: a rate keeps its halalas.
+        price_per_meter = N.measure_num(raw_price) or None
     elif transaction_type == "Rent":
         tok = _PERIOD_TOKEN.search(price_text)
         rent_period, price_annual = N.rent_period_and_annual(

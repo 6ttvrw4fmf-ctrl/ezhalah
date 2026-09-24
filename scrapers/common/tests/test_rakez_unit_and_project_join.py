@@ -258,7 +258,8 @@ def test_an_unmapped_or_missing_type_is_skipped_never_guessed():
 
 def test_price_and_area_are_the_units_own_and_a_silent_field_stays_null():
     row, _ = _map(_unit(price=1350000, area=160.49, rooms=2))
-    assert (row["price_total"], row["area_m2"], row["bedrooms"]) == (1350000, 160, 2)
+    # area_m2 is the source's exact 160.49 — it used to be truncated to 160 (exact measurements, 2026-09-21).
+    assert (row["price_total"], row["area_m2"], row["bedrooms"]) == (1350000, 160.49, 2)
     assert row["bathrooms"] is None, "not published per unit — never inferred from room count"
     bare, _ = _map(_unit(price=None, area=None, rooms=None))
     assert bare["price_total"] is None and bare["area_m2"] is None

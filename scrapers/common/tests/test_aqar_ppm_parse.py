@@ -98,8 +98,8 @@ def test_flap_6693642_new_reads_the_label_old_read_the_area():
 
 def test_flap_6708090_new_reads_the_label_old_read_the_area():
     assert _old_parse(G_6708090) == 739_100
-    # to_int("7.5") truncates the halala fraction to whole riyals, same as every other price path.
-    assert parse_price_per_meter(G_6708090) == 7
+    # 2026-09-21 exact measurements: price_per_meter keeps the published fraction (was 7 via to_int).
+    assert parse_price_per_meter(G_6708090) == 7.5
 
 
 def test_flap_rows_no_longer_trip_the_sanitize_gate():
@@ -123,7 +123,8 @@ def test_flap_rows_no_longer_trip_the_sanitize_gate():
 
 def test_spec_row_with_fractional_value():
     assert _old_parse(G_6768687) == 412              # area again — old was wrong on normal pages too
-    assert parse_price_per_meter(G_6768687) == 1_093  # to_int("1,093.74") → 1093 (trigger stores 1094)
+    # 2026-09-21 exact measurements: the page prints 1,093.74; to_int used to truncate it to 1093.
+    assert parse_price_per_meter(G_6768687) == 1_093.74
 
 
 def test_free_text_and_spec_row_agree():
@@ -134,7 +135,7 @@ def test_free_text_and_spec_row_agree():
 def test_decimal_area_in_description_does_not_leak():
     # Old regex matched the fraction digits of "882.49 م²" — ppm "49"(!).
     assert _old_parse(G_6776946) == 49
-    assert parse_price_per_meter(G_6776946) == 2_201
+    assert parse_price_per_meter(G_6776946) == 2_201.22  # exact (2026-09-21); was truncated to 2201
 
 
 # ── Pages with no سعر المتر: honest None (old returned the area) ────────────────────────────────

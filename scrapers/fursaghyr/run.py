@@ -309,8 +309,11 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
     purpose = (rea.get("purpose") or "").strip()
     is_rent = purpose.startswith("إيجار") or "إيجار" in purpose or "ايجار" in purpose
 
-    area = _int(rea.get("land_area"))
+    area = normalize.measure_num(rea.get("land_area")) or None   # exact: 2194.62 stays 2194.62
+    # meter_price feeds TWO fields: the whole-riyal total fallback (_resolve_total, unchanged) and
+    # the stored per-m² rate, which keeps every source decimal.
     meter = _int(rea.get("meter_price"))
+    meter_rate = normalize.measure_num(rea.get("meter_price")) or None
     total = _resolve_total(_int(rea.get("total_price")), meter)
     # A genuine rate and a null total_price: the source publishes NO total. Send AUTHORITATIVE_NULL,
     # not None. The upsert drops a None, so the rate × area totals this scraper stored before
@@ -377,7 +380,7 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
         # confirmed, but the NEXT rent listing might say شهري or nothing). UNKNOWN.
         "rent_period": None,
         # Trust meter_price as a per-m² figure only when it's in a plausible range.
-        "price_per_meter": meter if (meter and meter < 50000) else None,
+        "price_per_meter": meter_rate if (meter_rate and meter_rate < 50000) else None,
         "city": city,
         "region": region,
         "neighborhood": rea.get("district") or None,
@@ -386,7 +389,7 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
         "zip_code": rea.get("postal_code") or None,
         "additional_number": rea.get("additional_no") or None,
         "direction": rea.get("front") or None,
-        "street_width_m": _int(rea.get("street_width")),
+        "street_width_m": normalize.measure_num(rea.get("street_width")) or None,
         "rega_location_verified": bool(rea.get("license_number")),
         "title": title,
         "photo_urls": photos,

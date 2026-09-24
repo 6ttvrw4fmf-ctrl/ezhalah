@@ -269,7 +269,7 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     area_f = _num(rec.get("area"))
     if area_f is not None and area_f < 1:
         area_f = None
-    area = int(round(area_f)) if area_f is not None else None
+    area = normalize.measure_num(area_f)   # exact: 407.56 stays 407.56, never rounded
 
     bedrooms = _int(rec.get("bedrooms"))
     if category == "commercial" or property_type in ("Residential Land",):
@@ -303,7 +303,7 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     direction = DIRECTION_EN.get(direction_raw)
 
     street_width_f = _num(rec.get("width_street"))
-    street_width = int(round(street_width_f)) if street_width_f is not None else None
+    street_width = normalize.measure_num(street_width_f)   # exact: 12.5 m stays 12.5
 
     raw_city = (rec.get("city") or "").strip()
     # Normalize trailing-space variants

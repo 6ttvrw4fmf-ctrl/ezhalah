@@ -257,7 +257,7 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "active": (L.get("status") or "") in ACTIVE_STATUSES,
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": _int(L.get("area")),
+        "area_m2": normalize.measure_num(L.get("area")) or None,   # exact; 0 = not set, as _int
         "bedrooms": _int(L.get("rooms")),
         "bathrooms": _int(L.get("bathrooms")),
         "floor_number": _int(L.get("floor")) if str(L.get("floor") or "").strip().isdigit() else None,

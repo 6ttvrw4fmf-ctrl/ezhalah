@@ -74,6 +74,11 @@ def _int(v: Any) -> Optional[int]:
         return None
 
 
+def _measure(v: Any) -> Optional[float]:
+    """_int for a MEASUREMENT: the same number with its decimals; 0 still means "not stated"."""
+    return None if v is None else (normalize.measure_num(str(v).replace(",", "").strip()) or None)
+
+
 def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
     if not p.get("active") or p.get("deletedAt"):
         return None, "residential", "inactive"
@@ -141,7 +146,7 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "region_id": region_id,
         "district_ar": district_ar,
         "neighborhood": district_raw,
-        "area_m2": _int(p.get("area")),
+        "area_m2": _measure(p.get("area")),
         "bedrooms": (_int(p.get("rooms"))
                      if (p.get("type") or "").strip().lower() in _DWELLING_TYPES else None),
         "photo_urls": imgs[:20] or None,

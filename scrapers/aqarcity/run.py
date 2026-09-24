@@ -615,7 +615,9 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
             except (TypeError, ValueError):
                 continue
             if cand and cand > price and _price_round(cand / area) == price:
-                price_per_meter, price = price, cand
+                # the rate is a measurement: the source's exact offers.price (19.5 stays 19.5), not
+                # the badge-rounded `price` the proof above compares with.
+                price_per_meter, price = normalize.measure_num(offers.get("price")), cand
                 break
 
     # ── location ──
@@ -714,7 +716,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "active": True,
         "property_type": stored_property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
-        "area_m2": round(area) if area else None,
+        "area_m2": normalize.measure_num(area) if area else None,   # exact: 407.56 stays 407.56
         # Both "عدد الغرف" and schema.org's numberOfRooms are generic total-room-count fields, never
         # bedroom-specific — aqarcity exposes no separate bedroom field at all (live-confirmed
         # 2026-07-28: zero of 3 sampled pages carry a "غرف النوم" label anywhere). Owner decision:
@@ -723,7 +725,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "bathrooms": _int(pi.get("عدد دورات المياه")),
         "property_age": 0 if pi.get("عمر العقار") in ("جديد", "جديده") else None,
         "direction": pi.get("واجهة العقار") or None,
-        "street_width_m": _int(pi.get("عرض الشارع")),
+        "street_width_m": normalize.to_measure(pi.get("عرض الشارع")) or None,
         "price_total": price if not is_rent else None,
         # Monthly rentals must store the ANNUALIZED figure (monthly×12); the app displays
         # round(price_annual/12), so storing the raw monthly showed 1/12 of the real rent.

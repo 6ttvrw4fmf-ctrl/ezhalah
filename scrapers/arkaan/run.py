@@ -116,7 +116,7 @@ _ADTEXT = re.compile(r'detail-order-adtext[^>]*>(.*?)</div>', re.S)
 # (card / JSON-LD / index price cell) they agreed on 92 of 92 — zero disagreements.
 _PRICE_CARD = re.compile(r'detail-order-price[^>]*>(.*?)(?=<!--)', re.S)
 _CARD_TOTAL = re.compile(r'(السعر|السوم)\s*([\d,٬]+)\s*ريال')
-_CARD_PPM = re.compile(r'(?:سعر|سوم)\s*المتر\s*([\d,٬]+)\s*ريال')
+_CARD_PPM = re.compile(r'(?:سعر|سوم)\s*المتر\s*([\d,٬]+(?:[.٫]\d+)?)\s*ريال')   # rate keeps its decimals
 
 # The ONE Arabic label this source uses that the shared canonical map does not carry. «دبلكس» is a
 # spelling variant of «دوبلكس» (already in TYPE_MAP_AR → "Duplex"); this maps to that SAME existing
@@ -258,7 +258,7 @@ def _price_card(text: Optional[str]) -> dict[str, Any]:
         out["label"], out["total"] = m.group(1), N.to_int(m.group(2))
     p = _CARD_PPM.search(text)
     if p:
-        out["per_meter"] = N.to_int(p.group(1))
+        out["per_meter"] = N.to_measure(p.group(1))
     # «على السوم» with no adjacent amount anywhere in the card = the source's own "no price".
     out["on_request"] = out["total"] is None and out["per_meter"] is None and "على السوم" in text
     # Tri-state commercial facts the card publishes explicitly. Silent → key absent → NULL, never
@@ -275,21 +275,22 @@ def _price_card(text: Optional[str]) -> dict[str, Any]:
     return out
 
 
-def _street_width(raw: Optional[str]) -> Optional[int]:
-    """«20 م» → 20. «60 × 20 م» is TWO frontages, not a width — the numeric column stays NULL and
-    the raw string is preserved verbatim in additional_info."""
+def _street_width(raw: Optional[str]) -> Optional[float]:
+    """«20 م» → 20, «12.5 م» → 12.5. «60 × 20 م» is TWO frontages, not a width — the numeric column
+    stays NULL and the raw string is preserved verbatim in additional_info."""
     if not raw:
         return None
-    m = re.fullmatch(r"(\d{1,4})\s*م", raw.strip())
-    return int(m.group(1)) if m else None
+    m = re.fullmatch(r"(\d{1,4}(?:[.٫]\d+)?)\s*م", raw.strip())
+    return N.to_measure(m.group(1)) if m else None
 
 
-def _leading_int(raw: Optional[str]) -> Optional[int]:
-    """First number of a spec value («500 م²» → 500, «1,000 م²» → 1000). No number → None."""
+def _leading_measure(raw: Optional[str]) -> Optional[float]:
+    """First number of a spec value («500 م²» → 500, «1,000 م²» → 1000, «407.56 م²» → 407.56),
+    decimals kept exactly. No number → None."""
     if not raw:
         return None
-    m = re.match(r"\s*([\d,٬]+)", raw)
-    return N.to_int(m.group(1)) if m else None
+    m = re.match(r"\s*([\d,٬]+(?:[.٫]\d+)?)", raw)
+    return N.to_measure(m.group(1)) if m else None
 
 
 def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[dict, str]]:
@@ -430,7 +431,7 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
         "active": True,
         "property_type": property_type,
         "transaction_type": transaction_type,
-        "area_m2": _leading_int(specs.get("المساحة")),
+        "area_m2": _leading_measure(specs.get("المساحة")),
         "bedrooms": N.to_int(specs.get("غرف النوم")),
         "reception_rooms_majlis": N.to_int(specs.get("المجلس")),
         "street_width_m": _street_width(specs.get("الشارع")),

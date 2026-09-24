@@ -355,7 +355,8 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     if t in _LAND_TYPES and category == "commercial":
         property_type = "Commercial Land"
 
-    area = _int(L.get("area")) or _int(L.get("built_up_area"))
+    # measure_num, not _int: the API's 407.56 stays 407.56 (int(float()) truncated it). 0 = "not set".
+    area = normalize.measure_num(L.get("area")) or normalize.measure_num(L.get("built_up_area")) or None
     # Rent fidelity (monthly-rent contract; 2026-07-16 unification follow-up): price_annual is truly
     # ANNUAL. The old `rent_price_annually or rent_price_monthly` fallback stored a raw MONTHLY
     # figure as annual — the exact BUG-2 class fixed fleet-wide 2026-07-13 (eaqartabuk/aqarcity/

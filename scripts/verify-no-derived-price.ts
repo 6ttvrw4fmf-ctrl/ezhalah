@@ -139,8 +139,10 @@ for (const f of pyFiles) {
 // and 629 -> 660 on 2026-09-12 when the daily engineer added _fetch_page() (retries a transient
 // list-fetch 5xx/503 instead of failing on the first one — the same fix already applied to
 // ramzalqasim/eastabha) 31 lines above the call; re-verified: still the file's ONLY
-// _extract_price(desc_raw) call, ninth shift, same exception.
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:660']);
+// _extract_price(desc_raw) call, ninth shift, same exception. 660 -> 670 on 2026-09-21 when the
+// exact-measurements fix added _measure() (area/street width keep their decimals) above the call;
+// re-verified: still the file's ONLY _extract_price(desc_raw) call, tenth shift, same exception.
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:670']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);

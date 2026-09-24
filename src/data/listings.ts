@@ -172,7 +172,9 @@ export function derivedTotalFromPerMeter(
   if (typeof priceTotal === 'number' || typeof priceAnnual === 'number') return null; // (b) source spoke
   if (typeof pricePerMeter !== 'number' || !(pricePerMeter > 0)) return null;         // (c)
   if (typeof areaM2 !== 'number' || !(areaM2 > 0)) return null;                       // (c)
-  const total = pricePerMeter * areaM2;
+  // Areas and rates keep their decimals (407.56 m²); only OUR final figure is rounded, exactly like
+  // the SQL half's round(price_per_meter * area_m2).
+  const total = Math.round(pricePerMeter * areaM2);
   if (!Number.isFinite(total) || total > DERIVED_TOTAL_MAX) return null;              // (d)
   return total;
 }

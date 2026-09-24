@@ -671,7 +671,7 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
     # decision 2026-07-28: null rather than store an unverifiable figure.
     bedrooms = None
 
-    area = _int(p.get("area_sqm"))
+    area = normalize.measure_num(p.get("area_sqm")) or None   # exact; 0 = "not set" as before
 
     raw_neigh = (p.get("neighborhood") or "").strip() or None
     region_hint = n_to_region.get(raw_neigh) if raw_neigh else None
