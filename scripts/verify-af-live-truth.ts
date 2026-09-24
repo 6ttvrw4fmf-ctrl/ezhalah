@@ -9,7 +9,7 @@
 // duplicate, not just counts.
 import { chromium } from 'playwright';
 import { openAfOffer } from './lib/afOfferLive.ts';
-import { pairCountForSelection } from './lib/afCountPairing.ts';
+import { pairCountForSelection, isResultsRequest } from './lib/afCountPairing.ts';
 
 // ONE BUDGET FOR "WAIT FOR THE AGENT'S NEXT TURN", not three magic numbers (2026-09-03).
 // Every wait below is behind the same dependency: a PAID LLM turn whose latency is variable. This
@@ -226,7 +226,14 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     if (u.includes('/rpc/location_search_candidates_ar') && resp.request().method() === 'POST') {
       try {
         const j = await resp.json();
-        if (Array.isArray(j)) { lastSearchBody = JSON.parse(resp.request().postData() || '{}'); lastSearchResp = j; }
+        // ONLY A RESULTS-SHAPED REQUEST IS "the search". Several count probes share this RPC name,
+        // and keeping whichever answered last captured a `p_limit: 1` probe on the no-نوع journey —
+        // the journey then compared the UI's 42,309 against that probe's 1,769 and reported a count
+        // defect that production does not have. scripts/lib/afCountPairing.ts holds the shape.
+        if (Array.isArray(j)) {
+          const b = JSON.parse(resp.request().postData() || '{}');
+          if (isResultsRequest(b)) { lastSearchBody = b; lastSearchResp = j; }
+        }
       } catch {}
     }
   });

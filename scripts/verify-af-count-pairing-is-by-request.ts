@@ -16,7 +16,7 @@
 // built from those measured numbers, and carries the OLD rule as a mutation that must fail where the
 // new one passes — and, in the other direction, proves the new rule still catches a chip no count
 // call explains, which is the defect the assertion exists for.
-import { pairCountForChip, pairCountForSelection, pricedTheTappedOption, type CountPair } from './lib/afCountPairing.ts';
+import { pairCountForChip, pairCountForSelection, pricedTheTappedOption, isResultsRequest, type CountPair } from './lib/afCountPairing.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -107,6 +107,21 @@ const WALK: CountPair[] = [
   const unmoved = pricedTheTappedOption({ body: PRE.body, resp: [{ cnt_selected: 13700 }] }, PRE.body, 'new');
   mustCatch('a body that never moved off the pre-AF scope passing the fallback',
     unmoved.ok === false);
+}
+
+// ── 5. the SEARCH capture has the same problem, one RPC over ────────────────────────────────────
+// Measured 2026-09-24 on الرياض/شراء with no نوع picked: the journey had kept a `p_limit: 1` probe
+// as "the search" and reported «ui=42309 rpc=1769», then diffed an ID set belonging to nothing on
+// screen. A one-row response cannot back a screen of cards.
+{
+  const PROBE = { p_cities: ['الرياض'], p_deal: 'بيع', p_limit: 1, p_offset: 0 };
+  const RESULTS = { p_cities: ['الرياض'], p_deal: 'بيع', p_limit: 1500, p_offset: 0 };
+  check('a results-shaped request (page 0, many rows) IS the search', isResultsRequest(RESULTS));
+  mustCatch('the measured `p_limit: 1` probe being kept as "the search"', !isResultsRequest(PROBE));
+  mustCatch('a page-2 load-more being mistaken for the first results page',
+    !isResultsRequest({ ...RESULTS, p_offset: 1500 }));
+  mustCatch('a body with no limit at all reading as a results page',
+    !isResultsRequest({ p_cities: ['الرياض'] }));
 }
 
 console.log(failed

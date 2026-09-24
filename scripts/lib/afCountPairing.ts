@@ -89,3 +89,21 @@ export function pricedTheTappedOption(paired: CountPair | null, preBody: any, ta
     : [];
   return { literal, movedKeys, ok: literal || movedKeys.length > 0 };
 }
+
+/**
+ * Is this `location_search_candidates_ar` request the RESULTS page the user is looking at — as
+ * opposed to one of the count-shaped probes that share the same RPC name?
+ *
+ * THE DEFECT THIS EXISTS FOR (measured on production 2026-09-24). `verify-af-live-truth.ts` kept
+ * "the last search response" and compared the UI's headline to it. On الرياض/شراء with NO نوع
+ * picked, the body it had kept was `p_limit: 1` — a probe — so the journey reported
+ * «UI displayed count == result-RPC total_count: ui=42309 rpc=1769» and then diffed an ID set that
+ * belonged to nothing the user had seen. A one-row response cannot back a screen of cards; the body
+ * itself proves the capture was wrong, which is why this is a shape question and not a tolerance.
+ *
+ * Same rule as the sibling journeys' `isResults` (AGENTS.md harness note 3: pair a surface to its
+ * REQUEST). A page-0 results call asks for many rows; every count probe asks for one.
+ */
+export function isResultsRequest(body: any): boolean {
+  return (body?.p_offset ?? 0) === 0 && Number(body?.p_limit ?? 0) > 1;
+}
