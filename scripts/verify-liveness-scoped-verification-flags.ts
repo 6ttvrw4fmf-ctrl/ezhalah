@@ -79,10 +79,17 @@ check('#3 the ALIVE path is untouched and still uses the sanctioned contract hel
   SRC.includes('direct_alive_patch(now_iso=now_iso)')
   && SRC.includes('from scrapers.common.liveness_contract import direct_alive_patch'));
 
-// ── 4. COHORT CONSISTENCY — shard windows and the walk must see the same population ──────────────
-const cohortUses = (SRC.match(/_cohort\(/g) || []).length;
-check(`#4 the cohort filter is applied in all three places (count, offset probe, keyset loop) — found ${cohortUses}`,
-  cohortUses >= 4); // 1 definition + 3 call sites
+// ── 4. COHORT CONSISTENCY — every read of the listing population must see the same population ────
+// This used to count call sites ("all three places: count, offset probe, keyset loop"), which is a
+// fact about one implementation rather than the invariant: when the offset-probe sharding was
+// replaced by an id-modulo partition on 2026-09-24 there were two reads left, and a call-site count
+// cannot tell that from a read that has escaped the scope. Assert the invariant instead — EVERY
+// select on the swept table is wrapped in _cohort — so adding a fourth read is covered for free and
+// an unwrapped one is red however many there are.
+const selects = (SRC.match(/client\.table\(table\)\s*\.select\(/g) || []).length;
+const scopedSelects = (SRC.match(/_cohort\(\s*client\.table\(table\)\s*\.select\(/g) || []).length;
+check(`#4 every read of the swept table is inside _cohort — ${scopedSelects} of ${selects} selects`,
+  selects >= 2 && scopedSelects === selects);
 check('#4 no raw .eq("active", True) survives on the sweep queries (all go through _cohort)',
   (SRC.match(/\.eq\("active",\s*True\)/g) || []).length === 1); // only the one inside _cohort
 

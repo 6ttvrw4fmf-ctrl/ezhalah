@@ -773,6 +773,72 @@ That needs a **lightweight** check built and proven (HEAD, or a range-limited GE
 already shows a `head=404 get=404` hybrid path), not a switch flipped. Enabling it as-is would trade
 a coverage number for a blown budget and a blocked source.
 
+### §4.1e — A SHARD BOUNDARY IS A NEGOTIATION, AND SIXTEEN RUNNERS CANNOT HOLD ONE (2026-09-24, routine #11)
+
+§4.1d fixed a rotation whose HEAD could not clear. This is the opposite failure in the same
+machine: a rotation with no head at all, on **aqar — the one platform §4.1d's table showed at 94.5%
+and therefore the one nobody was looking at.**
+
+`mon_detect_liveness_rotation_stranded` (shipped the day before, and this was its first real
+finding) raised 920 `aqar_residential_listings` rows: `active = true`, `missing_count = 0`,
+`last_seen_at` frozen at **2026-08-04 01:00:19 — fifty-one days**, while a user could find and click
+every one.
+
+**The mechanism, and it is not capacity.** The sweep split its work by **row offset**: shard k swept
+`[id_at(k*N/16), id_at((k+1)*N/16))` with `N` and `id_at` read live. Those windows are contiguous,
+disjoint and jointly covering — *for one caller reading one snapshot*. Production is sixteen GitHub
+runners starting up to 40 minutes apart, each calling `count` and `id_at` against its **own**
+snapshot of a table the other fifteen are deactivating ~1,700 rows a day in. Shard k's `lo` and shard
+k−1's `hi` are then two different answers to the same question, and whenever `lo_k > hi_(k-1)` every
+active row between them is swept by **nobody**. Kills cluster in the legacy id block, which biases
+the drift systematically into the gap direction.
+
+The sweep printed its own boundary every day:
+
+```
+shard 3/16 → rows [17398, 23197) of 92791 active → id window [76727, 123731)
+```
+
+`76727` is where shard 3 *began*; the true offset-17398 id was `75310`, and shard 2 had already
+stopped. Every frozen cohort sat exactly at the bottom of a shard's window (527 under shard 0, 182
+under shard 4, 195 under shard 6, 14 at the top of shard 5). The run's own counters reconcile
+exactly, and that is what proves the rows were **never fetched** rather than fetched and lost:
+`seen 5,799 = refreshed 5,633 + pending_kill 93 + killed 73`, against **6,327** rows active inside
+the window it actually walked.
+
+Three things to carry forward:
+
+1. **The gap is permanent, not a daily lottery.** A row nothing sweeps never changes state, so it
+   keeps its place in the ordering and falls into the same gap tomorrow. And because `missing_count`
+   never increments for an unprobed row, it can never reach the strike grace either — so
+   `served_after_source_gone` and `prune_unseen` are **structurally** blind to it while every
+   platform-level coverage percentage reads healthy. §9's "absence cannot be compared, so silence
+   reads as health", one layer lower than that section describes it.
+2. **The fix is to delete the negotiation, not to tune it.** Ownership is now
+   `listing_id % shards == shard` (`scrapers/common/shard_partition.py`): it reads the row's own id
+   and nothing else, so the sixteen runners need not agree about anything — there is no boundary to
+   negotiate, hence nothing to negotiate wrongly. A margin, an overlap or a tighter clock would each
+   have narrowed the gap and left the class alive. Balance measured the same day: `id % 16` over
+   93,056 active rows gives 5,664–5,901 per shard (±2%) against the offset split's exact 5,816.
+   Cost: one id-only keyset pass of the active set per shard (~95 pages, seconds) against a sweep
+   that spends half an hour on HTTP; the probe volume is unchanged.
+3. **The hermetic test certified the defect for all fifty-one days.**
+   `test_aqar_liveness_sharding.py` asserted the windows were *"contiguous, disjoint, jointly
+   covering every active row … for ANY id distribution"* — every word true — because `_sweep()` built
+   all sixteen windows from ONE shared `id_at` and ONE shared row count. **It modelled a world in
+   which the shards agree.** When a barrier's input is a model rather than the mechanism, "for ANY
+   input" is a claim about the model. The replacement takes DIVERGENT SNAPSHOTS as its primary
+   input; `scripts/verify-liveness-shards-cover-every-row.ts` executes the real partition over
+   sixteen of them and mutation-proves six ways, including the guard on the guard (a
+   `partition_coverage` that has stopped reporting misses must break the barrier, not satisfy it).
+
+**What the 920 turned out to be, and why that is the expected result.** Fifteen drawn at random and
+re-probed through the real shipped oracle (`looks_dead` / `looks_closed`, not a re-implementation)
+answered **HTTP 200, alive, 15/15**. They were UNKNOWN, never dead, and §0's guard held throughout:
+nothing struck them, nothing deactivated them, nothing started a clock. The defect was a **coverage**
+hole, not a serving-dead-listings hole — which is exactly the direction this routine is built to
+fail in, and is not a reason to think a coverage hole is cheap. `ops_incident` #696.
+
 ### §4.1c — A ONE-WAY ORACLE MAKES AN ALERT CORRECT BEHAVIOUR CANNOT CLEAR (2026-09-23, routine #11)
 
 §4.1b made the sold pin WRITE its evidence. This is the half that was still missing: it wrote only
