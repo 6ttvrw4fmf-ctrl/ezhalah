@@ -89,6 +89,18 @@ const clauses: Array<{ id: string; test: (sql: string) => boolean; why: string }
        + 'landed: a concurrent session recreated mon_run_all_detectors and dropped the entry',
   },
   {
+    id: 'NEVER_AUDITED distinguishes a LAG from a broken sampler',
+    test: s => /verifier_last_word/.test(s) && /read_verifier_last_word_first/.test(s)
+            && /scrape_runs/.test(s),
+    why: 'NEVER_AUDITED has two causes needing opposite responses, and the alert must carry the '
+       + "verifier's own last run notes so the responder classifies it instead of guessing. "
+       + 'Measured 2026-09-24: aqar read as NEVER_AUDITED because its first deletion landed three '
+       + 'hours AFTER that week\'s verifier run, not because anything was broken — the original '
+       + 'action text said "find why it never samples this platform" and would have sent the next '
+       + 'reader hunting a sampler bug that does not exist (§8.3: a remedy field that misdirects '
+       + 'is worse than no remedy field)',
+  },
+  {
     id: 'the deleter is never throttled to clear the alert',
     test: s => /do NOT stop, slow or widen the sanctioned deleter/i.test(s)
             && /evidence about the VERIFIER/i.test(s),
@@ -152,6 +164,8 @@ mustCatch('the p_inject seam removed, so nothing can inject a known-blind platfo
   broke(/jsonb_array_elements\(coalesce\(p_inject/, 'jsonb_array_elements((select 1)'));
 mustCatch('the roster anchor guard removed, letting the insert fail silently',
   broke('roster anchor not matched', 'ok whatever'));
+mustCatch('the verifier last-word field dropped, so a LAG reads as a broken sampler',
+  broke('verifier_last_word', 'some_other_field'));
 mustCatch('the do-not-throttle-the-deleter instruction dropped from the alert',
   broke('Do NOT stop, slow or widen the sanctioned deleter', 'Feel free to adjust the deleter'));
 
@@ -161,5 +175,5 @@ if (problems.length) {
 }
 console.log(
   `PASS verify-deletion-audit-blindness-is-visible — ${clauses.length} clauses hold over the ` +
-  'committed migration, 6 mutations caught; the behavioural proof runs in production on every ' +
+  'committed migration, 7 mutations caught; the behavioural proof runs in production on every ' +
   `roster sweep via ${DETECTOR}()'s two-direction self-test`);
