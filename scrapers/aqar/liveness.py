@@ -383,11 +383,13 @@ def main() -> None:
             _flush_detail()
 
     try:
-        # PHASE 2: fetch the full rows for THIS shard's ids, 500 at a time. The cohort filter is
+        # PHASE 2: fetch the full rows for THIS shard's ids, 200 at a time. The cohort filter is
         # re-applied, so a row another shard deactivated between the two phases is dropped rather
         # than probed — the only rows that can go unprobed in a run are rows that stopped being
         # this shard's business, never rows that fell between two shards' boundaries.
-        page_size = 500
+        # 200 is not a guess: it is the batch size the alive flush below has been sending through
+        # `.in_("id", …)` against this same table for months, so the query-string length is proven.
+        page_size = 200
         for i in range(0, len(worklist), page_size):
             chunk = worklist[i:i + page_size]
             res = _run_with_retry(
