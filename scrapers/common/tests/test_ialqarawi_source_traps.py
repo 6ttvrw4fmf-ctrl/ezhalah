@@ -394,3 +394,52 @@ def test_a_200_that_is_the_block_page_is_not_accepted_as_a_served_profile(monkey
     assert "no TLS profile was served" in msg
     for prof in http.IMPERSONATE_ORDER:
         assert prof in msg, "the error must name every profile tried, so a block is not read as a dead site"
+
+
+# ---------------------------------------------------------------------------
+# AREA vs PRICE: «X.YYY» is thousands-grouped in a price cell and a decimal on a
+# surveyed land area. Every string below is a verbatim `area_raw` measured from
+# production (all 2,568 ialqarawi rows, 150 separator strings).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,m2", [
+    ("4,260 م²", 4_260),              # head 1 — canonical grouping
+    ("11.295م", 11_295),              # head 2
+    ("509,879م", 509_879),            # head 3
+    ("175.000 الف متر", 175_000),     # head 3, «الف» is the redundant word again
+    ("1,056,174م", 1_056_174),        # head 1, two groups
+    ("10,630,467 م²", 10_630_467),    # head 2, two groups
+    ("1500.000م", 1_500_000),         # head 4 — this office's «1500 thousand» shorthand
+    ("526م", 526),                    # no separator at all
+    ("517.5م", 517),                  # a 1-2 digit fraction is a decimal and truncates to int4
+])
+def test_an_unambiguous_area_is_read_exactly_as_before(raw, m2):
+    assert R.parse_area(raw) == (m2, "")
+
+
+def test_a_five_plus_digit_head_is_ambiguous_and_the_parser_abstains():
+    """REGRESSION (routine-3, 2026-09-24). Listing QRW3566 — «للبيع أرض زراعية بحي شمال عنيزة»,
+    source area «361788.431م» — was stored and indexed at 361,788,431 m², i.e. 362 km², because
+    parse_area reused the PRICE grammar in which a dot followed by exactly three digits is a
+    thousands separator. The source's own description gives the plot's frontages as 316.64 m /
+    245.70 m / 698.97 m / 504 m, which no 362 km² parcel has.
+
+    That row happens to carry no source price, so it is production_ready=false and was never served
+    as a Normal Filter card — but the parser is the live one, and the next surveyed ialqarawi area
+    that DOES carry a price would reach users 1000x wrong. The defect is the grammar, not the row.
+
+    Both readings (361,788.431 m² and 361,788,431 m²) are grammatically available and differ by
+    1000x, and the stored capture is an auto.v1-fallback with no raw HTML, so nothing on record can
+    settle it. The parser must therefore publish NEITHER: honest NULL beats a guess, and the exact
+    string survives in additional_info.area_raw.
+    """
+    assert R.parse_area("361788.431م") == (None, "ambiguous_thousands_or_decimal")
+    # The class, not just the one row.
+    assert R.parse_area("12345.678 م²") == (None, "ambiguous_thousands_or_decimal")
+
+
+def test_the_price_grammar_is_deliberately_untouched_by_the_area_rule():
+    """A price is never written to three decimals, so parse_money keeps its measured reading —
+    the abstention above must not leak across and start nulling prices."""
+    assert R.parse_money("3850.000")[0] == 3_850_000
+    assert R.parse_money("1.600.000 الف")[0] == 1_600_000
