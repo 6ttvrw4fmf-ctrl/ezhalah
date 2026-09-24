@@ -20,6 +20,20 @@
 # other case — an oracle that would throw, 403, or quarantine on its first real candidate, and which
 # nothing will discover until the day it is asked to decide whether a listing may be removed.
 #
+# A KILL-COHORT SIZE IN THIS FILE IS A MEASUREMENT, NEVER AN ALERT'S SNAPSHOT (2026-09-22).
+# The muktamel row below said 94 for a day; the real cohort was 241. The 94 came from the alert
+# that fired at 04:54, while the run that caused it kept killing until 08:48 — so the number was
+# a reading taken through a window that was still open. `mass_inactivation` re-affirms its detail
+# on every sweep and by 05:59 already held 241, meaning the correct figure was sitting in the
+# database the whole time the ledger disagreed with it. Before writing a count here, COUNT IT:
+#
+#   select count(*) from <platform>_<type>_listings
+#    where active = false and deactivated_at >= '<day>' and deactivated_at < '<day+1>';
+#
+# This matters more than tidiness. A §15 resurrection audit sizes its restore from this line, so
+# an undercount does not merely misinform — it silently narrows the set of listings anyone will
+# ever go back and check.
+#
 # HOW A PLATFORM LEAVES THIS FILE: produce a real verdict in production. One row in
 # ops_stale_inactivation_probe is enough to move it from UNPROVEN to observed:
 #
@@ -84,7 +98,7 @@ jazwtn         |    108 | 404/410 on the listing's own URL (29/31 dead rows, 0/4
 masar          |      1 | wp/v2/aqar REST record: 404 carrying rest_post_invalid_id. Capture itself is failing (curl 28 timeout through the shared proxy, ops_incident #325) — an oracle cannot be exercised by a crawl that never completes.
 mizlaj         |     30 | 404/410 on the listing's own URL. Same proxy dependency as masar (#325).
 moftah         |     13 | REST record's own invalid-id 404.
-muktamel       |  3,864 | THE LARGEST UNPROVEN CHAIN. Redirect OFF the listing's own path; canary-gated from ids the same run read LIVE, failing closed — the host answers 403 CONNECT from cloud egress, so it was never pre-validated against a dead cohort. 94 rows were deactivated here on 2026-09-21 WITHOUT a direct verdict, before the oracle was wired (ops_incident #371).
+muktamel       |  3,864 | THE LARGEST UNPROVEN CHAIN. Redirect OFF the listing's own path; canary-gated from ids the same run read LIVE, failing closed — the host answers 403 CONNECT from cloud egress, so it was never pre-validated against a dead cohort. Adjudicate a cohort from CI, which CAN reach the host: .github/workflows/muktamel-adjudicate.yml. 241 rows (237 residential + 4 commercial) were deactivated here on 2026-09-21 WITHOUT a direct verdict, before the oracle was wired (ops_incident #371). CORRECTED 2026-09-22 from 94: that was alert 4344's 04:54 snapshot, and the SAME pre-oracle run (35558571911, head 0d343f8, started 03:45Z) went on killing until 08:48Z — 04:00Z 94, 07:00Z 48, 08:00Z 95 — while the oracle only merged at 08:22Z. The mass_inactivation alert's own detail already said 241; the ledger took the first number and nobody re-measured, so a restore sized from this line would have missed 147 rows.
 nowaisiry      |     22 | 404/410 on the listing's own URL.
 nufouth        |    285 | death is data in its API record, or its own /B/ page, API-gated.
 sakan          |  3,094 | a removed listing 301s to the listings index — NOT a 404 — and the sitemap is not the catalogue (37 of 40 gap-ids redirected, 3 were live «فعال» listings the sitemap omits). Canary-gated. First scrape run landed 2026-09-21 and has not yet completed healthily.
