@@ -37,9 +37,27 @@ function initialsFrom(name: string, fallback: string): string {
 // in-memory store dies with the tab (pre-existing gap, owner-ordered fix 2026-08-29). Both
 // full_name and name are written because mapSupabaseUser reads them in that order. Fire-and-forget:
 // the local rename must never be blocked by a slow/failed network write.
+// THE SAME STALE-CONTINUATION CLASS, ON THE PERSISTENCE AXIS (routine #8, 2026-09-24). Fixing only
+// the in-memory write would have DISPLACED the symptom rather than removed it: two renames in quick
+// succession used to put two independent `updateUser` requests in flight, and nothing orders their
+// ARRIVAL at the server. The older value could be written last, so user_metadata held a name the
+// user had already replaced and `mapSupabaseUser` rebuilt it on the next load — the name reverting
+// on a refresh, with no user action, after the screen had shown the new one.
+//
+// Serialised, so the last value CALLED is the last value WRITTEN: each write waits for the previous
+// one to settle, and a value already superseded before its turn is skipped rather than written and
+// immediately overwritten. Still fire-and-forget — the local rename is never blocked on the network.
+let nameWriteQueue: Promise<unknown> = Promise.resolve();
+let latestIntendedName: string | null = null;
+
 export function persistDisplayName(v: string): void {
   if (!supabase) return;
-  supabase.auth.updateUser({ data: { full_name: v, name: v } }).catch(() => {});
+  latestIntendedName = v;
+  nameWriteQueue = nameWriteQueue
+    .then(() => (latestIntendedName === v
+      ? supabase!.auth.updateUser({ data: { full_name: v, name: v } })
+      : undefined))
+    .catch(() => {});
 }
 
 export function mapSupabaseUser(u: any, method: AuthUser['method']): AuthUser {
