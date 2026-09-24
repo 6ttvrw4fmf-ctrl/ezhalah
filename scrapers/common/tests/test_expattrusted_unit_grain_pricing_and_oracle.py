@@ -198,13 +198,16 @@ def test_recommendations_block_never_prices_this_compound():
 
 
 # 3 ── skips ─────────────────────────────────────────────────────────────────────────────────────
-def test_type_word_missing_is_type_unmapped_and_studio_routes_by_the_shared_category():
+def test_type_word_missing_is_type_unmapped_and_a_studio_stays_residential():
     rows, skipped = R.map_compound(FLOW_NARJIS, "u")
     assert rows == [] and skipped == {"type_unmapped": 1}
     assert R.type_ar_for("Single Room Suite") is None and R.type_ar_for("2 Bedroom Bungalow") is None
     assert R.type_ar_for("3 Bedroom Townhouse") == "فيلا" and R.type_ar_for("Studio Apartment") == "استوديو"
     row, cat = _row(BUSTAN, RES_32)
-    assert row["property_type"] == "Studio" and cat == "commercial"
+    # 2026-09-24 first crawl: the shared routing filed the studio types commercial and collided with the
+    # compound URL's residential rows (url_collision_res_vs_com). A residential compound's unit types are
+    # residential by construction, so the category is fixed, never derived from the type word.
+    assert row["property_type"] == "Studio" and cat == "residential"
     luxury, _ = _row(BUSTAN, RES_27)
     assert luxury["property_type"] == "Villa" and luxury["bedrooms"] is None and luxury["bathrooms"] is None
 

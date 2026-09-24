@@ -230,7 +230,11 @@ def map_listing(prop: dict, res: dict, url: str, loc: dict) -> tuple[Optional[di
         return None, None, "type_unmapped"
     if not loc:
         return None, None, "city_not_stated"
-    category = normalize.category_for_type(property_type).lower()
+    # A residential compound's unit types are residential by construction (azure and rightcompound
+    # write their residential table only). The fleet routes the raw «Studio» commercial — the 2026-09-24
+    # first crawl filed 3 «Studio Apartment» types commercial and collided with the compound URL's
+    # residential rows (url_collision_res_vs_com) — so the category is fixed here, never derived.
+    category = "residential"
     price, period, extra = price_from_pricing(res.get("pricing"))
 
     features = [f.get("attributes") or {} for f in (prop.get("features") or {}).get("data") or []]
