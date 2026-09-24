@@ -524,6 +524,49 @@ export function dockedEdgeOffset(base: number, edgeInset: number): number {
   return b + band;
 }
 
+/**
+ * Where a CENTRED, VIEWPORT-ANCHORED dialog must lay itself out so a docked prompt cannot cover it
+ * (ops_incident #670).
+ *
+ * `dockedEdgeOffset` above answers this for a component that pins itself to an edge. A centred
+ * modal is the other shape, and it needs BOTH numbers — which is the whole lesson here:
+ *
+ *  · `paddingTop` alone is NOT enough. The card is centred inside the overlay's content box; if its
+ *    maxHeight still assumes the full viewport it simply OVERFLOWS that box and re-centres
+ *    symmetrically, putting its top edge — and the × pinned to it — back above the padding.
+ *  · shrinking the card alone is not enough either: centred in an unpadded box it stays centred.
+ *
+ * MEASURED on production, 375x812, signed out, 2/2 fresh contexts each, 2026-09-24, with the
+ * WebKit top-dock shape injected into the served bundle (the same pre-deploy technique this file's
+ * own header used). The × is at [308,63,34,34] and `elementsFromPoint` at its centre returns
+ * `iframe(accounts.google.com/gsi/iframe/select)` on top, the × at index 3, real click TimeoutError:
+ *
+ *   padding only (16+178)            → × y 63 → 152 | still iframe on top, index 3 | click FAILS
+ *   padding AND availHeight − band   → × y 63 → 219 | div on top, index 1         | click LANDS
+ *
+ * So a fix that applies one half looks like progress and ships a still-dead control. Both, or
+ * neither. Returns today's numbers unchanged whenever nothing is docked.
+ *
+ * PURE, so `verify-bottom-prompt-inset.ts` can EXECUTE it — including the half-fix case, which is
+ * the one a future edit is most likely to reintroduce.
+ */
+export function centredDialogBox(
+  viewportHeight: number,
+  basePad: number,
+  safe: { top: number; bottom: number },
+  prompt: PromptInsets,
+  chrome: number,
+): { paddingTop: number; availHeight: number } {
+  const vh = Number.isFinite(viewportHeight) && viewportHeight > 0 ? viewportHeight : 0;
+  const pad = Number.isFinite(basePad) && basePad > 0 ? basePad : 0;
+  const top = Number.isFinite(prompt?.top) && prompt.top > 0 ? prompt.top : 0;
+  const bottom = Number.isFinite(prompt?.bottom) && prompt.bottom > 0 ? prompt.bottom : 0;
+  return {
+    paddingTop: pad + top,
+    availHeight: vh - (safe?.top ?? 0) - (safe?.bottom ?? 0) - top - bottom - chrome,
+  };
+}
+
 /** Both insets, as React state. Zeroes on native and whenever no prompt is docked over the app. */
 export function usePromptInsets(): PromptInsets {
   const [insets, setInsets] = useState<PromptInsets>({ top: 0, bottom: 0 });
