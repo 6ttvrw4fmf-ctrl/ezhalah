@@ -57,6 +57,12 @@ SOURCE SHAPE (probed live before any code — every number below is measured, no
     commercial); skipped city_not_in_catalog 13 («القصيم» 11, «القويعية», «محافظة تربة»),
     type_unmapped 3, off_plan 1.
 
+TRANSPORT (2026-09-24, first cloud crawl): api.eilmalriyada.com answered HTTP 403 to GitHub's
+    datacenter IP and 200 to a residential IP on EVERY TLS profile (chrome, safari17_0, firefox133,
+    edge101, safari15_5) — an IP block, not a handshake. The cloud run goes through the Saudi
+    residential proxy (matrix `proxy: true` -> WASALT_PROXY_URL / SCRAPE_PROXY_URL); a local run
+    with neither set hits the API directly.
+
 REMOVAL ORACLE (measured 2026-09-24 on GET /api/recent/<id>):
   gone — 136, 169, 170 (sitemap ids absent from the catalogue): HTTP 404
          {"message":"العقار غير موجود"} (100 bytes); id 999999 the same.
@@ -66,6 +72,7 @@ REMOVAL ORACLE (measured 2026-09-24 on GET /api/recent/<id>):
   answer LIVE through the same route (fails CLOSED).
 """
 from __future__ import annotations
+import os
 
 import argparse
 import json
@@ -96,9 +103,13 @@ DETAIL_MISSES: dict[str, int] = __import__("collections").Counter()   # reason �
 
 
 # ── transport ─────────────────────────────────────────────────────────────────────────────────────
+_PROXY = (os.environ.get("SCRAPE_PROXY_URL") or os.environ.get("WASALT_PROXY_URL") or "").strip()
+_PROXIES = {"http": _PROXY, "https": _PROXY} if _PROXY else None
+
+
 def session() -> cc.Session:
     # impersonate OWNS the User-Agent — only Accept-* and the SPA's own Origin/Referer are ours.
-    s = cc.Session(impersonate="chrome")
+    s = cc.Session(impersonate="chrome", proxies=_PROXIES)
     s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7",
                       "Origin": "https://www.eilmalriyada.com", "Referer": "https://www.eilmalriyada.com/"})
     return s

@@ -140,8 +140,11 @@ jobs:
           - { source: sakan,       cmd: "python -m scrapers.sakan.run --type all", tmo: 180 }
           # ── onboarded 2026-09-24: thirty-five platforms ───────────────────────────────────────
           # Same shape as the 2026-09-21 batch above: one matrix job per platform, so one source
-          # down never hides another and each keeps its own run ledger. None reads WASALT_PROXY_URL
-          # or SCRAPE_PROXY_URL (grepped all 35 run.py files) — no `proxy:` flag. Every run.py
+          # down never hides another and each keeps its own run ledger. Two carry `proxy: true` and read
+          # WASALT_PROXY_URL / SCRAPE_PROXY_URL — sakani (Cloudflare challenge from a datacenter IP) and
+          # eilmalriyada (api.eilmalriyada.com 403s datacenter IPs, 200 to residential on every TLS
+          # profile) — both measured on the 2026-09-24 first cloud crawl; the other 33 hit their
+          # sources directly. Every run.py
           # takes `--type all` (its argparse default) and prunes ONLY on a complete `all` walk.
           # `tmo` is sized from each scraper's MEASURED cost (its docstring: requests × (pause +
           # response)) with >=2x headroom, because a job killed at its limit never reaches
@@ -164,7 +167,7 @@ jobs:
           #   default) keeps >=2x at 2 s; re-size from the first dispatched run's duration.
           - { source: aqalemhajer,    cmd: "python -m scrapers.aqalemhajer.run --type all", tmo: 90 }
           #   sakani: 15 API pages + 282 detail records at 1.5 s (measured 740 s dry run).
-          - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 45 }
+          - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 45, proxy: true }
           #   API / REST sources whose whole catalogue is one page or a handful of calls:
           - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20 }
           - { source: almuteb,        cmd: "python -m scrapers.almuteb.run --type all", tmo: 20 }
@@ -197,7 +200,7 @@ jobs:
           #   ebriza: 22 API pages + one POST detail per record (207) at 0.7 s.
           - { source: ebriza,         cmd: "python -m scrapers.ebriza.run --type all", tmo: 20 }
           #   eilmalriyada: one catalogue call + 283 gallery records at 0.6 s.
-          - { source: eilmalriyada,   cmd: "python -m scrapers.eilmalriyada.run --type all", tmo: 20 }
+          - { source: eilmalriyada,   cmd: "python -m scrapers.eilmalriyada.run --type all", tmo: 20, proxy: true }
           #   daryusuf: 3 REST pages + one page per post (290) at 1.0 s.
           - { source: daryusuf,       cmd: "python -m scrapers.daryusuf.run --type all", tmo: 30 }
           #   Compound sites (one row per unit type; the compound page is the unit of work):

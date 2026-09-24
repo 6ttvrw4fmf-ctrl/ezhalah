@@ -78,7 +78,10 @@ CITIES       city_text is Arabic (الرياض 150, جدة 51, الخبر 24, ا
   Hyphenated twins («الجموم - بحرة», «بارق - البيضاء», «الدوادمي - الخالديه») are the source's own
   labels; whatever to_catalog() cannot place skips as city_not_in_catalog — never defaulted.
 
-TRANSPORT    Cloudflare. The catalogue walk at ~1.5 s per request drew 0 challenges over 15 pages;
+TRANSPORT    Cloudflare. 2026-09-24 first cloud crawl: catalogue page 1 drew the challenge from
+  GitHub's datacenter IP («catalogue page 1 unreadable — walk aborted»), so the cloud run goes
+  through the Saudi residential proxy (matrix `proxy: true` -> WASALT_PROXY_URL / SCRAPE_PROXY_URL);
+  a local run with neither set hits the API directly. The catalogue walk at ~1.5 s per request drew 0 challenges over 15 pages;
   bursts across mixed routes drew intermittent «Just a moment…» pages (HTTP 403 text/html, and once
   an HTTP 500 wrapping an upstream 403). A challenge is a fact about our access, never about a
   listing: fetch_json() backs off and retries, the ENUMERATION fails closed (raises → the run is not
@@ -125,6 +128,7 @@ MEASURED DRY RUN (2026-09-23, --dry-run, full catalogue, 740 s at PAUSE=1.5 s, 0
   rent-now-pay-later, any title (the row's title is the card's own type + location line).
 """
 from __future__ import annotations
+import os
 
 import argparse
 import json
@@ -188,8 +192,12 @@ _PRIVATE_KEY = re.compile(
     re.I)
 
 
+_PROXY = (os.environ.get("SCRAPE_PROXY_URL") or os.environ.get("WASALT_PROXY_URL") or "").strip()
+_PROXIES = {"http": _PROXY, "https": _PROXY} if _PROXY else None
+
+
 def session() -> cc.Session:
-    s = cc.Session(impersonate="chrome")   # impersonate OWNS the User-Agent — never set one
+    s = cc.Session(impersonate="chrome", proxies=_PROXIES)   # impersonate OWNS the User-Agent — never set one
     s.headers.update({"Accept": "application/json", "Accept-Language": "ar"})
     return s
 

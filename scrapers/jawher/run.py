@@ -315,8 +315,6 @@ def nuzul_fields(d: dict[str, Any]) -> tuple[Optional[dict[str, Any]], str, str]
         "direction": direction_for(d),
         "license_number": (str(d["rega_ad_number"]).strip() or None) if d.get("rega_ad_number") else None,
         "photo_urls": photos(d),
-        "latitude": d.get("latitude") if d.get("latitude") not in (None, "") else None,
-        "longitude": d.get("longitude") if d.get("longitude") not in (None, "") else None,
     }
     # Tri-state from zero-defaulted counters / false-defaulted flags: only a POSITIVE statement
     # is a statement. (An explicit «بدون مصعد» in the prose already landed as False above.)
@@ -348,6 +346,8 @@ def nuzul_fields(d: dict[str, Any]) -> tuple[Optional[dict[str, Any]], str, str]
     projects = [p for p in (d.get("projects") or []) if isinstance(p, dict)]
     fields["additional_info"] = redact_capture({k: v for k, v in {
         "unit_number": d.get("unit_number") or None,
+        "latitude": d.get("latitude") if d.get("latitude") not in (None, "") else None,
+        "longitude": d.get("longitude") if d.get("longitude") not in (None, "") else None,
         "type_key": d.get("type"), "type_ar": type_ar, "purpose": purpose,
         "source_category": d.get("category"),
         "usages": [u for u, on in (("residential", d.get("is_for_residential")),

@@ -189,27 +189,46 @@ _SCRAPERS = ROOT / "scrapers"
 
 
 def _row_literal_keys(tree) -> set[str]:
+    """Every key a scraper writes onto its row: the anchored literal, keys assigned onto the row
+    afterwards (row["k"] = …), and — the jawher shape, missed on the first crawl of 2026-09-24 —
+    keys of any dict literal SPLATTED into the row ({"ad_number": …, **fields}), recursively."""
     import ast
 
     def str_keys(d: ast.Dict) -> set[str]:
         return {k.value for k in d.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
 
-    keys: set[str] = set()
-    row_vars: set[str] = set()
+    bound: dict[str, ast.Dict] = {}      # name -> the dict literal it was bound to
+    extra: dict[str, set[str]] = {}      # name -> keys assigned later via name["k"] = …
     for node in ast.walk(tree):
-        if isinstance(node, ast.Dict) and {"ad_number", "listing_url", "source"} <= str_keys(node):
-            keys |= str_keys(node)
-        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict) \
-                and {"ad_number", "listing_url", "source"} <= str_keys(node.value):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            row_vars |= {t.id for t in targets if isinstance(t, ast.Name)}
-    for node in ast.walk(tree):
+            for t in targets:
+                if isinstance(t, ast.Name):
+                    bound[t.id] = node.value
         if isinstance(node, ast.Assign):
             for t in node.targets:
                 if (isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name)
-                        and t.value.id in row_vars and isinstance(t.slice, ast.Constant)
-                        and isinstance(t.slice.value, str)):
-                    keys.add(t.slice.value)
+                        and isinstance(t.slice, ast.Constant) and isinstance(t.slice.value, str)):
+                    extra.setdefault(t.value.id, set()).add(t.slice.value)
+
+    def keys_of(d: ast.Dict, seen: tuple = ()) -> set[str]:
+        ks = str_keys(d)
+        for k, v in zip(d.keys, d.values):
+            if k is None and isinstance(v, ast.Name) and v.id in bound and v.id not in seen:
+                ks |= keys_of(bound[v.id], seen + (v.id,)) | extra.get(v.id, set())
+        return ks
+
+    anchor = {"ad_number", "listing_url", "source"}
+    keys: set[str] = set()
+    for name, d in bound.items():
+        ks = keys_of(d) | extra.get(name, set())
+        if anchor <= ks:
+            keys |= ks
+    for node in ast.walk(tree):          # an anonymous row literal returned directly
+        if isinstance(node, ast.Dict):
+            ks = keys_of(node)
+            if anchor <= ks:
+                keys |= ks
     return keys
 
 
@@ -235,5 +254,8 @@ def test_the_row_literal_reader_catches_the_suwar_defect():
     import ast
     literal = 'row = {"ad_number": 1, "listing_url": 2, "source": 3, "living_rooms": 4}'
     later = 'row = {"ad_number": 1, "listing_url": 2, "source": 3}\nrow["majlis_rooms"] = 5'
-    for src, bad in ((literal, "living_rooms"), (later, "majlis_rooms")):
+    # The jawher shape (2026-09-24): the offending key sits in a dict that is SPLATTED into the row.
+    splat = ('fields = {"bedrooms": 1}\nfields["latitude"] = 2\n'
+             'row = {"ad_number": 1, "listing_url": 2, "source": 3, **fields}')
+    for src, bad in ((literal, "living_rooms"), (later, "majlis_rooms"), (splat, "latitude")):
         assert sorted(_row_literal_keys(ast.parse(src)) - LISTING_COLUMNS) == [bad]
