@@ -107,8 +107,33 @@ mustCatch('the pick moved out of the mount effect (frozen into the pre-rendered 
 mustCatch('a first render that does not match the pre-rendered index 0',
   heroWiringProblems(home.replace('const [heroTagline, setHeroTagline] = useState(0);',
     'const [heroTagline, setHeroTagline] = useState(nextHeroTaglineIndex());')));
+// A MUTATION PROOF MAY NOT BE A COIN FLIP (2026-09-24). This line used to hand `rotationProblems`
+// an unseeded `Math.random()` picker. The mutant is correct — a random picker really is not a
+// rotation — but the PROOF was a draw: over 2*5 samples from a pool of 5, an unbiased picker shows
+// all five ~90% of the time and avoids a back-to-back repeat (4/5)^9 ≈ 13% of the time, so the
+// proof reported "the audit passed deliberately broken input" and turned `npm test` RED on
+// 200,000 trials in **9.54%** of runs. `npm test` is the REQUIRED status check on every PR in this
+// repo, so roughly one PR in ten failed for a reason that had nothing to do with its diff — the
+// placement hazard AGENTS.md names, arriving through randomness instead of through production.
+// The mutant is now SEEDED, so it is the same broken picker on every run; and the general claim it
+// is standing in for is asserted as a MEASURED RATE over many seeds rather than left to one draw,
+// which also means this proof goes red if `rotationProblems` ever stops discriminating.
+const lcg = (seed: number) => () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32);
+const randomPicker = (seed: number) => {
+  const next = lcg(seed);
+  return () => Math.floor(next() * HERO_TAGLINE_KEYS.length);
+};
 mustCatch('a Math.random() "rotation" that repeats and can strand a visitor',
-  rotationProblems(() => Math.floor(Math.random() * HERO_TAGLINE_KEYS.length), HERO_TAGLINE_KEYS.length));
+  rotationProblems(randomPicker(20260924), HERO_TAGLINE_KEYS.length));
+{
+  let caught = 0;
+  for (let seed = 1; seed <= 1000; seed++) {
+    if (rotationProblems(randomPicker(seed), HERO_TAGLINE_KEYS.length).length > 0) caught++;
+  }
+  check('…and a random picker is caught on the great majority of seeds, so the line above is a '
+    + 'statement about random pickers and not about one lucky draw',
+    caught >= 850, `caught on only ${caught} of 1000 seeds (measured 2026-09-24: 915)`);
+}
 mustCatch('a picker that never moves off one headline',
   rotationProblems(() => 2, HERO_TAGLINE_KEYS.length));
 mustCatch('a headline shipped without its Arabic',
