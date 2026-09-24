@@ -37,6 +37,13 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
 };
 
+// Each mutation below is a shape this helper actually had. `mustCatch` is the repo's proof call:
+// it applies the barrier's own predicate to a deliberately broken input and fails if the mutant
+// survives (scripts/verify-new-barriers-are-mutation-proven.ts).
+const mustCatch = (what: string, caught: boolean) =>
+  check(`(mutation) catches ${what}`, caught,
+    caught ? '' : 'MUTANT SURVIVED — the assertion it pairs with is blind to the defect it exists for');
+
 console.log('\nAn Advanced Filter tap is only a tap once the page says the CTA took it\n');
 
 // ── the stub page ────────────────────────────────────────────────────────────────────────────────
@@ -186,8 +193,8 @@ async function legacyOpenAfOffer(page: any, opts: { timeoutMs?: number; pollMs?:
 {
   const s = stubPage({ ctaPresent: true, hasTurn: true, lands: () => false });
   const r = await legacyOpenAfOffer(s.page, FAST);
-  check('MUTATION — the pre-fix opener DOES report a missed click as opened (the predicate bites)',
-    r.opened === true, JSON.stringify(r));
+  mustCatch('the pre-fix opener reporting a missed click as opened — the predicate bites',
+    r.opened === true);
 }
 
 // ── 7. the in-page half: the witness itself, executed against a fake document ────────────────────
@@ -234,7 +241,7 @@ async function legacyOpenAfOffer(page: any, opts: { timeoutMs?: number; pollMs?:
     // attempt's — the same "absence read as an answer" shape the repo names everywhere.
     listeners[0]({ target: leaf('', true, AF_OFFER_CTA) });
     ARM_CLICK_WITNESS_SRC(WANT);
-    check('MUTATION — arming clears a previous landing (a stale hit cannot survive into the next attempt)',
+    mustCatch('a stale landing surviving into the next attempt (arming clears it)',
       READ_CLICK_WITNESS_SRC() == null);
   } finally {
     g.window = savedWin; g.document = savedDoc;
@@ -271,8 +278,8 @@ async function legacyOpenAfOffer(page: any, opts: { timeoutMs?: number; pollMs?:
     mouse: { click: async () => {} },
   };
   const r2 = await clickWitnessed(silent as any, { x: 1, y: 2 }, { testid: 'x' });
-  check('MUTATION — a page that reports nothing is NOT a landing (fail closed)',
-    r2.landed === false && r2.hit === '(no click event seen)', JSON.stringify(r2));
+  mustCatch('a page that reports no click reading as a landing (fail closed)',
+    r2.landed === false && r2.hit === '(no click event seen)');
 }
 
 console.log(failed

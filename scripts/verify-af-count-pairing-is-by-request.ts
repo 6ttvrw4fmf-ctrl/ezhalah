@@ -24,6 +24,12 @@ const check = (label: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `\n      ${detail}` : ''}`);
 };
 
+// The repo's proof call: apply the barrier's own predicate to a deliberately broken input and fail
+// if the mutant survives (scripts/verify-new-barriers-are-mutation-proven.ts).
+const mustCatch = (what: string, caught: boolean) =>
+  check(`(mutation) catches ${what}`, caught,
+    caught ? '' : 'MUTANT SURVIVED — the pairing rule is blind to the defect it exists for');
+
 console.log('\nA card\'s count is paired to the call that priced it, not to whatever answered last\n');
 
 const pair = (amenity: string, sel: number): CountPair =>
@@ -44,9 +50,8 @@ const WALK: CountPair[] = [
   const paired = pairCountForChip(WALK, 2968);
   check('the chip 2,968 pairs with the call that priced المطبخ — not with the last response (5,488)',
     paired?.body.p_amenities[0] === 'kitchen', JSON.stringify(paired?.body.p_amenities));
-  check('MUTATION — the OLD rule (compare to the last response) gets this wrong, which is why it was red',
-    Number(WALK[WALK.length - 1].resp[0].cnt_selected) !== 2968,
-    `last response = ${WALK[WALK.length - 1].resp[0].cnt_selected}`);
+  mustCatch('the OLD rule — compare the chip to the LAST response — which is why this was red',
+    Number(WALK[WALK.length - 1].resp[0].cnt_selected) !== 2968);
   const priced = pricedTheTappedOption(paired, PRE.body, 'kitchen');
   check('…and that call is shown to have priced the option the user tapped', priced.ok && priced.literal,
     JSON.stringify(priced));
@@ -60,7 +65,7 @@ const WALK: CountPair[] = [
   check('…and a null chip is never paired with anything', pairCountForChip(WALK, null) === null);
   check('…and an empty walk cannot pair (no post-tap count call means NOT proved, never proved)',
     pairCountForChip([], 2968) === null);
-  check('MUTATION — pricedTheTappedOption refuses to judge when there is no paired call',
+  mustCatch('a verdict rendered with NO paired call to judge',
     pricedTheTappedOption(null, PRE.body, 'kitchen').ok === false);
 }
 
@@ -82,7 +87,7 @@ const WALK: CountPair[] = [
   const r = pairCountForSelection(WALK, 2968, 'kitchen', PRE.body);
   check('the chip is paired with the call that primed it BEFORE the tap',
     r.paired?.body.p_amenities[0] === 'kitchen' && r.via === 'literal', JSON.stringify(r.via));
-  check('MUTATION — searching only the calls issued AFTER the tap finds nothing here (the old red)',
+  mustCatch('the second old rule — search only the calls issued AFTER the tap, of which there are none',
     pairCountForSelection([], 2968, 'kitchen', PRE.body).paired === null);
 }
 
@@ -100,8 +105,8 @@ const WALK: CountPair[] = [
   check('…and the combined rule pairs it through that fallback, and SAYS it used the fallback',
     viaMoved.paired === agePaired && viaMoved.via === 'moved', JSON.stringify(viaMoved.via));
   const unmoved = pricedTheTappedOption({ body: PRE.body, resp: [{ cnt_selected: 13700 }] }, PRE.body, 'new');
-  check('MUTATION — a body that did NOT move off the pre-tap scope fails the fallback too',
-    unmoved.ok === false, JSON.stringify(unmoved));
+  mustCatch('a body that never moved off the pre-AF scope passing the fallback',
+    unmoved.ok === false);
 }
 
 console.log(failed

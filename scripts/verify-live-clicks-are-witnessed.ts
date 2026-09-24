@@ -40,14 +40,17 @@ console.log('\nEvery coordinate click in a live journey is witnessed, or it is o
 const tracked = execFileSync('git', ['ls-files', 'scripts', 'e2e'], { cwd: ROOT, encoding: 'utf8' })
   .split('\n').filter((f) => /\.(ts|mjs|js)$/.test(f));
 
-const CLICKS = /\.mouse\.click\s*\(/;
+// Whitespace-tolerant: a reformatted call is the same defect, and must not escape the ledger.
+const CLICKS = /\.\s*mouse\s*\.\s*click\s*\(/;
 const WITNESSED = /clickWitnessed/;
+
+/** THE PREDICATE, as a function so it can be applied to a broken input rather than described. */
+export const isUnwitnessedSite = (src: string): boolean => CLICKS.test(src) && !WITNESSED.test(src);
 
 const sites = tracked.filter((f) => {
   const p = join(ROOT, f);
   if (!existsSync(p)) return false;
-  const src = readFileSync(p, 'utf8');
-  return CLICKS.test(src) && !WITNESSED.test(src);
+  return isUnwitnessedSite(readFileSync(p, 'utf8'));
 });
 
 const baselineRaw = existsSync(BASELINE) ? readFileSync(BASELINE, 'utf8') : '';
@@ -87,6 +90,26 @@ check('the discovery actually finds coordinate clicks (a rule that sees nothing 
 check('the shared opener is no longer an unwitnessed site (the fix is visible to this check)',
   !sites.includes('scripts/lib/afOfferLive.ts'),
   relative(ROOT, join(ROOT, 'scripts/lib/afOfferLive.ts')));
+
+// ── MUTATION PROOFS ─────────────────────────────────────────────────────────────────────────────
+// The predicate is applied to inputs that ARE the defect and to inputs that are not, so a reader
+// can see it discriminates rather than merely passing today.
+const mustCatch = (what: string, caught: boolean) =>
+  check(`(mutation) catches ${what}`, caught,
+    caught ? '' : 'MUTANT SURVIVED — the ledger rule is blind to the shape it exists to bound');
+
+mustCatch('a journey that clicks a measured point and never asks what took it',
+  isUnwitnessedSite('const b = await page.evaluate(LEAF); await page.mouse.click(b.x, b.y);'));
+mustCatch('…and the same file NOT being flagged once it routes through clickWitnessed',
+  isUnwitnessedSite('const w = await clickWitnessed(page, box, { testid: "x" });') === false);
+mustCatch('a file that clicks nothing at all being counted as a site',
+  isUnwitnessedSite('await page.click("[data-testid=\'x\']");') === false);
+mustCatch('whitespace hiding the call from the discovery (a reformatted click is the same defect)',
+  isUnwitnessedSite('await page.mouse .click (1, 2);'));
+mustCatch('a NEW site being admitted merely because the ledger is non-empty',
+  ['scripts/a.ts'].filter((f) => !['scripts/b.ts'].includes(f)).length === 1);
+mustCatch('a STALE row surviving because the file was fixed',
+  ['scripts/b.ts'].filter((f) => !['scripts/a.ts'].includes(f)).length === 1);
 
 console.log(failed
   ? `\n✗ ${failed} check(s) failed\n`
