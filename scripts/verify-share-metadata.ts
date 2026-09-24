@@ -40,7 +40,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
 const OG_FILE = 'public/og-image-v4.jpg';
-const REQUIRED_AR = 'موقع واحد. كل إعلانات العقار في السعودية، بثواني. جرّبه الآن.';
+const REQUIRED_AR = 'تدور على العقارات وتبي تشوف كل المعروض في مكان واحد؟ كل إعلانات العقار في السعودية، في ثواني.';
 // Either word names the country. Owner wording moved from «المملكة» to «السعودية» on 2026-09-05.
 const NAMES_COUNTRY = /في\s+(المملكة|السعودية)/;
 
