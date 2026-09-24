@@ -260,27 +260,36 @@ def test_the_guard_still_proves_reachability_for_most_of_the_fleet():
 # missing_count=0 five weeks after their last parse) and on arkaan's AK907.
 #
 # october had BOTH halves of this bug: the dead split, and no retire call to clean up the flip the
-# fix causes. 36 dual-table platforms still lack the call — a real pre-existing gap, NOT opened by
-# this change and too wide to fix here. Shrink-only ratchet, the pattern AGENTS.md already uses for
-# unbounded RPC call sites: a NEW dual-table scraper without the call is RED, and an entry here that
-# has since been fixed is RED as stale, so the baseline can never read better than reality.
-RETIRE_BASELINE = {
-    "abeea", "abralosol", "abwbna", "aldarim", "alhoshan", "alkhaas", "alnokhba", "alobid", "alta",
-    "amlakalahsa", "aouj", "aqaratikom", "aqarcity", "aqargate", "awal", "azdad", "bahadhabab",
-    "eaqartabuk", "eastabha", "erapulse", "fursaghyr", "hajer", "jazwtn", "jurash", "mizlaj",
-    "muktamel", "mustqr", "nowaisiry", "raghdan", "ramzalqasim", "rawasidark", "sanadak", "satel",
-    "souq24", "therc", "toor",
-}
+# fix causes. The 35 platforms that were missing the call have since been backfilled, so the
+# baseline is EMPTY and every dual-table pruner is covered. Kept as a ratchet, not deleted: a NEW
+# dual-table scraper without the call is RED, and an entry added here would have to be justified.
+#
+# NOT COVERED, stated rather than silently skipped: 10 scrapers route res/com but never call
+# prune_unseen at all (alta, amaall, aqarnajran, deal, fahadalshahri, ksaaqar, remal, sadiqeltajer,
+# shmoualshmal, wslnaa). Whether a category flip strands a row on those depends on how each one
+# deactivates instead, which nobody has analysed — that is a separate question, not this guard's.
+RETIRE_BASELINE: set[str] = set()
+
+
+def _calls(tree: ast.AST, name: str) -> bool:
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == name
+               for n in ast.walk(tree))
 
 
 def _dual_table_pruners() -> dict[str, bool]:
-    """{platform: calls retire_superseded_siblings} for every scraper that routes AND prunes."""
+    """{platform: calls retire_superseded_siblings} for every scraper that routes AND prunes.
+
+    Membership is decided by real CALLS, never by `"prune_unseen" in src`: alta only mentions the
+    name in a prose paragraph, and the substring version of this function counted it as a pruner
+    and put it in the baseline. A comment is not a code path — the same trap this file's own
+    ordering assertion fell into.
+    """
     out = {}
     for path in WRITERS:
-        src = path.read_text(encoding="utf-8")
-        if not (split_literals(ast.parse(src)) and "prune_unseen" in src):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if not (split_literals(tree) and _calls(tree, "prune_unseen")):
             continue
-        out[path.parent.name] = "retire_superseded_siblings" in src
+        out[path.parent.name] = _calls(tree, "retire_superseded_siblings")
     return out
 
 
