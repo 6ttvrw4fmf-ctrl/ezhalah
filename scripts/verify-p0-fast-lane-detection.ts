@@ -43,7 +43,27 @@
 // migration, not when someone opens a PR.
 //
 //   node --experimental-strip-types scripts/verify-p0-fast-lane-detection.ts
+// A SCHEMA-CACHE RELOAD REDDENED THIS CHECK ON EVERY OPEN PR (routine #10, 2026-09-23).
+// Measured: at 23:31:46Z this file reported `UNREADABLE — HTTP 503 {"code":"PGRST002"}` on TWO
+// unrelated PRs simultaneously, 96 seconds after an unrelated session applied migration
+// 20260923233010. Four function-creating migrations landed from three sessions inside twelve
+// minutes that evening, so the window opens often — and because this check runs on `pull_request`,
+// every one of those windows fails somebody else's diff. That is ops_incident #573's class exactly,
+// arriving in a check PR #3732's repair did not reach.
+//
+// The generic loop below retried 3x over ~4.5s and exhausted the budget inside the window. It is now
+// wrapped by the canonical driver, which is BOTH more patient and MORE discriminating, so this is a
+// repair and not a softening (BARRIER_ENGINEER.md Prohibition 1):
+//   * only a 503 whose JSON `code` is EXACTLY "PGRST002" is retried — the one self-describing,
+//     transient state that says "Retrying." in its own body. Every other failure, including a body
+//     that merely MENTIONS the code, is returned on the first attempt exactly as before.
+//   * the budget is bounded (~30s); a cache that cannot load inside it is a real problem and the
+//     LAST probe is returned as-is, still not-ok. The driver has no path that turns not-ok into ok.
+// The verdict this file reaches on every other answer, including an exhausted budget, is unchanged:
+// UNREADABLE is still a FAILURE, never an honest empty. Proven in
+// scripts/verify-schema-cache-retry-is-not-fail-open.ts.
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { fetchRetryingSchemaCacheReload } from './lib/postgrestRetry.ts';
 
 const { url, key } = resolvePublicSupabase();
 const ENDPOINT = `${url}/rest/v1/rpc/ops_p0_detectors_off_fast_lane`;
@@ -125,12 +145,14 @@ async function readOffLane(): Promise<LaneAnswer> {
   let last: LaneAnswer = { readable: false, error: 'never attempted' };
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {
-      const res = await fetch(ENDPOINT, {
+      // The schema-cache reload is absorbed INSIDE one attempt (see the header): the outer loop
+      // still owns transport errors and every other status, and still spends its own budget on them.
+      const res = await fetchRetryingSchemaCacheReload(ENDPOINT, {
         method: 'POST',
         headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: '{}',
       });
-      last = interpret(res.status, await res.text());
+      last = interpret(res.status, res.body);
       if (last.readable) return last;
     } catch (e) {
       last = { readable: false, error: e instanceof Error ? e.message : String(e) };

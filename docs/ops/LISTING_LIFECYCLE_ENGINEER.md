@@ -271,6 +271,25 @@ Three things to carry forward:
    `13:29:00 → 13:40:18`, **11m18s**, and every other slot that day measured 10m41s–11m25s. The
    blackout length equals the job's real duration, every time. A `max(end_time)` with no `status`
    predicate is not a completion; **`status` would have read `running`.**
+
+   **The same trap in the OPPOSITE direction, measured 2026-09-24 (routine #11).** Lesson 3 above
+   produced a false RETRACTION of a correct finding; this produced a false FINDING. A fleet-wide
+   "is any inactive row still served?" sweep at 00:23 returned 24 rows (alsidra res 20 + com 4, all
+   deactivated at 00:20:06), and they were filed as an hour of extra exposure caused by the
+   job17(:20)/job28(:22) inversion. That sweep is 69 `query_to_xml` subqueries and it **straddled
+   the 00:22 sync's own DELETE leg**. Re-measured at 00:28:08, after `cron.job_run_details`
+   confirmed the 00:22 run `status = succeeded`: alsidra held **zero** rows in `search_listings_ar`
+   and the fleet-wide count was **zero**. *Read the sync's `status` before trusting any propagation
+   measurement, and never sample the served index between `:20` and `:24`.*
+
+   The real finding was better than the filed one and is worth keeping: `active_listing_ids_v2`
+   **still** carried those 20 rows as active (the `:20` refresh snapshot predates the 00:20:06
+   deactivation) while `search_listings_ar` was already clean — so the matview path did not remove
+   them, **`prune_inactive_from_search()` did**. That is §2.3 property 3's second remover observed
+   covering precisely the aliveness gap the inversion opens, which is the half `ops_incident` #354
+   never measured. It means the inversion's damage is to FRESHNESS, not to serving source-confirmed
+   dead listings. One observation is not a guarantee (§7.1) — but it is the first evidence either
+   way, and it is the reason #354 stays a scheduling defect rather than becoming a §1.1 leak.
 3. **Repairing the data is not closing this.** The out-of-band five-statement sync (§2.3) restores
    the index in one pass and is fully within this routine's authority, but the index refreezes at
    the next :36 until #300 is fixed. Report that as a mitigation, never as a fix.
@@ -647,6 +666,75 @@ it; `scrapers/dealapp/repair.py` inherits it by import.
 
 **Why the old barrier was green the whole time:** it asserted the pin PAYLOAD in all eleven copies,
 and the payload was never the missing part. That is AGENTS.md's source-TEXT trap in its exact form.
+
+### §4.1c — A ONE-WAY ORACLE MAKES AN ALERT CORRECT BEHAVIOUR CANNOT CLEAR (2026-09-23, routine #11)
+
+§4.1b made the sold pin WRITE its evidence. This is the half that was still missing: it wrote only
+one of the three values. Census of the whole `ops_stale_inactivation_probe` ledger that day:
+
+| oracle | GONE | LIVE | UNKNOWN |
+|---|---:|---:|---:|
+| `prune_unseen.verify_gone` | 362 | 300 | 618 |
+| `wasalt.liveness.check_hybrid` | 1,405 | 145 | 0 |
+| **all 9 `*.sold_pin.*` oracles** | **5,853** | **0** | **0** |
+
+Every other evidence writer in this repo records the source saying *still here*. The sold pin is
+handed only the ids the caller judged sold, so the available complement — read from the SAME field,
+on the SAME page, in the SAME crawl — was used to decide and then thrown away.
+
+**Why that is a defect and not untidiness.** `ops_lifecycle_false_resurrection()` takes the LATEST
+verdict per `ad_number` and reports rows where it is `GONE` while the row is `active = true`. When a
+source RELISTS a unit the scraper does exactly the right thing — the next upsert carries
+`active = true` — but nothing records the contradicting reading, so the ledger's latest verdict stays
+GONE **forever** and the P1 can never clear by any amount of correct behaviour. That is §2.5a's trap
+in its exact form (*a permanently unclearable alert is how a detector teaches people to dismiss it*)
+and §8.3 names this class as the one that can least afford to cry wolf.
+
+**The worked case.** satel `STC0084`: GONE on 09-14, 09-15, 09-16, 09-17 from
+`satel.sold_pin.property_status`, then silence; the row correctly `active = true` with a fresh
+`last_seen_at` every day; the alert open since 09-18. A DIRECT re-probe of the listing's own URL on
+09-23 returned HTTP 200, identity confirmed by brace-matching the JSON object carrying
+`"propertyNumber":"C0084"`, and that object's `status` — the very field the oracle reads — said
+`"Available"`, `postStatus: "Published"`. A sibling object on the same page still read `"Rented out"`,
+which is what proves the field is per-property and the read sound.
+
+**The repair, and the direction that matters.** `scrapers/common/sold_pin.py` now also records the
+reversal: `plan_relisting_evidence()` writes a `LIVE` row for `(seen − sold) ∩ previously_gone`, and
+all 11 platforms pass their crawl's seen-set. Both intersections are load-bearing:
+
+- subtracting the sold set **in the law, not in the caller**, is what makes it impossible to certify
+  as available an id this very crawl read as sold. **This cannot bury a real false resurrection:** if
+  a listing really is still sold and something wrongly reactivated it, the same crawl writes a fresh
+  GONE row and the alert fires exactly as before. The source distinguishes the two cases, every
+  crawl, which is the only thing allowed to.
+- intersecting `previously_gone` keeps it bounded. Without it a daily crawl would file tens of
+  thousands of "still available" rows into a ledger holding ~12k in total.
+
+It writes evidence only — never `active`, never `missing_count`, and never `last_verified_alive_at`
+(§3: only `liveness_contract.py` may write that). Per §0 it is a RESTORATIVE write, which §5.4 does
+not gate: a block cannot manufacture a source that says available.
+
+**Two things that were nearly got wrong, recorded so they are not paid for twice:**
+
+1. **The reversal write must sit BEFORE `pin_source_confirmed_gone()`'s `if not pinnable: return []`,
+   and the caller's `if sold_res:` guard had to go too.** A crawl in which nothing is sold is
+   precisely a crawl in which a previously-sold unit may have come back. Both early exits would have
+   let the one-way ledger survive the fix while every test of the sold path stayed green.
+2. **Deriving the available set from the DATABASE (`active = true` + fresh `last_seen_at`) was
+   rejected**, although it needed no scraper changes at all. It infers a status reading from crawl
+   presence, which is `LISTING_LIVENESS.md` §3's forbidden move wearing a convenient shape. The
+   caller hands over the ids it actually read and classified; that is evidence, not inference.
+
+Held by `scripts/verify-sold-pin-evidence-law.ts` (now 8 executed mutations, and a wiring half that
+goes RED if any platform wires the kill half and omits the reversal — proven by stripping jurash's)
+and `scrapers/common/tests/test_sold_pin_records_the_reversal.py` (10 tests against a stub client).
+
+**The sibling class this does NOT fix, and must not be confused with it.** rakez, raghdan and wasalt
+reach `false_resurrection` through `prune_unseen`/`liveness` oracles, which only ever probe rows the
+crawl did **not** see. A row that carries a GONE verdict and then returns to the crawl is therefore
+never re-probed, never stamped, and equally stuck — but there is no symmetric re-read to record, so
+the honest answer is a fresh DIRECT re-probe of the contradicting row by the oracle that killed it,
+not a write. Tracked separately; see `ops_incident` #530/#531/#533.
 
 ### §4.2 — What the rest of the ledger actually is (surveyed 2026-09-06)
 

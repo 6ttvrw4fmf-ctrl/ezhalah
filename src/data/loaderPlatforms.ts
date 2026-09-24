@@ -32,9 +32,10 @@ export type LoaderPlatform = { name: string; i18nKey: string; logo: number };
 // its entry here in the same PR that also confirms it should stop being advertised. Barrier:
 // `scripts/verify-loader-platforms-match-active.ts`.
 //
-// Aqar Monthly reuses `aqar-logo.png` — it is Aqar's own monthly-rental vertical (same site, same
-// brand), not a separate platform. Distinguished at the token level (see SOURCE_TOKENS) so a raw
-// `aqarmonthly` source resolves to the Monthly entry and not the generic Aqar one.
+// Aqar Monthly is Aqar's own monthly-rental vertical (same site, same brand), so it is NOT a
+// separate tile (owner 2026-09-23: dropped the duplicate — it reused aqar-logo.png). A raw
+// `aqarmonthly` source resolves to the single Aqar tile via SOURCE_TOKENS, so its listings still
+// show the Aqar logo.
 export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'Aqar',         i18nKey: 'AQAR',                                    logo: require('../../assets/images/aqar-logo.png') },
   { name: 'Wasalt',       i18nKey: 'Wasalt',                                  logo: require('../../assets/images/wasalt-logo.png') },
@@ -59,7 +60,6 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'Abeea',        i18nKey: 'Abeea Real Estate',                       logo: require('../../assets/images/abeea.png') },
   { name: 'Jurash',       i18nKey: 'Jurash Real Estate',                      logo: require('../../assets/images/jurash.png') },
   { name: 'Gathern',      i18nKey: 'Gathern',                                 logo: require('../../assets/images/gathern.png') },
-  { name: 'Aqar Monthly', i18nKey: 'AQAR',                                    logo: require('../../assets/images/aqar-logo.png') },
   { name: 'Deal App',     i18nKey: 'Deal App',                                logo: require('../../assets/images/dealapp.png') },
   { name: '24 Souq',      i18nKey: '24 Souq',                                 logo: require('../../assets/images/souq24.png') },
   { name: 'Era Pulse',    i18nKey: 'Era Pulse',                               logo: require('../../assets/images/erapulse.png') },
@@ -113,16 +113,16 @@ export const PLATFORM_META: LoaderPlatform[] = [
   // another company's logo. `name` is the stored db `source` value (the scraper's SOURCE constant),
   // the same convention as 'Al Khaas' / 'KSA Aqar' / 'Rawasi Dark' above.
   { name: 'Al Sidra', i18nKey: 'Al Sidra Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Moftah', i18nKey: 'Moftah Al Aqar', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مسار المستقبل', i18nKey: 'Masar Al Mustaqbal Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'منصات', i18nKey: 'Menassat Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Sakan Saudi', i18nKey: 'Sakan', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'مكتب بوصبيح', i18nKey: 'Bossbih Real Estate Office', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Al Shawaf', i18nKey: 'Al Shawaf Real Estate Office', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Ibrahim Alqarawi', i18nKey: 'Ibrahim Alqarawi Real Estate Investments', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Al Jassim', i18nKey: 'Al Jassim Real Estate Services', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'Almotmkenah', i18nKey: 'Almotmkenah Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
-  { name: 'نفوذ', i18nKey: 'Nufouth Development Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'Moftah', i18nKey: 'Moftah Al Aqar', logo: require('../../assets/images/moftah.png') },
+  { name: 'مسار المستقبل', i18nKey: 'Masar Al Mustaqbal Real Estate', logo: require('../../assets/images/masar.png') },
+  { name: 'منصات', i18nKey: 'Menassat Real Estate', logo: require('../../assets/images/gomenassat.png') },
+  { name: 'Sakan Saudi', i18nKey: 'Sakan', logo: require('../../assets/images/sakan.png') },
+  { name: 'مكتب بوصبيح', i18nKey: 'Bossbih Real Estate Office', logo: require('../../assets/images/bossbih.png') },
+  { name: 'Al Shawaf', i18nKey: 'Al Shawaf Real Estate Office', logo: require('../../assets/images/alshawaf.png') },
+  { name: 'Ibrahim Alqarawi', i18nKey: 'Ibrahim Alqarawi Real Estate Investments', logo: require('../../assets/images/ialqarawi.png') },
+  { name: 'Al Jassim', i18nKey: 'Al Jassim Real Estate Services', logo: require('../../assets/images/aljassim.png') },
+  { name: 'Almotmkenah', i18nKey: 'Almotmkenah Real Estate', logo: require('../../assets/images/almotmkenah.png') },
+  { name: 'نفوذ', i18nKey: 'Nufouth Development Real Estate', logo: require('../../assets/images/nufouth.png') },
 ];
 
 // Ordered SPECIFIC-first token → platform name map, mirroring ResultCard's SourceBadge matching so a
@@ -133,7 +133,7 @@ export const PLATFORM_META: LoaderPlatform[] = [
 // loader_active_platforms_ar().
 const SOURCE_TOKENS: Array<[string, string]> = [
   ['wasalt', 'Wasalt'], ['aldarim', 'Aldarim'], ['aqargate', 'Aqargate'], ['aqarcity', 'Aqarcity'],
-  ['aqaratikom', 'Aqaratikom'], ['aqarmonthly', 'Aqar Monthly'],
+  ['aqaratikom', 'Aqaratikom'], ['aqarmonthly', 'Aqar'],
   ['alhoshan', 'Alhoshan'], ['alkhaas', 'Al Khaas'],
   ['hajer', 'Hajer'], ['sanadak', 'Sanadak'], ['eastabha', 'Eastabha'], ['raghdan', 'Raghdan'],
   ['eaqartabuk', 'Eaqartabuk'], ['satel', 'Satel'], ['sadin', 'Sadin'],

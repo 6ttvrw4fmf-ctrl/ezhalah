@@ -13,7 +13,7 @@ import { withPage, settle, bodyText, storedHistory, clickText, clickReason, slee
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
-         SELECTED_CITY_MARKER } from './harness.mjs';
+         SELECTED_CITY_MARKER, isBottomDocked } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -1426,7 +1426,8 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
       const r = await page.evaluate((sel) => {
         for (const f of document.querySelectorAll(sel)) {
           const q = f.getBoundingClientRect();
-          if (q.height > 0) return { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height) };
+          if (q.height > 0) return { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height),
+            height: q.height, vh: window.innerHeight, vw: window.innerWidth };
         }
         return null;
       }, SHEET_SEL);
@@ -1507,7 +1508,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     // Desktop's prompt sits in a corner rather than docked, so «بحث» needs no reserved space there —
     // but the mode-switch check below still runs, because a corner prompt on a 1440px viewport can
     // still land on a control near the top edge, and "not bottom-docked" says nothing about that.
-    const desktopCornerPrompt = sheet.bottom < 660 && !mobile;
+    const desktopCornerPrompt = !isBottomDocked(sheet, sheet.vh) && !mobile;
     if (desktopCornerPrompt) pass(name, `desktop prompt is not bottom-docked (${sheet.top}-${sheet.bottom})`);
 
 
@@ -1572,7 +1573,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     await sleep(3500);
     const sheet = await waitForSheet(page);
     if (!sheet) { skip(`${name}/composer`, 'Google never showed the One Tap prompt this run'); return; }
-    if (sheet.bottom < 660 && !mobile) { pass(`${name}/composer`, 'desktop prompt is not bottom-docked'); return; }
+    if (!isBottomDocked(sheet, sheet.vh) && !mobile) { pass(`${name}/composer`, 'desktop prompt is not bottom-docked'); return; }
     const comp = await winnerAt(page, 'composer');
     if (comp.missing) { skip(`${name}/composer`, 'no composer on this screen'); return; }
     if (!comp.isSelf) {
@@ -1790,8 +1791,38 @@ JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile
   // pointer-blocked, click times out, and the whole × check skipped 2/2 while reading as coverage.
   const x = page.locator('[data-testid="info-modal-close"]').first();
   if (await x.count()) {
-    await x.click({ timeout: 10_000 }).catch(() => {});
-    if (!(await waitSupportClosed(page))) { skip(`${name}/x`, 'the X did not close the dialog'); return; }
+    // THE CLICK'S OWN ERROR USED TO BE SWALLOWED, AND THAT IS WHY THIS SKIP SAYS NOTHING
+    // (ops_incident #670, routine #6, 2026-09-24). `.catch(() => {})` threw away the one fact that
+    // distinguishes the two shapes — PART 11.2 rule 4, and the identical trap PR #1146 paid for
+    // (five retries into a swallowed catch). «the X did not close the dialog» reads like a product
+    // verdict and is equally consistent with "the click never landed at all".
+    //
+    // MEASURED, and the reason this is instrumentation rather than a guessed fix: the skip fires
+    // 2/2 on WebKit (sweep 35934755839) AND 2/2 on Firefox (sweep 35941044015), and 0/2 on
+    // Chromium. Two of three engines, so Chromium is the outlier and this points at the product —
+    // but neither failing engine is drivable from this container (PART 11.5), and the #1053
+    // precedent is explicit that the move when you are blind on a surface is to MAKE THE FAILURE
+    // VISIBLE, not to guess a third time. One CI dispatch now answers it on both engines.
+    const clickErr = await x.click({ timeout: 10_000 }).then(() => null, (e) => String(e).split('\n')[0]);
+    if (!(await waitSupportClosed(page))) {
+      // Who actually owns the X's centre? PLURAL, never `elementFromPoint` — a rect is LAYOUT and
+      // being painted is not (PART 5 shape 13; enforced as a class by
+      // scripts/verify-ownership-probes-use-the-painted-stack.ts). A control clipped out of view
+      // keeps its rect, and the singular form would report a healthy build as covered.
+      const at = await x.boundingBox().then((b) => (b ? page.evaluate(([cx, cy]) => {
+        const stack = document.elementsFromPoint(cx, cy);
+        return {
+          painted: stack.slice(0, 3).map((e) => `${e.tagName.toLowerCase()}`
+            + `${e.getAttribute('data-testid') ? `[${e.getAttribute('data-testid')}]` : ''}`),
+          selfIndex: stack.findIndex((e) => e.getAttribute?.('data-testid') === 'info-modal-close'),
+        };
+      }, [b.x + b.width / 2, b.y + b.height / 2]) : null)).catch(() => null);
+      skip(`${name}/x`, 'the X did not close the dialog — '
+        + (clickErr ? `the CLICK ITSELF FAILED: «${clickErr}»` : 'the click resolved without error, so the dialog stayed open on its own')
+        + (at ? ` | painted at the X's centre: [${at.painted.join(', ')}], the X is at index ${at.selfIndex}`
+              : ' | the X had no box to probe'));
+      return;
+    }
     const why3 = await openSupport(page, mobile);
     if (why3) { skip(`${name}/x`, `could not reopen after the X: ${why3}`); return; }
     const afterX = await readSupportDraft(page);
