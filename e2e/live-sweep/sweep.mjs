@@ -51,7 +51,6 @@ const ID_SET_CAP = 1200;
 
 mkdirSync(OUT_DIR, { recursive: true });
 const JOURNAL = `${OUT_DIR}/journeys.jsonl`;
-writeFileSync(JOURNAL, '');
 
 // ── MINIMUM COVERAGE FLOORS (owner). A run that cannot meet these FAILS: silently shrinking
 // coverage is the failure mode a rotation system invites, so the floors are asserted, not hoped for.
@@ -316,6 +315,36 @@ const ledgerRecord = async (dimension, key, result, notes) => {
 // ── findings ─────────────────────────────────────────────────────────────────────────────────────
 const findings = [];
 const journeys = [];
+
+// ── THE EVIDENCE JOURNAL — one writer, and never truncated by an IMPORT ──────────────────────────
+// The journal is the §40.7 machine-readable evidence for a run. Two defects were measured on
+// 2026-09-24, and together they meant a sweep could report "PRODUCTION VERIFIED: YES / 11 journeys
+// / 10/10" over a journal containing NOTHING — the report is built from the in-memory `journeys`
+// array above, and nothing ever reads the file back, so neither defect had any visible symptom.
+//
+// 1. TRUNCATE-ON-IMPORT. `writeFileSync(JOURNAL, '')` used to run at module eval. Eleven
+//    scripts/verify-*.ts import this module for their offline proofs, so any of them running while
+//    a sweep was in flight blanked that sweep's evidence. Proven by execution, not by reading:
+//    a 2-line journal became 0 bytes on a bare `import('./sweep.mjs')`. Truncation is now LAZY —
+//    the FIRST journey this process records starts the fresh journal — so importing the module
+//    touches no file, while a real sweep still never appends onto a previous run's journal.
+//
+// 2. THE INTERESTING JOURNEYS WERE THE ONES OMITTED. `assertChain` had three `journeys.push(j)`
+//    sites and only the last one appended. The two that did not were the early returns for "the
+//    search sent no candidates request at all" and "RPC replay unavailable" — precisely the
+//    anomalous journeys an auditor would most want in the ledger. They counted in the report and
+//    vanished from the evidence.
+//
+// Both are fixed by routing every record through THIS function, so a fourth early return added
+// tomorrow cannot forget the journal it does not have to write.
+// Pinned by scripts/verify-live-sweep-journal-records-every-journey.ts.
+let journalStarted = false;
+function recordJourney(j) {
+  journeys.push(j);
+  if (!journalStarted) { writeFileSync(JOURNAL, ''); journalStarted = true; }
+  appendFileSync(JOURNAL, JSON.stringify(j) + '\n');
+  return j;
+}
 
 // `UI→RENDERED` is RESERVED for judgeAdvertisedVsLanded() below, and defect() enforces that with a
 // module-private token no caller outside this file can forge. See the block after it for why: every
@@ -931,7 +960,7 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   const rendered = ui.headline != null ? num(ui.headline) : (ui.zero ? 0 : null);
   const j = { name, intent, ui, request: req, rpc: null, db: null, rendered, ok: true };
 
-  if (!req) { defect(name, 'UI→REQUEST', 'the search sent no candidates request at all'); j.ok = false; journeys.push(j); return j; }
+  if (!req) { defect(name, 'UI→REQUEST', 'the search sent no candidates request at all'); j.ok = false; return recordJourney(j); }
 
   // 1→2 INTENT vs UI
   if (intent.city && ui.city && !ui.city.includes(intent.city) && !intent.city.includes(ui.city)) {
@@ -951,7 +980,7 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
 
   // 3→4 REQUEST vs RPC
   j.rpc = await rpcTotal(req);
-  if (j.rpc == null) { note('RPC replay unavailable — skipping 4/5 for this journey'); journeys.push(j); return j; }
+  if (j.rpc == null) { note('RPC replay unavailable — skipping 4/5 for this journey'); return recordJourney(j); }
 
   // 4→5 RPC vs INDEPENDENT DB TRUTH — derived from the app's OWN request, or skipped honestly.
   // الحي first: the request's label may not be the SERVED label (see resolveDistrictLabels). Resolve
@@ -1025,9 +1054,7 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   if (ui.entities.length) { defect(name, 'RENDERED', `raw HTML entities on screen: ${ui.entities.join(' ')} (no-html-entities-rendered)`); j.ok = false; }
   if (ui.latinInCards.length) { defect(name, 'RENDERED', `placeholder junk on screen: ${ui.latinInCards.join(' ')}`); j.ok = false; }
 
-  journeys.push(j);
-  appendFileSync(JOURNAL, JSON.stringify(j) + '\n');
-  return j;
+  return recordJourney(j);
 }
 
 // ── the browser ──────────────────────────────────────────────────────────────────────────────────
