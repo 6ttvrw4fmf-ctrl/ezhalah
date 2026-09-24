@@ -559,6 +559,16 @@ const AKARIYOUN_LOGO = require('../../assets/images/akariyoun.png');
 // exist even while they render this: the fallback at the end of SourceBadge returns عقار's logo,
 // so a missing branch stamps another company's mark on their listings — the misattribution the
 // owner called a legal problem, not a cosmetic one.
+const MOFTAH_LOGO = require('../../assets/images/moftah.png');
+const MASAR_LOGO = require('../../assets/images/masar.png');
+const GOMENASSAT_LOGO = require('../../assets/images/gomenassat.png');
+const SAKAN_LOGO = require('../../assets/images/sakan.png');
+const BOSSBIH_LOGO = require('../../assets/images/bossbih.png');
+const ALSHAWAF_LOGO = require('../../assets/images/alshawaf.png');
+const IALQARAWI_LOGO = require('../../assets/images/ialqarawi.png');
+const ALJASSIM_LOGO = require('../../assets/images/aljassim.png');
+const ALMOTMKENAH_LOGO = require('../../assets/images/almotmkenah.png');
+const NUFOUTH_LOGO = require('../../assets/images/nufouth.png');
 const PLATFORM_PLACEHOLDER_LOGO = require('../../assets/images/platform-placeholder.png');
 const KSAAQAR_LOGO = require('../../assets/images/ksaaqar.png');
 const SADIQELTAJER_LOGO = require('../../assets/images/sadiq-eltajer.png');
@@ -735,16 +745,16 @@ function SourceBadge({ source }: { source: string }) {
   // each real logo. LAST on purpose, right above the fallback: no new token can capture an existing
   // platform's source, and each branch must EXIST — the fallback below is عقار's own logo.
   if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('moftah') || s.includes('مفتاح العقار')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('masar') || s.includes('مسار المستقبل')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('menassat') || s.includes('منصات')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('sakan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('bossbih') || s.includes('بوصبيح')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('alshawaf') || s.includes('al shawaf') || s.includes('الشواف')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('alqarawi') || s.includes('القرعاوي')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('almotmkenah') || s.includes('المتمكنة')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('nufouth') || s.includes('نفوذ')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('moftah') || s.includes('مفتاح العقار')) return <PlatformLogo source={MOFTAH_LOGO} />;
+  if (s.includes('masar') || s.includes('مسار المستقبل')) return <PlatformLogo source={MASAR_LOGO} />;
+  if (s.includes('menassat') || s.includes('منصات')) return <PlatformLogo source={GOMENASSAT_LOGO} />;
+  if (s.includes('sakan')) return <PlatformLogo source={SAKAN_LOGO} />;
+  if (s.includes('bossbih') || s.includes('بوصبيح')) return <PlatformLogo source={BOSSBIH_LOGO} />;
+  if (s.includes('alshawaf') || s.includes('al shawaf') || s.includes('الشواف')) return <PlatformLogo source={ALSHAWAF_LOGO} />;
+  if (s.includes('alqarawi') || s.includes('القرعاوي')) return <PlatformLogo source={IALQARAWI_LOGO} />;
+  if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return <PlatformLogo source={ALJASSIM_LOGO} />;
+  if (s.includes('almotmkenah') || s.includes('المتمكنة')) return <PlatformLogo source={ALMOTMKENAH_LOGO} />;
+  if (s.includes('nufouth') || s.includes('نفوذ')) return <PlatformLogo source={NUFOUTH_LOGO} />;
   return <PlatformLogo source={AQAR_LOGO} />;
 }
 
