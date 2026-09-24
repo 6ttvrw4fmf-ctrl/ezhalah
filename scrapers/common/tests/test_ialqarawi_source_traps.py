@@ -345,3 +345,52 @@ def test_a_labelled_per_metre_figure_has_no_plausibility_ceiling():
     ambiguity («1 حد المتر» may be «1 [ألف]») abstains; a large labelled rate is stored as given."""
     assert R.parse_money("250000 حد المتر") == (None, 250000, "")
     assert R.parse_money("1 حد المتر") == (None, None, "ppm_unit_unstated")
+
+
+# ── 2026-09-23: the host started refusing some TLS fingerprints ──────────────────────────────────
+class _Resp:
+    def __init__(self, status, text):
+        self.status_code, self.text = status, text
+        self.headers, self.url = {}, ""
+
+
+class _FakeSession:
+    """Stands in for curl_cffi's Session: answers per impersonate profile, like the live host did."""
+    SERVED = {}
+    seen = []
+
+    def __init__(self, impersonate=None, **_kw):
+        self.impersonate = impersonate
+        self.headers = {}
+        _FakeSession.seen.append(impersonate)
+
+    def get(self, *_a, **_kw):
+        return _FakeSession.SERVED.get(self.impersonate, _Resp(403, "<title>403 - Forbidden</title>"))
+
+
+def test_the_session_walks_past_a_refused_fingerprint_to_one_that_serves_cards(monkeypatch):
+    """Measured live: chrome116/120/124 → an identical 75,193-byte 403; safari/firefox/edge → the
+    full catalogue, same IP. A run that pins one profile reads a block as "no cards" and the
+    platform silently stops refreshing (two daily runs did, 2026-09-22 and 09-23)."""
+    from scrapers.common import http
+    _FakeSession.seen = []
+    _FakeSession.SERVED = {"safari17_0": _Resp(200, '<section class="cards"><a href="index.php?router=card&id=1"></a>')}
+    monkeypatch.setattr(http.cc, "Session", _FakeSession)
+    s = R.session()
+    assert s.impersonate == "safari17_0"
+    assert s.__dict__["_impersonate_profile"] == "safari17_0"
+    assert _FakeSession.seen[0] == "chrome", "the newest chrome is still tried first"
+
+
+def test_a_200_that_is_the_block_page_is_not_accepted_as_a_served_profile(monkeypatch):
+    """The block can arrive as HTTP 200 with a challenge body. A profile counts as served only when
+    the page carries the catalogue section this scraper reads."""
+    from scrapers.common import http
+    _FakeSession.SERVED = {p: _Resp(200, "<title>Just a moment…</title>") for p in http.IMPERSONATE_ORDER}
+    monkeypatch.setattr(http.cc, "Session", _FakeSession)
+    with pytest.raises(RuntimeError) as e:
+        R.session()
+    msg = str(e.value)
+    assert "no TLS profile was served" in msg
+    for prof in http.IMPERSONATE_ORDER:
+        assert prof in msg, "the error must name every profile tried, so a block is not read as a dead site"
