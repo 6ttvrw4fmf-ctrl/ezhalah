@@ -107,6 +107,13 @@ const AR: Record<string, string> = {
   'One search across every major Saudi property platform.': 'بحث واحد عبر جميع منصات العقارات السعودية الكبرى.',
   // Note #1 — hero copy update. Arabic and English sides are the canonical wording the user supplied.
   'Looking for a property and want to see all available listings in one place? Ezhalah.': 'تدور على عقار وتبي تشوف كل المعروض في مكان واحد؟ إزهله',
+  // The rotating home headline (owner-authored 2026-09-23) — one per visit, see
+  // src/data/heroTaglineRotation.ts. The Arabic is the owner's own wording.
+  'One site to search every Saudi real-estate platform and website.': 'موقع واحد للبحث في كل المنصات والمواقع العقارية السعودية.',
+  'Every property listing in the Kingdom, in one place': 'كل الإعلانات العقارية بالمملكة في موقع واحد',
+  'The complete property site for every listing in the Kingdom, from every platform': 'الموقع العقاري الشامل لكل الإعلانات العقارية بالمملكة من جميع المنصات',
+  'One site for every property you are looking for in the Kingdom, from every platform': 'موقع واحد لكل العقار الذي تبحث عنه بالمملكة من جميع المنصات',
+  'Search one site for the property you want across every real-estate platform and website, easily.': 'ابحث في موقع واحد عن العقار الذي تريده في جميع المنصات العقارية والمواقع بكل سهولة.',
   'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.': 'إزهله منصة متخصصة للبحث في منصات العقار الإلكترونية بالمملكة باستخدام الذكاء الاصطناعي',
   'Ezhalah, and may your luck be good.': 'إزهله وفالك طيب.',
   "Type anything. I'll search Aqar, Wasalt, Aldarim and more in seconds.": 'اكتب أي شيء. سأبحث في منصات عقار ووصلت والدريم والمزيد في ثواني.',

@@ -8,6 +8,7 @@ import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { RANGE_ICON, categoryImg, groupImg, typeImg, BED_IMG, DEAL_IMG, PERIOD_IMG, LOC_IMG } from '@/theme/propertyIcons';
 import HeroBackground from '@/components/HeroBackground';
+import { HERO_TAGLINE_KEYS, nextHeroTaglineIndex } from '@/data/heroTaglineRotation';
 import { OptionBox, FieldLabel, Tappable, Reveal, DropdownReveal } from '@/components/ui';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { useAtLeast } from '@/lib/useAtLeast';
@@ -1002,6 +1003,11 @@ export default function Home() {
   // other, every time Home gains focus — so on a refresh or coming back they re-introduce themselves
   // with a cool layered reveal instead of just being there. (user request.)
   const badgeAnim = useRef(new RNAnimated.Value(0)).current;
+  // ONE of the owner's five headlines per visit (2026-09-23). Starts at 0 — the index the statically
+  // pre-rendered index.html holds, so hydration matches — and advances in the mount effect below,
+  // while the title is still at opacity 0. See src/data/heroTaglineRotation.ts.
+  const [heroTagline, setHeroTagline] = useState(0);
+  useEffect(() => { setHeroTagline(nextHeroTaglineIndex()); }, []);
   const titleAnim = useRef(new RNAnimated.Value(0)).current;
   const subAnim = useRef(new RNAnimated.Value(0)).current;
   // Read the optional `fresh` param that New Chat sends — every change of it should REPLAY the
@@ -1140,7 +1146,7 @@ export default function Home() {
 
           {/* Hero — title then subtitle rise in, staggered (user request). */}
           <View style={s.hero}>
-            <RNAnimated.Text style={[s.heroTitle, reveal(titleAnim, 20)]}>{t('Looking for a property and want to see all available listings in one place? Ezhalah.')}</RNAnimated.Text>
+            <RNAnimated.Text style={[s.heroTitle, reveal(titleAnim, 20)]}>{t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
             <RNAnimated.Text style={[s.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
             {/* Note #1 — tagline below the description. */}
             <RNAnimated.Text style={[s.heroTagline, reveal(subAnim, 10)]}>{t('Ezhalah, and may your luck be good.')}</RNAnimated.Text>
