@@ -16,6 +16,12 @@ The grace period is what keeps us correct even when Aqar's site has a brief outa
 their pagination glitches, or a single curl request randomly times out: a real removed
 listing fails THREE runs in a row; a temporary blip recovers on the next run.
 
+Work is split across 16 parallel shards by `id % 16` (scrapers/common/shard_partition.py). That
+file carries the measurement that made it a modulo rather than a row-offset window: ownership has
+to be a property of the row, because sixteen runners reading sixteen snapshots of a table they are
+all mutating cannot agree on a shared boundary, and the rows between two disagreeing boundaries
+were swept by nobody for fifty-one days.
+
 Designed to be cron-driven from the VPS — once a day at 04:00 KSA time.
 
 Run it locally for testing:
@@ -32,11 +38,12 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Optional
+from typing import Optional
 
 from scrapers.common.db import begin_run, end_run, sb
 from scrapers.common.http import get
 from scrapers.common.liveness_contract import direct_alive_patch
+from scrapers.common.shard_partition import shard_worklist
 
 
 # Phrases Aqar puts on a removed/expired listing page (both languages).
@@ -94,63 +101,8 @@ def _run_with_retry(fn, tries: int = 5):
             raise
 
 
-def shard_row_window(total_rows: int, shards: int, shard: int) -> tuple[int, int]:
-    """This shard's window [start, end) of ROW OFFSETS into the active rows ordered by id — a
-    COUNT-balanced split (fix 2026-07-16, bug B1).
-
-    History: the split used to be geometric over the ID RANGE (bucket = (max_id-min_id)//shards+1,
-    anchored at min_id since the morning fix for high-start tables). But aqar ids are dense at the
-    low end and sparse above: on 2026-07-16 shard 0's geometric window [1, ~193k) held 70,427 of
-    the 86,464 active aqar_residential rows (81%) — a ~16h sweep against the workflow's
-    timeout-minutes: 120, so shard 0 was SIGKILLed every day (live proof: run 13176 started 01:00,
-    finished_at NULL, rows_seen 0) and those ~70k rows were never liveness-checked — the 44.6%
-    stale-active backlog. Splitting by ROW COUNT instead gives every shard ~total/shards rows
-    (~5.4k at 16 shards, ~60-80 min at the observed 1.2-3 rows/s) regardless of how ids cluster.
-
-    floor(shard*N/S) arithmetic ⇒ windows are contiguous, disjoint, jointly cover [0, N), and any
-    two shards' row counts differ by at most 1. A shard's window is empty only when N < S (fewer
-    active rows than shards) — for these tables that means the source is effectively dead, and the
-    empty shard's 0-row run is honestly demoted by end_run's RC-B rule, same as before.
-    """
-    shards = max(1, shards)
-    total_rows = max(0, total_rows)
-    start = (shard * total_rows) // shards
-    end = ((shard + 1) * total_rows) // shards
-    return start, end
-
-
-def shard_id_window(
-    id_at: Callable[[int], Optional[int]],
-    total_rows: int,
-    shards: int,
-    shard: int,
-) -> Optional[tuple[int, Optional[int]]]:
-    """Translate this shard's row-offset window into a keyset ID window [lo, hi).
-
-    `id_at(offset)` returns the id of the offset-th active row ordered by id ascending (None if
-    the active set shrank below that offset since `total_rows` was counted — concurrent shards
-    deactivate rows while we compute). Returns None when this shard owns no rows; hi is None for
-    the tail shard = sweep unbounded to the top of the table.
-
-    Boundary tolerance (documented, deliberate): each parallel shard counts + probes at its OWN
-    start time, so if rows are deactivated in between, adjacent windows can gap/overlap by a few
-    rows. An overlap double-checks a row (idempotent — same alive/dead verdict); a gap skips a row
-    for ONE daily run, and the grace=3 consecutive-miss rule means a skip can never kill or revive
-    anything by itself. Exact partition of a moving set isn't achievable without a lock and isn't
-    needed here.
-    """
-    start, end = shard_row_window(total_rows, shards, shard)
-    if start >= end:
-        return None
-    lo = id_at(start)
-    if lo is None:  # active set shrank below our window's start — nothing left for this shard
-        return None
-    hi = id_at(end) if end < total_rows else None  # None ⇒ unbounded tail
-    return lo, hi
-
-
-# A begin_run() stub whose process was SIGKILLed (the exact fate of shard 0 above: GitHub Actions
-# timeout-minutes kills the job, end_run never runs) sits finished_at=NULL/ok=NULL forever —
+# A begin_run() stub whose process was SIGKILLed (a job that outlives GitHub Actions'
+# timeout-minutes is killed outright, so end_run never runs) sits finished_at=NULL/ok=NULL forever —
 # invisible to the failure detectors, which key on ok=false. Must comfortably exceed the workflow
 # timeout (120 min) so a live concurrent run can never be finalized out from under itself.
 ORPHAN_STUB_HOURS = 6
@@ -339,35 +291,37 @@ def main() -> None:
     run_id = begin_run(platform)
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # ── Row-count-balanced shard window (fix 2026-07-16, bug B1 — see shard_row_window) ─────────
-    # One count + at most two single-row offset probes. The probes run on the same
-    # (active, id) access path the keyset loop below uses — live-verified as an Index Only Scan
-    # on idx_aqar_active_id, ~40 ms at the worst-case mid-table offset.
-    # --only-struck narrows the cohort. The count probe, the offset probes and the keyset loop
-    # below must ALL apply the identical filter, or the shard windows are computed over one
-    # population and walked over another — the exact class of bug B1 above.
+    # --only-struck narrows the cohort. The id walk below and the row fetch must apply the
+    # IDENTICAL filter, or the worklist is built over one population and probed over another.
     def _cohort(q):
         q = q.eq("active", True)
         return q.gte("missing_count", args.grace) if args.only_struck else q
 
-    count_res = _run_with_retry(
-        lambda: _cohort(client.table(table).select("id", count="exact")).limit(1).execute())
-    total_rows = int(count_res.count or 0)
+    # ── PHASE 1: this shard's worklist, by id modulo (fix 2026-09-24, see shard_partition.py) ────
+    # Ownership is `id % shards == shard` — a property of the ROW, so the sixteen parallel runners
+    # need not agree about anything. The offset-window split this replaced asked each shard to
+    # compute a SHARED boundary from its OWN snapshot of a table the other fifteen were mutating,
+    # and whenever shard k's `lo` landed above shard k-1's `hi` the rows in between were swept by
+    # nobody: 920 aqar_residential rows had gone 51 days unprobed when this was measured.
+    #
+    # Walking every active id costs 16x an id-only keyset scan (~93k ids, ~95 pages of 1000, a few
+    # seconds) against a sweep that spends half an hour on HTTP. The full rows are still fetched
+    # only for the ~1/16 this shard owns, so the probe volume is unchanged.
+    worklist: list[int] = []
+    total_rows = 0
+    cursor = -1
+    while True:
+        res = _run_with_retry(lambda c=cursor: _cohort(client.table(table).select("id"))
+                              .gt("id", c).order("id", desc=False).limit(1000).execute())
+        page = res.data or []
+        if not page:
+            break
+        cursor = int(page[-1]["id"])
+        total_rows += len(page)
+        worklist.extend(shard_worklist((int(r["id"]) for r in page), args.shards, args.shard))
 
-    def _id_at(offset: int) -> Optional[int]:
-        res = _run_with_retry(
-            lambda: _cohort(client.table(table).select("id"))
-            .order("id", desc=False).range(offset, offset).execute())
-        return int(res.data[0]["id"]) if res.data else None
-
-    window = shard_id_window(_id_at, total_rows, args.shards, args.shard)
-    if window is None:
-        lo, hi = 0, 0  # empty shard (total_rows < shards): sweep nothing, finalize honestly below
-    else:
-        lo, hi = window
-    row_lo, row_hi = shard_row_window(total_rows, args.shards, args.shard)
-    print(f"shard {args.shard}/{args.shards} → rows [{row_lo}, {row_hi}) of {total_rows} active "
-          f"→ id window [{lo}, {'∞' if hi is None else hi})", flush=True)
+    print(f"shard {args.shard}/{args.shards} → {len(worklist)} of {total_rows} active rows "
+          f"(id % {args.shards} == {args.shard % max(1, args.shards)})", flush=True)
 
     seen = 0
     killed = 0
@@ -429,32 +383,25 @@ def main() -> None:
             _flush_detail()
 
     try:
-        # Pull active rows in pages of 1000 via KEYSET pagination (walk forward by id) — NOT offset.
-        # Offset pagination on a 77k+ row table re-scans and skips `offset` rows every page, getting
-        # slower the deeper it goes until it hits the DB statement timeout (error 57014). Keyset is
-        # O(page_size) per page regardless of depth, AND it's more correct here: the sweep flips rows
-        # to active=false as it runs, which would shift an offset window and skip rows — a forward id
-        # cursor never does. (fix: liveness statement-timeout failure as the table grew.)
-        page_size = 1000
-        last_id = lo - 1  # start the cursor at the bottom of this shard's ID window
-        while window is not None:
-            q = (
-                _cohort(client.table(table)
-                        .select("id, ad_number, listing_url, missing_count, transaction_type,"
-                                " price_total, area_m2, price_per_meter"))
-                .gt("id", last_id)
+        # PHASE 2: fetch the full rows for THIS shard's ids, 500 at a time. The cohort filter is
+        # re-applied, so a row another shard deactivated between the two phases is dropped rather
+        # than probed — the only rows that can go unprobed in a run are rows that stopped being
+        # this shard's business, never rows that fell between two shards' boundaries.
+        page_size = 500
+        for i in range(0, len(worklist), page_size):
+            chunk = worklist[i:i + page_size]
+            res = _run_with_retry(
+                lambda ids=chunk: _cohort(
+                    client.table(table)
+                    .select("id, ad_number, listing_url, missing_count, transaction_type,"
+                            " price_total, area_m2, price_per_meter"))
+                .in_("id", ids)
                 .order("id", desc=False)
-                .limit(page_size)
-            )
-            if hi is not None:
-                q = q.lt("id", hi)  # stay within this shard's window (tail shard is unbounded)
-            res = q.execute()
+                .limit(len(ids))
+                .execute())
             rows = res.data or []
-            if not rows:
-                break
 
             for row in rows:
-                last_id = row["id"]  # advance the cursor (rows are id-ascending)
                 seen += 1
                 url = (row.get("listing_url") or "").strip()
                 if not url:
