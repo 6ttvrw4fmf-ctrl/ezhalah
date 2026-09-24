@@ -17,7 +17,8 @@ verbatim block to reach a branch the live site did not exhibit on capture day, a
 WHAT IT PINS
   1. GRAIN: one row per unit, ad_number = RCP + the source's villa id, listing_url = the compound page.
   2. PRICE = SOURCE: «Rent - (SR)247,000» → price_annual 247000 with the raw text in price_evidence;
-     «Rent - (SR)0» stays 0 (a printed figure is never blanked); a label that is not «Rent» is skipped.
+     «Rent - (SR)0» is the site's UNSET (311 of 840 units on the first crawl, 2026-09-24): no price,
+     no period, both as AUTHORITATIVE NULLs, the raw text kept as evidence; a non-«Rent» label is skipped.
   3. PERIOD: annual, from the platform's own statement (API rentPeriod=year / llms.txt) — recorded on
      the row, and NULL when there is no figure to attach it to.
   4. AREA: «300 sqm» → 300; «245 sqf» → NULL with the raw text kept — never converted or assumed.
@@ -112,10 +113,12 @@ def test_price_is_the_printed_figure_and_the_period_is_the_platforms_statement()
 
 
 def test_a_printed_zero_stays_zero_and_is_never_blanked_or_hidden():
-    """Palma Village prints «Rent - (SR)0» on every unit. The figure is the source's; it is stored
-    exactly (0), not NULLed, not dropped — price fidelity (db._sanitize_ints keeps 0 legal)."""
+    """Palma Village prints «Rent - (SR)0» on every unit: the platform's unset default, not a rent
+    (a 0 shown as a yearly price would read as «free»). Stored as authoritative NULLs so an earlier
+    read's value is cleared, with the printed text kept in the evidence."""
     row = R.map_units(URL, page(PALMA))[0][0]
-    assert row["price_annual"] == 0 and row["price_evidence"]["raw"] == "Rent - (SR)0"
+    assert row["price_annual"] is R.db.AUTHORITATIVE_NULL and row["rent_period"] is R.db.AUTHORITATIVE_NULL
+    assert row["price_evidence"]["raw"] == "Rent - (SR)0" and row["price_evidence"]["stored"] is None
     assert row["property_type"] == "Apartment", "«Apt.» is the site's own abbreviation"
 
 
@@ -126,6 +129,7 @@ def test_a_price_whose_label_is_not_rent_is_skipped_not_parked():
     rows, why, skips = R.map_units(URL, page(U629.replace("Rent - (SR)247,000", "Sale - (SR)247,000")))
     assert rows == [] and why == "no_available_units" and skips == {"deal_not_rent": 1}
     assert R.rent_price("Sale - (SR)1") == (None, "deal_not_rent")
+    assert R.rent_price("Rent - (SR)0") == (None, "")          # the site's unset marker is not a rent
     assert R.rent_price("") == (None, "")
 
 
@@ -303,3 +307,13 @@ def test_sitemap_filter_keeps_punctuation_slugs_and_drops_city_index_pages():
     assert R.fetch_compounds(_S()) == [
         "https://rightcompound.com/compounds/khobar/radisson-blu-residence,-dhahran",
         "https://rightcompound.com/compounds/riyadh/kease-compound-%E2%80%93-qurtubah-district,-riyadh"]
+
+
+def test_bhk_names_are_apartments_and_a_suite_or_nameless_unit_is_never_guessed():
+    # 2026-09-24 first crawl: 209 of 254 compounds' units carried no type NOUN. NBHK is the flat
+    # configuration by definition; «suite» (maybe a hotel room) and a bare «unit» are skipped.
+    assert R.unit_type_ar("DELUXE SUITE") is None and R.unit_type_ar("Suite Type 1") is None
+    assert R.unit_type_ar("FAMILY TYPE 3BHK") == "شقة" and R.unit_type_ar("PC/LPC TYPE 2BHK") == "شقة"
+    assert R.unit_type_ar("Studio Suite") == "استوديو"
+    assert R.unit_type_ar("Two Bedroom Fully Furnished Unit Type A") is None
+    assert R.unit_type_ar("Type C fully furnished three bedroom unit") is None

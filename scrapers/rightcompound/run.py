@@ -155,9 +155,14 @@ _AREA_RE = re.compile(r"([\d,\.]+)\s*(sq\s*m|sqm|m2|m²|sqf|sq\s*ft|sqft)", re.I
 _RENT_PRICE_RE = re.compile(r"^\s*Rent\s*-\s*\(SR\)\s*([\d,]+)\s*$", re.I)
 
 # The unit NAME carries the type word; the fleet folds townhouse→Villa and penthouse→Apartment.
+# «NBHK» (bedroom-hall-kitchen, «FAMILY TYPE 3BHK», 2026-09-24 first crawl) is the flat
+# configuration by definition → شقة. «suite» («DELUXE SUITE», «Suite Type 1») and a name with no
+# type word at all («Two Bedroom Fully Furnished Unit Type A») stay unmapped and are skipped —
+# a suite may be a hotel-style room, which this product excludes — an owner question, never a guess.
 _TYPE_WORDS = (("studio", "استوديو"), ("townhouse", "فيلا"), ("town house", "فيلا"),
                ("villa", "فيلا"), ("penthouse", "شقة"), ("apartment", "شقة"), ("apt", "شقة"),
                ("chalet", "شاليه"), ("duplex", "دوبلكس"))
+_BHK_RE = re.compile(r"\d\s*bhk\b", re.I)
 
 
 def unit_type_ar(name: str) -> Optional[str]:
@@ -166,6 +171,8 @@ def unit_type_ar(name: str) -> Optional[str]:
     low = name.lower()
     if "studio" in low:
         return "استوديو"
+    if _BHK_RE.search(low):
+        return "شقة"
     last = None
     for word, ar in _TYPE_WORDS:
         if word in ("studio", "duplex"):
@@ -206,13 +213,16 @@ def area_m2(meta: str) -> tuple[Optional[int], Optional[str]]:
 
 def rent_price(price_raw: str) -> tuple[Optional[int], str]:
     """«Rent - (SR)247,000» → (247000, ""); no figure → (None, ""); a non-Rent label →
-    (None, "deal_not_rent")."""
+    (None, "deal_not_rent"). «Rent - (SR) 0» is the site's own UNSET — 311 of 840 units on the
+    2026-09-24 first crawl — and 0 is not a rent: (None, ""), so the row carries no price and no
+    period (PRICE = SOURCE; the goldendeal «0» = not provided rule)."""
     if not price_raw.strip():
         return None, ""
     m = _RENT_PRICE_RE.match(price_raw)
     if not m:
         return None, "deal_not_rent"
-    return normalize.to_int(m.group(1).replace(",", "")), ""
+    n = normalize.to_int(m.group(1).replace(",", ""))
+    return (n if n else None), ""
 
 
 def _ld_blocks(page_html: str) -> list[dict]:
@@ -338,9 +348,11 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
             "area_m2": a_m2,
             "bedrooms": normalize.to_int(bm.group(1)) if bm else None,
             "bathrooms": normalize.to_int(hm.group(1)) if hm else None,
-            "price_annual": amount,
+            # A unit the site prices «0» has no price and therefore no period; the NULL is
+            # authoritative so a value stored by an earlier read is cleared, never frozen.
+            "price_annual": amount if amount is not None else db.AUTHORITATIVE_NULL,
             # The platform's own statement, not a per-unit token: see the module header.
-            "rent_period": "annual" if amount is not None else None,
+            "rent_period": "annual" if amount is not None else db.AUTHORITATIVE_NULL,
             "zip_code": facts["postal"],
             "photo_urls": photos(page_html),
             "price_evidence": normalize.price_evidence(
