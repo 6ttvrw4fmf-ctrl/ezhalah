@@ -49,6 +49,10 @@ const LAW = join(SCRAPERS, 'common', 'sold_pin.py');
 const PIN_DEF = /^def _pin_sold_inactive\(/m;
 const SHARED_CALL = /sold_pin\.pin_source_confirmed_gone\(/;
 const ORACLE_KW = /oracle\s*=\s*(["'])([^"']+)\1/;
+// The REVERSAL half (2026-09-23). A platform that hands over only its sold ids leaves the oracle
+// one-way, and a one-way oracle makes ops_lifecycle_false_resurrection() unclearable by construction
+// — see the ledger census in scrapers/common/sold_pin.py's docstring.
+const SEEN_KW = /seen_ad_numbers\s*=/;
 // The canonical payload, as it is actually written. Its presence outside the shared law means a
 // platform re-implemented the pin — and a re-implemented pin is a re-implemented law.
 const PAYLOAD = '{"active": False, "missing_count": 3}';
@@ -104,6 +108,14 @@ for (const p of platforms) {
       `scrapers/${p}/run.py still spells out the canonical pin payload locally — the payload and ` +
       'the evidence write belong together in the shared law; writing it here is how a platform ' +
       'silently opts back out of the evidence half');
+  }
+  if (!SEEN_KW.test(src)) {
+    problems.push(
+      `scrapers/${p}/run.py wires the KILL half of the sold pin but never passes seen_ad_numbers= ` +
+      '— so this platform records only "gone" and never the reversal the same field publishes. ' +
+      'ops_lifecycle_false_resurrection() reports the LATEST verdict per ad_number, so every ' +
+      'relisting here becomes a P1 that no amount of correct behaviour can ever clear ' +
+      '(docs/ops/LISTING_LIFECYCLE_ENGINEER.md §2.5a, §8.3)');
   }
 }
 if (pinners.length === 0) {
@@ -192,10 +204,87 @@ mustCatch('evidence rows written WITHOUT the oracle that names the source field'
   mustCatch('a blank oracle being accepted instead of refused', threw);
 }
 
+// ── Half 3: the REVERSAL, by EXECUTING the real law ─────────────────────────────────────────────
+// Measured over the whole ops_stale_inactivation_probe ledger on 2026-09-23: prune_unseen wrote
+// 362 GONE / 300 LIVE / 618 UNKNOWN and wasalt 1405 / 145 / 0, while all NINE sold_pin oracles
+// wrote 5853 GONE and not one LIVE. The available reading was taken from the same field, on the
+// same page, in the same crawl — and thrown away. satel STC0084 is the worked case.
+type Rows = Array<Record<string, string>>;
+const runRev = (calls: unknown[][], mutated?: string): Rows[] =>
+  pyCall(ROOT, 'scrapers.common.sold_pin', 'plan_relisting_evidence', calls, mutated) as Rows[];
+
+const ads = (r: Rows) => r.map(x => x.ad_number);
+
+let rev: Rows[];
+try {
+  rev = runRev([
+    // seen, sold-this-crawl, previously-GONE, oracle, table
+    [['STC0084', 'STC0090'], [], ['STC0084'], ORACLE, 'satel_residential_listings'],
+    [['STC0084', 'STC0018'], ['STC0018'], ['STC0084', 'STC0018'], ORACLE, 't'],
+    [['STC0084', 'STC0084'], [], ['STC0084'], ORACLE, 't'],
+    [['STC0090'], [], [], ORACLE, 't'],
+  ]);
+} catch (e) {
+  console.error(`RED  verify-sold-pin-evidence-law: could not EXECUTE plan_relisting_evidence — ${e}`);
+  process.exit(1);
+}
+const [relisted, alsoSold, dupRev, noPrior] = rev;
+
+if (ads(relisted).join() !== 'STC0084'
+    || relisted[0]?.verdict !== 'LIVE' || !relisted[0]?.oracle?.trim()) {
+  problems.push('EXECUTED plan_relisting_evidence(): a listing the source had published as gone ' +
+    'and now reads available produced no LIVE row naming its oracle — the ledger stays one-way ' +
+    'and its false_resurrection P1 can never clear');
+}
+if (ads(alsoSold).includes('STC0018')) {
+  problems.push('EXECUTED plan_relisting_evidence(): an id read SOLD this very crawl was still ' +
+    'certified available — that is the one direction this must never allow, because it would bury ' +
+    'a REAL false resurrection instead of clearing a stale one');
+}
+if (dupRev.length !== 1) {
+  problems.push('EXECUTED plan_relisting_evidence(): one reversal was filed as several separate ' +
+    'source confirmations');
+}
+if (noPrior.length !== 0) {
+  problems.push('EXECUTED plan_relisting_evidence(): an id with no prior GONE verdict was written ' +
+    'anyway — unbounded, a daily crawl would bury the real signal under tens of thousands of ' +
+    '"still available" rows in a ledger that holds ~12k in total');
+}
+
+// 5. THE SHIPPED DEFECT ITSELF: read the reversal, decide with it, record nothing.
+mustCatch('the reversal rows stop being produced at all (the one-way ledger, as shipped)',
+  runRev([[['STC0084'], [], ['STC0084'], ORACLE, 't']],
+    mutate('    rows: list[dict[str, Any]] = []', '    rows: list[dict[str, Any]] = []\n    return rows'))[0].length === 0);
+
+// 6. A DIFFERENT WRONG WAY, in the DANGEROUS direction (§4.2: re-mutate or the barrier is narrower
+//    than it reads). Drop the sold subtraction and the law will certify as available an id this
+//    crawl read as sold — which would mask a genuine false resurrection rather than clear a stale
+//    verdict. This is the mutation that matters most.
+mustCatch('an id read SOLD this crawl being certified available once the subtraction is removed',
+  ads(runRev([[['STC0084', 'STC0018'], ['STC0018'], ['STC0084', 'STC0018'], ORACLE, 't']],
+    mutate('        if a in gone or a in seen_already or a not in prior:',
+           '        if a in seen_already or a not in prior:'))[0]).includes('STC0018'));
+
+// 7. The prior-GONE intersection removed — the bound that keeps the signal legible.
+mustCatch('every available listing being filed as evidence once the prior-GONE bound is removed',
+  runRev([[['STC0090'], [], [], ORACLE, 't']],
+    mutate('        if a in gone or a in seen_already or a not in prior:',
+           '        if a in gone or a in seen_already:'))[0].length > 0);
+
+// 8. The blank-oracle refusal on the reversal half — an unfalsifiable LIVE row is as bad as an
+//    unfalsifiable GONE one, and it is the one that can WITHHOLD an alert.
+{
+  console.log('     (the Python traceback below is EXPECTED — mutation 8 asserts the reversal refuses a blank oracle)');
+  let threw = false;
+  try { runRev([[['STC0084'], [], ['STC0084'], '', 't']]); } catch { threw = true; }
+  mustCatch('a blank oracle being accepted on the reversal half instead of refused', threw);
+}
+
 if (problems.length) {
   console.error('RED  verify-sold-pin-evidence-law\n  - ' + problems.join('\n  - '));
   process.exit(1);
 }
 console.log(
   `PASS verify-sold-pin-evidence-law — ${pinners.length} sold-pin platforms (${pinners.join(', ')}) ` +
-  'all route through the one shared law; plan_pin() executed, 4 mutations caught');
+  'all route through the one shared law, kill AND reversal halves wired; plan_pin() and ' +
+  'plan_relisting_evidence() executed, 8 mutations caught');
