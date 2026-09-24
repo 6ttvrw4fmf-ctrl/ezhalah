@@ -46,6 +46,7 @@ import html as ihtml
 import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
@@ -126,13 +127,38 @@ def _to_int(v: Any) -> Optional[int]:
     return n if n > 0 else None
 
 
+# Fetch-failure tally (daily engineer, 2026-09-24). Same defect class already fixed for
+# sadin/sanadak/erapulse/abeea: fetch_all() used to swallow every exception and every non-200/400
+# status with a bare break, so a block page, a 5xx, or a transport failure on page 1 read EXACTLY
+# like "the catalogue is genuinely empty" — the "0 posts fetched (blocked/empty source?)" question
+# mark that gave silent_scraper_death/legacy_scraper_freshness no root cause to point at (open
+# since 2026-09-21). rows_seen alone can never separate "the source served nothing" from "we never
+# got an answer we can believe" — the reason must be captured at fetch time.
+_fetch_fail_reasons: list[str] = []
+
+
+def _record_fetch_failure(reason: str) -> None:
+    _fetch_fail_reasons.append(reason)
+
+
+def fetch_failure_summary() -> str:
+    """Compact 'reason=count' breakdown, most common first. '' when nothing failed."""
+    if not _fetch_fail_reasons:
+        return ""
+    return ", ".join(f"{r}={n}" for r, n in Counter(_fetch_fail_reasons).most_common(6))
+
+
 def fetch_all(s: cc.Session) -> list[dict]:
-    """Every post, with terms embedded. One page covers this site; the loop is for safety only."""
+    """Every post, with terms embedded. One page covers this site; the loop is for safety only.
+
+    A page that never gets a 200 records WHY (via _record_fetch_failure) before fetch_all() gives
+    up on it — never a silent empty list indistinguishable from a genuinely empty catalogue."""
     out: list[dict] = []
     page = 1
     while True:
         _throttle()
         r = None
+        last_reason = "no_response"
         for attempt in range(3):
             try:
                 # wp:featuredmedia is NOT optional here. _photos() reads it out of _embedded, and
@@ -143,18 +169,27 @@ def fetch_all(s: cc.Session) -> list[dict]:
                 r = s.get(f"{REST}/properties?page={page}&per_page={PER_PAGE}"
                           f"&_embed=wp:term,wp:featuredmedia",
                           timeout=40)
-            except Exception:
+            except Exception as e:
+                r = None
+                last_reason = f"transport_{type(e).__name__}"
                 time.sleep(2 * (attempt + 1))
                 continue
             if r.status_code == 400:
                 return out  # WP answers 400 past the last page, not an empty 200
             if r.status_code == 200:
                 break
+            last_reason = f"http_{r.status_code}"
             time.sleep(2 * (attempt + 1))
         if r is None or r.status_code != 200:
+            _record_fetch_failure(last_reason)
             break
         batch = r.json() or []
         if not batch:
+            if page == 1:
+                # A real 200 we extracted nothing from is a DIFFERENT fact from the source
+                # blocking us — most likely the markup/API shape changed under us. Keep the two
+                # buckets apart, same as sadin's http_200_zero_ids_page1.
+                _record_fetch_failure("http_200_zero_posts_page1")
             break
         out.extend(batch)
         try:
@@ -492,8 +527,17 @@ def main() -> int:
 
         print(f"✓ AqarAlSaudia: {len(res_rows)} residential + {len(com_rows)} commercial upserted, "
               f"{pruned} stale pruned, {superseded} superseded sibling(s) retired")
+        # Carry the fetch-failure breakdown into the run row. Without it a run where the listing
+        # feed 4xx/5xx'd or a transport error hit every retry is recorded identically to a run
+        # whose catalogue was genuinely this small — see fetch_all()'s docstring.
+        fail_summary = fetch_failure_summary()
+        if fail_summary:
+            print(f"  fetch failures: {fail_summary}", flush=True)
+        notes = f"pruned={pruned} superseded={superseded} skipped_not_built={skipped_not_built}"
+        if fail_summary:
+            notes += f" | fetch failures: {fail_summary}"
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res_rows) + len(com_rows),
-                             notes=f"pruned={pruned} superseded={superseded} skipped_not_built={skipped_not_built}",
+                             notes=notes[:300],
                              check_tables=["aqaralsaudia_residential_listings",
                                            "aqaralsaudia_commercial_listings"])
         return 0 if healthy else 1
