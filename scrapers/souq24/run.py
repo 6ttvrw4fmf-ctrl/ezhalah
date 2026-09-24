@@ -921,6 +921,18 @@ def main() -> int:
                                  check_tables=["souq24_residential_listings",
                                                "souq24_commercial_listings"])
             return 0 if healthy else 1
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="souq24_residential_listings", com_table="souq24_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="24 Souq")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("souq24_residential_listings", res),
                                ("souq24_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="24 Souq",

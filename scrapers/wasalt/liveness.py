@@ -702,6 +702,39 @@ def rollup_ok(shards_seen: int, shards_expected: int, rows: int, min_rows: int) 
     return True, f"{shards_seen}/{shards_expected} shards, {rows} rows"
 
 
+def rollup_started_at(shard_started_ats: list[str]) -> str:
+    """Pure: the enumeration's real start is the EARLIEST of its shards' own started_at — never the
+    rollup job's own clock (bug found 2026-09-24, ops_incident, routine #11).
+
+    THE BUG. run_enum_rollup() used to stamp its published `platform='wasalt'` row with
+    `db.begin_run("wasalt")`, which sets `started_at = now()` at the moment the ROLLUP job runs —
+    the summing step, which by design runs AFTER every shard has already finished
+    (`needs: [enum, rollup]` in the workflow). Measured 2026-09-24: the 34 shards started
+    2026-09-23T21:03:07 through 21:50:24; the rollup that summed them ran at 2026-09-24T00:38:56 —
+    almost 3 HOURS after enumeration actually began. `run_enum_strike()` then reads that row's
+    `started_at` as "when the enumeration started" for two queries that must answer "was this row
+    just seen": the control group (`last_seen_at >= enum_start`, proving the checker is healthy on
+    known-live rows) and the strike scan (`last_seen_at < enum_start` = "unseen by the enum" ⇒
+    +1 strike). Every listing genuinely refreshed during the real 3-hour enumeration window has a
+    `last_seen_at` BEFORE the rollup's clock and therefore AFTER none of it — it reads as "not seen"
+    on both queries at once. Reproduced live and read-only against production the same day: with the
+    rollup's own timestamp as the cutoff the control-group query returns 0 (bit-for-bit the
+    `control group=0` the job actually logged); with the earliest shard's timestamp it returns
+    49,782. Real listing id 475284 was refreshed at 00:37:51 — 65 seconds before the wrong cutoff —
+    and was struck as "unseen" for it.
+
+    Consequence, all from one wrong clock: the CONTROL GUARD (`control_ok`) always sees an empty
+    sample, so `aborted_flips=True` on every run since the sharded design shipped (2026-09-20) —
+    zero confirms, zero self-heals, zero kills — while the STRIKE step (which is NOT gated by that
+    guard) keeps incrementing `missing_count` on nearly the whole active table every single run,
+    because on this wrong clock nearly every row looks unseen. Neither guard is loosened by this fix;
+    both keep exactly the logic they had. Only the timestamp they are FED is corrected.
+    """
+    if not shard_started_ats:
+        raise ValueError("rollup_started_at() called with no shard rows — refuse rather than guess")
+    return min(shard_started_ats)
+
+
 def run_enum_rollup(args) -> int:
     """Sum this dispatch's shard runs into ONE `platform='wasalt'` scrape_runs row.
 
@@ -745,6 +778,18 @@ def run_enum_rollup(args) -> int:
     db.end_run(rid, ok=True, rows_seen=rows, rows_upserted=rows,
                notes=f"enum-rollup of {len(good)} shards ({why})",
                check_tables=["wasalt_residential_listings", "wasalt_commercial_listings"])
+    # begin_run() stamped started_at=now() — the ROLLUP's own clock, ~3h after the shards it is
+    # summing actually ran. run_enum_strike() reads this row's started_at as "when the enumeration
+    # began" for both its control-group and its strike queries; left as the rollup's own timestamp,
+    # every listing genuinely refreshed during the real enumeration window reads as unseen by BOTH
+    # (see rollup_started_at()'s docstring for the measured 2026-09-24 proof). Overwrite it with the
+    # true start: the earliest of the shards actually being published.
+    db._execute(
+        db.sb().table("scrape_runs")
+        .update({"started_at": rollup_started_at([r["started_at"] for r in good])})
+        .eq("id", rid),
+        what="scrape_runs.enum_rollup_started_at_fix",
+    )
     return 0
 
 
@@ -906,10 +951,129 @@ def run_enum_strike(args) -> int:
     return 0
 
 
+def run_repair_clock_bug_backlog(args) -> int:
+    """ONE-TIME repair for the confirm-eligible backlog the enum-rollup clock bug produced
+    (ops_incident, routine #11, 2026-09-24 — see rollup_started_at() for the full writeup).
+
+    Every row this cohort selects reached `missing_count >= grace` via strikes computed against the
+    WRONG clock (the rollup's own start time, measured ~3h later than the enumeration it was
+    summarising), so an ordinary enum-strike confirm cannot be trusted to decide them: it would treat
+    three clock-bug strikes as three legitimately earned ones and deactivate on the very first
+    post-fix confirm. This mode instead:
+
+      * confirmed LIVE  → full self-heal (missing_count=0, last_seen_at refreshed). Correct
+                          regardless of how the row was flagged — a true "it's fine" is a true
+                          "it's fine".
+      * confirmed DEAD  → missing_count=1, and active is NEVER touched. This is real, honestly
+                          obtained evidence — a direct GET performed right now, this run — and it is
+                          not thrown away. But it counts as exactly ONE freshly earned strike under
+                          the now-fixed pipeline, not three unearned ones inherited from the bug. It
+                          must reach grace again through correctly-clocked runs (or another confirm)
+                          before this listing can ever be deactivated.
+      * FAILED/unclear  → missing_count=0. Nothing was proven either way, and the existing value was
+                          already unproven — the safe direction wins, exactly as everywhere else in
+                          this module (LISTING_LIVENESS.md: absence of an answer is never evidence of
+                          death).
+
+    `active` DOES NOT APPEAR as a key anywhere a write happens in this function. That is not
+    discipline this run happens to exercise — it is structurally absent from the code, so this mode
+    cannot deactivate a single listing no matter what the checks return.
+
+    A degenerate read (checker apparently unable to distinguish anything — overwhelmingly dead, or
+    overwhelmingly failed) skips even the missing_count writes: it means don't trust today's DEAD
+    verdicts as freshly-earned strikes either, not just "don't kill anyone" (which was never on the
+    table). Mirrors the collapse guard in run_enforce() at the same 90% degenerate threshold used
+    there is deliberately stricter (that guard's job is to stop a kill; this one has no kill to stop,
+    so it only needs to protect the QUALITY of the strike it is about to hand back to the ordinary
+    pipeline).
+    """
+    started = time.time()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cohort: list[tuple[str, int, str, int]] = []
+    for tbl in TABLES:
+        rows = db._execute(
+            db.sb().table(tbl).select("id, listing_url, missing_count")
+            .eq("active", True).gte("missing_count", args.grace)
+            .order("id", desc=False).limit(100_000),
+            what=f"{tbl}.repair_backlog_cohort",
+        ).data or []
+        for x in rows:
+            url = (x.get("listing_url") or "").strip()
+            if url:
+                cohort.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
+
+    print(f"repair-clock-bug-backlog: {len(cohort)} rows at missing_count>={args.grace} "
+          f"(this mode can only ever write missing_count=0 or 1 — never active)", flush=True)
+    if args.dry_run or not cohort:
+        print("  [DRY-RUN or empty cohort] no checks performed, no writes", flush=True)
+        return 0
+
+    checked = live = dead = failed = 0
+    total_bytes = 0
+    alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
+    fresh_strike_ids: dict[str, list[int]] = {t: [] for t in TABLES}   # dead → mc=1, never a kill
+    reset_ids: dict[str, list[int]] = {t: [] for t in TABLES}          # failed → mc=0
+    detail: list[dict] = []
+
+    for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in _pmap(check_hybrid, cohort, args.workers):
+            checked += 1
+            total_bytes += nbytes
+            detail.append({
+                "tbl": tbl, "listing_id": lid, "head_status": hc, "get_status": gc,
+                "get_verdict": verdict, "nbytes": nbytes,
+                "has_property_details": (verdict == "live") if used_get else None,
+            })
+            if verdict == "live":
+                live += 1; alive_ids[tbl].append(lid)
+            elif verdict == "dead":
+                dead += 1; fresh_strike_ids[tbl].append(lid)
+            else:
+                failed += 1; reset_ids[tbl].append(lid)
+            if checked % 500 == 0:
+                el = max(1e-6, time.time() - started)
+                print(f"  [{checked}/{len(cohort)}] live={live} dead={dead} failed={failed} "
+                      f"({checked / el:.1f}/s)", flush=True)
+
+    _flush_detail(detail)  # evidence first, exactly as enum-strike's confirm step does
+
+    decided = live + dead
+    degenerate = decided >= 20 and (dead > 0.9 * decided or failed > 0.9 * checked)
+    if degenerate:
+        print(f"⚠ REPAIR GUARD: live={live} dead={dead} failed={failed} of {checked} — reads as a "
+              f"broken checker, not a broken backlog. Skipping missing_count writes this run "
+              f"(nothing here was ever going to be deactivated either way).", flush=True)
+    else:
+        for tbl, ids in alive_ids.items():
+            _flush_alive(tbl, ids, now_iso)
+        for tbl, ids in fresh_strike_ids.items():
+            for i in range(0, len(ids), 200):
+                db._execute(db.sb().table(tbl).update({"missing_count": 1}).in_("id", ids[i:i + 200]),
+                            what=f"{tbl}.repair_fresh_strike")
+        for tbl, ids in reset_ids.items():
+            for i in range(0, len(ids), 200):
+                db._execute(db.sb().table(tbl).update({"missing_count": 0}).in_("id", ids[i:i + 200]),
+                            what=f"{tbl}.repair_reset_unproven")
+
+    runtime = round(time.time() - started, 1)
+    notes = (f"mode=repair-clock-bug-backlog checked={checked} live={live} dead={dead} failed={failed} "
+             f"degenerate={degenerate} runtime_s={runtime}")
+    db._execute(db.sb().table("wasalt_liveness_runs").insert({
+        "started_at": now_iso, "finished_at": datetime.now(timezone.utc).isoformat(),
+        "shard": "repair", "mode": "repair-clock-bug-backlog",
+        "checked": checked, "live": live, "dead": dead, "failed": failed,
+        "skipped": int(degenerate), "bytes_downloaded": total_bytes, "notes": notes}),
+        what="wasalt_liveness_runs.insert")
+    print(f"\n✓ repair-clock-bug-backlog: checked={checked} live(self-healed)={live} "
+          f"dead(ONE fresh strike, never killed)={dead} failed(reset to 0)={failed} "
+          f"degenerate={degenerate} runtime_s={runtime}", flush=True)
+    return 0 if not degenerate else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Wasalt hybrid liveness (HEAD-first, GET-confirm)")
     ap.add_argument("--mode", default="pilot",
-                    choices=["pilot", "enforce", "enum-strike", "enum-rollup"])
+                    choices=["pilot", "enforce", "enum-strike", "enum-rollup",
+                             "repair-clock-bug-backlog"])
     ap.add_argument("--shards-expected", type=int, default=20,
                     help="enum-rollup: how many shard runs MUST have reported before their sum may "
                          "be published as one enumeration. A missing shard is a slice nobody "
@@ -961,6 +1125,8 @@ def main() -> int:
             return run_enum_rollup(args)
         if args.mode == "enum-strike":
             return run_enum_strike(args)
+        if args.mode == "repair-clock-bug-backlog":
+            return run_repair_clock_bug_backlog(args)
         return run_enforce(args) if args.mode == "enforce" else run_pilot(args)
     finally:
         # Chromium is a child process, not a socket — an un-closed one can hold the CI step open.

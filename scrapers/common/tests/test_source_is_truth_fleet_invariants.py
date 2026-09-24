@@ -175,7 +175,18 @@ PERIOD_DEFAULT_ALLOWLIST = {
 # no period label of its own — so there is no per-listing token to read and nothing is being
 # overridden. Consistent with the standing RNPL→ANNUAL reading. If compoundin ever lists a monthly
 # contract, this entry is what must be revisited.
-SINGLE_PERIOD_PLATFORMS = {"gathern", "aqarmonthly", "compoundin"}   # short-stay marketplaces, one period by design
+SINGLE_PERIOD_PLATFORMS = {
+    "gathern", "aqarmonthly", "compoundin",   # short-stay marketplaces, one period by design
+    # azure/rightcompound added 2026-09-24 — see the matching entry + full reasoning in
+    # test_source_fidelity_no_defaults.py: each has its own explicit, site-wide, single-period
+    # source statement (rightcompound's literal "not monthly" disclaimer; azure's price read
+    # only from the page's own "Paid Annually" tab), never a per-listing override.
+    "azure", "rightcompound",
+    # wadod added 2026-09-24: the site states only the payment split («دفعة واحدة»/«دفعتين»); the
+    # OWNER attested the 7 rentals are yearly after reading the pages (ops_rent_period_single_value_ok
+    # 20260924224146). A page that names a period still wins in scrapers/wadod/run.py.
+    "wadod",
+}
 
 # Matched on ONE line only: `\s+` spanning newlines turns an assignment followed by an unrelated
 # `if` on the next statement into a false positive.

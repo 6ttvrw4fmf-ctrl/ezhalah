@@ -39,8 +39,10 @@ import scrapers.common.arabic_location as _al  # noqa: E402
 # The shared listing shape, verbatim from
 #   select column_name from information_schema.columns
 #    where table_name = 'suwar_residential_listings'
-# on production, 2026-09-14 (89 columns). Every *_residential_listings / *_commercial_listings table
-# is created `LIKE abwbna_… INCLUDING ALL`, so they all carry exactly this set.
+# on production, 2026-09-14 (89 columns); re-read from nufouth_residential_listings on 2026-09-24:
+# 90 columns, the one addition being last_liveness_probe_at (20260924020545). Every
+# *_residential_listings / *_commercial_listings table is created `LIKE abwbna_… INCLUDING ALL`, so
+# they all carry exactly this set.
 LISTING_COLUMNS = {
     'active', 'ad_number', 'ad_source', 'additional_info', 'additional_number', 'air_conditioner',
     'apartment_in_project', 'area_m2', 'balcony_terrace', 'bathrooms', 'bedrooms',
@@ -48,7 +50,8 @@ LISTING_COLUMNS = {
     'deactivated_at', 'deed_area_m2', 'description', 'direction', 'discount_pct', 'district_ar',
     'driver_room', 'electricity', 'elevator', 'extension', 'floor_number', 'fullparse_done',
     'furnished', 'halls', 'id', 'image_storage_keys', 'interior_space_m2', 'kitchen',
-    'last_seen_at', 'last_update', 'last_verified_alive_at', 'laundry_room', 'license_expiry',
+    'last_liveness_probe_at', 'last_seen_at', 'last_update', 'last_verified_alive_at',
+    'laundry_room', 'license_expiry',
     'license_number', 'listing_url', 'maid_room', 'master_bedrooms', 'missing_count',
     'neighborhood', 'num_apartments', 'optical_fibers', 'outdoor_area_m2', 'parking', 'photo_urls',
     'plan_parcel', 'price_annual', 'price_original', 'price_per_meter', 'price_total',
@@ -168,6 +171,16 @@ def test_the_guard_would_actually_catch_the_original_defect(monkeypatch):
 BATCH_2026_09_21 = ("alsidra", "moftah", "masar", "gomenassat", "sakan", "bossbih", "alshawaf",
                     "ialqarawi", "aljassim", "almotmkenah", "nufouth")
 
+# The thirty-five onboarded 2026-09-24 (tables: 20260924170534, same LIKE + four location columns).
+BATCH_2026_09_24 = ("dwelleo", "aqalemhajer", "sakani", "shatri", "alqasem", "fkralemar", "wadod",
+                    "almuteb", "aalbarrak", "alrifai", "sodasyat", "hasaad", "aqaralriyadh", "justsa",
+                    "snam", "jawher", "m3tmd", "senan", "goldendeal", "thousand", "yameen", "ebriza",
+                    "eilmalriyada", "daryusuf", "albdah", "eydah", "tamyaz", "hazim", "villassa",
+                    "marksa", "rightcompound", "livingcompound", "azure", "expattrusted", "flow")
+# A platform whose row literal lives in ANOTHER scraper's file (yameen imports goldendeal's
+# map_listing, yameen/run.py:56-58) is judged on that file — a defect there is a defect in both.
+ROW_LITERAL_LIVES_IN = {"yameen": "goldendeal"}
+
 # Keys that never reach PostgREST: db._wasalt_batch pops them into source_capture first
 # (_fold_price_evidence / _fold_images_evidence). Anything else must be a column.
 FOLDED_BEFORE_UPSERT = {"price_evidence", "images_evidence"}
@@ -176,34 +189,54 @@ _SCRAPERS = ROOT / "scrapers"
 
 
 def _row_literal_keys(tree) -> set[str]:
+    """Every key a scraper writes onto its row: the anchored literal, keys assigned onto the row
+    afterwards (row["k"] = …), and — the jawher shape, missed on the first crawl of 2026-09-24 —
+    keys of any dict literal SPLATTED into the row ({"ad_number": …, **fields}), recursively."""
     import ast
 
     def str_keys(d: ast.Dict) -> set[str]:
         return {k.value for k in d.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
 
-    keys: set[str] = set()
-    row_vars: set[str] = set()
+    bound: dict[str, ast.Dict] = {}      # name -> the dict literal it was bound to
+    extra: dict[str, set[str]] = {}      # name -> keys assigned later via name["k"] = …
     for node in ast.walk(tree):
-        if isinstance(node, ast.Dict) and {"ad_number", "listing_url", "source"} <= str_keys(node):
-            keys |= str_keys(node)
-        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict) \
-                and {"ad_number", "listing_url", "source"} <= str_keys(node.value):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            row_vars |= {t.id for t in targets if isinstance(t, ast.Name)}
-    for node in ast.walk(tree):
+            for t in targets:
+                if isinstance(t, ast.Name):
+                    bound[t.id] = node.value
         if isinstance(node, ast.Assign):
             for t in node.targets:
                 if (isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name)
-                        and t.value.id in row_vars and isinstance(t.slice, ast.Constant)
-                        and isinstance(t.slice.value, str)):
-                    keys.add(t.slice.value)
+                        and isinstance(t.slice, ast.Constant) and isinstance(t.slice.value, str)):
+                    extra.setdefault(t.value.id, set()).add(t.slice.value)
+
+    def keys_of(d: ast.Dict, seen: tuple = ()) -> set[str]:
+        ks = str_keys(d)
+        for k, v in zip(d.keys, d.values):
+            if k is None and isinstance(v, ast.Name) and v.id in bound and v.id not in seen:
+                ks |= keys_of(bound[v.id], seen + (v.id,)) | extra.get(v.id, set())
+        return ks
+
+    anchor = {"ad_number", "listing_url", "source"}
+    keys: set[str] = set()
+    for name, d in bound.items():
+        ks = keys_of(d) | extra.get(name, set())
+        if anchor <= ks:
+            keys |= ks
+    for node in ast.walk(tree):          # an anonymous row literal returned directly
+        if isinstance(node, ast.Dict):
+            ks = keys_of(node)
+            if anchor <= ks:
+                keys |= ks
     return keys
 
 
-@pytest.mark.parametrize("platform", BATCH_2026_09_21)
-def test_every_row_literal_key_of_the_2026_09_21_batch_is_a_real_column(platform):
+@pytest.mark.parametrize("platform", BATCH_2026_09_21 + BATCH_2026_09_24)
+def test_every_row_literal_key_of_an_onboarded_batch_is_a_real_column(platform):
     import ast
-    tree = ast.parse((_SCRAPERS / platform / "run.py").read_text(encoding="utf-8"))
+    src = _SCRAPERS / ROW_LITERAL_LIVES_IN.get(platform, platform) / "run.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
     keys = _row_literal_keys(tree)
     assert {"ad_number", "listing_url", "source", "transaction_type"} <= keys, (
         f"{platform}: no row literal found — the reader stopped seeing this scraper's rows")
@@ -221,5 +254,8 @@ def test_the_row_literal_reader_catches_the_suwar_defect():
     import ast
     literal = 'row = {"ad_number": 1, "listing_url": 2, "source": 3, "living_rooms": 4}'
     later = 'row = {"ad_number": 1, "listing_url": 2, "source": 3}\nrow["majlis_rooms"] = 5'
-    for src, bad in ((literal, "living_rooms"), (later, "majlis_rooms")):
+    # The jawher shape (2026-09-24): the offending key sits in a dict that is SPLATTED into the row.
+    splat = ('fields = {"bedrooms": 1}\nfields["latitude"] = 2\n'
+             'row = {"ad_number": 1, "listing_url": 2, "source": 3, **fields}')
+    for src, bad in ((literal, "living_rooms"), (later, "majlis_rooms"), (splat, "latitude")):
         assert sorted(_row_literal_keys(ast.parse(src)) - LISTING_COLUMNS) == [bad]

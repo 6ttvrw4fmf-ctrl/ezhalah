@@ -508,6 +508,11 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
   impact — it only stops burning ~5.5 GH Actions compute-hours every Monday. Historical rows kept.
   **Re-enable only after the scraper itself is rebuilt** (its enumeration approach needs redesigning,
   not just a longer timeout).
+  **dwelleo — RE-ONBOARDED 2026-09-24 (owner decision).** `scrapers/dwelleo/` is back with the
+  35-platform batch; migration `20260924171203_thirty_five_platforms_registry_and_liveness` flips
+  `platform_cadence.is_active` to true with the note «re-onboarded 2026-09-24 (owner decision)» and
+  inserts its platform_registry / ops_liveness_registry rows (its old tables were dropped, so it
+  starts empty). The 2026-07-15 history below is kept as written.
   **dwelleo, semsar** — `scrapers/dwelleo/` and `scrapers/semsar/` no longer exist in this repo (code
   removed at some point). `scrape_runs` shows dwelleo ran 4 times (last 2026-06-23, 1,540 rows on
   its last successful run) and semsar ran once (2026-06-22, 72 rows) — genuine, working scrapers at
@@ -1166,6 +1171,29 @@ migration-drift-guard rule in `AGENTS.md`).
 - **Rent scaling:** monthly price ×12 handling vs Gathern's pre-annualized `price_annual`.
 - **In-app browser proxy** proven for all partners (currently Aqar-centric); reconcile the "iframe
   impossible" note.
+- **`scrapers/common/normalize.category_for_type()`'s residential set is missing "Duplex"/"Studio"
+  fleet-wide (found 2026-09-24).** Every "house pattern" scraper that calls this shared helper
+  unqualified gets `Commercial` for these two types, so they physically land in each platform's
+  `*_commercial_listings` table. **RESOLVED 2026-09-24 (owner decision): this is intentional,
+  fleet-wide, canonical — do NOT route around it per-platform.** It is not a reachability bug:
+  Duplex/Studio are residential-macro clean types with `kinds: BOTH` in `propertyTypes.ts` (dated
+  2026-07-16, "the latent invisible-listing fix"), and the 2026-07-10 broad-Residential
+  misfile-recovery (`resMisfileTypes`/`attachResScopeB` in `remote.ts`) generically recovers any
+  residential-macro `type_ar` sitting in a commercial table — confirmed live via the real anon-key
+  RPC path for bossbih (133/136 misfiled دوبلكس rows returned in one page of a plain
+  Category=Residential search). This same physically-misfiled-but-frontend-compensated pattern is
+  already how a dozen-plus other `kinds: BOTH` types are handled (Rest House, Farm, Agriculture
+  Plot, Residential Land, Bank, Warehouse, Telecom Tower, Hotel, and the المرافق set), so leaving
+  Duplex/Studio on it is consistent with the established architecture, not an exception to it.
+  `scrapers/aqalemhajer/run.py` (batch-36, merged/deployed 2026-09-24) originally shipped a
+  per-scraper `DWELLING_TYPES` override that routed around the shared helper — reverted the same
+  day to match bossbih and every other platform (its 57 already-upserted residential-table
+  Duplex/Studio rows were left as-is; only future scrapes are affected). Both platforms' tests now
+  pin `category == "commercial"` for Duplex/Studio as the intentional, canonical behavior.
+  **If this is ever revisited:** fixing `category_for_type()` itself would require migrating every
+  affected platform's already-upserted rows in one coordinated pass and does not let the frontend
+  `kinds: BOTH` compensation be retired (it is the general reachability safety net for ANY
+  current/future table misfile, not specific to this gap) — so the cost/benefit did not favor it.
 
 **PRD §13 business items — DECIDED 2026-06-09 (don't re-ask these):**
 1. Revenue: **CPC (pay-per-click) first**, subscriptions later. Near-term work = click tracking, not
