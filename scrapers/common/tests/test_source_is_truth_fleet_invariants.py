@@ -186,6 +186,11 @@ SINGLE_PERIOD_PLATFORMS = {
     # OWNER attested the 7 rentals are yearly after reading the pages (ops_rent_period_single_value_ok
     # 20260924224146). A page that names a period still wins in scrapers/wadod/run.py.
     "wadod",
+    # tamyaz added 2026-09-24: the UI stamps a universal «/ سنة» on every rent row (no per-listing
+    # period field exists); the OWNER checked the live site and attested it is yearly
+    # (ops_rent_period_single_value_ok 20260924231422). A period the listing states, or a
+    # daily/weekly rate, still wins in scrapers/tamyaz/run.py.
+    "tamyaz",
 }
 
 # Matched on ONE line only: `\s+` spanning newlines turns an assignment followed by an unrelated

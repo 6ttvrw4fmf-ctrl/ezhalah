@@ -156,11 +156,15 @@ _RENT_PRICE_RE = re.compile(r"^\s*Rent\s*-\s*\(SR\)\s*([\d,]+)\s*$", re.I)
 
 # The unit NAME carries the type word; the fleet folds townhouse→Villa and penthouse→Apartment.
 # «NBHK» (bedroom-hall-kitchen, «FAMILY TYPE 3BHK», 2026-09-24 first crawl) is the flat
-# configuration by definition → شقة. «suite» («DELUXE SUITE», «Suite Type 1») and a name with no
-# type word at all («Two Bedroom Fully Furnished Unit Type A») stay unmapped and are skipped —
-# a suite may be a hotel-style room, which this product excludes — an owner question, never a guess.
+# configuration by definition → شقة. «condominium» added 2026-09-24 (owner review of the live
+# Rilam Al Raed compound page: "Two bedroom furnished Condominium…" is an ordinary apartment, not a
+# hotel-style unit — condominium IS the flat, same as apartment/apt) → شقة. «suite»
+# («DELUXE SUITE», «Suite Type 1») and a name with no type word at all («Two Bedroom Fully
+# Furnished Unit Type A») still stay unmapped and are skipped — a suite may be a hotel-style room,
+# which this product excludes (owner confirmed 2026-09-24: leave those out).
 _TYPE_WORDS = (("studio", "استوديو"), ("townhouse", "فيلا"), ("town house", "فيلا"),
                ("villa", "فيلا"), ("penthouse", "شقة"), ("apartment", "شقة"), ("apt", "شقة"),
+               ("condominium", "شقة"), ("condo", "شقة"),
                ("chalet", "شاليه"), ("duplex", "دوبلكس"))
 _BHK_RE = re.compile(r"\d\s*bhk\b", re.I)
 

@@ -63,18 +63,19 @@ def _p(base, **over):
     return p
 
 
-def test_the_uis_per_year_template_is_never_read_as_the_source_period():
-    """ROOF's own title+desc state no period word anywhere (checked: neither شهري nor سنوي occurs),
-    yet the UI stamps «/ سنة» beside EVERY rent regardless — that literal is a constant, not this
-    listing's own words for this price, so RENT PERIOD = SOURCE means silent → NULL, price verbatim
-    (2026-09-24 review fix: previously hardcoded rent_period='annual' from forSale alone, the same
-    shape as the fleet-wide "11 scrapers hardcoded annual" incident)."""
+def test_a_silent_listing_falls_back_to_the_sites_own_universal_template():
+    """ROOF's own title+desc state no period word anywhere (checked: neither شهري nor سنوي occurs).
+    The UI stamps «/ سنة» beside EVERY rent regardless — a platform-wide constant, not this ONE
+    listing's own words. Owner attestation 2026-09-24 (checked the live site, confirmed yearly):
+    that universal template is now trusted as a platform-level statement when a listing is silent,
+    the same class as azure/rightcompound's single-period entries — a period the listing DOES state
+    still wins (see the next test)."""
     row, cat, why = R.map_listing(ROOF)
     assert why == "" and cat == "residential" and row["property_type"] == "Apartment"
     assert row["ad_number"] == "TMZprop-mu7drwdljc4k"
     assert row["listing_url"] == "https://www.tamyaz-sa.com/#property-prop-mu7drwdljc4k"
     assert row["transaction_type"] == "Rent"
-    assert "rent_period" not in row and row["price_annual"] == 24000     # silent → NULL, verbatim
+    assert row["rent_period"] == "annual" and row["price_annual"] == 24000     # template fallback
     assert "price_total" not in row and row["additional_info"]["price_unit_ui"] == "ر.س / سنة"
     assert row["city_ar"] == "جدة" and row["region_id"] == 2 and row["district_ar"] == "حي الفلاح" and row["neighborhood"] == "حي الفلاح"
     assert row["additional_info"]["region_ar"] == "منطقة مكة المكرمة"
@@ -82,13 +83,14 @@ def test_the_uis_per_year_template_is_never_read_as_the_source_period():
 
 def test_a_period_the_listing_actually_states_is_honored_over_the_ui_template():
     """If a listing's OWN title/desc ever does state a period, that — not the UI's blanket «/ سنة»
-    — is what gets stored, via the shared rent_period_and_annual() parser."""
+    fallback — is what gets stored, via the shared rent_period_and_annual() parser."""
     annual = R.map_listing(_p(ROOF, desc={"ar": "شقة للإيجار السنوي في حي الفلاح", "en": ""}))[0]
     assert annual["rent_period"] == "annual" and annual["price_annual"] == 24000
     monthly = R.map_listing(_p(ROOF, desc={"ar": "شقة للإيجار الشهري في حي الفلاح", "en": ""}))[0]
     assert monthly["rent_period"] == "monthly" and monthly["price_annual"] == 24000 * 12
     weekly = R.map_listing(_p(ROOF, desc={"ar": "شقة للإيجار الأسبوعي في حي الفلاح", "en": ""}))[0]
-    assert "rent_period" not in weekly and weekly["price_annual"] is None   # no bucket, never invented
+    # a daily/weekly rate is never parked as annual, even the template fallback does not apply here
+    assert "rent_period" not in weekly and weekly["price_annual"] is None
 
 
 def test_count_zero_chips_are_shown_amenities_and_counts_land_in_real_columns():
