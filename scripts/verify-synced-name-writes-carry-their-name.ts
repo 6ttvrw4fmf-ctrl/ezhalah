@@ -294,6 +294,11 @@ check('§B the guarded writer exists in the store and compares the name the patc
       { header: 'export function persistDisplayName(v: string): void {', endsWith: /^\}$/ },
     ],
     ['persistDisplayName'],
+    // NAME_WRITE_TIMEOUT_MS is deliberately NOT lifted: the real 15s bound is correct in production
+    // and untestable in a barrier, so the prelude supplies a small one and the lifted function body
+    // — production's, unmodified — closes over it. The shipped constant is checked separately below,
+    // so shortening it here cannot hide a production value that is missing or infinite.
+    `const NAME_WRITE_TIMEOUT_MS = 300;\n` +
     // A supabase whose updateUser resolves on a delay the test chooses, recording arrival order.
     `const supabase = { auth: { updateUser: (p: any) => {\n` +
     `  const g = (globalThis as any).__authRig;\n` +
@@ -325,6 +330,43 @@ check('§B the guarded writer exists in the store and compares the name the patc
   await new Promise((r) => setTimeout(r, 120));
   mustCatch('the unserialised fire-and-forget write lets the older name arrive last',
     out[out.length - 1] === 'أحمد', `arrival order was ${JSON.stringify(out)}`);
+
+  // §D.2 — THE HAZARD SERIALISING ITSELF INTRODUCES. Independent writes could not block each other;
+  // a queue can. One request that never settles must not swallow every rename after it, which would
+  // be a worse failure than the race the queue fixes. The wait is bounded, so a later write still
+  // lands — the cap releases the QUEUE, it does not cancel the wedged request.
+  // The shipped bound is a real, finite number — the prelude's small stand-in above cannot disguise
+  // a production constant that was removed or set to Infinity.
+  const authSrc = readFileSync(AUTH, 'utf8');
+  const capM = /const NAME_WRITE_TIMEOUT_MS = (\d+);/.exec(authSrc);
+  check('§D.2 the shipped queue bound is finite and sane',
+    !!capM && Number(capM[1]) > 0 && Number(capM[1]) <= 30000,
+    `NAME_WRITE_TIMEOUT_MS = ${capM?.[1] ?? 'ABSENT'}`);
+
+  // EXECUTED: one request that never settles must not swallow every rename after it. Serialising
+  // introduced this hazard — independent writes could not block each other, a queue can — and a
+  // dead queue would be a worse failure than the race the queue fixes.
+  g.__authRig = { written: [] as string[], delay: (v: string) => (v === 'عالق' ? 10 ** 9 : 1) };
+  persistDisplayName('عالق');           // a write that never settles
+  persistDisplayName('سالم');           // the rename that must still get through
+  await new Promise((r) => setTimeout(r, 900));   // > the prelude's 300ms bound
+  const after: string[] = g.__authRig.written;
+  check('§D.2 a wedged write does not hold the queue forever — the later rename still lands',
+    after.includes('سالم'), `written ${JSON.stringify(after)}`);
+  check('§D.2 …and the wedged request never wrote anything itself',
+    !after.includes('عالق'), `written ${JSON.stringify(after)}`);
+
+  // MUTATION: an UNBOUNDED wait (the shape before the cap) drops the later rename entirely.
+  const unbounded: string[] = [];
+  let q: Promise<unknown> = Promise.resolve();
+  const enqueue = (v: string, ms: number) => {
+    q = q.then(() => new Promise((r) => setTimeout(() => { unbounded.push(v); r({}); }, ms)));
+  };
+  enqueue('عالق', 10 ** 9);
+  enqueue('سالم', 1);
+  await new Promise((r) => setTimeout(r, 900));
+  mustCatch('an unbounded queue loses every rename behind a request that never settles',
+    !unbounded.includes('سالم'), `written ${JSON.stringify(unbounded)}`);
 }
 
 console.log(failures === 0
