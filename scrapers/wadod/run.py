@@ -18,8 +18,11 @@ SOURCE SHAPE (measured live 2026-09-24, before any code):
       simply not listed → NULL, never False.
       «مميزات العقار» is the NEIGHBOURHOOD (صراف آلي، مسجد، مدرسة، مستشفى) → ignored.
       Header: h1 title · «حي العارض, الرياض» · price «65,000» · payment terms «دفعة واحدة» / «دفعتين».
-  · RENT PERIOD = SOURCE. «دفعة واحدة»/«دفعتين» are PAYMENT terms, not a period; no measured page
-    says سنوي/شهري (7/7 silent) → rent_period NULL, price_annual = the figure unconverted.
+  · RENT PERIOD. «دفعة واحدة»/«دفعتين» are PAYMENT terms, not a period; no measured page says
+    سنوي/شهري (7/7 silent). OWNER ATTESTATION 2026-09-24 («those are yearly», after reading the 7
+    pages): a silent page gets rent_period 'annual', price_annual = the figure unconverted; a page
+    that names a period still wins. Registered in ops_rent_period_single_value_ok
+    (20260924224146) and SINGLE_PERIOD_PLATFORMS.
   · PHOTOS. The detail gallery is a lazily-loaded Livewire component: the server HTML holds no image
     URL (0/3 pages). The card's cover image on S3
     (…amazonaws.com/propertiesImages/<uuid>-<n>.webp) is the photo — fetched, image/webp.
@@ -220,6 +223,11 @@ def map_listing(card: dict[str, Any], detail: dict[str, Any]) -> tuple[Optional[
         row["price_annual"] = annual
         if period:
             row["rent_period"] = period
+        elif annual is not None:
+            # Owner attestation 2026-09-24: wadod's rents are yearly (the page states only the
+            # payment split «دفعة واحدة»/«دفعتين»). Registered in ops_rent_period_single_value_ok;
+            # a page that DOES name a period (سنوي/شهري/يومي) still wins above.
+            row["rent_period"] = "annual"
     else:
         row["price_total"] = price
     row["additional_info"] = {k: v for k, v in {
