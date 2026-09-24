@@ -1,7 +1,6 @@
--- STEP 1 of the restore of the 11 objects the listing_location_index CASCADE (20260914114002)
--- dropped.
+-- STEP 1 of the restore of the 11 objects my listing_location_index CASCADE dropped.
 --
--- Full chain the CASCADE walked (the planning query saw only the first hop):
+-- Full chain the CASCADE walked (my planning query saw only the first hop):
 --   listing_location_index
 --     -> listing_location_canonical (+ _mv)            [restored in the splice migration]
 --        -> listing_native_location_v1                  [step 2, from the byte-verified mirror]

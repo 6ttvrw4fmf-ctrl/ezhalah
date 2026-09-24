@@ -1,17 +1,3 @@
--- REGISTER mon_detect_city_duplicate_orphaned_districts() INTO THE DAILY ROTATION.
---
--- The function itself is created by the sibling migration
--- 20260924000205_create_city_duplicate_orphaned_districts_detector_fn.sql (applied second, after
--- this one committed) -- split into two migrations because the first combined attempt used a
--- dynamic do-block to patch this array and it failed to parse, rolling back BOTH statements in the
--- same transaction. This migration is the SAFE half: the full function body below was reconstructed
--- by asking Postgres itself for pg_get_functiondef('mon_run_all_detectors()') and inserting exactly
--- ONE new array entry ('mon_detect_city_duplicate_orphaned_districts', appended after
--- 'mon_detect_aqar_area_truncation_residue') -- verified byte-for-byte against the live function
--- before this was ever applied, so nothing else in the ~230-entry rotation changed.
---
--- See scripts/verify-no-orphaned-duplicate-city.ts for what this detector protects against and why.
-
 CREATE OR REPLACE FUNCTION public.mon_run_all_detectors()
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -229,7 +215,7 @@ begin
                  max(elapsed_ms) filter (where rn <= 3) as recent_max
             from (select detector, elapsed_ms,
                          row_number() over (partition by detector
-                                                 order by swept_at desc) as rn
+                                                order by swept_at desc) as rn
                     from public.ops_detector_timing
                    where swept_at > now() - interval '7 days'
                      and not skipped

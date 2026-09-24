@@ -1,6 +1,3 @@
--- Mirror of the applied migration `alert_to_incident_bridge_selftest_fixture_fix`.
--- Fixes the self-test fixture: dispatched_at was exactly 48h old, hitting the strict `<` boundary of
--- the unworked-queue predicate, so test 2a read false. Aged to 3 days so the boundary is clear.
 create or replace function public.mon_selftest_bridge_chain()
  returns text language plpgsql security definer set search_path to 'public'
 as $fn$

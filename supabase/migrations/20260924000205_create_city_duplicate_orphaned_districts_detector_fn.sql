@@ -1,21 +1,7 @@
--- A CITY MUST NEVER OWN A DISTRICT CATALOG WHILE ITS OWN LISTINGS LIVE UNDER A DIFFERENT ID.
---
--- Root cause: sa-locations.json (the official third-party Saudi hierarchy, imported verbatim) lists
--- some places TWICE under two different official codes, in the same region. الدرعية and بيشة were
--- both this shape: one city_id received every real listing, the other silently owned the district
--- catalog and never received a single one (fixed by migration 20260923234716; الحريق and الحرجة
--- follow separately once confirmed the same shape). scripts/verify-no-orphaned-duplicate-city.ts
--- catches this at every deploy; this detector catches it ONGOING, so a future re-import outside a
--- deploy (a data-only migration, a direct edit) is caught within one detector sweep instead of
--- waiting for someone to notice a city's district list looks empty.
---
--- Self-healing: mon_resolve_stale_keys clears any previously-raised pair the moment it is fixed (or
--- the twin stops having listings), so this never accumulates dead alerts.
---
--- Registered into the rotation by the sibling migration 20260924000125 (applied first, before this
--- one committed — see that file's header for why it is split this way). Verified live 2026-09-23:
--- raised exactly 2 (الحريق, الحرجة — the two confirmed-but-not-yet-fixed pairs at the time), matching
--- scripts/verify-no-orphaned-duplicate-city.ts's independent finding on the same data exactly.
+-- The registration migration (register_city_duplicate_orphaned_districts_detector) already added
+-- 'mon_detect_city_duplicate_orphaned_districts' to mon_run_all_detectors()'s rotation. This creates
+-- the function itself, which a prior attempt (in the SAME transaction as a do-block that failed to
+-- parse) rolled back before it ever committed. Confirmed missing via pg_proc before writing this.
 create or replace function public.mon_detect_city_duplicate_orphaned_districts()
 returns int
 language plpgsql

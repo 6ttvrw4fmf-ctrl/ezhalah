@@ -20,14 +20,10 @@
 --     listings). Moving those would collide on the PK, so only the NON-overlapping rows move; the
 --     colliding ones stay under the dead id as harmless orphans (the live id already resolves them).
 --
--- VERIFIED against the real picker RPC immediately after applying: district_options_ar(664) and
--- district_options_ar(1301) both return real districts with real, nonzero listing_count summing
--- toward the city's true total (629 / 149).
---
 -- NOT done here, deliberately conservative: the dead loc_catalog_city rows (828, 1514) are left in
 -- place, not deleted or merged — they now simply own zero districts. Whether they should be removed,
 -- and whether the SAME duplicate-city-id pattern exists elsewhere in the catalog beyond this pair,
--- is a separate, unaudited question — reported alongside this fix, not resolved by it.
+-- is a separate, unaudited question — see the swept findings reported alongside this fix.
 
 update public.loc_catalog_district set city_id = 664 where city_id = 828;    -- الدرعية: 828 (dead) -> 664 (live, 629 listings)
 update public.loc_catalog_district set city_id = 1301 where city_id = 1514; -- بيشة: 1514 (dead) -> 1301 (live, 149 listings)
