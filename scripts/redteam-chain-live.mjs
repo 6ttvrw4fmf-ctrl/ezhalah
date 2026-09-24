@@ -42,6 +42,11 @@ import { dismissCookieConsent } from './lib/liveConsent.ts';
 // imports, so it loads directly under Node's type stripping — no copy, no lift needed). See the
 // L1==L3 assertion below for why a substring test over p_types was wrong.
 import { CLEAN_MACRO, EN_TO_AR, HIERARCHY, typeArForSelection } from '../src/data/propertyTypes.ts';
+// The product's own opening-cascade size. IMPORTED, never re-typed: a live journey that hardcodes
+// it ends up asserting a contract production retired (src/lib/initialReveal.ts says so above the
+// constant, and scripts/verify-cards-reveal-on-scroll.ts imports it for the same reason).
+// initialReveal.ts is pure and import-free, so it loads directly under Node's type stripping.
+import { CASCADE_MAX } from '../src/lib/initialReveal.ts';
 import { parseVisibleState } from '../e2e/live-sweep/visibleState.mjs';
 import { setDifferential, differentialIsClean, describeDifferential } from './lib/setDifferential.ts';
 import { settledSource } from '../e2e/lib/resultsSentence.mjs';
@@ -188,6 +193,47 @@ async function settleCards(page, { tries = 60, stableFor = 4, everyMs = 700 } = 
     await sleep(everyMs);
   }
   return last;
+}
+
+/**
+ * SCROLL UNTIL THE OPENING REVEAL CASCADE HAS FINISHED, then report the card count.
+ *
+ * A turn ARRIVES with only `min(initialReveal(...), CASCADE_MAX)` cards — CASCADE_MAX is imported
+ * from the product, never re-typed — and `maybeRevealOnScroll` walks the rest up to the turn's real
+ * target as the reader approaches it (owner 2026-09-20). `settleCards` above waits for growth to
+ * STOP but never scrolls, so on a turn whose target exceeds the cascade it settles at exactly
+ * CASCADE_MAX and reports a screenful as if it were the whole reveal.
+ *
+ * MEASURED, 2026-09-24, on this instrument: two of twelve chains — حفر-الباطن/إيجار-سنوي/شقة and
+ * الخبر/تجاري/مستودع, both with an honest total of 18 — reported
+ *     «pager absent while 18 > 12 shown»
+ * and the run recorded a NOT REACHED against a production that was entirely correct. Driven by hand
+ * in the same browser immediately afterwards, the arrival showed 12, and after scrolling the page
+ * showed all 18. Nothing was unreachable and no user was stranded; the harness had simply stopped
+ * reading at the first screenful. `src/lib/initialReveal.ts` says so in the comment above the
+ * constant: *"Live journeys must therefore expect a screenful ON ARRIVAL and scroll to reach the
+ * target — asserting the whole first page renders immediately is the PRE-2026-09-20 contract."*
+ * This driver was still asserting the pre-2026-09-20 contract.
+ *
+ * WHY THAT IS THE WORST KIND OF HARNESS BUG HERE. PRODUCTION_RED_TEAM_ENGINEER.md PART 7: "an oracle
+ * that accuses the product for its own imprecision is worse than no oracle." The window is narrow
+ * and exactly where it hurts — a total of 13..25 closes the chat (≤ INTERVIEW_STOP_AT), so no pager
+ * is rendered BY DESIGN and every one of those cells would have been read as a dead end.
+ *
+ * It bounds itself: growth is re-read after every wheel, and a screen that stops growing ends the
+ * walk. A cascade that is genuinely stuck still returns its last real count, so a real failure still
+ * fails — the fix removes a false accusation without buying a pass.
+ */
+async function revealAll(page, { rounds = 60, stableFor = 3, everyMs = 500, dy = 1400 } = {}) {
+  let last = -1, stable = 0;
+  for (let i = 0; i < rounds; i++) {
+    const n = (await page.evaluate(CARD_IDS)).length;
+    if (n === last) { if (++stable >= stableFor) break; } else { stable = 0; }
+    last = n;
+    await page.mouse.wheel(0, dy);
+    await sleep(everyMs);
+  }
+  return (await page.evaluate(CARD_IDS)).length;
 }
 
 const launchOpts = () => ({
@@ -535,26 +581,54 @@ async function runChain(cell) {
         `unexplained=${outOfSet.length} ${outOfSet.slice(0, 4).join(',')}`);
     }
     if (clicks === 0) {
-      await settleCards(page);
+      // EXHAUST THE REVEAL CASCADE BEFORE JUDGING "how much did the user get to see" — the arrival
+      // is a screenful, not the turn's whole reveal (see revealAll's header). Every assertion below
+      // is about what is REACHABLE without a pager, and a reader reaches it by scrolling.
+      const arrival = await settleCards(page);
+      const walked = await revealAll(page);
+      console.log(`  (reveal cascade: arrived with ${arrival}, walked to ${walked}`
+        + ` — the product's CASCADE_MAX is ${CASCADE_MAX})`);
+      // …and ask the pager question AGAIN now that the walk is done. If one only becomes reachable
+      // after the cascade, that is not a pass and not an accusation — it is a layer this run did not
+      // page, said out loud.
+      const lateY = await page.evaluate(PAGER, 30);
       const onScreen = await page.evaluate(CARD_IDS);
       const shown = onScreen.length;
-      // THE HONESTY EQUALITY (scripts/verify-result-cap-honesty.ts, asserted live). With no pager the
-      // app must either have shown the whole matched set, or say so honestly — a closing line that
-      // claims «كل النتائج» over fewer cards than the headline counted is the count/set disagreement
-      // this routine exists to find, and it is the shape ops_incident #66 took.
-      const closing = (await text()).match(/عرضت لك[^\n]*/g) ?? [];
-      const claimsAll = closing.some((l) => /كل النتائج|جميع الإعلانات/.test(l));
-      if (claimsAll) {
-        const unreachable = first.json.filter((r) => !onScreen.includes(String(r.listing_id)))
-          .map((r) => `${r.source_table}:${r.listing_id}`);
-        eq(name, 'L8 a closing line claiming ALL is backed by the whole matched set on screen',
-          shown === rpcTotal && unreachable.length === 0,
-          `closing=${JSON.stringify(closing.slice(-1))} shown=${shown} total=${rpcTotal} ` +
-          `counted-but-never-rendered=${unreachable.length} ${unreachable.slice(0, 6).join(' ')}`);
-      } else if (rpcTotal > shown) {
-        unreached(name, 'L8 «عرض المزيد»', `pager absent while ${rpcTotal} > ${shown} shown, and the ` +
-          `closing line does not claim completion: ${JSON.stringify(closing.slice(-1))}`);
-      } else console.log(`  (L8 n/a — every match is on screen: ${shown} of ${rpcTotal})`);
+      if (lateY != null) {
+        unreached(name, 'L8 «عرض المزيد»',
+          `the pager was absent on arrival and present after the reveal cascade finished `
+          + `(${shown} of ${rpcTotal} on screen) — this run did not page it`);
+      } else {
+        // THE HONESTY EQUALITY (scripts/verify-result-cap-honesty.ts, asserted live). With no pager the
+        // app must either have shown the whole matched set, or say so honestly — a closing line that
+        // claims «كل النتائج» over fewer cards than the headline counted is the count/set disagreement
+        // this routine exists to find, and it is the shape ops_incident #66 took.
+        const closing = (await text()).match(/عرضت لك[^\n]*/g) ?? [];
+        const claimsAll = closing.some((l) => /كل النتائج|جميع الإعلانات/.test(l));
+        if (claimsAll) {
+          const unreachable = first.json.filter((r) => !onScreen.includes(String(r.listing_id)))
+            .map((r) => `${r.source_table}:${r.listing_id}`);
+          eq(name, 'L8 a closing line claiming ALL is backed by the whole matched set on screen',
+            shown === rpcTotal && unreachable.length === 0,
+            `closing=${JSON.stringify(closing.slice(-1))} shown=${shown} total=${rpcTotal} ` +
+            `counted-but-never-rendered=${unreachable.length} ${unreachable.slice(0, 6).join(' ')}`);
+        } else if (rpcTotal > shown) {
+          unreached(name, 'L8 «عرض المزيد»', `pager absent while ${rpcTotal} > ${shown} shown even after `
+            + `the reveal cascade was walked to its end, and the closing line does not claim `
+            + `completion: ${JSON.stringify(closing.slice(-1))}`);
+        } else {
+          // EVERY MATCH IS REACHABLE WITHOUT A PAGER — assert it as an EQUALITY rather than log it.
+          // This is the branch a ≤ INTERVIEW_STOP_AT turn lands in (the chat closes, so no pager is
+          // rendered BY DESIGN), and it is exactly where a row counted but never reachable would
+          // hide. Before 2026-09-24 it printed a note and asserted nothing.
+          const unreachable = first.json.filter((r) => !onScreen.includes(String(r.listing_id)))
+            .map((r) => `${r.source_table}:${r.listing_id}`);
+          eq(name, 'L8 with no pager, every counted match is reachable on screen',
+            shown === rpcTotal && unreachable.length === 0,
+            `shown=${shown} total=${rpcTotal} counted-but-never-rendered=${unreachable.length} `
+            + unreachable.slice(0, 6).join(' '));
+        }
+      }
     }
   } catch (e) {
     // A harness failure is UNDETERMINED, never a product bug (AUTONOMOUS_INCIDENT_LOOP.md §6).
