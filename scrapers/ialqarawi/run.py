@@ -99,7 +99,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, http, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
@@ -187,10 +187,18 @@ _WORD_FRACTION_RE = re.compile(r"نصف|ربع|ثلث|مايه|مائه|مائة
 
 
 def session() -> cc.Session:
-    """impersonate OWNS the User-Agent — setting one here would contradict the TLS fingerprint."""
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept-Language": "ar,en;q=0.7"})
-    return s
+    """A fingerprint this host serves, negotiated once (impersonate OWNS the User-Agent).
+
+    2026-09-23: the site began answering pinned chrome fingerprints with an identical 75,193-byte
+    «403 - Forbidden» while serving safari/firefox/edge and the newest chrome from the same IP. Two
+    daily runs died at "index returned no cards" — which reads exactly like a dead site. The probe
+    below is the catalogue page the run needs anyway, so a profile is only accepted when it answers
+    with real cards.
+    """
+    return http.negotiated_session(
+        f"{BASE}/index.php?router=cards&catid={sorted(CATEGORY_IDS)[0]}&type=1",
+        headers={"Accept-Language": "ar,en;q=0.7"},
+        served=lambda r: r.status_code == 200 and '<section class="cards' in r.text)
 
 
 def _clean(raw: Optional[str]) -> str:
