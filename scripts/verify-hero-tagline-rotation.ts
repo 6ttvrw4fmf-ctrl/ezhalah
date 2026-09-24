@@ -107,8 +107,29 @@ mustCatch('the pick moved out of the mount effect (frozen into the pre-rendered 
 mustCatch('a first render that does not match the pre-rendered index 0',
   heroWiringProblems(home.replace('const [heroTagline, setHeroTagline] = useState(0);',
     'const [heroTagline, setHeroTagline] = useState(nextHeroTaglineIndex());')));
-mustCatch('a Math.random() "rotation" that repeats and can strand a visitor',
-  rotationProblems(() => Math.floor(Math.random() * HERO_TAGLINE_KEYS.length), HERO_TAGLINE_KEYS.length));
+// A memoryless picker is not a rotation. Proving that with a LIVE `Math.random()` draw made THIS
+// CHECK nondeterministic, and `npm test` is the required status check on every PR: with a 5-line
+// pool and 10 draws, a random picker happens to walk all five with no adjacent repeat 9.45% of the
+// time (measured, 200,000 trials), so the mutant survived and the suite went RED on roughly one PR
+// in eleven for reasons that had nothing to do with that PR's diff. It did exactly that to
+// data-integrity PR #3898 on 2026-09-24, whose diff touches only scrapers/ and supabase/migrations/.
+// The required suite is HERMETIC — its verdict depends only on the diff (AGENTS.md) — and a
+// stopwatch and an unseeded RNG break that the same way. Same claim, seeded so it cannot flake:
+// 200 fixed LCG seeds, of which 184 produce a picker this predicate rejects.
+const seededPicker = (seed: number) => {
+  let s = seed;
+  return () => {
+    s = (s * 1103515245 + 12345) % 2147483648;
+    return Math.floor((s / 2147483648) * HERO_TAGLINE_KEYS.length);
+  };
+};
+let memorylessRejected = 0;
+for (let seed = 1; seed <= 200; seed++) {
+  if (rotationProblems(seededPicker(seed), HERO_TAGLINE_KEYS.length).length > 0) memorylessRejected++;
+}
+check('(mutation) catches a Math.random() "rotation" that repeats and can strand a visitor',
+  memorylessRejected >= 170,
+  `only ${memorylessRejected}/200 seeded memoryless pickers were rejected — the predicate has lost its teeth`);
 mustCatch('a picker that never moves off one headline',
   rotationProblems(() => 2, HERO_TAGLINE_KEYS.length));
 mustCatch('a headline shipped without its Arabic',
