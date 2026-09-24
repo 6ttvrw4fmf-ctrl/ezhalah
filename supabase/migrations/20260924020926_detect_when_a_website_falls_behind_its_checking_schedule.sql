@@ -11,9 +11,9 @@
 -- nothing. gathern did precisely that while 27,102 of its 28,639 listings were never looked at once.
 --
 -- It was unanswerable before today because a probe that returned DEAD or UNKNOWN moved no column at
--- all. `last_liveness_probe_at` (migration 20260924020545) records "we LOOKED at this row, whatever
--- we concluded", so "how many rows did this platform check in the last 24h" is now a real
--- measurement instead of an inference.
+-- all. `last_liveness_probe_at` (migration 20260924…) records "we LOOKED at this row, whatever we
+-- concluded", so "how many rows did this platform check in the last 24h" is now a real measurement
+-- instead of an inference.
 --
 -- THE YARDSTICK IS THE PLATFORM'S OWN PROMISE, not a number invented here:
 --     required_per_day = active_rows / (sla_hours / 24)
@@ -186,7 +186,7 @@ begin
             || 'changes the promise instead of the checking, which LISTING_LIVENESS.md §7 forbids '
             || 'in terms. The fix is checking capacity or rotation fairness — see gathern, whose '
             || '0.4% was caused by a sweep re-probing the same 1,500 rows every run, not by '
-            || 'throughput (migration 20260924020545, last_liveness_probe_at).',
+            || 'throughput (migration 20260924, last_liveness_probe_at).',
         'note', 'last_liveness_probe_at starts NULL everywhere it was just added, so a platform '
             || 'reads NEVER_CHECKED until its checker runs once after 2026-09-24. Read this '
             || 'alert''s trend, not its first firing.'));

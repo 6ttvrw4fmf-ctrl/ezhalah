@@ -1,6 +1,3 @@
--- Mirror of the applied migration `alert_to_incident_bridge_selftest_fixture_fix`.
--- Fixes the self-test fixture: dispatched_at was exactly 48h old, hitting the strict `<` boundary of
--- the unworked-queue predicate, so test 2a read false. Aged to 3 days so the boundary is clear.
 create or replace function public.mon_selftest_bridge_chain()
  returns text language plpgsql security definer set search_path to 'public'
 as $fn$
@@ -14,8 +11,8 @@ begin
     delete from public.ops_incident where fingerprint in ('alert:bridge_selftest:age','alert:bridge_selftest:ack');
     insert into public.alert_event (severity, kind, platform, dedup_key, detail, created_at, last_affirmed_at, dispatched_at, acknowledged_at, owner_routine)
     values
-      ('P1','bridge_selftest','age','bridge_selftest:age','{"selftest":true}'::jsonb, now()-interval '3 days', now(), now()-interval '3 days', null, 'routine-3-data-integrity'),
-      ('P1','bridge_selftest','ack','bridge_selftest:ack','{"selftest":true}'::jsonb, now()-interval '3 days', now(), now()-interval '3 days', now(), 'routine-3-data-integrity');
+      ('P1','bridge_selftest','age','bridge_selftest:age','{"selftest":true}'::jsonb, now()-interval '2 days', now(), now()-interval '2 days', null, 'routine-3-data-integrity'),
+      ('P1','bridge_selftest','ack','bridge_selftest:ack','{"selftest":true}'::jsonb, now()-interval '2 days', now(), now()-interval '2 days', now(), 'routine-3-data-integrity');
     perform public.promote_aged_alerts_to_incidents();
     select exists(select 1 from public.ops_incident where fingerprint='alert:bridge_selftest:age' and state not in ('resolved','wont_fix')) into v_age_exists;
     select (dispatched_at is not null and acknowledged_at is null and resolved_at is null and dispatched_at < now()-interval '48 hours') into v_unworked_a from public.alert_event where dedup_key='bridge_selftest:age';
@@ -26,12 +23,12 @@ begin
     perform public.promote_aged_alerts_to_incidents();
     select (state='resolved' and exit_reason='source_alert_resolved') into v_age_resolved from public.ops_incident where fingerprint='alert:bridge_selftest:age';
     select exists(select 1 from public.ops_incident where fingerprint='alert:bridge_selftest:ack' and state not in ('resolved','wont_fix')) into v_ack_open;
-    if v_age_exists is not true then v_result := 'FAIL(3)'; end if;
-    if v_unworked_a is not true then v_result := 'FAIL(2a)'; end if;
-    if v_unworked_b is not false then v_result := 'FAIL(2b)'; end if;
-    if v_age_count <> 1 then v_result := 'FAIL(4): '||v_age_count; end if;
-    if v_age_resolved is not true then v_result := 'FAIL(5)'; end if;
-    if v_ack_open is not true then v_result := 'FAIL(6)'; end if;
+    if v_age_exists is not true then v_result := 'FAIL(3): serious aged alert did not become an incident'; end if;
+    if v_unworked_a is not true then v_result := 'FAIL(2a): unacked alert should be in the unworked scope'; end if;
+    if v_unworked_b is not false then v_result := 'FAIL(2b): acknowledged alert should leave the unworked scope'; end if;
+    if v_age_count <> 1 then v_result := 'FAIL(4): duplicate incidents ('||v_age_count||')'; end if;
+    if v_age_resolved is not true then v_result := 'FAIL(5): verified-resolved alert did not close its incident'; end if;
+    if v_ack_open is not true then v_result := 'FAIL(6): unresolved alert incident did not stay open'; end if;
     raise exception 'ROLLBACK_SELFTEST';
   exception when others then
     if sqlerrm <> 'ROLLBACK_SELFTEST' then v_result := 'FAIL: ' || sqlerrm; end if;

@@ -1,12 +1,3 @@
--- Owner directive 2026-09-13: agents work autonomously (per docs/ops/AGENT_AUTHORITY.md's GREEN
--- list) but were colliding — two sessions independently fixed the same district problem the same
--- night, and this repo's existing collision-prevention (scripts/agent-surface.sh) covers exactly
--- ONE file (supabase/functions/agent/index.ts). This generalizes that proven shape (identical to
--- acquire_deploy_lock/release_deploy_lock — insert-or-take-over-if-expired, holder-scoped release)
--- to an arbitrary work AREA: a file, a platform, a feature — anything two sessions might both start
--- fixing without knowing about each other. Advisory, not gate-enforced: an agent claims before
--- starting overlapping work and checks ops_active_claims before starting work that touches
--- something wide (a platform's data, a shared table).
 create table if not exists public.ops_work_claims (
   area        text primary key,
   holder      text not null,
@@ -55,9 +46,6 @@ create or replace view public.ops_active_claims as
   where expires_at > now()
   order by claimed_at;
 
--- Prove the shape in-migration: claim, see it active, a different holder is refused, the real
--- holder can re-claim (extend), a non-holder can't release, the real holder can, and it disappears
--- from the active view.
 do $verify$
 declare
   r1 record; r2 record; r3 record;

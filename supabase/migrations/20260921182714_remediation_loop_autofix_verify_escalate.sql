@@ -1,30 +1,7 @@
--- THE REMEDIATION LOOP: detect -> safely auto-fix -> VERIFY against production -> resolve only if
--- genuinely gone, else ESCALATE. Nothing important sits unfixed forever.
---
--- WHY (owner mandate, 2026-09-21). Detection is strong (~270 detectors); the weak link is that
--- detected problems sit in the queue unhandled (2 of 1,014 alerts ever acknowledged; oldest open 41
--- days). This adds the missing half: a worker that, for alert kinds with a KNOWN SAFE deterministic
--- fix, runs the fix, RE-CHECKS the real production condition, and closes the alert ONLY when the
--- condition is verified gone — and when a fix keeps failing, raises ONE escalation instead of
--- retrying forever or spamming. Judgment-required kinds are deliberately NOT auto-fixed; they keep
--- their owner and their age-escalation (migration 20260921091500).
---
--- SAFETY (all owner rules honoured):
---  * "fix executed" is never success — verify_fn re-reads production; close only if it returns true.
---  * Never auto-fix judgment calls — a kind is auto-fixed ONLY if explicitly registered with a
---    fix_fn in ops_remediation_policy. Default is escalate-only.
---  * Guardrails: per-alert cooldown, per-alert max_attempts, a global per-run cap, and a
---    mon_config kill switch (remediation_enabled). Each fix runs in its own subtransaction so one
---    failure neither aborts the sweep nor leaves a half-applied change.
---  * Idempotent by construction: verify-before-close, and registered fix_fns must be re-runnable.
---  * Every attempt is logged (ops_remediation_attempt) and every sweep heartbeats
---    (ops_remediation_run) so the worker itself is watchable (mon_detect_remediation_worker_stale).
-
--- ── Registry: which kinds have a safe auto-fix, and how to verify it ──────────────────────────
 create table if not exists public.ops_remediation_policy (
   kind             text primary key,
-  fix_fn           text,                       -- public.<fn>(p_dedup text, p_platform text) returns void; NULL = escalate-only
-  verify_fn        text not null,              -- public.<fn>(p_dedup text, p_platform text) returns boolean = condition CLEARED?
+  fix_fn           text,
+  verify_fn        text not null,
   max_attempts     int  not null default 3,
   cooldown_minutes int  not null default 60,
   enabled          boolean not null default true,
@@ -32,11 +9,8 @@ create table if not exists public.ops_remediation_policy (
   registered_at    timestamptz not null default now()
 );
 comment on table public.ops_remediation_policy is
-  'Auto-remediation registry. A kind is auto-fixed ONLY if it has a row here with fix_fn set and '
-  'enabled. fix_fn must be idempotent; verify_fn re-reads production and returns true when the '
-  'original condition is gone. A row with fix_fn NULL is escalate-only (judgment required).';
+  'Auto-remediation registry. A kind is auto-fixed ONLY if it has a row here with fix_fn set and enabled. fix_fn must be idempotent; verify_fn re-reads production and returns true when the original condition is gone. A row with fix_fn NULL is escalate-only (judgment required).';
 
--- ── Attempt log: idempotency, rate-limit source of truth, and the metrics substrate ──────────
 create table if not exists public.ops_remediation_attempt (
   id           bigserial primary key,
   kind         text not null,
@@ -45,13 +19,12 @@ create table if not exists public.ops_remediation_attempt (
   attempted_at timestamptz not null default now(),
   attempt_no   int  not null,
   fix_fn       text,
-  fix_ok       boolean,       -- did the fix command run without error?
-  verified     boolean,       -- did production re-check show the condition cleared?
+  fix_ok       boolean,
+  verified     boolean,
   error        text
 );
 create index if not exists ops_remediation_attempt_dedup on public.ops_remediation_attempt (dedup_key, attempted_at desc);
 
--- ── Worker heartbeat: so the remediation worker is itself watchable ──────────────────────────
 create table if not exists public.ops_remediation_run (
   id             bigserial primary key,
   ran_at         timestamptz not null default now(),
@@ -67,10 +40,6 @@ insert into public.mon_config (key, value, note) values
   ('remediation_max_fixes_per_run', '50', 'Global guardrail: max fix attempts per run_remediation() sweep, so a bad registration cannot storm production.')
 on conflict (key) do nothing;
 
--- ── A real, safe, idempotent registered fix: orphaned scrape_runs ─────────────────────────────
--- mon_reconcile_dangling_scrape_runs() closes runs stuck >12h (killed before end_run()). Idempotent
--- (already-closed rows are untouched). Verify = the detector's own self-heal condition: no dangling
--- run remains for this platform in the 3-48h window.
 create or replace function public.remediate_dangling_scrape_run(p_dedup text, p_platform text)
  returns void language plpgsql security definer set search_path to 'public'
 as $fn$
@@ -93,7 +62,6 @@ insert into public.ops_remediation_policy (kind, fix_fn, verify_fn, max_attempts
    'Closes scrape_runs killed before end_run() (>12h). Idempotent; verify = no dangling run left for the platform.')
 on conflict (kind) do update set fix_fn=excluded.fix_fn, verify_fn=excluded.verify_fn, note=excluded.note;
 
--- ── THE WORKER ────────────────────────────────────────────────────────────────────────────────
 create or replace function public.run_remediation()
  returns jsonb language plpgsql security definer set search_path to 'public'
 as $fn$
@@ -118,10 +86,10 @@ begin
       join public.ops_remediation_policy p on p.kind = ae.kind
      where ae.resolved_at is null
        and p.enabled and p.fix_fn is not null
-     order by ae.severity, ae.created_at   -- worst + oldest first
+     order by ae.severity, ae.created_at
   loop
     v_considered := v_considered + 1;
-    if v_attempted >= v_cap then exit; end if;               -- global guardrail
+    if v_attempted >= v_cap then exit; end if;
     select * into pol from public.ops_remediation_policy where kind = a.kind;
 
     select count(*), max(attempted_at)
@@ -129,21 +97,17 @@ begin
       from public.ops_remediation_attempt
      where dedup_key = a.dedup_key and attempted_at > now() - interval '24 hours';
 
-    -- cooldown (rate limit + idempotency): do not re-attempt within the cooldown window
     if v_last is not null and v_last > now() - make_interval(mins => pol.cooldown_minutes) then
       continue;
     end if;
 
-    -- exhausted: escalate ONCE (deduped per problem), then stop attempting
     if v_attempts_today >= pol.max_attempts then
       v_escalated := v_escalated + public.mon_raise('P0', 'remediation_exhausted', a.platform,
         'remediation_exhausted:' || a.dedup_key,
         jsonb_build_object('failed_kind', a.kind, 'dedup_key', a.dedup_key, 'platform', a.platform,
           'attempts_24h', v_attempts_today, 'max_attempts', pol.max_attempts,
-          'why', 'Auto-fix ran ' || v_attempts_today || ' times in 24h and production still shows the '
-              || 'condition. This is no longer a safe automatic fix; a human/owner routine must take it.',
-          'action', 'Investigate ' || a.kind || ' for ' || coalesce(a.platform,'(none)')
-              || '; see ops_remediation_attempt for the errors. Resolves automatically once verify passes.'));
+          'why', 'Auto-fix ran ' || v_attempts_today || ' times in 24h and production still shows the condition. This is no longer a safe automatic fix; a human/owner routine must take it.',
+          'action', 'Investigate ' || a.kind || ' for ' || coalesce(a.platform,'(none)') || '; see ops_remediation_attempt for the errors. Resolves automatically once verify passes.'));
       continue;
     end if;
 
@@ -151,7 +115,6 @@ begin
     v_attempted := v_attempted + 1;
     v_fix_ok := false; v_err := null;
 
-    -- run the fix in its OWN subtransaction so an error neither aborts the sweep nor half-applies
     begin
       execute format('select public.%I($1,$2)', pol.fix_fn) using a.dedup_key, a.platform;
       v_fix_ok := true;
@@ -159,7 +122,6 @@ begin
       v_fix_ok := false; v_err := sqlerrm;
     end;
 
-    -- VERIFY against production regardless of whether the fix "ran" — executed != fixed
     begin
       execute format('select public.%I($1,$2)', pol.verify_fn) into v_verified using a.dedup_key, a.platform;
     exception when others then
@@ -170,11 +132,10 @@ begin
       values (a.kind, a.dedup_key, a.platform, v_attempt_no, pol.fix_fn, v_fix_ok, coalesce(v_verified,false), v_err);
 
     if coalesce(v_verified, false) then
-      perform public.mon_resolve_key(a.kind, a.dedup_key);                 -- close ONLY when verified gone
+      perform public.mon_resolve_key(a.kind, a.dedup_key);
       perform public.mon_resolve_key('remediation_exhausted', 'remediation_exhausted:' || a.dedup_key);
       v_fixed := v_fixed + 1;
     elsif v_attempt_no >= pol.max_attempts then
-      -- last allowed attempt just failed verification → escalate now, do not wait a full day
       v_escalated := v_escalated + public.mon_raise('P0', 'remediation_exhausted', a.platform,
         'remediation_exhausted:' || a.dedup_key,
         jsonb_build_object('failed_kind', a.kind, 'dedup_key', a.dedup_key, 'platform', a.platform,
@@ -192,9 +153,6 @@ begin
     'verified_fixed', v_fixed, 'escalated', v_escalated);
 end $fn$;
 
--- ── Watchdog: the remediation worker must not silently stop ────────────────────────────────────
--- Runs inside the main detector sweep (itself watched by mon_watchdog_detector_job + the external
--- dead-man switch), so the worker is NOT the sole monitor of itself.
 create or replace function public.mon_detect_remediation_worker_stale()
  returns integer language plpgsql security definer set search_path to 'public'
 as $fn$
@@ -205,9 +163,7 @@ begin
     n := public.mon_raise('P1', 'remediation_worker_stale', 'monitoring',
       'remediation_worker_stale',
       jsonb_build_object('last_ran_at', v_last, 'threshold_hours', 2,
-        'why', 'run_remediation() has not recorded a sweep in over 2h. Auto-fixing is dark: '
-            || 'detected problems with safe fixes are no longer being repaired. Detection and '
-            || 'escalation still run, but the self-healing half is down.',
+        'why', 'run_remediation() has not recorded a sweep in over 2h. Auto-fixing is dark: detected problems with safe fixes are no longer being repaired. Detection and escalation still run, but the self-healing half is down.',
         'action', 'Check the run-remediation cron and mon_config.remediation_enabled.'));
   else
     perform public.mon_resolve_key('remediation_worker_stale', 'remediation_worker_stale');
@@ -215,7 +171,6 @@ begin
   return n;
 end $fn$;
 
--- ── Metrics (area 10): one place to read whether remediation actually works ───────────────────
 create or replace view public.mon_remediation_health as
 select
   (select count(*) from alert_event where resolved_at is null) as open_incidents,
@@ -240,11 +195,6 @@ select
            from (select unnest(incident_known_owners()) as canonical) o) a) as routines_silent,
   (select count(*) from alert_event where kind='alert_flapping' and resolved_at is null) as flapping_open;
 
--- ── Cron: run the worker every 15 minutes; watch the worker every 30 ─────────────────────────
--- The worker-stale detector gets its OWN cron (not the big roster) so it is scheduled and watched
--- independently of the sweep it would otherwise depend on. The cron scheduler itself is watched by
--- mon_detect_cron_scheduler_frozen / mon_detect_cron_health and the external dead-man switch, so no
--- component is the sole monitor of itself.
 select cron.schedule('run-remediation', '*/15 * * * *',
   $$ set statement_timeout to '120s'; select public.run_remediation(); $$);
 select cron.schedule('mon-remediation-worker-stale', '13,43 * * * *',

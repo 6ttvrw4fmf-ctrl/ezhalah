@@ -77,3 +77,10 @@
 20260921180400
 20260921180600
 20260921180700
+# 2026-09-24 — MIRROR REPAIR, not a newly authored pointer. 20260920080113's committed file used to
+# cite ITSELF, but production executed text citing 20260920075900 (a version apply_migration never
+# minted). Drift condition #5 caught the two copies disagreeing; mirroring production's verbatim
+# statements surfaced the pointer that the divergent file had been hiding. Correcting the text is the
+# one repair this file's header rules out: it would manufacture content-parity drift on a file that
+# is clean the moment it matches production. History stays as it ran.
+20260920075900

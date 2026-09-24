@@ -17,13 +17,7 @@
 -- ops_liveness_checking_shortfall() was executed and verified, and the WRAPPER never was. Executing
 -- the thing you actually ship is the rule; a tested component inside an untested caller is untested.
 --
--- The system would have caught it within 30 minutes — AGENTS.md's standing rule is that
--- mon_run_all_detectors()'s `failed` must be EMPTY, and this would have appeared there on the next
--- :29/:59 sweep. That is the safety net working; it is not a substitute for executing the function.
---
 -- Fix: append with an explicit ::text cast so element-append is unambiguous, on both arms.
--- Verified after applying by CALLING the detector: returns 1, and the fleet alert now carries
--- platforms_behind=67 with gathern reading shape=BEHIND, probes_24h=43, required_per_day=7096.
 create or replace function public.mon_detect_liveness_checking_shortfall()
 returns integer
 language plpgsql

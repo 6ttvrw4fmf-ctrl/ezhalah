@@ -1,27 +1,5 @@
 -- AN UNWORKED ALERT QUEUE MUST GET LOUDER THE LONGER IT ROTS -- BUT AS ONE SIGNAL, NOT EIGHT.
---
--- WHY (owner audit, 2026-09-21). mon_detect_alert_queue_unworked() already names each routine that
--- is not working its queue (P1, or P0 if that owner's batch contains a P0). But it had NO sense of
--- AGE: an owner whose oldest unacked alert was 48 hours old and one whose oldest was 41 DAYS old
--- produced the identical P1. Measured 2026-09-21: EIGHT owners have unworked queues, oldest ranging
--- 14 to 41 days; 108 open alerts are older than 7 days; system-wide, 2 of 1,014 alerts have ever
--- been acknowledged. Detection is excellent; remediation is the weak link, and the one lever meant
--- to force remediation could not tell 41-day neglect from a fresh miss.
---
--- WHY A ROLL-UP, NOT A PER-OWNER RATCHET. The obvious fix -- promote each stale owner's alert to P0
--- -- would have raised EIGHT P0s at once, because the whole queue is chronic. Eight P0s is not
--- triage; it is P0 inflation, and "if everything is P0, nothing is" is exactly how a breaker stops
--- being trusted. The true finding is not "routine-3 is behind"; it is "the remediation layer is
--- failing system-wide." So the per-owner alerts stay P1 (now carrying each owner's oldest-age for
--- triage), and a SINGLE systemic P0 fires when any owner's backlog is chronically old, carrying the
--- full per-owner breakdown. One unmissable signal, self-healing when the oldest falls back under the
--- threshold.
---
--- NOTE (owner action, surfaced not fixed here): a P0 still only reaches GitHub issues until
--- mon_config.alert_webhook_url is set. This ratchet makes rot loud inside the system; a human is
--- paged only once that webhook (and mon_config.deadman_ping_url) are configured -- both are null today.
---
--- Detect-only: writes to alert_event via mon_raise/mon_resolve_key, never to a listing or an index.
+-- (full rationale in supabase/migrations/20260921091500_unworked_alert_queue_escalates_with_age.sql)
 
 insert into public.mon_config (key, value, note) values
   ('alert_queue_escalate_days', '14',
@@ -89,7 +67,6 @@ begin
     end if;
   end loop;
 
-  -- Self-heal per owner, across every owner that can exist.
   perform public.mon_resolve_key('alert_queue_unworked', 'alert_queue_unworked:' || o)
     from unnest(c_owners) as o
    where not exists (
@@ -99,11 +76,8 @@ begin
         and a.acknowledged_at is null
         and a.dispatched_at < now() - c_grace);
 
-  -- Retire the pre-attribution key so it cannot sit open forever as a zombie.
   perform public.mon_resolve_key('alert_queue_unworked', 'alert_queue_unworked:all');
 
-  -- THE SINGLE SYSTEMIC ESCALATION. One P0 when any owner's backlog is chronically old; it carries
-  -- the whole breakdown so it is actionable on its own. Self-heals when nothing is chronic anymore.
   if v_chronic > 0 then
     n := n + public.mon_raise('P0', 'alert_queue_unworked', null,
       'alert_queue_unworked:__systemic__',

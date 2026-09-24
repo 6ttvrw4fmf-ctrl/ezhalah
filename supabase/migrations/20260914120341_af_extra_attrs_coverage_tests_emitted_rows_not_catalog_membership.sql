@@ -12,11 +12,8 @@
 -- detector that runs twice an hour, and it replaces a whole-view text search that was never cheap
 -- either.
 --
--- This remains a REPAIR, not a silencing. Mutation-proven on production inside a rolled-back
--- transaction: with listing_extra_attrs rewritten to stop emitting rows for a real platform, the
--- helper named it and mon_af_new_listing_readiness() raised P1 af_new_listing_unmapped_platform;
--- after rollback the helper returned (none) and the detector resolved the alert. The false P1
--- alert_event 2705 is now closed on production.
+-- This remains a REPAIR, not a silencing: it still names a genuinely uncovered platform, proven by
+-- the mutation below.
 create or replace function public.af_extra_attrs_uncovered_tables()
 returns table(source_table text)
 language sql
