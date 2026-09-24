@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from scrapers.common import http_liveness  # noqa: E402
 from scrapers.sakani import run as R  # noqa: E402
+from curl_cffi import requests as cc  # noqa: E402
 
 # --- offline stand-ins for the only two DB-backed helpers -------------------------------------
 _CATALOG = {"الدمام": (32, 4), "الرياض": (1, 1), "خميس مشيط": (53, 6)}
@@ -458,7 +459,6 @@ def test_fetch_json_treats_a_challenge_as_no_answer_and_enumeration_fails_closed
     assert R.fetch_json(s, R.SEARCH, tries=3) is None
     assert len(s.calls) == 3
     import pytest
-from curl_cffi import requests as cc
     with pytest.raises(RuntimeError):
         R.enumerate_rent(_Session([_CHALLENGE]))
     # a real answer after one challenge is read normally
