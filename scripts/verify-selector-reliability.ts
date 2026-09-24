@@ -48,8 +48,21 @@ check('district onFocus with existing text runs the match immediately (cohort-ty
 //    suggestion list is never an invisible box again. ──
 check('city dropdown gate includes the zero-state branch', /<DropdownReveal visible=\{cityFocus && \(citySuggestions\.length > 0 \|\| cityZeroRow != null\)\}>/.test(indexSrc));
 check('district dropdown gate includes the zero-state branch', /<DropdownReveal visible=\{citySelected != null && districtFocus && \(districtSuggestions\.length > 0 \|\| districtZeroRow != null\)\}>/.test(indexSrc));
-check('zero-row derives loading/error from the pool status, empty only when settled', /cityStatus !== 'ready' \? cityStatus/.test(indexSrc) && /districtStatus !== 'ready' \? districtStatus/.test(indexSrc));
-check('English typing keeps its OWN message path (zero-row excluded on latin input)', /citySuggestions\.length > 0 \|\| cityLatin \? null/.test(indexSrc) && /districtSuggestions\.length > 0 \|\| districtLatin \? null/.test(indexSrc));
+// RE-POINTED 2026-09-23 (routine #8, ops_incident #648). Both dropdowns now derive their zero-row
+// through ONE shared `zeroRowFor`, so the two orderings cannot drift apart — and the STATUS test now
+// runs BEFORE the length test, because a non-empty list is not evidence that THIS cohort has loaded:
+// nothing clears the list when the pool key changes, so rows already on screen belong to the cohort
+// the user left. Observed on production that day, فيلا selected with its pool still loading: six
+// city rows with the previous cohort's counts, no loading row, no error row. Both assertions below
+// are unchanged in substance and now also pin that both call sites really go through the one rule.
+// (verify-suggestion-writes-carry-their-cohort.ts §D EXECUTES the predicate and mutation-proves it.)
+check('zero-row derives loading/error from the pool status, empty only when settled',
+  /:\s*status !== 'ready' \? status/.test(indexSrc)
+  && /const cityZeroRow = zeroRowFor\(cityLatin, cityStatus, citySuggestions\.length,/.test(indexSrc)
+  && /zeroRowFor\(districtLatin, districtStatus, districtSuggestions\.length,/.test(indexSrc));
+check('English typing keeps its OWN message path (zero-row excluded on latin input)',
+  /\n    latin \? null\n/.test(indexSrc)
+  && /zeroRowFor\(cityLatin,/.test(indexSrc) && /zeroRowFor\(districtLatin,/.test(indexSrc));
 check('the error row taps into a real retry (re-ensure, box kept open via refocus)', /const retryCityPool = \(\) => \{\s*clearBlurTimer\(cityBlurTimer\);\s*cityRef\.current\?\.focus\(\);/.test(indexSrc) && /const retryDistrictPool = \(\) => \{/.test(indexSrc) && /onPress=\{retryCityPool\}/.test(indexSrc) && /onPress=\{retryDistrictPool\}/.test(indexSrc));
 
 // locations.ts must EXPORT the pool status (keep the silent-[] catch, but record what happened).
