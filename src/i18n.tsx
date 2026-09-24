@@ -704,6 +704,13 @@ const AR: Record<string, string> = {
   // still true; only the question is dropped, because there is no button on screen to answer it with.
   'I showed you the first {shown} of {total} matching listings.': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق.',
   'I showed you the first {n} listings.': 'عرضت لك أول {n} إعلانات.',
+  // …and the CLOSED-CHAT variants of the same pair (ops_incident #598). Same counts, no invitation
+  // to a button that does not exist — but the chat is over, so the one path that IS open is named,
+  // in the owner's own words from the two terminal notes above.
+  'I showed you the first {shown} of {total} matching listings. For a new search, open the menu and choose Search.':
+    'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
+  'I showed you the first {n} listings. For a new search, open the menu and choose Search.':
+    'عرضت لك أول {n} إعلانات. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
   // …and the narrow-only pair: «عرض المزيد» is not rendered but «خلّنا نحدد الطلب أكثر» is, so the
   // sentence invites exactly the one button that exists.
   'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أساعدك توصل لنتائج أدق؟',
