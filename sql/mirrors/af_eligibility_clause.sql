@@ -1,4 +1,13 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-09-24 (migration 20260924182710_af_tables_cap_admits_the_thirty_five_platform_batch):
+--   CHANGED — one line: the p_tables cardinality cap 200 → 500. The 2026-09-24 batch took the
+--   searchable scope to 207 tables and every scoped surface answered an honest zero (the cap
+--   fails CLOSED by design); rebuild_af_filter_rpcs() re-rendered the six templated RPCs.
+--   Body below is production's text VERBATIM (fetched base64 from pg_get_functiondef after
+--   apply — format(%L) re-quotes the literal, so the previous body plus the one edit is NOT
+--   byte-identical to it). Recorded md5 of pg_get_functiondef: f195840b6f1812da87ab6951b4126259
+--   (length 9,458; the previous text hashed 47feed9ce3a08e743c44a7fb978f4278, 9,452).
+--
 --
 -- Re-verified 2026-09-13 (AF + Trending data-integrity daily run): UNCHANGED — and, for the second
 --   time in seven days, a MENTION rather than a redefinition. Migration 20260913111514 edits
@@ -136,15 +145,6 @@
 --   result verified to match production's md5(pg_get_functiondef) exactly before being written here.
 -- Verified byte-exact against the 2026-09-02 rolled-back dry run; md5 of everything below this header block: 178deacbfa50de38e6b5a18e09bc737b
 --   (previous live value 681da577d8e10df55e30c345d284e139 through 2026-08-31; changes ONLY when 20260902220100 is applied).
---
--- Re-verified 2026-09-24 (migration 20260924182710_af_tables_cap_admits_the_thirty_five_platform_batch):
---   CHANGED — one line: the p_tables cardinality cap 200 → 500. The 2026-09-24 batch took the
---   searchable scope to 207 tables and every scoped surface answered an honest zero (the cap
---   fails CLOSED by design); rebuild_af_filter_rpcs() re-rendered the six templated RPCs.
---   Body below is production's text VERBATIM (fetched base64 from pg_get_functiondef after
---   apply — format(%L) re-quotes the literal, so the previous body plus the one edit is NOT
---   byte-identical to it): md5(pg_get_functiondef) = f195840b6f1812da87ab6951b4126259,
---   length 9,458 (was 47feed9ce3a08e743c44a7fb978f4278, 9,452).
 --
 CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
