@@ -441,6 +441,7 @@ def _flush_alive(tbl: str, ids: list[int], now_iso: str) -> None:
         if chunk:
             db._execute(
                 db.sb().table(tbl).update({"last_seen_at": now_iso, "missing_count": 0,
+                                           "last_liveness_probe_at": now_iso,
                                            **direct_alive_patch(now_iso=now_iso)}).in_("id", chunk),
                 what=f"{tbl}.touch_alive",
             )
@@ -788,7 +789,10 @@ def run_enum_strike(args) -> int:
             if args.dry_run or not ids:
                 continue
             for i in range(0, len(ids), 200):
-                db._execute(db.sb().table(tbl).update({"missing_count": mc + 1}).in_("id", ids[i:i + 200]),
+                # We LOOKED, whatever the verdict — see migration 20260924. Not evidence of life.
+                db._execute(db.sb().table(tbl).update(
+                    {"missing_count": mc + 1,
+                     "last_liveness_probe_at": datetime.now(timezone.utc).isoformat()}).in_("id", ids[i:i + 200]),
                             what=f"{tbl}.enum_strike")
     print(f"  strikes (unseen by enum): " +
           ", ".join(f"mc{mc}→{mc+1}: {n}" for mc, n in sorted(struck.items())), flush=True)
@@ -879,7 +883,9 @@ def run_enum_strike(args) -> int:
                 _flush_alive(tbl, ids, now_iso)          # missing_count=0 + fresh last_seen
             for tbl, ids in dead_ids.items():
                 for i in range(0, len(ids), 200):
-                    db._execute(db.sb().table(tbl).update({"active": False}).in_("id", ids[i:i + 200]),
+                    db._execute(db.sb().table(tbl).update(
+                        {"active": False,
+                         "last_liveness_probe_at": datetime.now(timezone.utc).isoformat()}).in_("id", ids[i:i + 200]),
                                 what=f"{tbl}.enum_kill")
                 killed += len(ids)
 
