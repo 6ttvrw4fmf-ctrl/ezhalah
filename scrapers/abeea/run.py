@@ -785,9 +785,15 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str],
     including a source that contradicts itself — HOLDS. It cannot mask a real sale either: when the
     remaining live twin also flips to Sold/Rented, no live sighting exists that crawl and the pin
     applies normally."""
-    sold_pin.pin_source_confirmed_gone(table, ad_numbers,
-                                       oracle="abeea.sold_pin.property_status",
-                                       live_ad_numbers=live_ad_numbers)
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers,
+        oracle="abeea.sold_pin.property_status",
+        live_ad_numbers=live_ad_numbers,
+        # `live_ad_numbers` already IS {ad_number for row in this crawl}, so abeea needs no
+        # extra plumbing: the set it computes for the contradictory-source hold is exactly
+        # the seen-set the reversal half wants.
+        seen_ad_numbers=sorted(live_ad_numbers or ()),
+    )
 
 
 # ── Main ────────────────────────────────────────────────────────────────────────
@@ -856,10 +862,8 @@ def main() -> int:
         # an ad_number upserted as available THIS crawl must not then be pinned by its twin.
         live_res = {r["ad_number"] for r in res}
         live_com = {r["ad_number"] for r in com}
-        if sold_res:
-            _pin_sold_inactive("abeea_residential_listings", sold_res, live_res)
-        if sold_com:
-            _pin_sold_inactive("abeea_commercial_listings", sold_com, live_com)
+        _pin_sold_inactive("abeea_residential_listings", sold_res, live_res)
+        _pin_sold_inactive("abeea_commercial_listings", sold_com, live_com)
 
         if args.limit:
             print(f"✓ Abeea VALIDATION: {len(res)} residential + {len(com)} commercial upserted "
