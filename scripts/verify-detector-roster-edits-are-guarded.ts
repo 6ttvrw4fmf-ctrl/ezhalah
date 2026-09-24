@@ -103,6 +103,17 @@ const GRANDFATHERED = new Set([
   // Drift mirror must stay byte-identical; the NEXT roster edit still must use the
   // pg_get_functiondef needle-edit.
   '20260911214754_remal_native_location_gets_a_detector.sql',
+  // 2026-09-24: miss #9 — same shape as #8. A concurrent session applied the city-duplicate
+  // orphaned-districts detector registration straight to prod at 00:01 as a wholesale roster paste,
+  // and committed the guarded needle-edit version instead; drift condition #5 caught the two copies
+  // disagreeing and the verbatim mirror (md5 a077b26d835acfbc0180dbdfb18b15ca) is what production ran.
+  // LIVE ROSTER VERIFIED INTACT before grandfathering: mon_detect_orphaned_detectors() = 0, 231
+  // detectors in the live mon_run_all_detectors body, the newly registered
+  // mon_detect_city_duplicate_orphaned_districts among them, and zero orphan/roster alerts open (the
+  // three matching 'orphan' are that detector's OWN findings plus one orphan_after_delete).
+  // Drift mirror must stay byte-identical; the NEXT roster edit still must use the
+  // pg_get_functiondef needle-edit.
+  '20260924000125_register_city_duplicate_orphaned_districts_detector.sql',
 ]);
 
 // Every detector the 2026-08-10 repair put back. Pinned so a future revert of that migration, or a
