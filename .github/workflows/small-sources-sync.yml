@@ -217,7 +217,7 @@ jobs:
           # listings, and the sweep deliberately re-checks the whole id range (skipping ids would miss
           # reactivated ads). So we cut its bandwidth by cadence instead: every_n_days=2 (owner 2026-07-07).
           # (tmo+cadence restored 2026-07-16 — PR #77 accidentally dropped both overrides.)
-          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150, every_n_days: 2 }
+          - { source: souq24,     cmd: "python -m scrapers.souq24.run --type all", tmo: 150, every_n_days: 2, proxy: true }
           # NOTE: toor is NOT here. RETIRED 2026-07-06 (owner-approved, commit d5ca9d6).
           # THE ORIGINAL REASON (IP-block: every detail fetch exc:Timeout) IS FIXED — re-probed
           # 2026-09-19, sitemap + details all return HTTP 200 from a clean egress. It stays out for
@@ -340,26 +340,35 @@ jobs:
           #
           # Only sources with `proxy: true` receive it. NOTHING currently sets it.
           #
-          # souq24 CAME OFF IT 2026-09-18, and the note that kept it there was wrong on its own
-          # terms. It read "24.com.sa's Cloudflare serves datacenter IPs a listing-less shell".
-          # Measured against the live host that same day: there is no Cloudflare. The response
-          # headers are `Server: nginx` with ZERO Cloudflare fingerprints (no cf-ray, no cf-cache
-          # -- it is a plain Laravel/nginx app), and /properties answers a direct request with
-          # HTTP 200, 161 KB and 18 real /<id>/<slug> listing links.
+          # souq24 CAME OFF IT 2026-09-18, on a note that read "24.com.sa's Cloudflare serves
+          # datacenter IPs a listing-less shell" and was wrong on its own terms that day: there was
+          # no Cloudflare (`Server: nginx`, zero cf-ray/cf-cache), and /properties answered DIRECT
+          # with HTTP 200, 161 KB, 18 real /<id>/<slug> links. Meanwhile the proxy hop measured a
+          # failure for exactly this client shape (wasalt-proxy-diagnostic.yml, same day: the
+          # CONNECT tunnel opened fine but curl_cffi impersonating chrome124 -- precisely what
+          # scrapers/souq24/run.py uses -- TIMED OUT at 15,002 ms). So the proxy came off, with an
+          # explicit test written down for what would put it back: "if souq24 now fails DIRECT with
+          # a REFUSAL (403, connection reset, or a listing-less shell) ... put `proxy: true` back
+          # on. A timeout is not a refusal."
           #
-          # Meanwhile the proxy hop is a measured failure for exactly this client shape.
-          # wasalt-proxy-diagnostic.yml, same proxy, same day: the CONNECT tunnel opens fine
-          # (HTTP/1.1 200 OK in 757 ms) and then curl_cffi impersonating chrome124 -- which is
-          # precisely what scrapers/souq24/run.py uses -- TIMES OUT at 15,002 ms, while the same
-          # proxy with a NON-impersonated client returns a real response in 1,737 ms. So a
-          # chrome-shaped TLS handshake through this proxy hangs, and souq24 sends one on every
-          # browse page and every id probe. That is the "browse harvest incomplete: prune
-          # withheld" + 0-row run it has been recording.
+          # `proxy: true` IS BACK ON (2026-09-24, daily engineer) — souq24 met exactly that test.
+          # scrapers/souq24/run.py used to swallow a page's status/exception once retries were
+          # exhausted (fixed in #3862, same day): harvest_ids() read `.text` regardless of
+          # `.status_code`, so a WAF/soft-block response served without ever raising was invisible.
+          # With that fix landed, a DIRECT dispatch (workflow run 36017619031) recorded:
           #
-          # This is the same shape as alta/remal/shmoualshmal below: a stated block that is not a
-          # block, hiding a proxy stall. Same test applies -- if souq24 now fails DIRECT with a
-          # REFUSAL (403, connection reset, or a listing-less shell), the old note was right after
-          # all and `proxy: true` goes back on. A timeout is not a refusal.
+          #   harvest: 23/23 browse pages in 2.0s (0 failed, 8 workers, 15s/page) -> 0 seed ids
+          #   fetch failures: http_200_zero_ids_all_pages=1
+          #
+          # Every page answered 200 with no transport failure and no bad status — not a timeout,
+          # not a 403 — and extracted zero listing ids from all 23 pages in 2 seconds flat. That IS
+          # "a listing-less shell": a clean, fast, empty response, the exact positive case the
+          # 09-18 note's own test named as sufficient without also requiring a refusal. This had
+          # been running DIRECT and silently 0-row since 09-20 (silent_scraper_death P0, issue
+          # #3742) with no way to tell a block from markup drift until the diagnostic above
+          # existed. If the next proxied run also comes back 0 seed ids, the block is not proxy-
+          # shaped after all and this reasoning needs revisiting — do not treat `proxy: true` as a
+          # permanent fix, only as the next measurement.
           #
           # WHY THE OTHERS WERE TAKEN OFF IT. Measured 2026-09-18: alta, remal and shmoualshmal all
           # answer a DIRECT request in 1-2s (alta.com.sa 0.97s, remalre.com 1.6s,
