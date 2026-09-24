@@ -29,11 +29,14 @@ jobs:
         table:
           - aqar_residential_listings
           - aqar_commercial_listings
-        # 16 ROW-COUNT-balanced buckets per table → ~86k/16 ≈ 5.4k listings each ≈ 60-80 min/shard,
-        # comfortably inside timeout-minutes: 120. Balanced by row count, NOT by id range: aqar ids
-        # are dense at the low end, so the old geometric split handed shard 0 ~81% of the rows and
-        # it was timeout-killed every day (fix 2026-07-16, bug B1 — see shard_row_window() in
-        # scrapers/aqar/liveness.py). Each shard is its own GitHub machine/IP with its own throttle.
+        # 16 buckets per table, split by `id % 16` → ~5.8k listings each ≈ 30-40 min/shard,
+        # comfortably inside timeout-minutes: 120. Each shard is its own GitHub machine/IP with its
+        # own throttle. The split is a MODULO, not an id range and not a row-offset window: aqar ids
+        # are dense at the low end, so a geometric split handed shard 0 ~81% of the rows and it was
+        # timeout-killed every day (2026-07-16); the row-offset window that replaced it was balanced
+        # but asked sixteen runners to agree on shared boundaries computed from sixteen different
+        # snapshots, and the rows between two disagreeing boundaries went 51 days unprobed
+        # (2026-09-24). See scrapers/common/shard_partition.py for both measurements.
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@v4
