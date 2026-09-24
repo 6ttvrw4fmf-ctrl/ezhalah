@@ -197,7 +197,11 @@ _PROXIES = {"http": _PROXY, "https": _PROXY} if _PROXY else None
 
 
 def session() -> cc.Session:
-    s = cc.Session(impersonate="chrome", proxies=_PROXIES)   # impersonate OWNS the User-Agent — never set one
+    # Through the Saudi residential proxy the gateway RESETS a post-quantum ClientHello (the fleet's
+    # measured gotcha, docs/ops/VERIFYING_PRODUCTION.md; wasalt pins chrome124 for the same reason):
+    # the 2026-09-24 re-crawl through the proxy with the newest «chrome» alias died as an SSLError /
+    # a 90 s connect timeout. Pre-PQ chrome124 when proxied; the site's own measured profile otherwise.
+    s = cc.Session(impersonate="chrome124" if _PROXY else "chrome", proxies=_PROXIES)   # impersonate OWNS the User-Agent — never set one
     s.headers.update({"Accept": "application/json", "Accept-Language": "ar"})
     return s
 
