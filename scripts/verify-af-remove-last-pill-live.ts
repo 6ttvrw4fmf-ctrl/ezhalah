@@ -600,6 +600,11 @@ try {
   }
   check('the AF offer «خلّنا نحدد الطلب أكثر» is present on the baseline turn', opened,
     opened ? `waited ${lastOffer && lastOffer.opened ? lastOffer.waitedMs : 0}ms`
+           // 'intercepted' is a HARNESS verdict, never an AF one: the offer WAS on screen and the
+           // reflowing conversation took the click (scripts/lib/afOfferLive.ts, ops_incident #340).
+           : lastOffer && !lastOffer.opened && lastOffer.reason === 'intercepted'
+           ? `the offer was present but ${lastOffer.attempts} click(s) landed on «${lastOffer.hit}» ` +
+             `within ${lastOffer.waitedMs}ms — a harness miss, not an AF verdict`
            : `the results turn landed but NO offer rendered on it within ${lastOffer?.waitedMs}ms ` +
              `(N0=${N0} is above INTERVIEW_STOP_AT, so R4.3/R11.1 cannot explain the absence)`);
   if (!opened) throw new Error('offer absent on the baseline turn');

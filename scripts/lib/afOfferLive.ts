@@ -38,6 +38,7 @@
 // has already paid that price once (see HAS_TURN_SRC).
 
 import { resultsSentenceAtStartSource } from '../../e2e/lib/resultsSentence.mjs';
+import { clickWitnessed, isStable, MAX_CLICK_ATTEMPTS } from './liveClick.ts';
 
 /** Find the smallest visible leaf whose trimmed innerText is exactly `txt`, scroll it into view
  *  inside its own scroll container, and hand back a clickable viewport point. Runs in the page. */
@@ -93,13 +94,29 @@ const HEADLINE_AT_START = resultsSentenceAtStartSource();
 
 export const AF_OFFER_CTA = 'خلّنا نحدد الطلب أكثر';
 
+/** The app's own testID on the offer (src/app/agent.tsx:4103) — the join key, never the label. */
+export const AF_OFFER_TESTID = 'results-narrow';
+
+// THE CLICK IS WITNESSED, NOT ASSUMED — the whole rule, and why, lives in scripts/lib/liveClick.ts.
+// In one line: `CLICK_LEAF_SRC` measures the CTA in one round trip and the mouse clicks in the next,
+// and the agent conversation reflows in between. Measured on production 2026-09-24
+// (الرياض/شراء/شقة desktop, fleet healthy): 11 of 24 taps landed on `card-listing-11678443`, and
+// every one was reported as a broken Advanced Filter — `ops_incident` #340.
+
+/** How many polls the CTA must be present for before "it never held still" outranks "it was not
+ *  really there" — a single flicker must never mask a real absence. */
+const CTA_PERSISTENT_POLLS = 3;
+
 export type OfferResult =
-  /** The CTA was found and clicked. */
-  | { opened: true; waitedMs: number }
+  /** The CTA was found and clicked — and the click was OBSERVED to land on it. */
+  | { opened: true; waitedMs: number; attempts: number }
   /** No CTA, but the agent never produced a results turn either — NOT a verdict about AF. */
   | { opened: false; reason: 'no-turn'; waitedMs: number }
   /** The turn landed and stayed put, and no CTA ever rendered on it — a real absence. */
-  | { opened: false; reason: 'absent'; waitedMs: number };
+  | { opened: false; reason: 'absent'; waitedMs: number }
+  /** The CTA was there every time and every click landed on something else — a HARNESS failure,
+   *  never a statement about Advanced Filter. `hit` names what took the click instead. */
+  | { opened: false; reason: 'intercepted'; waitedMs: number; attempts: number; hit: string };
 
 /**
  * Wait for the Advanced Filter offer and click it.
@@ -107,6 +124,11 @@ export type OfferResult =
  * `timeoutMs` defaults to 60s because the CTA sits behind the agent's own LLM turn: the CI run that
  * motivated this file spent ~40s on the reply alone. It still fails in bounded time — the point is
  * a budget set by what the dependency actually costs, not by what it costs on a good day.
+ *
+ * A click is only reported as `opened` once the page itself has confirmed the CTA took it. A click
+ * that missed is retried inside the same budget, and a budget that expires with the CTA present and
+ * every click landing elsewhere returns `'intercepted'` — a harness verdict, so a caller can never
+ * again turn a missed tap into an accusation against Advanced Filter.
  */
 export async function openAfOffer(
   page: any,
@@ -116,17 +138,45 @@ export async function openAfOffer(
   const pollMs = opts.pollMs ?? 400;
   const t0 = Date.now();
   let sawTurn = false;
+  let ctaSeen = 0;
+  let attempts = 0;
+  let lastHit = '(the offer never held still long enough to be clicked)';
+  let prev: { x: number; y: number } | null = null;
 
-  while (Date.now() - t0 < timeoutMs) {
+  while (Date.now() - t0 < timeoutMs && attempts < MAX_CLICK_ATTEMPTS) {
     // Re-scroll EVERY iteration: the conversation is still growing while we poll.
     await page.evaluate(SCROLL_BOTTOM_SRC).catch(() => {});
     if (!sawTurn) sawTurn = await page.evaluate(HAS_TURN_SRC, HEADLINE_AT_START).catch(() => false);
     const box = await page.evaluate(CLICK_LEAF_SRC, AF_OFFER_CTA).catch(() => null);
     if (box) {
-      await page.mouse.click(box.x, box.y);
-      return { opened: true, waitedMs: Date.now() - t0 };
+      ctaSeen++;
+      // ONLY CLICK A POINT THAT HAS HELD STILL. The measurement and the click are two round trips;
+      // requiring the same coordinates twice in a row is what makes the point still true when the
+      // mouse gets there. A page mid-reveal simply does not qualify yet, and we poll again — this is
+      // the cheap half of the fix, and the witness below is the half that cannot be fooled.
+      if (isStable(prev, box)) {
+        attempts++;
+        const w = await clickWitnessed(page, box, { testid: AF_OFFER_TESTID, text: AF_OFFER_CTA });
+        if (w.landed) return { opened: true, waitedMs: Date.now() - t0, attempts };
+        // The page moved under the pointer anyway. Say what took the click, let the conversation
+        // settle, and measure again — never report a tap that the CTA did not receive.
+        lastHit = w.hit;
+        prev = null;                            // re-establish stability before spending another click
+        // A miss means the turn is still moving. Let the reveal cascade breathe rather than spending
+        // the bounded attempts inside one second — the six of them should cover the settle, not race it.
+        await page.waitForTimeout(Math.max(pollMs, 1200));
+      } else {
+        prev = box;
+      }
+    } else {
+      prev = null;
     }
     await page.waitForTimeout(pollMs);
+  }
+  // A CTA that was PERSISTENTLY on screen and never clickable is a harness verdict; a one-frame
+  // flicker is not, and must not be allowed to downgrade a genuine absence into a NOT-VERIFIED.
+  if (attempts > 0 || ctaSeen >= CTA_PERSISTENT_POLLS) {
+    return { opened: false, reason: 'intercepted', waitedMs: Date.now() - t0, attempts, hit: lastHit };
   }
   return { opened: false, reason: sawTurn ? 'absent' : 'no-turn', waitedMs: Date.now() - t0 };
 }
