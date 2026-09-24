@@ -9,6 +9,7 @@
 // duplicate, not just counts.
 import { chromium } from 'playwright';
 import { openAfOffer } from './lib/afOfferLive.ts';
+import { pairCountForSelection } from './lib/afCountPairing.ts';
 
 // ONE BUDGET FOR "WAIT FOR THE AGENT'S NEXT TURN", not three magic numbers (2026-09-03).
 // Every wait below is behind the same dependency: a PAID LLM turn whose latency is variable. This
@@ -198,6 +199,9 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'ar-SA', viewport });
   const page = await ctx.newPage();
   let lastCountBody = null, lastCountResp = null, lastSearchBody = null, lastSearchResp = null;
+  const countPairs: Array<{ body: any; resp: any[] }> = [];
+  let countsBeforeTap = 0;
+  let tappedKey = '';
   // Only accept a WELL-FORMED array response as "the" capture — a transient bad parse (or, per
   // remote.ts's own comments, a secondary diversity-seed call racing the main one) must never
   // silently overwrite a good capture with garbage and poison the total_count read downstream.
@@ -206,7 +210,17 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     if (u.includes('/rpc/apartment_guided_counts_ar') && resp.request().method() === 'POST') {
       try {
         const j = await resp.json();
-        if (Array.isArray(j)) { lastCountBody = JSON.parse(resp.request().postData() || '{}'); lastCountResp = j; }
+        if (Array.isArray(j)) {
+          lastCountBody = JSON.parse(resp.request().postData() || '{}'); lastCountResp = j;
+          // EVERY count call, kept with ITS OWN body. "The last one" stopped being "the card's one"
+          // when primeFooterCounts shipped (2026-09-21): the app now walks the question's options
+          // and prices each with its own apartment_guided_counts_ar, serially, ~680 ms apart — so
+          // after a tap the LAST response is the last PRIMED OPTION, not the selection. Measured
+          // 2026-09-24: card=2,968 (كمطبخ) vs last response 5,488 (عداد ماء مستقل, the final call of
+          // that walk), and card=10,904 vs 385 on the Villa/street-width journey. A count surface is
+          // paired to a card by its REQUEST, never by arrival order (AGENTS.md harness note 3).
+          countPairs.push({ body: lastCountBody, resp: j });
+        }
       } catch {}
     }
     if (u.includes('/rpc/location_search_candidates_ar') && resp.request().method() === 'POST') {
@@ -402,6 +416,8 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
           `the card rendered no [data-testid^="af-option-"] to click (opts=${opts.length}) — refusing to click a selector built from undefined`);
         await ctx.close(); return;
       }
+      tappedKey = testid.replace(/^af-option-/, '');
+      countsBeforeTap = countPairs.length;
       await page.click(`[data-testid="${testid}"]`);
     } else {
       const opts = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="af-option-"]')].map((e) => e.getAttribute('data-testid')));
@@ -410,6 +426,8 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
           `the card rendered no [data-testid^="af-option-"] to click (opts=${opts.length}) — refusing to click a selector built from undefined`);
         await ctx.close(); return;
       }
+      tappedKey = String(opts[0]).replace(/^af-option-/, '');
+      countsBeforeTap = countPairs.length;
       await page.click(`[data-testid="${opts[0]}"]`); // first option — deterministic, whatever the question is
     }
     // `s.chip !== baselineChip` alone is satisfied BY the pending window's null (fix 2026-08-26), so
@@ -424,9 +442,30 @@ async function runJourney(name, { viewport = { width: 1440, height: 900 }, deal 
     // passed. Selecting an answer fires exactly one count call (fetchGuidedLiveCount → cnt_selected);
     // the last captured response must be that call, and its cnt_selected must be the chip.
     await page.waitForTimeout(600);
-    check(`${name}: the card's count IS the count RPC's cnt_selected`,
-      lastCountResp?.[0]?.cnt_selected != null && Number(lastCountResp[0].cnt_selected) === afterSelect.chip,
-      `card=${afterSelect.chip} rpc cnt_selected=${lastCountResp?.[0]?.cnt_selected}`);
+    // PAIRED BY REQUEST, NOT BY ARRIVAL ORDER — AND OVER THE WHOLE CONVERSATION.
+    //
+    // Two facts about the shipped app that this check used to contradict, both measured on
+    // production 2026-09-24 and both created by primeFooterCounts (2026-09-21):
+    //   1. A tap is followed by a count call PER OPTION, ~680 ms apart, so "the last response" is
+    //      the last PRIMED option — card 2,968 (المطبخ) vs last response 5,488 (عداد ماء مستقل),
+    //      and card 10,904 vs 385 on the Villa/street-width journey. Both were reported FAIL.
+    //   2. A tap fires ZERO count calls of its own: the option was already priced during the search
+    //      wait and settledGuidedCounts remembers it — which is precisely what that walk is for.
+    //      So "the call after the tap" does not exist to be compared with.
+    // The honest assertion is therefore: SOME count call priced this number FOR THE OPTION THE USER
+    // TAPPED. Both halves are needed — the walk prices every option, so the number alone would let a
+    // card showing a different option's count pass. scripts/lib/afCountPairing.ts holds the rule and
+    // scripts/verify-af-count-pairing-is-by-request.ts executes it against the measured walk.
+    await page.waitForTimeout(600);
+    const baseBody = [...countPairs].reverse()
+      .find((p) => Number(p.resp?.[0]?.cnt_selected) === baselineChip)?.body ?? null;
+    const { paired, via } = pairCountForSelection(countPairs, afterSelect.chip, tappedKey, baseBody);
+    check(`${name}: the card's count IS a count RPC's cnt_selected, for the option the user tapped`,
+      paired != null,
+      paired
+        ? `card=${afterSelect.chip} priced by a call carrying «${tappedKey}» (matched ${via})`
+        : `card=${afterSelect.chip} matched NO count call that also carried «${tappedKey}» ` +
+          `(${countPairs.length} count call(s) seen: [${countPairs.map((p) => p.resp?.[0]?.cnt_selected).join(', ')}])`);
     // ARM THE CAPTURE **BEFORE** THE COMMITTING CLICK, never after it (fix 2026-08-28). Confirming
     // the last useful question can end the round on its own and fire the final search inside the
     // 1200 ms below; the reset used to sit after this block, so that search was captured and then
