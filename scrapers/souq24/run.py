@@ -56,6 +56,7 @@ import re
 import sys
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
@@ -113,6 +114,29 @@ _SWEEP_BUDGET_S = int(os.environ.get("SOUQ24_SWEEP_BUDGET_S", "2700"))   # 45 mi
 # Set when the budget is spent. fetch_one() checks it and returns immediately so the remaining
 # queued futures drain in milliseconds instead of each burning its own retry ladder.
 _SWEEP_ABORT = threading.Event()
+
+# Fetch-failure tally (daily engineer, 2026-09-24). Same defect class already fixed for
+# sadin/sanadak/erapulse/abeea: both harvest_ids()'s per-page fetch and fetch_one() read `.text`
+# (or returned None) without ever recording a non-200/non-404 status or a transport exception, so
+# a WAF/proxy block, a 5xx, or a hung TLS handshake reads EXACTLY like "the source genuinely has
+# nothing" — the "0 seed ids" + "browse: N failed" question mark this run had no reason attached
+# to. Threaded callers (ThreadPoolExecutor) share this list, so every append is lock-guarded.
+_fetch_fail_lock = threading.Lock()
+_fetch_fail_reasons: list[str] = []
+
+
+def _record_fetch_failure(reason: str) -> None:
+    with _fetch_fail_lock:
+        _fetch_fail_reasons.append(reason)
+
+
+def fetch_failure_summary() -> str:
+    """Compact 'reason=count' breakdown, most common first. '' when nothing failed."""
+    with _fetch_fail_lock:
+        if not _fetch_fail_reasons:
+            return ""
+        reasons = list(_fetch_fail_reasons)
+    return ", ".join(f"{r}={n}" for r, n in Counter(reasons).most_common(6))
 
 # Arabic property-type word (from realestate_name / heading) → canonical English type.
 TYPE_MAP_AR = {
@@ -458,11 +482,22 @@ def harvest_ids(s: cc.Session) -> tuple[set[int], int, bool]:
             ran_out.set()
             return
         try:
-            b = s.get(u, timeout=_HARVEST_PAGE_TIMEOUT_S).text
-        except Exception:
+            resp = s.get(u, timeout=_HARVEST_PAGE_TIMEOUT_S)
+        except Exception as e:
             with lock:
                 failed += 1
+            _record_fetch_failure(f"transport_{type(e).__name__}")
             return
+        if resp.status_code != 200:
+            # A non-200 must count as failed too — not just a transport exception. Reading `.text`
+            # regardless of status is how a WAF/block page (403/503) used to read as "a page we
+            # visited that just happened to have 0 ids", keeping `complete=True` on a harvest that
+            # never actually saw real content.
+            with lock:
+                failed += 1
+            _record_fetch_failure(f"http_{resp.status_code}")
+            return
+        b = resp.text
         found = re.findall(r"24\.com\.sa/(\d+)/", b)
         with lock:
             visited += 1
@@ -471,6 +506,14 @@ def harvest_ids(s: cc.Session) -> tuple[set[int], int, bool]:
 
     with ThreadPoolExecutor(max_workers=_HARVEST_WORKERS) as ex:
         list(ex.map(one, pages))
+
+    if not ids and failed == 0 and visited == len(pages):
+        # Every page answered 200 and none of them raised, yet nothing was extracted — a
+        # DIFFERENT fact from "every page failed": either the markup/URL scheme changed under us,
+        # or the response body is a listing-less shell served without ever refusing the request
+        # (the exact shape a soft datacenter-IP block takes; see small-sources-sync.yml's souq24
+        # proxy history). Never let this collapse into the same bucket as a hard failure.
+        _record_fetch_failure("http_200_zero_ids_all_pages")
 
     elapsed = time.monotonic() - t0
     mx = max(ids) if ids else 0
@@ -507,10 +550,12 @@ def fetch_one(pid: int) -> Optional[tuple[int, str]]:
         return None
     s = _session()
     url = f"{BASE}/{pid}/x"
+    last_reason = "no_response"
     for attempt in range(3):
         try:
             r = s.get(url, timeout=_SWEEP_TIMEOUT_S, allow_redirects=True)
-        except Exception:
+        except Exception as e:
+            last_reason = f"transport_{type(e).__name__}"
             time.sleep(0.8 * (attempt + 1))
             continue
         if r.status_code == 404:
@@ -520,8 +565,11 @@ def fetch_one(pid: int) -> Optional[tuple[int, str]]:
             m = REALESTATE_NAME_RE.search(body)
             if m and m.group(1).strip():
                 return pid, body
-            return None  # homepage fallback (sold/deleted/expired/out-of-range)
+            return None  # homepage fallback (sold/deleted/expired/out-of-range) — NOT a failure
+        last_reason = f"http_{r.status_code}"
         time.sleep(0.8 * (attempt + 1))
+    # Every attempt either raised or drew a non-200/404 status — a block/error, never silent.
+    _record_fetch_failure(last_reason)
     return None
 
 
@@ -855,12 +903,21 @@ def main() -> int:
         #   - sweep aborted      -> ids we DID intend to visit were abandoned mid-run.
         # Upserts still land either way; only the destructive half is withheld.
         sweep_incomplete = _SWEEP_ABORT.is_set()
+        # Carry the fetch-failure breakdown into the run row either way — it is the difference
+        # between "the source refused/timed out" and "this run just found nothing" and neither
+        # exit path below recorded it before. See harvest_ids()/fetch_one()'s docstrings.
+        fail_summary = fetch_failure_summary()
+        if fail_summary:
+            print(f"  fetch failures: {fail_summary}", flush=True)
         if not harvest_complete or sweep_incomplete:
             which = "browse harvest" if not harvest_complete else "id sweep"
             print(f"⚠ 24 Souq: skipping prune — the {which} was incomplete, so an unseen listing "
                   f"cannot be distinguished from a delisted one", flush=True)
+            notes = f"pruned=0 ({which} incomplete: prune withheld)"
+            if fail_summary:
+                notes += f" | fetch failures: {fail_summary}"
             healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                                 notes=f"pruned=0 ({which} incomplete: prune withheld)",
+                                 notes=notes[:300],
                                  check_tables=["souq24_residential_listings",
                                                "souq24_commercial_listings"])
             return 0 if healthy else 1
@@ -873,7 +930,10 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ 24 Souq: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["souq24_residential_listings", "souq24_commercial_listings"])
+        notes = f"pruned={pruned}"
+        if fail_summary:
+            notes += f" | fetch failures: {fail_summary}"
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=notes[:300], check_tables=["souq24_residential_listings", "souq24_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1
