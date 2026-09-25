@@ -524,3 +524,33 @@ def test_one_street_in_the_street_field_fills_street_width_and_direction():
     two, _, _ = mapped("أرض للبيع في الاتصالات بالمبرز", fields=(("shar-rd", "string", "شارع 25*12"),))
     assert (two["street_width_m"], two["direction"]) == (None, None)
     assert two["additional_info"]["street_width"] == "25*12"
+
+
+# ── direct-alive stamp gate (fleet liveness, 2026-09-25) ─────────────────────────────────────────
+class _Resp:
+    def __init__(self, status, text):
+        self.status_code, self.text = status, text
+
+
+class _Sess:
+    def __init__(self, status, text):
+        self._r = _Resp(status, text)
+
+    def get(self, *_a, **_k):
+        return self._r
+
+
+def test_own_node_flag_is_set_only_on_this_listings_own_page():
+    page = detail_html("شقة للبيع في النزهه")          # carries data-history-node-id="1"
+    assert R.fetch_detail(_Sess(200, page), "1")["_own_node"] is True
+    other = R.fetch_detail(_Sess(200, page), "2")
+    assert other is not None and other["_own_node"] is False, (
+        "another node's page must not be certified as this listing alive")
+    assert R.fetch_detail(_Sess(404, page), "1") is None
+
+
+def test_own_node_flag_agrees_with_the_validated_liveness_signal():
+    page = detail_html("شقة للبيع في النزهه")
+    for nid in ("1", "2"):
+        flag = R.fetch_detail(_Sess(200, page), nid)["_own_node"]
+        assert flag == (R._signal_for(nid)(200, page, False) == "live"), nid

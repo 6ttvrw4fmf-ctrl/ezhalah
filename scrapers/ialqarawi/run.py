@@ -755,6 +755,9 @@ def crawl(limit: int = 0, workers: int = 8) -> tuple[list[dict], list[dict], int
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
+            # map_listing returns a row only after this listing's own page parsed AND its
+            # «رقم العقار» matched the requested id, i.e. a direct, identity-checked read.
+            db.mark_direct_alive(row, oracle="ialqarawi.detail_page.raqm_alaqar")
             (com if cat == "commercial" else res).append(row)
     # A per-page `except` keeps one bad page from killing a 2,641-page crawl, but it must not turn a
     # SYSTEMIC failure into a quiet empty run: a missing catalog key raises KeyError on every single

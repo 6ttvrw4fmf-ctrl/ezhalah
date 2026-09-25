@@ -464,7 +464,14 @@ def sitemap_urls(s: cc.Session) -> list[str]:
         + (f" (last error: {last_err})" if last_err else " (all attempts returned partial bodies)"))
 
 
-def fetch_one(url: str) -> Optional[tuple[str, str]]:
+def _property_seg(u: str) -> Optional[str]:
+    m = re.search(r"/property/([^/?#]+)", u or "")
+    return m.group(1) if m else None
+
+
+def fetch_one(url: str) -> Optional[tuple[str, str, bool]]:
+    """(body, url, live) or None. `live` is True only when the request landed on THIS property's own
+    page and _gone_verdict — the measured oracle verify_gone uses — reads that page as 'live'."""
     s = _session()
     for attempt in range(3):
         try:
@@ -473,7 +480,9 @@ def fetch_one(url: str) -> Optional[tuple[str, str]]:
             time.sleep(1.2 * (attempt + 1))
             continue
         if r.status_code == 200 and "/ar/property/" in str(r.url):
-            return r.text, url
+            own = _property_seg(url) is not None and _property_seg(url) == _property_seg(str(r.url))
+            v = _gone_verdict(r.status_code, r.text, str(r.url)) if own else None
+            return r.text, url, bool(v and v[0] == "live")
         if r.status_code in (429, 502, 503, 504):
             time.sleep(2.0 * (attempt + 1))
             continue
@@ -920,12 +929,14 @@ def main() -> int:
             for result in ex.map(fetch_one, urls):
                 if not result:
                     continue
-                body, u = result
+                body, u, live = result
                 row, cat = map_listing(body, u)
                 if not row:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                if live:
+                    db.mark_direct_alive(row, oracle="raghdan.property_page.RealEstateListing_jsonld")
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 seen += 1

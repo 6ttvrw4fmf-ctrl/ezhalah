@@ -648,6 +648,10 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            # The same measured signal verify_gone uses, run on the page we already fetched: only
+            # its affirmative "live" (canonical id == this ad, status فعال, not sold/auctioned) stamps.
+            if _signal_for(row["ad_number"][len(PREFIX):])(200, page, False) == "live":
+                db.mark_direct_alive(row, oracle="sakan.detail_page.canonical_id_and_status")
             (com if cat == "commercial" else res).append(row)
             if args.delay:
                 time.sleep(args.delay)            # 3,158 pages — be polite

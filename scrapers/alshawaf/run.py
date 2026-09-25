@@ -829,6 +829,9 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
             stats["no_price"] += 1
         if row["price_per_meter"] is not None:
             stats["per_sqm"] += 1
+        if detail:
+            # parse_detail() is non-empty only when /{nid}'s own <article> and wa.me link name nid.
+            db.mark_direct_alive(row, oracle="alshawaf.detail_page.article_nid")
         (com if cat == "commercial" else res).append(row)
     return res, com, stats["seen"], stats
 
