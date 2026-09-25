@@ -327,3 +327,135 @@ class BrowserFetcher:
                 except Exception:
                     pass
         self._ctx = self._browser = self._pw = None
+
+
+# ── HARD PER-CALL DEADLINE (ops_incident #708, 2026-09-25) ─────────────────────────────────────────
+# page.goto() honours _NAV_TIMEOUT_MS, but new_page(), page.content() and page.close() take no
+# timeout at all: a wedged renderer or a dead driver pipe blocks the calling thread forever, and with
+# one browser on one thread that is the whole job. A watchdog THREAD cannot rescue it — Playwright's
+# sync driver is bound to the thread that started it (see liveness._pmap) — so the browser runs in a
+# forked child process and the parent waits on a pipe with a deadline. On expiry the child is
+# SIGKILLed (the Playwright driver sees its stdin close and tears Chromium down), the call returns
+# "no parseable answer" — which every caller already maps to UNKNOWN, never dead — and the next call
+# forks a fresh browser.
+_UNBOUNDED_SLACK_S = 30.0   # per attempt: launch + new_page + content + close, none of them bounded
+
+
+def ladder_budget_s() -> float:
+    """Worst case for one page_data() whose Playwright calls all return: the whole retry ladder."""
+    per_attempt = _NAV_TIMEOUT_MS / 1000 + _CHALLENGE_ROUNDS * _CHALLENGE_WAIT_MS / 1000 + _UNBOUNDED_SLACK_S
+    backoff = sum(_BACKOFF_S * (a + 1) for a in range(_ATTEMPTS - 1))
+    return _ATTEMPTS * per_attempt + backoff
+
+
+def hard_deadline_s() -> float:
+    """Derived from the ladder so raising _ATTEMPTS or a timeout can never make the deadline cut a
+    healthy-but-slow check short; only a genuinely stuck call ever reaches it."""
+    override = float(os.environ.get("WASALT_BROWSER_HARD_DEADLINE_S", "0") or 0)
+    return override if override > 0 else ladder_budget_s() + 60.0
+
+
+_NO_ANSWER: tuple[Optional[dict], Optional[int], int] = (None, None, 0)
+
+
+def _bounded_child(conn, factory) -> None:
+    fetcher = factory() if factory is not None else BrowserFetcher()
+    try:
+        while True:
+            try:
+                url = conn.recv()
+            except EOFError:
+                return
+            if url is None:
+                return
+            try:
+                conn.send(("ok", fetcher.page_data(url)))
+            except Exception as e:
+                conn.send(("error", f"{type(e).__name__}: {str(e)[:300]}"))
+    finally:
+        try:
+            fetcher.close()
+        except Exception:
+            pass
+
+
+class BoundedBrowserFetcher:
+    """BrowserFetcher.page_data() with a hard wall-clock deadline per call. Same contract:
+    (parsed __NEXT_DATA__ | None, status, nbytes); a timeout, a crash or an exception is (None, None, 0)."""
+
+    def __init__(self, factory=None, deadline_s: Optional[float] = None) -> None:
+        self._factory = factory
+        self.deadline_s = deadline_s if deadline_s is not None else hard_deadline_s()
+        self._proc = None
+        self._conn = None
+        self.deadline_kills = 0
+        self.child_failures = 0
+
+    def _start(self) -> None:
+        import multiprocessing as mp
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
+        # fork, not spawn: the parent never starts Playwright itself (only children do), so there is
+        # no driver loop to duplicate, and the child inherits the environment and any test doubles.
+        ctx = mp.get_context("fork")
+        parent_conn, child_conn = ctx.Pipe()
+        proc = ctx.Process(target=_bounded_child, args=(child_conn, self._factory), daemon=True)
+        proc.start()
+        child_conn.close()
+        self._proc, self._conn = proc, parent_conn
+
+    def _discard(self) -> None:
+        proc, conn = self._proc, self._conn
+        self._proc = self._conn = None
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        if proc is not None:
+            try:
+                if proc.is_alive():
+                    proc.kill()
+                proc.join(10)
+            except Exception:
+                pass
+
+    def page_data(self, url: str) -> tuple[Optional[dict], Optional[int], int]:
+        if self._proc is None or not self._proc.is_alive():
+            self._discard()
+            self._start()
+        try:
+            self._conn.send(url)
+            if not self._conn.poll(self.deadline_s):
+                self.deadline_kills += 1
+                print(f"   ⏱ wasalt browser: no answer within {self.deadline_s:.0f}s — killed the "
+                      f"browser process, row counts as no answer (never dead)", flush=True)
+                _record_failure("hard_deadline")
+                self._discard()
+                return _NO_ANSWER
+            kind, payload = self._conn.recv()
+        except (EOFError, OSError) as e:
+            self.child_failures += 1
+            print(f"   ⚠ wasalt browser process died mid-call: {type(e).__name__}", flush=True)
+            _record_failure("browser_process_died")
+            self._discard()
+            return _NO_ANSWER
+        if kind == "ok":
+            return payload
+        # A raise leaves the child's browser in an unknown state; a fresh one is cheaper than a
+        # poisoned one failing every row after it.
+        self.child_failures += 1
+        print(f"   ⚠ wasalt browser raised: {payload}", flush=True)
+        _record_failure("page_data_raised")
+        self._discard()
+        return _NO_ANSWER
+
+    def close(self) -> None:
+        if self._proc is not None and self._conn is not None:
+            try:
+                self._conn.send(None)
+                self._proc.join(30)
+            except Exception:
+                pass
+        self._discard()

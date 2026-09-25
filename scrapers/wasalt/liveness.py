@@ -116,10 +116,19 @@ def _pmap(fn, items, workers: int):
     measured on the AR enricher, 2026-09-18, before the same mistake shipped there (PR #3140).
     A pool of one looks single-threaded and is not.
     """
+    return list(_imap(fn, items, workers))
+
+
+def _imap(fn, items, workers: int):
+    """_pmap, but LAZY — each result is yielded as it is produced. A loop that writes as it goes
+    must use this: over _pmap its body only starts once EVERY row has been checked (ops_incident
+    #708 — 87 minutes of real checks sat in memory, unwritten, and read from outside as a hang)."""
     if workers <= 1:
-        return [fn(x) for x in items]
+        for x in items:
+            yield fn(x)
+        return
     with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-        return list(ex.map(fn, items))
+        yield from ex.map(fn, items)
 
 
 def _note_exc(where: str, exc: BaseException) -> None:
@@ -155,8 +164,12 @@ def _browser() -> Any:
     global _BROWSER
     if _BROWSER is None:
         from scrapers.wasalt import browser as _b
-        _BROWSER = _b.BrowserFetcher()
+        _BROWSER = _b.BoundedBrowserFetcher()   # hard per-listing deadline — ops_incident #708
     return _BROWSER
+
+
+def _browser_deadline_kills() -> int:
+    return int(getattr(_BROWSER, "deadline_kills", 0) or 0)
 
 
 def close_browser() -> None:
@@ -1069,7 +1082,7 @@ def run_repair_clock_bug_backlog(args) -> int:
         for t in TABLES:
             b_alive[t] = []; b_fresh[t] = []; b_reset[t] = []
 
-    for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in _pmap(check_hybrid, cohort, args.workers):
+    for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in _imap(check_hybrid, cohort, args.workers):
             checked += 1; b_checked += 1
             total_bytes += nbytes
             b_detail.append({
@@ -1095,7 +1108,7 @@ def run_repair_clock_bug_backlog(args) -> int:
     degenerate = degenerate_batches > 0
     notes = (f"mode=repair-clock-bug-backlog shard={args.shard}/{args.shards} checked={checked} "
              f"live={live} dead={dead} failed={failed} degenerate_batches={degenerate_batches} "
-             f"runtime_s={runtime}")
+             f"browser_deadline_kills={_browser_deadline_kills()} runtime_s={runtime}")
     db._execute(db.sb().table("wasalt_liveness_runs").insert({
         "started_at": now_iso,
         "finished_at": datetime.now(timezone.utc).isoformat(),

@@ -257,6 +257,9 @@ jobs:
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
           WASALT_BROWSER: "1"
           SCRAPE_MIN_INTERVAL: "0.3"
+          # The browser's own diagnostics print without flush; buffered, a cancelled run shows none
+          # of them and reads as a hang (ops_incident #708).
+          PYTHONUNBUFFERED: "1"
         run: |
           exec xvfb-run -a python -m scrapers.wasalt.liveness \
             --mode repair-clock-bug-backlog \
