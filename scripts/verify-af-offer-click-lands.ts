@@ -28,7 +28,7 @@
 // It also carries the mutation as a FIRST-CLASS CASE: `legacyOpenAfOffer` below is the pre-fix body,
 // byte-for-byte in behaviour, and the barrier asserts it FAILS the same predicate the shipped one
 // passes. So the predicate is proven to discriminate, not merely to be satisfied.
-import { openAfOffer, CLICK_LEAF_SRC, CTA_PRESENT_SRC, AF_OFFER_TESTID, AF_OFFER_CTA } from './lib/afOfferLive.ts';
+import { openAfOffer, CLICK_LEAF_SRC, AF_OFFER_TESTID, AF_OFFER_CTA } from './lib/afOfferLive.ts';
 import { ARM_CLICK_WITNESS_SRC, READ_CLICK_WITNESS_SRC, clickWitnessed, isStable } from './lib/liveClick.ts';
 
 let failed = 0;
@@ -78,9 +78,13 @@ function stubPage(opts: {
   let hit: any = null;
   const page = {
     evaluate: async (fn: any, arg?: any) => {
-      if (fn === CTA_PRESENT_SRC) return opts.ctaPresent;            // PRESENCE — the DOM question
-      if (fn === CLICK_LEAF_SRC)                                      // CLICKABILITY — a different one
-        return opts.ctaPresent && !opts.unmeasurable ? { x: 100, y: 200 + (opts.movingTarget ? (drift += 40) : 0) } : null;
+      // ONE scan, two answers — the shape the real CLICK_LEAF_SRC returns. `present` is the DOM
+      // question; `point` is the clickability question, and it is null when the CTA is there but
+      // has no laid-out box (the #687 state).
+      if (fn === CLICK_LEAF_SRC) return {
+        present: opts.ctaPresent,
+        point: opts.ctaPresent && !opts.unmeasurable ? { x: 100, y: 200 + (opts.movingTarget ? (drift += 40) : 0) } : null,
+      };
       if (fn === ARM_CLICK_WITNESS_SRC) { armed = true; hit = null; return undefined; }
       if (fn === READ_CLICK_WITNESS_SRC) { const h = hit; hit = null; return h; }
       return opts.hasTurn;                       // the has-turn reader (and the scroller, ignored)
@@ -139,11 +143,13 @@ const FAST = { timeoutMs: 400, pollMs: 5 };
   // The flicker is in BOTH probes, because that is what a one-frame CTA really is: present and
   // measurable for a single poll, then gone from the DOM entirely. (A CTA that stays PRESENT while
   // only the click probe loses it is the #687 shape, covered in 5b — and must NOT read as absent.)
-  let seen = 0, polls = 0;
+  let polls = 0;
   const page = {
     evaluate: async (fn: any) => {
-      if (fn === CTA_PRESENT_SRC) return ++seen === 1;                               // one frame only
-      if (fn === CLICK_LEAF_SRC) return ++polls === 1 ? { x: 100, y: 200 } : null;   // one frame only
+      if (fn === CLICK_LEAF_SRC) {                                                   // one frame only
+        const first = ++polls === 1;
+        return { present: first, point: first ? { x: 100, y: 200 } : null };
+      }
       return true;                                                                   // a turn landed
     },
     mouse: { click: async () => { throw new Error('must not click: the point was never stable'); } },
@@ -208,7 +214,8 @@ const FAST = { timeoutMs: 400, pollMs: 5 };
   let ctaSeenFromClickProbe = 0;
   const t0 = Date.now();
   while (Date.now() - t0 < FAST.timeoutMs) {
-    if (await s.page.evaluate(CLICK_LEAF_SRC, { testid: AF_OFFER_TESTID, txt: AF_OFFER_CTA })) ctaSeenFromClickProbe++;
+    const f = await s.page.evaluate(CLICK_LEAF_SRC, { testid: AF_OFFER_TESTID, txt: AF_OFFER_CTA });
+    if (f?.point) ctaSeenFromClickProbe++;          // the PRE-FIX rule: counted off the click point
     await s.page.waitForTimeout(FAST.pollMs);
   }
   const legacyReason = ctaSeenFromClickProbe >= 3 ? 'intercepted' : 'absent';
