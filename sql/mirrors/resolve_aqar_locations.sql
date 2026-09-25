@@ -4,6 +4,9 @@
 -- Refreshed 2026-09-12 for the district-fold repair chain (migration 20260912183332).
 -- Verified byte-exact; md5 of everything below this header block: 313aa32eaf5cc066ce241b56f073831b
 --   equals md5(pg_get_functiondef) in production, checked 2026-09-12.
+-- Re-verified 2026-09-25: migration 20260925175109 only NAMES this function in prose (a comment on
+--   the new, independent aqar_classify_shadow_drift() function, which reimplements the same join
+--   rather than calling this one) — the body below is still byte-identical to production, unchanged.
 CREATE OR REPLACE FUNCTION public.resolve_aqar_locations()
  RETURNS TABLE(shadow_added integer, lal_added integer)
  LANGUAGE plpgsql
