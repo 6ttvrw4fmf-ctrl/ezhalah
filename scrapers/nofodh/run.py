@@ -780,12 +780,27 @@ def _signal(status, body, _moved) -> Optional[str]:
     return None                                # قريباً, or a state the enum gained since
 
 
+#: Seconds between oracle reads. LivenessProbe.fetch() builds a session per request, so pacing the
+#: FACTORY paces the probe exactly once per read — the only seam available without touching the shared
+#: law. It matters because a liveness sweep over many rows is the same request pattern that tripped
+#: the WAF during the first crawl. A challenge would still be handled correctly (UNKNOWN, and the
+#: canary withholds every removal — it fails CLOSED), but a sweep that challenges itself confirms no
+#: removals at all, so the safe outcome would also be a useless one.
+ORACLE_PACE = 0.6
+
+
+def _oracle_session() -> cc.Session:
+    import time
+    time.sleep(ORACLE_PACE)
+    return session()
+
+
 def _make_verify_gone(control: Optional[dict]):
     def probe(ad_number: str, canary=None):
         lid = ad_number[len(PREFIX):] if ad_number.startswith(PREFIX) else ""
         if not lid:
             return "unknown", f"{ad_number!r} is not a {PREFIX}<id> ad number"
-        return LivenessProbe(platform=SLUG, signal=_signal, session=session,
+        return LivenessProbe(platform=SLUG, signal=_signal, session=_oracle_session,
                              url_for=lambda _ad: f"{BASE}/listings/{lid}",
                              canary=canary).verify_gone(ad_number)
 
