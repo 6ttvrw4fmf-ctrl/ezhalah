@@ -39,6 +39,18 @@ on:
         description: "ONE-TIME (ops_incident, routine #11, 2026-09-24): run --mode repair-clock-bug-backlog instead of the normal enum+strike, to resolve the confirm-eligible backlog the rollup clock bug produced. Structurally cannot deactivate a listing — see run_repair_clock_bug_backlog()'s docstring. Leave false for every ordinary run."
         type: boolean
         default: false
+      repair_shards:
+        description: "repair mode only: split the backlog into this many id%N shards (each dispatch runs ONE shard — see repair_shard). The first full-cohort attempt (2026-09-24) hit its 3h timeout with real per-check latency far higher than estimated; sharding + --limit let you measure the real rate on a small slice before committing to the whole backlog."
+        type: string
+        default: "1"
+      repair_shard:
+        description: "repair mode only: which 0-indexed shard (of repair_shards) this dispatch handles."
+        type: string
+        default: "0"
+      repair_limit:
+        description: "repair mode only: cap this dispatch to the first N rows of its shard (0 = no cap). Use a small number (e.g. 20) for a timed measurement pilot before sizing a full run."
+        type: string
+        default: "0"
 
 concurrency:
   group: wasalt-enum-liveness
@@ -250,4 +262,7 @@ jobs:
             --mode repair-clock-bug-backlog \
             --grace 3 \
             --workers 1 \
+            --shards ${{ inputs.repair_shards || '1' }} \
+            --shard ${{ inputs.repair_shard || '0' }} \
+            --limit ${{ inputs.repair_limit || '0' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }}

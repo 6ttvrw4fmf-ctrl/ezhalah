@@ -61,6 +61,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db  # noqa: E402
 from scrapers.common.liveness_contract import direct_alive_patch
+from scrapers.common.shard_partition import shard_worklist
 
 BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -987,8 +988,19 @@ def run_repair_clock_bug_backlog(args) -> int:
     so it only needs to protect the QUALITY of the strike it is about to hand back to the ordinary
     pipeline).
     """
+    # INCREMENTAL FLUSH (added after the 2026-09-24 first attempt). That attempt held every verdict
+    # in memory and wrote NOTHING until the whole cohort was checked — so when the real per-check
+    # latency turned out far higher than estimated and the job hit its 3h timeout, THREE HOURS of
+    # real browser checks were thrown away: 0 rows written, 0 evidence rows, because the process was
+    # killed before it ever reached the write. Every FLUSH_EVERY checks are now written and cleared
+    # immediately, so a kill at any point loses at most one partial batch, never the whole run — and
+    # a second dispatch of the same --shard/--shards slice picks up wherever the cohort query (which
+    # only selects rows STILL at missing_count>=grace) shows work remaining.
+    FLUSH_EVERY = 100
     started = time.time()
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()  # the RUN-START stamp — see
+    # test_wasalt_liveness_run_timestamps.py: started_at below must be this, never a fresh read
+    # taken when the summary row is finally inserted.
     cohort: list[tuple[str, int, str, int]] = []
     for tbl in TABLES:
         rows = db._execute(
@@ -1002,70 +1014,99 @@ def run_repair_clock_bug_backlog(args) -> int:
             if url:
                 cohort.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
 
-    print(f"repair-clock-bug-backlog: {len(cohort)} rows at missing_count>={args.grace} "
-          f"(this mode can only ever write missing_count=0 or 1 — never active)", flush=True)
+    # Reuses --shards/--shard/--limit already defined for `enforce` — a fixed, already-fetched list
+    # partitioned by id%shards (scrapers/common/shard_partition.py: the same proven-safe partition
+    # the 2026-09-24 aqar liveness fix uses), never a row-offset window computed from a live table.
+    if args.shards > 1:
+        mine = set(shard_worklist((r[1] for r in cohort), args.shards, args.shard))
+        cohort = [r for r in cohort if r[1] in mine]
+    if args.limit:
+        cohort = cohort[:args.limit]
+
+    print(f"repair-clock-bug-backlog: {len(cohort)} rows at missing_count>={args.grace}, "
+          f"shard {args.shard}/{args.shards} (this mode can only ever write missing_count=0 or 1 — "
+          f"never active)", flush=True)
     if args.dry_run or not cohort:
         print("  [DRY-RUN or empty cohort] no checks performed, no writes", flush=True)
         return 0
 
     checked = live = dead = failed = 0
     total_bytes = 0
-    alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
-    fresh_strike_ids: dict[str, list[int]] = {t: [] for t in TABLES}   # dead → mc=1, never a kill
-    reset_ids: dict[str, list[int]] = {t: [] for t in TABLES}          # failed → mc=0
-    detail: list[dict] = []
+    degenerate_batches = 0
+    b_checked = b_live = b_dead = b_failed = 0
+    b_detail: list[dict] = []
+    b_alive: dict[str, list[int]] = {t: [] for t in TABLES}
+    b_fresh: dict[str, list[int]] = {t: [] for t in TABLES}   # dead → mc=1, never a kill
+    b_reset: dict[str, list[int]] = {t: [] for t in TABLES}   # failed → mc=0
+
+    def flush_batch() -> None:
+        nonlocal b_checked, b_live, b_dead, b_failed, b_detail, b_alive, b_fresh, b_reset
+        nonlocal degenerate_batches
+        if b_checked == 0:
+            return
+        _flush_detail(b_detail)  # evidence written even for a degenerate batch — never hidden
+        decided = b_live + b_dead
+        degenerate = decided >= 20 and (b_dead > 0.9 * decided or b_failed > 0.9 * b_checked)
+        if degenerate:
+            degenerate_batches += 1
+            print(f"⚠ REPAIR GUARD (batch of {b_checked}): live={b_live} dead={b_dead} "
+                  f"failed={b_failed} — reads as a broken checker for this batch, not a broken "
+                  f"backlog. Skipping this batch's missing_count writes.", flush=True)
+        else:
+            now = datetime.now(timezone.utc).isoformat()
+            for tbl, ids in b_alive.items():
+                _flush_alive(tbl, ids, now)
+            for tbl, ids in b_fresh.items():
+                if ids:
+                    db._execute(db.sb().table(tbl).update({"missing_count": 1}).in_("id", ids),
+                                what=f"{tbl}.repair_fresh_strike")
+            for tbl, ids in b_reset.items():
+                if ids:
+                    db._execute(db.sb().table(tbl).update({"missing_count": 0}).in_("id", ids),
+                                what=f"{tbl}.repair_reset_unproven")
+        b_checked = b_live = b_dead = b_failed = 0
+        b_detail = []
+        for t in TABLES:
+            b_alive[t] = []; b_fresh[t] = []; b_reset[t] = []
 
     for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in _pmap(check_hybrid, cohort, args.workers):
-            checked += 1
+            checked += 1; b_checked += 1
             total_bytes += nbytes
-            detail.append({
+            b_detail.append({
                 "tbl": tbl, "listing_id": lid, "head_status": hc, "get_status": gc,
                 "get_verdict": verdict, "nbytes": nbytes,
                 "has_property_details": (verdict == "live") if used_get else None,
             })
             if verdict == "live":
-                live += 1; alive_ids[tbl].append(lid)
+                live += 1; b_live += 1; b_alive[tbl].append(lid)
             elif verdict == "dead":
-                dead += 1; fresh_strike_ids[tbl].append(lid)
+                dead += 1; b_dead += 1; b_fresh[tbl].append(lid)
             else:
-                failed += 1; reset_ids[tbl].append(lid)
-            if checked % 500 == 0:
+                failed += 1; b_failed += 1; b_reset[tbl].append(lid)
+            if checked % 25 == 0:
                 el = max(1e-6, time.time() - started)
                 print(f"  [{checked}/{len(cohort)}] live={live} dead={dead} failed={failed} "
-                      f"({checked / el:.1f}/s)", flush=True)
-
-    _flush_detail(detail)  # evidence first, exactly as enum-strike's confirm step does
-
-    decided = live + dead
-    degenerate = decided >= 20 and (dead > 0.9 * decided or failed > 0.9 * checked)
-    if degenerate:
-        print(f"⚠ REPAIR GUARD: live={live} dead={dead} failed={failed} of {checked} — reads as a "
-              f"broken checker, not a broken backlog. Skipping missing_count writes this run "
-              f"(nothing here was ever going to be deactivated either way).", flush=True)
-    else:
-        for tbl, ids in alive_ids.items():
-            _flush_alive(tbl, ids, now_iso)
-        for tbl, ids in fresh_strike_ids.items():
-            for i in range(0, len(ids), 200):
-                db._execute(db.sb().table(tbl).update({"missing_count": 1}).in_("id", ids[i:i + 200]),
-                            what=f"{tbl}.repair_fresh_strike")
-        for tbl, ids in reset_ids.items():
-            for i in range(0, len(ids), 200):
-                db._execute(db.sb().table(tbl).update({"missing_count": 0}).in_("id", ids[i:i + 200]),
-                            what=f"{tbl}.repair_reset_unproven")
+                      f"({checked / el:.2f}/s, {el / max(1, checked):.1f}s/check)", flush=True)
+            if b_checked >= FLUSH_EVERY:
+                flush_batch()
+    flush_batch()  # the final partial batch
 
     runtime = round(time.time() - started, 1)
-    notes = (f"mode=repair-clock-bug-backlog checked={checked} live={live} dead={dead} failed={failed} "
-             f"degenerate={degenerate} runtime_s={runtime}")
+    degenerate = degenerate_batches > 0
+    notes = (f"mode=repair-clock-bug-backlog shard={args.shard}/{args.shards} checked={checked} "
+             f"live={live} dead={dead} failed={failed} degenerate_batches={degenerate_batches} "
+             f"runtime_s={runtime}")
     db._execute(db.sb().table("wasalt_liveness_runs").insert({
-        "started_at": now_iso, "finished_at": datetime.now(timezone.utc).isoformat(),
-        "shard": "repair", "mode": "repair-clock-bug-backlog",
+        "started_at": now_iso,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "shard": f"repair-{args.shard}/{args.shards}", "mode": "repair-clock-bug-backlog",
         "checked": checked, "live": live, "dead": dead, "failed": failed,
         "skipped": int(degenerate), "bytes_downloaded": total_bytes, "notes": notes}),
         what="wasalt_liveness_runs.insert")
-    print(f"\n✓ repair-clock-bug-backlog: checked={checked} live(self-healed)={live} "
-          f"dead(ONE fresh strike, never killed)={dead} failed(reset to 0)={failed} "
-          f"degenerate={degenerate} runtime_s={runtime}", flush=True)
+    print(f"\n✓ repair-clock-bug-backlog shard {args.shard}/{args.shards}: checked={checked} "
+          f"live(self-healed)={live} dead(ONE fresh strike, never killed)={dead} "
+          f"failed(reset to 0)={failed} degenerate_batches={degenerate_batches} runtime_s={runtime}",
+          flush=True)
     return 0 if not degenerate else 1
 
 
