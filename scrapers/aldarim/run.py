@@ -442,6 +442,12 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     return row, category
 
 
+def revisit_verify():
+    """scrapers/common/fleet_revisit.py hook: the same oracle prune_unseen consults. The revisit job
+    only ever stamps a 'live' answer; a 'gone' is counted there, never acted on."""
+    return _probe.verify_gone
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--pages", type=int, default=50)
