@@ -1652,6 +1652,109 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
   });
 };
 
+/** READ ALOUD MUST NOT TELL A USER THEIR DEVICE CANNOT DO SOMETHING IT HAS NOT FINISHED CHECKING.
+ *
+ *  ops_incident #722. PART 1 names the read-aloud controller as this routine's, and until this
+ *  journey existed it had NO real-browser coverage at all — only two offline barriers. PART 5 is
+ *  explicit that a unit test must not stand in for the click, so the decision being executed offline
+ *  by `verify-read-aloud-voice-logic.ts` §6 is proven HERE against the real bundle and a real tap.
+ *
+ *  THE STATE THIS EXERCISES, and why it is the ordinary path rather than a startup edge. `resolveVoice()`
+ *  starts at module import and keeps retrying for `RETRY_WINDOW_MS = 45_000`; the 🔊 control does not
+ *  exist until an agent search has returned cards, measured on production at t = 29,283 / 30,290 /
+ *  30,311 / 30,695 ms since load (4/4). So the button's first availability lands ~15s INSIDE the
+ *  window, every time, and a tap there means "still looking" — not "this device has no Arabic voice".
+ *
+ *  THE ORACLE IS THE ELAPSED TIME, MEASURED, NEVER ASSUMED, and it is deliberately asymmetric:
+ *    · inside the window  ⇒ the message must be the TEMPORARY one. Sound in the safe direction: the
+ *      45s clock starts at module import, which cannot be EARLIER than page load, so "elapsed since
+ *      load < 45s" is a conservative proof that the window is still open.
+ *    · past the window    ⇒ the reverse implication does NOT hold (import may be later than load), so
+ *      this only asserts that SOME honest refusal message appeared, and names which. Claiming the
+ *      device verdict there would be asserting more than the measurement supports.
+ *  Either way an outcome is recorded with its numbers — never a bare return (PART 9.5).
+ *
+ *  A DEVICE WITH ZERO VOICES IS A REAL DEVICE, not a harness artifact: headless Chromium reports 0
+ *  voices of any language, which is exactly a stock install with no Arabic language pack, the case
+ *  readAloud.ts's own root-cause note was written for. What this journey does NOT prove is anything
+ *  about a physical iPhone's voice list or how long it takes to populate (PART 10). */
+const RA_BUTTON = 'استماع للرد';
+const RA_DEVICE_VERDICT = 'الاستماع غير متاح على هذا الجهاز';
+const RA_STILL_PREPARING = 'نُجهّز الصوت — أعد المحاولة بعد لحظة';
+const RA_WINDOW_MS = 45_000;   // mirrors RETRY_WINDOW_MS in src/lib/readAloud.ts
+
+JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `read-aloud-refusal-is-honest:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const t0 = Date.now();
+  await gotoOrRetryTransport(page, `${BASE}/`);
+  await settle(page);
+  await sleep(2500);
+  // Through the UI, as a person does — a direct /agent deep link is sent Home by design.
+  if (!(await clickText(page, 'الوسيط الذكي', { exact: false }))) {
+    skip(name, `the agent tab was not clickable (${clickReason()})`); return;
+  }
+  await sleep(4000);
+  if (!page.url().includes('/agent')) { skip(name, `the agent tab did not land on /agent (${page.url()})`); return; }
+
+  const box = page.locator('textarea, input[type="text"]');
+  if (!(await box.count())) { skip(name, 'no composer on the agent screen'); return; }
+  const composer = box.first();
+  await composer.click();
+  await composer.pressSequentially('شقة للإيجار في الرياض', { delay: 40 });
+  await composer.press('Enter');
+
+  // The 🔊 control only exists once a results turn has rendered. Poll on THAT condition, never a
+  // fixed sleep (PART 11.2) — and record when it arrived, because the verdict depends on it.
+  let btn = null, appearedAt = null;
+  for (let i = 0; i < 140; i++) {
+    const c = page.getByLabel(RA_BUTTON);
+    if (await c.count()) { btn = c.first(); appearedAt = Date.now() - t0; break; }
+    await sleep(1000);
+  }
+  if (!btn) { skip(name, 'the 🔊 control never appeared — no results turn rendered, so there was nothing to tap'); return; }
+
+  const voices = await page.evaluate(() => ({
+    n: (window.speechSynthesis?.getVoices?.() || []).length,
+    ar: (window.speechSynthesis?.getVoices?.() || []).filter((v) => /^ar/i.test(v.lang)).length,
+  }));
+  // A device that HAS an Arabic voice will speak, so there is no refusal to judge. That is a real
+  // and welcome state, and a skip rather than a pass because nothing was measured.
+  if (voices.ar > 0) { skip(name, `this engine has ${voices.ar} Arabic voice(s), so the tap speaks — no refusal to judge`); return; }
+
+  await btn.scrollIntoViewIfNeeded().catch(() => {});
+  await btn.click();
+  await sleep(700);
+  const body = await bodyText(page);
+  const saidDevice = body.includes(RA_DEVICE_VERDICT);
+  const saidPreparing = body.includes(RA_STILL_PREPARING);
+  const where = `🔊 appeared at t=${appearedAt}ms since load (window ${RA_WINDOW_MS}ms); `
+    + `engine reports ${voices.n} voice(s), ${voices.ar} Arabic`;
+
+  if (appearedAt < RA_WINDOW_MS) {
+    if (saidDevice && !saidPreparing) {
+      defect(name, 'a tap while the voice lookup was STILL RUNNING claimed the device cannot do it',
+        `${where}. The app said «${RA_DEVICE_VERDICT}» — a permanent verdict about the user's hardware — `
+        + `while resolveVoice() was still inside its retry window. ops_incident #722; this is the `
+        + `owner-locked unknown -> NO rule in the read-aloud surface.`);
+    } else if (saidPreparing) {
+      pass(name, `a refusal inside the retry window says «${RA_STILL_PREPARING}» and not the device verdict — ${where}`);
+    } else {
+      defect(name, 'a refused 🔊 tap produced NO message at all — a silent dead control',
+        `${where}. Neither refusal sentence is on screen, so the tap did nothing a user can see.`);
+    }
+  } else if (saidDevice || saidPreparing) {
+    // Past the window the implication does not run backwards (import may be later than load), so
+    // assert only that an honest refusal was shown, and name which one.
+    pass(name, `a refusal past the retry window shows an honest message `
+      + `(«${saidDevice ? RA_DEVICE_VERDICT : RA_STILL_PREPARING}») — ${where}. Which state the app was in `
+      + `is not decidable from elapsed-since-load in this direction, so only presence is asserted.`);
+  } else {
+    defect(name, 'a refused 🔊 tap produced NO message at all — a silent dead control',
+      `${where}. Neither refusal sentence is on screen, so the tap did nothing a user can see.`);
+  }
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while judging the read-aloud refusal', errs.join(' | ')); }
+});
+
 // ── «تواصل مع الدعم»: shared plumbing ───────────────────────────────────────────────────────────
 // The form landed 2026-09-02 inside InfoModal's dialog and had never been driven by a journey.
 const SUP = {
