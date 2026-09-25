@@ -155,6 +155,9 @@ def test_type_words_fold_the_way_the_fleet_does():
     assert R.unit_type_ar("Four Bedroom Duplex Villa Pool View") == "فيلا"
     assert R.unit_type_ar("Duplex") == "دوبلكس"
     assert R.unit_type_ar("DELUXE SUITE") is None and R.unit_type_ar("A-1") is None
+    # added 2026-09-24 (owner review of Rilam Al Raed): a "Condominium" IS an apartment, not a
+    # hotel-style suite — must not be left in the unmapped bucket with genuine suites.
+    assert R.unit_type_ar("Two bedroom furnished Condominium with built-in closets") == "شقة"
 
 
 def test_an_unavailable_unit_is_skipped():

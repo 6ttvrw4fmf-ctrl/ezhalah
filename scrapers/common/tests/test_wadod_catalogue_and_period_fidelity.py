@@ -83,9 +83,11 @@ def test_the_ground_floor_is_zero_not_null():
 
 
 def test_payment_terms_are_not_a_rent_period():
-    """«دفعة واحدة» / «دفعتين» say how the rent is PAID. The period is stated nowhere (7/7 pages)."""
+    """«دفعة واحدة» / «دفعتين» say how the rent is PAID. The period is stated nowhere (7/7 pages),
+    so the period comes from the OWNER's platform-level attestation (2026-09-24: «those are yearly»,
+    registered in ops_rent_period_single_value_ok), never from the payment split."""
     row, _, _ = R.map_listing(_cards()[0], R.parse_detail(FX["p92"]))
-    assert row["price_annual"] == 65000 and "rent_period" not in row
+    assert row["price_annual"] == 65000 and row["rent_period"] == "annual"
     assert row["additional_info"]["payment_terms"] == "دفعة واحدة"
 
 
@@ -104,7 +106,7 @@ def test_furnished_floor_with_new_age():
     row, _, why = R.map_listing(card, R.parse_detail(FX["p85"]))
     assert why == "" and row["property_type"] == "Floor" and row["floor_number"] == 1
     assert row["furnished"] is True and row["property_age"] == 0 and row["bathrooms"] == 4
-    assert row["additional_info"]["payment_terms"] == "دفعتين" and "rent_period" not in row
+    assert row["additional_info"]["payment_terms"] == "دفعتين" and row["rent_period"] == "annual"
 
 
 def test_unknown_type_or_offer_is_skipped_not_guessed():

@@ -517,6 +517,18 @@ def main() -> int:
             # Rented-out rows were upserted with active=False + pinned missing_count=3 above;
             # prune_unseen never touches them (it only reads active=true rows and only updates ids
             # ABSENT from the seen set), so passing their ad_numbers in rows_seen is harmless.
+            # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+            # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+            # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+            # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+            # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+            superseded = db.retire_superseded_siblings(
+                res_table="satel_residential_listings", com_table="satel_commercial_listings",
+                res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+                source=SOURCE)
+            if superseded:
+                print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
             for tbl, rows_seen in (("satel_residential_listings", res), ("satel_commercial_listings", com)):
                 if args.type != "all":
                     want = "commercial" if "commercial" in tbl else "residential"

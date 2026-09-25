@@ -82,6 +82,14 @@ SINGLE_PERIOD_PLATFORMS = {
     #   No per-listing token is being overridden on either — same reading as compoundin's RNPL
     #     entry above. If either site ever lists a genuine standalone monthly-only contract, this
     #     entry is what must be revisited.
+    #   wadod (added 2026-09-24) — pages state only the payment split («دفعة واحدة»/«دفعتين»);
+    #     the OWNER read the 7 pages and attested they are yearly (ops_rent_period_single_value_ok
+    #     20260924224146). A named period on a page still wins in scrapers/wadod/run.py.
+    "wadod",
+    #   tamyaz (added 2026-09-24) — the UI's universal «/ سنة» applies to every rent row alike; the
+    #     OWNER checked the live site and attested it is yearly (ops_rent_period_single_value_ok
+    #     20260924231422). A period the listing states, or a daily/weekly rate, still wins.
+    "tamyaz",
     "azure", "rightcompound",
 }
 
