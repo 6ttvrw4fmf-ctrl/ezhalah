@@ -267,6 +267,29 @@ def _session() -> cc.Session:
     return s
 
 
+def _rotate_session() -> cc.Session:
+    """Drop this thread's cached session so the next call dials a FRESH proxy route.
+
+    MEASURED 2026-09-24 (run 36073310746, the first run after the residential proxy was re-enabled):
+    the proxy was injected and the credentials were fine, yet EVERY request timed out —
+    `transport_Timeout=465`, 23/23 browse pages unreadable, 433/1300 ids swept before the budget
+    ran out, zero rows. The cause is not the proxy account: individual DataImpulse exit routes die,
+    and this scraper pinned ONE session per thread in `_local` for the whole run, so a route that
+    died on request 1 kept timing out for every request after it. `fetch_one`'s three attempts all
+    rode that same dead socket, which is why a retry ladder did not help.
+
+    Same failure and same fix as eilmalriyada (PR #4065): abandon the session, not just the request.
+    """
+    try:
+        old = getattr(_local, "s", None)
+        if old is not None:
+            old.close()
+    except Exception:
+        pass
+    _local.s = None
+    return _session()
+
+
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     if _PROXIES:
@@ -556,6 +579,9 @@ def fetch_one(pid: int) -> Optional[tuple[int, str]]:
             r = s.get(url, timeout=_SWEEP_TIMEOUT_S, allow_redirects=True)
         except Exception as e:
             last_reason = f"transport_{type(e).__name__}"
+            # A transport failure means the ROUTE is gone, not that this id is slow — retrying on
+            # the same dead socket just burns the ladder (see _rotate_session).
+            s = _rotate_session()
             time.sleep(0.8 * (attempt + 1))
             continue
         if r.status_code == 404:
