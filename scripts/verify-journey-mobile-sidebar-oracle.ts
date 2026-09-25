@@ -34,6 +34,7 @@ import { join } from 'node:path';
 import {
   sidebarIsOpen, SIDEBAR_OPEN_MARKER, SIDEBAR_OPEN_MARKER_GUEST,
   topDockBandBottom, pickHamburgerRect, isBottomDocked,
+  APP_MIN_FRACTION, TOP_DOCK_MIN_SPAN_FRACTION, dockedBandCap,
 } from '../e2e/journeys/harness.mjs';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -228,6 +229,46 @@ check('auth-overlay-clears-controls asks isBottomDocked(), not an absolute liter
 const layout = readFileSync(join(ROOT, 'src/app/_layout.tsx'), 'utf8');
 check('src/app/_layout.tsx still reserves the top band on the app root (the cause of the displacement)',
   /paddingTop:\s*promptInset\.top/.test(layout));
+
+// ── §D — EVERY FRACTION THE HARNESS MIRRORS MUST STILL MATCH THE APP'S OWN ───────────────────────
+// routine #6, 2026-09-25. The same class as §B and §C, in its third form: a number retyped into the
+// harness that the app also owns. Measured cost: `docked-prompts-stack` computed the combined-band
+// cap as `floor(vh * 0.5)` while the app uses `floor(vh * (1 - MIN_APP_FRACTION))` = `floor(vh * 0.7)`
+// — 406 vs 568 at 812px, so the oracle was loose by 162px and a genuine shortfall anywhere in
+// (406, 568] would have passed. `TOP_DOCK_MIN_SPAN_FRACTION` was mirrored from
+// `MIN_SHEET_SPAN_FRACTION` with a comment saying so and NOTHING checked it at all.
+//
+// Read out of `src/` by value rather than trusted: if either constant moves, this goes RED at the
+// PR that moves it, which is the only moment the drift is cheap to fix.
+const inset = readFileSync(join(ROOT, 'src/lib/bottomPromptInset.ts'), 'utf8');
+const appFraction = (name: string) => {
+  const m = inset.match(new RegExp(`const ${name}\\s*=\\s*([0-9.]+)\\s*;`));
+  return m ? Number(m[1]) : NaN;
+};
+const appMinApp = appFraction('MIN_APP_FRACTION');
+const appMinSpan = appFraction('MIN_SHEET_SPAN_FRACTION');
+check('D0 both app fractions were actually READ (a failed match must not pass as agreement)',
+  Number.isFinite(appMinApp) && Number.isFinite(appMinSpan));
+check(`D1 the harness's APP_MIN_FRACTION matches the app's MIN_APP_FRACTION (${appMinApp})`,
+  APP_MIN_FRACTION === appMinApp);
+check(`D2 the harness's TOP_DOCK_MIN_SPAN_FRACTION matches the app's MIN_SHEET_SPAN_FRACTION (${appMinSpan})`,
+  TOP_DOCK_MIN_SPAN_FRACTION === appMinSpan);
+// The cap helper must compute the APP's formula, not merely hold the right fraction.
+check('D3 dockedBandCap() is the app\'s own cap formula at the measured mobile viewport',
+  dockedBandCap(812) === Math.floor(812 * (1 - appMinApp)) && dockedBandCap(812) === 568);
+check('D4 …and at the desktop viewport this harness really uses (1000px, not 812)',
+  dockedBandCap(1000) === Math.floor(1000 * (1 - appMinApp)));
+check('D5 a zero or absent viewport caps at 0 rather than producing NaN/-0',
+  dockedBandCap(0) === 0 && Object.is(dockedBandCap(0), 0));
+// THE DEFECT ITSELF: the retyped 0.5 must be gone, and the journey must ask the shared helper.
+check('D6 docked-prompts-stack no longer retypes a 0.5 cap',
+  !/Math\.floor\(after\.vh \* 0\.5\)/.test(journeys) && /dockedBandCap\(after\.vh\)/.test(journeys));
+// And the verdict must be COVERAGE, not a bare reservation-to-reservation comparison. The old first
+// branch filed a defect on any decrease and fired 2/2 on healthy production, printing «0px of app
+// content is now under an opaque card» in its own failure text.
+check('D7 …and no longer files a defect on a bare reservation DECREASE',
+  !/if \(after\.reserved < before\.reserved\) \{/.test(journeys)
+  && /after\.reserved \+ 1 < need/.test(journeys));
 
 if (failed) { console.error(`\nverify-journey-mobile-sidebar-oracle: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-journey-mobile-sidebar-oracle: the drawer oracle answers only to the drawer,');

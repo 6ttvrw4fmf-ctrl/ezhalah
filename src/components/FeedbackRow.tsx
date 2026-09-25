@@ -13,7 +13,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { getListingFeedback, setListingFeedback, type FeedbackRating } from '@/lib/listingFeedback';
-import { speakReadAloud, stopReadAloud, subscribeReadAloud, type ReadAloudSegment } from '@/lib/readAloud';
+import { speakReadAloud, stopReadAloud, subscribeReadAloud, readAloudRefusal,
+         type ReadAloudSegment } from '@/lib/readAloud';
+import { readAloudRefusalMessageKey, type ReadAloudRefusal } from '@/lib/readAloudVoice';
 
 export default function FeedbackRow({
   feedbackKey, shareUrl, onFeedback, readAloudSegments,
@@ -35,11 +37,19 @@ export default function FeedbackRow({
   // row back to idle automatically (single-speaker, no local queue to get out of sync).
   const [speaking, setSpeaking] = useState(false);
   const speakingRef = useRef(false); // mirrors `speaking` for the unmount-only cleanup below
-  // Shown briefly when speakReadAloud() refuses to speak — genuinely no Arabic voice on this
-  // device/browser (root-cause fix, 2026-08-22: never hand Arabic text to a non-Arabic voice; this
-  // is the graceful Arabic message the owner asked for instead). Auto-hides, same pattern as `copied`
-  // below.
-  const [unavailable, setUnavailable] = useState(false);
+  // Shown briefly when speakReadAloud() refuses to speak (root-cause fix, 2026-08-22: never hand
+  // Arabic text to a non-Arabic voice; a graceful Arabic message instead). Auto-hides, same pattern
+  // as `copied` below.
+  //
+  // WHICH message is now asked of readAloudRefusal(), not assumed. This used to be a boolean that
+  // always rendered «الاستماع غير متاح على هذا الجهاز», so a refusal that only meant "the voice list
+  // has not finished loading yet" was reported to the user as a permanent verdict about their
+  // hardware — the repo's unknown -> NO rule, in the read-aloud surface. Measured on production,
+  // 4/4: the 🔊 control first becomes tappable ~30s after load, which is INSIDE readAloud.ts's 45s
+  // RETRY_WINDOW_MS, so the still-looking state is on the ordinary path rather than a startup edge.
+  // i18n's own comment on that string already said it is "shown ONLY when the device/browser has no
+  // Arabic voice at all"; this makes that true.
+  const [refusal, setRefusal] = useState<ReadAloudRefusal>('none');
   useEffect(() => subscribeReadAloud((id) => {
     const mine = id === feedbackKey;
     speakingRef.current = mine;
@@ -55,8 +65,14 @@ export default function FeedbackRow({
     if (!readAloudSegments?.length) return;
     const started = speakReadAloud(feedbackKey, readAloudSegments);
     if (!started) {
-      setUnavailable(true);
-      setTimeout(() => setUnavailable(false), 3200);
+      // Ask WHY it refused rather than assuming the permanent case. 'none' cannot normally appear
+      // here (a confirmed voice is exactly what makes speakReadAloud start), but if it ever does —
+      // e.g. an empty segment list — saying nothing is more honest than inventing a device verdict.
+      const why = readAloudRefusal();
+      if (why !== 'none') {
+        setRefusal(why);
+        setTimeout(() => setRefusal('none'), 3200);
+      }
     }
   };
 
@@ -102,7 +118,9 @@ export default function FeedbackRow({
           />
         ) : null}
       </View>
-      {unavailable ? <Text style={fb.unavailable}>{t('Listening isn\'t available on this device')}</Text> : null}
+      {readAloudRefusalMessageKey(refusal)
+        ? <Text style={fb.unavailable}>{t(readAloudRefusalMessageKey(refusal) as any)}</Text>
+        : null}
     </View>
   );
 }
