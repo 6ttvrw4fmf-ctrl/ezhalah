@@ -67,6 +67,7 @@ import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
+import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
@@ -3255,8 +3256,11 @@ export default function Agent() {
     // needs none; the replay branch re-runs a REAL search and is the longest await on this screen.
     const epoch = conversationEpochRef.current;
     const { bubble, sub } = override ?? filterToChat(q);
-    const userId = uid();
-    const resultsId = uid();
+    // DERIVED FROM THE CONVERSATION, NOT MINTED (ops_incident #337). `uid()` here made the ids stable
+    // only within one invocation, so reopening the same legacy chat re-rolled the Results-Found
+    // rotation memo (keyed on the results message id, PR #3232) and re-worded a turn the user had
+    // already read. The transcript path never had this problem — restoreChat keeps the persisted ids.
+    const { userId, resultsId } = replayMsgIds(chatIdRef.current, uid);
     // A saved chat carries the results it already found — render them INSTANTLY, zero network,
     // no "searching…" beat of any kind (owner 2026-08-14: "it should already show him the property
     // because he already listed it. This is just saved."). «عرض المزيد» still pages live from here.
