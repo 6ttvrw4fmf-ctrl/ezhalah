@@ -598,3 +598,31 @@ real page of each kind — `scripts/verify-aqar-soft-close-oracle-can-fire.ts` d
 fixtures that deliberately retain the adversarial i18n bundle, and three mutants including a restore
 of the dead badge regex. A source-text tripwire over `looks_closed()` would have stayed green for
 every day the oracle was dead.
+
+## 10. ONE CHECKLIST FOR THE WHOLE FLEET — `ops_platform_protection_matrix()` (owner, 2026-09-25)
+
+The owner's rule: *every platform is eventually protected by the same core rules; platform-specific
+fixes are fine where necessary, but the main safety system is global wherever possible.* A barrier's
+name is never evidence of its scope: measured the day this was written, the only
+"district contradicts what the source published" check (`mon_detect_district_contradicts_source`)
+read a view hard-coded to ONE table (gathern) and so covered 1 of 104 active platforms.
+
+`select * from ops_platform_protection_matrix();` is the standing answer to "which platforms are
+protected?", one row per platform with active inventory. Every column is computed from production on
+each call, never from code existing:
+
+| column | measured as |
+|---|---|
+| `direct_liveness_check` | registry strategy is a per-listing oracle, not crawl presence alone |
+| `production_verified` | >= 90% of active rows carry `last_verified_alive_at` inside the SLA |
+| `location_protections` | every active row is in both relations the generic location detectors read (`search_listings_ar`, `listing_native_location_v1`) |
+| `district_source_check` | the platform has rows in `listing_source_district_ar_fleet`, the input the district-vs-source detector compares against |
+| `remaining_issue` / `final_status` | derived from the above: PROTECTED / PARTIAL / UNPROTECTED |
+
+`listing_source_district_ar_fleet` is rebuilt every 3h (`refresh-listing-source-district-ar-fleet`)
+from the live list of listing tables, so a platform added later is compared automatically. It takes the
+first ARABIC-script value among `additional_info.district_ar`, `district_ar` and `neighborhood`
+(English names are a language difference, not a contradiction) and the comparison is
+containment-aware (`الرحاب` vs `الرحاب - بريده` is formatting). The older
+`listing_source_district_ar` stays gathern-only on purpose: `refresh_district_recovery()` uses it as
+an exclusion list when it WRITES, so widening it would change a data path.
