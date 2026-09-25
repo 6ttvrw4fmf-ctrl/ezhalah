@@ -44,7 +44,10 @@ jobs:
   verify:
     name: Verify ${{ matrix.platform }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 180 min (was 60), matching wasalt-cleanup.yml: the wasalt leg now drives a real browser per
+    # sampled row (~15-20s each through the Cloudflare path), so a 200-row sample needs ~1h. The
+    # other three legs still finish in seconds.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -60,14 +63,35 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      # THE AUDIT COULD NOT READ WASALT AT ALL (ops_incident #704, fixed 2026-09-25). This job
+      # re-probes through cleanup.py's `_probe`, which routes wasalt via scrapers/wasalt/browser.py
+      # ONLY when WASALT_BROWSER is set — and this workflow never set it, never installed Chromium
+      # and never supplied a display. So every wasalt probe fell back to the curl_cffi+proxy shape
+      # wasalt.sa has null-routed since 2026-08-17 (issue #1019) and timed out at the 25s mark.
+      # Measured on run 35490675449 (2026-09-20): the wasalt leg took 16m43s for 40 rows — 25.1s
+      # each — and reported `sampled=40 still_dead=0 live=0 unknown=40`, every verdict NULL-status.
+      # 5,015 permanent wasalt deletions therefore had no independent post-delete confirmation, and
+      # `mon_detect_deleted_but_source_live` fires only on verdict='live', so an audit that can read
+      # nothing is indistinguishable from an audit that found nothing wrong. The deleting workflow
+      # (wasalt-cleanup.yml) has carried this transport since the browser migration; the AUDITING
+      # one did not, so the second opinion was structurally impossible on the exact platform whose
+      # source the generic transport cannot reach.
+      #
+      # Installed on every matrix leg, not just wasalt: `_probe` consults the browser only for
+      # wasalt URLs, so this is inert elsewhere, and an unconditional step is one a barrier can
+      # check without parsing workflow expressions.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Run verification
         if: ${{ github.event.inputs.platform == '' || github.event.inputs.platform == matrix.platform }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
         run: |
-          exec python -m scrapers.common.verify_deletions \
+          # headless=False clears the challenge; the runner has no display, so xvfb-run supplies one.
+          exec xvfb-run -a python -m scrapers.common.verify_deletions \
             --platform "${{ matrix.platform }}" \
             --sample "${{ github.event.inputs.sample || '40' }}" \
             --days "${{ github.event.inputs.days || '30' }}" \
