@@ -183,7 +183,7 @@ BATCH_2026_09_24 = ("dwelleo", "aqalemhajer", "sakani", "shatri", "alqasem", "fk
 # that introduces it instead of by the first production run, which is the whole point of the suwar
 # lesson. Every *_listings table is created `LIKE … INCLUDING ALL`, so LISTING_COLUMNS is the oracle
 # for these too. Move a platform into its dated batch above once its migration is applied.
-NOT_YET_ONBOARDED = ("abaad",)
+NOT_YET_ONBOARDED = ("abaad", "safa")
 
 # A platform whose row literal lives in ANOTHER scraper's file (yameen imports goldendeal's
 # map_listing, yameen/run.py:56-58) is judged on that file — a defect there is a defect in both.
