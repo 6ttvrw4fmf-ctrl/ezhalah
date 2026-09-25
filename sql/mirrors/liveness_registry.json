@@ -6,6 +6,12 @@
     "grace": 3
   },
   {
+    "platform": "abaad",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "abeea",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
