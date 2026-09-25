@@ -165,6 +165,21 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'Expat Trusted Housing', i18nKey: 'Expat Trusted Housing', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'Flow', i18nKey: 'Flow', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'أبعاد', i18nKey: 'Abaad', logo: require('../../assets/images/platform-placeholder.png') },
+  // WAVE 1, 2026-09-25 — the ten crawled and are reachable, so this barrier's HIDES-NO-LIVE
+  // direction demands a tile for each. Placeholder artwork until the owner supplies logos.
+  { name: 'آل سعيدان', i18nKey: 'Al Saedan', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'إيجو عقار', i18nKey: 'Ego Real Estate', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'أحمد المحيسني العقارية', i18nKey: 'Ahmed Almuhaysini', logo: require('../../assets/images/platform-placeholder.png') },
+  // NO TILE for نفوذ للاستثمار العقاري yet: its first crawl was CANCELLED on the workflow timeout
+  // (2026-09-25, 2,601 listings against a 45-minute budget), so it has zero reachable rows and this
+  // barrier refuses a logo nobody can reach. Its SOURCE_TOKENS entry stays below, so the moment the
+  // crawl lands the HIDES-NO-LIVE direction goes red and names it — which is how the tile arrives.
+  { name: 'راز العقارية', i18nKey: 'Razre', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'ري إنفست', i18nKey: 'Reinvest', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'صفا للاستثمار', i18nKey: 'Safa Investment', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'صكوك العقارية', i18nKey: 'Sokok', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'سكنة', i18nKey: 'Sukna', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'طوبة العقارية', i18nKey: 'Tuba', logo: require('../../assets/images/platform-placeholder.png') },
   // LOGO-ONLY (owner decision 2026-09-24): brand shown in the strip, no scraper, no tables, never searchable.
   { name: 'Maskanre', i18nKey: 'Maskan United', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
   { name: 'Wetheaddress', i18nKey: 'The Address', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
@@ -325,6 +340,28 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['flow', 'Flow'],
   ['abaad', 'أبعاد'],
   ['أبعاد', 'أبعاد'],
+  // نفوذ للاستثمار العقاري BEFORE the older نفوذ, for the same substring reason as ResultCard's
+  // matchers: «نفوذ» is contained in the longer name and the first match wins.
+  ['نفوذ للاستثمار العقاري', 'نفوذ للاستثمار العقاري'],
+  ['nofodh', 'نفوذ للاستثمار العقاري'],
+  ['alsaedan', 'آل سعيدان'],
+  ['آل سعيدان', 'آل سعيدان'],
+  ['ego', 'إيجو عقار'],
+  ['إيجو عقار', 'إيجو عقار'],
+  ['muhaysini', 'أحمد المحيسني العقارية'],
+  ['أحمد المحيسني العقارية', 'أحمد المحيسني العقارية'],
+  ['razre', 'راز العقارية'],
+  ['راز العقارية', 'راز العقارية'],
+  ['reinvest', 'ري إنفست'],
+  ['ري إنفست', 'ري إنفست'],
+  ['safa', 'صفا للاستثمار'],
+  ['صفا للاستثمار', 'صفا للاستثمار'],
+  ['sokok', 'صكوك العقارية'],
+  ['صكوك العقارية', 'صكوك العقارية'],
+  ['sukna', 'سكنة'],
+  ['سكنة', 'سكنة'],
+  ['tuba', 'طوبة العقارية'],
+  ['طوبة العقارية', 'طوبة العقارية'],
   ['aqar', 'Aqar'],
 ];
 
