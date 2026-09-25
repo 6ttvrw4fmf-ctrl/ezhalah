@@ -212,21 +212,45 @@ def _redact(text: Optional[str]) -> Optional[str]:
 
 
 # ── REST listing enumeration ──────────────────────────────────────────────────
-def fetch_listings(s: cc.Session) -> list[dict]:
-    """Every rtcl_listing via the default WP REST. Returns the raw post dicts."""
+def fetch_listings(s: cc.Session, diag: Optional[dict] = None) -> list[dict]:
+    """Every rtcl_listing via the default WP REST. Returns the raw post dicts.
+
+    `diag`, when passed, is filled with WHY enumeration stopped. Five very different things used to
+    leave this function by the same door — all of them returning `[]`:
+
+        transport died · non-200 · 200 but not JSON (parked) · 200 but not a list · 200 with []
+
+    Only the last one means "the source itself published zero listings". The other four mean WE
+    FAILED TO READ IT, which is UNKNOWN and must never be reported as an empty answer (AGENTS.md,
+    "A FAILED FETCH IS NOT AN EMPTY ANSWER"). The caller's note used to say
+    "(source down, parked, or blocked)" — three guesses, listed because the evidence that separates
+    them had already been discarded here. awal has now failed three consecutive runs on exactly
+    that sentence, and it is still unknown which of the five it is.
+
+    Nothing about the enumeration changes: every `break` breaks where it broke before.
+    """
+    d = diag if diag is not None else {}
+    d.setdefault("stop", "ok")
+    d.setdefault("pages_ok", 0)
     out: list[dict] = []
     page = 1
     while True:
+        last_exc: Optional[Exception] = None
         for attempt in range(3):
             try:
                 r = s.get(f"{LIST_API}?per_page=50&page={page}", timeout=60,
                           headers={"Accept": "application/json"})
                 break
-            except Exception:
+            except Exception as e:                      # noqa: BLE001 — recorded, then re-reported
+                last_exc = e
                 time.sleep(2 * (attempt + 1))
         else:
+            d.update(stop="transport", page=page,
+                     detail=f"3 attempts raised, last {type(last_exc).__name__}: "
+                            f"{str(last_exc)[:160]}")
             break
         if r.status_code != 200:
+            d.update(stop="http_status", page=page, detail=f"HTTP {r.status_code}")
             break
         # A 200 is not a promise of JSON: on 2026-07-27 the domain was parked and every page
         # answered 200 text/html with a 133-byte redirect stub, so the bare r.json() raised
@@ -234,19 +258,56 @@ def fetch_listings(s: cc.Session) -> list[dict]:
         # "no more real pages" signal and let the caller's 0-post check fail the run cleanly.
         try:
             arr = r.json() or []
-        except Exception:
+        except Exception as e:                          # noqa: BLE001 — recorded, then re-reported
+            body = getattr(r, "text", "") or ""
+            ctype = (getattr(r, "headers", None) or {}).get("content-type", "?")
+            d.update(stop="not_json", page=page,
+                     detail=f"200 but body is not JSON ({ctype}, {len(body)} bytes, "
+                            f"{type(e).__name__}) — the 2026-07-27 parked-page shape was "
+                            f"200 text/html at 133 bytes",
+                     body_head=body[:200])
             break
         # WP can answer 200 with an ERROR OBJECT (e.g. rest_post_invalid_page_number) instead of a
         # list; `out += dict` would extend with its string KEYS and crash `.get()` later (CI 2026-07-01).
         # A non-list payload means "no more real pages" — stop and keep what we have.
         if not isinstance(arr, list):
+            code = arr.get("code") if isinstance(arr, dict) else None
+            d.update(stop="not_a_list", page=page,
+                     detail=f"200 but payload is {type(arr).__name__}"
+                            + (f" (WP error code {code!r})" if code else ""))
+            break
+        if page == 1 and not arr:
+            # The ONE shape that is an answer rather than a failure: the source answered correctly
+            # and published nothing. Recorded distinctly so it is never read as a fetch failure.
+            d.update(stop="empty_first_page", page=page,
+                     detail="200 with an EMPTY list on page 1 — the SOURCE published zero listings")
             break
         arr = [p for p in arr if isinstance(p, dict)]
         out += arr
+        d["pages_ok"] = page
         if len(arr) < 50:
             break
         page += 1
     return out
+
+
+def why_no_listings(diag: dict) -> str:
+    """One line naming which of the five cases emptied the crawl, for scrape_runs.notes.
+
+    The distinction that matters to a responder is the first word: `empty_first_page` is the source
+    speaking, everything else is us failing to hear it. UNKNOWN is never DEAD (LISTING_LIVENESS.md),
+    so no caller may deactivate anything on the strength of the other four.
+    """
+    stop = diag.get("stop", "ok")
+    detail = diag.get("detail", "")
+    verdict = ("SOURCE-TRUTH: the site answered and published nothing"
+               if stop == "empty_first_page" else
+               "UNKNOWN: we could not read the source — this is NOT evidence it is empty")
+    page = diag.get("page")
+    return (f"stop={stop}"
+            + (f" page={page}" if page else "")
+            + (f" | {detail}" if detail else "")
+            + f" | {verdict}")
 
 
 def fetch_detail(link: str) -> tuple[Optional[str], str]:
@@ -513,7 +574,8 @@ def main() -> int:
     gone_ct = 0
     seen = 0
     try:
-        posts = fetch_listings(s)
+        diag: dict = {}
+        posts = fetch_listings(s, diag)
         # WP REST occasionally returns error strings/fragments inside the list (seen 2026-07-01:
         # a str where a post object was expected → AttributeError crash at the link comprehension).
         # Degrade to skipping the junk items; if NOTHING valid remains, the 0-post raise below
@@ -522,7 +584,10 @@ def main() -> int:
         if not posts:
             # Raise rather than return: the except-arm owns end_run(ok=False), so a dead/parked
             # source is recorded as a failed run instead of a silent exit.
-            raise RuntimeError("REST returned no listings (source down, parked, or blocked)")
+            # Was: "(source down, parked, or blocked)" — three guesses in place of the one fact the
+            # fetch already had. Now it names which door the crawl left by, so the next responder
+            # reads a measurement instead of re-deriving it from an ambiguous sentence.
+            raise RuntimeError(f"REST returned no listings — {why_no_listings(diag)}")
         if args.limit:
             posts = posts[: args.limit]
         print(f"Awal: {len(posts)} listings from WP REST ({WORKERS} workers)"
