@@ -473,3 +473,17 @@ def test_the_apis_labelled_facts_reach_their_af_columns():
         got = (row["street_width_m"], row["direction"], row["property_age"], row["floor_number"])
         assert got == want, (prop, frontage, floor)
         assert row["additional_info"].get("lng") == msg["property"].get("long")
+
+
+# ── direct-alive stamp gate (fleet liveness, 2026-09-25) ─────────────────────────────────────────
+def test_a_crawled_row_round_trips_to_the_liveness_signal_it_is_stamped_by():
+    import json as _json
+    msg = {**N4990, "ads": [{"ad": N4990_AD, "units": [N4990_U1]}]}
+    row, _cat, why = R.map_listing(msg, N4990_AD, N4990_U1, URL)
+    assert row, why
+    m = R._AD_NUMBER.match(row["ad_number"])
+    assert m, f"crawl ad_number {row['ad_number']!r} does not parse, so the stamp gate never fires"
+    body = _json.dumps({"message": msg}, ensure_ascii=False)
+    assert R._signal_for(*m.groups())(200, body, False) == "live"
+    gone = {**N4990, "ads": [{"ad": dict(N4990_AD, status="منتهي"), "units": [N4990_U1]}]}
+    assert R._signal_for(*m.groups())(200, _json.dumps({"message": gone}, ensure_ascii=False), False) == "gone"
