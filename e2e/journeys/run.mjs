@@ -2433,9 +2433,52 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   }
 
   if (!sawOverlay) {
-    // Not a pass and not a failure: Google decides whether to show it, and it often does not.
-    skip(name, 'no auth overlay appeared within 20s on either screen — geometry unproven this run '
-      + '(the tab presses above still ran and passed)');
+    // A BARRIER THAT ONLY FIRES ON THE DAYS GOOGLE FEELS LIKE SHOWING THE PROMPT IS NOT A BARRIER.
+    //
+    // That sentence is already in this file, above `injectTopDockPrompt`, and it names the cost:
+    // ops_incident #670 shipped a dead control behind exactly this gap. Absence of the real prompt is
+    // still a SKIP and never a pass (PART 5 shape 13) — but leaving it there is what the sibling
+    // journeys `docked-prompts-stack` and `both-edges-docked-clears-controls` deliberately do NOT do:
+    // they inject the measured shape so the geometry is proven on every run.
+    //
+    // Measured 2026-09-25 (routine #6): across a full production sweep this journey skipped its
+    // geometry half 4/4, on BOTH viewports, while `onetap-clear-of-controls` found a real sheet on
+    // mobile 2/2 in the same sweep. Those are separate browser contexts and Google suppresses
+    // per-context, so it is not a contradiction — but it does mean the owner's 2026-09-06 rule
+    // («One Tap must never cover, block, or intercept any Ezhalah controls») went unproven here on
+    // every run of that sweep, behind a tidy skip. PART 9.5 is explicit: when a journey skips, ask
+    // why before accepting it.
+    //
+    // So the real prompt's absence is recorded as the skip it is, and then the SAME geometry read is
+    // run against the injected shape, as its own clearly-labelled outcome. The synthetic pass is
+    // never dressed up as evidence about Google's real prompt: it proves the APP's reservation and
+    // hit-testing against the geometry the engines were measured serving, which is the half a
+    // suppressed prompt takes away.
+    skip(name, 'no auth overlay appeared within 20s on either screen — the REAL prompt proved nothing '
+      + 'this run (the tab presses above still ran and passed); falling back to the injected shape below');
+
+    await gotoOrRetryTransport(page, BASE + '/');
+    await settle(page);
+    await injectTopDockPrompt(page);
+    await sleep(1500);
+    const synth = await page.evaluate(READ);
+    if (!synth.frames.some((f) => !f.hidden && f.box[3] > 0)) {
+      skip(`${name}/synthetic`, 'the injected prompt did not register as an auth overlay — the app\'s own '
+        + 'selector did not match the shape the engines serve, which is itself worth knowing');
+    } else if (synth.blockedCount) {
+      defect(`${name}/synthetic`, 'an auth overlay sitting at the measured TOP dock blocks an Ezhalah control',
+        `${synth.blockedCount} control(s) blocked — ` + synth.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')
+        + `. APP RESERVED top=${synth.reservedTop} bottom=${synth.reservedBottom} appSees=${JSON.stringify(synth.appSees)}`
+        + `. overlay=${JSON.stringify(synth.frames)} viewport=${JSON.stringify(synth.vp)}`
+        + '. INJECTED shape (ops_incident #202 geometry), so this is evidence about OUR reservation and '
+        + 'hit-testing, not about Google\'s real prompt.');
+    } else {
+      pass(`${name}/synthetic`, `an auth overlay at the measured TOP dock blocks 0 controls `
+        + `(app reserved top=${synth.reservedTop} bottom=${synth.reservedBottom}, overlay `
+        + `${JSON.stringify(synth.frames.map((f) => f.box))}) — INJECTED shape, so this proves our own `
+        + 'reservation and hit-testing, never Google\'s real prompt');
+    }
+    await page.evaluate((s) => document.querySelectorAll(s).forEach((n) => n.remove()), TOP_DOCK_SYNTH);
   }
   const errs = appPageErrors(bag, name);
   if (errs.length) defect(name, 'uncaught page error on the auth-overlay journey', errs[0]);
