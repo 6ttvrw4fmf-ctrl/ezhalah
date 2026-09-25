@@ -32,6 +32,7 @@
 // stay green for the entire life of the bugs they covered (2026-09-04), and the old defect here was
 // itself protected by a comment asserting the wrong thing.
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { liftSymbols } from './lib/liftSymbols.ts';
 
 let failed = 0;
@@ -70,7 +71,13 @@ function stubPage(appSelects: boolean) {
     }),
     waitForFunction: async () => true,                     // the suggestion appeared
     evaluateHandle: async () => el,
-    evaluate: async () => undefined,
+    // The suggestion list the app rendered. Since 2026-09-25 pickCity READS these texts and hands
+    // them to pickCityOptionIndex, so a stub returning undefined would make every pick fail for a
+    // reason that has nothing to do with the confirmation rule under test. The exact city asked for
+    // is always offered here — whether the RIGHT one is chosen is a different question, proven in
+    // scripts/verify-city-option-pick-is-exact.ts against the strings production really renders.
+    evaluate: async (_fn: unknown, arg?: unknown) =>
+      (typeof arg === 'string' ? [`${arg}\n1,234 إعلان`] : undefined),
     // THE POINT: the app's own confirmation element only ever exists if the app accepted the pick.
     waitForSelector: async (sel: string) => {
       if (sel.includes('selected-city-visual') && !appSelects) throw new Error('timeout');
@@ -80,7 +87,14 @@ function stubPage(appSelects: boolean) {
   return { page, clicks, typed: () => field };
 }
 
+// `pickCityOptionIndex` is IMPORTED here, not stubbed. Both harnesses now delegate the choice of
+// suggestion to that shared rule (2026-09-25), and a stub of it would be a second, unshipped copy of
+// production logic — the exact thing AGENTS.md forbids and the thing that would let this barrier pass
+// over a pickCity that chooses wrongly. Its own correctness is proven separately and by execution in
+// scripts/verify-city-option-pick-is-exact.ts; here it is simply the real collaborator.
 const PRELUDE = `
+import { pickCityOptionIndex } from ${JSON.stringify(
+  pathToFileURL(join(ROOT, 'e2e', 'live-sweep', 'cityOption.mjs')).href)};
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 1)));
 const CITY_OPTION_TIMEOUT_MS = 1;
 const until = async (fn) => await fn();

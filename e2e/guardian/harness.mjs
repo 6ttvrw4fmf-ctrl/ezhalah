@@ -36,6 +36,7 @@ export const VIEWPORTS = [
 /** The property-search RPC. Journeys count these to prove "no search fired" / "no duplicate". */
 import { isHydrationNoticePageError, hydrationNoticeNote } from '../lib/pageErrors.mjs';
 import { resultsFoundCount, settledSource } from '../lib/resultsSentence.mjs';
+import { pickCityOptionIndex } from '../live-sweep/cityOption.mjs';
 
 export const SEARCH_RPC = '/rpc/location_search_candidates_ar';
 
@@ -339,14 +340,31 @@ export async function pickCity(page, city) {
   const optionSrc = (c) => [...document.querySelectorAll('div')].filter((e) => {
     const t = (e.innerText || '').trim();
     return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
-  }).pop();
+  });
   const appeared = await page.waitForFunction(
     (c) => [...document.querySelectorAll('div')].some((e) => {
       const t = (e.innerText || '').trim();
       return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
     }), city, { timeout: 20000 }).then(() => true).catch(() => false);
   if (!appeared) return false;
-  const handle = await page.evaluateHandle(optionSrc, city);
+  // WHICH option is decided by the shared, mutation-proven rule — not by `.pop()`, which this
+  // function also used until 2026-09-25 and which selects «الخبراء» (13 إعلان) when a journey asks
+  // for «الخبر» (6,606). Guardian asserts product INVARIANTS, so a silently substituted city makes
+  // every one of them an assertion about a different place. Same defect as e2e/live-sweep/sweep.mjs,
+  // same fix, one rule: e2e/live-sweep/cityOption.mjs, proven in
+  // scripts/verify-city-option-pick-is-exact.ts.
+  const texts = await page.evaluate(
+    (c) => [...document.querySelectorAll('div')].filter((e) => {
+      const t = (e.innerText || '').trim();
+      return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
+    }).map((e) => (e.innerText || '').trim()), city);
+  const idx = pickCityOptionIndex(texts, city);
+  if (idx < 0) return false;
+  const handle = await page.evaluateHandle(
+    ({ c, i }) => [...document.querySelectorAll('div')].filter((e) => {
+      const t = (e.innerText || '').trim();
+      return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
+    })[i], { c: city, i: idx });
   const option = handle.asElement();
   if (!option) return false;
   // Scroll the option with the DOM, not Playwright. `scrollIntoViewIfNeeded()` does NOT move a

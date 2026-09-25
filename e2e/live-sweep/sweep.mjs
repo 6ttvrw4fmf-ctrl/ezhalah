@@ -32,6 +32,7 @@
 import { chromium, devices } from '@playwright/test';
 import { appendFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { parseVisibleState } from './visibleState.mjs';
+import { pickCityOptionIndex } from './cityOption.mjs';
 import { resultsFoundCount, settledSource } from '../lib/resultsSentence.mjs';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
@@ -551,10 +552,24 @@ async function pickCity(page, city) {
   // exactly the trap that section describes — the coordinate lands, the city commits, and the page
   // is left in a state where the subsequent «بحث» click never becomes actionable. Take the ELEMENT
   // and click it, so Playwright does its own scrolling and actionability checks.
-  const handle = await page.evaluateHandle((c) => [...document.querySelectorAll('div')].filter((e) => {
+  //
+  // WHICH of the matching options is chosen is decided by pickCityOptionIndex (cityOption.mjs), a
+  // PURE rule that is mutation-proven offline — not by `.pop()` here. This used to take the LAST node
+  // starting with the typed name, and `.pop()` on «الخبر» selects «الخبراء»: measured live 2026-09-25,
+  // the product offers الخبر (6,606 إعلان) first and الخبراء (13 إعلان) second, so every الخبر journey
+  // in this sweep was really searching a city with 17 rows instead of 14,066 — and assertChain's
+  // INTENT→UI guard could not see it, because `'الخبراء'.includes('الخبر')` is true. Eleven city pairs
+  // in production collide this way; cityOption.mjs lists them.
+  const texts = await page.evaluate((c) => [...document.querySelectorAll('div')].filter((e) => {
     const t = (e.innerText || '').trim();
     return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
-  }).pop(), city);
+  }).map((e) => (e.innerText || '').trim()), city);
+  const idx = pickCityOptionIndex(texts, city);
+  if (idx < 0) return false;
+  const handle = await page.evaluateHandle(({ c, i }) => [...document.querySelectorAll('div')].filter((e) => {
+    const t = (e.innerText || '').trim();
+    return t.startsWith(c) && t.includes('إعلان') && t.length < 46;
+  })[i], { c: city, i: idx });
   const option = handle.asElement();
   if (!option) return false;
   // Scroll the option with the DOM, not Playwright. `scrollIntoViewIfNeeded()` does NOT move a
