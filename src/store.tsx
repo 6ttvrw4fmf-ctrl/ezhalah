@@ -525,12 +525,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // by id — the newer side (per-entry activity stamp) wins; server-only chats appear, local-only
   // chats stay and get pushed. Transcripts are NOT pulled here (metas stay small) — hydrateTranscript
   // fetches one lazily when its chat is opened.
+  // ── THE ACCOUNT SCOPE TOKEN (ops_incident #693, routine-8 2026-09-25) ────────────────────────────
+  // The sync refs below are guards of the shape "have I already done this for this account?", and
+  // they were keyed on `historyKey(user.sub)` ALONE. An account key is not a session: it is identical
+  // before and after a sign-out, so every one of those guards silently answered a question nobody
+  // asked it — "same account" instead of "same signed-in session". Two consequences, both real:
+  //
+  //   · An in-flight `loadChatMetas()` (bounded at 15s, plus a 1.2s retry and a second 15s) that
+  //     resolved AFTER sign-out re-checked `serverMergedRef`, which sign-out never reset, passed its
+  //     own guard, and wrote the previous account's 50 chat metas into the live history state of the
+  //     GUEST session that replaced it.
+  //   · `serverMergedRef` never being reset made "merge once per account" really mean "merge once per
+  //     account PER PAGE LOAD": signing out and back into the SAME account in one tab skipped the
+  //     server pull entirely, so a chat created on another device since the last pull stayed missing
+  //     from the sidebar until a full reload — against the owner 2026-08-25 rule that conversations
+  //     survive "logging back in on any device".
+  //
+  // THE FIX IS NOT A LONGER RESET LIST IN signOut(). This is the EIGHTH recurrence of one class
+  // (ops_incident #211/#271/#319/#341/#599/#648/#692/#693 — an async continuation writing state that
+  // belongs to a context the user has already left), and #319's own repair was a hand-maintained
+  // reset list that turned out to be a subset of what needed resetting. A list that must be extended
+  // by hand every time a ref is added is the defect, not the cure.
+  //
+  // So the scope token carries a SEQUENCE NUMBER that advances on every account transition — sign-in,
+  // sign-out, and account switch alike — and `accountScopeRef` always holds the CURRENT one. Every
+  // guard below compares against `accountScopeRef.current` AT CONTINUATION TIME (the #648 lesson:
+  // re-check the cohort you are keyed on, not merely the value you can see), so work started in a
+  // session the user has left cannot pass, and a new session cannot inherit a previous one's answer.
+  // Nothing has to be remembered at sign-out: signOut() and deleteAccount() need no change, and a
+  // ref added here tomorrow is scope-safe by construction if it is compared the same way.
+  //
+  // Keyed on `user?.sub`, never on the user OBJECT: a profile patch (a rename via updateUser) makes a
+  // new object without changing who is signed in, and must not invalidate a merge that is still true.
+  const accountScopeRef = useRef<string | null>(null);
+  const scopeSeqRef = useRef(0);
+  useEffect(() => {
+    scopeSeqRef.current += 1;
+    accountScopeRef.current = user ? `${historyKey(user.sub)}#${scopeSeqRef.current}` : null;
+  }, [user?.sub]);
+
   const serverMergedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!authChecked || !user || !supabase) return;
-    const key = historyKey(user.sub);
-    if (serverMergedRef.current === key) return;
-    serverMergedRef.current = key;
+    const scope = accountScopeRef.current;
+    if (!scope) return;
+    if (serverMergedRef.current === scope) return;
+    serverMergedRef.current = scope;
     // `null` from loadChatMetas means the LOAD FAILED — never "this account has no chats" (an empty
     // account resolves as `[]`). A single transient blip used to strand the whole session on the
     // local-only list with no retry and no sign anything was missing, because `serverMergedRef` was
@@ -544,7 +584,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return loadChatMetas();
     };
     pull().then((rows) => {
-      if (!rows || serverMergedRef.current !== key) return;
+      // LIVE re-check, not a captured one: `accountScopeRef.current` is what the app is showing NOW.
+      // A sign-out makes it null and an account switch makes it a different token, so a pull that
+      // outlived its session is discarded here instead of landing on whoever replaced it.
+      if (!rows || accountScopeRef.current !== scope) return;
       setHistory((h) => {
         const byId = new Map(h.map((it) => [it.id, it] as const));
         for (const r of rows) {
@@ -562,7 +605,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Baseline AFTER the merge lands so the first push diff is against what the server now holds.
       syncBaselineRef.current = new Map(rows.map((r) =>
         [r.id, syncKeyOf({ ...r.meta, id: r.id } as unknown as HistoryItem)] as const));
-      syncReadyRef.current = key;
+      syncReadyRef.current = scope;
     }).catch(() => { /* offline → local-only session; next sign-in retries */ });
   }, [authChecked, user]);
 
@@ -589,7 +632,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!user || !supabase) return;
-    if (syncReadyRef.current !== historyKey(user.sub)) return; // push only after the pull merged
+    // Push only after the pull merged — and only after the pull that merged for THIS session. Keyed
+    // on the account alone, this armed the push against a baseline a previous session had built (see
+    // the scope-token note above), so a sign-out/sign-in round trip could write through against a
+    // server state nobody had re-read. `syncBaselineRef` needs no reset of its own for the same
+    // reason: it is only ever reachable behind this gate, and the pull that opens the gate replaces
+    // it wholesale.
+    if (syncReadyRef.current !== accountScopeRef.current) return;
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(() => {
       const items = historyRef.current;
