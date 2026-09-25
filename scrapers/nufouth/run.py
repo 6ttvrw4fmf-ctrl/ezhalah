@@ -579,6 +579,7 @@ def main() -> int:
             if not msg:
                 skipped["api_miss"] = skipped.get("api_miss", 0) + 1
                 continue
+            msg_body = json.dumps({"message": msg}, ensure_ascii=False)
             ads = msg.get("ads") or []
             if not ads:
                 # «لا يوجد شواغر متوفرة الان» — a building with no live ad has nothing to publish.
@@ -596,6 +597,11 @@ def main() -> int:
                         continue
                     if args.type != "all" and cat != args.type:
                         continue
+                    # The API record this crawl just read for THIS code, judged by the same signal
+                    # verify_gone uses: code echoed, this ad «نشط», this unit present.
+                    m_ad = _AD_NUMBER.match(row["ad_number"])
+                    if m_ad and _signal_for(*m_ad.groups())(200, msg_body, False) == "live":
+                        db.mark_direct_alive(row, oracle="nufouth.api.property_record.ad_status")
                     (com if cat == "commercial" else res).append(row)
 
         notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))

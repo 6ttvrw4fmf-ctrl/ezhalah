@@ -419,8 +419,9 @@ def sitemap_entries(s: cc.Session) -> list[tuple[str, Optional[str]]]:
         + (f" (last error: {last_err})" if last_err else " (all attempts returned decoy bodies)"))
 
 
-def fetch_one(entry: tuple[str, Optional[str]]) -> Optional[tuple[str, str, Optional[str]]]:
-    """Fetch the detail page. Returns (body, url, featured_image) or None."""
+def fetch_one(entry: tuple[str, Optional[str]]) -> Optional[tuple[str, str, Optional[str], bool]]:
+    """Fetch the detail page. Returns (body, url, featured_image, own) or None. `own` is True when
+    the request was not redirected — _signal() has no opinion about a page it was redirected to."""
     url, img = entry
     s = _session()
     for attempt in range(3):
@@ -430,7 +431,8 @@ def fetch_one(entry: tuple[str, Optional[str]]) -> Optional[tuple[str, str, Opti
             time.sleep(1.2 * (attempt + 1))
             continue
         if r.status_code == 200 and len(r.text) > 2000:
-            return r.text, url, img
+            own = http_liveness._path_of(str(getattr(r, "url", url) or url)) == http_liveness._path_of(url)
+            return r.text, url, img, own
         time.sleep(1.0 * (attempt + 1))
     return None
 
@@ -708,12 +710,16 @@ def main() -> int:
             for result in ex.map(fetch_one, entries):
                 if not result:
                     continue
-                body, u, img = result
+                body, u, img, own = result
                 row, cat = map_listing(body, u, img)
                 if not row:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                if own:
+                    # 200, not redirected, parses as a listing through map_listing: what _signal()
+                    # (verify_gone's oracle) calls "live".
+                    db.mark_direct_alive(row, oracle="jazwtn.detail_page.map_listing")
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 seen += 1

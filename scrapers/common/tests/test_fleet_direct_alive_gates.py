@@ -76,3 +76,24 @@ def test_raghdan_another_property_is_never_this_listing(monkeypatch):
 
 def test_raghdan_shell_without_payload_is_not_proof_of_life(monkeypatch):
     assert _rg(monkeypatch, "https://raghdan.sa/ar/property/AbC123xyz/", _RG_SHELL)[2] is False
+
+
+# ── jazwtn ──────────────────────────────────────────────────────────────────────────────────────
+from scrapers.jazwtn import run as JZ  # noqa: E402
+
+_JZ_PAGE = "<html>" + "x" * 2100 + "</html>"
+
+
+def _jz(monkeypatch, landed, url="https://jazwtn.com/property/villa-7/"):
+    monkeypatch.setattr(JZ, "_session", lambda: _S(landed, _JZ_PAGE))
+    monkeypatch.setattr(JZ.time, "sleep", lambda *_: None)
+    return JZ.fetch_one((url, None))
+
+
+def test_jazwtn_unredirected_own_page_is_own(monkeypatch):
+    assert _jz(monkeypatch, "https://jazwtn.com/property/villa-7/")[3] is True
+
+
+def test_jazwtn_redirected_page_is_never_this_listing(monkeypatch):
+    assert _jz(monkeypatch, "https://jazwtn.com/")[3] is False
+    assert _jz(monkeypatch, "https://jazwtn.com/property/other-9/")[3] is False
