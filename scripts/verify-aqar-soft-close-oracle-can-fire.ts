@@ -70,12 +70,16 @@ src = open("scrapers/aqar/liveness.py", encoding="utf-8").read()
 
 mutate = os.environ.get("MUTATE")
 if mutate == "old_badge_factor1":
-    # The pre-2026-09-25 factor 1: server-rendered badge markup around «مغلق».
+    # The pre-2026-09-25 factor 1: the badge branch ALONE, with the word pre-check that gated it.
     src = src.replace(
-        "    if not _CLOSED_FLAG_RE.search(body):\n        return False",
+        "    if not (_CLOSED_FLAG_RE.search(body) or _closed_badge(body)):\n        return False",
         "    if 'مغلق' not in body:\n        return False\n"
-        "    if not re.search(r'(?:badge|chip|tag|status)[^<>]{0,80}مغلق|مغلق[^<>]{0,40}</(?:span|div|p)>', body):\n"
-        "        return False")
+        "    if not _closed_badge(body):\n        return False")
+elif mutate == "drop_badge_branch":
+    # Retiring the badge instead of keeping it beside the flag.
+    src = src.replace(
+        "    if not (_CLOSED_FLAG_RE.search(body) or _closed_badge(body)):\n        return False",
+        "    if not _CLOSED_FLAG_RE.search(body):\n        return False")
 elif mutate == "drop_factor2":
     src = src.replace(
         "    has_offer = '\"offers\"' in body or '\"price\"' in body\n    return not has_offer",
@@ -92,7 +96,7 @@ if mutate and src == open("scrapers/aqar/liveness.py", encoding="utf-8").read():
     sys.exit(0)
 
 ns = {"re": re, "os": os}
-seg = src[src.index("_CLOSED_FLAG_RE = "):src.index("def looks_closed")]
+seg = src[src.index("_CLOSED_FLAG_RE = "):src.index("# Deactivating on the repaired factor 1")]
 exec(seg, ns)
 i = src.index("def looks_closed")
 j = src.index("\ndef ", i + 5)
@@ -129,11 +133,25 @@ const CONTRADICTORY = CLOSED + '\n<script type="application/ld+json">{"offers":{
 // the reason factor 1 must key on aqar's state flag rather than on the absence of a price.
 const MARKETING_REQUEST = CLOSED.replace('\\"closed\\":true', '\\"closed\\":false');
 
+// The pre-2026-09-25 server-rendered form, the shape
+// scrapers/common/tests/test_aqar_soft_close_detection.py pins. It is kept beside the structured
+// flag rather than replaced by it: its absence from today's pages is a measurement, not a promise
+// that it can never appear again (a cached page, another render path, another aqar surface).
+// `scrapers/common/cleanup.py` imports this same predicate, so both consumers ride on it.
+const BADGE_ONLY = '<div class="listing"><span class="badge badge-danger">مغلق</span><h1>شقة</h1></div>';
+// «مغلق» as bare description text beside a published price — a live gated compound. Neither factor
+// may fire on it.
+const GATED_COMPOUND = '<script type="application/ld+json">{"@type":"RealEstateListing",'
+  + '"offers":{"price":850000}}</script><p>الوصف: مجمع سكني مغلق بحراسة</p>';
+
 console.log('aqar soft-close oracle — the real predicate, executed\n');
 
-const base = run({
+const BODIES = {
   closed: CLOSED, live: LIVE, contradictory: CONTRADICTORY, marketing: MARKETING_REQUEST,
-});
+  badge: BADGE_ONLY, gated: GATED_COMPOUND,
+};
+
+const base = run(BODIES);
 
 ok('a source-confirmed CLOSED page scores closed', base.closed === true,
    'this is the half that was dead: it scored false for every page');
@@ -144,6 +162,10 @@ ok('an OPEN «طلب تسويق» ad with no offers node is spared', base.market
    'the marketing-request exemption promised since 2026-08-04 is broken');
 ok('the «طلب تسويق» case is really distinct from the closed one',
    MARKETING_REQUEST !== CLOSED, 'fixture lacks the escaped closed flag — case is vacuous');
+ok('the OLD badge form still scores closed — it is kept beside the flag, not replaced',
+   base.badge === true,
+   'retiring the badge breaks test_aqar_soft_close_detection.py and cleanup.py, which share this predicate');
+ok('«مغلق» as description text beside a published price is not closed', base.gated === false);
 
 // Both fixtures must really contain the adversarial i18n label, or the live assertion above is
 // vacuous — it would be proving nothing about a page that never mentioned «مغلق» at all.
@@ -161,13 +183,16 @@ ok('closed fixture publishes no offers node',
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 console.log('\nmutation proof\n');
 
-const MUTANT_BODIES = {
-  closed: CLOSED, live: LIVE, contradictory: CONTRADICTORY, marketing: MARKETING_REQUEST,
-};
+const MUTANT_BODIES = BODIES;
 
 const m1 = run(MUTANT_BODIES, 'old_badge_factor1');
-ok('restoring the pre-2026-09-25 badge factor 1 stops the oracle firing', m1.closed === false,
+ok('reverting factor 1 to the badge ALONE stops the oracle firing on a real closed page',
+   m1.closed === false,
    'the mutant still fired — this guard would not have caught the original defect');
+
+const m1b = run(MUTANT_BODIES, 'drop_badge_branch');
+ok('retiring the badge branch breaks the form the pytest barriers pin', m1b.badge === false,
+   'the badge assertion is not actually load-bearing');
 
 const m2 = run(MUTANT_BODIES, 'drop_factor2');
 ok('dropping factor 2 turns the contradictory page into a kill', m2.contradictory === true,

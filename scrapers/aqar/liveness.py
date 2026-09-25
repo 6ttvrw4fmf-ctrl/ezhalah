@@ -144,6 +144,18 @@ def reconcile_orphaned_stubs(client, platform: str, *, older_than_hours: int = O
 # the i18n bundle's «مغلق» string label (`"closed":"مغلق"`, present on every page) from matching.
 _CLOSED_FLAG_RE = re.compile(r'\\?"closed\\?"\s*:\s*true')
 
+# The pre-2026-09-25 server-rendered form of the same fact: the badge, not the bare word. «مغلق»
+# appears in live listings' own descriptions («مطبخ مغلق» = closed kitchen, «مجمع سكني مغلق» = gated
+# compound) and, since aqar's client-side rewrite, in an i18n label bundle on every page — so the
+# markup is what carries the meaning. Measured 0/77 false fires on live pages (2026-08-04) and it
+# matches neither real page stored under scrapers/aqar/testdata/, so keeping it adds no risk.
+_CLOSED_BADGE_RE = re.compile(
+    r"(?:badge|chip|tag|status)[^<>]{0,80}مغلق|مغلق[^<>]{0,40}</(?:span|div|p)>")
+
+
+def _closed_badge(body: str) -> bool:
+    return "مغلق" in body and bool(_CLOSED_BADGE_RE.search(body))
+
 # Deactivating on the repaired factor 1 is a BULK listing operation — the measured firing rate is
 # 5.3% of never-re-enriched priced rows (4/75 sampled 2026-09-25), i.e. order 2,500 aqar rows — and
 # AGENTS.md puts bulk listing operations behind owner approval. So the repaired oracle ships
@@ -194,9 +206,18 @@ def looks_closed(body: str) -> bool:
     Rows 874 and 882 had been affirmatively certified ALIVE that morning while aqar served
     `closed:true` with price, area, content and create_time all null.
 
-    THE REPLACEMENT IS AQAR'S OWN STATE FLAG, and it keeps the two-factor design intact:
-      • factor 1 — the payload states `"closed": true` (escaped as \"closed\":true in the stream);
+    THE REPAIR ADDS AQAR'S OWN STATE FLAG; IT DOES NOT DELETE THE BADGE. Factor 1 is now satisfied
+    by EITHER expression of the same fact, and the two-factor design is intact:
+      • factor 1 — the payload states `"closed": true` (escaped as \"closed\":true in the stream),
+        OR the old server-rendered «مغلق» badge markup is present;
       • factor 2 — unchanged: no offers node.
+    The badge branch is kept deliberately rather than replaced. It costs nothing (measured 0/77
+    false fires on live pages in 2026-08, and it matches neither of the real pages stored under
+    scrapers/aqar/testdata/), it is what `scrapers/common/tests/test_aqar_soft_close_detection.py`
+    and `test_cleanup.py` pin, and a signal that has stopped appearing on the page shapes we sampled
+    is not the same thing as a signal that can never appear again — a cached page, a different
+    render path or another aqar surface may still carry it. Retiring it would be a claim this run
+    did not measure.
     Measured 2026-09-25 over 75 random active rows plus 6 source-confirmed closed ads:
     6/6 closed → True, 2/2 live controls → False, and 0 pages anywhere carried `closed:true`
     beside a published price, so the two factors never disagreed. The i18n label is a STRING value
@@ -206,9 +227,12 @@ def looks_closed(body: str) -> bool:
     «يظهر هذا الإعلان في صفحة حسابك فقط (لا يظهر على الخريطة أو عند البحث)» — it is gone from the
     source's own search, which is exactly the condition this oracle exists to detect.
     """
-    # Factor 1: aqar's OWN state flag, not markup we have to guess at. The payload arrives inside
-    # `self.__next_f` chunks with its quotes backslash-escaped, so both spellings are accepted.
-    if not _CLOSED_FLAG_RE.search(body):
+    # Factor 1: aqar says closed, by EITHER of the two ways it has expressed that. The structured
+    # flag arrives inside `self.__next_f` chunks with its quotes backslash-escaped; the badge is the
+    # pre-2026-09-25 server-rendered form, kept because it costs nothing and its absence today is a
+    # measurement, not a guarantee. The badge branch keeps its own «مغلق» pre-check so the word
+    # alone can never satisfy factor 1 — the markup must be there too.
+    if not (_CLOSED_FLAG_RE.search(body) or _closed_badge(body)):
         return False
     # Factor 2: a live ad always publishes an offers node; a closed one has none.
     has_offer = '"offers"' in body or '"price"' in body
