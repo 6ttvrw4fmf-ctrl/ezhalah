@@ -2,27 +2,31 @@
 
 Every fixture below is a VERBATIM record captured from www.nofodh.sa on 2026-09-24 by the shipping
 `parse_listing_page()`, trimmed to the keys the mapper reads. The assertions execute the SHIPPING
-functions (`map_listing`, `read_price`, `parse_listing_page`, `_signal`) — nothing is re-implemented
-here, so a change to the scraper is a change to what these tests measure.
+functions (`map_listing`, `read_price`, `parse_listing_page`, `is_waf_challenge`, `_signal`) —
+nothing is re-implemented here, so a change to the scraper is a change to what these tests measure.
 
-MUTATION-VERIFIED (2026-09-24). The core price guard was broken on purpose and each test below was
-watched FAIL, then the guard was restored and each was watched PASS:
+MUTATION-VERIFIED (2026-09-24). Each guard below was broken on purpose, the suite was watched FAIL,
+the guard was restored, and the suite was watched PASS. The named tests are the ones that went red:
 
-  1. «السعر 0» accepted as a price — `read_price` changed to
-         shown = normalize.to_int(shown_raw)
-         if shown is None: ...          (i.e. `is None` instead of the falsy test)
-     → test_a_zero_price_is_not_a_price FAILED: price_annual became 0 on NFD108296, publishing a
-       263 m² Khobar office as free. Restored → passes.
+  1. «السعر 0» accepted as a price — `read_price`'s falsy test weakened to `if shown is None:`
+     → test_a_zero_price_is_not_a_price, test_a_price_the_page_hides_is_not_taken_from_the_model.
+       price_annual became 0 on NFD108296, publishing a 263 m² Khobar office as free.
   2. The rounding corroboration dropped — the `abs(exact - shown) >= 1` branch deleted and the
-     model's float stored instead of the printed figure
-         return int(exact), exact, None
-     → test_the_printed_price_is_what_is_stored FAILED: NFD432014 stored 530696 where the source
-       prints 530,697. Restored → passes.
+     model's float stored instead of the printed figure (`return int(exact), exact, None`)
+     → test_the_printed_price_is_what_is_stored (NFD432014 stored 530696 where the source prints
+       530,697), plus the mismatch, rent-period and price-band tests.
   3. The mismatch refusal weakened to "trust the model"
-     → test_a_price_the_page_and_the_model_disagree_on_is_refused FAILED: the row was stored with
-       the model's unrelated figure instead of being skipped. Restored → passes.
+     → test_a_price_the_page_and_the_model_disagree_on_is_refused,
+       test_the_range_check_catches_a_container_the_type_word_would_not — the second one is the
+       interesting failure: with the refusal gone, an abbreviated price BAND reaches a price column.
   4. The rent period defaulted — `row["rent_period"] = "annual"` added beside `price_annual`
-     → test_rent_period_is_never_stated_by_this_platform FAILED. Restored → passes.
+     → both test_rent_period_is_never_stated_by_this_platform cases and
+       test_a_period_the_source_did_state_would_still_be_honoured.
+  5. The photo pattern un-scoped from the listing id (back to any listing folder, not this one)
+     → test_photos_are_scoped_to_this_listing_and_to_real_images — the live defect: one row
+       claiming six other listings' photos plus a brochure PDF.
+  6. The WAF challenge check moved to AFTER the 404 branch in `_signal`
+     → test_the_waf_challenge_is_never_read_as_a_missing_listing — a block becomes a deletion.
 
 Run:
   python -m pytest scrapers/common/tests/test_nofodh_price_period_and_pdpl.py -q
@@ -218,14 +222,18 @@ def test_a_price_the_page_and_the_model_disagree_on_is_refused():
     """
     poisoned = {**APARTMENT_FOR_RENT, "price_exact": 75600.0}
     why = _skip(poisoned)
-    assert why.startswith("price_mismatch_"), why
-    assert "17000" in why and "75600" in why, "the reason must name both published figures"
+    # The tally KEY is value-free (so a hundred mismatches cannot become a hundred one-count
+    # buckets and get truncated out of scrape_runs.notes); the detail after the '|' still names both
+    # published figures, and crawl() prints those with their listing ids.
+    key, _, detail = why.partition("|")
+    assert key == "price_mismatch", why
+    assert "17000" in detail and "75600" in detail, "the detail must name both published figures"
 
 
 def test_a_price_the_page_hides_is_not_taken_from_the_model():
     """The model holding a figure the page does not print is not a published price."""
     hidden = {**OFFICE_PRICE_ZERO, "price_exact": 88000.0}
-    assert _skip(hidden).startswith("price_hidden_but_model_holds_")
+    assert _skip(hidden).partition("|")[0] == "price_hidden_by_source"
 
 
 def test_no_per_metre_rate_is_ever_derived_for_land():
@@ -342,7 +350,8 @@ def test_the_range_check_catches_a_container_the_type_word_would_not():
     assert nofodh.normalize.to_int("550.0K - 830.0K") == 55008300, "the band is not a number"
     naked = {**flat, "details": {k: v for k, v in flat["details"].items()
                                  if not k.startswith("عدد الوحدات")}}
-    assert _skip(naked).startswith("price_mismatch_"), "the band must never reach a price column"
+    assert _skip(naked).partition("|")[0] == "price_mismatch", (
+        "the band must never reach a price column")
 
 
 # ── TYPE MAPPING ────────────────────────────────────────────────────────────────────────────────
@@ -353,9 +362,17 @@ def test_the_range_check_catches_a_container_the_type_word_would_not():
     ("OFFICE", "Office", "commercial"),
     ("WORKSHOP", "Workshop", "commercial"),
     ("RETAIL_STORE", "Shop", "commercial"),
+    # Mapped from the SOURCE'S OWN words, not from the enum's English — see the override dict.
+    ("COMMERCIAL_GALLERY", "Shop", "commercial"),
+    ("STORAGE", "Warehouse", "commercial"),
 ])
 def test_the_type_mapping_covers_both_of_the_sources_vocabularies(raw, expected, category):
-    """The platform prints Arabic for translated types and leaks the bare enum for the rest."""
+    """The platform prints Arabic for translated types and leaks the bare enum for the rest.
+
+    COMMERCIAL_GALLERY is the one worth reading twice: it is mapped to Shop because the platform
+    codes all twelve of those units «محل -1» … «محل -12» (محل = shop), not because "gallery" sounded
+    retail. STORAGE is confirmed the same way by its «WH0050-…» code.
+    """
     rec = {**LAND_FOR_SALE,
            "details": {**LAND_FOR_SALE["details"], "نوع العقار": raw},
            "overview": {**LAND_FOR_SALE["overview"], "نوع العقار": raw}}

@@ -47,7 +47,7 @@ THE TRAPS, ALL MEASURED
    the number the source shows on the listing, and therefore the number a real-user comparison
    against the source checks — with the exact float kept verbatim in
    `additional_info.source_price_exact` and in price_evidence. The two must agree to within the
-   rounding that produced them; a wider gap REFUSES the row (`price_mismatch_…`) instead of picking a
+   rounding that produced them; a wider gap REFUSES the row (`price_mismatch`) instead of picking a
    winner, because neither figure is derived from the other and there is nothing to reconcile.
 
 3. NO PER-METRE PRICE EXISTS HERE, so none is invented. «سعر المتر» appears 0 times across a listing
@@ -236,6 +236,14 @@ _TYPE_OVERRIDES = {
     # (TYPE_MAP_EN['Commercial Shop'] and aldarim's 'store'), so this is that same fold, not a new
     # judgement.
     "RETAIL_STORE": "Shop",
+    # COMMERCIAL_GALLERY is NOT read as "gallery" — the PLATFORM names these units itself, in their
+    # own unit codes: every one of the twelve in حي طيبة is coded «محل -1» … «محل -12», and «محل» is
+    # shop. 48-65 m² units with one bathroom agree. So this is the source's own word for them, not an
+    # inference from the enum's English.
+    "COMMERCIAL_GALLERY": "Shop",
+    # STORAGE, likewise confirmed by the source twice over: the unit code is «WH0050-B-4-SN» (WH =
+    # warehouse) and the fleet's TYPE_MAP_EN already folds aldarim's 'storage' → 'Warehouse'.
+    "STORAGE": "Warehouse",
 }
 # The source's container type. Its page is a PROJECT, never a listing — see _skip_container.
 _CONTAINER_TYPE = "مشروع"
@@ -410,6 +418,13 @@ def read_price(rec: dict[str, Any]) -> tuple[Optional[int], Optional[float], Opt
     not describing the printed price — a different quantity, a stale morph, a shape change — and the
     row is REFUSED with a counted reason rather than stored on a coin-flip. `price_mismatch` firing
     at all is a signal to re-measure the page, not a number to reconcile in code.
+
+    A refusal is `"<stable key>|<detail>"`. The key is value-FREE on purpose: embedding the figures
+    in it would give the run's skip tally one bucket per distinct price, so a hundred mismatches
+    would print as a hundred one-count lines and be truncated out of `scrape_runs.notes` — a broken
+    price path would become invisible in exactly the run that found it. The detail still travels, and
+    crawl() prints a few worked examples WITH their listing ids, which is what makes an alarm
+    diagnosable from the record alone.
     """
     shown_raw = rec["details"].get("السعر")
     shown = normalize.to_int(shown_raw) if shown_raw else None
@@ -418,12 +433,12 @@ def read_price(rec: dict[str, Any]) -> tuple[Optional[int], Optional[float], Opt
         # No price printed, or the placeholder 0. If the model nevertheless holds a positive figure
         # the page is not showing it, and we do not publish what the source withholds.
         if exact is not None:
-            return None, exact, f"price_hidden_but_model_holds_{exact:g}"
+            return None, exact, f"price_hidden_by_source|model holds {exact:g}, page prints none"
         return None, None, None
     if exact is None:
-        return None, None, f"price_shown_{shown}_absent_from_model"
+        return None, None, f"price_absent_from_model|page prints {shown}"
     if abs(exact - shown) >= 1:
-        return None, exact, f"price_mismatch_shown_{shown}_model_{exact:g}"
+        return None, exact, f"price_mismatch|page {shown} vs model {exact:g}"
     return shown, exact, None
 
 
@@ -802,6 +817,7 @@ def crawl(s: cc.Session, ids: list[str], workers: int = 3,
     com: list[dict] = []
     skipped: dict[str, int] = {}
     unknown_labels: dict[str, int] = {}
+    examples: dict[str, list[str]] = {}
     blocked = 0
 
     def one(listing_id: str):
@@ -824,9 +840,14 @@ def crawl(s: cc.Session, ids: list[str], workers: int = 3,
                     unknown_labels[label] = unknown_labels.get(label, 0) + 1
             row, cat, why = map_listing(rec)
             if not row:
-                skipped[why] = skipped.get(why, 0) + 1
+                key, _, detail = why.partition("|")
+                skipped[key] = skipped.get(key, 0) + 1
+                if detail and len(examples.setdefault(key, [])) < 5:
+                    examples[key].append(f"{PREFIX}{listing_id}: {detail}")
                 continue
             (com if cat == "commercial" else res).append(row)
+    for key, shown in sorted(examples.items()):
+        print(f"  {key} e.g. " + "; ".join(shown))
     return res, com, skipped, unknown_labels, blocked
 
 
