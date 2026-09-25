@@ -218,7 +218,9 @@ jobs:
           - { source: alsaedan,      cmd: "python -m scrapers.alsaedan.run --type all", tmo: 30 }
           - { source: ego,           cmd: "python -m scrapers.ego.run --type all", tmo: 20 }
           - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 45 }
-          - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 45 }
+          #   nofodh raised 45 -> 90 after its first crawl was CANCELLED on the 45-minute budget:
+          #   2,601 listings, each needing its own detail fetch to read the «حالة البيع» state.
+          - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 90 }
           - { source: razre,         cmd: "python -m scrapers.razre.run --type all", tmo: 20 }
           - { source: reinvest,      cmd: "python -m scrapers.reinvest.run --type all", tmo: 30 }
           - { source: safa,          cmd: "python -m scrapers.safa.run --type all", tmo: 20 }

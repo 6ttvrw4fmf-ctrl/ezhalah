@@ -38,11 +38,6 @@
 -- successful crawl restores it with no migration and no human step.
 --
 -- REVERSIBLE IN ONE LINE:  update public.platform_registry set status = 'active' where platform = 'awal';
---
--- VERIFIED LIVE through the anon interfaces the app itself uses, after the gate propagated to the
--- served index (2026-09-25 07:4xZ): location_search_candidates_ar returns 0 for awal (was 51) while
--- loader_active_platforms_ar() still lists it among 104 platforms — listings hidden, brand retained.
--- Healthy neighbour wadod untouched at 7.
 
 update public.platform_registry
    set status = 'dormant'

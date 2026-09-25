@@ -89,14 +89,6 @@ set search_path to 'public'
 as $function$
 declare
   n int := 0; total int := 0; sample jsonb := '[]'::jsonb;
-  -- Measured live 2026-09-25, immediately after fixing the 3 owner-reported rows: 2,063
-  -- residential + 83 commercial = 2,146 rows where the FROZEN parsed_city_id genuinely
-  -- disagrees (not just a ة/ه spelling variant) with a fresh run of resolve_aqar_locations()'s
-  -- own join logic against today's loc_city_map/loc_catalog_city. This is PRE-EXISTING historical
-  -- drift, not something this migration creates or fixes — the 2026-07-08 freeze was a deliberate
-  -- owner decision and a bulk backfill of these 2,146 is the owner's call, not an automatic one.
-  -- Shrink-only is the WRONG shape here (nothing in this repo shrinks it), so this is a GROWTH
-  -- ratchet: alert only when NEW drift accumulates past this known baseline.
   baseline_residential constant int := 2063;
   baseline_commercial constant int := 83;
   cur_residential int; cur_commercial int;

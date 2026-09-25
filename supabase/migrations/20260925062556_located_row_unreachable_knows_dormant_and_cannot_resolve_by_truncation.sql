@@ -43,16 +43,6 @@
 --     mon_resolve_key() on the same key it raises, so it self-heals the moment the cohort fits.
 --   * The window is left at 200. Raising it would trade one silent truncation point for a higher
 --     one; the guard makes the boundary VISIBLE, which is the property that was missing.
---
--- PROVEN AGAINST REAL PRODUCTION, not inferred (all four executed 2026-09-25 06:2x-06:3xZ):
---   before  154 open located_row_unreachable (151 dormant, 3 genuine)
---   after   151 resolved, 3 genuine STILL OPEN (aqar 12710, raghdan 12586145, wasalt 12915861);
---           queue P1 321 -> 170
---   mutation proof of the guard: an identical clone with window_limit = 2 against the real cohort
---           of 3 raised located_row_unreachable_truncated and left all 3 genuine alerts OPEN, where
---           the old code would have resolved row 3 of 3
---   self-heal: the shipped function's next real sweep resolved that truncation alert (0 open), so
---           the new kind cannot become an unresolvable ratchet. Clone dropped.
 
 create or replace function public.mon_detect_located_row_unreachable()
  returns integer
