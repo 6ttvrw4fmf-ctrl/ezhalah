@@ -182,6 +182,20 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-searchable-scope-matches-inventory.ts
 
+      # …AND SO IS THE SCOPE THE BROWSER ACTUALLY HOLDS (added 2026-09-25, ops_incident #731). The
+      # step above lifts resTables/comTables out of the CHECKOUT, so it answers the question about
+      # main. On 2026-09-25 those two answers disagreed for ~7 hours: main named أبعاد's tables,
+      # the served bundle's 207-table scope did not, and 380 production_ready rows were reachable by
+      # no user search while the step above read green. The live-sweep chain could not see it either
+      # — its "independent" DB oracle translates the captured p_tables straight through, so it
+      # inherits exactly the scope under suspicion. This reads production's own bytes.
+      - name: The scope in the SERVED bundle reaches every platform holding live inventory
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-served-scope-reaches-every-live-platform-live.ts
+
       # A CATEGORY COUNT MUST RESPECT THE TABLE THE ROW LIVES IN (added 2026-09-05). Trending
       # over-counted مكة المكرمة/شقة by relying on known_type_ar.macro alone; discovery found the
       # SAME class at a much larger scale (أرض تجارية alone: 18,233 rows across ~100+ cities). Fixed
