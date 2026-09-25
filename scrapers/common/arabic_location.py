@@ -542,3 +542,70 @@ def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Option
                     if ar:
                         return ar
     return None
+
+
+# ── AMBIGUOUS STANDALONE WORDS — a bare occurrence is never enough to be a CITY (found 2026-09-25,
+# ialqarawi) ───────────────────────────────────────────────────────────────────────────────────
+#
+# THE BUG THIS CLOSES. ialqarawi's own city_from_title() scans a title's tokens for a catalog city
+# and already stopped the bare directional NOUNS (شرق/غرب/شمال/جنوب/وسط) from ever being treated as
+# one — a half-finished pattern that never added their ال-prefixed ADJECTIVE forms. Two live
+# listings' titles trailed off with «...حي النوارية الشرقية مخطط اللابة» (a Makkah plot) and
+# «...في الشرقيه امام شاطئ نصف القمر» (a Khobar plot). Neither «الشرقية» is a place on its own —
+# one modifies a subdivision name, the other is the colloquial whole-Eastern-Province sense — but
+# the catalog also has one real, obscure Asir-region village of that exact spelling (city_id
+# 14645), and the scanner matched it: both listings were served as being IN ASIR REGION.
+#
+# THE WORD CLASS, not a one-off list. Arabic relative/comparative adjectives — direction (شرقي/
+# غربي/شمالي/جنوبي/وسطى), age/currency (جديد/قديم/حديث/محدث), relative position (عليا/سفلى/كبرى/
+# صغرى) — grammatically require a head noun to name a place ("الحي الشرقي", "المدينة الجديدة"). A
+# BARE occurrence in free listing text is overwhelmingly a truncated modifier, never the place
+# itself. Checked live against the whole catalog 2026-09-25 (src/data/sa-locations.json /
+# loc_catalog_city): every word below is a REAL, if obscure, standalone town somewhere in Saudi
+# Arabia — الوسطى (Qassim), الجديدة (5 different cities), الجديد (1), العليا (4), الحديثة (Jouf),
+# المحدثة (Asir) — so a naive "is this in the catalog" check alone cannot tell a genuine reference
+# apart from a truncated one. This is why the fix is a STOPLIST, not a catalog fix: these ARE real
+# towns, and normalize_ar()/to_catalog() must keep answering for them honestly when a caller
+# deliberately asks for the bare word — the risk is ONLY in accepting one as a free-text scan's
+# unsupervised guess.
+#
+# NOT the same problem as a popular REUSED neighbourhood name (الروضة/النزهة/الصفا/الفيصلية exist
+# in 40-60 different cities each) — those are complete, legitimate standalone place names on their
+# own; their risk is "which of the 40 did they mean" (a twin-name disambiguation `resolve()`
+# already handles via region_hint/district narrowing), not "is this a place at all". Do not add
+# popular-but-real place names to this set — audited and deliberately excluded 2026-09-25.
+#
+# KEEP IN SYNC with the SQL mirror: the risky[] array literal inside
+# mon_detect_ambiguous_adjective_resolved_as_city() (supabase/migrations/
+# 20260925171201_location_barriers_ambiguous_adjective_and_aqar_drift.sql) — that function is the
+# production backstop that must always read 0 across the WHOLE fleet, not just this module's
+# callers, so a word added here without also being added there is a silent gap in that guard.
+AMBIGUOUS_STANDALONE_WORDS: frozenset[str] = frozenset({
+    "الجديد", "الجديدة", "الجديده",
+    "الحديثة", "الحديثه", "الحديث",
+    "المحدثة", "المحدثه", "المحدث",
+    "الشرقي", "الشرقية", "الشرقيه",
+    "الغربي", "الغربية", "الغربيه",
+    "الشمالي", "الشمالية", "الشماليه",
+    "الجنوبي", "الجنوبية", "الجنوبيه",
+    "الوسطى", "الوسطي",
+    "العليا", "العلياء",
+    "السفلى", "السفلي",
+    "الكبرى", "الصغرى",
+    "القديم", "القديمة", "القديمه",
+})
+
+
+_AMBIGUOUS_NORMALIZED = {norm_ar(w) for w in AMBIGUOUS_STANDALONE_WORDS}
+
+
+def is_ambiguous_standalone_word(word: Optional[str]) -> bool:
+    """True when `word` (any spelling/normalization state) is in the closed class of relative/
+    comparative Arabic adjectives that must never be accepted as a CITY from an unsupervised
+    free-text scan — see AMBIGUOUS_STANDALONE_WORDS above. Any scraper doing its own title/
+    description token-scan for a city (the ialqarawi city_from_title() shape) should skip a
+    candidate this returns True for and keep scanning, exactly like an ordinary stopword — never
+    treat it as a resolved city on its own, no matter what to_catalog() would say about it."""
+    if not word:
+        return False
+    return norm_ar(word) in _AMBIGUOUS_NORMALIZED

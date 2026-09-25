@@ -100,7 +100,9 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, http, normalize  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import (  # noqa: E402
+    find_district_in_text, is_ambiguous_standalone_word, to_catalog,
+)
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://ialqarawi.com"
@@ -152,23 +154,15 @@ _BIG_IMG_RE = re.compile(r'data-rsBigImg="([^"]+)"')
 _AUCTION_RE = re.compile(r"مزاد(?![ةه])")
 _SOLD_RE = re.compile(r"تم\s+(?:البيع|بيع|الإيجار|الايجار|التأجير)|مبا[عة]\b")
 _TOK_SPLIT = re.compile(r"[\s/،,\-–—_()\[\]:؛]+")
-# Words that are never the city itself, only its label.
+# Words that are never the city itself, only its label. The directional/age/position ADJECTIVE
+# class (شرقية/جديدة/عليا/...) that caused the 2026-09-25 Makkah/Khobar bug now lives in the
+# SHARED, fleet-wide arabic_location.AMBIGUOUS_STANDALONE_WORDS instead of a local copy here — see
+# that module for the full reasoning and the SQL backstop that keeps it honest across every
+# platform, not just this one. This set keeps only the STRUCTURAL noise words specific to how this
+# file's token-window scan works (labels, prepositions, deal words) — never place names at all.
 _CITY_STOP = {"مدينه", "محافظه", "منطقه", "مركز", "حي", "مخطط", "شارع", "طريق", "شمال", "جنوب",
               "شرق", "غرب", "وسط", "ال", "على", "في", "قريب", "بجوار", "امام", "طريقه",
-              "للبيع", "لبيع", "للايجار", "للاستثمار", "لاستثمار", "ارض", "اراضي", "فيلا", "شقه",
-              # The ال-prefixed ADJECTIVE forms of the directional nouns already stopped above
-              # (شرق/غرب/شمال/جنوب/وسط stop the noun; a title just as often carries the adjective:
-              # «حي النوارية الشرقية», «مخطط العليا»). Bare, these are never a specific place on
-              # their own — always a modifier of an omitted or nearby noun (a subdivision name) or
-              # the colloquial whole-Eastern-Province sense of «الشرقية» — but each one ALSO exists
-              # as a real, obscure, unrelated catalog city (checked 2026-09-25 against
-              # src/data/sa-locations.json: «الشرقية»→Asir village city_id 14645, «الوسطى»→Qassim,
-              # «الجديدة»→5 different cities, «الجديد»→1, «العليا»→4). Found via two live listings
-              # — a Makkah plot and a Khobar/شاطئ نصف القمر plot — silently matched to that Asir
-              # village; nothing downstream (search, the app) can tell a village pick from a
-              # genuine one, so this must stay a scraper-level never-guess, not a search-time patch.
-              "الشرقيه", "الغربيه", "الشماليه", "الجنوبيه", "الوسطى", "الوسطي",
-              "الجديده", "الجديد", "العليا"}
+              "للبيع", "لبيع", "للايجار", "للاستثمار", "لاستثمار", "ارض", "اراضي", "فيلا", "شقه"}
 _PLACEHOLDER = {"", "-", "--", "لا يوجد", "لايوجد", "غير متوفر", "غيرمتوفر", "غير محدد", "لا شيء",
                 "لا يوجد سعر", "على السوم", "علي السوم", "ع السوم", "عالسوم", "السوم", "على السوم.",
                 "جاري", "قريبا", "لا"}
@@ -451,7 +445,7 @@ def city_from_title(title: str) -> tuple[Optional[str], Optional[int], Optional[
             if cand[:1] in "بل" and len(cand) > 2:
                 forms.append(cand[1:])        # «بعنيزة» → «عنيزة», keeping the raw form too
             for form in forms:
-                if normalize._norm_ar(form) in _CITY_STOP:
+                if normalize._norm_ar(form) in _CITY_STOP or is_ambiguous_standalone_word(form):
                     continue
                 cid, rid = to_catalog(form, hint)
                 if cid:
@@ -526,18 +520,35 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         return None, category, "deal_title_contradicts_index"
 
     city_raw, city_id, region_id = city_from_title(title)
-    if not city_id:
-        return None, category, "city_not_in_catalog"
-    # city_ar is the source's own Arabic text for the city — the very token to_catalog accepted.
-    city_ar = city_raw
     district_field = f.get("الحي") or ""
     if _is_blank(district_field):
         district_field = ""
-    # A «الحي» the catalog recognises as a CITY is not this listing's district (measured: three
-    # عنيزة rentals carry «الحي: الدوادمي»).
-    field_is_a_city = bool(district_field) and bool(to_catalog(district_field)[0])
-    district_ar = ((find_district_in_text(district_field, city_id) if not field_is_a_city else None)
-                   or find_district_in_text(title, city_id))
+
+    if not city_id:
+        # The free-text title scan found NOTHING. Last resort, before quarantining: try the
+        # source's own «الحي» field AS a city — it sometimes holds a city instead of a district
+        # (measured: three عنيزة rentals carry «الحي: الدوادمي», 500km away). This branch runs
+        # ONLY when the title itself resolved no city, so it can never override a correct
+        # title-based answer — it only fills a blank that would otherwise be dropped. Found live
+        # 2026-09-25: a «شاطئ نصف القمر» plot whose title has no recognisable city at all, whose
+        # «الحي» field plainly says «الدمام» — a real catalog city, and the beach it names really
+        # does sit in the Dammam/Khobar area.
+        city_id, region_id = to_catalog(district_field) if district_field else (None, None)
+        if not city_id:
+            return None, category, "city_not_in_catalog"
+        city_raw = district_field
+        city_ar = city_raw
+        # The field WAS the city here, not a district — never also read it as one below.
+        field_is_a_city = True
+        district_ar = find_district_in_text(title, city_id)
+    else:
+        # city_ar is the source's own Arabic text for the city — the very token to_catalog accepted.
+        city_ar = city_raw
+        # A «الحي» the catalog recognises as a CITY is not this listing's district (measured: three
+        # عنيزة rentals carry «الحي: الدوادمي»).
+        field_is_a_city = bool(district_field) and bool(to_catalog(district_field)[0])
+        district_ar = ((find_district_in_text(district_field, city_id) if not field_is_a_city else None)
+                       or find_district_in_text(title, city_id))
 
     area_m2, area_skip = parse_area(f.get("مساحة الأرض"))
     som, som_ppm, som_skip = parse_money(f.get("سعر السوم"))
