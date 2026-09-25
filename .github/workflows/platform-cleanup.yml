@@ -28,7 +28,10 @@ concurrency:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 180 min, matching wasalt-cleanup.yml: a wasalt dispatch drives a real browser per candidate
+    # (~15-20s each), so a drain batch needs ~2.5h. 60 min cancelled wasalt-cleanup's first drain
+    # dry-run mid-recheck (2026-09-20) — the same ceiling would do the same here.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,13 +41,28 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      # `platform` is a free-text input, so this entrypoint CAN be dispatched for wasalt — and
+      # cleanup.py's re-check only reaches wasalt.sa through scrapers/wasalt/browser.py, which is
+      # gated on WASALT_BROWSER. Without it every wasalt re-check falls back to the curl_cffi+proxy
+      # shape wasalt null-routes (issue #1019), returns unknown after a 25s timeout, and the run's
+      # inconclusive freeze trips: this workflow could never delete a single genuinely-dead wasalt
+      # listing, while reporting a plausible run. Fails safe, but silently — the same shape as
+      # ops_incident #704 on the auditing side. The dedicated wasalt-cleanup.yml has carried this
+      # transport since the browser migration; the generic entrypoint had not.
+      #
+      # Adds no capability and moves no guard: identical code, identical policy row, identical
+      # age/strike/anomaly/fraction gates and the same fresh per-row DIRECT re-check.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Run cleanup
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
         run: |
-          exec python -m scrapers.common.cleanup \
+          # headless=False clears the challenge; the runner has no display, so xvfb-run supplies one.
+          exec xvfb-run -a python -m scrapers.common.cleanup \
             --platform "${{ github.event.inputs.platform }}" \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }} \
             ${{ github.event.inputs.force == 'true' && '--force' || '' }}
