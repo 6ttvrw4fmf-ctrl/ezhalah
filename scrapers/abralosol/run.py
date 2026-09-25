@@ -559,10 +559,6 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
                 stats["per_sqm"] += 1
             if ix["price"]["amount"] is not None and not row["additional_info"].get("price_basis"):
                 stats["unlabelled_price"] += 1
-            if detail:
-                # _detail() is non-empty only when /{nid} itself loaded and its <article> carried
-                # this nid. An index-only fallback row gets no stamp.
-                db.mark_direct_alive(row, oracle="abralosol.detail_page.article_nid")
             (com if category == "commercial" else res).append(row)
             stats["rows"] += 1
             if limit and stats["rows"] >= limit:
