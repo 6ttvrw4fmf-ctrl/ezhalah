@@ -346,3 +346,25 @@ def test_a_limit_run_is_a_dry_run_that_touches_no_table(monkeypatch):
     monkeypatch.setattr(R, "fetch_offers", lambda s, limit=0: (R.parse_offers(OFFERS)[0][:limit], 105))
     assert R.main(["--limit", "2"]) == 0
     assert written == {} and ended == {} and pruned == []
+
+
+# ── direct-alive stamp gate (fleet liveness, 2026-09-25) ─────────────────────────────────────────
+class _GateResp:
+    def __init__(self, status, text):
+        self.status_code, self.text = status, text
+
+
+class _GateSess:
+    def __init__(self, status, text):
+        self._r = _GateResp(status, text)
+
+    def get(self, *_a, **_k):
+        return self._r
+
+
+def test_live_flag_only_for_this_listings_own_page():
+    pid = "cmnh40o40000210i8x84ezr2n"
+    assert R.fetch_detail(_GateSess(200, DETAIL_MONTHLY), pid)["_live"] is True
+    other = R.fetch_detail(_GateSess(200, DETAIL_MONTHLY), "cmnh40od500hf10i8wa7gv7jh")
+    assert other is not None and other["_live"] is False
+    assert R.fetch_detail(_GateSess(404, DETAIL_MONTHLY), pid) is None
