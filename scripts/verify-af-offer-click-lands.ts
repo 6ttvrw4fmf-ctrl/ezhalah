@@ -28,7 +28,7 @@
 // It also carries the mutation as a FIRST-CLASS CASE: `legacyOpenAfOffer` below is the pre-fix body,
 // byte-for-byte in behaviour, and the barrier asserts it FAILS the same predicate the shipped one
 // passes. So the predicate is proven to discriminate, not merely to be satisfied.
-import { openAfOffer, CLICK_LEAF_SRC, AF_OFFER_TESTID, AF_OFFER_CTA } from './lib/afOfferLive.ts';
+import { openAfOffer, CLICK_LEAF_SRC, CTA_PRESENT_SRC, AF_OFFER_TESTID, AF_OFFER_CTA } from './lib/afOfferLive.ts';
 import { ARM_CLICK_WITNESS_SRC, READ_CLICK_WITNESS_SRC, clickWitnessed, isStable } from './lib/liveClick.ts';
 
 let failed = 0;
@@ -67,6 +67,10 @@ function stubPage(opts: {
   silentWitness?: boolean;
   /** simulate a conversation still reflowing: the CTA's measured point moves on every poll */
   movingTarget?: boolean;
+  /** simulate the `ops_incident` #687 shape: the CTA IS in the DOM, but the click probe can never
+   *  measure it (it sits under a running reveal cascade / below the fold, and `innerText` is empty
+   *  for a node the engine has not laid out). Presence true, measurability false. */
+  unmeasurable?: boolean;
 }): Stub {
   let attempt = 0;
   let drift = 0;
@@ -74,7 +78,9 @@ function stubPage(opts: {
   let hit: any = null;
   const page = {
     evaluate: async (fn: any, arg?: any) => {
-      if (fn === CLICK_LEAF_SRC) return opts.ctaPresent ? { x: 100, y: 200 + (opts.movingTarget ? (drift += 40) : 0) } : null;
+      if (fn === CTA_PRESENT_SRC) return opts.ctaPresent;            // PRESENCE — the DOM question
+      if (fn === CLICK_LEAF_SRC)                                      // CLICKABILITY — a different one
+        return opts.ctaPresent && !opts.unmeasurable ? { x: 100, y: 200 + (opts.movingTarget ? (drift += 40) : 0) } : null;
       if (fn === ARM_CLICK_WITNESS_SRC) { armed = true; hit = null; return undefined; }
       if (fn === READ_CLICK_WITNESS_SRC) { const h = hit; hit = null; return h; }
       return opts.hasTurn;                       // the has-turn reader (and the scroller, ignored)
@@ -130,9 +136,13 @@ const FAST = { timeoutMs: 400, pollMs: 5 };
 
 // ── 2c. a CTA that flickers once and is genuinely gone is still «absent», not «intercepted» ─────
 {
-  let polls = 0;
+  // The flicker is in BOTH probes, because that is what a one-frame CTA really is: present and
+  // measurable for a single poll, then gone from the DOM entirely. (A CTA that stays PRESENT while
+  // only the click probe loses it is the #687 shape, covered in 5b — and must NOT read as absent.)
+  let seen = 0, polls = 0;
   const page = {
     evaluate: async (fn: any) => {
+      if (fn === CTA_PRESENT_SRC) return ++seen === 1;                               // one frame only
       if (fn === CLICK_LEAF_SRC) return ++polls === 1 ? { x: 100, y: 200 } : null;   // one frame only
       return true;                                                                   // a turn landed
     },
@@ -168,6 +178,42 @@ const FAST = { timeoutMs: 400, pollMs: 5 };
   const noTurn = await openAfOffer(stubPage({ ctaPresent: false, hasTurn: false, lands: () => true }).page, FAST);
   check('no CTA and no turn is still «no-turn» — a dependency timeout, never an AF verdict',
     noTurn.opened === false && noTurn.reason === 'no-turn', JSON.stringify(noTurn));
+}
+
+// ── 5b. THE #687 DEFECT: present in the DOM, never measurable — that is a HARNESS verdict ────────
+//
+// Measured on production 2026-09-25 (الرياض/شراء/شقة desktop, fleet healthy): after removing the
+// last AF pill, `[data-testid="results-narrow"]` AND an exact `textContent` leaf for
+// «خلّنا نحدد الطلب أكثر» were present at EVERY 3 s sample for the full 60 s budget, while the click
+// probe returned null on every poll — the offer renders under a reveal cascade that was still
+// mounting cards (90 → 150 during the window). `openAfOffer` counted `ctaSeen` off the CLICK probe,
+// so it read 0, and returned `reason: 'absent'` — the one verdict in this file that blames Advanced
+// Filter. Three runs recorded a correct production as a broken contract rule R9.2.3.
+//
+// Presence and clickability are now two different questions, and only presence may retire `absent`.
+{
+  const s = stubPage({ ctaPresent: true, hasTurn: true, unmeasurable: true, lands: () => true });
+  const r = await openAfOffer(s.page, FAST);
+  check('a CTA that is in the DOM but never measurable is NEVER «absent» (that would blame AF)',
+    r.opened === false && r.reason !== 'absent', JSON.stringify(r));
+  check('…it is named INTERCEPTED — a harness fact — and no click was spent on a point never measured',
+    r.opened === false && r.reason === 'intercepted' && (r as any).attempts === 0, JSON.stringify(r));
+}
+
+// ── 5c. MUTATION: counting presence off the CLICK probe brings the false accusation straight back ─
+// The exact pre-fix rule, run against the exact stub above. If a future edit re-fuses the two
+// questions, 5b turns red — proven here by executing the old rule, not asserted.
+{
+  const s = stubPage({ ctaPresent: true, hasTurn: true, unmeasurable: true, lands: () => true });
+  let ctaSeenFromClickProbe = 0;
+  const t0 = Date.now();
+  while (Date.now() - t0 < FAST.timeoutMs) {
+    if (await s.page.evaluate(CLICK_LEAF_SRC, { testid: AF_OFFER_TESTID, txt: AF_OFFER_CTA })) ctaSeenFromClickProbe++;
+    await s.page.waitForTimeout(FAST.pollMs);
+  }
+  const legacyReason = ctaSeenFromClickProbe >= 3 ? 'intercepted' : 'absent';
+  mustCatch('the pre-fix rule calling a present-but-unmeasurable CTA «absent» — the predicate bites',
+    legacyReason === 'absent');
 }
 
 // ── 6. MUTATION: the pre-fix opener must FAIL the predicate this barrier enforces ────────────────

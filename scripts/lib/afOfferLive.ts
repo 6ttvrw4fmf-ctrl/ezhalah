@@ -40,15 +40,35 @@
 import { resultsSentenceAtStartSource } from '../../e2e/lib/resultsSentence.mjs';
 import { clickWitnessed, isStable, MAX_CLICK_ATTEMPTS } from './liveClick.ts';
 
-/** Find the smallest visible leaf whose trimmed innerText is exactly `txt`, scroll it into view
- *  inside its own scroll container, and hand back a clickable viewport point. Runs in the page. */
-export const CLICK_LEAF_SRC = (txt: string) => {
+/** Find the offer, scroll it into view inside its own scroll container, and hand back a clickable
+ *  viewport point. Runs in the page.
+ *
+ *  THE TESTID IS TRIED FIRST, AND THAT IS THE POINT (routine #5, 2026-09-25, `ops_incident` #687).
+ *  This used to match on `innerText` alone. `innerText` is the RENDERED text: it depends on layout,
+ *  and it is empty for a node the engine has not laid out yet. The AF offer renders directly beneath
+ *  a turn whose reveal cascade is still mounting cards, so on a big restored turn it is routinely in
+ *  the DOM with an `innerText` this scan cannot see — measured on production 2026-09-25 on
+ *  الرياض/شراء/شقة, where `[data-testid="results-narrow"]` and an exact `textContent` leaf were BOTH
+ *  present at every 3 s sample for the whole 60 s budget while this probe returned null on every
+ *  poll. `openAfOffer` then reported `reason: 'absent'` — an ADVANCED FILTER verdict — for a button
+ *  that was on screen the entire time, and three runs recorded it as a broken R9.2.3.
+ *
+ *  So: ask the app's own testID, which this file already calls "the join key, never the label", and
+ *  keep the label only as a fallback — now on `textContent`, which does not need layout. */
+export const CLICK_LEAF_SRC = (want: { testid: string; txt: string }) => {
   let best: any = null;
-  document.querySelectorAll('div,span,li,button').forEach((e: any) => {
-    if ((e.innerText || '').trim() !== txt) return;
+  const consider = (e: any) => {
     const r = e.getBoundingClientRect();
     if (r.width > 0 && r.height > 0 && (!best || e.children.length <= best.children.length)) best = e;
-  });
+  };
+  const byId = document.querySelector(`[data-testid="${want.testid}"]`);
+  if (byId) consider(byId);
+  if (!best) {
+    document.querySelectorAll('div,span,li,button').forEach((e: any) => {
+      if (((e.textContent || '')).trim() !== want.txt) return;
+      consider(e);
+    });
+  }
   if (!best) return null;
   let a = best.parentElement, sc: any = null;
   while (a) {
@@ -63,6 +83,18 @@ export const CLICK_LEAF_SRC = (txt: string) => {
   const r = best.getBoundingClientRect();
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 };
+
+/** IS THE OFFER IN THE DOM AT ALL? Presence, deliberately separate from clickability.
+ *
+ *  `absent` is a statement about ADVANCED FILTER ("the offer never came back"); every other verdict
+ *  here is a statement about the HARNESS. Deciding absence from a CLICK probe fuses the two, and the
+ *  fused version accused production three times (`ops_incident` #687). Presence is read from the
+ *  app's own testID, with the label on `textContent` as a fallback — neither needs layout, so a CTA
+ *  below the fold or under a running reveal cascade still counts as present, which is the truth. */
+export const CTA_PRESENT_SRC = (want: { testid: string; txt: string }) =>
+  !!document.querySelector(`[data-testid="${want.testid}"]`)
+  || [...document.querySelectorAll('div,span,li,button')]
+    .some((e: any) => e.children.length === 0 && (e.textContent || '').trim() === want.txt);
 
 /** Drive every scrollable container to its bottom — the CTA renders below the newest turn. */
 const SCROLL_BOTTOM_SRC = () => {
@@ -103,8 +135,9 @@ export const AF_OFFER_TESTID = 'results-narrow';
 // (الرياض/شراء/شقة desktop, fleet healthy): 11 of 24 taps landed on `card-listing-11678443`, and
 // every one was reported as a broken Advanced Filter — `ops_incident` #340.
 
-/** How many polls the CTA must be present for before "it never held still" outranks "it was not
- *  really there" — a single flicker must never mask a real absence. */
+/** How many polls the CTA must be PRESENT IN THE DOM for before "it never took a click" outranks
+ *  "it was not really there" — a single flicker must never mask a real absence. Counted from
+ *  `CTA_PRESENT_SRC`, never from the click probe: see that function for why the two must not fuse. */
 const CTA_PERSISTENT_POLLS = 3;
 
 export type OfferResult =
@@ -114,8 +147,9 @@ export type OfferResult =
   | { opened: false; reason: 'no-turn'; waitedMs: number }
   /** The turn landed and stayed put, and no CTA ever rendered on it — a real absence. */
   | { opened: false; reason: 'absent'; waitedMs: number }
-  /** The CTA was there every time and every click landed on something else — a HARNESS failure,
-   *  never a statement about Advanced Filter. `hit` names what took the click instead. */
+  /** The CTA WAS on screen and never took a click — either every tap landed elsewhere, or it never
+   *  held still long enough to be measured. Both are HARNESS failures, never a statement about
+   *  Advanced Filter. `hit` names what took the click instead, or why none was spent. */
   | { opened: false; reason: 'intercepted'; waitedMs: number; attempts: number; hit: string };
 
 /**
@@ -140,16 +174,19 @@ export async function openAfOffer(
   let sawTurn = false;
   let ctaSeen = 0;
   let attempts = 0;
-  let lastHit = '(the offer never held still long enough to be clicked)';
+  let lastHit = '(the offer was on screen but never yielded a stable point to click)';
   let prev: { x: number; y: number } | null = null;
 
   while (Date.now() - t0 < timeoutMs && attempts < MAX_CLICK_ATTEMPTS) {
     // Re-scroll EVERY iteration: the conversation is still growing while we poll.
     await page.evaluate(SCROLL_BOTTOM_SRC).catch(() => {});
     if (!sawTurn) sawTurn = await page.evaluate(HAS_TURN_SRC, HEADLINE_AT_START).catch(() => false);
-    const box = await page.evaluate(CLICK_LEAF_SRC, AF_OFFER_CTA).catch(() => null);
+    const want = { testid: AF_OFFER_TESTID, txt: AF_OFFER_CTA };
+    // PRESENCE FIRST, and counted on its OWN poll: a CTA that is in the DOM but not measurable this
+    // frame must still retire `absent`, because `absent` is the only verdict here that blames AF.
+    if (await page.evaluate(CTA_PRESENT_SRC, want).catch(() => false)) ctaSeen++;
+    const box = await page.evaluate(CLICK_LEAF_SRC, want).catch(() => null);
     if (box) {
-      ctaSeen++;
       // ONLY CLICK A POINT THAT HAS HELD STILL. The measurement and the click are two round trips;
       // requiring the same coordinates twice in a row is what makes the point still true when the
       // mouse gets there. A page mid-reveal simply does not qualify yet, and we poll again — this is
