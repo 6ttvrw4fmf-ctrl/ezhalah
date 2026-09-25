@@ -177,7 +177,12 @@ def looks_closed(body: str) -> bool:
     That exemption still holds — it is now enforced by factor 1 reading aqar's OWN `closed` flag
     instead of the price slot, so an open ad that merely withholds its price can never be killed.
 
-    FACTOR 1 WAS REWRITTEN 2026-09-25 (routine #3) BECAUSE IT HAD STOPPED MATCHING ANYTHING.
+    FACTOR 1 WAS REWRITTEN 2026-09-25 (routine #3) BECAUSE IT HAD STOPPED MATCHING ANYTHING —
+    and the sweep's kill count could not show it. looks_dead() reaches DEAD on a 200 by two
+    independent paths, a DEAD_MARKERS phrase or this predicate; the marker path was unaffected and
+    produced 8,845 kills in the 30 days to 2026-09-25, so the oracle looked healthy by volume while
+    this half was blind. An aqar soft-closed page carries no DEAD_MARKER, so that cohort escaped
+    both paths.
     The badge regex above looked for server-rendered markup around «مغلق». aqar has since moved the
     listing page to client-side rendering: the closed banner is painted by JS from the payload, so
     no badge markup reaches the HTML at all. What DOES reach it is an i18n label bundle shipped to

@@ -526,11 +526,21 @@ because the comment above the self-heal *names* the function. A comment is not a
 ### 9.7 AN ORACLE THAT READS RENDERED MARKUP DIES WHEN THE SOURCE CHANGES ITS RENDERER — aqar, measured 2026-09-25
 
 §9.2 says a green job that does nothing is the default failure mode. This is that failure one level
-down: the job ran, on schedule, at full volume, and its **verdict function** had quietly become
-incapable of returning DEAD.
+down, and one degree more deceptive: the job ran, on schedule, at full volume, **and it kept
+killing listings the whole time** — 8,845 kills and 17,190 strikes in the 30 days to 2026-09-25.
+What had died was one of its two death routes, and the surviving route's healthy output is exactly
+what made the dead one invisible.
 
-`scrapers/aqar/liveness.py::looks_closed()` is the whole of aqar's death signal — aqar does not 404
-a closed ad, it serves HTTP 200. The 2026-08-04 design was deliberately two-factor: a «مغلق» badge
+`looks_dead()` reaches DEAD on a 200 by two independent paths: a `DEAD_MARKERS` phrase in the body,
+or `looks_closed()`. The marker path was never affected and produced every one of those kills. The
+soft-close path could not return True for any page — **and aqar's soft-closed pages carry no
+DEAD_MARKER**, so that cohort escaped both routes and was certified ALIVE. Measuring the oracle by
+its kill count would have reported it healthy on every day it was half-blind; only a per-page test
+of `looks_closed()` itself could see it.
+
+`scrapers/aqar/liveness.py::looks_closed()` is aqar's SOFT-CLOSE detector — aqar does not 404 a
+closed ad, it serves HTTP 200, and an ad it closes carries no removal phrase, so this predicate is
+the only thing that can retire it. The 2026-08-04 design was deliberately two-factor: a «مغلق» badge
 in the markup **and** a missing offers node, because the bare word «مغلق» also appears in live ads'
 own descriptions («مطبخ مغلق» = closed kitchen). Badge-alone was measured 0/77 live and 17/17 closed.
 
