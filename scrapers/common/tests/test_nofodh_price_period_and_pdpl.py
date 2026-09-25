@@ -394,6 +394,7 @@ def test_a_city_outside_the_catalog_is_never_filed_under_a_neighbour():
     assert _skip(rec) == "city_not_in_catalog"
 
 
+# ── NUMERALS ────────────────────────────────────────────────────────────────────────────────────
 def test_arabic_indic_digits_parse_in_every_numeric_field():
     """Defensive, and honest about being so: this site publishes WESTERN digits only.
 

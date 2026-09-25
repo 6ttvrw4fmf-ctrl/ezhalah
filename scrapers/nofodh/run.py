@@ -645,6 +645,12 @@ def fetch_roster(s: cc.Session) -> list[str]:
     and the containers are dropped later by their own marker (see _skip_container).
     """
     r = _get(s, SITEMAP)
+    if r is not None and is_waf_challenge(r.text):
+        # Named explicitly: "sitemap returned 202" reads like a broken sitemap and would send the
+        # next person looking at the wrong thing.
+        raise RuntimeError(
+            f"the WAF challenged {SITEMAP} (HTTP {r.status_code}) — we were blocked before the "
+            f"roster; wait for the cooldown (~2 min measured) and retry, or raise --pace")
     if r is None or r.status_code != 200:
         raise RuntimeError(f"{SITEMAP} returned {getattr(r, 'status_code', 'no response')}")
     ids: list[str] = []
