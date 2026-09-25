@@ -157,6 +157,18 @@ export function countReadLines(lines: string[], prefix: string): number[] {
 
 /** A line that puts a card count next to a total. The FALSIFIER for the judgement verdict: it is
  *  what goes red the day a settling-only counter starts deciding whether a pager is missing. */
+/*  STATED LIMIT, because a coverage claim nobody measured is the defect this whole file exists for.
+ *  The falsifier is LINE-BASED and two hops deep, so it sees a count and a total that meet in one
+ *  statement. It does NOT see one that meets across a multi-line closure: in
+ *  verify-af-option-card-truth-live.ts, `revealed` comes out of a `settleUntil(async () => { … })`
+ *  whose card read is three lines below the assignment, and the §4 assertion
+ *  `revealed === (landed.total ?? 0)` is therefore invisible here. That file is classified
+ *  walks-the-cascade from what it DOES — its ledger row says so and says why — and the barrier then
+ *  holds it to the walk requirement, which is the part that matters. The consequence of this limit
+ *  is that a judgement verdict can be MISSED, never that a walk requirement is waived: a file the
+ *  reader cannot see through still needs a human to classify it, and the ledger is where that
+ *  happens. Widen this only with a proof in both directions; the fixpoint that would have seen it
+ *  also swallowed a whole file (see countNames above). */
 export function countBesideTotalLines(lines: string[], prefix: string): Array<{ line: number; text: string }> {
   const names = countNames(lines, prefix);
   const out: Array<{ line: number; text: string }> = [];
