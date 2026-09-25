@@ -863,7 +863,11 @@ def main() -> int:
 
     s = session()
     dry = args.dry_run or bool(args.limit)
+    # begin_run BEFORE the fetch: a source that goes dark (or challenges us away) must still leave a
+    # scrape_runs row, or a silent platform looks identical to a healthy one that had nothing to do.
     run_id = None if dry else db.begin_run(SLUG)
+    skipped: dict[str, int] = {}
+    blocked = 0
     try:
         ids = fetch_roster(s)
         complete = not args.limit
@@ -926,7 +930,7 @@ def main() -> int:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
                 else:
                     pruned += n
-        elif args.type == "all":
+        elif args.type == "all" and not blocked:
             print("  prune skipped: the roster was limited, so absence proves nothing")
         healthy = db.end_run(run_id, ok=True, rows_seen=len(ids),
                              rows_upserted=len(res) + len(com),
@@ -940,7 +944,12 @@ def main() -> int:
         return 0
     except Exception as e:
         if run_id:
-            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0, notes=f"{e}"[:300])
+            # Carry the skip tally and the block count into the failure note: "why did it fail" and
+            # "what had it already seen" are different questions, and a run row that answers only the
+            # first is what made an earlier incident unfalsifiable from the record.
+            db.end_run(run_id, ok=False, rows_seen=0, rows_upserted=0,
+                       notes=(f"{e}"[:220] + f" | blocked={blocked}"
+                              + " | skips: " + (_tally(skipped) or "none"))[:300])
         print(f"✗ {SOURCE}: {e}", flush=True)
         return 1
 
