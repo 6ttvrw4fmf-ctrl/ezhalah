@@ -138,6 +138,25 @@ def reconcile_orphaned_stubs(client, platform: str, *, older_than_hours: int = O
     return n
 
 
+# aqar's own `closed` flag. The listing payload is streamed inside `self.__next_f` chunks with its
+# quotes backslash-escaped, so `\"closed\":true` is the shape actually seen on the wire; the bare
+# form is accepted too in case a future render stops escaping. Requiring the BOOLEAN is what keeps
+# the i18n bundle's «مغلق» string label (`"closed":"مغلق"`, present on every page) from matching.
+_CLOSED_FLAG_RE = re.compile(r'\\?"closed\\?"\s*:\s*true')
+
+# Deactivating on the repaired factor 1 is a BULK listing operation — the measured firing rate is
+# 5.3% of never-re-enriched priced rows (4/75 sampled 2026-09-25), i.e. order 2,500 aqar rows — and
+# AGENTS.md puts bulk listing operations behind owner approval. So the repaired oracle ships
+# DISARMED: the verdict is computed and written to aqar_liveness_detail on every sweep, but a
+# soft-closed page is treated as UNKNOWN rather than DEAD, which per docs/ops/LISTING_LIVENESS.md
+# neither deactivates the row NOR certifies it alive. That is already strictly better than the
+# broken state it replaces, where the same page took the ALIVE branch and had
+# last_verified_alive_at written onto it. Set AQAR_SOFT_CLOSE_ARMED=1 to let it strike and kill
+# under aqar's declared 3-strike / 48h grace once the owner has approved the volume
+# (ops_incident: aqar_soft_close_oracle_dead).
+SOFT_CLOSE_ARMED = os.environ.get("AQAR_SOFT_CLOSE_ARMED", "0") == "1"
+
+
 def looks_closed(body: str) -> bool:
     """True iff this 200-OK page is aqar's SOFT-CLOSED state (2026-08-04).
 
@@ -155,12 +174,36 @@ def looks_closed(body: str) -> bool:
 
     «طلب تسويق» (marketing-request) pages are deliberately NOT treated as closed: the ad exists,
     the owner simply publishes no price. Those stay active with an honest «السعر عند الطلب».
+    That exemption still holds — it is now enforced by factor 1 reading aqar's OWN `closed` flag
+    instead of the price slot, so an open ad that merely withholds its price can never be killed.
+
+    FACTOR 1 WAS REWRITTEN 2026-09-25 (routine #3) BECAUSE IT HAD STOPPED MATCHING ANYTHING.
+    The badge regex above looked for server-rendered markup around «مغلق». aqar has since moved the
+    listing page to client-side rendering: the closed banner is painted by JS from the payload, so
+    no badge markup reaches the HTML at all. What DOES reach it is an i18n label bundle shipped to
+    EVERY page, live ones included, carrying «مغلق» as a dictionary value
+    (`listing_status.closed`, `closed_banner.title`). So the old factor 1 was false on closed pages
+    and the word-presence pre-check was true on live ones — the detector could not fire, and the
+    sweep took the ALIVE branch and wrote last_verified_alive_at onto ads aqar had closed.
+    Measured that day on live pages: 2/2 source-confirmed closed ads scored badge_match=False.
+    Rows 874 and 882 had been affirmatively certified ALIVE that morning while aqar served
+    `closed:true` with price, area, content and create_time all null.
+
+    THE REPLACEMENT IS AQAR'S OWN STATE FLAG, and it keeps the two-factor design intact:
+      • factor 1 — the payload states `"closed": true` (escaped as \"closed\":true in the stream);
+      • factor 2 — unchanged: no offers node.
+    Measured 2026-09-25 over 75 random active rows plus 6 source-confirmed closed ads:
+    6/6 closed → True, 2/2 live controls → False, and 0 pages anywhere carried `closed:true`
+    beside a published price, so the two factors never disagreed. The i18n label is a STRING value
+    («مغلق»), never the boolean, so the bundle cannot trip factor 1.
+
+    aqar states what the flag means, in the same bundle: a closed ad
+    «يظهر هذا الإعلان في صفحة حسابك فقط (لا يظهر على الخريطة أو عند البحث)» — it is gone from the
+    source's own search, which is exactly the condition this oracle exists to detect.
     """
-    if "مغلق" not in body:
-        return False
-    # Factor 1: the badge, not the word — the description text never carries this markup.
-    badge = re.search(r"(?:badge|chip|tag|status)[^<>]{0,80}مغلق|مغلق[^<>]{0,40}</(?:span|div|p)>", body)
-    if not badge:
+    # Factor 1: aqar's OWN state flag, not markup we have to guess at. The payload arrives inside
+    # `self.__next_f` chunks with its quotes backslash-escaped, so both spellings are accepted.
+    if not _CLOSED_FLAG_RE.search(body):
         return False
     # Factor 2: a live ad always publishes an offers node; a closed one has none.
     has_offer = '"offers"' in body or '"price"' in body
@@ -328,6 +371,7 @@ def main() -> None:
     refreshed = 0
     transient = 0
     pending_kill = 0  # missing this run but not yet past grace
+    unknown_soft_closed = 0  # aqar says closed, oracle disarmed → UNKNOWN: row left untouched
     alive_ids: list[int] = []  # batched "still alive" ids → one UPDATE per 200 (see flush below)
     price_updated = 0   # prices re-read from the page we already fetched (owner-approved 2026-08-04)
     price_capped = 0    # changes seen past PRICE_REFRESH_CAP — next sweep picks them up
@@ -412,6 +456,17 @@ def main() -> None:
                 r = get(url, max_retries=2)
                 status = r.status_code if r is not None else 0
                 body = r.text if r is not None else ""
+
+                # Soft-closed and not armed ⇒ UNKNOWN. Falling through to the ALIVE branch is what
+                # this run had to fix: it wrote last_verified_alive_at onto ads aqar had closed.
+                # UNKNOWN writes nothing to the row — no strike, no kill, no alive patch — so the
+                # row keeps exactly the state it had, and the verdict is still recorded as evidence.
+                if (r is not None and status == 200 and not SOFT_CLOSE_ARMED
+                        and looks_closed(body)):
+                    mc_now = row.get("missing_count") or 0
+                    _detail(row["id"], status, "unknown_soft_closed", mc_now, mc_now, applied=False)
+                    unknown_soft_closed += 1
+                    continue
 
                 if r is not None and looks_dead(status, body):
                     mc_before = row.get("missing_count") or 0
@@ -499,6 +554,7 @@ def main() -> None:
                     print(
                         f"  [{seen}] refreshed={refreshed} killed={killed} "
                         f"pending_kill={pending_kill} transient={transient} "
+                        f"unknown_soft_closed={unknown_soft_closed} "
                         f"({rate:.1f}/s)",
                         flush=True,
                     )
@@ -526,6 +582,7 @@ def main() -> None:
     notes = (
         f"refreshed={refreshed} killed={killed} "
         f"pending_kill={pending_kill} transient={transient} "
+        f"unknown_soft_closed={unknown_soft_closed} "
         f"price_updated={price_updated} price_capped={price_capped} "
         f"price_artifact_rejected={price_artifact_rejected}"
     )

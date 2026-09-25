@@ -522,3 +522,63 @@ one stamp un-cashes all 29 claims at once. It asks the stripped source for the s
 `**direct_alive_patch(...)` that actually reaches the database: an earlier version tested the raw
 file and a planted mutant proved it worthless — deleting both the import and the call left it GREEN,
 because the comment above the self-heal *names* the function. A comment is not a code path.
+
+### 9.7 AN ORACLE THAT READS RENDERED MARKUP DIES WHEN THE SOURCE CHANGES ITS RENDERER — aqar, measured 2026-09-25
+
+§9.2 says a green job that does nothing is the default failure mode. This is that failure one level
+down: the job ran, on schedule, at full volume, and its **verdict function** had quietly become
+incapable of returning DEAD.
+
+`scrapers/aqar/liveness.py::looks_closed()` is the whole of aqar's death signal — aqar does not 404
+a closed ad, it serves HTTP 200. The 2026-08-04 design was deliberately two-factor: a «مغلق» badge
+in the markup **and** a missing offers node, because the bare word «مغلق» also appears in live ads'
+own descriptions («مطبخ مغلق» = closed kitchen). Badge-alone was measured 0/77 live and 17/17 closed.
+
+aqar then moved the listing page to **client-side rendering**. The closed banner is now painted by
+JS from the payload, so no badge markup reaches the HTML at all. What does reach it is an i18n label
+bundle shipped to **every** page, live ones included, carrying «مغلق» as a dictionary value
+(`listing_status.closed`, `closed_banner.title`). So on 2026-09-25 the word-presence pre-check was
+true on live pages and the badge regex was false on closed ones: **`looks_closed()` could not return
+True for any page in existence.**
+
+**The failure was not silence — it was an affirmative false ALIVE.** A page that fails `looks_dead()`
+falls through to the ALIVE branch, which writes `last_verified_alive_at` via `direct_alive_patch()`.
+Rows 874 and 882 were certified ALIVE that morning while aqar served them `closed:true` with
+`price`, `area`, `content` and `create_time` all null. This is the §3 distinction inverted: not a
+crawl sighting mistaken for proof of life, but our own per-listing oracle *manufacturing* the proof.
+
+Measured that day, by direct fetch of each listing's own URL, with a live control arm in the same
+session (the control matters — an all-null payload read from one container is otherwise
+indistinguishable from the egress facts §9 warns about):
+
+| arm | n | result |
+|---|---|---|
+| random active rows, never re-enriched | 75 | 71 live with a price matching ours exactly, **4 closed at source and still served (5.3%)** |
+| source-confirmed closed ads | 6 | 6/6 scored `badge_match=false` — the oracle could not fire |
+| live controls | 2 | structured price read back exactly (9,000,000 and 295,000) |
+| pages carrying `closed:true` beside a published price | 0 | the two factors never disagreed |
+
+**The repair keys factor 1 on aqar's own state flag** (`"closed": true`, escaped in the streamed
+payload) instead of on markup we have to guess at, keeping factor 2 unchanged. aqar states what the
+flag means in that same bundle: a closed ad «يظهر هذا الإعلان في صفحة حسابك فقط (لا يظهر على الخريطة
+أو عند البحث)» — it is gone from the source's own search. The «طلب تسويق» exemption is preserved and
+is now *stronger*: it is enforced by reading the flag rather than by the absence of a price, so an
+open ad that merely withholds its price can never be killed.
+
+**It ships DISARMED, and that is a deliberate reading of the RED list, not timidity.** Deactivating
+on the repaired factor 1 is a BULK listing operation (order 2,500 rows at the measured rate), which
+AGENTS.md puts behind owner approval. So a soft-closed page is treated as **UNKNOWN**: per §1 that
+neither deactivates the row nor certifies it alive, which is already strictly better than the state
+it replaces, where the same page had `last_verified_alive_at` written onto it. The verdict is
+recorded every sweep (`aqar_liveness_detail.verdict = 'unknown_soft_closed'`, migration
+`20260925072159`) and counted in the run summary, so the disarmed oracle cannot be mistaken for a
+silent one. `AQAR_SOFT_CLOSE_ARMED=1` lets it strike and kill under aqar's declared 3-strike / 48h
+grace once the owner has approved the volume.
+
+**The general rule this platform paid for: a liveness oracle that parses RENDERED MARKUP has a
+silent expiry date set by someone else's frontend team.** Prefer the source's own state field.
+Where markup is genuinely the only signal, the barrier must EXECUTE the predicate against a stored
+real page of each kind — `scripts/verify-aqar-soft-close-oracle-can-fire.ts` does exactly that, with
+fixtures that deliberately retain the adversarial i18n bundle, and three mutants including a restore
+of the dead badge regex. A source-text tripwire over `looks_closed()` would have stayed green for
+every day the oracle was dead.
