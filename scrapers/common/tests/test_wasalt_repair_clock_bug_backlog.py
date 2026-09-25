@@ -54,6 +54,8 @@ from scrapers.common import db  # noqa: E402
 from scrapers.wasalt import liveness  # noqa: E402
 from scrapers.wasalt.liveness import run_repair_clock_bug_backlog  # noqa: E402
 
+_REAL_CHECK_HYBRID = liveness.check_hybrid
+
 
 class _Resp:
     def __init__(self, data):
@@ -398,3 +400,104 @@ def test_limit_still_caps_the_cohort_when_sharded(monkeypatch):
     # ignored --limit after sharding would attempt up to 10 checks (40/4) instead of 2 — covered by
     # test_a_mixed_realistic_cohort_writes_exactly_the_three_buckets style call-count assertions
     # elsewhere; this test's job is only to confirm the combination doesn't crash or skip the insert.
+
+
+# ── 4. ops_incident #708: a batch reaches the DB before the next row is checked ──────────────────
+# The repair loop used to consume the EAGER _pmap, so its first 100-row flush could only run once
+# every row in the cohort had been checked. 87 minutes of real production checks sat in memory,
+# printed nothing, wrote nothing, and read from outside as a hang.
+
+def _backlog(n):
+    rows = {"wasalt_residential_listings": [ROW("wasalt_residential_listings", i)
+                                            for i in range(1, n + 1)]}
+    verdicts = {i: ("live", 200, None) if i % 5 == 0 else ("dead", 404, 404)
+                for i in range(1, n + 1)}
+    return rows, verdicts
+
+
+def test_each_batch_is_written_before_the_next_row_is_checked(monkeypatch):
+    rows, verdicts = _backlog(250)
+    writes = _install(monkeypatch, cohort_rows=rows, verdicts_by_id=verdicts)
+    inner = liveness.check_hybrid
+    batches_written_when_checked: dict[int, int] = {}
+
+    def spying(row):
+        batches_written_when_checked[row[1]] = writes["pilot_detail"].get("calls", 0)
+        return inner(row)
+    monkeypatch.setattr(liveness, "check_hybrid", spying)
+
+    run_repair_clock_bug_backlog(_Args())
+
+    assert batches_written_when_checked[100] == 0
+    assert batches_written_when_checked[101] == 1, (
+        "row 101 was checked before batch 1 reached the DB — every check is being held in memory "
+        "until the whole cohort is done, so a run cut off at any point writes nothing")
+    assert batches_written_when_checked[201] == 2
+    assert writes["repair_fresh_strike"]["calls"] == 3
+
+
+class _JobKilled(BaseException):
+    """Stands in for the runner cancelling the step (not an Exception: nothing may swallow it)."""
+
+
+def test_a_run_cut_off_mid_cohort_keeps_every_completed_batch(monkeypatch):
+    rows, verdicts = _backlog(250)
+    writes = _install(monkeypatch, cohort_rows=rows, verdicts_by_id=verdicts)
+    inner = liveness.check_hybrid
+
+    def killed_at_150(row):
+        if row[1] == 150:
+            raise _JobKilled()
+        return inner(row)
+    monkeypatch.setattr(liveness, "check_hybrid", killed_at_150)
+
+    try:
+        run_repair_clock_bug_backlog(_Args())
+    except _JobKilled:
+        pass
+    assert writes["pilot_detail"].get("calls", 0) == 1, "the completed first batch was lost"
+    assert writes["repair_fresh_strike"].get("calls", 0) == 1
+    assert writes["touch_alive"].get("calls", 0) == 1
+    assert "active" not in str(writes)
+
+
+def test_a_hung_browser_check_becomes_one_reset_row_and_the_backlog_finishes(monkeypatch):
+    """End to end over the REAL check_hybrid → browser_verdict → BoundedBrowserFetcher, with a
+    child browser that genuinely never answers for one listing."""
+    import time as _time
+    from scrapers.wasalt import browser as B
+
+    rows = {"wasalt_residential_listings": [ROW("wasalt_residential_listings", i) for i in range(1, 7)]}
+    writes = _install(monkeypatch, cohort_rows=rows, verdicts_by_id={})
+    monkeypatch.setattr(liveness, "check_hybrid", _REAL_CHECK_HYBRID)
+    monkeypatch.setenv("WASALT_BROWSER", "1")
+    monkeypatch.setattr(liveness, "_throttle", lambda: None)
+
+    live = ({"props": {"pageProps": {"propertyDetailsV3": {"id": 1}}}}, 200, 326)
+    gone = ({"props": {"pageProps": {}}}, 404, 211)
+
+    class _HangsOn3:
+        def page_data(self, url):
+            lid = int(url.rsplit("/", 1)[-1])
+            if lid == 3:
+                _time.sleep(3600)
+            return gone if lid in (2, 5) else live
+
+        def close(self):
+            pass
+
+    fetcher = B.BoundedBrowserFetcher(factory=_HangsOn3, deadline_s=1.5)
+    monkeypatch.setattr(liveness, "_BROWSER", fetcher)
+    from scrapers.common.tests.test_wasalt_browser_hard_deadline import within
+    try:
+        rc = within(30, lambda: run_repair_clock_bug_backlog(_Args()))
+    finally:
+        fetcher.close()
+
+    assert rc == 0
+    run = writes["wasalt_liveness_runs"][0]
+    assert (run["checked"], run["live"], run["dead"], run["failed"]) == (6, 3, 2, 1), run
+    assert "browser_deadline_kills=1" in run["notes"], run["notes"]
+    assert writes["repair_reset_unproven"]["calls"] == 1, "the hung row must reset to 0, not strike"
+    assert writes["repair_fresh_strike"]["calls"] == 1
+    assert "active" not in str(writes)
