@@ -197,7 +197,7 @@ def _browser() -> Any:
     global _BROWSER
     if _BROWSER is None:
         from scrapers.wasalt import browser as _b
-        _BROWSER = _b.BrowserFetcher()
+        _BROWSER = _b.BoundedBrowserFetcher()   # hard per-call deadline — ops_incident #708
     return _BROWSER
 
 
