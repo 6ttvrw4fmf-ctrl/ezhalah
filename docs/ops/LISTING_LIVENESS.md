@@ -568,8 +568,14 @@ indistinguishable from the egress facts §9 warns about):
 | live controls | 2 | structured price read back exactly (9,000,000 and 295,000) |
 | pages carrying `closed:true` beside a published price | 0 | the two factors never disagreed |
 
-**The repair keys factor 1 on aqar's own state flag** (`"closed": true`, escaped in the streamed
-payload) instead of on markup we have to guess at, keeping factor 2 unchanged. aqar states what the
+**The repair ADDS aqar's own state flag to factor 1 — it does not delete the badge.** Factor 1 is
+satisfied by either expression of the same fact (`"closed": true`, escaped in the streamed payload,
+**or** the old badge markup), with factor 2 unchanged. Keeping the badge is not sentiment: its
+absence from the page shapes sampled today is a measurement, not a promise it can never appear
+again, it costs nothing (0/77 false fires in 2026-08, and it matches neither stored fixture), and
+two existing barriers pin it — one of them because `scrapers/common/cleanup.py` imports this same
+predicate as its aqar dead-check, so a regression here resurrects sold listings from the cleanup
+side too. Replacing it outright was the first attempt and CI rejected it, correctly. aqar states what the
 flag means in that same bundle: a closed ad «يظهر هذا الإعلان في صفحة حسابك فقط (لا يظهر على الخريطة
 أو عند البحث)» — it is gone from the source's own search. The «طلب تسويق» exemption is preserved and
 is now *stronger*: it is enforced by reading the flag rather than by the absence of a price, so an
