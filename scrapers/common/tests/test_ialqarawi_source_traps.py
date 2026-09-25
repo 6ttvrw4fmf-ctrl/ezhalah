@@ -307,6 +307,51 @@ def test_a_directional_adjective_does_not_block_the_real_city_further_left(monke
     assert row["city_id"] == CITY_ID and row["region_id"] == REGION_ID
 
 
+# ── THE «الحي» FIELD AS A LAST-RESORT CITY (found live 2026-09-25, nid 2511) ─────────────────────
+# «للبيع أرض في الشرقيه امام شاطئ نصف القمر» — «شاطئ نصف القمر» (Half Moon Bay) is a real beach
+# near Khobar/Dammam, but it is a LANDMARK, not a loc_catalog_district entry (checked live: no
+# «نصف القمر»/«القمر» row anywhere in the catalog), so find_district_in_text could never recover
+# it even scoped to the right city. The title itself has no other recognisable city token. The
+# listing's own «الحي» field says «الدمام» plainly — a real catalog city — but nothing used it for
+# CITY resolution before now, only to decide district-vs-neighbourhood AFTER a city already existed.
+DAMMAM_ID, DAMMAM_REGION = 13, 5
+
+
+def _stub_with_dammam(monkeypatch):
+    real_to_catalog = R.to_catalog
+    monkeypatch.setattr(R, "to_catalog", lambda name, region_hint=None: (
+        (DAMMAM_ID, DAMMAM_REGION) if str(name).strip() == "الدمام" else real_to_catalog(name, region_hint)))
+
+
+def test_the_district_field_becomes_the_city_only_when_the_title_finds_nothing(monkeypatch):
+    _stub_with_dammam(monkeypatch)
+    row, _, why = mapped(district="الدمام", section="اراضي خام",
+                         title="للبيع أرض في الشرقيه امام شاطئ نصف القمر")
+    assert why == "" and row is not None
+    assert row["city_ar"] == "الدمام"
+    assert row["city_id"] == DAMMAM_ID and row["region_id"] == DAMMAM_REGION
+    # The field WAS the city, not a district — it must never also leak into neighbourhood.
+    assert row["neighborhood"] is None
+    assert row["additional_info"]["district_field_raw"] == "الدمام"
+
+
+def test_the_district_field_fallback_never_overrides_a_title_that_already_resolved(monkeypatch):
+    """Same «الحي: الدمام» field, but this time the TITLE already names a real city (عنيزة). The
+    fallback must never even be consulted — title wins, exactly like the pre-existing الدوادمي
+    guard two tests up. Regression target: a naive "prefer the field" fix would break this."""
+    _stub_with_dammam(monkeypatch)
+    row, _, _ = mapped(district="الدمام", section="فلل", title="للبيع فيلا بحي الصالحية بعنيزة")
+    assert row["city_ar"] == UNAIZAH
+    assert row["city_id"] == CITY_ID and row["region_id"] == REGION_ID
+
+
+def test_a_blank_district_field_still_quarantines_when_the_title_finds_nothing():
+    """No title city AND no «الحي» field to fall back on — must stay a clean skip, never a crash."""
+    row, _, why = mapped(district="", section="اراضي خام",
+                         title="للبيع أرض في الشرقيه امام شاطئ نصف القمر")
+    assert row is None and why == "city_not_in_catalog"
+
+
 def test_a_title_that_contradicts_the_index_deal_is_skipped():
     """id 217 sits in the RENT index with a «للبيع» title — two source claims, no known deal."""
     row, _, why = mapped(card=card(ty=2, title="للبيع إستراحة شباب بالخليج/عنيزة"),

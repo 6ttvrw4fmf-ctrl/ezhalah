@@ -81,6 +81,15 @@ doc for the claim-before-you-fix protocol that prevents seven routines from work
 
 ## PART 1 — WHAT YOU OWN
 
+> **A SURFACE THIS FILE NAMES CAN STILL HAVE ZERO COVERAGE — CHECK, DON'T ASSUME** (routine #6,
+> 2026-09-25). Read-aloud is listed below, has two offline barriers, and until 2026-09-25 had **no
+> real-browser journey at all**: nothing in the suite had ever tapped 🔊. The defect that was sitting
+> there (`ops_incident` #722) is one PART 5 shape #6 describes exactly — a control whose refusal
+> message was wrong — and it was reachable by one tap. PART 5's «check whether an existing barrier
+> already covers the shape» cuts both ways: two barriers existed and neither exercised the click. Once
+> a run, take one surface from PART 1 and ask not «is it barriered» but **«has any journey ever driven
+> it»** — the ledger answers that, and a `journey_` dimension with no row for a surface is the answer.
+
 - Authentication and session flows: sign-in, sign-out, Google One Tap (including its reappearance
   after account deletion — this exact regression escaped every existing routine once already),
   token expiry, guest vs. signed-in parity.
@@ -207,6 +216,54 @@ old build and passes on the fix, not a unit test standing in for the click. At m
       The general form, for the next one: **a rect is LAYOUT; being painted is not.** Any probe that
       decides who owns a point must read the painted stack, whichever journey it happens to live in —
       scope the rule to the QUESTION the probe asks, never to the file it sits in.
+    · **AND THE CLASS BARRIER HAD ITS OWN HOLE, ONE LEVEL DOWN** (routine #6, 2026-09-25,
+      `ops_incident` #723). §1 of `verify-ownership-probes-use-the-painted-stack.ts` discovers
+      violations **by CALL SHAPE**, matching `.elementFromPoint(`. That leaves the same question
+      askable in a spelling it cannot see: take the PLURAL stack, then read only `stack[0]` — which
+      returns, by definition, exactly what the singular form returns. `onetap-clear-of-controls` did
+      precisely that, **in the very function whose comment claims «`elementsFromPoint` (PLURAL), not
+      `elementFromPoint`» as a virtue**, so it could not tell a CLIPPED control from a COVERED one and
+      filed 2/2 defects on the 2026-09-25 production sweep while §1 stayed green. This is the
+      `AGENTS.md` PART 1.11 shape again: a pointer reads as coverage.
+      The repair is **§1b, which asserts the INVARIANT rather than a forbidden spelling**, per call
+      site, over every `elementsFromPoint` site in `e2e/`: a probe deciding ownership must interrogate
+      the stack for **membership** (`findIndex`/`some`/`includes`/`indexOf`, or a `for…of` scan), never
+      read only its top. It is deliberately **not** a ban on `[0]` — three sites read the top to NAME
+      what is there, which a good failure message needs, and a barrier that cried wolf on those would
+      be deleted by the next author (PART 9's stated cost). Per call site and never per file:
+      `run.mjs` holds six, and per-file would let one bad site hide behind five good ones.
+      `classifyBlockedControl` also refuses to turn a **missing** `selfIndex` into a cover finding, so
+      the next probe to forget the field gets no free verdict — the same unknown→NO move, one layer up.
+      **The lesson to carry: when a rule is enforced by matching a CALL, ask what other spelling asks
+      the same QUESTION.** And the payoff is real, not hygiene — it is what let the same sweep prove
+      `ops_incident` #262's remaining half a GENUINE cover (the finding fires only when `selfIndex` is
+      neither `0` nor `-1`, i.e. the control is painted with something above it) rather than another
+      instance of #377's clipping artifact.
+
+14. **A NUMBER THE HARNESS MIRRORS FROM THE APP MUST BE PINNED TO IT, BY VALUE** (routine #6,
+    2026-09-25, `ops_incident` #723). This is §13's class on a third axis, and the one most likely to
+    recur, because mirroring a constant *with a comment saying so* feels like diligence.
+    Measured: `docked-prompts-stack` computed the combined docked-band cap as a retyped
+    `floor(vh * 0.5)` while the app uses `floor(vh * (1 - MIN_APP_FRACTION))` = `floor(vh * 0.7)` —
+    **406 vs 568 at 812px**, so the oracle was loose by 162px and a genuine shortfall anywhere in
+    (406, 568] would have passed. `TOP_DOCK_MIN_SPAN_FRACTION` had been mirrored from
+    `MIN_SHEET_SPAN_FRACTION` with a comment naming it and **nothing checked it at all**.
+    Both are now read out of `src/` by value in `verify-journey-mobile-sidebar-oracle.ts` §D, which
+    **fails closed** when the constant cannot be read — a failed match must never pass as agreement.
+    Same family as the smoke journey retyping `INTERVIEW_STOP_AT`, and `r.y < 80` in `ops_incident`
+    #593. If the harness needs one of the app's numbers, derive it or pin it; never retype it.
+
+15. **A DEFECT MESSAGE THAT REFUTES ITS OWN ARITHMETIC IS THE TELL** (routine #6, 2026-09-25).
+    `docked-prompts-stack` filed «a SECOND docked prompt SHRANK the reservation the first one had
+    earned» 2/2 against healthy production, and printed, in the same sentence, **«0px of app content
+    is now under an opaque card»**. Both numbers were right; the verdict was not. It compared
+    reservation to *reservation* — an absolute test standing in for the relative question the incident
+    it cites actually asks: *does the reservation still COVER the band the card occupies?* A shorter
+    reservation for a shorter docked stack is the inset working.
+    Two habits from it. **Write the failure message so its numbers can contradict its conclusion** —
+    this one caught itself, and a message that merely said «the reservation shrank» would not have.
+    And **when a finding names an old incident, re-read what that incident's assertion actually was**
+    before assuming the new observation is the same thing.
 
 Mutation-prove the important ones — deliberately break the fix, prove the barrier goes red, restore
 it. Before writing a new barrier, check whether an existing one already covers the shape (e.g.

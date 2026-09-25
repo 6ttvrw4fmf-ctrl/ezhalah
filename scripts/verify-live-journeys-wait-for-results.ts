@@ -29,6 +29,16 @@
 //      card to paint, which for a 28,846-row cohort is a Buy card far more often than a rent one;
 //      that is how two of the three assertions still failed after the first fix attempt.
 //
+// THIS FILE PINS THREE JOURNEYS BY NAME, AND THAT IS ITS KNOWN LIMIT (ops_incident #699).
+// A fourth instrument grew a sibling defect — scripts/redteam-chain-live.mjs read the arrival
+// screenful as the whole reveal and filed two correct production cells as dead ends — and nothing
+// here could see it, because COMBINED/TRENDING/PILL is a list and not a discovery. Do not read the
+// three names below as the coverage of the class. The card-count half of that class is now
+// discovered by shape in scripts/verify-live-card-counts-walk-the-cascade.ts, which finds every
+// file under scripts/ and e2e/ that reads result cards and fails on any it has never been told
+// about. The READINESS-WAIT rule this file pins is still enumerated, and a journey outside these
+// three is outside it.
+//
 // Every assertion below runs on COMMENT-STRIPPED source, and that is load-bearing here rather than
 // hygiene: this very file's subject matter means `waitForTimeout(14000)` and the word `سنوياً` appear
 // in prose inside the files under test, so a raw grep would be satisfied by the explanation of the

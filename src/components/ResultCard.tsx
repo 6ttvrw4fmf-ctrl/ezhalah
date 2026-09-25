@@ -757,6 +757,11 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('alqarawi') || s.includes('القرعاوي')) return <PlatformLogo source={IALQARAWI_LOGO} />;
   if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return <PlatformLogo source={ALJASSIM_LOGO} />;
   if (s.includes('almotmkenah') || s.includes('المتمكنة')) return <PlatformLogo source={ALMOTMKENAH_LOGO} />;
+  // نفوذ للاستثمار العقاري (nofodh.sa) BEFORE نفوذ (nufouth.com): «نفوذ» is a SUBSTRING of the longer
+  // name, and first match wins, so the shorter branch would steal every nofodh card and show it under
+  // another company's brand and domain. Specific token first. Caught by
+  // verify-platform-registration-complete, which is the barrier that exists for exactly this.
+  if (s.includes('نفوذ للاستثمار العقاري') || s.includes('nofodh')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('nufouth') || s.includes('نفوذ')) return <PlatformLogo source={NUFOUTH_LOGO} />;
   // ── onboarded 2026-09-24 (batch 36): the SAME neutral placeholder for all 35 until the owner supplies
   // each real logo. LAST, right above the fallback, for the reason stated above. aqalemhajer,
@@ -794,6 +799,15 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('expattrusted') || s.includes('expat trusted housing')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('flow')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('أبعاد') || s.includes('abaad')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('آل سعيدان') || s.includes('alsaedan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('إيجو عقار') || s.includes('ego')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('أحمد المحيسني العقارية') || s.includes('muhaysini')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('راز العقارية') || s.includes('razre')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('ري إنفست') || s.includes('reinvest')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('صفا للاستثمار') || s.includes('safa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('صكوك العقارية') || s.includes('sokok')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('سكنة') || s.includes('sukna')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('طوبة العقارية') || s.includes('tuba')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   return <PlatformLogo source={AQAR_LOGO} />;
 }
 
@@ -900,6 +914,11 @@ function sourceHost(source: string): string {
   if (s.includes('alqarawi') || s.includes('القرعاوي')) return 'ialqarawi.com';
   if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return 'aljassimaqar.com';
   if (s.includes('almotmkenah') || s.includes('المتمكنة')) return 'almotmkenah.com';
+  // نفوذ للاستثمار العقاري (nofodh.sa) BEFORE نفوذ (nufouth.com): «نفوذ» is a SUBSTRING of the longer
+  // name, and first match wins, so the shorter branch would steal every nofodh card and show it under
+  // another company's brand and domain. Specific token first. Caught by
+  // verify-platform-registration-complete, which is the barrier that exists for exactly this.
+  if (s.includes('نفوذ للاستثمار العقاري') || s.includes('nofodh')) return 'nofodh.sa';
   if (s.includes('nufouth') || s.includes('نفوذ')) return 'nufouth.com';
   // onboarded 2026-09-24 (batch 36) — last, right above the fallback, for the same reason as in SourceBadge.
   if (s.includes('dwelleo') || s.includes('دويليو')) return 'dwelleo.sa';
@@ -935,6 +954,15 @@ function sourceHost(source: string): string {
   if (s.includes('expattrusted') || s.includes('expat trusted housing')) return 'expattrustedhousingriyadh.com';
   if (s.includes('flow')) return 'flow.life';
   if (s.includes('أبعاد') || s.includes('abaad')) return 'app.abaadapp.sa';
+  if (s.includes('آل سعيدان') || s.includes('alsaedan')) return 'alsaedan.com';
+  if (s.includes('إيجو عقار') || s.includes('ego')) return 'ego-aqar.com';
+  if (s.includes('أحمد المحيسني العقارية') || s.includes('muhaysini')) return 'aqaralmuhaysini.com';
+  if (s.includes('راز العقارية') || s.includes('razre')) return 'razre.sa';
+  if (s.includes('ري إنفست') || s.includes('reinvest')) return 'reinvest.sa';
+  if (s.includes('صفا للاستثمار') || s.includes('safa')) return 'safainv.sa';
+  if (s.includes('صكوك العقارية') || s.includes('sokok')) return 'sokok.sa';
+  if (s.includes('سكنة') || s.includes('sukna')) return 'sukna.app';
+  if (s.includes('طوبة العقارية') || s.includes('tuba')) return 'tuba.com.sa';
   return 'sa.aqar.fm';
 }
 

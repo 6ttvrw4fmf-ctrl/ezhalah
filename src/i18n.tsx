@@ -591,6 +591,13 @@ const AR: Record<string, string> = {
   // Graceful failure (owner root-cause fix, 2026-08-22): shown ONLY when the device/browser has no
   // Arabic voice at all — never silently read Arabic text with a non-Arabic (usually English) voice.
   'Listening isn\'t available on this device': 'الاستماع غير متاح على هذا الجهاز',
+  // The OTHER refusal, which used to borrow the line above and so told a user their device could not
+  // do something the app had not finished checking (routine #6, 2026-09-25). readAloud.ts keeps
+  // looking for a voice for RETRY_WINDOW_MS = 45s after load, and the 🔊 control first becomes
+  // tappable ~30s in (measured on production, 4/4), so this state is on the ordinary path. It is
+  // temporary and the user's own next tap clears it, so the copy says exactly that instead of naming
+  // the device — and gives the recovery action rather than leaving a dead end.
+  'Still preparing the voice — tap again in a moment': 'نُجهّز الصوت — أعد المحاولة بعد لحظة',
   // Floating playback controller (owner 2026-08-22, ChatGPT-style pill — Arabic-branded, own layout).
   // Every accessibility label on the controller must be Arabic, no English leak ('Close' reuses the
   // existing app-wide key just below — same word, same meaning, one definition).
@@ -1017,6 +1024,16 @@ const AR: Record<string, string> = {
   'Expat Trusted Housing': 'إكسبات ترستد هاوسينج',  // transliteration — no Arabic name at the source
   'Flow': 'فلو',
   'Abaad': 'أبعاد',                                 // the site's own Arabic name (app.abaadapp.sa writes «أبعاد»)                                    // transliteration — no Arabic name at the source
+  'Al Saedan': 'آل سعيدان',                              // the site's own Arabic name
+  'Ego Real Estate': 'إيجو عقار',                              // the site's own Arabic name
+  'Ahmed Almuhaysini': 'أحمد المحيسني العقارية',                              // the site's own Arabic name
+  'Nofodh Investment': 'نفوذ للاستثمار العقاري',                              // the site's own Arabic name
+  'Razre': 'راز العقارية',                              // the site's own Arabic name
+  'Reinvest': 'ري إنفست',                              // the site's own Arabic name
+  'Safa Investment': 'صفا للاستثمار',                              // the site's own Arabic name
+  'Sokok': 'صكوك العقارية',                              // the site's own Arabic name
+  'Sukna': 'سكنة',                              // the site's own Arabic name
+  'Tuba': 'طوبة العقارية',                              // the site's own Arabic name
   // logo-only strip entries (owner decision 2026-09-24): no scraper, no tables, never searchable.
   'Maskan United': 'مسكن الموحدة',  // maskanre.sa
   'The Address': 'العنوان',  // wetheaddress.com

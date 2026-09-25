@@ -22,7 +22,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AR_LANG, QUALITY_ENHANCED, pickBestArabicVoice, scoreArabicVoice, shouldForcePauseFallback,
-  type ArabicVoiceCandidate,
+  readAloudRefusalVerdict, readAloudRefusalMessageKey,
+  type ArabicVoiceCandidate, type ReadAloudRefusal,
 } from '../src/lib/readAloudVoice.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -148,5 +149,83 @@ const contract = readFileSync(join(ROOT, 'scripts/verify-read-aloud-contract.ts'
 check('verify-read-aloud-contract.ts no longer scores voices through a hand-written replica',
   !/pickBestArabicReplica/.test(contract));
 
+// ── 6. A REFUSED TAP MUST NOT INVENT A VERDICT ABOUT THE DEVICE ─────────────────────────────────
+// routine #6, 2026-09-25. readAloud.ts keeps THREE voice states and speakReadAloud() returns a
+// BOOLEAN, so the component that renders the refusal used to see only "it did not speak" and always
+// said «الاستماع غير متاح على هذا الجهاز» — a permanent claim about the user's hardware, shown while
+// resolveVoice()'s 45s RETRY_WINDOW_MS was still running. That is the repo's owner-locked
+// unknown -> NO rule broken in the read-aloud surface, the shape AGENTS.md records as "A FAILED
+// FETCH IS NOT AN EMPTY ANSWER".
+//
+// MEASURED on production, Chromium, 4/4 fresh contexts, real Playwright clicks, page foregrounded:
+// the 🔊 control does not exist until an agent search has returned cards, at t = 29,283 / 30,290 /
+// 30,311 / 30,695 ms since load — every one ~15s INSIDE the 45s window. A second tap at
+// t = 52,977 / 53,345 ms, past the window, produced the BYTE-IDENTICAL message, so the two states
+// were indistinguishable to the user. Not a startup edge: the ordinary path.
+//
+// The ENTIRE user-visible decision is executed here — (voiceConfirmed, checkExhausted) -> verdict ->
+// the sentence on screen — rather than the verdict being executed and the branch grepped. The three
+// states are exhaustive by construction, so the table below is the whole function.
+const verdict = (voiceConfirmed: boolean, checkExhausted: boolean) =>
+  readAloudRefusalVerdict({ voiceConfirmed, checkExhausted });
+
+check('a confirmed voice is not a refusal at all',
+  verdict(true, false) === 'none' && verdict(true, true) === 'none');
+// THE DEFECT, as a positive assertion. This is the case that used to render the device verdict.
+check('no voice yet AND the search is still running ⇒ «still-resolving», NEVER a verdict about the device',
+  verdict(false, false) === 'still-resolving');
+check('no voice AND the search is exhausted ⇒ «no-voice-on-device» — the one state that claim is true in',
+  verdict(false, true) === 'no-voice-on-device');
+// The two refusals must not collapse into one sentence, which is precisely what the defect was.
+check('the two refusals are DIFFERENT states',
+  verdict(false, false) !== verdict(false, true));
+const stillKey = readAloudRefusalMessageKey('still-resolving');
+const noneKey = readAloudRefusalMessageKey('no-voice-on-device');
+check('…and they map to DIFFERENT sentences — one message for both is the defect this section exists for',
+  !!stillKey && !!noneKey && stillKey !== noneKey);
+check('the device-verdict sentence is reachable ONLY from the exhausted state',
+  noneKey === "Listening isn't available on this device"
+  && stillKey !== "Listening isn't available on this device");
+check('a refusal with a confirmed voice says nothing rather than inventing a cause',
+  readAloudRefusalMessageKey('none') === null);
+// Exhaustiveness: every verdict the type admits must have a defined mapping (null is a decision, but
+// `undefined` would be an unhandled state rendering as a blank line).
+for (const r of ['none', 'no-voice-on-device', 'still-resolving'] as ReadAloudRefusal[]) {
+  check(`«${r}» has an explicit message decision (not undefined)`,
+    readAloudRefusalMessageKey(r) !== undefined);
+}
+
+// Both sentences must actually EXIST as i18n keys with Arabic values — a key the app cannot
+// translate renders the English source string to an Arabic-only user, which would turn this fix
+// into a different user-visible bug.
+// Read by plain scan, not by regex: i18n.tsx writes an apostrophe inside a single-quoted key as
+// `isn\'t`, and hand-escaping that into a pattern is exactly how a check ends up asserting something
+// it did not mean. Unescaping the source first makes the key a literal substring on both sides.
+const i18n = readFileSync(join(ROOT, 'src/i18n.tsx'), 'utf8').replace(/\\'/g, "'");
+const hasArabic = (s: string) => /[؀-ۿ]/.test(s);
+for (const key of [noneKey!, stillKey!]) {
+  const at = i18n.indexOf(`'${key}':`);
+  // The value is the rest of that line; an Arabic character in it is what proves it was translated
+  // rather than left to fall through to the English source string for an Arabic-only user.
+  const value = at < 0 ? '' : (i18n.slice(at).split('\n')[0] ?? '');
+  check(`«${key}» has an Arabic translation in i18n.tsx`, at >= 0 && hasArabic(value));
+}
+
+// WIRING: the component must route through the executed decision rather than re-deciding. Without
+// this the two functions above could be perfect and unused — exactly the state
+// isReadAloudDefinitelyUnavailable() was in for the whole life of the defect (exported, documented,
+// ZERO callers, while the UI guessed).
+const row = code(readFileSync(join(ROOT, 'src/components/FeedbackRow.tsx'), 'utf8')).replace(/\\'/g, "'");
+check('FeedbackRow asks readAloud WHY the tap was refused', /readAloudRefusal\(\)/.test(row));
+check('FeedbackRow renders the sentence the shared mapping chose',
+  /readAloudRefusalMessageKey\(/.test(row));
+// Plain substring on the unescaped source — the component must not name the device verdict itself,
+// because naming it is how it gets rendered for a state it is not true in.
+check('FeedbackRow no longer hardcodes the device verdict', !row.includes(noneKey!));
+check('readAloud.ts composes its real module state through the shared verdict',
+  /readAloudRefusalVerdict\(\{/.test(readAloudCode)
+  && /voiceConfirmed: !!bestArabicVoice/.test(readAloudCode)
+  && /checkExhausted: voiceCheckExhausted/.test(readAloudCode));
+
 if (failed) { console.error(`\nverify-read-aloud-voice-logic: ${failed} check(s) failed`); process.exit(1); }
-console.log('\nverify-read-aloud-voice-logic: voice selection and the WebKit pause watchdog, executed — not replicated.');
+console.log('\nverify-read-aloud-voice-logic: voice selection, the WebKit pause watchdog, and the refusal verdict, executed — not replicated.');
