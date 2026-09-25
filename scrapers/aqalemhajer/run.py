@@ -661,6 +661,8 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            # fetch_detail returned a page only on HTTP 200 carrying data-history-node-id == nid.
+            db.mark_direct_alive(row, oracle="aqalemhajer.detail_page.history_node_id")
             (com if cat == "commercial" else res).append(row)
         tally = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         if tally:
