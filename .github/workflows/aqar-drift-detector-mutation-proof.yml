@@ -1,0 +1,63 @@
+# Mutation proof that mon_detect_aqar_proven_wrong_resolution() and mon_detect_city_region_mismatch()
+# (migration 20260925175109) actually catch the bug shape they exist for, not just read 0 by
+# accident. See scripts/verify-aqar-drift-detectors-live.ts for the method: it reproduces the exact
+# historic bug on one real, already-repaired row inside a guarded try/finally, watches both
+# detectors flip 0 -> nonzero, then restores the row and watches them flip back to 0.
+#
+# NOT IN THE REQUIRED `npm test` (scripts/test-exclusions.txt records this file as the home): it
+# needs SUPABASE_SERVICE_ROLE_KEY to write past RLS, and it briefly mutates a real production row -
+# neither belongs in a check that runs on every unrelated PR, same precedent as
+# repair-enrollment-guard.yml and migration-drift-guard.yml.
+#
+# Daily rather than every few minutes: the mechanism being proven (the detector functions'
+# behaviour) only changes when this migration or the script itself changes, so a tight interval adds
+# write load against production without adding real coverage. The push trigger re-proves it
+# immediately whenever the mechanism actually changes.
+name: Aqar drift detector mutation proof (live)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/20260925175109_aqar_drift_precise_classifier_and_repair_barriers.sql'
+      - 'scripts/verify-aqar-drift-detectors-live.ts'
+      - '.github/workflows/aqar-drift-detector-mutation-proof.yml'
+  schedule:
+    - cron: '17 5 * * *'   # daily, offset from the sibling live-check jobs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aqar-drift-detector-mutation-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Both detectors flip 0 -> nonzero -> 0 against a real reproduced bug
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: Reproduce the historic bug on a real row, prove detection, restore it
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+            scripts/verify-aqar-drift-detectors-live.ts
+
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind seam_check_failed
+          --workflow aqar-drift-detector-mutation-proof.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
