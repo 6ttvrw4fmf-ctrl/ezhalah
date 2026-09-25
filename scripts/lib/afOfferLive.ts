@@ -54,22 +54,56 @@ import { clickWitnessed, isStable, MAX_CLICK_ATTEMPTS } from './liveClick.ts';
  *  that was on screen the entire time, and three runs recorded it as a broken R9.2.3.
  *
  *  So: ask the app's own testID, which this file already calls "the join key, never the label", and
- *  keep the label only as a fallback — now on `textContent`, which does not need layout. */
-export const CLICK_LEAF_SRC = (want: { testid: string; txt: string }) => {
-  let best: any = null;
-  const consider = (e: any) => {
-    const r = e.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0 && (!best || e.children.length <= best.children.length)) best = e;
-  };
+ *  keep the label only as a fallback — now on `textContent`, which does not need layout.
+ *
+ *  ONE SCAN ANSWERS BOTH QUESTIONS, AND IT HAS TO (corrected hours later, same day). The first cut
+ *  of this fix put presence in a SECOND in-page function with its own matching rule — testid, or a
+ *  label match that additionally required `children.length === 0`. That rule was STRICTER than the
+ *  one the clicker used, so on the Filter flow (`verify-af-card-evidence-live.ts`, where the label
+ *  sits on an element that has children) presence answered false while the clicker was finding and
+ *  clicking the CTA perfectly well — and the journey reported `absent after 60261ms` against a
+ *  production that had just passed the same check on the pre-fix opener. That is this very defect
+ *  inverted: two probes, two rules, disagreeing about what "the CTA" is. So there is now ONE scan
+ *  and one rule. `present` means the scan found the element; `point` is null when it found it but
+ *  the element has no laid-out box yet, which is exactly the #687 state and is a HARNESS fact. */
+export const CLICK_LEAF_SRC = (want: { testid: string; txt: string }): { present: boolean; point: { x: number; y: number } | null } => {
+  const hits: any[] = [];
   const byId = document.querySelector(`[data-testid="${want.testid}"]`);
-  if (byId) consider(byId);
-  if (!best) {
+  if (byId) hits.push(byId);
+  // EITHER text property counts, because each one alone has been measured MISSING the CTA, in
+  // opposite flows and for opposite reasons (both on production, 2026-09-25):
+  //   • `innerText` is the RENDERED text and is empty for a node that is not laid out yet. In the
+  //     AGENT flow the offer renders under a reveal cascade still mounting cards, so an innerText-
+  //     only scan found nothing for 60s while the button was on screen — `ops_incident` #687.
+  //   • `textContent` includes text from hidden descendants, so it is NOT equal to the label
+  //     wherever the control carries any. In the FILTER flow a textContent-only scan found nothing
+  //     for 60s on verify-af-card-evidence-live.ts — a check the pre-fix opener had just passed.
+  // Matching on EITHER is strictly more permissive than the innerText-only rule this replaced, so
+  // it cannot lose a CTA that rule found, and it gains the one that rule could not see.
+  //
+  // THE TESTID WINS OUTRIGHT WHEN IT IS THERE, and the text scan is only a fallback. Letting both
+  // contribute looks harmless and is not: agent.tsx also builds a READ-ALOUD script naming the same
+  // labels (`spokenActionLabels`), so a visually-hidden node carrying the exact label text exists on
+  // the page. It has no children, so it WINS the smallest-node tie-break below, and its box is
+  // nowhere near the button. Measured on production 2026-09-25 with both sources merged: presence
+  // was correct, and all 6 click attempts landed on «ازهله» — the header — because the point came
+  // from that hidden node. `innerText` never matched it (it is not rendered), which is the accident
+  // that kept the original innerText-only scan working here.
+  if (!hits.length) {
     document.querySelectorAll('div,span,li,button').forEach((e: any) => {
-      if (((e.textContent || '')).trim() !== want.txt) return;
-      consider(e);
+      const t = (e.innerText || '').trim(), c = (e.textContent || '').trim();
+      if (t === want.txt || c === want.txt) hits.push(e);
     });
   }
-  if (!best) return null;
+  if (!hits.length) return { present: false, point: null };
+  // Present. Now: is any of them laid out enough to receive a click? Smallest such node wins, the
+  // same preference the label scan has always had.
+  let best: any = null;
+  for (const e of hits) {
+    const r = e.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0 && (!best || e.children.length <= best.children.length)) best = e;
+  }
+  if (!best) return { present: true, point: null };   // in the DOM, not measurable — the #687 state
   let a = best.parentElement, sc: any = null;
   while (a) {
     const s = getComputedStyle(a);
@@ -81,20 +115,8 @@ export const CLICK_LEAF_SRC = (want: { testid: string; txt: string }) => {
     sc.scrollTop += (er.top - sr.top) - sc.clientHeight / 2 + er.height / 2;
   }
   const r = best.getBoundingClientRect();
-  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  return { present: true, point: { x: r.x + r.width / 2, y: r.y + r.height / 2 } };
 };
-
-/** IS THE OFFER IN THE DOM AT ALL? Presence, deliberately separate from clickability.
- *
- *  `absent` is a statement about ADVANCED FILTER ("the offer never came back"); every other verdict
- *  here is a statement about the HARNESS. Deciding absence from a CLICK probe fuses the two, and the
- *  fused version accused production three times (`ops_incident` #687). Presence is read from the
- *  app's own testID, with the label on `textContent` as a fallback — neither needs layout, so a CTA
- *  below the fold or under a running reveal cascade still counts as present, which is the truth. */
-export const CTA_PRESENT_SRC = (want: { testid: string; txt: string }) =>
-  !!document.querySelector(`[data-testid="${want.testid}"]`)
-  || [...document.querySelectorAll('div,span,li,button')]
-    .some((e: any) => e.children.length === 0 && (e.textContent || '').trim() === want.txt);
 
 /** Drive every scrollable container to its bottom — the CTA renders below the newest turn. */
 const SCROLL_BOTTOM_SRC = () => {
@@ -182,10 +204,11 @@ export async function openAfOffer(
     await page.evaluate(SCROLL_BOTTOM_SRC).catch(() => {});
     if (!sawTurn) sawTurn = await page.evaluate(HAS_TURN_SRC, HEADLINE_AT_START).catch(() => false);
     const want = { testid: AF_OFFER_TESTID, txt: AF_OFFER_CTA };
-    // PRESENCE FIRST, and counted on its OWN poll: a CTA that is in the DOM but not measurable this
-    // frame must still retire `absent`, because `absent` is the only verdict here that blames AF.
-    if (await page.evaluate(CTA_PRESENT_SRC, want).catch(() => false)) ctaSeen++;
-    const box = await page.evaluate(CLICK_LEAF_SRC, want).catch(() => null);
+    // ONE scan, TWO answers. `present` retires `absent` — the only verdict here that blames AF —
+    // even on a frame where the CTA has no laid-out box yet, which is the #687 state.
+    const found = await page.evaluate(CLICK_LEAF_SRC, want).catch(() => null);
+    if (found?.present) ctaSeen++;
+    const box = found?.point ?? null;
     if (box) {
       // ONLY CLICK A POINT THAT HAS HELD STILL. The measurement and the click are two round trips;
       // requiring the same coordinates twice in a row is what makes the point still true when the
