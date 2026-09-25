@@ -76,7 +76,22 @@ check('speakReadAloud() itself has no await before Speech.speak() (stays synchro
 check('speakReadAloud() refuses to speak (returns false) when no Arabic voice has been confirmed — never falls through to a language-only (wrong-voice) call', /if \(!bestArabicVoice\) return false;/.test(readAloud));
 check('every actual Speech.speak() call passes an explicit .voice (the confirmed Arabic voice identifier), never language-only', /voice: bestArabicVoice!\.identifier,/.test(readAloud));
 check('speakReadAloud has a boolean return type so callers can react to "genuinely unavailable" (FeedbackRow shows a graceful Arabic message, never silently speaks wrong-language)', /export function speakReadAloud\(id: string, segments: ReadAloudSegment\[\]\): boolean \{/.test(readAloud));
-check('FeedbackRow shows the graceful "not available" message only when speakReadAloud reports it did not start — never as a silent no-op', /const started = speakReadAloud\(feedbackKey, readAloudSegments\);/.test(feedbackRow) && /if \(!started\) \{/.test(feedbackRow) && /setUnavailable\(true\)/.test(feedbackRow));
+// RETARGETED 2026-09-25, routine #6 — THIS CHECK HAD PINNED THE DEFECT AS CORRECT.
+// It required the literal `setUnavailable(true)`, and that single boolean WAS the bug: a refusal
+// that only meant "the voice list has not finished loading" was rendered as
+// «الاستماع غير متاح على هذا الجهاز», a permanent verdict about the user's hardware, for the whole
+// 45s RETRY_WINDOW_MS after load. Measured on production 4/4: the 🔊 control first becomes tappable
+// ~30s in, i.e. INSIDE that window. So this check was green for exactly as long as the defect was
+// live, under a label about showing the message "gracefully" — the same shape ops_incident #297
+// recorded for verify-chat-persistence/verify-transcript-integrity, and the repair is the same:
+// assert the PROPERTY, never the expression.
+//
+// The property has two halves. (a) The message still appears ONLY on a refusal — never a silent
+// no-op, which is what this check was always for. (b) WHICH message is asked of the shared verdict
+// rather than assumed, so the device line can only be reached from the state it is true in. The
+// verdict itself is EXECUTED by verify-read-aloud-voice-logic.ts §6; this pins the wiring.
+check('FeedbackRow shows a refusal message only when speakReadAloud reports it did not start — never as a silent no-op', /const started = speakReadAloud\(feedbackKey, readAloudSegments\);/.test(feedbackRow) && /if \(!started\) \{/.test(feedbackRow) && /readAloudRefusal\(\)/.test(feedbackRow));
+check('…and WHICH refusal message is decided by the shared verdict, never a single boolean that cannot tell "no voice on this device" from "still looking"', /readAloudRefusalMessageKey\(/.test(feedbackRow) && !/setUnavailable\(/.test(feedbackRow));
 // CHATGPT-LIKE PACING (owner 2026-08-19): rate is a MEASURED value (real playback timing against the
 // documented ~4.5 syllable/second natural-Arabic-speech benchmark), not a guess — pinned distinctly
 // from "some slow-sounding default" so a future edit can't silently drift it back toward 0.92 without
