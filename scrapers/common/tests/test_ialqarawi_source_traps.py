@@ -276,6 +276,37 @@ def test_a_district_field_holding_a_city_never_reaches_the_card():
     assert row["additional_info"]["district_field_raw"] == "الدوادمي"
 
 
+# ── A LONE DIRECTIONAL ADJECTIVE IS NEVER A CITY (found live 2026-09-25) ─────────────────────────
+# nid 2613 (a Makkah plot) and nid 2511 (a Khobar/شاطئ نصف القمر plot) both trail off with
+# «…الشرقية»/«…الشرقيه» and NOTHING else the title-scanner recognised, so city_from_title's
+# right-to-left scan landed on that word — which also happens to be the literal name of an
+# unrelated, obscure Asir-region village (city_id 14645) — and both were served as being IN ASIR.
+# _catalog here layers a stub «الشرقية»→14645 on top of the file's own عنيزة/الدوادمي stub, so
+# these tests exercise the exact shape of the real catalog collision, not an invented one.
+def test_a_lone_directional_adjective_is_never_treated_as_the_city(monkeypatch):
+    real_to_catalog = R.to_catalog
+    monkeypatch.setattr(R, "to_catalog", lambda name, region_hint=None: (
+        (14645, 6) if str(name).strip() in ("الشرقية", "الشرقيه") else real_to_catalog(name, region_hint)))
+    row, _, why = mapped(card=card(title="للبيع أرض في الشرقيه امام شاطئ نصف القمر"),
+                         section="اراضي سكنية")
+    assert row is None and why == "city_not_in_catalog", (
+        "a bare «الشرقيه» with no other recognisable city token must be quarantined, never filed "
+        "under the unrelated Asir village that happens to share its literal spelling")
+
+
+def test_a_directional_adjective_does_not_block_the_real_city_further_left(monkeypatch):
+    """The scan must SKIP «الشرقية» and keep going left — not give up the moment it hits a stopped
+    token — so a real city stated earlier in the same title (nid 2613's own «...عنيزة...» stand-in
+    here) is still found."""
+    real_to_catalog = R.to_catalog
+    monkeypatch.setattr(R, "to_catalog", lambda name, region_hint=None: (
+        (14645, 6) if str(name).strip() in ("الشرقية", "الشرقيه") else real_to_catalog(name, region_hint)))
+    row, _, _ = mapped(card=card(title="للبيع أرض سكنية بعنيزة حي النوارية الشرقية مخطط اللابة"),
+                       section="اراضي سكنية")
+    assert row["city_ar"] == UNAIZAH
+    assert row["city_id"] == CITY_ID and row["region_id"] == REGION_ID
+
+
 def test_a_title_that_contradicts_the_index_deal_is_skipped():
     """id 217 sits in the RENT index with a «للبيع» title — two source claims, no known deal."""
     row, _, why = mapped(card=card(ty=2, title="للبيع إستراحة شباب بالخليج/عنيزة"),
