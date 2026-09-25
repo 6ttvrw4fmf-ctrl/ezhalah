@@ -824,7 +824,20 @@ try {
 
   // ── 6. the removed question is offerable again, and it is the SAME question ───────────────────
   const reopened = await openOffer();
-  check('R9.2.3 — the offer «خلّنا نحدد الطلب أكثر» is present again after the removal', reopened, reopened ? '' : 'no offer on the restored turn — the removed question may have stayed in the asked carry');
+  // THE FAILURE MESSAGE NAMES WHAT WAS MEASURED, NOT A GUESS (routine #5, 2026-09-25).
+  // It used to read «the removed question may have stayed in the asked carry». That hypothesis is
+  // REFUTED by execution: on production 2026-09-25 the post-removal probe on the wire was
+  // `property_age_option_counts_ar` — the very question that had just been removed — so it IS back
+  // in the pool, and its answer (cnt_total 15,628 with every bucket qualifying) makes the offer
+  // gate's verdict `yes`. The absence was the harness's own (ops_incident #687): the CTA was in the
+  // DOM at every sample while the click probe could not measure it. Keep the two apart here too.
+  check('R9.2.3 — the offer «خلّنا نحدد الطلب أكثر» is present again after the removal', reopened,
+    reopened ? ''
+      : lastOffer && !lastOffer.opened && lastOffer.reason === 'intercepted'
+      ? `the offer WAS on screen but never took a click within ${lastOffer.waitedMs}ms ` +
+        `(${lastOffer.attempts} attempt(s), last hit «${lastOffer.hit}») — a harness miss, not an AF verdict`
+      : `the restored turn landed but NO offer rendered on it within ${lastOffer?.waitedMs}ms ` +
+        `(N2=${N2} is above INTERVIEW_STOP_AT, so R4.3/R11.1 cannot explain the absence)`);
   if (reopened) {
     const ag = await readCardSettled((s) => s.hasCard && !!s.q && s.chip != null);
     const again = ag.value;
