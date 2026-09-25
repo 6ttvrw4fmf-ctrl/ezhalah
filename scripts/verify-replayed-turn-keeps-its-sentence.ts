@@ -22,6 +22,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pickResultsFoundSentence } from '../src/data/resultsFoundRotation.ts';
 import { replayMsgIds } from '../src/lib/replayIds.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -32,6 +33,10 @@ const check = (label: string, ok: boolean, detail = '') => {
   failures++;
   console.error(`FAIL  ${label}${detail ? `\n      ${detail}` : ''}`);
 };
+// Same convention as scripts/verify-results-found-rotation.ts: an EXECUTED differential, where
+// `caught` is the result of running this barrier's own property against a deliberately broken input.
+const mustCatch = (label: string, caught: boolean, detail = '') =>
+  check(`MUTATION — ${label}`, caught, detail);
 
 console.log('\nA replayed saved conversation keeps the Results-Found sentence it was already shown\n');
 
@@ -124,7 +129,7 @@ try {
   scripted([0.5]);
   const second = pickResultsFoundSentence({ lang: 'ar', name: null, count: '9,999', stableKey: uid() });
   restore();
-  check('MUTATION — re-minting the id per reopen DOES re-word the turn (the defect is real)',
+  mustCatch('re-minting the id per reopen DOES re-word the turn (the defect is real)',
     first !== second, `both reopens produced: ${first}`);
 } finally { restore(); }
 
@@ -133,8 +138,9 @@ const agent = read('src/app/agent.tsx');
 check('agent.tsx imports the replay id helper',
   /import\s*\{[^}]*\breplayMsgIds\b[^}]*\}\s*from\s*'@\/lib\/replayIds'/.test(agent));
 
-const openStatic = agent.slice(agent.indexOf('const openStatic = async'));
-const body = openStatic.slice(0, openStatic.indexOf('\n  };'));
+// windowBetween THROWS if either marker moves, rather than silently widening to the rest of the file
+// and passing every assertion below against unrelated source (scripts/lib/sourceWindow.ts).
+const body = windowBetween(agent, 'const openStatic = async', '\n  };', 'agent.tsx openStatic');
 check('openStatic derives its ids through replayMsgIds(chatIdRef.current, uid)',
   /replayMsgIds\(\s*chatIdRef\.current\s*,\s*uid\s*\)/.test(body));
 check('openStatic no longer mints userId/resultsId with uid()',
