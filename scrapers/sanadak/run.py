@@ -759,6 +759,9 @@ def main() -> int:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                # fetch_one returned only on HTTP 200 carrying the object whose own
+                # advertisementNumber equals this URL's (a soft-404 shell carries none).
+                db.mark_direct_alive(row, oracle="sanadak.listing_page.advertisementNumber")
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 seen += 1
