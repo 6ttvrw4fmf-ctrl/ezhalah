@@ -102,6 +102,12 @@
     "grace": 3
   },
   {
+    "platform": "alsaedan",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "alshawaf",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -270,6 +276,12 @@
     "grace": 3
   },
   {
+    "platform": "ego",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "eilmalriyada",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -432,6 +444,12 @@
     "grace": 3
   },
   {
+    "platform": "muhaysini",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "muktamel",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -439,6 +457,12 @@
   },
   {
     "platform": "mustqr",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "nofodh",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
@@ -486,6 +510,18 @@
     "grace": 3
   },
   {
+    "platform": "razre",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "reinvest",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "remal",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -506,6 +542,12 @@
   {
     "platform": "sadiqeltajer",
     "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "safa",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
@@ -570,7 +612,19 @@
     "grace": 3
   },
   {
+    "platform": "sokok",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "souq24",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "sukna",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
@@ -595,6 +649,12 @@
   },
   {
     "platform": "thousand",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "tuba",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3

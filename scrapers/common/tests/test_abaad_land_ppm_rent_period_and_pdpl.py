@@ -292,10 +292,15 @@ def test_a_non_land_row_stores_price_as_the_total_and_claims_no_per_metre_rate()
 
 # ── 2. RENT PERIOD = SOURCE ─────────────────────────────────────────────────────────────────────
 
-def test_a_rent_whose_text_states_no_period_stores_a_null_period_and_the_price_unconverted():
+def test_a_silent_rent_takes_the_owners_yearly_attestation_with_its_price_unconverted():
+    """Owner 2026-09-25, after opening five period-silent ads: «those are all yearly». abaad's API
+    carries NO period field, so that attestation is the only period statement this platform makes
+    (same class as wadod 20260924224146 and tamyaz 20260924231422). It reaches a GENUINELY silent ad
+    only — the three gates below hold it back otherwise — and 'annual' converts nothing, so the
+    published figure cannot move."""
     row, _ = _row(RENT_SILENT)
-    assert row.get("rent_period") is None, "a silent listing must never be defaulted to annual"
-    assert row["price_annual"] == 14000, "and its price is stored exactly as published"
+    assert row["rent_period"] == "annual", "silence is yearly on this platform, by owner attestation"
+    assert row["price_annual"] == 14000, "and its price is stored exactly as published, unconverted"
 
 
 def test_a_period_the_listing_itself_states_is_honoured():
@@ -322,7 +327,7 @@ def test_a_monthly_token_that_describes_a_different_number_is_not_applied():
     ("* السعر ٨٠٠ ريال شهري", 9600, (None, 9600)),          # the measured 875 shape
     ("للايجار الشهري واليومي", 3800, (None, 3800)),          # two periods = no statement
     ("شقه للإيجار السنوي", 60000, ("annual", 60000)),        # no conversion, no corroboration owed
-    ("شقة للإيجار", 14000, (None, 14000)),                   # silent
+    ("شقة للإيجار", 14000, ("annual", 14000)),                # silent → the owner's attestation
     # A period this schema has no bucket for. The shared parser answers (None, None) for platforms
     # whose price field carries that label; abaad's does not, so the published figure is kept with
     # an UNKNOWN period instead of being discarded (no hiding a source-published price).
@@ -331,6 +336,77 @@ def test_a_monthly_token_that_describes_a_different_number_is_not_applied():
 ])
 def test_the_rent_gate_itself_on_the_shapes_measured_live(text, price, expect):
     assert R._rent_fields(price, text) == expect
+
+
+# ── THE THREE GATES ON THE OWNER'S YEARLY ATTESTATION ────────────────────────────────────────────
+# Every text below is the platform's OWN title + short + long description, captured verbatim from
+# /api/v1/estate/get-estate/all on 2026-09-25 — not a paraphrase. All 116 live rents were classified
+# and then adversarially re-judged; these are the shapes where a blind yearly label would have been a
+# price claim the source does not make. A miss here understates a rent; a false hold only leaves
+# rent_period NULL, which is the state the row was already in — so every gate holds rather than guesses.
+#
+# The window matters and is why paraphrasing would have hidden a real result: in 583's REAL body the
+# «السعر / 3800 بالشهر» line sits farther from the first «الشهري» token than the corroboration window
+# reaches, so the audited gate answers UNKNOWN. Shortened by hand, the same ad corroborates and
+# converts. The verbatim capture is the only honest input.
+G1_G2_G3 = [
+    # G1 — a sub-year period word. 583 and 646 publish MONTHLY figures; annual understates 12x.
+    ("583 «للايجار الشهري واليومي … السعر / 3800 بالشهر»", "شقة-الخبر-الحمراء 🎖️شقه موثثه فاخره للايجار الشهري 🎖️ شقه موثثه فاخره للايجار الشهري واليومي غرفه وصاله يوجد مصعد موثثه بالكامل مواقف مظلله السعر / 3800 بالشهر ترخيص رقم / 7200780038", 3800),
+    ("646 «استديو فاخر للإيجار الشهري»", "شقَّة صغيرة (استوديو)-الرياض-العقيق 🎖️شقة صغيرة (استديو) فاخرة للإيجار-حي العقيق🎖️ استديو فاخر للإيجار الشهري في فلة بالعقيق جديدة بالكامل يشمل : 1- دخول ذكي 2- ثلاجة 2- مكيف 3- مكرويف 4- تلفزيون سمارت 5- سرير ودولاب 6- ركن قهوة مختصه 7- كنب للاستراحة شامل المويه والكهرب الايجار 2900 الشهري ترخيص 7200834360", 2900),
+    ("601 «مكاتب للإيجار شهري وسنوي» — two periods at once is no statement", "مكتب-الرياض-الدريهمية مكاتب للإيجار شهري وسنوي 🚀 انطلق بمشروعك من أكبر حاضنة أعمال في الرياض! نوفر لك جميع حلول الأعمال في مكان واحد وبجودة عالية، تشمل: 🏢 مكاتب خاصة ومشتركة مجهّزة بالكامل 🏭 مستودعات آمنة لتخزين منتجاتك بكل مرونة 🚗 مواقف سيارات متوفّرة لراحتك وراحة عملائك خيارات تأجير مرنة: تأجير يومي تأجير شهري تأجير سنوي 📌 اختر الفرع الأقرب لك: العارض السويدي السليمانية هنا تبدأ رحلتك… وهنا يكبر مشروعك! ✨ مساحات عمل جاهزة – خدمات احترافية – مواقع استراتيجية صاحب الترخيص : ماجد فؤاد حمزه ابورديف تاريخ انتهاء رخصة الإعلان : 2026-12-11", 1500),
+    # G2 — the prose prints a DIFFERENT price, so it witnesses nothing about the stored figure.
+    ("526 stores 67,000 while its only price line reads «السعر / 670000» (10x)", "دور-الرياض-الملقا 🎖️دور مميز للإيجار - الملقا🎖️ دور علوي للايجار بفيلا بحي الملقا 5 غرف شارع جنوبي 20 مكيفات مطبخ راكب السعر / 670000 7200741676", 67000),
+    ("899 prints three prices for three assets against one stored figure", "مكتب-الرياض-الورود مكاتب للايجار بحي الورود (طريق العروبه ) مكاتب للايجار بحي الورود (طريق العروبه ) المساحه التقريبيه للمكتبين ٣٥٠ متر عباره عن شقتين مكتبيه كل شقه ٦ غرف الدور الثاني السعر / ٣٢٠الف للمكتبين المكتب الواحد ١٧٠الف اطلاله عالشارع ١٦٠ الف الداخلي 7200936951", 160000),
+    # G3 — the figure is PER UNIT. 918 is a عمارة whose body prices ONE of its four flats; the
+    # platform's own annual anchors for a single Abha flat sit at exactly that figure (917: 24,000,
+    # 920: 25,000, 943: 26,000, 968: 23,000), which is what proves the scope.
+    ("918 «لإيجار 4 شقق … السعر : 30,000 ريال للشقة»", "عمارة-أبها-الشرقية عمارة سكني للإيجار في حي الشرفية في ابها لإيجار 4 شقق بحي الهيام في أبها - بجوار جامع بن عريدان كل شقه عباره عن : 5 غرف ، صاله ، 3 دورات مياه ، مطبخ مركب ، عداد كهرباء مستقل شبكة مياه وخزان مستقل لكل شقة ، موقف سياره خاص ، مصعد السعر : 30,000 ريال للشقة رقم ترخيص الإعلان : 7201083165 تاريخ انتهاء الترخيص : 17/07/2027 رخصة فال : 1200006125", 30000),
+]
+
+
+@pytest.mark.parametrize("label,text,price", G1_G2_G3, ids=[c[0][:3] for c in G1_G2_G3])
+def test_a_gate_holds_the_yearly_attestation_back_and_keeps_the_price_verbatim(label, text, price):
+    period, annual = R._rent_fields(price, text)
+    assert period is None, f"the attestation must not reach this ad: {label}"
+    assert annual == price, "and the source's own published figure is stored, unconverted"
+
+
+@pytest.mark.parametrize("text,price", [
+    # Two sub-year periods spelled with the word for YEAR. A plain year-word filter waves these
+    # through, and half-yearly labelled annual understates by 2x.
+    ("للإيجار نصف سنوي", 40000),
+    ("للإيجار ربع سنوي", 40000),
+])
+def test_a_sub_year_period_spelled_with_the_year_word_is_still_held(text, price):
+    assert R._rent_fields(price, text) == (None, price)
+
+
+@pytest.mark.parametrize("text,price", [
+    # A YEAR-word alone never blocks the attestation: in this corpus «سنوات» / «سنتين» is BUILDING
+    # AGE on 13 ads, and a year-word can at worst AGREE with annual.
+    ("فيلا للإيجار في حي الملقا عمر البناء: تسع سنوات", 275000),
+    ("شقة للإيجار العمر / سنتين المساحة 182 م", 23000),
+    ("دور للإيجار مكيفات راكبه ٥ سنوات ضمان", 90000),
+])
+def test_a_year_word_that_is_building_age_does_not_block_the_attestation(text, price):
+    assert R._rent_fields(price, text) == ("annual", price)
+
+
+def test_the_attestation_never_reaches_a_priceless_rent():
+    """No price, nothing to label — and certainly nothing to call an annual figure."""
+    assert R._rent_fields(None, "شقة للإيجار") == (None, None)
+
+
+def test_871_keeps_its_published_figure_even_though_the_number_looks_wrong():
+    """A REVIEW FLAGGED THIS AD AND THE ANSWER IS STILL TO PUBLISH IT. 871 is a rent-typed ad with
+    price 1,000,000 and no period word; an adversarial pass argued the figure is likelier a sale
+    price or a mistyped zero, on per-metre comparison with the same advertiser's other ads. Acting on
+    that would be a plausibility gate, which this repo treats as a regression in its own right — a
+    source-published price is never hidden, repaired, or swapped for a figure that looks better. The
+    source states no period, so the owner's attestation applies and the number is stored verbatim."""
+    period, annual = R._rent_fields(1000000, "فيلا-الرياض-الملقا فيلا فاخرة للإيجار - حي الملقا - الرياض فيلا 883 متر مربع واجهة شمالية ب 5 غرف الملقا، شمال الرياض، الرياض")
+    assert period == "annual"
+    assert annual == 1000000, "the published figure, not a repaired one"
 
 
 def test_arabic_indic_digits_corroborate_just_as_western_ones_do():

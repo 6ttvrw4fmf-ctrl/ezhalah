@@ -122,6 +122,19 @@ export const PLATFORMS: Platform[] = [
   { name: 'Expat Trusted Housing', domain: 'expattrustedhousingriyadh.com', brand: 'Expat Trusted Housing', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   { name: 'Flow', domain: 'flow.life', brand: 'Flow', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   { name: 'أبعاد', domain: 'app.abaadapp.sa', brand: 'Abaad', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // WAVE 1, 2026-09-25. allowsRent/allowsBuy state what each SCRAPER actually writes, not what the
+  // company could in principle offer: razre, sokok and sukna are sale-side developers whose parsers
+  // never emit a Rent row, so claiming rent support would advertise inventory that cannot appear.
+  { name: 'آل سعيدان', domain: 'alsaedan.com', brand: 'Al Saedan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'إيجو عقار', domain: 'ego-aqar.com', brand: 'Ego Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'أحمد المحيسني العقارية', domain: 'aqaralmuhaysini.com', brand: 'Ahmed Almuhaysini', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'نفوذ للاستثمار العقاري', domain: 'nofodh.sa', brand: 'Nofodh Investment', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'راز العقارية', domain: 'razre.sa', brand: 'Razre', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'ري إنفست', domain: 'reinvest.sa', brand: 'Reinvest', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'صفا للاستثمار', domain: 'safainv.sa', brand: 'Safa Investment', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'صكوك العقارية', domain: 'sokok.sa', brand: 'Sokok', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'سكنة', domain: 'sukna.app', brand: 'Sukna', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'طوبة العقارية', domain: 'tuba.com.sa', brand: 'Tuba', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'RawasiDark', domain: 'rawasi-dark.com', brand: 'Rawasi Dark Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: '1 October', domain: '1october.com.sa', brand: '1 October Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:

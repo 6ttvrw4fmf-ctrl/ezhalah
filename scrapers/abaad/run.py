@@ -300,6 +300,65 @@ def _states_figure_beside(text: str, price: int, at: int) -> bool:
                      re.sub(r"[,٬،_\s](?=\d{3}\b)", "", window)) is not None
 
 
+# ── THE OWNER'S YEARLY ATTESTATION, AND THE THREE THINGS THAT OVERRIDE IT ──────────────────────
+# Owner 2026-09-25, after opening five period-silent ads (details/975, 898, 964, 963, 962): «those
+# are all yearly». abaad's API has NO period field — a rent record carries a bare `price` — so that
+# attestation is the only period statement this platform makes, the same class as wadod's
+# (20260924224146) and tamyaz's (20260924231422).
+#
+# IT IS AN ATTESTATION ABOUT SILENCE, NOT ABOUT EVERY ROW. All 116 live rents were classified and
+# then adversarially re-judged, and the sweep found ads where a blind yearly label is a real price
+# claim the source does not make. Three gates hold the default back; each was measured, not guessed.
+#
+# G1 — A SUB-YEAR PERIOD WORD. Only periods SHORTER than a year can make the number wrong, so only
+# those are read here, and year-words are deliberately ignored: «تسع سنوات» / «٥ سنوات» / «العمر /
+# سنتين» are BUILDING AGE in this corpus (13 ads), and a year-word can at worst agree with annual.
+# The month/day/week side is the opposite — id 583 «للايجار الشهري واليومي … السعر / 3800 بالشهر»
+# and id 646 «استديو فاخر للإيجار الشهري» publish MONTHLY figures, so annual would understate them
+# by 12x. The regex is deliberately WIDER than normalize._RENT_PERIOD_TOKEN_RE (which sees neither
+# «بالشهر» nor «الشهري» nor «شهريا»): a miss here is a 12x price error, while a false hold only
+# leaves rent_period NULL, which is the state the row is already in.
+# «نصف سنوي» and «ربع سنوي» are SUB-YEAR periods spelled with the word for year, so they are named
+# here explicitly: a plain year-word filter would let a half-yearly price through as annual and
+# understate it by 2x. They are matched before any bare year-word is ignored.
+_SUBYEAR_PERIOD_RE = re.compile(
+    r"نصف\s*سنو|ربع\s*سنو|شهر|شهور|[أا]شهر|شهري[اةه]?|يوم|[أاآ]يام|ليل[ةه]|ليالي|[أا]سبوع|سبوع"
+    r"|semi[-\s]?ann|quarter|month|week|night|daily|nightly", re.I)
+
+# G2 — THE PROSE PRINTS A DIFFERENT PRICE. The body is not always about the stored figure: id 526
+# stores 67000 while its only price line reads «السعر / 670000» (10x), and id 899 prints three
+# prices for three assets («٣٢٠الف للمكتبين … ١٧٠الف … ١٦٠ الف الداخلي») while the row carries one
+# of them against the wrong area. Worse, id 945's `long_description` is ANOTHER property's ad
+# entirely — a for-sale Abha land — so this field cannot be trusted as a witness to its own row.
+# When a «السعر» line names a figure that is not the stored one, the period is not stated for the
+# stored one either.
+_PRICE_LINE_RE = re.compile(r"(?:السعر|الايجار|الإيجار|بسعر)\s*[:/]?\s*([0-9]{3,12})")
+
+# G3 — THE FIGURE IS PER UNIT, NOT FOR THIS LISTING. Id 918 is a عمارة (whole building) whose body
+# says «لإيجار 4 شقق … السعر : 30,000 ريال للشقة» — per APARTMENT. The platform's own annual anchors
+# for one Abha flat sit at exactly that figure (917: 24,000, 920: 25,000, 943: 26,000, 968: 23,000),
+# which is what proves 30,000 is one unit's rent and not the building's. Scope, not period — but the
+# harm is the same shape, so the row is held.
+_PER_UNIT_RE = re.compile(r"لل?(?:شقة|شقه|وحدة|وحده|مكتب|غرفة|غرفه)\b|لكل\s*(?:شقة|شقه|وحدة|وحده)"
+                          r"|المكتب\s*الواحد")
+
+
+def _silence_is_yearly(price: Optional[int], text: str) -> bool:
+    """Does the owner's yearly attestation reach THIS ad? True only if all three gates are clear."""
+    if price is None:
+        return False
+    t = text or ""
+    if _SUBYEAR_PERIOD_RE.search(t):
+        return False
+    if _PER_UNIT_RE.search(t):
+        return False
+    plain = re.sub(r"[,\u066c\u060c_\s](?=\d{3}\b)", "", t.translate(_WESTERN))
+    for m in _PRICE_LINE_RE.finditer(plain):
+        if int(m.group(1)) != price:
+            return False
+    return True
+
+
 def _rent_fields(price: Optional[int], text: str) -> tuple[Optional[str], Optional[int]]:
     """(rent_period, price_annual) for an abaad rent — the platform's own hardest trap.
 
@@ -324,6 +383,10 @@ def _rent_fields(price: Optional[int], text: str) -> tuple[Optional[str], Option
     'annual' needs no corroboration because it converts nothing.
     """
     period, annual = normalize.rent_period_and_annual(price, text)
+    if not period and _silence_is_yearly(price, text):
+        # The owner's attestation, applied only to a genuinely silent ad. price_annual is the
+        # published figure UNCONVERTED — 'annual' converts nothing, so no number can move.
+        return "annual", price
     if not period:
         # UNKNOWN period. The price is still the source's own published figure and is stored as
         # such — the same state as the 98 rents that state nothing at all. Note this deliberately

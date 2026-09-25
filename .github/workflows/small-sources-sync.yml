@@ -211,6 +211,20 @@ jobs:
           - { source: expattrusted,   cmd: "python -m scrapers.expattrusted.run --type all", tmo: 20 }
           - { source: flow,           cmd: "python -m scrapers.flow.run --type all", tmo: 20 }
           - { source: abaad,          cmd: "python -m scrapers.abaad.run --type all", tmo: 20 }
+          #   WAVE 1, 2026-09-25. tmo is scaled to the catalogue each one actually walks in its own
+          #   build run: tuba 4,417 rows and muhaysini 2,819 / nofodh 2,556 are the long ones; ego 33
+          #   and razre 57 and safa 41 are minutes. A scraper with no entry here is a scraper that
+          #   never runs again after its first crawl — verify-every-scraper-has-a-scheduled-workflow.
+          - { source: alsaedan,      cmd: "python -m scrapers.alsaedan.run --type all", tmo: 30 }
+          - { source: ego,           cmd: "python -m scrapers.ego.run --type all", tmo: 20 }
+          - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 45 }
+          - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 45 }
+          - { source: razre,         cmd: "python -m scrapers.razre.run --type all", tmo: 20 }
+          - { source: reinvest,      cmd: "python -m scrapers.reinvest.run --type all", tmo: 30 }
+          - { source: safa,          cmd: "python -m scrapers.safa.run --type all", tmo: 20 }
+          - { source: sokok,         cmd: "python -m scrapers.sokok.run --type all", tmo: 30 }
+          - { source: sukna,         cmd: "python -m scrapers.sukna.run --type all", tmo: 25 }
+          - { source: tuba,          cmd: "python -m scrapers.tuba.run --type all", tmo: 60 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }

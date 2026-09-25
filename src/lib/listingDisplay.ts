@@ -142,6 +142,11 @@ export function sourceName(source: string): string {
   if (s.includes('alqarawi') || s.includes('القرعاوي')) return 'Ibrahim Alqarawi Real Estate Investments';
   if (s.includes('aljassim') || s.includes('al jassim') || s.includes('الجاسم')) return 'Al Jassim Real Estate Services';
   if (s.includes('almotmkenah') || s.includes('المتمكنة')) return 'Almotmkenah Real Estate';
+  // نفوذ للاستثمار العقاري (nofodh.sa) BEFORE نفوذ (nufouth.com): «نفوذ» is a SUBSTRING of the longer
+  // name, and first match wins, so the shorter branch would steal every nofodh card and show it under
+  // another company's brand and domain. Specific token first. Caught by
+  // verify-platform-registration-complete, which is the barrier that exists for exactly this.
+  if (s.includes('نفوذ للاستثمار العقاري') || s.includes('nofodh')) return 'نفوذ للاستثمار العقاري';
   if (s.includes('nufouth') || s.includes('نفوذ')) return 'Nufouth Development Real Estate';
   // onboarded 2026-09-24 (batch 36) — LAST, same contract as above. Each tests the stored `source` (the
   // scraper's SOURCE constant) and the slug; Arabic tokens are the WHOLE stored source string.
@@ -178,6 +183,15 @@ export function sourceName(source: string): string {
   if (s.includes('expattrusted') || s.includes('expat trusted housing')) return 'Expat Trusted Housing';
   if (s.includes('flow')) return 'Flow';
   if (s.includes('أبعاد') || s.includes('abaad')) return 'أبعاد';
+  if (s.includes('آل سعيدان') || s.includes('alsaedan')) return 'آل سعيدان';
+  if (s.includes('إيجو عقار') || s.includes('ego')) return 'إيجو عقار';
+  if (s.includes('أحمد المحيسني العقارية') || s.includes('muhaysini')) return 'أحمد المحيسني العقارية';
+  if (s.includes('راز العقارية') || s.includes('razre')) return 'راز العقارية';
+  if (s.includes('ري إنفست') || s.includes('reinvest')) return 'ري إنفست';
+  if (s.includes('صفا للاستثمار') || s.includes('safa')) return 'صفا للاستثمار';
+  if (s.includes('صكوك العقارية') || s.includes('sokok')) return 'صكوك العقارية';
+  if (s.includes('سكنة') || s.includes('sukna')) return 'سكنة';
+  if (s.includes('طوبة العقارية') || s.includes('tuba')) return 'طوبة العقارية';
   return 'AQAR';
 }
 

@@ -311,7 +311,13 @@ def _strip_marks(s: Optional[str]) -> Optional[str]:
 
 # Keyed on the mark-free form. The value is the fold TYPE_MAP_EN already applies to wasalt's
 # "Small apartment (studio)" and abaad's «شقة صغيرة (استوديو)».
-_TYPE_OVERRIDES = {"شقة صغيرة (استوديو)": "Studio"}
+# Written across three lines ON PURPOSE. verify-scraper-type-tokens-mapped finds a type map by its
+# opening `= {` and ends the block at a `}` in column 0; collapsed onto one line the scan runs past
+# it and swallows the NEXT dict, so _DEAL's "Buy"/"Rent" were read as PROPERTY TYPES and reported as
+# unmapped. Same defect abaad shipped and fixed the same way (2026-09-25).
+_TYPE_OVERRIDES = {
+    "شقة صغيرة (استوديو)": "Studio",
+}
 
 _DEAL = {"للبيع": "Buy", "للإيجار": "Rent"}
 

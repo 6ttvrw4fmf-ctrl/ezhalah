@@ -738,6 +738,129 @@ POLICIES: dict[str, _P] = {
         "Canary-gated on a row THIS run mapped (fails CLOSED).",
         "Row grain is the residence (unit type): measured 2026-09-24, 43 compounds, 55 residences on "
         "16 of them; 27 compounds publish no residence and yield no row."),
+    # ── WAVE 1, onboarded 2026-09-25 ────────────────────────────────────────────────────────────
+    # Ten platforms, and NOT ONE of them can use 'is it 200?' as its oracle: every one of the ten
+    # keeps serving a de-listed listing, or serves a soft-404 shell for ids that never existed, or
+    # both. Each entry below names what the source says about ITSELF instead, with the sample it
+    # was measured on. Absence from the crawl only SELECTS candidates; the platform's own
+    # verify_gone gives the verdict, canary-gated on a row THIS run mapped, and fails CLOSED.
+    "alsaedan": _P(
+        _pol("alsaedan", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit's OWN `/sales/unit/<id>` PATH, not its status code. *** A 200 IS NOT A LIFE HERE *** "
+        "an unavailable unit stops having a page: the URL answers 302 to its PROJECT page, which then "
+        "answers 200, so an \"is it 200?\" oracle following redirects would call every sold unit alive "
+        "forever. The signal is the PATH CHANGE. A 302 to another path is GONE; a 404 is GONE; a 200 on "
+        "the unit's own path carrying its own `aup-h1` unit block is LIVE (and self-heals a row absent "
+        "from OUR crawl); anything else is UNKNOWN.",
+        "Measured 2026-09-24 through the shipping _make_verify_gone: 14/14 unavailable ids redirected "
+        "to their project (69→/sales/deem-01, 158→/sales/deem-06, 3270→/sales/deem-11, the sama-najd "
+        "block), 3/3 never-existed ids answered 404, 6/6 available controls answered 200 with no "
+        "redirect. This platform publishes NO REGA ad licence on any of its 332 pages, so the "
+        "licence-expiry oracle abaad uses is unavailable here — ask آل سعيدان for that field."),
+    "ego": _P(
+        _pol("ego", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the ad's own API detail record, NOT the web page. *** A 200 ON THE WEB URL IS WORTH NOTHING "
+        "*** `/unit-details/<anything>` serves the same shell with 200 (verified on a fabricated id "
+        "999999). The API answers three ways: 200 whose `data.id` equals the probed id is LIVE, a 409 "
+        "saying «This unit is inactive» is GONE, a 404 is GONE, and anything else is UNKNOWN under the "
+        "shared law.",
+        "Measured 2026-09-24 on 73 ids with zero counter-examples: 33/33 of the catalogue answered 200 "
+        "with a matching data.id; 40/40 ids absent from the catalogue answered 409 «inactive» (25 "
+        "interleaved through the live block 2340-2460, 15 drawn at random from 1-2339); ids past the id "
+        "space (2500, 9999) answered 404."),
+    "muhaysini": _P(
+        _pol("muhaysini", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the API record the listing page itself loads. *** THE LISTING PAGE IS WORTHLESS AS AN ORACLE "
+        "*** the site is a client-rendered SPA: /propertydetails/<id>, /robots.txt and /anything-at-all "
+        "all return the SAME 200 with the same 3,399-byte shell, so an HTTP oracle on the listing URL "
+        "reads 'live' for every id that has ever existed, fabricated ones included. HTTP 400 carrying "
+        "`error_number` 229 («لم يتم العثور على العقار») is GONE; a 200 whose `property.id` matches the "
+        "probed id is LIVE and self-heals; anything else is UNKNOWN.",
+        "Measured 2026-09-24: ids 10-4,071 exist, 2,827 live and 1,235 gone inside that range. 14 gone "
+        "ids sampled at random plus fabricated 0 / 4,200 / 999,999 gave 17/17 HTTP 400 with "
+        "error_number 229, zero counter-examples; every live id answered 200 with a matching "
+        "property.id."),
+    "nofodh": _P(
+        _pol("nofodh", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the sale state the page prints about ITSELF, read from the platform's own «حالة البيع» enum "
+        "(taken off its filter checkboxes, so the list is the platform's and complete). *** A 200 IS "
+        "NOT PROOF OF LIFE *** a SOLD unit keeps its page: id 531729 answers 200 with full content, "
+        "«حالة العقار: مباع» and its «السعر» row simply gone, so an \"is it 200?\" oracle would never "
+        "retire anything this developer sells. A real 404 is GONE; a 200 saying «للبيع»/«للإيجار» is "
+        "LIVE and self-heals; a 200 saying مباع/مؤجر/محجوز/مدفوع is GONE; anything else is UNKNOWN.",
+        "Measured 2026-09-24: 7/7 fabricated or adjacent ids (999999999, 0, 1, abc, 111111, and 149627 "
+        "/ 149629 either side of a live one) returned an identical 23,648-byte hard 404 page — no "
+        "soft-404 shell exists on this host."),
+    "razre": _P(
+        _pol("razre", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the unit's PROJECT page, read back from the row's own stored listing_url (the _id alone does "
+        "not name the project), and the status that page prints about the unit. A 404/410 on the "
+        "project page is GONE; the unit present with status «متاح» is LIVE; present with «مباع» or "
+        "«محجوز» is GONE — the source's own statement; absent from the page's own data is a death "
+        "signal on ONE family only, and every removal is additionally gated by an in-run positive "
+        "control that fails CLOSED.",
+        "Measured 2026-09-24: 4/4 fabricated ids answered 404 (/onepro-1/9999, /onepro-1/58, /com/99, "
+        "/com/7) and 0 of 35 real pages did. The probe runs through the shared law in http_liveness, so "
+        "a 403/429/5xx/timeout/empty body can never read as a death."),
+    "reinvest": _P(
+        _pol("reinvest", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the detail API, which states removal in words. A 404 saying «هذا الاعلان لم يعد متوفر» (the "
+        "record is known, the ad is withdrawn) or «لم يتم العثور على البيانات» (no such record) is "
+        "GONE; a 200 carrying a `data` object is LIVE and self-heals; a 200 WITHOUT one is UNKNOWN, "
+        "because that shape has not been measured; anything else is UNKNOWN under the shared law. The "
+        "verdict is taken from the STATUS and the message only recorded, so a third message could never "
+        "turn a 404 into a life.",
+        "Measured 2026-09-24: 4/4 ads that left the catalogue mid-capture and 16/16 never-existed slugs "
+        "answered 404 with one of those two messages; 20/20 sampled catalogue rows answered 200 with "
+        "data."),
+    "safa": _P(
+        _pol("safa", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the SURFACE'S OWN ROSTER — a DIRECT walk of every page of the list named by the row's own "
+        "stored listing_url. *** THE SHEET ENDPOINT IS NOT AN ORACLE *** /unit/details answers 200 with "
+        "a complete sheet for units the site publishes nowhere (12828, a SOLD SF050 unit at 762,000, "
+        "plus 12236, 12237, 13208, 14149, 19222 all rendered in full), so \"the sheet still loads\" would "
+        "resurrect sold inventory forever. Card present on the surface is LIVE; card absent with the "
+        "WHOLE surface walked is GONE; any page non-200 or empty body is UNKNOWN, because an incomplete "
+        "walk returns an empty body which read_is_unbelievable() turns into a retry and then UNKNOWN.",
+        "Measured 2026-09-24: a unit id the ERP has never held answers HTTP 500 (0, 1, 100, 5000, "
+        "12000, 19220, 999999) — and a 5xx can never kill a row under the shared law in any case."),
+    "sokok": _P(
+        _pol("sokok", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the status the piece's detail page prints about ITSELF, which agreed with the list endpoint on "
+        "every status measured. A 404 is GONE; a 200 with status «متاحة» is LIVE and self-heals; a 200 "
+        "with «مباعة»/«محجوزة»/«قريباً»/«موقفة من الشركة» is GONE — the source itself saying it is not "
+        "on the market; a 200 with no status in the props is UNKNOWN.",
+        "Measured 2026-09-25, all five statuses fetched on a real piece: ids 99999 and 999999999 "
+        "answered 404 with Laravel's own 6,603-byte error page while id 1 is a REAL piece and answered "
+        "200, which is what proves the 404 is about the id and not the route; 234328899 answered "
+        "«متاحة»; 1522 / 1581 / 1757 / 234327981 answered مباعة/محجوزة/قريباً/موقفة and none of the "
+        "four publishes a price."),
+    "sukna": _P(
+        _pol("sukna", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the API, never the rendered page. *** THE RENDERED PAGE CANNOT BE IT *** "
+        "sukna.app/unit-details?id=<anything> answers 200 with the full app shell — fabricated ids 0 "
+        "and 999999 both did — because the route is client-rendered and fetches its data afterwards, so "
+        "a page-status oracle here would resurrect every dead row forever. API 404 «resource not found» "
+        "is GONE; API 200 with `case` == 2 is GONE (the source's own «مباعة»); API 200 with `case` in "
+        "(0, 1) is LIVE and self-heals («متاحة»/«محجوزة» are both still published); API 200 with no "
+        "readable case is UNKNOWN.",
+        "Measured 2026-09-25: ids 0, 99999 and 999999 answered API 404; case == 2 agreed with absence "
+        "from the source's OWN sitemap on 227/227 with zero counter-examples. Note id 1 answers HTTP "
+        "500 with a null-property error, which is a missing record and not a death — the shared law "
+        "keeps it UNKNOWN."),
+    "tuba": _P(
+        _pol("tuba", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "a banner the ad's own page prints about ITSELF: «هذا العقار لم يعد متاحًا.» together with "
+        "«منتهي الصلاحية». *** A DE-LISTED AD KEEPS ITS PAGE AND ANSWERS 200 WITH FULL CONTENT *** so "
+        "\"is it 200?\" would retire nothing and \"200 means live\" would resurrect the dead forever. "
+        "Banner present is GONE; a 200 with the banner ABSENT is LIVE and self-heals; anything else is "
+        "UNKNOWN. The row's URL comes from the shared stored_listing_url reader rather than a rebuilt "
+        "one, because the slug is not derivable.",
+        "Measured 2026-09-25 with NO fabricated ids — the slug is not derivable, so the gone sample was "
+        "built from the numeric GAPS in the platform's own sequential slug families "
+        "(«apartment-for-rent-in-jeddah-N», «Floor-For-Sale-الرياض-N»): 55/55 gap slugs answered 200 + "
+        "the banner (reason «منتهي الصلاحية» extracted on 25/25) against 40/40 interleaved known-live "
+        "controls from the same crawl that answered 200 with the banner absent, zero counter-examples."),
     "abaad": _P(
         _pol("abaad", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the ad's OWN /api/v1/estate/get-estate/<id> record. *** A 200 IS NOT A LIFE HERE *** a "
