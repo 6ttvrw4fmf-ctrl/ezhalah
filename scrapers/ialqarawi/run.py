@@ -526,18 +526,35 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         return None, category, "deal_title_contradicts_index"
 
     city_raw, city_id, region_id = city_from_title(title)
-    if not city_id:
-        return None, category, "city_not_in_catalog"
-    # city_ar is the source's own Arabic text for the city — the very token to_catalog accepted.
-    city_ar = city_raw
     district_field = f.get("الحي") or ""
     if _is_blank(district_field):
         district_field = ""
-    # A «الحي» the catalog recognises as a CITY is not this listing's district (measured: three
-    # عنيزة rentals carry «الحي: الدوادمي»).
-    field_is_a_city = bool(district_field) and bool(to_catalog(district_field)[0])
-    district_ar = ((find_district_in_text(district_field, city_id) if not field_is_a_city else None)
-                   or find_district_in_text(title, city_id))
+
+    if not city_id:
+        # The free-text title scan found NOTHING. Last resort, before quarantining: try the
+        # source's own «الحي» field AS a city — it sometimes holds a city instead of a district
+        # (measured: three عنيزة rentals carry «الحي: الدوادمي», 500km away). This branch runs
+        # ONLY when the title itself resolved no city, so it can never override a correct
+        # title-based answer — it only fills a blank that would otherwise be dropped. Found live
+        # 2026-09-25: a «شاطئ نصف القمر» plot whose title has no recognisable city at all, whose
+        # «الحي» field plainly says «الدمام» — a real catalog city, and the beach it names really
+        # does sit in the Dammam/Khobar area.
+        city_id, region_id = to_catalog(district_field) if district_field else (None, None)
+        if not city_id:
+            return None, category, "city_not_in_catalog"
+        city_raw = district_field
+        city_ar = city_raw
+        # The field WAS the city here, not a district — never also read it as one below.
+        field_is_a_city = True
+        district_ar = find_district_in_text(title, city_id)
+    else:
+        # city_ar is the source's own Arabic text for the city — the very token to_catalog accepted.
+        city_ar = city_raw
+        # A «الحي» the catalog recognises as a CITY is not this listing's district (measured: three
+        # عنيزة rentals carry «الحي: الدوادمي»).
+        field_is_a_city = bool(district_field) and bool(to_catalog(district_field)[0])
+        district_ar = ((find_district_in_text(district_field, city_id) if not field_is_a_city else None)
+                       or find_district_in_text(title, city_id))
 
     area_m2, area_skip = parse_area(f.get("مساحة الأرض"))
     som, som_ppm, som_skip = parse_money(f.get("سعر السوم"))
