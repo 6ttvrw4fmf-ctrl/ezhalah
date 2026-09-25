@@ -850,7 +850,11 @@ POLICIES: dict[str, _P] = {
                         "block IS proof of life. Measured on 50 live controls and 6 not-served ids; "
                         "the removal limb has no real dead cohort — this platform has never "
                         "deactivated a listing — which is why it is gated"),
-            ("aqarcity", "the «الإعلان منتهي» expiry banner on the listing's own page, plus 404/410"),
+            ("aqarcity", "the expiry banner on the listing's own page — «الإعلان غير متاح» since "
+                         "2026-09-20, «الإعلان منتهي» before that, plus the «- إعلان منتهي» title "
+                         "suffix — plus 404/410. Both banner wordings are kept and the title arm is "
+                         "anchored to the suffix shape: naming ONE of them is what took the marker "
+                         "dark for five days (ops_incident #730)"),
             ("eastabha", "this listing's OWN slider-property-status ribbon reading تأجرت / تم البيع "
                          "(the related-listings carousel's ribbons are explicitly not read), plus 404/410"),
             ("hajer", "this listing's OWN property-status-badge reading status-sold / status-rented, "

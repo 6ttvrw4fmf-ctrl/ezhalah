@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -58,11 +59,50 @@ def _aqar_dead(body: str) -> bool:
 def _never(body: str) -> bool:
     return False  # 404-only platforms: a delisted unit returns a real HTTP 404; every 200 is treated LIVE
 
+# aqarcity SOFT-expires: an expired listing serves HTTP 200 and says so in the page; a live listing
+# serves 200 and says nothing. So this predicate is the ONLY thing separating a dead aqarcity ad
+# from a live one, in BOTH directions — cleanup.py's delete-time re-check and verify_deletions.py's
+# post-delete audit share it.
+#
+# IT WAS A SINGLE SUBSTRING, AND ON 2026-09-25 IT COULD NOT RETURN True FOR ANY PAGE. aqarcity had
+# reworded the banner from «الإعلان منتهي» to «الإعلان غير متاح» and moved the old phrase into the
+# <title> as a suffix («… - إعلان منتهي | عقار ستي»), where it no longer carries the «ال». The
+# post-delete audit caught it on the first run after ops_incident #704 was fixed: aqarcity came back
+# live=40/40 having been dead=40/40 on each of 2026-08-30, 09-06, 09-13 and 09-20.
+#
+# The consequence was NOT silence, it was a false positive in the resurrecting direction: verdict()
+# reaches 'dead' on a 200 only through this function, so every expired aqarcity ad read LIVE and
+# cleanup.py would have SELF-HEALED it back into search ({"active": True, "missing_count": 0}) on
+# the next weekly run — source-expired listings returned to users, and no aqarcity listing ever
+# deletable again.
+#
+# CONTROL-VALIDATED before wiring (LISTING_LIFECYCLE_ENGINEER.md §4.2 lesson 1), 14 previously-
+# deleted and 14 currently-active listings probed INTERLEAVED through the real _probe() on
+# 2026-09-25:
+#
+#   «الإعلان منتهي»    (the shipped marker)  DEAD  0/14   LIVE 0/14   ← cannot fire at all
+#   «الإعلان غير متاح» (the current banner)  DEAD 14/14   LIVE 0/14
+#   «- إعلان منتهي» as a title suffix        DEAD 14/14   LIVE 0/14
+#
+# TWO independent signals are kept, not one, precisely because this incident IS a single signal
+# drifting. Both were measured on the same interleaved cohort, and neither appears anywhere in the
+# full body of the captured live page. The legacy banner stays because a cached or older page that
+# still carries it is still expired — and because widening is only safe in the direction the
+# controls actually cover.
+_AQARCITY_EXPIRED_BANNERS = (
+    "الإعلان غير متاح",   # current banner: <h2 class="text-lg font-bold …">الإعلان غير متاح</h2>
+    "الإعلان منتهي",      # the wording this platform used until 2026-09-20
+)
+# Anchored to the TITLE SUFFIX shape, never a bare phrase match: «… - إعلان منتهي | عقار ستي», and
+# the same string in og:title / twitter:title, which terminate with a quote or a tag instead of «|».
+# A bare `"إعلان منتهي" in body` would also match a seller writing it in free-text description, and
+# a false dead marker on this platform deletes a live listing.
+_AQARCITY_EXPIRED_TITLE_SUFFIX = re.compile(r"-\s*إعلان منتهي\s*(?:\||\"|<|&)")
+
+
 def _aqarcity_expired(body: str) -> bool:
-    # aqarcity SOFT-expires: an expired listing serves HTTP 200 with the banner «الإعلان منتهي ...»
-    # ("this ad is expired and no longer available"). Live listings (200) never carry it. Verified
-    # 2026-07-27: 8/8 inactive pages had it, 12/12 active pages did NOT.
-    return "الإعلان منتهي" in body
+    return (any(m in body for m in _AQARCITY_EXPIRED_BANNERS)
+            or bool(_AQARCITY_EXPIRED_TITLE_SUFFIX.search(body)))
 
 PLATFORMS: dict[str, dict] = {
     "aqar":   {"tables": ["aqar_residential_listings", "aqar_commercial_listings"],     "dead_marker": _aqar_dead},
@@ -71,8 +111,10 @@ PLATFORMS: dict[str, dict] = {
     # serves 200. So delete ONLY on a hard 404 — a booked-but-listed 200 is never deleted, and a
     # relisted unit that comes back 200 is self-healed. Verified on 8 inactive+2 active URLs 2026-07-27.
     "gathern": {"tables": ["gathern_residential_listings"], "dead_marker": _never},
-    # aqarcity: soft-expire (200 + «الإعلان منتهي» banner). Delete only when that banner is present;
-    # every other 200 is live → self-heal.
+    # aqarcity: soft-expire (200 + an expiry banner, or the expiry title suffix — see
+    # _aqarcity_expired, whose single-substring form was structurally unable to fire from
+    # 2026-09-20 to 2026-09-25). Delete only on one of those signals; every other 200 is live →
+    # self-heal.
     "aqarcity": {"tables": ["aqarcity_residential_listings", "aqarcity_commercial_listings"], "dead_marker": _aqarcity_expired},
 }
 

@@ -258,8 +258,27 @@ def test_gathern_is_404_only_booked_200_never_deleted():
 
 def test_aqarcity_expired_marker_deletes_clean_200_self_heals():
     dm = C.PLATFORMS["aqarcity"]["dead_marker"]
-    assert dm("... الإعلان منتهي ولم يعد متاحًا ...") is True     # expired banner → dead
+    assert dm("... الإعلان منتهي ولم يعد متاحًا ...") is True     # legacy banner → still dead
+    assert dm('<h2 class="text-lg">الإعلان غير متاح</h2>') is True  # current banner → dead
     assert dm("شقة للبيع في جدة — 500000 ريال") is False          # normal live listing → not dead
+
+
+def test_aqarcity_marker_survives_a_banner_rewording_and_never_reads_prose(): # ops_incident #730
+    """2026-09-25: aqarcity reworded its expiry banner and the single-substring marker went dark —
+    it could not return True for ANY page, so every expired ad read LIVE and the weekly cleanup
+    would have SELF-HEALED it back into search. Two independent signals now, and the title one is
+    anchored to the suffix shape because a bare phrase match would delete a live listing whose
+    seller merely wrote the words. Measured that day over 14 expired + 14 active pages, interleaved:
+    old marker 0/14 and 0/14; current banner 14/14 and 0/14; title suffix 14/14 and 0/14."""
+    dm = C.PLATFORMS["aqarcity"]["dead_marker"]
+    # the title / og:title / twitter:title suffix, verbatim shapes from a real expired page
+    assert dm("<title>ارض للبيع في حي السليم - إعلان منتهي | عقار ستي</title>") is True
+    assert dm('<meta property="og:title" content="شقة للبيع في جدة - إعلان منتهي"/>') is True
+    # the SAME words in a seller's own prose are not the platform declaring anything
+    assert dm("<p>الفرصة محدودة، إعلان منتهي قريباً فسارع بالحجز</p>") is False
+    assert dm('<meta name="description" content="شقة مميزة إعلان منتهي الصلاحية"/>') is False
+    # an unreadable / empty response is never a death
+    assert dm("") is False
     # live (200, no banner) → self-heal, never deleted
     c = _install({"aqarcity_residential_listings": [_cand(1)]}, POL(),
                  probe=lambda url: (200, "شقة للبيع 500000 ريال"),
