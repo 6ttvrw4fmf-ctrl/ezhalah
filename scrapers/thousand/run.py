@@ -279,7 +279,12 @@ def fetch_detail(s: cc.Session, pid: str, attempts: int = 3) -> Optional[dict]:
     if r.status_code != 200:
         return None
     d = parse_detail(r.text)
-    return d if d["title"] else None
+    if not d["title"]:
+        return None
+    # The same reading _signal_for() (verify_gone's measured oracle) calls "live": this page echoes
+    # data-listing-id == pid. Recorded as a flag so crawl output is unchanged.
+    d["_live"] = _signal_for(pid)(r.status_code, r.text, False) == "live"
+    return d
 
 
 # ── MAPPING ─────────────────────────────────────────────────────────────────────────────────────
@@ -462,6 +467,8 @@ def crawl(s: cc.Session, limit: int = 0):
         if not row:
             skipped[why] = skipped.get(why, 0) + 1
             continue
+        if detail.get("_live"):
+            db.mark_direct_alive(row, oracle="thousand.property_page.data_listing_id")
         (com if cat == "commercial" else res).append(row)
     return cards, total, res, com, skipped
 
