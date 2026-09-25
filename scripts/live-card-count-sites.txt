@@ -1,0 +1,54 @@
+# EVERY INSTRUMENT THAT READS RESULT CARDS OFF A REAL SCREEN, AND WHAT IT DOES WITH THE COUNT.
+#
+# Routine #10, ops_incident #699, 2026-09-25.
+#
+# THE CONTRACT THIS PROTECTS. Since 2026-09-20 a results turn ARRIVES with only
+# `min(initialReveal(...), CASCADE_MAX)` cards — a screenful, ~1.5s of animation — and
+# `maybeRevealOnScroll` walks the rest as the user approaches it (src/lib/initialReveal.ts, which
+# states the rule directly above the constant). So a live instrument that counts the cards on
+# arrival and compares that number to a TOTAL is asserting a contract production retired: it will
+# report a correct production as a user-facing dead end. Measured 2026-09-23 on
+# scripts/redteam-chain-live.mjs — two honest cells (حفر الباطن/إيجار-سنوي/شقة and
+# الخبر/تجاري/مستودع, honest total 18 each) filed as «pager absent while 18 > 12 shown», while the
+# same journeys driven by hand in the same browser reached all 18 by scrolling.
+#
+# WHY A LEDGER AND NOT A LIST OF NAMES IN A BARRIER. The sibling guard
+# scripts/verify-live-journeys-wait-for-results.ts pins three journeys BY FILENAME, so the fourth
+# instrument to grow this defect was invisible to it — the enumerate-vs-discover gap #699 routed
+# here. scripts/verify-live-card-counts-walk-the-cascade.ts DISCOVERS every file under scripts/ and
+# e2e/ whose comment-stripped source names the product's own `card-listing-` testID prefix, and
+# fails on any it finds that has no row here. A new instrument is therefore RED until somebody
+# classifies it, and a row whose file stopped reading cards is RED as STALE.
+#
+# EVERY VERDICT IS EXECUTED, NEVER BELIEVED. The barrier re-derives each row's claim from the
+# source, so a row cannot read better than the tree:
+#
+#   walks-the-cascade                 the file puts a card count next to a total, so it must WALK —
+#                                     a loop that scrolls AND re-reads the cards until the reveal
+#                                     stops growing — and the walk must be REACHED before the last
+#                                     such line. It may not keep its own copy of CASCADE_MAX; the
+#                                     product owns that number. (Importing it is not required:
+#                                     what makes an instrument safe is that it walks, and demanding
+#                                     an unused import of the rest is ceremony.)
+#   count-is-not-judged-against-a-total  the file reduces a card query to a number, but only for
+#                                     settling / id joins / a zero-state. The barrier asserts the
+#                                     FALSIFIER: no line puts one of its card-count bindings next
+#                                     to a total. The day somebody adds one, this row goes RED and
+#                                     must be reclassified.
+#   no-card-count                     the file names the prefix but never reduces a card query to a
+#                                     number (a fixture id, a coverage ledger's prose evidence, a
+#                                     click target). Falsifier: a count expression appearing is RED.
+#
+# Format:  path | verdict | what it does with the count
+#
+scripts/redteam-chain-live.mjs | walks-the-cascade | L8 asks whether «عرض المزيد» is reachable by comparing `shown` to the RPC `total_count`. revealAll() walks the cascade first and re-asks the pager question afterwards (PR #3904, ops_incident #699).
+scripts/verify-af-remove-last-pill-live.ts | walks-the-cascade | R9.2.1 asserts the arrival is min(initialReveal(...), CASCADE_MAX), then R9.2.2 scrolls and asserts the walk delivers the rest without overrunning the app's own target.
+scripts/verify-af-agent-cta-live.ts | count-is-not-judged-against-a-total | awaitFirstResultsSettled() polls the count only to know the turn stopped changing before the CTA is read.
+scripts/verify-af-card-evidence-live.ts | count-is-not-judged-against-a-total | joins each rendered attribute strip to its row through the card's own card-listing-<id> wrapper; the count only reports how many strips were traced.
+scripts/verify-af-option-card-truth-live.ts | walks-the-cascade | §4 asserts `revealed === (landed.total ?? 0) || atCap` after «عرض المزيد», so it DOES judge a card count against a total. Its pager loop scrollToBottom()s and re-reads the cards on every pass, and the load-more path is not cascade-capped anyway (src/app/agent.tsx cascadeIn reveals CASCADE_VISIBLE one-by-one and then setRevealCount(target) mounts the rest at once). Classified from what the file DOES, not from what the reader below can see: the two-hop reader does not reach `revealed`, whose read helper sits inside a multi-line settleUntil closure.
+scripts/verify-combined-budget-live.ts | count-is-not-judged-against-a-total | the readiness wait settles on QUIESCENCE — now.cards === prev.cards — and never against the headline total (scripts/verify-live-journeys-wait-for-results.ts pins that neutrality separately).
+e2e/guardian/harness.mjs | count-is-not-judged-against-a-total | waitForCards() settles on a count that stopped changing; snapshot() returns `cards` and `countChip` as two independent facts and compares neither to the other.
+e2e/guardian/journeys.mjs | count-is-not-judged-against-a-total | uses the count for presence and zero-state («New Chat left N cards on screen», «an impossible budget still rendered N cards») and reads every card's text; the count chip is asserted on its own line.
+scripts/verify-af-offer-click-lands.ts | no-card-count | `card-listing-11678443` is the FIXTURE id of the card that intercepted 11 of 24 taps; nothing here counts cards.
+scripts/verify-listing-ids-draw-from-one-sequence.ts | no-card-count | names the `card-listing-${listing.id}` DOM identity as one of the three places the listing-id sequence surfaces; it is a SQL/id-space check with no browser.
+scripts/lib/afContractCoverage.ts | no-card-count | a rule→barrier coverage ledger; the prefix appears inside an evidence string describing how verify-af-card-evidence-live joins a strip to its row.
