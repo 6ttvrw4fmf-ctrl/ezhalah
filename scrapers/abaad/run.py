@@ -212,7 +212,9 @@ def _strip_marks(s: Optional[str]) -> Optional[str]:
 
 # Keyed on the mark-free form. The value is the fold TYPE_MAP_EN already applies to wasalt's
 # "Small apartment (studio)".
-_TYPE_OVERRIDES = {"شقة صغيرة (استوديو)": "Studio"}
+_TYPE_OVERRIDES = {
+    "شقة صغيرة (استوديو)": "Studio",
+}
 
 # The source's OWN category word whose detail page labels `price` «سعر المتر» and `total_price`
 # «إجمالي السعر». Keyed on the category rather than on "total_price is present" because the one
