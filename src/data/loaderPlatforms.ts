@@ -106,7 +106,12 @@ export const PLATFORM_META: LoaderPlatform[] = [
   // or in ResultCard.tsx needs to change.
   { name: 'Gudai',                 i18nKey: 'Gudai Real Estate',                       logo: require('../../assets/images/gudai.png') },
   { name: 'Safera',                i18nKey: 'Safera Real Estate',                      logo: require('../../assets/images/safera.png') },
-  { name: 'Al Humaidan',           i18nKey: 'Al Humaidan Real Estate Office',        logo: require('../../assets/images/alhumaidan.png') },
+  // NO TILE for Al Humaidan (2026-09-25). Not the owner's DOWN rule — al-humaidan.inblaj.net is UP and its
+  // crawl is green (scrape_runs: seen=3, upserted=0, «skipped: already_transacted x3» every run since 09-23).
+  // All three of its listings are transacted, so NO user can reach one, and the 2026-08-29 honesty rule above
+  // says the strip may not advertise a platform users cannot reach. Its SOURCE_TOKENS entries stay below, so a
+  // returning listing renders under its own brand — and verify-loader-platforms-match-active's HIDES-NO-LIVE
+  // direction then goes red and names it, which is how the tile comes back.
   { name: 'Aqar Najran',           i18nKey: 'Aqar Najran',                             logo: require('../../assets/images/aqarnajran.png') },
   { name: 'Maqam Al Wisam',        i18nKey: 'Maqam Al Wisam Real Estate',              logo: require('../../assets/images/fahadalshahri.png') },
   { name: 'CompoundIn',            i18nKey: 'CompoundIn',                              logo: require('../../assets/images/compoundin.png') },
@@ -164,6 +169,7 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'Azure', i18nKey: 'Azure', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'Expat Trusted Housing', i18nKey: 'Expat Trusted Housing', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'Flow', i18nKey: 'Flow', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'أبعاد', i18nKey: 'Abaad', logo: require('../../assets/images/platform-placeholder.png') },
   // LOGO-ONLY (owner decision 2026-09-24): brand shown in the strip, no scraper, no tables, never searchable.
   { name: 'Maskanre', i18nKey: 'Maskan United', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
   { name: 'Wetheaddress', i18nKey: 'The Address', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },

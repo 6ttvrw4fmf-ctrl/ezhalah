@@ -639,9 +639,8 @@ def main() -> int:
                       f"rp={r0.get('rent_period')} sw={r0.get('street_width_m')} "
                       f"ag={r0.get('property_age')} ph={len(r0.get('photo_urls') or [])}")
             return 0
-        # The public upsert_abaad_*_batch wrappers are added centrally at onboarding; same funnel.
-        db._wasalt_batch("abaad_residential_listings", res)
-        db._wasalt_batch("abaad_commercial_listings", com)
+        db.upsert_abaad_residential_batch(res)
+        db.upsert_abaad_commercial_batch(com)
         superseded = db.retire_superseded_siblings(
             res_table="abaad_residential_listings", com_table="abaad_commercial_listings",
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
