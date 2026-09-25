@@ -100,7 +100,9 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, http, normalize  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import (  # noqa: E402
+    find_district_in_text, is_ambiguous_standalone_word, to_catalog,
+)
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://ialqarawi.com"
@@ -152,23 +154,15 @@ _BIG_IMG_RE = re.compile(r'data-rsBigImg="([^"]+)"')
 _AUCTION_RE = re.compile(r"مزاد(?![ةه])")
 _SOLD_RE = re.compile(r"تم\s+(?:البيع|بيع|الإيجار|الايجار|التأجير)|مبا[عة]\b")
 _TOK_SPLIT = re.compile(r"[\s/،,\-–—_()\[\]:؛]+")
-# Words that are never the city itself, only its label.
+# Words that are never the city itself, only its label. The directional/age/position ADJECTIVE
+# class (شرقية/جديدة/عليا/...) that caused the 2026-09-25 Makkah/Khobar bug now lives in the
+# SHARED, fleet-wide arabic_location.AMBIGUOUS_STANDALONE_WORDS instead of a local copy here — see
+# that module for the full reasoning and the SQL backstop that keeps it honest across every
+# platform, not just this one. This set keeps only the STRUCTURAL noise words specific to how this
+# file's token-window scan works (labels, prepositions, deal words) — never place names at all.
 _CITY_STOP = {"مدينه", "محافظه", "منطقه", "مركز", "حي", "مخطط", "شارع", "طريق", "شمال", "جنوب",
               "شرق", "غرب", "وسط", "ال", "على", "في", "قريب", "بجوار", "امام", "طريقه",
-              "للبيع", "لبيع", "للايجار", "للاستثمار", "لاستثمار", "ارض", "اراضي", "فيلا", "شقه",
-              # The ال-prefixed ADJECTIVE forms of the directional nouns already stopped above
-              # (شرق/غرب/شمال/جنوب/وسط stop the noun; a title just as often carries the adjective:
-              # «حي النوارية الشرقية», «مخطط العليا»). Bare, these are never a specific place on
-              # their own — always a modifier of an omitted or nearby noun (a subdivision name) or
-              # the colloquial whole-Eastern-Province sense of «الشرقية» — but each one ALSO exists
-              # as a real, obscure, unrelated catalog city (checked 2026-09-25 against
-              # src/data/sa-locations.json: «الشرقية»→Asir village city_id 14645, «الوسطى»→Qassim,
-              # «الجديدة»→5 different cities, «الجديد»→1, «العليا»→4). Found via two live listings
-              # — a Makkah plot and a Khobar/شاطئ نصف القمر plot — silently matched to that Asir
-              # village; nothing downstream (search, the app) can tell a village pick from a
-              # genuine one, so this must stay a scraper-level never-guess, not a search-time patch.
-              "الشرقيه", "الغربيه", "الشماليه", "الجنوبيه", "الوسطى", "الوسطي",
-              "الجديده", "الجديد", "العليا"}
+              "للبيع", "لبيع", "للايجار", "للاستثمار", "لاستثمار", "ارض", "اراضي", "فيلا", "شقه"}
 _PLACEHOLDER = {"", "-", "--", "لا يوجد", "لايوجد", "غير متوفر", "غيرمتوفر", "غير محدد", "لا شيء",
                 "لا يوجد سعر", "على السوم", "علي السوم", "ع السوم", "عالسوم", "السوم", "على السوم.",
                 "جاري", "قريبا", "لا"}
@@ -451,7 +445,7 @@ def city_from_title(title: str) -> tuple[Optional[str], Optional[int], Optional[
             if cand[:1] in "بل" and len(cand) > 2:
                 forms.append(cand[1:])        # «بعنيزة» → «عنيزة», keeping the raw form too
             for form in forms:
-                if normalize._norm_ar(form) in _CITY_STOP:
+                if normalize._norm_ar(form) in _CITY_STOP or is_ambiguous_standalone_word(form):
                     continue
                 cid, rid = to_catalog(form, hint)
                 if cid:

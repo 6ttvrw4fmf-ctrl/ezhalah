@@ -238,6 +238,20 @@ as city · city never used as district · duplicate names resolved via hierarchy
 Confident match → canonical ID. Ambiguous/unverifiable → NULL. **Never guess.** An unresolved
 district must not delete the listing from city-level search.
 
+**"A bare adjective is never a city" is now a standing, roster-wired check (§32 below), not just a
+prose rule.** `select mon_detect_ambiguous_adjective_resolved_as_city();` must always read 0 — it
+fires on ANY production_ready row whose city_ar is a bare directional/age/position adjective
+(`scrapers.common.arabic_location.AMBIGUOUS_STANDALONE_WORDS`), fleet-wide, not just ialqarawi. If
+a new platform's resolver free-text-scans a title/description for a city (the ialqarawi
+`city_from_title()` shape), it MUST call `is_ambiguous_standalone_word()` on every scan candidate
+before accepting it — see that module's docstring for the full list and reasoning, and extend the
+list (never the detector's SQL) if the audit finds a new member of the same closed class.
+`select mon_detect_aqar_shadow_resolution_drift();` must always read 0 new growth past its pinned
+baseline — aqar's `aqar_shadow_resolved.parsed_city_id` is frozen by a deliberate 2026-07-08 owner
+decision (never re-checked once resolved) and can silently drift from `loc_city_map`/
+`loc_catalog_city` corrections; this only detects new drift, it does not auto-correct the
+historical backlog (§32).
+
 ## 7. Normal Filter data fidelity
 Verify all core normal-search fields across all platforms: Buy/Rent · Annual/Monthly · Region ·
 City · District · Category · Property group · Property type · Price · Price per m² · Area ·
@@ -864,123 +878,6 @@ in bulk on a hunch.
 claim as "unverifiable".* A divide-by-N that lands on pretty numbers is never evidence; the source's
 own per-unit field and its own prose are.
 
-### 25a. The fourth re-investigation (2026-09-18) — same verdict, and the reason it had to be asked again
-
-**Verdict unchanged: wasalt publishes these figures. Nothing was repriced, nothing was backfilled.**
-§25 predicted this run almost exactly ("read this before starting a fourth"), and the trigger was the
-same arithmetic: the cohort had grown to **172** rows (53 at `>= 1e9`, max **360,404,462,610**), and
-the two worst fit a *new* variant of the seduction — the URL slugs
-(`land-3523967-sqm`, `land-72327-sqm`) look like the area with a decimal point deleted, which invites
-reading the price the same way. It is the ÷1000 coincidence wearing a different hat.
-
-**Why §25's oracle could not answer it, and this is the part worth keeping.** §25 settles the class
-against `ar_data`. The two alerting rows (`11939802`, `11939808`) were scraped 2026-09-17 by the new
-browser transport (#3129) and their **`ar_data` is NULL** — as it is for most of that run's rows,
-because `enrich_ar.py` still fetches over plain HTTP and is still Cloudflare-blocked. So the archive
-was silent on precisely the rows under suspicion. **A settled class does not settle a row the oracle
-cannot see.**
-
-**The population, re-measured 2026-09-18** (§25 measured 115 rows; the cohort is now 172). Measured
-TWICE the same day, because the gap below was closed in between — and the second measurement is the
-one that settles it, because it has NO unverified remainder:
-
-- **As found:** only **119/172** carried an archived `propertyInfo`. 119/119 matched, zero mismatches;
-  the **53** rows with no archive were all from 2026-09-17, the first browser sweep.
-- **After `enrich_ar` moved onto the browser transport (#3140, same day): 172/172 carry an archive,
-  0 errored, 0 NULL — and 172/172 stored `price_total` == wasalt's own `salePrice`. ZERO mismatches
-  across the entire cohort.**
-- **172/172** carry wasalt's own `averageSalePricePerSqm` at the SAME magnitude, and **0** rows show a
-  source per-m² ~1000× smaller — which is precisely what would exist if our total were inflated ×1000.
-  That is the whole hypothesis, refuted on every row rather than on a sample.
-
-**Two independent network paths agree to the digit.** The four rows below were read by hand from a
-residential browser at ~22:0x, and re-fetched hours later by the fixed enricher through the metered
-Saudi proxy (`ar_fetched_at` 22:46–23:08). Same `salePrice`, same `averageSalePricePerSqm`, every row.
-A shared parser bug could produce one of those; it cannot produce both.
-
-**Answered by §27b's rule — ask the source.** Read live from wasalt.sa on 2026-09-18, all four
-corroborants agreeing on every row (`salePrice` == `conversionPrice` == our stored `price_total`;
-wasalt's own `averageSalePricePerSqm` at the SAME magnitude; `currencyType`/`conversionUnit` = SAR;
-wasalt's own prose quoting our exact digits):
-
-| row | stored `price_total` | wasalt `salePrice` | wasalt `averageSalePricePerSqm` | wasalt `carpetArea` | our `area_m2` |
-|---|---|---|---|---|---|
-| 11939802 | 24,829,872,186 | 24,829,872,186 | 7,046,000 | `3523.967` | 3523 |
-| 11939808 | 4,183,393,680 | 4,183,393,680 | 5,784,000 | `723.27` | 723 |
-| 11939904 | 76,859,520,864 | 76,859,520,864 | 3,920,702 | `19603.51` | 19603 |
-| 11940462 | 515,413,000 | 515,413,000 | 950,000 | `542.54` | 542 |
-
-e.g. «Land Area: 3523.967 SQM … Price: 24829872186 SAR». The slug theory dies on the same page: the
-title reads `Land 3523.967 SQM`, so the slug merely strips the dot from the **area**, and our
-`area_m2` is that area correctly truncated (§25's known, separate, still-non-urgent precision point).
-
-**The code could not have done it anyway, and this is checkable without any fetch.** `run.py` maps
-`price_total = int(info["salePrice"])` on a JSON-native number — `int()` truncates and cannot inflate.
-#3129 changed only the *transport*: `fetch_page()`'s browser branch returns the identical
-`searchResult.properties[]` shape into the identical `_map()`, and `salePrice` has exactly one reader
-in the whole repo. **Whenever a magnitude bug is alleged, check whether the mapping is even
-arithmetically capable of it before fetching anything.**
-
-**Both open alerts were correct reporting, not bugs:**
-- `located_row_unreachable` on those two rows is **not a `sync_search_listings_ar()` defect.**
-  `enforce_price_size_sanity()` is a BEFORE trigger on `search_listings_ar` that re-forces
-  `production_ready=false` on every upsert for a `price_size_impossible()` row absent from
-  `ops_price_source_verified` — so re-running sync can *never* clear one, by design (migration
-  `20260804120000` says so in its own header). 19 wasalt rows trip the >5,000,000 SAR/m² clause; 17 are
-  visible because they are registered, these 2 were not yet adjudicated. The alert is the system
-  asking for an adjudication, and it worked.
-  Measured on production 2026-09-18 **as found, before the close-out below registered the three** —
-  the registry IS the whole mechanism, with zero exceptions:
-
-  | trips `price_size_impossible()` | in `ops_price_source_verified` | `production_ready` | rows |
-  |---|---|---|---|
-  | true | **true** | **true** | 17 |
-  | true | **false** | **false** | 3 (`11939802`, `11939808`, `11939904`) — now registered, so 0 |
-  | false | true | true | 15 |
-  | false | false | true | 136 |
-  | false | false | false | 1 (`11939901` — location, not price) |
-
-  Every gate-tripping row that is registered is visible; every one that is not is hidden. Nothing
-  else moves the flag. (Read this via MCP, not the anon key — `ops_price_source_verified` is
-  RLS-hidden from `anon` and reads as **0 rows** there, which is not the same as empty. 39 wasalt
-  rows are registered.)
-
-  All **4** hidden band rows account cleanly, and the split is why exactly 2 alerts exist and not 4:
-  `11939802` / `11939808` resolve to Makkah (`city_id=6`) and are held false by the price gate alone —
-  located, unreachable, correctly alerting. `11939901` / `11939904` are `production_ready=false` in
-  `listing_native_location_v2` itself with `city_id IS NULL`, so they are hidden for a LOCATION reason
-  and reach users through the unlocated fallback — correctly NOT alerting. (`11939901` trips no clause
-  of `price_size_impossible()` at all.) Registering a price therefore cannot un-hide those two: the
-  §25 ungate joins `listing_native_location_v2` and requires `v.production_ready`, which is exactly
-  the guard that keeps a price adjudication from publishing an unlocated row.
-- `field_integrity` "phone/ID artifact band" on wasalt is a **band coincidence**: 11 rows land in
-  [500M, 600M) because genuine Makkah/Madinah land prices land there, and every one with an archive
-  matches its source exactly. The band is an aqar-shaped heuristic; it is not evidence about wasalt.
-
-**Closed out (migration `20260918220610`).** `11939802`, `11939808` and `11939904` were registered in
-`ops_price_source_verified` with the live evidence above — the outcome the detector's own adjudicate
-text asks for ("never repriced and never left hidden"). **No price was changed.** Verified in
-production through the anon path afterwards: `11939802` / `11939808` are `production_ready=true` and
-reachable with their prices intact; `11939904` is registered but stays hidden, because the ungate's
-join on `listing_native_location_v2` correctly refuses to publish a row whose location never
-resolved. `mon_detect_located_row_unreachable()` re-run: **0 raised**, both P1s resolved.
-
-**The standing gap this exposed — FIXED the same day (#3140), and that is why the numbers above are
-complete.** While `enrich_ar.py` sat on the blocked HTTP path, every newly-scraped wasalt row arrived
-with `ar_data = NULL`, so the §25 oracle was blind to exactly the rows most likely to be questioned
-and each one cost a fresh live adjudication. Moving it onto `browser.py` — which already existed and
-which `run.py` already used — took the band from 119/172 archived to 172/172 within hours. **The
-lesson outlives the fix: an oracle is only as good as its coverage, and the rows it cannot see are
-selected for being new, which is the same population most likely to be under suspicion.** Until a
-row's archive exists, do not read a NULL `ar_data` as "unverifiable" (§27b): the source answers.
-
-**How to read the source when you need to.** From a session with a browser pane, just open the listing
-and read `__NEXT_DATA__` (`props.pageProps.propertyDetailsV3.propertyInfo`) — wasalt.sa loads fine from
-an ordinary residential connection; the block is specific to the CI proxy × TLS-fingerprint
-combination. From CI or a cloud routine, which has no browser, dispatch
-`.github/workflows/wasalt-price-probe.yml` with the listing URLs (`scrapers/wasalt/probe_price.py` —
-read-only, and deliberately given no database credentials).
-
 ## 27. Three adjudications from run 2026-08-29 — do not re-derive any of them
 
 **27a. A row with a city that is not `production_ready` is served to NOBODY, and now something asks.**
@@ -1265,6 +1162,76 @@ touched at any point, so no period is fabricated even transiently. **Note the as
 omitted there:** inside one transaction Postgres freezes `now()`, so a raise-then-resolve *necessarily*
 shares a timestamp; the insta-resolve check is only meaningful across transactions, and asserting it
 in-migration fails on a transaction artifact (it did, and the migration was rolled back).
+
+## 32. "الشرقية" resolved as a city in Asir — a bare adjective bug class, and a frozen resolver found holding 2,146 rows of drift (settled 2026-09-25)
+
+**Owner-reported:** clicking "الشرقية" (Eastern Province) in the city picker showed it as a
+selectable *city* with 2 listings, claiming region = عسير (Asir) — the opposite side of the
+country from the real Eastern Province.
+
+**Root cause.** ialqarawi's `city_from_title()` scans a title's tokens right-to-left for a catalog
+city. Its `_CITY_STOP` set already excluded the bare directional NOUNS (شرق/غرب/شمال/جنوب/وسط)
+from ever being treated as a city — a half-finished pattern that never added their ال-prefixed
+ADJECTIVE forms. Two live listings' titles trailed off with «...حي النوارية الشرقية مخطط اللابة»
+(a Makkah plot) and «...في الشرقيه امام شاطئ نصف القمر» (a Khobar plot). Neither «الشرقية» names a
+place on its own — one modifies a subdivision name, the other is the colloquial whole-Eastern-
+Province sense — but the catalog also holds one real, obscure Asir-region village of that exact
+spelling (`city_id 14645`), and the scanner matched it.
+
+**Verified before touching anything (owner asked specifically):** «حي النوارية» IS a real Makkah
+district (`loc_catalog_district`, `city_id=6`) — the fixed scanner correctly recovers it once the
+adjective is skipped. «شاطئ نصف القمر» is a genuine Khobar/Dammam beach but NOT a catalog district
+at all (checked live, zero matches); its listing's own «الحي» field plainly said «الدمام» — a real
+catalog city that nothing in the scraper used for city resolution, only for district-vs-
+neighbourhood classification after a city already existed.
+
+**Fix, generalised — not a one-scraper patch.** Audited the WHOLE catalog for the same word class
+(relative/comparative Arabic adjectives: direction, age/currency, relative position) live against
+`loc_catalog_city`: 18 exact collisions across 10 distinct words (`الوسطى`→Qassim, `الجديدة`→5
+different cities, `العليا`→4, `الحديثة`→Jouf, `المحدثة`→Asir, ...). Built
+`scrapers.common.arabic_location.AMBIGUOUS_STANDALONE_WORDS` /
+`is_ambiguous_standalone_word()` — the SHARED, fleet-wide version of ialqarawi's local fix — and a
+second fallback: when a title scan finds nothing at all, try the listing's own district/city field
+as a last-resort city (only when the title found NOTHING, so it can never override a correct
+title-based answer — proven against the pre-existing «الحي: الدوادمي, 500km from the title's own
+عنيزة» regression guard, untouched). Fleet-swept: `city_from_title`/`_CITY_STOP` is unique to
+ialqarawi — nobody else duplicates the anti-pattern.
+
+**A second, larger, DIFFERENT bug surfaced auditing aqar's own separate resolver** (not the same
+mechanism — aqar has no `city_ar` column at all, its location comes from
+`aqar_shadow_resolved.parsed_city_id`, populated by `resolve_aqar_locations()`). The 3 aqar rows
+the owner also asked about: `aqar_residential_listings.city = 'Al Hariq'` (correct, unchanged) but
+`aqar_shadow_resolved.parsed_city_id` pointed to `city_id 643` = «الجديدة», an unrelated Riyadh-
+region town — because `loc_city_map`/`loc_catalog_city` had since been corrected, but
+`resolve_aqar_locations()` **never re-checks a row once resolved** (`WHERE
+aqar_shadow_resolved.parsed_city_id IS NULL`) — a DELIBERATE 2026-07-08 owner decision
+("a row is only ever filled in, never overwritten once resolved"), not a bug in itself. Re-running
+the exact same proven join logic fresh against every currently-active row found **2,146 rows**
+(2,063 residential + 83 commercial) where the frozen answer now genuinely disagrees with a fresh
+resolution (excluding pure ة/ه spelling drift, which is ~91k rows and harmless). Sampled and
+cross-checked against the LIVE `aqar.city` text directly (not a stale snapshot) — 97%+ agreement
+that the fresh answer is correct, not the frozen one.
+
+**Did NOT reverse the 2026-07-08 freeze** — that is an explicit stability decision, not this run's
+call to make. Fixed the 3 owner-reported rows directly (verified: city, district, AND region all
+now agree, and the district is catalog-proven to belong to that exact city). Added
+`mon_detect_aqar_shadow_resolution_drift()` as a **growth ratchet** pinned to the measured
+2,146-row baseline — it alerts only on NEW drift past that baseline, so a live gap that was
+previously invisible is now visible without either silently mass-correcting 2,146 historical rows
+or leaving the pattern able to recur undetected. Whether to bulk-backfill the historical 2,146 is
+an explicit, separate owner decision — not something a detector or this routine should do alone
+given ~20% of the sample looked like a deliberate governorate→specific-city map refinement
+(`الأحساء`→`الهفوف`, 426 rows) rather than an unambiguous bug.
+
+**Barriers:**
+`mon_detect_ambiguous_adjective_resolved_as_city()` (P1, standing-0, roster-wired) and
+`mon_detect_aqar_shadow_resolution_drift()` (P2 growth-ratchet, roster-wired) —
+`supabase/migrations/20260925171201_location_barriers_ambiguous_adjective_and_aqar_drift.sql`.
+`scrapers/common/tests/test_ambiguous_standalone_words.py` (35 tests, mutation-proven: removing an
+entry from the set is watched to flip detection to False) +
+`scrapers/common/tests/test_ialqarawi_source_traps.py`'s directional-adjective and
+district-field-fallback tests (mutation-proven against the real pre-fix code, not a synthetic
+copy). Full suite 4,504 passed / 3 skipped at ship time.
 
 ## Final daily principle
 Every listing should have an explainable journey: Where did it come from? What exactly did the
