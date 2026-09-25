@@ -84,7 +84,13 @@ check('no job is gated on the deploy CONCLUSION any more',
       !wfDirectives.includes("workflow_run.conclusion == 'success'"),
       'that condition is false forever — it is what made this workflow dark');
 const gatedJobs = (wf.match(/needs\.gate\.outputs\.shipped == 'yes'/g) ?? []).length;
-check('every AF job plus attendance is gated on the shipped output', gatedJobs === 6, `found ${gatedJobs}, expected 6`);
+// 6 → 7 on 2026-09-25: `af-rest-oracles` split the four REST-only oracles out of af-truth's tail,
+// which run #431 left unexecuted when that 24-step chain hit its 50-minute cap. A literal count is
+// the point — a job added without this gate skips silently, so raising it must be a deliberate,
+// reviewed edit rather than something a new job does to the barrier on its way past.
+const EXPECTED_GATED_JOBS = 7;
+check('every AF job plus attendance is gated on the shipped output',
+      gatedJobs === EXPECTED_GATED_JOBS, `found ${gatedJobs}, expected ${EXPECTED_GATED_JOBS}`);
 check('the gate job runs the real decision script',
       wf.includes('scripts/af-live-truth-deploy-gate.ts') && wf.includes('shipped: ${{ steps.decide.outputs.shipped }}'));
 // A job referencing needs.gate without depending on it silently evaluates to empty and skips —
