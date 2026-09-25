@@ -71,11 +71,23 @@ THE TRAPS, ALL MEASURED
    it. The abbreviated band text never reaches a price column by any path.
 
 6. THE TYPE VOCABULARY IS HALF UNTRANSLATED. Arabic types resolve through the shared TYPE_MAP_AR
-   («أرض», «شقة», «فيلا»); for the types whose Arabic string is missing the platform leaks the bare
-   enum constant onto the page — `WAREHOUSE`, `WORKSHOP`, `RETAIL_STORE`, `OFFICE`. Those are mapped
-   by an EXPLICIT override dict, not by title-casing a rule, so a constant added upstream tomorrow
-   cannot be auto-guessed into a type. «بلوك» (a land block, id 531729) has no fleet meaning and is
-   skipped, counted.
+   («أرض», «شقة»); for the types whose Arabic string is missing the platform leaks the bare ENUM
+   CONSTANT onto the page. Six are mapped, by an EXPLICIT override dict rather than by title-casing a
+   rule, so a constant added upstream tomorrow cannot be auto-guessed into a type:
+     WAREHOUSE → Warehouse, WORKSHOP → Workshop, OFFICE → Office  (TYPE_MAP_EN, verbatim)
+     RETAIL_STORE → Shop        (the fold TYPE_MAP_EN already applies to 'Commercial Shop' and
+                                 aldarim's 'store')
+     COMMERCIAL_GALLERY → Shop  NOT from the enum's English. The PLATFORM names these units itself:
+                                all twelve in حي طيبة are coded «محل -1» … «محل -12», and «محل» is
+                                shop. 48-65 m² with one bathroom agrees.
+     STORAGE → Warehouse        confirmed twice: the unit is coded «WH0050-B-4-SN» (WH = warehouse),
+                                and TYPE_MAP_EN already folds aldarim's 'storage' → 'Warehouse'.
+   THREE ARE DELIBERATELY NOT MAPPED, because each is a genuine ambiguity and the ask-first rule
+   applies — they skip with a counted reason and are raised below:
+     «بلوك» — a LAND BLOCK (a group of plots), not a plot. Every one measured is also «مباع».
+     «روف» — bare "roof", coded «السطح». A rooftop dwelling and a roof terrace are different things.
+     DRIVE_THRU — a specific retail format (150-300 m², coded by bare numbers). Shop? Kiosk?
+   Guessing any of the three would file real inventory under a type a searcher did not ask for.
 
 7. TWO LABELS FOR ONE FIELD. The «تفاصيل العقار» table and the «نظرة عامة» strip name the same fact
    differently — «الحمامات» vs «حمام», «غرف نوم» vs «غرفة نوم». Both spellings are read; reading only
@@ -146,6 +158,9 @@ OPEN QUESTIONS FOR ONBOARDING (none of these are guessed in code)
   · PLATFORM NAME. The roster line reads «نفوذ العقارية للاستثمار»; the site's own <title>, JSON-LD
     `name` and footer all say «نفوذ للاستثمار العقاري». SOURCE uses the site's own wording. If the
     registry/UI label should be the roster wording instead, this constant is the single place to change.
+  · THREE UNMAPPED TYPE WORDS need a product decision (trap 6): «بلوك» (a land block — is a block
+    of plots a listing at all, or only its plots?), «روف» (rooftop dwelling or roof terrace?) and
+    `DRIVE_THRU` (Shop, Kiosk, or its own type?). Each skips as `type_unmapped_<word>`, counted.
   · «أرض» → «Residential Land» is the shared TYPE_MAP_AR fold, applied verbatim. But one of the seven
     projects is «مخطط طيبة الصناعي» — an INDUSTRIAL land plan — so some of these plots are not
     residential. The source's own «الفئة» (سكني / تجاري / زراعي / استثماري / Hotel / Office) would
@@ -324,6 +339,8 @@ def _photo_re(listing_id: str) -> re.Pattern:
     return re.compile(
         rf'https://www\.nofodh\.sa/listings/{re.escape(listing_id)}_[0-9a-zA-Z]+/'
         rf'[^"\'\s<>]+\.{_PHOTO_EXT}\b', re.IGNORECASE)
+
+
 _TAG_RE = re.compile(r"<[^>]+>")
 
 

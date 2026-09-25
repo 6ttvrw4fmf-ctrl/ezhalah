@@ -382,10 +382,22 @@ def test_the_type_mapping_covers_both_of_the_sources_vocabularies(raw, expected,
     assert row["additional_info"]["type_raw"] == raw
 
 
-def test_an_unmapped_type_word_is_skipped_not_guessed():
-    """«بلوك» is a real source word (id 531729) with no fleet meaning. It is never invented into one."""
-    rec = {**BLOCK_SOLD, "details": {**BLOCK_SOLD["details"], "حالة العقار": "للبيع"}}
-    assert _skip(rec) == "type_unmapped_بلوك"
+@pytest.mark.parametrize("raw", ["بلوك", "روف", "DRIVE_THRU"])
+def test_the_three_ambiguous_type_words_stay_unmapped(raw):
+    """Real source words with no safe fleet meaning. Skipped, counted, and raised — never guessed.
+
+    This is a LOCK on a product decision, not a description of missing work. «بلوك» is a land block
+    (a group of plots, not a plot); «روف» is a bare "roof" coded «السطح», which could be a rooftop
+    dwelling or a roof terrace; `DRIVE_THRU` is a specific retail format that is arguably a Shop and
+    arguably a Kiosk. Mapping any of them without the owner's answer files real inventory under a
+    type a searcher did not ask for — the ambiguous-mapping ask-first rule. If this test is ever
+    changed, it should be because the question was answered, not because the gap looked untidy.
+    """
+    rec = {**BLOCK_SOLD,
+           "details": {**BLOCK_SOLD["details"], "حالة العقار": "للبيع", "نوع العقار": raw},
+           "overview": {**BLOCK_SOLD["overview"], "نوع العقار": raw}}
+    assert _skip(rec) == f"type_unmapped_{raw}"
+    assert raw not in nofodh._TYPE_OVERRIDES, f"{raw} must not be given a mapping here"
 
 
 def test_a_city_outside_the_catalog_is_never_filed_under_a_neighbour():
