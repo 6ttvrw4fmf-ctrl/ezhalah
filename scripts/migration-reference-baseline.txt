@@ -84,3 +84,11 @@
 # one repair this file's header rules out: it would manufacture content-parity drift on a file that
 # is clean the moment it matches production. History stays as it ran.
 20260920075900
+# 2026-09-25, the same mirror exception as 20260920075900 above and not a new licence.
+# 20260925175109 was applied to production at 17:51 UTC and filed on no branch, which shut the
+# deploy gate for every PR in the repo. Its production text cites 20260925193000 for its own
+# method; that version was never minted (absent from supabase_migrations.schema_migrations).
+# The citation is a COMMENT on a function and resolves nothing at runtime, so the file is
+# mirrored exactly as production runs it and the pointer is recorded here instead of edited —
+# editing it would manufacture content-parity drift on a file that is otherwise clean.
+20260925193000

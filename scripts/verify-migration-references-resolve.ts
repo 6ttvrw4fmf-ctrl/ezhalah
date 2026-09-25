@@ -54,8 +54,17 @@ const BASELINE_FILE = join(ROOT, 'scripts', 'migration-reference-baseline.txt');
  *  20260920080113's file was diverging from production (drift condition #5) and its committed text
  *  cited itself; production's actual statements cite 20260920075900, which was never minted. Making
  *  the file match production is mandatory; correcting the pointer is the repair the header above
- *  forbids, because it would re-open parity drift. No newly authored migration may use this. */
-const MAX_BASELINE_ENTRIES = 30;
+ *  forbids, because it would re-open parity drift. No newly authored migration may use this.
+ *
+ *  30 -> 31 on 2026-09-25, the SAME exception and nothing new. 20260925175109 was applied to
+ *  production at 17:51 and committed to no branch, which shut ops_deploy_preflight_checks for the
+ *  WHOLE repo (missing_in_git fails closed for every deploy, not just its author's). Its production
+ *  text cites `migration 20260925193000` for its own method; that version was never minted — it is
+ *  absent from supabase_migrations.schema_migrations, checked directly. So the file cannot be both
+ *  parity-correct and citation-clean, and parity is the one that is mandatory. The pointer is a
+ *  COMMENT on a function, carrying no schema dependency: nothing resolves it at runtime.
+ *  Again: no newly authored migration may use this. Mint the version you cite, or cite nothing. */
+const MAX_BASELINE_ENTRIES = 31;
 
 /**
  * 14-digit literals that are NOT citations of a migration. Each needs a reason, because the whole
