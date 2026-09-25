@@ -109,9 +109,17 @@ check('no second, private copy of the timing constants survives in the component
   'two sources for one number is how the sweep and the floor drifted apart in the first place');
 
 // The grouped wave is the owner's answer to the 56-platform ceiling, so it is asserted, not assumed.
+// Asserted AGAINST PILL_GROUP, not against the number 2. The shape is what matters: the first
+// PILL_GROUP pills share step 0, and the pill right after them starts step 1. Hardcoding
+// waveDelayMs(2) === 180 silently encoded "the wave is exactly 2 wide", so widening the wave to 3 —
+// the very change this file exists to keep honest — failed here instead of being checked.
 check(`the wave lights ${PILL_GROUP} pills per step, which is what lifts the ceiling to ${MAX_ROSTER}`,
-  PILL_GROUP >= 2 && waveDelayMs(1, 180) === 0 && waveDelayMs(2, 180) === 180,
-  `waveDelayMs(1)=${waveDelayMs(1, 180)} waveDelayMs(2)=${waveDelayMs(2, 180)}`);
+  PILL_GROUP >= 2
+  && waveDelayMs(PILL_GROUP - 1, 180) === 0          // the last pill of the first group shares step 0
+  && waveDelayMs(PILL_GROUP, 180) === 180            // the next pill starts step 1
+  && waveDelayMs(0, 180) === 0,
+  `group=${PILL_GROUP} waveDelayMs(${PILL_GROUP - 1})=${waveDelayMs(PILL_GROUP - 1, 180)} `
+  + `waveDelayMs(${PILL_GROUP})=${waveDelayMs(PILL_GROUP, 180)}`);
 
 console.log('\n── D. mutation proofs ──');
 const mustCatch = (what: string, caught: boolean) =>

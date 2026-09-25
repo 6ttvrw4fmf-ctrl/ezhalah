@@ -39,6 +39,11 @@ export const PILL_FADE = 260;
  * and the grouping is why it lands on an even number: pills 111 and 112 share a step, both lit at
  * 10,460ms, while a 113th would start a new step and not be lit until 10,640ms.
  *
+ * 112 → 168 on 2026-09-25 with PILL_GROUP 2 → 3, and derived the same way against the SAME floor:
+ * pills 166/167/168 share the 56th step and are lit at floor(167/3) x 180 + 560 = 10,580ms, while a
+ * 169th starts a new step and waits 10,760ms. The reveal side is not what binds — a 168-roster has
+ * faded in by 167 x 60 + 260 = 10,280ms — which is why this number comes off the SWEEP.
+ *
  * 50 → 56 on 2026-09-19, when the ksaaqar / sadiqeltajer / toor logos took the catalogue to 52 and
  * this barrier failed. Investigating that failure showed the ceiling had been computed from a model
  * that did not match the animation (see everyPlatformSeen below): the OLD arithmetic added REVEAL and
@@ -49,7 +54,7 @@ export const PILL_FADE = 260;
  * floor. So 56 is the real ceiling of the owner's ten seconds, and platform #57 needs a decision
  * (a longer floor, or a wave that lights more than one pill per step) rather than a nudged constant.
  */
-export const MAX_ROSTER = 112;
+export const MAX_ROSTER = 168;
 /** Every pill is on screen by this point, worst case. */
 export const LOADER_REVEAL_MS = (MAX_ROSTER - 1) * PILL_STAGGER + PILL_FADE;
 /**
@@ -86,10 +91,20 @@ export const WAVE_LIT_MS = WAVE_RISE + WAVE_HOLD;
  *
  * Each pill is still lit for its full WAVE_RISE + WAVE_HOLD + WAVE_FALL (940ms) — the wave gets
  * WIDER, not faster, so no platform gets less time on screen than before. What changes is that the
- * front of the wave advances two pills per step instead of one, which halves the tail's wait and
- * takes the ceiling from 56 platforms to 111 at the same 10,600ms floor.
+ * front of the wave advances several pills per step instead of one, which cuts the tail's wait and
+ * lifts the ceiling at the same 10,600ms floor.
+ *
+ * 2 -> 3 on 2026-09-25, and this REVISES the owner's own "2 pills at a time" from 2026-09-19, so it
+ * is flagged rather than buried. The wave-1 ten took the catalogue to 116 and the tail stopped
+ * fitting: lastPillLitMs(116) = floor(115/2) x 180 + 560 = 10,820ms against a 10,600ms floor, so the
+ * last two platforms would never have been lit — the exact defect the owner reported in the first
+ * place. The two honest levers were a wider wave or a longer wait, and the owner's words pin which
+ * one: "let the user wait 10 seconds ... doing it quick will make them lost". A wider wave keeps BOTH
+ * halves of that — the ten seconds, and 940ms of light per pill, unchanged. A longer wait would break
+ * the first half for every search. Nothing is quicker; three pills simply share a step.
+ * At 3 the honest ceiling is 168 platforms, which also covers the 27 sites still to build.
  */
-export const PILL_GROUP = 2;
+export const PILL_GROUP = 3;
 
 /** When the wave reaches pill `index` — pills share a step in groups of PILL_GROUP. */
 export function waveDelayMs(index: number, step: number): number {
