@@ -57,6 +57,12 @@ const ok = (label: string, pass: boolean, detail = '') => {
   if (!pass) failed++;
 };
 
+// A mutation proof: `caught` is the assertion that the deliberately-broken predicate CHANGED a
+// verdict this file pins. If a mutant leaves every verdict intact, the assertion it was meant to
+// defend is decoration and this fails — which is the whole point of the ratchet in
+// scripts/verify-new-barriers-are-mutation-proven.ts.
+const mustCatch = (label: string, caught: boolean, detail = '') => ok(label, caught, detail);
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // Lift the REAL looks_closed() out of the shipped module. The module imports the DB client at
 // import time, so the predicate is exec'd out of the source rather than imported — the bytes under
@@ -186,23 +192,23 @@ console.log('\nmutation proof\n');
 const MUTANT_BODIES = BODIES;
 
 const m1 = run(MUTANT_BODIES, 'old_badge_factor1');
-ok('reverting factor 1 to the badge ALONE stops the oracle firing on a real closed page',
+mustCatch('reverting factor 1 to the badge ALONE stops the oracle firing on a real closed page',
    m1.closed === false,
    'the mutant still fired — this guard would not have caught the original defect');
 
 const m1b = run(MUTANT_BODIES, 'drop_badge_branch');
-ok('retiring the badge branch breaks the form the pytest barriers pin', m1b.badge === false,
+mustCatch('retiring the badge branch breaks the form the pytest barriers pin', m1b.badge === false,
    'the badge assertion is not actually load-bearing');
 
 const m2 = run(MUTANT_BODIES, 'drop_factor2');
-ok('dropping factor 2 turns the contradictory page into a kill', m2.contradictory === true,
+mustCatch('dropping factor 2 turns the contradictory page into a kill', m2.contradictory === true,
    'the two-factor assertion is not actually load-bearing');
 
 // Keying factor 1 on the KEY rather than the boolean cannot hurt a page that publishes offers —
 // factor 2 still spares it. It hurts exactly the «طلب تسويق» cohort, which has no offers node and
 // is spared only because the flag reads false. That is the assertion this mutant must break.
 const m3 = run(MUTANT_BODIES, 'accept_string_flag');
-ok('keying factor 1 on the "closed" KEY rather than the boolean kills an OPEN «طلب تسويق» ad',
+mustCatch('keying factor 1 on the "closed" KEY rather than the boolean kills an OPEN «طلب تسويق» ad',
    m3.marketing === true,
    'the marketing-request assertion is not actually load-bearing');
 
