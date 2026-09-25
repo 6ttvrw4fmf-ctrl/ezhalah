@@ -177,6 +177,7 @@ BATCH_2026_09_24 = ("dwelleo", "aqalemhajer", "sakani", "shatri", "alqasem", "fk
                     "snam", "jawher", "m3tmd", "senan", "goldendeal", "thousand", "yameen", "ebriza",
                     "eilmalriyada", "daryusuf", "albdah", "eydah", "tamyaz", "hazim", "villassa",
                     "marksa", "rightcompound", "livingcompound", "azure", "expattrusted", "flow")
+BATCH_2026_09_24 += ("tuba",)   # built 2026-09-24; tables still to create — the check is static
 # A platform whose row literal lives in ANOTHER scraper's file (yameen imports goldendeal's
 # map_listing, yameen/run.py:56-58) is judged on that file — a defect there is a defect in both.
 ROW_LITERAL_LIVES_IN = {"yameen": "goldendeal"}
