@@ -322,6 +322,8 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['expattrusted', 'Expat Trusted Housing'],
   ['expat trusted housing', 'Expat Trusted Housing'],
   ['flow', 'Flow'],
+  ['abaad', 'أبعاد'],
+  ['أبعاد', 'أبعاد'],
   ['aqar', 'Aqar'],
 ];
 

@@ -1015,7 +1015,8 @@ const AR: Record<string, string> = {
   'LivingCompound': 'ليفينج كومباوند',              // transliteration — no Arabic name at the source
   'Azure': 'أزور',                                  // transliteration — no Arabic name at the source
   'Expat Trusted Housing': 'إكسبات ترستد هاوسينج',  // transliteration — no Arabic name at the source
-  'Flow': 'فلو',                                    // transliteration — no Arabic name at the source
+  'Flow': 'فلو',
+  'Abaad': 'أبعاد',                                 // the site's own Arabic name (app.abaadapp.sa writes «أبعاد»)                                    // transliteration — no Arabic name at the source
   // logo-only strip entries (owner decision 2026-09-24): no scraper, no tables, never searchable.
   'Maskan United': 'مسكن الموحدة',  // maskanre.sa
   'The Address': 'العنوان',  // wetheaddress.com

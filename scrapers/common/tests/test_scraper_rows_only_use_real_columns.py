@@ -177,6 +177,14 @@ BATCH_2026_09_24 = ("dwelleo", "aqalemhajer", "sakani", "shatri", "alqasem", "fk
                     "snam", "jawher", "m3tmd", "senan", "goldendeal", "thousand", "yameen", "ebriza",
                     "eilmalriyada", "daryusuf", "albdah", "eydah", "tamyaz", "hazim", "villassa",
                     "marksa", "rightcompound", "livingcompound", "azure", "expattrusted", "flow")
+# BUILT BUT NOT YET ONBOARDED — the scraper exists in the tree and its tables are still to be
+# created. The check is purely static (it parses run.py), so the guarantee applies from the day the
+# scraper is written rather than from the day its tables land: a wrong key is then caught in the PR
+# that introduces it instead of by the first production run, which is the whole point of the suwar
+# lesson. Every *_listings table is created `LIKE … INCLUDING ALL`, so LISTING_COLUMNS is the oracle
+# for these too. Move a platform into its dated batch above once its migration is applied.
+NOT_YET_ONBOARDED = ("abaad",)
+
 # A platform whose row literal lives in ANOTHER scraper's file (yameen imports goldendeal's
 # map_listing, yameen/run.py:56-58) is judged on that file — a defect there is a defect in both.
 ROW_LITERAL_LIVES_IN = {"yameen": "goldendeal"}
@@ -232,7 +240,7 @@ def _row_literal_keys(tree) -> set[str]:
     return keys
 
 
-@pytest.mark.parametrize("platform", BATCH_2026_09_21 + BATCH_2026_09_24)
+@pytest.mark.parametrize("platform", BATCH_2026_09_21 + BATCH_2026_09_24 + NOT_YET_ONBOARDED)
 def test_every_row_literal_key_of_an_onboarded_batch_is_a_real_column(platform):
     import ast
     src = _SCRAPERS / ROW_LITERAL_LIVES_IN.get(platform, platform) / "run.py"

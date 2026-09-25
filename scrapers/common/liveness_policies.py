@@ -738,6 +738,20 @@ POLICIES: dict[str, _P] = {
         "Canary-gated on a row THIS run mapped (fails CLOSED).",
         "Row grain is the residence (unit type): measured 2026-09-24, 43 compounds, 55 residences on "
         "16 of them; 27 compounds publish no residence and yield no row."),
+    "abaad": _P(
+        _pol("abaad", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the ad's OWN /api/v1/estate/get-estate/<id> record. *** A 200 IS NOT A LIFE HERE *** a "
+        "de-listed abaad ad keeps serving its full detail page, so the decider is the REGA ad "
+        "licence the record publishes about ITSELF: an HTTP 404 is GONE, and a 200 whose end_date "
+        "(«تاريخ انتهاء رخصة الإعلان») has already passed is GONE; a 200 whose licence is still "
+        "valid is LIVE; a licence expiring TODAY is held as UNKNOWN (the measured boundary, never "
+        "resolved either way); a 200 without a readable end_date, a body that will not parse, and "
+        "401/403/429/5xx are UNKNOWN. Canary-gated on a row THIS run mapped (fails CLOSED).",
+        "Measured 2026-09-25: the catalogue went 405 -> 400 inside ~25 minutes and the five ids "
+        "that left were EXACTLY the five whose end_date was that day, with zero of the remaining "
+        "400 carrying a past expiry; validated on 12 sampled absent ids (4 x 404, 8 x "
+        "200-with-lapsed-licence, 12/12). Absence from the catalogue only SELECTS candidates — "
+        "scrapers/abaad/run.py::verify_gone gives the verdict."),
     "flow": _P(
         _pol("flow", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the home type's own /home/fid/<fid> page under its property's available-homes route "

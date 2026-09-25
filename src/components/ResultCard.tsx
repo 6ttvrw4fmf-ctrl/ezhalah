@@ -793,6 +793,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('azure')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('expattrusted') || s.includes('expat trusted housing')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('flow')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('أبعاد') || s.includes('abaad')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   return <PlatformLogo source={AQAR_LOGO} />;
 }
 
@@ -933,6 +934,7 @@ function sourceHost(source: string): string {
   if (s.includes('azure')) return 'azure.sa';
   if (s.includes('expattrusted') || s.includes('expat trusted housing')) return 'expattrustedhousingriyadh.com';
   if (s.includes('flow')) return 'flow.life';
+  if (s.includes('أبعاد') || s.includes('abaad')) return 'app.abaadapp.sa';
   return 'sa.aqar.fm';
 }
 

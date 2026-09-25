@@ -1,22 +1,18 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
--- Re-verified 2026-09-24 (migration 20260924170648_thirty_five_platforms_wiring_into_search):
--- CHANGED. Seventy arms were added right after the nufouth commercial arm — dwelleo, aqalemhajer,
--- sakani, shatri, alqasem, fkralemar, wadod, almuteb, aalbarrak, alrifai, sodasyat, hasaad,
--- aqaralriyadh, justsa, snam, jawher, m3tmd, senan, goldendeal, thousand, yameen, ebriza,
--- eilmalriyada, daryusuf, albdah, eydah, tamyaz, hazim, villassa, marksa, rightcompound,
--- livingcompound, azure, expattrusted and flow, each residential + commercial — so the body below
--- is genuinely new, not a re-dated copy.
---   Base: the live body read 2026-09-24 15:02 UTC, md5 024fa413d718ee03c6aa13af77894de7 over
---   51,672 chars (byte-identical to this file's previous body). The added arms use the exact
---   rendering pg_get_viewdef produced for #3516's arms — re-proven today by reproducing #3516's live
---   digest 024fa413d718ee03c6aa13af77894de7 from the pre-#3516 body (dcda0a5ff4fe7942c22bb8d37af5dca0)
---   with the same rendering — so the body below is what production renders once
---   20260924170648 applies. 20260924171530 asserts live == this digest at apply time; if it ever
---   disagrees, regenerate from pg_get_viewdef, never re-date.
---   • md5 of everything below this header block: 70d106fc0bd506b9bc69497f4ad0745b
---   Previous: 024fa413d718ee03c6aa13af77894de7 over 51,672 chars.
+-- Re-verified 2026-09-25 (migration 20260925012657_abaad_wiring_into_search):
+-- CHANGED. Two arms were added right after the nufouth commercial arm — أبعاد (abaad),
+-- residential + commercial — so the body below is genuinely new, not a re-dated copy.
+--   The two arms were spliced into the previous body in the identical rendering
+--   pg_get_viewdef produces for every other arm, and the result was then PROVEN equal to
+--   production rather than assumed: md5 of the spliced body (trailing newline stripped, which is
+--   how pg_get_viewdef returns it) == the live digest, over the same 94,952 chars. No 95 KB of
+--   view text had to be shipped through a tool call to establish that.
+--   • md5 of everything below this header block: 6a0c034c408d43d3f179bafef7f97a55
+--     (as pg_get_viewdef returns it, i.e. the body minus the file's trailing newline — the same
+--     convention the previous header used for 70d106fc, and the digest the migration registers)
+--   Previous: 70d106fc0bd506b9bc69497f4ad0745b over 93,797 chars.
 --   ops_sql_mirror_expected.expected_md5 is updated to the same digest in the SAME change
 --   (regenerating a mirror is a two-place edit; verify-mirror-md5-is-registered enforces it).
  WITH native AS (
@@ -499,6 +495,30 @@
             nufouth_commercial_listings.transaction_type
            FROM nufouth_commercial_listings
           WHERE nufouth_commercial_listings.active
+        UNION ALL
+         SELECT 'abaad'::text AS platform,
+            'abaad_residential_listings'::text AS source_table,
+            abaad_residential_listings.id AS listing_id,
+            abaad_residential_listings.city_ar,
+            abaad_residential_listings.city_id,
+            abaad_residential_listings.district_ar,
+            abaad_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            abaad_residential_listings.transaction_type
+           FROM abaad_residential_listings
+          WHERE abaad_residential_listings.active
+        UNION ALL
+         SELECT 'abaad'::text AS platform,
+            'abaad_commercial_listings'::text AS source_table,
+            abaad_commercial_listings.id AS listing_id,
+            abaad_commercial_listings.city_ar,
+            abaad_commercial_listings.city_id,
+            abaad_commercial_listings.district_ar,
+            abaad_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            abaad_commercial_listings.transaction_type
+           FROM abaad_commercial_listings
+          WHERE abaad_commercial_listings.active
         UNION ALL
          SELECT 'dwelleo'::text AS platform,
             'dwelleo_residential_listings'::text AS source_table,

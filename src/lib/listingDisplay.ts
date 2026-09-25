@@ -177,6 +177,7 @@ export function sourceName(source: string): string {
   if (s.includes('azure')) return 'Azure';
   if (s.includes('expattrusted') || s.includes('expat trusted housing')) return 'Expat Trusted Housing';
   if (s.includes('flow')) return 'Flow';
+  if (s.includes('أبعاد') || s.includes('abaad')) return 'أبعاد';
   return 'AQAR';
 }
 
