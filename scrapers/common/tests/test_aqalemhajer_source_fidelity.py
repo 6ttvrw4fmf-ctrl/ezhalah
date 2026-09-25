@@ -377,6 +377,11 @@ class _FakeDB:
     def _wasalt_batch(self, table, rows):
         self.calls.append(("_wasalt_batch", table, len(rows)))
 
+    def mark_direct_alive(self, row, *, oracle):
+        from scrapers.common import db as _real
+        self.calls.append(("mark_direct_alive", oracle))
+        return _real.mark_direct_alive(row, oracle=oracle)
+
     def retire_superseded_siblings(self, **kw):
         self.calls.append(("retire", kw["res_table"], kw["com_table"]))
         return 0
