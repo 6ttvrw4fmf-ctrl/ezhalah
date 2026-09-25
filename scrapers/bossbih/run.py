@@ -516,7 +516,11 @@ def fetch_detail(s: cc.Session, nid: str) -> Optional[dict]:
     if r.status_code != 200:
         return None
     d = parse_detail(r.text)
-    return d if (d["fields"] or d["title"]) else None
+    if not (d["fields"] or d["title"]):
+        return None
+    # The same identity test _signal_for() uses for a life: this page is node `nid` itself.
+    d["_own_node"] = f'data-history-node-id="{nid}"' in r.text
+    return d
 
 
 # ── MAPPING ─────────────────────────────────────────────────────────────────────────────────────
@@ -778,6 +782,10 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            if detail.get("_own_node"):
+                # HTTP 200 on /{nid}, carrying data-history-node-id == nid, not retired in place
+                # (map_listing already refused those): the reading _signal_for() calls "live".
+                db.mark_direct_alive(row, oracle="bossbih.detail_page.history_node_id")
             (com if cat == "commercial" else res).append(row)
         tally = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         if tally:
