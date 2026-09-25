@@ -210,6 +210,7 @@ jobs:
           - { source: azure,          cmd: "python -m scrapers.azure.run --type all", tmo: 20 }
           - { source: expattrusted,   cmd: "python -m scrapers.expattrusted.run --type all", tmo: 20 }
           - { source: flow,           cmd: "python -m scrapers.flow.run --type all", tmo: 20 }
+          - { source: abaad,          cmd: "python -m scrapers.abaad.run --type all", tmo: 20 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }

@@ -121,6 +121,7 @@ export const PLATFORMS: Platform[] = [
   { name: 'Azure', domain: 'azure.sa', brand: 'Azure', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   { name: 'Expat Trusted Housing', domain: 'expattrustedhousingriyadh.com', brand: 'Expat Trusted Housing', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   { name: 'Flow', domain: 'flow.life', brand: 'Flow', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  { name: 'أبعاد', domain: 'app.abaadapp.sa', brand: 'Abaad', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'RawasiDark', domain: 'rawasi-dark.com', brand: 'Rawasi Dark Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: '1 October', domain: '1october.com.sa', brand: '1 October Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
