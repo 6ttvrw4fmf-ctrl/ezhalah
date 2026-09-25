@@ -394,6 +394,64 @@ def test_a_city_outside_the_catalog_is_never_filed_under_a_neighbour():
     assert _skip(rec) == "city_not_in_catalog"
 
 
+def test_arabic_indic_digits_parse_in_every_numeric_field():
+    """Defensive, and honest about being so: this site publishes WESTERN digits only.
+
+    Measured across 674 captured pages — zero ٠-٩ in any price or area. The handling exists because
+    the fleet rule is fleet-wide and a Blade locale flip would otherwise silently NULL every number
+    on the platform at once, so it is proven to work rather than assumed to be unnecessary.
+    """
+    ar = {**LAND_FOR_SALE,
+          "details": {**LAND_FOR_SALE["details"],
+                      "السعر": "٨٨٢,٤٤٦", "مساحة العقار": "١٦٨٩٫٤٥ متر مربع",
+                      "الحمامات": "٣"},
+          "overview": {**LAND_FOR_SALE["overview"], "غرف نوم": "٤", "مواقف": "٢"}}
+    row, _ = _row(ar)
+    assert row["price_total"] == 882446, "an Arabic-Indic price must parse, not vanish"
+    assert row["area_m2"] == 1689
+    assert row["bathrooms"] == 3
+    assert row["bedrooms"] == 4
+    assert row["parking"] == 2
+
+
+# ── SOURCE IS TRUTH: what this platform does NOT publish ────────────────────────────────────────
+def test_the_build_year_label_never_becomes_a_property_age():
+    """«سنة البناء» prints a DATE, and it is the same date as «تاريخ النشر» on every page measured.
+
+    It is the import timestamp wearing a build-year label. Fed to an age parser it would fabricate
+    `property_age` 0 for the entire catalogue — a confident wrong number on every row — so the column
+    is left alone and the raw value is preserved for the onboarding question.
+    """
+    row, _ = _row(LAND_FOR_SALE)
+    assert "property_age" not in row
+    assert row["additional_info"]["source_build_year_raw"] == "2026-05-15"
+    # And it is the publish date, which is why: same value in both labels.
+    assert LAND_FOR_SALE["overview"]["تاريخ النشر"] == LAND_FOR_SALE["details"]["سنة البناء"]
+    src = Path(nofodh.__file__).read_text(encoding="utf-8")
+    for banned in ("parse_property_age", "age_from_completion_year", "exact_age",
+                   "age_from_labelled_prose"):
+        assert banned not in src, f"{banned} must not be reachable — «سنة البناء» is not an age"
+
+
+def test_no_amenity_is_ever_written_for_this_platform():
+    """The platform publishes NO amenity anywhere: a unit page has no features section at all.
+
+    The only feature words on the page are the site-wide filter dialog's «تشطيب مميز» /
+    «واجهات عصرية ومودرن», which describe the FILTER, not the listing. So every amenity column stays
+    absent — never False. This is the aldarim/abwbna incident's shape (a source that said nothing
+    stored as "this property has no balcony"), guarded ahead of time rather than after.
+    """
+    row, _ = _row(LAND_FOR_SALE)
+    for amenity in ("elevator", "furnished", "kitchen", "maid_room", "driver_room", "car_entrance",
+                    "extension", "electricity", "water_supply", "sanitation", "optical_fibers",
+                    "balcony_terrace", "air_conditioner", "private_entrance", "villa_on_roof",
+                    "laundry_room", "separate_electricity_meter", "separate_water_meter"):
+        assert amenity not in row, f"{amenity} was written, but the source never states it"
+    assert False not in row.values(), "no column may carry a manufactured negative"
+    # The shared text-amenity helper must not be wired in either — there is no text to read.
+    assert "amenities_from_text" not in Path(nofodh.__file__).read_text(encoding="utf-8")
+
+
 # ── PDPL ────────────────────────────────────────────────────────────────────────────────────────
 def test_a_poisoned_record_leaks_no_contact_detail_anywhere():
     """Every nofodh page carries «920029555» and «info@nofodh.sa» in its footer and JSON-LD.

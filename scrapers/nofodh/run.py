@@ -200,6 +200,11 @@ SITEMAP = f"{BASE}/sitemap.xml"
 SOURCE = "نفوذ للاستثمار العقاري"
 PREFIX = "NFD"
 SLUG = "nofodh"
+# Spelled out as LITERALS, never f"{SLUG}_…": test_check_tables_wiring reads these statically to
+# prove a scraper's end_run(check_tables=…) can only ever point at its OWN platform's tables, and an
+# f-string is invisible to that check. (It caught this file doing exactly that.)
+RES_TABLE = "nofodh_residential_listings"
+COM_TABLE = "nofodh_commercial_listings"
 
 # ── THE SOURCE'S OWN VOCABULARIES, read off its own «حالة البيع» / «النوع» filter checkboxes ──────
 # The filter renders the complete enum, so these lists are the platform's, not ours.
@@ -926,10 +931,10 @@ def main() -> int:
                       f"pk={r0.get('parking')} ph={len(r0.get('photo_urls') or [])} "
                       f"t={r0.get('title')}")
             return 0
-        db._wasalt_batch(f"{SLUG}_residential_listings", res)
-        db._wasalt_batch(f"{SLUG}_commercial_listings", com)
+        db._wasalt_batch(RES_TABLE, res)
+        db._wasalt_batch(COM_TABLE, com)
         superseded = db.retire_superseded_siblings(
-            res_table=f"{SLUG}_residential_listings", com_table=f"{SLUG}_commercial_listings",
+            res_table=RES_TABLE, com_table=COM_TABLE,
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
             source=SOURCE)
         if superseded:
@@ -937,8 +942,8 @@ def main() -> int:
         pruned = 0
         if args.type == "all" and complete:
             verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
-            for tbl, rows in ((f"{SLUG}_residential_listings", res),
-                              (f"{SLUG}_commercial_listings", com)):
+            for tbl, rows in ((RES_TABLE, res),
+                              (COM_TABLE, com)):
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
                                     verify_gone=verify_gone)
                 if n < 0:
@@ -950,8 +955,8 @@ def main() -> int:
         healthy = db.end_run(run_id, ok=True, rows_seen=len(ids),
                              rows_upserted=len(res) + len(com),
                              notes=f"pruned={pruned} complete={complete} {notes}"[:300],
-                             check_tables=[f"{SLUG}_residential_listings",
-                                           f"{SLUG}_commercial_listings"])
+                             check_tables=["nofodh_residential_listings",
+                                           "nofodh_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard", flush=True)
             return 1
