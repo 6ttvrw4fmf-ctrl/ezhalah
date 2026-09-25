@@ -95,7 +95,7 @@ as $function$
 $function$;
 
 comment on function public.aqar_classify_shadow_drift() is
-  'Classifies every aqar_shadow_resolved row that disagrees with a fresh re-run of resolve_aqar_locations() into PROVEN_WRONG / SOURCE_CONFLICT / AMBIGUOUS / GOVERNORATE, using the listing''s own neighborhood field matched against loc_catalog_district as per-row evidence. See migration 20260925175109 for the full method and the 2026-09-25 audit.';
+  'Classifies every aqar_shadow_resolved row that disagrees with a fresh re-run of resolve_aqar_locations() into PROVEN_WRONG / SOURCE_CONFLICT / AMBIGUOUS / GOVERNORATE, using the listing''s own neighborhood field matched against loc_catalog_district as per-row evidence. See migration 20260925193000 for the full method and the 2026-09-25 audit.';
 
 -- ── Detector 1: unambiguous new drift (must be 0 - this is a real bug when it fires) ────────────
 create or replace function public.mon_detect_aqar_proven_wrong_resolution()
