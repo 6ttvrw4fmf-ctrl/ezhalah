@@ -69,6 +69,8 @@ class _Args:
     shards = 1
     shard = 0
     limit = 0
+    control_n = 30
+    control_min_live = 0.90
 
 
 def _cohort_response(rows_by_table):
@@ -80,8 +82,12 @@ def _cohort_response(rows_by_table):
     return fake_execute
 
 
-def _install(monkeypatch, *, cohort_rows, verdicts_by_id):
-    """verdicts_by_id: {listing_id: ('live'|'dead'|'failed', head_status, get_status)}"""
+CONTROL_IDS = range(900001, 900031)
+
+
+def _install(monkeypatch, *, cohort_rows, verdicts_by_id, control_verdict="live"):
+    """verdicts_by_id: {listing_id: ('live'|'dead'|'failed', head_status, get_status)}
+    control_verdict: what the 30 known-live control rows come back as."""
     writes: dict = {"repair_fresh_strike": {}, "repair_reset_unproven": {}, "touch_alive": {},
                     "pilot_detail": {}, "liveness_runs": {}}
 
@@ -110,6 +116,10 @@ def _install(monkeypatch, *, cohort_rows, verdicts_by_id):
     def fake_execute(builder, what=None, **kw):
         if what and what.endswith(".repair_backlog_cohort"):
             return cohort_fn(builder, what=what)
+        if what == "wasalt_residential_listings.repair_control":
+            return _Resp([ROW("wasalt_residential_listings", i, 0) for i in CONTROL_IDS])
+        if what == "wasalt_commercial_listings.repair_control":
+            return _Resp([])
         if what and what.endswith(".repair_fresh_strike"):
             writes["repair_fresh_strike"].setdefault("calls", 0)
             writes["repair_fresh_strike"]["calls"] += 1
@@ -134,6 +144,10 @@ def _install(monkeypatch, *, cohort_rows, verdicts_by_id):
 
     def fake_check_hybrid(row):
         tbl, lid, url, cur = row
+        writes.setdefault("checked_ids", []).append(lid)
+        if lid in CONTROL_IDS:
+            return (tbl, lid, cur, control_verdict, True, 1000, None,
+                    {"live": 200, "dead": 404}.get(control_verdict))
         verdict, hc, gc = verdicts_by_id[lid]
         used_get = verdict != "live" or gc is not None
         return (tbl, lid, cur, verdict, used_get, 1000, hc, gc)
@@ -209,35 +223,67 @@ def test_a_mixed_realistic_cohort_writes_exactly_the_three_buckets(monkeypatch):
     assert "active" not in str(writes)
 
 
-# ── 2. The degenerate-checker guard: skip the writes, but there was never a kill to skip ──────────
+# ── 2. Checker health: a known-live control group, not a dead-percentage ────────────────────────
+# Production pilot run 36111901590 (2026-09-25): 141 of 150 backlog rows came back as real HTTP 404s
+# with the 211KB dead-page signature. The old ">90% dead in a batch" rule read that as a broken
+# checker and skipped both batches, leaving every row at missing_count>=grace — the state CLOSEST to
+# deactivation, because every write this mode can make lowers a strike count.
 
-def test_overwhelmingly_dead_result_skips_writes_entirely(monkeypatch):
-    """30 rows, 29 come back dead — reads as a broken checker (or a genuinely collapsed source),
-    not 29 independently confirmed deaths. The guard must still hold even though nothing here could
-    ever deactivate anyone — writing 29 fresh strikes off a checker that might be lying is itself not
-    something to trust."""
-    rows = {"wasalt_residential_listings": [
-        ROW("wasalt_residential_listings", i) for i in range(1, 31)
-    ]}
+def _mostly_dead_cohort():
+    rows = {"wasalt_residential_listings": [ROW("wasalt_residential_listings", i) for i in range(1, 31)]}
     verdicts = {i: ("dead", 404, 404) for i in range(1, 30)}
     verdicts[30] = ("live", 200, None)
+    return rows, verdicts
+
+
+def test_a_genuinely_dead_backlog_gets_its_fresh_strikes_when_the_control_is_healthy(monkeypatch):
+    rows, verdicts = _mostly_dead_cohort()
     writes = _install(monkeypatch, cohort_rows=rows, verdicts_by_id=verdicts)
 
     rc = run_repair_clock_bug_backlog(_Args())
 
-    assert rc == 1, "a degenerate read must report non-zero, even with nothing to roll back"
+    assert rc == 0
+    assert writes["repair_fresh_strike"].get("calls", 0) == 1, (
+        "29 real 404s behind a healthy control were skipped — they stay at missing_count>=grace and "
+        "the next ordinary confirm deactivates them, which is what this mode exists to prevent")
+    assert writes["touch_alive"].get("calls", 0) == 1
+    assert "active" not in str(writes)
+
+
+def test_a_checker_that_calls_known_live_rows_dead_writes_nothing(monkeypatch):
+    rows, verdicts = _mostly_dead_cohort()
+    writes = _install(monkeypatch, cohort_rows=rows, verdicts_by_id=verdicts, control_verdict="dead")
+
+    rc = run_repair_clock_bug_backlog(_Args())
+
+    assert rc == 1
     assert writes["repair_fresh_strike"].get("calls", 0) == 0
     assert writes["touch_alive"].get("calls", 0) == 0
     assert writes["repair_reset_unproven"].get("calls", 0) == 0
+    assert not set(writes["checked_ids"]) - set(CONTROL_IDS), "cohort rows were checked after a failed control"
+    assert "control_failed" in writes["wasalt_liveness_runs"][0]["notes"]
 
 
-def test_small_cohorts_are_never_treated_as_degenerate():
-    """The guard's own floor (decided >= 20) must not fire on a tiny, ordinary-looking cohort — a
-    handful of real dead listings is not a broken checker."""
-    from scrapers.wasalt.liveness import run_repair_clock_bug_backlog as _f  # noqa: F401
-    # Exercised via the mixed-cohort test above (7 dead of 30) already passing rc == 0; this test
-    # documents the boundary explicitly for the reader rather than re-deriving it.
-    assert 7 <= 0.9 * (20 + 7)  # 7 is nowhere near 90% of 27 decided — sanity-checks the threshold
+def test_a_blocked_checker_fails_the_control_and_writes_nothing(monkeypatch):
+    rows, verdicts = _mostly_dead_cohort()
+    writes = _install(monkeypatch, cohort_rows=rows, verdicts_by_id=verdicts, control_verdict="failed")
+
+    assert run_repair_clock_bug_backlog(_Args()) == 1
+    assert writes["repair_reset_unproven"].get("calls", 0) == 0
+    assert writes["repair_fresh_strike"].get("calls", 0) == 0
+
+
+def test_an_overwhelmingly_failed_batch_is_skipped(monkeypatch):
+    """The old clause required decided>=20, which a >90%-failed batch of 100 can never reach."""
+    rows = {"wasalt_residential_listings": [ROW("wasalt_residential_listings", i) for i in range(1, 101)]}
+    verdicts = {i: ("failed", None, None) for i in range(1, 96)}
+    verdicts.update({i: ("dead", 404, 404) for i in range(96, 101)})
+    writes = _install(monkeypatch, cohort_rows=rows, verdicts_by_id=verdicts)
+
+    assert run_repair_clock_bug_backlog(_Args()) == 1
+    assert writes["repair_reset_unproven"].get("calls", 0) == 0, "a no-answer batch reset its strikes"
+    assert writes["repair_fresh_strike"].get("calls", 0) == 0
+    assert writes["pilot_detail"].get("calls", 0) == 1, "evidence is still written for a skipped batch"
 
 
 # ── 3. Structural guarantee: grep the function's own source for 'active' as a write key ──────────
@@ -334,8 +380,8 @@ def test_a_degenerate_batch_does_not_poison_a_later_healthy_batch(monkeypatch):
     rows = {"wasalt_residential_listings": [
         ROW("wasalt_residential_listings", i) for i in range(1, 201)
     ]}
-    verdicts = {i: ("dead", 404, 404) for i in range(1, 100)}   # batch 1: 99 dead, 1 live -> degenerate
-    verdicts[100] = ("live", 200, None)
+    verdicts = {i: ("failed", None, None) for i in range(1, 96)}   # batch 1: 95 failed -> degenerate
+    verdicts.update({i: ("dead", 404, 404) for i in range(96, 101)})
     verdicts.update({i: ("live", 200, None) for i in range(101, 201)})  # batch 2: all live -> healthy
     writes = _install(monkeypatch, cohort_rows=rows, verdicts_by_id=verdicts)
 
@@ -344,6 +390,7 @@ def test_a_degenerate_batch_does_not_poison_a_later_healthy_batch(monkeypatch):
     assert rc == 1, "at least one degenerate batch must still be reported"
     assert writes["repair_fresh_strike"].get("calls", 0) == 0, "the degenerate first batch must not " \
         "write its dead verdicts as fresh strikes"
+    assert writes["repair_reset_unproven"].get("calls", 0) == 0
     assert writes["touch_alive"].get("calls", 0) == 1, "the second, healthy batch's live verdicts " \
         "must still be self-healed — one bad batch must not poison a later good one"
 
@@ -369,7 +416,8 @@ def test_sharding_partitions_a_fixed_cohort_with_no_overlap_and_no_gap(monkeypat
 
         def wrapped(row, _current=current, _seen=seen):
             res = _current(row)
-            _seen.add(res[1])
+            if res[1] not in CONTROL_IDS:
+                _seen.add(res[1])
             return res
         monkeypatch.setattr(liveness, "check_hybrid", wrapped)
 
