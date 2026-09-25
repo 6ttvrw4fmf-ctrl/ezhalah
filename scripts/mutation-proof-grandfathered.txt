@@ -102,7 +102,6 @@ verify-aqar-category-coverage.ts
 verify-aqar-city-slug-scope.ts
 verify-aqar-labeled-total-beats-subfloor.ts
 verify-aqar-ppm-card-display.ts
-verify-aqar-price-artifact-write-guard.ts
 verify-aqar-trigger-preserves-source-ppm.ts
 verify-arabic-summary-fallback.ts
 verify-auth-popup.ts
