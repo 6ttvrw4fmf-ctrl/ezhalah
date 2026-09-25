@@ -2488,3 +2488,10 @@ def upsert_flow_residential_batch(rows: list[dict[str, Any]]) -> None:
 
 def upsert_flow_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("flow_commercial_listings", rows)
+
+def upsert_abaad_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("abaad_residential_listings", rows)
+
+
+def upsert_abaad_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("abaad_commercial_listings", rows)
