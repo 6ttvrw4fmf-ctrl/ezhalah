@@ -462,6 +462,12 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
     return "unknown", f"REST {r.status_code}"
 
 
+def revisit_verify():
+    """scrapers/common/fleet_revisit.py hook: the same oracle prune_unseen consults. The revisit job
+    only ever stamps a 'live' answer; a 'gone' is counted there, never acted on."""
+    return _verify_gone
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--limit-test", type=int, default=0,
