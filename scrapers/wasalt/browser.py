@@ -358,7 +358,16 @@ def hard_deadline_s() -> float:
 _NO_ANSWER: tuple[Optional[dict], Optional[int], int] = (None, None, 0)
 
 
+def _take_fail_reasons() -> dict:
+    out = dict(_fail_reasons)
+    _fail_reasons.clear()
+    return out
+
+
 def _bounded_child(conn, factory) -> None:
+    # The failure tally is what run.py persists to scrape_runs.notes; it is counted here, in the
+    # child, so each reply carries the new counts back and the parent's tally stays complete.
+    _fail_reasons.clear()
     fetcher = factory() if factory is not None else BrowserFetcher()
     try:
         while True:
@@ -368,10 +377,12 @@ def _bounded_child(conn, factory) -> None:
                 return
             if url is None:
                 return
+            method, url = url
             try:
-                conn.send(("ok", fetcher.page_data(url)))
+                out = getattr(fetcher, method)(url)
+                conn.send(("ok", out, _take_fail_reasons()))
             except Exception as e:
-                conn.send(("error", f"{type(e).__name__}: {str(e)[:300]}"))
+                conn.send(("error", f"{type(e).__name__}: {str(e)[:300]}", _take_fail_reasons()))
     finally:
         try:
             fetcher.close()
@@ -422,25 +433,32 @@ class BoundedBrowserFetcher:
                 pass
 
     def page_data(self, url: str) -> tuple[Optional[dict], Optional[int], int]:
+        return self._call("page_data", url, _NO_ANSWER)
+
+    def next_data(self, url: str) -> Optional[dict]:
+        return self._call("next_data", url, None)
+
+    def _call(self, method: str, url: str, no_answer):
         if self._proc is None or not self._proc.is_alive():
             self._discard()
             self._start()
         try:
-            self._conn.send(url)
+            self._conn.send((method, url))
             if not self._conn.poll(self.deadline_s):
                 self.deadline_kills += 1
                 print(f"   ⏱ wasalt browser: no answer within {self.deadline_s:.0f}s — killed the "
                       f"browser process, row counts as no answer (never dead)", flush=True)
                 _record_failure("hard_deadline")
                 self._discard()
-                return _NO_ANSWER
-            kind, payload = self._conn.recv()
+                return no_answer
+            kind, payload, child_fails = self._conn.recv()
+            _fail_reasons.update(child_fails)
         except (EOFError, OSError) as e:
             self.child_failures += 1
             print(f"   ⚠ wasalt browser process died mid-call: {type(e).__name__}", flush=True)
             _record_failure("browser_process_died")
             self._discard()
-            return _NO_ANSWER
+            return no_answer
         if kind == "ok":
             return payload
         # A raise leaves the child's browser in an unknown state; a fresh one is cheaper than a
@@ -449,7 +467,7 @@ class BoundedBrowserFetcher:
         print(f"   ⚠ wasalt browser raised: {payload}", flush=True)
         _record_failure("page_data_raised")
         self._discard()
-        return _NO_ANSWER
+        return no_answer
 
     def close(self) -> None:
         if self._proc is not None and self._conn is not None:
