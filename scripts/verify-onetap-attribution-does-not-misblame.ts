@@ -34,9 +34,20 @@ const check = (m: string, cond: boolean) => { if (cond) ok(m); else { console.er
 const mustCatch = check;
 
 // ── 1. THE EXACT MEASURED SHAPES ────────────────────────────────────────────────────────────────
-const CTA_MEASURED = { winnerIsSheet: false, sheetNow: '668-812', top: 587, bottom: 606, winner: 'DIV' };
-const COMPOSER_MEASURED = { winnerIsSheet: false, sheetNow: '668-812', top: 557, bottom: 579, winner: 'DIV' };
-const REAL_ONETAP_BLOCK = { winnerIsSheet: true, sheetNow: '668-812', top: 700, bottom: 720, winner: 'IFRAME#credential_picker_iframe' };
+// `selfIndex` is the painted-stack position of the control itself: 0 owns its centre, > 0 means
+// something paints ABOVE it (genuinely covered), -1 means it is absent from the stack entirely
+// (CLIPPED, not covered — ops_incident #377). These three fixtures all encode the precondition they
+// always assumed, "the control is blocked by something painted over it", which is selfIndex > 0.
+const CTA_MEASURED = { winnerIsSheet: false, sheetNow: '668-812', top: 587, bottom: 606, winner: 'DIV', selfIndex: 1 };
+const COMPOSER_MEASURED = { winnerIsSheet: false, sheetNow: '668-812', top: 557, bottom: 579, winner: 'DIV', selfIndex: 1 };
+const REAL_ONETAP_BLOCK = { winnerIsSheet: true, sheetNow: '668-812', top: 700, bottom: 720, winner: 'IFRAME#credential_picker_iframe', selfIndex: 1 };
+// THE CASE THAT USED TO BE FILED AS A COVER (routine #6, 2026-09-25). ops_incident #377 measured it:
+// a control clipped out of the app's shortened content box has a rect but is not painted, so it is
+// absent from the stack — `elementsFromPoint(135,287)` returned `[card, root, root]` with the tab
+// absent, while reading only `stack[0]` named the card and filed a DEFECT.
+const CLIPPED_MEASURED = { winnerIsSheet: false, sheetNow: '558-812', top: 269, bottom: 305, winner: 'DIV.css-g5y9jx', selfIndex: -1 };
+// A probe that forgot to report membership: an UNKNOWN, which must not become a confident cover.
+const UNREPORTED = { winnerIsSheet: false, sheetNow: '558-812', top: 269, bottom: 305, winner: 'DIV' };
 
 const ctaResult = classifyBlockedControl(CTA_MEASURED, 'بحث');
 check('the measured «بحث» shape (sheet 668-812, control 587-606, no overlap) is NOT attributed to One Tap',
@@ -52,6 +63,27 @@ const realResult = classifyBlockedControl(REAL_ONETAP_BLOCK, 'بحث');
 check('a genuine One Tap block (the sheet really is in the hit-test stack) IS still called a One Tap regression',
   realResult.what === 'the One Tap prompt is covering «بحث»');
 check('…this is not a vacuous rule that never fires FOR One Tap either', realResult.what.includes('One Tap'));
+
+// ── 1b. CLIPPED IS NOT COVERED, AND AN UNREPORTED STACK IS NOT A VERDICT ───────────────────────
+const clipped = classifyBlockedControl(CLIPPED_MEASURED, 'تصفية');
+check('a control ABSENT from the painted stack is called CLIPPED, not covered',
+  clipped.isClipped === true && clipped.what.includes('CLIPPED') && !clipped.what.includes('covering'));
+check('…and it is not attributed to One Tap either', clipped.isOneTap === false);
+check('…and the detail hands the caller the only question left: reachability',
+  clipped.detail.includes('Reachability') && clipped.detail.includes('#377'));
+// The distinction has to be REAL: the same geometry with the control genuinely painted over must
+// still produce a cover finding, or this is a rule that excuses every failure.
+const coveredSameGeometry = classifyBlockedControl({ ...CLIPPED_MEASURED, selfIndex: 2 }, 'تصفية');
+check('the SAME rects with the control merely painted under something IS still a cover finding',
+  !coveredSameGeometry.isClipped && coveredSameGeometry.what.includes('covering'));
+// And a One Tap block must survive the new branch rather than be swallowed by it.
+check('a genuine One Tap cover is unaffected by the clipped branch',
+  classifyBlockedControl(REAL_ONETAP_BLOCK, 'بحث').isOneTap === true);
+const unreported = classifyBlockedControl(UNREPORTED, 'تصفية');
+check('a probe that did not report membership yields NO verdict, not a free cover finding',
+  unreported.isUnreported === true && !unreported.what.includes('covering') && !unreported.isClipped);
+check('…and it says to fix the probe rather than dressing the gap up as a product finding',
+  unreported.detail.includes('Fix the probe'));
 
 // ── 2. MUTATION: the exact pre-fix behaviour is proven to misattribute ──────────────────────────
 // The old code's whole decision was `!isSelf` alone — it never consulted winnerIsSheet at all.

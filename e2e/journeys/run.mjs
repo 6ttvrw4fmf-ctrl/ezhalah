@@ -13,7 +13,7 @@ import { withPage, settle, bodyText, storedHistory, clickText, clickReason, slee
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
-         SELECTED_CITY_MARKER, isBottomDocked } from './harness.mjs';
+         SELECTED_CITY_MARKER, isBottomDocked, dockedBandCap } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -1526,18 +1526,47 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     // answers "did the sheet win this tap" is whether the TESTED POINT falls inside the sheet's own
     // rect, exactly the two numbers this journey already prints side by side in every finding.
     const winnerIsSheet = !!q && q.height > 0 && cy >= q.top && cy <= q.bottom && cx >= q.left && cx <= q.right;
+    // THE WHOLE STACK, NOT stack[0]. `elementsFromPoint(...)[0]` is by definition what
+    // `elementFromPoint` returns, so reading only the top was the singular question PART 5 shape 13
+    // forbids here — dressed as the plural form, and therefore invisible to
+    // verify-ownership-probes-use-the-painted-stack.ts, whose §1 discovers by CALL SHAPE.
+    //   selfIndex === -1  the control is ABSENT from the painted stack ⇒ CLIPPED, not covered
+    //   selfIndex === 0   the control owns its own centre ⇒ clear
+    //   selfIndex > 0     something paints above it ⇒ genuinely covered
+    // ops_incident #377 measured the first case being filed as the third.
+    const selfIndex = stack.findIndex((n) => n === el || n.contains(el) || el.contains(n));
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), sheetNow,
              winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}${t.className && typeof t.className === 'string' ? '.' + t.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}` : null,
-             isSelf: !!t && (t === el || t.contains(el) || el.contains(t)),
+             isSelf: selfIndex === 0,
+             selfIndex,
              winnerIsSheet };
   }, { s: sel, sheetSel: SHEET_SEL });
 
   /** Turn a failed hit-test into the RIGHT finding via the pure, mutation-proven classifier in
    *  harness.mjs — One Tap's own class if the sheet is really the blocker, or an honest "some other
-   *  overlay" finding otherwise. Never the wrong one asserted with confidence. */
-  const reportBlocked = (journeyName, controlLabel, r) => {
-    const { what, detail } = classifyBlockedControl(r, controlLabel);
-    defect(journeyName, what, detail);
+   *  overlay" finding otherwise. Never the wrong one asserted with confidence.
+   *
+   *  A CLIPPED control is not a blocked one, and that case is now RESOLVED BY REACHABILITY rather
+   *  than filed on geometry (ops_incident #377): the control is absent from the painted stack, so
+   *  the only question left is whether a person can still get to it. Scroll it into view and click
+   *  it the way a user would — if that lands, the reservation was doing its job and this is a PASS
+   *  with the numbers printed; if it does not, the control really is unreachable and that IS a
+   *  defect, filed with the reason. Either way the outcome is explicit, never a silent drop
+   *  (PART 9.5: a run that asserted nothing is not a pass). */
+  const reportBlocked = async (page, journeyName, controlLabel, r, loc) => {
+    const { what, detail, isClipped } = classifyBlockedControl(r, controlLabel);
+    if (!isClipped) { defect(journeyName, what, detail); return; }
+    let err = null;
+    await loc.scrollIntoViewIfNeeded().catch((e) => { err = `scrollIntoViewIfNeeded: ${String(e).split('\n')[0]}`; });
+    if (!err) await loc.click({ timeout: 10_000 }).catch((e) => { err = String(e).split('\n')[0]; });
+    if (err) {
+      defect(journeyName, `«${controlLabel}» is clipped out of view AND cannot be reached`,
+        `${detail} || scrolling to it and clicking it failed: ${err}`);
+    } else {
+      pass(journeyName, `«${controlLabel}» (${r.top}-${r.bottom}) is clipped by the app's reserved band `
+        + `(absent from the painted stack at its centre, which holds ${r.winner}) but a real scroll+click `
+        + `still reaches it — the reservation working, not an overlay covering it (ops_incident #377)`);
+    }
   };
 
   await withPage({ mobile }, async (page, bag) => {
@@ -1563,7 +1592,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const ms = await winnerAt(page, 'modeswitch');
     if (ms.missing) skip(`${name}/modeswitch`, '«تصفية» not rendered');
     else if (!ms.isSelf) {
-      reportBlocked(`${name}/modeswitch`, 'تصفية', ms);
+      await reportBlocked(page, `${name}/modeswitch`, 'تصفية', ms, page.getByText('تصفية', { exact: true }).first());
     } else {
       let msErr = null;
       await page.getByText('تصفية', { exact: true }).first().click({ timeout: 10_000 })
@@ -1590,7 +1619,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     if (cta.skipCta) { /* handled above — fall through to the mode-switch check */ }
     else if (cta.missing) { skip(name, '«بحث» not rendered'); }
     else if (!cta.isSelf) {
-      reportBlocked(name, 'بحث', cta);
+      await reportBlocked(page, name, 'بحث', cta, page.getByText('بحث', { exact: true }).first());
     } else {
       // Not just the hit test — a REAL click must land (PART 9.2 (4)).
       let err = null;
@@ -1616,7 +1645,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const comp = await winnerAt(page, 'composer');
     if (comp.missing) { skip(`${name}/composer`, 'no composer on this screen'); return; }
     if (!comp.isSelf) {
-      reportBlocked(`${name}/composer`, 'the AI Agent composer', comp);
+      await reportBlocked(page, `${name}/composer`, 'the AI Agent composer', comp, page.locator('textarea').first());
     } else {
       pass(`${name}/composer`, `composer (${comp.top}-${comp.bottom}) is clear of the prompt (now ${comp.sheetNow})`);
     }
@@ -1777,22 +1806,39 @@ JOURNEYS['docked-prompts-stack'] = async (mobile) => withPage({ mobile }, async 
 
   if (!after.card) { skip(name, 'the consent card disappeared while the second prompt was docked'); return; }
 
+  // WHAT THIS JOURNEY IS ALLOWED TO CONCLUDE, corrected by routine #6, 2026-09-25.
+  //
+  // It used to file a DEFECT on `after.reserved < before.reserved` — any DECREASE in the reservation —
+  // before asking whether the BAND had decreased with it. That fired 2/2 against healthy production
+  // on the 2026-09-25 sweep, and the failure text refuted itself in its own arithmetic: reserved
+  // 526 → 416 with the card moving 286-558 → 396-668, i.e. a band of 812-396 = 416 covered by a
+  // reservation of exactly 416, printed as «0px of app content is now under an opaque card». A
+  // smaller reservation for a smaller band is the inset working, not ops_incident #201 recurring:
+  // the synthetic 144px prompt is shorter than the real One Tap sheet it displaced, so the whole
+  // docked stack got shorter and the correct reservation got shorter with it.
+  //
+  // Same CLASS as ops_incident #593 (`r.y < 80`) and the 660 literal beside it: an ABSOLUTE
+  // comparison standing in for an inherently RELATIVE question. The question #201 actually asks is
+  // «does the reservation still COVER the band the card occupies», and that is what is asserted —
+  // once, on coverage. A shrink is reported as CONTEXT in both outcomes so it stays visible in the
+  // log without being mistaken for a verdict.
   const band = after.vh - after.card.top;           // what the card now occupies, from its top down
-  if (after.reserved < before.reserved) {
-    defect(name, 'a SECOND docked prompt SHRANK the reservation the first one had earned',
-      `root reserved ${before.reserved}px → ${after.reserved}px; the card moved `
-      + `${before.card.top}-${before.card.bottom} → ${after.card.top}-${after.card.bottom}, so `
-      + `${band - after.reserved}px of app content is now under an opaque card. ops_incident #201.`);
-  } else if (after.reserved + 1 < Math.min(band, Math.floor(after.vh * 0.5))) {
-    // Not a shrink, but still short of the band the card occupies (allowing the documented 50% cap).
-    defect(name, 'the reservation does not cover the band the consent card occupies',
-      `root reserved ${before.reserved}px → ${after.reserved}px, but the card occupies ${band}px from `
-      + `${after.card.top} down (cap ${Math.floor(after.vh * 0.5)}px), so `
-      + `${Math.min(band, Math.floor(after.vh * 0.5)) - after.reserved}px of app content is under an `
-      + `opaque card. ops_incident #201.`);
+  const need = Math.min(band, dockedBandCap(after.vh));
+  const shrank = after.reserved < before.reserved;
+  const moved = `root reserved ${before.reserved}px → ${after.reserved}px; the card moved `
+    + `${before.card.top}-${before.card.bottom} → ${after.card.top}-${after.card.bottom} (band ${band}px, `
+    + `cap ${dockedBandCap(after.vh)}px, so ${need}px is owed)`;
+  if (after.reserved + 1 < need) {
+    // The two shapes are named apart, because they point at different code: a reservation that
+    // SHRANK while the band did not is #201's signature (a prompt resting on another prompt stopped
+    // being admitted); one that simply never covered the band is the single-prompt arithmetic.
+    defect(name, shrank
+      ? 'a SECOND docked prompt SHRANK the reservation below the band the card still occupies'
+      : 'the reservation does not cover the band the consent card occupies',
+      `${moved}, so ${need - after.reserved}px of app content is under an opaque card. ops_incident #201.`);
   } else {
-    pass(name, `a second docked prompt grew the reservation ${before.reserved}px → ${after.reserved}px `
-      + `(card ${after.card.top}-${after.card.bottom}), so nothing lays out under it`);
+    pass(name, `a second docked prompt left the reservation covering the card's band — ${moved}`
+      + `${shrank ? ' (it shrank, correctly: the docked stack itself got shorter)' : ''}`);
   }
   bag.ok = true;
 });

@@ -28,7 +28,8 @@
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { type Voice } from 'expo-speech';
-import { pickBestArabicVoice, shouldForcePauseFallback } from '@/lib/readAloudVoice';
+import { pickBestArabicVoice, shouldForcePauseFallback, readAloudRefusalVerdict,
+         type ReadAloudRefusal } from '@/lib/readAloudVoice';
 
 const AR_LANG = 'ar-SA';
 // CHATGPT-LIKE PACING (owner 2026-08-19 — "don't assume slower is correct, compare against
@@ -567,11 +568,27 @@ export function cycleReadAloudRate(): number {
 }
 
 // Synchronous snapshot for callers that want to show a hint before the user even taps (optional —
-// FeedbackRow currently reacts to speakReadAloud's return value instead, which covers the same
-// "genuinely unavailable" case without needing a second subscription).
+// FeedbackRow reacts to readAloudRefusal() after a refused tap instead, which covers the same cases
+// without needing a second subscription).
 export function isReadAloudVoiceConfirmed(): boolean {
   return !!bestArabicVoice;
 }
 export function isReadAloudDefinitelyUnavailable(): boolean {
   return voiceCheckExhausted && !bestArabicVoice;
+}
+
+// WHY a tap refused — 'no-voice-on-device' vs 'still-resolving'. The decision itself is the pure
+// `readAloudRefusalVerdict` in readAloudVoice.ts (see its note for the measurement and for why it
+// lives there); this is only the live module state being handed to it, so there is exactly one
+// definition of the rule and a barrier can execute the real one.
+//
+// The old boolean from speakReadAloud() is deliberately NOT what the UI branches on any more: a
+// boolean cannot distinguish "this device has no Arabic voice" from "I am still looking", and for
+// the ~45s RETRY_WINDOW_MS after load those are different facts. Keeping the boolean return means
+// every existing caller still works unchanged; this only tells an already-refused caller why.
+export function readAloudRefusal(): ReadAloudRefusal {
+  return readAloudRefusalVerdict({
+    voiceConfirmed: !!bestArabicVoice,
+    checkExhausted: voiceCheckExhausted,
+  });
 }

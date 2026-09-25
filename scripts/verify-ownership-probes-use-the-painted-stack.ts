@@ -117,6 +117,64 @@ console.log('§1 every singular elementFromPoint in e2e/ is discovered by shape 
     check(`the registry entry for ${file} still describes a real call site (not stale)`, !!found[file]);
   }
 
+  // ── §1b · CALLING THE PLURAL FORM IS NOT ASKING THE PLURAL QUESTION ───────────────────────────
+  // routine #6, 2026-09-25. §1 above discovers by CALL SHAPE, matching `.elementFromPoint(`. That
+  // leaves the same question askable in a spelling it cannot see: take the PLURAL stack, then read
+  // only `stack[0]` — which is, by definition, exactly what the singular form returns.
+  //
+  // MEASURED, not hypothetical. `onetap-clear-of-controls` did this, in the very function whose
+  // comment claims «`elementsFromPoint` (PLURAL), not `elementFromPoint`» as a virtue:
+  //     const stack = document.elementsFromPoint(cx, cy);
+  //     const t = stack[0] || null;
+  //     isSelf: !!t && (t === el || t.contains(el) || el.contains(t))
+  // so a control CLIPPED out of the app's shortened content box — absent from the painted stack
+  // entirely, which is ops_incident #377's whole finding — was indistinguishable from one genuinely
+  // covered, and the journey filed «an overlay is covering «بحث»» 2/2 on the 2026-09-25 production
+  // sweep. §1 stayed green throughout. The PART 1.11 shape, one level down: a pointer reads as
+  // coverage.
+  //
+  // WHAT IS ASSERTED, and why it is not a ban on `[0]`. Reading the top of the stack to NAME what is
+  // there is a description, and a good failure message needs it — three sites in this repo do
+  // exactly that and are right to. The invariant is not "never index 0"; it is that a probe deciding
+  // ownership must compute MEMBERSHIP OVER THE WHOLE STACK. So this requires, per call site, that
+  // the stack the call returns is interrogated with findIndex/some/includes/indexOf — the only forms
+  // that can answer "is the control in here at all". A site that binds the stack and never asks is
+  // the violation, and that is precisely what the defect looked like.
+  //
+  // PER CALL SITE, never per file: run.mjs holds six of these, and a per-file check would let one
+  // bad site hide behind five good ones — the neighbourhood flaw AGENTS.md names for the RPC
+  // ratchet, where proximity stood in for a per-call fact.
+  console.log('§1b every elementsFromPoint site asks MEMBERSHIP over the stack, not just its top');
+  {
+    const MEMBERSHIP = /\.(findIndex|some|includes|indexOf)\s*\(/;
+    let sites = 0, bad = 0;
+    for (const file of walk(join(ROOT, 'e2e'))) {
+      const rel = relative(ROOT, file);
+      const src = codeOnly(readFileSync(file, 'utf8'));
+      const re = /\bconst\s+(\w+)\s*=\s*[^;\n]*\.elementsFromPoint\s*\(/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(src))) {
+        sites++;
+        const name = m[1];
+        // The window after the binding, bounded so this stays a statement about THIS site.
+        const after = src.slice(m.index, m.index + 900);
+        const asksMembership = new RegExp(`\\b${name}\\s*${MEMBERSHIP.source}`).test(after)
+          // A for/of scan over the whole stack answers the same question.
+          || new RegExp(`for\\s*\\((?:const|let)\\s+\\w+\\s+of\\s+${name}\\b`).test(after);
+        if (!asksMembership) {
+          bad++;
+          console.error(`        ${rel}: the stack bound as «${name}» is never interrogated for membership `
+            + `— reading only its top is the singular question in plural clothing`);
+        }
+      }
+    }
+    console.log(`  discovered: ${sites} elementsFromPoint site(s)`);
+    check('every elementsFromPoint site was actually FOUND (a discovery that finds nothing cannot fail)',
+      sites > 0);
+    check(`every elementsFromPoint site asks membership over the whole stack (${sites - bad}/${sites})`,
+      bad === 0);
+  }
+
   // The two repaired probes, asserted positively: they must ASK with the plural form.
   const runner = readFileSync(join(ROOT, 'e2e/journeys/run.mjs'), 'utf8');
   const guardian = readFileSync(join(ROOT, 'e2e/guardian/journeys.mjs'), 'utf8');

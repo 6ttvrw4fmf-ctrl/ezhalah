@@ -869,6 +869,22 @@ export async function gotoOrRetryTransport(
 export const TOP_DOCK_ANCHOR_TOLERANCE = 32;
 /** Mirrors `MIN_SHEET_SPAN_FRACTION`: a docked SHEET spans the viewport; a corner CARD does not. */
 export const TOP_DOCK_MIN_SPAN_FRACTION = 0.8;
+
+/**
+ * Mirrors `MIN_APP_FRACTION` in `src/lib/bottomPromptInset.ts`: the app never reserves so much that
+ * less than this fraction of the viewport is left for its own content, so the combined docked band is
+ * capped at `floor(vh * (1 - MIN_APP_FRACTION))`.
+ *
+ * WHY IT IS HERE AND PINNED. `docked-prompts-stack` used to compute that cap as a retyped
+ * `floor(vh * 0.5)`. At 812px that is 406 rather than the app's 568 — the oracle was loose by 162px,
+ * so a genuine shortfall anywhere in (406, 568] would have passed. This is the retyped-constant
+ * hazard this repo keeps paying for (the smoke journey retyping INTERVIEW_STOP_AT; `r.y < 80` in
+ * ops_incident #593; the 660 literal beside it), so §D of
+ * `scripts/verify-journey-mobile-sidebar-oracle.ts` now asserts this and the span fraction above
+ * against the real values in `src/`, and turns RED if either drifts.
+ */
+export const APP_MIN_FRACTION = 0.3;
+export const dockedBandCap = (vh) => (vh > 0 ? Math.floor(vh * (1 - APP_MIN_FRACTION)) : 0);
 /** How deep below the content's top edge the top bar sits. The old absolute constant, now relative. */
 export const TOP_BAR_DEPTH = 80;
 
@@ -1061,7 +1077,50 @@ export function classifyTapOwnership(pts) {
 //
 // This is the decision alone, pulled out of the DOM-reading closure so it can be proven with plain
 // objects instead of a browser — the same precedent as `classifyTapOwnership` just above.
-export function classifyBlockedControl({ winnerIsSheet, sheetNow, top, bottom, winner }, controlLabel) {
+// A CONTROL ABSENT FROM THE PAINTED STACK IS CLIPPED, NOT COVERED (routine #6, 2026-09-25).
+//
+// ops_incident #377 settled this for `tap-targets-meet-44` and `classifyTapOwnership` above carries
+// the verdict. `onetap-clear-of-controls` never adopted it: it took the PLURAL
+// `document.elementsFromPoint(cx, cy)` and then read only `stack[0]`, which is by definition what
+// `elementFromPoint` returns — the singular question PART 5 shape 13 forbids for exactly this
+// question, asked in a form `scripts/verify-ownership-probes-use-the-painted-stack.ts` could not see,
+// because its §1 discovers `.elementFromPoint(` by CALL SHAPE. The rule was enforced as a class and
+// the class had a hole one level down, which is the PART 1.11 shape the spec keeps naming: a pointer
+// reads as coverage. The journey's own comment claimed the plural form as a virtue while its verdict
+// threw the rest of the stack away.
+//
+// The distinction is not cosmetic. A control clipped out of the app's shortened content box has a
+// rect but is NOT PAINTED, so it is absent from the stack entirely — #377 measured
+// `elementsFromPoint(135,287)` returning `[card, root, root]` with the tab absent, while the singular
+// form named the card and filed a DEFECT. A rect is LAYOUT; being painted is not.
+//
+// `selfIndex` is therefore the input, not `isSelf`: -1 means absent (clipped), 0 means the control
+// owns the point, > 0 means something paints above it (genuinely covered — still a real finding).
+export function classifyBlockedControl({ winnerIsSheet, sheetNow, top, bottom, winner, selfIndex }, controlLabel) {
+  // A PROBE THAT DID NOT REPORT MEMBERSHIP HAS NOT ANSWERED THE QUESTION. Defaulting a missing
+  // `selfIndex` to "covered" would be the same unknown -> NO move this whole verdict exists to undo,
+  // one layer up: the next probe to forget the field would get a confident cover verdict for free.
+  if (selfIndex === undefined || selfIndex === null) {
+    return {
+      what: `«${controlLabel}» failed its hit test, but the probe did not report stack membership`,
+      detail: `«${controlLabel}» ${top}-${bottom}, sheet ${sheetNow}, top of stack ${winner}. Without a `
+        + `selfIndex over the WHOLE painted stack this cannot tell COVERED from CLIPPED (ops_incident `
+        + `#377), so no verdict is asserted. Fix the probe, not this message.`,
+      isOneTap: false,
+      isUnreported: true,
+    };
+  }
+  if (selfIndex === -1) {
+    return {
+      what: `«${controlLabel}» is CLIPPED out of view, not covered`,
+      detail: `«${controlLabel}» ${top}-${bottom} has a rect but is absent from the painted stack at its `
+        + `own centre (the stack there is ${winner}); sheet reported at ${sheetNow}. A rect is LAYOUT and `
+        + `being painted is not — ops_incident #377. Reachability is what decides whether this matters, `
+        + `so the caller must scroll and click before concluding anything.`,
+      isOneTap: false,
+      isClipped: true,
+    };
+  }
   if (winnerIsSheet) {
     return {
       what: `the One Tap prompt is covering «${controlLabel}»`,
