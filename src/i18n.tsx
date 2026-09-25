@@ -1024,6 +1024,16 @@ const AR: Record<string, string> = {
   'Expat Trusted Housing': 'إكسبات ترستد هاوسينج',  // transliteration — no Arabic name at the source
   'Flow': 'فلو',
   'Abaad': 'أبعاد',                                 // the site's own Arabic name (app.abaadapp.sa writes «أبعاد»)                                    // transliteration — no Arabic name at the source
+  'Al Saedan': 'آل سعيدان',                              // the site's own Arabic name
+  'Ego Real Estate': 'إيجو عقار',                              // the site's own Arabic name
+  'Ahmed Almuhaysini': 'أحمد المحيسني العقارية',                              // the site's own Arabic name
+  'Nofodh Investment': 'نفوذ للاستثمار العقاري',                              // the site's own Arabic name
+  'Razre': 'راز العقارية',                              // the site's own Arabic name
+  'Reinvest': 'ري إنفست',                              // the site's own Arabic name
+  'Safa Investment': 'صفا للاستثمار',                              // the site's own Arabic name
+  'Sokok': 'صكوك العقارية',                              // the site's own Arabic name
+  'Sukna': 'سكنة',                              // the site's own Arabic name
+  'Tuba': 'طوبة العقارية',                              // the site's own Arabic name
   // logo-only strip entries (owner decision 2026-09-24): no scraper, no tables, never searchable.
   'Maskan United': 'مسكن الموحدة',  // maskanre.sa
   'The Address': 'العنوان',  // wetheaddress.com
