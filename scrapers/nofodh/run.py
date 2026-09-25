@@ -17,11 +17,11 @@ listing data is in the rendered HTML, plus a few Livewire `wire:snapshot` compon
   unit pages are reachable only through the sitemap or a project's own sub-listing cards.
 
   DETAIL URL = {BASE}/listings/<id>. There is a second route, `/listings/sub/<id>`, which serves the
-  SAME content (compared byte-for-byte on id 163694); the sitemap publishes the plain form and that is
-  what is stored. PER-LISTING IDENTITY IS PROVEN, not assumed: across all 501 pages fetched for this
-  build, the id in the URL equalled the page's own «رقم العقار» 501/501, and the 501 pages carried
-  501 DISTINCT (price, area, unit-code) triples. So no two rows share a page and no row shares a
-  building page — the azure/rightcompound unit-grain exception is not needed here.
+  SAME content (compared on id 163694); the sitemap publishes the plain form and that is what is
+  stored. PER-LISTING IDENTITY IS PROVEN ON THE WHOLE ROSTER, not sampled: every one of the 2,601
+  pages answered 200, and on all 2,601 the id in the URL equalled the page's own «رقم العقار»
+  (2601/2601, zero exceptions). So each row has its own page and no row shares a building or project
+  page — the azure/rightcompound unit-grain exception is not needed here.
 
   TITLE. The page has no listing title and NO DESCRIPTION FIELD AT ALL. What it does publish is the
   unit's own code, in its map iframe's `title` and an <h2>: «WAP-BLK54-6» (project-block-plot),
@@ -34,12 +34,16 @@ listing data is in the rendered HTML, plus a few Livewire `wire:snapshot` compon
 
 THE TRAPS, ALL MEASURED
 -----------------------
-1. «السعر 0» IS NOT A PRICE. The site number_format()s whatever the column holds, so an unpriced unit
-   renders a literal «0» and its component state reads `min_price: 0`. Fourteen of a 44-page spread
-   were in that state. Storing it publishes a free property. A SOLD unit goes further and omits the
-   «السعر» row entirely (id 531729). Both are UNKNOWN → NULL, and deliberately a plain None rather
-   than db.AUTHORITATIVE_NULL: a 0 cannot be told apart from "nobody typed a price yet", so it must
-   not be licensed to erase a figure an earlier crawl read. See read_price().
+1. «السعر 0» IS NOT A PRICE, AND IT IS NOT RARE. The site number_format()s whatever the column
+   holds, so an unpriced unit renders a literal «0» and its component state reads `min_price: 0`.
+   MEASURED OVER THE WHOLE ROSTER: 759 of 2,601 pages (29%) are in that state, and 7 more omit the
+   «السعر» row entirely (the sold blocks). Storing the 0 would publish 759 free properties.
+   Both states are UNKNOWN → NULL, and deliberately a plain None rather than db.AUTHORITATIVE_NULL:
+   a 0 cannot be told apart from "nobody typed a price yet", so it must not be licensed to erase a
+   figure an earlier crawl read. See read_price().
+   The consequence is deliberate and is raised below: 734 of the 2,556 stored rows carry no price.
+   They are real, published listings that the source prices on request, and hiding them would be the
+   plausibility-gate regression in reverse — but whether the UI should surface them is a product call.
 
 2. THE PRINTED PRICE IS ROUNDED AND THE MODEL'S IS NOT. id 432014 prints «530,697» while its
    `homez.booking-component` holds 530696.94; id 314771 prints «40,249» for 40248.74. Two published
@@ -49,6 +53,11 @@ THE TRAPS, ALL MEASURED
    `additional_info.source_price_exact` and in price_evidence. The two must agree to within the
    rounding that produced them; a wider gap REFUSES the row (`price_mismatch`) instead of picking a
    winner, because neither figure is derived from the other and there is nothing to reconcile.
+   THE TRAP IS LIVE AND THE GUARD IS FREE, both measured over all 2,601 pages: 279 rows hold a
+   fractional model value, i.e. 279 rows where the two published figures genuinely differ — and
+   ZERO rows disagree by a riyal or more, and zero pages lack the component. So the refusal has no
+   false positives on the real catalogue; it stands between a page-shape change and a wrong price,
+   and costs no inventory today.
 
 3. NO PER-METRE PRICE EXISTS HERE, so none is invented. «سعر المتر» appears 0 times across a listing
    page, a project page and every unit page sampled — even though most of the inventory is land plots
@@ -93,10 +102,11 @@ THE TRAPS, ALL MEASURED
    differently — «الحمامات» vs «حمام», «غرف نوم» vs «غرفة نوم». Both spellings are read; reading only
    the table's would silently drop every overview-only row.
 
-8. «سنة البناء» IS NOT A BUILD YEAR. It prints a DATE, and that date is identical to «تاريخ النشر» on
-   every page measured (2026-05-15 on essentially the whole catalogue). It is the import timestamp
-   wearing a build-year label, so it NEVER becomes `property_age`; the raw value is kept in
-   `additional_info.source_build_year_raw` and raised as an open question.
+8. «سنة البناء» IS NOT A BUILD YEAR, and the proof is total rather than sampled. It prints a DATE,
+   and on ALL 2,601 pages that date is identical to «تاريخ النشر» — 2601/2601, with only FIVE
+   distinct values across the entire catalogue. It is the import timestamp wearing a build-year
+   label, so it NEVER becomes `property_age` (no age helper is even imported); the raw value is kept
+   in `additional_info.source_build_year_raw` and raised as an open question.
 
 9. PDPL. Every page carries the developer's own «920029555» and «info@nofodh.sa» in its footer and
    JSON-LD Organization block, and the interested/booking forms embed a full country-code picker.
@@ -118,7 +128,8 @@ It is NOT the handshake: once the state was set, ten TLS profiles from the same 
 chrome116/120/124/131, safari17_0, safari15_5, firefox133, edge101, edge99) all drew the identical
 202, so unlike ialqarawi there is no profile that is served and negotiation is not attempted. The
 cooldown is short — a paced probe recovered after 123 s — and a re-walk at 3 workers with ~0.6 s
-spacing (0.80 req/s, measured) drew ZERO challenges over 150 of the very ids that had been blocked.
+spacing drew ZERO challenges over 150 of the very ids that had been blocked, then ZERO over the
+FULL 2,601-id roster at 0.82 req/s in 43 minutes. So the ceiling is real and it is workable.
 
 Counted as absence, 2,250 challenges look exactly like 2,250 listings vanishing at once. So:
   · the challenge is recognised by its BODY, not its status, and checked BEFORE the 404 branch in
@@ -153,6 +164,37 @@ What decides is the state the page prints about ITSELF, from the platform's own 
 Removals are additionally gated by an in-run positive control that fails CLOSED, and rows are built
 from page fetches of each listing's own URL.
 
+COVERAGE — a REAL FULL WALK of the whole roster (2026-09-24, paced, nothing written)
+------------------------------------------------------------------------------------
+2,601 sitemap ids → 2,601 answered HTTP 200 (the sitemap is exactly in sync with the site; not one
+404) → **2,556 mapped** (1,685 residential + 871 commercial), 45 skipped and counted, ZERO WAF
+challenges at 3 workers / 0.6 s pacing (0.82 req/s, 2,564 s ≈ 43 min).
+
+  SKIPPED, every one on a marker the SOURCE published:
+    sold                           27   «حالة العقار: مباع»
+    project_container               7   «نوع العقار: مشروع» — the seven browsable projects
+    project_container_unit_counts   6   «بلوك» rows carrying «عدد الوحدات» (6/8/14/22/24/6) and no
+                                        price, area or unit code: land BLOCKS holding plots, not plots
+    type_unmapped_DRIVE_THRU        4   raised, not guessed
+    type_unmapped_روف               1   raised, not guessed
+  45 + 2,556 = 2,601 — every id in the roster is accounted for.
+  UNKNOWN LABELS: none. Every label any of the 2,601 pages printed is one the mapper reads.
+
+  Types    Residential Land 1492 · Workshop 447 · Apartment 193 · Office 183 · Shop 126 ·
+           Warehouse 115
+  Deal     Buy 1,506 / Rent 1,050
+  Cities   الرياض 2052 · جدة 244 · الخبر 218 · ابها 20 · الدمام 19 · جازان 3 (all Saudi this crawl —
+           the Istanbul districts in the picker had no live listings)
+  Prices   price_total 813 · price_annual 1,009 · price_per_meter 0 (never written) ·
+           **734 rows with NO price at all** — the «السعر 0» state of trap 1
+  Periods  rent_period set on 0 of 1,050 rents. Not a gap: the platform states no period anywhere.
+  Fields   area_m2 2466 · bathrooms 1064 · title 2452 · date_added 2556 · district_ar 1911 ·
+           neighborhood 1911 · photo_urls 1337 (2,712 photos) · parking 37 · bedrooms 14
+  Location 1,911 rows resolve a district EXACTLY against loc_catalog_district — all 13 distinct
+           «الحي» labels the platform publishes are in the catalog, so there are no location gaps to
+           fill here. The other 651 pages publish no «الحي» at all and keep district_ar NULL.
+  Amenities none. The platform publishes no amenity, so every amenity column stays absent, never False.
+
 OPEN QUESTIONS FOR ONBOARDING (none of these are guessed in code)
 -----------------------------------------------------------------
   · PLATFORM NAME. The roster line reads «نفوذ العقارية للاستثمار»; the site's own <title>, JSON-LD
@@ -176,8 +218,15 @@ OPEN QUESTIONS FOR ONBOARDING (none of these are guessed in code)
     Ezhalah should carry non-Saudi listings at all is an owner/product decision.
   · REGA. No FAL/ad-licence number is printed on any page, so `license_number` and `license_expiry`
     stay NULL — worth asking the platform for, since the fleet stores them where published.
-  · A daily cron must budget ~55 minutes for the paced walk of 2.6k pages (see the WAF section), or
-    be given a residential-proxy route so the rate ceiling stops being the constraint.
+  · A daily cron must budget ~45 minutes for the paced walk of 2.6k pages (43 min measured; see the
+    WAF section), or be given a residential-proxy route so the rate ceiling stops being the
+    constraint. The pages are 3.6 MB each, so the walk also moves ~9 GB — worth knowing before it
+    runs on metered egress.
+  · 734 OF THE 2,556 STORED ROWS HAVE NO PRICE, because the source publishes «السعر 0» on 759 of its
+    2,601 pages (trap 1). They are real listings priced on request. Hiding them would be the
+    plausibility-gate regression in reverse, and inventing a price is out of the question — so they
+    are stored priceless. Whether search should rank, filter or badge a priceless row is a product
+    decision, and it affects nearly a third of this platform.
 
 DETAIL, MEASURED
 ----------------
