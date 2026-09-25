@@ -107,13 +107,30 @@ async function idsFrom(what: string, url: string, init: RequestInit): Promise<Se
   return new Set(j.map((row: { source_table: string; listing_id: number }) => key(row)));
 }
 
-async function rpcIds(c: Case, answer: Record<string, unknown>): Promise<Set<RowKey> | null> {
+const PAGE = 5000;
+
+async function rpcIds(c: Case, answer: Record<string, unknown>, offset = 0): Promise<Set<RowKey> | null> {
   const body = {
     p_deal: c.deal, p_types: c.types, p_category: c.category, p_region_ids: [REGION],
-    p_rent_period: c.period ?? null, p_per_platform: null, p_limit: 5000, p_offset: 0, ...answer,
+    p_rent_period: c.period ?? null, p_per_platform: null, p_limit: PAGE, p_offset: offset, ...answer,
   };
   return idsFrom('RPC location_search_candidates_ar', `${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`,
     { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
+// A single-field slice is the LOOSER query, so it is the one that outgrows a page. Read with one
+// page it came back truncated at exactly PAGE rows and "every compound id is in the slice" failed by
+// construction (2026-09-25: Villa/Buy p_bath_min alone = 5000, full = 324, on unchanged code).
+// Page it to exhaustion; any failed page is null (never a partial set read as complete).
+async function rpcIdsAll(c: Case, answer: Record<string, unknown>): Promise<Set<RowKey> | null> {
+  const all = new Set<RowKey>();
+  for (let page = 0; page < 40; page++) {
+    const got = await rpcIds(c, answer, page * PAGE);
+    if (got == null) return null;
+    got.forEach((k) => all.add(k));
+    if (got.size < PAGE) return all;
+  }
+  return null;
 }
 
 const setEq = (a: Set<RowKey>, b: Set<RowKey>) => a.size === b.size && [...a].every((x) => b.has(x));
@@ -142,7 +159,7 @@ for (const c of CASES) {
   // not somehow match MORE than any one field alone allows (an OR-not-AND defect). Each slice is a
   // whole logical field (e.g. the age range as one unit), never a lone min/max half of a range.
   if (c.slices.length >= 2) {
-    const partials = await Promise.all(c.slices.map((s) => rpcIds(c, s)));
+    const partials = await Promise.all(c.slices.map((s) => rpcIdsAll(c, s)));
     partials.forEach((p, i) => {
       const label = Object.keys(c.slices[i]!).join('+');
       check(`${c.label} — single-field slice (${label} alone) is a SUPERSET of the full conjunction`,
