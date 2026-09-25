@@ -423,8 +423,11 @@ def sequential_id_urls(s: cc.Session, start_id: int) -> list[str]:
     return out
 
 
-def fetch_one(url: str) -> Optional[tuple[str, str]]:
-    """Warm the session (Cloudflare cookie) then fetch the detail page. Returns (body, url) or None."""
+def fetch_one(url: str) -> Optional[tuple[str, str, bool]]:
+    """Warm the session (Cloudflare cookie) then fetch the detail page.
+
+    Returns (body, url, own) or None. `own` is True when the request LANDED on this listing's own
+    /property/<id>, not a redirect elsewhere — the identity half of a direct-alive stamp."""
     s = _session()
     for attempt in range(3):
         try:
@@ -435,7 +438,9 @@ def fetch_one(url: str) -> Optional[tuple[str, str]]:
             time.sleep(1.5 * (attempt + 1))
             continue
         if r.status_code == 200 and "/property/" in str(r.url):
-            return r.text, url
+            want = re.search(r"/property/(\d+)", url)
+            got = re.search(r"/property/(\d+)", str(r.url))
+            return r.text, url, bool(want and got and want.group(1) == got.group(1))
         time.sleep(1.0 * (attempt + 1))
     return None
 
@@ -801,12 +806,17 @@ def main() -> int:
             for result in ex.map(fetch_one, urls):
                 if not result:
                     continue
-                body, u = result
+                body, u, own = result
                 row, cat = map_listing(body, u)
                 if not row:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                if own:
+                    # Landed on this listing's own /property/<id>, and map_listing only returns a row
+                    # for a page with JSON-LD and no «هذا الإعلان منتهي»/«Page Not Found»: the exact
+                    # shape _probe_id() calls 'live'.
+                    db.mark_direct_alive(row, oracle="aqarcity.property_page.jsonld_not_expired")
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 seen += 1
