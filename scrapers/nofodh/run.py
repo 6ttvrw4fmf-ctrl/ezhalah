@@ -189,7 +189,9 @@ challenges at 3 workers / 0.6 s pacing (0.82 req/s, 2,564 s ≈ 43 min).
            **734 rows with NO price at all** — the «السعر 0» state of trap 1
   Periods  rent_period set on 0 of 1,050 rents. Not a gap: the platform states no period anywhere.
   Fields   area_m2 2466 · bathrooms 1064 · title 2452 · date_added 2556 · district_ar 1911 ·
-           neighborhood 1911 · photo_urls 1337 (2,712 photos) · parking 37 · bedrooms 14
+           neighborhood 1911 · photo_urls 1337 (2,712 photos) · bedrooms 14 ·
+           additional_info.parking_spaces_count 37 (a COUNT, fixed 2026-09-26 to no longer land in
+           the boolean `parking` amenity column — see the row-builder comment)
   Location 1,911 rows resolve a district EXACTLY against loc_catalog_district — all 13 distinct
            «الحي» labels the platform publishes are in the catalog, so there are no location gaps to
            fill here. The other 651 pages publish no «الحي» at all and keep district_ar NULL.
@@ -620,7 +622,13 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "area_m2": normalize.to_int(area_raw) if area_raw else None,
         "bathrooms": _int_label(rec, _BATHROOMS),
         "bedrooms": _int_label(rec, _BEDROOMS),
-        "parking": _int_label(rec, _PARKING),
+        # `parking` the COLUMN is the fleet's boolean amenity flag ("is there parking"); «مواقف» /
+        # «المواقف» on this platform is a COUNT of spaces (bug found 2026-09-26: writing the count
+        # here sent e.g. "8" into a boolean column and PostgREST rejected the WHOLE batch with
+        # `invalid input syntax for type boolean: "8"` — 0/1 counts didn't error but silently became
+        # a manufactured True/False amenity flag the source never stated). No amenity is published
+        # by this platform (see the module docstring), so the boolean column stays untouched and the
+        # real count is preserved losslessly in additional_info instead, same as floors_count below.
         "date_added": redact_pii(rec["overview"].get("تاريخ النشر")),
         "photo_urls": photos,
     }
@@ -659,6 +667,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         # «تاريخ النشر» on every page measured. Kept raw and never mapped to property_age.
         "source_build_year_raw": rec["details"].get("سنة البناء"),
         "floors_count": rec["details"].get("الطوابق"),   # a count; there is no column for it
+        "parking_spaces_count": _int_label(rec, _PARKING),   # a count; `parking` the column is boolean
     }
     # Every one of those is source text, so redaction is applied to the WHOLE dict in one pass
     # rather than per key: the first version redacted `unit_code` only and an advertiser's WhatsApp
