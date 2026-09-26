@@ -122,7 +122,11 @@ check('no hardcoded 100 stands in for a result count in the closing message bloc
 // function, lifted out of src/store.tsx (it is a closure inside AppProvider and cannot be imported),
 // against a fetch that FAILS.
 const loadMore = (() => {
-  const m = storeSrc.match(/loadMoreListings: async \(q: SearchQuery, offset: number\) => \{[\s\S]*?\n {6}\},/);
+  // The third parameter is OPTIONAL in this pattern on purpose: `seed` arrived with ops_incident #796
+  // (a walk pages with its own rotation seed, not the app's latest) and a lift that hard-codes the old
+  // two-parameter signature dies with "could not lift" on a change that has nothing to do with the
+  // cursor arithmetic measured here — a barrier failing for a reason it is not about.
+  const m = storeSrc.match(/loadMoreListings: async \(q: SearchQuery, offset: number(?:, seed\?: string)?\) => \{[\s\S]*?\n {6}\},/);
   if (!m) {
     console.error('FAIL  could not lift loadMoreListings out of src/store.tsx — was it moved or renamed?');
     process.exit(1);
@@ -136,9 +140,11 @@ const loadMore = (() => {
   // searchSeedRef IS stubbed (unlike LOAD_MORE_PAGE_SIZE above): since 2026-09-26 load-more carries
   // the search's rotation seed so every page of one walk keeps the same server ORDER BY. That seed
   // cannot influence the cursor/hasMore arithmetic measured here — it only picks WHICH listings the
-  // (stubbed) fetch would have returned — so a fixed value keeps this lift faithful. That the real
-  // load-more passes the SEARCH's ref and never mints a fresh one is a different contract, owned by
-  // scripts/verify-rotation-seed-is-per-search.ts.
+  // (stubbed) fetch would have returned — so a fixed value keeps this lift faithful, and the `seed`
+  // argument is simply not passed below. WHICH seed reaches the fetch is two other contracts, both
+  // owned elsewhere: that it VARIES per search (verify-rotation-seed-is-per-search.ts) and that it is
+  // the paged SET's own rather than the app's latest (verify-loadmore-pages-with-its-own-search-seed.ts,
+  // ops_incident #796).
   const raw = new Function('fetchListingsForQuery', 'runSearch', 'buildPools', 'LOAD_MORE_PAGE_SIZE', 'searchSeedRef',
     `${js}\nreturn surface.loadMoreListings;`);
   return ((f: unknown, r: unknown, b: unknown) => raw(f, r, b, LOAD_MORE_PAGE_SIZE, { current: 'lifted-test-seed' })) as

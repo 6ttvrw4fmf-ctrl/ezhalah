@@ -439,9 +439,15 @@ mustCatch('M-first-overreveals — a first press revealing past the 100-boundary
   overrevealBus.revealedTo !== 100, `revealedTo: ${overrevealBus.revealedTo}`);
 
 // M-drop: the exact pre-fix line. This is the defect, restored.
+// The third argument (`m.result.rotationSeed`) arrived with ops_incident #796 — a walk pages with the
+// seed its own first page was cut from, never the app's latest. It is carried through both sides of the
+// mutant so this anchor stays about `failed`, the one thing this file is for, and fails for its own
+// reasons rather than on an unrelated signature change. (It threw `mutation anchor missing` when the
+// argument landed — loud and fail-closed, which is the right way round.)
+const LOADMORE_CALL_ARGS = 'q, pageOffset, m.result.rotationSeed';
 const mDrop = mutantOf(agentSrc,
-  'const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, pageOffset);',
-  'const { listings: more, nextOffset, hasMore } = await loadMoreListings(q, pageOffset);\n        const failed = undefined;');
+  `const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(${LOADMORE_CALL_ARGS});`,
+  `const { listings: more, nextOffset, hasMore } = await loadMoreListings(${LOADMORE_CALL_ARGS});\n        const failed = undefined;`);
 const dropBus = await runLoadMore(mDrop, [{ listings: [], nextOffset: 0, hasMore: true, failed: true }], PAGE(10));
 mustCatch('M-drop — ignoring `failed` reproduces the silent dead tap (no message, no cards)',
   dropBus.appended.length === 0 && dropBus.merged.length === 10,
