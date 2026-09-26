@@ -343,6 +343,11 @@ def main() -> int:
         complete = (bad_projects == 0)
         db.upsert_rawaf_residential_batch(res)
         db.upsert_rawaf_commercial_batch(com)
+        superseded = db.retire_superseded_siblings(
+            res_table="rawaf_residential_listings", com_table="rawaf_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com}, source=SOURCE)
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         for tbl, rr in (("rawaf_residential_listings", res),
                         ("rawaf_commercial_listings", com)):
             if rr and complete:
@@ -354,7 +359,11 @@ def main() -> int:
         if not complete:
             print(f"  NOT pruning: {bad_projects} project(s) did not serve their units this run",
                   flush=True)
-        db.end_run(run_id, ok=True, rows_seen=seen_units, rows_upserted=len(res) + len(com))
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen_units, rows_upserted=len(res) + len(com),
+                             check_tables=["rawaf_residential_listings", "rawaf_commercial_listings"])
+        if not healthy:
+            print("✗ run demoted to unhealthy by end_run()", flush=True)
+            return 1
         print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted", flush=True)
         return 0
     except Exception as e:  # noqa: BLE001
