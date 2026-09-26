@@ -30,9 +30,10 @@ LOCATION IS PROSE-DERIVED, and the source does state it: every title names a dis
 («محلات تجارية بحي النسيم للبيع», «فيلا بحي الخليج للبيع», «مزرعة في حي هيث للبيع»). The
 `property_city` term ids exist in class_list (114 ×14, 144 ×2, 154 ×1) but their names are NOT
 resolvable — the taxonomy routes are closed and `?taxonomy=…&term_id=…` serves the homepage — so
-the city is read from the text with the fleet's own find_district_in_text/to_catalog, never from an
-unresolvable id. A listing whose location cannot be resolved keeps city_id/region_id NULL and is
-simply not production_ready, which is the honest outcome.
+the city is read from the text, and ONLY where the text names it («مدينة X», arabic_location.
+stated_city), never from an unresolvable id and never from a street or district name that happens
+to match a town. A listing whose city is not stated keeps city_id/region_id NULL and is simply not
+production_ready, which is the honest outcome.
 
 *** DEAL IS READ FROM THE LISTING'S OWN TITLE, NOT FROM THE STATUS LINK. *** Learning the status
 term the same first-link way produced a WRONG MAP: it put term 89 and term 90 both on «للبيع»,
@@ -57,7 +58,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, resolve_slug, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, stated_city  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://squares.com.sa"
@@ -150,19 +151,15 @@ def map_listing(rec: dict, ptype_ar: str, deal: str) -> tuple[dict[str, Any], st
     title = redact_pii(_clean((rec.get("title") or {}).get("rendered")) or "")
     body = _clean((rec.get("content") or {}).get("rendered")) or ""
 
-    # The source states the location in its own words. resolve_slug is the fleet's DETERMINISTIC,
-    # catalog-VALIDATED parse: it returns confidence='unresolved' rather than guessing, so a
-    # listing whose city does not validate simply keeps NULLs and is not production_ready.
-    # (An earlier draft of this scraper hardcoded الرياض as the only city it would try, which
-    # silently mislocated «شقة مفروشة في درة العروس» — not a Riyadh property at all.)
+    # The source states the location in its own words — sometimes. stated_city() accepts only an
+    # explicit «مدينة X», validated against the catalog; the district is then read only against THAT
+    # city's catalog. A listing that never names its city keeps NULLs (not production_ready) rather
+    # than borrowing a town from its prose: resolve_slug() on this text filed 9 of 16 listings in
+    # the wrong city (see stated_city's docstring). An earlier draft hardcoded الرياض, which
+    # mislocated «شقة مفروشة في درة العروس» — not a Riyadh property at all.
     text = f"{title} {body}"
-    loc = resolve_slug(text)
-    city_ar = loc.get("city_ar")
-    city_id = loc.get("city_id")
-    region_id = loc.get("region_id")
-    district_ar = loc.get("district_ar")
-    if city_id and not district_ar:
-        district_ar = find_district_in_text(text, city_id)
+    city_ar, city_id, region_id = stated_city(text)
+    district_ar = find_district_in_text(text, city_id) if city_id else None
 
     photos = []
     for m in ((rec.get("_embedded") or {}).get("wp:featuredmedia") or []):

@@ -322,6 +322,32 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
             "district_ar": district_ar, "confidence": "slug"}
 
 
+# «مدينة الرياض», «بمدينة بريدة», «لمدينة الرياض», «مــدينة بريــدة» (tatweel) — the listing
+# NAMING its city. The lookbehind keeps «المدينة المنورة»'s own «مدينة» from being read as a phrase.
+_STATED_CITY_RE = re.compile(r"(?<![\u0621-\u064a])(?:ب|ل|و)?مدين[ةه]\s*[:\-.]?\s*"
+                             r"([\u0621-\u064a]+(?:\s+[\u0621-\u064a]+)?)")
+
+
+def stated_city(text: Optional[str]) -> tuple[Optional[str], Optional[int], Optional[int]]:
+    """(city_ar, city_id, region_id) for a city the text STATES with «مدينة X», catalog-validated —
+    else (None, None, None).
+
+    For listing PROSE, where resolve_slug() is the wrong tool: resolve_slug is built for Aqar-style
+    slugs and, on prose, takes ANY whole word that is also a catalog town. On squares (2026-09-26)
+    that filed 9 of 16 listings in the wrong city: «العمارة» (the word for the building), «الخرج»
+    (from «طريق الخرج»), «حجاب» (from «سوق حجاب»), «العروس» (from «درة العروس»), «الخليج» and
+    «السلام» (the DISTRICT names). Only an explicit «مدينة X» counts here; a listing that never
+    names its city keeps NULL rather than borrowing a town from its street names."""
+    s = re.sub(r"\s+", " ", (text or "").replace("\u0640", ""))
+    for m in _STATED_CITY_RE.finditer(s):
+        words = m.group(1).split()
+        for cand in (" ".join(words), words[0]):
+            cid, rid = to_catalog(cand)
+            if cid:
+                return cand, cid, rid
+    return None, None, None
+
+
 def _hint_to_id(region_hint: Union[int, str, None]) -> Optional[int]:
     if region_hint is None:
         return None
