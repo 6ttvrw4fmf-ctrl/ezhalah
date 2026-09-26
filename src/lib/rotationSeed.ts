@@ -79,6 +79,29 @@ function isoWeekBucket(now: Date): string {
 
 // The value to pass as the RPC's p_rotation_seed param. Accepts `now` only so it stays testable
 // without faking global Date - production call sites simply omit it.
+//
+// NOTE (2026-09-26): this device+week seed is now the FALLBACK, not the primary path. It is what a
+// caller gets when it supplies no seed of its own - see newSearchSeed() below for why.
 export function rotationSeed(now: Date = new Date()): string {
   return `${deviceToken()}|${isoWeekBucket(now)}`;
+}
+
+// ONE FRESH SEED PER SEARCH (owner rule 2026-09-26): "I do a search, it shows عقار first. I refresh
+// — the same exact one shouldn't show عقار first. It changes and shows another website." The
+// device+week seed above re-rolled only once a week, so a refresh looked frozen; and until the same
+// day's SQL change, rotation could not reach WHICH listing a platform fronts anyway (it sat below
+// div_rank). Both halves are needed: the SQL makes rotation able to pick the listing, this makes it
+// pick a new one every search.
+//
+// WHY THIS IS THREADED, NOT CALLED INLINE. rotationSeed() is a pure function, so the RPC call site
+// could just call it per request and always get the same answer. A per-SEARCH seed cannot work that
+// way: recomputing a random value on page 2 would re-shuffle the list mid-walk, which is precisely
+// how «عرض المزيد» starts repeating and skipping cards. So the seed is minted ONCE when a search
+// starts and carried, unchanged, through every page of that search (store.tsx holds it; Advanced
+// Filter re-runs the search and therefore mints a fresh one, and its own Show More reuses that).
+//
+// Random per search also gives "different per user" for free - two people searching the same city
+// in the same second get different seeds, with no user id involved.
+export function newSearchSeed(): string {
+  return randomToken();
 }
