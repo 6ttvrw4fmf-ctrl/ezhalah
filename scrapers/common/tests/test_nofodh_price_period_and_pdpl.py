@@ -424,7 +424,8 @@ def test_arabic_indic_digits_parse_in_every_numeric_field():
     assert row["area_m2"] == 1689
     assert row["bathrooms"] == 3
     assert row["bedrooms"] == 4
-    assert row["parking"] == 2
+    assert row["additional_info"]["parking_spaces_count"] == 2
+    assert "parking" not in row
 
 
 # ── SOURCE IS TRUTH: what this platform does NOT publish ────────────────────────────────────────
@@ -458,11 +459,30 @@ def test_no_amenity_is_ever_written_for_this_platform():
     for amenity in ("elevator", "furnished", "kitchen", "maid_room", "driver_room", "car_entrance",
                     "extension", "electricity", "water_supply", "sanitation", "optical_fibers",
                     "balcony_terrace", "air_conditioner", "private_entrance", "villa_on_roof",
-                    "laundry_room", "separate_electricity_meter", "separate_water_meter"):
+                    "laundry_room", "separate_electricity_meter", "separate_water_meter",
+                    "parking"):
         assert amenity not in row, f"{amenity} was written, but the source never states it"
     assert False not in row.values(), "no column may carry a manufactured negative"
     # The shared text-amenity helper must not be wired in either — there is no text to read.
     assert "amenities_from_text" not in Path(nofodh.__file__).read_text(encoding="utf-8")
+
+
+def test_parking_count_never_lands_in_the_boolean_amenity_column():
+    """REGRESSION (found 2026-09-26, production incident). `parking` the fleet COLUMN is a boolean
+
+    amenity flag; this platform's «مواقف» / «المواقف» is a COUNT of spaces. The count was written
+    straight into the boolean column: a count of "8" made PostgREST reject the WHOLE batch with
+    `invalid input syntax for type boolean: "8"` (rows_seen=0 for the entire run), while counts of
+    "0"/"1" didn't error but silently became a manufactured True/False amenity the source never
+    stated — the exact SOURCE-IS-TRUTH violation `test_no_amenity_is_ever_written_for_this_platform`
+    exists to catch, just for a key that test didn't check. The count now lives only in
+    additional_info, losslessly, under a name that cannot collide with the boolean column.
+    """
+    ar = {**LAND_FOR_SALE,
+          "overview": {**LAND_FOR_SALE["overview"], "مواقف": "8"}}
+    row, _ = _row(ar)
+    assert "parking" not in row
+    assert row["additional_info"]["parking_spaces_count"] == 8
 
 
 # ── PDPL ────────────────────────────────────────────────────────────────────────────────────────
