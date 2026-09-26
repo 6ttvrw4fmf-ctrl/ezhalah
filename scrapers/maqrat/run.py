@@ -236,7 +236,7 @@ def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple
         "title": redact_pii(title) or None,
         "description": redact_pii(desc) or None,
         "property_type": ptype,
-        "transaction_type": deal,
+        "transaction_type": "Rent" if deal == "Rent" else "Buy",   # deal is validated above
         "city": normalize.map_city(city_ar) if city_ar else None,
         "city_ar": city_ar,
         "city_id": city_id,
