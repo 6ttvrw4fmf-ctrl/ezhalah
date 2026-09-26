@@ -1543,6 +1543,14 @@ def end_run(
 # غدي / سفيرة / الحميدان are three tenant offices of one inblaj.net WordPress product and share a
 # parser (scrapers/common/inblaj_platform.py), but each keeps its OWN tables, registry row and run
 # ledger — a shared parser is not a shared platform.
+def upsert_wahadat_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wahadat_residential_listings", rows)
+
+
+def upsert_wahadat_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wahadat_commercial_listings", rows)
+
+
 def upsert_gudai_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("gudai_residential_listings", rows)
 

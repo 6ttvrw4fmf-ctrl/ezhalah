@@ -800,6 +800,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('flow')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('أبعاد') || s.includes('abaad')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('آي باكس') || s.includes('ibaax')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('وحدات') || s.includes('wahadat')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('re/max') || s.includes('remaxsa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('قمرا') || s.includes('qmra')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('العجلان') || s.includes('alajlan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
@@ -959,6 +960,7 @@ function sourceHost(source: string): string {
   if (s.includes('flow')) return 'flow.life';
   if (s.includes('أبعاد') || s.includes('abaad')) return 'app.abaadapp.sa';
   if (s.includes('آي باكس') || s.includes('ibaax')) return 'ibaax.sa';
+  if (s.includes('وحدات') || s.includes('wahadat')) return 'wahadat.sa';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'remax.sa';
   if (s.includes('قمرا') || s.includes('qmra')) return 'qmra.sa';
   if (s.includes('العجلان') || s.includes('alajlan')) return 'alajlan-re.com';
