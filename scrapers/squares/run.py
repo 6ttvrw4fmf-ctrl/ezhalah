@@ -10,11 +10,20 @@ Plain WordPress with a `property` custom post type exposed on the public REST AP
 GET is a complete enumeration and prune_unseen may run after it (the same self-declaring
 completeness contract qmra uses).
 
-*** THIS SOURCE PUBLISHES NO PRICE. *** Checked on the REST payload AND by rendering a detail page:
-there is no price field, no price element, and only 3 of 18 descriptions mention a number in prose
-at all. price_total/price_annual therefore stay unset and `price_evidence.found` is false — the
-honest "never stated", exactly as on qmra. Nothing is inferred from the prose numbers, which are
-plot dimensions and street widths as often as they are money.
+*** THE PRICE, AREA AND ADDRESS LIVE ON THE DETAIL PAGE, NOT IN THE REST PAYLOAD. *** The first
+version of this scraper read only the REST API, found no price there, and concluded «this source
+publishes no price» — WRONG, and caught in the real-user pass: the listing page for post 19678
+prints «ريال840,000», «المساحة 350 م2», «سنة البناء 2009» and the address line «بريدة, القصيم,
+السعودية». Measured over all 18 pages (2026-09-26): 10 print a price, 18 an area, 18 a structured
+address. Each page is therefore fetched once and read from its OWN blocks only — the first
+`.title-area .address`, the single `.property-description .price-area`, the single `.main-features`
+and the `.property-features` list — never from the «عقارات ذات صلة» (related) cards further down,
+which carry other listings' prices. A page that does not print a price keeps price NULL.
+
+LOCATION comes from that address line («district, city, [zip,] country» or «city, region, …»),
+read right-to-left: the rightmost part that is a catalog CITY is the city, and the district is
+resolved against that city's catalog only. This replaced prose parsing, which filed 9 of 16
+listings in towns that were merely words in the text (see arabic_location.stated_city).
 
 TYPE COMES FROM THE POST'S OWN TERM ID, NOT FROM DOCUMENT ORDER. The REST payload carries
 `class_list` with the authoritative per-post `property_type-<id>`, but the taxonomy REST routes are
@@ -51,6 +60,7 @@ import html as ihtml
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -58,7 +68,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, stated_city  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, stated_city, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://squares.com.sa"
@@ -110,7 +120,7 @@ def deal_from_title(title: str) -> Optional[str]:
     return None
 
 
-def learn_type_map(s: cc.Session, rows: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
+def learn_type_map(pages: dict[str, str], rows: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
     """(type_id→name, status_id→name) learned from each post's FIRST taxonomy link.
 
     See the module docstring: the first link is measurably the post's own. Learning a map and then
@@ -124,12 +134,8 @@ def learn_type_map(s: cc.Session, rows: list[dict]) -> tuple[dict[str, str], dic
         tid, sid = _term_id(rec, "property_type"), _term_id(rec, "property_status")
         if (tid and tid in tmap) and (sid and sid in smap):
             continue
-        link = rec.get("link")
-        if not link:
-            continue
-        try:
-            page = s.get(link, impersonate=IMPERSONATE, timeout=TIMEOUT).text
-        except Exception:  # noqa: BLE001
+        page = pages.get(str(rec.get("id")))
+        if not page:
             continue
         if tid and tid not in tmap:
             m = _TYPE_LINK.search(page)
@@ -144,22 +150,95 @@ def learn_type_map(s: cc.Session, rows: list[dict]) -> tuple[dict[str, str], dic
     return tmap, smap
 
 
-def map_listing(rec: dict, ptype_ar: str, deal: str) -> tuple[dict[str, Any], str]:
+def fetch_pages(s: cc.Session, rows: list[dict]) -> dict[str, str]:
+    """Every post's own listing page, once. A page that fails is simply absent from the map."""
+    pages: dict[str, str] = {}
+    for rec in rows:
+        link = rec.get("link")
+        if not link:
+            continue
+        try:
+            r = s.get(link, impersonate=IMPERSONATE, timeout=TIMEOUT)
+            if r.status_code == 200:
+                pages[str(rec.get("id"))] = r.text
+        except Exception:  # noqa: BLE001
+            continue
+    return pages
+
+
+_ADDRESS = re.compile(r'class="title-area".*?<p class="address">(.*?)</p>', re.S)
+_PRICE = re.compile(r'<div class="price-area">.*?<span class="price[^"]*">(.*?)</span>', re.S)
+_FACTS = re.compile(r'<div class="main-features">(.*?)</ul>', re.S)
+_FACT = re.compile(r'<p>(.*?)</p>\s*<span>(.*?)</span>', re.S)
+_FEATURES = re.compile(r'<div class="sl-box property-features">.*?<ul>(.*?)</ul>', re.S)
+_FEATURE = re.compile(r'<span>(.*?)</span>', re.S)
+# «مميزات العقار» items that name a column. Named → True; an item the list does not name stays
+# NULL (unknown) — a list that omits «مصعد» does not say there is no lift.
+_FEATURE_COLS = {"غرفة سائق": "driver_room", "غرفة خادمة": "maid_room", "غرفة عاملة": "maid_room",
+                 "مصعد": "elevator", "كراج سيارة": "parking", "موقف سيارة": "parking",
+                 "مواقف": "parking", "مطبخ": "kitchen"}
+
+
+def parse_detail(page: str) -> dict[str, Any]:
+    """The listing's OWN blocks only (see the docstring): address, printed price, fact pairs, features."""
+    a, p, f, fl = _ADDRESS.search(page), _PRICE.search(page), _FACTS.search(page), _FEATURES.search(page)
+    return {
+        "address": _clean(a.group(1)) if a else None,
+        "price_text": _clean(p.group(1)) if p else None,
+        "facts": {_clean(k) or "": _clean(v) or "" for k, v in _FACT.findall(f.group(1))} if f else {},
+        "features": [x for x in (_clean(s) for s in _FEATURE.findall(fl.group(1))) if x] if fl else [],
+    }
+
+
+def place(address: Optional[str]) -> tuple[Optional[str], Optional[int], Optional[int], Optional[str], Optional[str]]:
+    """(city_ar, city_id, region_id, district_ar, district_raw) from the page's address line.
+    Parts are read right-to-left: «بريدة, القصيم, 52583, السعودية» → بريدة (القصيم is a region);
+    «اشبيلية, الرياض, السعودية» → الرياض + حي اشبيلية. Country and postcodes are ignored."""
+    parts = [x.strip() for x in (address or "").split(",") if x.strip()]
+    parts = [x for x in parts if x != "السعودية" and not re.fullmatch(r"\d{4,6}", x)]
+    for i in range(len(parts) - 1, -1, -1):
+        cid, rid = to_catalog(parts[i])
+        if cid:
+            raw = " ".join(parts[:i]) or None
+            return parts[i], cid, rid, (find_district_in_text(raw, cid) if raw else None), raw
+    return None, None, None, None, None
+
+
+def _area(v: Optional[str]) -> Optional[float]:
+    m = re.search(r"[\d.,]+", v or "")
+    try:
+        f = float(m.group(0).replace(",", "")) if m else None
+    except ValueError:
+        return None
+    return f if f and f > 0 else None
+
+
+def map_listing(rec: dict, ptype_ar: str, deal: str, detail: dict[str, Any]) -> tuple[dict[str, Any], str]:
     pid = str(rec.get("id"))
     ptype = normalize.map_type_exact(ptype_ar)
     category = normalize.category_for_type(ptype).lower() if ptype else "residential"
     title = redact_pii(_clean((rec.get("title") or {}).get("rendered")) or "")
     body = _clean((rec.get("content") or {}).get("rendered")) or ""
 
-    # The source states the location in its own words — sometimes. stated_city() accepts only an
-    # explicit «مدينة X», validated against the catalog; the district is then read only against THAT
-    # city's catalog. A listing that never names its city keeps NULLs (not production_ready) rather
-    # than borrowing a town from its prose: resolve_slug() on this text filed 9 of 16 listings in
-    # the wrong city (see stated_city's docstring). An earlier draft hardcoded الرياض, which
-    # mislocated «شقة مفروشة في درة العروس» — not a Riyadh property at all.
+    # LOCATION from the page's own address line; stated_city() («مدينة X» in the prose) only if the
+    # page printed none. Never resolve_slug on prose — see the module docstring.
     text = f"{title} {body}"
-    city_ar, city_id, region_id = stated_city(text)
-    district_ar = find_district_in_text(text, city_id) if city_id else None
+    city_ar, city_id, region_id, district_ar, district_raw = place(detail.get("address"))
+    if not city_id:
+        city_ar, city_id, region_id = stated_city(text)
+    if city_id and not district_ar:
+        # «بريدة, القصيم, السعودية» names no district; the prose may («فلل البساتين في مدينة بريدة»).
+        # Read against THAT city's catalog only, and kept only if the catalog name appears in the
+        # text AS WRITTEN: «درة العروس» (a resort) must not become Jeddah's «حي الدرة».
+        hit = find_district_in_text(text, city_id)
+        bare = (hit or "").removeprefix("حي ").strip()
+        district_ar = hit if bare and re.search(rf"(?<![\u0621-\u064a]){re.escape(bare)}(?![\u0621-\u064a])",
+                                                  text.replace("\u0640", "")) else None
+
+    facts = detail.get("facts") or {}
+    price_text = detail.get("price_text")
+    price = normalize.to_int(re.sub(r"[^\d.,]", "", price_text or "")) if price_text else None
+    price = price if price and price > 0 else None
 
     photos = []
     for m in ((rec.get("_embedded") or {}).get("wp:featuredmedia") or []):
@@ -181,14 +260,26 @@ def map_listing(rec: dict, ptype_ar: str, deal: str) -> tuple[dict[str, Any], st
         "city_id": city_id,
         "region_id": region_id,
         "district_ar": district_ar,
+        "neighborhood": district_raw if city_id and detail.get("address") else None,
+        "area_m2": _area(facts.get("المساحة")),
+        "property_age": normalize.age_from_completion_year(
+            facts.get("سنة البناء"), this_year=datetime.now(timezone.utc).year),
         "date_added": _clean(rec.get("date")),
         "photo_urls": photos or None,
     }
-    # NO PRICE FIELD EXISTS ON THIS SOURCE — see the docstring. found=False says no price field was
-    # ever read; authoritative_absent stays False because the source never states an explicit null.
+    features = detail.get("features") or []
+    for word, col in _FEATURE_COLS.items():
+        if word in features:
+            row[col] = True
+    if deal == "Buy":
+        row["price_total"] = price
+    else:
+        row["rent_period"], row["price_annual"] = normalize.rent_period_and_annual(price, price_text)
+    stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
+    # The page's own price-area. A page that prints none leaves price NULL: never stated, not zero.
     row["price_evidence"] = normalize.price_evidence(
-        field=None, raw=None, stored=None,
-        kind="total" if deal == "Buy" else "annual", unit="total", origin="api",
+        field="price-area" if price_text else None, raw=price_text, stored=stored,
+        kind="total" if deal == "Buy" else "annual", unit="total", origin="structured",
         authoritative_absent=False)
     row["images_evidence"] = {"observed": True, "container_present": bool(rec.get("featured_media")),
                               "key_present": bool(photos), "count": len(photos)}
@@ -199,8 +290,13 @@ def map_listing(rec: dict, ptype_ar: str, deal: str) -> tuple[dict[str, Any], st
         "status_term_id": _term_id(rec, "property_status"),
         "city_term_id": _term_id(rec, "property_city"),   # kept raw: its NAME is not resolvable
         "modified": _clean(rec.get("modified")),
+        "address_ar": detail.get("address"),
+        "price_printed": price_text,
+        "total_area_m2": _area(facts.get("المساحة الكلية")),
+        "build_year": facts.get("سنة البناء") if (facts.get("سنة البناء") or "").isdigit() else None,
+        "features_ar": features or None,
     }
-    row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
+    row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [])})
     row["source_capture"] = strip_pii_fields({"schema": "squares.wp-v2-property.v1",
                                               "id": rec.get("id"), "slug": rec.get("slug"),
                                               "class_list": rec.get("class_list")})
@@ -220,7 +316,8 @@ def main() -> int:
     if a.limit:
         rows = rows[: a.limit]
     print(f"{SOURCE}: {len(rows)} posts (X-WP-Total={declared})", flush=True)
-    tmap, smap = learn_type_map(s, rows)
+    pages = fetch_pages(s, rows)
+    tmap, smap = learn_type_map(pages, rows)
     print(f"  learned {len(tmap)} type term(s), {len(smap)} status term(s)", flush=True)
 
     run_id = None if dry else db.begin_run(SLUG)
@@ -251,7 +348,11 @@ def main() -> int:
                 k = f"deal_conflict_title_{deal}_vs_term_{by_term}"
                 skipped[k] = skipped.get(k, 0) + 1
                 continue
-            row, cat = map_listing(rec, ptype_ar, deal)
+            page = pages.get(str(rec.get("id")))
+            if not page:
+                skipped["detail_page_unreadable"] = skipped.get("detail_page_unreadable", 0) + 1
+                continue
+            row, cat = map_listing(rec, ptype_ar, deal, parse_detail(page))
             (com if cat == "commercial" else res).append(row)
 
         if skipped:
@@ -261,8 +362,8 @@ def main() -> int:
             print(f"DRY: {len(res)} residential + {len(com)} commercial")
             for row in (res[:3] + com[:2]):
                 print("   ", json.dumps({k: row.get(k) for k in
-                      ("ad_number", "property_type", "transaction_type", "city_ar",
-                       "district_ar", "listing_url")}, ensure_ascii=False)[:190])
+                      ("ad_number", "property_type", "transaction_type", "price_total", "area_m2",
+                       "city_ar", "district_ar", "listing_url")}, ensure_ascii=False)[:190])
             return 0
 
         db.upsert_squares_residential_batch(res)
@@ -274,7 +375,7 @@ def main() -> int:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         for tbl, rr in (("squares_residential_listings", res),
                         ("squares_commercial_listings", com)):
-            if rr:
+            if rr and len(pages) == len(rows):      # a sweep with an unreadable page is incomplete
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
