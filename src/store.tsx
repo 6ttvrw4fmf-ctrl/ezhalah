@@ -9,6 +9,7 @@ import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource
 import { dismissalOutlivesTransition } from '@/lib/authPopupBehavior';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
+import { newSearchSeed } from '@/lib/rotationSeed';
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
@@ -630,6 +631,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const pendingDeleteRef = useRef<Set<string>>(new Set());
   const syncReadyRef = useRef<string | null>(null);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // THE CURRENT SEARCH'S ROTATION SEED (owner rule 2026-09-26 — "I refresh, the same exact one
+  // shouldn't show عقار first"). Minted fresh in runQuery for every new search, then reused
+  // UNCHANGED by every «عرض المزيد» page of that same search: the server's ordering is a pure
+  // function of this seed, so holding it steady is exactly what keeps paging duplicate-free and
+  // gap-free, while a new search gets a new one. An Advanced Filter round re-runs the search
+  // through runQuery, so it mints its own seed and its Show More inherits it.
+  //
+  // Starts UNDEFINED rather than minting at render: a load-more that somehow precedes any search
+  // then passes undefined, and the RPC call site falls back to the device+week seed — a stable,
+  // correct order, just not a per-search one. (Minting here instead would also break
+  // verify-account-scope-invalidates-sync-continuations.ts, which lifts this region of the file out
+  // and executes it against stubs, where the generator is not in scope.)
+  const searchSeedRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!user || !supabase) return;
     // Push only after the pull merged — and only after the pull that merged for THIS session. Keyed
@@ -937,7 +951,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // became unbounded (PR #1267): windowing an in-memory array can't survive a real "next 100"
         // server page. The new seed varies per device from its very first search and is stable
         // across an entire browse/pagination walk by construction (same seed → same server ORDER BY).
-        const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal });
+        //
+        // 2026-09-26: the seed is now minted PER SEARCH here (not derived from device+week at the
+        // RPC call site) and carried into every «عرض المزيد» page via searchSeedRef, so a repeat of
+        // the same search returns a different mix of houses and a different platform in front —
+        // while one browse walk stays internally stable.
+        searchSeedRef.current = newSearchSeed();
+        const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeedRef.current });
         const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null });
         // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
         // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
@@ -1040,7 +1060,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // agent.tsx's page-count backstop was sized in its comment against 1,500 — so the guard
         // covered 25,000 rows while believing it covered 75,000.
         const PAGE_MORE = LOAD_MORE_PAGE_SIZE;
-        const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE });
+        // THE SAME SEED THE FIRST PAGE USED (2026-09-26). Re-minting here — or letting the RPC call
+        // site fall back to its own default — would re-shuffle the server ORDER BY between pages,
+        // which is exactly how «عرض المزيد» starts repeating cards and skipping others. Rotation
+        // belongs to the SEARCH, not to the page.
+        const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE, rotationSeed: searchSeedRef.current });
         // A FAILED PAGE IS NOT PROGRESS (defect hunt-2026-09-04:pagination:06). `rows === null` is
         // this fetch's backend-error signal — the SAME one page 0 hands runSearch as `fetchFailed`
         // rather than a second invention. It used to be swallowed by `rows ?? []`, which made an
