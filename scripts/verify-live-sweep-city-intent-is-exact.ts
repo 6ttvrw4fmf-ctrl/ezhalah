@@ -61,6 +61,20 @@ const PREFIX_PAIRS: Array<{ asked: string; served: string; askedRows: number; se
   { asked: 'القاع',   served: 'القاعد',           askedRows: 1,     servedRows: 3 },
 ];
 
+// The SAME city, spelled differently — every one of these must NOT be a mismatch (section 3). Held
+// here beside PREFIX_PAIRS because the mutation proofs in section 2 apply the barrier's assertions to
+// both fixture sets, and a mutant is only meaningful against the data the real check uses.
+const SAME_CITY_FIXTURES: Array<[string, string]> = [
+  ['أبو عريش', 'ابو عريش'],   // أ/ا
+  ['إبو عريش', 'ابو عريش'],   // إ/ا
+  ['آبو عريش', 'ابو عريش'],   // آ/ا
+  ['مكة',      'مكه'],        // ة/ه
+  ['المرتضى',  'المرتضي'],    // ى/ي
+  ['بـريدة',   'بريدة'],      // tatweel
+  ['  جدة  ',  'جدة'],        // surrounding whitespace
+  ['ابو   عريش', 'ابو عريش'], // collapsed whitespace run
+];
+
 // ── 1. THE RULE CATCHES EVERY REAL PREFIX PAIR, BY EXECUTION ────────────────────────────────────
 for (const { asked, served, askedRows, servedRows } of PREFIX_PAIRS) {
   check(`«${asked}» (${askedRows} rows) searched as «${served}» (${servedRows}) is a MISMATCH`,
@@ -73,35 +87,34 @@ for (const { asked, served } of PREFIX_PAIRS) {
     cityIntentMismatch(served, asked) === true);
 }
 
-// ── 2. THE MUTATION — the OLD predicate must FAIL these, or this barrier proves nothing ─────────
-// If a future edit restores the substring form, section 1 goes red. This asserts the two predicates
-// genuinely DISAGREE on the production data, so section 1 is a live discriminator and not a tautology.
-const substringPredicate = (intent: string, ui: string) =>
-  !ui.includes(intent) && !intent.includes(ui);
-const missedByOld = PREFIX_PAIRS.filter(({ asked, served }) => substringPredicate(asked, served) === false);
-check('MUTATION: the substring predicate this replaced misses ALL 9 production prefix pairs',
-  missedByOld.length === PREFIX_PAIRS.length,
-  `it would have caught ${PREFIX_PAIRS.length - missedByOld.length} of them — then section 1 is not a discriminator`);
-check('MUTATION: the exact rule and the substring rule disagree on every one of them',
-  PREFIX_PAIRS.every(({ asked, served }) =>
-    cityIntentMismatch(asked, served) !== !substringPredicate(asked, served)) === false
-  && PREFIX_PAIRS.every(({ asked, served }) =>
-    cityIntentMismatch(asked, served) === true && substringPredicate(asked, served) === false));
+// ── 2. MUTATION PROOF — re-executed on every run, never a one-time act ──────────────────────────
+// `ops_incident` #728: a mutation run by hand in the session that landed a barrier is a ONE-TIME ACT
+// that nothing re-executes, so the barrier ends up protected by a sentence in a merged PR body. Each
+// mutant below is a shape this predicate ACTUALLY HAD, and section 1's own assertion is applied to it.
+const mustCatch = (what: string, caught: boolean) =>
+  check(`(mutation) catches ${what}`, caught,
+    'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
+
+// The pre-2026-09-26 predicate, verbatim. Section 1 asserts `mismatch(asked, served) === true`;
+// under this mutant it is false for every production prefix pair, so section 1 goes red.
+const SUBSTRING_MUTANT = (intent: string, ui: string) => !ui.includes(intent) && !intent.includes(ui);
+mustCatch('a SUBSTRING city equality test (production until 2026-09-26)',
+  PREFIX_PAIRS.every(({ asked, served }) => SUBSTRING_MUTANT(asked, served) === false));
+// The naive "repair" that looks stricter and is not: raw `===` flags every orthographic variant, so
+// section 3 goes red and the sweep would accuse the product on ordinary spelling.
+const RAW_EQUALS_MUTANT = (intent: string, ui: string) => ui !== intent;
+mustCatch('a raw === comparison that would call «مكة» and «مكه» different cities',
+  SAME_CITY_FIXTURES.some(([a, b]) => RAW_EQUALS_MUTANT(a, b) === true));
+// A fold that SHORTENS a name collapses the prefix pairs into equality: section 4 goes red, and
+// section 1 would silently start passing wrong cities again.
+const SHORTENING_FOLD = (s: string) => cityLookupKey(s).replace(/(اء|ة|ه|ية|د)$/u, '');
+mustCatch('a normalising fold that strips a suffix (prefix pairs collapse into equality)',
+  PREFIX_PAIRS.some(({ asked, served }) => SHORTENING_FOLD(asked) === SHORTENING_FOLD(served)));
 
 // ── 3. NO FALSE DEFECTS — the same city spelled differently is still the same city ──────────────
 // §40.7 / §41.15: an oracle that accuses the product for its own imprecision is worse than no oracle.
 // A strict `===` would report every one of these as a wrong city.
-const SAME_CITY: Array<[string, string]> = [
-  ['أبو عريش', 'ابو عريش'],   // أ/ا
-  ['إبو عريش', 'ابو عريش'],   // إ/ا
-  ['آبو عريش', 'ابو عريش'],   // آ/ا
-  ['مكة',      'مكه'],        // ة/ه
-  ['المرتضى',  'المرتضي'],    // ى/ي
-  ['بـريدة',   'بريدة'],      // tatweel
-  ['  جدة  ',  'جدة'],        // surrounding whitespace
-  ['ابو   عريش', 'ابو عريش'], // collapsed whitespace run
-];
-for (const [a, b] of SAME_CITY) {
+for (const [a, b] of SAME_CITY_FIXTURES) {
   check(`«${a}» and «${b}» are the SAME city, not a mismatch`,
     cityIntentMismatch(a, b) === false,
     `normalised: ${JSON.stringify(cityLookupKey(a))} vs ${JSON.stringify(cityLookupKey(b))}`);

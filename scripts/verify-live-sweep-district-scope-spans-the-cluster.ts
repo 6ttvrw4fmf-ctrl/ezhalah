@@ -69,6 +69,10 @@ const CATALOG = [
 // The real trending-district request, as the app serialised it.
 const CLUSTER_REQ = { p_cities: ['الاحساء'], p_districts: ['الدانة'], p_deal: 'بيع', p_region_ids: [5], p_limit: 1500 };
 
+// The comparison's own city arm — computed here because both section 2's mutants and section 3's
+// sharing property are stated against it.
+const arm0 = cityScopeArm(CLUSTER_REQ, CATALOG);
+
 // ── 1. THE SCOPE CARRIES ALL THREE ARMS, BY EXECUTION ───────────────────────────────────────────
 const scoped = districtResolutionScope(CLUSTER_REQ, CATALOG);
 check('the resolution scope is expressible for the cluster request', !scoped.reason && typeof scoped.scope === 'string',
@@ -81,25 +85,40 @@ check('it carries the MATCH_CITY_IDS arm — the one that carries clusters',
   `without this arm الهفوف's «حي الدانة» rows are outside the resolution scope\n      ${scope}`);
 check('it carries the region predicate', /region_id=in\.\(5\)/.test(scope), scope);
 
-// ── 2. THE MUTATION — the OLD label-only scope must NOT satisfy section 1 ────────────────────────
-// Without this, section 1 could be passing for reasons unrelated to the defect.
-const OLD_LABEL_ONLY_SCOPE = '&city_ar=in.("الاحساء")&region_id=in.(5)';
-check('MUTATION: the label-only scope this replaced lacks the match_city_ids arm',
-  !/match_city_ids\.ov\./.test(OLD_LABEL_ONLY_SCOPE));
-check('MUTATION: the label-only scope lacks the city_id arm too',
-  !/city_id\.in\./.test(OLD_LABEL_ONLY_SCOPE));
-check('MUTATION: the new scope and the old one genuinely differ', scope !== OLD_LABEL_ONLY_SCOPE);
-// The whole reason the old scope was wrong: «حي الدانة» rows carry city_ar='الهفوف', so a predicate
-// that can only name «الاحساء» cannot see them. Proven as a property of the STRINGS, since the row
-// counts (181 / 69, both verified in production) are what make it matter.
-check('MUTATION: the old scope cannot name الهفوف at all, so its «حي الدانة» rows are invisible to it',
-  !OLD_LABEL_ONLY_SCOPE.includes('الهفوف') && !/(city_id|match_city_ids)/.test(OLD_LABEL_ONLY_SCOPE),
-  'if it could reach الهفوف by any arm, the 44 false accusations would not have happened');
+// ── 2. MUTATION PROOF — re-executed on every run, never a one-time act ──────────────────────────
+// `ops_incident` #728: a mutation run by hand in the session that landed a barrier is a ONE-TIME ACT
+// nothing re-executes, leaving the barrier protected by a sentence in a merged PR body. Each mutant
+// below is a scope shape the sweep ACTUALLY PRODUCED, and section 1's own assertions are applied to it.
+const mustCatch = (what: string, caught: boolean) =>
+  check(`(mutation) catches ${what}`, caught,
+    'MUTANT SURVIVED — the assertion above is blind to the defect it exists to catch');
+
+// Production until 2026-09-26, verbatim: the LABEL arm alone. It can name «الاحساء» and nothing else,
+// so الهفوف's «حي الدانة» rows are outside it — which is precisely the 44 false accusations.
+const LABEL_ONLY_MUTANT = '&city_ar=in.("الاحساء")&region_id=in.(5)';
+mustCatch('a label-only resolution scope (production until 2026-09-26)',
+  !/match_city_ids\.ov\.\{3677\}/.test(LABEL_ONLY_MUTANT));
+mustCatch('a label-only scope also failing the city_id arm',
+  !/city_id\.in\.\(3677\)/.test(LABEL_ONLY_MUTANT));
+// The half-fix that resolves ids but forgets the arm carrying clusters. It looks thorough — it names
+// a city_id — and is still blind to every cluster sibling, which is the failure mode worth pinning.
+const NO_CLUSTER_ARM_MUTANT = '&or=(city_ar.in.("الاحساء"),city_id.in.(3677))&region_id=in.(5)';
+mustCatch('a scope carrying city_id but NOT match_city_ids (the plausible half-fix)',
+  !/match_city_ids\.ov\.\{3677\}/.test(NO_CLUSTER_ARM_MUTANT));
+// A resolution scope that drops the region predicate stops being the comparison's scope in the other
+// direction — §41.16, a city NAME is not an identity, 290 of them repeat across regions.
+const NO_REGION_MUTANT = '&or=(city_ar.in.("الاحساء"),city_id.in.(3677),match_city_ids.ov.{3677})';
+mustCatch('a resolution scope that drops the region predicate',
+  !/region_id=in\.\(5\)/.test(NO_REGION_MUTANT));
+// And the sharing property (section 3): a scope built independently of cityScopeArm no longer begins
+// with it, so the two can drift apart again silently.
+mustCatch('a resolution scope not derived from cityScopeArm (two definitions, free to drift)',
+  !LABEL_ONLY_MUTANT.startsWith((arm0.arm ?? '\u0000')));
 
 // ── 3. ONE DEFINITION — the resolution scope IS the comparison's city arm ───────────────────────
 // This is the actual class: two places deriving "the same" scope independently. Proven by comparing
 // what the two functions RETURN, so they cannot drift apart silently again.
-const arm = cityScopeArm(CLUSTER_REQ, CATALOG);
+const arm = arm0;
 check('cityScopeArm resolves the cluster request', !arm.reason, arm.reason ?? '');
 check('districtResolutionScope BEGINS with exactly cityScopeArm\'s arm — one definition, not two',
   scope.startsWith(arm.arm ?? '\u0000'),
