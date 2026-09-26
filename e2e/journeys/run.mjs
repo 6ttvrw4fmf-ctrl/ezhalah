@@ -13,7 +13,8 @@ import { withPage, settle, bodyText, storedHistory, clickText, clickReason, slee
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
-         SELECTED_CITY_MARKER, isBottomDocked, dockedBandCap } from './harness.mjs';
+         SELECTED_CITY_MARKER, isBottomDocked, dockedBandCap,
+         filterHomeState, filterHomeWhy, paintedTextCarriers, stayedAtZero } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -95,10 +96,15 @@ const JOURNEYS = {};
  *  mobile it does not overflow horizontally (PART 5 shape 11). */
 JOURNEYS['cold-open'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `cold-open:${mobile ? 'mobile375' : 'desktop1440'}`;
-  const text = await bodyText(page);
-  if (text.length < 200) defect(name, 'blank page', `body innerText is ${text.length} chars`);
-  else pass(name, `rendered (${text.length} chars)`);
-  if (!text.includes('بحث')) defect(name, 'missing primary control', '«بحث» not rendered on Filter home');
+  // Identity by ELEMENT, never by an innerText substring — see filterHomeVerdict in harness.mjs.
+  // The old line here was `!text.includes('بحث')`, and deleting the real «بحث» control out of the
+  // live production DOM left it TRUE (2/2), so this journey's own named defect could not fire.
+  const home = await filterHomeState(page);
+  if (home.verdict === 'blank') defect(name, 'blank page', filterHomeWhy(home));
+  else pass(name, `rendered (${home.bodyLength} chars)`);
+  if (home.verdict === 'home-missing-search-control') defect(name, 'missing primary control', filterHomeWhy(home));
+  else if (home.verdict === 'not-home') defect(name, 'cold open did not land on the Filter home', filterHomeWhy(home));
+  else if (home.verdict === 'home') pass(name, filterHomeWhy(home));
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on cold open', errs.join(' | ')); }
   if (mobile) {
     const ov = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
@@ -365,10 +371,16 @@ JOURNEYS['back-after-search'] = async (mobile) => withPage({ mobile }, async (pa
     note(`${name}: Back left the app origin (${url}) — a fresh context has no prior in-app entry`);
     return;
   }
-  const text = await bodyText(page);
-  if (text.length < 200) defect(name, 'Back stranded the user', `body is ${text.length} chars at ${url}`);
-  else if (!text.includes('بحث')) defect(name, 'Back landed off-route', `no Filter home controls at ${url}`);
-  else pass(name, `Back returned to a usable screen (${url})`);
+  // PART 5 shape 9 is «Browser Back stranding the user off-route», and the old oracle here could
+  // not see it: `text.includes('بحث')` is TRUE on the agent screen too (the greeting says «أبحث»),
+  // measured 4/4 on production across both viewports. A Back that landed on the wrong screen
+  // reported `pass`. Ask the ELEMENTS instead, and name WHICH failure it is.
+  const home = await filterHomeState(page);
+  if (home.verdict === 'blank') defect(name, 'Back stranded the user', `${filterHomeWhy(home)} at ${url}`);
+  else if (home.verdict === 'home-missing-search-control')
+    defect(name, 'Back landed on the Filter home without its primary control', `${filterHomeWhy(home)} at ${url}`);
+  else if (home.verdict === 'not-home') defect(name, 'Back landed off-route', `${filterHomeWhy(home)} at ${url}`);
+  else pass(name, `Back returned to the Filter home — ${filterHomeWhy(home)} at ${url}`);
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on Back', errs.join(' | ')); }
 });
 
@@ -730,11 +742,18 @@ JOURNEYS['adv-newchat-mid-restore'] = async (mobile) => withPage({ mobile, signe
   if (!(await ensureSidebar(page, mobile))) { skip(name, 'sidebar closed after open'); return; }
   if (!(await clickText(page, 'محادثة جديدة'))) { skip(name, 'New Chat not found'); return; }
   await sleep(5000);
-  const t = await bodyText(page);
   const ta = page.locator('textarea').first();
   const composer = (await ta.count()) ? await ta.inputValue() : '';
-  const leaked = t.includes('أبحث عن') && ['جدة', 'الرياض', 'الخبر'].some((c) => t.includes(c));
-  if (leaked) defect(name, 'interrupted restore leaked into the new chat', 'a restored search bubble is on the blank chat');
+  // THE OLD ORACLE COULD NOT TELL A LEAK FROM THE PRODUCT WORKING (routine #6, 2026-09-26):
+  //   t.includes('أبحث عن') && ['جدة','الرياض','الخبر'].some((c) => t.includes(c))
+  // «أبحث عن» is carried by «وسأبحث عنه» (two greeting strings in src/i18n.tsx) and by the composer's
+  // aria-hidden rotating examples (src/data/introExamples.ts renders «أبحث عن أرض سكنية في الرياض…»),
+  // and the city conjunct was measured PERMANENTLY TRUE — all three city names are on screen from the
+  // sidebar's own saved-chat titles, 2/2 across 21 s of rotation — so it narrowed nothing. Ask for a
+  // PAINTED, non-decoration leaf carrying the phrase as its own word instead: an actual bubble.
+  const bubbles = await paintedTextCarriers(page, 'أبحث عن');
+  if (bubbles.length) defect(name, 'interrupted restore leaked into the new chat',
+    `a restored search bubble is on the blank chat: ${bubbles.map((b) => `«${b}»`).join(' | ')}`);
   else if (composer.trim()) defect(name, 'New Chat inherited composer text', `holds «${composer}»`);
   else pass(name, 'New Chat is blank even when it interrupts a restore');
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on interrupted restore', errs.join(' | ')); }
@@ -752,10 +771,13 @@ JOURNEYS['adv-background-tab'] = async (mobile) => withPage({ mobile, signedIn: 
   await sleep(45_000);
   await page.bringToFront();
   await sleep(3500);
-  const t = await bodyText(page);
-  if (t.length < 200) defect(name, 'backgrounded tab came back blank', `body is ${t.length} chars`);
-  else if (!t.includes('بحث')) defect(name, 'controls missing after backgrounding', 'no «بحث» on return');
-  else pass(name, `survived 45s backgrounded (${t.length} chars, controls present)`);
+  // «no «بحث» on return» was unreachable: the substring survives the control's removal (harness.mjs).
+  // A frozen-rAF screen that came back as the agent chat, or with the button gone, is exactly what
+  // this journey exists to catch — so the verdict has to come from the elements.
+  const home = await filterHomeState(page);
+  if (home.verdict === 'blank') defect(name, 'backgrounded tab came back blank', filterHomeWhy(home));
+  else if (home.verdict !== 'home') defect(name, 'controls missing after backgrounding', filterHomeWhy(home));
+  else pass(name, `survived 45s backgrounded — ${filterHomeWhy(home)}`);
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error after backgrounding', errs.join(' | ')); }
   await other.close().catch(() => {});
 });
@@ -2834,6 +2856,107 @@ JOURNEYS['agent-round-trip-is-a-fresh-conversation'] = async (mobile) => withPag
   } else {
     pass(name, `the round trip produced a genuinely new conversation (greeting typed fresh, ${first} → ${max} chars)`);
   }
+});
+
+/** J33 — BROWSER FORWARD. PART 1 names «browser Back/Forward behaves»; before this journey existed,
+ *  `goForward` appeared ZERO times anywhere in `e2e/` or `scripts/` — a surface this routine's own
+ *  spec lists, with no journey that had ever pressed it (PART 1's «has any journey ever DRIVEN it»
+ *  question, 2026-09-26).
+ *
+ *  WHAT IT ASSERTS, and what it deliberately does not. The owner-locked rule is 2026-08-16's: a
+ *  navigation that is not a user search action must produce «no duplicate AI request, duplicate
+ *  property-search RPC, duplicate conversation message, duplicate analytics event, or duplicate saved
+ *  conversation» (src/lib/appSession.ts). Back and Forward are both same-document popstate hops, so
+ *  `isAppSessionStarted()` is TRUE for both — the module flag resets only on a DOCUMENT load — which
+ *  is exactly the state in which a `?filter=` left in the URL WOULD re-execute. `consumeSearchParams()`
+ *  is what makes that safe, and this journey is the only thing that watches it hold across a history
+ *  hop.
+ *
+ *  Measured on production before it was written, 2/2 desktop: «بحث» → `/agent` with the params already
+ *  consumed (bare URL), ONE results-class RPC; Back → `/` with ZERO further results calls and ZERO
+ *  edge-function calls; Forward → `/agent`, again ZERO and ZERO, landing on the greeting screen with a
+ *  composer.
+ *
+ *  It does NOT assert that Forward restores the results. For a guest nothing is persisted, and
+ *  re-running the search to repopulate the screen is the precise thing rule 1 forbids — so «Forward
+ *  shows a blank chat» is the owner's design showing through, not a defect, and pinning either
+ *  behaviour here would be inventing a product decision (PART 9's «a barrier that pins a quirk as
+ *  product behaviour»). What is pinned is: no re-execution, and not stranded. */
+JOURNEYS['back-forward-no-duplicate-search'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `back-forward-no-duplicate-search:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const results = (from) => bag.rpc.slice(from).filter((r) => classifySearchRpc(r) === 'results').length;
+  // The edge function is the AI request half of the owner's rule; bag.rpc only carries /rest/v1/rpc/.
+  const ai = [];
+  page.on('request', (r) => { if (r.url().includes('/functions/v1/')) ai.push(r.url().split('/functions/v1/')[1].split('?')[0]); });
+
+  if (!(await primeSearch(page))) { skip(name, 'search could not be primed'); return; }
+  const homeUrl = page.url();
+  const beforeSearch = bag.rpc.length;
+  await page.getByText('بحث', { exact: true }).last().click().catch(() => {});
+  const submitted = await settledCount(() => results(beforeSearch));
+  if (!submitted.settled || submitted.n < 1) {
+    skip(name, `the search never landed (results calls ${submitted.n}, settled=${submitted.settled}) — `
+      + 'there is no history entry to go Back from, so Forward is not reachable');
+    return;
+  }
+  const resultsUrl = page.url();
+  if (resultsUrl === homeUrl) {
+    skip(name, `«بحث» pushed no history entry (${resultsUrl}) — Forward is not applicable on this route`);
+    return;
+  }
+  // THE URL MUST CARRY NOTHING EXECUTABLE ONCE THE HOP IS OVER. This is the same fact
+  // src/lib/webRefreshRoute.ts's hasRestorableQuery() states, asserted on the real URL after a real
+  // press: it is what makes the two history hops below safe, so it is checked before them.
+  if (/[?&](filter|seed)=/.test(resultsUrl)) {
+    defect(name, 'the search intent was left in the URL', `«بحث» landed on ${resultsUrl} with an `
+      + 'unconsumed param — a Back/Forward hop would re-execute it (owner 2026-08-16)');
+  } else pass(name, `«بحث» consumed its params (${resultsUrl}), so no history hop can re-execute it`);
+
+  // ── BACK ──────────────────────────────────────────────────────────────────────────────────────
+  const beforeBack = bag.rpc.length;
+  const aiBeforeBack = ai.length;
+  await page.goBack().catch(() => {});
+  await settle(page);
+  const backUrl = page.url();
+  if (!backUrl.startsWith(BASE)) {
+    note(`${name}: Back left the app origin (${backUrl}) — a fresh context has no prior in-app entry`);
+    pass(name, 'Back left the origin, which is the browser behaving, not the app');
+    return;
+  }
+  const back = await filterHomeState(page);
+  if (back.verdict !== 'home') defect(name, 'Back did not land on the Filter home', `${filterHomeWhy(back)} at ${backUrl}`);
+  else pass(name, `Back landed on the Filter home — ${filterHomeWhy(back)}`);
+  const backQuiet = await stayedAtZero(() => results(beforeBack));
+  if (!backQuiet.zero || ai.length > aiBeforeBack) {
+    defect(name, 'Back re-executed the search', `${backQuiet.peak} results-class RPC(s) and `
+      + `${ai.length - aiBeforeBack} AI call(s) within ${backQuiet.windowMs} ms of a Back — owner `
+      + '2026-08-16 forbids a duplicate search, RPC, AI request or saved conversation from a '
+      + 'navigation that is not a user search');
+  } else pass(name, `Back fired no search: 0 results RPCs, 0 AI calls over a ${backQuiet.windowMs} ms window`);
+
+  // ── FORWARD — the half nothing in this repo had ever pressed ───────────────────────────────────
+  const beforeFwd = bag.rpc.length;
+  const aiBeforeFwd = ai.length;
+  await page.goForward().catch(() => {});
+  await settle(page);
+  const fwdUrl = page.url();
+  const fwd = await filterHomeState(page);
+  if (fwd.verdict === 'blank') {
+    defect(name, 'Forward stranded the user', `${filterHomeWhy(fwd)} at ${fwdUrl}`);
+  } else pass(name, `Forward landed on a rendered screen (${fwdUrl}, ${fwd.bodyLength} chars) — `
+    + 'results are NOT expected back: re-running the search is what the owner rule forbids');
+  const fwdQuiet = await stayedAtZero(() => results(beforeFwd));
+  if (!fwdQuiet.zero || ai.length > aiBeforeFwd) {
+    defect(name, 'Forward re-executed the search', `${fwdQuiet.peak} results-class RPC(s) and `
+      + `${ai.length - aiBeforeFwd} AI call(s) within ${fwdQuiet.windowMs} ms of a Forward — the `
+      + 'appSession gate only sees a DOCUMENT load, so a param left in the URL re-runs on a '
+      + 'same-document history hop');
+  } else pass(name, `Forward fired no search: 0 results RPCs, 0 AI calls over a ${fwdQuiet.windowMs} ms window`);
+  if (/[?&](filter|seed)=/.test(fwdUrl)) {
+    defect(name, 'Forward restored an executable search intent into the URL',
+      `${fwdUrl} — a refresh from here is a page load carrying params`);
+  }
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error across Back/Forward', errs.join(' | ')); }
 });
 
 let ran = 0;
