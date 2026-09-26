@@ -920,6 +920,20 @@ POLICIES: dict[str, _P] = {
         "site does not read would look like a real deep link and silently fail. Measured 13 total "
         "records (10 rent status:true/3 false, 1 investment status:true, 0 sale) across all three "
         "categories."),
+    "wahadat": _P(
+        _pol("wahadat", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set, and it is a genuine FULL-STATE fetch: every run re-reads the "
+        "sitemap's complete list of 100 project pages and re-parses every unit on each, so a unit "
+        "dropping out, or its project leaving the sitemap, is the complete liveness signal. "
+        "db.prune_unseen's 3-strike/coverage/collapse guards are the only additional protection, "
+        "the same shape ~40 other whole-catalogue platforms in this fleet already use.",
+        "Not CANDIDATE_PLUS_DIRECT even though a project page can be re-fetched: the unit-level "
+        "detail endpoint (pro.wahadat.sa/ar/unit/api/units/<uuid>/) answers 403 unauthenticated, so "
+        "there is no per-unit surface to re-probe INDEPENDENTLY of the crawl — a 'direct' check "
+        "would just be the same project-page read the crawl already did, which would dress a "
+        "presence signal up as a second opinion. Measured 2026-09-26 over 14 projects: 128 units, "
+        "available 90 / reserved 28 / sold 10; only `available` is ever listed, per the owner's "
+        "ready-only rule, so a unit selling out leaves our index by changing its own status."),
     "abaad": _P(
         _pol("abaad", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the ad's OWN /api/v1/estate/get-estate/<id> record. *** A 200 IS NOT A LIFE HERE *** a "
