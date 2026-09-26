@@ -197,10 +197,12 @@ export function orderByScope<L extends { cleanType?: string | null; rentPeriod?:
 }
 
 // ── HOW MANY PLATFORMS GENUINELY MATCH THIS SEARCH ────────────────────────────────────────────
-// Owner PERMANENT rule 2026-09-02: the initial batch is
-//   min(genuine matches, max(10, distinct matching platforms))
-// so the first screen carries one listing from EVERY platform that has a real match, instead of a
-// fixed ten. This function supplies the "distinct matching platforms" term.
+// Owner PERMANENT rule 2026-09-25 (reversing 2026-09-02's `max(10, ...)` floor — see
+// src/lib/initialReveal.ts for the full history): the initial batch is
+//   min(genuine matches, max(1, distinct matching platforms))
+// so the first screen carries EXACTLY one listing per platform that has a real match — no more,
+// no fewer, and never padded up to a fixed floor from whichever platform has the most inventory.
+// This function supplies the "distinct matching platforms" term.
 //
 // DERIVED, NEVER LISTED. The count is read from the eligible rows themselves — no allowlist, no
 // array of platform names, no number to bump. A new scraper participates the moment it contributes

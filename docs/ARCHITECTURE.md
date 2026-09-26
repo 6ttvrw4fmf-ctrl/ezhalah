@@ -971,11 +971,23 @@ migration-drift-guard rule in `AGENTS.md`).
       unconditional `(source_table, listing_id)` total-order tiebreaker — so total-order pagination
       (no duplicate/skip across `عرض المزيد` batches, PR #1267) holds regardless of rotation.
     - **THE INITIAL BATCH IS SIZED BY THE MARKET, NOT BY A CONSTANT** (owner PERMANENT rule,
-      2026-09-02, PR #1688). The first screen after a normal search reveals
-      `min(genuine matches, max(10, distinct platforms in the matching set))` — 10 is a FLOOR, never
-      a cap. Tiers 1–3 above already ordered one row per platform before any platform repeats, but
-      the CLIENT truncated that at a hardcoded 10, so every platform past the tenth was erased from
-      the first screen. Measured on production over SUPPORTED scopes only (a city is required — see
+      2026-09-25, REVERSING the 2026-09-02 floor below). The first screen after a normal search
+      reveals `min(genuine matches, max(1, distinct platforms in the matching set))` — exactly one
+      card per matching platform, however many that is. `max(1, …)` is a SAFETY floor only (guards a
+      blank screen if platform-counting ever miscounts as 0 while real matches exist); it is not a
+      fairness floor and never pads beyond the platforms actually present.
+      - **Why the floor of 10 came out.** It fixed a real coverage bug (below), but its `max(10, …)`
+        had a side effect: when only 1-2 platforms genuinely matched, the floor still demanded 10
+        cards, and those extra slots could only come from whichever platform had more inventory to
+        contribute — round-robin naturally hands the big platform every leftover slot once the small
+        one runs out of rows. A platform's SIZE was quietly buying it more first-screen presence than
+        a platform with a single genuine match. Coverage does not regress: revealing every matching
+        platform (instead of padding TO 10) already guarantees none is dropped, so the historical
+        floor was never needed for coverage, only for screen-width.
+      - **The 2026-09-02 rule, for history — the coverage bug it fixed** (PR #1688). Tiers 1–3 above
+        already ordered one row per platform before any platform repeats, but the CLIENT truncated
+        that at a hardcoded 10, so every platform past the tenth was erased from the first screen.
+        Measured on production over SUPPORTED scopes only (a city is required — see
       `CITY_REQUIRED_MSG`; there is no nationwide scope): «الرياض / كل السكني» lost 8 of 18 matching
       platforms, «جدة / كل السكني» 7 of 17, «جدة / شقق / إيجار» 5 of 15, «الدمام / كل السكني» 4 of
       14, «فلل للبيع في الرياض» 3 of 13. A district search («الرياض / حي الملقا», 8 platforms) lost
@@ -988,7 +1000,8 @@ migration-drift-guard rule in `AGENTS.md`).
         contributes one genuine matching listing, and a disabled or non-matching platform
         contributes nothing. Adding a platform must never require editing ranking code.
       - It **cannot weaken MATCH**: it only sizes a PREFIX of the array the RPC already filtered to
-        the eligible set, and stays bounded by rows actually fetched — 7 matches show 7.
+        the eligible set, and stays bounded by rows actually fetched — 7 matches from 3 platforms
+        show exactly 3, never padded up to what would fit on screen.
       - It applies to the INITIAL batch of a normal search. Advanced Filter, narrowing, Trending and
         continuation keep MATCH → DIVERSITY → PHOTO but never widen the eligible universe to
         reproduce an earlier platform spread; a platform that stopped matching stays gone.

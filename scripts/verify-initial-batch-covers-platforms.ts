@@ -1,21 +1,33 @@
-// THE FIRST SCREEN SHOWS THE WHOLE MARKET, NOT THE BIGGEST PLATFORM.
+// THE FIRST SCREEN SHOWS ONE CARD PER MATCHING PLATFORM, NO PADDING.
 //
-// Owner PERMANENT rule 2026-09-02, extending the supreme 2026-08-05 rule. Priority, in order:
+// Owner PERMANENT rule 2026-09-25, REVERSING the 2026-09-02 rule below. Priority, in order:
 //   1. MATCH            — absolute; diversity may never add, widen, or invent a row
 //   2. PLATFORM DIVERSITY — cover every platform that has a genuine match
 //   3. PHOTO PREFERENCE — prefer a real photo, target ≤3 no-photo cards WHEN alternatives exist
 //   4. everything else  — closeness, rotation
 //
-//   initial_visible_count = min(genuine matches, max(10, distinct matching platforms))
+//   initial_visible_count = min(genuine matches, max(1, distinct matching platforms))
 //
-// WHAT WAS ACTUALLY WRONG (measured on production 2026-09-02). Both ordering layers were already
-// correct — the RPC's div_rank is a per-platform row_number(), and the client's interleaveRanked
-// round-robins with `platform` as the OUTERMOST key — so the first K rows already were one listing
-// from each of K platforms. The client then sliced that at a hardcoded `FIRST_PAGE = 10`:
+// WHY THE FLOOR CAME OUT. The 2026-09-02 rule below fixed a real coverage bug, but its `max(10, …)`
+// floor had a side effect nobody wanted: when only 1-2 platforms genuinely matched, the floor still
+// demanded 10 cards, and those extra slots could only be filled from whichever platform had more
+// inventory to contribute (round-robin naturally hands the big platform every leftover slot once
+// the small one runs out of rows). A platform's SIZE was quietly buying it more first-screen
+// presence than a platform with a single genuine match. `max(1, …)` is a SAFETY floor only — it
+// guards a blank first screen if platform-counting ever miscounts as 0 while real matches exist; it
+// never pads beyond the platforms actually present.
+//
+// THE 2026-09-02 RULE, for history — WHAT WAS ACTUALLY WRONG (measured on production 2026-09-02).
+// Both ordering layers were already correct — the RPC's div_rank is a per-platform row_number(), and
+// the client's interleaveRanked round-robins with `platform` as the OUTERMOST key — so the first K
+// rows already were one listing from each of K platforms. The client then sliced that at a
+// hardcoded `FIRST_PAGE = 10`:
 //   فلل للبيع في الرياض        13 matching platforms → 3 erased from the first screen
 //   الرياض / كل السكني         18 matching platforms → 8 erased
 //   كل السكني للبيع (المملكة)  33 matching platforms → 23 erased
-// A correct 33-platform ordering was being truncated to look like a 10-platform site.
+// A correct 33-platform ordering was being truncated to look like a 10-platform site. That coverage
+// problem is solved a different way now: revealing every matching platform (instead of padding TO
+// 10) already guarantees none is dropped, so the historical floor is no longer needed for coverage.
 //
 // This file EXECUTES the real functions — never a copy (repo rule: "NEVER test a copy of production
 // code"). The SQL half is read through rpcReplay, the same replay the RNPL guard uses, so it checks
@@ -41,18 +53,21 @@ const rowsFor = (platforms: string[]) =>
   platforms.map((p, i) => ({ l: { cleanType: 't' }, platform: p, city: 'c', region: 'r', district: 'd', rank: i, source_table: `${p}_t` }));
 
 // ── 1. THE COUNT RULE, EXECUTED ───────────────────────────────────────────────────────────────
-// initial_visible_count = min(matches, max(10, distinct matching platforms)).
+// initial_visible_count = min(matches, max(1, distinct matching platforms)).
 // STOP_AT is the canonical small-final-set cutoff (25) already honoured by initialReveal.
 {
-  const FLOOR = 10, STOP_AT = 25;
+  const SAFETY_FLOOR = 1, STOP_AT = 25;
   const rows = (n: number, plat: (i: number) => string) => Array.from({ length: n }, (_, i) => ({ source: plat(i) }));
   const reveal = (n: number, platforms: number, honestTotal: number | null = null) =>
-    initialReveal({ fetched: n, honestTotal, firstPage: FLOOR, stopAt: STOP_AT, platforms });
+    initialReveal({ fetched: n, honestTotal, stopAt: STOP_AT, platforms });
 
   const cases: Array<[string, number, number]> = [
-    ['7 matches, 3 platforms → all 7 (never invent rows)', reveal(7, 3), 7],
+    // Only 3 of the 7 fetched rows show, even though all 7 would fit on screen — the point of the
+    // 2026-09-25 rule is exactly this: never show more than one per platform before «عرض المزيد»,
+    // even when there is room to spare.
+    ['7 matches but only 3 platforms → exactly 3, not padded up to what fits', reveal(7, 3), 3],
     ['exactly 10 matches from 10 platforms → 10', reveal(10, 10), 10],
-    ['500 matches but only 2 platforms → the floor, 10', reveal(500, 2), 10],
+    ['500 matches but only 2 platforms → exactly 2, no padding from the bigger one', reveal(500, 2), 2],
     ['500 matches, 13 platforms → 13', reveal(500, 13), 13],
     ['500 matches, 15 platforms → 15', reveal(500, 15), 15],
     ['500 matches, 29 platforms → 29', reveal(500, 29), 29],
@@ -63,8 +78,12 @@ const rowsFor = (platforms: string[]) =>
   ];
   for (const [name, got, want] of cases) check(got === want, name, `got ${got}, want ${want}`);
 
-  // The floor must never behave as a ceiling — the defect this rule exists to kill.
-  check(reveal(500, 33) > FLOOR, 'the floor is NOT a cap: 33 platforms yields more than 10');
+  // The defect the 2026-09-25 rule exists to kill: a low platform count must never be padded above
+  // its own platform count, no matter how much a single matching platform has to give.
+  check(reveal(500, 1) === 1, 'a single matching platform is never padded up with its own extra inventory');
+  check(reveal(500, 2) === 2, 'two matching platforms are never padded up — see case above too');
+  // The safety floor only guards a true zero-platform miscount; it is not a fairness floor.
+  check(reveal(500, 0) === SAFETY_FLOOR, 'a platform-count of exactly 0 (a miscount, since matches exist) still shows something, not a blank screen');
   // A pre-existing guarantee that must survive: a small FINAL set still renders in full.
   check(reveal(13, 4, 13) === 13, 'small final set (<= stopAt) still renders in full, platforms or not');
 
@@ -90,13 +109,14 @@ const rowsFor = (platforms: string[]) =>
     // the country scope survived until this loop existed.)
     for (const scope of ['country', 'region', 'city', 'district'] as const) {
     const ordered = orderByScope(rows as never, scope);
-    const batch = initialReveal({ fetched: ordered.length, honestTotal: null, firstPage: 10, stopAt: 25, platforms: distinctPlatformCount(ordered.map((r) => ({ source: r.platform }))) });
+    const batch = initialReveal({ fetched: ordered.length, honestTotal: null, stopAt: 25, platforms: distinctPlatformCount(ordered.map((r) => ({ source: r.platform }))) });
     const covered = new Set(ordered.slice(0, batch).map((r) => r.platform));
     check(covered.size === n, `${n} matching platforms / ${scope} → all ${n} represented in the first batch`,
       `covered ${covered.size} of ${n}`);
     // The precise rule: NO platform may repeat until EVERY matching platform has had its turn.
-    // (With few platforms the batch is still the floor of 10, so the big platform correctly fills
-    // the leftover slots — «distribute those 10 reasonably across those two platforms».)
+    // (Since 2026-09-25 the batch IS exactly `n` when the market has few platforms — no floor
+    // means no leftover slots to distribute, and none of the extra rows a big platform used to be
+    // handed just because a small one ran out.)
     const seq = ordered.map((r) => r.platform);
     const firstRepeatAt = seq.findIndex((p, i) => seq.indexOf(p) < i);
     const distinctBeforeRepeat = new Set(seq.slice(0, firstRepeatAt === -1 ? seq.length : firstRepeatAt)).size;
@@ -111,7 +131,7 @@ const rowsFor = (platforms: string[]) =>
   const rows = [...Array.from({ length: 300 }, (_, i) => ({ l: { cleanType: 't' }, platform: 'aqar', city: 'c', region: 'r', district: 'd', rank: i, source_table: 'aqar_t' })),
                 { l: { cleanType: 't' }, platform: 'lonely', city: 'c', region: 'r', district: 'd', rank: 999, source_table: 'lonely_t' }];
   const ordered = orderByScope(rows as never, 'city');
-  const batch = initialReveal({ fetched: ordered.length, honestTotal: null, firstPage: 10, stopAt: 25, platforms: distinctPlatformCount(ordered.map((r) => ({ source: r.platform }))) });
+  const batch = initialReveal({ fetched: ordered.length, honestTotal: null, stopAt: 25, platforms: distinctPlatformCount(ordered.map((r) => ({ source: r.platform }))) });
   check(ordered.slice(0, batch).some((r) => r.platform === 'lonely'),
     'a platform whose ONLY match is the oldest row is still represented');
 }
@@ -130,7 +150,7 @@ const rowsFor = (platforms: string[]) =>
   check(new Set(ordered.map(key)).size === ordered.length, 'no duplicate rows after ordering');
   // Pagination: the initial batch is a strict PREFIX of the same ordering, so page 2 continues
   // rather than reshuffling. A batch that were not a prefix could repeat or skip listings.
-  const batch = initialReveal({ fetched: ordered.length, honestTotal: null, firstPage: 10, stopAt: 25, platforms: distinctPlatformCount(ordered.map((r) => ({ source: r.platform }))) });
+  const batch = initialReveal({ fetched: ordered.length, honestTotal: null, stopAt: 25, platforms: distinctPlatformCount(ordered.map((r) => ({ source: r.platform }))) });
   check(ordered.slice(0, batch).every((r, i) => key(r) === key(ordered[i])),
     'the initial batch is a PREFIX of the full ordering — pagination cannot duplicate or skip');
 }
@@ -141,9 +161,11 @@ const rowsFor = (platforms: string[]) =>
   const screen = stripComments(read('src/app/agent.tsx'));
   const reveal = stripComments(read('src/lib/initialReveal.ts'));
   check(!/return Math\.min\(firstPage, fetched\);/.test(reveal),
-    'the fixed `min(firstPage, fetched)` cap is gone — firstPage is a floor now');
-  check(/Math\.max\(firstPage, platforms\)/.test(reveal),
-    'initialReveal widens the floor to the matching-platform count');
+    'the fixed `min(firstPage, fetched)` cap is gone — no fixed cap has ever come back');
+  check(!/\bfirstPage\b/.test(reveal),
+    'firstPage was retired 2026-09-25 with the fixed floor — it must not quietly reappear');
+  check(/Math\.max\(1, platforms\)/.test(reveal),
+    'initialReveal reveals exactly the matching-platform count, floored only at 1 for safety');
   check(/platforms: distinctPlatformCount\(/.test(screen),
     'the screen passes the DERIVED platform count into initialReveal');
   check(!/Math\.min\(\s*10\s*,/.test(screen), 'no literal `Math.min(10, …)` cap on the results screen');

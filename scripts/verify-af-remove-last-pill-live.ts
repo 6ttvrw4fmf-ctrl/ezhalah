@@ -193,7 +193,9 @@ const R = {
   /** R9.2.2 — the restored turn RENDERED exactly the first page of cards under its headline.
    *  `expected` comes from the PRODUCT's own initialReveal(), never from a copy of the rule here:
    *  FIRST_PAGE stopped being a cap on 2026-09-02 (#1688, owner PERMANENT rule) and became a FLOOR —
-   *  reveal max(10, distinct matching platforms). This assertion still read the old `min(total, 10)`
+   *  reveal max(10, distinct matching platforms) — then the floor itself was retired 2026-09-25 in
+   *  favour of exactly one card per matching platform (src/lib/initialReveal.ts has the full
+   *  history). This assertion still read the old `min(total, 10)`
    *  and so called a correct production broken the moment a scope matched more than ten platforms
    *  (measured: الرياض restored turn rendered 13 cards for 13 platforms, and this reported
    *  `expected=10`). Equality is unchanged — only the number it compares against is now the one the
@@ -726,7 +728,7 @@ try {
     R.pageZeroComplete(ROWS2.length, N2, PAGE0_BUFFER), `rows=${ROWS2.length} N2=${N2} buffer=${PAGE0_BUFFER}`);
   platforms2 = searches[searches.length - 1]?.platforms ?? 0;
   expectedFirstPage = N2 == null ? null : initialReveal({
-    fetched: ROWS2.length, honestTotal: N2, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
+    fetched: ROWS2.length, honestTotal: N2, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
   });
   // THE APP'S OWN TARGET FOR THIS TURN, which is NOT expectedFirstPage. removeGuidedFacet re-enters
   // runRefine carrying the guided record, and agent.tsx sets `afCompleted = !!opts?.guided` — so the
@@ -737,7 +739,7 @@ try {
   // (raised, not decided here — ops_incident #597); this journey asserts the app against the rule
   // the app actually implements, and would go red the moment that rule changes.
   revealTarget = N2 == null ? null : initialReveal({
-    fetched: ROWS2.length, honestTotal: N2, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
+    fetched: ROWS2.length, honestTotal: N2, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
     afCompleted: true,
   });
   // R9.2.2 / R12.3 — THE TURNS ABOVE ARE HISTORY. This is the assertion ops_incident #338 needed
