@@ -34,6 +34,12 @@
       "today_pct": 100.0,
       "active_rows": 276
     },
+    "alajlan": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 11,
+      "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 11 of 11 active rows carry photo_urls (100%). TINY: one listing is ~9 points; floor set one listing below the observation, as villassa is at the same size."
+    },
     "albdah": {
       "floor_pct": 85,
       "today_pct": 100.0,
@@ -312,6 +318,12 @@
       "active_rows": 100,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 100 of 100 rows carried photo_urls (the first 100 of 2,641). A head-of-index sample, so the floor keeps extra margin; re-check against the first snapshot."
     },
+    "ibaax": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 155,
+      "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 155 of 155 active rows carry photo_urls (100%). 155 rows is large enough for a percentage to mean something; floor follows this file's today-minus-about-three convention on a single observation."
+    },
     "jawher": {
       "floor_pct": 95,
       "today_pct": 100.0,
@@ -395,6 +407,12 @@
       "today_pct": 100,
       "active_rows": 12
     },
+    "qmra": {
+      "floor_pct": 83,
+      "today_pct": 100.0,
+      "active_rows": 6,
+      "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 6 of 6 active rows carry photo_urls (100%). TINY: one listing is ~17 points; floor set one listing below the observation. 6 of the site's 19 posts mapped — the other 13 are not-ready (8 sold, 3 under construction, 1 sold, 1 rented) and skipped by run.py's own gate per the owner's ready-only rule."
+    },
     "raghdan": {
       "floor_pct": 88,
       "today_pct": 91.9,
@@ -420,6 +438,12 @@
       "floor_pct": 89,
       "today_pct": 91.7,
       "active_rows": 84
+    },
+    "remaxsa": {
+      "floor_pct": 85,
+      "today_pct": 100.0,
+      "active_rows": 7,
+      "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 7 of 7 active rows carry photo_urls (100%). TINY: one listing is ~14 points; floor set one listing below the observation, as marksa and wadod are at the same size. 7 of the site's 21 ads mapped — the other 14 are off_plan and skipped by run.py's own gate, not lost."
     },
     "rightcompound": {
       "floor_pct": 95,
