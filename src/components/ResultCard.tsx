@@ -799,6 +799,10 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('expattrusted') || s.includes('expat trusted housing')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('flow')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('أبعاد') || s.includes('abaad')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('آي باكس') || s.includes('ibaax')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('re/max') || s.includes('remaxsa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('قمرا') || s.includes('qmra')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('العجلان') || s.includes('alajlan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('آل سعيدان') || s.includes('alsaedan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('إيجو عقار') || s.includes('ego')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('أحمد المحيسني العقارية') || s.includes('muhaysini')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
@@ -954,6 +958,10 @@ function sourceHost(source: string): string {
   if (s.includes('expattrusted') || s.includes('expat trusted housing')) return 'expattrustedhousingriyadh.com';
   if (s.includes('flow')) return 'flow.life';
   if (s.includes('أبعاد') || s.includes('abaad')) return 'app.abaadapp.sa';
+  if (s.includes('آي باكس') || s.includes('ibaax')) return 'ibaax.sa';
+  if (s.includes('re/max') || s.includes('remaxsa')) return 'remax.sa';
+  if (s.includes('قمرا') || s.includes('qmra')) return 'qmra.sa';
+  if (s.includes('العجلان') || s.includes('alajlan')) return 'alajlan-re.com';
   if (s.includes('آل سعيدان') || s.includes('alsaedan')) return 'alsaedan.com';
   if (s.includes('إيجو عقار') || s.includes('ego')) return 'ego-aqar.com';
   if (s.includes('أحمد المحيسني العقارية') || s.includes('muhaysini')) return 'aqaralmuhaysini.com';

@@ -72,7 +72,13 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // so removal on this source is a redirect, on a slugless URL that cannot change path benignly.
 // Wired through the shared law with an in-run canary; `not_available_or_zero_price` deliberately
 // stays UNKNOWN because the measured dead shape is a conjunction and fetch_one's gate is not.
-const RATCHET = 23;
+// 23 → 24: alajlan onboarded (wave-2, 2026-09-26). NOT a to-do like every other entry —
+// there is no per-listing URL or detail endpoint anywhere on this platform, so no oracle CAN be
+// built. Every run re-fetches the site's entire /data/projects.json array in one shot, and that one
+// fetch already IS the complete, authoritative per-unit state; a constructed per-row URL the site
+// does not read would look like a real oracle while proving nothing, which is worse than declaring
+// the gap honestly here. Registered CRAWL_PRESENCE_ONLY in liveness_policies.py for the same reason.
+const RATCHET = 24;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

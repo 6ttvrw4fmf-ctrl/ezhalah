@@ -1,25 +1,27 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
--- Re-verified 2026-09-25 (migration 20260925081236_wave1_ten_wiring_into_search):
--- CHANGED. Twenty arms were added immediately after the nufouth commercial arm — wave 1's ten
--- platforms, residential + commercial each:
---   alsaedan  ego  muhaysini  nofodh  razre  reinvest  safa  sokok  sukna  tuba
--- They sit BEFORE أبعاد (abaad)'s two arms, because the wiring migration splices at the nufouth
--- anchor and abaad was already past it.
+-- Re-verified 2026-09-26 (migrations 20260926042615_wave2_four_wiring_into_search and
+-- 20260926043530_wave2_four_join_listing_location_index — the second touches a DIFFERENT object,
+-- listed here because both were part of the same onboarding pass): CHANGED. Eight arms were added
+-- immediately after the nufouth commercial arm — wave 2's four platforms, residential + commercial
+-- each:
+--   ibaax  remaxsa  qmra  alajlan
+-- They sit BEFORE wave 1's ten platforms (alsaedan…tuba), because the wiring migration splices at
+-- the SAME nufouth anchor every prior pass used, and wave 1's ten were already past it.
 --
---   The twenty arms were spliced into the previous body in the identical rendering
---   pg_get_viewdef produces for every other arm, and the result was then PROVEN equal to
---   production rather than assumed: md5 of the spliced body (trailing newline stripped, which is
---   how pg_get_viewdef returns it) == the live digest, over the same 106,642 chars. No 104 KB of
---   view text had to be shipped through a tool call to establish that.
---   • md5 of everything below this header block: 57e2a412b53db5c479f67c29789d1601
---   • 94,952 -> 106,642 chars.
+--   The eight arms were spliced into the previous body in the identical rendering pg_get_viewdef
+--   produces for every other arm, and the result was then PROVEN equal to production rather than
+--   assumed: md5 of the spliced body (trailing newline stripped, which is how pg_get_viewdef
+--   returns it) == the live digest, over the same 111,322 chars. No 109 KB of view text had to be
+--   shipped through a tool call to establish that.
+--   • md5 of everything below this header block: c7ffdce9a6763a5c99593788a37a7068
+--   • 106,642 -> 111,322 chars.
 --
--- WHY THIS WAS STALE: 20260925081236 rebuilt the matview in production at 08:12 UTC and was never
--- committed, so BOTH its migration file and this mirror were missing. alert_event 5622
--- (sql_mirror_drift, P1) fired at 08:29 naming exactly this object. Same root cause as the
--- migration drift repaired in the same change — one unmirrored apply, two stale artefacts.
+-- CAUGHT BY verify-sql-mirrors-not-stale (required npm test) mid-onboarding, not by an alert: the
+-- object itself was correctly rebuilt in production and mirrored in a byte-exact migration file,
+-- but THIS separate reference mirror was one artefact this pass forgot to refresh. Same class the
+-- barrier and the 09-25 incident above both exist for.
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
@@ -500,6 +502,102 @@
             nufouth_commercial_listings.transaction_type
            FROM nufouth_commercial_listings
           WHERE nufouth_commercial_listings.active
+        UNION ALL
+         SELECT 'ibaax'::text AS platform,
+            'ibaax_residential_listings'::text AS source_table,
+            ibaax_residential_listings.id AS listing_id,
+            ibaax_residential_listings.city_ar,
+            ibaax_residential_listings.city_id,
+            ibaax_residential_listings.district_ar,
+            ibaax_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            ibaax_residential_listings.transaction_type
+           FROM ibaax_residential_listings
+          WHERE ibaax_residential_listings.active
+        UNION ALL
+         SELECT 'ibaax'::text AS platform,
+            'ibaax_commercial_listings'::text AS source_table,
+            ibaax_commercial_listings.id AS listing_id,
+            ibaax_commercial_listings.city_ar,
+            ibaax_commercial_listings.city_id,
+            ibaax_commercial_listings.district_ar,
+            ibaax_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            ibaax_commercial_listings.transaction_type
+           FROM ibaax_commercial_listings
+          WHERE ibaax_commercial_listings.active
+        UNION ALL
+         SELECT 'remaxsa'::text AS platform,
+            'remaxsa_residential_listings'::text AS source_table,
+            remaxsa_residential_listings.id AS listing_id,
+            remaxsa_residential_listings.city_ar,
+            remaxsa_residential_listings.city_id,
+            remaxsa_residential_listings.district_ar,
+            remaxsa_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            remaxsa_residential_listings.transaction_type
+           FROM remaxsa_residential_listings
+          WHERE remaxsa_residential_listings.active
+        UNION ALL
+         SELECT 'remaxsa'::text AS platform,
+            'remaxsa_commercial_listings'::text AS source_table,
+            remaxsa_commercial_listings.id AS listing_id,
+            remaxsa_commercial_listings.city_ar,
+            remaxsa_commercial_listings.city_id,
+            remaxsa_commercial_listings.district_ar,
+            remaxsa_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            remaxsa_commercial_listings.transaction_type
+           FROM remaxsa_commercial_listings
+          WHERE remaxsa_commercial_listings.active
+        UNION ALL
+         SELECT 'qmra'::text AS platform,
+            'qmra_residential_listings'::text AS source_table,
+            qmra_residential_listings.id AS listing_id,
+            qmra_residential_listings.city_ar,
+            qmra_residential_listings.city_id,
+            qmra_residential_listings.district_ar,
+            qmra_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            qmra_residential_listings.transaction_type
+           FROM qmra_residential_listings
+          WHERE qmra_residential_listings.active
+        UNION ALL
+         SELECT 'qmra'::text AS platform,
+            'qmra_commercial_listings'::text AS source_table,
+            qmra_commercial_listings.id AS listing_id,
+            qmra_commercial_listings.city_ar,
+            qmra_commercial_listings.city_id,
+            qmra_commercial_listings.district_ar,
+            qmra_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            qmra_commercial_listings.transaction_type
+           FROM qmra_commercial_listings
+          WHERE qmra_commercial_listings.active
+        UNION ALL
+         SELECT 'alajlan'::text AS platform,
+            'alajlan_residential_listings'::text AS source_table,
+            alajlan_residential_listings.id AS listing_id,
+            alajlan_residential_listings.city_ar,
+            alajlan_residential_listings.city_id,
+            alajlan_residential_listings.district_ar,
+            alajlan_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            alajlan_residential_listings.transaction_type
+           FROM alajlan_residential_listings
+          WHERE alajlan_residential_listings.active
+        UNION ALL
+         SELECT 'alajlan'::text AS platform,
+            'alajlan_commercial_listings'::text AS source_table,
+            alajlan_commercial_listings.id AS listing_id,
+            alajlan_commercial_listings.city_ar,
+            alajlan_commercial_listings.city_id,
+            alajlan_commercial_listings.district_ar,
+            alajlan_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            alajlan_commercial_listings.transaction_type
+           FROM alajlan_commercial_listings
+          WHERE alajlan_commercial_listings.active
         UNION ALL
          SELECT 'alsaedan'::text AS platform,
             'alsaedan_residential_listings'::text AS source_table,

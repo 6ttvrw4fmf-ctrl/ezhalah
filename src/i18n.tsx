@@ -1024,6 +1024,10 @@ const AR: Record<string, string> = {
   'Expat Trusted Housing': 'إكسبات ترستد هاوسينج',  // transliteration — no Arabic name at the source
   'Flow': 'فلو',
   'Abaad': 'أبعاد',                                 // the site's own Arabic name (app.abaadapp.sa writes «أبعاد»)                                    // transliteration — no Arabic name at the source
+  'iBaax': 'أيباكس',                              // the site's own Arabic name
+  'RE/MAX Saudi': 'ريماكس السعودية',                              // the site's own Arabic name
+  'Qmra': 'قمرا',                              // the site's own Arabic name
+  'Al Ajlan': 'العجلان',                              // the site's own Arabic name
   'Al Saedan': 'آل سعيدان',                              // the site's own Arabic name
   'Ego Real Estate': 'إيجو عقار',                              // the site's own Arabic name
   'Ahmed Almuhaysini': 'أحمد المحيسني العقارية',                              // the site's own Arabic name
