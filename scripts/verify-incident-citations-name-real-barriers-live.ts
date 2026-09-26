@@ -48,6 +48,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import {
+import { postgrestFetch } from './lib/postgrestRetry.ts';
   citationProblems, bareIndex, committedFunctions, treeMentionTest,
   type Artifact, type IncidentRow,
 } from './lib/barrierCitations.ts';
@@ -67,7 +68,7 @@ async function readIncidents(): Promise<IncidentRow[] | null> {
   const select = 'id,state,owner_routine,barrier_script,detail';
   let res: Response;
   try {
-    res = await fetch(`${URL_BASE}/rest/v1/ops_incident?select=${select}&limit=10000`, {
+    res = await postgrestFetch(`${URL_BASE}/rest/v1/ops_incident?select=${select}&limit=10000`, {
       headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
     });
   } catch (e) {

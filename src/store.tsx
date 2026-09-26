@@ -90,7 +90,10 @@ type AppState = {
   // `failed` = the backend page errored. Nothing advanced: `nextOffset` and `hasMore` come back
   // exactly as they went in, so the caller re-offers «عرض المزيد» on the same page instead of
   // recording a failure as "that was the last page".
-  loadMoreListings: (q: SearchQuery, offset: number) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
+  // `seed` = the result set's own `rotationSeed` (ops_incident #796). The caller passes the seed of
+  // the SET it is paging, not the app's most recent one, so a later or cancelled search cannot
+  // re-key this walk's server ORDER BY mid-flight.
+  loadMoreListings: (q: SearchQuery, offset: number, seed?: string) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
   dataSource: DataSource;
   // Auth. SEARCH IS FREE, ALWAYS (owner rule 2026-08-15, retiring the PRD §9 gate): a guest can run
   // unlimited searches; sign-in only adds persistence (saved history/language). The old `gated`
@@ -956,12 +959,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // RPC call site) and carried into every «عرض المزيد» page via searchSeedRef, so a repeat of
         // the same search returns a different mix of houses and a different platform in front —
         // while one browse walk stays internally stable.
+        //
+        // 2026-09-26 (ops_incident #796): the seed also RIDES OUT on the result. searchSeedRef alone
+        // could not carry this promise — it is one app-level slot, written here before the fetch is
+        // known to succeed, so any later runQuery re-keys the ORDER BY of a walk still on screen. The
+        // one that proved it is a search the user CANCELS: Stop leaves the earlier results block
+        // rendered and still pageable (it only drops `status` bubbles), while this line has already
+        // replaced the seed that block's page 1 was cut from. Measured live on الرياض/إيجار (42,101
+        // matches): the next «عرض المزيد» delivered 439 of the 500 cards it owed and left 434 the walk
+        // owed unfetched behind an advancing cursor. The seed belongs to the SET, so it travels with it.
         searchSeedRef.current = newSearchSeed();
+        const searchSeed = searchSeedRef.current;
         const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeedRef.current });
         const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null });
         // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
         // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
-        const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal };
+        const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal, rotationSeed: searchSeed };
         // STOP-BUTTON GUARD (owner 2026-08-18): "A cancelled request must never later write results
         // into the UI or history." fetchListingsForQuery already aborts the underlying network calls
         // on `signal`, but a response can still be mid-flight (or already back) at the exact instant
@@ -1054,7 +1067,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Load More (owner 2026-07-08): fetch the NEXT real page of matching listings beyond `offset`
       // (filter-first, recency order) so broad searches page through the FULL set. Returns the ranked
       // page + the advanced cursor; the caller appends (de-duped) to the shown list.
-      loadMoreListings: async (q: SearchQuery, offset: number) => {
+      loadMoreListings: async (q: SearchQuery, offset: number, seed?: string) => {
         // ONE definition, shared with the «عرض المزيد» drain budget that is derived from it
         // (src/data/resultCount.ts). It was a second, private `500` here until 2026-09-12, while
         // agent.tsx's page-count backstop was sized in its comment against 1,500 — so the guard
@@ -1064,7 +1077,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // site fall back to its own default — would re-shuffle the server ORDER BY between pages,
         // which is exactly how «عرض المزيد» starts repeating cards and skipping others. Rotation
         // belongs to the SEARCH, not to the page.
-        const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE, rotationSeed: searchSeedRef.current });
+        //
+        // AND THE SEARCH IS THE ONE BEING PAGED, NOT THE LAST ONE THE APP RAN (ops_incident #796,
+        // 2026-09-26). searchSeedRef is a single app-level slot that every runQuery overwrites before
+        // it knows whether its own fetch will survive — so reading it here paged the walk on screen
+        // with a seed belonging to some OTHER search, and the proven case is a search the user
+        // CANCELLED (Stop keeps the earlier results block rendered and pageable; the seed had already
+        // moved). Measured live on الرياض/إيجار, 42,101 matches, seed swapped between offset 0 and
+        // offset 500: the press added 439 of the 500 cards it owed, 61 already-shown rows came back and
+        // were de-duped away, and 434 rows the walk owed were delivered by neither page — unreachable
+        // once the cursor moved to 1000. `seed` is the result set's own; searchSeedRef remains the
+        // fallback ONLY for a transcript persisted before SearchResult carried one, which is exactly
+        // today's behaviour for those and strictly better for everything else.
+        const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE, rotationSeed: seed ?? searchSeedRef.current });
         // A FAILED PAGE IS NOT PROGRESS (defect hunt-2026-09-04:pagination:06). `rows === null` is
         // this fetch's backend-error signal — the SAME one page 0 hands runSearch as `fetchFailed`
         // rather than a second invention. It used to be swallowed by `rows ?? []`, which made an

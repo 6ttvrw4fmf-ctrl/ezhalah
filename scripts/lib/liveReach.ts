@@ -41,7 +41,25 @@ export const PRODUCTION_HOST = /https?:\/\/[A-Za-z0-9.-]*(?:\.supabase\.co|ezhal
  * `execSync('curl https://…')` reaches production exactly as `fetch` does, and a barrier that only
  * knew about `fetch` would be one shell-out away from the same blindness it exists to close.
  */
-const NETWORK_CALLS = ['fetch', 'execSync', 'execFileSync', 'spawnSync', 'exec', 'request'];
+// THE REPO'S OWN PostgREST TRANSPORTS BELONG HERE TOO (routine #10, 2026-09-26, ops_incident #794).
+//
+// MEASURED, on this very change. Eighteen alert-raising live checks adopted
+// `postgrestFetch` from scripts/lib/postgrestRetry.ts, replacing their bare `await fetch(`. The
+// population of "workflows invoking a PostgREST-reading check" then fell from FOURTEEN to ONE —
+// not because anything stopped reading PostgREST, but because the only name this list knew had
+// been renamed. Every one of those eighteen became invisible to the very ratchet that exists to
+// count them, and the correct repair read as the whole class disappearing.
+//
+// That is the hazard scripts/verify-af-live-checks-survive-schema-cache-reload.ts's header already
+// records from the other side: after its three repairs moved onto lib/afLiveProbe.ts, `readsPostgrest`
+// called two of them non-readers "because their own `fetch(` calls were gone". It was fixed there by
+// walking the module graph; the LEAF test was left naming one identifier, so the same blindness
+// waited here for the next adopter. A wrapper is still a socket.
+//
+// These are safe to add because the path literal stays at the CALL SITE — `postgrestFetch(
+// `${URL_BASE}/rest/v1/rpc/…`)` — so the argument text this walk collects is unchanged in substance.
+const NETWORK_CALLS = ['fetch', 'execSync', 'execFileSync', 'spawnSync', 'exec', 'request',
+  'postgrestFetch', 'fetchRetryingSchemaCacheReload'];
 
 /**
  * The text of a call's argument list, starting at the '(' that follows `src.slice(at)`'s callee.

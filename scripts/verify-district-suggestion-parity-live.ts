@@ -19,6 +19,7 @@
 // Env wins when set; otherwise the committed PUBLIC endpoint. Before 2026-08-10 this required env
 // and the workflow's repo secret did not exist, so this barrier exited 1 without ever running.
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
 
@@ -32,13 +33,13 @@ const MAX_DISTRICTS_PER_SCOPE = 40; // bound runtime; each city rarely has more 
 type DistrictOpt = { district_ar: string; listing_count: number; match_values: string[] };
 
 async function post(fn: string, body: Record<string, unknown>): Promise<any[]> {
-  const res = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: HEADERS, body: JSON.stringify(body) });
+  const res = await postgrestFetch(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: HEADERS, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`${fn} ${res.status}: ${await res.text()}`);
   return (await res.json()) as any[];
 }
 
 async function cityId(cityAr: string): Promise<number | null> {
-  const res = await fetch(`${URL_BASE}/rest/v1/loc_catalog_city?select=city_id,city_ar&city_ar=eq.${encodeURIComponent(cityAr)}&limit=1`, { headers: HEADERS });
+  const res = await postgrestFetch(`${URL_BASE}/rest/v1/loc_catalog_city?select=city_id,city_ar&city_ar=eq.${encodeURIComponent(cityAr)}&limit=1`, { headers: HEADERS });
   if (!res.ok) return null;
   const rows = (await res.json()) as { city_id: number }[];
   return rows.length ? rows[0].city_id : null;

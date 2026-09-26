@@ -9,20 +9,41 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { pickBestArabicVoice } from '../src/lib/readAloudVoice.ts';
+import { pickBestArabicVoice, QUALITY_ENHANCED, type ArabicVoiceCandidate } from '../src/lib/readAloudVoice.ts';
 
+
+// ── THE CONTRACT AS A PURE FUNCTION OF ITS SOURCES (routine #10, 2026-09-26, ops_incident #728) ──
+//
+// Almost every assertion below reads SOURCE TEXT. That is legitimate here for a real reason — most of
+// these are statements about a module Node cannot import (readAloud.ts resolves expo-speech's native
+// 'ExponentSpeech') and about React components — but AGENTS.md is explicit that a source-text tripwire
+// passes for the entire time a defect is live, and this file carried NO mutation proof at all: it
+// landed in PR #4317, whose body claims «MUTATION-PROVEN 14/14, each watched red and restored», and
+// nothing re-executed those mutations afterwards. The barrier was protected by a sentence in a merged
+// PR body — the PART 1.11 shape at one remove, a CLAIM of proof reading as durable coverage.
+//
+// The repair that makes a source read provable is a SEAM: every source arrives through `rd`, so §M at
+// the bottom can hand this same function MUTATED COPIES OF THE REAL SHIPPED FILES and watch it go
+// red. A proof fed hand-written snippets would prove nothing about the tree (PART 3, R1: "a proof
+// that supplies its own input proves nothing"). This is the `coverageProblems(entries, read)` shape
+// the barrier spec names as its reference.
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const readAloud = readFileSync(join(root, 'src/lib/readAloud.ts'), 'utf8');
-const readAloudScript = readFileSync(join(root, 'src/lib/readAloudScript.ts'), 'utf8');
-const listingDisplay = readFileSync(join(root, 'src/lib/listingDisplay.ts'), 'utf8');
-const feedbackRow = readFileSync(join(root, 'src/components/FeedbackRow.tsx'), 'utf8');
-const readAloudPlayer = readFileSync(join(root, 'src/components/ReadAloudPlayer.tsx'), 'utf8');
-const agent = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
-const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
-const pkg = readFileSync(join(root, 'package.json'), 'utf8');
+const READ = (rel: string) => readFileSync(join(root, rel), 'utf8');
 
-let failed = 0;
-const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); };
+let asserted = 0;
+const contractProblems = (rd: (rel: string) => string): string[] => {
+const problems: string[] = [];
+let n = 0;
+const check = (label: string, ok: boolean) => { n++; if (!ok) problems.push(label); };
+const readAloud = rd('src/lib/readAloud.ts');
+const readAloudScript = rd('src/lib/readAloudScript.ts');
+const listingDisplay = rd('src/lib/listingDisplay.ts');
+const feedbackRow = rd('src/components/FeedbackRow.tsx');
+const readAloudPlayer = rd('src/components/ReadAloudPlayer.tsx');
+const agent = rd('src/app/agent.tsx');
+const i18n = rd('src/i18n.tsx');
+const pkg = rd('package.json');
+
 
 // ── STAYS FREE: no paid TTS provider anywhere near the read-aloud path. ──────────────────────────
 const PAID_TTS_SIGNS = /elevenlabs|texttospeech\.googleapis\.com|cognitiveservices.*speech|azure.*(?:cognitive|speech)|speechSynthesizer\.speakText|api\.elevenlabs/i;
@@ -50,17 +71,37 @@ check('no speak call sits inside a bare useEffect (would autoplay without a tap)
 // ── LANGUAGE: Arabic ONLY (owner 2026-08-19) — every utterance speaks as ar-SA, no English branch,
 //    no per-message language detection to keep in sync with anything else. ──────────────────────────
 check("every speak() call is hardcoded to ar-SA — no English/other-language branch", /const AR_LANG = 'ar-SA';/.test(readAloud) && /language: AR_LANG/.test(readAloud) && !/en-US/.test(readAloud));
-check('msgRTL (bubble RTL layout) has ONE definition (src/lib/textDirection.ts) — read-aloud no longer needs or imports it', /export const msgRTL = /.test(readFileSync(join(root, 'src/lib/textDirection.ts'), 'utf8')) && /import \{ msgRTL \} from '@\/lib\/textDirection'/.test(agent) && !/textDirection/.test(readAloud));
+check('msgRTL (bubble RTL layout) has ONE definition (src/lib/textDirection.ts) — read-aloud no longer needs or imports it', /export const msgRTL = /.test(rd('src/lib/textDirection.ts')) && /import \{ msgRTL \} from '@\/lib\/textDirection'/.test(agent) && !/textDirection/.test(readAloud));
 
 // ── VOICE QUALITY (owner feedback 2026-08-19 — "sounds robotic"; root-cause voice-selection fix,
 //    2026-08-22): prefer an exact ar-SA, on-device, Enhanced-quality Arabic voice when available,
 //    resolved ahead of time via a bounded poll (never awaited inside speakReadAloud — that would
 //    break iOS Safari's synchronous-user-gesture requirement), plus a calmer rate. ──────────────────
-const voiceLogic = readFileSync(join(root, 'src/lib/readAloudVoice.ts'), 'utf8');
+const voiceLogic = rd('src/lib/readAloudVoice.ts');
 // Retargeted 2026-09-03: the scoring moved to the import-free lib/readAloudVoice.ts so it could be
 // EXECUTED rather than replicated (see the block below). The three axes are still pinned — and the
 // behaviour itself is now run, per engine, by scripts/verify-read-aloud-voice-logic.ts.
-check('voice scoring prefers exact ar-SA, on-device (localService), AND Enhanced quality — all three axes', /AR_LANG\.toLowerCase\(\)\) s \+= 4/.test(voiceLogic) && /localService[\s\S]{0,20}!== false\) s \+= 2/.test(voiceLogic) && /QUALITY_ENHANCED\) s \+= 1/.test(voiceLogic));
+// RETARGETED 2026-09-26, routine #10 — ops_incident #727's shape, found in this file.
+// This check's LABEL states a property ("prefers exact ar-SA, on-device, AND Enhanced quality — all
+// three axes"). Its ASSERTION used to freeze three exact EXPRESSIONS, including two numeric literals
+// and the accumulator's NAME:
+//     /AR_LANG\.toLowerCase\(\)\) s \+= 4/ · /localService[\s\S]{0,20}!== false\) s \+= 2/ · /QUALITY_ENHANCED\) s \+= 1/
+// Those are not the property. Renaming `s` to `score`, or extracting `const EXACT_LOCALE_BONUS = 4`,
+// changes nothing any user or engine can observe and turns this check RED; meanwhile every edit that
+// DOES change which voice a device picks is caught by executing the function. So the pin could only
+// ever fire on a correct refactor — the class ops_incident #727 routes to this routine: a barrier
+// holding the current code in place instead of the invariant, green for exactly as long as the code
+// is unchanged and red at the fix.
+// readAloudVoice.ts is import-free on purpose — which is why line 12 above can import it — so the
+// three axes are ASSERTED BY EXECUTION, on the code production actually runs.
+const axis = (language: string, extra: { localService?: boolean; quality?: string } = {}): ArabicVoiceCandidate =>
+  ({ identifier: `${language}${extra.localService === false ? '|remote' : ''}${extra.quality ? '|enh' : ''}`, language, ...extra });
+check('voice scoring prefers exact ar-SA over a generic Arabic locale, even when the generic one is local AND Enhanced (executed, not pinned to `s += 4`)',
+  pickBestArabicVoice([axis('ar-EG', { localService: true, quality: QUALITY_ENHANCED }), axis('ar-SA', { localService: false })])?.language === 'ar-SA');
+check('…prefers an ON-DEVICE voice when the locale ties (executed, not pinned to `s += 2`)',
+  pickBestArabicVoice([axis('ar-SA', { localService: false }), axis('ar-SA', { localService: true })])?.localService === true);
+check('…and prefers Enhanced quality when locale and locality both tie (executed, not pinned to `s += 1`)',
+  pickBestArabicVoice([axis('ar-SA', { localService: true }), axis('ar-SA', { localService: true, quality: QUALITY_ENHANCED })])?.quality === QUALITY_ENHANCED);
 check('voice resolution is a bounded POLL (not a single voiceschanged await) — resilient to voiceschanged never firing on some engines', /const POLL_TIMEOUTS_MS = \[/.test(readAloud) && /Promise\.race\(\[/.test(readAloud) && /void resolveVoice\(\);/.test(readAloud));
 // ROOT-CAUSE FIX (owner report, 2026-08-23 — Windows Chrome: the button always said "not available",
 // even though the device may genuinely have a usable Arabic voice that just took longer than the
@@ -132,7 +173,7 @@ check('card facts come from the SAME Arabic display helpers ResultCard.tsx itsel
 //    SAME 'Hosted on {name}' i18n key and sourceName() mapping ResultCard.tsx's visible "مستضاف على X"
 //    badge uses — moved to listingDisplay.ts as the ONE shared mapping so the spoken platform can
 //    never drift from what the card shows. ──────────────────────────────────────────────────────────
-const resultCard = readFileSync(join(root, 'src/components/ResultCard.tsx'), 'utf8');
+const resultCard = rd('src/components/ResultCard.tsx');
 check('every card speaks its platform name last, via the shared listingPlatformAr() helper', /sentences\.push\(listingPlatformAr\(listing\)\);/.test(readAloudScript) && /import \{ listingTypeAr, listingLocationAr, listingPriceAr, listingPlatformAr \} from '\.\/listingDisplay';/.test(readAloudScript));
 check('listingPlatformAr() reuses the SAME \'Hosted on {name}\' i18n key the visible card badge renders — cannot say a different platform than what is shown', /export function listingPlatformAr[\s\S]{0,120}?translate\('ar', 'Hosted on \{name\}', \{ name: translate\('ar', sourceName\(listing\.source\)\) \}\)/.test(listingDisplay));
 check('sourceName() (the platform-slug-to-label mapping) lives in ONE place, listingDisplay.ts — ResultCard.tsx imports it rather than keeping its own copy', /export function sourceName\(source: string\): string \{/.test(listingDisplay) && /import \{ sourceName \} from '@\/lib\/listingDisplay';/.test(resultCard) && !/^function sourceName/m.test(resultCard));
@@ -361,6 +402,94 @@ function seekTargetIndexReplica(units: TestUnit[], currentIndex: number, current
   // actually reacts to the current speed, not a rate-blind fixed unit-count skip.
   check('a faster rate reaches an equal-or-later unit than a slower rate for the identical seek delta (the estimate reacts to current speed)', seekTargetIndexReplica(timeline, 0, 0, 1.3, 3000) >= seekTargetIndexReplica(timeline, 0, 0, 0.8, 3000) && seekTargetIndexReplica(timeline, 0, 0, 1.3, 3000) === 4 && seekTargetIndexReplica(timeline, 0, 0, 0.8, 3000) === 2);
 }
+asserted = n;
+return problems;
+};
+
+const problems = contractProblems(READ);
+let failed = problems.length;
+for (const label of problems) console.log(`FAIL  ${label}`);
+console.log(`${failed ? 'FAIL' : 'PASS'}  ${asserted - failed} of ${asserted} read-aloud contract assertions hold`);
+
+
+// ── §M — MUTATION PROOFS: the contract watched to go RED, against the REAL shipped files ─────────
+//      (routine #10, 2026-09-26, ops_incident #728)
+//
+// Every mutant is `READ` with ONE file edited — never a hand-written snippet — so each proof is a
+// statement about this tree, not about a fixture. `mutate()` keeps every other source real, which is
+// what makes a caught mutant attributable to the property it names.
+const mutate = (target: string, fn: (src: string) => string) =>
+  (rel: string) => (rel === target ? fn(READ(rel)) : READ(rel));
+
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`PASS  (mutation) catches ${label}`); return; }
+  mutFail++;
+  console.error(`FAIL  (mutation) BLIND to ${label}`);
+};
+const breaks = (target: string, fn: (src: string) => string) => contractProblems(mutate(target, fn)).length > 0;
+
+// The healthy control first: a predicate red for everything proves nothing (PART 3, R1 step 4).
+mustCatch('…while the REAL shipped tree is NOT flagged (contractProblems is not vacuously red)',
+  contractProblems(READ).length === 0);
+
+// — THE OWNER P0: native/OS TTS only, $0 at any volume —
+mustCatch('a paid TTS endpoint wired into the read-aloud path (the owner P0 this file exists for)',
+  breaks('src/lib/readAloud.ts', (src) => `${src}\nconst TTS = 'https://api.elevenlabs.io/v1/text-to-speech';\n`));
+mustCatch('the floating player learning to fetch() — a network call on the speech path at all',
+  breaks('src/components/ReadAloudPlayer.tsx', (src) => `${src}\nasync function warm() { await fetch('/x'); }\n`));
+mustCatch('a paid speech SDK added to package.json',
+  breaks('package.json', (src) => src.replace('"expo-speech":', '"elevenlabs": "^1.0.0",\n    "expo-speech":')));
+
+// — ARABIC ONLY (owner 2026-08-19): no per-message language branch —
+mustCatch('an English language branch reappearing in readAloud.ts',
+  breaks('src/lib/readAloud.ts', (src) => src.replace("language: AR_LANG", "language: isArabic ? AR_LANG : 'en-US'")));
+
+// — «SOUNDS ENGLISH» (owner 2026-08-22): never speak without a CONFIRMED Arabic voice —
+mustCatch('THE ROOT CAUSE: speakReadAloud() no longer refusing when no Arabic voice is confirmed, so it falls through to a language-only call the engine resolves to the system default',
+  breaks('src/lib/readAloud.ts', (src) => src.replace('if (!bestArabicVoice) return false;', '')));
+mustCatch('a Speech.speak() call that stops passing the confirmed voice identifier (language-only again)',
+  breaks('src/lib/readAloud.ts', (src) => src.replace(/voice: bestArabicVoice!\.identifier,/g, '')));
+mustCatch('the 45s background retry window deleted, so a device is called "genuinely unavailable" right after the fast poll',
+  breaks('src/lib/readAloud.ts', (src) => src.replace('const RETRY_WINDOW_MS = 45000;', 'const RETRY_WINDOW_MS = 0;')));
+
+// — THE ops_incident #693 SIBLING THIS FILE ONCE PINNED AS CORRECT —
+// The predecessor of the check below asserted `setUnavailable(true)` — the exact boolean that could
+// not tell «no Arabic voice» from «still looking». Both directions are proven: the shared mapping
+// going away, and the single boolean coming back.
+mustCatch('FeedbackRow going back to a single boolean that cannot tell «no voice on this device» from «still looking»',
+  breaks('src/components/FeedbackRow.tsx', (src) => src.replace(/readAloudRefusalMessageKey\(/g, 'setUnavailable(')));
+
+// — SINGLE SPEAKER / NO AUTOPLAY —
+mustCatch('speakReadAloud() no longer stopping the in-progress utterance first (two voices at once)',
+  breaks('src/lib/readAloud.ts', (src) => src.replace(/(export function speakReadAloud[^{]*\{\s*)stopReadAloud\(\);/, '$1')));
+mustCatch('a speak call moved into a bare useEffect — autoplay, which iOS Safari silently drops and every other engine obeys',
+  breaks('src/components/FeedbackRow.tsx', (src) => `${src}\nuseEffect(() => {\n  speakReadAloud(feedbackKey, readAloudSegments);\n}, []);\n`));
+
+// — SCRIPT STRUCTURE (owner 2026-08-19) —
+mustCatch('a card cap returning to the script, so listings on screen are silently not spoken',
+  breaks('src/lib/readAloudScript.ts', (src) => src.replace('visibleListings.forEach(', 'visibleListings.slice(0, 3).forEach(')));
+mustCatch('the intro word changed, so the reading no longer opens the way the owner specified',
+  breaks('src/lib/readAloudScript.ts', (src) => src.replace("const INTRO_WORD = 'إزهله';", "const INTRO_WORD = 'مرحبا';")));
+mustCatch('agent.tsx passing the FULL fetched set instead of the reveal-count slice, so a listing the user cannot see is read aloud',
+  breaks('src/app/agent.tsx', (src) => src.replace('m.result.listings.slice(0, shown)', 'm.result.listings')));
+
+// — THE RETARGET ITSELF (ops_incident #727), proven in BOTH directions —
+// The property must survive a semantics-preserving refactor of readAloudVoice.ts, and the pin it
+// replaced must be shown to fail on that same refactor. Otherwise "strictly stronger" is a claim.
+const RENAMED = READ('src/lib/readAloudVoice.ts')
+  .replace('let s = 0;', 'const EXACT_LOCALE = 4, ON_DEVICE = 2, ENHANCED = 1;\n  let score = 0;')
+  .replace('if (norm(v.language) === AR_LANG.toLowerCase()) s += 4;', 'if (norm(v.language) === AR_LANG.toLowerCase()) score += EXACT_LOCALE;')
+  .replace('if (v.localService !== false) s += 2;', 'if (v.localService !== false) score += ON_DEVICE;')
+  .replace('if (v.quality === QUALITY_ENHANCED) s += 1;', 'if (v.quality === QUALITY_ENHANCED) score += ENHANCED;')
+  .replace('  return s;\n}', '  return score;\n}');
+mustCatch('the OLD pin failing on a rename that changes no behaviour (which is why it was a false red waiting to happen)',
+  !/AR_LANG\.toLowerCase\(\)\) s \+= 4/.test(RENAMED));
+mustCatch('…while the RETARGETED, executed property is untouched by that same rename',
+  contractProblems(mutate('src/lib/readAloudVoice.ts', () => RENAMED)).length === 0
+  && RENAMED !== READ('src/lib/readAloudVoice.ts'));
+
+if (mutFail) { console.error(`\n✗ ${mutFail} mutation(s) went UNCAUGHT — contractProblems cannot fail for them`); process.exit(1); }
 
 console.log(failed === 0 ? '\n✓ read-aloud contract holds — native/OS TTS only, $0 at any volume' : `\n✗ ${failed} assertion(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);
