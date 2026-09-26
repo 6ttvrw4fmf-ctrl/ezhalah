@@ -965,6 +965,25 @@ def run_enum_strike(args) -> int:
     return 0
 
 
+def _repair_control(n: int) -> list[tuple[str, int, str, int]]:
+    """Known-live rows for the repair's control check: active, no strikes, seen by the crawl in the
+    last 48h. Disjoint from the cohort (missing_count >= grace) by construction."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+    out: list[tuple[str, int, str, int]] = []
+    for tbl in TABLES:
+        rows = db._execute(
+            db.sb().table(tbl).select("id, listing_url, missing_count")
+            .eq("active", True).eq("missing_count", 0).gte("last_seen_at", since)
+            .order("id", desc=True).limit(n // len(TABLES) + 1),
+            what=f"{tbl}.repair_control",
+        ).data or []
+        for x in rows:
+            url = (x.get("listing_url") or "").strip()
+            if url:
+                out.append((tbl, x["id"], url, 0))
+    return out[:n]
+
+
 def run_repair_clock_bug_backlog(args) -> int:
     """ONE-TIME repair for the confirm-eligible backlog the enum-rollup clock bug produced
     (ops_incident, routine #11, 2026-09-24 — see rollup_started_at() for the full writeup).
@@ -993,13 +1012,11 @@ def run_repair_clock_bug_backlog(args) -> int:
     discipline this run happens to exercise — it is structurally absent from the code, so this mode
     cannot deactivate a single listing no matter what the checks return.
 
-    A degenerate read (checker apparently unable to distinguish anything — overwhelmingly dead, or
-    overwhelmingly failed) skips even the missing_count writes: it means don't trust today's DEAD
-    verdicts as freshly-earned strikes either, not just "don't kill anyone" (which was never on the
-    table). Mirrors the collapse guard in run_enforce() at the same 90% degenerate threshold used
-    there is deliberately stricter (that guard's job is to stop a kill; this one has no kill to stop,
-    so it only needs to protect the QUALITY of the strike it is about to hand back to the ordinary
-    pipeline).
+    Checker health is proven up front by a known-live control group (control_ok(), the daily
+    enum-strike's own guard): if known-live rows do not come back live, nothing is written. A batch
+    that is overwhelmingly FAILED is skipped too — no answer is no evidence to reset strikes on. A
+    batch that is overwhelmingly DEAD is NOT skipped: this backlog really is ~94% gone at source, and
+    every write here lowers a strike count, so skipping is the branch closer to deactivation.
     """
     # INCREMENTAL FLUSH (added after the 2026-09-24 first attempt). That attempt held every verdict
     # in memory and wrote NOTHING until the whole cohort was checked — so when the real per-check
@@ -1043,6 +1060,30 @@ def run_repair_clock_bug_backlog(args) -> int:
         print("  [DRY-RUN or empty cohort] no checks performed, no writes", flush=True)
         return 0
 
+    # KNOWN-LIVE CONTROL, checked before any cohort row. A ">90% dead" batch rule cannot tell a
+    # broken checker from a backlog that really is ~94% gone (pilot run 36111901590: 141/150 real
+    # HTTP 404s with the 211KB dead-page signature), and skipping left every row at
+    # missing_count>=grace — the state closest to deactivation, since every write this mode makes
+    # LOWERS a strike count. A checker that calls known-live rows dead fails this and nothing is
+    # written; it is the same control_ok() the daily enum-strike trusts.
+    control = _repair_control(args.control_n)
+    c = [r[3] for r in _imap(check_hybrid, control, args.workers)]
+    c_live, c_dead, c_failed = c.count("live"), c.count("dead"), c.count("failed")
+    if not control_ok(c_live, c_dead, c_failed, len(control), args.control_min_live):
+        print(f"⚠ REPAIR CONTROL GUARD: known-live controls verified live={c_live} dead={c_dead} "
+              f"failed={c_failed} of {len(control)} — checker unhealthy, NO writes this run.", flush=True)
+        db._execute(db.sb().table("wasalt_liveness_runs").insert({
+            "started_at": now_iso,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "shard": f"repair-{args.shard}/{args.shards}", "mode": "repair-clock-bug-backlog",
+            "checked": 0, "live": 0, "dead": 0, "failed": 0, "skipped": 1, "bytes_downloaded": 0,
+            "notes": (f"mode=repair-clock-bug-backlog control_failed live={c_live} dead={c_dead} "
+                      f"failed={c_failed} n={len(control)}")}),
+            what="wasalt_liveness_runs.insert")
+        return 1
+    print(f"  control healthy: live={c_live}/{len(control)} (dead={c_dead} failed={c_failed})",
+          flush=True)
+
     checked = live = dead = failed = 0
     total_bytes = 0
     degenerate_batches = 0
@@ -1058,13 +1099,14 @@ def run_repair_clock_bug_backlog(args) -> int:
         if b_checked == 0:
             return
         _flush_detail(b_detail)  # evidence written even for a degenerate batch — never hidden
-        decided = b_live + b_dead
-        degenerate = decided >= 20 and (b_dead > 0.9 * decided or b_failed > 0.9 * b_checked)
+        # Overwhelmingly FAILED = no information: don't reset a batch's strikes on it. (The old
+        # form gated this on decided>=20, which a >90%-failed batch of 100 can never reach.)
+        degenerate = b_checked >= 20 and b_failed > 0.9 * b_checked
         if degenerate:
             degenerate_batches += 1
             print(f"⚠ REPAIR GUARD (batch of {b_checked}): live={b_live} dead={b_dead} "
-                  f"failed={b_failed} — reads as a broken checker for this batch, not a broken "
-                  f"backlog. Skipping this batch's missing_count writes.", flush=True)
+                  f"failed={b_failed} — no answer for this batch, so no evidence to reset its "
+                  f"strikes on. Skipping this batch's missing_count writes.", flush=True)
         else:
             now = datetime.now(timezone.utc).isoformat()
             for tbl, ids in b_alive.items():
