@@ -129,9 +129,18 @@ withFakeStorage(() => {
     /import\s*\{\s*rotationSeed\s*\}\s*from\s*'@\/lib\/rotationSeed'/.test(remoteSrc));
   const rpcCallIdx = remoteSrc.indexOf("supabase.rpc('location_search_candidates_ar'");
   check('location_search_candidates_ar RPC call site exists', rpcCallIdx >= 0);
-  const rpcCallSlice = remoteSrc.slice(rpcCallIdx, rpcCallIdx + 800);
-  check('the RPC call passes p_rotation_seed: rotationSeed()',
-    /p_rotation_seed:\s*rotationSeed\(\)/.test(rpcCallSlice), rpcCallSlice.slice(0, 300));
+  // Window widened 800 -> 1600 (2026-09-26): the call block grew the threaded-seed fallback and its
+  // explanatory comment, which pushed p_rotation_seed past the old slice. The subject of this check
+  // is the PARAM, not how many bytes of comment precede it.
+  const rpcCallSlice = remoteSrc.slice(rpcCallIdx, rpcCallIdx + 1600);
+  // 2026-09-26: the seed is now THREADED from the caller (one per search, held across that search's
+  // pages — src/store.tsx), with rotationSeed() kept as the fallback for callers that pass none. So
+  // the contract this line guards is unchanged — a seed always reaches the RPC, and this module is
+  // still what produces it when nobody supplies one — but the literal shape is now the `??` form.
+  // Pinning the old exact text would have forced the per-search rotation to be reverted to pass.
+  check('the RPC call passes a rotation seed, with rotationSeed() as the fallback',
+    /p_rotation_seed:\s*opts\?\.rotationSeed\s*\?\?\s*rotationSeed\(\)/.test(rpcCallSlice)
+    || /p_rotation_seed:\s*rotationSeed\(\)/.test(rpcCallSlice), rpcCallSlice.slice(0, 300));
 }
 
 console.log(failures === 0

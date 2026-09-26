@@ -133,9 +133,15 @@ const loadMore = (() => {
   // be independent literals, which is how a backstop sized in its comment against 1,500 came to
   // cover a 500-row pager. Handing the lift the REAL constant keeps this check measuring the shipped
   // arithmetic; a stub here would re-open exactly the drift the shared constant closed.
-  const raw = new Function('fetchListingsForQuery', 'runSearch', 'buildPools', 'LOAD_MORE_PAGE_SIZE',
+  // searchSeedRef IS stubbed (unlike LOAD_MORE_PAGE_SIZE above): since 2026-09-26 load-more carries
+  // the search's rotation seed so every page of one walk keeps the same server ORDER BY. That seed
+  // cannot influence the cursor/hasMore arithmetic measured here — it only picks WHICH listings the
+  // (stubbed) fetch would have returned — so a fixed value keeps this lift faithful. That the real
+  // load-more passes the SEARCH's ref and never mints a fresh one is a different contract, owned by
+  // scripts/verify-rotation-seed-is-per-search.ts.
+  const raw = new Function('fetchListingsForQuery', 'runSearch', 'buildPools', 'LOAD_MORE_PAGE_SIZE', 'searchSeedRef',
     `${js}\nreturn surface.loadMoreListings;`);
-  return ((f: unknown, r: unknown, b: unknown) => raw(f, r, b, LOAD_MORE_PAGE_SIZE)) as
+  return ((f: unknown, r: unknown, b: unknown) => raw(f, r, b, LOAD_MORE_PAGE_SIZE, { current: 'lifted-test-seed' })) as
     (f: unknown, r: unknown, b: unknown) => (q: unknown, offset: number) =>
       Promise<{ listings: unknown[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
 })();
