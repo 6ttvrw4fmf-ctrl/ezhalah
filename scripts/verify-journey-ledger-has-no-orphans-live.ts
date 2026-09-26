@@ -27,6 +27,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { orphanLedgerKeys } from './lib/ledgerOrphans.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 let failures = 0;
@@ -52,7 +53,7 @@ if (registered.length < 10) {
 let rows: Array<{ key: string; last_tested_at: string }> | null = null;
 let fetchError = '';
 try {
-  const r = await fetch(
+  const r = await postgrestFetch(
     `${URL_BASE}/rest/v1/ops_qa_coverage_ledger`
       + '?dimension=eq.journey_persistence&select=key,last_tested_at&limit=2000',
     { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` }, signal: AbortSignal.timeout(30_000) },

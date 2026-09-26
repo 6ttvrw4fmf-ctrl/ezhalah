@@ -40,6 +40,7 @@
 // to the load it is trying to survive.
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { paceUntilHealthy, readSearchLoad, describeLoad, verdictForNonArrival, type SearchLoad } from './lib/afJourneyPacing.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
 
@@ -53,7 +54,7 @@ export const isStatementTimeout = (status: number, body: string): boolean => (
 class RpcTimeout extends Error {}
 
 async function rpc(fn: string, args: Record<string, unknown>): Promise<any[]> {
-  const res = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: HEADERS, body: JSON.stringify(args) });
+  const res = await postgrestFetch(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: HEADERS, body: JSON.stringify(args) });
   if (!res.ok) {
     const body = await res.text();
     if (isStatementTimeout(res.status, body)) throw new RpcTimeout(`${fn} timed out (57014)`);

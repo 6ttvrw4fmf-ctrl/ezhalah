@@ -26,6 +26,7 @@
 // because the logic under proof (mon_detect_aqar_proven_wrong_resolution,
 // mon_detect_city_region_mismatch) lives in Postgres, not in this file.
 import { PUBLIC_SUPABASE_URL } from './lib/public-supabase.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 if (!SERVICE_ROLE_KEY) {
@@ -48,7 +49,7 @@ const TEST_ROW = {
 };
 
 async function rest(path: string, init: RequestInit) {
-  const r = await fetch(`${PUBLIC_SUPABASE_URL}/rest/v1/${path}`, {
+  const r = await postgrestFetch(`${PUBLIC_SUPABASE_URL}/rest/v1/${path}`, {
     ...init,
     headers: {
       apikey: SERVICE_ROLE_KEY,

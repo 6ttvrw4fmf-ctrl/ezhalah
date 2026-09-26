@@ -52,6 +52,7 @@ import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { COMMITTED_NOT_APPLIED_BASELINE } from './lib/migrationDrift.ts';
 import {
+import { postgrestFetch } from './lib/postgrestRetry.ts';
   repairsData, migrationVersion, enrollmentVerdict, parseWaivers, registryVersionsFromResponse,
 } from './lib/repairClassifier.ts';
 
@@ -67,7 +68,7 @@ const DEDUP_KEY = 'repair_guarantee_unenrolled';
 async function callRpc(fn: string, body: unknown): Promise<void> {
   if (!SERVICE_ROLE_KEY) return;
   try {
-    await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, {
+    await postgrestFetch(`${URL_BASE}/rest/v1/rpc/${fn}`, {
       method: 'POST',
       headers: {
         apikey: SERVICE_ROLE_KEY,
@@ -93,7 +94,7 @@ async function readRegistry(): Promise<string[] | null> {
   // a FAILURE — it is never allowed to imitate the clean result.
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const r = await fetch(
+      const r = await postgrestFetch(
         `${URL_BASE}/rest/v1/ops_repair_guarantee_registry?select=repair_version&limit=10000`,
         { headers: { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` } });
       const versions = registryVersionsFromResponse(r.ok, await r.json().catch(() => null));
