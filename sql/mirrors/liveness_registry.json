@@ -522,6 +522,12 @@
     "grace": 3
   },
   {
+    "platform": "rawaf",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "rawasidark",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -648,6 +654,12 @@
     "grace": 3
   },
   {
+    "platform": "squares",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "sukna",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -692,6 +704,12 @@
   {
     "platform": "wadod",
     "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "wahadat",
+    "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3
   },

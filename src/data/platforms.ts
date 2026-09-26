@@ -145,6 +145,10 @@ export const PLATFORMS: Platform[] = [
   // wahadat allowsRent=false: measured 2026-09-26 over ALL 100 project pages, advertisement_purpose
   // is 'sale' on 100/100 — the platform is a new-build developer marketplace with no rental stock.
   { name: 'وحدات', domain: 'wahadat.sa', brand: 'Wahadat', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // squares: 18 posts, 17 «للبيع» + 1 «للإيجار» measured on every title, so both deals are on.
+  { name: 'شركة المربعات العقارية', domain: 'squares.com.sa', brand: 'Squares', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // rawaf allowsRent=false: contractType is SALE on all 215 units measured across its 11 projects.
+  { name: 'رواف', domain: 'rawaf.ai', brand: 'Rawaf', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   { name: 'العجلان', domain: 'alajlan-re.com', brand: 'Al Ajlan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
   // 0 rent rows today, but its scraper maps «للإيجار» to Rent — absence is not incapability.

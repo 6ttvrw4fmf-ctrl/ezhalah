@@ -920,6 +920,31 @@ POLICIES: dict[str, _P] = {
         "site does not read would look like a real deep link and silently fail. Measured 13 total "
         "records (10 rent status:true/3 false, 1 investment status:true, 0 sale) across all three "
         "categories."),
+    "squares": _P(
+        _pol("squares", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the WordPress catalogue is fetched WHOLE each run and the source declares its own size in "
+        "X-WP-Total (18, which matched the 18 rows returned), so absence from a complete, "
+        "self-declaring enumeration SELECTS a candidate — and the candidate is then confirmed "
+        "directly, because every post has a real per-listing URL (/property/<slug>/) that can be "
+        "re-fetched on its own.",
+        "Measured 2026-09-26: 18 posts, 16 listable (2 «مول» have no type in our taxonomy and are "
+        "skipped, not forced). The source publishes NO price anywhere, so a price change can never "
+        "be a liveness signal here; presence in the catalogue is."),
+    "rawaf": _P(
+        _pol("rawaf", 3, 168), CRAWL_PRESENCE_ONLY,
+        "every run re-reads all 11 projects and each project's full unit list, and each unit states "
+        "its OWN status (AVAILABLE/SOLD/NOT_AVAILABLE) in that payload — so a unit leaving our index "
+        "is normally the source itself saying SOLD, not an inference from absence. The project "
+        "endpoint /api/deals/<projectId> is a real per-project surface that can be re-queried to "
+        "confirm a candidate — but no such probe is written yet, so this is registered "
+        "CRAWL_PRESENCE_ONLY rather than claiming a direct check the scraper does not perform. "
+        "Upgrade it by adding verify_gone= (re-read the unit's status from its project endpoint) "
+        "and then move the entry out of absence-only-prune.txt.",
+        "Measured 2026-09-26 over all 11 projects: 215 units — SOLD 171, NOT_AVAILABLE 25, "
+        "AVAILABLE 19; only AVAILABLE is listed. Two operational hazards are handled in run.py "
+        "rather than here: the endpoint alternates between JSON and XML, and a project that fails "
+        "to serve its units suppresses prune_unseen entirely so a bad response cannot retire live "
+        "stock."),
     "wahadat": _P(
         _pol("wahadat", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set, and it is a genuine FULL-STATE fetch: every run re-reads the "
