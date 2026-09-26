@@ -248,11 +248,18 @@ if (owner !== null) {
       apply: (s) => s.replace(/and p_recent_desc\[2\] >/, 'and p_recent_desc[1] >') },
   ];
 
+  // Reported through the repo's `mustCatch(label, caught)` convention so
+  // verify-new-barriers-are-mutation-proven.ts can SEE these proofs. `caught` is computed by
+  // running this file's own problems() over the mutated source — never a literal, which that
+  // ratchet rejects as a proof that cannot fail.
+  const mustCatch = (label: string, caught: boolean, detail: string): void => {
+    check(`(mutation) catches ${label}`, caught, detail);
+  };
+
   for (const m of MUTANTS) {
     const mutated = m.apply(owner.sql);
     const changed = mutated !== owner.sql;
-    const caught = problems(mutated).length > 0;
-    check(`${m.label} → caught`, changed && caught,
+    mustCatch(m.label, changed && problems(mutated).length > 0,
       !changed ? 'the mutation did not alter the source — this mutant proves nothing'
                : 'the mutant SURVIVED: this barrier has a hole');
   }
