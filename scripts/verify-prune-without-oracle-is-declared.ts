@@ -78,7 +78,7 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // fetch already IS the complete, authoritative per-unit state; a constructed per-row URL the site
 // does not read would look like a real oracle while proving nothing, which is worse than declaring
 // the gap honestly here. Registered CRAWL_PRESENCE_ONLY in liveness_policies.py for the same reason.
-const RATCHET = 24;
+const RATCHET = 23;
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

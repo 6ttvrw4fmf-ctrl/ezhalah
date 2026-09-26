@@ -69,6 +69,7 @@ aqaralriyadh   |      0 | onboarded 2026-09-24, no candidate has reached grace y
 aqaralsaudia   |     16 | tiny catalogue, full re-read each run.
 bossbih        |  1,448 | Drupal; a deleted node hard-404s.
 daryusuf       |      0 | onboarded 2026-09-24, no candidate has reached grace yet (0 active rows until the first scrape; docstring-measured catalogue 290). wp/v2 portfolio record: rest_post_invalid_id 404, or status left publish.
+eaqartabuk     |    537 | oracle wired 2026-09-26 (alert_event 5923): this scraper pruned on crawl ABSENCE alone until that day. Its public/v1 property record answers 403 rh_not_public (withdrawn) or 404 rh_not_found (deleted); a 403/404 with no such code is UNKNOWN. Control-validated 9/9 live the day it was wired, but ZERO production verdicts so far — the chain has never been observed to execute. NOTE candles-map/v1, the endpoint this scraper itself calls authoritative, answers 200 for a WITHDRAWN property and would have certified every dead ad alive.
 eastabha       |    195 | this listing's OWN slider-property-status ribbon (تأجرت / تم البيع), plus 404/410.
 ebriza         |      0 | onboarded 2026-09-24, no candidate has reached grace yet (0 active rows until the first scrape; docstring-measured catalogue 207). POST-only detail route: 404 «No property found», or status left 1.
 expattrusted   |      0 | onboarded 2026-09-24, no candidate has reached grace yet (0 active rows until the first scrape; docstring-measured catalogue 43). the compound page's own JSON no longer listing the residence id; 404. Canary-gated.

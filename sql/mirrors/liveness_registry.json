@@ -265,7 +265,7 @@
   },
   {
     "platform": "eaqartabuk",
-    "strategy": "CRAWL_PRESENCE_ONLY",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },
