@@ -355,10 +355,30 @@ try {
   });
   // Key-order-insensitive signature of a search request body, so an incidental serializer reorder
   // can never masquerade as a query change. A body that does not parse is compared verbatim.
+  //
+  // p_rotation_seed is EXCLUDED on purpose (2026-09-26). What E/F/H below actually assert is that a
+  // mid-flight cancel does not mutate FILTER STATE — an untouched resubmit must ask for the same
+  // THING. The rotation seed is not part of what the user asked for: it is per-search entropy that
+  // the owner requires to CHANGE on every search ("I do a search, it shows عقار first. I refresh —
+  // the same exact one shouldn't show عقار first"), so a byte-identical body is now the wrong
+  // oracle. Leaving it in would have forced that feature to be reverted to make this pass.
+  //
+  // Dropping a key from a signature can only ever WEAKEN a guard, so seedOf() below re-adds the lost
+  // coverage as its own, sharper assertion: the seed must be PRESENT in both bodies and must DIFFER
+  // between two searches. Net effect is strictly stronger than the old whole-body compare, which
+  // could not tell a missing seed from a reused one.
+  const ROT_SEED_KEY = 'p_rotation_seed';
   const reqSig = (body) => {
     if (body == null) return null;
-    try { const o = JSON.parse(body); return JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]])); }
-    catch { return body; }
+    try {
+      const o = JSON.parse(body);
+      return JSON.stringify(Object.keys(o).filter((k) => k !== ROT_SEED_KEY).sort().map((k) => [k, o[k]]));
+    } catch { return body; }
+  };
+  const seedOf = (body) => {
+    if (body == null) return null;
+    try { const v = JSON.parse(body)[ROT_SEED_KEY]; return typeof v === 'string' && v.length > 0 ? v : null; }
+    catch { return null; }
   };
 
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -588,9 +608,17 @@ try {
   // What Stop must actually guarantee is that the QUERY survived intact — so the oracle is the
   // serialized search request, compared key-order-insensitively. The count stays only as a
   // liveness check: the resubmit must land real results, whatever today's inventory is.
-  check('[E] resubmitting untouched after rapid-cancel fires the EXACT SAME serialized search request as the uninterrupted baseline',
+  check('[E] resubmitting untouched after rapid-cancel fires the EXACT SAME serialized search request as the uninterrupted baseline (rotation seed aside)',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  // The coverage reqSig() gave up by excluding p_rotation_seed, re-added sharper: both searches must
+  // CARRY a seed, and the two must DIFFER — a resubmit is a new search, so it re-rolls which listing
+  // fronts each platform (owner 2026-09-26). A dropped seed or a frozen one both fail here.
+  check('[E] both searches carry a rotation seed', seedOf(baselineReq) != null && seedOf(lastSearchBody) != null,
+    `baseline=${seedOf(baselineReq)} resubmit=${seedOf(lastSearchBody)}`);
+  check('[E] the resubmit is a NEW search, so its rotation seed differs from the baseline’s',
+    seedOf(lastSearchBody) !== seedOf(baselineReq),
+    `both=${seedOf(baselineReq)}`);
   check('[E] the rapid-cancel resubmit still lands a real result count', Number.isFinite(rapidResubmitCount), `count=${rapidResubmitCount}`);
   }
 
@@ -626,9 +654,12 @@ try {
   await page.unroute('**/rest/v1/rpc/location_search_candidates_ar', delayRoute);
   await submitSearch();
   const midResubmitCount = await waitForCount(90000);
-  check('[F] resubmitting untouched after a mid-flight cancel still fires the EXACT SAME serialized search request',
+  check('[F] resubmitting untouched after a mid-flight cancel still fires the EXACT SAME serialized search request (rotation seed aside)',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[F] the mid-flight-cancel resubmit carries a rotation seed, and a NEW one',
+    seedOf(lastSearchBody) != null && seedOf(lastSearchBody) !== seedOf(baselineReq),
+    `baseline=${seedOf(baselineReq)} resubmit=${seedOf(lastSearchBody)}`);
   check('[F] the mid-flight-cancel resubmit still lands a real result count', Number.isFinite(midResubmitCount), `count=${midResubmitCount}`);
 
   // ---- G: a CHAT-originated Stop must NOT navigate home — origin-tracking must not over-apply. ----
@@ -694,9 +725,12 @@ try {
     JSON.stringify(postMobileInputs) === JSON.stringify(preStopInputsMobile));
   await submitSearch(); // never inherit [F]/[G] traffic — this window proves the MOBILE resubmit
   const mobResubmitCount = await waitForCount(90000);
-  check('[H mobile] resubmitting untouched after rapid-cancel fires the EXACT SAME serialized search request as baseline',
+  check('[H mobile] resubmitting untouched after rapid-cancel fires the EXACT SAME serialized search request as baseline (rotation seed aside)',
     reqSig(lastSearchBody) != null && reqSig(lastSearchBody) === reqSig(baselineReq),
     `baselineReq=${baselineReq} resubmitReq=${lastSearchBody}`);
+  check('[H mobile] the mobile resubmit carries a rotation seed, and a NEW one',
+    seedOf(lastSearchBody) != null && seedOf(lastSearchBody) !== seedOf(baselineReq),
+    `baseline=${seedOf(baselineReq)} resubmit=${seedOf(lastSearchBody)}`);
   // Failed twice in CI (2026-08-24) while the request fired+matched, [E] desktop landed, a direct
   // prod repro rendered in 5s, and [I] read a fresh count seconds later — so on a null read, dump
   // the page state: the next failure must explain itself instead of costing another guessing round.
