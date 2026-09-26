@@ -20,4 +20,11 @@
 # verify-p0-fast-lane-detection.ts is NOT here: it is the one that actually bit, and it was repaired
 # in the same change rather than baselined. Its reproduction is in that file's header.
 
-verify-af-independent-oracle.ts | .github/workflows/af-oracle-pr-check.yml | two fetches: a PostgREST count with Prefer/Range headers, and an RPC read via r.json(). It carries its own 3x retry for ANY failure (see its exclusion row), which is both shorter and less discriminating than the driver's PGRST002-only ~30s budget — converting it means threading the driver's Probe through two differently-shaped readers, which is a change worth making on its own rather than riding this one
+# EMPTY SINCE 2026-09-26, AND THAT IS THE POINT — do not read an empty file as an unused mechanism.
+# routine #5 adopted the driver in verify-af-independent-oracle.ts (the last row, deleted above:
+# ops_incident #563), so PR_GATE_UNPROTECTED_CEILING is 0 and ANY new unprotected PR gate is red
+# immediately, with no ledger to hide in. Reproduced before and after against a stub holding
+# PGRST002 open indefinitely, the exact shape that bit on somebody else's diff:
+#     pre-fix  → ✗ 27 check(s) FAILED — an AF answer means something different than the product intends
+#     post-fix → ✗ NOT MEASURED — … this cell was NOT measured, and says nothing about the product
+# Same exit code (1) both times: adopting the driver changed the CLAIM, never the fail-closed verdict.

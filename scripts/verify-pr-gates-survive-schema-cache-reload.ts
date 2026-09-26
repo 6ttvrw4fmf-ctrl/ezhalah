@@ -40,7 +40,13 @@ import {
 // had TWO members when this barrier was written; verify-p0-fast-lane-detection.ts — the one that
 // actually bit — was repaired in the same change rather than baselined, taking it 2 → 1. Lower it as
 // the others adopt the driver; never raise it.
-const PR_GATE_UNPROTECTED_CEILING = 1;
+//
+// 1 → 0 on 2026-09-26 (routine #5, ops_incident #563). The last row was
+// verify-af-independent-oracle.ts, whose own ledger entry said converting it meant threading the
+// driver's Probe through two differently-shaped readers and was "a change worth making on its own" —
+// so it was made, on the run that found the same class reddening the AF live sweep. At 0 there is no
+// ledger left to hide in: a new unprotected PR gate is red on the diff that adds it.
+const PR_GATE_UNPROTECTED_CEILING = 0;
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => {
@@ -68,14 +74,29 @@ check('the trigger reader is not vacuous (it still finds PR-triggered workflows)
   workflows.some((w) => hasPullRequestTrigger(w.source)));
 
 // ── the declared floor ──────────────────────────────────────────────────────────────────────────
-const declared = new Set(
-  readFileSync(join(ROOT, 'scripts/pr-gate-schema-cache-baseline.txt'), 'utf8')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#'))
-    .map((l) => l.split('|')[0].trim()),
-);
-check('the baseline parsed to a non-empty set', declared.size > 0);
+const baselineText = readFileSync(join(ROOT, 'scripts/pr-gate-schema-cache-baseline.txt'), 'utf8');
+const baselineRows = baselineText
+  .split('\n')
+  .map((l) => l.trim())
+  .filter((l) => l && !l.startsWith('#'));
+const declared = new Set(baselineRows.map((l) => l.split('|')[0].trim()));
+
+// THIS USED TO ASSERT `declared.size > 0`, AND THAT COULD NOT WELCOME ITS OWN PROGRESS
+// (repaired 2026-09-26 when the class actually reached zero). The guard exists to catch a ledger
+// that silently stopped being READ — an unreadable file, a moved path, a parser that returns nothing
+// — because the stale-row check below is vacuous against an empty set. But "some rows exist" is the
+// wrong proxy for "the file was read": it also demands the class never be finished, which is the
+// AGENTS.md shape where a barrier fails on the very change it exists to encourage.
+//
+// So: the FILE must be non-empty (an unreadable or truncated ledger is still caught), and every
+// non-comment row must carry the documented three fields (a row silently losing its shape would
+// otherwise vanish from `declared` and read as progress). An EMPTY class is allowed, and at that
+// point PR_GATE_UNPROTECTED_CEILING is 0, which is a strictly stronger position than any ledger.
+check('the baseline file was read and is not empty (an unreadable ledger would pass forever)',
+  baselineText.trim().length > 0);
+const malformed = baselineRows.filter((l) => l.split('|').length < 3);
+check('every baseline row carries `check | workflow | what its reads are` (a reshaped row would vanish silently)',
+  malformed.length === 0, malformed.join('\n      '));
 
 const unprotected = unprotectedPrGates(workflows, readCheck);
 const names = unprotected.map((u) => u.check);
