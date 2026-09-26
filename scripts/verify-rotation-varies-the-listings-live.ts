@@ -27,6 +27,7 @@
 //
 //   node --experimental-strip-types scripts/verify-rotation-varies-the-listings-live.ts
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 
 const { url: URL_BASE, key: ANON_KEY } = resolvePublicSupabase();
 
@@ -46,7 +47,7 @@ async function candidates(opts: { seed?: string; limit: number; offset?: number 
     p_deal: DEAL, p_cities: [CITY], p_limit: opts.limit, p_offset: opts.offset ?? 0,
   };
   if (opts.seed !== undefined) body.p_rotation_seed = opts.seed;
-  const r = await fetch(`${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`, {
+  const r = await postgrestFetch(`${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`, {
     method: 'POST',
     headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

@@ -19,6 +19,7 @@
 // same shared predicate. A proof duplicated here would exercise nothing this file itself decides.
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { auditDistrictOptions, auditNoBogusEntries, HISTORICALLY_POLLUTED_CITIES, type DistrictRow } from './lib/districtCatalog.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 
 const RIYADH = 3;
 const JAZAN = 17; // richest set of GENUINE numbered sub-districts observed — the positive control.
@@ -34,7 +35,7 @@ async function main() {
   const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
 
   async function districtOptions(cityId: number, extra: Record<string, unknown> = {}): Promise<DistrictRow[]> {
-    const res = await fetch(`${URL_BASE}/rest/v1/rpc/district_options_ar`, {
+    const res = await postgrestFetch(`${URL_BASE}/rest/v1/rpc/district_options_ar`, {
       method: 'POST',
       headers: HEADERS,
       body: JSON.stringify({ p_city_id: cityId, ...extra }),

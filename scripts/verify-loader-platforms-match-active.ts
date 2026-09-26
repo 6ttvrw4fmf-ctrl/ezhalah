@@ -18,6 +18,7 @@
 // pointer to the workflow that runs it.
 
 import { existsSync, readFileSync } from 'node:fs';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 
 // Parse PLATFORM_META names and SOURCE_TOKENS from the source file rather than importing the
 // module — `loaderPlatforms.ts` calls `require()` for its bundled logo assets (Metro's require),
@@ -71,7 +72,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 console.log('\nLoader roster must equal production active-searchable set (owner 2026-08-29)\n');
 
 // ── 1. Fetch the current production active set via the same public RPC the client calls ─────────
-const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/loader_active_platforms_ar`, {
+const rpcRes = await postgrestFetch(`${SUPABASE_URL}/rest/v1/rpc/loader_active_platforms_ar`, {
   method: 'POST',
   headers: {
     apikey: ANON_KEY,
