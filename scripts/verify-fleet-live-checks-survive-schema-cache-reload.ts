@@ -159,7 +159,7 @@ const undeclared = unprotected.filter((u) => !declared.has(u.check));
 check('no NEW live check outside the two measured populations reads PostgREST without the driver',
   undeclared.length === 0,
   undeclared.map((u) => `${u.check} (invoked by ${u.workflow}) reads PostgREST without reaching `
-    + 'scripts/lib/' + DRIVER + ', so any session applying a function-creating migration can make it '
+    + 'scripts/' + DRIVER + ', so any session applying a function-creating migration can make it '
     + 'accuse the product. Adopt it by changing ONE identifier: `await fetch(` -> `await '
     + "postgrestFetch(`, importing { postgrestFetch } from './lib/postgrestRetry.ts'. It retries ONLY "
     + 'a 503 whose JSON code is exactly PGRST002, on ONE bounded budget, and returns the LAST probe '
