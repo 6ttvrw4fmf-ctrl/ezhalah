@@ -1695,7 +1695,9 @@ export default function Agent() {
         // store.tsx already refuses to treat a backend error as progress. Stop the drain here — say
         // so out loud (same wording/posture page 0's own fetch failure uses, src/data/search.ts) —
         // and never claim completion for a reveal that did not actually finish.
-        const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, pageOffset);
+        // THE SEED THIS SET WAS CUT FROM (ops_incident #796) — never the app's latest. m.result is the
+        // block being paged, so its own rotationSeed is the only one whose `pageOffset` means anything.
+        const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, pageOffset, m.result.rotationSeed);
         // THE USER LEFT THIS CONVERSATION WHILE THE PAGE WAS IN FLIGHT — every write below belongs
         // to a chat that no longer exists, and this screen is now showing a different one
         // (router.replace to the SAME route: same component instance, nothing remounted).

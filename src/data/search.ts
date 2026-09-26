@@ -745,7 +745,13 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
   return { kind: 'totalBuy', echo: `${sar} ${grouped(amount)}` };
 }
 
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number };
+// `rotationSeed` — THE ORDER THIS SET WAS CUT FROM (ops_incident #796, 2026-09-26). The server's
+// ORDER BY is keyed on p_rotation_seed, so `pageOffset` only names a position within ONE seed's
+// total order: paging this set with a different seed skips rows nobody will fetch again. It rides
+// here, beside the cursor it is only meaningful next to, rather than in an app-level slot a later
+// (or CANCELLED) search can overwrite. Optional because a transcript persisted before this field
+// existed carries none; see loadMoreListings for what that falls back to.
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number; rotationSeed?: string };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run

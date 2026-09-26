@@ -79,9 +79,15 @@ const loadMoreStart = store.indexOf('loadMoreListings: async');
 const loadMore = loadMoreStart === -1 ? '' : store.slice(loadMoreStart, store.indexOf('trackOpen:', loadMoreStart));
 check('the load-more implementation was located (an empty span would make the checks below vacuous)',
   loadMoreStart !== -1 && loadMore.includes('fetchListingsForQuery'), `span=${loadMore.length} chars`);
-check('«عرض المزيد» passes the SAME seed (not a new one, not none)',
-  /rotationSeed:\s*searchSeedRef\.current/.test(loadMore),
-  'load-more does not thread searchSeedRef — its pages would be ordered by a different seed');
+// STRENGTHENED 2026-09-26 by ops_incident #796. This used to require the literal
+// `rotationSeed: searchSeedRef.current` — i.e. it asserted that load-more reads the app-level slot,
+// which is the very thing that let a CANCELLED search re-key a live walk (failure mode 2 in this
+// file's own header, which this predicate could not actually see). The contract now: the seed comes
+// from the paged SET, with the ref kept only as the pre-#796-transcript fallback. Executed — rather
+// than matched — by scripts/verify-loadmore-pages-with-its-own-search-seed.ts.
+check('«عرض المزيد» passes the seed of the SET it is paging, falling back to the search ref',
+  /rotationSeed:\s*seed\s*\?\?\s*searchSeedRef\.current/.test(loadMore),
+  'load-more does not thread the set\'s own seed — a later or cancelled search would re-key this walk');
 check('«عرض المزيد» never mints its own seed (that is how paging repeats and skips cards)',
   !/newSearchSeed\(/.test(loadMore));
 
@@ -106,15 +112,22 @@ console.log('\n  mutation proofs\n');
 }
 // M2: load-more minting its own seed.
 {
-  const mutant = loadMore.replace(/rotationSeed:\s*searchSeedRef\.current/, 'rotationSeed: newSearchSeed()');
+  const mutant = loadMore.replace(/rotationSeed:\s*seed\s*\?\?\s*searchSeedRef\.current/, 'rotationSeed: newSearchSeed()');
   mustCatch('«عرض المزيد» minting a fresh seed mid-walk (cards repeat and vanish)',
     /newSearchSeed\(/.test(mutant));
 }
 // M3: load-more omitting the seed entirely (falls back to device+week → different order than page 1).
 {
-  const mutant = loadMore.replace(/,\s*rotationSeed:\s*searchSeedRef\.current/, '');
+  const mutant = loadMore.replace(/,\s*rotationSeed:\s*seed\s*\?\?\s*searchSeedRef\.current/, '');
   mustCatch('«عرض المزيد» dropping the seed and inheriting the fallback instead',
-    !/rotationSeed:\s*searchSeedRef\.current/.test(mutant));
+    !/rotationSeed:\s*(?:seed\s*\?\?\s*)?searchSeedRef\.current/.test(mutant));
+}
+// M3b (#796): load-more reading the app-level slot ALONE — the shape this file used to require.
+{
+  const mutant = loadMore.replace(/rotationSeed:\s*seed\s*\?\?\s*searchSeedRef\.current/,
+    'rotationSeed: searchSeedRef.current');
+  mustCatch('«عرض المزيد» paging with the app\'s latest seed instead of the paged set\'s own',
+    !/rotationSeed:\s*seed\s*\?\?\s*searchSeedRef\.current/.test(mutant));
 }
 // M4: the RPC call site ignoring the caller's seed.
 {
@@ -131,7 +144,7 @@ console.log('\n  mutation proofs\n');
 }
 // M6: the real files are NOT flagged — the proofs above are not vacuously true.
 mustCatch('nothing — the shipped wiring still passes every predicate above',
-  /rotationSeed:\s*searchSeedRef\.current/.test(loadMore)
+  /rotationSeed:\s*seed\s*\?\?\s*searchSeedRef\.current/.test(loadMore)
   && /searchSeedRef\.current\s*=\s*newSearchSeed\(\)/.test(store)
   && /p_rotation_seed:\s*opts\?\.rotationSeed\s*\?\?\s*rotationSeed\(\)/.test(remote));
 
