@@ -28,7 +28,7 @@ export const SHARE_MESSAGE_EN = `${SHARE_LEAD_EN}\n${SHARE_LINK}`;
 // og:description and the in-app preview get the sentence WITHOUT the emoji or the link: a preview
 // card already shows the domain under it, and repeating the url inside the description is the mark
 // of a page that was never actually looked at in a chat window.
-export const SHARE_BLURB_AR = 'تدور على العقارات وتبي تشوف كل المعروض في مكان واحد؟ كل إعلانات العقار في السعودية، في ثواني.';
+export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، عقارات السعودية في ثواني.';
 export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Every property listing in Saudi Arabia, in seconds.';
 export const SHARE_TITLE_AR = 'إزهله';
 const SHARE = {
