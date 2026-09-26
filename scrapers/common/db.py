@@ -1559,6 +1559,22 @@ def upsert_rawaf_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("rawaf_commercial_listings", rows)
 
 
+def upsert_vmksa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("vmksa_residential_listings", rows)
+
+
+def upsert_vmksa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("vmksa_commercial_listings", rows)
+
+
+def upsert_macsaib_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("macsaib_residential_listings", rows)
+
+
+def upsert_macsaib_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("macsaib_commercial_listings", rows)
+
+
 def upsert_wahadat_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("wahadat_residential_listings", rows)
 

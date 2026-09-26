@@ -149,6 +149,10 @@ export const PLATFORMS: Platform[] = [
   { name: 'شركة المربعات العقارية', domain: 'squares.com.sa', brand: 'Squares', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // rawaf allowsRent=false: contractType is SALE on all 215 units measured across its 11 projects.
   { name: 'رواف', domain: 'rawaf.ai', brand: 'Rawaf', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // vm-ksa: 109 rent + 54 sale of 163 REGA-licensed ads measured 2026-09-26 (99 offices for rent).
+  { name: 'المسوق الافتراضي', domain: 'vm-ksa.com', brand: 'Virtual Marketer', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // macsaib: 48 sale + 29 rent of 77 measured 2026-09-26 (Taearif feed).
+  { name: 'مكسب العقارية', domain: 'macsaib.sa', brand: 'Macsaib', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'العجلان', domain: 'alajlan-re.com', brand: 'Al Ajlan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
   // 0 rent rows today, but its scraper maps «للإيجار» to Rent — absence is not incapability.

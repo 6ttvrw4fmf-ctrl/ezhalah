@@ -928,8 +928,8 @@ POLICIES: dict[str, _P] = {
         "directly, because every post has a real per-listing URL (/property/<slug>/) that can be "
         "re-fetched on its own.",
         "Measured 2026-09-26: 18 posts, 16 listable (2 «مول» have no type in our taxonomy and are "
-        "skipped, not forced). The source publishes NO price anywhere, so a price change can never "
-        "be a liveness signal here; presence in the catalogue is."),
+        "skipped, not forced). Prices are printed on the listing PAGE (10 of 16), not in the REST "
+        "payload; presence in the catalogue, not a price change, is the liveness signal."),
     "rawaf": _P(
         _pol("rawaf", 3, 168), CRAWL_PRESENCE_ONLY,
         "every run re-reads all 11 projects and each project's full unit list, and each unit states "
@@ -1028,6 +1028,25 @@ POLICIES: dict[str, _P] = {
         "carrying strikes (1 expired, 2 hard-deleted). Population coverage is still 0% — see the "
         "tier note above.",
     ),
+    "vmksa": _P(
+        _pol("vmksa", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over a complete, self-declaring index: every run walks /ar/ads "
+        "pages 1..lastPage exactly as the page's own pagination object declares them "
+        "({total:163,lastPage:11} when measured) and re-reads every ad page. run.py suppresses "
+        "prune_unseen unless every listed ad was readable and the walk reached the declared total.",
+        "Not CANDIDATE_PLUS_DIRECT: an ad page that no longer exists answers 200 with the site's "
+        "generic shell (ad 551, 2026-09-26), so a re-fetch cannot tell 'gone' from 'blipped' without "
+        "a parser-level oracle that is not written yet. The ads carry REGA licence expiry dates "
+        "(«تاريخ انتهاء ترخيص الاعلان»), kept in license_expiry for a future oracle."),
+    "macsaib": _P(
+        _pol("macsaib", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over Taearif's complete, self-declaring JSON feed: "
+        "api.taearif.com/api/v1/tenant-website/macsaib.sa/properties pages 1..last_page with "
+        "pagination.total (77 when measured, 48 sale + 29 rent), and every record states its own "
+        "status (all 77 `available`; status=unavailable returned 0). run.py suppresses prune_unseen "
+        "unless the walk reached the declared total and every detail record was readable.",
+        "An oracle is possible — GET …/properties/<slug> answers RESOURCE_NOT_FOUND for a slug that "
+        "does not exist — but it is not written yet, so this does not claim a direct check."),
     # ── Tier 3a: the deactivation path IS direct, but the population is still unverified ─────────
     # Same reasoning as aqargate immediately above, applied to every other platform whose prune
     # gained an oracle. These are NOT relabelled tier 2: CANDIDATE_PLUS_DIRECT would be a claim

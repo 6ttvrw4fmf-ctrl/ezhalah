@@ -78,7 +78,7 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // fetch already IS the complete, authoritative per-unit state; a constructed per-row URL the site
 // does not read would look like a real oracle while proving nothing, which is worse than declaring
 // the gap honestly here. Registered CRAWL_PRESENCE_ONLY in liveness_policies.py for the same reason.
-const RATCHET = 26;  // 23 -> 26: wahadat, squares and rawaf onboarded 2026-09-26. wahadat has no probeable per-unit surface (403); squares and rawaf COULD have an oracle but none is written yet, and verify-liveness-registry-mirror rejected claiming CANDIDATE_PLUS_DIRECT without one. A NEW platform may raise this; a FIXED one must lower it.
+const RATCHET = 28;  // 26 -> 28: vm-ksa and macsaib onboarded 2026-09-26 (wave-3 batch 2); both COULD have an oracle (a parser-level 'ad object absent' check / Taearif's RESOURCE_NOT_FOUND) but none is written yet. 23 -> 26 before that: wahadat (no probeable per-unit surface, 403), squares and rawaf (oracle possible, not written). A NEW platform may raise this; a FIXED one must lower it.
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

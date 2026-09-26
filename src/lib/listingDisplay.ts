@@ -187,6 +187,8 @@ export function sourceName(source: string): string {
   if (s.includes('وحدات') || s.includes('wahadat')) return 'وحدات';
   if (s.includes('المربعات') || s.includes('squares')) return 'شركة المربعات العقارية';
   if (s.includes('رواف') || s.includes('rawaf')) return 'رواف';
+  if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'المسوق الافتراضي';
+  if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'مكسب العقارية';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'RE/MAX';  // real SOURCE, no 'السعودية' suffix
   if (s.includes('قمرا') || s.includes('qmra')) return 'قمرا';
   if (s.includes('العجلان') || s.includes('alajlan')) return 'العجلان';

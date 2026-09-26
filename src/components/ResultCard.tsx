@@ -803,6 +803,8 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('وحدات') || s.includes('wahadat')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('المربعات') || s.includes('squares')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('رواف') || s.includes('rawaf')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('مكسب العقارية') || s.includes('macsaib')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('re/max') || s.includes('remaxsa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('قمرا') || s.includes('qmra')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('العجلان') || s.includes('alajlan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
@@ -965,6 +967,8 @@ function sourceHost(source: string): string {
   if (s.includes('وحدات') || s.includes('wahadat')) return 'wahadat.sa';
   if (s.includes('المربعات') || s.includes('squares')) return 'squares.com.sa';
   if (s.includes('رواف') || s.includes('rawaf')) return 'rawaf.ai';
+  if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'vm-ksa.com';
+  if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'macsaib.sa';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'remax.sa';
   if (s.includes('قمرا') || s.includes('qmra')) return 'qmra.sa';
   if (s.includes('العجلان') || s.includes('alajlan')) return 'alajlan-re.com';
