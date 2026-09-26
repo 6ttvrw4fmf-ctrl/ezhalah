@@ -238,6 +238,10 @@ jobs:
           - { source: wahadat,      cmd: "python -m scrapers.wahadat.run --type all", tmo: 30 }
           - { source: squares,      cmd: "python -m scrapers.squares.run --type all", tmo: 15 }
           - { source: rawaf,        cmd: "python -m scrapers.rawaf.run --type all", tmo: 15 }
+          # wave 3, batch 2. vmksa walks 11 index pages + 163 ad pages (RSC); macsaib is Taearif's JSON
+          # feed: 4 list pages, 20 category walks and 77 detail records.
+          - { source: vmksa,        cmd: "python -m scrapers.vmksa.run --type all", tmo: 20 }
+          - { source: macsaib,      cmd: "python -m scrapers.macsaib.run --type all", tmo: 15 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }

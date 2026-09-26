@@ -432,6 +432,12 @@
     "grace": 3
   },
   {
+    "platform": "macsaib",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "marksa",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -698,6 +704,12 @@
   {
     "platform": "villassa",
     "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "vmksa",
+    "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3
   },

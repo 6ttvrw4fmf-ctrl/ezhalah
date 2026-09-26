@@ -1031,6 +1031,8 @@ const AR: Record<string, string> = {
   'Wahadat': 'وحدات',                                 // the site's own Arabic name (og:site_name)
   'Squares': 'المربعات العقارية',                     // the site's own Arabic name (شركة المربعات العقارية)
   'Rawaf': 'رواف',                                    // the site's own Arabic name
+  'Virtual Marketer': 'المسوق الافتراضي',            // the site's own Arabic name (vm-ksa.com)
+  'Macsaib': 'مكسب العقارية',                         // the site's own Arabic name (macsaib.sa)
   'Al Saedan': 'آل سعيدان',                              // the site's own Arabic name
   'Ego Real Estate': 'إيجو عقار',                              // the site's own Arabic name
   'Ahmed Almuhaysini': 'أحمد المحيسني العقارية',                              // the site's own Arabic name
