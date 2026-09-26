@@ -180,6 +180,10 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'صكوك العقارية', i18nKey: 'Sokok', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'سكنة', i18nKey: 'Sukna', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'طوبة العقارية', i18nKey: 'Tuba', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'آي باكس', i18nKey: 'iBaax', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'RE/MAX', i18nKey: 'RE/MAX Saudi', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'قمرا للتطوير العقاري', i18nKey: 'Qmra', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'العجلان للتسويق العقاري', i18nKey: 'Al Ajlan', logo: require('../../assets/images/platform-placeholder.png') },
   // LOGO-ONLY (owner decision 2026-09-24): brand shown in the strip, no scraper, no tables, never searchable.
   { name: 'Maskanre', i18nKey: 'Maskan United', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
   { name: 'Wetheaddress', i18nKey: 'The Address', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
@@ -362,6 +366,14 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['سكنة', 'سكنة'],
   ['tuba', 'طوبة العقارية'],
   ['طوبة العقارية', 'طوبة العقارية'],
+  ['ibaax', 'آي باكس'],
+  ['آي باكس', 'آي باكس'],
+  ['remaxsa', 'RE/MAX'],
+  ['re/max', 'RE/MAX'],
+  ['qmra', 'قمرا للتطوير العقاري'],
+  ['قمرا للتطوير العقاري', 'قمرا للتطوير العقاري'],
+  ['alajlan', 'العجلان للتسويق العقاري'],
+  ['العجلان للتسويق العقاري', 'العجلان للتسويق العقاري'],
   ['aqar', 'Aqar'],
 ];
 
