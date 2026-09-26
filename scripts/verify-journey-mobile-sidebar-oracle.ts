@@ -68,23 +68,44 @@ const SIGNED_IN_OPEN = fakePage([SIDEBAR_OPEN_MARKER]);
  * oracle trips fakePage()'s guard, and "the oracle read visible text" is the diagnosis the next
  * reader needs — PART 11.2 rule 4: the failure message must distinguish the two shapes itself.
  */
-const asks = async (label: string, page: unknown, opts: { guestOk?: boolean }, want: boolean) => {
-  let got: boolean;
-  try {
-    got = await sidebarIsOpen(page, opts);
-  } catch (e) {
-    check(`${label} — the oracle threw: ${String((e as Error).message)}`, false);
-    return;
-  }
-  check(label, got === want);
+/**
+ * THE ORACLE'S JUDGEMENT AS A PURE PREDICATE (routine #10, 2026-09-26, ops_incident #728).
+ *
+ * This used to be six `await asks(...)` calls straight onto `sidebarIsOpen`. That EXECUTES the right
+ * function — which is why this barrier was never a source-text tripwire — but it leaves no seam to
+ * hand a BROKEN oracle to, so the barrier's own judgement could never be watched to fail. The
+ * mutations behind it were run by hand in the session that landed it (PR #4317) and nothing
+ * re-executed them, which is the PART 1.11 shape at one remove: a claim of proof reading as coverage.
+ *
+ * So the verdict takes the oracle as an argument. The real check below passes the REAL
+ * `sidebarIsOpen`; §E passes deliberately broken ones — including the text-reading oracle that is the
+ * defect this file was written for. There is no second copy of the judgement (R1 step 2).
+ *
+ * A THROW is turned into a named problem rather than a stack trace: a text-based oracle trips
+ * fakePage()'s guard, and "the oracle read visible text" is the diagnosis the next reader needs.
+ */
+type Oracle = (page: unknown, opts: { guestOk?: boolean }) => Promise<boolean>;
+
+const oracleProblems = async (oracle: Oracle): Promise<string[]> => {
+  const p: string[] = [];
+  const asks = async (label: string, page: unknown, opts: { guestOk?: boolean }, want: boolean) => {
+    let got: boolean;
+    try { got = await oracle(page, opts); }
+    catch (e) { p.push(`${label} — the oracle threw: ${String((e as Error).message)}`); return; }
+    if (got !== want) p.push(`${label} (got ${got}, want ${want})`);
+  };
+  await asks('guest + drawer CLOSED reads as CLOSED (the top-bar CTA must not count)', GUEST_CLOSED, { guestOk: true }, false);
+  await asks('guest + drawer OPEN reads as OPEN', GUEST_OPEN, { guestOk: true }, true);
+  await asks('signed-in + drawer CLOSED reads as CLOSED', SIGNED_IN_CLOSED, {}, false);
+  await asks('signed-in + drawer OPEN reads as OPEN', SIGNED_IN_OPEN, {}, true);
+  await asks('guestOk is OFF by default — the guest marker alone does not satisfy a signed-in journey', GUEST_OPEN, {}, false);
+  await asks('the signed-in marker still satisfies a guest-tolerant call', SIGNED_IN_OPEN, { guestOk: true }, true);
+  return p;
 };
 
-await asks('guest + drawer CLOSED reads as CLOSED (the top-bar CTA must not count)', GUEST_CLOSED, { guestOk: true }, false);
-await asks('guest + drawer OPEN reads as OPEN', GUEST_OPEN, { guestOk: true }, true);
-await asks('signed-in + drawer CLOSED reads as CLOSED', SIGNED_IN_CLOSED, {}, false);
-await asks('signed-in + drawer OPEN reads as OPEN', SIGNED_IN_OPEN, {}, true);
-await asks('guestOk is OFF by default — the guest marker alone does not satisfy a signed-in journey', GUEST_OPEN, {}, false);
-await asks('the signed-in marker still satisfies a guest-tolerant call', SIGNED_IN_OPEN, { guestOk: true }, true);
+const realOracleProblems = await oracleProblems(sidebarIsOpen as Oracle);
+check(`the drawer oracle answers only to the drawer, and guestOk stays OFF by default${realOracleProblems.length ? ` — ${realOracleProblems.join(' | ')}` : ''}`,
+  realOracleProblems.length === 0);
 
 // (5) is enforced by fakePage() throwing; prove the throw is real rather than trusting it.
 try {
@@ -141,8 +162,6 @@ check('src/app/index.tsx still renders its own top-bar sign-in CTA (the node the
 //   B6. The probe must not pick a control belonging to the PROMPT: a box inside the reserved band
 //       is above the content's top edge and loses.
 //   B7. The window stays RELATIVE and BOUNDED — a control far below the band is not the top bar.
-const banded = (rects: unknown[], vw = 375) => topDockBandBottom(rects as never, vw);
-
 // The two engines' measured container shapes, from src/lib/bottomPromptInset.ts's own notes.
 const WEBKIT_TOP_DOCK = { top: 20, bottom: 178, height: 158, width: 375 };   // fixed container
 const WEBKIT_INNER_IFRAME = { top: 20, bottom: 170, height: 150, width: 375 }; // static iframe
@@ -151,41 +170,48 @@ const DESKTOP_CORNER_CARD = { top: 20, bottom: 210, height: 190, width: 280 };
 
 const HAMB_TOP = { x: 18, y: 22, width: 34, height: 34 };       // measured, no dock
 const HAMB_DISPLACED = { x: 18, y: 174, width: 34, height: 34 }; // measured, top dock
+// A control belonging to the PROMPT: inside the 178px band, and WIDER than the hamburger, so a
+// probe that searched from y=0 would sort it ahead of the real top bar.
+const PROMPT_BUTTON = { x: 10, y: 60, width: 60, height: 40 };
 
-check('B1 no docked prompt → band 0 (original behaviour preserved)', banded([]) === 0);
-check('B1 no dock → the hamburger at y=22 is still found',
-  pickHamburgerRect([HAMB_TOP], 0)?.y === 39);
+const hamburgerProblems = (
+  band: (rects: unknown[], vw?: number) => number,
+  pick: (rects: unknown[], bandBottom: number) => { y: number } | null,
+): string[] => {
+  const p: string[] = [];
+  const eq = (label: string, got: unknown, want: unknown) => { if (got !== want) p.push(`${label} (got ${String(got)}, want ${String(want)})`); };
+  eq('B1 no docked prompt → band 0 (original behaviour preserved)', band([]), 0);
+  eq('B1 no dock → the hamburger at y=22 is still found', pick([HAMB_TOP], 0)?.y, 39);
+  eq('B2 the WebKit top dock reserves the CONTAINER bottom (178), not the static iframe (170)',
+    band([WEBKIT_TOP_DOCK, WEBKIT_INNER_IFRAME]), 178);
+  if (pick([HAMB_DISPLACED], band([WEBKIT_TOP_DOCK])) === null)
+    p.push('B2 with the top dock, the displaced hamburger at y=174 is NOT found (the #593 defect)');
+  // The defect is real, not hypothetical: the old absolute window was `r.y < 80`.
+  if (HAMB_DISPLACED.y < 80) p.push('B2 the measured displaced hamburger is no longer outside the old absolute window — this premise needs re-measuring');
+  eq('B3 a BOTTOM-docked sheet reserves nothing at the top', band([CHROMIUM_BOTTOM_SHEET]), 0);
+  if (pick([HAMB_TOP], band([CHROMIUM_BOTTOM_SHEET])) === null)
+    p.push('B3 the hamburger at y=22 is not findable on Chromium');
+  eq('B4 a desktop corner card does not span the viewport → reserves nothing', band([DESKTOP_CORNER_CARD], 1440), 0);
+  eq('B5 a hidden prompt reserves nothing', band([{ ...WEBKIT_TOP_DOCK, hidden: true }]), 0);
+  eq('B5 a zero-height prompt reserves nothing', band([{ top: 0, bottom: 0, height: 0, width: 375 }]), 0);
+  // B6 — the prompt's own controls sit INSIDE the band, i.e. above where the app's content starts.
+  // A probe that searched from y=0 would sort a wide prompt button ahead of the real hamburger.
+  eq('B6 a control inside the reserved band is not mistaken for the top bar',
+    pick([PROMPT_BUTTON, HAMB_DISPLACED], band([WEBKIT_TOP_DOCK]))?.y, 191);
+  // B7 — relative, and still bounded. A control a long way below the band is not the top bar.
+  if (pick([{ x: 18, y: 400, width: 34, height: 34 }], band([WEBKIT_TOP_DOCK])) !== null)
+    p.push('B7 a control far below the band was accepted as the top bar');
+  if (pick([{ x: 18, y: 324, width: 34, height: 34 }], band([{ top: 0, bottom: 320, height: 320, width: 375 }])) === null)
+    p.push('B7 the window is not RELATIVE — the same offset from a DIFFERENT band was rejected');
+  return p;
+};
 
-check('B2 the WebKit top dock reserves the CONTAINER bottom (178), not the static iframe (170)',
-  banded([WEBKIT_TOP_DOCK, WEBKIT_INNER_IFRAME]) === 178);
-check('B2 with the top dock, the displaced hamburger at y=174 IS found (the #593 defect)',
-  pickHamburgerRect([HAMB_DISPLACED], banded([WEBKIT_TOP_DOCK])) !== null);
-check('B2 …and the old absolute window would NOT have found it (the defect is real)',
-  HAMB_DISPLACED.y >= 80);
-
-check('B3 a BOTTOM-docked sheet reserves nothing at the top', banded([CHROMIUM_BOTTOM_SHEET]) === 0);
-check('B3 …so the hamburger stays findable at y=22 on Chromium',
-  pickHamburgerRect([HAMB_TOP], banded([CHROMIUM_BOTTOM_SHEET])) !== null);
-
-check('B4 a desktop corner card does not span the viewport → reserves nothing',
-  banded([DESKTOP_CORNER_CARD], 1440) === 0);
-check('B5 a hidden prompt reserves nothing',
-  banded([{ ...WEBKIT_TOP_DOCK, hidden: true }]) === 0);
-check('B5 a zero-height prompt reserves nothing',
-  banded([{ top: 0, bottom: 0, height: 0, width: 375 }]) === 0);
-
-// B6 — the prompt's own controls sit INSIDE the band, i.e. above where the app's content starts.
-// A probe that searched from y=0 would sort a wide prompt button ahead of the real hamburger.
-const PROMPT_BUTTON = { x: 10, y: 60, width: 60, height: 40 };  // inside the 178px band, wider
-check('B6 a control inside the reserved band is not mistaken for the top bar',
-  pickHamburgerRect([PROMPT_BUTTON, HAMB_DISPLACED], banded([WEBKIT_TOP_DOCK]))?.y === 191);
-
-// B7 — relative, and still bounded. A control a long way below the band is not the top bar.
-check('B7 a control far below the band is rejected',
-  pickHamburgerRect([{ x: 18, y: 400, width: 34, height: 34 }], banded([WEBKIT_TOP_DOCK])) === null);
-check('B7 the window is RELATIVE: the same offset from a DIFFERENT band is accepted',
-  pickHamburgerRect([{ x: 18, y: 324, width: 34, height: 34 }],
-    banded([{ top: 0, bottom: 320, height: 320, width: 375 }])) !== null);
+const realHamburgerProblems = hamburgerProblems(
+  (rects, vw = 375) => topDockBandBottom(rects as never, vw),
+  (rects, bandBottom) => pickHamburgerRect(rects as never, bandBottom) as { y: number } | null,
+);
+check(`the hamburger probe follows the app's own top edge rather than a viewport constant${realHamburgerProblems.length ? ` — ${realHamburgerProblems.join(' | ')}` : ''}`,
+  realHamburgerProblems.length === 0);
 
 // ── §C — THE SAME CLASS, THE OTHER EDGE: «is this prompt bottom-docked?» ────────────────────────
 // `auth-overlay-clears-controls` decided that with `sheet.bottom < 660 && !mobile`, and the desktop
@@ -201,23 +227,28 @@ check('B7 the window is RELATIVE: the same offset from a DIFFERENT band is accep
 // to collect a free pass. Filed as a latent oracle weakness, NOT as a measured live defect: no
 // prompt has been observed at bottom ∈ (660, 998) on desktop, and PART 9.1 forbids filing one
 // without N>=2. It is fixed anyway because the probe is ours and PART 9.4 makes it ours to fix.
-check('C1 a bottom-flush sheet IS bottom-docked (1000px desktop viewport)',
-  isBottomDocked({ top: 856, bottom: 1000, height: 144 }, 1000) === true);
-check('C1 …and within the 2px tolerance, as sub-pixel layout requires',
-  isBottomDocked({ top: 856, bottom: 998, height: 142 }, 1000) === true);
-check('C2 the desktop CORNER prompt is not bottom-docked (the measured shape, bottom ~210)',
-  isBottomDocked({ top: 20, bottom: 210, height: 190 }, 1000) === false);
-check('C3 THE GAP THE OLD 660 LITERAL GAVE A FREE PASS: a prompt at bottom 700 is not docked…',
-  isBottomDocked({ top: 500, bottom: 700, height: 200 }, 1000) === false);
-check('C3 …but one at bottom 999 IS, and the old literal called it "not bottom-docked"',
-  isBottomDocked({ top: 800, bottom: 999, height: 199 }, 1000) === true && 999 >= 660);
-check('C4 mobile: a 144px sheet flush at 812 is bottom-docked',
-  isBottomDocked({ top: 668, bottom: 812, height: 144 }, 812) === true);
-check('C5 a zero-height or absent prompt is never "docked"',
-  isBottomDocked({ top: 0, bottom: 0, height: 0 }, 1000) === false
-  && isBottomDocked(null, 1000) === false);
-check('C6 an unknown viewport height is never "docked" (a failed measurement is not a verdict)',
-  isBottomDocked({ top: 856, bottom: 1000, height: 144 }, 0) === false);
+type DockedFn = (rect: { top: number; bottom: number; height: number } | null, vh: number) => boolean;
+
+const bottomDockProblems = (docked: DockedFn): string[] => {
+  const p: string[] = [];
+  const eq = (label: string, got: boolean, want: boolean) => { if (got !== want) p.push(`${label} (got ${got}, want ${want})`); };
+  eq('C1 a bottom-flush sheet IS bottom-docked (1000px desktop viewport)', docked({ top: 856, bottom: 1000, height: 144 }, 1000), true);
+  eq('C1 …and within the 2px tolerance, as sub-pixel layout requires', docked({ top: 856, bottom: 998, height: 142 }, 1000), true);
+  eq('C2 the desktop CORNER prompt is not bottom-docked (the measured shape, bottom ~210)', docked({ top: 20, bottom: 210, height: 190 }, 1000), false);
+  // THE GAP THE OLD 660 LITERAL GAVE A FREE PASS. Both directions, because only the pair shows it:
+  // 700 must NOT be docked, and 999 must BE — the old literal called 999 "not bottom-docked" too.
+  eq('C3 a prompt at bottom 700 is not docked', docked({ top: 500, bottom: 700, height: 200 }, 1000), false);
+  eq('C3 …but one at bottom 999 IS (the old literal said otherwise)', docked({ top: 800, bottom: 999, height: 199 }, 1000), true);
+  eq('C4 mobile: a 144px sheet flush at 812 is bottom-docked', docked({ top: 668, bottom: 812, height: 144 }, 812), true);
+  eq('C5 a zero-height prompt is never "docked"', docked({ top: 0, bottom: 0, height: 0 }, 1000), false);
+  eq('C5 an absent prompt is never "docked"', docked(null, 1000), false);
+  eq('C6 an unknown viewport height is never "docked" (a failed measurement is not a verdict)', docked({ top: 856, bottom: 1000, height: 144 }, 0), false);
+  return p;
+};
+
+const realDockProblems = bottomDockProblems(isBottomDocked as DockedFn);
+check(`«is this prompt bottom-docked?» uses the app's own rule, not an absolute literal${realDockProblems.length ? ` — ${realDockProblems.join(' | ')}` : ''}`,
+  realDockProblems.length === 0);
 
 // The journey must actually USE the predicate — a pure function nothing calls is decoration.
 const journeys = readFileSync(join(ROOT, 'e2e/journeys/run.mjs'), 'utf8');
@@ -270,6 +301,110 @@ check('D7 …and no longer files a defect on a bare reservation DECREASE',
   !/if \(after\.reserved < before\.reserved\) \{/.test(journeys)
   && /after\.reserved \+ 1 < need/.test(journeys));
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// §E — MUTATION PROOFS: every predicate above, watched to go RED
+//      (routine #10, 2026-09-26, ops_incident #728)
+//
+// This file landed in PR #4317, whose body says «MUTATION-PROVEN 14/14, each watched red and
+// restored» and names this barrier by section. The mutations were real — they were run by hand in
+// that session — but a one-time act is not coverage: nothing re-executed them, so the barrier sat on
+// `scripts/mutation-proof-grandfathered.txt` protected by a sentence in a merged PR body. That is
+// the PART 1.11 shape at one remove, a CLAIM of proof reading as durable protection.
+//
+// Every mutant below is the shape of a real edit: the defect this file was written for, the
+// simplification that looks harmless, or the literal someone would reach for. The healthy controls
+// matter as much as the mutants — a predicate red for everything is as useless as one green for
+// everything (PART 3, R1 step 4).
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  ok  (mutation) catches ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  (mutation) BLIND to ${label}`);
+};
+
+// — healthy controls: none of the three predicates is vacuously red —
+mustCatch('…while the REAL oracle is NOT flagged (oracleProblems is not vacuously red)',
+  (await oracleProblems(sidebarIsOpen as Oracle)).length === 0);
+mustCatch('…while the REAL band/pick pair is NOT flagged (hamburgerProblems is not vacuously red)',
+  hamburgerProblems(
+    (rects, vw = 375) => topDockBandBottom(rects as never, vw),
+    (rects, bandBottom) => pickHamburgerRect(rects as never, bandBottom) as { y: number } | null,
+  ).length === 0);
+mustCatch('…while the REAL dock rule is NOT flagged (bottomDockProblems is not vacuously red)',
+  bottomDockProblems(isBottomDocked as DockedFn).length === 0);
+
+// — §A: the oracle. The first mutant IS the measured defect (routine #6, 2026-09-03) —
+// The guest oracle matched the CTA's visible TEXT, which src/app/index.tsx also renders in the
+// mobile TOP BAR. fakePage() throws on any text read precisely so this cannot pass here.
+type FakePage = { locator: (s: string) => { count: () => Promise<number> }; getByText: () => never };
+mustCatch('THE DEFECT: an oracle that reads visible TEXT, which the top bar renders identically',
+  (await oracleProblems(async (page) => { (page as FakePage).getByText(); return true; })).length > 0);
+mustCatch('an oracle that always answers OPEN — openMobileSidebar() then taps nothing and every downstream assertion is judged against the wrong screen',
+  (await oracleProblems(async () => true)).length > 0);
+mustCatch('an oracle that never answers OPEN — the drawer is tapped forever and the journey skips',
+  (await oracleProblems(async () => false)).length > 0);
+mustCatch('guestOk defaulting ON, so a FAILED session seed passes as a signed-in screen instead of an honest skip',
+  (await oracleProblems(async (page) =>
+    (await (page as FakePage).locator(SIDEBAR_OPEN_MARKER).count()) > 0
+    || (await (page as FakePage).locator(SIDEBAR_OPEN_MARKER_GUEST).count()) > 0)).length > 0);
+mustCatch('an oracle keyed on a marker the app does not render at all (the same blindness, a different selector)',
+  (await oracleProblems(async (page) =>
+    (await (page as FakePage).locator('[data-testid="sidebar-not-a-real-testid"]').count()) > 0)).length > 0);
+
+// — §B: the hamburger probe. The first mutant IS ops_incident #593 —
+const ABSOLUTE_WINDOW = (rects: unknown[]) => {
+  const hit = (rects as { x: number; y: number; width: number; height: number }[])
+    .filter((b) => b && b.y < 80 && b.x < 80 && b.width >= 18 && b.width <= 70 && b.height >= 18 && b.height <= 70)
+    .sort((a, b) => b.width - a.width);
+  return hit.length ? { y: hit[0]!.y + hit[0]!.height / 2 } : null;
+};
+const realBand = (rects: unknown[], vw = 375) => topDockBandBottom(rects as never, vw);
+const realPick = (rects: unknown[], bandBottom: number) => pickHamburgerRect(rects as never, bandBottom) as { y: number } | null;
+mustCatch('ops_incident #593: an ABSOLUTE `r.y < 80` window, which loses the hamburger the app itself moved down',
+  hamburgerProblems(realBand, ABSOLUTE_WINDOW).length > 0);
+// The inner static iframe's bottom is 170 and the fixed container's is 178. Reserving the iframe's
+// leaves the real hamburger 8px above the band's floor — inside the slack today, so this mutant is
+// asserted through the BAND value itself rather than through the pick.
+mustCatch('a band that reserves the inner static iframe (170) instead of the fixed container (178)',
+  hamburgerProblems((rects, vw = 375) => {
+    const rs = (rects as { top: number; bottom: number; height: number; width: number; hidden?: boolean }[]) || [];
+    const eligible = rs.filter((r) => r && !r.hidden && r.height > 0 && r.top <= 2 && r.width >= vw * 0.8);
+    return eligible.length ? Math.min(...eligible.map((r) => r.bottom)) : 0;
+  }, realPick).length > 0);
+mustCatch('a band that reserves for a BOTTOM-docked sheet too (Chromium’s own shape), pushing the probe past a top bar that never moved',
+  hamburgerProblems((rects, vw = 375) => {
+    const rs = (rects as { top: number; bottom: number; height: number; width: number; hidden?: boolean }[]) || [];
+    let band = 0;
+    for (const r of rs) { if (r && !r.hidden && r.height > 0 && r.width >= vw * 0.8 && r.bottom > band) band = r.bottom; }
+    return band;
+  }, realPick).length > 0);
+mustCatch('a band that reserves for a HIDDEN prompt — a display:none One Tap container is not covering anything',
+  hamburgerProblems((rects, vw = 375) => {
+    const rs = (rects as { top: number; bottom: number; height: number; width: number }[]) || [];
+    const eligible = rs.filter((r) => r && r.top <= 2 && r.width >= vw * 0.8);
+    return eligible.length ? Math.max(...eligible.map((r) => r.bottom)) : 0;
+  }, realPick).length > 0);
+mustCatch('a probe with NO lower bound, so a control 400px down the page is accepted as the top bar',
+  hamburgerProblems(realBand, (rects, bandBottom) => {
+    const hit = (rects as { x: number; y: number; width: number; height: number }[])
+      .filter((b) => b && b.y >= bandBottom - 4 && b.x < 80 && b.width >= 18 && b.width <= 70 && b.height >= 18 && b.height <= 70)
+      .sort((a, b) => b.width - a.width);
+    return hit.length ? { y: hit[0]!.y + hit[0]!.height / 2 } : null;
+  }).length > 0);
+mustCatch('a probe that searches from y=0 regardless of the band, so the PROMPT’s own wider button outranks the hamburger',
+  hamburgerProblems(realBand, (rects) => realPick(rects, 0)).length > 0);
+
+// — §C: the bottom-dock rule —
+mustCatch('the old absolute 660 literal, which called a prompt at bottom 999 «not bottom-docked» on a 1000px viewport',
+  bottomDockProblems((rect) => !!rect && rect.bottom >= 660).length > 0);
+mustCatch('a rule with no tolerance at all, so sub-pixel layout reads a flush sheet as floating',
+  bottomDockProblems((rect, vh) => !!rect && vh > 0 && rect.height > 0 && rect.bottom >= vh).length > 0);
+mustCatch('a rule that answers YES on an unmeasurable viewport — a failed measurement becoming a verdict',
+  bottomDockProblems((rect, vh) => !!rect && rect.height > 0 && rect.bottom >= vh - 2).length > 0);
+mustCatch('a rule that treats an ABSENT prompt as docked',
+  bottomDockProblems((rect, vh) => !rect || (vh > 0 && rect.bottom >= vh - 2)).length > 0);
+
+if (mutFail) { console.error(`\nverify-journey-mobile-sidebar-oracle: ${mutFail} mutation(s) went UNCAUGHT — a predicate above cannot fail`); process.exit(1); }
 if (failed) { console.error(`\nverify-journey-mobile-sidebar-oracle: ${failed} check(s) failed`); process.exit(1); }
 console.log('\nverify-journey-mobile-sidebar-oracle: the drawer oracle answers only to the drawer,');
 console.log('and the hamburger probe follows the app\'s own top edge rather than a viewport constant.');
