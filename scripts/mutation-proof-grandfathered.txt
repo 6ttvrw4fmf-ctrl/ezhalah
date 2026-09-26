@@ -169,7 +169,6 @@ verify-interview-hierarchy.ts
 verify-intro-rotator-contract.ts
 verify-journey-fixture-session-seed.ts
 verify-journey-ledger-reachable.ts
-verify-journey-mobile-sidebar-oracle.ts
 verify-journey-seam-engineer-contracts.ts
 verify-journey-transport-discriminator.ts
 verify-landmark-collision-and-platform-mention-fix.ts
@@ -231,8 +230,6 @@ verify-platform-registration-complete.ts
 verify-ppm-searchable-and-filter-safe.ts
 verify-property-age-counts-amenities-param.ts
 verify-qa-coverage-planner.ts
-verify-read-aloud-contract.ts
-verify-read-aloud-voice-logic.ts
 verify-recency-fallback-live.ts
 verify-refine-single-pending-guard.ts
 verify-refresh-restores-filter-search.ts
