@@ -36,6 +36,12 @@
     "grace": 3
   },
   {
+    "platform": "alajlan",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "albdah",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -378,6 +384,12 @@
     "grace": 3
   },
   {
+    "platform": "ibaax",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "jawher",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -486,6 +498,12 @@
     "grace": 3
   },
   {
+    "platform": "qmra",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "raghdan",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -524,6 +542,12 @@
   {
     "platform": "remal",
     "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "remaxsa",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
     "grace": 3
   },

@@ -861,6 +861,65 @@ POLICIES: dict[str, _P] = {
         "(«apartment-for-rent-in-jeddah-N», «Floor-For-Sale-الرياض-N»): 55/55 gap slugs answered 200 + "
         "the banner (reason «منتهي الصلاحية» extracted on 25/25) against 40/40 interleaved known-live "
         "controls from the same crawl that answered 200 with the banner absent, zero counter-examples."),
+    # ── WAVE 2, onboarded 2026-09-26 ────────────────────────────────────────────────────────────
+    # Four platforms. ibaax and qmra both keep serving a de-listed/sold-out unit forever — the
+    # oracle is a structured field, never the status code, and each has an in-run verify_gone that
+    # candidate-selects from absence then confirms directly: CANDIDATE_PLUS_DIRECT. remaxsa's detail
+    # URL is byte-identical for a live, sold and fabricated id — a real page never exists to read
+    # at all, only the index record does, but that record IS re-queried per id: CANDIDATE_PLUS_DIRECT
+    # too. alajlan is DIFFERENT IN KIND, not just in URL shape: it has no per-listing surface to
+    # re-query at all — every run re-fetches the platform's ENTIRE catalogue in one shot, and that
+    # one fetch already IS the final, complete answer (status:true/false/absent), with no separate
+    # candidate-selection step and no separate direct-confirm step to write code for. Honestly
+    # CRAWL_PRESENCE_ONLY, even though the signal it gets that way is stronger than most
+    # CRAWL_PRESENCE_ONLY platforms' (a real status flip, not just absence) — the tier describes
+    # the CODE PATH, not the confidence, and no direct-revisit code exists nor can exist here.
+    "ibaax": _P(
+        _pol("ibaax", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the ad's own detail endpoint's STATUS CODE — no page content to interpret. A 200 with «status: "
+        "success» is LIVE; a 422 error body is GONE. A fully fabricated id gets the identical 422 a "
+        "real gap id gets.",
+        "Measured 2026-09-25/26: 40 ids sampled from 411 numeric gaps inside the live catalogue's own "
+        "204-774 range answered 422, 0 counter-examples; 25 interleaved known-live ids answered 200 "
+        "(19) or a connection timeout the shared law already treats as UNKNOWN, never as a kill (6). 0 "
+        "of the 40 gap ids and 0 of the 19 responsive live ids crossed into the other's verdict."),
+    "remaxsa": _P(
+        _pol("remaxsa", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the listing's OWN index record, queried by exact MLSID. *** A PLAIN GET PROVES NOTHING HERE, "
+        "NOT EVEN \"IS A LISTING PAGE\" *** every detail URL — live, sold, cancelled, or fabricated — "
+        "returns the identical 2,589-byte SPA shell (verified on 5 URLs), so there is no page body to "
+        "read a signal from. A record count of 0 is GONE (a fabricated MLSID); IsViewable=true + "
+        "OnHoldListing=false + ListingStatusUID 160 (Active) is LIVE; IsViewable=false + "
+        "OnHoldListing=true + a non-160 status is GONE — the source's own statement; anything else is "
+        "UNKNOWN under the shared law.",
+        "Measured 2026-09-25 on 4 real historical Saudi MLS ids: Cancelled/161, Expired/162, Rented/167 "
+        "and Proposal/1616 all answered IsViewable=false, OnHoldListing=true, 4/4. Full measured status "
+        "vocabulary: 160 Active, 161 Cancelled, 162 Expired, 165 Partially Rented, 166 Prospective, 167 "
+        "Rented, 168 Exchanged, 169 Sold, 1616 Proposal — none treated individually, "
+        "IsViewable/OnHoldListing already collapse every one."),
+    "qmra": _P(
+        _pol("qmra", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the same first-class «property-status» taxonomy field the mapper itself gates on, re-read "
+        "fresh on the post's own REST endpoint. *** A SOLD-OUT UNIT KEEPS SERVING 200 FOREVER *** its "
+        "status term just changes. HTTP 404 with `rest_post_invalid_id` is GONE (a hard delete); any "
+        "other 404 shape is UNKNOWN (a WAF/routing 404 is not this platform's own statement); 200 "
+        "naming a READY term is LIVE; 200 naming anything else is GONE — the source's own current "
+        "statement; 200 with no status at all is UNKNOWN.",
+        "Measured 2026-09-25: three units that sold out mid-session (ids 853, 837, 820) still answer "
+        "200 with a complete, valid body — their property-status simply moved to «تم البيع»/«مُباع»/«تم "
+        "التأجير». 8/8 fabricated or gap ids answered the hard 404 shape."),
+    "alajlan": _P(
+        _pol("alajlan", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set — there is no separate detail endpoint or per-listing URL to "
+        "re-probe. The entire catalogue is one JSON array fetched whole each run, so a unit keeping "
+        "status:true, flipping to status:false, or dropping out of the array is the complete liveness "
+        "signal; db.prune_unseen's own 3-strike/coverage/collapse guards are the only additional "
+        "protection, the same shape ~40 other single-fetch platforms in this fleet already use.",
+        "Owner-approved 2026-09-26: this platform ALSO has no per-listing URL at all — every row's "
+        "listing_url is the bare homepage, deliberately, because a constructed #fragment or ?id= the "
+        "site does not read would look like a real deep link and silently fail. Measured 13 total "
+        "records (10 rent status:true/3 false, 1 investment status:true, 0 sale) across all three "
+        "categories."),
     "abaad": _P(
         _pol("abaad", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the ad's OWN /api/v1/estate/get-estate/<id> record. *** A 200 IS NOT A LIFE HERE *** a "

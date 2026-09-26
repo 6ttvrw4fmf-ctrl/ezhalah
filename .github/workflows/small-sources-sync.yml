@@ -227,6 +227,12 @@ jobs:
           - { source: sokok,         cmd: "python -m scrapers.sokok.run --type all", tmo: 30 }
           - { source: sukna,         cmd: "python -m scrapers.sukna.run --type all", tmo: 25 }
           - { source: tuba,          cmd: "python -m scrapers.tuba.run --type all", tmo: 60 }
+          #   WAVE 2, 2026-09-26. ibaax pages through 160 rows (16 requests); remaxsa/qmra/alajlan
+          #   are small single-shot catalogues (21/19/13 records respectively).
+          - { source: ibaax,        cmd: "python -m scrapers.ibaax.run --type all", tmo: 20 }
+          - { source: remaxsa,      cmd: "python -m scrapers.remaxsa.run --type all", tmo: 15 }
+          - { source: qmra,         cmd: "python -m scrapers.qmra.run --type all", tmo: 15 }
+          - { source: alajlan,      cmd: "python -m scrapers.alajlan.run --type all", tmo: 15 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
