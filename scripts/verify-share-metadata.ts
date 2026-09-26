@@ -19,8 +19,9 @@
  *      relative path silently yields a preview with no picture;
  *   3. the image file EXISTS, is 1200x630, and is small enough that a crawler will actually fetch it;
  *   4. the description is the OWNER'S wording, and it NAMES THE COUNTRY. The literal was «في المملكة»
- *      when this was written and is «في السعودية» after the owner's 2026-09-05 rewrite — the rule was
- *      never about one phrase, it is that the line must say WHERE. A property search that could be
+ *      when this was written, «في السعودية» after the 2026-09-05 rewrite, and dropped the «في» after
+ *      the 2026-09-25 rewrite («عقارات السعودية», not «في السعودية») — the rule was never about one
+ *      phrase or one preposition, it is that the line must say WHERE. A property search that could be
  *      anywhere is a slogan; one that says Saudi Arabia is a product. The literal moves when the
  *      owner rewrites it; the country requirement does not.
  *   5. the title goes through expo-router's <Head> (helmet). A <title> anywhere else in +html.tsx is
@@ -40,9 +41,10 @@ const check = (label: string, ok: boolean, detail = '') => {
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
 const OG_FILE = 'public/og-image-v4.jpg';
-const REQUIRED_AR = 'تدور على العقارات وتبي تشوف كل المعروض في مكان واحد؟ كل إعلانات العقار في السعودية، في ثواني.';
-// Either word names the country. Owner wording moved from «المملكة» to «السعودية» on 2026-09-05.
-const NAMES_COUNTRY = /في\s+(المملكة|السعودية)/;
+const REQUIRED_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، عقارات السعودية في ثواني.';
+// Either word, anywhere in the line, names the country — «في» is not required: the 2026-09-25
+// wording says «عقارات السعودية», not «في السعودية».
+const NAMES_COUNTRY = /المملكة|السعودية/;
 
 // JSX comments are stripped: this file's own prose quotes the tags it is checking for.
 const code = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
