@@ -348,16 +348,132 @@ export async function withPage(opts, fn) {
 export async function settle(page, timeout = 30_000) {
   const t0 = Date.now();
   try {
-    await page.waitForFunction(() => {
+    // The floor is BLANK_BODY_MAX, passed IN rather than retyped inside the browser callback —
+    // PART 5 shape #14: if the harness needs a number, derive it or pin it, never mirror it.
+    await page.waitForFunction((min) => {
       const t = document.body?.innerText || '';
-      return t.length > 200;
-    }, { timeout });
+      return t.length > min;
+    }, BLANK_BODY_MAX, { timeout });
   } catch { /* fall through — caller sees an empty body and files it */ }
   await sleep(1500);
   return Date.now() - t0;
 }
 
 export const bodyText = (page) => page.evaluate(() => document.body.innerText);
+
+// ═══ WHICH SCREEN IS ON THE PAGE ════════════════════════════════════════════════════════════════
+//
+// THE SUBSTRING «بحث» IS NOT A SCREEN, AND IT IS NOT A CONTROL (routine #6, 2026-09-26).
+//
+// Three journeys decided "the Filter home and its primary control are on screen" with
+// `bodyText(page).includes('بحث')`: `cold-open` («missing primary control»), `back-after-search`
+// («Back landed off-route») and `adv-background-tab` («controls missing after backgrounding»).
+// Arabic is agglutinative, and «بحث» is a proper substring of «أبحث», «البحث», «للبحث» and «بحثك» —
+// all four of which this product renders. So the test was answering a question about VOCABULARY
+// while its failure message claimed a question about a BUTTON.
+//
+// MEASURED on production, Chromium, a fresh context per run, real clicks, pane foregrounded:
+//   · Filter home   — includes('بحث') true  · exact «بحث» nodes 1 · city-input 1   (4/4)
+//   · agent screen  — includes('بحث') TRUE  · exact «بحث» nodes 0 · city-input 0   (4/4, both
+//     viewports; the greeting reads «وأنا أبحث لك بين المنصات العقارية»)
+//   · Filter home with its primary control DELETED out of the live DOM — exact nodes 1 → 0 and
+//     includes('بحث') still TRUE (2/2). So cold-open's own named defect, «missing primary control»,
+//     could not fire. That mutation was WATCHED on production, not inferred from reading the copy.
+//
+// `back-after-search` exists for PART 5 shape 9 — «Browser Back stranding the user off-route» — and
+// would have reported `pass` for a Back that landed on the agent screen. PART 9.5's class exactly:
+// not a red, a PASS that asserted something other than what it claimed.
+//
+// THE RULE: screen identity is decided by interrogating ELEMENTS, never by an innerText substring of
+// a control's label. `scripts/verify-screen-identity-is-an-element-not-a-substring.ts` enforces it
+// as a class — it discovers every ambiguous substring oracle in `e2e/` by asking the PRODUCT whether
+// a longer word carries the same token, so the rule stays true as the copy changes.
+//
+// AND THE VERDICT IS THREE-VALUED, because the three call sites need two different failures told
+// apart: a wrong SCREEN and a missing CONTROL are not the same bug, and one vague sentence standing
+// in for both is how neither could be reported. Same unknown→NO discipline, applied to a screen.
+
+/** The blank-body floor, defined ONCE — `settle()` waits on it and the verdict below reports it. */
+export const BLANK_BODY_MAX = 200;
+
+/** The Filter home's own two identities. Elements, not words. */
+export const FILTER_HOME_CITY_INPUT = '[data-testid="city-input"]';
+export const FILTER_HOME_SEARCH_LABEL = 'بحث';
+
+/**
+ * Pure, so the barrier EXECUTES the real decision rather than grepping for it.
+ * 'blank' · 'home' · 'home-missing-search-control' · 'not-home'.
+ */
+export function filterHomeVerdict({ exactSearchNodes, cityInputs, bodyLength }) {
+  if (!(bodyLength > BLANK_BODY_MAX)) return 'blank';
+  if (cityInputs > 0) return exactSearchNodes > 0 ? 'home' : 'home-missing-search-control';
+  return 'not-home';
+}
+
+/** Ask the page by ELEMENT. `exact: true` is what makes «أبحث» not a «بحث» button. */
+export async function filterHomeState(page) {
+  const [exactSearchNodes, cityInputs, bodyLength] = await Promise.all([
+    page.getByText(FILTER_HOME_SEARCH_LABEL, { exact: true }).count(),
+    page.locator(FILTER_HOME_CITY_INPUT).count(),
+    page.evaluate(() => (document.body?.innerText || '').length),
+  ]);
+  return { verdict: filterHomeVerdict({ exactSearchNodes, cityInputs, bodyLength }),
+           exactSearchNodes, cityInputs, bodyLength };
+}
+
+/** Arabic letters — what makes a WORD longer. Shared with scripts/lib/productStrings.ts's rule. */
+const ARABIC_LETTER_SRC = '\\u0621-\\u063A\\u0641-\\u064A\\u0671-\\u06D3';
+
+/**
+ * How many PAINTED, non-decorative leaf elements carry `token` as its own Arabic word.
+ *
+ * Three discriminators the page-wide `innerText.includes(token)` it replaces had none of, each one
+ * measured rather than assumed:
+ *
+ *  · WORD BOUNDARY. «أبحث عن» is carried by «وسأبحث عنه», which src/i18n.tsx renders in two greeting
+ *    strings — so the old test could answer yes on a chat that holds only a greeting.
+ *  · NOT A DECORATION. src/data/introExamples.ts rotates «أبحث عن أرض سكنية في الرياض وميزانيتي مليون
+ *    ونص» through the composer's placeholder, `aria-hidden` with `pointerEvents: none` (agent.tsx).
+ *    That is the product working, and it carries both halves of the old predicate.
+ *  · PAINTED. This harness already records that «a CSS-faded toast stays in innerText», so presence
+ *    is never the oracle. A zero-area node is not on screen.
+ *
+ * Measured on production while repairing `adv-newchat-mid-restore` (2026-09-26, desktop1440, 2/2,
+ * five samples across 21 s of example rotation): the city conjunct that predicate ANDed in was
+ * permanently true — «جدة», «الرياض» and «الخبر» are all present from the sidebar's own saved-chat
+ * titles — so it could never narrow anything and only read as extra rigour.
+ */
+export async function paintedTextCarriers(page, token) {
+  return page.evaluate(({ tok, letters }) => {
+    const boundary = new RegExp(`(^|[^${letters}])${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+    const out = [];
+    for (const el of document.querySelectorAll('*')) {
+      if (el.children.length) continue;                        // leaf text only
+      const s = (el.textContent || '').trim();
+      if (!boundary.test(` ${s}`)) continue;
+      if (el.closest('[aria-hidden="true"]')) continue;        // the rotating example is a decoration
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;               // present but not painted
+      out.push(s.slice(0, 120));
+    }
+    return out;
+  }, { tok: token, letters: ARABIC_LETTER_SRC });
+}
+
+/** A sentence that names WHICH failure, so a defect message cannot be read two ways. */
+export const filterHomeWhy = (s) => {
+  if (s.verdict === 'blank') return `body innerText is ${s.bodyLength} chars`;
+  if (s.verdict === 'home-missing-search-control') {
+    return `the Filter home rendered (city input \u00d7${s.cityInputs}) but its primary `
+      + `«${FILTER_HOME_SEARCH_LABEL}» control does not exist — 0 exact label nodes`;
+  }
+  if (s.verdict === 'not-home') {
+    return `this is not the Filter home — no «${FILTER_HOME_CITY_INPUT}» and `
+      + `${s.exactSearchNodes} exact «${FILTER_HOME_SEARCH_LABEL}» control node(s), body ${s.bodyLength} chars`;
+  }
+  return `Filter home with its primary control (city input \u00d7${s.cityInputs}, `
+    + `exact «${FILTER_HOME_SEARCH_LABEL}» node(s) \u00d7${s.exactSearchNodes}, body ${s.bodyLength} chars)`;
+};
 
 /** LocalStorage history as the app itself stored it — the persistence oracle. */
 export const storedHistory = (page) => page.evaluate((sub) => {
@@ -771,6 +887,33 @@ export async function settledCount(readCount, { budgetMs = 45_000, stableMs = 5_
     await sleepFn(250);
   }
   return { n: readCount(), settled: false };
+}
+
+/**
+ * Did `readCount` stay at ZERO for a bounded observation window?
+ *
+ * THE MIRROR OF settledCount, AND A DIFFERENT QUESTION. Settling is defined over a count that GROWS,
+ * so by its own contract it can never settle on zero — «an early zero means not started, not fired
+ * nothing» (PART 11.2 rule 1). An ABSENCE claim has no condition to wait for: nothing is going to
+ * happen, and the only honest measurement is «nothing happened for this long». So the window IS the
+ * oracle here, which PART 11.2 permits as a last resort on the condition that a finding resting on
+ * one SAYS so — hence `windowMs` is returned for the caller to print, never hidden inside.
+ *
+ * Used by `back-forward-no-duplicate-search` for the owner's 2026-08-16 rule: a history hop must fire
+ * no duplicate search, RPC or AI request. The PEAK is returned rather than the final count, so a call
+ * that fired and was then filtered out of the tally cannot pass as an absence.
+ *
+ * `sleepFn`/`now` are injectable so a barrier can EXECUTE this rather than grep it.
+ */
+export async function stayedAtZero(readCount, { windowMs = 8_000, sleepFn = sleep, now = () => Date.now() } = {}) {
+  const started = now();
+  let peak = readCount();
+  while (now() - started < windowMs) {
+    await sleepFn(250);
+    const n = readCount();
+    if (n > peak) peak = n;
+  }
+  return { peak, windowMs, zero: peak === 0 };
 }
 
 export function appPageErrors(bag, journey) {
