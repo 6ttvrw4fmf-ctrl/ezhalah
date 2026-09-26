@@ -47,12 +47,12 @@ const check = (label: string, ok: boolean, why = '') => {
 console.log('\nA reveal is counted on the turn that owns it, and the first page is never a constant\n');
 
 // ── 1. WHAT THE FIRST REVEAL IS SUPPOSED TO BE — executed, not asserted from memory ─────────────
-const FLOOR = 10, STOP = 25;
+const STOP = 25;
 const first = (platforms: number, fetched = 1500, honestTotal: number | null = 6629) =>
-  initialReveal({ fetched, honestTotal, firstPage: FLOOR, stopAt: STOP, platforms });
+  initialReveal({ fetched, honestTotal, stopAt: STOP, platforms });
 
-check('the first page is a FLOOR widened by matching platforms, never a fixed 10',
-  first(3) === 10 && first(10) === 10 && first(19) === 19 && first(38) === 38,
+check('the first page is EXACTLY the matching-platform count, never a fixed 10 (owner 2026-09-25)',
+  first(3) === 3 && first(10) === 10 && first(19) === 19 && first(38) === 38,
   `3 platforms → ${first(3)} · 10 → ${first(10)} · 19 → ${first(19)} · 38 → ${first(38)}`);
 check('the first page never claims a row the fetched set does not contain',
   first(38, 12) === 12, `38 platforms but only 12 fetched → ${first(38, 12)}`);
@@ -132,8 +132,11 @@ const incrementModel = (f: number, k: number) => f + BROWSE_BATCH * k;
 mustCatch('a shown+100 increment model instead of the next clean boundary',
   incrementModel(19, 1) !== walk(19, 2000, 1)[0]);
 // M-3: THE EXACT #125 ARITHMETIC — page-wide count, baseline caught mid-cascade at 8, +FIRST_PAGE.
+// The `+ 10` here is the historical incident's own literal constant (the old fixed FIRST_PAGE the
+// #125 harness bug added back) — reproduced verbatim for the proof, independent of the current
+// (2026-09-25) initialReveal formula, which no longer has any such constant at all.
 const buggyRevealed = (trueReveal: number, baselineCaughtAt: number, otherTurns: number) =>
-  (otherTurns + trueReveal) - (otherTurns + baselineCaughtAt) + FLOOR;
+  (otherTurns + trueReveal) - (otherTurns + baselineCaughtAt) + 10;
 mustCatch('the #125 arithmetic itself: a baseline caught mid-cascade yields a constant +2',
   buggyRevealed(100, 8, 37) === 102 && buggyRevealed(1500, 8, 37) === 1502);
 // M-4: and the turn-scoped count does NOT have that error — same inputs, right answer.

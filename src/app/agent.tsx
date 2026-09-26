@@ -969,22 +969,24 @@ export default function Agent() {
   // live 2026-08-24: ~715px of such growth, which left the new count line just under the fold every
   // time, at any single delay. Each pass re-measures and converges as fewer images remain; a pass that
   // has nothing left to correct scrolls to where the thread already is and is invisible. The first
-  // delay also clears the new turn's own card cascade (FIRST_PAGE × REVEAL_STEP_MS ≈ 1.3s), so the
+  // delay also clears the new turn's own card cascade (CASCADE_MAX × REVEAL_STEP_MS ≈ 1.6s), so the
   // first move already reads the settled height of the thing being landed on.
   const LAND_PASSES_MS = [1400, 3200];
-  const FIRST_PAGE = 10; // FLOOR for the initial batch, never a cap — initialReveal() widens it to the number of matching platforms (owner 2026-09-02). «عرض المزيد» pages the rest.
+  // NO FLOOR ANYMORE (owner PERMANENT rule 2026-09-25, reversing 2026-09-02's fixed floor of 10 —
+  // full history in src/lib/initialReveal.ts): the initial batch is exactly one card per matching
+  // platform, never padded. «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
   // INTERVIEW_STOP_AT (25, owner 2026-09-20 — briefly 50 under the 2026-09-04 rule): the line at which Advanced
   // Filter stops narrowing (R11.1) and the set
   // is by contract the FINAL one, so there is nothing left for a first page to be a preview OF. Gated
   // on quotableTotal() — the honest total, null whenever the RPC count would overstate (client-only
-  // narrowing, agent-annualized budgets) — and in those cases we fall back to FIRST_PAGE rather than
-  // reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 50, so a ≤50 set is always
+  // narrowing, agent-annualized budgets) — and in those cases we fall back to the platform-count reveal
+  // rather than reveal a page that might not be the whole set. QUERY_LIMIT (1,500) ≥ 50, so a ≤50 set is always
   // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
   // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
   const initialReveal = (r: SearchResult | undefined | null, afCompleted = false): number =>
-    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings), afCompleted });
+    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings), afCompleted });
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
@@ -3892,7 +3894,7 @@ export default function Agent() {
                         // Show once this page's cards are on screen. Gate on (typing && !doneTyping) — the SAME
                         // condition the cards use — NOT on `m.typing` alone: a live results message keeps typing=true
                         // even after the intro finishes (only doneTyping flips), so gating on m.typing hid this block.
-                        // min(FIRST_PAGE, fetched): a search with <10 matches still gets its closing message.
+                        // min(platforms, fetched): a search with fewer matches than the reveal target still gets its closing message.
                         // ALSO gates FeedbackRow/Read Aloud below (merged into one block, owner 2026-08-23 — the
                         // spoken closing note must reuse this SAME computed text, never re-derive it separately).
                         //
