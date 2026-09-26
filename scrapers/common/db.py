@@ -1567,6 +1567,46 @@ def upsert_maqrat_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("maqrat_commercial_listings", rows)
 
 
+def upsert_dallali_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("dallali_residential_listings", rows)
+
+
+def upsert_dallali_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("dallali_commercial_listings", rows)
+
+
+def upsert_muajarh_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("muajarh_residential_listings", rows)
+
+
+def upsert_muajarh_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("muajarh_commercial_listings", rows)
+
+
+def upsert_mobasher_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("mobasher_residential_listings", rows)
+
+
+def upsert_mobasher_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("mobasher_commercial_listings", rows)
+
+
+def upsert_nafithh_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nafithh_residential_listings", rows)
+
+
+def upsert_nafithh_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nafithh_commercial_listings", rows)
+
+
+def upsert_opensooq_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("opensooq_residential_listings", rows)
+
+
+def upsert_opensooq_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("opensooq_commercial_listings", rows)
+
+
 def upsert_vmksa_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("vmksa_residential_listings", rows)
 

@@ -155,6 +155,16 @@ export const PLATFORMS: Platform[] = [
   { name: 'مكسب العقارية', domain: 'macsaib.sa', brand: 'Macsaib', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // maqrat: 83 REGA-licensed ads measured 2026-09-26 (58 sale + 24 rent + 1 «مجمع» left unmapped).
   { name: 'MAQRAT', domain: 'maqrat.com', brand: 'MAQRAT', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // opensooq: 78 real-estate items measured 2026-09-26 (72 kept: 2 under construction, 1 deal conflict, 1 multi-use plot, 2 duplicate posts skipped).
+  { name: 'السوق المفتوح', domain: 'sa.opensooq.com', brand: 'OpenSooq', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // nafithh: 30 measured 2026-09-26 (22 sale + 8 rent; 2 «مجمع» unmapped). Server-rendered REGA blocks.
+  { name: 'معرض نافذة', domain: 'nafithh.sa', brand: 'Nafithh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // mobasher: 28 DIRECT-SALE real estate measured 2026-09-26 (auctions are a separate feed and never read). Owner 2026-09-25: keep.
+  { name: 'مباشر', domain: 'mobasher.sa', brand: 'Mobasher', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // muajarh: 11 real of 18 feed rows measured 2026-09-26 (7 are the platform's own demo records, no REGA licence); all Riyadh yearly rents.
+  { name: 'مؤاجرة', domain: 'muajarh.com', brand: 'Muajarh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // dallali: 7 measured 2026-09-26 (3 rent: 2 offices + 1 apartment; 4 KAEC plots). Open JSON API p1.dallali.com.
+  { name: 'دلّالي', domain: 'dallali.com', brand: 'Dallali', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'العجلان', domain: 'alajlan-re.com', brand: 'Al Ajlan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
   // 0 rent rows today, but its scraper maps «للإيجار» to Rent — absence is not incapability.

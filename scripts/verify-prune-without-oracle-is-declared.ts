@@ -78,7 +78,7 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // fetch already IS the complete, authoritative per-unit state; a constructed per-row URL the site
 // does not read would look like a real oracle while proving nothing, which is worse than declaring
 // the gap honestly here. Registered CRAWL_PRESENCE_ONLY in liveness_policies.py for the same reason.
-const RATCHET = 29;  // 28 -> 29: maqrat onboarded 2026-09-26 (wave-3 batch 3) — an oracle is possible (the details page loses its licence block) but none is written yet. 26 -> 28 before that: vm-ksa and macsaib. A NEW platform may raise this; a FIXED one must lower it.
+const RATCHET = 34;  // 29 -> 34: dallali, muajarh, mobasher, nafithh, opensooq onboarded 2026-09-26 (wave-3 batch 4) — each COULD have an oracle (a 404 per id / the feed's own status) but none is written yet. 28 -> 29 before that: maqrat. A NEW platform may raise this; a FIXED one must lower it.
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {
