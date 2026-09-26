@@ -1,0 +1,60 @@
+# AF/TRENDING LIVE CHECKS THAT DO NOT YET SURVIVE A SCHEMA-CACHE RELOAD.
+#
+# routine #5, 2026-09-26 (ops_incident #563 · alert 1434). Every check in
+# .github/workflows/af-live-truth-check.yml that reads PostgREST without reaching
+# scripts/lib/postgrestRetry.ts can be turned into a FALSE PRODUCT VERDICT by any session applying a
+# function-creating migration — measured that morning, when five wahadat_* migrations made this suite
+# print «Warehouse/Buy: cell completed without a harness error» about three healthy cohorts and crash
+# one sweep outright, discarding 5,527 real passing checks.
+#
+# THIS LIST MAY ONLY SHRINK. Its size is pinned by AF_LIVE_UNPROTECTED_CEILING in
+# scripts/verify-af-live-checks-survive-schema-cache-reload.ts, so adding a name is a reviewed source
+# change and never a quiet append. A NEW unprotected check is RED. A row the tree has outgrown is RED
+# as STALE, so the ledger can never read better than reality.
+#
+# SHRINK IT BY ADOPTING THE DRIVER, NEVER BY REMOVING THE ALERT BRIDGE. A workflow that stopped
+# raising alert_event would leave this population — and leave its reds reaching nobody at all, which
+# is a larger finding than this file measures. That is the prohibited act wearing this ratchet's
+# syntax.
+#
+# HOW TO CLEAR A ROW: import scripts/lib/afLiveProbe.ts (afProbeOk / afRpcOk / afProbeFetch). It
+# retries ONLY a 503 whose JSON `code` is exactly PGRST002, on the ONE measured budget, and raises
+# SchemaCacheUnresolved when even that is outlasted — so the cell is reported UNMEASURED rather than as
+# a defect in whatever cohort happened to be in the label. It cannot make a check more permissive
+# about anything else, and the run still exits non-zero: the CLAIM changes, the verdict does not.
+#
+# NOT HERE, because they were repaired in this same change rather than baselined — each had measured
+# production evidence, and their reproductions are in their own headers:
+#   verify-af-full-surface-differential.ts   no retry at all; a 503 crashed the sweep AND its
+#                                            oracleCount() never checked `ok`, so a 503 became `null`
+#   verify-af-matrix-truth-live.ts            a hand-rolled ~8s budget against a reload the repo had
+#                                            already measured needs ~15s
+#   verify-af-independent-oracle.ts           also routine #10's last PR-gate ledger row, cleared the
+#                                            same day, taking PR_GATE_UNPROTECTED_CEILING to 0
+#
+# Format:  check filename | what its reads are
+
+verify-af-live-truth.ts | drives a real browser AND takes Node-side oracle reads (RPC totals + PostgREST id sets) beside it; the browser's own requests cannot go through a Node driver, but the oracle arm can and should
+verify-trending-live-four-way-truth.ts | Trending chip vs RPC vs click-through vs independent PostgREST truth — four reads, none driven
+verify-af-property-type-differential.ts | sweeps every certified cohort: RPC vs independent DB truth
+verify-trending-filter-state-live.ts | live trending/district RPC counts vs independent PostgREST truth
+verify-trending-set-equals-the-click-live.ts | the only SET differential for Trending: walks the click to exhaustion by p_offset and differences it against PostgREST
+verify-count-surfaces-share-the-results-purity-gate.ts | reconciles every scope-carrying count surface against the results RPC under the identical scope
+verify-clause-carrying-rpcs-are-templated.ts | asks the live catalog which functions inline af_eligibility_clause() via ops_af_clause_surfaces()
+verify-detector-total-matches-its-breakdown-live.ts | executes the real production detector functions through the publishable key
+verify-inactive-listing-is-not-searchable.ts | ops_lifecycle_inactive_still_searchable() plus a sample taken off location_search_candidates_ar
+verify-af-pill-removal-live.ts | browser journey with an anon replay of the same body as its DB-truth arm
+verify-strict-filter-parity-live.ts | live RPC total_count vs strict PostgREST ground truth on every once-permissive filter
+verify-guided-counts-carry-monthly-af-live.ts | live half: the advanced params must still bite server-side
+verify-ui-controls-have-predicates-live.ts | reads af_field_registry live; deliberately fails CLOSED on an unreachable registry, which is exactly why a reload currently reads as a registry problem
+verify-af-option-card-truth-live.ts | browser journey plus a captured-count RPC and an independent oracle per rendered option
+verify-af-remove-last-pill-live.ts | browser journey plus byte-comparison of the pre/post-AF search bodies
+verify-af-scope-change-live.ts | browser journey plus cohortAllows executed against live counts
+verify-af-agent-cta-live.ts | browser journey whose non-arrival classifier and count arm read PostgREST through imported helpers — invisible to a single-file text scan, found by the module-graph arm
+verify-af-card-evidence-live.ts | R12A.6: every committed AF answer visible on the returned card with the listing's OWN value; reads the listing's canonical columns back through an imported reader
+verify-combined-budget-live.ts | combined شراء+إيجار, each budget binding only its own deal; reads both legs' truth through an imported reader
+
+# THE LAST THREE ROWS ABOVE ARE WHY THE ARM WALKS THE GRAPH. A single-file scan for `fetch(` counted
+# 17 members; asking the module graph "does this check, or anything it imports, really fetch a
+# /rest/v1/ path" counted 19 and named these three. A shallower predicate would have under-reported the
+# class by three and called that progress.

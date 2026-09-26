@@ -18,6 +18,22 @@
 // is deliberately OUT: the rule earns its keep by being narrow enough that nobody wants to weaken
 // it. `npm test` is out too — its members are covered by #573 already and by the hermeticity ratchet.
 //
+// THAT "WAKES AN OWNER AND BLOCKS NOBODY" PREMISE DOES NOT HOLD FOR AN ALERT-RAISING SWEEP, measured
+// 2026-09-26 by routine #5 (ops_incident #563). `af-live-truth-check.yml` is schedule-triggered, so
+// it is correctly OUT of this file's population — and its reds do not wake anybody either. Its only
+// channel to a human is an `alert_event` row, and the P1 `af_live_check_failed` (alert 1434) had
+// stood open, re-affirmed daily, since 2026-09-04. Meanwhile its reds are not mere noise: on that
+// day the suite printed «Warehouse/Buy: cell completed without a harness error» and «27 check(s)
+// FAILED — an AF answer means something different than the product intends» while PostgREST was
+// simply reloading its schema cache after another routine's platform-onboarding migrations. So the
+// harm is different in kind from a blocked merge, not smaller: a healthy product is named as
+// defective, and a genuine AF regression would land inside 22 days of accumulated noise unnoticed.
+//
+// That population is measured by its own sibling ratchet,
+// scripts/verify-af-live-checks-survive-schema-cache-reload.ts, which shares the predicates below
+// rather than re-deriving them. This file's population is DELIBERATELY unchanged: widening it would
+// overwrite a reasoned decision and force this ceiling up by the size of somebody else's backlog.
+//
 // NOT A STYLE RULE. The driver retries ONLY a 503 whose JSON `code` is exactly PGRST002, is bounded
 // (~30s), and returns the LAST probe as-is, so an unbroken reload still fails. Adopting it cannot
 // make any check more permissive about anything else; refusing it means a required PR gate whose
@@ -61,9 +77,35 @@ export function scriptsInvokedBy(source: string): string[] {
 export const readsPostgrest = (source: string): boolean =>
   networkCallArguments(source).some((a) => a.includes('/rest/v1/'));
 
-/** Does it route that read through the canonical driver? */
+/**
+ * Does it route that read through the canonical driver, judged by TEXT (one file, direct import)?
+ *
+ * This is the cheap arm, and it is BLIND TO ONE HOP — which matters, because the correct refactor is
+ * to put the reads behind a shared module. Measured 2026-09-26: after routine #5 moved three AF live
+ * checks onto scripts/lib/afLiveProbe.ts (which imports the driver), this predicate called all three
+ * unprotected, and `readsPostgrest` then called two of them non-readers because their own `fetch(`
+ * calls were gone. So the text arms together would have PUNISHED the adoption and rewarded
+ * copy-pasting an import next to a hand-rolled budget. Pass a `ProtectionGraph` to
+ * `unprotectedChecksIn` to judge the module graph instead — computed, not grepped, which is the
+ * distinction importGraph.ts's own header is about.
+ */
 export const usesSchemaCacheDriver = (source: string): boolean =>
   /from\s+['"][^'"]*lib\/postgrestRetry\.ts['"]/.test(source);
+
+/**
+ * The graph-aware arms, injected so a proof can hand this rule a module graph that does not exist.
+ *
+ * `driven(name)` — the check reaches scripts/lib/postgrestRetry.ts through its imports, at any depth.
+ * `reads(name)`  — the check, or a module it imports, really fetches a /rest/v1/ path.
+ *
+ * Both are OPTIONAL: with neither, the walk uses the single-file text arms above, which is what keeps
+ * the existing PR-gate barrier's thirteen synthetic-world proofs meaningful (they hand it sources,
+ * not a filesystem).
+ */
+export type ProtectionGraph = {
+  driven?: (checkName: string) => boolean;
+  reads?: (checkName: string) => boolean;
+};
 
 export type Unprotected = { check: string; workflow: string };
 
@@ -78,20 +120,45 @@ export function unprotectedPrGates(
   workflows: WorkflowFile[],
   readCheck: (name: string) => string | null,
 ): Unprotected[] {
+  return unprotectedChecksIn(workflows, readCheck, (wf) => hasPullRequestTrigger(wf.source));
+}
+
+/**
+ * The same walk, over whatever population the caller names.
+ *
+ * Extracted 2026-09-26 so the alert-raising sibling ratchet applies the IDENTICAL rule instead of a
+ * second copy of it — a per-file private copy of a shared vocabulary is the drift this repo keeps
+ * paying for (AF_TRENDING_DATA_INTEGRITY_ENGINEER.md harness note 13). `unprotectedPrGates` is now
+ * one line over this, so neither population can quietly diverge in how it reads a workflow, decides
+ * that a file really fetches PostgREST, or handles an unreadable check.
+ *
+ * `inPopulation` receives the whole WorkflowFile, not just its source, so a population may be defined
+ * by PATH (one named workflow) as well as by trigger.
+ */
+export function unprotectedChecksIn(
+  workflows: WorkflowFile[],
+  readCheck: (name: string) => string | null,
+  inPopulation: (wf: WorkflowFile) => boolean,
+  graph: ProtectionGraph = {},
+): Unprotected[] {
   const out: Unprotected[] = [];
   const seen = new Set<string>();
   for (const wf of workflows) {
-    if (!hasPullRequestTrigger(wf.source)) continue;
+    if (!inPopulation(wf)) continue;
     for (const name of scriptsInvokedBy(wf.source)) {
       if (seen.has(name)) continue;
       const src = readCheck(name);
       if (src === null) {
+        // Unreadable is REPORTED, never skipped as healthy. A rule that treats "I could not look" as
+        // "nothing wrong" is the manufactured negative this whole class is about.
         seen.add(name);
         out.push({ check: name, workflow: wf.path });
         continue;
       }
-      if (!readsPostgrest(src)) continue;
-      if (usesSchemaCacheDriver(src)) continue;
+      const reads = graph.reads ? graph.reads(name) : readsPostgrest(src);
+      if (!reads) continue;
+      const driven = graph.driven ? graph.driven(name) : usesSchemaCacheDriver(src);
+      if (driven) continue;
       seen.add(name);
       out.push({ check: name, workflow: wf.path });
     }
