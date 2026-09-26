@@ -2574,3 +2574,11 @@ def upsert_tuba_residential_batch(rows: list[dict[str, Any]]) -> None:
 
 def upsert_tuba_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("tuba_commercial_listings", rows)
+
+
+def upsert_qmra_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("qmra_residential_listings", rows)
+
+
+def upsert_qmra_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("qmra_commercial_listings", rows)
