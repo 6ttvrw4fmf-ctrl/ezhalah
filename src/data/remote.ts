@@ -1606,7 +1606,10 @@ async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?
 // (user spec: route rent→rent_location_index, buy→buy_location_index, then fetch details from raw.)
 export async function fetchListingsForQuery(
   q: SearchQuery,
-  opts?: { offset?: number; limit?: number; signal?: AbortSignal },
+  // `rotationSeed` (2026-09-26): the ONE seed for this whole search, minted once by the caller when
+  // the search starts and passed back unchanged on every «عرض المزيد» page. Omitting it falls back
+  // to the device+week seed, which keeps every other caller working exactly as before.
+  opts?: { offset?: number; limit?: number; signal?: AbortSignal; rotationSeed?: string },
 ): Promise<FetchListingsResult> {
   let pageCandidates = 0;
   let pageTotal = 0;
@@ -1675,11 +1678,14 @@ export async function fetchListingsForQuery(
     p_per_platform: null,
     p_limit: pageLimit,
     p_offset: pageOffset,
-    // CONTROLLED ROTATION, tier 4 (owner PERMANENT rule 2026-08-29). Same seed on every page of one
-    // search/pagination walk (rotationSeed() is a pure function of device+week, recomputed identically
-    // on every call — nothing to thread through Load-More by hand), so the RPC's rot_key ORDER BY term
-    // stays stable for the whole walk while still varying across devices/weeks. See rotationSeed.ts.
-    p_rotation_seed: rotationSeed(),
+    // CONTROLLED ROTATION (owner PERMANENT rule 2026-08-29, widened 2026-09-26). ONE seed for the
+    // whole search/pagination walk, so the RPC's ordering stays stable across «عرض المزيد» — that
+    // stability is what makes paging duplicate-free and gap-free, and it is why the seed is THREADED
+    // from the caller rather than recomputed here. `opts.rotationSeed` is minted once per search by
+    // store.tsx (see newSearchSeed); the device+week rotationSeed() remains the fallback for callers
+    // that pass none, so nothing regresses. Since 2026-09-26 this seed also decides WHICH listing
+    // fronts each platform, not just the platform order — see the div_rank window in the RPC.
+    p_rotation_seed: opts?.rotationSeed ?? rotationSeed(),
   }), RPC_TIMEOUT_MS, signal);
   if (error) return { listings: null, pageCandidates, pageTotal };   // index error OR timeout (RC-A) → retry UI, not "no matches"
   pageCandidates = (cands as Cand[] | null)?.length ?? 0;   // this page's matching-candidate count → drives Load-More offset/hasMore

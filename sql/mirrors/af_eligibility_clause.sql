@@ -1,4 +1,10 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-09-26 (migration 20260926073334_rotation_picks_which_listing_per_platform):
+--   UNCHANGED. That migration edits af_rpc_templates' location_search_candidates_ar row and runs
+--   rebuild_af_filter_rpcs(); it only CALLS af_eligibility_clause() — inside its byte-for-byte
+--   template/live parity assertion — and never redefines it. The staleness checker counts an object
+--   named in EXECUTED SQL as "touched" (correctly — it cannot know a call from a redefinition), so
+--   this line records that the body below was re-checked against production and still matches.
 -- Re-verified 2026-09-24 (migration 20260924182710_af_tables_cap_admits_the_thirty_five_platform_batch):
 --   CHANGED — one line: the p_tables cardinality cap 200 → 500. The 2026-09-24 batch took the
 --   searchable scope to 207 tables and every scoped surface answered an honest zero (the cap
