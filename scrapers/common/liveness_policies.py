@@ -1037,6 +1037,20 @@ POLICIES: dict[str, _P] = {
                          "suffix — plus 404/410. Both banner wordings are kept and the title arm is "
                          "anchored to the suffix shape: naming ONE of them is what took the marker "
                          "dark for five days (ops_incident #730)"),
+            ("eaqartabuk", "the application's OWN removal code on this property's public record: "
+                           "HTTP 403 `rh_not_public` (withdrawn — «العقار غير متاح.») or HTTP 404 "
+                           "`rh_not_found` (deleted — «العقار غير موجود.»). A 403 or 404 carrying "
+                           "NO such code — an edge block, a WAF, a rate-limiter, a misrouted path — "
+                           "is UNKNOWN, and that distinction is the whole safety margin here, "
+                           "because a blocked run and a withdrawn ad both answer 403. A 200 proves "
+                           "life only when the payload echoes the id asked for. "
+                           "Control-validated live 2026-09-26, 9/9 through the shipped function "
+                           "with live controls interleaved: 10221/10306 403 rh_not_public, 10181 "
+                           "and a never-existing 999999 404 rh_not_found, 8329/5664/5702/5727 200. "
+                           "THE ENRICH PATH'S OWN ENDPOINT WOULD HAVE LIED: candles-map/v1, which "
+                           "this scraper calls «the authoritative record», answers 200 with a full "
+                           "record for a WITHDRAWN property, so an oracle built on it would have "
+                           "certified every dead ad ALIVE (the aqargate/abeea trap)"),
             ("eastabha", "this listing's OWN slider-property-status ribbon reading تأجرت / تم البيع "
                          "(the related-listings carousel's ribbons are explicitly not read), plus 404/410"),
             ("hajer", "this listing's OWN property-status-badge reading status-sold / status-rented, "
@@ -1081,7 +1095,7 @@ POLICIES: dict[str, _P] = {
               "reported as unverified, never as verified-alive.")
         for p in (
             "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "amlakalahsa", "aouj", "aqaratikom",
-            "aqarmonthly", "arkaan", "awal", "azdad", "bahadhabab", "eaqartabuk", "erapulse",
+            "aqarmonthly", "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
             "fursaghyr", "jurash",
             "october",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",

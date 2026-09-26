@@ -333,6 +333,105 @@ def _enrich(pid: int) -> tuple[dict, Optional[str], list[str]]:
     return mp, desc, _gallery(pid)
 
 
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# DIRECT per-listing liveness oracle — `db.prune_unseen(verify_gone=...)`
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# WHY THIS EXISTS. Until 2026-09-26 this scraper called prune_unseen with NO oracle, so crawl
+# ABSENCE alone deactivated a listing after 3 misses. That is the inference
+# docs/ops/LISTING_LIVENESS.md §1-§3 forbids: absence is EvidenceKind.ABSENCE, a candidate signal
+# and never a verdict, because a throttled run, a partial page or a source-side index gap is
+# indistinguishable from a removal. It produced a standing P1 `unknown_treated_as_dead`
+# (alert_event 5923, 2026-09-26).
+#
+# WHICH ENDPOINT — AND THE ONE THAT WOULD HAVE LIED. Measured live 2026-09-26 against rows of
+# every known state. `candles-map/v1/property/{id}` — the record the ENRICH path calls
+# "authoritative" — answers HTTP 200 with a full record for a WITHDRAWN property, so an oracle
+# built on it would have certified every dead ad ALIVE. This is the aqargate/abeea trap exactly.
+# `public/v1/property/{id}` is the endpoint that discriminates, and it does so affirmatively, in
+# the application's OWN words:
+#
+#   pid    state                             HTML page   candles-map   public/v1/property
+#   10221  withdrawn (deactivated 09-26)       404          200 ←trap   403 rh_not_public
+#   10306  withdrawn (deactivated 07-14)        —           200 ←trap   403 rh_not_public
+#   10181  hard-deleted (deactivated 07-24)    404          —           404 rh_not_found
+#   8329   LIVE (in LIST page 7)               200          200         200, id echoed
+#   5664 / 5702 / 5727  LIVE controls          200          200         200, id echoed
+#   999999 / 1  never existed                   —           —           404 rh_not_found
+#
+# So both death limbs are real and both are AFFIRMATIVE — the application states that this
+# property is not public, or that it does not exist. A BARE 403 (a WAF, a rate-limiter, an edge
+# block) carries no such code and is UNKNOWN, never death: that distinction is the whole safety
+# margin, because a blocked run and a withdrawn ad both answer 403.
+#
+# NO 200-MEANS-ALIVE SHORTCUT: the id in the payload must echo the id asked for. A 200 for a
+# different post, or a body we cannot parse, is UNKNOWN.
+_GONE_CODES = {
+    "rh_not_public",   # the property exists but is no longer published — «العقار غير متاح.»
+    "rh_not_found",    # the property id does not exist at all      — «العقار غير موجود.»
+}
+
+
+def _liveness_verdict(status: Optional[int], body: Any, pid: str) -> tuple[str, str]:
+    """Pure decision: (HTTP status, parsed JSON body or None, asked-for id) → (verdict, reason).
+
+    Split from the fetch on purpose so the three-valued law can be EXECUTED against every shape
+    the source really produces, with no network — see
+    scripts/verify-eaqartabuk-liveness-oracle.ts. Anything that is not an affirmative answer is
+    'unknown', and 'unknown' holds the strike without deactivating.
+    """
+    if status is None:
+        return "unknown", "no answer from the source"
+    if status == 200:
+        if not isinstance(body, dict):
+            return "unknown", "200 with an unparseable body"
+        got = str(body.get("id") or "")
+        if got != pid:
+            return "unknown", f"200 for a different property (asked {pid}, got {got!r})"
+        return "live", f"200 public record, id {pid} echoed"
+    if status in (403, 404):
+        # ONLY the application's own code kills. A 403 from an edge/WAF, or a 404 from a
+        # misrouted path, arrives without one and is UNKNOWN.
+        code = str(body.get("code") or "") if isinstance(body, dict) else ""
+        if code in _GONE_CODES:
+            return "gone", f"HTTP {status} {code}"
+        return "unknown", f"HTTP {status} carrying no affirmative removal code (got {code!r})"
+    # 401/408/429/5xx/3xx and everything else: an unreachable source is not proof of death.
+    return "unknown", f"HTTP {status}"
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    """DIRECT liveness probe of ONE listing's own record. See _liveness_verdict for the law."""
+    raw = (ad_number or "").strip()
+    pid = raw[2:] if raw.upper().startswith("ET") else raw
+    if not pid.isdigit():
+        return "unknown", f"ad_number {ad_number!r} does not carry a numeric property id"
+    s = _session()
+    last = "no attempt made"
+    for attempt in range(3):
+        status: Optional[int] = None
+        body: Any = None
+        try:
+            r = s.get(f"{DETAIL}/{pid}", timeout=30)
+            status = r.status_code
+            try:
+                body = r.json()
+            except Exception:  # noqa: BLE001 — an unreadable body is not an answer
+                body = None
+        except Exception as e:  # noqa: BLE001 — an unreachable source is never proof of death
+            last = f"{type(e).__name__}: {str(e)[:80]}"
+            time.sleep(1.2 * (attempt + 1))
+            continue
+        verdict, why = _liveness_verdict(status, body, pid)
+        if verdict != "unknown":
+            return verdict, why
+        last = why
+        # A transient shape (5xx, 429, reset, unparseable) deserves a retry; an affirmative
+        # answer already returned above. Measured: id 10181 answered ERR once and 404
+        # rh_not_found on 4 of 5 attempts.
+        time.sleep(1.2 * (attempt + 1))
+    return "unknown", last
+
+
 _PERIOD_MONTHLY_RE = re.compile(r"شهري|شهريا|بالشهر|/\s*شهر|في\s*الشهر")
 _PERIOD_ANNUAL_RE = re.compile(r"سنوي|سنويا|بالسنة|/\s*سنة|في\s*السنة")
 
@@ -638,7 +737,8 @@ def main() -> int:
 
         for tbl, rows_seen in (("eaqartabuk_residential_listings", res),
                                ("eaqartabuk_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Eaqartabuk")
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Eaqartabuk",
+                               verify_gone=_verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
