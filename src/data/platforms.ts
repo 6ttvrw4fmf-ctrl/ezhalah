@@ -142,6 +142,9 @@ export const PLATFORMS: Platform[] = [
   { name: 'آي باكس', domain: 'ibaax.sa', brand: 'iBaax', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'RE/MAX', domain: 'remax.sa', brand: 'RE/MAX Saudi', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   { name: 'قمرا', domain: 'qmra.sa', brand: 'Qmra', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // wahadat allowsRent=false: measured 2026-09-26 over ALL 100 project pages, advertisement_purpose
+  // is 'sale' on 100/100 — the platform is a new-build developer marketplace with no rental stock.
+  { name: 'وحدات', domain: 'wahadat.sa', brand: 'Wahadat', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   { name: 'العجلان', domain: 'alajlan-re.com', brand: 'Al Ajlan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
   // 0 rent rows today, but its scraper maps «للإيجار» to Rent — absence is not incapability.
