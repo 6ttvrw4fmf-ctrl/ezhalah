@@ -114,7 +114,7 @@ const AR: Record<string, string> = {
   'The complete property site for every listing in the Kingdom, from every platform': 'الموقع العقاري الشامل لكل الإعلانات بالمملكة من مختلف المنصات والمواقع.',
   'One site for every property you are looking for in the Kingdom, from every platform': 'موقع واحد لكل العقار الذي تبحث عنه بالمملكة من مختلف المنصات والمواقع.',
   'Search one site for the property you want across every real-estate platform and website, easily.': 'ابحث في موقع واحد عن العقار الذي تريده في جميع المنصات والمواقع العقارية بكل سهولة.',
-  'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.': 'إزهله منصة متخصصة للبحث في منصات العقار الإلكترونية بالمملكة باستخدام الذكاء الاصطناعي',
+  'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.': 'إزهله محرك بحث عقاري بالذكاء الاصطناعي متخصص في العقارات داخل السعودية.',
   'Ezhalah, and may your luck be good.': 'إزهله وفالك طيب.',
   "Type anything. I'll search Aqar, Wasalt, Aldarim and more in seconds.": 'اكتب أي شيء. سأبحث في منصات عقار ووصلت والدريم والمزيد في ثواني.',
   "Tell me what you want and I'll find it": 'أخبرني بما تريد وسأجده لك',
