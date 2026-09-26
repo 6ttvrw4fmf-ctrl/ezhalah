@@ -5,6 +5,7 @@ import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius, cardShadow } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
+import { derivedTotalEquation } from '@/data/listings';
 import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
@@ -275,6 +276,18 @@ export function ResultCard({
         {/* TRUTHFULNESS: a derived total is arithmetic, not an advertised price, and must say so.
             The figure above already carries '≈'; this states plainly where it came from, so nobody
             reads it as a number the seller published. (owner rule 2026-09-03) */}
+        {/* THE WORKING, NOT JUST THE ANSWER (owner 2026-09-26): «320 ريال/م² × 900 م² = 288,000 ر.س».
+            The '≈' figure above is our arithmetic; showing the three numbers lets anyone check it
+            against the source's own per-metre rate and area. derivedTotalEquation runs the SAME
+            function that produced the price, so this line and the price line cannot disagree. */}
+        {listing.priceIsDerived ? (() => {
+          const eq = derivedTotalEquation(listing.pricePerMeter, listing.area);
+          return eq ? (
+            <Text style={card.derivedTotalEquation} numberOfLines={1}>
+              {`${eq.perMeter.toLocaleString('en-US')} ${t('SAR/m²')} × ${eq.area.toLocaleString('en-US')} ${t('m²')} = ${eq.total.toLocaleString('en-US')} ${t('SAR')}`}
+            </Text>
+          ) : null;
+        })() : null}
         {listing.priceIsDerived ? (
           <Text style={card.derivedTotalNote} numberOfLines={1}>
             {t('Calculated from price per m² × area — not published by the source')}
@@ -1115,6 +1128,7 @@ const card = StyleSheet.create({
   // have no total price. Deliberately quieter than `price` (muted, smaller) so it reads as
   // supporting information the source happened to publish, never as the listing's headline price.
   derivedTotalNote: { fontSize: 10.5, color: colors.muted, marginTop: 2, textAlign: 'right' },
+  derivedTotalEquation: { fontSize: 12, color: colors.muted, marginTop: 2, textAlign: 'right', fontWeight: '600' },
   pricePerMeter: { fontSize: 11.5, color: colors.muted, fontWeight: '500', marginTop: 2 },
   pricePerMeterStrong: { fontWeight: '700', color: colors.ink },
 
