@@ -35,8 +35,9 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { distinctPlatformCount, orderByScope, interleaveRanked } from '../src/lib/platformDiversity.ts';
+import { distinctPlatformCount, orderByScope, interleaveRanked, platformIdentity } from '../src/lib/platformDiversity.ts';
 import { initialReveal } from '../src/lib/initialReveal.ts';
+import { PLATFORMS } from '../src/data/platforms.ts';
 import { replayFunction, codeOnly } from './lib/rpcReplay.ts';
 
 const root = join(import.meta.dirname, '..');
@@ -92,6 +93,67 @@ const rowsFor = (platforms: string[]) =>
   check(distinctPlatformCount([{ source: 'a' }, { source: '' }, { source: '  ' }, { source: null }]) === 1,
     'a blank/unknown source does not invent a platform');
   check(distinctPlatformCount(null) === 0, 'null-safe');
+
+  // ── AN ARABIC PLATFORM NAME IS A NAME (owner P0, 2026-09-26) ────────────────────────────────
+  // THIS SECTION IS THE REASON THE BUG LIVED. Every case above feeds `p0`, `p1`, `p2`… — names this
+  // file INVENTED, and invented names are ASCII. platformToken() was `[^a-z0-9]` → '', so a platform
+  // whose stored `source` is Arabic tokenised to the empty string and distinctPlatformCount() —
+  // which skips empties by design, correctly, so a blank source cannot invent a slot — did not
+  // count it. initialReveal() sizes the first screen from that count, so those platforms got NO
+  // first-screen card and appeared only after «عرض المزيد». A barrier that supplies its own input
+  // proves nothing: these strings are the REAL `source` values, captured off production.
+  //
+  // Measured live 2026-09-26 on الرياض / تجاري / بيع: the RPC returned 21 platforms, all 21 were
+  // already in the page-0 buffer (no further fetch fired), 11 of the 21 `source` values were Arabic,
+  // surviving identities were 10 — and the app rendered exactly 10 cards. Same number, same bug.
+  const LIVE_ARABIC_SOURCES = [
+    'أبعاد', 'نفوذ', 'دويليو', 'عقاريون', 'منصات', 'القاسم العقارية', 'آي باكس',
+    'ري إنفست', 'علم الريادة الإدارية', 'أحمد المحيسني العقارية', 'العجلان للتسويق العقاري',
+  ];
+  const LIVE_LATIN_SOURCES = [
+    'Almotmkenah', 'Muktamel', 'Raghdan', 'Sanadak', 'Deal App', 'Aldarim',
+    'Ibrahim Alqarawi', 'KSA Aqar', 'Wasalt', 'Aqar',
+  ];
+  const liveRows = [...LIVE_ARABIC_SOURCES, ...LIVE_LATIN_SOURCES].map((source) => ({ source }));
+  check(distinctPlatformCount(LIVE_ARABIC_SOURCES.map((source) => ({ source }))) === LIVE_ARABIC_SOURCES.length,
+    `all ${LIVE_ARABIC_SOURCES.length} Arabic-named platforms are COUNTED (each is a distinct platform, none erased)`);
+  check(distinctPlatformCount(liveRows) === 21,
+    'the exact production set of 21 sources counts as 21 — the first screen is sized for every matching platform');
+  check(reveal(1500, distinctPlatformCount(liveRows)) === 21,
+    'and initialReveal() therefore opens 21 slots, not 10 (the measured production defect)');
+  // Each Arabic name must be its OWN identity — folding two different websites into one is the same
+  // bug mirrored, and it would silently cost the second one its slot.
+  check(new Set(LIVE_ARABIC_SOURCES.map(platformIdentity)).size === LIVE_ARABIC_SOURCES.length,
+    'no two Arabic platform names collapse onto one identity');
+  check(LIVE_ARABIC_SOURCES.every((s) => platformIdentity(s) !== ''),
+    'no Arabic platform name tokenises to the empty string');
+  // Spelling parity, the same folding normLocKey() gives locations: a hamza/ta-marbuta variant and a
+  // vocalised spelling are the SAME platform, so one website can never take two slots.
+  check(platformIdentity('أبعاد') === platformIdentity('ابعاد'),
+    'hamza variants of one platform name are one identity (أبعاد / ابعاد)');
+  check(platformIdentity('نُفوذ') === platformIdentity('نفوذ'),
+    'a vocalised spelling is the same platform (نُفوذ / نفوذ)');
+  // Arabic-Indic digits fold to ASCII — the repo-wide parser parity rule.
+  check(platformIdentity('عقار٢٤') === platformIdentity('عقار24'),
+    'Arabic-Indic digits fold to ASCII (عقار٢٤ / عقار24)');
+  // A genuinely blank source must STILL not invent a slot — the widened token keeps that property,
+  // which is the one thing the old Latin-only filter got right.
+  check(distinctPlatformCount([{ source: '' }, { source: '   ' }, { source: '،  -' }, { source: null }]) === 0,
+    'punctuation/whitespace-only sources still invent no platform slot');
+  // EVERY registry row must survive the token, not just the ones this list names — 47 of the 120
+  // were erased before the fix.
+  check(PLATFORMS.every((p) => platformIdentity(p.name) !== ''),
+    `all ${PLATFORMS.length} registry platform names produce a non-empty identity`);
+  const idsByDomain = new Map<string, Set<string>>();
+  for (const p of PLATFORMS) {
+    const id = platformIdentity(p.name);
+    if (!idsByDomain.has(id)) idsByDomain.set(id, new Set());
+    idsByDomain.get(id)!.add(p.domain);
+  }
+  const crossDomain = [...idsByDomain.entries()].filter(([, d]) => d.size > 1);
+  check(crossDomain.length === 0,
+    'no identity is shared by two DIFFERENT domains (folding Aqar/Aqar Monthly onto one domain is correct; folding two websites is not)',
+    crossDomain.slice(0, 3).map(([id, d]) => `${id} → ${[...d].join(', ')}`).join(' | '));
 }
 
 // ── 2. COVERAGE: EVERY MATCHING PLATFORM IS IN THE FIRST BATCH ────────────────────────────────

@@ -66,10 +66,82 @@ function normLocKey(s: string): string {
 // same identity — an exact-string map missed the slug side and «عقار» still showed twice (live,
 // 2026-09-04, after the first fix). A slug the registry cannot resolve stays itself, so it remains a
 // distinct identity rather than colliding with anything.
-const platformToken = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-const DOMAIN_BY_PLATFORM: ReadonlyMap<string, string> = new Map(
-  PLATFORMS.map((p) => [platformToken(p.name), p.domain]),
-);
+// AN ARABIC PLATFORM NAME IS A NAME, NOT NOISE (owner P0, 2026-09-26; fleet rule: Arabic notation
+// parity in every deterministic parser).
+//
+// This used to be `s.toLowerCase().replace(/[^a-z0-9]/g, '')` — a LATIN-ONLY filter. Every Arabic
+// character is outside `a-z0-9`, so a platform whose stored `source` is Arabic tokenised to the
+// EMPTY STRING. Two things broke, both silently and both against the platforms least able to absorb
+// it — the smaller, Arabic-named ones:
+//   1. distinctPlatformCount() skips empty identities by design ("a blank source must not invent a
+//      platform slot"), so those platforms were NOT COUNTED. initialReveal() sizes the first screen
+//      from that count, so they got NO FIRST-SCREEN SLOT AT ALL and surfaced only after «عرض المزيد».
+//   2. DOMAIN_BY_PLATFORM is keyed by this token, so all 47 Arabic-named registry rows collapsed
+//      onto ONE `""` key (last write wins) — and rankedKey('platform') gave them all one identity,
+//      making the five-dimension round-robin treat 47 different websites as a single platform.
+//
+// Measured on production 2026-09-26, الرياض / تجاري / بيع: the RPC returned 21 platforms and all 21
+// were already in the page-0 buffer (no further fetch happened), 21 distinct `source` values, of
+// which 11 were Arabic — «أبعاد», «نفوذ», «دويليو», «عقاريون», «منصات», «القاسم العقارية»,
+// «آي باكس», «ري إنفست», «علم الريادة الإدارية», «أحمد المحيسني العقارية», «العجلان للتسويق
+// العقاري». Surviving identities: 10. Cards on the first screen: 10. Those are the same number
+// because they are the same bug. The owner's rule is that every matching platform gets exactly one
+// first-screen card; hiding 11 of 21 behind a tap is the opposite of it.
+//
+// The fix keeps the folding this file already does for locations (normLocKey: hamza أإآٱ→ا,
+// ة→ه, ى→ي, tatweel + directional marks dropped) and then strips only what is genuinely not a
+// letter or a digit — keeping Arabic letters. Arabic-Indic digits fold to ASCII so «٢٤» and «24»
+// are one token, the same parity every other deterministic parser in this repo holds to.
+const ARABIC_INDIC_ZERO = 0x0660;
+const rawPlatformToken = (s: string): string =>
+  // NFKC FIRST. Arabic reaches us in more than one encoding of the same letters: a scraper that
+  // lifts a name out of rendered HTML can hand us Arabic Presentation Forms (U+FE70–U+FEFF — the
+  // contextual glyph shapes), and «رﺍﻛﺰ» is the same word as «راكز». Those code points are outside
+  // the letter ranges kept below, so without this they would be STRIPPED — leaving «ر», a fragment
+  // that could collide with another platform. NFKC folds them onto the base letters, and also folds
+  // full-width Latin, so the ranges below only ever see canonical characters.
+  normLocKey(s.normalize('NFKC'))
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - ARABIC_INDIC_ZERO))
+    // Latin letters/digits and Arabic LETTERS only. ء-غ and ف-ي are the letters;
+    // ـ (tatweel) and ً-ْ (harakat) are deliberately excluded so a vocalised spelling
+    // and a bare one are the same platform — the same reason normLocKey drops them for cities.
+    .replace(/[^a-z0-9ء-غف-ي]/g, '');
+
+// Memoised because the ordering walks the whole page (1500 rows) and every row's platform is one of
+// ~21 strings, so the same handful of names is tokenised thousands of times. Measured on the
+// production page-0 shape: the Arabic-aware token costs 1.43 ms per 1500 rows against the old
+// Latin-only one's 0.42 ms — a real but trivial +1 ms on a ~400 ms search. The cache removes even
+// that, so correctness here is not paid for in latency.
+// Keys come from OUR OWN registry and `source` column, a set bounded by the platform roster (~120),
+// never from user input — but the cap makes that a property of the code rather than an assumption
+// about the data, so a future caller passing something unbounded cannot grow this without limit.
+const TOKEN_CACHE_MAX = 4096;
+const tokenCache = new Map<string, string>();
+const platformToken = (s: string): string => {
+  const hit = tokenCache.get(s);
+  if (hit !== undefined) return hit;
+  const out = rawPlatformToken(s);
+  if (tokenCache.size >= TOKEN_CACHE_MAX) tokenCache.clear();
+  tokenCache.set(s, out);
+  return out;
+};
+
+// ONE WEBSITE, ONE IDENTITY — WHICHEVER OF ITS THREE SPELLINGS ARRIVES.
+// The same platform reaches this function under different names depending on the call site: the RPC
+// hands a DB slug ('aqarmonthly', 'therc'), a hydrated listing carries the stored `source` (which may
+// be Latin 'Muktamel' or Arabic «أبعاد»), and some rows carry the domain itself. Keying only on the
+// registry NAME left the other spellings unresolved — they fell through to themselves, so one website
+// could hold two identities and take two "one per platform" slots.
+// Keyed by name AND by domain, both tokenised, so every spelling lands on the domain — the one
+// canonical value. A name key is never overwritten by a domain key (first write wins per key), so
+// the deliberate Aqar / Aqar Monthly fold onto sa.aqar.fm is untouched. A spelling the registry
+// genuinely does not know still stays itself: a distinct identity, never a collision.
+const DOMAIN_BY_PLATFORM: ReadonlyMap<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const p of PLATFORMS) m.set(platformToken(p.name), p.domain);
+  for (const p of PLATFORMS) { const k = platformToken(p.domain); if (!m.has(k)) m.set(k, p.domain); }
+  return m;
+})();
 export function platformIdentity(platform: string | null | undefined): string {
   const p = platformToken(platform ?? '');
   if (!p) return '';
