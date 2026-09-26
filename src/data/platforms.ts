@@ -153,6 +153,8 @@ export const PLATFORMS: Platform[] = [
   { name: 'المسوق الافتراضي', domain: 'vm-ksa.com', brand: 'Virtual Marketer', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // macsaib: 48 sale + 29 rent of 77 measured 2026-09-26 (Taearif feed).
   { name: 'مكسب العقارية', domain: 'macsaib.sa', brand: 'Macsaib', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // maqrat: 83 REGA-licensed ads measured 2026-09-26 (58 sale + 24 rent + 1 «مجمع» left unmapped).
+  { name: 'MAQRAT', domain: 'maqrat.com', brand: 'MAQRAT', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'العجلان', domain: 'alajlan-re.com', brand: 'Al Ajlan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
   // 0 rent rows today, but its scraper maps «للإيجار» to Rent — absence is not incapability.
