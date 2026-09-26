@@ -58,7 +58,14 @@ const POLICIES = join(ROOT, 'scrapers', 'common', 'liveness_policies.py');
  * first scrape — exactly the set mon_detect_oracle_chain_never_observed() raises on. Listing them
  * is the reviewed decision; each leaves by producing its first verdict in production.
  */
-const RATCHET = 44;
+// RAISED 44 -> 45 on 2026-09-26 (routine #11, alert_event 5923): eaqartabuk was wired with its
+// first DIRECT oracle that day. It had been pruning on crawl ABSENCE alone, so it moves OUT of
+// scrapers/absence-only-prune.txt (that ledger's ratchet falls 24 -> 23 in the same change) and
+// INTO this one. That is the honest direction of both numbers: the platform went from "no
+// mechanism at all" to "a mechanism nobody has yet watched run", and this file exists precisely so
+// the second state is not read as the third. The oracle was control-validated 9/9 against the live
+// source with live controls interleaved, but a control run is not a production verdict.
+const RATCHET = 45;
 
 let failures = 0;
 function check(ok: boolean, name: string, detail = ''): void {
