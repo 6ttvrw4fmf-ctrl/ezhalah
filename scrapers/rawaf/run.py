@@ -139,6 +139,9 @@ def _int(v) -> Optional[int]:
     return int(f) if f is not None else None
 
 
+_PARKING_KINDS = {"OUTSIDE", "UNDERGROUND"}
+
+
 def _flag(v) -> Optional[bool]:
     """True only when the source says so; None when it says nothing. Never False-by-default."""
     if v is True:
@@ -149,6 +152,8 @@ def _flag(v) -> Optional[bool]:
             return True
         if t == "false":
             return False
+        if t.isdigit():             # the XML encoding of this endpoint turns every count into a string
+            return True if int(t) > 0 else None
         return None
     if isinstance(v, (int, float)) and not isinstance(v, bool):
         return True if v > 0 else None
@@ -244,7 +249,10 @@ def map_unit(proj: dict, u: dict) -> Optional[tuple[dict[str, Any], str]]:
         "bedrooms": _int(u.get("bedroom")),
         "bathrooms": _int(u.get("bathroom")),
         "floor_number": _int(u.get("floor")),
-        "parking": _flag(u.get("parking")),
+        # `parking` is an ENUM here, not a flag: OUTSIDE ×7 / UNDERGROUND ×12 of the 19 available
+        # units (2026-09-26), and the project page prints «موقف خارجي» / «موقف قبو» on every one.
+        # _flag() cannot read a word, so all 19 were stored without parking until this line.
+        "parking": True if str(u.get("parking") or "").strip().upper() in _PARKING_KINDS else _flag(u.get("parking")),
         "maid_room": _flag(u.get("maidRoom")),
         "kitchen": _flag(u.get("ketchin")),
         "furnished": _flag(u.get("furnitured")),
@@ -273,6 +281,7 @@ def map_unit(proj: dict, u: dict) -> Optional[tuple[dict[str, Any], str]]:
         "dining_room": u.get("diningRoom"),
         "storage_room": u.get("storageRoom"),
         "laundry_room": u.get("laundrayRoom"),
+        "parking_kind": u.get("parking") if isinstance(u.get("parking"), str) else None,
         "verified": u.get("verified"),
         # See wahadat: coordinates live in additional_info, which listing_rich_attrs reads.
         "latitude": proj.get("locationLatitude"),
