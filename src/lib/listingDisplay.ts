@@ -185,6 +185,8 @@ export function sourceName(source: string): string {
   if (s.includes('أبعاد') || s.includes('abaad')) return 'أبعاد';
   if (s.includes('آي باكس') || s.includes('ibaax')) return 'آي باكس';  // real SOURCE has a space
   if (s.includes('وحدات') || s.includes('wahadat')) return 'وحدات';
+  if (s.includes('المربعات') || s.includes('squares')) return 'شركة المربعات العقارية';
+  if (s.includes('رواف') || s.includes('rawaf')) return 'رواف';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'RE/MAX';  // real SOURCE, no 'السعودية' suffix
   if (s.includes('قمرا') || s.includes('qmra')) return 'قمرا';
   if (s.includes('العجلان') || s.includes('alajlan')) return 'العجلان';
