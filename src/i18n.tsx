@@ -1028,6 +1028,9 @@ const AR: Record<string, string> = {
   'RE/MAX Saudi': 'ريماكس السعودية',                              // the site's own Arabic name
   'Qmra': 'قمرا',                              // the site's own Arabic name
   'Al Ajlan': 'العجلان',                              // the site's own Arabic name
+  'Wahadat': 'وحدات',                                 // the site's own Arabic name (og:site_name)
+  'Squares': 'المربعات العقارية',                     // the site's own Arabic name (شركة المربعات العقارية)
+  'Rawaf': 'رواف',                                    // the site's own Arabic name
   'Al Saedan': 'آل سعيدان',                              // the site's own Arabic name
   'Ego Real Estate': 'إيجو عقار',                              // the site's own Arabic name
   'Ahmed Almuhaysini': 'أحمد المحيسني العقارية',                              // the site's own Arabic name

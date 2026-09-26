@@ -233,6 +233,11 @@ jobs:
           - { source: remaxsa,      cmd: "python -m scrapers.remaxsa.run --type all", tmo: 15 }
           - { source: qmra,         cmd: "python -m scrapers.qmra.run --type all", tmo: 15 }
           - { source: alajlan,      cmd: "python -m scrapers.alajlan.run --type all", tmo: 15 }
+          # wave 3. wahadat fetches 100 project pages (~56 MB of RSC payload) so it gets a wider
+          # timeout; squares is one REST call plus 18 detail pages; rawaf is 11 projects + 11 unit calls.
+          - { source: wahadat,      cmd: "python -m scrapers.wahadat.run --type all", tmo: 30 }
+          - { source: squares,      cmd: "python -m scrapers.squares.run --type all", tmo: 15 }
+          - { source: rawaf,        cmd: "python -m scrapers.rawaf.run --type all", tmo: 15 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
