@@ -62,6 +62,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import unquote
 
 from curl_cffi import requests as cc
 
@@ -133,19 +134,51 @@ def _norm_type(raw: Optional[str]) -> Optional[str]:
     return t.replace("ڤ", "ف") or None
 
 
-def parse_project(html: str, url: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """(project, units) from one project page's flight payload."""
+def _main_project(raw: str, slug: str) -> Optional[dict]:
+    """The page's OWN project object, located by the page's slug — never by first occurrence.
+
+    A project page also renders related projects («عقارات ممكن تعجبك») with the same object shape:
+    measured, 49 image URLs sit on one page while its own project has 4. Reading fields as "the
+    first `images`/`city`/`types` key in the payload" can therefore take a neighbour's — the alta
+    class of bug (a listing inheriting a related listing's photos). Instead: the page's slug occurs
+    exactly once, the object's own absolute_url just before it carries the project UUID, and the
+    object that starts `{"id":"<uuid>"` is decoded whole and accepted only if its slug matches.
+    Measured 12/12 found, each with its own photos (وشاح 7 → 4, matching the page's 1/4 slider).
+    """
+    i = raw.find('"slug":"' + slug + '"')
+    if i < 0:
+        return None
+    ids = list(re.finditer(r"/project/api/projects/([0-9a-f\-]{36})/", raw[:i]))
+    if not ids:
+        return None
+    uuid = ids[-1].group(1)
+    dec = json.JSONDecoder()
+    for m in re.finditer(r'\{"id":"' + re.escape(uuid) + '"', raw):
+        try:
+            obj, _ = dec.raw_decode(raw, m.start())
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("slug") == slug:
+            return obj
+    return None
+
+
+def parse_project(html: str, url: str) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]]]:
+    """(project | None, units) from one project page. None when the page's own project object
+    cannot be located — the caller skips it with a counted reason rather than guessing."""
     txt = flight_text(html)
-    proj: dict[str, Any] = {}
-    for k in ("name_ar", "name", "city", "neighborhood", "category",
-              "advertisement_purpose", "license_number", "latitude", "longitude",
-              "is_active", "slug", "about_ar"):
-        v, _ = _json_after(txt, k)
-        if v is not None and k not in proj:
-            proj[k] = v
-    types, _ = _json_after(txt, "types")
-    proj["types"] = [t.get("name") for t in (types or []) if isinstance(t, dict) and t.get("name")]
+    slug = unquote(url.rstrip("/").split("/project/")[-1])
+    p = _main_project(txt, slug)
     units, _ = _json_after(txt, "unitsData")
+    if p is None:
+        return None, [u for u in (units or []) if isinstance(u, dict)]
+    proj: dict[str, Any] = {k: p.get(k) for k in (
+        "name_ar", "name", "city", "neighborhood", "category", "advertisement_purpose",
+        "license_number", "latitude", "longitude", "is_active", "slug", "about_ar")}
+    proj["types"] = [t.get("name") for t in (p.get("types") or []) if isinstance(t, dict) and t.get("name")]
+    proj["images"] = [im.get("image") for im in (p.get("images") or [])
+                      if isinstance(im, dict) and isinstance(im.get("image"), str)
+                      and im["image"].startswith("http")]
     proj["url"] = url
     return proj, [u for u in (units or []) if isinstance(u, dict)]
 
@@ -213,6 +246,9 @@ def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[
         "bathrooms": u.get("toilets") if isinstance(u.get("toilets"), int) else None,
         "parking": True if u.get("has_basement_parking") else None,
         "license_number": proj.get("license_number") or None,
+        # The PROJECT's own gallery (see _main_project). Units carry no images of their own on
+        # this source, so every unit of a project shows that project's photos.
+        "photo_urls": proj.get("images") or None,
     }
     if deal == "Buy":
         row["price_total"] = price
@@ -221,6 +257,9 @@ def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[
     if ppm is not None:
         row["price_per_meter"] = ppm
 
+    row["images_evidence"] = {"observed": True, "container_present": "images" in proj,
+                              "key_present": bool(proj.get("images")),
+                              "count": len(proj.get("images") or [])}
     row["price_evidence"] = normalize.price_evidence(
         field="price", raw=str(u.get("price")), stored=price,
         kind="total" if deal == "Buy" else "annual", unit="total", origin="api",
@@ -279,6 +318,9 @@ def main() -> int:
                     skipped[f"http_{r.status_code}"] = skipped.get(f"http_{r.status_code}", 0) + 1
                     continue
                 proj, units = parse_project(r.text, u)
+                if proj is None:
+                    skipped["project_object_not_found"] = skipped.get("project_object_not_found", 0) + 1
+                    continue
             except Exception as e:                      # noqa: BLE001
                 skipped[f"fetch_{type(e).__name__}"] = skipped.get(f"fetch_{type(e).__name__}", 0) + 1
                 continue
