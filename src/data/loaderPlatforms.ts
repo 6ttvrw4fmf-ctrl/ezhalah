@@ -184,6 +184,9 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'RE/MAX', i18nKey: 'RE/MAX Saudi', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'قمرا للتطوير العقاري', i18nKey: 'Qmra', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'العجلان للتسويق العقاري', i18nKey: 'Al Ajlan', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'وحدات', i18nKey: 'Wahadat', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'شركة المربعات العقارية', i18nKey: 'Squares', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'رواف', i18nKey: 'Rawaf', logo: require('../../assets/images/platform-placeholder.png') },
   // LOGO-ONLY (owner decision 2026-09-24): brand shown in the strip, no scraper, no tables, never searchable.
   { name: 'Maskanre', i18nKey: 'Maskan United', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
   { name: 'Wetheaddress', i18nKey: 'The Address', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
@@ -374,6 +377,12 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['قمرا للتطوير العقاري', 'قمرا للتطوير العقاري'],
   ['alajlan', 'العجلان للتسويق العقاري'],
   ['العجلان للتسويق العقاري', 'العجلان للتسويق العقاري'],
+  ['wahadat', 'وحدات'],
+  ['وحدات', 'وحدات'],
+  ['squares', 'شركة المربعات العقارية'],
+  ['المربعات', 'شركة المربعات العقارية'],
+  ['rawaf', 'رواف'],
+  ['رواف', 'رواف'],
   ['aqar', 'Aqar'],
 ];
 

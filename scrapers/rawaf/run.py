@@ -177,6 +177,30 @@ def fetch_units(s: cc.Session, project_id) -> tuple[list[dict], Optional[str]]:
     return d, None
 
 
+def unit_photos(u: dict) -> list[str]:
+    """The unit's OWN images, MAIN first (it becomes the card thumbnail).
+
+    `propertyImages` is a list of OBJECTS — {"imageLink": url, "mediaRefPath": url,
+    "imageType": "MAIN"|…} — not strings. The first version of this scraper kept only string
+    items and so stored ZERO photos for all 19 units (caught by measuring production coverage:
+    0/19). Each object's path embeds PROPERTY_<unit id>, so these are per-unit photos and cannot be
+    a neighbouring unit's.
+    """
+    imgs = u.get("propertyImages")
+    if isinstance(imgs, dict):          # the XML encoding collapses a single <item> to a dict
+        imgs = [imgs]
+    out: list[tuple[int, str]] = []
+    for it in imgs if isinstance(imgs, list) else []:
+        if isinstance(it, str) and it.startswith("http"):
+            out.append((1, it))
+        elif isinstance(it, dict):
+            url = it.get("imageLink") or it.get("mediaRefPath")
+            if isinstance(url, str) and url.startswith("http"):
+                out.append((0 if (it.get("imageType") or "").upper() == "MAIN" else 1, url))
+    seen: set[str] = set()
+    return [u_ for _, u_ in sorted(out, key=lambda t: t[0]) if not (u_ in seen or seen.add(u_))]
+
+
 def map_unit(proj: dict, u: dict) -> Optional[tuple[dict[str, Any], str]]:
     """(row, category) for ONE unit already proven status == AVAILABLE, or None if unmappable."""
     raw_type = (u.get("type") or "").strip()
@@ -225,7 +249,7 @@ def map_unit(proj: dict, u: dict) -> Optional[tuple[dict[str, Any], str]]:
         "kitchen": _flag(u.get("ketchin")),
         "furnished": _flag(u.get("furnitured")),
         "license_number": proj.get("adLicenseNumber") or None,
-        "photo_urls": [p for p in (u.get("propertyImages") or []) if isinstance(p, str)] or None,
+        "photo_urls": unit_photos(u) or None,
     }
     if deal == "Buy":
         row["price_total"] = price
