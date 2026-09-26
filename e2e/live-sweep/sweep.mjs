@@ -182,6 +182,94 @@ export function districtLabelVariants(label) {
   const bare = stripHayy(label);
   return [...new Set([String(label ?? '').trim(), bare, `حي ${bare}`].filter(Boolean))];
 }
+/**
+ * The RPC's THREE-arm city predicate as a PostgREST `or=` group — ONE definition, used both by
+ * `dbFilterFromRequest`'s own city filter and by the الحي label-resolution scope below.
+ * → `{ ids, arm }` · `{ reason }` when a requested name cannot be resolved.
+ *
+ * WHY IT IS SHARED (routine #4, 2026-09-26). The city predicate has three arms — the LABEL
+ * (`normalize_ar(city_ar) = any(tokens)`), the row's own `city_id`, and `match_city_ids && city_ids`,
+ * which is what carries aliases and CLUSTERS. `dbFilterFromRequest` was taught all three on
+ * 2026-09-01 after a label-only filter produced eleven false COUNT MISMATCHes. The الحي
+ * label-resolution step was NOT, and kept building its scope from `city_ar` alone for 25 days.
+ *
+ * That is not a cosmetic duplication, because the resolution step decides WHICH SERVED LABELS the
+ * comparison is allowed to match. Measured on the run that found it — trending-district
+ * الاحساء/بيع/«الدانة», where the owner-approved al_ahsa cluster resolves «الاحساء» to city_ids
+ * {12, 3677}:
+ *   الاحساء (3677) renders the token «الدانة»        → 181 rows
+ *   الهفوف  (12)   renders the SAME token «حي الدانة» → 69 rows
+ * `servedLabelExists('حي الدانة', '&city_ar=in.("الاحساء")')` is FALSE — those rows carry
+ * `city_ar = 'الهفوف'` — so the variant machinery that exists precisely for «حي X» vs «X» resolved
+ * «الدانة» alone, the oracle counted 113 against the RPC's 157, and the sweep reported «44 served
+ * listing(s) fail the user's own filters» against a PERFECTLY CORRECT product. §41.15 and §40.7
+ * exactly: when the oracle and the product disagree over a whole slice, suspect the oracle's ability
+ * to NAME the scope before the product's ability to find the rows.
+ *
+ * The fix is to resolve labels inside the SAME scope the comparison will use, so both renderings of
+ * one token are found and the oracle stays comparable. It is NOT to normalise the token here —
+ * that would reimplement `norm_district_tok` and turn agreement into self-confirmation, which is the
+ * whole reason the الحي arm compares served labels instead.
+ */
+export function cityScopeArm(req, cities) {
+  const enc = encodeURIComponent;
+  if (!req?.p_cities?.length) return { ids: [], arm: '' };
+  if (!Array.isArray(cities) || !cities.length) {
+    return { reason: 'city catalog unavailable: the RPC\'s city_id / match_city_ids arms cannot be expressed' };
+  }
+  const wantRegions = req.p_region_ids?.length ? new Set(req.p_region_ids.map(Number)) : null;
+  const ids = new Set();
+  for (const name of req.p_cities) {
+    const hits = cities.filter((c) => (c.city_ar === name || c.city_norm === cityLookupKey(name))
+                                   && (!wantRegions || wantRegions.has(Number(c.region_id))));
+    if (!hits.length) {
+      return { reason: `city «${name}» does not resolve in loc_catalog_city${wantRegions ? ' for the requested region' : ''}` };
+    }
+    for (const h of hits) ids.add(Number(h.city_id));
+  }
+  const sorted = [...ids].sort((a, b) => a - b);
+  const idList = sorted.join(',');
+  // Repeated `or=` params are ANDed by PostgREST (verified live 2026-09-01: `or=deal` + `or=region`
+  // returned 17,524, byte-identical to the same two as plain ANDed predicates), so this composes
+  // safely alongside the «سنوي» disjunction and the scope arm.
+  return {
+    ids: sorted,
+    arm: `&or=(city_ar.in.(${enc(req.p_cities.map((c) => `"${c}"`).join(','))})`
+       + `,city_id.in.(${idList}),match_city_ids.ov.{${idList}})`,
+  };
+}
+
+/**
+ * The FULL scope the الحي label resolution runs in — the three city arms plus the region predicate.
+ * Exported as a pure rule so a barrier can EXECUTE it instead of reading the call site's source:
+ * the defect it exists for was a scope that LOOKED right beside a correct comparison.
+ * → `{ scope }` · `{ reason }` when the city names cannot be resolved.
+ */
+export function districtResolutionScope(req, cities) {
+  const cs = cityScopeArm(req, cities);
+  if (cs.reason) return { reason: cs.reason };
+  let scope = cs.arm;
+  if (req?.p_region_ids?.length) scope += `&region_id=in.(${req.p_region_ids.map((n) => Number(n)).join(',')})`;
+  return { scope };
+}
+
+/**
+ * Does the city the app's «ملخص البحث» shows DIFFER from the city the journey asked for?
+ *
+ * Exported as a pure rule for the same reason `cityOption.mjs` is: the previous form of this test
+ * was `!ui.includes(intent) && !intent.includes(ui)`, which passes for every pair where one city
+ * name is a substring of another — and NINE such pairs exist in production, worst الخبر (15,254
+ * production_ready rows) vs الخبراء (17). A barrier can only prove that is gone by RUNNING it.
+ *
+ * Normalised (not `===`) so an orthographic variant of the same name — أ/إ/آ, ة/ه, ى/ي, tatweel,
+ * collapsed spaces — is never reported as a different city. The fold never shortens a name, so no
+ * prefix pair collapses under it.
+ */
+export function cityIntentMismatch(intentCity, uiCity) {
+  if (!intentCity || !uiCity) return false;      // a field the summary does not show cannot be judged
+  return cityLookupKey(uiCity) !== cityLookupKey(intentCity);
+}
+
 /** Does this exact served label exist inside the request's own city scope? */
 async function servedLabelExists(label, cityScopeFilter) {
   const q = `${SUPA}/rest/v1/search_listings_ar?select=listing_id&production_ready=is.true`
@@ -808,28 +896,13 @@ function dbFilterFromRequest(req, tax, cities) {
   // So resolve the requested names the way the RPC does — through the catalog, region-constrained
   // (§41.16: a city NAME is not an identity; 290 of them repeat across regions) — and REFUSE when a
   // name does not resolve, rather than silently falling back to the label that caused this.
+  // ONE definition of the three-arm city predicate, shared with the الحي label-resolution scope —
+  // see `cityScopeArm` and routine #4's 2026-09-26 note there. Two copies of this is what let the
+  // label arm survive in one of the two places for 25 days.
   if (req.p_cities?.length) {
-    if (!Array.isArray(cities) || !cities.length) {
-      return { comparable: false,
-               reason: 'city catalog unavailable: the RPC\'s city_id / match_city_ids arms cannot be expressed' };
-    }
-    const wantRegions = req.p_region_ids?.length ? new Set(req.p_region_ids.map(Number)) : null;
-    const ids = new Set();
-    for (const name of req.p_cities) {
-      const hits = cities.filter((c) => (c.city_ar === name || c.city_norm === cityLookupKey(name))
-                                     && (!wantRegions || wantRegions.has(Number(c.region_id))));
-      if (!hits.length) {
-        return { comparable: false,
-                 reason: `city «${name}» does not resolve in loc_catalog_city${wantRegions ? ' for the requested region' : ''}` };
-      }
-      for (const h of hits) ids.add(Number(h.city_id));
-    }
-    const idList = [...ids].sort((a, b) => a - b).join(',');
-    // Repeated `or=` params are ANDed by PostgREST (verified live 2026-09-01: `or=deal` + `or=region`
-    // returned 17,524, byte-identical to the same two as plain ANDed predicates), so this composes
-    // safely alongside the «سنوي» disjunction above.
-    f += `&or=(city_ar.in.(${enc(req.p_cities.map((c) => `"${c}"`).join(','))})`
-       + `,city_id.in.(${idList}),match_city_ids.ov.{${idList}})`;
+    const cs = cityScopeArm(req, cities);
+    if (cs.reason) return { comparable: false, reason: cs.reason };
+    f += cs.arm;
   }
 
   // ── the SCOPE arm: (tables ∧ types) OR (tables2 ∧ types2) ─────────────────────────────────────
@@ -978,7 +1051,28 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   if (!req) { defect(name, 'UI→REQUEST', 'the search sent no candidates request at all'); j.ok = false; return recordJourney(j); }
 
   // 1→2 INTENT vs UI
-  if (intent.city && ui.city && !ui.city.includes(intent.city) && !intent.city.includes(ui.city)) {
+  // The city comparison is EXACT on the normalised name, never a substring test (routine #4,
+  // 2026-09-26 — the second half of ops_incident #733, left open when the wrong PICK was fixed).
+  //
+  // It used to read `!ui.city.includes(intent.city) && !intent.city.includes(ui.city)`, and
+  // `'الخبراء'.includes('الخبر')` is TRUE — so a journey that asked for الخبر (15,254 production_ready
+  // rows, measured 2026-09-26) and actually searched الخبراء (17) reported `ok`, and
+  // `ops_qa_coverage_ledger` recorded coverage for a city that was never searched. NINE such prefix
+  // pairs exist in production today (`b.city_ar LIKE a.city_ar||'%'` over distinct production_ready
+  // cities): الخبر/الخبراء 15,254/17 · الجبيل/الجبيلة 1,229/29 · صبيا/صبياء 256/10 · بيش/بيشة 162/160 ·
+  // الخرماء/«الخرماء الجنوبية» · السلام/«السلام العليا» · العمار/العمارية · الجلة/«الجلة وتبراك» ·
+  // القاع/القاعد.
+  //
+  // This is the guard `e2e/live-sweep/cityOption.mjs` DELEGATES TO by name: its prefix fallback is
+  // justified there with «let the caller's own INTENT→UI comparison be the thing that judges the
+  // result». That delegation was unsound for exactly the prefix pairs the fallback can return, so
+  // the pick and the judgement were blind in the same direction at the same time. Now the judgement
+  // is exact, and the fallback is genuinely judged.
+  //
+  // `cityLookupKey` (not `===`) so an orthographic variant of the SAME name — أ/إ/آ, ة/ه, ى/ي,
+  // tatweel, collapsed spaces — is not reported as a different city. It normalises the shape of a
+  // name and nothing else: it never shortens one, so no prefix pair collapses under it.
+  if (cityIntentMismatch(intent.city, ui.city)) {
     defect(name, 'INTENT→UI', `asked for city «${intent.city}», summary shows «${ui.city}»`); j.ok = false;
   }
   // THE أبها WATCH: an exact city must never come back scoped to a neighbourhood. Observed only
@@ -1002,17 +1096,24 @@ async function assertChain(name, { intent, page, requests, expectDb }) {
   // it against what is actually served, and REFUSE the layer when it cannot be — never accuse.
   let dbReq = req;
   if (req.p_districts?.length) {
-    const enc = encodeURIComponent;
-    let scope = '';
-    if (req.p_cities?.length) scope += `&city_ar=in.(${enc(req.p_cities.map((c) => `"${c}"`).join(','))})`;
-    if (req.p_region_ids?.length) scope += `&region_id=in.(${req.p_region_ids.map((n) => Number(n)).join(',')})`;
-    const r = await resolveDistrictLabels(req.p_districts, scope);
-    if (r.unresolved) {
+    // Resolve the labels inside the SAME three-arm city scope the comparison itself will use — a
+    // `city_ar`-only scope cannot see a cluster sibling's rendering of the token, which is how
+    // الاحساء/«الدانة» produced 44 false accusations on 2026-09-26. See `cityScopeArm`.
+    const cs = cityScopeArm(req, await cityCatalog());
+    if (cs.reason) {
+      // Refuse the layer rather than resolve labels in a scope NARROWER than the comparison's: a
+      // narrower resolution scope is exactly what silently dropped a cluster sibling's rendering.
       dbReq = null;
-      j.dbSkipped = `الحي «${r.unresolved.join('», «')}» matches no served label in this city — `
-        + 'the index renders it differently and this oracle will not guess (§40.7)';
+      j.dbSkipped = `city scope not expressible for الحي resolution: ${cs.reason}`;
     } else {
-      dbReq = { ...req, p_districts: r.labels };
+      const r = await resolveDistrictLabels(req.p_districts, districtResolutionScope(req, await cityCatalog()).scope);
+      if (r.unresolved) {
+        dbReq = null;
+        j.dbSkipped = `الحي «${r.unresolved.join('», «')}» matches no served label in this city — `
+          + 'the index renders it differently and this oracle will not guess (§40.7)';
+      } else {
+        dbReq = { ...req, p_districts: r.labels };
+      }
     }
   }
   const dbf = dbReq ? dbFilterFromRequest(dbReq, await taxonomy(), await cityCatalog()) : { comparable: false, reason: j.dbSkipped };
