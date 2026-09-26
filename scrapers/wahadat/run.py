@@ -213,8 +213,6 @@ def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[
         "bathrooms": u.get("toilets") if isinstance(u.get("toilets"), int) else None,
         "parking": True if u.get("has_basement_parking") else None,
         "license_number": proj.get("license_number") or None,
-        "latitude": proj.get("latitude"),
-        "longitude": proj.get("longitude"),
     }
     if deal == "Buy":
         row["price_total"] = price
@@ -237,6 +235,11 @@ def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[
         "project_types": proj.get("types") or None,
         "meter_price_source": ppm,
         "has_private_sitting_room": u.get("has_private_sitting_room"),
+        # No latitude/longitude COLUMNS exist on the listing tables (a PGRST204 on the first crawl
+        # proved it). listing_rich_attrs reads coordinates from additional_info->>'latitude', so
+        # this is where they are both legal and useful to the Advanced Filter.
+        "latitude": proj.get("latitude"),
+        "longitude": proj.get("longitude"),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
     row["source_capture"] = strip_pii_fields({"schema": "wahadat.rsc-unitsData.v1", **u})
@@ -313,9 +316,10 @@ def main() -> int:
         for tbl, rows in (("wahadat_residential_listings", res),
                           ("wahadat_commercial_listings", com)):
             if rows:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
-                                    reason="absent from wahadat sitemap crawl")
-                if n:
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE)
+                if n < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
+                elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         db.end_run(run_id, ok=True, rows_seen=seen_projects,
                    rows_upserted=len(res) + len(com))
@@ -323,7 +327,7 @@ def main() -> int:
         return 0
     except Exception as e:                              # noqa: BLE001
         if run_id:
-            db.end_run(run_id, ok=False, rows_seen=seen_projects, rows_upserted=0, error=str(e)[:500])
+            db.end_run(run_id, ok=False, rows_seen=seen_projects, rows_upserted=0, notes=str(e)[:300])
         raise
 
 

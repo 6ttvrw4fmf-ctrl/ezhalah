@@ -224,8 +224,6 @@ def map_unit(proj: dict, u: dict) -> Optional[tuple[dict[str, Any], str]]:
         "maid_room": _flag(u.get("maidRoom")),
         "kitchen": _flag(u.get("ketchin")),
         "furnished": _flag(u.get("furnitured")),
-        "latitude": proj.get("locationLatitude"),
-        "longitude": proj.get("locationLongitude"),
         "license_number": proj.get("adLicenseNumber") or None,
         "photo_urls": [p for p in (u.get("propertyImages") or []) if isinstance(p, str)] or None,
     }
@@ -252,6 +250,9 @@ def map_unit(proj: dict, u: dict) -> Optional[tuple[dict[str, Any], str]]:
         "storage_room": u.get("storageRoom"),
         "laundry_room": u.get("laundrayRoom"),
         "verified": u.get("verified"),
+        # See wahadat: coordinates live in additional_info, which listing_rich_attrs reads.
+        "latitude": proj.get("locationLatitude"),
+        "longitude": proj.get("locationLongitude"),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
     row["source_capture"] = strip_pii_fields({"schema": "rawaf.api-deals-unit.v1", **u})
@@ -321,9 +322,10 @@ def main() -> int:
         for tbl, rr in (("rawaf_residential_listings", res),
                         ("rawaf_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
-                                    reason="unit no longer AVAILABLE in the complete /api/deals sweep")
-                if n:
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                if n < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
+                elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
             print(f"  NOT pruning: {bad_projects} project(s) did not serve their units this run",
@@ -333,7 +335,7 @@ def main() -> int:
         return 0
     except Exception as e:  # noqa: BLE001
         if run_id:
-            db.end_run(run_id, ok=False, rows_seen=seen_units, rows_upserted=0, error=str(e)[:500])
+            db.end_run(run_id, ok=False, rows_seen=seen_units, rows_upserted=0, notes=str(e)[:300])
         raise
 
 

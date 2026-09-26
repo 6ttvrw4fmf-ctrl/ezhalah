@@ -273,16 +273,17 @@ def main() -> int:
         for tbl, rr in (("squares_residential_listings", res),
                         ("squares_commercial_listings", com)):
             if rr:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
-                                    reason="absent from the complete wp/v2/property catalogue")
-                if n:
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                if n < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
+                elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         db.end_run(run_id, ok=True, rows_seen=len(rows), rows_upserted=len(res) + len(com))
         print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted", flush=True)
         return 0
     except Exception as e:  # noqa: BLE001
         if run_id:
-            db.end_run(run_id, ok=False, rows_seen=len(rows), rows_upserted=0, error=str(e)[:500])
+            db.end_run(run_id, ok=False, rows_seen=len(rows), rows_upserted=0, notes=str(e)[:300])
         raise
 
 
