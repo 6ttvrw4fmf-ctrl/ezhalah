@@ -25,19 +25,22 @@ The public site (ibaax.sa) is a Nuxt SPA with NO server-rendered pages at all
   crawl only prunes when the two agree, so a truncated response can never look like a shrunken
   catalogue.
 
-  DETAIL / LISTING URL. There is no addressable per-ad web page. Measured, not assumed:
-    · Direct navigation to `https://ibaax.sa/ad-details/<id>` (the shape used inside the app) is a
-      hard client-side 404 — the SPA does client-side MODAL routing that never touches the URL bar
-      (clicking a card in the live app leaves the address bar at bare `https://ibaax.sa`).
-    · The API's own `share_link` (`https://api.ibaax.sa/ad-details/<id>`) is NOT id-aware: fetched
-      directly it returns a generic "Save My Place in iBaax" app-install interstitial — BYTE-FOR-BYTE
-      the same 3,472-byte page for id 774 (a real, live ad), id 999999 (fabricated) and id 1 (a low
-      id no longer in the catalogue). A 200 there proves nothing about any specific listing, so it
-      cannot serve as `listing_url` — a link that looks like it points at one ad actually points at
-      none of them.
-    · The JSON detail endpoint (below) IS id-aware and distinguishing, so it is what `listing_url`
-      points at and what the removal oracle probes directly. This is a real, if inelegant, trade
-      raised as an open question below — there is no prettier URL to give a human end-user yet.
+  DETAIL / LISTING URL. A real, addressable, RENDERED per-ad page exists — it was misdiagnosed
+  once and is corrected here, verified live in a real browser, not by curl:
+    · `https://ibaax.sa/ad-details/<id>` (the in-app share-link shape) and the API's own
+      `share_link` field are both dead ends, exactly as measured below — neither is id-aware.
+    · The REAL route is `/ar/advertisements/<id>` (and `/advertisements/<id>` for the English
+      locale), found in the compiled Nuxt router chunk (`path:"/ar/advertisements/:id()"`) and
+      confirmed by RENDERING id 774 in a browser: the tab title itself becomes "iBaax - 57,000 SAR
+      / Monthly", and the page shows that exact unit — 3 bedrooms, 450 m², حي النرجس الرياض, ad
+      number RANC3823 — not a generic shell. curl cannot see this because the server always returns
+      the identical pre-hydration SPA shell (measured: id 774 and a fabricated id are byte-identical
+      at the raw-HTML level) — the distinguishing content only exists after the client's own JS runs,
+      so ANY check of this route must render it, never just fetch it.
+    · `listing_url` therefore points at the real user-facing page, not the JSON API:
+      `https://ibaax.sa/ar/advertisements/<id>`. The JSON detail endpoint below is kept as the
+      removal-oracle probe (cheap, id-aware, and does not require rendering), but it is no longer
+      what a human clicks through to.
 
     GET /api/advertisements/<numeric id>
         → 200 {"status": "success", "data": {…the same shape as one list-page row…}}   (live)
@@ -520,7 +523,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
 
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{pid}",
-        "listing_url": f"{API}/{pid}",
+        "listing_url": f"https://ibaax.sa/ar/advertisements/{pid}",
         "source": SOURCE,
         "active": True,
         "title": _scrub(title, names),

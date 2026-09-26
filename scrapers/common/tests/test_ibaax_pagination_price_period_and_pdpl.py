@@ -450,7 +450,7 @@ def test_an_unmapped_type_word_skips_with_a_counted_reason():
 def test_every_row_carries_the_platforms_ad_number_and_a_verified_listing_url(rec):
     row, _ = _row(rec)
     assert row["ad_number"] == f"IBX{rec['id']}"
-    assert row["listing_url"] == f"https://api.ibaax.sa/api/advertisements/{rec['id']}"
+    assert row["listing_url"] == f"https://ibaax.sa/ar/advertisements/{rec['id']}"
     assert row["source"] == "آي باكس"
 
 
