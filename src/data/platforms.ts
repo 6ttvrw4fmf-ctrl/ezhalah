@@ -137,6 +137,12 @@ export const PLATFORMS: Platform[] = [
   { name: 'طوبة العقارية', domain: 'tuba.com.sa', brand: 'Tuba', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'RawasiDark', domain: 'rawasi-dark.com', brand: 'Rawasi Dark Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: '1 October', domain: '1october.com.sa', brand: '1 October Real Estate', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // WAVE 2, 2026-09-26. remaxsa allowsRent=false: its parser writes 0 live Rent rows for this
+  // tenant/region today; qmra allowsRent=false: its readiness gate found 0 ready Rent units.
+  { name: 'آي باكس', domain: 'ibaax.sa', brand: 'iBaax', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  { name: 'RE/MAX', domain: 'remax.sa', brand: 'RE/MAX Saudi', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'قمرا', domain: 'qmra.sa', brand: 'Qmra', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  { name: 'العجلان', domain: 'alajlan-re.com', brand: 'Al Ajlan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
   // 0 rent rows today, but its scraper maps «للإيجار» to Rent — absence is not incapability.
   // CompoundIn's scraper hardcodes Rent, so it can never produce a Buy row.

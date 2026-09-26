@@ -177,15 +177,16 @@ BATCH_2026_09_24 = ("abaad", "dwelleo", "aqalemhajer", "sakani", "shatri", "alqa
                     "almuteb", "aalbarrak", "alrifai", "sodasyat", "hasaad", "aqaralriyadh", "justsa",
                     "snam", "jawher", "m3tmd", "senan", "goldendeal", "thousand", "yameen", "ebriza",
                     "eilmalriyada", "daryusuf", "albdah", "eydah", "tamyaz", "hazim", "villassa",
-                    "marksa", "rightcompound", "livingcompound", "azure", "expattrusted", "flow")
+                    "marksa", "rightcompound", "livingcompound", "azure", "expattrusted", "flow",
+                    "alsaedan", "ego", "muhaysini", "nofodh", "razre", "reinvest", "safa",
+                    "sokok", "sukna", "tuba")
 # BUILT BUT NOT YET ONBOARDED — the scraper exists in the tree and its tables are still to be
 # created. The check is purely static (it parses run.py), so the guarantee applies from the day the
 # scraper is written rather than from the day its tables land: a wrong key is then caught in the PR
 # that introduces it instead of by the first production run, which is the whole point of the suwar
 # lesson. Every *_listings table is created `LIKE … INCLUDING ALL`, so LISTING_COLUMNS is the oracle
 # for these too. Move a platform into its dated batch above once its migration is applied.
-NOT_YET_ONBOARDED = ("alsaedan", "ego", "muhaysini", "nofodh", "razre", "reinvest", "safa",
-                     "sokok", "sukna", "tuba")
+NOT_YET_ONBOARDED = ("ibaax", "remaxsa", "qmra", "alajlan")
 
 # A platform whose row literal lives in ANOTHER scraper's file (yameen imports goldendeal's
 # map_listing, yameen/run.py:56-58) is judged on that file — a defect there is a defect in both.

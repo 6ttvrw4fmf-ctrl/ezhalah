@@ -183,6 +183,10 @@ export function sourceName(source: string): string {
   if (s.includes('expattrusted') || s.includes('expat trusted housing')) return 'Expat Trusted Housing';
   if (s.includes('flow')) return 'Flow';
   if (s.includes('أبعاد') || s.includes('abaad')) return 'أبعاد';
+  if (s.includes('آي باكس') || s.includes('ibaax')) return 'آي باكس';  // real SOURCE has a space
+  if (s.includes('re/max') || s.includes('remaxsa')) return 'RE/MAX';  // real SOURCE, no 'السعودية' suffix
+  if (s.includes('قمرا') || s.includes('qmra')) return 'قمرا';
+  if (s.includes('العجلان') || s.includes('alajlan')) return 'العجلان';
   if (s.includes('آل سعيدان') || s.includes('alsaedan')) return 'آل سعيدان';
   if (s.includes('إيجو عقار') || s.includes('ego')) return 'إيجو عقار';
   if (s.includes('أحمد المحيسني العقارية') || s.includes('muhaysini')) return 'أحمد المحيسني العقارية';
