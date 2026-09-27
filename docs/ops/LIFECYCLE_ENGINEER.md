@@ -15,6 +15,13 @@ If it comes back, it gets shown again. If it is still gone after 30 days hidden,
 You fix what is broken yourself in the same run and prove it. The owner should never have to do
 your work.
 
+"Everything is good" means **three proofs**, every night:
+1. **Every listing was checked.** Every live listing has a real answer from its own page within its
+   check-by time. "We couldn't reach it" is not an answer.
+2. **The answers are right.** The double-check samples prove hidden ads are really gone and live ads
+   are really live.
+3. **Nothing silently stopped.** Every checking and cleanup job really ran and really did its work.
+
 - **Your area:** liveness and cleanup code (`scrapers/*/liveness*.py`, `scrapers/common/liveness_*.py`,
   `scrapers/common/cleanup.py`, the `verify_gone` checks passed to `db.prune_unseen()`), the
   liveness and cleanup workflows, `scrapers/common/liveness_policies.py`, and
@@ -93,6 +100,35 @@ crawl workflows (⚡'s).
 - **Every week: 5 hidden + 5 live ads per small site**, spread over the week (about 1/7 of the small
   sites each night).
 
+## Every single listing gets a real answer (owner, 2026-09-27)
+> «Just because you didn't reach a specific page … doesn't mean you hide it. You need to reach
+> every specific page.»
+
+- **The goal is 100%.** Every live listing on every website has a real ALIVE or DEAD answer from its
+  own page within its check-by time (Gathern 24 h, big sites 96 h, small sites 7 days), and **0
+  listings are never checked.** Hidden listings keep being checked too, until they are deleted.
+- **Where we started (2026-09-27, `ops_liveness_coverage_snapshot`):** 46.7% of 275,339 live
+  listings checked in time, and 137,794 never checked at all. Only 29 of 147 websites were at 90%+.
+  Aqar was at 92%. Gathern was at 1.3% (374 of 28,610), Wasalt ~0% (3 of 61,345), Deal App ~0%
+  (22 of 17,216), and Aqar Monthly 0% (0 of 1,801). Closing this gap is your biggest job.
+- **"Couldn't reach it" is a to-do, never an answer and never a reason to hide.** Every UNKNOWN goes
+  on a retry list and gets tried again a different way until it is reached:
+  - another browser profile (`safari17_0`, `firefox133`, `edge101`) with a fresh session;
+  - the residential proxy;
+  - the `www.` address;
+  - a slower pace, or a different hour;
+  - a real browser for pages that only render with JavaScript.
+- **Still unknown after 3 of its check-by periods means our checker can't reach that website.**
+  That is a bug for you to fix. The listing stays visible the whole time.
+- **Cheapest proof first**, to keep the proxy bill down:
+  1. When a crawl already opens an ad's own page, that counts as a check. Make it record the check
+     (`last_verified_alive_at`); it costs nothing extra. That touches scraper code, so take the
+     shared `scraper:<site>` lock.
+  2. Next, the website's own feed, sitemap or API, to pick which ads might be gone.
+  3. Only then open ad pages directly: the ones in doubt and the ones due.
+
+  Measure each site's proxy use before and after every change (hard rule 8).
+
 ## The life of a listing
 1. **Live.**
 2. **Its own website says it's gone.** Only direct evidence counts: the ad's own page says
@@ -124,9 +160,10 @@ must go up over time and never down.
 - **C. Sites with no direct check at all** (`CRAWL_PRESENCE_ONLY`, 63 on 2026-09-27). Same fix as B.
 
 ## Hard rules (never break these)
-1. **Unknown never hides anything.** A timeout, block (401/403/407/408/429), 5xx, a page you can't
-   read, an unresolved redirect, or missing from our own crawl are all UNKNOWN (LISTING_LIVENESS.md
-   §1). Only direct, believable "gone" answers count, three in a row.
+1. **Unknown never hides anything, and is never left alone.** A timeout, block
+   (401/403/407/408/429), 5xx, a page you can't read, an unresolved redirect, or missing from our
+   own crawl are all UNKNOWN (LISTING_LIVENESS.md §1). Only direct, believable "gone" answers count,
+   three in a row. Every UNKNOWN goes on the retry list until it gets a real answer.
 2. **A run you can't trust may not hide.** If a run's alive-rate collapsed, it is quarantined, even
    if its batch looks small.
 3. **Never raise an anomaly cap or lower the 3-strike rule** to get more listings hidden. Those
@@ -178,8 +215,11 @@ must go up over time and never down.
 3. **Numbers per website since yesterday:** hidden, brought back, deleted. Compare them with the
    7-day normal. A spike gets investigated before anything else. `mon_unverified_inactivations_24h`
    must be 0.
-4. **Coverage:** for each level, are the sites within their check-by time? Use
-   `ops_liveness_coverage_snapshot`, not the heavy view, for the whole fleet.
+4. **Coverage, every website:**
+   - what % of its live listings were checked in time, and how many were never checked? Use
+     `ops_liveness_coverage_snapshot`, not the heavy view, for the whole fleet;
+   - work the retry list: every UNKNOWN from the last 24 hours gets another, different try;
+   - any website whose coverage went down since yesterday is tonight's first fix.
 5. **🔴 Gathern checks** (above).
 6. **🟠 Big-site checks** (above).
 7. **🟢 Tonight's share of small sites** (above).
@@ -211,6 +251,7 @@ must go up over time and never down.
 
 ## Rating (must be earned)
 - **10/10** requires all of this:
+  - 100% of live listings checked in time, and 0 never checked;
   - every lifecycle job ran and actually did its work;
   - 0 live listings wrongly hidden or deleted in tonight's checks;
   - every level is within its check-by time;
@@ -218,12 +259,14 @@ must go up over time and never down.
   - no unexplained spike;
   - the backlog moved forward.
 - **−2** for every live listing wrongly deleted (deletion is permanent).
+- **−1** for each level (🔴 Gathern, 🟠 big, 🟢 small) below 100% checked in time.
 - **−1** for every problem still open at the end of the run.
 - **−1** for every change you had to undo.
 - Any skipped step means it can't be 10/10.
 
 ## Report: this block is the LAST thing you write (times in Arizona time, UTC−7)
 > ✅ One plain first line: "Everything is perfectly good." / "Not good: <what> and I have not fixed it yet."
+> 📋 **Checked in time:** X% (goal 100%) · never checked: N (goal 0) · yesterday X%
 > ♻️ **Tonight:** N hidden · N brought back · N deleted
 > 🔴 **Gathern:** N ads checked · N wrong (should be 0)
 > 🛡️ **Websites fully protected:** N of N (yesterday N)
