@@ -56,6 +56,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 BASE = "https://awaalun.com"
 LIST_API = f"{BASE}/wp-json/wp/v2/rtcl_listing"
 WORKERS = int(os.environ.get("AWAL_WORKERS", "5"))
@@ -560,7 +561,10 @@ def main() -> int:
                     help="small validation run: upsert only the first N parsed listings, NO prune")
     args = ap.parse_args()
 
-    s = session()
+    # Retry smarter (2026-09-27): 3 browser profiles direct, then through the proxy, so a failure
+    # is recorded as "every route tried" rather than "chrome124 once".
+    s, tried = retry_smarter_session(f"{LIST_API}?per_page=1", headers={"Accept": "application/json"})
+    print(f"Awal: probe {' '.join(tried)}", flush=True)
     # begin_run BEFORE the REST fetch (2026-07-28 audit, same defect jazwtn fixed on 07-27): when
     # awaalun.com was parked on 07-27 the unguarded r.json() crashed the process before begin_run
     # ever ran, so TWO days of failures produced ZERO scrape_runs rows — run-based monitoring saw a
@@ -587,7 +591,8 @@ def main() -> int:
             # Was: "(source down, parked, or blocked)" — three guesses in place of the one fact the
             # fetch already had. Now it names which door the crawl left by, so the next responder
             # reads a measurement instead of re-deriving it from an ambiguous sentence.
-            raise RuntimeError(f"REST returned no listings — {why_no_listings(diag)}")
+            raise RuntimeError(f"REST returned no listings — {why_no_listings(diag)}"
+                               f" | probe {' '.join(tried)}")
         if args.limit:
             posts = posts[: args.limit]
         print(f"Awal: {len(posts)} listings from WP REST ({WORKERS} workers)"

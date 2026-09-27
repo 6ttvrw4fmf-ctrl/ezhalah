@@ -45,7 +45,7 @@ jobs:
           - { source: raghdan,    cmd: "python -m scrapers.raghdan.run --type all" }
           - { source: eaqartabuk, cmd: "python -m scrapers.eaqartabuk.run --type all" }
           - { source: satel,      cmd: "python -m scrapers.satel.run --type all" }
-          - { source: sadin,      cmd: "python -m scrapers.sadin.run --type all" }
+          - { source: sadin,      cmd: "python -m scrapers.sadin.run --type all", proxy: true }
           - { source: mustqr,      cmd: "python -m scrapers.mustqr.run --type all" }
           - { source: ramzalqasim, cmd: "python -m scrapers.ramzalqasim.run --type all" }
           - { source: fursaghyr,   cmd: "python -m scrapers.fursaghyr.run --type all" }
@@ -60,7 +60,7 @@ jobs:
           # 2026-02-14 (real but LOW-CHURN, so a run returning the same 128 is healthy), and the
           # source publishes NO price at all (0/128 in the REST payload AND the detail pages) —
           # nothing is inferred to fill it, exactly like the 7,534 priceless rows already live.
-          - { source: awal,        cmd: "python -m scrapers.awal.run --type all" }
+          - { source: awal,        cmd: "python -m scrapers.awal.run --type all", proxy: true }
           - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
           - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
           - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
@@ -356,7 +356,7 @@ jobs:
           # aqaralsaudia (owner-approved 2026-09-13): العروض العقارية, Riyadh-only RealHomes site.
           # Scheduled in the SAME change that adds the scraper — the barrier that caught amlakalahsa
           # shipping unscheduled exists precisely so this is never a follow-up.
-          - { source: aqaralsaudia, cmd: "python -m scrapers.aqaralsaudia.run" }
+          - { source: aqaralsaudia, cmd: "python -m scrapers.aqaralsaudia.run", proxy: true }
           # suwar (owner-approved 2026-09-14): سوار العقارية, a Makkah freehold developer, 167
           # published listings. Scheduled in the SAME change that adds the scraper — the barrier
           # that caught amlakalahsa shipping unscheduled exists precisely so this is never a
@@ -445,6 +445,13 @@ jobs:
           # the test: if they come back green, the proxy was the cause and the metered spend was
           # pure waste; if they fail DIRECT with a refusal (403/connection reset rather than a
           # timeout), put `proxy: true` back on them and the old note was right.
+          #
+          # sadin, awal, aqaralsaudia (2026-09-27, scraping engineer): all three were dormant on
+          # source-side 5xx (502 / 500 / Cloudflare 522) while pinned to ONE profile with no proxy,
+          # so "down after 2+ profiles AND the proxy" had never been measured. Their main() now
+          # opens with scrapers.common.http.retry_smarter_session(): 3 profiles direct, then the
+          # same 3 through this proxy, and ONLY that probe (plus the session it returns, if the
+          # proxy route is the one that answered) reads the variable. Down, it costs 3 tiny GETs.
           #
           # Before adding a source here, check whether its session() reads WASALT_PROXY_URL.
           WASALT_PROXY_URL: ${{ matrix.proxy && secrets.WASALT_PROXY_URL || '' }}
