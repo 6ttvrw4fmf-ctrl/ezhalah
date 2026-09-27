@@ -1,6 +1,10 @@
 -- MIRROR of the LIVE production TABLE public.af_cohort_registry. NOT a migration — this file is
 -- READ, never applied; the rows below already exist in production and the insert is written
 -- idempotently only so the mirror is a runnable statement rather than a blob.
+-- Re-verified 2026-09-27 (migration 20260921111609_age_gap_alert_respects_a_recorded_decision): UNCHANGED.
+--   Production ROWS md5 (recipe below) = e24bc3e63b85a7d2c84714b03ff5b710, 59 rows, 0 disabled.
+--   Stamped for verify-sql-mirrors-not-stale (B2): the previous same-day stamp named no version at or
+--   after this migration, so nothing proved it was re-checked AFTER it. Nothing in the body was edited.
 -- Re-verified 2026-09-21 (routine #5, the age-gap/decided-source fix): the production ROWS md5,
 --   re-derived with the exact recipe below, = e24bc3e63b85a7d2c84714b03ff5b710 — identical again,
 --   59 rows, 0 disabled, so the registry is UNCHANGED. Re-stamped for the same reason as the

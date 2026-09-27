@@ -1,6 +1,12 @@
 -- MIRROR of the LIVE production object (audit item 7f). NOT a migration — see the
 -- full-body-replace rule. Regenerated verbatim from pg_get_viewdef(..., true).
 --
+-- Re-verified 2026-09-27 (migration 20260927015240_sql_mirror_expected_catches_up_through_wave3b_arms):
+--   UNCHANGED by it — it only registers this body's digest, and its own DO block raised unless
+--   md5(pg_get_viewdef) = c9fb60d0df760c109e4f524cb5902654 at apply time. That is the proof of this stamp.
+--   NOT CURRENT BEYOND THIS TREE: production has since applied 20260927021406_batch5_wiring_into_search
+--   (live md5 6933a8725df7ea9007e04af125a58982 on 2026-09-27, ops_sql_mirror_expected still c9fb60d0),
+--   which is not committed yet. When it lands, (B2) turns this mirror RED until it is refreshed.
 -- Re-verified 2026-09-27 (migration 20260927014059_w3b_maqam_earthapp_nawafeth_wiring_into_search):
 -- CHANGED. 28 arms added since the 2026-09-26 wave-2 refresh, all spliced immediately after the
 -- nufouth commercial arm by six wiring passes that each forgot this file and the registered digest:
