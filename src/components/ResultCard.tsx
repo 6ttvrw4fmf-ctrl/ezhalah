@@ -805,6 +805,12 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('رواف') || s.includes('rawaf')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('maqrat')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('السوق المفتوح') || s.includes('opensooq')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('معرض نافذة') || s.includes('nafithh')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('مباشر') || s.includes('mobasher')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('مؤاجرة') || s.includes('muajarh')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('دلّالي') || s.includes('dallali')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('re/max') || s.includes('remaxsa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('قمرا') || s.includes('qmra')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('العجلان') || s.includes('alajlan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
@@ -969,6 +975,12 @@ function sourceHost(source: string): string {
   if (s.includes('رواف') || s.includes('rawaf')) return 'rawaf.ai';
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'vm-ksa.com';
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'macsaib.sa';
+  if (s.includes('maqrat')) return 'maqrat.com';
+  if (s.includes('السوق المفتوح') || s.includes('opensooq')) return 'sa.opensooq.com';
+  if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'nafithh.sa';
+  if (s.includes('مباشر') || s.includes('mobasher')) return 'mobasher.sa';
+  if (s.includes('مؤاجرة') || s.includes('muajarh')) return 'muajarh.com';
+  if (s.includes('دلّالي') || s.includes('dallali')) return 'dallali.com';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'remax.sa';
   if (s.includes('قمرا') || s.includes('qmra')) return 'qmra.sa';
   if (s.includes('العجلان') || s.includes('alajlan')) return 'alajlan-re.com';

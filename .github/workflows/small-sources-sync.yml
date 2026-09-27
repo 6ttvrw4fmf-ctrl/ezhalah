@@ -242,6 +242,14 @@ jobs:
           # feed: 4 list pages, 20 category walks and 77 detail records.
           - { source: vmksa,        cmd: "python -m scrapers.vmksa.run --type all", tmo: 20 }
           - { source: macsaib,      cmd: "python -m scrapers.macsaib.run --type all", tmo: 15 }
+          # wave 3, batch 3. maqrat pages its own POST index (/Property/_Properities) then reads 83 details pages.
+          - { source: maqrat,       cmd: "python -m scrapers.maqrat.run --type all", tmo: 20 }
+          # wave 3, batch 4: dallali is an open JSON storefront (7 rows); muajarh is an open JSON API (18 rows, 11 real); mobasher reads its discovery API + 28 pages for age/facade; nafithh is server-rendered HTML (3 list pages + 30 details); opensooq's SERP carries the whole vertical as inline JSON (3 pages).
+          - { source: opensooq,     cmd: "python -m scrapers.opensooq.run --type all", tmo: 10 }
+          - { source: nafithh,      cmd: "python -m scrapers.nafithh.run --type all", tmo: 15 }
+          - { source: mobasher,     cmd: "python -m scrapers.mobasher.run --type all", tmo: 15 }
+          - { source: muajarh,      cmd: "python -m scrapers.muajarh.run --type all", tmo: 10 }
+          - { source: dallali,      cmd: "python -m scrapers.dallali.run --type all", tmo: 10 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }

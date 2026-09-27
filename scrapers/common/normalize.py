@@ -545,6 +545,54 @@ def rent_period_and_annual(price: Optional[int], text: Optional[str]) -> tuple[O
     return None, None
 
 
+# ── Rent period tied to the AD'S OWN PRICE (owner rule 2026-09-26, first measured on MAQRAT) ──────
+# A site-wide card label («سنويًا» on every MAQRAT rent card) is not the listing: MAQRAT ad 23 prints
+# 1,800 with «1800 ريال سعودي شهريًا» in its own text. Owner: «check the price — if it looks monthly,
+# put it monthly, even though it has written yearly». Order:
+#   1. the ad's own text ties a period word to THIS price → that period; a MONTHLY figure whose ×12
+#      equals the price means the price is the YEARLY total;
+#   2. otherwise a price ≤ MONTHLY_LOOKING_MAX is monthly — no Saudi unit rents for under 10,000 a year;
+#   3. otherwise the listing's own TITLE, when it names exactly one period («غرف واجنحة مفروشة للايجار
+#      الشهري» — Nafithh ad 178, 16,000; a title is the listing's own headline, not a site-wide label);
+#   4. otherwise the period the site itself states for the listing (its card), or unknown if none.
+MONTHLY_LOOKING_MAX = 10_000   # SAR
+_MONTHLY_WORD_RE = re.compile(r"شهري|شهريًا|شهريا|شهرية|بالشهر|في الشهر|الشهري")
+_YEARLY_WORD_RE = re.compile(r"سنوي|سنويًا|سنويا|سنوية|بالسنة|في السنة|السنوي")
+_NUMBER_RE = re.compile(r"\d[\d,٬.]*")
+
+
+def stated_rent_period(price: Optional[int], text: Optional[str]) -> Optional[str]:
+    """'monthly' / 'annual' when the ad's OWN text ties a period to THIS price, else None. A period
+    word within 40 chars of a number: that number == price → that period; a monthly number whose ×12
+    == price → 'annual'. re's \\d and to_int read Arabic-Indic digits too."""
+    if not price or not text:
+        return None
+    found: Optional[str] = None
+    for word_re, period in ((_MONTHLY_WORD_RE, "monthly"), (_YEARLY_WORD_RE, "annual")):
+        for m in word_re.finditer(text):
+            for n in _NUMBER_RE.findall(text[max(0, m.start() - 40): m.end() + 40]):
+                v = to_int(n.replace("٬", ","))
+                if v == price:
+                    return period
+                if period == "monthly" and v and v * 12 == price:
+                    found = found or "annual"
+    return found
+
+
+def rent_period_from_ad(price: Optional[int], text: Optional[str], card_period: Optional[str],
+                        title: Optional[str] = None) -> tuple[Optional[str], Optional[int]]:
+    """(rent_period, price_annual) by the rule above; monthly is stored ×12 (the fleet convention)."""
+    period = stated_rent_period(price, text)
+    if price and not period:
+        if price <= MONTHLY_LOOKING_MAX:
+            period = "monthly"
+        else:
+            in_title = {p for r, p in ((_MONTHLY_WORD_RE, "monthly"), (_YEARLY_WORD_RE, "annual"))
+                        if r.search(title or "")}
+            period = in_title.pop() if len(in_title) == 1 else card_period
+    return rent_period_and_annual(price, {"monthly": "شهري", "annual": "سنوي"}.get(period or ""))
+
+
 # ── Property age: the SHARED Saudi Arabic age vocabulary ──────────────────────────────────────────
 # WHY THIS EXISTS (2026-07-17): every scraper parsed «عمر العقار» with an int-only regex of the shape
 # `عمر\s*العقار[\s:]*?(\d+)`. That regex can only ever match a LATIN DIGIT, so the three non-numeric

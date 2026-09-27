@@ -205,6 +205,12 @@
       "active_rows": 99,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 72 of 99 rows carried photo_urls (the first 99 of 1,485). The office posts many cards with the site placeholder, which the scraper refuses; sample error ~±4.5 points, so the floor keeps that margin."
     },
+    "dallali": {
+      "floor_pct": 85,
+      "today_pct": 100.0,
+      "active_rows": 7,
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 7 of 7 active rows carry photo_urls (100.0%). TINY: one listing is ~14.3 points; floor set one listing below the observation."
+    },
     "daryusuf": {
       "floor_pct": 95,
       "today_pct": 100.0,
@@ -364,6 +370,12 @@
       "active_rows": 76,
       "note": "Declared 2026-09-26 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl of all 77 records (network live, database stubbed): 76 of 76 rows carried photo_urls (the detail record's images). Re-check against the first snapshot."
     },
+    "maqrat": {
+      "floor_pct": 80,
+      "today_pct": 81.7,
+      "active_rows": 82,
+      "note": "Declared 2026-09-26 at onboarding, before the first production sweep, from the REAL parse_detail + map_listing over a live crawl of all 83 details pages (network live, database stubbed): 67 of 82 rows carried photo_urls. The other 15 are not a parser gap — the source page shows only the site's default placeholder for them, which is not a photo of the listing and is not stored. TINY: one listing is ~1.2 points; floor set one listing below the observation. Re-check against the first snapshot."
+    },
     "marksa": {
       "floor_pct": 85,
       "today_pct": 100.0,
@@ -381,11 +393,23 @@
       "today_pct": 100,
       "active_rows": 27
     },
+    "mobasher": {
+      "floor_pct": 96,
+      "today_pct": 100.0,
+      "active_rows": 26,
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 26 of 26 active rows carry photo_urls (100.0%). TINY: one listing is ~3.8 points; floor set one listing below the observation."
+    },
     "moftah": {
       "floor_pct": 90,
       "today_pct": 100.0,
       "active_rows": 13,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 13 of 13 rows carried photo_urls (the whole catalogue). TINY: one listing is ~8 points; floor set one listing below the observation."
+    },
+    "muajarh": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 11,
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 11 of 11 active rows carry photo_urls (100.0%). TINY: one listing is ~9.1 points; floor set one listing below the observation."
     },
     "muktamel": {
       "floor_pct": 97,
@@ -396,6 +420,12 @@
       "floor_pct": 27,
       "today_pct": 30.7,
       "active_rows": 1204
+    },
+    "nafithh": {
+      "floor_pct": 96,
+      "today_pct": 100.0,
+      "active_rows": 28,
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 28 of 28 active rows carry photo_urls (100.0%). TINY: one listing is ~3.6 points; floor set one listing below the observation."
     },
     "nowaisiry": {
       "floor_pct": 97,
@@ -412,6 +442,12 @@
       "floor_pct": 97,
       "today_pct": 100,
       "active_rows": 12
+    },
+    "opensooq": {
+      "floor_pct": 97,
+      "today_pct": 98.6,
+      "active_rows": 72,
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 71 of 72 active rows carry photo_urls (98.6%). TINY: one listing is ~1.4 points; floor set one listing below the observation."
     },
     "qmra": {
       "floor_pct": 83,
