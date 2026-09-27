@@ -244,12 +244,21 @@ jobs:
           - { source: macsaib,      cmd: "python -m scrapers.macsaib.run --type all", tmo: 15 }
           # wave 3, batch 3. maqrat pages its own POST index (/Property/_Properities) then reads 83 details pages.
           - { source: maqrat,       cmd: "python -m scrapers.maqrat.run --type all", tmo: 20 }
+          # wave 3, batch 5: holoul is an open JSON API (238 rows → 30); eightfloor is a Nuzul tenant (public API, 2 rows); manzo is an open JSON API (1 row).
+          - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10 }
+          - { source: eightfloor,   cmd: "python -m scrapers.eightfloor.run --type all", tmo: 10 }
+          - { source: holoul,       cmd: "python -m scrapers.holoul.run --type all", tmo: 10 }
           # wave 3, batch 4: dallali is an open JSON storefront (7 rows); muajarh is an open JSON API (18 rows, 11 real); mobasher reads its discovery API + 28 pages for age/facade; nafithh is server-rendered HTML (3 list pages + 30 details); opensooq's SERP carries the whole vertical as inline JSON (3 pages).
           - { source: opensooq,     cmd: "python -m scrapers.opensooq.run --type all", tmo: 10 }
           - { source: nafithh,      cmd: "python -m scrapers.nafithh.run --type all", tmo: 15 }
           - { source: mobasher,     cmd: "python -m scrapers.mobasher.run --type all", tmo: 15 }
           - { source: muajarh,      cmd: "python -m scrapers.muajarh.run --type all", tmo: 10 }
           - { source: dallali,      cmd: "python -m scrapers.dallali.run --type all", tmo: 10 }
+          # wave 3b (2026-09-27): maqam is a Nuzul tenant feed (130 records, only `available` kept); earthapp and
+          # nawafeth are small complete feeds (54 / 20 ads).
+          - { source: maqam,        cmd: "python -m scrapers.maqam.run --type all", tmo: 15 }
+          - { source: earthapp,     cmd: "python -m scrapers.earthapp.run --type all", tmo: 15 }
+          - { source: nawafeth,     cmd: "python -m scrapers.nawafeth.run --type all", tmo: 15 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }

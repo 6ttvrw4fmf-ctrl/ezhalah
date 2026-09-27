@@ -1034,11 +1034,17 @@ const AR: Record<string, string> = {
   'Virtual Marketer': 'المسوق الافتراضي',            // the site's own Arabic name (vm-ksa.com)
   'Macsaib': 'مكسب العقارية',                         // the site's own Arabic name (macsaib.sa)
   'MAQRAT': 'مقرات',                                  // transliteration — the site names itself «منصة MAQRAT», no Arabic name at the source
+  'Manzo': 'مانزو',                          // the site's own Arabic name (manzo.com.sa)
+  '8Floor': 'الطابق الثامن',                 // the site's own Arabic name (www.8floor.sa)
+  'Holoul': 'حلول',                          // the site's own Arabic name (holoul.io)
   'OpenSooq': 'السوق المفتوح',               // the site's own Arabic name (sa.opensooq.com)
   'Nafithh': 'معرض نافذة',                   // the site's own Arabic name (nafithh.sa)
   'Mobasher': 'مباشر',                       // the site's own Arabic name (mobasher.sa)
   'Muajarh': 'مؤاجرة',                       // the site's own Arabic name (muajarh.com)
   'Dallali': 'دلّالي',                       // the site's own Arabic name (dallali.com)
+  'Maqam Development': 'شركة مقام للتطوير العقاري',   // the site's own Arabic name (property.maqamco.sa)
+  'Earth App': 'تطبيق أرض',   // the site's own Arabic name (earthapp.com.sa)
+  'Nawafeth Alwatan': 'نوافذ الوطن',   // the site's own Arabic name (nawafethalwatan.com)
   'Al Saedan': 'آل سعيدان',                              // the site's own Arabic name
   'Ego Real Estate': 'إيجو عقار',                              // the site's own Arabic name
   'Ahmed Almuhaysini': 'أحمد المحيسني العقارية',                              // the site's own Arabic name

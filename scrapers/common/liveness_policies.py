@@ -1075,6 +1075,28 @@ POLICIES: dict[str, _P] = {
         "when measured). run.py suppresses prune_unseen unless the walk reached meta.count.",
         "An oracle is possible — /ar/search/<id> for a removed post — but it is not written yet, so "
         "this does not claim a direct check."),
+    "holoul": _P(
+        _pol("holoul", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over app.holoul.io/customer/api/v1/units/ (per_page=100, `pages`) "
+        "checked against the API's own `total` (238 when measured — the feed ignores every filter, "
+        "so listed/licensed/Sale is applied here). run.py suppresses prune_unseen unless the walk "
+        "reached that total.",
+        "An oracle is possible — /customer/api/v1/units/<uuid> answers 404 unit__not_found for a "
+        "removed unit — but it is not written yet, so this does not claim a direct check."),
+    "eightfloor": _P(
+        _pol("eightfloor", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the Nuzul public API www.8floor.sa/api/public/v2/properties "
+        "(per_page=50, meta.last_page) checked against meta.total (2 when measured). run.py "
+        "suppresses prune_unseen unless the walk reached that total and every detail was readable.",
+        "An oracle is possible — /api/public/v2/properties/<id> for a removed property — but it is "
+        "not written yet, so this does not claim a direct check."),
+    "manzo": _P(
+        _pol("manzo", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over api.manzo.com.sa/property/v1/properties/search/ walked while "
+        "pagination.has_next, checked against pagination.total_count (1 when measured). run.py "
+        "suppresses prune_unseen unless the walk reached that total and every detail was readable.",
+        "An oracle is possible — the details endpoint's own display_status / ad_licence_status — "
+        "but it is not written yet, so this does not claim a direct check."),
     "maqrat": _P(
         _pol("maqrat", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over a complete, self-declaring index: the page script's own POST "
@@ -1093,6 +1115,25 @@ POLICIES: dict[str, _P] = {
         "unless the walk reached the declared total and every detail record was readable.",
         "An oracle is possible — GET …/properties/<slug> answers RESOURCE_NOT_FOUND for a slug that "
         "does not exist — but it is not written yet, so this does not claim a direct check."),
+    "maqam": _P(
+        _pol("maqam", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the same Nuzul engine as goldendeal/yameen (scrapers/goldendeal/run.py::verify_gone_for on "
+        "tenant maqamco, host maqamco.nzl-backend.com), wired exactly as yameen wires it: "
+        "prune_unseen(..., verify_gone=verify_gone_for(TENANT, make_canary(TENANT, control))). A 404 "
+        "is GONE; a 200 for THIS id is LIVE only while availability_status is available, otherwise "
+        "GONE; another record and 401/403/429/5xx are UNKNOWN; canary-gated (fails CLOSED), complete "
+        "enumeration only. The feed itself states availability for every record (130 = 50 available, "
+        "59 sold, 10 unavailable, 7 reserved, 4 rented, measured 2026-09-26).",
+        "The oracle's semantics are the engine's, measured on yameen 2026-09-23; the canary gate means "
+        "maqam prunes nothing unless its own control answers correctly on the first crawl."),
+    "earthapp": _P(
+        _pol("earthapp", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over earthapp.com.sa/api/offer-list-by-area (pagination.total 54 when measured), which the server itself filters to status=active AND an unexpired REGA licence. run.py prunes only when every list page was read.",
+        'The detail endpoint adds only GIS features, so it cannot act as a liveness oracle.'),
+    "nawafeth": _P(
+        _pol("nawafeth", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the antiforgery-token POST listing (Home/FilterAdvertisment, 20 ads when measured), walked until hasMoreAds=0. Each ad page states its REGA licence expiry. run.py prunes only on a complete walk with every ad page readable.",
+        'An unknown advertisement id answers 404, so an oracle is feasible, but it is not written yet.'),
     # ── Tier 3a: the deactivation path IS direct, but the population is still unverified ─────────
     # Same reasoning as aqargate immediately above, applied to every other platform whose prune
     # gained an oracle. These are NOT relabelled tier 2: CANDIDATE_PLUS_DIRECT would be a claim

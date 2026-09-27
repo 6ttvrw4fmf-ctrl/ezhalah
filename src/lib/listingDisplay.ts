@@ -190,11 +190,17 @@ export function sourceName(source: string): string {
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'المسوق الافتراضي';
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'مكسب العقارية';
   if (s.includes('maqrat')) return 'MAQRAT';                           // the site names itself «منصة MAQRAT», Latin only
+  if (s.includes('مانزو') || s.includes('manzo')) return 'مانزو';
+  if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return 'الطابق الثامن';
+  if (s.includes('حلول') || s.includes('holoul')) return 'حلول';
   if (s.includes('السوق المفتوح') || s.includes('opensooq')) return 'السوق المفتوح';
   if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'معرض نافذة';
   if (s.includes('مباشر') || s.includes('mobasher')) return 'مباشر';
   if (s.includes('مؤاجرة') || s.includes('muajarh')) return 'مؤاجرة';
   if (s.includes('دلّالي') || s.includes('dallali')) return 'دلّالي';
+  if (s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'شركة مقام للتطوير العقاري';
+  if (s.includes('تطبيق أرض') || s.includes('earthapp')) return 'تطبيق أرض';
+  if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return 'نوافذ الوطن';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'RE/MAX';  // real SOURCE, no 'السعودية' suffix
   if (s.includes('قمرا') || s.includes('qmra')) return 'قمرا';
   if (s.includes('العجلان') || s.includes('alajlan')) return 'العجلان';
