@@ -9,7 +9,7 @@ import scrapers.arsh.run as R
 def _catalog(monkeypatch):
     monkeypatch.setattr(R, "to_catalog", lambda c, region_hint=None: (31, 5) if c else (None, None))
     monkeypatch.setattr(R, "stated_city", lambda t: ("الخبر", 31, 5) if "مدينة الخبر" in (t or "") else (None, None, None))
-    monkeypatch.setattr(R, "find_district_in_text", lambda t, cid: t if t in ("حي الصدفة", "حي القصور") else None)
+    monkeypatch.setattr(R, "find_district_in_text", lambda t, cid: t if t in ("حي الصدفة", "حي القصور", "حي الخزامى") else None)
 
 
 def _d(content, slug="الخبر-الصدفة-بلك-23"):
@@ -33,8 +33,17 @@ def test_a_commercial_word_in_the_prose_never_retypes_the_header():
 
 
 def test_a_bracketed_district_is_read():
-    (row, _), _ = R.map_page(_d("أراضي سكنية حي الظهران ( القصور ) مخطط الصقعبي رقم 113/1 بلك رقم 22 نبذة عن المخطط"))
-    assert row["district_ar"] == "حي القصور"
+    (row, _), _ = R.map_page(_d("أراضي سكنية حي الظهران ( القصور ) مخطط الصقعبي رقم 113/1 بلك رقم 22 نبذة عن المخطط",
+                                slug="الظهران-الصقعبي-بلك-22"))
+    assert row["district_ar"] == "حي القصور"          # «حي CITY ( X )»: the bracket IS the district
+
+
+def test_a_bracketed_plan_name_is_never_the_district():
+    # live 2026-09-27: «حي العزيزية ( الخزامى )» was filed under الخزامى — a DIFFERENT Khobar district —
+    # because the catalog lacks العزيزية; the source's district unresolved stays NULL, never the plan
+    (row, _), _ = R.map_page(_d("أراضي سكنية حي العزيزية ( الخزامى ) مخطط رقم 385/2 بلك رقم 22 نبذة عن المخطط",
+                                slug="الخبر-الخزامى-بلك-22"))
+    assert row["district_ar"] is None and row["neighborhood"] == "العزيزية"
 
 
 def test_prose_about_selling_or_leasing_later_is_not_this_listings_deal():
