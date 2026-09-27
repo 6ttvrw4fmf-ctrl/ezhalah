@@ -14,7 +14,8 @@ import { withPage, settle, bodyText, storedHistory, clickText, clickReason, slee
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
          SELECTED_CITY_MARKER, isBottomDocked, dockedBandCap,
-         filterHomeState, filterHomeWhy, paintedTextCarriers, stayedAtZero } from './harness.mjs';
+         filterHomeState, filterHomeWhy, paintedTextCarriers, stayedAtZero,
+         expiredSession } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -1701,6 +1702,10 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
  *  readAloud.ts's own root-cause note was written for. What this journey does NOT prove is anything
  *  about a physical iPhone's voice list or how long it takes to populate (PART 10). */
 const RA_BUTTON = 'استماع للرد';
+// The SAME control's label while speaking — FeedbackRow: label={speaking ? t('Stop reading') : …},
+// i18n «إيقاف الاستماع». It is how the journey asks the APP whether the tap started, instead of
+// inferring it from a pre-tap voice count that `voiceschanged` is free to invalidate (#856).
+const RA_STOP_BUTTON = 'إيقاف الاستماع';
 const RA_DEVICE_VERDICT = 'الاستماع غير متاح على هذا الجهاز';
 const RA_STILL_PREPARING = 'نُجهّز الصوت — أعد المحاولة بعد لحظة';
 const RA_WINDOW_MS = 45_000;   // mirrors RETRY_WINDOW_MS in src/lib/readAloud.ts
@@ -1744,13 +1749,56 @@ JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }
   if (voices.ar > 0) { skip(name, `this engine has ${voices.ar} Arabic voice(s), so the tap speaks — no refusal to judge`); return; }
 
   await btn.scrollIntoViewIfNeeded().catch(() => {});
+
+  // WATCH THE TAP, DO NOT JUST LOOK AFTER IT (ops_incident #856).
+  //
+  // A silent 🔊 has TWO possible causes and a single read at +700ms cannot tell them apart:
+  //   (a) the tap NEVER STARTED — speakReadAloud() refused on a branch that shows no sentence;
+  //   (b) the tap STARTED and DIED almost immediately — e.g. an utterance handed a stale cached
+  //       voice — which also leaves no message and, by +700ms, no speaking state either.
+  // Measured 2026-09-27 on production, Chromium: silent 3 times in 32 runs, on BOTH viewports, with
+  // post-tap speaking=false every time. That rules out "it spoke and kept speaking" and nothing more.
+  // So sample tightly THROUGH the tap: if the app was ever in the speaking state, it was (b).
+  // PART 10.2's rule for a surface that is hard to observe — make the failure visible rather than
+  // guess again.
+  const sawSpeaking = { ever: false, atMs: null };
+  const t1 = Date.now();
   await btn.click();
+  for (let i = 0; i < 24; i++) {          // 24 x 50ms = 1.2s, straddling the 700ms verdict below
+    const live = await page.evaluate((stopLabel) =>
+      !!(window.speechSynthesis?.speaking || window.speechSynthesis?.pending)
+      || document.querySelectorAll(`[aria-label="${stopLabel}"]`).length > 0,
+    RA_STOP_BUTTON).catch(() => false);
+    if (live) { sawSpeaking.ever = true; sawSpeaking.atMs = Date.now() - t1; break; }
+    await sleep(50);
+  }
   await sleep(700);
   const body = await bodyText(page);
   const saidDevice = body.includes(RA_DEVICE_VERDICT);
   const saidPreparing = body.includes(RA_STILL_PREPARING);
+
+  const after = await page.evaluate((stopLabel) => ({
+    stop: document.querySelectorAll(`[aria-label="${stopLabel}"]`).length,
+    speaking: !!(window.speechSynthesis?.speaking || window.speechSynthesis?.pending),
+    n: (window.speechSynthesis?.getVoices?.() || []).length,
+    ar: (window.speechSynthesis?.getVoices?.() || []).filter((v) => /^ar/i.test(v.lang)).length,
+  }), RA_STOP_BUTTON);
+  const started = after.stop > 0 || after.speaking || sawSpeaking.ever;
+
   const where = `🔊 appeared at t=${appearedAt}ms since load (window ${RA_WINDOW_MS}ms); `
-    + `engine reports ${voices.n} voice(s), ${voices.ar} Arabic`;
+    + `engine reported ${voices.n} voice(s), ${voices.ar} Arabic BEFORE the tap and `
+    + `${after.n}/${after.ar} after; speaking seen during the tap: `
+    + `${sawSpeaking.ever ? `YES at +${sawSpeaking.atMs}ms` : 'NO (24 samples over 1.2s)'}; `
+    + `at +700ms speaking=${after.speaking}, stop-control=${after.stop}`;
+
+  // A tap that SPOKE is not a refusal, so there is nothing for this journey to judge. Not a pass
+  // either — the refusal path was never exercised (PART 9.5: a run that asserted nothing is a skip).
+  if (started) {
+    skip(name, `the tap started speaking, so no refusal was produced to judge — ${where}. `
+      + `If it was seen speaking only briefly, that is cause (b) above: an utterance that began and `
+      + `died, which src/lib/readAloud.ts's refusal path never gets to explain.`);
+    return;
+  }
 
   if (appearedAt < RA_WINDOW_MS) {
     if (saidDevice && !saidPreparing) {
@@ -1762,7 +1810,9 @@ JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }
       pass(name, `a refusal inside the retry window says «${RA_STILL_PREPARING}» and not the device verdict — ${where}`);
     } else {
       defect(name, 'a refused 🔊 tap produced NO message at all — a silent dead control',
-        `${where}. Neither refusal sentence is on screen, so the tap did nothing a user can see.`);
+        `${where}. Neither refusal sentence is on screen AND the app was never seen in the speaking `
+        + `state (sampled every 50ms through the tap, not inferred), so the tap did nothing a user can `
+        + `see and it never started. ops_incident #856.`);
     }
   } else if (saidDevice || saidPreparing) {
     // Past the window the implication does not run backwards (import may be later than load), so
@@ -1772,7 +1822,8 @@ JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }
       + `is not decidable from elapsed-since-load in this direction, so only presence is asserted.`);
   } else {
     defect(name, 'a refused 🔊 tap produced NO message at all — a silent dead control',
-      `${where}. Neither refusal sentence is on screen, so the tap did nothing a user can see.`);
+      `${where}. Neither refusal sentence is on screen AND the app was never seen in the speaking `
+      + `state (sampled, not inferred), so the tap did nothing a user can see. ops_incident #856.`);
   }
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while judging the read-aloud refusal', errs.join(' | ')); }
 });
@@ -2882,6 +2933,106 @@ JOURNEYS['agent-round-trip-is-a-fresh-conversation'] = async (mobile) => withPag
  *  shows a blank chat» is the owner's design showing through, not a defect, and pinning either
  *  behaviour here would be inventing a product decision (PART 9's «a barrier that pins a quirk as
  *  product behaviour»). What is pinned is: no re-execution, and not stranded. */
+/** TOKEN EXPIRY MUST NOT WITHHOLD THE GUEST'S OWN AFFORDANCES (PART 1 "token expiry"; PART 5 shape
+ *  #12, a loading state that never resolves with no recovery path).
+ *
+ *  THE SURFACE HAD ZERO JOURNEY COVERAGE until 2026-09-27, which is the PART 1 header's own warning
+ *  — «a surface this file names can still have zero coverage» — landing on an AUTH row rather than on
+ *  read-aloud. `authChecked` gates five things in src/store.tsx (the local history restore, the
+ *  server pull, the sign-in card, the cookie-consent banner, the intro), and the launch restore
+ *  awaited supabase.auth.getSession() with no timeout and no .catch(). getSession() is not the
+ *  local-only read its name suggests: on an expired session auth-js calls _callRefreshToken over the
+ *  NETWORK. So an expired token parked the app in a state no gate expects —
+ *  `user === null && authChecked === false` — rendering as a guest while withholding every
+ *  affordance a guest is supposed to get, and emitting no error at all.
+ *
+ *  THE ORACLE IS A DIFFERENTIAL AGAINST A TRUE GUEST, not an absolute. PART 9.1 condition 3 asks for
+ *  the same served bundle checked somewhere else; arm A IS that check, in the same run and the same
+ *  engine. Both controls are gated on `authChecked && !user`, so a true guest renders BOTH and an
+ *  expired session that settled honestly must render them too. Asserting "cookie banner present"
+ *  alone would go red on the day the product legitimately stops showing it; asserting A === C stays
+ *  true through that change and still catches the wedge.
+ *
+ *  ELEMENTS, NEVER A BODY SUBSTRING (ops_incident #787): [data-testid=…], not text matching.
+ *  DESKTOP ONLY for the sign-in card: shouldShowSignInCard requires `docked`, so at 375px its
+ *  absence would mean the breakpoint, not the gate. The cookie banner is checked at both.
+ *
+ *  `signedIn: true` IS LOAD-BEARING ALONGSIDE `session`, and leaving it out is a silent false
+ *  pass: seedInitScript returns at `if (!wantAuth) return;` before it writes the auth slot, so a
+ *  session override with no signedIn seeds NOTHING and both arms below run as plain guests —
+ *  which renders the guest controls and reads as a clean green. Measured 2026-09-27: this
+ *  journey passed 4/4 against the UNFIXED production bundle that way, having asserted nothing
+ *  (PART 9.5's «ask what it actually asserted»). The true-guest control arm cannot catch it,
+ *  because a fixture that seeds nothing IS the control arm. */
+JOURNEYS['expired-token-still-opens-the-gate'] = async (mobile) => {
+  const name = `expired-token-still-opens-the-gate:${mobile ? 'mobile375' : 'desktop1440'}`;
+  // Both controls animate in, so the read waits on a CONDITION rather than a fixed sleep (PART 11.2):
+  // poll until the pair stops changing, from a budget generous enough to clear auth-js's own retry
+  // window (30 000 ms) — the fix is supposed to beat that by 5×, and the point is to measure whether
+  // it does, not to give it a deadline it cannot miss.
+  const gateState = async (page) => {
+    let last = null, stable = 0;
+    for (let i = 0; i < 40 && stable < 3; i++) {
+      await sleep(1000);
+      const now = await page.evaluate(() => ({
+        cookie: document.querySelectorAll('[data-testid="cookie-consent"]').length,
+        signin: document.querySelectorAll('[data-testid="signin-card"]').length,
+      }));
+      const key = `${now.cookie}/${now.signin}`;
+      stable = key === last ? stable + 1 : 0;
+      last = key;
+      if (i >= 8 && now.cookie && (mobile || now.signin)) return { ...now, atMs: (i + 1) * 1000 };
+    }
+    const [cookie, signin] = last.split('/').map(Number);
+    return { cookie, signin, atMs: null };
+  };
+
+  // ARM A — a true guest. This is what "the gate opened and there is no user" LOOKS like.
+  const guest = await withPage({ mobile }, async (page) => {
+    await gotoOrRetryTransport(page, BASE + '/');
+    return gateState(page);
+  });
+  if (!guest.cookie) {
+    // Without a working control arm the comparison below proves nothing in either direction — and a
+    // run that asserted nothing is a SKIP, never a pass (PART 9.5).
+    skip(name, `the true-guest control rendered no cookie-consent card (cookie=${guest.cookie} `
+      + `signin=${guest.signin}) — the product may have changed what a guest sees, so this run has no `
+      + `baseline to compare an expired session against`);
+    return;
+  }
+
+  // ARM C — expired with an empty refresh_token: getSession() REJECTS. Terminal on the old build.
+  // ARM D — expired with the refresh REQUEST failing: getSession() never settles while auth-js
+  //         retries. Self-healing on the old build, but only after >40s of a dead-looking app.
+  for (const [arm, opts] of [
+        ['rejected refresh (refresh_token: "")', { mobile, signedIn: true,
+                                                  session: expiredSession('empty-refresh') }],
+        ['blocked refresh request',              { mobile, signedIn: true,
+                                                  session: expiredSession('server-rejects'),
+                                                  abort: '**/auth/v1/token**' }]]) {
+    const got = await withPage(opts, async (page) => {
+      await gotoOrRetryTransport(page, BASE + '/');
+      return gateState(page);
+    });
+    const want = mobile ? guest.cookie > 0 : guest.cookie > 0 && guest.signin > 0;
+    const have = mobile ? got.cookie > 0 : got.cookie > 0 && got.signin > 0;
+    if (want && !have) {
+      defect(name, `an expired session withheld the guest affordances (${arm})`,
+        `true guest: cookie-consent ×${guest.cookie}, signin-card ×${guest.signin} — `
+        + `expired session: cookie-consent ×${got.cookie}, signin-card ×${got.signin}. `
+        + `Same served bundle, same engine, same viewport, one variable changed: the stored session. `
+        + `Both controls are gated on authChecked && !user, and the user IS null here, so the gate `
+        + `never opened — the app is in user===null && authChecked===false, which renders as a guest `
+        + `while withholding what a guest gets, with no error shown. Root cause class: an auth read `
+        + `that can hang or reject, awaited unbounded (src/lib/sessionRestore.ts owns the bound).`);
+    } else {
+      pass(name, `an expired session still opened the gate (${arm}) — cookie-consent ×${got.cookie}, `
+        + `signin-card ×${got.signin}, settled${got.atMs ? ` by ${got.atMs}ms` : ' (stable)'}, `
+        + `matching the true-guest control ×${guest.cookie}/×${guest.signin}`);
+    }
+  }
+};
+
 JOURNEYS['back-forward-no-duplicate-search'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `back-forward-no-duplicate-search:${mobile ? 'mobile375' : 'desktop1440'}`;
   const results = (from) => bag.rpc.slice(from).filter((r) => classifySearchRpc(r) === 'results').length;
