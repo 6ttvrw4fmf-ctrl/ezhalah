@@ -870,6 +870,18 @@ def main() -> int:
             # the in-run positive control is drawn from proven-available rows rather than from a
             # column this same path writes (the self-referential canary pool that deadlocked
             # gathern for five days — ops_incident #168).
+            # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+            # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+            # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+            # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+            # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+            superseded = db.retire_superseded_siblings(
+                res_table="mustqr_residential_listings", com_table="mustqr_commercial_listings",
+                res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+                source="Mustqr")
+            if superseded:
+                print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
             set_liveness_oracle(s, jwt, [_pid(r["ad_number"]) for r in (res + com)[:3]])
             for tbl, rows_seen in (
                 ("mustqr_residential_listings", res),

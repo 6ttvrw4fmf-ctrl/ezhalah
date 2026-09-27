@@ -22,9 +22,45 @@
 // FAILS LOUD, NEVER SILENT. Missing credentials, a bad argument, a non-2xx RPC or a network error
 // all exit non-zero. A bridge that quietly does nothing is precisely the bug class being closed
 // here — it would restore the old silence while every file still LOOKS wired.
+//
+// ...BUT LOUD IS NOT DELIVERED, AND THIS BRIDGE COULD NOT RAISE AT THE ONE MOMENT IT MATTERS MOST
+// (ops_incident #658, fixed 2026-09-26 by routine-7). Measured 2026-09-23 23:31:56Z on
+// p0-fast-lane-coverage.yml:
+//
+//     raise-workflow-alert: mon_raise returned HTTP 503 {"code":"PGRST002"}
+//
+// PGRST002 is PostgREST reloading its schema cache — which is exactly what ANY migration that
+// creates or replaces a function triggers. So the bridge failed in the one window where reds are
+// MOST likely, because the same migration that opens the reload window is what breaks live checks.
+// The consequence is precisely the thing this file exists to prevent: a red unattended run that
+// notified nobody. Exiting 1 made the already-red run redder and wrote no alert_event row at all.
+//
+// THE FIX REUSES THE ONE EXISTING POLICY — it does not invent a second one. The repo already has a
+// deliberately strict, mutation-proven classifier for this exact transient in
+// scripts/lib/postgrestRetry.ts (ops_incident #573), used by ten `.ts` checks. This bridge was the
+// only caller that could not reach it.
+//
+// The recorded blocker for that was WRONG, and checking it is what unblocked this: #658 says the
+// bridge "is .mjs and is invoked as plain `node`, so it cannot import scripts/lib/postgrestRetry.ts
+// (a .ts module) without either a strip-types flag on every bridge step or a .mjs sibling of the
+// driver." Node strips types by default since 22.18, and all 32 bridge invocations run on Node 24 —
+// so a plain `node` .mjs imports the .ts driver with no flag, no sibling, and no second copy of the
+// decision. Verified by execution before this change was written.
+//
+// So ONLY a 503 whose JSON `code` is exactly PGRST002 is retried, bounded at DEFAULT_RETRY. Every
+// other failure — the HTTP 500 / 57014 statement timeout that took aqar-drift-detector-mutation-
+// proof.yml red the same morning, a 503 that merely MENTIONS the code in prose, a non-JSON body —
+// is still returned on the FIRST attempt and still exits non-zero. Nothing here can turn a not-ok
+// into an ok: the driver hands back the last probe it really took.
+//
+// Barrier: scripts/verify-workflow-alert-bridge-survives-schema-cache-reload.ts EXECUTES sendRpc()
+// against an injected PostgREST, because the pre-existing barrier over this file
+// (verify-scheduled-checks-alert-on-failure.ts) proves every workflow is WIRED to the bridge and
+// nothing proved the bridge DELIVERS — a pointer reading as coverage, AGENTS.md PART 1.11.
 
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { fetchRetryingSchemaCacheReload, DEFAULT_RETRY } from '../lib/postgrestRetry.ts';
 
 /** Severity for a dead production check. P1 = "a human must look today". */
 export const SEVERITY = 'P1';
@@ -85,6 +121,33 @@ export function buildRpcCall({ kind, workflow, status, runUrl }) {
   };
 }
 
+/**
+ * POST the RPC, retrying ONLY a PostgREST schema-cache reload, and return the last probe taken.
+ *
+ * Exported so the barrier can EXECUTE it against a stub PostgREST rather than grep for the import —
+ * every defect in this repo's "a failed fetch is not an empty answer" family had a source-TEXT
+ * tripwire over the exact line that passed for the whole time the defect was live (AGENTS.md).
+ *
+ * `opts` is injected by the barrier so its proofs run without real time passing. Production uses
+ * DEFAULT_RETRY: 5 attempts, ~30s of total patience — enough for a cache reload, short of an outage.
+ * The return value is always a probe the network really produced; it is never a synthesised success.
+ */
+export async function sendRpc({ url, key, call }, opts = DEFAULT_RETRY) {
+  return fetchRetryingSchemaCacheReload(
+    `${url.replace(/\/+$/, '')}/rest/v1/rpc/${call.fn}`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(call.body),
+    },
+    opts,
+  );
+}
+
 const die = (message) => {
   console.error(`::error::raise-workflow-alert: ${message}`);
   process.exit(1);
@@ -115,19 +178,11 @@ async function main() {
 
   let res;
   try {
-    res = await fetch(`${url.replace(/\/+$/, '')}/rest/v1/rpc/${call.fn}`, {
-      method: 'POST',
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(call.body),
-    });
+    res = await sendRpc({ url, key, call });
   } catch (e) {
     die(`${call.fn} could not be reached: ${e.message}`);
   }
-  if (!res.ok) die(`${call.fn} returned HTTP ${res.status}: ${(await res.text()).slice(0, 400)}`);
+  if (!res.ok) die(`${call.fn} returned HTTP ${res.status}: ${res.body.slice(0, 400)}`);
 
   console.log(`raise-workflow-alert: ${call.fn} ok — kind=${parsed.kind} dedup=${dedupKey(parsed.workflow)}`);
 }

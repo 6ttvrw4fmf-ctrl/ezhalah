@@ -17,13 +17,10 @@
 -- sat unworked for days while this P1 was on screen claiming 77 platforms were broken. A barrier
 -- that reports everything reports nothing.
 --
--- THE FIX IS NOT A SILENCING. It replaces a text match with a question the catalog can actually
--- answer, and it still fires for a genuinely uncovered platform (mutation-proven). UNION with no
--- depth column, so dedup bounds the recursion and a wrapper nested any number of views deep is
--- still resolved.
---
--- NOTE: the helper below is superseded later the same day by 20260914120341, which strengthens it
--- from catalog membership to ACTUAL ROW EMISSION. This migration is kept as applied.
+-- THE FIX IS NOT A SILENCING. It replaces a text match with the transitive dependency walk the
+-- catalog can actually answer — the same technique ops_af_attribute_coverage() uses, and it still
+-- fires for a genuinely uncovered platform (mutation-proven below). UNION with no depth column, so
+-- dedup bounds the recursion and a wrapper nested any number of views deep is still resolved.
 create or replace function public.af_extra_attrs_uncovered_tables()
 returns table(source_table text)
 language sql

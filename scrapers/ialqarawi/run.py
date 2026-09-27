@@ -99,8 +99,10 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common import db, http, normalize  # noqa: E402
+from scrapers.common.arabic_location import (  # noqa: E402
+    find_district_in_text, is_ambiguous_standalone_word, to_catalog,
+)
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://ialqarawi.com"
@@ -152,7 +154,12 @@ _BIG_IMG_RE = re.compile(r'data-rsBigImg="([^"]+)"')
 _AUCTION_RE = re.compile(r"مزاد(?![ةه])")
 _SOLD_RE = re.compile(r"تم\s+(?:البيع|بيع|الإيجار|الايجار|التأجير)|مبا[عة]\b")
 _TOK_SPLIT = re.compile(r"[\s/،,\-–—_()\[\]:؛]+")
-# Words that are never the city itself, only its label.
+# Words that are never the city itself, only its label. The directional/age/position ADJECTIVE
+# class (شرقية/جديدة/عليا/...) that caused the 2026-09-25 Makkah/Khobar bug now lives in the
+# SHARED, fleet-wide arabic_location.AMBIGUOUS_STANDALONE_WORDS instead of a local copy here — see
+# that module for the full reasoning and the SQL backstop that keeps it honest across every
+# platform, not just this one. This set keeps only the STRUCTURAL noise words specific to how this
+# file's token-window scan works (labels, prepositions, deal words) — never place names at all.
 _CITY_STOP = {"مدينه", "محافظه", "منطقه", "مركز", "حي", "مخطط", "شارع", "طريق", "شمال", "جنوب",
               "شرق", "غرب", "وسط", "ال", "على", "في", "قريب", "بجوار", "امام", "طريقه",
               "للبيع", "لبيع", "للايجار", "للاستثمار", "لاستثمار", "ارض", "اراضي", "فيلا", "شقه"}
@@ -187,10 +194,18 @@ _WORD_FRACTION_RE = re.compile(r"نصف|ربع|ثلث|مايه|مائه|مائة
 
 
 def session() -> cc.Session:
-    """impersonate OWNS the User-Agent — setting one here would contradict the TLS fingerprint."""
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept-Language": "ar,en;q=0.7"})
-    return s
+    """A fingerprint this host serves, negotiated once (impersonate OWNS the User-Agent).
+
+    2026-09-23: the site began answering pinned chrome fingerprints with an identical 75,193-byte
+    «403 - Forbidden» while serving safari/firefox/edge and the newest chrome from the same IP. Two
+    daily runs died at "index returned no cards" — which reads exactly like a dead site. The probe
+    below is the catalogue page the run needs anyway, so a profile is only accepted when it answers
+    with real cards.
+    """
+    return http.negotiated_session(
+        f"{BASE}/index.php?router=cards&catid={sorted(CATEGORY_IDS)[0]}&type=1",
+        headers={"Accept-Language": "ar,en;q=0.7"},
+        served=lambda r: r.status_code == 200 and '<section class="cards' in r.text)
 
 
 def _clean(raw: Optional[str]) -> str:
@@ -344,6 +359,25 @@ def _parse_million(txt: str, low: str) -> tuple[Optional[int], Optional[int], st
     return None, None, "million_second_term_unit_unstated"
 
 
+# An AREA is not a price, and this is the one place the two grammars must part company.
+# `_to_amount` reads «X.YYY» as thousands-GROUPED, which is right for this office's price cells
+# («3850.000» is 3,850,000 — measured). Applied to an area it silently multiplies by 1000 the one
+# shape a surveyed land area actually takes: metre² to the mm², «361788.431م». Listing QRW3566
+# (أرض زراعية شمال عنيزة) was served at 361,788,431 m² — 362 km², larger than the governorate —
+# because of exactly this, while its own source string says 361788.431 and its own description
+# gives frontages of 316.64 m / 245.70 m / 698.97 m / 504 m.
+#
+# A head of 1-3 digits is canonical grouping; a 4-digit head is this office's «1500.000» = «1500
+# thousand» shorthand. Both are unambiguous and stay. At 5+ digits the token reads equally well as
+# a plain decimal, the two readings differ by 1000x, and NOTHING in the stored capture can settle
+# it (ialqarawi rows carry an auto.v1-fallback source_capture with no raw HTML). So the parser
+# ABSTAINS: honest NULL beats a guess, and area_raw keeps the exact string for a future probe.
+# Measured over the complete vocabulary — all 2,568 ialqarawi rows, 150 separator strings: heads of
+# 1-4 digits are 149 correct rows, and a 5+ digit head has exactly one instance, the defect above.
+# parse_money is deliberately NOT touched: a price is never written to three decimals.
+_AMBIGUOUS_SEPARATOR_RE = re.compile(r"\d{5,}[.,]\d{3}")
+
+
 def parse_area(raw: Optional[str]) -> tuple[Optional[int], str]:
     """«526م» / «600 م الاجمالي» / «25.000» → m². A per-unit or range area is not the listing's."""
     txt = _clean(raw)
@@ -354,6 +388,8 @@ def parse_area(raw: Optional[str]) -> tuple[Optional[int], str]:
     tok = _one_number(txt)
     if not tok:
         return None, "multiple_numbers" if _NUM_RE.search(_strip_units(txt)) else "no_digits"
+    if _AMBIGUOUS_SEPARATOR_RE.fullmatch(tok):
+        return None, "ambiguous_thousands_or_decimal"
     val, _ = _to_amount(tok)
     if val is None or val <= 0:
         return None, "unparseable"
@@ -409,7 +445,7 @@ def city_from_title(title: str) -> tuple[Optional[str], Optional[int], Optional[
             if cand[:1] in "بل" and len(cand) > 2:
                 forms.append(cand[1:])        # «بعنيزة» → «عنيزة», keeping the raw form too
             for form in forms:
-                if normalize._norm_ar(form) in _CITY_STOP:
+                if normalize._norm_ar(form) in _CITY_STOP or is_ambiguous_standalone_word(form):
                     continue
                 cid, rid = to_catalog(form, hint)
                 if cid:
@@ -484,18 +520,35 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         return None, category, "deal_title_contradicts_index"
 
     city_raw, city_id, region_id = city_from_title(title)
-    if not city_id:
-        return None, category, "city_not_in_catalog"
-    # city_ar is the source's own Arabic text for the city — the very token to_catalog accepted.
-    city_ar = city_raw
     district_field = f.get("الحي") or ""
     if _is_blank(district_field):
         district_field = ""
-    # A «الحي» the catalog recognises as a CITY is not this listing's district (measured: three
-    # عنيزة rentals carry «الحي: الدوادمي»).
-    field_is_a_city = bool(district_field) and bool(to_catalog(district_field)[0])
-    district_ar = ((find_district_in_text(district_field, city_id) if not field_is_a_city else None)
-                   or find_district_in_text(title, city_id))
+
+    if not city_id:
+        # The free-text title scan found NOTHING. Last resort, before quarantining: try the
+        # source's own «الحي» field AS a city — it sometimes holds a city instead of a district
+        # (measured: three عنيزة rentals carry «الحي: الدوادمي», 500km away). This branch runs
+        # ONLY when the title itself resolved no city, so it can never override a correct
+        # title-based answer — it only fills a blank that would otherwise be dropped. Found live
+        # 2026-09-25: a «شاطئ نصف القمر» plot whose title has no recognisable city at all, whose
+        # «الحي» field plainly says «الدمام» — a real catalog city, and the beach it names really
+        # does sit in the Dammam/Khobar area.
+        city_id, region_id = to_catalog(district_field) if district_field else (None, None)
+        if not city_id:
+            return None, category, "city_not_in_catalog"
+        city_raw = district_field
+        city_ar = city_raw
+        # The field WAS the city here, not a district — never also read it as one below.
+        field_is_a_city = True
+        district_ar = find_district_in_text(title, city_id)
+    else:
+        # city_ar is the source's own Arabic text for the city — the very token to_catalog accepted.
+        city_ar = city_raw
+        # A «الحي» the catalog recognises as a CITY is not this listing's district (measured: three
+        # عنيزة rentals carry «الحي: الدوادمي»).
+        field_is_a_city = bool(district_field) and bool(to_catalog(district_field)[0])
+        district_ar = ((find_district_in_text(district_field, city_id) if not field_is_a_city else None)
+                       or find_district_in_text(title, city_id))
 
     area_m2, area_skip = parse_area(f.get("مساحة الأرض"))
     som, som_ppm, som_skip = parse_money(f.get("سعر السوم"))
@@ -581,23 +634,82 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     return row, category, ""
 
 
-def fetch_index(s: cc.Session, deal_types=(1, 2, 3), limit: int = 0) -> list[dict]:
+def fetch_index(s: cc.Session, deal_types=(1, 2, 3), limit: int = 0,
+                outcomes: Optional[dict] = None) -> list[dict]:
     """Every card of every category — 66 pages, no pagination parameter exists. Only the
-    `<section class="cards">` block counts; the nav/footer carry other listings' links."""
+    `<section class="cards">` block counts; the nav/footer carry other listings' links.
+
+    `outcomes` is filled in with one tally per index request — `http_<code>`, `transport_<Error>`,
+    or `ok_cards` / `ok_no_cards` — and it is not an optional nicety. Until 2026-09-23 a non-200
+    was `continue`d and the status DISCARDED, so 66 requests that were all BLOCKED produced the
+    same run note as 66 that returned HTTP 200 with markup we no longer parse:
+
+        "index returned no cards in <section class=\"cards\"> — blocked or the markup changed"
+
+    That sentence names two causes with opposite fixes and cannot say which. It sat on a P0 for
+    two days (2026-09-22 and 2026-09-23, both at the 04:24 cron slot, each failing in 3-4 seconds)
+    and two separate engineer runs each had to spend a CI dispatch to answer a question the run
+    should have answered itself. This is the repo's own rule — a failed fetch is not an empty
+    answer — in the DIAGNOSTIC layer: a transport failure rendered as an ambiguous verdict.
+
+    A transport exception is caught and tallied for the same reason: raising out of the first
+    blip used to abort the sweep with a traceback and no tally at all, which reads as a crash
+    rather than as the block it usually is.
+    """
+    tally = outcomes if outcomes is not None else {}
     seen: dict[str, dict] = {}
     for ty in deal_types:
         for catid in CATEGORY_IDS:
-            r = s.get(f"{BASE}/index.php?router=cards&catid={catid}&type={ty}", timeout=60)
+            try:
+                r = s.get(f"{BASE}/index.php?router=cards&catid={catid}&type={ty}", timeout=60)
+            except Exception as e:                      # noqa: BLE001 — tally, never swallow
+                tally[f"transport_{type(e).__name__}"] = tally.get(
+                    f"transport_{type(e).__name__}", 0) + 1
+                continue
             if r.status_code != 200:
+                tally[f"http_{r.status_code}"] = tally.get(f"http_{r.status_code}", 0) + 1
                 continue
             body = r.text.split('<section class="cards', 1)[-1].split("</section>", 1)[0]
-            for url, lid, cid, title in _CARD_RE.findall(body):
+            found = _CARD_RE.findall(body)
+            key = "ok_cards" if found else "ok_no_cards"
+            tally[key] = tally.get(key, 0) + 1
+            for url, lid, cid, title in found:
                 seen.setdefault(lid, {"id": lid, "catid": int(cid), "type": ty,
                                       "title": html.unescape(re.sub(r"\s+", " ", _clean(title))),
                                       "url": html.unescape(url)})
             if limit and len(seen) >= limit:
                 return list(seen.values())[:limit]
     return list(seen.values())
+
+
+def index_failure_note(outcomes: dict) -> str:
+    """Turn the per-request tally into the one sentence an engineer needs at 04:24.
+
+    The two causes are DISTINGUISHABLE and the tally distinguishes them: if no request reached
+    HTTP 200 the site refused us, and the markup is not in question at all; if requests DID
+    return 200 and carried no cards, the markup is the suspect. Anything else is mixed and says
+    so rather than picking.
+    """
+    if not outcomes:
+        return "index made no requests at all — the category list is empty (a code fault, not the source)"
+    detail = ", ".join(f"{k}={v}" for k, v in sorted(outcomes.items(), key=lambda kv: -kv[1]))
+    ok = outcomes.get("ok_cards", 0) + outcomes.get("ok_no_cards", 0)
+    lost = sum(v for k, v in outcomes.items() if k.startswith(("http_", "transport_")))
+    if ok == 0:
+        return (f"index BLOCKED — not one of {sum(outcomes.values())} requests reached HTTP 200 "
+                f"[{detail}]. The markup is NOT implicated; re-measure from CI egress before "
+                f"touching the parser (LISTING_LIVENESS 9.4: a block is a fact about the network "
+                f"that observed it)")
+    # MARKUP CHANGED requires that NOTHING was lost. `ok_no_cards == ok` is true of a half-blocked
+    # sweep too (33 x 403 beside 33 x 200-with-no-cards), and the first draft of this function
+    # confidently called that a parser fix — the exact over-claim this whole change exists to stop,
+    # reintroduced one line below the paragraph condemning it. Its own barrier caught it.
+    if lost == 0 and outcomes.get("ok_no_cards", 0) == ok:
+        return (f"index MARKUP CHANGED — all {ok} request(s) returned HTTP 200 and not one "
+                f"carried a card in <section class=\"cards\"> [{detail}]. This is a parser fix, "
+                f"not a block")
+    return (f"index returned no cards from a MIXED sweep [{detail}] — adjudicate before assuming "
+            f"either cause")
 
 
 def fetch_detail(s: cc.Session, card: dict) -> dict:
@@ -609,10 +721,19 @@ def fetch_detail(s: cc.Session, card: dict) -> dict:
 
 def crawl(limit: int = 0, workers: int = 8) -> tuple[list[dict], list[dict], int, dict]:
     s = session()
-    cards = fetch_index(s, limit=limit)
+    outcomes: dict[str, int] = {}
+    cards = fetch_index(s, limit=limit, outcomes=outcomes)
     if not cards:
-        raise RuntimeError("index returned no cards in <section class=\"cards\"> — blocked or "
-                           "the markup changed")
+        raise RuntimeError(index_failure_note(outcomes))
+    # A sweep that lost requests captured an UNPROVABLE catalogue, so say so on the run row even
+    # when it succeeds. Deliberately NOT an abort: prune_unseen here is oracle-gated
+    # (_make_verify_gone, CANDIDATE_PLUS_DIRECT), so a short list cannot falsely kill anything,
+    # and there is no measurement yet of how often one of the 66 pages blips. Making a 1-of-66
+    # failure fatal is a real availability change and wants that measurement first — this line is
+    # what will produce it.
+    lost = {k: v for k, v in outcomes.items() if k.startswith(("http_", "transport_"))}
+    if lost:
+        print(f"⚠ index sweep incomplete: {index_failure_note(outcomes)}", flush=True)
     print(f"{SOURCE}: {len(cards)} listings discovered across {len(CATEGORY_IDS)} categories",
           flush=True)
     res: list[dict] = []
@@ -634,6 +755,9 @@ def crawl(limit: int = 0, workers: int = 8) -> tuple[list[dict], list[dict], int
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
+            # map_listing returns a row only after this listing's own page parsed AND its
+            # «رقم العقار» matched the requested id, i.e. a direct, identity-checked read.
+            db.mark_direct_alive(row, oracle="ialqarawi.detail_page.raqm_alaqar")
             (com if cat == "commercial" else res).append(row)
     # A per-page `except` keeps one bad page from killing a 2,641-page crawl, but it must not turn a
     # SYSTEMIC failure into a quiet empty run: a missing catalog key raises KeyError on every single
@@ -642,6 +766,10 @@ def crawl(limit: int = 0, workers: int = 8) -> tuple[list[dict], list[dict], int
     if errors >= 3 and errors * 4 > len(cards):
         raise RuntimeError(f"{errors}/{len(cards)} listings failed the same way — "
                            f"{', '.join(k for k in skipped if k.startswith('fetch_error'))}")
+    # Carry the lost index requests onto the run row too. stdout is discarded once the CI job ages
+    # out; scrape_runs.notes is what the next engineer actually reads.
+    for k, v in lost.items():
+        skipped[f"index_{k}"] = skipped.get(f"index_{k}", 0) + v
     return res, com, len(cards), skipped
 
 

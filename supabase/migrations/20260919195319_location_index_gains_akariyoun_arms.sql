@@ -5,19 +5,17 @@
 -- ops_liveness_registry, search_listings_ar, active_listing_ids_v2 — except
 -- listing_location_index, which reported 50. The missing one was akariyoun, launched the same day.
 --
--- THE COST. listing_location_index is the only source of llc.last_updated -> v1 -> v2 ->
--- search_listings_ar.last_updated, so all 276 akariyoun rows (251 residential + 25 commercial)
--- carried last_updated = NULL. Note this did NOT make them invisible: sync_search_first_seen_at
--- gives every row a first_seen_at, and the recency order falls back to it — which is why
--- mon_detect_unsortable_served_listing (last_updated IS NULL *AND* first_seen_at IS NULL) stayed
--- correctly silent. What it DID cost is a real source timestamp, and akariyoun's city/district
--- spellings never reaching refresh_city_name_bridge / refresh_district_name_bridge, so its
--- location vocabulary was invisible to the catalogs that canonicalise future listings.
+-- THE COST, identical to the earlier pair: listing_location_index is the only source of
+-- llc.last_updated -> v1 -> v2 -> search_listings_ar.last_updated. A LEFT JOIN with no row yields
+-- NULL, so all 276 akariyoun rows (251 residential + 25 commercial) carried last_updated = NULL.
+-- The search orders by recency and NULL sorts last, so عقاريون sat behind every other platform:
+-- present in the result set, invisible to a human scrolling. It also never contributed its
+-- city/district spellings to refresh_city_name_bridge / refresh_district_name_bridge.
 --
 -- Same recipe as 20260919184741: capture EVERY dependent from the live catalog (a recursive walk,
--- not one hop of pg_depend — it finds thirteen objects, not two), build the new matview as a __mig
--- twin FIRST so a bad splice cannot drop the original, then replay the dependents verbatim in
--- dependency order. DDL is transactional, so any failure leaves production untouched.
+-- not one hop of pg_depend), build the new matview as a __mig twin FIRST so a bad splice cannot
+-- drop the original, then replay the dependents verbatim in dependency order. DDL is transactional,
+-- so any failure leaves production untouched.
 
 do $do$
 declare
@@ -30,7 +28,6 @@ begin
     return;
   end if;
 
-  -- ── capture every dependent the CASCADE will take, in dependency order ───────────────────────
   create temp table _dep_capture2 on commit drop as
   with recursive deps as (
     select c.oid, c.relname::text nm, c.relkind, 1 lvl
@@ -63,11 +60,9 @@ begin
   if exists (select 1 from _dep_capture2 where def is null or btrim(def) = '') then
     raise exception 'a dependent definition came back empty - refusing to drop anything';
   end if;
-  raise notice 'captured % dependents of listing_location_index', (select count(*) from _dep_capture2);
 
   select count(*) into before_rows from public.listing_location_index;
 
-  -- ── splice the four new arms in, before the wrapper ─────────────────────────────────────────
   base := rtrim(rtrim(pg_get_viewdef('public.listing_location_index'::regclass,true)),';');
   if right(base, length(suffix)) <> suffix then
     raise exception 'listing_location_index shape changed; refusing to splice';
@@ -95,7 +90,6 @@ UNION ALL
       r.tbl, r.slug, r.cat);
   end loop;
 
-  -- ── build the twin FIRST; a bad splice fails here and the original survives ──────────────────
   execute 'DROP MATERIALIZED VIEW IF EXISTS public.listing_location_index__mig CASCADE';
   execute 'CREATE MATERIALIZED VIEW public.listing_location_index__mig AS ' || body || arms || suffix;
   execute 'CREATE UNIQUE INDEX lli__mig_pk2 ON public.listing_location_index__mig (index_id)';
@@ -104,7 +98,6 @@ UNION ALL
   execute 'ALTER MATERIALIZED VIEW public.listing_location_index__mig RENAME TO listing_location_index';
   execute 'ALTER INDEX public.lli__mig_pk2 RENAME TO listing_location_index_pk';
 
-  -- ── replay every captured dependent, in dependency order ────────────────────────────────────
   for d in select * from _dep_capture2 order by ord, nm loop
     if d.relkind = 'm' then
       execute format('CREATE MATERIALIZED VIEW public.%I AS %s', d.nm, d.def);
@@ -115,7 +108,6 @@ UNION ALL
     if d.grants <> '' then execute d.grants; end if;
   end loop;
 
-  -- ── prove it grew, the new platforms are in, and nothing came back empty ────────────────────
   select count(*) into after_rows from public.listing_location_index;
   if after_rows < before_rows then
     raise exception 'listing_location_index SHRANK % -> %', before_rows, after_rows;
@@ -131,7 +123,6 @@ UNION ALL
   if (select count(*) from public.listing_native_location_v1) = 0 then
     raise exception 'listing_native_location_v1 came back empty';
   end if;
-  raise notice 'listing_location_index % -> % rows (% from akariyoun)',
-    before_rows, after_rows, n_new;
+  raise notice 'listing_location_index % -> % rows (% from akariyoun)', before_rows, after_rows, n_new;
 end
 $do$;

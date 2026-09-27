@@ -74,7 +74,12 @@ check('…and still makes the invitation when the button IS offered',
   'dropping the false offers must not retire the true one');
 check('agent.tsx feeds that function the RENDERED-button booleans, not the raw gates',
   /const offersNarrow = canNarrowFurther && showActionsRow;/.test(ag)
-  && /closingNoteKey\(\{ endKind: rc\.endKind, quoteTotal, offersMore, offersNarrow, lastTapOffer: rc\.lastTapOffer, cappedAtCap: rc\.cappedAtCap \}\)/.test(ag),
+  // The RULE this check owns is that `offersMore`/`offersNarrow` — the showActionsRow-folded
+  // booleans above — are what reaches the pure function. It used to pin the call's ENTIRE argument
+  // list verbatim, so adding an unrelated argument reddened it: ops_incident #598's `chatClosed`
+  // did exactly that, in a barrier with nothing to say about that argument. Pinning the two names
+  // keeps the rule and stops a second file owning the call site's punctuation.
+  && /closingNoteKey\(\{[^}]*\boffersMore, offersNarrow,/.test(ag),
   'the pure function can only be as right as the values handed to it');
 
 check("both new ≤25 copy variants have real Arabic translations (no English key leak)",

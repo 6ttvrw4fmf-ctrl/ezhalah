@@ -271,6 +271,25 @@ Three things to carry forward:
    `13:29:00 → 13:40:18`, **11m18s**, and every other slot that day measured 10m41s–11m25s. The
    blackout length equals the job's real duration, every time. A `max(end_time)` with no `status`
    predicate is not a completion; **`status` would have read `running`.**
+
+   **The same trap in the OPPOSITE direction, measured 2026-09-24 (routine #11).** Lesson 3 above
+   produced a false RETRACTION of a correct finding; this produced a false FINDING. A fleet-wide
+   "is any inactive row still served?" sweep at 00:23 returned 24 rows (alsidra res 20 + com 4, all
+   deactivated at 00:20:06), and they were filed as an hour of extra exposure caused by the
+   job17(:20)/job28(:22) inversion. That sweep is 69 `query_to_xml` subqueries and it **straddled
+   the 00:22 sync's own DELETE leg**. Re-measured at 00:28:08, after `cron.job_run_details`
+   confirmed the 00:22 run `status = succeeded`: alsidra held **zero** rows in `search_listings_ar`
+   and the fleet-wide count was **zero**. *Read the sync's `status` before trusting any propagation
+   measurement, and never sample the served index between `:20` and `:24`.*
+
+   The real finding was better than the filed one and is worth keeping: `active_listing_ids_v2`
+   **still** carried those 20 rows as active (the `:20` refresh snapshot predates the 00:20:06
+   deactivation) while `search_listings_ar` was already clean — so the matview path did not remove
+   them, **`prune_inactive_from_search()` did**. That is §2.3 property 3's second remover observed
+   covering precisely the aliveness gap the inversion opens, which is the half `ops_incident` #354
+   never measured. It means the inversion's damage is to FRESHNESS, not to serving source-confirmed
+   dead listings. One observation is not a guarantee (§7.1) — but it is the first evidence either
+   way, and it is the reason #354 stays a scheduling defect rather than becoming a §1.1 leak.
 3. **Repairing the data is not closing this.** The out-of-band five-statement sync (§2.3) restores
    the index in one pass and is fully within this routine's authority, but the index refreezes at
    the next :36 until #300 is fixed. Report that as a mitigation, never as a fix.
@@ -647,6 +666,247 @@ it; `scrapers/dealapp/repair.py` inherits it by import.
 
 **Why the old barrier was green the whole time:** it asserted the pin PAYLOAD in all eleven copies,
 and the payload was never the missing part. That is AGENTS.md's source-TEXT trap in its exact form.
+
+### §4.1d — EVERY WEBSITE GETS CHECKED, AND A ROTATION MUST BE FAIR (owner directive, 2026-09-24)
+
+**The owner's instruction, in his words:** *"Fix this across EVERY website currently connected to
+Ezhalah and every website I add in the future. I do not want Aqar to be the only website getting
+proper listing checks… New websites added in the future must automatically use the same checking
+system. I should not have to manually enable it for each website… Do not just change documentation
+or thresholds. Fix the actual checking capacity/system."*
+
+**What provoked it, measured that day:**
+
+| | active listings | verified inside its own SLA |
+|---|---:|---:|
+| aqar | 97,784 | 94.5% |
+| **wasalt** | 56,643 | **0.0%** |
+| **gathern** | 28,639 | **0.4%** |
+| **dealapp** | 16,899 | **0.3%** |
+| *62 other platforms* | 136,964 | **0.0%** |
+
+234,748 active listings, 92,650 verified in SLA — **92,439 of them aqar. Every other platform
+combined: 211.** Sixty-two platforms sat at exactly zero while three of the four biggest were
+*declared* `DIRECT_REVISIT`.
+
+#### The lesson: a rotation whose head cannot clear is not a capacity problem
+
+gathern's sweep ordered its worklist `last_seen_at asc`. A row it probes and finds **DEAD** moves
+**neither** existing timestamp — `last_seen_at` is a crawl fact and a sweep is not a crawl;
+`last_verified_alive_at` only moves on ALIVE. So a dead row the anomaly cap *correctly* refuses to
+kill keeps its ancient `last_seen_at` and sits at the head of the queue **permanently**.
+
+The run notes are the proof, and they were sitting in `scrape_runs` the whole time: an **identical
+`strike=1461`** on 09-16, 17, 18, 19, 20, 21 and 22. The same ~1,500 rows every run. 27,102 rows
+never looked at once. Oldest `last_seen_at` still **2026-07-27**.
+
+Measured on the live selection:
+
+| | run 2 repeats run 1 | fresh rows reached |
+|---|---:|---:|
+| old ordering | **1,500 / 1,500**, forever | 0 |
+| new ordering | **0** | **1,500** |
+
+> **Throughput was never the binding constraint. A faster loop over a queue whose head cannot clear
+> just re-reads the same rows more often.** Six runs a day of the old ordering would have re-probed
+> the same 1,500 rows six times a day and moved coverage by nothing.
+
+#### `last_liveness_probe_at` is the missing third fact
+
+`20260924020545` adds it to all 143 listing tables. The three facts are now distinct, and conflating
+any two of them is how this failed:
+
+| column | means | evidence class |
+|---|---|---|
+| `last_seen_at` | a crawl encountered this ad in a feed | ABSENCE |
+| `last_liveness_probe_at` | **we LOOKED at this row, whatever we concluded** | none — it is not evidence |
+| `last_verified_alive_at` | the source PROVED it alive on a direct read | DIRECT |
+
+**It is never evidence of life.** A row probed a minute ago and found 404, blocked or timing out
+carries a fresh `last_liveness_probe_at` and is still DEAD or UNKNOWN. It exists so a worklist can
+order `NULLS FIRST` and a probed row drops to the back for a full cycle. Every sweep writes it on
+**every** verdict **including the kills the anomaly cap quarantines** — that last one is the whole
+point, because those are the rows that were stuck.
+
+#### Capacity is added by cadence, never by probing harder
+
+gathern rate-limits detail pages **globally** (429 above ~2 req/s across *all* IPs), so a bigger or
+faster batch buys nothing and risks the block that makes every verdict worthless. The sweep went
+1×/day → **6×/day with the batch size and per-run request rate unchanged**. From measured runs
+(0.79–0.96 rows/s, 1,500 rows in ~29 min): in-run ~0.85 req/s, daily average ~**0.10 req/s**, full
+pass 28,639/9,000 ≈ **3.2 days < the 96h SLA**. One run a day gave a 19-day pass against a 4-day SLA.
+
+#### The crawl is the cheapest honest oracle, and it was being thrown away
+
+`db.mark_direct_alive()` — ~28 scrapers **already** fetch each listing's own detail page every crawl
+and that read was recorded only as `last_seen_at`. It now stamps through
+`liveness_contract.direct_alive_patch()` at **zero extra requests**: there is no new way to get
+blocked because there is no new request. It is consumed in `db._wasalt_batch`, **the single
+chokepoint all 141 `upsert_*` wrappers funnel through**, which is what makes auto-enrolment real
+rather than a promise. A caller cannot relax the law — a row the pipeline concluded is inactive
+never gets a stamp, whatever the call site passed (the `http_liveness.py` shape again).
+
+#### Is the CHECKER running? — a question nothing asked before
+
+`mon_detect_liveness_checking_shortfall` (`20260924020926`) measures the machine, not the inventory.
+Yardstick is the platform's **own** promise: `required_per_day = active / (sla_hours/24)`. Arm 1 is
+**one** fleet alert (62 separate ones would bury the real one); arm 2 is per-platform `STALLED` — a
+checker that was running and stopped, invisible in a fleet total and §9's expected-but-absent shape.
+Cohort discovered from `pg_tables` every sweep, so a website added next month is measured with
+nobody enabling anything. **Clearing it by raising an SLA or lowering a cap is forbidden in its own
+payload** (`LISTING_LIVENESS.md` §7).
+
+#### Two things the barrier caught in its own first run
+
+`scripts/verify-every-platform-is-liveness-checked.ts` discovers its cohort by shape, never a list.
+On its first execution it found a **fourth** direct write path into listing tables that had been
+missed, and that **wasalt's sweep was unwired**. And its own first version was a source-TEXT
+tripwire: `src.includes('last_liveness_probe_at')` passed on a **comment** after every real write had
+been deleted — caught only by mutating it, which is exactly why AGENTS.md insists on the mutation.
+
+#### What is NOT fixed, and must not be reported as fixed
+
+**wasalt — 56,643 listings, the single largest gap — remains at 0%.** Its per-listing liveness is
+deliberately unscheduled: each page is ~400KB through the **metered** Saudi proxy, so daily over 58k
+rows is ~700 GB/month and would blow the DataImpulse plan. The workflow says so in its own header.
+That needs a **lightweight** check built and proven (HEAD, or a range-limited GET — the probe ledger
+already shows a `head=404 get=404` hybrid path), not a switch flipped. Enabling it as-is would trade
+a coverage number for a blown budget and a blocked source.
+
+### §4.1e — A SHARD BOUNDARY IS A NEGOTIATION, AND SIXTEEN RUNNERS CANNOT HOLD ONE (2026-09-24, routine #11)
+
+§4.1d fixed a rotation whose HEAD could not clear. This is the opposite failure in the same
+machine: a rotation with no head at all, on **aqar — the one platform §4.1d's table showed at 94.5%
+and therefore the one nobody was looking at.**
+
+`mon_detect_liveness_rotation_stranded` (shipped the day before, and this was its first real
+finding) raised 920 `aqar_residential_listings` rows: `active = true`, `missing_count = 0`,
+`last_seen_at` frozen at **2026-08-04 01:00:19 — fifty-one days**, while a user could find and click
+every one.
+
+**The mechanism, and it is not capacity.** The sweep split its work by **row offset**: shard k swept
+`[id_at(k*N/16), id_at((k+1)*N/16))` with `N` and `id_at` read live. Those windows are contiguous,
+disjoint and jointly covering — *for one caller reading one snapshot*. Production is sixteen GitHub
+runners starting up to 40 minutes apart, each calling `count` and `id_at` against its **own**
+snapshot of a table the other fifteen are deactivating ~1,700 rows a day in. Shard k's `lo` and shard
+k−1's `hi` are then two different answers to the same question, and whenever `lo_k > hi_(k-1)` every
+active row between them is swept by **nobody**. Kills cluster in the legacy id block, which biases
+the drift systematically into the gap direction.
+
+The sweep printed its own boundary every day:
+
+```
+shard 3/16 → rows [17398, 23197) of 92791 active → id window [76727, 123731)
+```
+
+`76727` is where shard 3 *began*; the true offset-17398 id was `75310`, and shard 2 had already
+stopped. Every frozen cohort sat exactly at the bottom of a shard's window (527 under shard 0, 182
+under shard 4, 195 under shard 6, 14 at the top of shard 5). The run's own counters reconcile
+exactly, and that is what proves the rows were **never fetched** rather than fetched and lost:
+`seen 5,799 = refreshed 5,633 + pending_kill 93 + killed 73`, against **6,327** rows active inside
+the window it actually walked.
+
+Three things to carry forward:
+
+1. **The gap is permanent, not a daily lottery.** A row nothing sweeps never changes state, so it
+   keeps its place in the ordering and falls into the same gap tomorrow. And because `missing_count`
+   never increments for an unprobed row, it can never reach the strike grace either — so
+   `served_after_source_gone` and `prune_unseen` are **structurally** blind to it while every
+   platform-level coverage percentage reads healthy. §9's "absence cannot be compared, so silence
+   reads as health", one layer lower than that section describes it.
+2. **The fix is to delete the negotiation, not to tune it.** Ownership is now
+   `listing_id % shards == shard` (`scrapers/common/shard_partition.py`): it reads the row's own id
+   and nothing else, so the sixteen runners need not agree about anything — there is no boundary to
+   negotiate, hence nothing to negotiate wrongly. A margin, an overlap or a tighter clock would each
+   have narrowed the gap and left the class alive. Balance measured the same day: `id % 16` over
+   93,056 active rows gives 5,664–5,901 per shard (±2%) against the offset split's exact 5,816.
+   Cost: one id-only keyset pass of the active set per shard (~95 pages, seconds) against a sweep
+   that spends half an hour on HTTP; the probe volume is unchanged.
+3. **The hermetic test certified the defect for all fifty-one days.**
+   `test_aqar_liveness_sharding.py` asserted the windows were *"contiguous, disjoint, jointly
+   covering every active row … for ANY id distribution"* — every word true — because `_sweep()` built
+   all sixteen windows from ONE shared `id_at` and ONE shared row count. **It modelled a world in
+   which the shards agree.** When a barrier's input is a model rather than the mechanism, "for ANY
+   input" is a claim about the model. The replacement takes DIVERGENT SNAPSHOTS as its primary
+   input; `scripts/verify-liveness-shards-cover-every-row.ts` executes the real partition over
+   sixteen of them and mutation-proves six ways, including the guard on the guard (a
+   `partition_coverage` that has stopped reporting misses must break the barrier, not satisfy it).
+
+**What the 920 turned out to be, and why that is the expected result.** Fifteen drawn at random and
+re-probed through the real shipped oracle (`looks_dead` / `looks_closed`, not a re-implementation)
+answered **HTTP 200, alive, 15/15**. They were UNKNOWN, never dead, and §0's guard held throughout:
+nothing struck them, nothing deactivated them, nothing started a clock. The defect was a **coverage**
+hole, not a serving-dead-listings hole — which is exactly the direction this routine is built to
+fail in, and is not a reason to think a coverage hole is cheap. `ops_incident` #696.
+
+### §4.1c — A ONE-WAY ORACLE MAKES AN ALERT CORRECT BEHAVIOUR CANNOT CLEAR (2026-09-23, routine #11)
+
+§4.1b made the sold pin WRITE its evidence. This is the half that was still missing: it wrote only
+one of the three values. Census of the whole `ops_stale_inactivation_probe` ledger that day:
+
+| oracle | GONE | LIVE | UNKNOWN |
+|---|---:|---:|---:|
+| `prune_unseen.verify_gone` | 362 | 300 | 618 |
+| `wasalt.liveness.check_hybrid` | 1,405 | 145 | 0 |
+| **all 9 `*.sold_pin.*` oracles** | **5,853** | **0** | **0** |
+
+Every other evidence writer in this repo records the source saying *still here*. The sold pin is
+handed only the ids the caller judged sold, so the available complement — read from the SAME field,
+on the SAME page, in the SAME crawl — was used to decide and then thrown away.
+
+**Why that is a defect and not untidiness.** `ops_lifecycle_false_resurrection()` takes the LATEST
+verdict per `ad_number` and reports rows where it is `GONE` while the row is `active = true`. When a
+source RELISTS a unit the scraper does exactly the right thing — the next upsert carries
+`active = true` — but nothing records the contradicting reading, so the ledger's latest verdict stays
+GONE **forever** and the P1 can never clear by any amount of correct behaviour. That is §2.5a's trap
+in its exact form (*a permanently unclearable alert is how a detector teaches people to dismiss it*)
+and §8.3 names this class as the one that can least afford to cry wolf.
+
+**The worked case.** satel `STC0084`: GONE on 09-14, 09-15, 09-16, 09-17 from
+`satel.sold_pin.property_status`, then silence; the row correctly `active = true` with a fresh
+`last_seen_at` every day; the alert open since 09-18. A DIRECT re-probe of the listing's own URL on
+09-23 returned HTTP 200, identity confirmed by brace-matching the JSON object carrying
+`"propertyNumber":"C0084"`, and that object's `status` — the very field the oracle reads — said
+`"Available"`, `postStatus: "Published"`. A sibling object on the same page still read `"Rented out"`,
+which is what proves the field is per-property and the read sound.
+
+**The repair, and the direction that matters.** `scrapers/common/sold_pin.py` now also records the
+reversal: `plan_relisting_evidence()` writes a `LIVE` row for `(seen − sold) ∩ previously_gone`, and
+all 11 platforms pass their crawl's seen-set. Both intersections are load-bearing:
+
+- subtracting the sold set **in the law, not in the caller**, is what makes it impossible to certify
+  as available an id this very crawl read as sold. **This cannot bury a real false resurrection:** if
+  a listing really is still sold and something wrongly reactivated it, the same crawl writes a fresh
+  GONE row and the alert fires exactly as before. The source distinguishes the two cases, every
+  crawl, which is the only thing allowed to.
+- intersecting `previously_gone` keeps it bounded. Without it a daily crawl would file tens of
+  thousands of "still available" rows into a ledger holding ~12k in total.
+
+It writes evidence only — never `active`, never `missing_count`, and never `last_verified_alive_at`
+(§3: only `liveness_contract.py` may write that). Per §0 it is a RESTORATIVE write, which §5.4 does
+not gate: a block cannot manufacture a source that says available.
+
+**Two things that were nearly got wrong, recorded so they are not paid for twice:**
+
+1. **The reversal write must sit BEFORE `pin_source_confirmed_gone()`'s `if not pinnable: return []`,
+   and the caller's `if sold_res:` guard had to go too.** A crawl in which nothing is sold is
+   precisely a crawl in which a previously-sold unit may have come back. Both early exits would have
+   let the one-way ledger survive the fix while every test of the sold path stayed green.
+2. **Deriving the available set from the DATABASE (`active = true` + fresh `last_seen_at`) was
+   rejected**, although it needed no scraper changes at all. It infers a status reading from crawl
+   presence, which is `LISTING_LIVENESS.md` §3's forbidden move wearing a convenient shape. The
+   caller hands over the ids it actually read and classified; that is evidence, not inference.
+
+Held by `scripts/verify-sold-pin-evidence-law.ts` (now 8 executed mutations, and a wiring half that
+goes RED if any platform wires the kill half and omits the reversal — proven by stripping jurash's)
+and `scrapers/common/tests/test_sold_pin_records_the_reversal.py` (10 tests against a stub client).
+
+**The sibling class this does NOT fix, and must not be confused with it.** rakez, raghdan and wasalt
+reach `false_resurrection` through `prune_unseen`/`liveness` oracles, which only ever probe rows the
+crawl did **not** see. A row that carries a GONE verdict and then returns to the crawl is therefore
+never re-probed, never stamped, and equally stuck — but there is no symmetric re-read to record, so
+the honest answer is a fresh DIRECT re-probe of the contradicting row by the oracle that killed it,
+not a write. Tracked separately; see `ops_incident` #530/#531/#533.
 
 ### §4.2 — What the rest of the ledger actually is (surveyed 2026-09-06)
 

@@ -4,9 +4,14 @@
 // a rotation between one of those." The previous shape shipped a first-search fallback that showed
 // the retired text on every first search of a session and looked broken to the user.)
 //
-// The 100 rows here are the same list the owner authored on 2026-09-18 (also stored server-side in
-// public.ui_filter_greetings for future editability — see supabase/migrations/20260918214451_*.sql
-// and src/data/loaderFilterGreetings.ts). If the server-side pool later differs from this list, the
+// The 60 rows here are the owner's trimmed list from 2026-09-26 (originally 100, authored
+// 2026-09-18) — the owner cut Gulf-wide/Emirati-leaning entries («مرحبا الساع») and phrases that
+// read forced or unnatural in Saudi Arabic («أرحب وأسهِل», «مرحبتين كبار», endings tacked on with a
+// bare «يا»), on the reasoning that 60 natural openings beat 100 with filler. Also stored
+// server-side in public.ui_filter_greetings for future editability — see
+// supabase/migrations/20260918214451_ui_filter_greetings_rotation.sql (original 100) and
+// supabase/migrations/20260926_filter_greetings_trimmed_to_60.sql (the 2026-09-26 replacement) —
+// and src/data/loaderFilterGreetings.ts. If the server-side pool later differs from this list, the
 // server pool wins as soon as its (bounded) fetch resolves; until then, the baked list still gives
 // a real rotation from search #1. That means neither an offline start nor a slow first request can
 // ever show the retired «ارحب إزهله» text again.
@@ -17,10 +22,11 @@
 
 export type FilterGreeting = { greeting: string; emoji: string };
 
-// Baked-in list: 100 Arabic openings the owner authored 2026-09-18. Immediately available at import
-// time so the picker never has to wait on a network request, so the very first Filter search of a
-// fresh session already reads a random one. Order matches the DB rows byte-for-byte, and the DB
-// mirror is asserted equal by scripts/verify-filter-greeting-rotation.ts so the two can never drift.
+// Baked-in list: 60 Arabic openings, the owner's 2026-09-26 trim of the original 100 (authored
+// 2026-09-18). Immediately available at import time so the picker never has to wait on a network
+// request, so the very first Filter search of a fresh session already reads a random one. Order
+// matches the DB rows byte-for-byte, and the DB mirror is asserted equal by
+// scripts/verify-filter-greeting-rotation.ts so the two can never drift.
 const BAKED: FilterGreeting[] = [
   { greeting: 'هلا', emoji: '👋' },
   { greeting: 'يا هلا', emoji: '🙌' },
@@ -47,81 +53,41 @@ const BAKED: FilterGreeting[] = [
   { greeting: 'يا مرحبتين', emoji: '🌹' },
   { greeting: 'يالله حيه', emoji: '⚡' },
   { greeting: 'يا هلا فيك', emoji: '🥳' },
-  { greeting: 'مرحبا الساع', emoji: '🌤️' },
   { greeting: 'هلا بك', emoji: '🏠' },
   { greeting: 'يا حيّك', emoji: '😌' },
-  { greeting: 'أرحب وأهلين', emoji: '💯' },
+  { greeting: 'أرحب وألف هلا', emoji: '💯' },
   { greeting: 'يا مرحبا مليون', emoji: '🌧️' },
   { greeting: 'هلا بالطلة', emoji: '🌞' },
   { greeting: 'حيا الله هالطلة', emoji: '🍃' },
-  { greeting: 'يا حي هالصوت', emoji: '🎙️' },
   { greeting: 'أهلًا وسهلًا', emoji: '🔎' },
-  { greeting: 'أرحب وأسهِل', emoji: '😃' },
   { greeting: 'هلا من جديد', emoji: '🔄' },
   { greeting: 'يا مرحبا تراحيب', emoji: '🌸' },
   { greeting: 'حياك ربي', emoji: '👌' },
   { greeting: 'هلا فيك', emoji: '🧭' },
   { greeting: 'يا هلا بك', emoji: '💪' },
   { greeting: 'حي الله من جانا', emoji: '🏘️' },
-  { greeting: 'أهلين والله', emoji: '😋' },
+  { greeting: 'أهلين والله', emoji: '😄' },
   { greeting: 'يا حي من لفانا', emoji: '🛬' },
   { greeting: 'مرحبا مليون', emoji: '💎' },
-  { greeting: 'أرحب يا', emoji: '😄' },
   { greeting: 'هلا والله ومرحبا', emoji: '🎈' },
   { greeting: 'حي الله', emoji: '😊' },
   { greeting: 'يا مرحبا بك', emoji: '🧡' },
   { greeting: 'أهلين فيك', emoji: '🪄' },
-  { greeting: 'يامرحبا', emoji: '🥰' },
-  { greeting: 'حياك يا', emoji: '🌵' },
+  { greeting: 'يا مرحبا', emoji: '🥰' },
   { greeting: 'أرحب تراحيب', emoji: '🌊' },
   { greeting: 'يا هلا بالطلة', emoji: '📍' },
   { greeting: 'حيّاك الله', emoji: '🏙️' },
   { greeting: 'هلا ومرحبا', emoji: '🛋️' },
   { greeting: 'يا مرحبا بالزين', emoji: '🌺' },
-  { greeting: 'حياك وين ما كنت', emoji: '🗺️' },
   { greeting: 'أهلًا ومرحبًا', emoji: '🎯' },
   { greeting: 'يا حي الله', emoji: '🍀' },
   { greeting: 'أهلًا أهلًا', emoji: '🙋' },
-  { greeting: 'مرحبا من القلب', emoji: '❤️' },
-  { greeting: 'حياك وأكثر', emoji: '💐' },
   { greeting: 'يا هلا مليون', emoji: '⭐' },
-  { greeting: 'أرحب من جديد', emoji: '🌅' },
-  { greeting: 'هلا يا', emoji: '😎' },
-  { greeting: 'حيّاك ربي', emoji: '🏆' },
-  { greeting: 'يا مرحبا فيك', emoji: '🔑' },
-  { greeting: 'أهلين بالطلة', emoji: '🥂' },
   { greeting: 'يالله حيّك', emoji: '🎊' },
   { greeting: 'هلا ومرحبتين', emoji: '🧩' },
   { greeting: 'يا هلا يا هلا', emoji: '🎵' },
-  { greeting: 'حيا الله هالحضور', emoji: '🎭' },
-  { greeting: 'مرحبا فيك', emoji: '🏗️' },
-  { greeting: 'أرحب وهلا', emoji: '🔔' },
-  { greeting: 'يا حي هالطلة', emoji: '🌙' },
-  { greeting: 'هلا من القلب', emoji: '💌' },
-  { greeting: 'مرحبتين كبار', emoji: '🪁' },
-  { greeting: 'حياك بكل وقت', emoji: '⏰' },
-  { greeting: 'يا هلا ومرحبتين', emoji: '🏖️' },
-  { greeting: 'أهلين يا', emoji: '🌻' },
-  { greeting: 'حي الله من حضر', emoji: '🎪' },
-  { greeting: 'هلا يا صاحبتنا', emoji: '😄' },
-  { greeting: 'أرحب وألف هلا', emoji: '🏅' },
-  { greeting: 'يا مرحبا يا', emoji: '🍀' },
-  { greeting: 'حياك يا كفو', emoji: '💪' },
+  { greeting: 'أرحب وألف مرحبا', emoji: '🏅' },
   { greeting: 'هلا بك والله', emoji: '🛎️' },
-  { greeting: 'يا هلا بهالطلة', emoji: '🎇' },
-  { greeting: 'أهلين ومرحبا', emoji: '🥇' },
-  { greeting: 'حياك ومرحبا', emoji: '🛟' },
-  { greeting: 'أرحب يا كفو', emoji: '🦅' },
-  { greeting: 'هلا يا زين', emoji: '🌙' },
-  { greeting: 'يا حي من وصل', emoji: '🚪' },
-  { greeting: 'مرحبا وألف مرحبا', emoji: '🎁' },
-  { greeting: 'حياك يا', emoji: '🐺' },
-  { greeting: 'هلا فيك والله', emoji: '🧿' },
-  { greeting: 'يا مرحبا', emoji: '💡' },
-  { greeting: 'أهلًا بالطلة', emoji: '🎨' },
-  { greeting: 'حياك الله', emoji: '🌍' },
-  { greeting: 'أرحب تراحيب', emoji: '👑' },
-  { greeting: 'يا هلا والله يا', emoji: '🏹' },
 ];
 
 // Live cache: starts equal to BAKED so the very first pick already rotates. The server-side loader

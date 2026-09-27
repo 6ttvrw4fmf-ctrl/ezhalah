@@ -152,6 +152,44 @@ check(
   'the exact comparison is no longer what decides whether a file diverges',
 );
 
+// ── 4b. AN AMBIGUOUS NAME IS COMPARED, NOT SKIPPED (blind spot closed 2026-09-24) ──────────────
+// alert_to_incident_bridge was applied three times and the repo carried ONE composite file under a
+// version apply_migration never minted. Its name matched 3 rows, so the old `named.length !== 1`
+// skip compared it to nothing: 9,135 bytes that matched none of the three read as clean for 3 days.
+const AMB = [
+  { version: '20260901000001', name: 'bridge', md5: 'aaaaaaaaaa', codeMd5: 'c1c1c1c1c1' },
+  { version: '20260901000002', name: 'bridge', md5: 'bbbbbbbbbb', codeMd5: 'c2c2c2c2c2' },
+  { version: '20260901000003', name: 'bridge', md5: 'cccccccccc', codeMd5: 'c3c3c3c3c3' },
+];
+const ambFile = (md5: string, codeMd5: string) =>
+  [{ version: '20260901999999', name: 'bridge', file: '20260901999999_bridge.sql', md5, codeMd5 }];
+
+const ambMiss = findContentDivergence(ambFile('zzzzzzzzzz', 'zzzzzzzzzz'), AMB);
+check(
+  ambMiss.length === 1 && ambMiss[0].matchedBy === 'name'
+    && ambMiss[0].candidates?.length === 3
+    && ambMiss[0].appliedVersion === '20260901000003',
+  'a file whose ambiguous name matches NO applied row is reported, against the newest, with its candidates',
+  'AMBIGUOUS-NAME BLIND SPOT IS BACK — a composite file matching none of its namesakes reads as clean',
+);
+check(
+  findContentDivergence(ambFile('bbbbbbbbbb', 'c2c2c2c2c2'), AMB).length === 0,
+  'a file that mirrors ONE of the ambiguous namesakes exactly is clean',
+  'a faithful mirror of one applied version is being reported as drift',
+);
+const ambComment = findContentDivergence(ambFile('zzzzzzzzzz', 'c2c2c2c2c2'), AMB);
+check(
+  ambComment.length === 1 && ambComment[0].kind === 'comments'
+    && ambComment[0].appliedVersion === '20260901000002',
+  'an ambiguous-name divergence is reported against the row whose CODE digest agrees, as comment-only',
+  'the closest candidate is not chosen, so a comment-only difference would alert at P1',
+);
+check(
+  findContentDivergence(ambFile('zzzzzzzzzz', 'zzzzzzzzzz'), []).length === 0,
+  'a name that matches NOTHING applied is still condition #2\'s job, not this one',
+  'a never-applied file is now double-reported as content drift',
+);
+
 // ── 5. THE SERVER SIDE STILL CARRIES THE SAME RULE ────────────────────────────────────────────
 // The digests are computed in two languages; only symmetry makes them comparable. The 2026-08-30
 // false-positive class (issue #1357) is exactly what one side drifting looks like.

@@ -25,6 +25,7 @@ seen-set and supersedes fewer rows; it can never cascade.
 """
 from __future__ import annotations
 
+import ast
 import sys
 import types
 
@@ -286,15 +287,33 @@ def test_every_dual_routing_scraper_is_wired_or_explicitly_outstanding():
     assert not stale, f"baseline names scrapers that no longer route to both tables: {sorted(stale)}"
 
 
+def _call_lines(src: str, attr: str) -> list[int]:
+    """Line numbers of real `<mod>.<attr>(...)` CALLS — not mentions in comments or docstrings.
+
+    This used to be `src.index("db.prune_unseen(")` on raw text, and it produced a FALSE RED the
+    first time a correctly-ordered scraper happened to name the helper in prose first: aqargate's
+    _verify_gone docstring cites db.prune_unseen(verify_gone=...) at line 154, while its real calls
+    are retire@476 before prune@484. Under the old text rule every such file was guilty, and the
+    accusation named the platform, so it read like a real ordering defect. A comment is not a code
+    path.
+    """
+    tree = ast.parse(src)
+    return sorted(n.lineno for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                  and n.func.attr == attr)
+
+
 def test_a_wired_scraper_supersedes_before_it_prunes():
     """Order is load-bearing: prune's guards protect the orphan rather than ageing it out."""
     found = _dual_routing_scrapers()
-    wired = {p: src for p, src in found.items() if "retire_superseded_siblings(" in src}
+    wired = {p: src for p, src in found.items()
+             if _call_lines(src, "retire_superseded_siblings")}
     assert wired, "no scraper calls the supersession step — the helper is decoration"
     for platform, src in sorted(wired.items()):
-        if "db.prune_unseen(" not in src:
+        prune = _call_lines(src, "prune_unseen")
+        if not prune:
             continue  # amaall prunes nothing; there is no ordering to get wrong
-        assert src.index("retire_superseded_siblings(") < src.index("db.prune_unseen("), \
+        assert _call_lines(src, "retire_superseded_siblings")[0] < prune[0], \
             f"{platform} must supersede BEFORE prune_unseen — prune's guards protect the orphan"
 
 

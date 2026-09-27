@@ -1,4 +1,19 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-09-26 (migration 20260926073334_rotation_picks_which_listing_per_platform):
+--   UNCHANGED. That migration edits af_rpc_templates' location_search_candidates_ar row and runs
+--   rebuild_af_filter_rpcs(); it only CALLS af_eligibility_clause() — inside its byte-for-byte
+--   template/live parity assertion — and never redefines it. The staleness checker counts an object
+--   named in EXECUTED SQL as "touched" (correctly — it cannot know a call from a redefinition), so
+--   this line records that the body below was re-checked against production and still matches.
+-- Re-verified 2026-09-24 (migration 20260924182710_af_tables_cap_admits_the_thirty_five_platform_batch):
+--   CHANGED — one line: the p_tables cardinality cap 200 → 500. The 2026-09-24 batch took the
+--   searchable scope to 207 tables and every scoped surface answered an honest zero (the cap
+--   fails CLOSED by design); rebuild_af_filter_rpcs() re-rendered the six templated RPCs.
+--   Body below is production's text VERBATIM (fetched base64 from pg_get_functiondef after
+--   apply — format(%L) re-quotes the literal, so the previous body plus the one edit is NOT
+--   byte-identical to it). Recorded md5 of pg_get_functiondef: f195840b6f1812da87ab6951b4126259
+--   (length 9,458; the previous text hashed 47feed9ce3a08e743c44a7fb978f4278, 9,452).
+--
 --
 -- Re-verified 2026-09-13 (AF + Trending data-integrity daily run): UNCHANGED — and, for the second
 --   time in seven days, a MENTION rather than a redefinition. Migration 20260913111514 edits
@@ -136,6 +151,7 @@
 --   result verified to match production's md5(pg_get_functiondef) exactly before being written here.
 -- Verified byte-exact against the 2026-09-02 rolled-back dry run; md5 of everything below this header block: 178deacbfa50de38e6b5a18e09bc737b
 --   (previous live value 681da577d8e10df55e30c345d284e139 through 2026-08-31; changes ONLY when 20260902220100 is applied).
+--
 CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
  LANGUAGE sql
@@ -189,7 +205,7 @@ AS $function$ select E'
       and coalesce(cardinality(p_districts), 0) <= 500
       and coalesce(cardinality(p_types), 0)     <= 200
       and coalesce(cardinality(p_platforms), 0) <= 100
-      and coalesce(cardinality(p_tables), 0)    <= 200
+      and coalesce(cardinality(p_tables), 0)    <= 500
       and (p_region_ids is null or s.region_id = any(p_region_ids))
       and (nullif(p_area_min,0) is null or (s.area_m2 is not null and s.area_m2 >= p_area_min))
       and (nullif(p_area_max,0) is null or (s.area_m2 is not null and s.area_m2 <= p_area_max))
@@ -257,4 +273,4 @@ AS $function$ select E'
       and (p_rating_min is null or s.rating >= p_rating_min)
       and (p_reviews_min is null or s.reviews_count >= p_reviews_min)
       and (p_unit_subtypes is null or cardinality(p_unit_subtypes) = 0 or s.unit_subtype_ar = any(p_unit_subtypes))
-' $function$
+'::text $function$

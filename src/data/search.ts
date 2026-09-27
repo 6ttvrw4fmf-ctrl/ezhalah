@@ -745,7 +745,13 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
   return { kind: 'totalBuy', echo: `${sar} ${grouped(amount)}` };
 }
 
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number };
+// `rotationSeed` — THE ORDER THIS SET WAS CUT FROM (ops_incident #796, 2026-09-26). The server's
+// ORDER BY is keyed on p_rotation_seed, so `pageOffset` only names a position within ONE seed's
+// total order: paging this set with a different seed skips rows nobody will fetch again. It rides
+// here, beside the cursor it is only meaningful next to, rather than in an app-level slot a later
+// (or CANCELLED) search can overwrite. Optional because a transcript persisted before this field
+// existed carries none; see loadMoreListings for what that falls back to.
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number; rotationSeed?: string };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
@@ -1643,5 +1649,14 @@ function noResultsSuggestion(q: SearchQuery, pools: Pools): string {
   if (q.location && countWith({ location: '' }) > 0) {
     return t("No matches in that city — but the same search has results elsewhere in Saudi Arabia. Want me to broaden it Kingdom-wide?");
   }
-  return t("Nothing matches that exact combination right now. Want me to broaden the search and try again?");
+  return t(NO_RESULTS_GENERIC_FALLBACK_EN);
 }
+
+// The untranslated English key behind noResultsSuggestion()'s LAST branch — the true generic
+// catch-all reached only when none of the 8 more specific diagnoses above apply. Exported so the
+// render layer (agent.tsx) can detect exactly this one branch and swap in the owner's 80-message
+// rotation (src/data/noResultsRotation.ts) — the other 8 branches give an earned, specific reason
+// and are left exactly as they render today. Kept as the untranslated key (not the Arabic/English
+// text) so the comparison at the call site works under either locale via the same `t()`.
+export const NO_RESULTS_GENERIC_FALLBACK_EN =
+  "Nothing matches that exact combination right now. Want me to broaden the search and try again?";

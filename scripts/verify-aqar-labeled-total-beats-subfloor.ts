@@ -44,6 +44,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { replayFunction } from './lib/rpcReplay.ts';
 
 const MIGRATIONS_DIR = join(import.meta.dirname, '..', 'supabase', 'migrations');
 const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
@@ -55,19 +56,20 @@ const ok = (label: string, pass: boolean, detail = '') => {
 };
 
 /** Body of the LAST `CREATE OR REPLACE FUNCTION public.<name>` across all migrations. */
+// BLIND-GUARD REPAIR, 2026-09-24 (routine-10-barrier). This used to bake the tag `$function$` into
+// the pattern, so a definition written with the ordinary `$$` was simply NOT FOUND. That fails
+// closed — `body` is '' and the `body.length > 0` check below goes red — which sounds harmless and
+// is not: the barrier would then be RED because some unrelated migration changed its quoting style,
+// and a guard that cries wolf is a guard someone lowers. `replayFunction()` (scripts/lib/rpcReplay.ts)
+// reads the ACTUAL tag, requires its matching close, replays later needle-edits, and reports what it
+// could not interpret in `unresolved` — which is a failure here and never a silent pass. Five sibling
+// barriers had each hand-rolled a broken version of this reader beside the correct shared one.
 function lastBodyOf(name: string): string {
-  const re = new RegExp(
-    `create\\s+or\\s+replace\\s+function\\s+public\\.${name}\\b[\\s\\S]*?\\$function\\$([\\s\\S]*?)\\$function\\$`,
-    'gi',
-  );
-  let body = '';
-  for (const f of files) {
-    const sql = readFileSync(join(MIGRATIONS_DIR, f), 'utf8');
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(sql)) !== null) body = m[1];
-    re.lastIndex = 0;
+  const played = replayFunction(MIGRATIONS_DIR, name);
+  if (played.unresolved.length > 0) {
+    ok(`every migration touching ${name}() was interpretable`, false, played.unresolved.join(' · '));
   }
-  return body;
+  return played.body ?? '';
 }
 
 console.log('verify-aqar-labeled-total-beats-subfloor: an explicit «السعر» total outranks a');

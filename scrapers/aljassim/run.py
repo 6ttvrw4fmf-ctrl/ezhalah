@@ -758,6 +758,9 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
             stats["per_sqm"] += 1
         if ix["price"]["amount"] is not None and not row["additional_info"].get("price_basis"):
             stats["unlabelled_price"] += 1
+        if detail:
+            # parse_detail() is non-empty only when /{nid}'s own <article> carries nid.
+            db.mark_direct_alive(row, oracle="aljassim.detail_page.article_nid")
         (com if category == "commercial" else res).append(row)
         stats["rows"] += 1
         if limit and stats["rows"] >= limit:

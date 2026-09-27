@@ -42,23 +42,36 @@ export const AF_REVEAL_MAX = 400;
 export const CASCADE_MAX = 12;
 
 export function initialReveal(args: {
-  fetched: number; honestTotal: number | null; firstPage: number; stopAt: number;
+  fetched: number; honestTotal: number | null; stopAt: number;
   /** Distinct platforms with a genuine match in this result set (see distinctPlatformCount). */
   platforms?: number;
   /** TRUE when this results turn was produced by a completed Advanced Filter round. */
   afCompleted?: boolean;
 }): number {
   const fetched = Math.max(0, Math.floor(args.fetched));
-  const { honestTotal, firstPage, stopAt } = args;
+  const { honestTotal, stopAt } = args;
   if (honestTotal != null && honestTotal <= stopAt) return fetched;
   if (args.afCompleted) return Math.min(fetched, AF_REVEAL_MAX);
-  // THE FIRST SCREEN IS AS WIDE AS THE MARKET (owner PERMANENT rule 2026-09-02).
-  // firstPage is a FLOOR, never a cap: reveal max(10, distinct matching platforms) so every platform
-  // with a genuine match gets a slot before any platform repeats. Both ordering layers already emit
-  // one row per platform first, so this size alone delivers the coverage — measured on production
-  // 2026-09-02, the old fixed 10 was erasing 3 platforms from «فلل للبيع في الرياض» (13 matched),
-  // 8 from «الرياض / كل السكني» (18), and 23 from «كل السكني للبيع» (33 matched).
-  // Still bounded by `fetched`, so it can never claim a row the eligible set does not contain.
+  // THE FIRST SCREEN SHOWS EXACTLY ONE CARD PER MATCHING PLATFORM, NO PADDING (owner PERMANENT
+  // rule 2026-09-25, reversing the 2026-09-02 rule below). The 2026-09-02 rule floored the reveal
+  // at 10 so a 1-2-platform match still filled a screen — but with few platforms, those extra
+  // slots could only come from whichever matching platform had more inventory (round-robin hands
+  // the big platform every leftover slot once the small one runs out of rows to contribute). The
+  // owner judged that unfair: a platform's SIZE should never buy it more first-screen presence
+  // than a platform with just one genuine match. `Math.max(1, ...)` below is a SAFETY floor, not a
+  // fairness floor — it only guards a blank first screen if platform-counting ever miscounts as 0
+  // while real matches exist; it never pads beyond the platforms actually present. «عرض المزيد»
+  // is unchanged and still reveals each platform's real depth (src/data/resultCount.ts) — this
+  // only shortens what arrives BEFORE that first tap.
+  //
+  // ORIGINAL 2026-09-02 RULE, for history: the reveal used to be `max(10, platforms)` because a
+  // fixed cap of 10 (before that date) was erasing platforms beyond the 10th entirely — measured
+  // on production, it dropped 3 platforms from «فلل للبيع في الرياض» (13 matched), 8 from
+  // «الرياض / كل السكني» (18), and 23 from «كل السكني للبيع» (33 matched). That coverage problem
+  // is solved a different way now: revealing every matching platform (instead of padding TO 10)
+  // already guarantees none is dropped, so the historical floor is no longer needed for coverage
+  // either — `platforms` alone (both ordering layers already emit one row per platform first)
+  // delivers full coverage whether that number is 2 or 33.
   const platforms = Math.max(0, Math.floor(args.platforms ?? 0));
-  return Math.min(Math.max(firstPage, platforms), fetched);
+  return Math.min(Math.max(1, platforms), fetched);
 }

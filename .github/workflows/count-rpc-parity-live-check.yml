@@ -23,7 +23,13 @@ concurrency:
 jobs:
   count-parity:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 was the cap until 2026-09-27. PACE_BUDGET_MS (afJourneyPacing.ts) is also 10 minutes, so
+    # waiting for production to leave a degraded window could consume this entire job and the runner
+    # killed it before the count check could print its own `NOT EXERCISED` verdict — 7 of 12 runs
+    # died that way at ~621s, silently, because a timeout-kill reports as `cancelled` (NO_VERDICT).
+    # Keep (sum of CHECK_DEADLINE_SECONDS in this job) + 180s <= timeout-minutes * 60 — pinned by
+    # scripts/verify-live-check-deadline-beats-its-job-timeout.ts.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,6 +40,7 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          CHECK_DEADLINE_SECONDS: '900'
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-count-rpc-parity-live.ts
 
       # Trending Cities must stay fast AND exact for a NARROWED user (2026-08-27). `if: !cancelled()`

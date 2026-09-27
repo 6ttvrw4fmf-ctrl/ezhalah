@@ -76,9 +76,10 @@ function rows(types: string[], cycles = 3): Listing[] {
   return orderByScope(ranked, 'region').map((r) => r.l);
 }
 const ids = (l: Listing[]) => l.map((r) => r.id).join(',');
-// Exactly agent.tsx's call: floor 10, widened to the distinct matching platforms, capped by fetched.
+// Exactly agent.tsx's call: exactly the distinct matching platforms, capped by fetched (owner
+// PERMANENT rule 2026-09-25 — no floor; src/lib/initialReveal.ts has the full history).
 const firstScreen = (drawn: Listing[]) =>
-  drawn.slice(0, initialReveal({ fetched: drawn.length, honestTotal: 63_653, firstPage: 10, stopAt: 100,
+  drawn.slice(0, initialReveal({ fetched: drawn.length, honestTotal: 63_653, stopAt: 100,
     platforms: distinctPlatformCount(drawn) }));
 
 // ── A. شراء+إيجار: the pool IS the fetched order, so the first screen is one card per platform ───

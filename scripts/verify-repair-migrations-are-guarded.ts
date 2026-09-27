@@ -48,6 +48,28 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // routine #11, 2026-09-24 (ops_incident). Resets wasalt missing_count in {1,2} to 0 — every one of
+  // those strikes was produced by the enum-rollup clock bug (rollup_started_at() in
+  // scrapers/wasalt/liveness.py), not by real absence, and nothing has self-healed a wasalt row since
+  // 2026-09-12 (the control-group guard aborted every flip on every run since). Same two-migrations
+  // shape as the ksaaqar precedent below: the repair had to run before its watcher could exist.
+  //
+  // What watches the class: mon_detect_wasalt_liveness_flips_stalled(), created in
+  // 20260924211725 (dedup-key fix in 211811, a missing-column fix in 211837), rostered into
+  // mon_run_all_detectors() in 20260924211857 via the idempotent anchor splice (raises rather than
+  // no-ops if its anchor moved; reachability asserted in the same migration). It fires when the last
+  // 3 wasalt enum-strike runs all aborted every flip — the exact standing shape the clock bug
+  // produced — which is a stronger guarantee than re-asserting THIS specific value reset: it catches
+  // any future cause of the same "checker running, striking, never confirming" failure, not only a
+  // recurrence of this one clock bug. Not re-asserted because re-running this reset after the pipeline
+  // is healthy again would blank real, freshly-earned strikes.
+  '20260924210249_repair_wasalt_clock_bug_false_strikes_mc1_mc2.sql':
+    'watched by its companion 20260924211725_create_wasalt_liveness_flips_stalled_detector_fn.sql '
+    + '(rostered in 20260924211857_register_wasalt_liveness_flips_stalled_detector.sql), which fires '
+    + 'mon_detect_wasalt_liveness_flips_stalled() whenever 3 consecutive wasalt enum-strike runs all '
+    + 'abort every flip — the standing shape of the bug this repair undoes, not just its one instance. '
+    + 'Not re-asserted because re-running the reset after the pipeline recovers would blank real, '
+    + 'freshly-earned strikes',
   // The two-migrations-minutes-apart shape (see the identical entries below). The repair blanks
   // EVERY ksaaqar price: its parser read a value from a static sidebar of five unrelated ads that
   // is byte-identical on every page of the site, so 685 of 720 priced rows shared seven values and

@@ -119,3 +119,45 @@ export async function fetchRetryingSchemaCacheReload(
     return { status: r.status, ok: r.ok, body, headers: r.headers };
   }, opts);
 }
+
+/**
+ * A Response-SHAPED view of the same driver, so an existing call site adopts it by changing ONE
+ * identifier: `await fetch(url, init)` -> `await postgrestFetch(url, init)`.
+ *
+ * WHY THIS EXISTS (routine #10, 2026-09-26, ops_incident #794). The eighteen alert-raising live
+ * checks in the fleet remainder each hand-roll a tiny local `rpc()` around `await fetch(...)` and
+ * then read `res.ok`, `res.status`, `await res.json()` or `res.headers.get('content-range')`. Asking
+ * each of them to switch to the `Probe` shape would be eighteen different downstream edits on
+ * eighteen other routines' surfaces — a diff big enough that the honest outcome would have been to
+ * baseline them all instead. This keeps adoption a one-identifier change, which is the difference
+ * between a ratchet that starts at 0 and one that starts at 18.
+ *
+ * The body is DRAINED ONCE by the driver and replayed, so `text()`/`json()` are idempotent here
+ * (unlike a real `Response`, which throws on a second read). `json()` still throws on a non-JSON
+ * body, exactly as `Response.json()` does — a malformed answer must not become a silent value.
+ *
+ * It adds no permissiveness of any kind: `retryingSchemaCacheReload` retries ONLY a 503 whose JSON
+ * `code` is exactly PGRST002, is bounded, and returns the LAST probe as-is.
+ */
+export type RetriedResponse = {
+  status: number;
+  ok: boolean;
+  headers: Headers;
+  text: () => Promise<string>;
+  json: () => Promise<unknown>;
+};
+
+export async function postgrestFetch(
+  url: string,
+  init: RequestInit = {},
+  opts: RetryOpts = DEFAULT_RETRY,
+): Promise<RetriedResponse> {
+  const p = await fetchRetryingSchemaCacheReload(url, init, opts);
+  return {
+    status: p.status,
+    ok: p.ok,
+    headers: p.headers,
+    text: async () => p.body,
+    json: async () => JSON.parse(p.body) as unknown,
+  };
+}

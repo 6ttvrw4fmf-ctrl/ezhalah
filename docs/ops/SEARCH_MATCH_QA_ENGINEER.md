@@ -810,6 +810,58 @@ appears broken.
     defect and one real one from the same journey, and stopping at "the harness was wrong" would have
     shipped the real one straight past.
 
+20. **A check's SETUP must resolve its scope in the SAME terms as the COMPARISON it feeds — the two
+    halves can each be correct while only the relationship between them is wrong** (found 2026-09-26,
+    `ops_incident` #782). The layer-5 oracle resolves each requested حي to the label the index really
+    serves (trap 15) and then compares that label exactly. The RESOLUTION ran in
+    `scope = &city_ar=in.("الاحساء")` — the LABEL arm alone — while the COMPARISON it handed those
+    labels to used all three city arms, `city_ar` **and** `city_id` **and** `match_city_ids &&`. That
+    third arm is the one carrying the owner-approved al_ahsa cluster, and `dbFilterFromRequest` had
+    been taught all three on 2026-09-01 after a label-only filter produced eleven false COUNT
+    MISMATCHes. The resolution step was never given the same treatment, for 25 days.
+
+    Measured on trending-district الاحساء/بيع/«الدانة»: الاحساء (city_id 3677) renders that token
+    «الدانة» (181 production_ready rows) and الهفوف (12) renders the SAME token «حي الدانة» (69, all
+    carrying `match_city_ids ⊇ {3677}`). `servedLabelExists('حي الدانة', '&city_ar=in.("الاحساء")')`
+    is FALSE, so the variant machinery that exists for exactly this resolved «الدانة» alone. The sweep
+    then reported `RPC 157 vs independent DB 113` and **«44 served listing(s) fail the user's own
+    filters»** — forty-four healthy listings named as defects, against a perfectly correct product.
+
+    Sharper than a missed variant, and this is the part worth remembering: **the app had already sent
+    BOTH labels** (`p_districts: ["الدانة","حي الدانة"]`) and the narrow resolution scope *deleted*
+    one. A setup step that "normalises" its input can silently discard something the product supplied
+    correctly, and every downstream layer then agrees with the reduced version.
+
+    The fix is ONE definition of the scope (`cityScopeArm`, used by both the filter and the
+    resolution), never normalising the token in the oracle — that would reimplement
+    `norm_district_tok` and turn agreement into self-confirmation, which is the whole reason the الحي
+    arm compares served labels. Proven against production with the real captured request: old scope →
+    113, new scope → 157, RPC → 157. Pinned by
+    `scripts/verify-live-sweep-district-scope-spans-the-cluster.ts`, mutation-proven on both halves
+    (degrade the rule → the executed checks go red; rebuild the label-only scope at the call site →
+    the call-site checks go red).
+
+21. **A SUBSTRING equality test cannot judge a prefix, and nine production city pairs are prefixes**
+    (found 2026-09-26, `ops_incident` #783 — the open second half of #733). `assertChain` judged
+    INTENT→UI with `!ui.city.includes(intent.city) && !intent.city.includes(ui.city)`, and
+    `'الخبراء'.includes('الخبر')` is TRUE. A journey that asked for الخبر (15,254 production_ready
+    rows) and actually searched الخبراء (17) reported `ok`, and `ops_qa_coverage_ledger` recorded
+    coverage for a city that was never searched. Measured the same day over distinct
+    production_ready cities: الخبر/الخبراء 15,254/17 · الجبيل/الجبيلة 1,229/29 · صبيا/صبياء 256/10 ·
+    بيش/بيشة 162/160 · الخرماء · السلام · العمار · الجلة · القاع.
+
+    **Why it survived a fix that named it.** Routine #9 fixed which option `pickCity` clicks
+    (`e2e/live-sweep/cityOption.mjs`) and recorded that the guard itself «remains blind by
+    construction» — then justified that module's prefix FALLBACK with *«let the caller's own INTENT→UI
+    comparison be the thing that judges the result»*. The fallback was delegated to precisely the test
+    that could not judge a prefix, eleven lines under a comment documenting that blindness. When a fix
+    delegates its residual risk to another guard, go READ that guard.
+
+    Compare EXACT normalised names (`cityIntentMismatch`, `cityLookupKey`) — normalised so أ/إ/آ,
+    ة/ه, ى/ي, tatweel and spacing are not false defects, and never with a fold that could SHORTEN a
+    name, or the prefix pairs collapse back into equality. Pinned and mutation-proven by
+    `scripts/verify-live-sweep-city-intent-is-exact.ts` over all nine real pairs, both directions.
+
 ## 42. THE VISIBLE OUTPUT CONTRACT (owner permanent rule, 2026-08-22)
 
 > **What the user sees must match the actual listing/search truth exactly, in clean Arabic, with no

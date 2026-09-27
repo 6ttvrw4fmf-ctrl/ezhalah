@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
@@ -9,6 +9,7 @@ import { autoTitleForQuery, autoTitleForPrompt, canAutoRetitle, type TitleSource
 import { dismissalOutlivesTransition } from '@/lib/authPopupBehavior';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
+import { newSearchSeed } from '@/lib/rotationSeed';
 import { resolveLocation, ensureLocationIndex } from '@/data/locations';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
@@ -18,7 +19,7 @@ import { restoreChat, persistedOnly, LOCAL_TRANSCRIPT_ENTRIES, type PersistedCha
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, chatsToDelete, type ChatMeta } from '@/lib/chatSync';
 import { mergeOne, pickTranscript, mayPromoteTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { PROBE_FAILED, isProbeFailure } from '@/lib/afProbe';
-import { buildSyncedName } from '@/lib/nameSync';
+import { buildSyncedName, type BilingualName } from '@/lib/nameSync';
 import { identifyUser } from '@/lib/observability';
 import { forgetSupportDraft } from '@/lib/supportDraft';
 import { LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
@@ -89,7 +90,10 @@ type AppState = {
   // `failed` = the backend page errored. Nothing advanced: `nextOffset` and `hasMore` come back
   // exactly as they went in, so the caller re-offers «عرض المزيد» on the same page instead of
   // recording a failure as "that was the last page".
-  loadMoreListings: (q: SearchQuery, offset: number) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
+  // `seed` = the result set's own `rotationSeed` (ops_incident #796). The caller passes the seed of
+  // the SET it is paging, not the app's most recent one, so a later or cancelled search cannot
+  // re-key this walk's server ORDER BY mid-flight.
+  loadMoreListings: (q: SearchQuery, offset: number, seed?: string) => Promise<{ listings: Listing[]; nextOffset: number; hasMore: boolean; failed?: boolean }>;
   dataSource: DataSource;
   // Auth. SEARCH IS FREE, ALWAYS (owner rule 2026-08-15, retiring the PRD §9 gate): a guest can run
   // unlimited searches; sign-in only adds persistence (saved history/language). The old `gated`
@@ -98,6 +102,15 @@ type AppState = {
   user: AuthUser | null;
   signIn: (u: AuthUser) => void;
   updateUser: (patch: Partial<AuthUser>) => void;
+  // THE ONE WAY A TRANSLITERATION RESULT REACHES THE USER (ops_incident #319/#599/#648 class,
+  // routine #8 2026-09-24). `buildSyncedName()` is a network round trip, so two renames in quick
+  // succession put two continuations in flight and the SLOWER one lands last. Applying it with a
+  // plain `updateUser` therefore reverts the display name — and the avatar initial — to a value the
+  // user has already replaced. The staleness check lives HERE, in the single writer both call sites
+  // route through, rather than in each caller: `synced.name` is the value the patch was computed
+  // for, so a patch whose name is no longer the current one is dropped. A caller cannot forget a
+  // guard it does not have to write.
+  applySyncedName: (synced: BilingualName & { initials?: string }) => void;
   signOut: () => void;
   // Permanently delete the account: delete the auth user on the SERVER, then wipe ALL on-device
   // state (history, parked message, saved language) from both memory AND storage. Distinct from
@@ -328,6 +341,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSignInCardDismissed(false);
   }, [user]);
 
+  // THE SINGLE GUARDED WRITER for a `buildSyncedName()` result — see the context type declaration.
+  // Both continuations that exist (this file's backfill effect below, and AccountMenu's rename) route
+  // through this one function, so the staleness check cannot be present at one call site and absent
+  // at the other. That asymmetry was the defect: this effect carried the check and the rename did
+  // not, so a rename's slower transliteration overwrote a newer name.
+  const applySyncedName = useCallback((synced: BilingualName & { initials?: string }) => {
+    setUser((u) => (u && u.name === synced.name ? { ...u, ...synced } : u));
+  }, []);
+
   // Backfill the missing-script spelling of the user's name (once per name) so both stay synced.
   useEffect(() => {
     const nm = user?.name?.trim();
@@ -335,11 +357,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (nameSyncRef.current === nm) return;
     nameSyncRef.current = nm;
     let cancelled = false;
-    buildSyncedName(nm).then((synced) => {
-      if (!cancelled) setUser((u) => (u && u.name === synced.name ? { ...u, ...synced } : u));
-    });
+    buildSyncedName(nm).then((synced) => { if (!cancelled) applySyncedName(synced); });
     return () => { cancelled = true; };
-  }, [user?.name, user?.nameEn, user?.nameAr]);
+  }, [user?.name, user?.nameEn, user?.nameAr, applySyncedName]);
 
   // Language persistence is auth-gated. A SIGNED-IN user keeps their chosen/detected language across a
   // refresh. A GUEST is ALWAYS Arabic-first on a fresh load — typing an English letter in the filter,
@@ -509,12 +529,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // by id — the newer side (per-entry activity stamp) wins; server-only chats appear, local-only
   // chats stay and get pushed. Transcripts are NOT pulled here (metas stay small) — hydrateTranscript
   // fetches one lazily when its chat is opened.
+  // ── THE ACCOUNT SCOPE TOKEN (ops_incident #693, routine-8 2026-09-25) ────────────────────────────
+  // The sync refs below are guards of the shape "have I already done this for this account?", and
+  // they were keyed on `historyKey(user.sub)` ALONE. An account key is not a session: it is identical
+  // before and after a sign-out, so every one of those guards silently answered a question nobody
+  // asked it — "same account" instead of "same signed-in session". Two consequences, both real:
+  //
+  //   · An in-flight `loadChatMetas()` (bounded at 15s, plus a 1.2s retry and a second 15s) that
+  //     resolved AFTER sign-out re-checked `serverMergedRef`, which sign-out never reset, passed its
+  //     own guard, and wrote the previous account's 50 chat metas into the live history state of the
+  //     GUEST session that replaced it.
+  //   · `serverMergedRef` never being reset made "merge once per account" really mean "merge once per
+  //     account PER PAGE LOAD": signing out and back into the SAME account in one tab skipped the
+  //     server pull entirely, so a chat created on another device since the last pull stayed missing
+  //     from the sidebar until a full reload — against the owner 2026-08-25 rule that conversations
+  //     survive "logging back in on any device".
+  //
+  // THE FIX IS NOT A LONGER RESET LIST IN signOut(). This is the EIGHTH recurrence of one class
+  // (ops_incident #211/#271/#319/#341/#599/#648/#692/#693 — an async continuation writing state that
+  // belongs to a context the user has already left), and #319's own repair was a hand-maintained
+  // reset list that turned out to be a subset of what needed resetting. A list that must be extended
+  // by hand every time a ref is added is the defect, not the cure.
+  //
+  // So the scope token carries a SEQUENCE NUMBER that advances on every account transition — sign-in,
+  // sign-out, and account switch alike — and `accountScopeRef` always holds the CURRENT one. Every
+  // guard below compares against `accountScopeRef.current` AT CONTINUATION TIME (the #648 lesson:
+  // re-check the cohort you are keyed on, not merely the value you can see), so work started in a
+  // session the user has left cannot pass, and a new session cannot inherit a previous one's answer.
+  // Nothing has to be remembered at sign-out: signOut() and deleteAccount() need no change, and a
+  // ref added here tomorrow is scope-safe by construction if it is compared the same way.
+  //
+  // Keyed on `user?.sub`, never on the user OBJECT: a profile patch (a rename via updateUser) makes a
+  // new object without changing who is signed in, and must not invalidate a merge that is still true.
+  const accountScopeRef = useRef<string | null>(null);
+  const scopeSeqRef = useRef(0);
+  useEffect(() => {
+    scopeSeqRef.current += 1;
+    accountScopeRef.current = user ? `${historyKey(user.sub)}#${scopeSeqRef.current}` : null;
+  }, [user?.sub]);
+
   const serverMergedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!authChecked || !user || !supabase) return;
-    const key = historyKey(user.sub);
-    if (serverMergedRef.current === key) return;
-    serverMergedRef.current = key;
+    const scope = accountScopeRef.current;
+    if (!scope) return;
+    if (serverMergedRef.current === scope) return;
+    serverMergedRef.current = scope;
     // `null` from loadChatMetas means the LOAD FAILED — never "this account has no chats" (an empty
     // account resolves as `[]`). A single transient blip used to strand the whole session on the
     // local-only list with no retry and no sign anything was missing, because `serverMergedRef` was
@@ -528,7 +588,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return loadChatMetas();
     };
     pull().then((rows) => {
-      if (!rows || serverMergedRef.current !== key) return;
+      // LIVE re-check, not a captured one: `accountScopeRef.current` is what the app is showing NOW.
+      // A sign-out makes it null and an account switch makes it a different token, so a pull that
+      // outlived its session is discarded here instead of landing on whoever replaced it.
+      if (!rows || accountScopeRef.current !== scope) return;
       setHistory((h) => {
         const byId = new Map(h.map((it) => [it.id, it] as const));
         for (const r of rows) {
@@ -546,7 +609,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Baseline AFTER the merge lands so the first push diff is against what the server now holds.
       syncBaselineRef.current = new Map(rows.map((r) =>
         [r.id, syncKeyOf({ ...r.meta, id: r.id } as unknown as HistoryItem)] as const));
-      syncReadyRef.current = key;
+      syncReadyRef.current = scope;
     }).catch(() => { /* offline → local-only session; next sign-in retries */ });
   }, [authChecked, user]);
 
@@ -571,9 +634,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const pendingDeleteRef = useRef<Set<string>>(new Set());
   const syncReadyRef = useRef<string | null>(null);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // THE CURRENT SEARCH'S ROTATION SEED (owner rule 2026-09-26 — "I refresh, the same exact one
+  // shouldn't show عقار first"). Minted fresh in runQuery for every new search, then reused
+  // UNCHANGED by every «عرض المزيد» page of that same search: the server's ordering is a pure
+  // function of this seed, so holding it steady is exactly what keeps paging duplicate-free and
+  // gap-free, while a new search gets a new one. An Advanced Filter round re-runs the search
+  // through runQuery, so it mints its own seed and its Show More inherits it.
+  //
+  // Starts UNDEFINED rather than minting at render: a load-more that somehow precedes any search
+  // then passes undefined, and the RPC call site falls back to the device+week seed — a stable,
+  // correct order, just not a per-search one. (Minting here instead would also break
+  // verify-account-scope-invalidates-sync-continuations.ts, which lifts this region of the file out
+  // and executes it against stubs, where the generator is not in scope.)
+  const searchSeedRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!user || !supabase) return;
-    if (syncReadyRef.current !== historyKey(user.sub)) return; // push only after the pull merged
+    // Push only after the pull merged — and only after the pull that merged for THIS session. Keyed
+    // on the account alone, this armed the push against a baseline a previous session had built (see
+    // the scope-token note above), so a sign-out/sign-in round trip could write through against a
+    // server state nobody had re-read. `syncBaselineRef` needs no reset of its own for the same
+    // reason: it is only ever reachable behind this gate, and the pull that opens the gate replaces
+    // it wholesale.
+    if (syncReadyRef.current !== accountScopeRef.current) return;
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(() => {
       const items = historyRef.current;
@@ -760,6 +842,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       signIn: (u) => setUser(u),
       updateUser: (patch) => setUser((u) => (u ? { ...u, ...patch } : u)),
+      applySyncedName,
       signOut: () => {
         // Drop the session from MEMORY so the next guest never sees the previous user's chats: clear
         // history, search count, the open chat, and any parked message. This account's OWN saved
@@ -871,11 +954,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // became unbounded (PR #1267): windowing an in-memory array can't survive a real "next 100"
         // server page. The new seed varies per device from its very first search and is stable
         // across an entire browse/pagination walk by construction (same seed → same server ORDER BY).
-        const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal });
+        //
+        // 2026-09-26: the seed is now minted PER SEARCH here (not derived from device+week at the
+        // RPC call site) and carried into every «عرض المزيد» page via searchSeedRef, so a repeat of
+        // the same search returns a different mix of houses and a different platform in front —
+        // while one browse walk stays internally stable.
+        //
+        // 2026-09-26 (ops_incident #796): the seed also RIDES OUT on the result. searchSeedRef alone
+        // could not carry this promise — it is one app-level slot, written here before the fetch is
+        // known to succeed, so any later runQuery re-keys the ORDER BY of a walk still on screen. The
+        // one that proved it is a search the user CANCELS: Stop leaves the earlier results block
+        // rendered and still pageable (it only drops `status` bubbles), while this line has already
+        // replaced the seed that block's page 1 was cut from. Measured live on الرياض/إيجار (42,101
+        // matches): the next «عرض المزيد» delivered 439 of the 500 cards it owed and left 434 the walk
+        // owed unfetched behind an advancing cursor. The seed belongs to the SET, so it travels with it.
+        searchSeedRef.current = newSearchSeed();
+        const searchSeed = searchSeedRef.current;
+        const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeedRef.current });
         const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null });
         // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
         // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
-        const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal };
+        const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal, rotationSeed: searchSeed };
         // STOP-BUTTON GUARD (owner 2026-08-18): "A cancelled request must never later write results
         // into the UI or history." fetchListingsForQuery already aborts the underlying network calls
         // on `signal`, but a response can still be mid-flight (or already back) at the exact instant
@@ -968,13 +1067,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Load More (owner 2026-07-08): fetch the NEXT real page of matching listings beyond `offset`
       // (filter-first, recency order) so broad searches page through the FULL set. Returns the ranked
       // page + the advanced cursor; the caller appends (de-duped) to the shown list.
-      loadMoreListings: async (q: SearchQuery, offset: number) => {
+      loadMoreListings: async (q: SearchQuery, offset: number, seed?: string) => {
         // ONE definition, shared with the «عرض المزيد» drain budget that is derived from it
         // (src/data/resultCount.ts). It was a second, private `500` here until 2026-09-12, while
         // agent.tsx's page-count backstop was sized in its comment against 1,500 — so the guard
         // covered 25,000 rows while believing it covered 75,000.
         const PAGE_MORE = LOAD_MORE_PAGE_SIZE;
-        const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE });
+        // THE SAME SEED THE FIRST PAGE USED (2026-09-26). Re-minting here — or letting the RPC call
+        // site fall back to its own default — would re-shuffle the server ORDER BY between pages,
+        // which is exactly how «عرض المزيد» starts repeating cards and skipping others. Rotation
+        // belongs to the SEARCH, not to the page.
+        //
+        // AND THE SEARCH IS THE ONE BEING PAGED, NOT THE LAST ONE THE APP RAN (ops_incident #796,
+        // 2026-09-26). searchSeedRef is a single app-level slot that every runQuery overwrites before
+        // it knows whether its own fetch will survive — so reading it here paged the walk on screen
+        // with a seed belonging to some OTHER search, and the proven case is a search the user
+        // CANCELLED (Stop keeps the earlier results block rendered and pageable; the seed had already
+        // moved). Measured live on الرياض/إيجار, 42,101 matches, seed swapped between offset 0 and
+        // offset 500: the press added 439 of the 500 cards it owed, 61 already-shown rows came back and
+        // were de-duped away, and 434 rows the walk owed were delivered by neither page — unreachable
+        // once the cursor moved to 1000. `seed` is the result set's own; searchSeedRef remains the
+        // fallback ONLY for a transcript persisted before SearchResult carried one, which is exactly
+        // today's behaviour for those and strictly better for everything else.
+        const { listings: rows, pageCandidates: cand } = await fetchListingsForQuery(q, { offset, limit: PAGE_MORE, rotationSeed: seed ?? searchSeedRef.current });
         // A FAILED PAGE IS NOT PROGRESS (defect hunt-2026-09-04:pagination:06). `rows === null` is
         // this fetch's backend-error signal — the SAME one page 0 hands runSearch as `fetchFailed`
         // rather than a second invention. It used to be swallowed by `rows ?? []`, which made an

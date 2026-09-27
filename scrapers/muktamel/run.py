@@ -333,9 +333,11 @@ def _note(reason: str) -> None:
 
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────────
-def fetch_one(listing_id: int) -> Optional[tuple[int, dict]]:
-    """Fetch + eval one listing id. Returns (id, parsed_nuxt) for LIVE listings, else None.
-    Live == final URL not /404 AND offer.isAvailable truthy."""
+def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
+    """Fetch + eval one listing id. Returns (id, parsed_nuxt, own) for LIVE listings, else None.
+    Live == final URL not /404 AND offer.isAvailable truthy. `own` is True when the request LANDED
+    on this id's own /real-estates/<id> (a removed ad redirects to /404, measured) — the identity
+    half of a direct-alive stamp."""
     url = f"{BASE}/real-estates/{listing_id}"
     s = _session()
     html = None
@@ -359,6 +361,8 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict]]:
             _note("redirect_404")
             return None
         html = r.text
+        landed = re.search(r"/real-estates/(\d+)", str(r.url))
+        own = bool(landed and landed.group(1) == str(listing_id))
         break
     if not html:
         # Every attempt failed — record the LAST concrete reason, not just "no html". A network
@@ -380,7 +384,7 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict]]:
         _note("not_available_or_zero_price")
         return None
     _note("live")
-    return listing_id, parsed
+    return listing_id, parsed, own
 
 
 # ── Liveness oracle: the ONLY thing allowed to kill a muktamel row ───────────────
@@ -774,12 +778,16 @@ def main() -> int:
             for result in ex.map(fetch_one, ids):
                 if not result:
                     continue
-                lid, parsed = result
+                lid, parsed, own = result
                 row, cat = map_listing(lid, parsed)
                 if not row:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                if own:
+                    # This id's own page, not redirected to /404, hydrated offer with isAvailable and
+                    # a price: the crawl's own definition of live, read directly.
+                    db.mark_direct_alive(row, oracle="muktamel.real_estate_page.offer_isAvailable")
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 seen += 1
@@ -807,6 +815,18 @@ def main() -> int:
         _canary_ids.extend(int(r["ad_number"][2:]) for r in (res + com)
                            if r.get("ad_number", "")[2:].isdigit())
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="muktamel_residential_listings", com_table="muktamel_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Muktamel")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("muktamel_residential_listings", res),
                                ("muktamel_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Muktamel",

@@ -316,7 +316,8 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     return row, category
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       seen_ad_numbers: list[str]) -> None:
     """Make source-confirmed sold/rented rows survive the nightly auto_recover_false_inactive().
 
     OBSERVED HERE, NOT THEORISED (2026-09-05): the first successful run landed at 05:20 UTC —
@@ -331,8 +332,18 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     active=true rows. When a listing is genuinely relisted, its next upsert carries active=true
     and the upsert's own missing_count=0 reset applies, so the pin only ever describes rows the
     source calls sold on THIS crawl.
+    
+
+    The `seen_ad_numbers` half is what makes this oracle three-valued instead of one-way: the same
+    status field that publishes a removal also publishes the reversal, and until 2026-09-23 the
+    reversal was read, used, and thrown away — leaving ops_lifecycle_false_resurrection() with a
+    GONE latest verdict that no amount of correct behaviour could clear. See scrapers/common/
+    sold_pin.py. It writes evidence only: never active, never missing_count, never
+    last_verified_alive_at.
     """
-    sold_pin.pin_source_confirmed_gone(table, ad_numbers, oracle="alta.sold_pin.property_status")
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers, oracle="alta.sold_pin.property_status", seen_ad_numbers=seen_ad_numbers,
+    )
 
 
 def main() -> int:
@@ -383,10 +394,10 @@ def main() -> int:
         if com:
             db.upsert_alta_commercial_batch(com)
         # Immediately after the upsert (which reset missing_count to 0) — see _pin_sold_inactive.
-        if sold_res:
-            _pin_sold_inactive("alta_residential_listings", sold_res)
-        if sold_com:
-            _pin_sold_inactive("alta_commercial_listings", sold_com)
+        _pin_sold_inactive("alta_residential_listings", sold_res,
+                           [r["ad_number"] for r in res])
+        _pin_sold_inactive("alta_commercial_listings", sold_com,
+                           [r["ad_number"] for r in com])
 
         if args.limit:
             print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial "

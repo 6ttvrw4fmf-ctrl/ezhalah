@@ -48,7 +48,18 @@ const roster = read(rosterFiles[0]);
 // ── 2. THE DETECTOR IS DETECTION-ONLY — IT MAY NEVER WRITE TO A LISTING ──────────────────────────
 // This is the invariant that protects source truth. mon_raise/mon_resolve_key write to alert_event,
 // which is monitoring state, not listing state — everything else is forbidden.
-const body = detector.slice(detector.indexOf('$function$'));
+// BLIND-GUARD REPAIR, 2026-09-24 (routine-10-barrier). This used to be
+// `detector.slice(detector.indexOf('$function$'))`. A detector written with the ordinary `$$` makes
+// `indexOf` return -1, `slice(-1)` yields THE LAST CHARACTER OF THE FILE, and every forbidden
+// pattern below then fails to match — so a detector that DID write to a listings table read as
+// clean. Fail-open, in a guard whose whole job is protecting source truth. The tag is now read
+// rather than assumed, and an unreadable body is reported, never silently narrowed to nothing.
+const bodyTag = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(detector);
+if (!bodyTag) {
+  console.log('FAIL  the detector migration has no dollar-quoted body this reader can locate');
+  process.exit(1);
+}
+const body = detector.slice(bodyTag.index);
 const forbidden = [
   [/update\s+public\.\w*_listings/i, 'UPDATE on a listings table'],
   [/delete\s+from\s+public\.\w*_listings/i, 'DELETE from a listings table'],

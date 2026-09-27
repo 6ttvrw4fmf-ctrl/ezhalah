@@ -36,6 +36,10 @@
     {
       "source": "/_img/sadin/:path*",
       "destination": "https://sadin.com.sa/:path*"
+    },
+    {
+      "source": "/_img/eydah/:path*",
+      "destination": "https://eydah.com/:path*"
     }
   ]
 }

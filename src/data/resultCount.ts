@@ -187,6 +187,13 @@ export type ClosingNoteKey =
   // new search from the menu. Second variant for when no useful narrowing question remains.
   | 'These are the last {shown} I can show you. Want help finding more precise ones? Or open the menu for a new search.'
   | 'These are the last {shown} I can show you. For a new search, open the menu and choose Search.'
+  // TERMINAL WITH INVENTORY STILL UNREACHED (ops_incident #598). The chat is CLOSED — an Advanced
+  // Filter round ends it at any total (owner 2026-09-20) — and neither button is on screen, yet the
+  // note states a {shown} smaller than {total}. Without these two keys the sentence stops dead on
+  // the counts and names nothing the user can do, so the remaining matches read as unreachable.
+  // The forward path is the owner's own sentence from the two terminals above, nothing new.
+  | 'I showed you the first {shown} of {total} matching listings. For a new search, open the menu and choose Search.'
+  | 'I showed you the first {n} listings. For a new search, open the menu and choose Search.'
   // RETIRED from closingNoteKey's own returns (the two above replace them, owner 2026-09-14) but kept
   // as valid ClosingNoteKey values: their i18n rows and a couple of history/CTA barriers still name them.
   | 'I showed you all {n} matching listings. Want help finding more precise ones?'
@@ -204,8 +211,21 @@ export function closingNoteKey(args: {
   lastTapOffer: boolean;
   /** TERMINAL because the 500 cap was hit with more still matching — see ResultCounts.cappedAtCap. */
   cappedAtCap: boolean;
+  /**
+   * The CHAT itself is closed (agent.tsx's `completed`): the composer is locked and this turn will
+   * never gain another button, so the only forward path left is a new search from the ☰ menu.
+   *
+   * Distinct from every other flag here, which describe THIS TURN. A turn with no buttons is an
+   * ordinary state in an open chat — an older results turn keeps its honest counts and stays quiet
+   * because the newest turn below it is where the user acts. Naming the menu there would be noise.
+   * It is only when the chat is closed that a button-less turn is the END of the road, and that is
+   * the one state that owes the user a way out. Optional so every existing caller and the barrier's
+   * historical enumerations keep their exact behaviour.
+   */
+  chatClosed?: boolean;
 }): ClosingNoteKey {
   const { quoteTotal, offersMore, offersNarrow, lastTapOffer, cappedAtCap } = args;
+  const chatClosed = args.chatClosed === true;
   if (args.endKind === 'more') {
     // THE FINAL «عرض المزيد» — the first 100 is on screen and the next tap reveals up to 500 and ends
     // (owner 2026-09-14). Only when a «عرض المزيد» is genuinely rendered; the narrow variant follows
@@ -228,11 +248,20 @@ export function closingNoteKey(args: {
       // but a narrow button that IS rendered still gets its invitation, or the fix would silently
       // retire a working affordance instead of telling the truth about which ones exist.
       if (offersNarrow) return 'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?';
+      // NO BUTTON, AND THE CHAT IS CLOSED — the dead end of ops_incident #598. Measured on
+      // production 2026-09-22: «عرضت لك أول 156 من أصل 6,441 إعلان مطابق.», zero «عرض المزيد»
+      // elements and zero «تحديد أكثر», on a chat an Advanced Filter round had just closed. The
+      // counts were exactly right and the sentence still left 6,285 matches looking unreachable.
+      // The numbers are untouched; only the way out is named, and it is a path that really exists.
+      if (chatClosed) return 'I showed you the first {shown} of {total} matching listings. For a new search, open the menu and choose Search.';
       return 'I showed you the first {shown} of {total} matching listings.';
     }
     if (offersMore && offersNarrow) return 'I showed you the first {n} listings. Want me to show more, or help you find more precise ones?';
     if (offersMore) return 'I showed you the first {n} listings. Want me to show more?';
     if (offersNarrow) return 'I showed you the first {n} listings. Want help finding more precise ones?';
+    // Same dead end, on the branch that may not quote an exact total (client-only narrowing). The
+    // count stays the honest floor it already was; only the forward path is added.
+    if (chatClosed) return 'I showed you the first {n} listings. For a new search, open the menu and choose Search.';
     return 'I showed you the first {n} listings.';
   }
   // TERMINAL (endKind 'all'), owner 2026-09-14. Two shapes:

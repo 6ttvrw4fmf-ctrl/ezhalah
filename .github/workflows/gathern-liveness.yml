@@ -29,7 +29,27 @@ name: Gathern liveness
 
 on:
   schedule:
-    - cron: "0 6 * * *"   # daily 06:00 UTC — automatic source-confirmed apply (owner 2026-08-10)
+    # SIX runs a day, not one (owner directive 2026-09-24: "put a very close eye on gathern").
+    #
+    # THE BATCH SIZE IS UNCHANGED AND SO IS THE REQUEST RATE. This adds capacity by running the
+    # same 1,500-row sweep more often, never by probing harder — gathern rate-limits detail pages
+    # GLOBALLY (429 above ~2 req/s across ALL IPs), so a bigger or faster batch buys nothing and
+    # risks the block that makes every verdict worthless.
+    #
+    # The arithmetic, from measured production runs (0.79–0.96 rows/s, 1,500 rows in ~29 min):
+    #   in-run rate      ~0.85 req/s   — unchanged, and well under the ~2 req/s global ceiling
+    #   daily volume     6 × 1,500 = 9,000 probes
+    #   daily average    9,000 / 86,400 s = ~0.10 req/s — gentler than one big burst
+    #   full pass        28,639 active / 9,000 ≈ 3.2 days  <  the 96h SLA it declares
+    # One run a day gave 1,500/day ⇒ a 19-day pass against a 4-day SLA: unreachable by ~5x.
+    #
+    # Slots dodge gathern's own jobs so the sweep never competes with them for the same global
+    # budget: gh-gathern-cleanup runs 03:00 and gh-gathern-daily 04:40.
+    #
+    # This is only half the fix. Cadence alone would have re-probed the SAME 1,500 rows six times a
+    # day — see _collect_stale's docstring and migration 20260924 (last_liveness_probe_at) for the
+    # rotation-fairness bug that was the real cause of 0.4% coverage.
+    - cron: "0 1,7,11,15,19,23 * * *"   # every 4h, avoiding 03:00 cleanup and 04:40 crawl
   workflow_dispatch:
     inputs:
       apply:

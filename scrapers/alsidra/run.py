@@ -195,8 +195,21 @@ def _api(s: cc.Session, route: str, **params: Any) -> Any:
     q = urllib.parse.urlencode(params)
     url = f"{BASE}/?rest_route={route}" + (f"&{q}" if q else "")
     r = s.get(url, timeout=60)
+    # THE SITE ITSELF CAN BE OFF THE AIR, and that must not read as a parser bug. 2026-09-23 the
+    # host suspended the account: every request — every TLS profile, from two networks — 302s to
+    # /cgi-sys/suspendedpage.cgi, whose cPanel page («Contact Support») is HTML, so r.json() died
+    # with "Expecting value: line 1 column 1" and the run ledger said nothing about the source.
+    # This is a SOURCE OUTAGE, not a block and not a dead catalogue: the run fails, nothing is
+    # pruned, and the stored listings stay exactly as they were (prune_unseen never runs).
+    if "suspendedpage.cgi" in (r.url or "") or "This Account has been suspended" in r.text[:4000]:
+        raise RuntimeError(f"{BASE} is SUSPENDED by its host (cPanel suspendedpage) — source outage, "
+                           "nothing scraped, nothing retired")
     if r.status_code != 200:
         raise RuntimeError(f"{route} → HTTP {r.status_code}")
+    ctype = (r.headers.get("content-type") or "").lower()
+    if "json" not in ctype:
+        raise RuntimeError(f"{route} → HTTP {r.status_code} but {ctype or 'no content-type'} "
+                           f"(not JSON): {r.text[:120]!r}")
     return r.json()
 
 

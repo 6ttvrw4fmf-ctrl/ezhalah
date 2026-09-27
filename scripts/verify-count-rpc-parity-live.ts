@@ -39,7 +39,9 @@
 // measured concurrency knee of 3 (§40.1). They are sequential now, so the check stops contributing
 // to the load it is trying to survive.
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import { paceUntilHealthy, readSearchLoad, describeLoad, verdictForNonArrival, type SearchLoad } from './lib/afJourneyPacing.ts';
+import { paceUntilHealthy, readSearchLoad, describeLoad, verdictForNonArrival, PACE_BUDGET_MS, type SearchLoad } from './lib/afJourneyPacing.ts';
+import { startDeadline, boundedBy, incompleteVerdict } from './lib/checkDeadline.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
 
@@ -53,7 +55,7 @@ export const isStatementTimeout = (status: number, body: string): boolean => (
 class RpcTimeout extends Error {}
 
 async function rpc(fn: string, args: Record<string, unknown>): Promise<any[]> {
-  const res = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: HEADERS, body: JSON.stringify(args) });
+  const res = await postgrestFetch(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: HEADERS, body: JSON.stringify(args) });
   if (!res.ok) {
     const body = await res.text();
     if (isStatementTimeout(res.status, body)) throw new RpcTimeout(`${fn} timed out (57014)`);
@@ -91,11 +93,25 @@ const SCOPES: { name: string; args: Record<string, unknown> }[] = [
 ];
 
 async function main() {
+  // THE DEADLINE (routine-4, 2026-09-27). PACE_BUDGET_MS is 10 minutes and this workflow's cap WAS
+  // also 10 minutes, with TWO checks sharing the job — so waiting for production to come back inside
+  // its envelope could consume the entire budget and the runner killed the job before this check
+  // could print the very `NOT EXERCISED ... re-run outside the scraper window` verdict it was built
+  // to emit. 7 of its last 12 runs died that way at ~621s, reported as `cancelled`, which the
+  // failure->alert bridge treats as NO_VERDICT and does not raise on. Bounding the pace budget by the
+  // deadline keeps the honest answer reachable. See scripts/lib/checkDeadline.ts.
+  const deadline = startDeadline();
   const readLoad = () => readSearchLoad(URL_BASE, HEADERS);
-  const load: SearchLoad = await paceUntilHealthy(readLoad, sleep, undefined, undefined, (s) => console.log(s));
+  const load: SearchLoad = await paceUntilHealthy(readLoad, sleep, boundedBy(deadline, PACE_BUDGET_MS), undefined, (s) => console.log(s));
   console.log(`Measuring against production: ${describeLoad(load)}${load.degraded ? ' — STILL DEGRADED after the pacing budget' : ''}\n`);
 
   for (const s of SCOPES) {
+    // Out of time: report the remaining scopes as unmeasured rather than letting the runner kill the
+    // job mid-scope. An expired deadline is never a pass — `clean` below requires notExercised === 0.
+    if (deadline.expired()) {
+      skip(s.name, `the ${deadline.budgetSeconds}s deadline expired before this scope was measured`);
+      continue;
+    }
     // Sequential, not Promise.all: three concurrent unfiltered counts is the contention this check
     // was dying of, and it is load this check creates itself.
     try {
@@ -124,8 +140,10 @@ async function main() {
     : failed > 0
       ? `\n✗ ${failed} count-RPC parity check(s) FAILED — a filter count would show a number search cannot fulfil` +
         (notExercised ? ` (and ${notExercised} scope(s) NOT EXERCISED)` : '')
-      : `\n✗ ${notExercised} scope(s) NOT EXERCISED — production was degraded, so this run did NOT certify count parity. ` +
-        `Not a pass: re-run outside the 01:00-06:00 UTC scraper window.`);
+      : `\n✗ ${notExercised} scope(s) NOT EXERCISED — this run did NOT certify count parity. ` +
+        `Not a pass: see the NOT EXERCISED lines above for whether production was degraded (re-run ` +
+        `outside the 01:00-06:00 UTC scraper window) or the deadline expired (${incompleteVerdict(
+          SCOPES.length - notExercised, SCOPES.length, deadline.budgetSeconds)}).`);
   process.exit(clean ? 0 : 1);
 }
 

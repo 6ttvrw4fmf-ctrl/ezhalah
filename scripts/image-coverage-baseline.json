@@ -8,6 +8,12 @@
     "today_pct/active_rows are informational, captured 2026-09-05."
   ],
   "platforms": {
+    "aalbarrak": {
+      "floor_pct": 85,
+      "today_pct": 100.0,
+      "active_rows": 9,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 9 of 9 rows carried photo_urls (the whole catalogue). TINY: one listing is ~11 points; floor set one listing below the observation."
+    },
     "abeea": {
       "floor_pct": 97,
       "today_pct": 100,
@@ -27,6 +33,18 @@
       "floor_pct": 97,
       "today_pct": 100.0,
       "active_rows": 276
+    },
+    "alajlan": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 11,
+      "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 11 of 11 active rows carry photo_urls (100%). TINY: one listing is ~9 points; floor set one listing below the observation, as villassa is at the same size."
+    },
+    "albdah": {
+      "floor_pct": 85,
+      "today_pct": 100.0,
+      "active_rows": 9,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 9 of 9 rows carried photo_urls (the whole catalogue). TINY: one listing is ~11 points; floor set one listing below the observation."
     },
     "aldarim": {
       "floor_pct": 97,
@@ -55,10 +73,28 @@
       "active_rows": 21,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 15 of 21 rows carried photo_urls (every live ad; 339 of 361 are archived by the site). TINY: one listing is ~5 points; floor set two listings below the observation."
     },
+    "almuteb": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 11,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 11 of 11 rows carried photo_urls (the whole catalogue). TINY: one listing is ~9 points; floor set one listing below the observation."
+    },
     "alobid": {
       "floor_pct": 97,
       "today_pct": 100.0,
       "active_rows": 138
+    },
+    "alqasem": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 23,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 23 of 23 rows carried photo_urls (23 mapped of the 29 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~4 points; floor set one listing below the observation."
+    },
+    "alrifai": {
+      "imageless_at_source": true,
+      "today_pct": 0.0,
+      "active_rows": 17,
+      "reason": "PHOTOS ARE BROKEN AT THE SOURCE (run.py docstring): every image is app/thumbnail.php?i=…, which answers 200 with a body that is not an image (naturalWidth 0 in a real Chrome, 5/5), so run.py writes photo_urls NULL and keeps the count in additional_info. Measured 2026-09-24 over a live crawl: 0 of 17 mapped rows. Re-measure when the thumbnail endpoint serves real images."
     },
     "alshawaf": {
       "floor_pct": 55,
@@ -93,10 +129,22 @@
       "today_pct": 100,
       "active_rows": 70
     },
+    "aqalemhajer": {
+      "floor_pct": 80,
+      "today_pct": 85.1,
+      "active_rows": 1158,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 985 of 1158 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
+    },
     "aqar": {
       "floor_pct": 97,
       "today_pct": 100,
       "active_rows": 90584
+    },
+    "aqaralriyadh": {
+      "imageless_at_source": true,
+      "today_pct": 0.0,
+      "active_rows": 14,
+      "reason": "the source publishes no images (run.py docstring): featured_media is 0 on 14/14 posts, the bodies carry no <img>, the page has no og:image; run.py writes photo_urls NULL. Measured 2026-09-24 over a live crawl: 0 of 14 mapped rows."
     },
     "aqaralsaudia": {
       "floor_pct": 80,
@@ -129,6 +177,12 @@
       "today_pct": 100,
       "active_rows": 1265
     },
+    "arsh": {
+      "floor_pct": 0,
+      "today_pct": 0.0,
+      "active_rows": 21,
+      "note": "Declared 2026-09-27 (wave-3 batch 6). IMAGELESS AT SOURCE: the site has no photo of any plot — its og:image is the project LOGO (one row briefly carried «malfa allulu logo», cleared) and the page images are stock pictures, maps and plans. photo_urls is deliberately NULL; 0 of 21."
+    },
     "awal": {
       "floor_pct": 93,
       "today_pct": 96.1,
@@ -139,6 +193,12 @@
       "today_pct": 87.0,
       "active_rows": 23,
       "note": "Declared 2026-09-13. Went production-searchable without a baseline row and failed the onboarding gate for days. The floor is deliberately well below today_pct because this platform is TINY and therefore VOLATILE: at 23 active rows a single listing is 4.3 points, and the seven observed snapshots run 76.0 / 76.0 / 76.9 / 78.3 / 79.2 / 86.4 / 87.0. 72 sits one listing below the lowest figure ever observed, so the gate fires on a real capture regression and not on ordinary churn. Raise it once the platform is large enough for a percentage to mean something."
+    },
+    "azure": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 32,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 32 of 32 rows carried photo_urls (32 mapped of the 16 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~3 points; floor set one listing below the observation."
     },
     "bahadhabab": {
       "floor_pct": 97,
@@ -151,25 +211,91 @@
       "active_rows": 99,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 72 of 99 rows carried photo_urls (the first 99 of 1,485). The office posts many cards with the site placeholder, which the scraper refuses; sample error ~±4.5 points, so the floor keeps that margin."
     },
+    "dallali": {
+      "floor_pct": 85,
+      "today_pct": 100.0,
+      "active_rows": 7,
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 7 of 7 active rows carry photo_urls (100.0%). TINY: one listing is ~14.3 points; floor set one listing below the observation."
+    },
+    "daryusuf": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 242,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 242 of 242 rows carried photo_urls (242 mapped of the 290 the site itself counts; the rest are skipped by run.py's own gates). Floor follows today-minus-about-three."
+    },
     "dealapp": {
       "floor_pct": 89,
       "today_pct": 92.8,
       "active_rows": 16049
+    },
+    "dwelleo": {
+      "floor_pct": 95,
+      "today_pct": 99.9,
+      "active_rows": 10745,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 10735 of 10745 rows carried photo_urls (the whole catalogue) (a --no-detail list crawl over all list pages (the list carries ONE cover image per listing; the production detail crawl adds galleries and never removes the cover)). Floor follows today-minus-about-three."
     },
     "eaqartabuk": {
       "floor_pct": 93,
       "today_pct": 96.2,
       "active_rows": 554
     },
+    "earthapp": {
+      "imageless_at_source": true,
+      "today_pct": 0.0,
+      "active_rows": 51,
+      "reason": "NO LISTING PHOTOS EXIST AT THE SOURCE: the offer-list-by-area records carry no gallery; user_image is the advertising agent's avatar, not the property, so run.py writes photo_urls NULL. Measured 2026-09-27: 0 of 51 production rows. Re-measure if the API ever adds offer images."
+    },
     "eastabha": {
       "floor_pct": 85,
       "today_pct": 88.2,
       "active_rows": 195
     },
+    "ebriza": {
+      "floor_pct": 95,
+      "today_pct": 99.5,
+      "active_rows": 204,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 203 of 204 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
+    },
+    "eightfloor": {
+      "floor_pct": 50,
+      "today_pct": 100.0,
+      "active_rows": 2,
+      "note": "Declared 2026-09-27 (wave-3 batch 5). MEASURED ON THE PRODUCTION ROWS after the first crawl: 2 of 2 active rows carry photo_urls (100.0%). TINY: one listing is ~50.0 points; floor set one listing below the observation."
+    },
+    "eilmalriyada": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 266,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 266 of 266 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
+    },
     "erapulse": {
       "floor_pct": 95,
       "today_pct": 98.4,
       "active_rows": 61
+    },
+    "expattrusted": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 50,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 50 of 50 rows carried photo_urls (50 mapped of the 43 the site itself counts; the rest are skipped by run.py's own gates). Floor follows today-minus-about-three."
+    },
+    "eydah": {
+      "floor_pct": 50,
+      "today_pct": 100.0,
+      "active_rows": 2,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 2 of 2 rows carried photo_urls (the whole catalogue). TINY: one listing is ~50 points; floor set one listing below the observation."
+    },
+    "fkralemar": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 10,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 10 of 10 rows carried photo_urls (10 mapped of the 47 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~10 points; floor set one listing below the observation."
+    },
+    "flow": {
+      "floor_pct": 85,
+      "today_pct": 93.3,
+      "active_rows": 15,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 14 of 15 rows carried photo_urls (the whole catalogue). TINY: one listing is ~7 points; floor set one listing below the observation."
     },
     "fursaghyr": {
       "floor_pct": 63,
@@ -180,6 +306,12 @@
       "floor_pct": 97,
       "today_pct": 100,
       "active_rows": 29249
+    },
+    "goldendeal": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 272,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 272 of 272 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
     },
     "gomenassat": {
       "floor_pct": 95,
@@ -192,11 +324,41 @@
       "today_pct": 60.5,
       "active_rows": 119
     },
+    "hasaad": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 12,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 12 of 12 rows carried photo_urls (the whole catalogue). TINY: one listing is ~8 points; floor set one listing below the observation."
+    },
+    "hazim": {
+      "floor_pct": 80,
+      "today_pct": 100.0,
+      "active_rows": 5,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 5 of 5 rows carried photo_urls (the whole catalogue). TINY: one listing is ~20 points; floor set one listing below the observation."
+    },
+    "holoul": {
+      "floor_pct": 70,
+      "today_pct": 73.3,
+      "active_rows": 30,
+      "note": "Declared 2026-09-27 (wave-3 batch 5). MEASURED ON THE PRODUCTION ROWS after the first crawl: 22 of 30 active rows carry photo_urls (73.3%). The rest: 8 units publish neither a main picture nor gallery media. TINY: one listing is ~3.3 points; floor set one listing below the observation."
+    },
     "ialqarawi": {
       "floor_pct": 90,
       "today_pct": 100.0,
       "active_rows": 100,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 100 of 100 rows carried photo_urls (the first 100 of 2,641). A head-of-index sample, so the floor keeps extra margin; re-check against the first snapshot."
+    },
+    "ibaax": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 155,
+      "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 155 of 155 active rows carry photo_urls (100%). 155 rows is large enough for a percentage to mean something; floor follows this file's today-minus-about-three convention on a single observation."
+    },
+    "jawher": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 44,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 44 of 44 rows carried photo_urls (44 mapped of the 9 the site itself counts; the rest are skipped by run.py's own gates). Floor follows today-minus-about-three."
     },
     "jazwtn": {
       "floor_pct": 97,
@@ -207,6 +369,54 @@
       "floor_pct": 97,
       "today_pct": 100,
       "active_rows": 11
+    },
+    "justsa": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 78,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 78 of 78 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
+    },
+    "livingcompound": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 17,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 17 of 17 rows carried photo_urls (the whole catalogue). TINY: one listing is ~6 points; floor set one listing below the observation."
+    },
+    "m3tmd": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 37,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 37 of 37 rows carried photo_urls (37 mapped of the 9 the site itself counts; the rest are skipped by run.py's own gates). Floor follows today-minus-about-three."
+    },
+    "macsaib": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 76,
+      "note": "Declared 2026-09-26 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl of all 77 records (network live, database stubbed): 76 of 76 rows carried photo_urls (the detail record's images). Re-check against the first snapshot."
+    },
+    "manzo": {
+      "floor_pct": 0,
+      "today_pct": 100.0,
+      "active_rows": 1,
+      "note": "Declared 2026-09-27 (wave-3 batch 5). MEASURED ON THE PRODUCTION ROWS after the first crawl: 1 of 1 active rows carry photo_urls (100.0%). TINY: one listing is ~100.0 points; floor set one listing below the observation."
+    },
+    "maqam": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 47,
+      "note": "Declared 2026-09-27 (wave 3b). MEASURED ON THE PRODUCTION ROWS after the first crawl: 47 of 47 active rows carry photo_urls (Nuzul cover_image + images). One listing is ~2.1 points; floor set one listing below the observation."
+    },
+    "maqrat": {
+      "floor_pct": 80,
+      "today_pct": 81.7,
+      "active_rows": 82,
+      "note": "Declared 2026-09-26 at onboarding, before the first production sweep, from the REAL parse_detail + map_listing over a live crawl of all 83 details pages (network live, database stubbed): 67 of 82 rows carried photo_urls. The other 15 are not a parser gap — the source page shows only the site's default placeholder for them, which is not a photo of the listing and is not stored. TINY: one listing is ~1.2 points; floor set one listing below the observation. Re-check against the first snapshot."
+    },
+    "marksa": {
+      "floor_pct": 85,
+      "today_pct": 100.0,
+      "active_rows": 7,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 7 of 7 rows carried photo_urls (7 mapped of the 10 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~14 points; floor set one listing below the observation."
     },
     "masar": {
       "floor_pct": 85,
@@ -219,11 +429,23 @@
       "today_pct": 100,
       "active_rows": 27
     },
+    "mobasher": {
+      "floor_pct": 96,
+      "today_pct": 100.0,
+      "active_rows": 26,
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 26 of 26 active rows carry photo_urls (100.0%). TINY: one listing is ~3.8 points; floor set one listing below the observation."
+    },
     "moftah": {
       "floor_pct": 90,
       "today_pct": 100.0,
       "active_rows": 13,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 13 of 13 rows carried photo_urls (the whole catalogue). TINY: one listing is ~8 points; floor set one listing below the observation."
+    },
+    "muajarh": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 11,
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 11 of 11 active rows carry photo_urls (100.0%). TINY: one listing is ~9.1 points; floor set one listing below the observation."
     },
     "muktamel": {
       "floor_pct": 97,
@@ -234,6 +456,18 @@
       "floor_pct": 27,
       "today_pct": 30.7,
       "active_rows": 1204
+    },
+    "nafithh": {
+      "floor_pct": 96,
+      "today_pct": 100.0,
+      "active_rows": 28,
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 28 of 28 active rows carry photo_urls (100.0%). TINY: one listing is ~3.6 points; floor set one listing below the observation."
+    },
+    "nawafeth": {
+      "floor_pct": 22,
+      "today_pct": 33.3,
+      "active_rows": 9,
+      "note": "Declared 2026-09-27 (wave 3b). MEASURED ON THE PRODUCTION ROWS after the first crawl: 3 of 9 carry photo_urls. Checked on source: the other ads have no #big gallery; images elsewhere on the page are the «إعلانات مشابهة» strip and dot thumbnails (e.g. #157, #151), correctly excluded. TINY: one listing is ~11.1 points; floor set one listing below."
     },
     "nowaisiry": {
       "floor_pct": 97,
@@ -251,6 +485,18 @@
       "today_pct": 100,
       "active_rows": 12
     },
+    "opensooq": {
+      "floor_pct": 97,
+      "today_pct": 98.6,
+      "active_rows": 72,
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 71 of 72 active rows carry photo_urls (98.6%). TINY: one listing is ~1.4 points; floor set one listing below the observation."
+    },
+    "qmra": {
+      "floor_pct": 83,
+      "today_pct": 100.0,
+      "active_rows": 6,
+      "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 6 of 6 active rows carry photo_urls (100%). TINY: one listing is ~17 points; floor set one listing below the observation. 6 of the site's 19 posts mapped — the other 13 are not-ready (8 sold, 3 under construction, 1 sold, 1 rented) and skipped by run.py's own gate per the owner's ready-only rule."
+    },
     "raghdan": {
       "floor_pct": 88,
       "today_pct": 91.9,
@@ -267,6 +513,12 @@
       "today_pct": 100,
       "active_rows": 154
     },
+    "rawaf": {
+      "floor_pct": 94,
+      "today_pct": 100.0,
+      "active_rows": 19,
+      "note": "Declared 2026-09-26 (missed at onboarding in PR #4578). MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: 19 of 19 active rows carry photo_urls (100%) after the unit_photos() fix (propertyImages is a list of objects; the first crawl stored 0 of 19). TINY: one listing is ~5 points; floor set one listing below the observation."
+    },
     "rawasidark": {
       "floor_pct": 67,
       "today_pct": 70.3,
@@ -276,6 +528,18 @@
       "floor_pct": 89,
       "today_pct": 91.7,
       "active_rows": 84
+    },
+    "remaxsa": {
+      "floor_pct": 85,
+      "today_pct": 100.0,
+      "active_rows": 7,
+      "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 7 of 7 active rows carry photo_urls (100%). TINY: one listing is ~14 points; floor set one listing below the observation, as marksa and wadod are at the same size. 7 of the site's 21 ads mapped — the other 14 are off_plan and skipped by run.py's own gate, not lost."
+    },
+    "rightcompound": {
+      "floor_pct": 95,
+      "today_pct": 99.0,
+      "active_rows": 840,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 832 of 840 rows carried photo_urls (all 254 compounds the site lists, expanded to their 840 units). Floor follows today-minus-about-three."
     },
     "sadin": {
       "floor_pct": 84,
@@ -288,6 +552,12 @@
       "active_rows": 99,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 99 of 99 rows carried photo_urls (the first 99 of 3,160 sitemap URLs). A head-of-sitemap sample, so the floor keeps extra margin; re-check against the first snapshot."
     },
+    "sakani": {
+      "floor_pct": 95,
+      "today_pct": 99.3,
+      "active_rows": 282,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, the run.py docstring's own MEASURED COVERAGE (all 282 marketplace API rows through the real map_listing; photo_urls 280, 2-20 each) — the 2026-09-24 onboarding crawl from this machine hit the marketplace API's Cloudflare challenge (HTTP 403 after 4 tries), so the docstring's full-run measurement is the declaration, to be re-checked against the first snapshot: 280 of 282 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
+    },
     "sanadak": {
       "floor_pct": 97,
       "today_pct": 100,
@@ -298,15 +568,45 @@
       "today_pct": 100,
       "active_rows": 94
     },
+    "senan": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 57,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 57 of 57 rows carried photo_urls (57 mapped of the 77 the site itself counts; the rest are skipped by run.py's own gates). Floor follows today-minus-about-three."
+    },
+    "shatri": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 50,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 50 of 50 rows carried photo_urls (50 mapped of the 74 the site itself counts; the rest are skipped by run.py's own gates). Floor follows today-minus-about-three."
+    },
     "shmoualshmal": {
       "floor_pct": 97,
       "today_pct": 100,
       "active_rows": 6
     },
+    "snam": {
+      "floor_pct": 95,
+      "today_pct": 100.0,
+      "active_rows": 21,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 21 of 21 rows carried photo_urls (21 mapped of the 72 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~5 points; floor set one listing below the observation."
+    },
+    "sodasyat": {
+      "floor_pct": 85,
+      "today_pct": 100.0,
+      "active_rows": 8,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 8 of 8 rows carried photo_urls (8 mapped of the 11 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~12 points; floor set one listing below the observation."
+    },
     "souq24": {
       "floor_pct": 28,
       "today_pct": 31.8,
       "active_rows": 44
+    },
+    "squares": {
+      "floor_pct": 93,
+      "today_pct": 100.0,
+      "active_rows": 16,
+      "note": "Declared 2026-09-26 (missed at onboarding in PR #4578). MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: 16 of 16 active rows carry photo_urls (100%). TINY: one listing is ~6 points; floor set one listing below the observation."
     },
     "suwar": {
       "floor_pct": 90,
@@ -314,15 +614,57 @@
       "active_rows": 96,
       "note": "Declared 2026-09-19 (routine-3). Went production-searchable without a baseline row (ops_incident #231). 96 active rows — small enough that a single listing losing its photo is ~1 point, so the floor is set meaningfully below the one observation taken so far rather than following the today-minus-about-three convention verbatim, matching the reasoning already used for azdad (a tiny, volatile platform)."
     },
+    "tamyaz": {
+      "floor_pct": 80,
+      "today_pct": 100.0,
+      "active_rows": 5,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 5 of 5 rows carried photo_urls (5 mapped of the 9 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~20 points; floor set one listing below the observation."
+    },
     "therc": {
       "floor_pct": 74,
       "today_pct": 77.3,
       "active_rows": 397
     },
+    "thousand": {
+      "floor_pct": 15,
+      "today_pct": 18.3,
+      "active_rows": 104,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 19 of 104 rows carried photo_urls (the whole catalogue) (86 of the site's 105 cards show only an Unsplash stock photo, which run.py refuses as a listing photo — those rows honestly carry none). Floor follows today-minus-about-three."
+    },
+    "villassa": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 11,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 11 of 11 rows carried photo_urls (11 mapped of the 14 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~9 points; floor set one listing below the observation."
+    },
+    "vmksa": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 160,
+      "note": "Declared 2026-09-26 at onboarding, before the first production sweep, from the REAL map_ad over a live crawl of all 163 ads (network live, database stubbed): 160 of 160 rows carried photo_urls (images_ads, falling back to main_image). Re-check against the first snapshot."
+    },
+    "wadod": {
+      "floor_pct": 85,
+      "today_pct": 100.0,
+      "active_rows": 7,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 7 of 7 rows carried photo_urls (7 mapped of the 33 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~14 points; floor set one listing below the observation."
+    },
+    "wahadat": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 968,
+      "note": "Declared 2026-09-26 (missed at onboarding in PR #4578 — this file was not updated then). MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: 968 of 968 active rows carry photo_urls (100%), and has_photo is set on all 968 after refresh_photo_capture_trust(). Large enough for this file's today-minus-about-three convention."
+    },
     "wasalt": {
       "floor_pct": 90,
       "today_pct": 93.3,
       "active_rows": 51500
+    },
+    "yameen": {
+      "floor_pct": 90,
+      "today_pct": 100.0,
+      "active_rows": 12,
+      "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 12 of 12 rows carried photo_urls (12 mapped of the 27 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~8 points; floor set one listing below the observation."
     }
   }
 }

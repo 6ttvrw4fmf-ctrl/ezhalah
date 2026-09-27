@@ -65,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # PINNED, and not optional. This job is the only thing standing between a shipped deploy and
-      # the five live jobs below: if it fails, `shipped` is empty, every job skips, and the barrier
+      # every live job below: if it fails, `shipped` is empty, every job skips, and the barrier
       # is dark again — the exact failure this whole change exists to end, reintroduced one level
       # up. `--experimental-strip-types` needs Node >= 22.6, and the runner's default `node` is not
       # guaranteed to be that. No `npm ci`: the gate script imports nothing outside node: builtins.
@@ -181,6 +181,20 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-searchable-scope-matches-inventory.ts
+
+      # …AND SO IS THE SCOPE THE BROWSER ACTUALLY HOLDS (added 2026-09-25, ops_incident #731). The
+      # step above lifts resTables/comTables out of the CHECKOUT, so it answers the question about
+      # main. On 2026-09-25 those two answers disagreed for ~7 hours: main named أبعاد's tables,
+      # the served bundle's 207-table scope did not, and 380 production_ready rows were reachable by
+      # no user search while the step above read green. The live-sweep chain could not see it either
+      # — its "independent" DB oracle translates the captured p_tables straight through, so it
+      # inherits exactly the scope under suspicion. This reads production's own bytes.
+      - name: The scope in the SERVED bundle reaches every platform holding live inventory
+        if: ${{ !cancelled() }}
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-served-scope-reaches-every-live-platform-live.ts
 
       # A CATEGORY COUNT MUST RESPECT THE TABLE THE ROW LIVES IN (added 2026-09-05). Trending
       # over-counted مكة المكرمة/شقة by relying on known_type_ar.macro alone; discovery found the
@@ -315,6 +329,53 @@ jobs:
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-af-pill-removal-live.ts
 
+  # THE FOUR REST-ONLY ORACLES — THEIR OWN JOB (split out 2026-09-25, routine #5).
+  #
+  # These four ask production over REST and nothing else: no browser, no Playwright, no paid agent
+  # turn, ~15 seconds for all of them together. They sat at the TAIL of af-truth's 24-step chain,
+  # and on 2026-09-25 run #431 that chain hit its 50-minute cap at step 22. The job was CANCELLED,
+  # step 22 with it, and these four were reported `skipped`. Five live AF barriers did not execute
+  # — the SAME shape as 2026-09-03, which the comment below this one was written about, recurring
+  # at 24 steps and 50 minutes instead of 20 and 30.
+  #
+  # The chain was not the whole story: step 6 alone burned 31m32s of the 50, because a FAILING
+  # browser journey spends its entire retry budget. That is why lengthening the budget is not the
+  # fix. A tail can always be starved by whatever runs ahead of it, so work that does not NEED to
+  # be in the chain should not be in it — and REST-only work does not.
+  #
+  # `if: always()` and `needs: [gate, af-truth, af-card-state]` for the same two reasons the sweeps
+  # below carry them, and they matter in opposite directions here. `always()` is what makes these
+  # run even when af-truth is cancelled, which is the entire point of moving them. The `needs` keeps
+  # them OUT of the browser jobs' window: production's measured envelope is a concurrency knee of 3
+  # and ~1.5 searches/s (SEARCH_MATCH_QA_ENGINEER.md §40.1), and the browser journeys are latency
+  # work behind a paid agent turn. Four REST calls would almost certainly be harmless beside them —
+  # but "almost certainly" is how the 2026-09-04 contention reds were argued from timings instead
+  # of measured, so this takes the already-proven ordering rather than a new assumption.
+  #
+  # Cost is UNCHANGED: these drive zero agent messages, so the owner's 2026-08-29 ruling (11 paid
+  # messages per run) is untouched by this split.
+  #
+  # Two of these steps are the live halves of an offline/live split, and their offline halves assert
+  # via liveHalfProblems() that THIS FILE invokes them. That check is file-scoped, so moving them
+  # between jobs inside the same file keeps it green — and deleting one would still turn it red.
+  af-rest-oracles:
+    needs: [gate, af-truth, af-card-state]
+    if: always() && needs.gate.outputs.shipped == 'yes'
+    name: The REST-only AF oracles (predicate, strict parity, guided carry, chips)
+    runs-on: ubuntu-latest
+    # Measured: the four steps total ~15s of work. 10 covers that plus checkout and npm ci with
+    # room to spare, and declares a budget somebody chose rather than GitHub's 360-minute default.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
       # THE HAND-WRITTEN PREDICATE ORACLE (moved here 2026-09-02). Nine AF answers expressed as
       # PostgREST filters written by hand — not derived from the clause — plus the exact UNKNOWN
       # partition. It used to run inside the REQUIRED `npm test`, calling production on every PR
@@ -411,7 +472,7 @@ jobs:
   # `if: always()` is load-bearing. A plain `needs:` SKIPS a dependent when its dependency fails, and a
   # skipped sweep is lost coverage that the attendance job would then have to report — the 2026-09-03
   # lesson about a guard that skips exactly what it exists to protect. These must run whatever the
-  # browser jobs concluded; attendance still requires all five to have concluded success.
+  # browser jobs concluded; attendance still requires EVERY job to have concluded success.
   af-surface-region:
     needs: [gate, af-truth, af-card-state]
     if: always() && needs.gate.outputs.shipped == 'yes'
@@ -493,7 +554,7 @@ jobs:
     #
     # `if: always()` for the same reason as the sweeps below: a plain `needs:` SKIPS a dependent when
     # its dependency fails, and a skipped browser job is lost coverage on the surface it exists to
-    # protect. Attendance still requires all five jobs to have concluded success.
+    # protect. Attendance still requires EVERY job to have concluded success.
     needs: [gate, af-truth]
     if: always() && needs.gate.outputs.shipped == 'yes'
     name: The rendered card, the removed pill and the scope change all tell one truth
@@ -624,11 +685,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Only attends a run that had something to verify. When the gate says nothing shipped, the
-    # five jobs above do not run and there is no attendance to take — reporting five skips as a
+    # jobs above do not run and there is no attendance to take — reporting those skips as a
     # DARK BARRIER there would be a false alarm on every refused deploy. This is NOT leniency:
     # whenever the gate says a bundle IS live, this job runs and every skip/cancel still fails.
     if: always() && needs.gate.outputs.shipped == 'yes'
-    needs: [gate, af-truth, af-surface-region, af-surface-city, af-card-state, af-matrix]
+    needs: [gate, af-truth, af-rest-oracles, af-surface-region, af-surface-city, af-card-state, af-matrix]
     steps:
       # The bridge step below runs a script from the repo, so this job needs a checkout of its own —
       # it previously had none, because asserting over `needs` requires nothing on disk.
@@ -663,7 +724,7 @@ jobs:
       # it chains off a successful production deploy, and for 11 consecutive deploys reported as
       # `failure` (a shell defect in the post-deploy bundle gate, fixed in this same change) it never
       # ran at all. Hooked to the ATTENDANCE job on purpose: attendance already computes the
-      # aggregate verdict across all five jobs, so a green shard cannot resolve an alert that a red
+      # aggregate verdict across EVERY job, so a green shard cannot resolve an alert that a red
       # sibling just raised.
       - name: Bridge this run's result to alert_event
         if: always()
