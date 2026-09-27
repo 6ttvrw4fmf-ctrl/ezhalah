@@ -1,3 +1,14 @@
+> **⛔ RETIRED 2026-09-27 — READ THIS FIRST.** The owner deleted all eleven routines described below
+> to start a smaller, clearer team. **Do NOT recreate them**, and ignore this file's instruction to
+> "restore the routine to match this file". The new team is being built one engineer at a time:
+>
+> | Engineer | Rulebook | Status |
+> |---|---|---|
+> | ⚡ Scraping Engineer | **`docs/ops/SCRAPING_ENGINEER.md`** | being created 2026-09-27 |
+>
+> Everything below is kept as history (and because barriers still read its roster) until this file is
+> rewritten for the new team. The GLOBAL ENGINEERING POLICY (§G) remains good guidance.
+
 # ENGINEER ROUTINES — THE ELEVEN DAILY ENGINEERS (canonical, owner-locked 2026-08-11; extended 2026-08-23, 2026-08-26, and 2026-09-04)
 
 > Owner rule: there are **exactly ELEVEN separate cloud routines, all DAILY** (the fourth added by

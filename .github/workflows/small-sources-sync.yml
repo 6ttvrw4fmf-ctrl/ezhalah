@@ -60,7 +60,11 @@ jobs:
           # 2026-02-14 (real but LOW-CHURN, so a run returning the same 128 is healthy), and the
           # source publishes NO price at all (0/128 in the REST payload AND the detail pages) —
           # nothing is inferred to fill it, exactly like the 7,534 priceless rows already live.
-          - { source: awal,        cmd: "python -m scrapers.awal.run --type all" }
+          # awal: `proxy: true` (2026-09-27, Scraping Engineer). Every crawl since 09-24 died on one
+          # chrome124 request answering HTTP 500; scrapers/awal/run.py now probes 3 profiles direct and
+          # then the same 3 through the proxy (only if all direct ones fail), so the metered proxy is
+          # spent only when the source refuses a datacenter handshake.
+          - { source: awal,        cmd: "python -m scrapers.awal.run --type all", proxy: true }
           - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
           - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
           - { source: jurash,      cmd: "python -m scrapers.jurash.run --type all" }
