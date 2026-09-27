@@ -378,6 +378,7 @@ must go up over time and never down.
 > 🔴 **Gathern:** N ads checked · N wrong (should be 0)
 > 🟠 **High priority:** N websites (N of them small) · N wrong (should be 0)
 > 🛡️ **Websites fully protected:** N of N (yesterday N)
+> 🔎 **Dead ads 🔎 found that you missed:** N (should be 0; once 🔎 exists)
 > 🐛 **Bugs found:** N
 > 🔧 **Bugs fixed:** N
 > 📖 **What happened:** one sentence.
