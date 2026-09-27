@@ -91,6 +91,11 @@ Recompute every Sunday, and the day a website is added:
   - Also count its **slots per listing**. A 40-listing website spread over 30 combinations has
     almost every listing on a first screen; that is high exposure.
   - Use one light `search_listings_ar` query, run off-peak.
+  - **Then measure it, don't just estimate it.** Every Sunday, replay the ~500 most common
+    searches (populated type × deal × city, biggest cities first) through the real search function
+    with the public key, at the safe rate (≤1.5 searches/second, 2 at a time, outside 01:00–06:00
+    UTC; reuse `e2e/qa-coverage/`). Record which listings land on a first screen. Those
+    **first-screen listings are checked every 24 hours, whatever their website.**
 - **Lifecycle risk:** any of these makes a website risky:
   - a dead ad found in its samples in the last 30 days;
   - a control answered wrong;
@@ -158,6 +163,9 @@ Recompute every Sunday, and the day a website is added:
   - a real browser for pages that only render with JavaScript.
 - **Still unknown after 3 of its check-by periods means our checker can't reach that website.**
   That is a bug for you to fix. The listing stays visible the whole time.
+- **What customers see gets checked first.** Within each website, check first the first-screen
+  listings from the Sunday replay, then the newest listings and the ones with photos (search ranks
+  those higher), then the rest.
 - **Cheapest proof first**, to keep the proxy bill down:
   1. When a crawl already opens an ad's own page, that counts as a check. Make it record the check
      (`last_verified_alive_at`); it costs nothing extra. That touches scraper code, so take the
@@ -174,6 +182,10 @@ Recompute every Sunday, and the day a website is added:
    strike. **Three strikes in a row, from three separate checks, hide it.** Any live answer in
    between resets the count to zero. (One reading is never proof: Gathern once answered 200 and
    404 for the same ad within minutes.)
+   **Fast confirm:** after the first "gone" reading, don't wait for the next scheduled check. Run the
+   second check about 6 hours later and the third about 24 hours later, each as its own trusted run
+   (controls included) with a different browser profile. Every website's dead ads are then hidden
+   within about a day, never weeks, and it is still three separate direct readings.
 3. **Comes back within 30 days** (its page is live again) → shown again. **A real comeback is rare**
    (owner, 2026-09-27): once a website removes or sells an ad, it almost never returns. So when a
    hidden listing turns out to be live, assume first that it was never gone and that our checker
@@ -215,9 +227,18 @@ Recompute every Sunday, and the day a website is added:
    jobs at once.
 8. **Silence is suspicious.** A big site with 0 hidden listings in 7 days, or a checker whose answers
    are 100% "live" for a week, has probably stopped seeing deaths. Test it with a known-gone control.
-9. **Weekly deep audit (Sundays).** Open 1,000 random ads across all websites, both hidden and live,
-   and measure each site's accuracy. Any website with even one wrong answer gets fixed that week.
-10. **A proxy ledger.** Record proxy use per website every night, so hard rule 8 is measured, not
+9. **Weekly deep audit (Sundays), with a second opinion.** Open 1,000 random ads across all
+   websites, both hidden and live, and measure each site's accuracy. Use a **different method** from
+   the nightly checker: a real browser reading the page itself (is the title, price and photo there,
+   or a "removed"/"sold" notice?), not `classify_response()`. A bug in one method can't then fool
+   both. Any website with even one wrong answer gets fixed that week.
+10. **Every mistake becomes a permanent known answer.** Any listing the checker ever got wrong is
+    added to that website's controls (protection 1), so the same kind of mistake is caught the
+    first night it comes back.
+11. **An independent score.** Once the 🔎 Search Engineer is built, every dead ad it finds by
+    clicking through from search is a listing you missed. Count them in your report and investigate
+    each one.
+12. **A proxy ledger.** Record proxy use per website every night, so hard rule 8 is measured, not
     guessed.
 
 ## The backlog you work through (a few websites every night)
@@ -299,9 +320,10 @@ must go up over time and never down.
      `ops_liveness_coverage_snapshot`, not the heavy view, for the whole fleet;
    - work the retry list: every UNKNOWN from the last 24 hours gets another, different try;
    - any website whose coverage went down since yesterday is tonight's first fix.
-5. **Extra protections:** controls in every run, evidence on every hide, the customer check (10
-   hidden gone from search, 10 brought back findable), and deletion log = real deletions with a
-   copy. On Sundays, the 1,000-ad deep audit.
+5. **Extra protections:** controls in every run, evidence on every hide, fast-confirm follow-ups for
+   yesterday's first "gone" readings, the customer check (10 hidden gone from search, 10 brought
+   back findable), and deletion log = real deletions with a copy. On Sundays, the search replay and
+   the 1,000-ad second-opinion audit.
 6. **🔴 Gathern checks** (above).
 7. **🟠 High-priority websites**, whatever their size (above).
 8. **⚪ Standard websites:** the big sites, plus tonight's share of the small ones (above). Move any
@@ -364,6 +386,9 @@ must go up over time and never down.
 >
 > ⭐ **Rating:** X/10
 > 🙋 **Needs from you:** Nothing.
+
+**Every number in this report comes from a query or job result from this run**, and those results
+are saved in your run log. Never a number from memory, an estimate, or yesterday.
 
 "Needs from you" is **Nothing** unless something is truly the owner's decision: a change that would
 raise the proxy bill, a website whose listings look fake, retiring a website, or a business or legal
