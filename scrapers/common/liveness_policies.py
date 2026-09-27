@@ -1097,6 +1097,13 @@ POLICIES: dict[str, _P] = {
         "suppresses prune_unseen unless the walk reached that total and every detail was readable.",
         "An oracle is possible — the details endpoint's own display_status / ad_licence_status — "
         "but it is not written yet, so this does not claim a direct check."),
+    "arsh": _P(
+        _pol("arsh", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's own property index /عقارات-عرش (a single "
+        "server-rendered Duda page listing every property link; 23 when measured, 21 mappable). "
+        "run.py suppresses prune_unseen unless every linked page was readable.",
+        "An oracle is possible — a removed page drops off the index and its URL stops rendering the "
+        "property header — but it is not written yet, so this does not claim a direct check."),
     "maqrat": _P(
         _pol("maqrat", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over a complete, self-declaring index: the page script's own POST "

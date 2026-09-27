@@ -155,6 +155,8 @@ export const PLATFORMS: Platform[] = [
   { name: 'مكسب العقارية', domain: 'macsaib.sa', brand: 'Macsaib', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // maqrat: 83 REGA-licensed ads measured 2026-09-26 (58 sale + 24 rent + 1 «مجمع» left unmapped).
   { name: 'MAQRAT', domain: 'maqrat.com', brand: 'MAQRAT', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // arsh: 21 land listings measured 2026-09-27 (no prices — «السعر عند الطلب»; owner: include, treat as for sale).
+  { name: 'عرش العقارية', domain: 'arshglobal.com.sa', brand: 'Arsh', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   // manzo: 1 listing measured 2026-09-27 (Dhahran apartment, 48,000/yr). Owner: include.
   { name: 'مانزو', domain: 'manzo.com.sa', brand: 'Manzo', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   // eightfloor: 2 Riyadh rentals measured 2026-09-27 (its 9 projects are off-plan — owner: excluded). Bare 8floor.sa has no DNS; www works.
