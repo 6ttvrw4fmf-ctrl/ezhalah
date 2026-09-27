@@ -309,8 +309,15 @@ real production path counts.
 
 | routine | cadence | time (UTC) | durable handoff |
 |---|---|---|---|
-| Junior/Beginner Daily Engineer | **daily** | 05:00 | `ops_daily_engineer_run` |
-| Senior Production Engineer | **daily** (was every 2 days) | 06:00 | `ops_senior_audit_run` |
+| Junior/Beginner Daily Engineer | **daily** | 11:00 | `ops_daily_engineer_run` |
+| Senior Production Engineer | **daily** (was every 2 days) | 11:30 | `ops_senior_audit_run` |
+
+**Corrected 2026-09-26** (the schedule divergence the 2026-09-05 Junior reconstruction had flagged): this
+table still read 05:00/06:00 UTC from the original 2026-08-10 decision below; the schedule moved
+since then and `docs/ops/ENGINEER_ROUTINES.md`'s roster (`:12-13`) is the current source —
+**04:00/04:30 America/Phoenix = 11:00/11:30 UTC**, 30 minutes apart, not an hour. Arizona is the
+anchor per that file; correct this table again if the roster ever moves rather than trusting this
+copy.
 
 **The Senior audit moved from every-2-days to DAILY on 2026-08-10, by owner decision.** It is recorded
 here because the schedule itself lives in the claude.ai scheduled-task configuration, outside this
@@ -322,13 +329,13 @@ values reading `every-2-day-scheduled` on rows before that date — historical, 
 file is an applied migration and is deliberately NOT edited — an applied migration is a record of
 what ran, and rewriting it would create schema drift for a documentation change.)
 
-**Keep the two routines on different hours.** They are deliberately an hour apart so the Senior run
-consumes the Junior run's fresh heartbeat as input rather than racing it, and so two heavyweight
-sessions never open together. This matters more now that both run daily: on 2026-08-10 a cron
-stampede wedged the database into a 522 outage (see `#430`), and the same day two sessions twice held
-what each believed was the deploy lock. The lock is now genuinely exclusive
-(`20260810131511`) — do not spend that safety margin by collapsing the two routines onto the same
-minute.
+**Keep the two routines staggered.** They are deliberately 30 minutes apart (11:00/11:30 UTC, per the
+corrected table above) so the Senior run consumes the Junior run's fresh heartbeat as input rather
+than racing it, and so two heavyweight sessions never open together. This matters more now that both
+run daily: on 2026-08-10 a cron stampede wedged the database into a 522 outage (see `#430`), and the
+same day two sessions twice held what each believed was the deploy lock. The lock is now genuinely
+exclusive (`20260810131511`) — do not spend that safety margin by collapsing the two routines onto
+the same minute.
 
 ## Junior/Beginner Daily Engineer — scope note
 
