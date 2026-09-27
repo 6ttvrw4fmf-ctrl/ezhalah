@@ -39,7 +39,8 @@ A Laravel marketplace whose «عقارات» grid loads over AJAX. No auth, no c
   («شقق-فاخرة-مؤثثة-للإيجار-في-برج-حي-الصحافة») and cannot be derived from an ad_number, which is
   why the removal oracle uses the shared `stored_listing_url` reader rather than rebuilding a URL.
 
-  PHOTOS. `gallery[].path` is already an absolute URL. 4424/4424 rows carry at least one. Two
+  PHOTOS. `gallery[].path` is already an absolute URL. 4424/4424 rows carry at least one — but on
+  99 of them (2026-09-27) it is only the site's stock placeholder, which map_listing refuses. Two
   fetched → HTTP 200, real WebP bytes (`RIFF….WEBPVP8`, content-length == the row's own
   `media[].size`) and NO cross-origin-resource-policy header. NOTE, honestly: the responses carry
   NO Content-Type header at all (Laravel storage route behind Cloudflare), so a header-based
@@ -294,6 +295,7 @@ PREFIX = "TBA"
 SLUG = "tuba"
 RES_TABLE = "tuba_residential_listings"
 COM_TABLE = "tuba_commercial_listings"
+PLACEHOLDER_PHOTO = "/login_asset/images/homepageimages/property_image.jpeg"  # see map_listing
 
 # The page's own removal banner and the anchor that proves we are looking at a listing page at all.
 GONE_MARK = "لم يعد متاح"
@@ -484,8 +486,12 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     desc = _scrub(desc, names)
     utilities = [w for u in (ar.get("propertyUtilities") or []) if (w := _clean(u))]
 
+    # The site's stock «no photo» image is served IN `gallery` for listings without their own
+    # (measured 2026-09-27: 99 of 4,417 active rows, whose own detail page shows only it). It is
+    # not the listing's photo — refused, so such a row stays photo-less rather than faked.
     photos = [p for g in (rec.get("gallery") or [])
-              if isinstance(g, dict) and (p := _clean(g.get("path")))] or None
+              if isinstance(g, dict) and (p := _clean(g.get("path")))
+              and not p.endswith(PLACEHOLDER_PHOTO)] or None
 
     # ── PRICE. Nothing is ever computed; see trap 2 for why the platform's own total is not one. ──
     # The source's OWN rate marker: it publishes a land total of its own (a sale's
