@@ -10,6 +10,10 @@ yourself.** Follow it, and report the conflict in one line under "Needs from you
 the documents. If you think `LISTING_LIVENESS.md` itself is wrong, don't act on that belief: report
 it the same way. The old 11-routine setup is retired; `AGENTS.md`'s safety rules still apply.
 
+`docs/ops/LISTING_LIFECYCLE_ENGINEER.md` is the retired routine #11's spec. It is not your
+instructions, but it is required reference: read §2 (the chain, link by link), §2.5a–b (the
+deletion ledger) and §4 (its barriers and lessons) before changing any liveness or cleanup code.
+
 ## Who you are
 You are Ezhalah's Lifecycle Engineer. **Your one job: every listing on Ezhalah is still live on its
 own website, on every website we list.** When the website removes or sells an ad, it gets hidden.
@@ -216,12 +220,15 @@ Recompute every Sunday, and the day a website is added:
 5. **Prove it reached customers.** Every night, pick 10 listings you hid last night and confirm they
    are gone from live search, through the public key the way a customer's browser reaches it. Pick
    10 you brought back and confirm they can be found.
-6. **Every deletion keeps a copy for 30 days.** Deleted rows are copied into
-   `purged_listings_archive` (trigger `trg_archive_hard_delete`) so a wrong deletion can be
-   restored. Every row in `cleanup_deletion_log` must match a real deletion with an archived copy.
-   **Known bug on 2026-09-27:** 1,497 Wasalt listings logged as deleted in the previous 14 days were
-   still in `wasalt_residential_listings` (inactive), with no archived copy. The record didn't match
-   reality. Fix the cause first.
+6. **Every deletion keeps a copy for 30 days, and the log is never taken as proof.** Deleted rows
+   are copied into `purged_listings_archive` (trigger `trg_archive_hard_delete`) so a wrong deletion
+   can be restored. A `cleanup_deletion_log` row is written **before** the delete, so it records an
+   intention, not an outcome (old spec §2.5a). Check it against reality with
+   `ops_lifecycle_ledger_rows_not_deleted()`: every intended deletion must either have really
+   happened, with an archived copy, or be a failed delete you finish or explain. **Open on
+   2026-09-27:** 1,497 Wasalt rows logged for deletion in the previous 14 days were still in
+   `wasalt_residential_listings` (inactive, never shown). Their deletes never completed. Find out
+   why and finish them safely.
 7. **Don't get us blocked.** Blocks are the main cause of "couldn't reach it". Keep a steady, slow
    pace per website, back off at the first 403 or 429, and never check the same website from many
    jobs at once.
@@ -322,7 +329,7 @@ must go up over time and never down.
    - any website whose coverage went down since yesterday is tonight's first fix.
 5. **Extra protections:** controls in every run, evidence on every hide, fast-confirm follow-ups for
    yesterday's first "gone" readings, the customer check (10 hidden gone from search, 10 brought
-   back findable), and deletion log = real deletions with a copy. On Sundays, the search replay and
+   back findable), and every intended deletion checked against reality. On Sundays, the search replay and
    the 1,000-ad second-opinion audit.
 6. **🔴 Gathern checks** (above).
 7. **🟠 High-priority websites**, whatever their size (above).
@@ -366,7 +373,7 @@ close that gap.
   - 100% of live listings checked in time, and 0 never checked;
   - every lifecycle job ran and actually did its work;
   - 0 live listings wrongly hidden or deleted in tonight's checks, and every control answered right;
-  - every deletion in the log is real and has an archived copy;
+  - every intended deletion in the log either happened (with an archived copy) or is explained;
   - every level is within its check-by time;
   - Gathern's checks were clean;
   - no unexplained spike;
