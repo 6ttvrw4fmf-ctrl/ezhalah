@@ -28,7 +28,7 @@ PRICE = SOURCE.
     card says yearly»), applied in this order:
       1. the ad's own text ties a period to THIS price → that period (a monthly figure whose ×12
          equals the price → the price is the yearly total);
-      2. otherwise a price ≤ MONTHLY_LOOKING_MAX (10,000) → MONTHLY: no unit here rents for under
+      2. otherwise a price ≤ normalize.MONTHLY_LOOKING_MAX (10,000) → MONTHLY: no unit here rents for under
          10,000 a YEAR, so the card's «سنويًا» contradicts the listing (rooms 1,800 / 2,500 / 4,500);
       3. otherwise → yearly, the card's own «سنويًا», which the price agrees with.
     Measured 2026-09-26: rent prices split cleanly — rooms ≤ 4,500, everything else ≥ 15,000.
@@ -158,33 +158,6 @@ def parse_detail(page: str, pid: str) -> dict[str, Any]:
             "photos": photos}
 
 
-MONTHLY_LOOKING_MAX = 10_000   # SAR; see the docstring
-_MONTHLY_RE = re.compile(r"شهري|شهريًا|شهريا|شهرية|بالشهر|في الشهر|الشهري")
-_YEARLY_RE = re.compile(r"سنوي|سنويًا|سنويا|سنوية|بالسنة|في السنة|السنوي")
-_NUM_RE = re.compile(r"\d[\d,٬.]*")
-
-
-def stated_rent_period(price: Optional[int], text: str) -> Optional[str]:
-    """'monthly' / 'annual' when the ad's OWN text ties a period to THIS price, else None.
-    A period word within 40 chars of a number: that number == price → that period; a MONTHLY number
-    whose ×12 == price → 'annual' (the price field is the yearly total). Arabic-Indic digits and
-    «٬»/«,» grouping are read the same as Latin ones."""
-    if not price or not text:
-        return None
-    s = text                    # re's \d and normalize.to_int already read Arabic-Indic digits
-    found: Optional[str] = None
-    for word_re, period in ((_MONTHLY_RE, "monthly"), (_YEARLY_RE, "annual")):
-        for m in word_re.finditer(s):
-            window = s[max(0, m.start() - 40): m.end() + 40]
-            for n in _NUM_RE.findall(window):
-                v = normalize.to_int(n.replace("٬", ","))
-                if v == price:
-                    return period
-                if period == "monthly" and v and v * 12 == price:
-                    found = found or "annual"
-    return found
-
-
 def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
     kv, title, desc = d["kv"], d["title"], d["description"]
     if _OFFPLAN_RE.search(title) or _OFFPLAN_RE.search(desc):
@@ -214,14 +187,9 @@ def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple
         row_price["price_per_meter"] = ppm
     else:
         price_int = normalize.to_int(str(unit_price)) if unit_price else None
-        period = stated_rent_period(price_int, f"{title} {desc}")
-        if price_int and not period:
-            # ponytail: one magnitude cut, measured on MAQRAT (≤4,500 vs ≥15,000); revisit if a
-            # listing ever lands between 10,000 and 15,000.
-            period = "monthly" if price_int <= MONTHLY_LOOKING_MAX else "annual"
-        # an explicit token lets the shared helper apply the fleet's storage convention (monthly ×12)
-        row_price["rent_period"], row_price["price_annual"] = normalize.rent_period_and_annual(
-            price_int, {"monthly": "شهري", "annual": "سنوي"}.get(period))
+        # every rent card says «سنويًا» — the shared owner rule decides whether this ad's price is
+        row_price["rent_period"], row_price["price_annual"] = normalize.rent_period_from_ad(
+            price_int, f"{title} {desc}", "annual")
 
     region_ar, city_ar, district_raw = _val(kv, "المنطقة"), _val(kv, "المدينة"), _val(kv, "الحي")
     city_id, region_id = to_catalog(city_ar, region_hint=region_ar) if city_ar else (None, None)
