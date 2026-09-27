@@ -444,7 +444,43 @@ jobs:
           # (Restored 2026-07-16 — PR #77 accidentally flattened this back to a bare `run: cmd`.)
           N="${{ matrix.every_n_days || 1 }}"
           if [ "$N" != "1" ] && [ -z "${{ github.event.inputs.source }}" ] && [ "$(( $(date -u +%s) / 86400 % N ))" -ne 0 ]; then
-            echo "::notice::Skipping ${{ matrix.source }} today — every-${N}-days cadence (off day). Manual single-source dispatch overrides."
-            exit 0
+            # A DORMANT source is re-probed EVERY day (owner down-rule 2026-09-26): a site that is
+            # down costs a few requests, not the metered sweep the off day exists to save.
+            if curl -sf "$SUPABASE_URL/rest/v1/platform_registry?platform=eq.${{ matrix.source }}&status=eq.dormant&select=platform" \
+                 -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" | grep -q '"platform"'; then
+              echo "::notice::${{ matrix.source }} is dormant — re-probing it on its off day."
+            else
+              echo "::notice::Skipping ${{ matrix.source }} today — every-${N}-days cadence (off day). Manual single-source dispatch overrides."
+              exit 0
+            fi
           fi
           exec ${{ matrix.cmd }}
+
+  # OWNER DOWN-RULE 2026-09-26, the "comes back by itself" half: the sync above re-crawls every
+  # dormant source daily; one that crawled real listings in THIS run goes back to 'active'
+  # (scrapers/common/restore_dormant.py). Nothing wrote 'active' back before 2026-09-27.
+  restore-dormant:
+    needs: sync
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read     # run_started_at of this run
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Bring back dormant platforms that crawled real listings in this run
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SINCE=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" --jq .run_started_at)
+          python -m scrapers.common.restore_dormant --since "$SINCE"
