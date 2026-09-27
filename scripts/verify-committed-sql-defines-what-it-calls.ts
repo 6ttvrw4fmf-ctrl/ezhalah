@@ -21,7 +21,7 @@
 // WHAT THIS CHECKS, AND WHAT IT CANNOT. It is OFFLINE and deterministic (so it runs on every PR
 // inside `npm test`, unlike the live drift check): for every `public.<name>(` that committed SQL
 // references, some committed migration must CREATE that name as a function, table, view,
-// materialized view or sequence. That catches exactly the incident's shape — the repo depends on an
+// materialized view or sequence (a PROCEDURE counts as a function). That catches exactly the incident's shape — the repo depends on an
 // object it never defines. It does NOT see a production object that nothing in the repo references;
 // only the live check (`ops_deploy_preflight_checks`, conditions #1/#4) can see those, and it is
 // blind below its own baseline. That gap is stated, not papered over.
@@ -62,7 +62,12 @@ const RECOVERED_MD5 = 'eaf7d972969dc71d23b35d590f267c6b';
 // 2026-09-11: norm_district_tok reconciled — its CREATE OR REPLACE FUNCTION was recovered verbatim
 // in 20260911221510_district_token_stranded_repair_owner_approved_incident_114.sql (ops_incident
 // #114, owner-approved). 31 -> 30.
-const MAX_BASELINE_ENTRIES = 30;
+//
+// 2026-09-27: the reader only knew `create function`, so a committed CREATE PROCEDURE never counted
+// as a definition. loc_rel_refresh_tick and backfill_aqar_res have been committed procedures all
+// along and sat here as "production-only" only because of that; teaching the reader PROCEDURE
+// resolves both. 30 -> 28.
+const MAX_BASELINE_ENTRIES = 28;
 
 let failed = 0;
 const check = (ok: boolean, msg: string, extra = '') => {
@@ -72,7 +77,7 @@ const check = (ok: boolean, msg: string, extra = '') => {
 
 export type SqlFile = { file: string; sql: string };
 
-const DEFINES_FUNCTION = /create\s+(?:or\s+replace\s+)?function\s+(?:"?public"?\.)?"?([a-zA-Z0-9_]+)"?\s*\(/gi;
+const DEFINES_FUNCTION = /create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+(?:"?public"?\.)?"?([a-zA-Z0-9_]+)"?\s*\(/gi;
 const DEFINES_RELATION =
   /create\s+(?:or\s+replace\s+)?(?:unlogged\s+)?(?:materialized\s+)?(?:table|view|sequence)\s+(?:if\s+not\s+exists\s+)?(?:"?public"?\.)?"?([a-zA-Z0-9_]+)"?/gi;
 const REFERENCES = /\bpublic\.([a-zA-Z0-9_]+)\s*\(/gi;
@@ -171,6 +176,15 @@ const REALLY_DEFINED: SqlFile[] = [
 ];
 mustCatch('a genuinely defined function being reported as production-only (false positive)',
   !unresolvedPublicRefs(REALLY_DEFINED).has('ghost'));
+
+// A procedure is defined by CREATE PROCEDURE; a reader that only knows FUNCTION reports every
+// committed procedure as production-only (loc_rel_refresh_tick and backfill_aqar_res, until 2026-09-27).
+const PROCEDURE_DEFINED: SqlFile[] = [
+  { file: 'a.sql', sql: 'create or replace procedure public.ghost() language plpgsql as $$ begin end $$;' },
+  { file: 'b.sql', sql: 'call public.ghost();' },
+];
+mustCatch('a committed CREATE PROCEDURE being reported as production-only (false positive)',
+  !unresolvedPublicRefs(PROCEDURE_DEFINED).has('ghost'));
 
 console.log(failed === 0
   ? '\n✅ verify-committed-sql-defines-what-it-calls: nothing the repo calls is invisible to the repo.'
