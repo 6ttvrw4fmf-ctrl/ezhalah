@@ -792,6 +792,12 @@
     "grace": 3
   },
   {
+    "platform": "superoffice",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "suwar",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
