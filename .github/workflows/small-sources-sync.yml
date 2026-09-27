@@ -246,6 +246,16 @@ jobs:
           - { source: maqrat,       cmd: "python -m scrapers.maqrat.run --type all", tmo: 20 }
           # wave 3, batch 6: arsh is a hand-built Duda site (1 index + 23 pages).
           - { source: arsh,         cmd: "python -m scrapers.arsh.run --type all", tmo: 10 }
+          # batch 7 (2026-09-27): the owner's 15-site list.
+          - { source: sirdab,      cmd: "python -m scrapers.sirdab.run --type all", tmo: 15 }
+          - { source: ashab,       cmd: "python -m scrapers.ashab.run --type all", tmo: 45 }
+          - { source: manafe,      cmd: "python -m scrapers.manafe.run --type all", tmo: 25 }
+          - { source: wajaf,       cmd: "python -m scrapers.wajaf.run --type all", tmo: 10 }
+          - { source: albukaeri,   cmd: "python -m scrapers.albukaeri.run --type all", tmo: 10 }
+          - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10 }
+          - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10 }
+          - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10 }
+          - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10 }
           # wave 3, batch 5: holoul is an open JSON API (238 rows → 30); eightfloor is a Nuzul tenant (public API, 2 rows); manzo is an open JSON API (1 row).
           - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10 }
           - { source: eightfloor,   cmd: "python -m scrapers.eightfloor.run --type all", tmo: 10 }
