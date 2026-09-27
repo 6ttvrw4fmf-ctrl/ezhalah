@@ -40,9 +40,59 @@ _PHONE_RE = re.compile(
     r"|واتس\S*\s*\d[\d\s\-]{6,}"              # واتساب/واتس اب followed by digits
 )
 
+# A PERSON'S NAME behind a label (owner PDPL rule, 2026-09-27). REGA's standard ad block prints
+# «صاحب الترخيص : <licence holder>» and «الموظف المسؤول عن الإعلان: <employee>»; on 2026-09-27
+# dealapp alone showed 4,363 such names on result cards. The label stays, the name becomes
+# [redacted] — the same token phones get.
+#   • a whole-word qualifier in front makes the label a number/phone/role/terms field whose value is
+#     NOT a name and must survive: «رقم المعلن», «جوال المعلن», «صفة المعلن: وسيط», and — for the
+#     broker/marketer labels only — «عمولة الوسيط: على المشتري». Whole-word matters: «قريب من جامع
+#     صاحب الترخيص : <name>» ends in «مع» and «بدون عمولة صاحب الترخيص» has «عمولة»; both are names.
+#   • the name is letters only — at most 9 words on one line — and stops at a digit, punctuation,
+#     a stop word («رقم», «تاريخ», any qualifier, …) or the next «label:». So «المدينة: جدة
+#     الحي: النرجس» after a name is untouched: places, not people, and no place label is listed.
+# The SAME pattern text runs in the DB floor (_redact_pii_sql); a test pins the two byte-identical.
+_L = r"[ء-يA-Za-z]"    # one Arabic/Latin letter (U+0621..U+064A: no digits, punctuation or harakat)
+
+
+def _not_after(*words: str) -> str:
+    """Not preceded by any of these as a WHOLE word (fixed-width lookbehinds, valid in re and PG)."""
+    return "".join(rf"(?<!(?<!{_L}){w}\s)" for w in words)
+
+
+_QUALIFIERS = ("جوال", "رقم", "هاتف", "صفة", "صفه", "نوع", "تصنيف")   # «صفة المعلن: وسيط»
+_TERMS = ("عمولة", "عموله", "أتعاب", "اتعاب", "سعي")                  # «عمولة الوسيط: على المشتري»
+_TERMS_OF = _not_after(*_TERMS)
+_NAME_LABELS = (
+    r"(?:الموظف\s+)?(?:ال)?مس[ؤئو]ول(?:\s+عن)?\s+ال[إاأ]علان"
+    r"|الموظف\s+(?:ال)?مس[ؤئو]ول"
+    r"|صاحب\s+(?:ال)?ترخيص"
+    r"|(?:اسم\s+)?(?:ال)?معلن"
+    rf"|{_TERMS_OF}(?:اسم\s+)?(?:ال)?مسوق[ةه]?(?:\s+(?:ال)?عقاري[ةه]?)?"
+    rf"|{_TERMS_OF}(?:اسم\s+)?(?:ال)?وسيط(?:\s+(?:ال)?عقاري)?"
+    r"|اسم\s+(?:ال)?(?:مالك|موظف|وكيل)"
+)
+# Every qualifier is also a stop word. Otherwise «مسؤول الإعلان: <name> صفة المعلن: وسيط» swallows
+# «صفة» with the name, and the NEXT write (the trigger re-runs on every UPDATE) sees a bare
+# «المعلن: وسيط» and redacts the role — measured on 57 aqar rows, 2026-09-27. Redaction must be
+# idempotent.
+_STOP_WORDS = ("الرقم", "الجوال", "الهاتف", "تاريخ", "رخصة", "رخصه", "ترخيص", "الترخيص", "للتواصل",
+               "التواصل", "تواصل", "واتس", "واتساب", "الضمانات", "نأمل") + _QUALIFIERS + _TERMS
+_NOT_A_NAME_WORD = (
+    rf"(?!(?:{'|'.join(_STOP_WORDS)})(?!{_L})|{_L}+[ \t]*:|(?:{_NAME_LABELS})[ \t]*:)"
+)
+_NAME_LABEL_RE = re.compile(
+    rf"(?<!{_L})"                       # whole word: «صفة المعلن» must not match from its «معلن»
+    + _not_after(*_QUALIFIERS)
+    + rf"(و?(?:{_NAME_LABELS})[ \t]*:[ \t*]*(?:\r?\n[ \t*]*)?)"
+    + rf'(?:[\[(«"][ \t]*)?{_NOT_A_NAME_WORD}{_L}+(?:[ \t]+{_NOT_A_NAME_WORD}{_L}+){{0,8}}'
+    + r'(?:[ \t]*[\])»"])?'
+)
+
 
 def redact_pii(text: Any) -> Any:
-    """Remove Saudi contact numbers, WhatsApp/Telegram handles and emails from free text.
+    """Remove Saudi contact numbers, WhatsApp/Telegram handles, emails and labelled advertiser /
+    ad-officer names from free text.
     Returns the cleaned string (whitespace-collapsed), or None if nothing readable remains.
     Non-string input is returned unchanged."""
     if not isinstance(text, str) or not text:
@@ -51,6 +101,7 @@ def redact_pii(text: Any) -> Any:
     out = _EMAIL_RE.sub(_REDACTED, out)
     out = _PHONE_LOOSE.sub(_REDACTED, out)
     out = _PHONE_RE.sub(_REDACTED, out)
+    out = _NAME_LABEL_RE.sub(r"\1" + _REDACTED, out)   # before the collapse: a line break ends a name
     out = re.sub(r"\s+", " ", out).strip()
     return out or None
 
