@@ -148,6 +148,40 @@ crawl workflows (⚡'s).
 4. **Still gone after 30 days hidden** → one last check on its website. If it's dead, delete it and
    log it in `cleanup_deletion_log`. If it's live, bring it back.
 
+## Extra protections: how you stop bugs before they happen (Claude's advice, owner-approved 2026-09-27)
+1. **Known answers in every check run.** For every big site and Gathern, keep a small set of
+   control ads whose answer you already know: a few confirmed live, a few confirmed gone (removed or
+   sold). Every checking run includes them. If the checker gets even one control wrong, that run
+   hides nothing, and fixing the checker is your first job. This catches a redesigned page, a
+   block, or broken code on the same night.
+2. **A shadow night before any new or changed checker hides anything.** It runs one night deciding
+   but hiding nothing. Compare its answers with the controls and a sample opened by hand. Only if
+   it gets every control right and calls no live ad "gone" does it switch on.
+3. **Every hide keeps its evidence:** the ad's address, what the page answered (status and the exact
+   "gone" words found), when, and which checker version. A hide without evidence is a bug: bring
+   the listing back.
+4. **Only the ad's own page can undo a hide.** A crawl or list page that still shows the ad does not
+   bring it back; only its own page answering "live" does. This stops sold listings coming back by
+   mistake, and stops ⚡ and ♻️ undoing each other.
+5. **Prove it reached customers.** Every night, pick 10 listings you hid last night and confirm they
+   are gone from live search, through the public key the way a customer's browser reaches it. Pick
+   10 you brought back and confirm they can be found.
+6. **Every deletion keeps a copy for 30 days.** Deleted rows are copied into
+   `purged_listings_archive` (trigger `trg_archive_hard_delete`) so a wrong deletion can be
+   restored. Every row in `cleanup_deletion_log` must match a real deletion with an archived copy.
+   **Known bug on 2026-09-27:** 1,497 Wasalt listings logged as deleted in the previous 14 days were
+   still in `wasalt_residential_listings` (inactive), with no archived copy. The record didn't match
+   reality. Fix the cause first.
+7. **Don't get us blocked.** Blocks are the main cause of "couldn't reach it". Keep a steady, slow
+   pace per website, back off at the first 403 or 429, and never check the same website from many
+   jobs at once.
+8. **Silence is suspicious.** A big site with 0 hidden listings in 7 days, or a checker whose answers
+   are 100% "live" for a week, has probably stopped seeing deaths. Test it with a known-gone control.
+9. **Weekly deep audit (Sundays).** Open 1,000 random ads across all websites, both hidden and live,
+   and measure each site's accuracy. Any website with even one wrong answer gets fixed that week.
+10. **A proxy ledger.** Record proxy use per website every night, so hard rule 8 is measured, not
+    guessed.
+
 ## The backlog you work through (a few websites every night)
 Progress is measured by `ops_platform_protection_matrix()`: the number of websites marked PROTECTED
 must go up over time and never down.
@@ -227,10 +261,13 @@ must go up over time and never down.
      `ops_liveness_coverage_snapshot`, not the heavy view, for the whole fleet;
    - work the retry list: every UNKNOWN from the last 24 hours gets another, different try;
    - any website whose coverage went down since yesterday is tonight's first fix.
-5. **🔴 Gathern checks** (above).
-6. **🟠 Big-site checks** (above).
-7. **🟢 Tonight's share of small sites** (above).
-8. **Fix everything broken:**
+5. **Extra protections:** controls in every run, evidence on every hide, the customer check (10
+   hidden gone from search, 10 brought back findable), and deletion log = real deletions with a
+   copy. On Sundays, the 1,000-ad deep audit.
+6. **🔴 Gathern checks** (above).
+7. **🟠 Big-site checks** (above).
+8. **🟢 Tonight's share of small sites** (above).
+9. **Fix everything broken:**
    - take the site's lock and find the root cause;
    - when a site changes its page layout, its "gone" check dies silently (LISTING_LIVENESS.md
      §9.7), so fix the check;
@@ -238,9 +275,9 @@ must go up over time and never down.
      restore it;
    - merge it and re-run that site's liveness job to prove it;
    - release the lock.
-9. **Backlog:** move 3–5 websites forward (A, B or C above).
-10. **Lock the door behind you.** Every new kind of bug gets a test or a monitor in the same PR.
-11. **Log the end** in `ops_daily_engineer_run`, then write the report.
+10. **Backlog:** move 3–5 websites forward (A, B or C above).
+11. **Lock the door behind you.** Every new kind of bug gets a test or a monitor in the same PR.
+12. **Log the end** in `ops_daily_engineer_run`, then write the report.
 
 ## Lessons from real breakages (use them)
 - Gathern expresses blocking as a 404. One ad answered 200 and 404 within minutes. A single reading
@@ -260,7 +297,8 @@ must go up over time and never down.
 - **10/10** requires all of this:
   - 100% of live listings checked in time, and 0 never checked;
   - every lifecycle job ran and actually did its work;
-  - 0 live listings wrongly hidden or deleted in tonight's checks;
+  - 0 live listings wrongly hidden or deleted in tonight's checks, and every control answered right;
+  - every deletion in the log is real and has an archived copy;
   - every level is within its check-by time;
   - Gathern's checks were clean;
   - no unexplained spike;
