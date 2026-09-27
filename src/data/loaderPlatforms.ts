@@ -195,6 +195,9 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'مباشر', i18nKey: 'Mobasher', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'مؤاجرة', i18nKey: 'Muajarh', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'دلّالي', i18nKey: 'Dallali', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'شركة مقام للتطوير العقاري', i18nKey: 'Maqam Development', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'تطبيق أرض', i18nKey: 'Earth App', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'نوافذ الوطن', i18nKey: 'Nawafeth Alwatan', logo: require('../../assets/images/platform-placeholder.png') },
   // LOGO-ONLY (owner decision 2026-09-24): brand shown in the strip, no scraper, no tables, never searchable.
   { name: 'Maskanre', i18nKey: 'Maskan United', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
   { name: 'Wetheaddress', i18nKey: 'The Address', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
@@ -406,6 +409,12 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['muajarh', 'مؤاجرة'],
   ['دلّالي', 'دلّالي'],
   ['dallali', 'دلّالي'],
+  ['maqam', 'شركة مقام للتطوير العقاري'],
+  ['شركة مقام للتطوير العقاري', 'شركة مقام للتطوير العقاري'],
+  ['earthapp', 'تطبيق أرض'],
+  ['تطبيق أرض', 'تطبيق أرض'],
+  ['nawafeth', 'نوافذ الوطن'],
+  ['نوافذ الوطن', 'نوافذ الوطن'],
   ['aqar', 'Aqar'],
 ];
 

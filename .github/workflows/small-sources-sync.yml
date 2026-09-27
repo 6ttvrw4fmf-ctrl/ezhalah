@@ -250,6 +250,11 @@ jobs:
           - { source: mobasher,     cmd: "python -m scrapers.mobasher.run --type all", tmo: 15 }
           - { source: muajarh,      cmd: "python -m scrapers.muajarh.run --type all", tmo: 10 }
           - { source: dallali,      cmd: "python -m scrapers.dallali.run --type all", tmo: 10 }
+          # wave 3b (2026-09-27): maqam is a Nuzul tenant feed (130 records, only `available` kept); earthapp and
+          # nawafeth are small complete feeds (54 / 20 ads).
+          - { source: maqam,        cmd: "python -m scrapers.maqam.run --type all", tmo: 15 }
+          - { source: earthapp,     cmd: "python -m scrapers.earthapp.run --type all", tmo: 15 }
+          - { source: nawafeth,     cmd: "python -m scrapers.nawafeth.run --type all", tmo: 15 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }
           - { source: october,    cmd: "python -m scrapers.october.run --type all" }
