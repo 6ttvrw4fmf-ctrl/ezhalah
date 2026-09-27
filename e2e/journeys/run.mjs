@@ -14,7 +14,8 @@ import { withPage, settle, bodyText, storedHistory, clickText, clickReason, slee
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
          SELECTED_CITY_MARKER, isBottomDocked, dockedBandCap,
-         filterHomeState, filterHomeWhy, paintedTextCarriers, stayedAtZero } from './harness.mjs';
+         filterHomeState, filterHomeWhy, paintedTextCarriers, stayedAtZero,
+         expiredSession } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -2882,6 +2883,106 @@ JOURNEYS['agent-round-trip-is-a-fresh-conversation'] = async (mobile) => withPag
  *  shows a blank chat» is the owner's design showing through, not a defect, and pinning either
  *  behaviour here would be inventing a product decision (PART 9's «a barrier that pins a quirk as
  *  product behaviour»). What is pinned is: no re-execution, and not stranded. */
+/** TOKEN EXPIRY MUST NOT WITHHOLD THE GUEST'S OWN AFFORDANCES (PART 1 "token expiry"; PART 5 shape
+ *  #12, a loading state that never resolves with no recovery path).
+ *
+ *  THE SURFACE HAD ZERO JOURNEY COVERAGE until 2026-09-27, which is the PART 1 header's own warning
+ *  — «a surface this file names can still have zero coverage» — landing on an AUTH row rather than on
+ *  read-aloud. `authChecked` gates five things in src/store.tsx (the local history restore, the
+ *  server pull, the sign-in card, the cookie-consent banner, the intro), and the launch restore
+ *  awaited supabase.auth.getSession() with no timeout and no .catch(). getSession() is not the
+ *  local-only read its name suggests: on an expired session auth-js calls _callRefreshToken over the
+ *  NETWORK. So an expired token parked the app in a state no gate expects —
+ *  `user === null && authChecked === false` — rendering as a guest while withholding every
+ *  affordance a guest is supposed to get, and emitting no error at all.
+ *
+ *  THE ORACLE IS A DIFFERENTIAL AGAINST A TRUE GUEST, not an absolute. PART 9.1 condition 3 asks for
+ *  the same served bundle checked somewhere else; arm A IS that check, in the same run and the same
+ *  engine. Both controls are gated on `authChecked && !user`, so a true guest renders BOTH and an
+ *  expired session that settled honestly must render them too. Asserting "cookie banner present"
+ *  alone would go red on the day the product legitimately stops showing it; asserting A === C stays
+ *  true through that change and still catches the wedge.
+ *
+ *  ELEMENTS, NEVER A BODY SUBSTRING (ops_incident #787): [data-testid=…], not text matching.
+ *  DESKTOP ONLY for the sign-in card: shouldShowSignInCard requires `docked`, so at 375px its
+ *  absence would mean the breakpoint, not the gate. The cookie banner is checked at both.
+ *
+ *  `signedIn: true` IS LOAD-BEARING ALONGSIDE `session`, and leaving it out is a silent false
+ *  pass: seedInitScript returns at `if (!wantAuth) return;` before it writes the auth slot, so a
+ *  session override with no signedIn seeds NOTHING and both arms below run as plain guests —
+ *  which renders the guest controls and reads as a clean green. Measured 2026-09-27: this
+ *  journey passed 4/4 against the UNFIXED production bundle that way, having asserted nothing
+ *  (PART 9.5's «ask what it actually asserted»). The true-guest control arm cannot catch it,
+ *  because a fixture that seeds nothing IS the control arm. */
+JOURNEYS['expired-token-still-opens-the-gate'] = async (mobile) => {
+  const name = `expired-token-still-opens-the-gate:${mobile ? 'mobile375' : 'desktop1440'}`;
+  // Both controls animate in, so the read waits on a CONDITION rather than a fixed sleep (PART 11.2):
+  // poll until the pair stops changing, from a budget generous enough to clear auth-js's own retry
+  // window (30 000 ms) — the fix is supposed to beat that by 5×, and the point is to measure whether
+  // it does, not to give it a deadline it cannot miss.
+  const gateState = async (page) => {
+    let last = null, stable = 0;
+    for (let i = 0; i < 40 && stable < 3; i++) {
+      await sleep(1000);
+      const now = await page.evaluate(() => ({
+        cookie: document.querySelectorAll('[data-testid="cookie-consent"]').length,
+        signin: document.querySelectorAll('[data-testid="signin-card"]').length,
+      }));
+      const key = `${now.cookie}/${now.signin}`;
+      stable = key === last ? stable + 1 : 0;
+      last = key;
+      if (i >= 8 && now.cookie && (mobile || now.signin)) return { ...now, atMs: (i + 1) * 1000 };
+    }
+    const [cookie, signin] = last.split('/').map(Number);
+    return { cookie, signin, atMs: null };
+  };
+
+  // ARM A — a true guest. This is what "the gate opened and there is no user" LOOKS like.
+  const guest = await withPage({ mobile }, async (page) => {
+    await gotoOrRetryTransport(page, BASE + '/');
+    return gateState(page);
+  });
+  if (!guest.cookie) {
+    // Without a working control arm the comparison below proves nothing in either direction — and a
+    // run that asserted nothing is a SKIP, never a pass (PART 9.5).
+    skip(name, `the true-guest control rendered no cookie-consent card (cookie=${guest.cookie} `
+      + `signin=${guest.signin}) — the product may have changed what a guest sees, so this run has no `
+      + `baseline to compare an expired session against`);
+    return;
+  }
+
+  // ARM C — expired with an empty refresh_token: getSession() REJECTS. Terminal on the old build.
+  // ARM D — expired with the refresh REQUEST failing: getSession() never settles while auth-js
+  //         retries. Self-healing on the old build, but only after >40s of a dead-looking app.
+  for (const [arm, opts] of [
+        ['rejected refresh (refresh_token: "")', { mobile, signedIn: true,
+                                                  session: expiredSession('empty-refresh') }],
+        ['blocked refresh request',              { mobile, signedIn: true,
+                                                  session: expiredSession('server-rejects'),
+                                                  abort: '**/auth/v1/token**' }]]) {
+    const got = await withPage(opts, async (page) => {
+      await gotoOrRetryTransport(page, BASE + '/');
+      return gateState(page);
+    });
+    const want = mobile ? guest.cookie > 0 : guest.cookie > 0 && guest.signin > 0;
+    const have = mobile ? got.cookie > 0 : got.cookie > 0 && got.signin > 0;
+    if (want && !have) {
+      defect(name, `an expired session withheld the guest affordances (${arm})`,
+        `true guest: cookie-consent ×${guest.cookie}, signin-card ×${guest.signin} — `
+        + `expired session: cookie-consent ×${got.cookie}, signin-card ×${got.signin}. `
+        + `Same served bundle, same engine, same viewport, one variable changed: the stored session. `
+        + `Both controls are gated on authChecked && !user, and the user IS null here, so the gate `
+        + `never opened — the app is in user===null && authChecked===false, which renders as a guest `
+        + `while withholding what a guest gets, with no error shown. Root cause class: an auth read `
+        + `that can hang or reject, awaited unbounded (src/lib/sessionRestore.ts owns the bound).`);
+    } else {
+      pass(name, `an expired session still opened the gate (${arm}) — cookie-consent ×${got.cookie}, `
+        + `signin-card ×${got.signin}, settled${got.atMs ? ` by ${got.atMs}ms` : ' (stable)'}, `
+        + `matching the true-guest control ×${guest.cookie}/×${guest.signin}`);
+    }
+  }
+};
+
 JOURNEYS['back-forward-no-duplicate-search'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `back-forward-no-duplicate-search:${mobile ? 'mobile375' : 'desktop1440'}`;
   const results = (from) => bag.rpc.slice(from).filter((r) => classifySearchRpc(r) === 'results').length;
