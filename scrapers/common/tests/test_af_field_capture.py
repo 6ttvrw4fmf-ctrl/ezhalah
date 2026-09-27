@@ -268,7 +268,10 @@ def test_inblaj_sitemap_fetch_is_retried() -> None:
             return _R(self.calls > 2)      # both spellings miss on the first pass
 
     sess = _S()
-    got = ip.fetch_catalogue(sess, "https://x.inblaj.net")
+    # Every retry now opens a fresh session with another browser profile; the stub hands back the
+    # same flaky transport so the test still models "fails, then recovers" without real network.
+    got, used, _trace = ip.fetch_catalogue(sess, "https://x.inblaj.net", make_session=lambda _p: sess)
+    assert used is sess
     assert len(got) == 2, f"a retried fetch must recover the catalogue, got {got}"
     assert sess.calls > 2, "it must actually retry, not succeed by luck on the first call"
 
@@ -284,7 +287,9 @@ def test_a_truly_empty_sitemap_still_returns_empty() -> None:
     class _S:
         def get(self, *_a, **_k): return _R()
 
-    assert ip.fetch_catalogue(_S(), "https://x.inblaj.net") == []
+    urls, _used, trace = ip.fetch_catalogue(_S(), "https://x.inblaj.net", make_session=lambda _p: _S())
+    assert urls == []
+    assert trace and all("HTTP 404" in t for t in trace), "an empty result must say what the source answered"
 
 
 # ─────────────────────────── gathern: a published label that reached no column ──────────────────
