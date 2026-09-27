@@ -1034,6 +1034,9 @@ const AR: Record<string, string> = {
   'Virtual Marketer': 'المسوق الافتراضي',            // the site's own Arabic name (vm-ksa.com)
   'Macsaib': 'مكسب العقارية',                         // the site's own Arabic name (macsaib.sa)
   'MAQRAT': 'مقرات',                                  // transliteration — the site names itself «منصة MAQRAT», no Arabic name at the source
+  'Manzo': 'مانزو',                          // the site's own Arabic name (manzo.com.sa)
+  '8Floor': 'الطابق الثامن',                 // the site's own Arabic name (www.8floor.sa)
+  'Holoul': 'حلول',                          // the site's own Arabic name (holoul.io)
   'OpenSooq': 'السوق المفتوح',               // the site's own Arabic name (sa.opensooq.com)
   'Nafithh': 'معرض نافذة',                   // the site's own Arabic name (nafithh.sa)
   'Mobasher': 'مباشر',                       // the site's own Arabic name (mobasher.sa)
